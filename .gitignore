@@ -1,0 +1,17 @@
+# Rust
+/target/
+**/target/
+# Node / frontend
+node_modules/
+dist/
+# Tauri
+src-tauri/gen/
+# Local artefacts
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+# Local Claude settings (per machine)
+.claude/settings.local.json
+# Personal notes used for local tests - never commit
+/testdata/private/
