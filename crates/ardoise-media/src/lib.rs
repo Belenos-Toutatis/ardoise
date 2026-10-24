@@ -26,6 +26,7 @@ pub mod microphone;
 mod mp4;
 mod narration;
 pub mod nv12;
+mod ogg;
 mod opus;
 pub mod replay;
 mod settings;

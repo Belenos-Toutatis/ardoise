@@ -308,6 +308,14 @@ impl OpusPacketDecoder {
             .decode(packet, &mut self.output, DecodeMode::Normal)
             .map_err(|e| MediaError::InvalidFile(format!("Opus packet: {e}")))
     }
+
+    /// Decodes one packet; returns its interleaved samples (valid until the next call).
+    pub(crate) fn decode_samples(&mut self, packet: &[u8]) -> Result<&[i16], MediaError> {
+        let frames = self.decode(packet)?;
+        // The buffer holds `MAX_DECODED_SAMPLES` frames of the decoder's channels.
+        let channels = self.output.len() / MAX_DECODED_SAMPLES;
+        Ok(self.output.get(..frames * channels).unwrap_or_default())
+    }
 }
 
 /// 48 kHz samples to a duration.
