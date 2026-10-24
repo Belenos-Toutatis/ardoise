@@ -134,3 +134,9 @@ Exemple pour M1 (remplacer `M1` par l'étape voulue) :
 ```
 /goal Le jalon M1 de ROADMAP.md est terminé : toutes ses cases sont cochées sauf celles marquées [matériel] (affiche la section pour le prouver), `cargo xtask check` se termine par CHECK OK (sortie affichée), et chaque critère de fin du jalon est prouvé par une sortie de commande affichée. Ne modifie pas SPEC.md. Ou arrête-toi après 60 tours.
 ```
+
+Dans une session cloud (Linux, voir la section « Sessions cloud » de `CLAUDE.md`), les cases ne sont cochées qu'après la vérification sur le PC. Exemple pour M5 :
+
+```
+Le jalon M5 de ROADMAP.md est réalisé sur la branche de cette session : le code et les tests de toutes ses cases sont écrits, `cargo xtask check` se termine par CHECK OK sous Linux (sortie affichée), et chaque critère de fin qui ne demande pas Windows est prouvé par une sortie de commande affichée. Suis la section « Sessions cloud » de CLAUDE.md : ne coche aucune case, pousse seulement la branche de la session, ne modifie pas SPEC.md. Termine par un compte rendu : ce qui est fait, ce qui reste à vérifier sous Windows et les commandes à lancer sur le PC. Ou arrête-toi après 60 tours.
+```
