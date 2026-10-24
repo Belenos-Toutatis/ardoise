@@ -127,7 +127,11 @@ mod tests {
         assert_eq!(outlines.strokes.len(), 2);
         assert_eq!(outlines.strokes[0].color, "#51a7f9ff");
         assert_eq!(outlines.strokes[1].color, "#bb3e9aff");
-        for (drawn, stroke) in outlines.strokes.iter().zip([&note.strokes[0], &note.strokes[2]]) {
+        for (drawn, stroke) in outlines
+            .strokes
+            .iter()
+            .zip([&note.strokes[0], &note.strokes[2]])
+        {
             assert_eq!(drawn.path, outline(stroke).to_svg_path());
             assert!(drawn.path.starts_with('M'), "{}", drawn.path);
         }
