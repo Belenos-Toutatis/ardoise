@@ -39,7 +39,7 @@ MediaError>` and `probe_<format>(path) -> Result<AnimationProbe, MediaError>`. E
 | Replay | `ardoise-media/src/replay.rs` (+ `replay/`), `ardoise-render` (new incremental API) | `Timeline` (speed, trimmed pauses, mapping replay time ↔ note time), `FrameRenderer` (frames at any size, drawn incrementally) |
 | Animated formats | `ardoise-media/src/{gif,webp,webm,opus}.rs` (or folders) | GIF (`gif` + colour quantisation, never `gifski`: AGPL), WebP (`webp-animation`), WebM (AV1 by `rav1e` + `webm`, sound in Opus), the Opus encoder shared with the MP4 fallback |
 | Microphone | `ardoise-media/src/microphone.rs` (+ folder) | list, choose, level meter, record to `AudioClip` (`cpal` WASAPI + `rubato`), silence detection (Windows privacy setting) |
-| MP4 | `ardoise-media/src/mp4.rs`, `openh264/` | `create_mp4` choosing Media Foundation (default) or the OpenH264 2.6.0 fallback (Cisco download, SHA-256 checked, `muxide`, Opus sound); `VideoSink` for `Mp4Writer` |
+| MP4 | `ardoise-media/src/mp4.rs`, `openh264/` | `create_mp4` choosing Media Foundation (default) or the OpenH264 2.6.0 fallback (Cisco download, SHA-256 checked, `shiguredo_mp4`, Opus sound); `VideoSink` for `Mp4Writer` |
 
 `lib.rs` and `Cargo.toml` are shared: add only your own `mod`/`pub use` lines and dependencies; the main session
 resolves the merge.

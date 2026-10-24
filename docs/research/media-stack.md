@@ -229,7 +229,7 @@ What Windows reports for both files (PowerShell `Shell.Application` `GetDetailsO
 | Output / function | Crate (version) | License | Build needs | Status | Notes |
 |---|---|---|---|---|---|
 | H.264 | `openh264` 0.9.9, `default-features=false, features=["libloading"]` | BSD-2 | none | active (2026-10) | Download `openh264-2.6.0-win64.dll.bz2` from `ciscobinary.openh264.org`, verify SHA-256, bzip2-decompress, `OpenH264API::from_blob_path`. Show Cisco notice, enable/disable control |
-| MP4 mux | `muxide` 0.5.0 (fallbacks `shiguredo_mp4`, `mp4-atom`) | MIT/Apache-2.0 | none | active, young | H.264 Annex B + AAC (or Opus) |
+| MP4 mux | `shiguredo_mp4` 2026.5.0 (chosen in M6, see docs/questions.md Q3; `muxide` 0.5.0 set aside) | MIT/Apache-2.0 | none | active, young | H.264 Annex B + AAC (or Opus) |
 | AAC for MP4 | Windows Media Foundation AAC MFT via `windows` 0.62.2 (not fdk-aac) | MIT/Apache-2.0 (crate); OS codec | none | OS | spike passed (section 7c); fallback Opus-in-MP4 (browser/VLC only), or ffmpeg download |
 | WebM video | `rav1e` 0.8.1, `default-features=false, features=["threading"]` | BSD-2 | none (nasm optional for big speedup) | stable, slow cadence | measured ~2.3 fps at 720p without asm |
 | WebM mux | `webm` 2.2.1 | MPL-2.0 | cc only (builds) | passively maintained | VP8/VP9/AV1 + Opus/Vorbis |

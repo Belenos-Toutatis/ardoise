@@ -212,7 +212,7 @@ testdata/private/   copies de notes personnelles pour les tests locaux — ignor
 | Fenêtres | Écrans listés par `available_monitors` (coordonnées physiques) ; fenêtres créées depuis des commandes asynchrones. | Projecteur en bureau étendu ; évite un blocage connu de Tauri sous Windows. |
 | Exécutable | CRT lié statiquement ; interface embarquée dans l'exe ; dossier de données WebView2 fixé explicitement dans `%LOCALAPPDATA%\Ardoise\webview`. | Fonctionne sur un PC vierge ; aucun cache dans Nextcloud. |
 | Réseau | Aucun port en écoute. Seule connexion sortante : téléchargement d'OpenH264 sur demande. | Une alerte du pare-feu demanderait des droits admin. |
-| Vidéo MP4 | Par défaut : Media Foundation de Windows (`IMFSinkWriter` via la crate `windows`) qui produit à la fois le H.264, l'AAC et le fichier MP4, avec accélération matérielle si disponible. Secours si Media Foundation manque : H.264 par OpenH264 2.6.0 chargé à l'exécution (`openh264` + `libloading`), téléchargé chez Cisco (empreinte SHA-256 vérifiée), multiplexé par `muxide`, son en Opus (lisible dans les navigateurs et VLC, pas dans le Lecteur multimédia de Windows). | Rien à télécharger dans le cas courant. Pour le secours, conditions de Cisco : téléchargement par l'utilisateur, désactivable et supprimable, mention « OpenH264 Video Codec provided by Cisco Systems, Inc. », licence affichée. |
+| Vidéo MP4 | Par défaut : Media Foundation de Windows (`IMFSinkWriter` via la crate `windows`) qui produit à la fois le H.264, l'AAC et le fichier MP4, avec accélération matérielle si disponible. Secours si Media Foundation manque : H.264 par OpenH264 2.6.0 chargé à l'exécution (`openh264` + `libloading`), téléchargé chez Cisco (empreinte SHA-256 vérifiée), multiplexé par `shiguredo_mp4`, son en Opus (lisible dans les navigateurs et VLC, pas dans le Lecteur multimédia de Windows). | Rien à télécharger dans le cas courant. Pour le secours, conditions de Cisco : téléchargement par l'utilisateur, désactivable et supprimable, mention « OpenH264 Video Codec provided by Cisco Systems, Inc. », licence affichée. |
 | Vidéo WebM | AV1 par `rav1e` + `webm` (son Opus). | libvpx impossible à compiler ici. AV1 est lent sans assembleur : `nasm` portable sera nécessaire sur la machine de compilation (pas chez l'utilisateur). |
 | GIF / WebP | `gif` + quantification des couleurs ; `webp-animation`. | `gifski` exclu (licence AGPL). |
 | Micro | `cpal` (WASAPI, liste et choix du micro) + `rubato` (rééchantillonnage) ; Opus par `ropus` (Rust pur). | Pas de droits admin. Si Windows bloque le micro pour les applications de bureau, on reçoit du silence : le détecter et expliquer le réglage à changer. |
@@ -234,7 +234,7 @@ testdata/private/   copies de notes personnelles pour les tests locaux — ignor
 | Le PC du travail peut bloquer un exe non signé (Smart App Control, AppLocker) sans possibilité de passer outre. | À vérifier dès H1 avec un exe minimal. |
 | Stratégie d'entreprise bloquant le Bluetooth ou le dongle. | Idem. |
 | Exe lancé depuis Nextcloud : verrouillé pendant l'exécution, la mise à jour par synchro échoue. | Documenter : mettre à jour l'exe quand il est fermé sur tous les PC. |
-| Bibliothèques vidéo jeunes (`muxide`, `webm`, `ropus`). | Isolées dans `ardoise-media` ; solutions de repli listées dans media-stack.md. |
+| Bibliothèques vidéo jeunes (`shiguredo_mp4`, `webm`, `ropus`). | Isolées dans `ardoise-media` ; solutions de repli listées dans media-stack.md. |
 
 ## 7. Qualité et tests
 

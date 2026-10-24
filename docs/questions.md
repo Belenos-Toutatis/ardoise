@@ -14,7 +14,7 @@ Le client Nextcloud ne synchronise pas les dossiers cachés (nom commençant par
 
 **Décision de l'utilisateur (2026-10-24)** : le dossier s'appelle désormais `_ardoise/` (non caché, synchronisé sans réglage). SPEC §3.2 et §4.8 sont mis à jour. Une bibliothèque qui a encore `.ardoise/` est migrée automatiquement au démarrage d'Ardoise et à l'ouverture de la bibliothèque (renommage, ou fusion sans rien écraser si `_ardoise/` existe déjà).
 
-## Q3 — Multiplexeur MP4 du secours OpenH264 : `shiguredo_mp4` au lieu de `muxide` ? (jalon M6) — **ouverte**
+## Q3 — Multiplexeur MP4 du secours OpenH264 : `shiguredo_mp4` au lieu de `muxide` ? (jalon M6) — **tranchée**
 
 SPEC §6.2 (ligne « Vidéo MP4 ») prévoit que le MP4 du secours OpenH264 soit « multiplexé par `muxide` ». À l'essai, `muxide` 0.5.0 ne convient pas :
 - le délai de démarrage du son Opus y est figé à 312 échantillons ;
@@ -26,4 +26,4 @@ SPEC §6.2 (ligne « Vidéo MP4 ») prévoit que le MP4 du secours OpenH264 soit
 
 **En attendant** : le secours utilise `shiguredo_mp4`. Le test de fin de M6 relit le fichier produit avec un lecteur indépendant (`mp4parse`, celui de Firefox), et Media Foundation le lit aussi.
 
-**À trancher** : remplacer `muxide` par `shiguredo_mp4` dans SPEC §6.2.
+**Décision de l'utilisateur (2026-10-24)** : `shiguredo_mp4` est retenu ; SPEC §6.2 est mis à jour (ligne « Vidéo MP4 » et risque des bibliothèques vidéo jeunes).
