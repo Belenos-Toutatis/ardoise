@@ -1171,3 +1171,243 @@ select {
     width: 11rem;
   }
 }
+
+
+/* Note editor */
+
+.editor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.editor-top {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.editor-top .title-field {
+  flex: 1;
+  min-width: 8rem;
+}
+
+.editor-top .title-field input {
+  width: 100%;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.editor-top .title-field input:hover,
+.editor-top .title-field input:focus {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.editor input[type='text']:focus-visible,
+.editor input[type='checkbox']:focus-visible,
+.editor input[type='radio']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.editor .status {
+  color: var(--muted);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.editor .status.unsaved {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.editor .status.unsaved::before {
+  content: '● ';
+  color: var(--accent);
+}
+
+.top-actions,
+.editor .buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.editor .button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.editor .small-button {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.875rem;
+}
+
+.editor .button.active {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+
+.editor-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 1rem;
+}
+
+.editor-banner p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.editor-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.editor-side {
+  width: 270px;
+  flex: none;
+  overflow: auto;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.side-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.side-section h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.side-section p {
+  margin: 0;
+}
+
+.side-section .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.side-section .row select {
+  width: 9.5rem;
+}
+
+.side-section .check {
+  font-size: 0.875rem;
+}
+
+.layers {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layer {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.layer.active {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+
+.layer .name {
+  flex: 1;
+  min-width: 0;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.layer .name:hover,
+.layer .name:focus {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.layer .icon {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.layer .icon:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.layer .icon:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.editor-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 35%);
+}
+
+.editor-dialog {
+  width: min(460px, 100%);
+}
+
+.editor .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .editor-side {
+    width: 220px;
+  }
+}
