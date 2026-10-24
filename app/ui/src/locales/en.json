@@ -169,6 +169,10 @@
       "folderHint": "A path relative to the library, for example Exports.",
       "save": "Save",
       "saved": "Setting saved."
+    },
+    "microphone": {
+      "title": "Microphone",
+      "hint": "The microphone used for the narration of videos and live mode. The choice is remembered on this computer."
     }
   },
   "tablet": {
@@ -434,7 +438,17 @@
     "liveNotRunning": "Live mode is not running.",
     "noMonitor": "No screen available for the presentation.",
     "simulationOnly": "This command only works with the simulated tablet.",
-    "tablet": "Problem with the tablet: {detail}"
+    "tablet": "Problem with the tablet: {detail}",
+    "videoExportFailed": "the video could not be written ({detail}); choose another location and check that there is enough space left",
+    "invalidVideoSettings": "these video settings are not valid ({detail}); check the image size, the duration and the background",
+    "codecUnavailable": "Windows cannot write MP4 files on this PC (the H.264 encoder is missing): install the OpenH264 backup in the Settings, or choose WebM",
+    "microphoneNotFound": "the chosen microphone cannot be found: plug it in, or choose another one in the Settings",
+    "microphoneSilent": "Windows may be blocking access to the microphone: Settings > Privacy & security > Microphone > \"Let desktop apps access your microphone\"",
+    "microphoneFailed": "the microphone cannot be used ({detail}); check that no other program is using it",
+    "noMicrophone": "no microphone is connected to this computer",
+    "narrationBusy": "a narration recording is already running",
+    "noRecording": "no narration recording is running",
+    "openh264DownloadFailed": "the OpenH264 download failed ({detail}); check the internet connection, then try again"
   },
   "editor": {
     "back": "Library",
@@ -730,6 +744,162 @@
     "pickFile": "Save the export",
     "pickFolder": "Choose the export folder",
     "defaultPdfName": "Notes"
+  },
+  "videoExport": {
+    "title": "Export as video",
+    "format": "Format",
+    "formats": {
+      "mp4": "MP4 (video)",
+      "gif": "Animated GIF",
+      "webp": "Animated WebP",
+      "webm": "WebM (video)"
+    },
+    "formatPros": {
+      "mp4": "Plays everywhere: Windows, phones, PowerPoint, school portals. With the sound of the narration.",
+      "gif": "Plays without a player: in an e-mail, a web page or a slide. Loops.",
+      "webp": "Like GIF, but smaller and sharper; transparent background possible.",
+      "webm": "Open format, with sound, small files. Plays in browsers and in Moodle."
+    },
+    "formatCons": {
+      "mp4": "No transparent background.",
+      "gif": "No sound, only 256 colours, large files.",
+      "webp": "No sound; some older programs cannot open it.",
+      "webm": "Slow export (AV1 encoding); some Windows players cannot open it."
+    },
+    "compare": {
+      "title": "Which format should I choose?",
+      "rows": {
+        "plays": {
+          "label": "Plays with",
+          "mp4": "Everything: Windows, phones, PowerPoint, school portals",
+          "gif": "Browser, e-mail, slide: no player needed",
+          "webp": "Browsers and recent programs",
+          "webm": "Browsers, Moodle, VLC"
+        },
+        "sound": {
+          "label": "Sound (narration)",
+          "mp4": "Yes",
+          "gif": "No",
+          "webp": "No",
+          "webm": "Yes"
+        },
+        "transparent": {
+          "label": "Transparent background possible",
+          "mp4": "No",
+          "gif": "Yes",
+          "webp": "Yes",
+          "webm": "No"
+        },
+        "size": {
+          "label": "File size",
+          "mp4": "Small",
+          "gif": "Large",
+          "webp": "Medium",
+          "webm": "Small"
+        },
+        "time": {
+          "label": "Export time",
+          "mp4": "Fast",
+          "gif": "Very fast",
+          "webp": "Long",
+          "webm": "The longest"
+        },
+        "bestFor": {
+          "label": "Best for",
+          "mp4": "A video lesson with my voice, PowerPoint, school portals",
+          "gif": "A short demonstration in an e-mail or a slide",
+          "webp": "A sharp animation on a web page, with transparency",
+          "webm": "Uploading to Moodle or a website, small file"
+        }
+      },
+      "advice": "When in doubt: MP4, which plays everywhere and carries the sound. GIF for a short animation that must show without a player."
+    },
+    "options": "Settings",
+    "resolution": "Image size",
+    "resolutions": {
+      "720p": "720p (1280 × 720)",
+      "1080p": "1080p (1920 × 1080)",
+      "4k": "4K (3840 × 2160)",
+      "page": "Page size"
+    },
+    "pageHint": "The video keeps the page's proportions, with 1920 pixels on the long side.",
+    "frameRate": "Frames per second",
+    "fps": "{count} frames/s",
+    "timing": "Length of the video",
+    "speed": "Speed",
+    "speedValue": "{speed}×",
+    "targetDuration": "Target duration",
+    "seconds": "seconds",
+    "trimPauses": "Remove dead time",
+    "trimPausesHint": "Long pauses between two strokes are shortened to half a second.",
+    "background": "Background",
+    "backgroundPaper": "With the paper",
+    "backgroundTransparent": "Transparent",
+    "backgroundFixed": "The background is always the paper: this format has no transparency.",
+    "holdEnd": "Freeze the last frame",
+    "narration": "Include the narration",
+    "narrationHint": "The sound recorded with the microphone is added to the video.",
+    "narrationLocked": "The narration keeps the speed it was recorded at ({speed}×): the speed, the target duration and the dead time cannot be changed.",
+    "narrationNoSound": "This note has a narration, but GIF and WebP have no sound: choose MP4 or WebM to include it.",
+    "invalidTiming": "The target duration must be between 1 and 3600 seconds.",
+    "invalidHold": "The last frame can stay on screen for 0 to 60 seconds.",
+    "estimate": {
+      "pending": "Working out the estimate…",
+      "size": "Image size: {width} × {height} pixels",
+      "length": "Video length: {duration} ({frames} frames)",
+      "speed": "Replay speed: {speed}×",
+      "narration": "Narration: {duration}",
+      "time": "Estimated export time: about {time}",
+      "long": "This export will take a while. To go faster, choose a smaller image size, fewer frames per second or another format (WebM is the slowest).",
+      "failed": "Cannot estimate the export: {message}"
+    },
+    "time": {
+      "lessThanSecond": "less than a second",
+      "seconds": "{seconds} s",
+      "minutes": "{minutes} min",
+      "minutesSeconds": "{minutes} min {seconds} s"
+    },
+    "destination": "You will then choose the file to create.",
+    "run": "Export…",
+    "again": "Export again…",
+    "running": "Exporting…",
+    "cancelRun": "Cancel the export",
+    "cancelling": "Cancelling…",
+    "cancelled": "Export cancelled.",
+    "progress": "Frames: {done} of {total} ({percent}%)",
+    "progressLabel": "Export progress",
+    "done": "Export finished.",
+    "resultLength": "Length: {duration}",
+    "resultSound": "Sound: {sound}",
+    "soundYes": "yes (narration)",
+    "soundNo": "no",
+    "failed": "The export failed: {message}",
+    "pickFile": "Save the video"
+  },
+  "openh264": {
+    "title": "Backup video encoder (OpenH264)",
+    "intro": "To write MP4 videos, Ardoise uses the encoder built into Windows (Media Foundation). It is missing on Windows \"N\" editions installed without the Media Feature Pack: Ardoise can then download the OpenH264 encoder from Cisco and keep it in its local folder.",
+    "mediaFoundationOk": "Windows can write MP4 files on this PC: the backup is not needed.",
+    "mediaFoundationMissing": "Windows cannot write MP4 files on this PC. Install the backup below, or choose WebM for your videos.",
+    "status": {
+      "label": "Status",
+      "notInstalled": "Not installed",
+      "installed": "Installed ({size} MB, version {version})",
+      "damaged": "Damaged file: remove it, then download it again"
+    },
+    "download": "Download from Cisco",
+    "downloadHint": "The file comes from Cisco's server; its fingerprint is checked before it is installed. Its licence is shown below.",
+    "downloading": "Downloading…",
+    "downloadProgress": "{received} of {total} MB",
+    "downloadReceived": "{received} MB received",
+    "downloadProgressLabel": "Download progress",
+    "cancelDownload": "Cancel the download",
+    "cancelling": "Cancelling…",
+    "cancelled": "Download cancelled.",
+    "allow": "Allow Ardoise to use OpenH264 for MP4 files",
+    "allowHint": "Unticked, the file stays installed but is not used.",
+    "remove": "Remove",
+    "licenseTitle": "OpenH264 licence (Cisco)"
   },
   "live": {
     "title": "Live mode",

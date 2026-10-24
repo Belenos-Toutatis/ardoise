@@ -1633,3 +1633,78 @@ select {
 .settings-section .choice {
   margin: 0.1rem 0;
 }
+
+/* Video export dialog */
+
+.video-timing select {
+  min-width: 5rem;
+}
+
+.video-seconds {
+  width: 5.5rem;
+}
+
+.video-background-fixed {
+  margin: 0.4rem 0;
+}
+
+.video-estimate {
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.video-estimate p {
+  margin: 0.15rem 0;
+}
+
+.video-estimate .banner {
+  margin: 0.5rem 0 0.15rem;
+  background: var(--surface);
+}
+
+.video-progress progress {
+  display: block;
+  width: 100%;
+  height: 0.9rem;
+  accent-color: var(--accent);
+}
+
+/* Settings: OpenH264 backup encoder */
+
+.openh264-notice {
+  margin: 0.5rem 0;
+  font-weight: 600;
+}
+
+.openh264-license {
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+}
+
+.openh264-license summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.openh264-license pre {
+  max-height: 12rem;
+  margin: 0.4rem 0 0;
+  padding: 0.5rem 0.7rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font: inherit;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+}
+
+.openh264-progress progress {
+  display: block;
+  width: 100%;
+  height: 0.8rem;
+  accent-color: var(--accent);
+}

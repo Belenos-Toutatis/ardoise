@@ -3,7 +3,7 @@
  * commands of `app/src-tauri/src/{video,narration,codec}.rs` take and return
  * (docs/design/media.md, "Interface package: contracts").
  */
-import type { FileStamp } from './note';
+import type { FileStamp, PageSize } from './note';
 
 export type VideoFormat = 'mp4' | 'gif' | 'webp' | 'webm';
 export const VIDEO_FORMATS: readonly VideoFormat[] = [
@@ -153,4 +153,79 @@ export interface OpenH264State {
 export interface DownloadProgress {
   received: number;
   total: number | null;
+}
+
+// --- Helpers of the export dialog -----------------------------------------------------------
+
+/** Only MP4 and WebM carry the narration; GIF and WebP have no sound. */
+export function supportsSound(format: VideoFormat): boolean {
+  return format === 'mp4' || format === 'webm';
+}
+
+/** Only GIF and WebP can have a transparent background. */
+export function supportsTransparency(format: VideoFormat): boolean {
+  return format === 'gif' || format === 'webp';
+}
+
+/** Frames per second offered first: the animated images are lighter at 15. */
+export function defaultFrameRate(format: VideoFormat): number {
+  return supportsSound(format) ? 30 : 15;
+}
+
+/** The final frame can stay at most this long, seconds. */
+export const MAX_HOLD_SECONDS = 60;
+export const DEFAULT_HOLD_SECONDS = 3;
+/** Longest target duration accepted, seconds. */
+export const MAX_TARGET_SECONDS = 3600;
+
+export function validHold(seconds: number | null | undefined): seconds is number {
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0 && seconds <= MAX_HOLD_SECONDS;
+}
+
+export function validTiming(timing: VideoTiming): boolean {
+  if (timing.kind === 'speed') return timing.speed >= MIN_SPEED && timing.speed <= MAX_SPEED;
+  return Number.isFinite(timing.seconds) && timing.seconds >= 1 && timing.seconds <= MAX_TARGET_SECONDS;
+}
+
+/** Frame size of the fixed resolutions (the page is fitted, bands of paper colour around it). */
+const FIXED_SIZES = {
+  '720p': [1280, 720],
+  '1080p': [1920, 1080],
+  '4k': [3840, 2160],
+} as const;
+
+/** Even number nearest to `value`, at least 2 (video encoders refuse odd sizes). */
+function even(value: number): number {
+  return Math.max(2, Math.round(value / 2) * 2);
+}
+
+/** Size of a video frame: the fixed sizes, or the page's proportions with 1920 px on the long side. */
+export function frameSize(resolution: VideoResolution, page: PageSize): { width: number; height: number } {
+  if (resolution !== 'page') {
+    const [width, height] = FIXED_SIZES[resolution];
+    return { width, height };
+  }
+  const long = 1920;
+  const longSide = Math.max(page.width, page.height, 1);
+  const short = even((long * Math.min(page.width, page.height)) / longSide);
+  return page.width >= page.height ? { width: long, height: short } : { width: short, height: long };
+}
+
+/** Whole minutes and seconds of a length in milliseconds, rounded to the nearest second. */
+export function splitSeconds(ms: number): { minutes: number; seconds: number } {
+  const total = Math.max(0, Math.round(ms / 1000));
+  return { minutes: Math.floor(total / 60), seconds: total % 60 };
+}
+
+/** An export time to show after "about": exact under 10 s, then to the nearest 5 s. */
+export function roundEstimate(ms: number): number {
+  return ms < 10_000 ? ms : Math.round(ms / 5000) * 5000;
+}
+
+/** Longest estimated export time shown without a warning, milliseconds. */
+export const LONG_EXPORT_MS = 120_000;
+
+/** Megabytes (10^6 bytes) with one decimal, for the size of the OpenH264 library. */
+export function megabytes(bytes: number): number {
+  return Math.round(bytes / 100_000) / 10;
 }

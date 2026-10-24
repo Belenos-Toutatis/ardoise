@@ -6,6 +6,8 @@
   import { formatDate } from '../lib/library-logic';
   import { sizeInMillimetres, tablet } from '../lib/tablet-state.svelte';
   import LanguagePicker from './LanguagePicker.svelte';
+  import MicrophonePicker from './narration/MicrophonePicker.svelte';
+  import OpenH264Section from './OpenH264Section.svelte';
   import TabletOptions from './tablet/TabletOptions.svelte';
 
   let { app, onchange, onclose, ontest }: {
@@ -179,6 +181,14 @@
       <p class="error" role="alert">{t('errors.generic', { message: autoError })}</p>
     {/if}
   </section>
+
+  <section class="settings-section" aria-labelledby="settings-microphone">
+    <h3 id="settings-microphone">{t('settings.microphone.title')}</h3>
+    <p class="muted small">{t('settings.microphone.hint')}</p>
+    <MicrophonePicker device={app.microphone} monitor onchange={(device) => run(() => api.setMicrophone(device))} />
+  </section>
+
+  <OpenH264Section />
 
   <dl class="facts">
     <dt>{t('settings.machine')}</dt>
