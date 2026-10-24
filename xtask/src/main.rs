@@ -6,6 +6,7 @@ mod licenses;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 const USAGE: &str = "Usage: cargo xtask <command>
@@ -66,9 +67,61 @@ fn licenses_command(write: bool) -> ExitCode {
     }
 }
 
+/// The newest `%LOCALAPPDATA%\ArdoiseDev\nasm-<version>\nasm.exe`: the portable nasm of the
+/// development PC, for rav1e's assembly (WebM export), unless `NASM` is already set. Elsewhere
+/// (Linux), nasm comes from the system packages, on `PATH`.
+fn local_nasm() -> Option<&'static Path> {
+    static NASM: OnceLock<Option<PathBuf>> = OnceLock::new();
+    NASM.get_or_init(|| {
+        if std::env::var_os("NASM").is_some() {
+            return None;
+        }
+        let base = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("ArdoiseDev");
+        let version = |name: &str| -> Option<Vec<u32>> {
+            name.strip_prefix("nasm-")?
+                .split('.')
+                .map(|part| part.parse().ok())
+                .collect()
+        };
+        fs::read_dir(base)
+            .ok()?
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let version = version(entry.file_name().to_str()?)?;
+                let exe = entry.path().join("nasm.exe");
+                exe.is_file().then_some((version, exe))
+            })
+            .max()
+            .map(|(_, exe)| exe)
+    })
+    .as_deref()
+}
+
+/// Says where nasm comes from, or how to get it when the build will not find it.
+fn report_nasm() {
+    if let Some(nasm) = local_nasm() {
+        println!("nasm: {} (NASM for cargo)", nasm.display());
+    } else if std::env::var_os("NASM").is_none() && Command::new("nasm").arg("-v").output().is_err()
+    {
+        println!(
+            "warning: nasm not found. rav1e (WebM export) needs it: unpack the win64 zip from \
+             https://www.nasm.us/pub/nasm/releasebuilds/ into \
+             %LOCALAPPDATA%\\ArdoiseDev\\nasm-<version>\\ (or install it on Linux, or set NASM); \
+             otherwise the build stops with rav1e's \"NASM build failed\"."
+        );
+    }
+}
+
 /// Runs a program with inherited stdio in `dir`; true if it exited with 0.
 fn run(dir: &Path, program: &str, args: &[&str]) -> bool {
-    match Command::new(program).args(args).current_dir(dir).status() {
+    let mut command = Command::new(program);
+    command.args(args).current_dir(dir);
+    if program == "cargo"
+        && let Some(nasm) = local_nasm()
+    {
+        command.env("NASM", nasm);
+    }
+    match command.status() {
         Ok(status) => status.success(),
         Err(e) => {
             eprintln!("cannot run {program}: {e}");
@@ -116,6 +169,7 @@ fn check(quick: bool) -> ExitCode {
     let (r, a) = (root.as_path(), app.as_path());
     let cargo = |args: &'static [&'static str]| move || run(r, "cargo", args);
     let npm = |args: &'static [&'static str]| move || run(a, NPM, args);
+    report_nasm();
 
     let mut steps = vec![
         Step {

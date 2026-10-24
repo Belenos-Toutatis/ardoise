@@ -7,6 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = ["asm"]
+# rav1e's x86-64 assembly: AV1 (WebM) several times faster. Needs `nasm` 2.15 or later on the
+# build machine (never on the user's PC): found through the `NASM` variable, which
+# `cargo xtask` sets from `%LOCALAPPDATA%\ArdoiseDev\nasm-*`, or on `PATH`. Without nasm the build
+# stops with rav1e's "NASM build failed" message; `--no-default-features` builds a slow AV1.
+asm = ["rav1e/asm"]
+
 [dependencies]
 # The replay: notes, strokes and their drawing (the same as every other export).
 ardoise-core = { path = "../ardoise-core" }
@@ -16,6 +24,19 @@ thiserror = "2"
 # Microphone capture (WASAPI on Windows) and resampling to the 48 kHz narration rate.
 cpal = "0.18"
 rubato = "5"
+# GIF: pure Rust (image-rs). Its default `color_quant` feature brings the NeuQuant quantiser,
+# used directly by `gif.rs` when a frame has more than 255 colours.
+gif = "0.14"
+color_quant = "1.1"
+# Animated WebP: libwebp's WebPAnimEncoder, built from source with `cc` (no cmake).
+webp-animation = "0.10"
+# WebM: AV1 by rav1e (pure Rust + optional assembly), Matroska muxing by libwebm (C++, `cc`).
+rav1e = { version = "0.8", default-features = false, features = ["threading"] }
+webm = "2.2"
+# Opus (narration in WebM, and in MP4 through the OpenH264 fallback): pure-Rust port of libopus.
+ropus = "0.12"
+# Reads WebM files back for `probe_webm` (pure Rust, no dependencies).
+matroska-demuxer = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 # Same version as `ardoise-ble`, so only one copy of the crate is compiled.

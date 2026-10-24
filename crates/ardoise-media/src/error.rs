@@ -78,4 +78,17 @@ pub enum MediaError {
     /// Drawing a replay frame failed (a page too small or too large for the frame size).
     #[error("cannot draw the replay: {0}")]
     Render(#[from] ardoise_render::RenderError),
+
+    // Animated formats (GIF, WebP, WebM) and the Opus encoder.
+    /// Reading or writing the file failed.
+    #[error("file error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// An encoder or muxer of the animated formats failed (`codec`: "GIF", "WebP", "AV1",
+    /// "Opus", "WebM").
+    #[error("{codec} encoding failed: {message}")]
+    Encoding {
+        codec: &'static str,
+        message: String,
+    },
 }
