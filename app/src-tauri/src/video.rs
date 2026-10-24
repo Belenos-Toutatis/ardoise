@@ -161,10 +161,24 @@ pub struct VideoExportResult {
     pub encoder: String,
 }
 
-/// The flag of the video export under way, set by `cancel_video_export` (its own: an image
-/// export may run meanwhile).
+/// The flag of the video export under way, set by `cancel_video_export`. A type of its own, so
+/// that the app manages it apart from the image export's `ExportCancel` (Tauri keeps one state
+/// per type): an image export may run meanwhile and is never stopped by it.
 #[derive(Debug, Default, Clone)]
 pub struct VideoCancel(pub Arc<AtomicBool>);
+
+impl VideoCancel {
+    /// Clears the flag for a new export and returns it, for the export's thread.
+    pub fn arm(&self) -> Arc<AtomicBool> {
+        self.0.store(false, Ordering::Relaxed);
+        Arc::clone(&self.0)
+    }
+
+    /// Asks the export under way to stop.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
 
 /// A note to replay and the narration that goes with it.
 #[derive(Debug, Clone, PartialEq)]
@@ -508,8 +522,7 @@ pub async fn export_video(
     let library = library_for(&context, &source, &options)?;
     let openh264 = (options.format == VideoFormat::Mp4 && openh264_allowed(&context))
         .then(|| OpenH264Codec::new(codec_dir()));
-    let flag = Arc::clone(&cancel.0);
-    flag.store(false, Ordering::Relaxed);
+    let flag = cancel.arm();
     // Encoding takes seconds to minutes: keep it off the async runtime's threads.
     tauri::async_runtime::spawn_blocking(move || {
         export_video_in(
@@ -532,7 +545,7 @@ pub async fn export_video(
 /// Asks the video export under way to stop (`export_video` then fails with `cancelled`).
 #[tauri::command]
 pub fn cancel_video_export(cancel: State<'_, VideoCancel>) {
-    cancel.0.store(true, Ordering::Relaxed);
+    cancel.cancel();
 }
 
 #[cfg(test)]
@@ -956,11 +969,31 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.code(), CANCELLED);
         assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
-        // The command's flag is a plain shared boolean, separate from the image export's.
-        let cancel = VideoCancel::default();
-        cancel.0.store(true, Ordering::Relaxed);
-        let image = crate::export::ExportCancel::default();
-        assert!(!image.0.load(Ordering::Relaxed));
+
+        // The commands' flag: a new export clears it (an earlier cancel does not stop it), and
+        // `cancel_video_export` reaches the export's thread through it.
+        let managed = VideoCancel::default();
+        managed.cancel();
+        let flag = managed.arm();
+        assert!(!flag.load(Ordering::Relaxed));
+        managed.cancel();
+        let error = export_video_in(
+            Some(&library),
+            from_library(&saved.path),
+            &options(VideoFormat::Gif),
+            &out.path().join("essai.gif"),
+            None,
+            &mut |_| {},
+            &flag,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), CANCELLED);
+        // Tauri keeps one managed state per type: the video flag is a type of its own, so
+        // cancelling a video export never reaches the image export's `ExportCancel`.
+        assert_ne!(
+            std::any::TypeId::of::<VideoCancel>(),
+            std::any::TypeId::of::<crate::export::ExportCancel>()
+        );
     }
 
     // --- With the media pipeline (export.rs, estimate.rs, narration.rs of ardoise-media) ---

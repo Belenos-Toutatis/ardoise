@@ -325,3 +325,47 @@ Deviations from the contract above, kept after review of each agent's report:
   "save as" answer can be scripted by the journey through `window.__ardoiseE2eSavePath`. The CSP allows `blob:` media
   so the narration's WAV plays in an `<audio>` element.
 
+After the review of the package (contract changes; the interface codes against them):
+
+- `narration_stop(save, stamp, path, replayStartedAtMs)` (`path`, `replayStartedAtMs`: `string | null`,
+  `number | null`). Replay target: `path`, when given, replaces the path fixed at `narration_start` (the editor may
+  have renamed the note). `replayStartedAtMs` is the Unix time in ms (`Date.now()`) at which the replay was at instant
+  0 and playing; then `start_ms = round(wall clock of the first sample − replayStartedAtMs)` (replay time runs at
+  wall-clock speed whatever the replay speed). The wall clock of the first sample is estimated as in live mode: every
+  recording, replay or live, has the 50 ms watcher that keeps the smallest "wall clock − audio received" (the wall
+  clock at the start when no audio was seen). Without `replayStartedAtMs`, the target's `startMs`. A
+  `replayStartedAtMs` that is not finite or beyond ±10¹⁵ is refused (`invalidVideoSettings`) before anything stops,
+  so the recording goes on.
+- A replay recording that cannot be saved (any error once the clip was captured and encoded: `noteConflict`,
+  `noteNotFound`, `notInLibrary`, I/O…) is not lost: the runtime keeps it as the pending narration (its `audio.opus`
+  bytes and its length: the PCM is not kept) and writes a best-effort copy `<note file stem> <yyyy-mm-dd hhmmss>.opus`
+  (`-2`, `-3`… when taken; stem cut to 150 characters) into `%LOCALAPPDATA%\Ardoise\narration-backup\` (temp folder +
+  `Ardoise/narration-backup` when `LOCALAPPDATA` is unset; never in the library). The error returned is unchanged.
+  `NarrationStatus.pending: boolean` says that one exists.
+  - `narration_retry(path, stamp)` → `NarrationSaved`: saves the pending narration into the note at `path` of the
+    current library (checked save, like `narration_stop`; `stamp: null` checks against the version read), then forgets
+    it and deletes its copy. On failure it stays pending (unless a newer one replaced it meanwhile).
+    `noPendingNarration` when there is none.
+  - `narration_discard()`: forgets the pending narration; its copy stays on disk as a last resort.
+  - Recording again while one is pending is allowed; the pending one stays until retried or discarded, or until a
+    newer recording fails to save (one pending narration at a time; the older copy stays on disk).
+  - A clip the Opus encoder refuses (never expected from the recorder: mono, 48 kHz) is `microphoneFailed` and is not
+    kept: a retry could not save it either.
+- `microphone_monitor_stop()`: stops the capture only if it is a level-only monitor; a recording goes on.
+- Error codes: `noNarration` (`narration_audio` on a note without narration), `emptyRecording` (a recording that
+  captured nothing), `noPendingNarration`, `openh264RemoveFailed` (removing the codec failed, e.g. Windows still has
+  the DLL loaded: the interface says to restart Ardoise). `noRecording` now only means "nothing is recording" (this
+  replaces the `noRecording` uses listed above).
+- `narration_info` reads `ardoise_media::narration_header` (headers and granule positions, no decoding): the length
+  comes from the last granule position, the origin from the first audio page's packet durations (table of contents,
+  RFC 6716 §3.1).
+- Hostile `audio.opus`: a stream whose granule positions give more than 4 hours is refused before decoding
+  (`InvalidFile`), and decoding stops with `InvalidFile` as soon as it yields more than that length plus one packet
+  (120 ms) of end trimming.
+- `export_animation` checks `cancel` again after the last frame (before the sink's final flush) and before the
+  rename: a cancel during the final flush leaves nothing.
+- Live narration memory: the clip is cut into its pages without copying it (pieces split off its end, the first one
+  keeps its buffer), a page's pieces are appended in place (`Narration::merge` grows the earlier track when the later
+  one follows it with as many channels), and a live page keeps only its `audio.opus` bytes; a second recording on the
+  page decodes them again to merge (re-encoding the earlier narration once more).
+

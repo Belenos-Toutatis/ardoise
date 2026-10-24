@@ -1,30 +1,41 @@
 //! Narration at the microphone (SPEC §4.5): choosing the microphone, its level, recording
 //! during a replay or in live mode, and the narration stored in a note (`audio.opus`).
-//! Contract: `docs/design/media.md`, "Interface package: contracts" (shapes of
-//! `app/ui/src/lib/video.ts`).
+//! Contract: `docs/design/media.md`, "Interface package: contracts" and the decisions after
+//! it (shapes of `app/ui/src/lib/video.ts`).
 //!
 //! - One capture at a time in the app ([`NarrationRuntime`]): a level-only monitor (settings,
-//!   before recording) or a recording. Starting a recording stops a monitor first.
+//!   before recording) or a recording. Starting a recording stops a monitor first;
+//!   `microphone_monitor_stop` stops only a monitor.
+//! - Every recording has a watcher that notes, every 50 ms, the smallest "wall clock − audio
+//!   received" ([`PageLog`]): the wall clock of the first sample.
 //! - A recording during a replay is in replay time (the replay's speed and trimming): at stop
-//!   it replaces the narration of its note, through the library's checked save with the
-//!   editor's stamp (a version changed on disk is a `noteConflict`, nothing is written).
-//! - A recording in live mode is in note time: a watcher notes which page is shown every 50 ms;
-//!   at stop the clip is cut per page ([`split_live_recording`]), each piece placed from its
+//!   it replaces the narration of its note (at the path given at stop when the editor renamed
+//!   it meanwhile), through the library's checked save with the editor's stamp (a version
+//!   changed on disk is a `noteConflict`, nothing is written). Its first sample is placed on
+//!   the replay from the wall clock at which the replay was at instant 0 ([`replay_start_ms`]).
+//! - A replay recording that cannot be saved is not lost: it stays pending in the runtime for
+//!   `narration_retry` (into the note's current path) or `narration_discard`, and a copy of
+//!   its `audio.opus` is written to [`backup_dir`] (local to this PC, outside the library),
+//!   removed once the narration is saved.
+//! - A recording in live mode is in note time: the watcher also notes which page is shown; at
+//!   stop the clip is cut per page ([`split_live_recording`]), each piece placed from its
 //!   page's first stroke, merged with the page's narration and handed to the live hub, which
 //!   writes it with the page (the hub is the only writer of live pages).
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use ardoise_core::fsutil;
 use ardoise_core::library::{FileStamp, Library, LibraryError};
 use ardoise_media::microphone::{CaptureStatus, Level, Recorder, list_input_devices};
 use ardoise_media::replay::{MAX_SPEED, MIN_SPEED, ReplayOptions};
 use ardoise_media::{
-    AudioClip, MediaError, NARRATION_SAMPLE_RATE, Narration, NarrationBase, decode_narration,
-    encode_narration, wav_bytes,
+    AudioClip, MediaError, NARRATION_SAMPLE_RATE, Narration, NarrationBase, NarrationHeader,
+    decode_narration, encode_narration, narration_header, wav_bytes,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -47,11 +58,20 @@ pub const MICROPHONE_FAILED: &str = "microphoneFailed";
 pub const NO_MICROPHONE: &str = "noMicrophone";
 /// A recording already runs.
 pub const NARRATION_BUSY: &str = "narrationBusy";
-/// Nothing was recorded, or the note has no narration.
+/// Nothing is being recorded.
 pub const NO_RECORDING: &str = "noRecording";
+/// The recording captured nothing.
+pub const EMPTY_RECORDING: &str = "emptyRecording";
+/// The note has no narration.
+pub const NO_NARRATION: &str = "noNarration";
+/// No replay narration waits to be saved again.
+pub const NO_PENDING_NARRATION: &str = "noPendingNarration";
 
-/// How often the live watcher looks at the page shown.
+/// How often the watcher of a recording looks at the audio received and the page shown.
 pub const WATCH_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Longest note file stem kept in the name of a backup copy, in characters.
+const BACKUP_STEM_CHARS: usize = 150;
 
 /// `Microphone` in `video.ts`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -118,6 +138,8 @@ pub struct NarrationStatus {
     pub elapsed_ms: u64,
     pub device: Option<String>,
     pub failure: Option<String>,
+    /// A replay narration that could not be saved waits for `narration_retry`.
+    pub pending: bool,
 }
 
 impl NarrationStatus {
@@ -130,6 +152,7 @@ impl NarrationStatus {
             elapsed_ms: 0,
             device: None,
             failure: None,
+            pending: false,
         }
     }
 }
@@ -165,16 +188,16 @@ pub struct NarrationInfo {
 }
 
 impl NarrationInfo {
-    pub fn of(narration: &Narration) -> Self {
+    pub fn of(header: &NarrationHeader) -> Self {
         Self {
-            duration_ms: duration_ms(narration.duration()),
-            base: match narration.base {
+            duration_ms: duration_ms(header.duration),
+            base: match header.base {
                 NarrationBase::Replay => BaseName::Replay,
                 NarrationBase::Note => BaseName::Note,
             },
-            speed: narration.options.speed,
-            max_pause_ms: narration.options.max_pause.map(duration_ms),
-            start_ms: narration.start_ms,
+            speed: header.options.speed,
+            max_pause_ms: header.options.max_pause.map(duration_ms),
+            start_ms: header.start_ms,
         }
     }
 }
@@ -245,7 +268,7 @@ pub fn level_state(level: Level) -> LevelState {
     }
 }
 
-// --- Live recordings: which page was shown when -------------------------------------------------
+// --- What the watcher sees: the clock of the first sample, the pages shown ----------------------
 
 /// From audio position `at` on, page `page` (0-based) was shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,10 +277,11 @@ pub struct PageChange {
     pub page: usize,
 }
 
-/// What the live watcher saw during a recording.
+/// What the watcher saw during a recording.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PageLog {
-    /// The page shown from the start, then each change; positions strictly increase.
+    /// The page shown from the start, then each change; positions strictly increase (live
+    /// mode only).
     pub changes: Vec<PageChange>,
     /// Smallest "wall clock − audio received" seen (Unix ms): the wall clock of the first
     /// sample, give or take the delivery delay of the audio (the smallest is the best bound).
@@ -320,15 +344,19 @@ fn frame_at(at: Duration, frames: usize) -> usize {
 /// `wall_start_ms` is the wall clock of the clip's first sample. Pieces of pages without any
 /// stroke (`None`, or unknown pages) and empty pieces are left out. A page shown several times
 /// gets several pieces, in order.
+///
+/// The clip is taken apart, not copied: the pieces are cut off its end one by one (its buffer
+/// shrinking as they go) and the first piece keeps the buffer itself.
 pub fn split_live_recording(
-    clip: &AudioClip,
+    clip: AudioClip,
     changes: &[PageChange],
     wall_start_ms: f64,
     origins: &[Option<i64>],
 ) -> Vec<(usize, Narration)> {
     let channels = usize::from(clip.channels.max(1));
     let frames = clip.samples.len() / channels;
-    let mut pieces = Vec::new();
+    // The pieces kept: page, first and end frames, start in note time.
+    let mut cuts = Vec::new();
     for (i, change) in changes.iter().enumerate() {
         let start = frame_at(change.at, frames);
         let end = changes
@@ -344,15 +372,27 @@ pub fn split_live_recording(
         let wall = (wall_start_ms + offset_ms).round();
         // Unix milliseconds: well within `i64`.
         let start_ms = (wall as i64).saturating_sub(*origin);
-        let Some(samples) = clip.samples.get(start * channels..end * channels) else {
-            continue;
+        cuts.push((change.page, start, end, start_ms));
+    }
+    let mut samples = clip.samples;
+    let mut pieces = Vec::with_capacity(cuts.len());
+    for &(page, start, end, start_ms) in cuts.iter().rev() {
+        // The cuts are in order and within the clip: `start < end <= samples.len()`.
+        samples.truncate(end * channels);
+        let piece = if start == 0 {
+            std::mem::take(&mut samples)
+        } else {
+            let piece = samples.split_off(start * channels);
+            // Gives the piece's room back (usually in place, without copying).
+            samples.shrink_to_fit();
+            piece
         };
         pieces.push((
-            change.page,
+            page,
             Narration {
                 clip: AudioClip {
                     channels: clip.channels,
-                    samples: samples.to_vec(),
+                    samples: piece,
                 },
                 base: NarrationBase::Note,
                 options: ReplayOptions::default(),
@@ -360,10 +400,12 @@ pub fn split_live_recording(
             },
         ));
     }
+    pieces.reverse();
     pieces
 }
 
-/// The pieces of each page merged into one narration, pages in the order they first appear.
+/// The pieces of each page merged into one narration, pages in the order they first appear
+/// (the pieces are moved, and a page's later piece is appended to its earlier one in place).
 pub fn merge_by_page(pieces: Vec<(usize, Narration)>) -> Vec<(usize, Narration)> {
     let mut merged: Vec<(usize, Narration)> = Vec::new();
     for (page, piece) in pieces {
@@ -402,9 +444,11 @@ pub fn watch_pages(
     }
 }
 
-/// The page watcher of a live recording.
-struct LiveWatch {
-    session: u64,
+/// How the watcher reads the page shown (`None` outside live mode).
+type PositionFn = Arc<dyn Fn() -> Option<PagePosition> + Send + Sync>;
+
+/// The watcher of a recording (see [`watch_pages`]).
+struct Watch {
     first_page: usize,
     /// Wall clock when the recording started (Unix ms), if no audio is ever seen.
     started_ms: f64,
@@ -412,18 +456,55 @@ struct LiveWatch {
     thread: Option<JoinHandle<PageLog>>,
 }
 
-impl LiveWatch {
-    /// Stops the watcher and returns what it saw.
-    fn finish(&mut self) -> PageLog {
+impl Watch {
+    /// Starts watching `recorder` and the page of `session` that `position` reads.
+    fn spawn(
+        recorder: &Arc<Box<dyn Source>>,
+        session: u64,
+        first_page: usize,
+        position: PositionFn,
+    ) -> CommandResult<Watch> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let started_ms = wall_now_ms();
+        let thread = {
+            let (stop, recorder) = (Arc::clone(&stop), Arc::clone(recorder));
+            std::thread::Builder::new()
+                .name("narration-watch".into())
+                .spawn(move || {
+                    watch_pages(
+                        &stop,
+                        WATCH_INTERVAL,
+                        session,
+                        first_page,
+                        &|| recorder.elapsed(),
+                        &*position,
+                        &wall_now_ms,
+                    )
+                })
+                .map_err(|error| CommandError::new(MICROPHONE_FAILED, error))?
+        };
+        Ok(Watch {
+            first_page,
+            started_ms,
+            stop,
+            thread: Some(thread),
+        })
+    }
+
+    /// Stops the watcher and returns what it saw, with the wall clock of the first sample.
+    fn finish(&mut self) -> (PageLog, f64) {
         self.stop.store(true, Ordering::Release);
-        self.thread
+        let log = self
+            .thread
             .take()
             .and_then(|thread| thread.join().ok())
-            .unwrap_or_else(|| PageLog::new(self.first_page))
+            .unwrap_or_else(|| PageLog::new(self.first_page));
+        let wall_start_ms = log.wall_start_ms(self.started_ms);
+        (log, wall_start_ms)
     }
 }
 
-impl Drop for LiveWatch {
+impl Drop for Watch {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         if let Some(thread) = self.thread.take() {
@@ -433,6 +514,56 @@ impl Drop for LiveWatch {
 }
 
 // --- The capture of the app ---------------------------------------------------------------------
+
+/// A microphone capture as the runtime uses it: a [`Recorder`], or a stand-in in the tests.
+pub trait Source: Send + Sync {
+    fn device_name(&self) -> &str;
+    fn level(&self) -> Level;
+    /// Audio received so far.
+    fn elapsed(&self) -> Duration;
+    fn status(&self) -> CaptureStatus;
+    /// Stops the capture and returns what it recorded.
+    fn stop(self: Box<Self>) -> Result<AudioClip, MediaError>;
+}
+
+impl Source for Recorder {
+    fn device_name(&self) -> &str {
+        Recorder::device_name(self)
+    }
+
+    fn level(&self) -> Level {
+        Recorder::level(self)
+    }
+
+    fn elapsed(&self) -> Duration {
+        Recorder::elapsed(self)
+    }
+
+    fn status(&self) -> CaptureStatus {
+        Recorder::status(self)
+    }
+
+    fn stop(self: Box<Self>) -> Result<AudioClip, MediaError> {
+        Recorder::stop(*self)
+    }
+}
+
+/// Opens a microphone (`None`: the system's default); `record` keeps the audio, else only the
+/// level is measured.
+pub type Opener = dyn Fn(Option<&str>, bool) -> CommandResult<Box<dyn Source>> + Send + Sync;
+
+/// Opens a microphone of this PC.
+fn open_microphone(device: Option<&str>, record: bool) -> CommandResult<Box<dyn Source>> {
+    let opened = if record {
+        Recorder::start(device)
+    } else {
+        Recorder::monitor(device)
+    };
+    match opened {
+        Ok(recorder) => Ok(Box::new(recorder)),
+        Err(error) => Err(start_error(error, device.is_none() && has_no_microphone())),
+    }
+}
 
 /// Where a replay recording goes.
 #[derive(Debug, Clone)]
@@ -445,24 +576,27 @@ struct ReplayTarget {
 
 enum Purpose {
     Monitor,
-    Replay(ReplayTarget),
-    Live(LiveWatch),
+    Replay { target: ReplayTarget, watch: Watch },
+    Live { session: u64, watch: Watch },
 }
 
 struct Capture {
-    /// Shared with the live watcher, which reads the audio position.
-    recorder: Arc<Recorder>,
+    /// Shared with the watcher, which reads the audio position.
+    recorder: Arc<Box<dyn Source>>,
     purpose: Purpose,
 }
 
-/// What a stopped capture was for.
+/// What a stopped capture was for, with the wall clock (Unix ms) of its first sample.
 enum Stopped {
     Monitor,
-    Replay(ReplayTarget),
+    Replay {
+        target: ReplayTarget,
+        wall_start_ms: f64,
+    },
     Live {
         session: u64,
         log: PageLog,
-        started_ms: f64,
+        wall_start_ms: f64,
     },
 }
 
@@ -472,7 +606,7 @@ impl Capture {
     }
 
     fn is_live(&self) -> bool {
-        matches!(self.purpose, Purpose::Live(_))
+        matches!(self.purpose, Purpose::Live { .. })
     }
 
     /// Stops the watcher, then the recorder.
@@ -480,13 +614,16 @@ impl Capture {
         let Capture { recorder, purpose } = self;
         let stopped = match purpose {
             Purpose::Monitor => Stopped::Monitor,
-            Purpose::Replay(target) => Stopped::Replay(target),
-            Purpose::Live(mut watch) => {
-                let log = watch.finish();
+            Purpose::Replay { target, mut watch } => Stopped::Replay {
+                target,
+                wall_start_ms: watch.finish().1,
+            },
+            Purpose::Live { session, mut watch } => {
+                let (log, wall_start_ms) = watch.finish();
                 Stopped::Live {
-                    session: watch.session,
+                    session,
                     log,
-                    started_ms: watch.started_ms,
+                    wall_start_ms,
                 }
             }
         };
@@ -502,15 +639,51 @@ impl Capture {
     }
 }
 
-/// The microphone capture of the running app: one at a time.
-#[derive(Default)]
+/// A replay recording that could not be saved: kept until `narration_retry` saves it,
+/// `narration_discard` drops it, or a newer one replaces it.
+struct Pending {
+    /// Its `audio.opus` (also what the backup copy holds).
+    audio: Vec<u8>,
+    duration_ms: u64,
+    /// The backup copy, removed once the narration is saved; `None` when it could not be
+    /// written.
+    backup: Option<PathBuf>,
+}
+
+/// The microphone capture of the running app (one at a time), and the replay narration that
+/// waits to be saved again.
 pub struct NarrationRuntime {
     capture: Mutex<Option<Capture>>,
+    pending: Mutex<Option<Pending>>,
+    open: Box<Opener>,
+    /// Where the copies of pending narrations go.
+    backup_dir: PathBuf,
+}
+
+impl Default for NarrationRuntime {
+    fn default() -> Self {
+        Self::new(Box::new(open_microphone), backup_dir())
+    }
 }
 
 impl NarrationRuntime {
+    /// A runtime opening its microphones with `open` and backing up pending narrations in
+    /// `backup_dir`.
+    pub fn new(open: Box<Opener>, backup_dir: PathBuf) -> Self {
+        Self {
+            capture: Mutex::new(None),
+            pending: Mutex::new(None),
+            open,
+            backup_dir,
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, Option<Capture>> {
         self.capture.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn lock_pending(&self) -> MutexGuard<'_, Option<Pending>> {
+        self.pending.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Takes the capture under way (`only_live`: only a live recording).
@@ -528,11 +701,53 @@ impl NarrationRuntime {
         self.lock().as_ref().is_some_and(Capture::is_live)
     }
 
+    /// Whether a replay narration waits to be saved again.
+    pub fn has_pending(&self) -> bool {
+        self.lock_pending().is_some()
+    }
+
+    /// Keeps a replay narration that could not be saved into the note at `note` (replacing
+    /// any older one, whose backup copy stays on disk), after writing its backup copy.
+    fn keep_pending(&self, note: &Path, audio: Vec<u8>, duration_ms: u64) {
+        let backup = match write_narration_backup(&self.backup_dir, note, &audio) {
+            Ok(path) => {
+                eprintln!("narration: kept unsaved, copy in {}", path.display());
+                Some(path)
+            }
+            Err(error) => {
+                eprintln!("narration: kept unsaved, no copy could be written: {error}");
+                None
+            }
+        };
+        *self.lock_pending() = Some(Pending {
+            audio,
+            duration_ms,
+            backup,
+        });
+    }
+
+    fn take_pending(&self) -> Option<Pending> {
+        self.lock_pending().take()
+    }
+
+    /// Puts back a pending narration that could not be saved again, unless a newer one took
+    /// its place meanwhile.
+    fn restore_pending(&self, pending: Pending) {
+        let mut slot = self.lock_pending();
+        if slot.is_none() {
+            *slot = Some(pending);
+        }
+    }
+
     /// What the capture under way is doing.
     pub fn status(&self) -> NarrationStatus {
+        let pending = self.has_pending();
         let slot = self.lock();
         let Some(capture) = slot.as_ref() else {
-            return NarrationStatus::idle();
+            return NarrationStatus {
+                pending,
+                ..NarrationStatus::idle()
+            };
         };
         let recorder = &capture.recorder;
         let (state, failure) = capture_state(&recorder.status());
@@ -547,6 +762,7 @@ impl NarrationRuntime {
             elapsed_ms: duration_ms(recorder.elapsed()),
             device: Some(recorder.device_name().to_owned()),
             failure,
+            pending,
         }
     }
 }
@@ -554,17 +770,6 @@ impl NarrationRuntime {
 /// A device id from the interface: `None` (or empty) for the system's default.
 fn device_of(device: Option<&str>) -> Option<&str> {
     device.map(str::trim).filter(|d| !d.is_empty())
-}
-
-/// Opens the microphone (`record`: keep the audio, else only the level).
-fn open(device: Option<&str>, record: bool) -> CommandResult<Recorder> {
-    let device = device_of(device);
-    let opened = if record {
-        Recorder::start(device)
-    } else {
-        Recorder::monitor(device)
-    };
-    opened.map_err(|error| start_error(error, device.is_none() && has_no_microphone()))
 }
 
 /// Starts the level meter (replacing a monitor; refused while recording).
@@ -575,12 +780,26 @@ pub fn monitor_in(runtime: &NarrationRuntime, device: Option<&str>) -> CommandRe
     }
     // The previous monitor stops before the device is opened again.
     *slot = None;
-    let recorder = open(device, false)?;
+    let recorder = (runtime.open)(device_of(device), false)?;
     *slot = Some(Capture {
         recorder: Arc::new(recorder),
         purpose: Purpose::Monitor,
     });
     Ok(())
+}
+
+/// Stops the level meter; a recording under way goes on untouched.
+pub fn monitor_stop_in(runtime: &NarrationRuntime) {
+    let monitor = {
+        let mut slot = runtime.lock();
+        if slot.as_ref().is_some_and(|capture| !capture.is_recording()) {
+            slot.take()
+        } else {
+            None
+        }
+    };
+    // The device closes outside the lock.
+    drop(monitor);
 }
 
 /// The replay options of a target from the interface (`invalidVideoSettings` when out of
@@ -608,9 +827,12 @@ pub fn target_options(speed: f64, max_pause_ms: Option<f64>) -> CommandResult<Re
     Ok(ReplayOptions { speed, max_pause })
 }
 
+/// Largest time in milliseconds taken from the interface (an instant or a Unix time).
+const MAX_INTERFACE_MS: f64 = 1e15;
+
 /// A replay instant from the interface, in whole milliseconds.
 fn target_start(start_ms: f64) -> CommandResult<i64> {
-    if start_ms.is_finite() && start_ms.abs() < 1e15 {
+    if start_ms.is_finite() && start_ms.abs() < MAX_INTERFACE_MS {
         Ok(start_ms.round() as i64)
     } else {
         Err(CommandError::new(
@@ -618,6 +840,26 @@ fn target_start(start_ms: f64) -> CommandResult<i64> {
             format!("replay instant {start_ms} ms"),
         ))
     }
+}
+
+/// The wall clock (Unix ms) at which the replay was at instant 0, from the interface.
+fn replay_clock(started_at_ms: f64) -> CommandResult<f64> {
+    if started_at_ms.is_finite() && started_at_ms.abs() < MAX_INTERFACE_MS {
+        Ok(started_at_ms)
+    } else {
+        Err(CommandError::new(
+            INVALID_VIDEO_SETTINGS,
+            format!("replay start {started_at_ms} ms"),
+        ))
+    }
+}
+
+/// Replay instant (ms) of the first sample of a replay recording: its wall clock less the wall
+/// clock at which the replay was at instant 0 and playing (replay time runs at wall-clock
+/// speed, whatever the replay's speed). Both are Unix milliseconds checked by
+/// [`replay_clock`]: the difference fits in `i64`.
+pub fn replay_start_ms(first_sample_wall_ms: f64, replay_started_at_ms: f64) -> i64 {
+    (first_sample_wall_ms - replay_started_at_ms).round() as i64
 }
 
 /// The note file a replay recording goes to: a note of `library` that exists.
@@ -651,7 +893,7 @@ pub fn start_in(
     target: NarrationTarget,
     library: impl FnOnce() -> CommandResult<Library>,
     hub: &LiveHub,
-    position: Arc<dyn Fn() -> Option<PagePosition> + Send + Sync>,
+    position: PositionFn,
 ) -> CommandResult<()> {
     let mut slot = runtime.lock();
     if slot.as_ref().is_some_and(Capture::is_recording) {
@@ -685,65 +927,44 @@ pub fn start_in(
         },
     };
     *slot = None;
-    let recorder = Arc::new(open(device, true)?);
+    let recorder = Arc::new((runtime.open)(device_of(device), true)?);
     let purpose = match planned {
-        Planned::Replay(target) => Purpose::Replay(target),
-        Planned::Live(start) => {
-            let stop = Arc::new(AtomicBool::new(false));
-            let started_ms = wall_now_ms();
-            let thread = {
-                let (stop, recorder) = (Arc::clone(&stop), Arc::clone(&recorder));
-                std::thread::Builder::new()
-                    .name("narration-pages".into())
-                    .spawn(move || {
-                        watch_pages(
-                            &stop,
-                            WATCH_INTERVAL,
-                            start.session,
-                            start.page,
-                            &|| recorder.elapsed(),
-                            &*position,
-                            &wall_now_ms,
-                        )
-                    })
-                    .map_err(|error| CommandError::new(MICROPHONE_FAILED, error))?
-            };
-            Purpose::Live(LiveWatch {
-                session: start.session,
-                first_page: start.page,
-                started_ms,
-                stop,
-                thread: Some(thread),
-            })
-        }
+        Planned::Replay(target) => Purpose::Replay {
+            target,
+            watch: Watch::spawn(&recorder, 0, 0, Arc::new(|| None::<PagePosition>))?,
+        },
+        Planned::Live(start) => Purpose::Live {
+            session: start.session,
+            watch: Watch::spawn(&recorder, start.session, start.page, position)?,
+        },
     };
     *slot = Some(Capture { recorder, purpose });
     Ok(())
 }
 
-/// Writes `narration` as the `audio.opus` of the note at `path` (replacing any), unless the
-/// file is no longer the version of `expected` (`noteConflict`, nothing written). Everything
-/// else in the file is kept. Returns the new stamp.
-pub fn save_replay_narration(
+/// Writes `audio` (an `audio.opus` member) into the note at `path` (replacing any narration),
+/// unless the file is no longer the version of `expected` (`noteConflict`, nothing written; no
+/// `expected`: checked against the version just read). Everything else in the file is kept.
+/// Returns the new stamp.
+pub fn save_replay_audio(
     library: &Library,
     path: &Path,
-    narration: &Narration,
+    audio: &[u8],
     expected: Option<&FileStamp>,
 ) -> CommandResult<FileStamp> {
     let loaded = library.read(path).map_err(library_error)?;
     if expected.is_some_and(|expected| *expected != loaded.stamp) {
         return Err(library_error(LibraryError::Conflict { path: loaded.path }));
     }
-    let audio = encode_narration(narration).map_err(narration_error)?;
     let mut file = loaded.file;
-    file.audio = Some(audio);
+    file.audio = Some(audio.to_vec());
     file.note.modified = now_ms().max(file.note.modified);
     library
         .save(&loaded.path, &file, &loaded.stamp)
         .map_err(library_error)
 }
 
-/// Removes the narration of the note at `path` (same checks as [`save_replay_narration`]).
+/// Removes the narration of the note at `path` (same checks as [`save_replay_audio`]).
 /// A note without narration is left as it is.
 pub fn delete_narration_in(
     library: &Library,
@@ -775,13 +996,35 @@ pub fn read_narration(library: &Library, path: &Path) -> CommandResult<Option<Na
         .transpose()
 }
 
+/// What the narration of the note at `path` is, if it has one, read without decoding its
+/// sound.
+pub fn narration_info_in(library: &Library, path: &Path) -> CommandResult<Option<NarrationInfo>> {
+    let loaded = library.read(path).map_err(library_error)?;
+    loaded
+        .file
+        .audio
+        .map(|bytes| {
+            narration_header(&bytes)
+                .map(|header| NarrationInfo::of(&header))
+                .map_err(damaged)
+        })
+        .transpose()
+}
+
+/// The narration of the note at `path` as a WAV file (`noNarration` when it has none).
+pub fn narration_wav(library: &Library, path: &Path) -> CommandResult<Vec<u8>> {
+    let narration = read_narration(library, path)?
+        .ok_or_else(|| CommandError::new(NO_NARRATION, "this note has no narration"))?;
+    Ok(wav_bytes(&narration.clip))
+}
+
 /// Hands the pieces of a live recording to the hub; returns how many pages got narration.
 pub fn give_to_hub(
     hub: &LiveHub,
     session: u64,
     log: &PageLog,
     wall_start_ms: f64,
-    clip: &AudioClip,
+    clip: AudioClip,
 ) -> CommandResult<usize> {
     let Some(origins) = hub.page_origins(session) else {
         return Err(CommandError::new(
@@ -802,45 +1045,160 @@ pub fn give_to_hub(
     Ok(pages)
 }
 
-/// Saves (or, without `save`, discards) what a stopped capture recorded.
+/// Where the copies of the replay narrations that could not be saved go:
+/// `%LOCALAPPDATA%\Ardoise\narration-backup` (local to this PC, never in the library); under
+/// the temporary folder when `LOCALAPPDATA` is not set (Linux).
+pub fn backup_dir() -> PathBuf {
+    backup_dir_in(std::env::var_os("LOCALAPPDATA"))
+}
+
+fn backup_dir_in(local_app_data: Option<OsString>) -> PathBuf {
+    local_app_data
+        .filter(|dir| !dir.is_empty())
+        .map_or_else(std::env::temp_dir, PathBuf::from)
+        .join("Ardoise")
+        .join("narration-backup")
+}
+
+/// Name of the backup copy of a narration for the note at `note` made at `time`
+/// (`yyyy-mm-dd hhmmss`): `<note file stem> <time>.opus`, `<…>-<n>.opus` for the `n`-th one
+/// (`n` > 1). A very long stem is shortened.
+pub fn backup_name(note: &Path, time: &str, n: u32) -> String {
+    let stem: String = note
+        .file_stem()
+        .map(|stem| {
+            stem.to_string_lossy()
+                .chars()
+                .take(BACKUP_STEM_CHARS)
+                .collect()
+        })
+        .unwrap_or_default();
+    let stem = stem.trim();
+    let stem = if stem.is_empty() { "narration" } else { stem };
+    if n <= 1 {
+        format!("{stem} {time}.opus")
+    } else {
+        format!("{stem} {time}-{n}.opus")
+    }
+}
+
+/// Writes `audio` atomically into a free [`backup_name`] in `dir` (created if needed).
+fn write_narration_backup(dir: &Path, note: &Path, audio: &[u8]) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let time = chrono::Local::now().format("%Y-%m-%d %H%M%S").to_string();
+    let mut n = 1;
+    loop {
+        let path = dir.join(backup_name(note, &time, n));
+        match fsutil::write_atomic_new(&path, audio) {
+            Ok(_) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && n < 1000 => n += 1,
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// What `narration_stop` asks for.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StopRequest {
+    /// Keep what was recorded (else it is discarded).
+    pub save: bool,
+    /// Replay target: the editor's stamp of the note (`None`: checked against the version
+    /// read).
+    pub stamp: Option<FileStamp>,
+    /// Replay target: the note's path now, instead of the one given at the start (the editor
+    /// may have renamed the note meanwhile).
+    pub path: Option<String>,
+    /// Replay target: Unix time (ms) at which the replay was at instant 0 and playing; without
+    /// it, the narration starts at the target's `startMs`.
+    pub replay_started_at_ms: Option<f64>,
+}
+
+/// Saves what a stopped replay recording captured into its note. A narration that cannot be
+/// saved stays pending in `runtime` (with its backup copy) and the error is returned as is.
+fn save_replay(
+    runtime: &NarrationRuntime,
+    target: ReplayTarget,
+    clip: AudioClip,
+    start_ms: i64,
+    request: &StopRequest,
+) -> CommandResult<NarrationSaved> {
+    let duration = duration_ms(clip.duration());
+    let narration = Narration {
+        clip,
+        base: NarrationBase::Replay,
+        options: target.options,
+        start_ms,
+    };
+    // Encoded once: what is saved, kept pending and backed up. A clip the encoder refuses
+    // (never expected from the recorder) could not be saved by a retry either.
+    let audio = encode_narration(&narration).map_err(narration_error)?;
+    drop(narration);
+    let (note, saved) = match request.path.as_deref() {
+        Some(path) => match target.library.note_path(Path::new(path)) {
+            Ok(note) => {
+                let saved =
+                    save_replay_audio(&target.library, &note, &audio, request.stamp.as_ref());
+                (note, saved)
+            }
+            Err(error) => (target.path.clone(), Err(library_error(error))),
+        },
+        None => {
+            let saved = save_replay_audio(
+                &target.library,
+                &target.path,
+                &audio,
+                request.stamp.as_ref(),
+            );
+            (target.path.clone(), saved)
+        }
+    };
+    match saved {
+        Ok(stamp) => Ok(NarrationSaved {
+            stamp: Some(stamp),
+            duration_ms: duration,
+            pages: 1,
+        }),
+        Err(error) => {
+            runtime.keep_pending(&note, audio, duration);
+            Err(error)
+        }
+    }
+}
+
+/// Saves (or, without `request.save`, discards) what a stopped capture recorded;
+/// `replay_started_at` is the checked `request.replay_started_at_ms`.
 fn save_stopped(
+    runtime: &NarrationRuntime,
     stopped: Stopped,
     clip: Result<AudioClip, MediaError>,
-    save: bool,
-    stamp: Option<&FileStamp>,
+    request: &StopRequest,
+    replay_started_at: Option<f64>,
     hub: &LiveHub,
 ) -> CommandResult<Option<NarrationSaved>> {
-    if matches!(stopped, Stopped::Monitor) || !save {
+    if matches!(stopped, Stopped::Monitor) || !request.save {
         return Ok(None);
     }
     let clip = clip.map_err(narration_error)?;
     if clip.samples.is_empty() {
-        return Err(CommandError::new(NO_RECORDING, "nothing was recorded"));
+        return Err(CommandError::new(EMPTY_RECORDING, "nothing was recorded"));
     }
-    let duration = duration_ms(clip.duration());
     match stopped {
         Stopped::Monitor => Ok(None),
-        Stopped::Replay(target) => {
-            let narration = Narration {
-                clip,
-                base: NarrationBase::Replay,
-                options: target.options,
-                start_ms: target.start_ms,
-            };
-            let stamp = save_replay_narration(&target.library, &target.path, &narration, stamp)?;
-            Ok(Some(NarrationSaved {
-                stamp: Some(stamp),
-                duration_ms: duration,
-                pages: 1,
-            }))
+        Stopped::Replay {
+            target,
+            wall_start_ms,
+        } => {
+            let start_ms =
+                replay_started_at.map_or(target.start_ms, |at| replay_start_ms(wall_start_ms, at));
+            save_replay(runtime, target, clip, start_ms, request).map(Some)
         }
         Stopped::Live {
             session,
             log,
-            started_ms,
+            wall_start_ms,
         } => {
-            let wall_start = log.wall_start_ms(started_ms);
-            let pages = give_to_hub(hub, session, &log, wall_start, &clip)?;
+            let duration = duration_ms(clip.duration());
+            let pages = give_to_hub(hub, session, &log, wall_start_ms, clip)?;
             Ok(Some(NarrationSaved {
                 stamp: None,
                 duration_ms: duration,
@@ -850,17 +1208,21 @@ fn save_stopped(
     }
 }
 
-/// Stops the capture under way and, with `save`, keeps what it recorded (see the module
-/// documentation). Nothing under way: `noRecording` with `save`, else nothing.
+/// Stops the capture under way and, with `request.save`, keeps what it recorded (see the
+/// module documentation). Nothing under way: `noRecording` with `save`, else nothing. A bad
+/// `replay_started_at_ms` is refused before anything stops.
 pub fn stop_in(
     runtime: &NarrationRuntime,
-    save: bool,
-    stamp: Option<&FileStamp>,
+    request: &StopRequest,
     hub: &LiveHub,
 ) -> CommandResult<Option<NarrationSaved>> {
+    let replay_started_at = match request.replay_started_at_ms {
+        Some(at) if request.save => Some(replay_clock(at)?),
+        _ => None,
+    };
     // The capture leaves the runtime first: stopping it (joining threads) holds no lock.
     let Some(capture) = runtime.take(false) else {
-        return if save {
+        return if request.save {
             Err(CommandError::new(
                 NO_RECORDING,
                 "no narration is being recorded",
@@ -870,7 +1232,7 @@ pub fn stop_in(
         };
     };
     let (stopped, clip) = capture.stop();
-    save_stopped(stopped, clip, save, stamp, hub)
+    save_stopped(runtime, stopped, clip, request, replay_started_at, hub)
 }
 
 /// Stops a live recording under way and gives it to its pages (before live mode stops, or when
@@ -881,7 +1243,54 @@ pub fn finish_live(
 ) -> Option<CommandResult<NarrationSaved>> {
     let capture = runtime.take(true)?;
     let (stopped, clip) = capture.stop();
-    save_stopped(stopped, clip, true, None, hub).transpose()
+    let request = StopRequest {
+        save: true,
+        ..StopRequest::default()
+    };
+    save_stopped(runtime, stopped, clip, &request, None, hub).transpose()
+}
+
+/// Saves the pending replay narration into the note at `path` (checked like
+/// [`save_replay_audio`]), then forgets it and removes its backup copy. On failure it stays
+/// pending. `noPendingNarration` when there is none.
+pub fn retry_in(
+    runtime: &NarrationRuntime,
+    library: &Library,
+    path: &str,
+    stamp: Option<&FileStamp>,
+) -> CommandResult<NarrationSaved> {
+    let Some(pending) = runtime.take_pending() else {
+        return Err(CommandError::new(
+            NO_PENDING_NARRATION,
+            "no narration waits to be saved",
+        ));
+    };
+    let saved = library
+        .note_path(Path::new(path))
+        .map_err(library_error)
+        .and_then(|note| save_replay_audio(library, &note, &pending.audio, stamp));
+    match saved {
+        Ok(stamp) => {
+            if let Some(backup) = &pending.backup {
+                // Best effort: an orphan copy only takes a little room.
+                let _ = fsutil::remove_file_with_retry(backup);
+            }
+            Ok(NarrationSaved {
+                stamp: Some(stamp),
+                duration_ms: pending.duration_ms,
+                pages: 1,
+            })
+        }
+        Err(error) => {
+            runtime.restore_pending(pending);
+            Err(error)
+        }
+    }
+}
+
+/// Drops the pending replay narration (its backup copy stays on disk, as a last resort).
+pub fn discard_in(runtime: &NarrationRuntime) {
+    drop(runtime.take_pending());
 }
 
 // --- Commands -----------------------------------------------------------------------------------
@@ -924,6 +1333,13 @@ pub async fn microphone_monitor(
     monitor_in(&runtime, device.as_deref())
 }
 
+/// Stops the level meter, never a recording.
+#[tauri::command]
+pub async fn microphone_monitor_stop(runtime: State<'_, NarrationRuntime>) -> CommandResult<()> {
+    monitor_stop_in(&runtime);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn narration_start(
     app: AppHandle,
@@ -961,15 +1377,42 @@ pub async fn narration_stop(
     app: AppHandle,
     save: bool,
     stamp: Option<FileStamp>,
+    path: Option<String>,
+    replay_started_at_ms: Option<f64>,
 ) -> CommandResult<Option<NarrationSaved>> {
+    let request = StopRequest {
+        save,
+        stamp,
+        path,
+        replay_started_at_ms,
+    };
     // Encoding a long recording takes a while: off the async runtime's threads.
     tauri::async_runtime::spawn_blocking(move || {
         let runtime = app.state::<NarrationRuntime>();
         let live = app.state::<LiveRuntime>();
-        stop_in(&runtime, save, stamp.as_ref(), live.hub())
+        stop_in(&runtime, &request, live.hub())
     })
     .await
     .map_err(|error| CommandError::new(MICROPHONE_FAILED, error))?
+}
+
+/// Saves the replay narration that could not be saved at stop into the note at `path`.
+#[tauri::command]
+pub async fn narration_retry(
+    context: State<'_, AppContext>,
+    runtime: State<'_, NarrationRuntime>,
+    path: String,
+    stamp: Option<FileStamp>,
+) -> CommandResult<NarrationSaved> {
+    let library = library_of(&context)?;
+    retry_in(&runtime, &library, &path, stamp.as_ref())
+}
+
+/// Forgets the replay narration that could not be saved (its backup copy stays).
+#[tauri::command]
+pub async fn narration_discard(runtime: State<'_, NarrationRuntime>) -> CommandResult<()> {
+    discard_in(&runtime);
+    Ok(())
 }
 
 #[tauri::command]
@@ -977,10 +1420,7 @@ pub async fn narration_info(
     context: State<'_, AppContext>,
     path: String,
 ) -> CommandResult<Option<NarrationInfo>> {
-    let library = library_of(&context)?;
-    Ok(read_narration(&library, Path::new(&path))?
-        .as_ref()
-        .map(NarrationInfo::of))
+    narration_info_in(&library_of(&context)?, Path::new(&path))
 }
 
 /// The narration of a note as a WAV file (raw bytes: an `ArrayBuffer` in the interface).
@@ -989,10 +1429,8 @@ pub async fn narration_audio(
     context: State<'_, AppContext>,
     path: String,
 ) -> CommandResult<tauri::ipc::Response> {
-    let library = library_of(&context)?;
-    let narration = read_narration(&library, Path::new(&path))?
-        .ok_or_else(|| CommandError::new(NO_RECORDING, "this note has no narration"))?;
-    Ok(tauri::ipc::Response::new(wav_bytes(&narration.clip)))
+    let wav = narration_wav(&library_of(&context)?, Path::new(&path))?;
+    Ok(tauri::ipc::Response::new(wav))
 }
 
 #[tauri::command]
@@ -1005,539 +1443,4 @@ pub async fn delete_narration(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::cell::{Cell, RefCell};
-    use std::fs;
-
-    use ardoise_media::microphone::simulated_narration;
-    use serde_json::json;
-
-    use super::*;
-    use crate::library::tests::{context, library, write_sample};
-    use crate::live::HubConfig;
-
-    fn tone(frames: usize, channels: u16) -> AudioClip {
-        AudioClip {
-            channels,
-            samples: (0..frames * usize::from(channels))
-                .map(|i| i16::try_from(i % 30_000).unwrap() + 1)
-                .collect(),
-        }
-    }
-
-    fn change(at_ms: u64, page: usize) -> PageChange {
-        PageChange {
-            at: Duration::from_millis(at_ms),
-            page,
-        }
-    }
-
-    #[test]
-    fn shapes_are_those_of_video_ts() {
-        let replay: NarrationTarget = serde_json::from_value(json!({
-            "kind": "replay", "path": "C:\\N\\a.ardoise", "speed": 2,
-            "maxPauseMs": 500, "startMs": -120.5
-        }))
-        .unwrap();
-        assert_eq!(
-            replay,
-            NarrationTarget::Replay {
-                path: "C:\\N\\a.ardoise".into(),
-                speed: 2.0,
-                max_pause_ms: Some(500.0),
-                start_ms: -120.5,
-            }
-        );
-        let untrimmed: NarrationTarget = serde_json::from_value(json!({
-            "kind": "replay", "path": "a", "speed": 1, "maxPauseMs": null, "startMs": 0
-        }))
-        .unwrap();
-        assert!(matches!(
-            untrimmed,
-            NarrationTarget::Replay {
-                max_pause_ms: None,
-                ..
-            }
-        ));
-        let live: NarrationTarget = serde_json::from_value(json!({ "kind": "live" })).unwrap();
-        assert_eq!(live, NarrationTarget::Live);
-
-        assert_eq!(
-            serde_json::to_value(NarrationStatus::idle()).unwrap(),
-            json!({ "state": "idle", "capture": null, "level": { "peak": 0.0, "rms": 0.0 },
-                    "elapsedMs": 0, "device": null, "failure": null })
-        );
-        let recording = NarrationStatus {
-            state: NarrationState::Recording,
-            capture: Some(CaptureState::NoData),
-            level: LevelState {
-                peak: 0.5,
-                rms: 0.25,
-            },
-            elapsed_ms: 1500,
-            device: Some("Micro".into()),
-            failure: None,
-        };
-        let value = serde_json::to_value(recording).unwrap();
-        assert_eq!(value["state"], "recording");
-        assert_eq!(value["capture"], "noData");
-        assert_eq!(value["level"], json!({ "peak": 0.5, "rms": 0.25 }));
-        assert_eq!(value["elapsedMs"], 1500);
-        assert_eq!(
-            serde_json::to_value(NarrationState::Monitoring).unwrap(),
-            "monitoring"
-        );
-
-        let saved = NarrationSaved {
-            stamp: None,
-            duration_ms: 3000,
-            pages: 2,
-        };
-        assert_eq!(
-            serde_json::to_value(saved).unwrap(),
-            json!({ "stamp": null, "durationMs": 3000, "pages": 2 })
-        );
-        let info = NarrationInfo::of(&Narration {
-            clip: tone(48_000, 1),
-            base: NarrationBase::Replay,
-            options: ReplayOptions {
-                speed: 2.0,
-                max_pause: Some(Duration::from_millis(500)),
-            },
-            start_ms: -40,
-        });
-        assert_eq!(
-            serde_json::to_value(info).unwrap(),
-            json!({ "durationMs": 1000, "base": "replay", "speed": 2.0, "maxPauseMs": 500,
-                    "startMs": -40 })
-        );
-        let note = NarrationInfo::of(&Narration {
-            clip: tone(4_800, 1),
-            base: NarrationBase::Note,
-            options: ReplayOptions::default(),
-            start_ms: 7,
-        });
-        assert_eq!(note.base, BaseName::Note);
-        assert_eq!(
-            serde_json::to_value(note).unwrap()["maxPauseMs"],
-            json!(null)
-        );
-        let microphone = Microphone {
-            id: "wasapi:1".into(),
-            name: "Micro".into(),
-            is_default: true,
-        };
-        assert_eq!(
-            serde_json::to_value(microphone).unwrap(),
-            json!({ "id": "wasapi:1", "name": "Micro", "isDefault": true })
-        );
-    }
-
-    #[test]
-    fn capture_statuses_and_levels_map_to_the_interface() {
-        assert_eq!(
-            capture_state(&CaptureStatus::Waiting),
-            (CaptureState::Waiting, None)
-        );
-        assert_eq!(
-            capture_state(&CaptureStatus::NoData),
-            (CaptureState::NoData, None)
-        );
-        assert_eq!(
-            capture_state(&CaptureStatus::Receiving),
-            (CaptureState::Receiving, None)
-        );
-        assert_eq!(
-            capture_state(&CaptureStatus::Silent),
-            (CaptureState::Silent, None)
-        );
-        assert_eq!(
-            capture_state(&CaptureStatus::Failed("unplugged".into())),
-            (CaptureState::Failed, Some("unplugged".into()))
-        );
-        for (state, text) in [
-            (CaptureState::Waiting, "waiting"),
-            (CaptureState::NoData, "noData"),
-            (CaptureState::Receiving, "receiving"),
-            (CaptureState::Silent, "silent"),
-            (CaptureState::Failed, "failed"),
-        ] {
-            assert_eq!(serde_json::to_value(state).unwrap(), text);
-        }
-        assert_eq!(
-            level_state(Level {
-                peak: 1.5,
-                rms: f32::NAN
-            }),
-            LevelState {
-                peak: 1.0,
-                rms: 0.0
-            }
-        );
-        assert_eq!(
-            level_state(Level {
-                peak: 0.3,
-                rms: 0.1
-            }),
-            LevelState {
-                peak: 0.3,
-                rms: 0.1
-            }
-        );
-    }
-
-    #[test]
-    fn microphone_errors_get_the_interface_codes() {
-        let code = |error, no_device| start_error(error, no_device).code();
-        assert_eq!(
-            code(MediaError::MicrophoneNotFound("Micro USB".into()), false),
-            MICROPHONE_NOT_FOUND
-        );
-        assert_eq!(code(MediaError::MicrophoneSilent, false), MICROPHONE_SILENT);
-        let failed = || MediaError::Microphone {
-            step: "opening the microphone",
-            message: "this PC has no microphone".into(),
-        };
-        assert_eq!(code(failed(), false), MICROPHONE_FAILED);
-        assert_eq!(code(failed(), true), NO_MICROPHONE);
-        // An unknown device is not "no microphone at all".
-        assert_eq!(
-            code(MediaError::MicrophoneNotFound("x".into()), true),
-            MICROPHONE_NOT_FOUND
-        );
-        assert_eq!(
-            narration_error(MediaError::Encoding {
-                codec: "Opus",
-                message: "x".into()
-            })
-            .code(),
-            MICROPHONE_FAILED
-        );
-        assert_eq!(
-            narration_error(MediaError::MicrophoneSilent).code(),
-            MICROPHONE_SILENT
-        );
-    }
-
-    #[test]
-    fn replay_targets_are_checked() {
-        assert_eq!(
-            target_options(2.0, Some(500.0)).unwrap(),
-            ReplayOptions {
-                speed: 2.0,
-                max_pause: Some(Duration::from_millis(500))
-            }
-        );
-        assert_eq!(
-            target_options(0.25, None).unwrap(),
-            ReplayOptions {
-                speed: 0.25,
-                max_pause: None
-            }
-        );
-        for (speed, pause) in [
-            (0.2, None),
-            (16.5, None),
-            (f64::NAN, None),
-            (1.0, Some(-1.0)),
-            (1.0, Some(f64::INFINITY)),
-        ] {
-            assert_eq!(
-                target_options(speed, pause).unwrap_err().code(),
-                INVALID_VIDEO_SETTINGS,
-                "{speed} {pause:?}"
-            );
-        }
-        assert_eq!(target_start(-120.4).unwrap(), -120);
-        assert!(target_start(f64::NAN).is_err());
-
-        let (dir, library) = library();
-        let saved = write_sample(&library, "", "Essai");
-        let path = saved.path.to_string_lossy().into_owned();
-        let target = replay_target(library.clone(), &path, 1.0, None, 250.0).unwrap();
-        assert_eq!(target.start_ms, 250);
-        let missing = dir.path().join("2026-10-24 Absente.ardoise");
-        let error =
-            replay_target(library.clone(), &missing.to_string_lossy(), 1.0, None, 0.0).unwrap_err();
-        assert_eq!(error.code(), "noteNotFound");
-        let elsewhere = tempfile::tempdir().unwrap();
-        let outside = elsewhere.path().join("2026-10-24 X.ardoise");
-        fs::write(&outside, "x").unwrap();
-        let error = replay_target(library, &outside.to_string_lossy(), 1.0, None, 0.0).unwrap_err();
-        assert_eq!(error.code(), "notInLibrary");
-    }
-
-    #[test]
-    fn the_page_log_keeps_the_changes_and_the_earliest_clock() {
-        let mut log = PageLog::new(2);
-        // No audio yet: no clock, but a page change counts from the start.
-        log.observe(1_000.0, Duration::ZERO, Some(2));
-        assert_eq!(log.anchor_ms, None);
-        assert_eq!(log.wall_start_ms(990.0), 990.0);
-        log.observe(1_010.0, Duration::ZERO, Some(3));
-        assert_eq!(log.changes, [change(0, 3)]);
-        // Audio arrives late (delivery delay): the smallest difference wins.
-        log.observe(1_100.0, Duration::from_millis(60), Some(3));
-        log.observe(1_150.0, Duration::from_millis(130), Some(3));
-        log.observe(1_200.0, Duration::from_millis(150), None);
-        assert_eq!(log.anchor_ms, Some(1_020.0));
-        assert_eq!(log.wall_start_ms(0.0), 1_020.0);
-        log.observe(1_250.0, Duration::from_millis(200), Some(4));
-        log.observe(1_300.0, Duration::from_millis(250), Some(4));
-        log.observe(1_310.0, Duration::from_millis(260), Some(5));
-        // Changes before new audio: the last one counts, and back to page 4 is no change.
-        log.observe(1_320.0, Duration::from_millis(260), Some(6));
-        assert_eq!(log.changes, [change(0, 3), change(200, 4), change(260, 6)]);
-        log.observe(1_330.0, Duration::from_millis(260), Some(4));
-        log.observe(1_400.0, Duration::from_millis(330), Some(3));
-        assert_eq!(log.changes, [change(0, 3), change(200, 4), change(330, 3)]);
-        assert_eq!(log.anchor_ms, Some(1_020.0));
-    }
-
-    #[test]
-    fn a_live_recording_is_cut_per_page_in_note_time() {
-        // 3 s of mono audio; pages 0, 1, 0 again, then 2 (no stroke) and 3.
-        let clip = tone(3 * 48_000, 1);
-        let changes = [
-            change(0, 0),
-            change(1000, 1),
-            change(1500, 0),
-            change(2000, 2),
-            change(2500, 3),
-        ];
-        let wall_start = 1_792_843_200_000.0;
-        let origins = [
-            Some(1_792_843_200_400),
-            Some(1_792_843_190_000),
-            None,
-            Some(1_792_843_203_000),
-        ];
-        let pieces = split_live_recording(&clip, &changes, wall_start, &origins);
-        let summary: Vec<(usize, i64, usize)> = pieces
-            .iter()
-            .map(|(page, n)| (*page, n.start_ms, n.clip.samples.len()))
-            .collect();
-        assert_eq!(
-            summary,
-            [
-                // Begins 400 ms before the first stroke of page 0.
-                (0, -400, 48_000),
-                (1, 11_000, 24_000),
-                (0, 1_100, 24_000),
-                // Page 2 has no stroke: nothing. Page 3's first stroke comes after the end.
-                (3, -500, 24_000),
-            ]
-        );
-        for (_, narration) in &pieces {
-            assert_eq!(narration.base, NarrationBase::Note);
-            assert_eq!(narration.options, ReplayOptions::default());
-            assert_eq!(narration.clip.channels, 1);
-        }
-        // The pieces put back together are the clip, minus what went to page 2.
-        let kept: Vec<i16> = pieces
-            .iter()
-            .flat_map(|(_, n)| n.clip.samples.clone())
-            .collect();
-        let mut expected = clip.samples[..96_000].to_vec();
-        expected.extend_from_slice(&clip.samples[120_000..]);
-        assert_eq!(kept, expected);
-    }
-
-    #[test]
-    fn cuts_fall_on_whole_frames_and_out_of_range_changes_are_ignored() {
-        // Stereo: a cut never separates the two channels of a frame.
-        let clip = tone(4_800, 2);
-        let changes = [change(0, 0), change(33, 1), change(500, 0)];
-        let pieces = split_live_recording(&clip, &changes, 1_000.0, &[Some(1_000), Some(900)]);
-        assert_eq!(pieces.len(), 2);
-        assert_eq!(pieces[0].1.clip.samples.len(), 2 * 1_584);
-        assert_eq!(pieces[1].1.clip.samples.len(), 2 * (4_800 - 1_584));
-        assert_eq!(pieces[1].1.start_ms, 133);
-        assert_eq!(pieces[0].1.clip.channels, 2);
-        // A page the hub does not know, an empty clip.
-        assert!(split_live_recording(&clip, &[change(0, 7)], 0.0, &[Some(0)]).is_empty());
-        assert!(
-            split_live_recording(&AudioClip::default(), &[change(0, 0)], 0.0, &[Some(0)])
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn the_watcher_follows_the_pages_of_its_session() {
-        let stop = AtomicBool::new(false);
-        let tick = Cell::new(0u64);
-        // Ticks of 50 ms of audio; the page changes at ticks 3 and 6, another session at 8.
-        let position = || {
-            let t = tick.get();
-            let (session, page) = match t {
-                0..=2 => (7, 0),
-                3..=5 => (7, 1),
-                6..=7 => (7, 2),
-                _ => (8, 0),
-            };
-            Some(PagePosition {
-                session,
-                page,
-                running: true,
-            })
-        };
-        let audio = || Duration::from_millis(50 * tick.get());
-        let seen = RefCell::new(0);
-        let wall = || {
-            let t = tick.get();
-            *seen.borrow_mut() += 1;
-            if t == 9 {
-                stop.store(true, Ordering::Release);
-            }
-            tick.set(t + 1);
-            5_000.0 + 50.0 * t as f64 + 3.0
-        };
-        let log = watch_pages(&stop, Duration::ZERO, 7, 0, &audio, &position, &wall);
-        assert_eq!(log.changes, [change(0, 0), change(150, 1), change(300, 2)]);
-        assert_eq!(log.anchor_ms, Some(5_003.0));
-        assert_eq!(*seen.borrow(), 11, "one last look after the stop");
-    }
-
-    #[test]
-    fn nothing_to_stop_and_nothing_running() {
-        let runtime = NarrationRuntime::default();
-        let hub = LiveHub::new(HubConfig::default());
-        assert_eq!(runtime.status(), NarrationStatus::idle());
-        assert!(!runtime.is_recording_live());
-        assert_eq!(stop_in(&runtime, false, None, &hub).unwrap(), None);
-        assert_eq!(
-            stop_in(&runtime, true, None, &hub).unwrap_err().code(),
-            NO_RECORDING
-        );
-        assert!(finish_live(&runtime, &hub).is_none());
-        // A live recording needs live mode (checked before the microphone is opened).
-        let error = start_in(
-            &runtime,
-            None,
-            NarrationTarget::Live,
-            || Err(CommandError::new("noLibrary", "unused")),
-            &hub,
-            Arc::new(|| None),
-        )
-        .unwrap_err();
-        assert_eq!(error.code(), "liveNotRunning");
-        // A replay recording needs a library and a valid target.
-        let error = start_in(
-            &runtime,
-            None,
-            NarrationTarget::Replay {
-                path: "a.ardoise".into(),
-                speed: 1.0,
-                max_pause_ms: None,
-                start_ms: 0.0,
-            },
-            || Err(CommandError::new("noLibrary", "none")),
-            &hub,
-            Arc::new(|| None),
-        )
-        .unwrap_err();
-        assert_eq!(error.code(), "noLibrary");
-        assert_eq!(runtime.status(), NarrationStatus::idle());
-    }
-
-    #[test]
-    fn a_stale_stamp_is_a_conflict_and_writes_nothing() {
-        let (_dir, library) = library();
-        let saved = write_sample(&library, "", "Essai");
-        // The note changes on disk after the editor opened it.
-        let mut file = library.read(&saved.path).unwrap().file;
-        file.note.title = "Changée ailleurs".into();
-        let newer = library.save(&saved.path, &file, &saved.stamp).unwrap();
-        let before = fs::read(&saved.path).unwrap();
-        let narration = Narration {
-            clip: tone(4_800, 1),
-            base: NarrationBase::Replay,
-            options: ReplayOptions::default(),
-            start_ms: 0,
-        };
-        let error = save_replay_narration(&library, &saved.path, &narration, Some(&saved.stamp))
-            .unwrap_err();
-        assert_eq!(error.code(), "noteConflict");
-        let error = delete_narration_in(&library, &saved.path, &saved.stamp).unwrap_err();
-        assert_eq!(error.code(), "noteConflict");
-        assert_eq!(fs::read(&saved.path).unwrap(), before);
-        assert_eq!(FileStamp::of(&saved.path).unwrap(), newer);
-
-        // Without narration, deleting it changes nothing.
-        assert_eq!(
-            delete_narration_in(&library, &saved.path, &newer).unwrap(),
-            newer
-        );
-        assert_eq!(read_narration(&library, &saved.path).unwrap(), None);
-        // A damaged member is reported as such.
-        file.audio = Some(b"OggS but not really".to_vec());
-        let damaged = library.save(&saved.path, &file, &newer).unwrap();
-        assert_eq!(
-            read_narration(&library, &saved.path).unwrap_err().code(),
-            "noteDamaged"
-        );
-        // Deleting it works without decoding it.
-        let stamp = delete_narration_in(&library, &saved.path, &damaged).unwrap();
-        let after = library.read(&saved.path).unwrap();
-        assert_eq!(after.stamp, stamp);
-        assert_eq!(after.file.audio, None);
-        assert_eq!(after.file.note.title, "Changée ailleurs");
-        assert_eq!(after.file.note.strokes, file.note.strokes);
-    }
-
-    #[test]
-    fn the_microphone_is_remembered_per_machine() {
-        let settings = tempfile::tempdir().unwrap();
-        let context = context(settings.path());
-        let state = set_microphone_in(&context, Some("wasapi:{abc}".into())).unwrap();
-        assert_eq!(state.microphone(), Some("wasapi:{abc}"));
-        let state = set_microphone_in(&context, Some("  ".into())).unwrap();
-        assert_eq!(state.microphone(), None);
-        let state = set_microphone_in(&context, None).unwrap();
-        assert_eq!(state.microphone(), None);
-    }
-
-    // --- With the media pipeline (narration.rs of ardoise-media: Opus encoding) ---
-
-    #[test]
-    fn a_replay_narration_is_saved_into_its_note_and_read_back() {
-        let (_dir, library) = library();
-        let saved = write_sample(&library, "", "Essai");
-        let before = library.read(&saved.path).unwrap().file;
-        let narration = Narration {
-            clip: simulated_narration(Duration::from_secs(2), 1),
-            base: NarrationBase::Replay,
-            options: ReplayOptions {
-                speed: 2.0,
-                max_pause: Some(Duration::from_millis(500)),
-            },
-            start_ms: 300,
-        };
-        let stamp =
-            save_replay_narration(&library, &saved.path, &narration, Some(&saved.stamp)).unwrap();
-        let after = library.read(&saved.path).unwrap();
-        assert_eq!(after.stamp, stamp);
-        assert_eq!(after.file.note.strokes, before.note.strokes);
-        assert_eq!(after.file.thumbnail, before.thumbnail);
-        let info = NarrationInfo::of(&read_narration(&library, &saved.path).unwrap().unwrap());
-        assert_eq!(info.base, BaseName::Replay);
-        assert_eq!(
-            (info.speed, info.max_pause_ms, info.start_ms),
-            (2.0, Some(500), 300)
-        );
-        assert!((1990..=2010).contains(&info.duration_ms), "{info:?}");
-        let wav = wav_bytes(&read_narration(&library, &saved.path).unwrap().unwrap().clip);
-        assert_eq!(&wav[..4], b"RIFF");
-
-        // Recording again replaces it; deleting it removes it.
-        let shorter = Narration {
-            clip: simulated_narration(Duration::from_secs(1), 1),
-            ..narration
-        };
-        let stamp = save_replay_narration(&library, &saved.path, &shorter, Some(&stamp)).unwrap();
-        let info = NarrationInfo::of(&read_narration(&library, &saved.path).unwrap().unwrap());
-        assert!(info.duration_ms < 1100, "{info:?}");
-        delete_narration_in(&library, &saved.path, &stamp).unwrap();
-        assert_eq!(read_narration(&library, &saved.path).unwrap(), None);
-    }
-}
+mod tests;

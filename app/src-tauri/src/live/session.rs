@@ -11,7 +11,6 @@ use ardoise_core::library::FileStamp;
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Timing};
 use ardoise_core::settings::LiveButton;
 use ardoise_ink::{Point, Stroke};
-use ardoise_media::Narration;
 use ardoise_proto::SLATE_MAX_PRESSURE;
 use ardoise_proto::live::LiveRecord;
 use ardoise_proto::stroke::Point as PenPoint;
@@ -50,10 +49,9 @@ pub struct Page {
     /// Why the last write failed, once the windows were told (set by the hub): cleared by the
     /// next write that succeeds.
     pub save_error: Option<String>,
-    /// The narration recorded on this page in live mode (note time), kept whole so that a later
-    /// recording is merged into it without encoding it twice.
-    pub narration: Option<Narration>,
-    /// `narration` as the note's `audio.opus` member, written with every version of the page.
+    /// The narration recorded on this page in live mode (note time), as the note's `audio.opus`
+    /// member written with every version of the page. Only the encoded bytes stay in memory: a
+    /// later recording on the page decodes them again to merge with them.
     pub audio: Option<Vec<u8>>,
     /// No stroke started yet: the note's time origin is still free.
     fresh: bool,
@@ -71,7 +69,6 @@ impl Page {
             urgent: false,
             last_attempt: None,
             save_error: None,
-            narration: None,
             audio: None,
             fresh: true,
             last_t: None,
@@ -84,13 +81,12 @@ impl Page {
         (!self.note.strokes.is_empty()).then_some(self.note.created)
     }
 
-    /// Gives the page its narration and the matching `audio.opus` bytes: it is written again
-    /// at the next pass. Refused (`false`) on a page without any stroke.
-    pub fn set_narration(&mut self, narration: Narration, audio: Vec<u8>) -> bool {
+    /// Gives the page its narration, as `audio.opus` bytes: it is written again at the next
+    /// pass. Refused (`false`) on a page without any stroke.
+    pub fn set_audio(&mut self, audio: Vec<u8>) -> bool {
         if self.time_origin().is_none() {
             return false;
         }
-        self.narration = Some(narration);
         self.audio = Some(audio);
         self.touch();
         self.urgent = true;

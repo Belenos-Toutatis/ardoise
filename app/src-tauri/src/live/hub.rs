@@ -23,7 +23,7 @@ use ardoise_core::library::{Library, LibraryError};
 use ardoise_core::note::{Note, PageSize};
 use ardoise_core::settings::LiveButton;
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
-use ardoise_media::{MediaError, Narration, encode_narration};
+use ardoise_media::{MediaError, Narration, decode_narration, encode_narration};
 use tauri::ipc::Channel;
 
 use super::model::{
@@ -77,7 +77,8 @@ pub enum LiveError {
     Stopped,
     #[error(transparent)]
     Library(#[from] LibraryError),
-    /// A narration could not be encoded for its page (nothing was changed).
+    /// A narration could not be merged with the page's (decoded again) or encoded for it
+    /// (nothing was changed).
     #[error("cannot store the narration of the page: {0}")]
     Narration(MediaError),
 }
@@ -895,6 +896,9 @@ impl LiveHub {
     /// live pages, so their stamps stay right. Also after a stop: the narration of a session
     /// is saved even when live mode was left first. Returns `false` when nothing changed: a
     /// page without any stroke, or a session or page that no longer exists.
+    ///
+    /// The page keeps only the encoded narration: a second recording on it decodes the first
+    /// one again (rare) rather than holding its sound for the rest of the session.
     pub fn attach_narration(
         &self,
         session: u64,
@@ -912,15 +916,18 @@ impl LiveHub {
                 return Ok(false);
             }
             match state.session.pages().get(page) {
-                Some(target) if target.time_origin().is_some() => target.narration.clone(),
+                Some(target) if target.time_origin().is_some() => target.audio.clone(),
                 _ => return Ok(false),
             }
         };
         let merged = match existing {
-            Some(earlier) => earlier.merge(narration),
+            Some(bytes) => decode_narration(&bytes)
+                .map_err(LiveError::Narration)?
+                .merge(narration),
             None => narration,
         };
         let audio = encode_narration(&merged).map_err(LiveError::Narration)?;
+        drop(merged);
         let mut state = self.shared.lock();
         if state.session.id() != session {
             return Ok(false);
@@ -928,7 +935,7 @@ impl LiveHub {
         let attached = state
             .session
             .page_mut(page)
-            .is_some_and(|target| target.set_narration(merged, audio));
+            .is_some_and(|target| target.set_audio(audio));
         if attached {
             self.shared.save_wake.notify_all();
         }
@@ -938,12 +945,12 @@ impl LiveHub {
     /// Gives page `page` of the current session a narration with ready-made `audio` bytes (no
     /// encoding, no merge): the tests of what the hub writes.
     #[cfg(test)]
-    pub fn set_page_audio(&self, page: usize, narration: Narration, audio: Vec<u8>) -> bool {
+    pub fn set_page_audio(&self, page: usize, audio: Vec<u8>) -> bool {
         let mut state = self.shared.lock();
         let attached = state
             .session
             .page_mut(page)
-            .is_some_and(|target| target.set_narration(narration, audio));
+            .is_some_and(|target| target.set_audio(audio));
         if attached {
             self.shared.save_wake.notify_all();
         }
