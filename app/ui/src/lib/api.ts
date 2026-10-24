@@ -6,13 +6,20 @@ import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import type {
+  AutoExportSettings,
   Background,
+  ExportFormat,
+  ExportOptions,
+  ExportSource,
   FileStamp,
   LibraryListing,
   Note,
   NoteSummary,
   OpenedNote,
+  MergeLayout,
   PageSize,
+  SplitResult,
+  SplitSpec,
   TabletInfo,
   TrashEntry,
 } from './note';
@@ -31,6 +38,8 @@ export interface AppState {
   selfTest: boolean;
   /** The executable was started with `--diagnostic`: open the tablet test right away. */
   openDiagnostic: boolean;
+  /** Automatic export after a sync (shared by every PC). */
+  autoExport: AutoExportSettings;
 }
 
 export interface LibraryInspection {
@@ -133,6 +142,30 @@ export const api = {
   /** PNG data URL of a page background (paper, template, texture) `widthPx` pixels wide. */
   renderBackground: (page: PageSize, background: Background, widthPx: number) =>
     call<string>('render_background', { page, background, widthPx }),
+
+  // --- Exports, split, merge (milestone M5; Rust side: export.rs, clipboard.rs, operations.rs) ---
+
+  /**
+   * Exports notes. PDF: `destination` is one file holding every note, one page each. PNG, JPG,
+   * SVG: a file for one note, a folder for several (one file per note, never overwriting).
+   * Returns the paths written.
+   */
+  exportNotes: (sources: ExportSource[], format: ExportFormat, options: ExportOptions, destination: string) =>
+    call<string[]>('export_notes', { sources, format, options, destination }),
+  /** Copies the note's image to the clipboard (Windows); rejects with `clipboardUnavailable` elsewhere. */
+  copyNoteImage: (source: ExportSource, dpi: number) => call<void>('copy_note_image', { source, dpi }),
+  /**
+   * Splits the editor's current `note`: the new note (titled `title`, same binder) is created
+   * first, then the kept part is saved over `path` (`noteConflict` if the file changed since
+   * `stamp`; the new note is then moved to the trash).
+   */
+  splitNote: (path: string, note: Note, stamp: FileStamp, split: SplitSpec, title: string) =>
+    call<SplitResult>('split_note', { path, note, stamp, split, title }),
+  /** Assembles notes (oldest first) into a new note in the first one's binder; sources unchanged. */
+  mergeNotes: (paths: string[], layout: MergeLayout, title: string) =>
+    call<NoteSummary>('merge_notes', { paths, layout, title }),
+  /** Sets the automatic export after a sync (`invalidFolder` if the folder is not acceptable). */
+  setAutoExport: (autoExport: AutoExportSettings) => call<AppState>('set_auto_export', { autoExport }),
 
   // --- Settings: tablet ---------------------------------------------------------------------
 

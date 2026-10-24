@@ -31,6 +31,7 @@ const state: AppState = {
   systemLocale: navigator.language,
   selfTest: false,
   openDiagnostic: new URLSearchParams(location.search).has('diagnostic'),
+  autoExport: { format: 'off', folder: 'Exports' },
 };
 
 const libraries = new Set<string>();

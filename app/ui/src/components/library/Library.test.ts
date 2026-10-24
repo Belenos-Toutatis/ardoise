@@ -18,6 +18,7 @@ const app: AppState = {
   systemLocale: 'fr-FR',
   selfTest: false,
   openDiagnostic: false,
+  autoExport: { format: 'off', folder: 'Exports' },
 };
 
 const ROOT = 'C:\\demo\\Ardoise';

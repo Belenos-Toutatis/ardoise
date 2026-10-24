@@ -5,12 +5,14 @@
 //! - [`manager`]: finds tablets, keeps the shared registration (`device.json`), reconnects.
 //! - [`log`] and [`logging`]: the `.jsonl` diagnostic log and the transport that feeds it.
 //! - [`diagnostic`]: the guided tablet test and its report.
+//! - [`pages`]: synced pages become notes of the library (then the automatic export).
 
 pub mod diagnostic;
 pub mod identity;
 pub mod log;
 pub mod logging;
 pub mod manager;
+pub mod pages;
 mod preview;
 mod report;
 mod runner;

@@ -43,6 +43,50 @@ pub enum Theme {
     Dark,
 }
 
+/// File format of the automatic export after a sync (SPEC §3.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoExportFormat {
+    /// No automatic export.
+    #[default]
+    Off,
+    /// One PDF per synced note.
+    Pdf,
+    /// One PNG per synced note.
+    Png,
+}
+
+/// Default folder of the automatic exports, relative to the library root.
+pub const DEFAULT_AUTO_EXPORT_FOLDER: &str = "Exports";
+
+fn default_auto_export_folder() -> String {
+    DEFAULT_AUTO_EXPORT_FOLDER.to_owned()
+}
+
+/// Automatic export of each synced note, to read the notes from a phone (SPEC §3.2). Shared by
+/// every computer, like the library.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutoExport {
+    #[serde(default)]
+    pub format: AutoExportFormat,
+    /// Sub-folder of the library, `/`-separated.
+    #[serde(default = "default_auto_export_folder")]
+    pub folder: String,
+    /// Keys this version does not know about, kept verbatim.
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for AutoExport {
+    fn default() -> Self {
+        Self {
+            format: AutoExportFormat::Off,
+            folder: default_auto_export_folder(),
+            extra: toml::Table::new(),
+        }
+    }
+}
+
 /// Settings that only make sense on one computer.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MachineSettings {
@@ -63,6 +107,9 @@ pub struct Settings {
     /// Interface theme.
     #[serde(default)]
     pub theme: Theme,
+    /// Automatic export after a sync.
+    #[serde(default)]
+    pub auto_export: AutoExport,
     /// Per-computer settings, keyed by machine name.
     #[serde(default)]
     pub machines: BTreeMap<String, MachineSettings>,

@@ -21,6 +21,7 @@ const firstRun: AppState = {
   systemLocale: 'fr-FR',
   selfTest: false,
   openDiagnostic: false,
+  autoExport: { format: 'off', folder: 'Exports' },
 };
 
 let cleanup: (() => void) | null = null;

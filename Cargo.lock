@@ -106,6 +106,7 @@ name = "ardoise-device"
 version = "0.1.0"
 dependencies = [
  "ardoise-core",
+ "ardoise-ink",
  "ardoise-proto",
  "chrono",
  "getrandom 0.3.4",

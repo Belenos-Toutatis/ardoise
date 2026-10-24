@@ -126,6 +126,50 @@ export interface TabletInfo {
   height: number;
 }
 
+// --- Milestone M5: exports, split, merge (docs/design/exports-and-operations.md) ----------
+
+export type ExportFormat = 'png' | 'jpg' | 'svg' | 'pdf';
+
+export interface ExportOptions {
+  /** Resolution of raster formats, 72..=600. */
+  dpi: number;
+  /** Draw the paper (colour, template, texture); without it PNG is transparent, JPG white. */
+  background: boolean;
+  /** JPG quality, 1..=100. */
+  quality: number;
+  /** PDF page: the note's own size, or A4 in the note's orientation (note fitted, centred). */
+  pdfPage: 'actual' | 'a4';
+}
+
+/**
+ * A note to export: the note at `path`, or the editor's current `note` (unsaved changes
+ * included). `path` also names the output file.
+ */
+export interface ExportSource {
+  path: string;
+  note?: Note;
+}
+
+/** How to split a note: at an instant (ms since `created`), or by a traced zone (page units). */
+export type SplitSpec = { kind: 'time'; at: number } | { kind: 'zone'; polygon: [number, number][] };
+
+/** The kept part, as saved over the note, and the new note made of the rest. */
+export interface SplitResult {
+  note: Note;
+  stamp: FileStamp;
+  created: NoteSummary;
+}
+
+/** Overlay: every note on one page; end to end: one long page, notes one below the other. */
+export type MergeLayout = 'overlay' | 'endToEnd';
+
+/** Automatic export of each synced note into a sub-folder of the library (SPEC §3.2). */
+export interface AutoExportSettings {
+  format: 'off' | 'pdf' | 'png';
+  /** Relative to the library root, `/`-separated. */
+  folder: string;
+}
+
 /** Colours of Inkspace's palette, offered first. */
 export const INKSPACE_COLORS: Rgba[] = [
   { r: 0x00, g: 0x00, b: 0x00, a: 255 },

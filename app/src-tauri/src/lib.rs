@@ -6,13 +6,17 @@
 #[cfg(all(dev, not(debug_assertions)))]
 compile_error!("release builds need `--features custom-protocol` (use `cargo xtask check`)");
 
+mod autoexport;
+mod clipboard;
 mod commands;
 mod console;
 mod demo;
 mod diagnostic;
+mod export;
 mod import;
 mod library;
 mod notes;
+mod operations;
 mod selftest;
 mod tablet;
 mod thumbnails;
@@ -166,6 +170,11 @@ pub fn run() {
             notes::render_background,
             tablet::tablet_info,
             tablet::forget_tablet,
+            commands::set_auto_export,
+            export::export_notes,
+            clipboard::copy_note_image,
+            operations::split_note,
+            operations::merge_notes,
         ])
         .setup(move |app| {
             if cli.self_test {

@@ -147,6 +147,16 @@ pub fn set_theme(context: State<'_, AppContext>, theme: Theme) -> CommandResult<
     update(&context, |settings| settings.theme = theme)
 }
 
+/// Sets the automatic export after a sync (`[auto_export]`, shared by every PC).
+/// Stub of the M5 contract: replaced by the implementation (validation, `AppState.autoExport`).
+#[tauri::command]
+pub fn set_auto_export(
+    context: State<'_, AppContext>,
+    auto_export: ardoise_core::settings::AutoExport,
+) -> CommandResult<AppState> {
+    update(&context, |settings| settings.auto_export = auto_export)
+}
+
 #[derive(Debug, Serialize)]
 pub struct LibraryInspection {
     existing: bool,
