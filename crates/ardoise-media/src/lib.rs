@@ -17,6 +17,7 @@
 mod error;
 pub mod nv12;
 mod settings;
+mod sink;
 // Only the Media Foundation back end needs it (tested everywhere).
 #[cfg(any(windows, test))]
 mod timing;
@@ -34,6 +35,10 @@ pub use error::MediaError;
 pub use settings::{
     AAC_BITRATE, AudioSettings, AudioTrackProbe, AvailableEncoders, Codec, EncoderInfo, Mp4Probe,
     Mp4Settings, Mp4Summary, ProbeOptions, RgbaFrame, VideoTrackProbe,
+};
+pub use sink::{
+    AnimationFormat, AnimationProbe, AudioClip, AudioProbe, NARRATION_SAMPLE_RATE, VideoSettings,
+    VideoSink, VideoSummary,
 };
 
 #[cfg(windows)]
