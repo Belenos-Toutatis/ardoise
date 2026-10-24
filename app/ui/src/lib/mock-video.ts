@@ -40,6 +40,8 @@ export const mockVideo = {
   mediaFoundation: true,
   /** The Cisco download fails (`openh264DownloadFailed`). */
   downloadFails: false,
+  /** Windows still holds the library: removing it fails (`openh264RemoveFailed`). */
+  removeFails: false,
   /** Narrations by note path, for notes whose narration the tests invent. */
   narrations: {} as Record<string, NarrationInfo>,
 };
@@ -78,6 +80,7 @@ export function resetMockVideo(): void {
   mockVideo.steps = 5;
   mockVideo.mediaFoundation = true;
   mockVideo.downloadFails = false;
+  mockVideo.removeFails = false;
   mockVideo.narrations = {};
   exportedVideos.length = 0;
   openH264 = initialOpenH264();
@@ -264,6 +267,7 @@ export function mockVideoInvoke(command: string, args: Record<string, unknown>):
       cancelDownloadRunning?.();
       return undefined;
     case 'openh264_remove':
+      if (mockVideo.removeFails) failure('openh264RemoveFailed', 'openh264.dll: access denied');
       openH264 = { ...openH264, status: 'notInstalled', bytes: null, allowed: false };
       return openH264State();
     case 'set_openh264_allowed':

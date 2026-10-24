@@ -9,9 +9,12 @@
     source,
     subject,
     onclose,
-  }: { source: ExportSource; subject: string; onclose: () => void } = $props();
+    onrunning,
+  }: { source: ExportSource; subject: string; onclose: () => void; onrunning?: (running: boolean) => void } = $props();
 </script>
 
 <div class="video-dialog-double" data-path={source.path} data-subject={subject} data-strokes={source.note?.strokes.length ?? -1}>
   <button type="button" onclick={onclose}>close-video</button>
+  <button type="button" onclick={() => onrunning?.(true)}>run-video</button>
+  <button type="button" onclick={() => onrunning?.(false)}>end-video</button>
 </div>

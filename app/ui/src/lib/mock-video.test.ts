@@ -283,6 +283,15 @@ describe('OpenH264', () => {
     expect(removed).toMatchObject({ status: 'notInstalled', bytes: null, allowed: false });
   });
 
+  it('cannot be removed while Windows still uses it, and then stays as it was', async () => {
+    await api.openH264Download(() => {});
+    mockVideo.removeFails = true;
+    expect(await code(api.openH264Remove())).toBe('openh264RemoveFailed');
+    expect(await api.openH264State()).toMatchObject({ status: 'installed', allowed: true });
+    mockVideo.removeFails = false;
+    expect((await api.openH264Remove()).status).toBe('notInstalled');
+  });
+
   it('reports whether Windows writes MP4 itself', async () => {
     mockVideo.mediaFoundation = false;
     expect((await api.openH264State()).mediaFoundation).toBe(false);

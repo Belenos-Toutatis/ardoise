@@ -448,7 +448,11 @@
     "noMicrophone": "aucun micro n'est connecté à cet ordinateur",
     "narrationBusy": "un enregistrement de narration est déjà en cours",
     "noRecording": "aucun enregistrement de narration n'est en cours",
-    "openh264DownloadFailed": "le téléchargement d'OpenH264 a échoué ({detail}) ; vérifiez la connexion à internet puis réessayez"
+    "openh264DownloadFailed": "le téléchargement d'OpenH264 a échoué ({detail}) ; vérifiez la connexion à internet puis réessayez",
+    "noNarration": "Cette note n'a pas de narration.",
+    "emptyRecording": "Le micro n'a rien enregistré.",
+    "noPendingNarration": "Aucun enregistrement n'est en attente.",
+    "openh264RemoveFailed": "Windows utilise encore OpenH264 : fermez puis relancez Ardoise, puis supprimez-le."
   },
   "editor": {
     "back": "Bibliothèque",
@@ -698,7 +702,20 @@
       "afterEnd": "La relecture est terminée ; l'enregistrement continue et la dernière image reste affichée.",
       "saving": "Enregistrement dans la note…",
       "saved": "Narration enregistrée ({duration}).",
-      "failed": "L'enregistrement a échoué : {message}"
+      "failed": "L'enregistrement a échoué : {message}",
+      "saveNote": "Le son est ajouté à la note telle qu'elle est enregistrée sur le disque : les modifications non enregistrées n'en font pas partie.",
+      "unsavedWarning": "Cette note a des modifications non enregistrées. Enregistrez-la d'abord (Ctrl+S), sinon elles ne seront pas conservées avec la narration."
+    },
+    "pending": {
+      "title": "Enregistrement en attente",
+      "message": "La narration n'a pas pu être ajoutée à la note, mais elle est conservée. Réglez le problème (par exemple en rouvrant la note ou en enregistrant une copie), puis réessayez.",
+      "messageElsewhere": "Un enregistrement n'a pas pu être ajouté à sa note, mais il est conservé. Ouvrez une note dans l'éditeur pour le réessayer (Relecture, puis Enregistrer une narration), ou abandonnez-le.",
+      "retry": "Réessayer",
+      "retrying": "Nouvel essai…",
+      "discard": "Abandonner l'enregistrement",
+      "discardConfirm": "Abandonner définitivement cet enregistrement ? Le son sera perdu.",
+      "discardYes": "Oui, abandonner",
+      "discardNo": "Non, le garder"
     },
     "stored": {
       "info": "Narration enregistrée dans la note ({duration}).",
@@ -941,6 +958,8 @@
     "running": "Export en cours…",
     "cancelRun": "Annuler l'export",
     "cancelling": "Annulation…",
+    "closeBusy": "Un export vidéo est en cours : attendez la fin ou annulez-le avant de fermer la fenêtre.",
+    "finalizing": "Finalisation…",
     "cancelled": "Export annulé.",
     "progress": "Images : {done} sur {total} ({percent} %)",
     "progressLabel": "Avancement de l'export",

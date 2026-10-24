@@ -116,6 +116,11 @@ export interface NarrationStatus {
   device: string | null;
   /** Technical detail of a failure. */
   failure: string | null;
+  /**
+   * A replay recording could not be saved and is kept (with a backup `.opus` on disk): retry it
+   * into a note, or discard it.
+   */
+  pending: boolean;
 }
 
 export interface NarrationSaved {

@@ -448,7 +448,11 @@
     "noMicrophone": "no microphone is connected to this computer",
     "narrationBusy": "a narration recording is already running",
     "noRecording": "no narration recording is running",
-    "openh264DownloadFailed": "the OpenH264 download failed ({detail}); check the internet connection, then try again"
+    "openh264DownloadFailed": "the OpenH264 download failed ({detail}); check the internet connection, then try again",
+    "noNarration": "This note has no narration.",
+    "emptyRecording": "The microphone recorded nothing.",
+    "noPendingNarration": "No recording is waiting.",
+    "openh264RemoveFailed": "Windows is still using OpenH264: close and restart Ardoise, then remove it."
   },
   "editor": {
     "back": "Library",
@@ -698,7 +702,20 @@
       "afterEnd": "The replay is over; the recording goes on and the last image stays on screen.",
       "saving": "Saving into the note…",
       "saved": "Narration saved ({duration}).",
-      "failed": "The recording failed: {message}"
+      "failed": "The recording failed: {message}",
+      "saveNote": "The sound is added to the note as it is saved on disk: unsaved changes are not part of it.",
+      "unsavedWarning": "This note has unsaved changes. Save it first (Ctrl+S), otherwise they will not be kept with the narration."
+    },
+    "pending": {
+      "title": "Recording on hold",
+      "message": "The narration could not be added to the note, but it is kept. Fix the problem (for example by reopening the note or saving a copy), then try again.",
+      "messageElsewhere": "A recording could not be added to its note, but it is kept. Open a note in the editor to try again (Replay, then Record a narration), or discard it.",
+      "retry": "Try again",
+      "retrying": "Trying again…",
+      "discard": "Discard the recording",
+      "discardConfirm": "Discard this recording for good? The sound will be lost.",
+      "discardYes": "Yes, discard",
+      "discardNo": "No, keep it"
     },
     "stored": {
       "info": "Narration saved in the note ({duration}).",
@@ -941,6 +958,8 @@
     "running": "Exporting…",
     "cancelRun": "Cancel the export",
     "cancelling": "Cancelling…",
+    "closeBusy": "A video export is running: wait for it to finish or cancel it before closing the window.",
+    "finalizing": "Finalizing…",
     "cancelled": "Export cancelled.",
     "progress": "Frames: {done} of {total} ({percent}%)",
     "progressLabel": "Export progress",

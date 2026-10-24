@@ -82,7 +82,8 @@ describe('microphone picker', () => {
 
   it('listens to the level while mounted and stops when it goes', async () => {
     const monitor = vi.spyOn(api, 'microphoneMonitor');
-    const stop = vi.spyOn(api, 'narrationStop');
+    const stop = vi.spyOn(api, 'microphoneMonitorStop');
+    const discard = vi.spyOn(api, 'narrationStop');
     const view = render({ device: 'mock-mic-1', monitor: true });
     await vi.waitFor(() => expect(monitor).toHaveBeenCalledWith('mock-mic-1'));
     await vi.waitFor(() => expect(view.line()?.dataset.capture).toBe('receiving'));
@@ -99,8 +100,22 @@ describe('microphone picker', () => {
     view.unmount();
     cleanup = null;
     await monitorSettled();
-    expect(stop).toHaveBeenCalledWith(false, null);
+    expect(stop).toHaveBeenCalledTimes(1);
+    // Only the level capture is stopped, with its own command: never `narrationStop`.
+    expect(discard).not.toHaveBeenCalled();
     expect((await api.narrationStatus()).state).toBe('idle');
+  });
+
+  it('never discards a recording when it goes away', async () => {
+    const view = render({ device: 'mock-mic-1', monitor: true });
+    await vi.waitFor(() => expect(view.line()?.dataset.capture).toBe('receiving'));
+    // A recording takes the microphone over from the level capture, as in the editor.
+    await api.narrationStart('mock-mic-1', { kind: 'live' });
+    view.unmount();
+    cleanup = null;
+    await monitorSettled();
+    expect((await api.narrationStatus()).state).toBe('recording');
+    await api.narrationStop(false, null, null, null);
   });
 
   it('restarts the level capture on another microphone', async () => {
@@ -165,7 +180,7 @@ describe('microphone picker', () => {
     await vi.waitFor(() => expect(view.line()?.dataset.capture).toBe('receiving'));
     expect(view.select().disabled).toBe(true);
     expect(view.meter()).toBeTruthy();
-    await api.narrationStop(false, null);
+    await api.narrationStop(false, null, null, null);
     await vi.waitFor(() => expect(view.meter()).toBeNull());
   });
 });

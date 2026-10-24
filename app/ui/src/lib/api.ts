@@ -268,20 +268,30 @@ export const api = {
   listMicrophones: () => call<Microphone[]>('list_microphones'),
   /** Remembers the microphone on this PC (null: the system's default). */
   setMicrophone: (device: string | null) => call<AppState>('set_microphone', { device }),
-  /** Starts a level-only capture (no audio kept); `narrationStop(false)` ends it. */
+  /** Starts a level-only capture (no audio kept); `microphoneMonitorStop` ends it. */
   microphoneMonitor: (device: string | null) => call<void>('microphone_monitor', { device }),
+  /** Stops a level-only capture, and only that: a recording is never touched by it. */
+  microphoneMonitorStop: () => call<void>('microphone_monitor_stop'),
   /** Starts recording the narration (`narrationBusy` if one is already recording). */
   narrationStart: (device: string | null, target: NarrationTarget) =>
     call<void>('narration_start', { device, target }),
   /** Level and state of the capture under way; poll about 10 times a second. */
   narrationStatus: () => call<NarrationStatus>('narration_status'),
   /**
-   * Stops the capture. With `save`, a replay recording is written into its note (`stamp`: the
-   * editor's; `noteConflict` if the file changed) and live recordings go to their pages.
-   * Returns null for a monitor or when nothing is saved.
+   * Stops the recording. With `save`, a replay recording is written into the note at `path` (the
+   * editor's current path: the note may have been renamed since the start) with `stamp` (the
+   * editor's; `noteConflict` if the file changed); `replayStartedAtMs` is `Date.now()` at the
+   * moment the replay was at instant 0 and playing, which places the sound in replay time.
+   * Live recordings go to their pages (`path` and `replayStartedAtMs` are null). A replay
+   * recording that cannot be saved stays pending (`narrationRetry`, `narrationDiscard`).
+   * Returns null when nothing is saved.
    */
-  narrationStop: (save: boolean, stamp: FileStamp | null) =>
-    call<NarrationSaved | null>('narration_stop', { save, stamp }),
+  narrationStop: (save: boolean, stamp: FileStamp | null, path: string | null, replayStartedAtMs: number | null) =>
+    call<NarrationSaved | null>('narration_stop', { save, stamp, path, replayStartedAtMs }),
+  /** Saves the pending recording into the note at `path` (`noteConflict` etc. keep it pending). */
+  narrationRetry: (path: string, stamp: FileStamp | null) => call<NarrationSaved>('narration_retry', { path, stamp }),
+  /** Throws the pending recording away (`noPendingNarration` if there is none). */
+  narrationDiscard: () => call<void>('narration_discard'),
   /** The narration stored in a note, or null. */
   narrationInfo: (path: string) => call<NarrationInfo | null>('narration_info', { path }),
   /** The narration as a WAV file, to play during the replay. */

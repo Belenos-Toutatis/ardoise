@@ -34,7 +34,16 @@
   import { NarrationRecorder } from '../narration/recorder.svelte';
   import LiveCanvas from './LiveCanvas.svelte';
 
-  let { app, onclose }: { app: AppState; onclose: () => void } = $props();
+  let {
+    app,
+    onclose,
+    onchange,
+  }: {
+    app: AppState;
+    onclose: () => void;
+    /** The app state changed (the microphone chosen here): the screen holding it takes the new one. */
+    onchange?: (next: AppState) => void;
+  } = $props();
 
   /** Nominal width per ink tool (device units), as in the editor. */
   const DEFAULT_WIDTHS: Record<Tool, number> = {
@@ -52,6 +61,8 @@
     { color: { r: 255, g: 255, b: 255, a: 255 }, label: 'live.colors.white' },
     { color: { r: 255, g: 214, b: 0, a: 255 }, label: 'live.colors.yellow' },
   ];
+  /** Why stopping the narration may fail without anything being lost: there was no sound to keep. */
+  const NOTHING_TO_KEEP = ['emptyRecording', 'microphoneSilent'];
   /** How often the latency shown is refreshed. */
   const LATENCY_REFRESH_MS = 500;
   const KEYS = ['next', 'previous', 'clear', 'board', 'laser', 'zoom', 'whole', 'pan', 'leave'] as const;
@@ -145,8 +156,8 @@
       clearInterval(timer);
       live.close();
       recorder.dispose();
-      // A capture left running would hold the microphone: discard it.
-      if (recorder.phase === 'recording') void api.narrationStop(false, null).catch(() => {});
+      // A recording is never thrown away silently: the pages get the sound recorded so far.
+      if (recorder.phase === 'recording') void api.narrationStop(true, null, null, null).catch(() => {});
     };
   });
 
@@ -172,7 +183,9 @@
   async function chooseMicrophone(device: string | null) {
     chosenMicrophone = device;
     try {
-      chosenMicrophone = (await api.setMicrophone(device)).microphone;
+      const next = await api.setMicrophone(device);
+      chosenMicrophone = next.microphone;
+      onchange?.(next);
     } catch (error) {
       chosenMicrophone = undefined;
       notice = errorMessage(error);
@@ -200,11 +213,12 @@
     if (recorder.phase === 'recording') {
       narrationOpen = false;
       const result = await recorder.stop(true, null);
-      if (!result.ok) {
+      if (!result.ok && !NOTHING_TO_KEEP.includes(result.code ?? '')) {
         stopError = recorder.error;
         stopping = false;
         return;
       }
+      // A recording with nothing in it (silent or blocked microphone) is nothing to keep: leaving goes on.
       narrated = result.saved;
     }
     try {

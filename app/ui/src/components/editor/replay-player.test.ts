@@ -162,6 +162,54 @@ describe('replay player', () => {
     expect(p.position).toBe(5000);
   });
 
+  it('opens the timeline with a lead-in for a narration that began before instant 0', () => {
+    const { p, hand } = player();
+    // 1.5 s of sound before the drawing, ending at replay instant 2000 (shorter than the drawing).
+    p.setNarrationSpan(1500, 2000);
+    expect(p.leadIn).toBe(1500);
+    expect(p.end).toBe(6500);
+    expect(p.instant).toBe(-1500);
+    // The page waits during the lead-in...
+    p.play();
+    hand.advance(1008);
+    expect(p.position).toBeGreaterThan(1000);
+    expect(p.instant).toBeLessThan(0);
+    expect(p.shown?.strokes).toHaveLength(1);
+    expect(p.shown?.strokes[0].points).toHaveLength(1);
+    // ...then the drawing runs at its own pace (the first stroke ends at instant 1000).
+    hand.advance(2000);
+    expect(p.instant).toBeGreaterThan(1000);
+    expect(p.shown?.strokes).toHaveLength(1);
+    hand.advance(10000);
+    expect(p.playing).toBe(false);
+    expect(p.position).toBe(6500);
+    expect(p.shown?.strokes).toHaveLength(3);
+    // Seeking is in timeline time too, and clamped to it.
+    p.seek(-5);
+    expect(p.position).toBe(0);
+    p.seek(1e9);
+    expect(p.position).toBe(6500);
+  });
+
+  it('keeps the same moment of the replay when the narration span changes', () => {
+    const { p } = player();
+    p.seek(2000);
+    p.setNarrationSpan(1000, 0);
+    expect(p.position).toBe(3000);
+    expect(p.instant).toBe(2000);
+    // Back to the drawing alone: an instant inside the lead-in goes to instant 0.
+    p.seek(400);
+    p.setNarrationSpan(0, 0);
+    expect(p.position).toBe(0);
+    expect(p.end).toBe(5000);
+    // The options change keeps the moment, lead-in or not.
+    p.setNarrationSpan(1000, 0);
+    p.seek(1000 + 1000);
+    p.setSpeed(2);
+    expect(p.instant).toBeCloseTo(500, 6);
+    expect(p.end).toBe(1000 + 2500);
+  });
+
   it('cannot play an empty note, and starts over for another one', () => {
     const hand = manualClock();
     const p = new ReplayPlayer(hand.clock);

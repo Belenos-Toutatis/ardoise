@@ -3,8 +3,11 @@
    * The recording controls shared by the editor (narration of a replay) and the live view: the
    * microphone (picker with its level and status), then start, and while recording the time, a
    * stop that saves and a cancel. The caller starts and stops through the recorder (`onstart`,
-   * `onstop`, `oncancel`), because the target and the saving differ.
+   * `onstop`, `oncancel`), because the target and the saving differ. A recording that could not be
+   * saved is kept by Rust (`recorder.pending`): the panel then offers to retry (`onretry`, which
+   * knows the note's current path and stamp; no retry for the live view) or to abandon it.
    */
+  import { onMount } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
   import { clock } from './format';
   import MicrophonePicker from './MicrophonePicker.svelte';
@@ -17,11 +20,14 @@
     onstart,
     onstop,
     oncancel,
+    onretry,
     open = $bindable(false),
     openLabel,
     openHint,
     replaces = false,
     info = null,
+    saveNote = null,
+    warning = null,
     duringInfo = null,
   }: {
     recorder: NarrationRecorder;
@@ -33,6 +39,8 @@
     onstop: () => void;
     /** Stop and throw the recording away. */
     oncancel: () => void;
+    /** Save the pending recording again, into the note as it is now. */
+    onretry?: () => void;
     /** The panel is unfolded (the microphone is listened to). */
     open?: boolean;
     openLabel: string;
@@ -41,15 +49,70 @@
     replaces?: boolean;
     /** Said before starting. */
     info?: string | null;
+    /** Said before starting, after `info`: where the sound goes. */
+    saveNote?: string | null;
+    /** Said before starting as a warning (the note has unsaved changes). */
+    warning?: string | null;
     /** Said while recording. */
     duringInfo?: string | null;
   } = $props();
 
   const idle = $derived(recorder.phase === 'idle');
+  const pending = $derived(idle && recorder.pending);
+  let confirmDiscard = $state(false);
+
+  // A recording kept by an earlier failure (this screen, or one left before) is offered again.
+  onMount(() => {
+    void recorder.refreshPending();
+  });
+
+  async function discard() {
+    confirmDiscard = false;
+    await recorder.discard();
+  }
 </script>
 
 <div class="record" data-phase={recorder.phase}>
-  {#if !open && idle}
+  {#if pending}
+    <div class="pending" role="group" aria-label={t('narration.pending.title')} data-slot="narration-pending">
+      <p><strong>{t('narration.pending.title')}</strong></p>
+      <p class="small">{t(onretry ? 'narration.pending.message' : 'narration.pending.messageElsewhere')}</p>
+      {#if confirmDiscard}
+        <p class="small" role="alert">{t('narration.pending.discardConfirm')}</p>
+        <div class="buttons">
+          <button type="button" class="button small-button danger" data-action="narration-discard-yes" onclick={discard}>
+            {t('narration.pending.discardYes')}
+          </button>
+          <button type="button" class="button small-button" data-action="narration-discard-no" onclick={() => (confirmDiscard = false)}>
+            {t('narration.pending.discardNo')}
+          </button>
+        </div>
+      {:else}
+        <div class="buttons">
+          {#if onretry}
+            <button
+              type="button"
+              class="button small-button primary"
+              data-action="narration-retry"
+              disabled={recorder.retrying}
+              onclick={onretry}
+            >
+              {recorder.retrying ? t('narration.pending.retrying') : t('narration.pending.retry')}
+            </button>
+          {/if}
+          <button
+            type="button"
+            class="button small-button danger"
+            data-action="narration-discard"
+            disabled={recorder.retrying}
+            onclick={() => (confirmDiscard = true)}
+          >
+            {t('narration.pending.discard')}
+          </button>
+        </div>
+      {/if}
+    </div>
+  {:else if !open && idle}
     <button type="button" class="button small-button" data-action="narration-open" title={openHint} onclick={() => (open = true)}>
       <span class="dot" aria-hidden="true"></span>
       {openLabel}
@@ -62,6 +125,12 @@
       {/if}
       {#if info}
         <p class="small muted">{info}</p>
+      {/if}
+      {#if saveNote}
+        <p class="small muted" data-slot="save-note">{saveNote}</p>
+      {/if}
+      {#if warning}
+        <p class="small warning" role="status" data-slot="unsaved-warning">{warning}</p>
       {/if}
       <div class="buttons">
         <button type="button" class="button small-button primary" data-action="narration-start" onclick={onstart}>
@@ -136,6 +205,22 @@
   }
 
   .replaces {
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    background: var(--surface-2);
+  }
+
+  .pending {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 0.65rem;
+    border-left: 4px solid var(--danger);
+    border-radius: 6px;
+    background: var(--danger-bg);
+  }
+
+  .warning {
     padding: 0.4rem 0.6rem;
     border-radius: 6px;
     background: var(--surface-2);
