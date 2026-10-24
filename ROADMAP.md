@@ -73,10 +73,10 @@ Règles permanentes :
 
 ## M4 — Synchro, mode direct et classe
 
-- [ ] Tablette dans l'interface : assistant d'enregistrement, état, batterie, synchro automatique, réglages de la tablette.
-- [ ] Mode direct : affichage temps réel, latence mesurée sur le simulateur (affichée), bouton = nouvelle page ou calque.
-- [ ] Fenêtre de présentation plein écran sur l'écran choisi + fenêtre de commande ; pointeur laser ; tableau noir ; navigation entre pages.
-- [ ] `docs/hardware-tests.md` : procédure H2.
+- [x] Tablette dans l'interface : assistant d'enregistrement, état, batterie, synchro automatique, réglages de la tablette.
+- [x] Mode direct : affichage temps réel, latence mesurée sur le simulateur (affichée), bouton = nouvelle page ou calque.
+- [x] Fenêtre de présentation plein écran sur l'écran choisi + fenêtre de commande ; pointeur laser ; tableau noir ; navigation entre pages.
+- [x] `docs/hardware-tests.md` : procédure H2.
 
 **Critères de fin** : `CHECK OK` ; test de bout en bout « synchro de 3 pages depuis le simulateur → 3 notes dans la bibliothèque » réussi ; latence médiane du mode direct sur le simulateur affichée et inférieure à 30 ms.
 
