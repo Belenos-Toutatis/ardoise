@@ -1,0 +1,255 @@
+# Tablet in the interface, live mode and classroom (milestone M4)
+
+Developer document (English). Requirements: SPEC §4.1, §4.2, §5, §6.2 ("Rust → interface", "Fenêtres"), §8;
+ROADMAP M4. Builds on [device-stack.md](device-stack.md) (Session, Manager, simulator) and
+[interface.md](interface.md) (screens, browser stand-in, translations).
+
+```
+                 ardoise-device::service::TabletService  (one worker thread, owns Manager + Session)
+ BLE connector ──┐   status ─────────────► app tablet.rs ── Channel<TabletEvent> ──► main window (sidebar, panel, wizard)
+ sim (real time)─┘   pages ──► store_page (app: LibrarySink + thumbnail + automatic export)
+                     live  ──► LiveSink ──► app live.rs LiveHub (pages, layers, style, view) ── Channel<LiveBatch> ──► every window
+                                                                                                        (control = main window, presentation)
+```
+
+## Rules
+
+- Everything in [device-stack.md](device-stack.md) still holds (no panic on tablet bytes, `Clock` for protocol time,
+  blocking + timeouts, atomic writes, CRLF files keep CRLF).
+- **Latency stamps are the one exception to "time comes from a `Clock`"**: they measure real elapsed time, so they
+  use the system clock (`SystemTime` for the wall-clock stamp sent to the interface, see "Latency").
+- One owner per file (see "Work packages"); a shared file is changed only by its owner, others ask in their report.
+
+## Settings (`ardoise.toml`, contract in `ardoise-core::settings`, done)
+
+`[tablet]` section, shared by every PC (like `auto_export`): `auto_sync = true`, `delete_after_import = true`,
+`hand = "right" | "left"`, `button = "newPage" | "newLayer"`, unknown keys kept. Unknown enum values load as the
+default. Per machine: `[machines."PC"] projector = "<monitor key>"` (the last screen chosen for the presentation).
+
+Left hand (`hand = "left"`): the tablet is used upside down, so every point (synced pages and live mode) is turned
+half a turn: `x' = width - x`, `y' = height - y` (`ardoise_device::pages::orient`).
+
+## ardoise-device::service (work package A)
+
+`TabletService` runs one worker thread that owns the connector, the `Manager` and the current `Session`. Public API
+(signatures fixed in `service.rs`; bodies are package A's):
+
+- `TabletService::start(config: ServiceConfig, connector: Box<dyn ConnectorFactory>, hooks: Arc<dyn ServiceHooks>,
+  on_status: StatusCallback, store_page: PageStore) -> TabletService`.
+- `status()`, `register()`, `sync_now()`, `cancel()`, `rename(name)`, `set_time()`, `set_options(options)`,
+  `forget()`, `set_library(library, identity_root)`, `start_live(sink)`, `stop_live()`, `shutdown()`.
+- Blocking requests (`rename`, `set_time`, `forget`) go to the worker and wait for its answer (timeout 30 s).
+
+Behaviour:
+
+- **Auto-connect** (SPEC §4.1): while a tablet is registered and nothing else runs, the worker scans for it in slices
+  of at most 5 s (`find_registered`), connects (`Manager::connect`: auth, set time), reads `info()` and the stored page
+  count, then, if `auto_sync` and pages are waiting, syncs. It stays connected (`connected`) until the tablet drops the
+  link, then goes back to `searching`. A connection error is shown (`error`) and retried after 5 s.
+- **Register** (wizard): `register()` → `registering` with `register_step` `holdButton` (hooks.registration_started),
+  `searching` (find in register mode, up to 60 s), `connecting`, `pressButton` (hooks.waiting_for_button; button
+  timeout 30 s), `done`. The identity is saved in `<identity_root>/_ardoise/device.json` by `Manager::register`.
+  `cancel()` stops it (`register_step` back to `null`, connection `notRegistered`).
+- **Sync** (`sync_now()` or automatic): `syncing` with `sync = { current, total, saved }`. Every page goes through
+  `store_page` (which writes the note and reads it back); only when it returned `Ok` is the page deleted from the
+  tablet, and only when `delete_after_import`. Without deletion the tablet only lets us read its oldest page: a page
+  already imported (same deterministic note id, `pages::page_note_id`) is not stored twice. `cancel()` stops between
+  pages (pages already saved stay saved and deleted). At the end `last_sync = { at, saved: [paths], deleted }`.
+  When the tablet is not connected, `sync_now()` waits for it (connection `searching`, `pending = "sync"`).
+- **Live mode**: `start_live(sink)` enters live mode when connected (or as soon as the tablet connects: `pending =
+  "live"`), calls `hooks.live_started()`, then forwards every notification to `sink` as `LiveInput` (decoded records
+  with the receipt stamp, proximity, button, state changes). Lost links are reopened (`Manager` logic) and reported
+  as `LiveInput::State(Reconnecting)` then `Live`. `stop_live()` leaves live mode (`b1 02`) and stays connected.
+- **Button in live mode**: protocol.md does not say what the Slate sends. Working hypothesis, to be checked at H2:
+  a sysevent notification. `ardoise_proto::live::BUTTON_SYSEVENTS` lists the known signatures (for now the
+  simulator's hypothetical `f1 02 14 01`); a match becomes `LiveInput::Button`. **Every other notification received
+  during live mode that is not pen data is written to the diagnostic log with the note `unclassified during live
+  mode`**, so that the H2 log shows the real signature.
+- **Log**: the service keeps an in-memory diagnostic log; when an error happens it is written to
+  `<identity_root>/_ardoise/diagnostics/` (atomic, one file per failing session) so that problems come back by
+  Nextcloud. Live mode sessions are not written unless they fail.
+- `set_library(None, ..)`: no library, connection `unavailable` with error code `noLibrary`.
+- BLE adapter missing / off: connection `unavailable`, error `bluetoothOff` / `bluetoothMissing`, checked again every 10 s.
+
+`TabletStatus` (serde camelCase, mirrored by `app/ui/src/lib/tablet.ts`):
+
+| field | meaning |
+|---|---|
+| `connection` | `unavailable`, `notRegistered`, `registering`, `searching`, `connecting`, `connected`, `syncing`, `live` |
+| `registered` | `TabletInfo` of `device.json` (name, address, registered, width, height) or null |
+| `device` | last information read: `name, firmware, batteryPercent, charging, width, height, storedPages, model, readAt` (unix ms) or null |
+| `registerStep` | `holdButton`, `searching`, `connecting`, `pressButton`, `done`, or null |
+| `sync` | `{ current, total, saved }` while syncing, else null |
+| `lastSync` | `{ at, saved: string[], deleted }` (paths of the notes written) or null |
+| `pending` | `sync`, `live` or null: what waits for the tablet to connect |
+| `error` | `{ code, message }` of the last failure (translated by `errorCodes.*`), cleared by the next success |
+| `simulated` | started with `--simulated-tablet` |
+| `options` | the `TabletOptions` in use (`autoSync`, `deleteAfterImport`, `hand`, `button`) |
+
+`model` is derived from the dimensions: `Bamboo Slate A4` (29700 × 21600), `Bamboo Slate A5` (21600 × 14800), else
+`Wacom (W × H)`.
+
+## Simulated tablet in the app (`--simulated-tablet`, work package A)
+
+`ardoise.exe --simulated-tablet` replaces Bluetooth by `ardoise_sim::realtime::RealTimeConnector`: the virtual
+clock follows the wall clock (recv waits for real), so live mode streams at 200 samples/s for real.
+
+- The simulated tablet starts with the 3 reference pages stored (`drawings::reference_pages`), battery 87 %.
+- `SimHooks` play the user: `registration_started` holds the button after 1 s, `waiting_for_button` presses it after
+  1 s, `live_started` queues 10 minutes of pen movement (`drawings::live_script_seeded`, hover gaps included).
+- **Never touches the real registration**: with `--simulated-tablet` the identity root is a throwaway folder
+  (`%TEMP%\ardoise-simulation-*`, like `--diagnostic --simulated`); synced notes still go to the configured library
+  (the e2e journeys use a demo library).
+- Test command, only with `--simulated-tablet` (`simulationOnly` error otherwise): `sim_press_button` (presses the
+  simulated tablet's button: in live mode it sends the button signature).
+
+## App commands (Tauri)
+
+Errors are `{ code, message }`. New codes: `tabletNotConnected`, `tabletBusy`, `tabletNotRegistered`,
+`bluetoothOff`, `bluetoothMissing`, `tabletTimeout`, `tabletRefused`, `liveNotRunning`, `noMonitor`,
+`simulationOnly`, `invalidName`, `tablet` (any other device error, `message` = detail).
+
+Tablet (`tablet.rs`, package A):
+
+| Command | Arguments | Returns |
+|---|---|---|
+| `tablet_info` / `forget_tablet` | – | unchanged (M3); `forget_tablet` also stops the service's connection |
+| `tablet_status` | – | `TabletStatus` |
+| `tablet_subscribe` | `onEvent: Channel<TabletEvent>` | current `TabletStatus`; then `{ type: 'status', status }` at every change |
+| `tablet_register` / `tablet_cancel` | – | – (progress in the status) |
+| `tablet_sync` | – | – (progress in the status) |
+| `tablet_rename` | `name` (1–15 printable ASCII characters after trimming, else `invalidName`) | `TabletStatus` |
+| `tablet_set_time` | – | drift in seconds after setting it |
+| `tablet_set_options` | `options: TabletOptions` | `TabletStatus` (saved in `ardoise.toml`) |
+| `sim_press_button` | – | – |
+
+Live and classroom (`live.rs`, `presentation.rs`, package B):
+
+| Command | Arguments | Returns |
+|---|---|---|
+| `live_subscribe` | `onEvent: Channel<LiveBatch>` | `LiveSnapshot`; then batches until the window goes away (a failed send drops the subscriber) |
+| `live_start` | – | `LiveSnapshot` (`state: 'waiting'` until the tablet streams) |
+| `live_stop` | – | paths of the notes saved |
+| `live_set_style` | `style: LiveStyle` | – (broadcast as a snapshot) |
+| `live_command` | `command: LiveCommand` | – |
+| `live_set_view` | `view: LiveViewState` | – (broadcast as `view`) |
+| `list_monitors` | – | `MonitorInfo[]` (the saved choice, if still present, has `chosen: true`) |
+| `open_presentation` | `monitor: string \| null` (null = saved or default choice) | `MonitorInfo` used |
+| `close_presentation` | – | – |
+
+### Live session (`LiveHub`, `live.rs`)
+
+- A session holds **pages**; each page is one note (`origin: live`, page size = tablet size, background white, or
+  `slate` paper while the blackboard is on), created in the library root when its first stroke ends, then rewritten
+  atomically (`Library::save` with the stamp it got) at most every 5 s while dirty, and when the page changes and at
+  `live_stop`. The title is empty (the library grid shows the date), like synced pages.
+- Strokes: pressure > 0 starts or continues a stroke (tool, colour, width from the current `LiveStyle`, current layer);
+  pressure 0 or "pen left" ends it. Pressure is normalised (0..2047 → 0..1); point time = ms since the note's
+  `created`, from the record stamps (5 ms per record).
+- Hover (pen near, pressure 0): `hover` events at most once per batch, `hoverEnd` when the pen leaves. With
+  `view.laser` on, the interface draws a red dot there and **nothing is written** while hovering.
+- Commands (`LiveCommand`): `nextPage` (to the next page, a new one at the end), `previousPage`, `newPage`,
+  `newLayer` (adds a layer to the current page, new strokes go there), `clearPage` (removes the current page's strokes;
+  undo is not needed), `button` (what the tablet's button does: `newPage` or `newLayer` from the options).
+  `LiveInput::Button` runs `button`.
+- View (`LiveViewState`): `zoom` (1 = whole page, up to 8), `x`, `y` (centre of the projected area in page units),
+  `board` (blackboard: slate paper, default style chalk white), `laser` (hover shows a dot). Shared by every window.
+- Batching (SPEC §6.2): input is applied at once; events are sent to every subscriber as soon as they exist, but not
+  more often than every 4 ms (pending events are flushed by a timer thread), each send carrying everything pending.
+
+TypeScript mirror (`app/ui/src/lib/live.ts`):
+
+```ts
+LiveStyle = { tool: Tool; color: Rgba; width: number }
+LiveViewState = { zoom: number; x: number; y: number; board: boolean; laser: boolean }
+LiveCommand = { kind: 'nextPage' | 'previousPage' | 'newPage' | 'newLayer' | 'clearPage' | 'button' }
+LiveSnapshot = { state: 'idle' | 'waiting' | 'live' | 'reconnecting'; page: Note; pageIndex: number; pageCount: number;
+                 layer: number; style: LiveStyle; view: LiveViewState; hover: { x: number; y: number } | null;
+                 presentation: MonitorInfo | null; saved: string[] }
+LivePoint = { x: number; y: number; p: number; t: number; recv: number }   // recv: wall-clock ms (fractional) at receipt
+LiveEvent =
+  | { type: 'snapshot'; snapshot: LiveSnapshot }               // page change, clear, layer, style, state, presentation
+  | { type: 'strokeStart'; pageIndex: number; stroke: Stroke } // stroke with its first point(s), as `LivePoint`s
+  | { type: 'points'; pageIndex: number; points: LivePoint[] } // appended to the stroke in progress
+  | { type: 'strokeEnd'; pageIndex: number }
+  | { type: 'hover'; x: number; y: number } | { type: 'hoverEnd' }
+  | { type: 'view'; view: LiveViewState }
+  | { type: 'saved'; paths: string[] }
+LiveBatch = { events: LiveEvent[]; sentAt: number }            // sentAt: wall-clock ms (fractional) when sent
+MonitorInfo = { key: string; name: string; x: number; y: number; width: number; height: number; scale: number;
+                primary: boolean; chosen: boolean }
+```
+
+### Presentation window (`presentation.rs`)
+
+- `list_monitors` uses `available_monitors()` (physical pixels). `key` = `name@x,y` (stable across unplugging).
+- Choice (pure function, unit-tested): the requested key if present; else the saved key (`[machines."PC"]
+  projector`) if present; else the first non-primary monitor; else the primary one; none → `noMonitor`.
+- `open_presentation` creates (or moves) the window labelled `presentation`, URL `index.html?view=presentation`,
+  `decorations(false)`, `skip_taskbar(true)`, `shadow(false)`, positioned at the monitor's physical position with its
+  physical size, then `set_fullscreen(true)`; created from an async command (SPEC §6.2: avoids a Tauri deadlock on
+  Windows). The choice is saved. Closing the window (Esc in it, or `close_presentation`) broadcasts a snapshot with
+  `presentation: null`.
+
+## Latency (SPEC §4.2: < 30 ms from the point's receipt to its display)
+
+- `LivePoint.recv` = wall-clock time (ms since the Unix epoch, fractional, `SystemTime`) when the notification holding
+  the point came out of the transport (`Session` stamps it). `LiveBatch.sentAt` = wall-clock time when the batch was
+  handed to the channel. **Rust part** = `sentAt - recv`.
+- **Interface part**: from the batch's arrival (`performance.timeOrigin + performance.now()`) to the end of the
+  drawing of its points (after the canvas calls, measured again just after the next `requestAnimationFrame` callback
+  that painted them). **End to end** (Windows, real window) = paint time − `recv`, both on the wall clock of the same PC.
+- The interface keeps the last 2 000 end-to-end samples (`lib/latency.ts`), shows the median in the control window
+  (`[data-latency-median]`, ms with one decimal) and exposes `window.__ardoiseLatency = { samples(), median() }` for
+  the e2e journey.
+- Linux proof (no window): the Rust part through simulator → service → hub (test prints the median), and the
+  interface part in vitest (batch → drawing on a mock canvas, prints the median).
+
+## Interface
+
+- `lib/tablet.ts` (types), `lib/live.ts` (types), `lib/api.ts` wrappers (section "Tablet (M4)" and "Live mode and
+  classroom (M4)"), browser stand-ins `lib/mock-tablet.ts` and `lib/mock-live.ts` (routed by `lib/mock.ts`).
+- `main.ts` mounts `components/live/Presentation.svelte` when the URL has `?view=presentation`, `App.svelte` otherwise.
+- `Home.svelte` shows `components/live/LiveView.svelte` (props `{ app, onclose }`) full space when live mode is open
+  (`openLive()` from the tablet panel), like the editor.
+- Sidebar (`library/TabletStatus.svelte`): name, connection state (dot + text), battery (% and charging), a progress
+  bar while syncing; click opens the tablet panel (`components/tablet/TabletPanel.svelte`).
+- Tablet panel: information (SPEC §4.1: name, battery and charge, firmware, pages in memory, model and size), "Sync
+  now" with progress `current / total` and **Cancel**, "Live mode", automatic sync toggle, "delete from the tablet
+  after import" toggle (on by default, with the sentence saying the page is deleted only once its file is written and
+  checked), button action (new page / new layer), settings: rename, set the clock, right / left hand, forget (with
+  confirmation). No tablet registered: the registration wizard.
+- Registration wizard (`components/tablet/RegisterWizard.svelte`): 1. warning first (registering makes the tablet
+  unusable with the phone app and with Inkspace until it is registered there again), 2. animation: a tablet drawing
+  whose button is held 6 s while a ring fills, then the LED blinks blue (CSS, `prefers-reduced-motion` respected),
+  3. searching, 4. "press the button briefly" animation, 5. done (information), with Cancel at every step and an
+  error step that says what to do.
+- Live view (control window): toolbar (tools, colours, width — the editor's palette), page navigation (previous,
+  `page n / N`, next, new page), new layer, clear page, blackboard, laser pointer, zoom (+ / − / 1:1) and pan (drag in
+  the preview), monitor chooser + "Project" / "Stop projecting", the preview (`LiveCanvas` of the whole page with the
+  projected rectangle drawn on it), the measured latency, "Stop".
+- Presentation window: only `LiveCanvas` with the view (zoom/pan), the blackboard and the laser dot; no element of
+  interface, cursor hidden after 2 s still.
+- Keyboard (both windows): → / PageDown / Space = next page, ← / PageUp = previous page, Ctrl+Delete (or Ctrl+Backspace)
+  = clear the page, B = blackboard, L = laser, + / − = zoom, 0 = whole page, arrows with Shift = pan, Esc = leave
+  (presentation window: close it). The pure mapping is `lib/live-keys.ts` (unit-tested).
+- `LiveCanvas.svelte`: a `<canvas class="live-canvas">` drawing the page background (`render_background`, or slate
+  paper), finished strokes cached on an offscreen canvas, the stroke in progress redrawn each frame from
+  `ink.ts` outlines (same geometry as the exports), the laser dot. Attributes for tests: `data-strokes` (number of
+  strokes of the page, in progress included), `data-page` (`n/N`).
+- Selectors used by the e2e journeys: `.tablet-status[data-connection]`, `.tablet-panel`, `button[data-action="sync"]`,
+  `button[data-action="register"]`, `.register-wizard [data-step]`, `button[data-action="live"]`, `.live-view[data-state]`,
+  `canvas.live-canvas[data-strokes][data-page]`, `[data-latency-median]`, `button[data-action="stop-live"]`.
+
+## Work packages
+
+| Package | Profile | Owns |
+|---|---|---|
+| A — service, simulator, tablet commands | specialiste | `crates/ardoise-device/src/{service,session,manager,pages}.rs` (+ tests), `crates/ardoise-proto/src/live.rs`, `crates/ardoise-sim/src/*` (+ `realtime.rs`, tests), `app/src-tauri/src/tablet.rs` |
+| B — live session, classroom windows | specialiste | `app/src-tauri/src/live.rs`, `app/src-tauri/src/presentation.rs` |
+| C — tablet interface, e2e, H2 | developpeur | `components/library/TabletStatus.svelte`, `components/tablet/*`, `components/Settings.svelte`, `lib/tablet-state.svelte.ts`, `lib/mock-tablet.ts`, locales section `tablet`, `app/e2e/*`, `docs/hardware-tests.md` |
+| D — live view, presentation, latency | specialiste | `components/live/*`, `lib/live-*.ts`, `lib/latency.ts`, `lib/mock-live.ts`, locales sections `live` and `presentation` |
+
+Contracts (this document, `service.rs` types, `settings.rs`, `lib.rs` command list and CLI, `api.ts`, `tablet.ts`,
+`live.ts`, `mock.ts` routing, `main.ts`, `Home.svelte`, `errorCodes.*`) are set in the contracts commit; a package that
+needs to change one says so in its report.

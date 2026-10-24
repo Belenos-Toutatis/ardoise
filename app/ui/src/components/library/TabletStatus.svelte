@@ -8,6 +8,9 @@
   import { t } from '../../lib/i18n.svelte';
   import type { TabletInfo } from '../../lib/note';
 
+  // Work package C turns this into the live status (docs/design/tablet-live-classroom.md).
+  let { open = false, onopen = () => {} }: { open?: boolean; onopen?: () => void } = $props();
+
   let info = $state<TabletInfo | null>(null);
 
   onMount(() => {
@@ -18,7 +21,14 @@
   });
 </script>
 
-<div class="tablet-status" data-slot="tablet-status" title={t('library.tabletState')}>
+<button
+  type="button"
+  class="tablet-status"
+  data-slot="tablet-status"
+  aria-expanded={open}
+  title={t('library.tabletState')}
+  onclick={onopen}
+>
   <span class="tablet-label">{t('library.tabletStatus')}</span>
   <span class="tablet-name" class:muted={!info}>{info ? info.name : t('library.tabletNone')}</span>
-</div>
+</button>

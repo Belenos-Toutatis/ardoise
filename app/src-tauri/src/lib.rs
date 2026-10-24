@@ -15,8 +15,10 @@ mod diagnostic;
 mod export;
 mod import;
 mod library;
+mod live;
 mod notes;
 mod operations;
+mod presentation;
 mod selftest;
 mod tablet;
 mod thumbnails;
@@ -44,6 +46,9 @@ pub struct Cli {
     /// `--create-demo-library DIR`: make DIR a library of synthetic notes without a window,
     /// print what was created and exit (an empty path when DIR is missing).
     pub create_demo_library: Option<PathBuf>,
+    /// `--simulated-tablet`: the simulated tablet replaces Bluetooth (real time, 3 stored pages);
+    /// its registration is kept in a throwaway folder, never in the library.
+    pub simulated_tablet: bool,
 }
 
 impl Cli {
@@ -57,6 +62,7 @@ impl Cli {
                 "--self-test" => cli.self_test = true,
                 "--diagnostic" => cli.diagnostic = true,
                 "--simulated" => cli.simulated = true,
+                "--simulated-tablet" => cli.simulated_tablet = true,
                 "--import-inkspace" => import_inkspace = true,
                 "--compare" => import_args.compare = true,
                 "--library" => import_args.library = args.next().map(PathBuf::from),
@@ -142,6 +148,8 @@ pub fn run() {
         .manage(thumbnails::ThumbnailCache::default_location())
         .manage(watcher::LibraryWatch::default())
         .manage(export::ExportCancel::default())
+        .manage(tablet::TabletRuntime::default())
+        .manage(live::LiveRuntime::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_state,
             commands::set_language,
@@ -171,6 +179,24 @@ pub fn run() {
             notes::render_background,
             tablet::tablet_info,
             tablet::forget_tablet,
+            tablet::tablet_status,
+            tablet::tablet_subscribe,
+            tablet::tablet_register,
+            tablet::tablet_cancel,
+            tablet::tablet_sync,
+            tablet::tablet_rename,
+            tablet::tablet_set_time,
+            tablet::tablet_set_options,
+            tablet::sim_press_button,
+            live::live_subscribe,
+            live::live_start,
+            live::live_stop,
+            live::live_set_style,
+            live::live_command,
+            live::live_set_view,
+            presentation::list_monitors,
+            presentation::open_presentation,
+            presentation::close_presentation,
             commands::set_auto_export,
             export::export_notes,
             export::cancel_export,
@@ -199,6 +225,8 @@ pub fn run() {
                 .map(str::to_owned);
             app.state::<watcher::LibraryWatch>()
                 .follow(app.handle(), library.as_deref());
+            // The tablet: auto-connect, sync, live mode (a failure shows in its status).
+            tablet::start_service(app.handle(), cli.simulated_tablet);
             Ok(())
         })
         .run(tauri::generate_context!());
@@ -229,6 +257,8 @@ mod tests {
         let simulated = parse(&["--diagnostic", "--simulated"]);
         assert!(simulated.diagnostic && simulated.simulated && !simulated.self_test);
         assert_eq!(parse(&["--unknown"]), Cli::default());
+        let tablet = parse(&["--simulated-tablet"]);
+        assert!(tablet.simulated_tablet && !tablet.simulated && !tablet.diagnostic);
         assert_eq!(parse(&["C:\\somewhere"]).import_inkspace, None);
     }
 

@@ -4,7 +4,11 @@ import { listen } from '@tauri-apps/api/event';
 import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic';
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
+import type { LiveBatch, LiveCommand, LiveSnapshot, LiveStyle, LiveViewState, MonitorInfo } from './live';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
+import { mockLiveSubscribe } from './mock-live';
+import { mockTabletSubscribe } from './mock-tablet';
+import type { TabletEvent, TabletOptions, TabletStatus } from './tablet';
 import type {
   AutoExportSettings,
   Background,
@@ -178,6 +182,50 @@ export const api = {
   tabletInfo: () => call<TabletInfo | null>('tablet_info'),
   /** Forgets the registered tablet (it must then be registered again). */
   forgetTablet: () => call<void>('forget_tablet'),
+
+  // --- Tablet (milestone M4; Rust side: tablet.rs, docs/design/tablet-live-classroom.md) -----
+
+  tabletStatus: () => call<TabletStatus>('tablet_status'),
+  /** Current status; then `onEvent` at every change (connection, battery, sync progress…). */
+  tabletSubscribe: (onEvent: (event: TabletEvent) => void) => {
+    if (!inDesktopApp()) return mockTabletSubscribe(onEvent);
+    const channel = new Channel<TabletEvent>();
+    channel.onmessage = onEvent;
+    return invoke<TabletStatus>('tablet_subscribe', { onEvent: channel });
+  },
+  /** Starts the registration wizard (its steps arrive in the status). */
+  tabletRegister: () => call<void>('tablet_register'),
+  /** Cancels the registration or the sync under way. */
+  tabletCancel: () => call<void>('tablet_cancel'),
+  /** Syncs now, or as soon as the tablet connects. */
+  tabletSync: () => call<void>('tablet_sync'),
+  /** Renames the tablet (1–15 characters; `invalidName` otherwise). */
+  tabletRename: (name: string) => call<TabletStatus>('tablet_rename', { name }),
+  /** Sets the tablet clock; returns the drift left in seconds. */
+  tabletSetTime: () => call<number>('tablet_set_time'),
+  tabletSetOptions: (options: TabletOptions) => call<TabletStatus>('tablet_set_options', { options }),
+  /** Presses the simulated tablet's button (`--simulated-tablet` only). */
+  simPressButton: () => call<void>('sim_press_button'),
+
+  // --- Live mode and classroom (milestone M4; Rust side: live.rs, presentation.rs) ------------
+
+  /** Current session; then `onBatch` with everything that happens, from every window. */
+  liveSubscribe: (onBatch: (batch: LiveBatch) => void) => {
+    if (!inDesktopApp()) return mockLiveSubscribe(onBatch);
+    const channel = new Channel<LiveBatch>();
+    channel.onmessage = onBatch;
+    return invoke<LiveSnapshot>('live_subscribe', { onEvent: channel });
+  },
+  liveStart: () => call<LiveSnapshot>('live_start'),
+  /** Leaves live mode; returns the paths of the notes saved. */
+  liveStop: () => call<string[]>('live_stop'),
+  liveSetStyle: (style: LiveStyle) => call<void>('live_set_style', { style }),
+  liveCommand: (command: LiveCommand) => call<void>('live_command', { command }),
+  liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
+  listMonitors: () => call<MonitorInfo[]>('list_monitors'),
+  /** Opens the presentation window full screen on `monitor` (null: the saved or default screen). */
+  openPresentation: (monitor: string | null) => call<MonitorInfo>('open_presentation', { monitor }),
+  closePresentation: () => call<void>('close_presentation'),
 };
 
 /**

@@ -171,6 +171,9 @@
       "saved": "Setting saved."
     }
   },
+  "tablet": {
+    "title": "Tablet"
+  },
   "diagnostic": {
     "open": "Test the tablet",
     "title": "Tablet test",
@@ -304,7 +307,18 @@
     "pageTooLarge": "the resulting page would be too large (over 100 m on a side); assemble fewer notes or overlay them",
     "invalidFolder": "this folder can't be used: enter a folder inside the library, for example \"Exports\" (no \"..\", no drive letter, and not the _ardoise folder)",
     "imageTooLarge": "the image would be larger than 16,384 pixels on a side; choose a lower resolution, or export as PDF or SVG",
-    "cancelled": "the export was cancelled"
+    "cancelled": "the export was cancelled",
+    "tabletNotConnected": "The tablet is not connected: press its button briefly to connect it.",
+    "tabletBusy": "The tablet is busy (sync or live mode under way). Try again when it is finished.",
+    "tabletNotRegistered": "No tablet is registered: start the registration wizard.",
+    "bluetoothOff": "Bluetooth is switched off: switch it on in Windows settings.",
+    "bluetoothMissing": "No Bluetooth adapter found: plug in the Bluetooth dongle, then try again.",
+    "tabletTimeout": "The tablet does not answer: bring it closer to the computer and press its button briefly.",
+    "tabletRefused": "The tablet refused the command ({detail}). If the phone app or Inkspace registered it, register it again in Ardoise.",
+    "liveNotRunning": "Live mode is not running.",
+    "noMonitor": "No screen available for the presentation.",
+    "simulationOnly": "This command only works with the simulated tablet.",
+    "tablet": "Problem with the tablet: {detail}"
   },
   "editor": {
     "back": "Library",
@@ -543,5 +557,11 @@
     "pickFile": "Save the export",
     "pickFolder": "Choose the export folder",
     "defaultPdfName": "Notes"
+  },
+  "live": {
+    "title": "Live mode"
+  },
+  "presentation": {
+    "title": "Presentation"
   }
 }

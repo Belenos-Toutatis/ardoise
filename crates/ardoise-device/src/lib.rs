@@ -6,6 +6,7 @@
 //! - [`log`] and [`logging`]: the `.jsonl` diagnostic log and the transport that feeds it.
 //! - [`diagnostic`]: the guided tablet test and its report.
 //! - [`pages`]: synced pages become notes of the library (then the automatic export).
+//! - [`service`]: the tablet as the application sees it (auto-connect, sync, registration, live).
 
 pub mod diagnostic;
 pub mod identity;
@@ -16,6 +17,7 @@ pub mod pages;
 mod preview;
 mod report;
 mod runner;
+pub mod service;
 pub mod session;
 pub mod transport;
 

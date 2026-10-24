@@ -1,10 +1,17 @@
-//! The registered tablet, as the settings screen shows it (`_ardoise/device.json`, shared by
-//! every computer of the library).
+//! The tablet in the interface (SPEC §4.1): the registered tablet (`_ardoise/device.json`,
+//! shared by every computer of the library), and the commands of the tablet service
+//! (`ardoise_device::service`): status, registration, sync, settings, the simulated tablet.
+//!
+//! Contract: docs/design/tablet-live-classroom.md (work package A).
+
+use std::sync::{Mutex, PoisonError};
 
 use ardoise_core::library::Library;
 use ardoise_device::identity::{self, IdentityError};
+use ardoise_device::service::{TabletOptions, TabletService, TabletStatus};
 use serde::Serialize;
-use tauri::State;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, State};
 
 use crate::AppContext;
 use crate::commands::{CommandError, CommandResult};
@@ -39,6 +46,108 @@ pub fn tablet_info_in(library: &Library) -> CommandResult<Option<TabletInfo>> {
 
 pub fn forget_tablet_in(library: &Library) -> CommandResult<()> {
     identity::forget(library.root()).map_err(identity_error)
+}
+
+/// What `tablet_subscribe` sends (`TabletEvent` in `tablet.ts`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum TabletEvent {
+    Status { status: TabletStatus },
+}
+
+/// The tablet service of the running app (see [`start_service`]).
+#[derive(Default)]
+pub struct TabletRuntime {
+    service: Mutex<Option<TabletService>>,
+}
+
+impl TabletRuntime {
+    /// Runs `f` with the service; `tablet` error when it is not running.
+    pub fn with_service<T>(&self, f: impl FnOnce(&TabletService) -> T) -> CommandResult<T> {
+        let guard = self.service.lock().unwrap_or_else(PoisonError::into_inner);
+        match guard.as_ref() {
+            Some(service) => Ok(f(service)),
+            None => Err(CommandError::new(
+                "tablet",
+                "the tablet service is not running",
+            )),
+        }
+    }
+}
+
+/// Starts the tablet service for this PC's library (once, from `setup`). With `simulated`, the
+/// simulated tablet in real time replaces Bluetooth.
+pub fn start_service(app: &AppHandle, simulated: bool) {
+    let _ = (app, simulated);
+}
+
+/// The library changed (`set_library`): the service follows it.
+pub fn library_changed(app: &AppHandle) {
+    let _ = app;
+}
+
+fn not_ready<T>() -> CommandResult<T> {
+    Err(CommandError::new("tablet", "not implemented yet"))
+}
+
+#[tauri::command]
+pub async fn tablet_status(runtime: State<'_, TabletRuntime>) -> CommandResult<TabletStatus> {
+    runtime.with_service(TabletService::status)
+}
+
+#[tauri::command]
+pub async fn tablet_subscribe(
+    runtime: State<'_, TabletRuntime>,
+    on_event: Channel<TabletEvent>,
+) -> CommandResult<TabletStatus> {
+    let _ = on_event;
+    runtime.with_service(TabletService::status)
+}
+
+#[tauri::command]
+pub async fn tablet_register(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
+    runtime.with_service(TabletService::register)
+}
+
+#[tauri::command]
+pub async fn tablet_cancel(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
+    runtime.with_service(TabletService::cancel)
+}
+
+#[tauri::command]
+pub async fn tablet_sync(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
+    runtime.with_service(TabletService::sync_now)
+}
+
+#[tauri::command]
+pub async fn tablet_rename(
+    runtime: State<'_, TabletRuntime>,
+    name: String,
+) -> CommandResult<TabletStatus> {
+    let _ = (runtime, name);
+    not_ready()
+}
+
+#[tauri::command]
+pub async fn tablet_set_time(runtime: State<'_, TabletRuntime>) -> CommandResult<i64> {
+    let _ = runtime;
+    not_ready()
+}
+
+#[tauri::command]
+pub async fn tablet_set_options(
+    runtime: State<'_, TabletRuntime>,
+    options: TabletOptions,
+) -> CommandResult<TabletStatus> {
+    let _ = (runtime, options);
+    not_ready()
+}
+
+/// Presses the simulated tablet's button (`--simulated-tablet` only, for the e2e journeys).
+#[tauri::command]
+pub async fn sim_press_button(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
+    let _ = runtime;
+    Err(CommandError::new("simulationOnly", "no simulated tablet"))
 }
 
 #[tauri::command]

@@ -6,6 +6,8 @@
   import { LibraryState } from '../lib/library-state.svelte';
   import type { NoteSummary } from '../lib/note';
   import Diagnostic from './Diagnostic.svelte';
+  import LiveView from './live/LiveView.svelte';
+  import TabletPanel from './tablet/TabletPanel.svelte';
   import ExportDialog from './ExportDialog.svelte';
   import Editor from './editor/Editor.svelte';
   import AssembleDialog from './library/AssembleDialog.svelte';
@@ -20,7 +22,9 @@
   const lib = new LibraryState();
 
   // One side panel at a time.
-  let panel = $state<'settings' | 'diagnostic' | null>(null);
+  let panel = $state<'settings' | 'diagnostic' | 'tablet' | null>(null);
+  /** Live mode (and the classroom's control window) takes the whole window, like the editor. */
+  let liveOpen = $state(false);
   /** Path of the note being edited; the editor then takes the whole window. */
   let openPath = $state<string | null>(null);
   let searchInput = $state<HTMLInputElement | null>(null);
@@ -33,7 +37,7 @@
     return lib.start();
   });
 
-  function toggle(name: 'settings' | 'diagnostic') {
+  function toggle(name: 'settings' | 'diagnostic' | 'tablet') {
     panel = panel === name ? null : name;
   }
 
@@ -46,13 +50,23 @@
     if (note) openPath = note.path;
   }
 
+  function openLive() {
+    panel = null;
+    liveOpen = true;
+  }
+
+  function closeLive() {
+    liveOpen = false;
+    void lib.refresh();
+  }
+
   function closeEditor() {
     openPath = null;
     void lib.refresh();
   }
 
   function shortcuts(event: KeyboardEvent) {
-    if (openPath || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+    if (openPath || liveOpen || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
     const key = event.key.toLowerCase();
     if (key === 'f') {
       event.preventDefault();
@@ -74,7 +88,9 @@
 
 <svelte:window onkeydown={shortcuts} />
 
-{#if openPath}
+{#if liveOpen}
+  <LiveView {app} onclose={closeLive} />
+{:else if openPath}
   <Editor
     path={openPath}
     {app}
@@ -124,7 +140,13 @@
     </header>
 
     <div class="library-body">
-      <Sidebar {lib} testOpen={panel === 'diagnostic'} ontest={() => toggle('diagnostic')} />
+      <Sidebar
+        {lib}
+        testOpen={panel === 'diagnostic'}
+        ontest={() => toggle('diagnostic')}
+        tabletOpen={panel === 'tablet'}
+        ontablet={() => toggle('tablet')}
+      />
 
       <main class="content library-main">
         <div class="library-scroll">
@@ -154,6 +176,8 @@
           <Settings {app} {onchange} onclose={() => (panel = null)} ontest={() => (panel = 'diagnostic')} />
         {:else if panel === 'diagnostic'}
           <Diagnostic onclose={() => (panel = null)} />
+        {:else if panel === 'tablet'}
+          <TabletPanel onclose={() => (panel = null)} onlive={openLive} ontest={() => (panel = 'diagnostic')} />
         {/if}
       </main>
     </div>

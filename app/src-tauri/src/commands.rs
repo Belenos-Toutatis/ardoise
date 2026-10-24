@@ -275,6 +275,7 @@ pub fn set_library(
 ) -> CommandResult<AppState> {
     let state = choose_library(&context, &path)?;
     watch.follow(&app, state.library());
+    crate::tablet::library_changed(&app);
     Ok(state)
 }
 

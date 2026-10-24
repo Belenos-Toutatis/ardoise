@@ -171,6 +171,9 @@
       "saved": "Réglage enregistré."
     }
   },
+  "tablet": {
+    "title": "Tablette"
+  },
   "diagnostic": {
     "open": "Tester la tablette",
     "title": "Test de la tablette",
@@ -304,7 +307,18 @@
     "pageTooLarge": "la page obtenue serait trop grande (plus de 100 m de côté) ; assemblez moins de notes ou superposez-les",
     "invalidFolder": "ce dossier n'est pas utilisable : indiquez un dossier à l'intérieur de la bibliothèque, par exemple « Exports » (sans « .. », sans lettre de lecteur, et pas le dossier _ardoise)",
     "imageTooLarge": "l'image dépasserait 16 384 pixels de côté ; choisissez une résolution plus basse, ou exportez en PDF ou en SVG",
-    "cancelled": "l'export a été annulé"
+    "cancelled": "l'export a été annulé",
+    "tabletNotConnected": "La tablette n'est pas connectée : appuyez brièvement sur son bouton pour la connecter.",
+    "tabletBusy": "La tablette est occupée (synchronisation ou mode direct en cours). Réessayez quand c'est terminé.",
+    "tabletNotRegistered": "Aucune tablette n'est enregistrée : lancez l'assistant d'enregistrement.",
+    "bluetoothOff": "Le Bluetooth est désactivé : activez-le dans les paramètres de Windows.",
+    "bluetoothMissing": "Aucun adaptateur Bluetooth trouvé : branchez le dongle Bluetooth, puis réessayez.",
+    "tabletTimeout": "La tablette ne répond pas : rapprochez-la de l'ordinateur et appuyez brièvement sur son bouton.",
+    "tabletRefused": "La tablette refuse la commande ({detail}). Si l'appli du téléphone ou Inkspace l'a enregistrée, enregistrez-la de nouveau dans Ardoise.",
+    "liveNotRunning": "Le mode direct n'est pas lancé.",
+    "noMonitor": "Aucun écran disponible pour la présentation.",
+    "simulationOnly": "Commande réservée à la tablette simulée.",
+    "tablet": "Problème avec la tablette : {detail}"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -543,5 +557,11 @@
     "pickFile": "Enregistrer l'export",
     "pickFolder": "Choisir le dossier de l'export",
     "defaultPdfName": "Notes"
+  },
+  "live": {
+    "title": "Mode direct"
+  },
+  "presentation": {
+    "title": "Présentation"
   }
 }
