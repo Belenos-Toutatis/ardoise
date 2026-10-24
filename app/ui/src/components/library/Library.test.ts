@@ -529,7 +529,7 @@ describe('library: opening notes and live refresh', () => {
     const editor = ui.q('.editor')!;
     expect(editor.getAttribute('data-path')).toBe(notePath(ROOT, 'Classe/3e B', '2026-10-20 Cours de physique.ardoise'));
     expect(ui.q('.topbar')).toBeNull();
-    await ui.click(ui.button('Fermer'));
+    await ui.click(ui.q('.editor-top button')!);
     expect(ui.q('.editor')).toBeNull();
     expect(ui.all('.note-card').length).toBe(3);
   });

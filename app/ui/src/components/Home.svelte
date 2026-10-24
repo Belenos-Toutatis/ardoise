@@ -73,7 +73,16 @@
 <svelte:window onkeydown={shortcuts} />
 
 {#if openPath}
-  <Editor path={openPath} {app} onclose={closeEditor} onsaved={() => void lib.refresh()} />
+  <Editor
+    path={openPath}
+    {app}
+    onclose={closeEditor}
+    onsaved={(path) => {
+      // A rename moves the file: keep following the note under its new name.
+      openPath = path;
+      void lib.refresh();
+    }}
+  />
 {:else}
   <div class="shell">
     <header class="topbar">
