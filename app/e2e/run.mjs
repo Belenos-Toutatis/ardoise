@@ -8,15 +8,27 @@
 //
 // Usage: node app/e2e/run.mjs <path to ardoise.exe>
 import { execFileSync, spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { journeys } from './journeys.mjs';
 
 const exe = process.argv[2];
 if (!exe) {
   console.error('usage: node app/e2e/run.mjs <ardoise.exe>');
   process.exit(2);
+}
+
+// The executable must contain the interface under test: warn when a source file is newer.
+const sources = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src');
+const newest = (dir) =>
+  readdirSync(dir, { withFileTypes: true }).reduce((latest, entry) => {
+    const path = join(dir, entry.name);
+    return Math.max(latest, entry.isDirectory() ? newest(path) : statSync(path).mtimeMs);
+  }, 0);
+if (newest(sources) > statSync(exe).mtimeMs) {
+  console.log('attention : l’interface a changé depuis la compilation de cet exécutable (lancer d’abord cargo xtask check pour le recompiler).');
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -34,8 +46,16 @@ async function startApp(language, port) {
     join(dir, 'ardoise.toml'),
     `language = "${language}"\n\n[machines."${machine}"]\nlibrary = '${library}'\n`,
   );
+  // LOCALAPPDATA in the run's folder: a fresh WebView2 profile and thumbnail cache, nothing
+  // shared with the Ardoise of this PC or with another run.
+  const local = join(dir, 'LocalAppData');
+  mkdirSync(local);
   const child = spawn(appExe, [], {
-    env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
+    env: {
+      ...process.env,
+      LOCALAPPDATA: local,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+    },
     stdio: 'ignore',
   });
 

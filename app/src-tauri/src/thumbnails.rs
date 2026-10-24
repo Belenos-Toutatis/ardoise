@@ -4,15 +4,17 @@
 //! when the file has none. Either way it is kept in a cache on this PC
 //! (`%LOCALAPPDATA%\Ardoise\thumbnails\`), never in the library (SPEC §3.1: the library holds
 //! notes only, and Nextcloud would sync the cache to every computer). A cache entry is named
-//! after the note's id and the file's stamp (size and modification time), so a note changed
-//! anywhere gets a new entry; older entries of the same note are removed when a new one is
-//! written. The cache is a convenience: when it cannot be read or written, thumbnails are
-//! simply made again.
+//! after the note's id, its place in the library and the file's stamp (size and modification
+//! time), so a note changed anywhere gets a new entry and two files with the same id (a
+//! Nextcloud conflict copy) do not share one; older entries of the same file are removed when a
+//! new one is written, and entries not written for [`MAX_AGE`] (notes deleted, moved or renamed
+//! since) at the same time. The cache is a convenience: when it cannot be read or written,
+//! thumbnails are simply made again.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ardoise_core::format;
 use ardoise_core::fsutil::write_atomic;
@@ -27,6 +29,10 @@ use crate::library::{library_error, library_of};
 /// Thumbnail width in pixels (the grid shows them at most about 240 px wide, sharper on
 /// high-density screens).
 pub const THUMBNAIL_WIDTH: u32 = 320;
+
+/// Cache entries not written for this long are removed (a thumbnail still in use is simply made
+/// again once).
+const MAX_AGE: Duration = Duration::from_secs(60 * 24 * 3600);
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
@@ -95,9 +101,9 @@ impl ThumbnailCache {
         is_png(&bytes).then_some(bytes)
     }
 
-    /// Stores `png` as `name` and removes the other entries of the same note. Failures are
-    /// ignored: the cache only saves time.
-    fn store(&self, id_prefix: &str, name: &str, png: &[u8]) {
+    /// Stores `png` as `name`, removes the other entries of the same file and the entries older
+    /// than [`MAX_AGE`]. Failures are ignored: the cache only saves time.
+    fn store(&self, prefix: &str, name: &str, png: &[u8]) {
         let Some(dir) = &self.dir else { return };
         if fs::create_dir_all(dir).is_err() || write_atomic(&dir.join(name), png).is_err() {
             return;
@@ -110,33 +116,63 @@ impl ThumbnailCache {
             let Some(other) = file_name.to_str() else {
                 continue;
             };
-            if other != name && other.starts_with(id_prefix) && other.ends_with(".png") {
+            if other == name || !other.ends_with(".png") {
+                continue;
+            }
+            let expired = || {
+                entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+                    .is_some_and(|age| age > MAX_AGE)
+            };
+            if other.starts_with(prefix) || expired() {
                 let _ = fs::remove_file(entry.path());
             }
         }
     }
 }
 
-/// The part of a cache file name that identifies a note: its id, reduced to characters safe in
-/// a file name (ids come from files, which may be hostile), then `_`.
-fn id_prefix(id: &str) -> String {
+/// The part of a cache file name that identifies a note file: its id, reduced to characters
+/// safe in a file name (ids come from files, which may be hostile), a hash of its path in the
+/// library (conflict copies share the id; different ids may reduce to the same characters),
+/// then `_`.
+fn entry_prefix(id: &str, relative: &Path) -> String {
     let safe: String = id
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
         .take(64)
         .collect();
-    format!("{}_", if safe.is_empty() { "note" } else { &safe })
+    // Windows paths ignore case and accept both separators.
+    let place = relative.to_string_lossy().to_lowercase().replace('\\', "/");
+    format!(
+        "{}-{:016x}_",
+        if safe.is_empty() { "note" } else { &safe },
+        fnv1a(id.as_bytes(), fnv1a(place.as_bytes(), FNV_OFFSET))
+    )
 }
 
-/// `<id>_<len>_<secs>_<nanos>.png`
-fn cache_name(id: &str, stamp: &FileStamp) -> String {
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// FNV-1a, 64 bits: a stable hash (the standard library's may change between versions).
+fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash
+}
+
+/// `<prefix><len>_<secs>_<nanos>.png`
+fn cache_name(prefix: &str, stamp: &FileStamp) -> String {
     let since = stamp
         .modified
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     format!(
         "{}{}_{}_{}.png",
-        id_prefix(id),
+        prefix,
         stamp.len,
         since.as_secs(),
         since.subsec_nanos()
@@ -165,8 +201,9 @@ pub fn thumbnail_of(
         source,
     };
     let header = format::read_header(&path).map_err(format_error)?;
-    let prefix = id_prefix(&header.note.id);
-    let name = cache_name(&header.note.id, &stamp);
+    let relative = path.strip_prefix(library.root()).unwrap_or(&path);
+    let prefix = entry_prefix(&header.note.id, relative);
+    let name = cache_name(&prefix, &stamp);
     if let Some(png) = cache.read(&name) {
         return Ok(Some(png));
     }
@@ -290,7 +327,7 @@ pub(crate) mod tests {
         let files = cache_files(&cache_dir.path().join("thumbnails"));
         assert_eq!(files.len(), 1);
         let id = library.read(&saved.path).unwrap().file.note.id;
-        assert!(files[0].starts_with(&format!("{id}_")), "{files:?}");
+        assert!(files[0].starts_with(&format!("{id}-")), "{files:?}");
 
         // Hit: served from the cache, not from the file.
         let marker = [PNG_SIGNATURE, b"cached"].concat();
@@ -311,6 +348,44 @@ pub(crate) mod tests {
         let files_after = cache_files(&cache_dir.path().join("thumbnails"));
         assert_eq!(files_after.len(), 1);
         assert_ne!(files_after, files);
+    }
+
+    #[test]
+    fn copies_of_a_note_keep_their_own_entries_and_old_entries_go() {
+        let (_dir, library) = library();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let thumbnails = cache_dir.path().join("thumbnails");
+        let cache = ThumbnailCache::at(&thumbnails);
+        let saved = write_sample(&library, "", "Essai");
+        // A Nextcloud conflict copy: same note, same id, another file.
+        let copy = saved
+            .path
+            .with_file_name("2026-10-24 Essai (conflicted copy).ardoise");
+        fs::copy(&saved.path, &copy).unwrap();
+        // An entry of a note deleted long ago.
+        fs::create_dir_all(&thumbnails).unwrap();
+        let old = thumbnails.join("gone-0000000000000000_1_2_3.png");
+        fs::write(&old, PNG_SIGNATURE).unwrap();
+        let long_ago = SystemTime::now() - MAX_AGE - Duration::from_secs(3600);
+        fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+
+        thumbnail_of(&library, &cache, &saved.path)
+            .unwrap()
+            .unwrap();
+        thumbnail_of(&library, &cache, &copy).unwrap().unwrap();
+        let files = cache_files(&thumbnails);
+        assert_eq!(files.len(), 2, "{files:?}");
+        assert!(!old.exists());
+        // Both stay: asking again for the first one is a hit, nothing is rewritten.
+        thumbnail_of(&library, &cache, &saved.path)
+            .unwrap()
+            .unwrap();
+        assert_eq!(cache_files(&thumbnails), files);
     }
 
     #[test]
@@ -362,8 +437,28 @@ pub(crate) mod tests {
 
     #[test]
     fn cache_names_never_escape_the_cache_folder() {
-        assert_eq!(id_prefix("../../evil"), "evil_");
-        assert_eq!(id_prefix(""), "note_");
-        assert_eq!(id_prefix("ab_cd"), "abcd_");
+        let place = Path::new("Physique/2026-10-24 Essai.ardoise");
+        for id in ["../../evil", "", "ab_cd", "a\\b:c"] {
+            let prefix = entry_prefix(id, place);
+            assert!(
+                prefix
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+                "{prefix}"
+            );
+        }
+        assert!(entry_prefix("../../evil", place).starts_with("evil-"));
+        assert!(entry_prefix("", place).starts_with("note-"));
+        // Ids that reduce to the same characters, or the same id in two places, do not collide.
+        assert_ne!(entry_prefix("ab_cd", place), entry_prefix("abcd", place));
+        assert_ne!(
+            entry_prefix("abcd", place),
+            entry_prefix("abcd", Path::new("2026-10-24 Essai.ardoise"))
+        );
+        // The same place written with another case or separator is the same entry.
+        assert_eq!(
+            entry_prefix("abcd", place),
+            entry_prefix("abcd", Path::new("physique\\2026-10-24 ESSAI.ardoise"))
+        );
     }
 }

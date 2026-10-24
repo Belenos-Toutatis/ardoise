@@ -78,8 +78,9 @@
     {app}
     onclose={closeEditor}
     onsaved={(path) => {
-      // A rename moves the file: keep following the note under its new name.
-      openPath = path;
+      // A rename moves the file: keep following the note under its new name, unless the
+      // editor was closed meanwhile (a late result must not reopen it).
+      if (openPath !== null) openPath = path;
       void lib.refresh();
     }}
   />

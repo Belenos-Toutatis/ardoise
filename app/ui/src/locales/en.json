@@ -248,7 +248,7 @@
   "errorCodes": {
     "settings": "the settings file cannot be read or written ({detail})",
     "notAFolder": "the folder “{detail}” does not exist",
-    "libraryInit": "cannot create the .ardoise folder in it ({detail})",
+    "libraryInit": "cannot create the _ardoise folder in it ({detail})",
     "noLibrary": "no library is chosen",
     "diagnosticRunning": "a test is already running",
     "noteAccess": "the note cannot be read or written ({detail})",
@@ -264,7 +264,9 @@
     "noFreeName": "no free file name was found ({detail})",
     "notInTrash": "this note is no longer in the trash ({detail})",
     "libraryWatch": "watching the library folder failed ({detail})",
-    "render": "rendering the note failed ({detail})"
+    "render": "rendering the note failed ({detail})",
+    "diagnostic": "the tablet test could not start ({detail})",
+    "unexpected": "unexpected error ({detail})"
   },
   "editor": {
     "back": "Library",

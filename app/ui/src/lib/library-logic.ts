@@ -48,7 +48,7 @@ export function notesOfView(notes: NoteSummary[], view: LibraryView): NoteSummar
     case 'binder':
       return notes.filter((n) => isInBinder(n.binder, view.binder));
     case 'tag':
-      return notes.filter((n) => n.tags.includes(view.tag));
+      return notes.filter((n) => n.tags.some((t) => sameTag(t, view.tag)));
     case 'trash':
       return [];
   }
@@ -179,4 +179,18 @@ export function tagsOfNotes(notes: NoteSummary[]): TagCount[] {
 /** Splits user input such as `a, b ; c` into trimmed, non-empty, unique tags. */
 export function parseTags(text: string): string[] {
   return [...new Set(text.split(/[,;]/).map((s) => s.trim()).filter(Boolean))];
+}
+
+/** Tags differing only by case are the same tag (the Rust listing merges them that way). */
+export function sameTag(a: string, b: string): boolean {
+  return a.toLocaleLowerCase() === b.toLocaleLowerCase();
+}
+
+/** `tags` then `added`, without case-insensitive duplicates (the first spelling wins). */
+export function mergeTags(tags: string[], added: string[]): string[] {
+  const merged: string[] = [];
+  for (const tag of [...tags, ...added]) {
+    if (!merged.some((t) => sameTag(t, tag))) merged.push(tag);
+  }
+  return merged;
 }

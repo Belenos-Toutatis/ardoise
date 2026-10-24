@@ -5,7 +5,6 @@
 
 use std::path::Path;
 
-use ardoise_core::format::read_note;
 use ardoise_core::library::{FileStamp, Library, LibraryError};
 use ardoise_core::note::{Background, Note, PageSize};
 use ardoise_ink::{Tool, outline};
@@ -65,11 +64,18 @@ pub fn outlines_of(note: &Note) -> NoteOutlines {
     }
 }
 
-/// Outlines of the note stored at `path`.
+/// Outlines of the note stored at `path`, which must be a note of the library (the interface
+/// cannot read other files through this command).
+pub fn outlines_in(library: &Library, path: &Path) -> Result<NoteOutlines, LibraryError> {
+    Ok(outlines_of(&library.read(path)?.file.note))
+}
+
 #[tauri::command]
-pub fn note_outlines(path: String) -> Result<NoteOutlines, CommandError> {
-    let file = read_note(Path::new(&path)).map_err(|e| CommandError::new(e.code(), e))?;
-    Ok(outlines_of(&file.note))
+pub async fn note_outlines(
+    context: State<'_, AppContext>,
+    path: String,
+) -> CommandResult<NoteOutlines> {
+    outlines_in(&library_of(&context)?, Path::new(&path)).map_err(library_error)
 }
 
 /// A note opened for editing, with the stamp to pass back when saving it.
@@ -246,14 +252,29 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_outlines_of_a_saved_note() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("2026-10-24 Essai.ardoise");
-        write_note(&path, &NoteFile::new(note())).unwrap();
-        let outlines = note_outlines(path.display().to_string()).unwrap();
-        assert_eq!(outlines.strokes.len(), 2);
-        let missing = note_outlines(dir.path().join("absent.ardoise").display().to_string());
-        assert!(missing.is_err());
+    fn reads_the_outlines_of_a_note_of_the_library_only() {
+        let (dir, library) = library();
+        let saved = write_sample(&library, "", "Essai");
+        let strokes = library.read(&saved.path).unwrap().file.note.strokes.len();
+        assert_eq!(
+            outlines_in(&library, &saved.path).unwrap().strokes.len(),
+            strokes
+        );
+        let missing = outlines_in(&library, &dir.path().join("absent.ardoise"));
+        assert!(
+            matches!(missing, Err(LibraryError::NotFound { .. })),
+            "{missing:?}"
+        );
+
+        // A note file outside the library is refused, even though it could be read.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let outside = elsewhere.path().join("2026-10-24 Ailleurs.ardoise");
+        write_note(&outside, &NoteFile::new(note())).unwrap();
+        let refused = outlines_in(&library, &outside);
+        assert!(
+            matches!(refused, Err(LibraryError::NotInLibrary { .. })),
+            "{refused:?}"
+        );
     }
 
     #[test]

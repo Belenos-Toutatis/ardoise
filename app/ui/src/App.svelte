@@ -39,7 +39,10 @@
     {t('errors.settings', { path: appState.settingsPath, message: appState.settingsError })}
   </p>
 {:else if appState.library}
-  <Home app={appState} onchange={apply} />
+  <!-- A new library is a new screen: nothing of the previous one may stay on display. -->
+  {#key appState.library}
+    <Home app={appState} onchange={apply} />
+  {/key}
 {:else}
   <Wizard app={appState} onchange={apply} />
 {/if}

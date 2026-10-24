@@ -248,7 +248,7 @@
   "errorCodes": {
     "settings": "le fichier de réglages ne peut pas être lu ou modifié ({detail})",
     "notAFolder": "le dossier « {detail} » n'existe pas",
-    "libraryInit": "impossible d'y créer le dossier .ardoise ({detail})",
+    "libraryInit": "impossible d'y créer le dossier _ardoise ({detail})",
     "noLibrary": "aucune bibliothèque n'est choisie",
     "diagnosticRunning": "un test est déjà en cours",
     "noteAccess": "la note ne peut pas être lue ou écrite ({detail})",
@@ -264,7 +264,9 @@
     "noFreeName": "aucun nom de fichier libre n'a été trouvé ({detail})",
     "notInTrash": "cette note n'est plus dans la corbeille ({detail})",
     "libraryWatch": "la surveillance du dossier de la bibliothèque a échoué ({detail})",
-    "render": "le rendu de la note a échoué ({detail})"
+    "render": "le rendu de la note a échoué ({detail})",
+    "diagnostic": "le test de la tablette n'a pas pu démarrer ({detail})",
+    "unexpected": "erreur inattendue ({detail})"
   },
   "editor": {
     "back": "Bibliothèque",

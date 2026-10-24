@@ -24,7 +24,7 @@ Tauri maps camelCase arguments to snake_case parameters (`widthPx` → `width_px
 | Command | Arguments | Returns |
 |---|---|---|
 | `library_list` | – | `LibraryListing` (notes, binders, tag counts, problems) |
-| `note_thumbnail` | `path`, `stamp` | PNG data URL or null. Cached in `%LOCALAPPDATA%\Ardoise\thumbnails\` (never in the library, SPEC §3.1), keyed by note id + stamp; from the file's `thumb.png`, else rendered |
+| `note_thumbnail` | `path`, `stamp` | PNG data URL or null. Cached in `%LOCALAPPDATA%\Ardoise\thumbnails\` (never in the library, SPEC §3.1), keyed by note id, place in the library and stamp (entries unused for 60 days are removed); from the file's `thumb.png`, else rendered |
 | `create_note` | `binder`, `title` | `NoteSummary` of a new blank A4 landscape note |
 | `create_binder` | `binder` | – |
 | `move_notes` | `paths`, `binder` | new paths |

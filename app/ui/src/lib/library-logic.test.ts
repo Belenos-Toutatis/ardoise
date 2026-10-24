@@ -9,6 +9,8 @@ import {
   notesOfView,
   originalBinder,
   parseTags,
+  mergeTags,
+  sameTag,
   sortNotes,
   tagsOfNotes,
   visibleNotes,
@@ -124,5 +126,13 @@ describe('small helpers', () => {
   it('parses and counts tags', () => {
     expect(parseTags(' a, b ;a,, c ')).toEqual(['a', 'b', 'c']);
     expect(tagsOfNotes(notes).map((t) => t.tag)).toEqual(['école', 'Physique']);
+  });
+});
+
+describe('tags ignore case', () => {
+  it('filters, merges and compares tags whatever their case', () => {
+    expect(sameTag('Physique', 'physique')).toBe(true);
+    expect(sameTag('Physique', 'chimie')).toBe(false);
+    expect(mergeTags(['physique'], ['Physique', 'chimie'])).toEqual(['physique', 'chimie']);
   });
 });

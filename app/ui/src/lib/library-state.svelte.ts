@@ -7,7 +7,9 @@ import { api, errorMessage, onLibraryChanged } from './api';
 import { currentLocale } from './i18n.svelte';
 import {
   buildBinderTree,
+  mergeTags,
   parseTags,
+  sameTag,
   sameView,
   visibleNotes,
   type LibraryView,
@@ -71,7 +73,7 @@ export class LibraryState {
       }
       const view = this.view;
       if (view.kind === 'binder' && !this.hasBinder(view.binder)) this.view = { kind: 'all' };
-      if (view.kind === 'tag' && !listing.tags.some((t) => t.tag === view.tag)) this.view = { kind: 'all' };
+      if (view.kind === 'tag' && !listing.tags.some((t) => sameTag(t.tag, view.tag))) this.view = { kind: 'all' };
     } catch (error) {
       if (mine === this.sequence) this.error = errorMessage(error);
     }
@@ -249,18 +251,18 @@ export class LibraryState {
     const added = parseTags(text);
     if (added.length === 0) return;
     await this.each(notes, (note) => {
-      const tags = [...new Set([...note.tags, ...added])];
+      const tags = mergeTags(note.tags, added);
       return tags.length === note.tags.length ? Promise.resolve() : api.setNoteTags(note.path, tags, note.stamp);
     });
   }
 
   async removeTag(notes: NoteSummary[], tag: string): Promise<void> {
     await this.each(
-      notes.filter((n) => n.tags.includes(tag)),
+      notes.filter((n) => n.tags.some((t) => sameTag(t, tag))),
       (note) =>
         api.setNoteTags(
           note.path,
-          note.tags.filter((t) => t !== tag),
+          note.tags.filter((t) => !sameTag(t, tag)),
           note.stamp,
         ),
     );
@@ -285,7 +287,21 @@ export class LibraryState {
     await this.run(() => api.trashPurge(id));
   }
 
-  async emptyTrash(): Promise<void> {
-    await this.run(() => api.trashEmpty());
+  /**
+   * Deletes for good the entries the user confirmed, one by one: a note trashed meanwhile
+   * (on another PC, say) stays in the trash instead of being deleted unseen.
+   */
+  async emptyTrash(ids: string[]): Promise<void> {
+    this.error = null;
+    let first: string | null = null;
+    for (const id of ids) {
+      try {
+        await api.trashPurge(id);
+      } catch (error) {
+        first ??= errorMessage(error);
+      }
+    }
+    if (first) this.error = first;
+    await this.refresh();
   }
 }

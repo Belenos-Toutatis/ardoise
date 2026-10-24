@@ -353,6 +353,20 @@ describe('library: selection, moving, trash', () => {
     expect(ui.target.textContent).toContain('La corbeille est vide.');
   });
 
+  it('empties only the notes the confirmation showed', async () => {
+    const ui = await render();
+    await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
+    await ui.click(ui.button('Mettre à la corbeille'));
+    await ui.view('[data-view="trash"]');
+    await ui.click(ui.button('Vider la corbeille'));
+    expect(ui.q('[role="alertdialog"]')?.textContent).toContain('Supprimer définitivement');
+
+    // Another PC trashes a note while the question is on screen.
+    await api.trashNotes([notePath(ROOT, '', fileName(mockLibrary().notes.get(notePath(ROOT, '', '2026-10-22 Liste de courses.ardoise'))!.note))]);
+    await ui.click(ui.button('Confirmer'));
+    expect(mockLibrary().trash.size).toBe(1);
+  });
+
   it('trashes the focused note with Delete', async () => {
     const ui = await render();
     const card = ui.open('Liste de courses');

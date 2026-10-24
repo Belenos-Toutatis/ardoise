@@ -9,6 +9,8 @@
 
   /** Id of the entry whose deletion awaits confirmation, or 'all'. */
   let confirming = $state<string | null>(null);
+  /** The entries shown when "empty the trash" was asked: only those are deleted. */
+  let confirmed = $state<string[]>([]);
 
   const locale = $derived(currentLocale());
   const entries = $derived(lib.trash);
@@ -26,9 +28,14 @@
     await lib.purge(id);
   }
 
+  function askEmpty() {
+    confirmed = entries.map((entry) => entry.id);
+    confirming = 'all';
+  }
+
   async function emptyAll() {
     confirming = null;
-    await lib.emptyTrash();
+    await lib.emptyTrash(confirmed);
   }
 </script>
 
@@ -37,7 +44,7 @@
     <h2 id="trash-heading">{t('library.trashView.title')}</h2>
     <span class="muted count">{entries.length}</span>
     {#if entries.length > 0 && confirming !== 'all'}
-      <button type="button" class="button danger push" onclick={() => (confirming = 'all')}>
+      <button type="button" class="button danger push" onclick={askEmpty}>
         {t('library.trashView.emptyAll')}
       </button>
     {/if}
@@ -47,7 +54,7 @@
 
   {#if confirming === 'all'}
     <div class="confirm" role="alertdialog" aria-label={t('library.trashView.emptyAll')}>
-      <p>{t('library.trashView.confirmEmpty', { count: entries.length })}</p>
+      <p>{t('library.trashView.confirmEmpty', { count: confirmed.length })}</p>
       <div class="actions">
         <button type="button" class="button primary danger-fill" onclick={emptyAll}>
           {t('library.trashView.confirm')}

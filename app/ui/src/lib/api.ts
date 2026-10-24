@@ -162,5 +162,6 @@ export function errorMessage(error: unknown): string {
     const text = t(key, { detail: message });
     return text === key ? message : text;
   }
-  return error instanceof Error ? error.message : String(error);
+  // Anything else (a rejected argument, a bug) is not meant for the user as is.
+  return t('errorCodes.unexpected', { detail: error instanceof Error ? error.message : String(error) });
 }

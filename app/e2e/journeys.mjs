@@ -32,6 +32,7 @@ export const journeys = [
       const newTitle = app.language === 'fr' ? 'Énergie – parcours de bout en bout' : 'Énergie – end-to-end journey';
       let initialFills;
       let strokeCount;
+      let drawnFill;
 
       await check('la bibliothèque de démonstration s’affiche (7 notes)', async () => {
         await app.waitFor(`document.querySelectorAll('.note-card').length === 7`, 'the 7 demo notes');
@@ -77,6 +78,7 @@ export const journeys = [
         }));
         await app.drag(points);
         await app.waitFor(`document.querySelectorAll(${JSON.stringify(STROKES)}).length === ${strokeCount + 1}`, 'the new stroke');
+        drawnFill = (await fills(app)).at(-1);
       });
 
       await check(`renommer la note « ${newTitle} »`, async () => {
@@ -105,9 +107,14 @@ export const journeys = [
         if (!titles[0].includes(newTitle)) throw new Error(`unexpected result ${titles}`);
       });
 
-      await check('la rouvrir : le trait ajouté a bien été enregistré sur le disque', async () => {
+      await check('la rouvrir : le trait ajouté est enregistré, les couleurs d’origine aussi', async () => {
         await app.click('.note-card .card-open');
         await app.waitFor(`document.querySelectorAll(${JSON.stringify(STROKES)}).length === ${strokeCount + 1}`, 'the saved stroke after reopening');
+        const saved = await fills(app);
+        const expected = [...initialFills, drawnFill];
+        if (JSON.stringify(saved) !== JSON.stringify(expected)) {
+          throw new Error(`saved colours ${JSON.stringify(saved)}, expected ${JSON.stringify(expected)}`);
+        }
       });
     },
   },
