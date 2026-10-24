@@ -135,6 +135,13 @@ version = "0.1.0"
 [[package]]
 name = "ardoise-sim"
 version = "0.1.0"
+dependencies = [
+ "ardoise-device",
+ "ardoise-proto",
+ "chrono",
+ "tempfile",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "ardoise-winpen"

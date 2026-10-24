@@ -321,7 +321,13 @@ pub fn diagnostic_start(
                 cancel: cancel.clone(),
             };
             let report = if options.simulated {
-                run_simulated(&library, options, language, cancel, Some(Box::new(operator)))
+                run_simulated(
+                    &library,
+                    options,
+                    language,
+                    cancel,
+                    Some(Box::new(operator)),
+                )
             } else {
                 run_ble(&library, options, language, cancel, operator)
             };

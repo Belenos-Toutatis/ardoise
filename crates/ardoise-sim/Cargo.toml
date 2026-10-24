@@ -8,6 +8,13 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+ardoise-device = { path = "../ardoise-device" }
+ardoise-proto = { path = "../ardoise-proto" }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
