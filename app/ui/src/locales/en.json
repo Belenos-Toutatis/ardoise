@@ -151,6 +151,10 @@
     "notAFolder": "the folder “{detail}” does not exist",
     "libraryInit": "cannot create the .ardoise folder in it ({detail})",
     "noLibrary": "no library is chosen",
-    "diagnosticRunning": "a test is already running"
+    "diagnosticRunning": "a test is already running",
+    "noteAccess": "the note cannot be read or written ({detail})",
+    "noteNewerVersion": "this note was made by a newer version of Ardoise; update Ardoise ({detail})",
+    "noteInvalid": "this note holds inconsistent data ({detail})",
+    "noteDamaged": "the note file is damaged ({detail})"
   }
 }

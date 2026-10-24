@@ -10,6 +10,7 @@ mod commands;
 mod console;
 mod diagnostic;
 mod import;
+mod notes;
 mod selftest;
 
 use std::path::PathBuf;
@@ -114,6 +115,7 @@ pub fn run() {
             diagnostic::diagnostic_start,
             diagnostic::diagnostic_answer,
             diagnostic::diagnostic_cancel,
+            notes::note_outlines,
         ])
         .setup(move |app| {
             if cli.self_test {

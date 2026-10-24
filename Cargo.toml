@@ -22,3 +22,18 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# Drawing code is hot (exports, thumbnails, video frames): optimise it for speed even though
+# the rest of the release build favours size.
+[profile.release.package.tiny-skia]
+opt-level = 3
+
+[profile.release.package.ardoise-ink]
+opt-level = 3
+
+[profile.release.package.ardoise-render]
+opt-level = 3
+
+# Keeps the rendering tests fast in debug builds.
+[profile.dev.package.tiny-skia]
+opt-level = 2

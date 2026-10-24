@@ -26,6 +26,23 @@ export interface LibraryInspection {
   existing: boolean;
 }
 
+/** A stroke ready to draw: SVG path data to fill with the non-zero rule (`notes.rs`). */
+export interface StrokeOutline {
+  /** `#rrggbbaa`. */
+  color: string;
+  tool: string;
+  layer: number;
+  /** Page coordinates in device units (10 µm). */
+  path: string;
+}
+
+/** The visible strokes of a note, drawn with the same geometry as the exports. */
+export interface NoteOutlines {
+  width: number;
+  height: number;
+  strokes: StrokeOutline[];
+}
+
 export interface UiSelfTestReport {
   rendered: boolean;
   i18nConsistent: boolean;
@@ -50,6 +67,7 @@ export const api = {
   inspectLibrary: (path: string) => call<LibraryInspection>('inspect_library', { path }),
   setLibrary: (path: string) => call<AppState>('set_library', { path }),
   selfTestReport: (report: UiSelfTestReport) => call<void>('self_test_report', { report }),
+  noteOutlines: (path: string) => call<NoteOutlines>('note_outlines', { path }),
   /**
    * Starts the guided tablet test. Resolves as soon as the run has started; its progress then
    * arrives through `onEvent` until a `done` (or `error`) event.

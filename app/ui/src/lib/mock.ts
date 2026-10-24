@@ -2,7 +2,7 @@
  * In-memory stand-in for the Rust commands, used when the interface runs in a plain browser
  * (`npm run dev`) so screens can be developed and tested without the desktop app.
  */
-import type { AppState } from './api';
+import type { AppState, NoteOutlines } from './api';
 import {
   STEP_IDS,
   type Decision,
@@ -47,6 +47,12 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
         libraries.add(args.path as string);
         state.library = args.path as string;
         return { ...state };
+      case 'note_outlines':
+        return {
+          width: 29700,
+          height: 21600,
+          strokes: [{ color: '#000000ff', tool: 'ballpoint', layer: 0, path: 'M1000 1000L2000 1000L2000 1050L1000 1050Z' }],
+        } satisfies NoteOutlines;
       case 'self_test_report':
         return undefined;
       case 'diagnostic_answer':

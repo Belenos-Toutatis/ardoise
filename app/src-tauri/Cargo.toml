@@ -27,6 +27,7 @@ tauri-build = { version = "2.5", features = [] }
 ardoise-core = { path = "../../crates/ardoise-core" }
 ardoise-ble = { path = "../../crates/ardoise-ble" }
 ardoise-device = { path = "../../crates/ardoise-device" }
+ardoise-ink = { path = "../../crates/ardoise-ink" }
 ardoise-inkspace = { path = "../../crates/ardoise-inkspace" }
 ardoise-render = { path = "../../crates/ardoise-render" }
 ardoise-sim = { path = "../../crates/ardoise-sim" }

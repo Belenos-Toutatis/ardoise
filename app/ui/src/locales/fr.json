@@ -151,6 +151,10 @@
     "notAFolder": "le dossier « {detail} » n'existe pas",
     "libraryInit": "impossible d'y créer le dossier .ardoise ({detail})",
     "noLibrary": "aucune bibliothèque n'est choisie",
-    "diagnosticRunning": "un test est déjà en cours"
+    "diagnosticRunning": "un test est déjà en cours",
+    "noteAccess": "la note ne peut pas être lue ou écrite ({detail})",
+    "noteNewerVersion": "cette note a été créée par une version plus récente d'Ardoise ; mettez Ardoise à jour ({detail})",
+    "noteInvalid": "cette note contient des données incohérentes ({detail})",
+    "noteDamaged": "le fichier de la note est endommagé ({detail})"
   }
 }
