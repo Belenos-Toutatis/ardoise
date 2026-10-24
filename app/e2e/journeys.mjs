@@ -118,4 +118,105 @@ export const journeys = [
       });
     },
   },
+  {
+    // The simulated tablet (`--simulated-tablet`) holds and presses its button by itself, holds three
+    // pages, and draws in live mode as soon as it is asked to; its identity is a throwaway folder.
+    name: 'tablette simulée : enregistrement, synchronisation, mode direct',
+    args: ['--simulated-tablet'],
+    async run(app, check) {
+      const l = (key) => text(app.language, key);
+      const j = JSON.stringify;
+      const STATUS = '.tablet-status';
+      const WIZARD = '.register-wizard';
+      const cards = (n) => `document.querySelectorAll('.note-card').length ${n}`;
+      const step = (name) => `document.querySelector(${j(`${WIZARD} [data-step="${name}"]`)}) !== null`;
+      const LIVE_CANVAS = 'canvas.live-canvas';
+      const canvasData = (field) => `document.querySelector(${j(LIVE_CANVAS)})?.dataset.${field}`;
+
+      await check('la bibliothèque de démonstration s’affiche (7 notes)', async () => {
+        await app.waitFor(cards('=== 7'), 'the 7 demo notes');
+      });
+
+      await check('la tablette simulée n’est pas encore enregistrée : le panneau propose l’assistant', async () => {
+        await app.waitFor(`document.querySelector(${j(`${STATUS}[data-connection="notRegistered"]`)}) !== null`, 'the sidebar block');
+        await app.click(STATUS);
+        await app.waitFor(`document.querySelector('.tablet-panel') !== null`, 'the tablet panel');
+        await app.waitFor(`document.querySelector('.tablet-panel button[data-action="register"]') !== null`, 'the register button');
+        const simulated = await app.evaluate(`document.querySelector('.tablet-panel').textContent.includes(${j(l('tablet.simulated'))})`);
+        if (!simulated) throw new Error('the panel does not say the tablet is simulated');
+      });
+
+      await check('l’assistant commence par l’avertissement', async () => {
+        await app.click('.tablet-panel button[data-action="register"]');
+        await app.waitFor(step('warning'), 'the warning step');
+        const warned = await app.evaluate(`document.querySelector(${j(WIZARD)}).textContent.includes(${j(l('tablet.register.warning'))})`);
+        if (!warned) throw new Error('the warning sentence is missing');
+      });
+
+      await check('continuer : la tablette simulée tient puis appuie le bouton, l’enregistrement aboutit', async () => {
+        await app.click(`${WIZARD} button[data-action="continue"]`);
+        await app.waitFor(step('done'), 'the end of the registration', 60_000);
+        await app.click(`${WIZARD} button[data-action="finish"]`);
+        await app.waitFor(`document.querySelector(${j(WIZARD)}) === null`, 'the wizard to close');
+      });
+
+      await check('la tablette est connectée', async () => {
+        await app.waitFor(
+          `['connected', 'syncing'].includes(document.querySelector(${j(STATUS)}).dataset.connection)`,
+          'the connection',
+          30_000,
+        );
+      });
+
+      await check('la synchronisation importe 3 pages : 10 notes dans la grille', async () => {
+        // Automatic on connecting; "Sync now" takes over if it did not start by itself.
+        try {
+          await app.waitFor(cards('=== 10'), 'the 3 synced pages in the grid', 20_000);
+        } catch {
+          await app.click('.tablet-panel button[data-action="sync"]');
+          await app.waitFor(cards('=== 10'), 'the 3 synced pages in the grid after "Sync now"', 40_000);
+        }
+      });
+
+      await check('la tablette n’a plus de page : le résultat le dit', async () => {
+        await app.waitFor(`document.querySelector(${j(`${STATUS}[data-connection="connected"]`)}) !== null`, 'the end of the sync', 30_000);
+        const saved = l('tablet.sync.savedMany').replace('{count}', '3');
+        const deleted = l('tablet.sync.deletedMany').replace('{count}', '3');
+        await app.waitFor(
+          `(() => { const t = document.querySelector('.tablet-panel [data-slot="last-sync"]')?.textContent ?? ''; return t.includes(${j(saved)}) && t.includes(${j(deleted)}); })()`,
+          'the result of the sync',
+        );
+        const stored = await app.evaluate(`document.querySelector('.tablet-panel [data-slot="stored-pages"]')?.textContent`);
+        if (stored !== undefined && stored !== '0') throw new Error(`the tablet still holds ${stored} pages`);
+      });
+
+      await check('mode direct : la vue s’ouvre et reçoit le tracé de la tablette', async () => {
+        await app.click('.tablet-panel button[data-action="live"]');
+        await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
+        await app.waitFor(`Number(${canvasData('strokes')}) > 0`, 'strokes on the live canvas', 10_000);
+      });
+
+      await check('la latence médiane est inférieure à 30 ms', async () => {
+        await app.waitFor(
+          `window.__ardoiseLatency !== undefined && window.__ardoiseLatency.samples().length >= 20`,
+          'latency samples',
+          15_000,
+        );
+        const median = await app.evaluate('window.__ardoiseLatency.median()');
+        console.log(`    latence médiane : ${Number(median).toFixed(1)} ms`);
+        if (!(median < 30)) throw new Error(`median latency ${median} ms, expected less than 30 ms`);
+      });
+
+      await check('→ passe à la page suivante : 2/2', async () => {
+        await app.key('ArrowRight');
+        await app.waitFor(`${canvasData('page')} === '2/2'`, 'page 2/2');
+      });
+
+      await check('arrêter le mode direct enregistre la session : au moins 11 notes dans la grille', async () => {
+        await app.click('button[data-action="stop-live"]');
+        await app.waitFor(`document.querySelector('input.search') !== null`, 'the library');
+        await app.waitFor(cards('>= 11'), 'the live note in the grid', 15_000);
+      });
+    },
+  },
 ];
