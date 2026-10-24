@@ -546,7 +546,10 @@ mod tests {
     #[test]
     fn long_file_names_can_be_written() {
         let dir = tempfile::tempdir().unwrap();
-        let name = format!("{}.txt", "é".repeat(246));
+        // 250 characters: Windows counts UTF-16 units (an accented name fits), Linux counts
+        // bytes (at most 255), so the accented variant is Windows only.
+        let letter = if cfg!(windows) { "é" } else { "e" };
+        let name = format!("{}.txt", letter.repeat(246));
         assert_eq!(name.chars().count(), 250);
         let target = dir.path().join(&name);
         write_atomic(&target, b"first").unwrap();
@@ -560,7 +563,10 @@ mod tests {
         assert_ne!(first, second);
         for temp in [first, second] {
             let temp_name = temp.file_name().unwrap().to_str().unwrap();
-            assert!(temp_name.starts_with(".éé"), "{temp_name}");
+            assert!(
+                temp_name.starts_with(&format!(".{letter}{letter}")),
+                "{temp_name}"
+            );
             assert!(temp_name.ends_with(".part"), "{temp_name}");
             assert!(temp_name.encode_utf16().count() <= 255, "{temp_name}");
             assert_eq!(temp.parent(), target.parent());

@@ -69,7 +69,14 @@ fn relative_note_path(original: &str) -> Option<PathBuf> {
     let mut parts = 0;
     for component in path.components() {
         match component {
-            Component::Normal(part) if !super::walk::is_skipped_name(part.to_str()?) => parts += 1,
+            // A colon is never part of a valid name (Windows reserves it for drive letters and
+            // streams): rejecting it keeps `C:/x` out on every system, not only on Windows.
+            Component::Normal(part)
+                if !super::walk::is_skipped_name(part.to_str()?)
+                    && !part.to_str()?.contains(':') =>
+            {
+                parts += 1
+            }
             _ => return None,
         }
     }
