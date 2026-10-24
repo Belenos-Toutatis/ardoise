@@ -1,8 +1,50 @@
 //! Windows Bluetooth LE transport for the tablet.
 //!
-//! Currently exposes adapter detection ([`adapter_info`]), used by `--self-test`.
+//! - [`BleConnector`] / [`BleTransport`] implement the blocking [`Connector`] / [`Transport`]
+//!   contract of `ardoise-device` over btleplug (WinRT backend). btleplug is asynchronous; a
+//!   private tokio runtime inside this crate runs it, and nothing async leaks out.
+//! - [`adapter_info`] reports the state of the default adapter (used by `--self-test`).
+//! - [`gatt`] lists the only characteristics ever used. Writes go to Nordic UART TX and
+//!   nowhere else; the firmware-update (DFU) service is never touched.
+//!
+//! On other platforms the connector finds no adapter.
+//!
+//! [`Connector`]: ardoise_device::transport::Connector
+//! [`Transport`]: ardoise_device::transport::Transport
 
 use std::fmt;
+
+pub mod gatt;
+
+#[cfg(windows)]
+mod connector;
+#[cfg(windows)]
+mod convert;
+#[cfg(windows)]
+mod executor;
+#[cfg(windows)]
+mod link;
+#[cfg(not(windows))]
+mod unsupported;
+// Keeps the placeholder compiling (and tested) on the Windows development machine.
+#[cfg(all(windows, test))]
+#[path = "unsupported.rs"]
+mod unsupported;
+
+#[cfg(windows)]
+pub use connector::BleConnector;
+#[cfg(windows)]
+pub use link::BleTransport;
+#[cfg(not(windows))]
+pub use unsupported::{BleConnector, BleTransport};
+
+// Compile-time check that the types fulfil the contract.
+const _: () = {
+    const fn connector<T: ardoise_device::transport::Connector + Send>() {}
+    const fn transport<T: ardoise_device::transport::Transport + Send>() {}
+    connector::<BleConnector>();
+    transport::<BleTransport>();
+};
 
 /// State of the default Bluetooth adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -139,5 +181,94 @@ mod tests {
         let r = adapter_info();
         println!("adapter_info = {r:?}");
         assert!(r.is_ok());
+    }
+
+    mod transport {
+        use super::super::{BleConnector, BleTransport};
+        use ardoise_device::transport::{Connector, Transport, TransportError};
+        use std::sync::{Mutex, PoisonError};
+        use std::time::{Duration, Instant};
+
+        /// The radio tests share the adapter: run them one at a time.
+        static RADIO: Mutex<()> = Mutex::new(());
+
+        #[test]
+        fn types_implement_the_contract() {
+            fn connector<T: Connector + Send>() {}
+            fn transport<T: Transport + Send>() {}
+            connector::<BleConnector>();
+            transport::<BleTransport>();
+        }
+
+        #[test]
+        fn clock_is_monotonic() {
+            let connector = BleConnector::new().unwrap();
+            let clock = connector.clock();
+            let a = clock.monotonic();
+            assert!(clock.monotonic() >= a);
+        }
+
+        /// Passes without an adapter or with the radio off; with one, nothing may match.
+        #[test]
+        fn smoke_find_nothing() {
+            let _radio = RADIO.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut connector = BleConnector::new().unwrap();
+            let mut seen = 0usize;
+            let start = Instant::now();
+            let result = connector.find(Duration::from_secs(3), &mut |_| {
+                seen += 1;
+                false
+            });
+            let elapsed = start.elapsed();
+            println!("find = {result:?} after {elapsed:?}, {seen} advertisement(s) offered");
+            match result {
+                Ok(None) => assert!(elapsed >= Duration::from_secs(3)),
+                Err(TransportError::NoAdapter | TransportError::AdapterOff) => {}
+                other => panic!("unexpected scan result {other:?}"),
+            }
+            assert!(
+                elapsed < Duration::from_secs(8),
+                "the scan did not stop in time"
+            );
+        }
+
+        /// No device has this address: the connector scans for it, then gives up.
+        #[test]
+        fn smoke_connect_unknown_address() {
+            let _radio = RADIO.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut connector = BleConnector::new().unwrap();
+            let start = Instant::now();
+            let result = connector.connect("00:00:5E:00:53:00", Duration::from_secs(2));
+            println!(
+                "connect = {:?} after {:?}",
+                result.as_ref().map(|t| t.peer().clone()),
+                start.elapsed()
+            );
+            match result {
+                Err(
+                    TransportError::NotFound(_)
+                    | TransportError::NoAdapter
+                    | TransportError::AdapterOff,
+                ) => {}
+                other => panic!(
+                    "unexpected connect result {:?}",
+                    other.map(|t| t.peer().clone())
+                ),
+            }
+            assert!(start.elapsed() < Duration::from_secs(8));
+        }
+
+        #[cfg(windows)]
+        #[test]
+        fn invalid_address_is_rejected() {
+            let mut connector = BleConnector::new().unwrap();
+            match connector.connect("not an address", Duration::from_secs(1)) {
+                Err(TransportError::Backend(text)) => assert!(text.contains("invalid")),
+                other => panic!(
+                    "unexpected connect result {:?}",
+                    other.map(|t| t.peer().clone())
+                ),
+            }
+        }
     }
 }
