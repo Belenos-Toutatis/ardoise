@@ -280,9 +280,10 @@ fn audio_frames_before(frame: u64, frame_rate: u32) -> u64 {
 /// Validates like [`plan_export`], prepares the frames (a page that cannot be drawn at that
 /// size fails here, before any file is created), then writes to a temporary file next to
 /// `path`, renamed over it once the sink has finished. `progress` is called after every frame;
-/// `cancel` is checked before every frame and stops the export with
-/// [`MediaError::Cancelled`]. On any error the temporary file is removed and `path` is left
-/// untouched. `openh264` is the MP4 fallback when the user allows it.
+/// `cancel` is checked before every frame, after the last one (before the sink's final flush)
+/// and before the rename, and stops the export with [`MediaError::Cancelled`]. On any error
+/// the temporary file is removed and `path` is left untouched. `openh264` is the MP4 fallback
+/// when the user allows it.
 pub fn export_animation(
     note: &Note,
     export: &AnimationExport,
@@ -293,13 +294,36 @@ pub fn export_animation(
     cancel: &AtomicBool,
 ) -> Result<VideoSummary, MediaError> {
     let mut job = Job::new(note, export, narration)?;
+    let format = export.format;
+    let mut open = |temp: &Path, settings: &VideoSettings| match &format {
+        FormatOptions::Mp4(options) => create_mp4(temp, settings, options, openh264),
+        FormatOptions::Gif(options) => create_gif(temp, settings, options),
+        FormatOptions::WebP(options) => create_webp(temp, settings, options),
+        FormatOptions::WebM(options) => create_webm(temp, settings, options),
+    };
+    write_file(path, &mut job, &mut open, progress, cancel)
+}
+
+/// How [`write_file`] creates the sink: on the temporary file, with the job's settings.
+type OpenSink<'a> = dyn FnMut(&Path, &VideoSettings) -> Result<Box<dyn VideoSink>, MediaError> + 'a;
+
+/// Writes `job` through the sink `open` creates on a temporary file next to `path`, then puts
+/// the file in place (see [`export_animation`]).
+fn write_file(
+    path: &Path,
+    job: &mut Job<'_>,
+    open: &mut OpenSink<'_>,
+    progress: &mut dyn FnMut(ExportProgress),
+    cancel: &AtomicBool,
+) -> Result<VideoSummary, MediaError> {
     let temp = temp_path_for(path);
-    let result = write_animation(&temp, &mut job, &export.format, openh264, progress, cancel)
-        .and_then(|summary| {
-            sync_file(&temp)?;
-            rename_replacing(&temp, path)?;
-            Ok(summary)
-        });
+    let result = write_animation(&temp, job, open, progress, cancel).and_then(|summary| {
+        sync_file(&temp)?;
+        // A cancel during the final flush still leaves nothing.
+        check_cancel(cancel)?;
+        rename_replacing(&temp, path)?;
+        Ok(summary)
+    });
     if result.is_err() {
         // Best effort (the sink may not have created it): the original error is the one
         // worth reporting.
@@ -313,20 +337,24 @@ pub fn export_animation(
 fn write_animation(
     temp: &Path,
     job: &mut Job<'_>,
-    format: &FormatOptions,
-    openh264: Option<&OpenH264Codec>,
+    open: &mut OpenSink<'_>,
     progress: &mut dyn FnMut(ExportProgress),
     cancel: &AtomicBool,
 ) -> Result<VideoSummary, MediaError> {
-    let settings = &job.settings;
-    let mut sink = match format {
-        FormatOptions::Mp4(options) => create_mp4(temp, settings, options, openh264)?,
-        FormatOptions::Gif(options) => create_gif(temp, settings, options)?,
-        FormatOptions::WebP(options) => create_webp(temp, settings, options)?,
-        FormatOptions::WebM(options) => create_webm(temp, settings, options)?,
-    };
+    let mut sink = open(temp, &job.settings)?;
     job.push_frames(sink.as_mut(), progress, cancel)?;
+    // After the last frame: a cancel then does not wait for the final flush.
+    check_cancel(cancel)?;
     sink.finish()
+}
+
+/// [`MediaError::Cancelled`] once `cancel` is set.
+fn check_cancel(cancel: &AtomicBool) -> Result<(), MediaError> {
+    if cancel.load(Ordering::Relaxed) {
+        Err(MediaError::Cancelled)
+    } else {
+        Ok(())
+    }
 }
 
 /// One export, ready to push into a sink.
@@ -397,9 +425,7 @@ impl<'n> Job<'n> {
         let frame_rate = self.settings.frame_rate;
         let mut sound = self.sound.map(SoundFeed::new);
         for index in 0..plan.frames {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(MediaError::Cancelled);
-            }
+            check_cancel(cancel)?;
             if let Some(sound) = sound.as_mut() {
                 sound.push_until(sink, audio_frames_before(index + 1, frame_rate))?;
             }

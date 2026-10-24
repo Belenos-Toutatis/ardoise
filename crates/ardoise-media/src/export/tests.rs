@@ -823,6 +823,93 @@ fn cancel_leaves_nothing_behind() {
     assert_eq!(entries(dir.path()), ["existing.gif"]);
 }
 
+/// A sink that writes its file only when it finishes, and sets `cancel_on_finish` then.
+struct Flushing {
+    path: PathBuf,
+    cancel_on_finish: Option<std::sync::Arc<AtomicBool>>,
+}
+
+impl VideoSink for Flushing {
+    fn push_frame(&mut self, _: &[u8], _: Duration) -> Result<(), MediaError> {
+        Ok(())
+    }
+
+    fn push_audio(&mut self, _: &[i16]) -> Result<(), MediaError> {
+        Ok(())
+    }
+
+    fn finish(self: Box<Self>) -> Result<VideoSummary, MediaError> {
+        std::fs::write(&self.path, b"finished")?;
+        if let Some(cancel) = &self.cancel_on_finish {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        Ok(VideoSummary {
+            format: AnimationFormat::Gif,
+            frames: 1,
+            duration: ms(100),
+            audio: false,
+            encoder: "test".into(),
+        })
+    }
+}
+
+#[test]
+fn a_cancel_after_the_last_frame_leaves_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let note = sample_note();
+    let path = dir.path().join("late.gif");
+    std::fs::write(&path, b"previous export").unwrap();
+
+    // Cancelled from the last frame's progress report: the file is not finished.
+    let cancel = AtomicBool::new(false);
+    let mut last = None;
+    let result = export_animation(
+        &note,
+        &export(gif()),
+        None,
+        &path,
+        None,
+        &mut |p| {
+            last = Some(p);
+            if p.frames_done == p.frames_total {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        },
+        &cancel,
+    );
+    assert!(matches!(result, Err(MediaError::Cancelled)), "{result:?}");
+    assert_eq!(last.map(|p| p.frames_done), Some(25));
+    assert_eq!(std::fs::read(&path).unwrap(), b"previous export");
+    assert_eq!(entries(dir.path()), ["late.gif"]);
+
+    // Cancelled while the sink finishes its file: the file is not put in place.
+    let cancel = std::sync::Arc::new(AtomicBool::new(false));
+    let mut job = Job::new(&note, &export(gif()), None).unwrap();
+    let mut open = |temp: &Path, _: &VideoSettings| -> Result<Box<dyn VideoSink>, MediaError> {
+        Ok(Box::new(Flushing {
+            path: temp.to_path_buf(),
+            cancel_on_finish: Some(std::sync::Arc::clone(&cancel)),
+        }))
+    };
+    let result = write_file(&path, &mut job, &mut open, &mut |_| {}, &cancel);
+    assert!(matches!(result, Err(MediaError::Cancelled)), "{result:?}");
+    assert_eq!(std::fs::read(&path).unwrap(), b"previous export");
+    assert_eq!(entries(dir.path()), ["late.gif"]);
+
+    // Not cancelled: the same sink's file replaces the destination.
+    let mut job = Job::new(&note, &export(gif()), None).unwrap();
+    let mut open = |temp: &Path, _: &VideoSettings| -> Result<Box<dyn VideoSink>, MediaError> {
+        Ok(Box::new(Flushing {
+            path: temp.to_path_buf(),
+            cancel_on_finish: None,
+        }))
+    };
+    let flag = AtomicBool::new(false);
+    write_file(&path, &mut job, &mut open, &mut |_| {}, &flag).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"finished");
+    assert_eq!(entries(dir.path()), ["late.gif"]);
+}
+
 #[test]
 fn errors_leave_nothing_behind() {
     let dir = tempfile::tempdir().unwrap();

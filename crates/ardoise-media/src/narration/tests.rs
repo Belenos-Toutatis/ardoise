@@ -684,6 +684,179 @@ fn random_opus_packets_never_panic() {
     );
 }
 
+#[test]
+fn the_header_is_read_without_decoding() {
+    for (channels, length, base, options, start) in [
+        (
+            1u16,
+            ms(2_345),
+            NarrationBase::Replay,
+            ReplayOptions::default(),
+            250,
+        ),
+        (
+            2,
+            ms(700),
+            NarrationBase::Replay,
+            ReplayOptions {
+                speed: 0.5,
+                max_pause: Some(ms(500)),
+            },
+            -40,
+        ),
+        (
+            1,
+            ms(10),
+            NarrationBase::Note,
+            ReplayOptions::default(),
+            -900,
+        ),
+        (
+            1,
+            Duration::ZERO,
+            NarrationBase::Replay,
+            ReplayOptions::default(),
+            0,
+        ),
+    ] {
+        let original = narration(simulated_narration(length, channels), base, options, start);
+        let bytes = encode_narration(&original).unwrap();
+        let header = narration_header(&bytes).unwrap();
+        let decoded = decode_narration(&bytes).unwrap();
+        let frames = (decoded.clip.samples.len() / usize::from(channels)) as u64;
+        assert_eq!(
+            header,
+            NarrationHeader {
+                channels,
+                base,
+                options,
+                start_ms: start,
+                duration: samples_to_duration(frames),
+            }
+        );
+        assert_eq!(header.duration, length);
+    }
+    // Another muxer's file: defaults, and the length of its granule positions.
+    let clip = simulated_narration(ms(700), 2);
+    let header = narration_header(&foreign_stream(&clip, 0)).unwrap();
+    assert_eq!((header.channels, header.start_ms), (2, 0));
+    assert_eq!(header.duration, ms(700));
+    // The same refusals as decoding.
+    assert!(matches!(
+        narration_header(b"RIFF\0\0\0\0WAVEfmt "),
+        Err(MediaError::InvalidFile(_))
+    ));
+    let valid = encode_narration(&replay(simulated_narration(ms(150), 1), 0)).unwrap();
+    for len in 0..valid.len() {
+        assert!(narration_header(&valid[..len]).is_err(), "prefix of {len}");
+    }
+}
+
+/// A mono stream of `count` one-byte packets of 60 ms (SILK, code 0: a table of contents and an
+/// empty frame), 255 to a page, the last page with granule position `final_granule`.
+fn tiny_packets(count: usize, final_granule: u64) -> Vec<u8> {
+    const SILK_60_MS: u8 = 3 << 3;
+    let mut writer = PageWriter::new(9);
+    writer.page(&[&encoder_head(1, 312)], 0, FLAG_BOS).unwrap();
+    writer.page(&[&opus_tags(&[])], 0, 0).unwrap();
+    let packet = [SILK_60_MS];
+    let mut written = 0;
+    while written < count {
+        let on_page = (count - written).min(MAX_SEGMENTS);
+        written += on_page;
+        let refs = vec![&packet[..]; on_page];
+        let (granule, flags) = if written == count {
+            (final_granule, FLAG_EOS)
+        } else {
+            (written as u64 * 2880, 0)
+        };
+        writer.page(&refs, granule, flags).unwrap();
+    }
+    writer.into_bytes()
+}
+
+#[test]
+fn a_stream_longer_than_four_hours_is_refused_before_decoding() {
+    // 20 000 packets of 60 ms (20 minutes, 115 MB once decoded) claiming 5 hours.
+    let bytes = tiny_packets(20_000, 312 + 5 * 3600 * 48_000);
+    assert!(bytes.len() < 60_000, "{} bytes", bytes.len());
+    let started = std::time::Instant::now();
+    assert!(invalid_file(decode_narration(&bytes)).contains("4 hours"));
+    assert!(matches!(
+        narration_header(&bytes),
+        Err(MediaError::InvalidFile(message)) if message.contains("4 hours")
+    ));
+    // Nothing was decoded: far quicker than the 20 minutes of sound.
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+
+    // Exactly 4 hours is read (here, only its header; two pages, so that the first one's
+    // granule position puts the origin at 0).
+    let four_hours = tiny_packets(300, 312 + 4 * 3600 * 48_000);
+    assert_eq!(
+        narration_header(&four_hours).unwrap().duration,
+        Duration::from_secs(4 * 3600)
+    );
+}
+
+#[test]
+fn a_lying_granule_position_stops_the_decode() {
+    // The same tiny packets decode when their granule positions are honest...
+    let honest = tiny_packets(300, 300 * 2880);
+    let decoded = decode_narration(&honest).unwrap();
+    assert_eq!(decoded.clip.samples.len(), 300 * 2880 - 312);
+    // ...but 20 000 of them claiming 20 ms stop after a few packets.
+    let lying = tiny_packets(20_000, 312 + 960);
+    assert_eq!(narration_header(&lying).unwrap().duration, ms(20));
+    let started = std::time::Instant::now();
+    assert!(invalid_file(decode_narration(&lying)).contains("more sound than the file can hold"));
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+    // Up to one packet of end trimming is accepted.
+    let trimmed = tiny_packets(2, 312 + 1);
+    assert_eq!(decode_narration(&trimmed).unwrap().clip.samples.len(), 1);
+}
+
+#[test]
+fn packet_durations_come_from_the_table_of_contents() {
+    let toc = |config: u8, code: u8| (config << 3) | code;
+    // SILK 10, 20, 40, 60 ms; hybrid 10, 20 ms; CELT 2.5, 5, 10, 20 ms.
+    for (config, frames) in [
+        (0, 480),
+        (5, 960),
+        (10, 1920),
+        (11, 2880),
+        (12, 480),
+        (15, 960),
+        (16, 120),
+        (21, 240),
+        (26, 480),
+        (31, 960),
+    ] {
+        assert_eq!(packet_frames(&[toc(config, 0)]), Some(frames), "{config}");
+        assert_eq!(packet_frames(&[toc(config, 1), 0]), Some(2 * frames));
+        assert_eq!(packet_frames(&[toc(config, 2), 0]), Some(2 * frames));
+    }
+    // Code 3: the count in the second byte; 120 ms at most, at least one frame.
+    assert_eq!(packet_frames(&[toc(31, 3), 6]), Some(5760));
+    assert_eq!(packet_frames(&[toc(31, 3), 0x80 | 3]), Some(2880));
+    assert_eq!(packet_frames(&[toc(31, 3), 7]), None);
+    assert_eq!(packet_frames(&[toc(11, 3), 3]), None);
+    assert_eq!(packet_frames(&[toc(31, 3), 0]), None);
+    assert_eq!(packet_frames(&[toc(31, 3)]), None);
+    assert_eq!(packet_frames(&[]), None);
+    // What the encoder writes: 20 ms packets.
+    let bytes = encode_narration(&replay(simulated_narration(ms(100), 1), 0)).unwrap();
+    let stream = read_stream(&bytes).unwrap();
+    assert_eq!(packet_frames(stream.packets.packet(2).unwrap()), Some(960));
+}
+
 fn constant(channels: u16, frames: usize, value: i16) -> AudioClip {
     AudioClip {
         channels,
@@ -755,6 +928,40 @@ fn merge_places_both_clips_on_one_track() {
     // Hours apart: only the later one.
     let later = replay(constant(1, 48, 7), 5 * 3600 * 1000);
     assert_eq!(first.merge(later.clone()), later);
+}
+
+#[test]
+fn a_following_piece_is_appended_in_place() {
+    // Room to grow: the merged track is the first clip's buffer.
+    let mut first = constant(2, 480, 100);
+    first.samples.reserve(10_000);
+    let buffer = first.samples.as_ptr();
+    let merged = replay(first, 0).merge(replay(constant(2, 240, 200), 15));
+    assert_eq!(merged.clip.samples.as_ptr(), buffer);
+    assert_eq!(merged.clip.samples.len(), 2 * (720 + 240));
+    assert!(
+        merged.clip.samples[..960]
+            .iter()
+            .step_by(2)
+            .all(|&v| v == 100)
+    );
+    assert!(merged.clip.samples[960..1440].iter().all(|&v| v == 0));
+    assert_eq!(&merged.clip.samples[1440..1444], &[200, 201, 200, 201]);
+
+    // Back to back, with partial last frames: the same track as the general case builds.
+    let mut odd = constant(2, 48, 1);
+    odd.samples.push(9);
+    let mut later = constant(2, 48, 2);
+    later.samples.push(9);
+    let appended = replay(odd.clone(), 3).merge(replay(later.clone(), 4));
+    // A mono piece takes the general way; its samples go to both sides.
+    let general = replay(odd, 3).merge(replay(constant(1, 48, 2), 4));
+    assert_eq!(appended.clip.samples.len(), 2 * 96);
+    assert_eq!(general.clip.samples.len(), 2 * 96);
+    assert_eq!(appended.clip.samples[..96], general.clip.samples[..96]);
+    assert_eq!(&appended.clip.samples[96..98], &[2, 3]);
+    assert_eq!(&general.clip.samples[96..98], &[2, 2]);
+    assert_eq!((appended.start_ms, appended.end_ms()), (3, 5));
 }
 
 #[test]

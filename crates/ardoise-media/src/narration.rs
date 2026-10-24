@@ -23,14 +23,24 @@
 //! `audio.opus` comes from note files, which can be damaged. [`decode_narration`] checks every
 //! page's CRC, never trusts a length or a count, and stops with [`MediaError::InvalidFile`] on
 //! anything malformed, truncated (the end-of-stream page must be there) or not mono/stereo
-//! Opus. What it allocates is bounded by the input: the packets' bytes, and the decoded sound,
-//! which Opus itself limits (a packet of at least one byte plus its lacing byte decodes to at
-//! most 120 ms); `MAX_FRAMES_PER_INPUT_BYTE` enforces that bound explicitly.
+//! Opus. What it allocates is bounded twice:
+//!
+//! - by the input: the packets' bytes, and the decoded sound, which Opus itself limits (a
+//!   packet of at least one byte plus its lacing byte decodes to at most 120 ms);
+//!   `MAX_FRAMES_PER_INPUT_BYTE` enforces that bound explicitly;
+//! - by the stream's own length, known before any audio is decoded (the last page's granule
+//!   position): a stream longer than 4 hours is refused at once, and decoding stops as soon as
+//!   it yields more than that length and one packet (a lying granule position).
+//!
+//! [`narration_header`] reads the time base and the length the same way, without decoding the
+//! audio (for the editor's narration line).
 
 use std::time::Duration;
 
 use crate::ogg::{self, FLAG_BOS, FLAG_EOS, NO_GRANULE, PacketReader, PageWriter};
-use crate::opus::{OpusEncoder, OpusHead, OpusPacket, OpusPacketDecoder, default_opus_bitrate};
+use crate::opus::{
+    OpusEncoder, OpusHead, OpusPacket, OpusPacketDecoder, default_opus_bitrate, samples_to_duration,
+};
 use crate::replay::{MAX_SPEED, MIN_SPEED, ReplayOptions};
 use crate::{AudioClip, MediaError, NARRATION_SAMPLE_RATE};
 
@@ -64,6 +74,9 @@ const FRAMES_PER_MS: i128 = NARRATION_SAMPLE_RATE as i128 / 1000;
 /// the later one, rather than allocating gigabytes of silence between them.
 const MAX_MERGED_FRAMES: i128 = 4 * 3600 * NARRATION_SAMPLE_RATE as i128;
 
+/// Longest `audio.opus` read (4 hours, like [`MAX_MERGED_FRAMES`]), in samples per channel.
+const MAX_STREAM_FRAMES: u64 = 4 * 3600 * NARRATION_SAMPLE_RATE as u64;
+
 impl Narration {
     /// Length of the clip.
     pub fn duration(&self) -> Duration {
@@ -83,7 +96,10 @@ impl Narration {
     /// The result has the larger channel count of the two (a mono clip is copied to both sides
     /// of a stereo one), starts at the earlier start and keeps `self`'s base and options. An
     /// empty clip adds nothing; two clips more than 4 hours apart give `later` alone.
-    pub fn merge(self, later: Narration) -> Narration {
+    ///
+    /// When `later` starts after `self` ends, with as many channels (pieces of one recording),
+    /// `self`'s track grows in place instead of being copied into a new one.
+    pub fn merge(mut self, later: Narration) -> Narration {
         let (first_frames, later_frames) = (frames(&self.clip), frames(&later.clip));
         if later_frames == 0 {
             return self;
@@ -97,6 +113,25 @@ impl Narration {
         let end = (first_start + first_frames as i128).max(later_start + later_frames as i128);
         if end - start > MAX_MERGED_FRAMES {
             return later;
+        }
+        if later_start >= first_start + first_frames as i128
+            && self.clip.channels == later.clip.channels
+            && self.clip.channels > 0
+        {
+            let channels = usize::from(self.clip.channels);
+            // Bounded by MAX_MERGED_FRAMES above; a partial last frame is left out, as below.
+            let gap = (later_start - first_start) as usize;
+            let samples = &mut self.clip.samples;
+            samples.truncate(first_frames * channels);
+            samples.resize(gap * channels, 0);
+            samples.extend_from_slice(
+                later
+                    .clip
+                    .samples
+                    .get(..later_frames * channels)
+                    .unwrap_or_default(),
+            );
+            return self;
         }
         let channels = self.clip.channels.max(later.clip.channels).max(1);
         let out_channels = usize::from(channels);
@@ -164,6 +199,10 @@ const MAX_SEGMENTS: usize = 255;
 /// samples) in a packet of 2 bytes plus its lacing value: 1920 per byte; the margin keeps any
 /// valid stream readable while the decoded size stays proportional to the input.
 const MAX_FRAMES_PER_INPUT_BYTE: u64 = 2880;
+/// Samples per channel in an Opus packet, at most (120 ms, RFC 6716 §3.2.5): how far decoding
+/// may go past the length the granule positions give (the end trimming drops the encoder's
+/// padding, less than one packet in the streams of every encoder known here).
+const MAX_PACKET_FRAMES: u64 = 5760;
 /// Offset of the output gain and of the channel mapping family in `OpusHead`.
 const HEAD_GAIN: usize = 16;
 const HEAD_MAPPING: usize = 18;
@@ -275,8 +314,91 @@ fn opus_tags(comments: &[&str]) -> Vec<u8> {
     packet
 }
 
-/// Reads an `audio.opus` member. [`MediaError::InvalidFile`] when it is not Ogg Opus.
+/// Reads an `audio.opus` member. [`MediaError::InvalidFile`] when it is not Ogg Opus, or when
+/// it is longer than 4 hours.
 pub fn decode_narration(bytes: &[u8]) -> Result<Narration, MediaError> {
+    let invalid = |what: &str| MediaError::InvalidFile(format!("narration: {what}"));
+    let parsed = parse(bytes)?;
+    let packets = &parsed.stream.packets;
+
+    // Decode every audio packet, never past what the stream says it holds.
+    let channels = usize::from(parsed.head.channels);
+    let limit = (bytes.len() as u64)
+        .saturating_mul(MAX_FRAMES_PER_INPUT_BYTE)
+        .min(parsed.end.saturating_add(MAX_PACKET_FRAMES));
+    let mut decoder = OpusPacketDecoder::new(parsed.head.channels)?;
+    let mut samples: Vec<i16> = Vec::new();
+    for index in 2..packets.len() {
+        let decoded = decoder.decode_samples(packets.packet(index).unwrap_or_default())?;
+        samples.extend_from_slice(decoded);
+        if (samples.len() / channels) as u64 > limit {
+            return Err(invalid("more sound than the file can hold"));
+        }
+    }
+    let total = (samples.len() / channels) as u64;
+    let end = parsed.end.min(total);
+    let start = u64::from(parsed.head.pre_skip).min(end);
+    // Both at most `total`, which fits in memory.
+    samples.truncate(end as usize * channels);
+    samples.drain(..start as usize * channels);
+    if parsed.gain != 0 {
+        apply_gain(&mut samples, parsed.gain);
+    }
+
+    let tags = parsed.tags;
+    Ok(Narration {
+        clip: AudioClip {
+            channels: parsed.head.channels,
+            samples,
+        },
+        base: tags.base,
+        options: tags.options,
+        start_ms: tags.start_ms,
+    })
+}
+
+/// What [`narration_header`] reads of an `audio.opus`: its time base and its length.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NarrationHeader {
+    /// 1 or 2.
+    pub channels: u16,
+    pub base: NarrationBase,
+    pub options: ReplayOptions,
+    pub start_ms: i64,
+    /// Length given by the granule positions: what [`decode_narration`] returns for an intact
+    /// stream.
+    pub duration: Duration,
+}
+
+/// The headers of an `audio.opus` member and its length, read without decoding the audio: the
+/// checks of [`decode_narration`] but those of the audio packets themselves.
+pub fn narration_header(bytes: &[u8]) -> Result<NarrationHeader, MediaError> {
+    let parsed = parse(bytes)?;
+    let frames = parsed.end.saturating_sub(u64::from(parsed.head.pre_skip));
+    Ok(NarrationHeader {
+        channels: parsed.head.channels,
+        base: parsed.tags.base,
+        options: parsed.tags.options,
+        start_ms: parsed.tags.start_ms,
+        duration: samples_to_duration(frames),
+    })
+}
+
+/// An `audio.opus` member read up to its audio packets.
+struct Parsed {
+    stream: OpusStream,
+    head: OpusHead,
+    /// Output gain of `OpusHead` (Q7.8 dB).
+    gain: i16,
+    tags: Tags,
+    /// Samples per channel from the start of the stream (pre-skip included) to the end
+    /// trimming: the last granule position less the origin.
+    end: u64,
+}
+
+/// Checks the layout of an `audio.opus` member (RFC 7845 §3) and reads its headers and the
+/// length its granule positions give; refuses a stream longer than 4 hours.
+fn parse(bytes: &[u8]) -> Result<Parsed, MediaError> {
     let invalid = |what: &str| MediaError::InvalidFile(format!("narration: {what}"));
     let stream = read_stream(bytes)?;
     let packets = &stream.packets;
@@ -313,52 +435,55 @@ pub fn decode_narration(bytes: &[u8]) -> Result<Narration, MediaError> {
         return Err(invalid("audio page without a granule position"));
     }
 
-    // Decode every audio packet.
-    let channels = usize::from(head.channels);
-    let limit = (bytes.len() as u64).saturating_mul(MAX_FRAMES_PER_INPUT_BYTE);
-    let mut decoder = OpusPacketDecoder::new(head.channels)?;
-    let mut samples: Vec<i16> = Vec::new();
-    // Where the first sample sits on the granule timeline (RFC 7845 §4.5): normally 0.
-    let mut origin = None;
-    for index in 2..packets.len() {
-        let decoded = decoder.decode_samples(packets.packet(index).unwrap_or_default())?;
-        samples.extend_from_slice(decoded);
-        let decoded_frames = (samples.len() / channels) as u64;
-        if decoded_frames > limit {
-            return Err(invalid("more sound than the file can hold"));
-        }
-        if origin.is_none() && index + 1 == first_page.packets {
-            origin = Some(match first_page.granule.checked_sub(decoded_frames) {
-                Some(origin) => origin,
-                // Fewer samples than decoded: only the end trimming of a one-page stream.
-                None if first_page.eos => 0,
-                None => return Err(invalid("first audio granule position too small")),
-            });
-        }
+    // Where the first sample sits on the granule timeline (RFC 7845 §4.5): normally 0. The
+    // durations of the first page's packets come from their table of contents, undecoded.
+    let mut first_page_frames = 0u64;
+    for index in 2..first_page.packets {
+        let packet = packets.packet(index).unwrap_or_default();
+        first_page_frames += packet_frames(packet).ok_or_else(|| invalid("bad Opus packet"))?;
     }
-    let total = (samples.len() / channels) as u64;
-    let end = last_page
-        .granule
-        .saturating_sub(origin.unwrap_or(0))
-        .min(total);
-    let start = u64::from(head.pre_skip).min(end);
-    // Both at most `total`, which fits in memory.
-    samples.truncate(end as usize * channels);
-    samples.drain(..start as usize * channels);
-    if gain != 0 {
-        apply_gain(&mut samples, gain);
+    let origin = match first_page.granule.checked_sub(first_page_frames) {
+        Some(origin) => origin,
+        // Fewer samples than in its packets: only the end trimming of a one-page stream.
+        None if first_page.eos => 0,
+        None => return Err(invalid("first audio granule position too small")),
+    };
+    let end = last_page.granule.saturating_sub(origin);
+    if end.saturating_sub(u64::from(head.pre_skip)) > MAX_STREAM_FRAMES {
+        return Err(invalid("longer than 4 hours"));
     }
-
     let tags = parse_tags(tags);
-    Ok(Narration {
-        clip: AudioClip {
-            channels: head.channels,
-            samples,
-        },
-        base: tags.base,
-        options: tags.options,
-        start_ms: tags.start_ms,
+    Ok(Parsed {
+        stream,
+        head,
+        gain,
+        tags,
+        end,
     })
+}
+
+/// Samples per channel at 48 kHz in an Opus packet, from its table of contents (RFC 6716 §3.1:
+/// the frame size of its configuration times its frame count); `None` for an empty packet, a
+/// code 3 packet without its frame count, or one holding no sound or more than 120 ms.
+fn packet_frames(packet: &[u8]) -> Option<u64> {
+    let toc = *packet.first()?;
+    let config = usize::from(toc >> 3);
+    let frame = match config {
+        // SILK only (narrow-, medium- and wideband): 10, 20, 40 and 60 ms.
+        0..=11 => [480, 960, 1920, 2880][config % 4],
+        // Hybrid (super-wide- and fullband): 10 and 20 ms.
+        12..=15 => [480, 960][config % 2],
+        // CELT only: 2.5, 5, 10 and 20 ms.
+        _ => [120, 240, 480, 960][config % 4],
+    };
+    let count = match toc & 3 {
+        0 => 1,
+        1 | 2 => 2,
+        // Code 3: the frame count is in the low 6 bits of the second byte.
+        _ => u64::from(*packet.get(1)? & 0x3F),
+    };
+    let frames = frame * count;
+    (1..=MAX_PACKET_FRAMES).contains(&frames).then_some(frames)
 }
 
 /// A page of the Opus stream on which packets end.
