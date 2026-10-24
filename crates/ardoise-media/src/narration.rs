@@ -185,6 +185,13 @@ fn encode_stream(clip: &AudioClip, tags: &[u8]) -> Result<Vec<u8>, MediaError> {
     writer.page(&[&encoder_head(clip.channels, pre_skip)], 0, FLAG_BOS)?;
     writer.page(&[tags], 0, 0)?;
     let pages = group_packets(&packets);
+    if pages.is_empty() {
+        // `finish` always encodes at least the encoder's delay: never expected.
+        return Err(MediaError::Encoding {
+            codec: "Opus",
+            message: "no audio packet to end the stream with".into(),
+        });
+    }
     for (index, page) in pages.iter().enumerate() {
         let last = index + 1 == pages.len();
         let (granule, flags) = if last {

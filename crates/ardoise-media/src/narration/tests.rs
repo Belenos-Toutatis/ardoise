@@ -283,7 +283,7 @@ fn stream_layout_follows_rfc_7845() {
     let (audio, last) = pages[2..].split_at(pages.len() - 3);
     for page in audio {
         assert_eq!(page.flags, 0);
-        assert_eq!(page.lacing.len(), PACKETS_PER_PAGE);
+        // 50 packets of 20 ms (a packet over 254 bytes takes two lacing values).
         let mut reader = PacketReader::default();
         assert_eq!(
             reader
@@ -314,6 +314,23 @@ fn stream_layout_follows_rfc_7845() {
     let pre_skip = u64::from(head.pre_skip);
     assert_eq!(last.granule, pre_skip + length);
     assert!(decoded > last.granule && decoded - last.granule < 120);
+}
+
+#[test]
+fn pages_hold_a_second_or_255_lacing_values() {
+    let packet = |len: usize, index: u64| OpusPacket {
+        data: vec![0; len],
+        start: index * 960,
+        samples: 960,
+    };
+    let small: Vec<OpusPacket> = (0..120).map(|i| packet(100, i)).collect();
+    let sizes: Vec<usize> = group_packets(&small).iter().map(Vec::len).collect();
+    assert_eq!(sizes, [50, 50, 20]);
+    // 4000-byte packets take 16 lacing values: 15 fit on a page.
+    let large: Vec<OpusPacket> = (0..40).map(|i| packet(4000, i)).collect();
+    let sizes: Vec<usize> = group_packets(&large).iter().map(Vec::len).collect();
+    assert_eq!(sizes, [15, 15, 10]);
+    assert!(group_packets(&[]).is_empty());
 }
 
 /// An Ogg file as another muxer could write it: a second logical stream around the Opus one,
@@ -601,6 +618,30 @@ fn damaged_bytes_never_panic() {
         }
         let _ = decode_narration(&bytes);
     }
+}
+
+/// Speed of `audio.opus` for a minute of narration:
+/// `cargo test --release -p ardoise-media narration_speed -- --ignored --nocapture`.
+#[test]
+#[ignore = "benchmark: run in release"]
+fn narration_speed() {
+    let clip = simulated_narration(Duration::from_secs(60), 1);
+    let started = std::time::Instant::now();
+    let bytes = encode_narration(&replay(clip, 0)).unwrap();
+    let encoding = started.elapsed();
+    let started = std::time::Instant::now();
+    let decoded = decode_narration(&bytes).unwrap();
+    let decoding = started.elapsed();
+    let started = std::time::Instant::now();
+    let wav = wav_bytes(&decoded.clip);
+    println!(
+        "1 min mono: {} kB, encoded in {:.2} s, decoded in {:.2} s, WAV ({} kB) in {:.3} s",
+        bytes.len() / 1000,
+        encoding.as_secs_f64(),
+        decoding.as_secs_f64(),
+        wav.len() / 1000,
+        started.elapsed().as_secs_f64()
+    );
 }
 
 #[test]

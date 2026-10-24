@@ -516,14 +516,20 @@ fn temp_path_for(path: &Path) -> PathBuf {
 /// Flushes the finished file to disk before it replaces the destination.
 fn sync_file(path: &Path) -> io::Result<()> {
     // Write access: Windows refuses to flush a file opened for reading only.
-    OpenOptions::new().write(true).open(path)?.sync_all()
+    with_retry(|| OpenOptions::new().write(true).open(path)?.sync_all())
 }
 
-/// Renames `from` over `to`, retrying while another process briefly holds `to` open.
+/// Renames `from` over `to` (replacing it).
 fn rename_replacing(from: &Path, to: &Path) -> io::Result<()> {
+    with_retry(|| std::fs::rename(from, to))
+}
+
+/// Runs `operation` again while another process (or an encoder still releasing the file)
+/// briefly holds a file open.
+fn with_retry(mut operation: impl FnMut() -> io::Result<()>) -> io::Result<()> {
     let mut attempt = 1;
     loop {
-        match std::fs::rename(from, to) {
+        match operation() {
             Err(error) if attempt < RENAME_ATTEMPTS && is_transient_lock(&error) => {
                 attempt += 1;
                 std::thread::sleep(RENAME_RETRY_DELAY);
