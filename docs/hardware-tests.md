@@ -56,7 +56,7 @@ Remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version (Ardoi
 
 ### Au travail
 
-1. Couper le Bluetooth du téléphone. Brancher le dongle. Vérifier que la synchronisation Nextcloud est active.
+1. Couper le Bluetooth du téléphone. Brancher le dongle. Vérifier que la synchronisation Nextcloud est active **et que les fichiers cachés sont synchronisés** : dans le client Nextcloud, *Paramètres* → *Général* → *Modifier les fichiers ignorés* → case **Synchroniser les fichiers cachés** cochée (à faire aussi sur le PC de la maison). Sans elle, le dossier `.ardoise` — qui contient l'enregistrement de la tablette et les journaux du test — ne serait pas synchronisé.
 2. Lancer `ardoise.exe` (double-clic). Cliquer sur **Tester la tablette** (en haut à droite).
 3. Laisser cochée la case **Effacer les pages de la tablette une fois enregistrées** (les pages sont d'abord enregistrées et vérifiées, ensuite seulement effacées). Ne pas cocher **Simulation**. Cliquer sur **Démarrer le test**.
    > Les pages **déjà présentes** sur la tablette sont aussi téléchargées puis effacées. Elles ne sont pas perdues (fichiers `page-N.bin` dans le dossier des diagnostics, qu'Ardoise saura importer plus tard), mais elles n'apparaîtront pas encore comme des notes. Si la tablette contient des pages importantes, les récupérer d'abord avec l'application du téléphone.
