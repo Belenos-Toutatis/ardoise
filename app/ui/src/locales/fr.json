@@ -155,6 +155,15 @@
     "noteAccess": "la note ne peut pas être lue ou écrite ({detail})",
     "noteNewerVersion": "cette note a été créée par une version plus récente d'Ardoise ; mettez Ardoise à jour ({detail})",
     "noteInvalid": "cette note contient des données incohérentes ({detail})",
-    "noteDamaged": "le fichier de la note est endommagé ({detail})"
+    "noteDamaged": "le fichier de la note est endommagé ({detail})",
+    "notALibrary": "ce dossier n'est pas une bibliothèque Ardoise ({detail})",
+    "libraryAccess": "la bibliothèque ne peut pas être lue ou modifiée ({detail})",
+    "noteConflict": "la note a été modifiée entre-temps, sans doute sur un autre ordinateur ; rouvrez-la avant de la modifier ({detail})",
+    "noteNotFound": "la note n'existe plus, elle a peut-être été supprimée ou déplacée sur un autre ordinateur ({detail})",
+    "notInLibrary": "ce fichier n'est pas dans la bibliothèque ({detail})",
+    "invalidName": "ce nom n'est pas utilisable ({detail})",
+    "noFreeName": "aucun nom de fichier libre n'a été trouvé ({detail})",
+    "notInTrash": "cette note n'est plus dans la corbeille ({detail})",
+    "libraryWatch": "la surveillance du dossier de la bibliothèque a échoué ({detail})"
   }
 }

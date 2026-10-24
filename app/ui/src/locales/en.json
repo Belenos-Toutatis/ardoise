@@ -155,6 +155,15 @@
     "noteAccess": "the note cannot be read or written ({detail})",
     "noteNewerVersion": "this note was made by a newer version of Ardoise; update Ardoise ({detail})",
     "noteInvalid": "this note holds inconsistent data ({detail})",
-    "noteDamaged": "the note file is damaged ({detail})"
+    "noteDamaged": "the note file is damaged ({detail})",
+    "notALibrary": "this folder is not an Ardoise library ({detail})",
+    "libraryAccess": "the library cannot be read or changed ({detail})",
+    "noteConflict": "the note was changed meanwhile, probably on another computer; open it again before changing it ({detail})",
+    "noteNotFound": "the note no longer exists; it may have been deleted or moved on another computer ({detail})",
+    "notInLibrary": "this file is not in the library ({detail})",
+    "invalidName": "this name cannot be used ({detail})",
+    "noFreeName": "no free file name was found ({detail})",
+    "notInTrash": "this note is no longer in the trash ({detail})",
+    "libraryWatch": "watching the library folder failed ({detail})"
   }
 }
