@@ -179,7 +179,7 @@ impl Connector for Unavailable {
 
 /// A throwaway library for simulated runs, so that a simulated registration never replaces
 /// the real tablet's identity in the user's library.
-fn simulation_library() -> std::io::Result<PathBuf> {
+pub(crate) fn simulation_library() -> std::io::Result<PathBuf> {
     remove_old_simulations();
     let dir = std::env::temp_dir().join(format!(
         "ardoise-simulation-{}-{}",
