@@ -97,4 +97,18 @@ pub enum MediaError {
     /// fallback is not installed, not allowed or not working.
     #[error("no H.264 encoder for the MP4: {0}")]
     CodecUnavailable(String),
+
+    /// Downloading OpenH264 from Cisco's server failed (no network, proxy or firewall, server
+    /// error); nothing was installed.
+    #[error("could not download OpenH264 from Cisco: {0}")]
+    CodecDownload(String),
+
+    /// The OpenH264 file downloaded from Cisco is not the expected one (corrupted transfer or a
+    /// different release): it was not installed.
+    #[error("the downloaded OpenH264 library is not the expected file: {0}")]
+    CodecIntegrity(String),
+
+    /// The operation was cancelled by the user (the OpenH264 download); nothing was left behind.
+    #[error("cancelled")]
+    Cancelled,
 }

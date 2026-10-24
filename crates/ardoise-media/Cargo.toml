@@ -37,6 +37,15 @@ webm = "2.2"
 ropus = "0.12"
 # Reads WebM files back for `probe_webm` (pure Rust, no dependencies).
 matroska-demuxer = "0.8"
+# MP4 through the OpenH264 fallback (`mp4.rs`, `openh264/`): the container is written by
+# Shiguredo's sans-I/O muxer (pure Rust, no dependencies; samples stream to the file), and the
+# files of both back ends are read back by Mozilla's `mp4parse` (Firefox's parser: independent
+# of either writer). The Cisco download is decompressed by `bzip2-rs` (pure-Rust decoder) and
+# checked with `sha2` (the same version `openh264` uses).
+shiguredo_mp4 = "2026.5"
+mp4parse = "0.17"
+bzip2-rs = "0.1"
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 # Same version as `ardoise-ble`, so only one copy of the crate is compiled.
@@ -47,7 +56,14 @@ windows = { version = "0.62", features = [
     # PROPVARIANT, for the container duration read by `probe_mp4`.
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Variant",
+    # LoadLibraryExW: is Media Foundation there (Windows N editions) before calling it?
+    "Win32_System_LibraryLoader",
 ] }
+# OpenH264 2.6.0 loaded at run time from the DLL the user downloaded from Cisco (never built
+# from source or bundled: Cisco's patent licence covers only its own binary).
+openh264 = { version = "0.9", default-features = false, features = ["libloading"] }
+# The HTTPS download from Cisco, through Windows' own TLS (SChannel) and certificate store.
+ureq = { version = "3.5", default-features = false, features = ["native-tls-no-default"] }
 
 [dev-dependencies]
 tempfile = "3"
