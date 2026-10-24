@@ -111,6 +111,9 @@ pub struct StepOutcome {
 
 /// The person (or the simulation) in front of the tablet.
 pub trait Operator {
+    /// A step begins (before its prompt, if it has one).
+    fn started(&mut self, _step: StepId) {}
+
     /// Shows `instruction` before `step` and blocks until the user answers.
     fn prompt(&mut self, step: StepId, instruction: &Instruction) -> Decision;
 
