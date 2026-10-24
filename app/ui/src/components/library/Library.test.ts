@@ -19,6 +19,7 @@ const app: AppState = {
   selfTest: false,
   openDiagnostic: false,
   autoExport: { format: 'off', folder: 'Exports' },
+  microphone: null,
 };
 
 const ROOT = 'C:\\demo\\Ardoise';

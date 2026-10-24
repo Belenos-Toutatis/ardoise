@@ -31,6 +31,7 @@ const app: AppState = {
   selfTest: false,
   openDiagnostic: false,
   autoExport: { format: 'off', folder: 'Exports' },
+  microphone: null,
 };
 
 let cleanup: (() => void) | null = null;

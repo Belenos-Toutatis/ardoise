@@ -97,4 +97,9 @@ pub enum MediaError {
     /// fallback is not installed, not allowed or not working.
     #[error("no H.264 encoder for the MP4: {0}")]
     CodecUnavailable(String),
+
+    // Export pipeline (`export`).
+    /// The user stopped the export.
+    #[error("export cancelled")]
+    Cancelled,
 }

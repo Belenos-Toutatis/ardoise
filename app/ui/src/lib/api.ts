@@ -10,6 +10,20 @@ import { mockLiveSubscribe } from './mock-live';
 import { mockTabletSubscribe } from './mock-tablet';
 import type { TabletEvent, TabletOptions, TabletStatus } from './tablet';
 import type {
+  DownloadProgress,
+  Microphone,
+  NarrationInfo,
+  NarrationSaved,
+  NarrationStatus,
+  NarrationTarget,
+  OpenH264State,
+  VideoEstimate,
+  VideoExportOptions,
+  VideoExportResult,
+  VideoProgress,
+} from './video';
+import { mockOpenH264Download, mockVideoExport } from './mock-video';
+import type {
   AutoExportSettings,
   Background,
   ExportFormat,
@@ -44,6 +58,8 @@ export interface AppState {
   openDiagnostic: boolean;
   /** Automatic export after a sync (shared by every PC). */
   autoExport: AutoExportSettings;
+  /** Microphone chosen on this PC for the narration (null: the system's default). */
+  microphone: string | null;
 }
 
 export interface LibraryInspection {
@@ -226,6 +242,65 @@ export const api = {
   /** Opens the presentation window full screen on `monitor` (null: the saved or default screen). */
   openPresentation: (monitor: string | null) => call<MonitorInfo>('open_presentation', { monitor }),
   closePresentation: () => call<void>('close_presentation'),
+
+  // --- Replay, video, narration (milestone M6; Rust side: video.rs, narration.rs, codec.rs) ---
+
+  /** Size, length and expected export time of a video export (no file written). */
+  estimateVideoExport: (source: ExportSource, options: VideoExportOptions) =>
+    call<VideoEstimate>('estimate_video_export', { source, options }),
+  /**
+   * Exports the replay of a note to `destination` (written only once complete); progress through
+   * `onProgress`. Rejects with `cancelled` after `cancelVideoExport`.
+   */
+  exportVideo: (
+    source: ExportSource,
+    options: VideoExportOptions,
+    destination: string,
+    onProgress: (progress: VideoProgress) => void,
+  ) => {
+    if (!inDesktopApp()) return mockVideoExport(source, options, destination, onProgress);
+    const channel = new Channel<VideoProgress>();
+    channel.onmessage = onProgress;
+    return invoke<VideoExportResult>('export_video', { source, options, destination, onProgress: channel });
+  },
+  cancelVideoExport: () => call<void>('cancel_video_export'),
+
+  listMicrophones: () => call<Microphone[]>('list_microphones'),
+  /** Remembers the microphone on this PC (null: the system's default). */
+  setMicrophone: (device: string | null) => call<AppState>('set_microphone', { device }),
+  /** Starts a level-only capture (no audio kept); `narrationStop(false)` ends it. */
+  microphoneMonitor: (device: string | null) => call<void>('microphone_monitor', { device }),
+  /** Starts recording the narration (`narrationBusy` if one is already recording). */
+  narrationStart: (device: string | null, target: NarrationTarget) =>
+    call<void>('narration_start', { device, target }),
+  /** Level and state of the capture under way; poll about 10 times a second. */
+  narrationStatus: () => call<NarrationStatus>('narration_status'),
+  /**
+   * Stops the capture. With `save`, a replay recording is written into its note (`stamp`: the
+   * editor's; `noteConflict` if the file changed) and live recordings go to their pages.
+   * Returns null for a monitor or when nothing is saved.
+   */
+  narrationStop: (save: boolean, stamp: FileStamp | null) =>
+    call<NarrationSaved | null>('narration_stop', { save, stamp }),
+  /** The narration stored in a note, or null. */
+  narrationInfo: (path: string) => call<NarrationInfo | null>('narration_info', { path }),
+  /** The narration as a WAV file, to play during the replay. */
+  narrationAudio: (path: string) => call<ArrayBuffer>('narration_audio', { path }),
+  /** Removes a note's narration; returns the new stamp. */
+  deleteNarration: (path: string, stamp: FileStamp) => call<FileStamp>('delete_narration', { path, stamp }),
+
+  openH264State: () => call<OpenH264State>('openh264_state'),
+  /** Downloads OpenH264 from Cisco (SHA-256 checked) and allows the fallback. */
+  openH264Download: (onProgress: (progress: DownloadProgress) => void) => {
+    if (!inDesktopApp()) return mockOpenH264Download(onProgress);
+    const channel = new Channel<DownloadProgress>();
+    channel.onmessage = onProgress;
+    return invoke<OpenH264State>('openh264_download', { onProgress: channel });
+  },
+  openH264CancelDownload: () => call<void>('openh264_cancel_download'),
+  /** Deletes the library and disallows the fallback. */
+  openH264Remove: () => call<OpenH264State>('openh264_remove'),
+  setOpenH264Allowed: (allowed: boolean) => call<OpenH264State>('set_openh264_allowed', { allowed }),
 };
 
 /**
