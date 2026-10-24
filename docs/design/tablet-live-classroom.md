@@ -255,3 +255,64 @@ MonitorInfo = { key: string; name: string; x: number; y: number; width: number; 
 Contracts (this document, `service.rs` types, `settings.rs`, `lib.rs` command list and CLI, `api.ts`, `tablet.ts`,
 `live.ts`, `mock.ts` routing, `main.ts`, `Home.svelte`, `errorCodes.*`) are set in the contracts commit; a package that
 needs to change one says so in its report.
+
+## Decisions made while building M4
+
+Tablet service (package A):
+
+- **One short step at a time.** The worker does one scan slice, one connection, one page or one notification, then
+  reads its requests. An urgent request (cancel, forget, another library, shutdown, or any request while scanning)
+  raises the `Manager`'s cancel flag; `Manager::scan` now notices it at the next advertisement instead of at the end
+  of the 5 s slice, so cancelling the wizard takes less than 2 s.
+- **Deletion is never interrupted halfway.** A page is deleted only after `store_page` returned `Ok`, and a cancel
+  arriving meanwhile does not stop that deletion (it would leave a saved page on the tablet, synced again later).
+  A panic in `store_page` is caught: the page stays on the tablet.
+- **No duplicates without deletion.** `pages::page_note_id` is a deterministic UUID (version 8) from the page's
+  time and bytes; `ImportedPages` recognises a page already imported by that id and identical `original.bin` bytes,
+  including a note now in the trash (it is not imported again).
+- New `DeviceError` cases `NotConnected`, `Busy`, `NoTabletRegistered`, `NoLibrary`, `InvalidName`, mapped to the
+  error codes by `service::error_code` / `From<&DeviceError> for StatusError`. `note_from_page` takes the hand;
+  `LibrarySink::with_hand`.
+- Synced notes go to the library root. `sync.total` is the number of pages read (1 without deletion). When the
+  tablet connects, a pending live mode goes before the automatic sync. Renaming or setting the clock during a sync or
+  live mode answers `tabletBusy`. A foreign tablet that refuses our identity at another address is ignored silently.
+- **Logs.** One in-memory log per connection attempt, written atomically to `<identity_root>/_ardoise/diagnostics/`
+  when it ends in an error (once for the same error repeated until the next success), and for a live session that
+  received an `unclassified during live mode` notification (at the end of live mode, at a lost link, or past 20 000
+  lines). The `10 …` status report is logged as unclassified.
+- `tablet_rename`, `tablet_set_time` and `forget_tablet` run in `spawn_blocking` (they wait for the worker).
+- Simulator: `realtime::RealTimeConnector` (the virtual clock follows the wall clock), `SimFactory`, `SimHooks`
+  (1 s delays in the app, none in tests; 10 min of handwriting when live mode starts), `app_tablet()` (3 reference
+  pages, battery 87 %), `SimStats::live_buttons`; the button pressed while live mode streams sends `f1 02 14 01` on
+  the sysevent channel (hypothesis, see "Button in live mode").
+
+Live session and presentation (package B):
+
+- The first batch of a subscription starts with the snapshot the command returns (the batch can arrive before the
+  reply), so a window applies batches in order. One subscription per window: subscribing again replaces it.
+- `pageIndex` is 0-based; `saved` carries every path, in page order; `hover` is sent even without the laser and a
+  `hoverEnd` is sent when the pen touches the paper. A snapshot sent in the middle of a stroke is followed by a
+  `strokeStart` that gives the stroke in progress again.
+- Point times are 5 ms apart and follow the wall clock after a pause, never going back; a page's `created` is its
+  first point.
+- After `live_stop` the session stays on screen (pages and view can still change); `liveNotRunning` only before the
+  first start; `live_stop` can be repeated. Pages are also saved when the main window closes. A note moved meanwhile
+  is followed; a note changed elsewhere is left alone and the page continues in a new note.
+- The blackboard changes the paper of the current and new pages only; leaving it restores the previous style.
+- Sends and file writes happen outside the hub's lock (a window or the disk never delays the tablet's input); within
+  a batch, points are grouped and only the last `hover` is kept.
+- Full screen uses `set_fullscreen_on_monitor` at the monitor's physical position (safer with mixed DPI); the
+  presentation window does not take the focus. `capabilities/presentation.json` grants `core:default` and
+  `core:window:allow-close` to it.
+- The 4 ms batching delay uses `thread::sleep` (to measure on Windows at H2: a timed wait on a condition variable
+  would follow the 15.6 ms system tick).
+
+Interface (packages C and D):
+
+- One `tabletSubscribe` for the whole app (`lib/tablet-state.svelte.ts`); options apply at once and roll back if the
+  service refuses. The panel has a `sim-press` button with the simulated tablet only.
+- `lib/live-state.svelte.ts` keeps batches received before the subscription's snapshot; view and style changes show
+  at once (an older echo from Rust does not undo them), views are sent at most every 32 ms.
+- `window.__ardoiseLatency = { samples, median, p95, uiSamples, uiMedian }`; `median()` is `null` without samples.
+- The e2e journey checks that the tablet is empty from the sync result ("3 pages deleted"), and clicks "Sync now" if
+  the automatic sync did not bring 10 notes within 20 s.
