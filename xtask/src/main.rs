@@ -20,6 +20,8 @@ Commands:
 const MAX_EXE_BYTES: u64 = 30 * 1024 * 1024;
 /// Time allowed for `ardoise.exe --self-test`.
 const SELFTEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// npm's launcher: a `.cmd` script on Windows, a plain program elsewhere (cloud sessions run Linux).
+const NPM: &str = if cfg!(windows) { "npm.cmd" } else { "npm" };
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -79,9 +81,9 @@ fn frontend_deps(app: &Path) -> bool {
         return true;
     }
     if app.join("package-lock.json").exists() {
-        run(app, "npm.cmd", &["ci"])
+        run(app, NPM, &["ci"])
     } else {
-        run(app, "npm.cmd", &["install"])
+        run(app, NPM, &["install"])
     }
 }
 
@@ -97,7 +99,7 @@ fn check(quick: bool) -> ExitCode {
     let app = root.join("app");
     let (r, a) = (root.as_path(), app.as_path());
     let cargo = |args: &'static [&'static str]| move || run(r, "cargo", args);
-    let npm = |args: &'static [&'static str]| move || run(a, "npm.cmd", args);
+    let npm = |args: &'static [&'static str]| move || run(a, NPM, args);
 
     let mut steps = vec![
         Step {

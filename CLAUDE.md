@@ -42,7 +42,18 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 - Ne jamais modifier le dossier d'Inkspace : travailler sur des copies.
 - La tablette n'est pas sur le poste de développement : tout ce qui la concerne doit être testable avec `ardoise-sim` ou des captures rejouées. Les tests réels passent par `docs/hardware-tests.md` ; les journaux de diagnostic reviennent par Nextcloud dans `<bibliothèque>/_ardoise/diagnostics/`.
 - Demander avant tout téléchargement d'outil (ex. `nasm`) ou installation globale.
-- Git : commits **locaux** autorisés, un par tâche cochée ou par groupe cohérent de changements, message en anglais. **Jamais de push** ni de publication sans accord explicite de l'utilisateur.
+- Git : un commit par tâche cochée ou par groupe cohérent de changements, message en anglais. Le dépôt GitHub **privé** `origin` (Belenos-Toutatis/ardoise) a été créé avec l'accord de l'utilisateur : y pousser des branches de travail est autorisé, et `main` seulement après la vérification Windows (`cargo xtask check` et `cargo xtask e2e` réussis sur le PC). **Jamais** rendre le dépôt public, créer une release ou publier quoi que ce soit sans accord explicite de l'utilisateur.
+
+## Sessions cloud (Linux)
+
+Une session Claude Code dans le cloud tourne sous Ubuntu, pas sous Windows.
+
+- `scripts/cloud-setup.sh` (lancé au démarrage par `.claude/settings.json`) installe Rust 1.98.1 avec la cible WebAssembly, Node 24 et les bibliothèques WebKitGTK dont Tauri a besoin sous Linux. Sa dernière ligne dit `ready` ou ce qui a échoué.
+- Possible : `cargo xtask check` (l'app se compile pour Linux ; le code propre à Windows a ses variantes `cfg(not(windows))`), les tests Rust et ceux de l'interface, `cargo xtask golden`.
+- Impossible : `cargo xtask selftest`, `cargo xtask e2e`, et tout ce qui demande Windows (WebView2, Bluetooth Windows, Media Foundation, injection de stylet, presse-papiers et fenêtres réelles). Les écrire quand même, avec des tests Linux de la logique, et lister dans le compte rendu final ce qui reste à vérifier sous Windows.
+- `testdata/private/` n'existe pas : les tests qui en ont besoin se sautent d'eux-mêmes.
+- Une case de `ROADMAP.md` n'est cochée qu'après la vérification Windows, faite par une session sur le PC qui fusionne la branche.
+- Travailler sur la branche de la session, la pousser sur `origin`, ne jamais pousser sur `main`. Les sous-agents en `worktree` restent possibles ; fusionner leurs branches dans celle de la session.
 
 ## Sous-agents
 
