@@ -84,7 +84,7 @@ Remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version (Ardoi
 Dans `<bibliothèque>\.ardoise\diagnostics\` :
 - `AAAA-MM-JJ_HHMMSS.jsonl` : le journal complet des échanges Bluetooth ;
 - `AAAA-MM-JJ_HHMMSS.txt` : le rapport lisible ;
-- `AAAA-MM-JJ_HHMMSS\page-1.bin`, `page-2.bin`… : les pages brutes reçues de la tablette.
+- `AAAA-MM-JJ_HHMMSS\page-1.bin`, `page-1.svg`… : chaque page brute reçue de la tablette et son aperçu (ouvrable dans un navigateur).
 
 Et dans `<bibliothèque>\.ardoise\device.json` : l'enregistrement de la tablette, partagé par tous les PC (pas besoin de réenregistrer la tablette sur un autre ordinateur).
 
