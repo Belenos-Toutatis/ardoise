@@ -5,7 +5,7 @@
 ### Ajouté (jalon M3 — interface : bibliothèque et éditeur)
 
 - Bibliothèque : grille de miniatures (cache local à chaque PC), tri par date ou titre, classeurs en arborescence, glisser-déposer, étiquettes, favoris, recherche sans accents ni majuscules, sélection multiple (déplacer, étiqueter, favori, corbeille), corbeille avec restauration, rafraîchissement automatique quand une note change sur un autre PC.
-- Éditeur : zoom et déplacement, stylo (outils d'encre, couleurs d'Inkspace et couleurs personnalisées, épaisseur), gomme (trait entier ou partielle), sélection au lasso (déplacer, redimensionner, recolorer, copier, supprimer), papiers, modèles et texture, calques, rotation par quart de tour, recadrage automatique ou à la main, annuler/rétablir sans limite, renommage, enregistrement protégé contre l'écrasement d'une version venue d'un autre PC.
+- Éditeur : zoom et déplacement, stylo (outils d'encre, couleurs d'Inkspace et couleurs personnalisées, épaisseur), gomme (trait entier ou partielle), sélection au lasso (déplacer, redimensionner, recolorer, copier, supprimer), papiers, modèles et texture, calques, rotation par quart de tour, recadrage automatique ou à la main, annuler/rétablir sans limite, renommage, enregistrement protégé contre l'écrasement d'une version venue d'un autre PC (la note modifiée peut alors être enregistrée comme copie), avertissement quand la note ouverte change ou disparaît sur un autre PC, confirmation avant de fermer la fenêtre avec des modifications non enregistrées.
 - Les traits sont dessinés à l'écran par le même code que les exports, compilé en WebAssembly.
 - Réglages : section Tablette (tablette enregistrée, l'oublier, la tester).
 - Favoris enregistrés dans la note (format de fichier 1.1).

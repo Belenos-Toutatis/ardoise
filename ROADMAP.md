@@ -64,10 +64,10 @@ Règles permanentes :
 
 ## M3 — Interface : bibliothèque et éditeur
 
-- [ ] Bibliothèque : grille de miniatures (cache local), tri, classeurs, glisser-déposer, étiquettes, favoris, recherche, sélection multiple, corbeille.
-- [ ] Éditeur : zoom/déplacement, outils, couleurs, épaisseur, fonds, calques, lasso, gomme, annuler/rétablir, rotation, recadrage.
-- [ ] Réglages : langue, thème, bibliothèque, tablette.
-- [ ] Tests de l'interface (composants) et tests de bout en bout des parcours principaux.
+- [x] Bibliothèque : grille de miniatures (cache local), tri, classeurs, glisser-déposer, étiquettes, favoris, recherche, sélection multiple, corbeille.
+- [x] Éditeur : zoom/déplacement, outils, couleurs, épaisseur, fonds, calques, lasso, gomme, annuler/rétablir, rotation, recadrage.
+- [x] Réglages : langue, thème, bibliothèque, tablette.
+- [x] Tests de l'interface (composants) et tests de bout en bout des parcours principaux.
 
 **Critères de fin** : `CHECK OK` ; les tests de bout en bout affichent les parcours « ouvrir une note, la modifier, annuler, sauvegarder, la retrouver par recherche » réussis en français et en anglais.
 
