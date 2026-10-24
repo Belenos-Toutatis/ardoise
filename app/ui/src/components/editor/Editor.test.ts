@@ -6,9 +6,17 @@ import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { freshStamp, mockLibrary, notifyLibraryChanged, resetMockLibrary } from '../../lib/mock-data';
 import { mockClipboard } from '../../lib/mock-export';
-import { bigNote } from '../../lib/editor/test-fixtures';
+import { mockNarration, resetMockNarration, setMockNarration } from '../../lib/mock-narration';
+import { BLACK, bigNote } from '../../lib/editor/test-fixtures';
 import type { WindowClose } from '../../lib/editor/window-close';
+import type { Stroke } from '../../lib/note';
 import Editor from './Editor.svelte';
+
+// The video export dialog is another work package: the editor is tested against a stand-in that
+// shows what the editor gave it.
+vi.mock('../VideoExportDialog.svelte', async () => ({
+  default: (await import('./VideoExportDialogDouble.svelte')).default,
+}));
 
 // The real stroke geometry, instantiated from the module's bytes (jsdom cannot fetch it).
 vi.mock('../../lib/ink', async (importOriginal) => {
@@ -1187,5 +1195,710 @@ describe('note editor: split, copy image and export', () => {
     await tick();
     expect(target.querySelector('[role="dialog"]')).toBeNull();
     expect(paths()).toHaveLength(2);
+  });
+});
+
+// --- Replay (SPEC §4.5) and narration (docs/design/media.md) --------------------------------------
+
+/** A stroke of 21 samples spread over [t0, t1] ms. */
+function slowStroke(y: number, t0: number, t1: number): Stroke {
+  return {
+    tool: 'ballpoint',
+    color: BLACK,
+    width: 60,
+    layer: 0,
+    points: Array.from({ length: 21 }, (_, i) => ({
+      x: 2000 + i * 500,
+      y,
+      pressure: 0.5,
+      t: Math.round(t0 + ((t1 - t0) * i) / 20),
+    })),
+  };
+}
+
+/** The demo note `title` gets strokes over [0, 1000], [3000, 4000] and [4200, 5000] ms: a 5 s replay. */
+function makeSlow(title: string) {
+  const entry = mockLibrary().notes.get(demoPath(title))!;
+  entry.note = {
+    ...entry.note,
+    strokes: [slowStroke(3000, 0, 1000), slowStroke(6000, 3000, 4000), slowStroke(9000, 4200, 5000)],
+  };
+}
+
+const action = <T extends HTMLElement = HTMLElement>(target: HTMLElement, name: string) =>
+  target.querySelector<T>(`[data-action="${name}"]`)!;
+const roleText = (target: HTMLElement, role: string) => target.querySelector(`[data-role="${role}"]`)?.textContent;
+
+describe('note editor: replay', () => {
+  beforeEach(() => {
+    resetMockNarration();
+    makeSlow('Liste de courses');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** Opens the replay of the slow note, with the clock under the test's control. */
+  async function replay() {
+    const view = await render('Liste de courses');
+    vi.useFakeTimers();
+    view.button('Relecture').click();
+    await tick();
+    return view;
+  }
+
+  it('is switched on and off by the toolbar button and by R, and never changes the note', async () => {
+    const { target, button, key, paths, drag, status } = await render('Liste de courses');
+    expect(target.querySelector('.replay-bar')).toBeNull();
+    expect(paths()).toHaveLength(3);
+    expect(button('Relecture').getAttribute('aria-pressed')).toBe('false');
+
+    button('Relecture').click();
+    await tick();
+    expect(target.querySelector('.replay-bar')).toBeTruthy();
+    expect(button('Relecture').getAttribute('aria-pressed')).toBe('true');
+    // The replay starts with the first sample.
+    expect(paths()).toHaveLength(1);
+
+    // Read-only: the tools wait, a drag moves the page and draws nothing, the editing keys do nothing.
+    expect(button('Stylo').disabled).toBe(true);
+    expect(button('Gomme').disabled).toBe(true);
+    expect(button('Découper').disabled).toBe(true);
+    expect(button('Annuler (Ctrl+Z)').disabled).toBe(true);
+    await drag(line(5000, 15000, 15000));
+    await key('a', { ctrlKey: true });
+    await key('Delete');
+    expect(paths()).toHaveLength(1);
+    expect(status()).toBe('Enregistrée');
+
+    await key('r');
+    expect(target.querySelector('.replay-bar')).toBeNull();
+    expect(paths()).toHaveLength(3);
+    expect(button('Stylo').disabled).toBe(false);
+    expect(status()).toBe('Enregistrée');
+    // Editing works again.
+    await drag(line(5000, 15000, 15000));
+    expect(paths()).toHaveLength(4);
+    expect(status()).toBe('Modifications non enregistrées');
+
+    await key('r');
+    expect(target.querySelector('.replay-bar')).toBeTruthy();
+    // The unsaved stroke is part of the replay, which ends on the whole page.
+    const seek = action<HTMLInputElement>(target, 'replay-seek');
+    seek.value = seek.max;
+    seek.dispatchEvent(new Event('input', { bubbles: true }));
+    await tick();
+    expect(paths()).toHaveLength(4);
+    await key('Escape');
+    expect(target.querySelector('.replay-bar')).toBeNull();
+    expect(status()).toBe('Modifications non enregistrées');
+  });
+
+  it('plays with the clock, stops at the end, and plays again from the start', async () => {
+    const { target, paths } = await replay();
+    const play = () => action<HTMLButtonElement>(target, 'replay-play');
+    expect(play().getAttribute('aria-label')).toBe('Lecture');
+    expect(roleText(target, 'replay-total')).toBe('0:05');
+    expect(roleText(target, 'replay-current')).toBe('0:00');
+
+    play().click();
+    await tick();
+    expect(play().getAttribute('aria-label')).toBe('Pause');
+    expect(target.querySelector('.replay-bar')?.getAttribute('data-playing')).toBe('yes');
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(roleText(target, 'replay-current')).toBe('0:02');
+    expect(Number(action<HTMLInputElement>(target, 'replay-seek').value)).toBeGreaterThan(2000);
+    // The first stroke is complete, the others have not begun.
+    expect(paths()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(roleText(target, 'replay-current')).toBe('0:03');
+    expect(paths()).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(roleText(target, 'replay-current')).toBe('0:05');
+    expect(target.querySelector('.replay-bar')?.getAttribute('data-playing')).toBe('no');
+    expect(play().getAttribute('aria-label')).toBe('Lecture');
+    expect(paths()).toHaveLength(3);
+
+    // Looping is off: playing again starts over.
+    play().click();
+    await tick();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(roleText(target, 'replay-current')).toBe('0:00');
+    expect(paths()).toHaveLength(1);
+    // Pause holds the page where it is.
+    play().click();
+    await tick();
+    const held = action<HTMLInputElement>(target, 'replay-seek').value;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(action<HTMLInputElement>(target, 'replay-seek').value).toBe(held);
+  });
+
+  it('plays and pauses with Space, also from the timeline', async () => {
+    const { target, key } = await replay();
+    const bar = () => target.querySelector('.replay-bar')?.getAttribute('data-playing');
+    await key(' ');
+    expect(bar()).toBe('yes');
+    await key(' ');
+    expect(bar()).toBe('no');
+    const seek = action<HTMLInputElement>(target, 'replay-seek');
+    seek.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    await tick();
+    expect(bar()).toBe('yes');
+    // On a button, Space presses the button (and the editor leaves it alone).
+    const play = action<HTMLButtonElement>(target, 'replay-play');
+    play.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    await tick();
+    expect(bar()).toBe('yes');
+  });
+
+  it('seeks by the timeline and by its keys', async () => {
+    const { target, paths } = await replay();
+    const seek = action<HTMLInputElement>(target, 'replay-seek');
+    expect(seek.max).toBe('5000');
+    seek.value = '3500';
+    seek.dispatchEvent(new Event('input', { bubbles: true }));
+    await tick();
+    expect(roleText(target, 'replay-current')).toBe('0:03');
+    expect(seek.getAttribute('aria-valuetext')).toBe('0:03 sur 0:05');
+    expect(seek.getAttribute('aria-label')).toBe('Position dans la relecture');
+    expect(paths()).toHaveLength(2);
+
+    const press = async (k: string) => {
+      seek.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+      await tick();
+    };
+    await press('ArrowRight');
+    expect(seek.value).toBe('4500');
+    await press('ArrowLeft');
+    await press('ArrowLeft');
+    expect(seek.value).toBe('2500');
+    expect(paths()).toHaveLength(1);
+    await press('PageUp');
+    expect(seek.value).toBe('5000');
+    expect(paths()).toHaveLength(3);
+    await press('PageDown');
+    expect(seek.value).toBe('0');
+
+    // Dragging the thumb pauses the replay and resumes it on release.
+    const bar = () => target.querySelector('.replay-bar')?.getAttribute('data-playing');
+    action<HTMLButtonElement>(target, 'replay-play').click();
+    await tick();
+    expect(bar()).toBe('yes');
+    seek.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await tick();
+    expect(bar()).toBe('no');
+    seek.dispatchEvent(new Event('pointerup', { bubbles: true }));
+    await tick();
+    expect(bar()).toBe('yes');
+  });
+
+  it('changes the speed and trims the dead time, which change the length but not the page', async () => {
+    const { target, paths } = await replay();
+    const seek = action<HTMLInputElement>(target, 'replay-seek');
+    const speed = action<HTMLSelectElement>(target, 'replay-speed');
+    const trim = action<HTMLInputElement>(target, 'replay-trim');
+    expect([...speed.options].map((o) => o.value)).toEqual(['0.25', '0.5', '1', '2', '4', '8', '16']);
+    expect([...speed.options].map((o) => o.textContent?.trim())).toEqual([
+      '0,25×',
+      '0,5×',
+      '1×',
+      '2×',
+      '4×',
+      '8×',
+      '16×',
+    ]);
+    expect(speed.value).toBe('1');
+    expect(trim.checked).toBe(false);
+
+    const choose = async (value: string) => {
+      speed.value = value;
+      speed.dispatchEvent(new Event('change', { bubbles: true }));
+      await tick();
+    };
+    await choose('4');
+    expect(roleText(target, 'replay-total')).toBe('0:01');
+    await choose('0.25');
+    expect(roleText(target, 'replay-total')).toBe('0:20');
+    await choose('1');
+
+    // At 3.5 s the second stroke is half drawn; trimming moves the playhead, not the drawing.
+    seek.value = '3500';
+    seek.dispatchEvent(new Event('input', { bubbles: true }));
+    await tick();
+    const before = paths().map((p) => p.getAttribute('d'));
+    trim.click();
+    await tick();
+    expect(trim.checked).toBe(true);
+    expect(roleText(target, 'replay-total')).toBe('0:03');
+    expect(roleText(target, 'replay-current')).toBe('0:02');
+    expect(paths().map((p) => p.getAttribute('d'))).toEqual(before);
+    trim.click();
+    await tick();
+    expect(roleText(target, 'replay-total')).toBe('0:05');
+    expect(roleText(target, 'replay-current')).toBe('0:03');
+
+    // At 16x the whole replay takes a third of a second.
+    await choose('16');
+    expect(roleText(target, 'replay-total')).toBe('0:00');
+    action<HTMLButtonElement>(target, 'replay-play').click();
+    await tick();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(target.querySelector('.replay-bar')?.getAttribute('data-playing')).toBe('no');
+    expect(paths()).toHaveLength(3);
+  });
+
+  it('draws the stroke in progress sample by sample and keeps the finished strokes as they are', async () => {
+    const { target, paths } = await replay();
+    const seek = action<HTMLInputElement>(target, 'replay-seek');
+    const seekTo = async (ms: number) => {
+      seek.value = String(ms);
+      seek.dispatchEvent(new Event('input', { bubbles: true }));
+      await tick();
+    };
+    await seekTo(5000);
+    const whole = paths().map((p) => p.getAttribute('d'));
+    expect(whole).toHaveLength(3);
+    await seekTo(500);
+    expect(paths()).toHaveLength(1);
+    const half = paths()[0].getAttribute('d');
+    expect(half).not.toBe(whole[0]);
+    // A little later the stroke has grown.
+    await seekTo(700);
+    expect(paths()[0].getAttribute('d')).not.toBe(half);
+    await seekTo(3500);
+    expect(paths()).toHaveLength(2);
+    // The first stroke is whole, the second still short of its final shape.
+    expect(paths()[0].getAttribute('d')).toBe(whole[0]);
+    expect(paths()[1].getAttribute('d')).not.toBe(whole[1]);
+    await seekTo(4100);
+    expect(paths()[1].getAttribute('d')).toBe(whole[1]);
+    expect(target.textContent).not.toContain('Cette note ne contient aucun tracé');
+  });
+
+  it('opens the video export for the note as it is in the editor', async () => {
+    const { path, target, button, key, drag, paths } = await render('Liste de courses');
+    await drag(line(5000, 15000, 15000));
+    expect(paths()).toHaveLength(4);
+    expect(target.querySelector('.video-dialog-double')).toBeNull();
+    button('Vidéo').click();
+    await tick();
+    const dialog = target.querySelector<HTMLElement>('.video-dialog-double')!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.dataset.path).toBe(path);
+    expect(dialog.dataset.subject).toBe('Liste de courses');
+    expect(dialog.dataset.strokes).toBe('4');
+    // The editing keys wait while it is open.
+    await key('a', { ctrlKey: true });
+    await key('Delete');
+    expect(paths()).toHaveLength(4);
+    [...dialog.querySelectorAll('button')].find((b) => b.textContent === 'close-video')!.click();
+    await tick();
+    expect(target.querySelector('.video-dialog-double')).toBeNull();
+  });
+
+  it('says so when there is nothing to replay', async () => {
+    const entry = mockLibrary().notes.get(demoPath('Liste de courses'))!;
+    entry.note = { ...entry.note, strokes: [] };
+    const { target, button } = await render('Liste de courses');
+    button('Relecture').click();
+    await tick();
+    expect(target.textContent).toContain('Cette note ne contient aucun tracé à rejouer.');
+    expect(action<HTMLButtonElement>(target, 'replay-play').disabled).toBe(true);
+    expect(action<HTMLInputElement>(target, 'replay-seek').disabled).toBe(true);
+  });
+
+  it('speaks English too', async () => {
+    setLocale('en');
+    const { target, button } = await render('Liste de courses');
+    button('Replay').click();
+    await tick();
+    const seek = action<HTMLInputElement>(target, 'replay-seek');
+    expect(seek.getAttribute('aria-label')).toBe('Position in the replay');
+    expect(seek.getAttribute('aria-valuetext')).toBe('0:00 of 0:05');
+    expect(target.textContent).toContain('Remove dead time');
+    expect(action<HTMLSelectElement>(target, 'replay-speed').options[0].textContent?.trim()).toBe('0.25×');
+    expect(button('Video')).toBeTruthy();
+  });
+});
+
+/** Stands in for the audio element's playback, which jsdom does not implement. */
+function fakeMedia() {
+  const paused = new WeakMap<object, boolean>();
+  const plays = vi.fn();
+  const pauses = vi.fn();
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+    paused.set(this, false);
+    plays();
+    return Promise.resolve();
+  });
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
+    paused.set(this, true);
+    pauses();
+  });
+  vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(function (this: HTMLMediaElement) {
+    return paused.get(this) ?? true;
+  });
+  vi.spyOn(HTMLMediaElement.prototype, 'duration', 'get').mockReturnValue(3);
+  const create = vi.fn((blob: Blob) => (blob ? 'blob:narration' : ''));
+  const revoke = vi.fn();
+  Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
+  return { plays, pauses, create, revoke };
+}
+
+describe('note editor: narration', () => {
+  beforeEach(() => {
+    resetMockNarration();
+    makeSlow('Liste de courses');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(URL, 'createObjectURL');
+    Reflect.deleteProperty(URL, 'revokeObjectURL');
+  });
+
+  async function replay(extra: { windowClose?: WindowClose } = {}) {
+    const view = await render('Liste de courses', extra);
+    vi.useFakeTimers();
+    view.button('Relecture').click();
+    await tick();
+    return view;
+  }
+
+  const barState = (target: HTMLElement) => target.querySelector('.replay-bar')?.getAttribute('data-playing');
+  const storedText = (target: HTMLElement) => target.querySelector('[data-slot="narration-stored"]')?.textContent?.trim();
+
+  it('plays the stored narration along with the replay, with the options it was recorded with', async () => {
+    const media = fakeMedia();
+    setMockNarration(demoPath('Liste de courses'), {
+      durationMs: 3000,
+      base: 'replay',
+      speed: 2,
+      maxPauseMs: 500,
+      startMs: 0,
+    });
+    const { target } = await replay();
+    await vi.waitFor(() => expect(action(target, 'replay-narration')).toBeTruthy());
+    const bar = target.querySelector('.replay-bar')!;
+    expect(bar.textContent).toContain('Lire avec la narration');
+    expect(bar.textContent).toContain('(0:03)');
+    expect(storedText(target)).toBe('Narration enregistrée dans la note (0:03).');
+    const along = action<HTMLInputElement>(target, 'replay-narration');
+    expect(along.checked).toBe(false);
+    expect(target.querySelector('audio')).toBeNull();
+
+    along.click();
+    await vi.waitFor(() => expect(target.querySelector('audio')).toBeTruthy());
+    const audio = target.querySelector('audio')!;
+    expect(audio.getAttribute('src')).toBe('blob:narration');
+    expect(media.create.mock.calls[0][0]).toBeInstanceOf(Blob);
+    expect(media.create.mock.calls[0][0].type).toBe('audio/wav');
+    // The replay now has the speed and the pauses of the recording, which the user cannot change.
+    const speed = action<HTMLSelectElement>(target, 'replay-speed');
+    const trim = action<HTMLInputElement>(target, 'replay-trim');
+    expect(speed.value).toBe('2');
+    expect(speed.disabled).toBe(true);
+    expect(trim.checked).toBe(true);
+    expect(trim.disabled).toBe(true);
+    // 3500 ms of drawing at 2x is shorter than the 3 s of sound.
+    expect(roleText(target, 'replay-total')).toBe('0:03');
+
+    action<HTMLButtonElement>(target, 'replay-play').click();
+    await tick();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(media.plays).toHaveBeenCalled();
+    expect(audio.currentTime).toBeGreaterThan(0.7);
+    expect(audio.currentTime).toBeLessThan(1.1);
+    action<HTMLButtonElement>(target, 'replay-play').click();
+    await tick();
+    expect(media.pauses).toHaveBeenCalled();
+
+    // Seeking moves the sound too.
+    const seek = action<HTMLInputElement>(target, 'replay-seek');
+    seek.value = '1500';
+    seek.dispatchEvent(new Event('input', { bubbles: true }));
+    await tick();
+    expect(audio.currentTime).toBe(1.5);
+
+    along.click();
+    await tick();
+    expect(target.querySelector('audio')).toBeNull();
+    expect(media.revoke).toHaveBeenCalledWith('blob:narration');
+    expect(speed.disabled).toBe(false);
+    expect(trim.disabled).toBe(false);
+    expect(roleText(target, 'replay-total')).toBe('0:01');
+  });
+
+  it('records a narration while the replay plays, and the next save uses the new stamp', async () => {
+    const setMicrophone = vi.spyOn(api, 'setMicrophone');
+    const monitor = vi.spyOn(api, 'microphoneMonitor');
+    const start = vi.spyOn(api, 'narrationStart');
+    const stop = vi.spyOn(api, 'narrationStop');
+    const saveNote = vi.spyOn(api, 'saveNote');
+    const { path, target, button, drag, key, status, onclose } = await replay();
+    const before = mockLibrary().notes.get(path)!.stamp;
+    expect(target.textContent).toContain("Cette note n'a pas de narration.");
+
+    // The panel listens to the microphone before recording.
+    action(target, 'narration-open').click();
+    await tick();
+    await vi.waitFor(() => expect(monitor).toHaveBeenCalledWith(null));
+    const select = target.querySelector<HTMLSelectElement>('select[data-field="microphone"]')!;
+    await vi.waitFor(() => expect(select.options.length).toBe(3));
+    select.value = 'mock-mic-2';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(setMicrophone).toHaveBeenCalledWith('mock-mic-2'));
+    await vi.waitFor(() => expect(monitor).toHaveBeenLastCalledWith('mock-mic-2'));
+    await vi.advanceTimersByTimeAsync(400);
+    expect(target.querySelector('[role="meter"]')).toBeTruthy();
+
+    // The replay options at that moment are the ones the narration is recorded with.
+    const speed = action<HTMLSelectElement>(target, 'replay-speed');
+    speed.value = '2';
+    speed.dispatchEvent(new Event('change', { bubbles: true }));
+    action<HTMLInputElement>(target, 'replay-trim').click();
+    await tick();
+    expect(target.querySelector('[data-section="narration"]')?.textContent).toContain(
+      'vitesse 2×, temps morts supprimés',
+    );
+
+    action(target, 'narration-start').click();
+    await vi.waitFor(() =>
+      expect(start).toHaveBeenCalledWith('mock-mic-2', { kind: 'replay', path, speed: 2, maxPauseMs: 500, startMs: 0 }),
+    );
+    // The level capture was stopped before the recording took the microphone over.
+    expect((await api.narrationStatus()).state).toBe('recording');
+    await vi.waitFor(() => expect(barState(target)).toBe('yes'));
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(target.querySelector('.elapsed')?.textContent).toContain('Enregistrement : 0:01');
+    await vi.waitFor(() =>
+      expect(Number(target.querySelector('[role="meter"]')?.getAttribute('aria-valuenow'))).toBeGreaterThan(0),
+    );
+
+    // Nothing that would put the sound out of step with the replay works meanwhile.
+    expect(action<HTMLButtonElement>(target, 'replay-play').disabled).toBe(true);
+    expect(action<HTMLInputElement>(target, 'replay-seek').disabled).toBe(true);
+    expect(speed.disabled).toBe(true);
+    expect(action<HTMLInputElement>(target, 'replay-trim').disabled).toBe(true);
+    expect(button('Relecture').disabled).toBe(true);
+    await key(' ');
+    expect(barState(target)).toBe('yes');
+    // Leaving the editor would lose it.
+    button('Bibliothèque').click();
+    await tick();
+    expect(onclose).not.toHaveBeenCalled();
+    expect(target.querySelector('.editor-notice')?.getAttribute('role')).toBe('alert');
+    expect(target.querySelector('select[data-field="microphone"]')).toBeTruthy();
+    expect(target.querySelector<HTMLSelectElement>('select[data-field="microphone"]')!.disabled).toBe(true);
+
+    action(target, 'narration-stop').click();
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledWith(true, before));
+    await vi.waitFor(() => expect(storedText(target)).toBe('Narration enregistrée dans la note (0:01).'));
+    const recorded = mockLibrary().notes.get(path)!.stamp;
+    expect(recorded).not.toEqual(before);
+    expect(target.querySelector('.editor-notice')?.textContent).toContain('Narration enregistrée (0:01)');
+    // The replay stopped and the panel went back to its start.
+    expect(barState(target)).toBe('no');
+    expect(action(target, 'narration-open')).toBeTruthy();
+    expect(action<HTMLButtonElement>(target, 'replay-play').disabled).toBe(false);
+    expect(target.querySelector('.replay-bar')?.textContent).toContain('Lire avec la narration');
+
+    // The editor kept the stamp of the file: the next save is not a conflict.
+    await key('r');
+    await drag(line(5000, 15000, 15000));
+    await key('s', { ctrlKey: true });
+    await vi.waitFor(() => expect(saveNote).toHaveBeenCalled());
+    expect(saveNote.mock.calls.at(-1)![2]).toEqual(recorded);
+    await vi.waitFor(() => expect(status()).toBe('Enregistrée'));
+    expect(target.querySelector('.banner.error')).toBeNull();
+    expect(mockLibrary().notes.get(path)!.note.strokes).toHaveLength(4);
+  });
+
+  it('cancels a recording without saving anything', async () => {
+    const stop = vi.spyOn(api, 'narrationStop');
+    const { path, target, button, onclose } = await replay();
+    const before = mockLibrary().notes.get(path)!.stamp;
+    action(target, 'narration-open').click();
+    await tick();
+    await vi.waitFor(() => expect(action(target, 'narration-start')).toBeTruthy());
+    action(target, 'narration-start').click();
+    await vi.waitFor(() => expect(barState(target)).toBe('yes'));
+    await vi.advanceTimersByTimeAsync(500);
+    action(target, 'narration-cancel').click();
+    await vi.waitFor(() => expect(action(target, 'narration-start')).toBeTruthy());
+    expect(stop).toHaveBeenCalledWith(false, null);
+    expect(mockLibrary().notes.get(path)!.stamp).toEqual(before);
+    expect(await api.narrationInfo(path)).toBeNull();
+    expect(target.textContent).toContain("Cette note n'a pas de narration.");
+    expect((await api.narrationStatus()).state).not.toBe('recording');
+    // Free to leave again.
+    expect(button('Relecture').disabled).toBe(false);
+    button('Bibliothèque').click();
+    await tick();
+    expect(onclose).toHaveBeenCalled();
+  });
+
+  it('lets the recording go on after the end of the replay, and stops the replay with the recording', async () => {
+    const { target } = await replay();
+    action(target, 'narration-open').click();
+    await tick();
+    await vi.waitFor(() => expect(action(target, 'narration-start')).toBeTruthy());
+    action(target, 'narration-start').click();
+    await vi.waitFor(() => expect(barState(target)).toBe('yes'));
+    await vi.advanceTimersByTimeAsync(5600);
+    // The replay is over, the last image stays and the recording runs on.
+    expect(barState(target)).toBe('no');
+    expect(roleText(target, 'replay-current')).toBe('0:05');
+    expect(target.querySelector('.elapsed')?.textContent).toContain('Enregistrement : 0:05');
+    expect(target.querySelector('[data-section="narration"]')?.textContent).toContain(
+      "La relecture est terminée ; l'enregistrement continue",
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(target.querySelector('.elapsed')?.textContent).toContain('Enregistrement : 0:06');
+    action(target, 'narration-stop').click();
+    await vi.waitFor(() => expect(storedText(target)).toBe('Narration enregistrée dans la note (0:06).'));
+  });
+
+  it('explains when Windows blocks the microphone, in the panel and during the recording', async () => {
+    mockNarration.silent = true;
+    const { target } = await replay();
+    action(target, 'narration-open').click();
+    await tick();
+    await vi.advanceTimersByTimeAsync(1500);
+    const silent = () => target.querySelector<HTMLElement>('[data-capture="silent"]');
+    expect(silent()?.textContent).toContain("Windows bloque peut-être l'accès au micro");
+    expect(silent()?.textContent).toContain('Paramètres > Confidentialité et sécurité > Microphone');
+    action(target, 'narration-start').click();
+    await vi.waitFor(() => expect(barState(target)).toBe('yes'));
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(silent()?.textContent).toContain("Windows bloque peut-être l'accès au micro");
+  });
+
+  it('replaces a narration after saying so, and deletes it after asking', async () => {
+    const deleteNarration = vi.spyOn(api, 'deleteNarration');
+    const saveNote = vi.spyOn(api, 'saveNote');
+    const path = demoPath('Liste de courses');
+    setMockNarration(path, { durationMs: 2000, base: 'replay', speed: 1, maxPauseMs: null, startMs: 0 });
+    const { target, drag, key, status } = await replay();
+    await vi.waitFor(() => expect(storedText(target)).toBe('Narration enregistrée dans la note (0:02).'));
+    action(target, 'narration-open').click();
+    await tick();
+    expect(target.querySelector('[data-slot="replaces"]')?.textContent).toBe(
+      'Un nouvel enregistrement remplace la narration actuelle.',
+    );
+    action(target, 'narration-close').click();
+    await tick();
+
+    action(target, 'narration-delete').click();
+    await tick();
+    expect(target.textContent).toContain('Supprimer définitivement la narration de cette note ?');
+    expect(deleteNarration).not.toHaveBeenCalled();
+    action(target, 'narration-delete-yes').click();
+    await vi.waitFor(() => expect(deleteNarration).toHaveBeenCalled());
+    const stamp = mockLibrary().notes.get(path)!.stamp;
+    await vi.waitFor(() => expect(target.textContent).toContain("Cette note n'a pas de narration."));
+    expect(target.querySelector('[data-action="replay-narration"]')).toBeNull();
+    expect(await api.narrationInfo(path)).toBeNull();
+
+    // Saving still works with the stamp the deletion left.
+    await key('r');
+    await drag(line(5000, 15000, 15000));
+    await key('s', { ctrlKey: true });
+    await vi.waitFor(() => expect(saveNote).toHaveBeenCalled());
+    expect(saveNote.mock.calls.at(-1)![2]).toEqual(stamp);
+    await vi.waitFor(() => expect(status()).toBe('Enregistrée'));
+  });
+
+  it('reports a recording that cannot start and stays ready for another try', async () => {
+    mockNarration.microphones = [];
+    const { target } = await replay();
+    action(target, 'narration-open').click();
+    await tick();
+    await vi.waitFor(() => expect(target.textContent).toContain('Aucun micro détecté'));
+    action(target, 'narration-start').click();
+    await vi.waitFor(() => expect(target.querySelector('[data-slot="record-error"]')).toBeTruthy());
+    expect(barState(target)).toBe('no');
+    expect(action<HTMLButtonElement>(target, 'replay-play').disabled).toBe(false);
+    expect(action(target, 'narration-start')).toBeTruthy();
+  });
+
+  it('does not let the window close while a narration is being recorded, and discards it when the editor goes away', async () => {
+    const stop = vi.spyOn(api, 'narrationStop');
+    const win = fakeWindow();
+    const { target } = await replay({ windowClose: win.closer });
+    action(target, 'narration-open').click();
+    await tick();
+    await vi.waitFor(() => expect(action(target, 'narration-start')).toBeTruthy());
+    action(target, 'narration-start').click();
+    await vi.waitFor(() => expect(barState(target)).toBe('yes'));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(win.request()).toBe(true);
+    await tick();
+    expect(win.destroy).not.toHaveBeenCalled();
+    expect(target.querySelector('.editor-notice')?.textContent).toContain('Arrêtez ou annulez');
+
+    cleanup?.();
+    cleanup = null;
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledWith(false, null));
+    expect((await api.narrationStatus()).state).toBe('idle');
+  });
+
+  it('has its texts in English', async () => {
+    setLocale('en');
+    mockNarration.silent = true;
+    setMockNarration(demoPath('Liste de courses'), { durationMs: 2000, base: 'replay', speed: 1, maxPauseMs: null, startMs: 0 });
+    const { target, button } = await render('Liste de courses');
+    vi.useFakeTimers();
+    button('Replay').click();
+    await tick();
+    await vi.waitFor(() => expect(storedText(target)).toBe('Narration saved in the note (0:02).'));
+    expect(target.querySelector('.replay-bar')?.textContent).toContain('Play with narration');
+    action(target, 'narration-open').click();
+    await tick();
+    expect(target.textContent).toContain('A new recording replaces the current narration.');
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(target.querySelector('[data-capture="silent"]')?.textContent).toContain('Let desktop apps access your microphone');
+    expect(button('Delete the narration')).toBeTruthy();
+  });
+});
+
+describe('note editor: narration sound', () => {
+  beforeEach(() => {
+    resetMockNarration();
+    makeSlow('Liste de courses');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(URL, 'createObjectURL');
+    Reflect.deleteProperty(URL, 'revokeObjectURL');
+  });
+
+  it('says so when the browser cannot play the sound, and when the sound cannot be fetched', async () => {
+    fakeMedia();
+    setMockNarration(demoPath('Liste de courses'), { durationMs: 3000, base: 'replay', speed: 1, maxPauseMs: null, startMs: 0 });
+    const { target, button } = await render('Liste de courses');
+    button('Relecture').click();
+    await vi.waitFor(() => expect(action(target, 'replay-narration')).toBeTruthy());
+    action<HTMLInputElement>(target, 'replay-narration').click();
+    await vi.waitFor(() => expect(target.querySelector('audio')).toBeTruthy());
+    expect(target.querySelector('[data-slot="replay-error"]')).toBeNull();
+    target.querySelector('audio')!.dispatchEvent(new Event('error'));
+    await tick();
+    expect(target.querySelector('[data-slot="replay-error"]')?.textContent).toBe('Le son de la narration ne peut pas être lu.');
+    action<HTMLInputElement>(target, 'replay-narration').click();
+    await tick();
+    expect(target.querySelector('[data-slot="replay-error"]')).toBeNull();
+
+    vi.spyOn(api, 'narrationAudio').mockRejectedValueOnce({ code: 'noRecording', message: 'gone' });
+    action<HTMLInputElement>(target, 'replay-narration').click();
+    await vi.waitFor(() => expect(target.querySelector('[data-slot="replay-error"]')).toBeTruthy());
+    expect(target.querySelector('audio')).toBeNull();
+    expect(action<HTMLInputElement>(target, 'replay-narration').checked).toBe(false);
   });
 });

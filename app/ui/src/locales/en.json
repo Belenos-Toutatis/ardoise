@@ -619,6 +619,82 @@
     "export": {
       "button": "Export…",
       "hint": "Export the note as PNG, JPG, SVG or PDF"
+    },
+    "replay": {
+      "button": "Replay",
+      "hint": "Replay the strokes as they were written (R)",
+      "recordingBusy": "Stop or cancel the narration recording first."
+    },
+    "video": {
+      "button": "Video",
+      "hint": "Export the replay as a video (MP4, WebM) or an animated image (GIF, WebP)…"
+    }
+  },
+  "replay": {
+    "bar": "Replay controls",
+    "play": "Play",
+    "pause": "Pause",
+    "spaceKey": "Space",
+    "timeline": "Position in the replay",
+    "timeValue": "{current} of {total}",
+    "speed": "Speed",
+    "speedValue": "{speed}×",
+    "trim": "Remove dead time",
+    "trimDetail": "(pauses over {seconds} s)",
+    "withNarration": "Play with narration",
+    "narrationLocks": "Speed and dead time are those of the narration.",
+    "narrationLoading": "Loading the narration…",
+    "narrationFailed": "The narration cannot be played: {message}",
+    "audioFailed": "The narration sound cannot be played.",
+    "empty": "This note has no strokes to replay.",
+    "locked": "Recording: the replay runs on its own, without pausing or changing speed."
+  },
+  "narration": {
+    "title": "Narration",
+    "picker": {
+      "label": "Microphone",
+      "default": "Windows default microphone",
+      "missing": "Microphone missing (unplugged?)",
+      "none": "No microphone detected",
+      "refresh": "Refresh the list of microphones",
+      "level": "Microphone level",
+      "levelValue": "Level {rms}%, peak {peak}%"
+    },
+    "status": {
+      "starting": "Starting the microphone…",
+      "waiting": "Waiting for sound from the microphone…",
+      "receiving": "The microphone is working.",
+      "noData": "The microphone sends nothing. Check that it is plugged in properly, or choose another one.",
+      "failed": "The microphone failed: {detail}",
+      "failedUnknown": "The microphone is not working.",
+      "silent": "Windows may be blocking access to the microphone: open Settings > Privacy & security > Microphone and turn on \"Let desktop apps access your microphone\". A microphone mute switch gives the same result."
+    },
+    "record": {
+      "open": "Record a narration",
+      "openHint": "Talk while the replay plays: the sound is recorded in the note",
+      "close": "Close",
+      "replaces": "A new recording replaces the current narration.",
+      "settings": "The sound will follow the replay with its current settings: speed {speed}, {pauses}.",
+      "pausesTrimmed": "dead time removed",
+      "pausesKept": "dead time kept",
+      "start": "Start",
+      "stop": "Stop and save",
+      "cancel": "Cancel",
+      "elapsed": "Recording: {time}",
+      "afterEnd": "The replay is over; the recording goes on and the last image stays on screen.",
+      "saving": "Saving into the note…",
+      "saved": "Narration saved ({duration}).",
+      "failed": "The recording failed: {message}"
+    },
+    "stored": {
+      "info": "Narration saved in the note ({duration}).",
+      "none": "This note has no narration.",
+      "delete": "Delete the narration",
+      "deleteConfirm": "Permanently delete this note's narration?",
+      "deleteYes": "Yes, delete it",
+      "deleteNo": "No, keep it",
+      "deleted": "Narration deleted.",
+      "deleteFailed": "The narration could not be deleted: {message}"
     }
   },
   "export": {
@@ -860,6 +936,15 @@
           "action": "Finish (on the projected screen: close the presentation)"
         }
       }
+    },
+    "narration": {
+      "title": "Narration",
+      "open": "Record the narration",
+      "openHint": "Talk during the session: the sound is recorded with the pages",
+      "hint": "The sound is cut page by page and saved with each note; the note's replay plays it back.",
+      "savedOne": "Narration saved on 1 page.",
+      "savedMany": "Narration saved on {count} pages.",
+      "savedNone": "No page of the session has any strokes: the narration was not kept."
     }
   },
   "presentation": {

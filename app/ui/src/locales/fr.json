@@ -619,6 +619,82 @@
     "export": {
       "button": "Exporter…",
       "hint": "Exporter la note en PNG, JPG, SVG ou PDF"
+    },
+    "replay": {
+      "button": "Relecture",
+      "hint": "Rejouer le tracé comme il a été écrit (R)",
+      "recordingBusy": "Arrêtez ou annulez d'abord l'enregistrement de la narration."
+    },
+    "video": {
+      "button": "Vidéo",
+      "hint": "Exporter la relecture en vidéo (MP4, WebM) ou en image animée (GIF, WebP)…"
+    }
+  },
+  "replay": {
+    "bar": "Contrôles de la relecture",
+    "play": "Lecture",
+    "pause": "Pause",
+    "spaceKey": "Espace",
+    "timeline": "Position dans la relecture",
+    "timeValue": "{current} sur {total}",
+    "speed": "Vitesse",
+    "speedValue": "{speed}×",
+    "trim": "Supprimer les temps morts",
+    "trimDetail": "(pauses de plus de {seconds} s)",
+    "withNarration": "Lire avec la narration",
+    "narrationLocks": "La vitesse et les temps morts sont ceux de la narration.",
+    "narrationLoading": "Chargement de la narration…",
+    "narrationFailed": "La narration ne peut pas être lue : {message}",
+    "audioFailed": "Le son de la narration ne peut pas être lu.",
+    "empty": "Cette note ne contient aucun tracé à rejouer.",
+    "locked": "Enregistrement en cours : la relecture suit son cours, sans pause ni changement de vitesse."
+  },
+  "narration": {
+    "title": "Narration",
+    "picker": {
+      "label": "Micro",
+      "default": "Micro par défaut de Windows",
+      "missing": "Micro absent (débranché ?)",
+      "none": "Aucun micro détecté",
+      "refresh": "Actualiser la liste des micros",
+      "level": "Niveau du micro",
+      "levelValue": "Niveau {rms} %, crête {peak} %"
+    },
+    "status": {
+      "starting": "Démarrage du micro…",
+      "waiting": "En attente du son du micro…",
+      "receiving": "Le micro fonctionne.",
+      "noData": "Le micro ne transmet rien. Vérifiez qu'il est bien branché ou choisissez-en un autre.",
+      "failed": "Le micro a échoué : {detail}",
+      "failedUnknown": "Le micro ne fonctionne pas.",
+      "silent": "Windows bloque peut-être l'accès au micro : ouvrez Paramètres > Confidentialité et sécurité > Microphone et activez « Autoriser les applications de bureau à accéder à votre microphone ». Un interrupteur de coupure du micro donne le même résultat."
+    },
+    "record": {
+      "open": "Enregistrer une narration",
+      "openHint": "Raconter pendant que la relecture défile : le son est enregistré dans la note",
+      "close": "Fermer",
+      "replaces": "Un nouvel enregistrement remplace la narration actuelle.",
+      "settings": "Le son suivra la relecture avec ses réglages actuels : vitesse {speed}, {pauses}.",
+      "pausesTrimmed": "temps morts supprimés",
+      "pausesKept": "temps morts conservés",
+      "start": "Démarrer",
+      "stop": "Arrêter et enregistrer",
+      "cancel": "Annuler",
+      "elapsed": "Enregistrement : {time}",
+      "afterEnd": "La relecture est terminée ; l'enregistrement continue et la dernière image reste affichée.",
+      "saving": "Enregistrement dans la note…",
+      "saved": "Narration enregistrée ({duration}).",
+      "failed": "L'enregistrement a échoué : {message}"
+    },
+    "stored": {
+      "info": "Narration enregistrée dans la note ({duration}).",
+      "none": "Cette note n'a pas de narration.",
+      "delete": "Supprimer la narration",
+      "deleteConfirm": "Supprimer définitivement la narration de cette note ?",
+      "deleteYes": "Oui, supprimer",
+      "deleteNo": "Non, la garder",
+      "deleted": "Narration supprimée.",
+      "deleteFailed": "La narration n'a pas pu être supprimée : {message}"
     }
   },
   "export": {
@@ -860,6 +936,15 @@
           "action": "Terminer (sur l'écran projeté : fermer la présentation)"
         }
       }
+    },
+    "narration": {
+      "title": "Narration",
+      "open": "Enregistrer la narration",
+      "openHint": "Raconter pendant la séance : le son est enregistré avec les pages",
+      "hint": "Le son est découpé page par page et enregistré avec chaque note ; la relecture de la note le rejoue.",
+      "savedOne": "Narration enregistrée sur 1 page.",
+      "savedMany": "Narration enregistrée sur {count} pages.",
+      "savedNone": "Aucune page de la séance ne contient de tracé : la narration n'a pas été conservée."
     }
   },
   "presentation": {

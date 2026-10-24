@@ -20,9 +20,13 @@
     splitting = false,
     locked = false,
     copying = false,
+    replaying = false,
+    replayDisabled = false,
     onsplit,
     oncopy,
     onexport,
+    onreplay,
+    onvideo,
   }: {
     tools: ToolSettings;
     customColors: Rgba[];
@@ -41,9 +45,15 @@
     locked?: boolean;
     /** The image is being copied to the clipboard. */
     copying?: boolean;
+    /** The replay mode is on: the page is read-only. */
+    replaying?: boolean;
+    /** The replay cannot be switched now (the split panel is open, or a narration is being recorded). */
+    replayDisabled?: boolean;
     onsplit: () => void;
     oncopy: () => void;
     onexport: () => void;
+    onreplay: () => void;
+    onvideo: () => void;
   } = $props();
 
   const MODES: { mode: Mode; icon: string }[] = [
@@ -176,7 +186,20 @@
   {/if}
 
   <div class="group share" role="group" aria-label={t('editor.share.label')}>
-    <button type="button" class="button small-button" aria-pressed={splitting} class:active={splitting} title={t('editor.split.hint')} onclick={onsplit}>
+    <button
+      type="button"
+      class="button small-button"
+      data-action="replay-toggle"
+      aria-pressed={replaying}
+      class:active={replaying}
+      disabled={replayDisabled}
+      title={t('editor.replay.hint')}
+      onclick={onreplay}
+    >
+      <span aria-hidden="true">▶</span>
+      {t('editor.replay.button')}
+    </button>
+    <button type="button" class="button small-button" aria-pressed={splitting} class:active={splitting} disabled={replaying} title={t('editor.split.hint')} onclick={onsplit}>
       <span aria-hidden="true">✂</span>
       {t('editor.split.button')}
     </button>
@@ -187,6 +210,10 @@
     <button type="button" class="button small-button" title={t('editor.export.hint')} onclick={onexport}>
       <span aria-hidden="true">⇪</span>
       {t('editor.export.button')}
+    </button>
+    <button type="button" class="button small-button" data-action="video-export" title={t('editor.video.hint')} onclick={onvideo}>
+      <span aria-hidden="true">▣</span>
+      {t('editor.video.button')}
     </button>
   </div>
 </div>
