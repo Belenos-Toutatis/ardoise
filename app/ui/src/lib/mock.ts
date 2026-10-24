@@ -4,6 +4,7 @@
  */
 import type { AppState, NoteOutlines } from './api';
 import { UNHANDLED } from './mock-data';
+import { checkAutoExport, mockExportInvoke } from './mock-export';
 import { mockLibraryInvoke } from './mock-library';
 import { mockNotesInvoke } from './mock-notes';
 
@@ -47,6 +48,9 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
       case 'set_theme':
         state.theme = args.theme as AppState['theme'];
         return { ...state };
+      case 'set_auto_export':
+        state.autoExport = checkAutoExport(args.autoExport as AppState['autoExport']);
+        return { ...state };
       case 'inspect_library':
         return { existing: libraries.has(args.path as string) };
       case 'set_library':
@@ -68,8 +72,8 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
         cancelMockRun();
         return undefined;
       default: {
-        // Library and editor commands live in their own modules, over the demo library.
-        for (const handle of [mockLibraryInvoke, mockNotesInvoke]) {
+        // Library, editor and export commands live in their own modules, over the demo library.
+        for (const handle of [mockLibraryInvoke, mockNotesInvoke, mockExportInvoke]) {
           const handled = handle(command, args);
           if (handled !== UNHANDLED) return handled;
         }

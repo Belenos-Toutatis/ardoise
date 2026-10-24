@@ -36,13 +36,13 @@ function tabletState(library: MockLibrary) {
 
 let counter = 0;
 
-function newId(): string {
+export function newId(): string {
   counter += 1;
   const random = globalThis.crypto?.randomUUID?.();
   return random ?? `00000000-0000-4000-8000-${String(counter).padStart(12, '0')}`;
 }
 
-function failure(code: string, message: string): never {
+export function failure(code: string, message: string): never {
   throw { code, message };
 }
 
@@ -52,11 +52,11 @@ function conflictOf(name: string): { originalName: string } | null {
   return match ? { originalName: match[1] + match[2] } : null;
 }
 
-function baseName(path: string): string {
+export function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
-function summary(path: string, stored: StoredNote): NoteSummary {
+export function summary(path: string, stored: StoredNote): NoteSummary {
   const { note } = stored;
   const name = baseName(path);
   return {
@@ -92,7 +92,7 @@ function addBinder(library: MockLibrary, binder: string): void {
 }
 
 /** `base.ardoise` → `base (2).ardoise`… until the path is free. */
-function freePath(library: MockLibrary, binder: string, name: string, ignore?: string): string {
+export function freePath(library: MockLibrary, binder: string, name: string, ignore?: string): string {
   let candidate = notePath(library.root, binder, name);
   for (let n = 2; library.notes.has(candidate) && candidate !== ignore; n++) {
     candidate = notePath(library.root, binder, name.replace(/\.ardoise$/, ` (${n}).ardoise`));
