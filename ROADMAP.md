@@ -95,11 +95,11 @@ Règles permanentes :
 
 ## M6 — Relecture, vidéo et narration
 
-- [ ] Relecture animée : ligne du temps, vitesses, suppression des temps morts.
+- [x] Relecture animée : ligne du temps, vitesses, suppression des temps morts.
 - [x] Essai préalable : écriture d'un MP4 H.264 + AAC par Media Foundation (`IMFSinkWriter`) depuis Rust ; résultat noté dans `docs/research/media-stack.md`. Si l'essai échoue, demander à l'utilisateur avant de choisir une autre solution.
 - [x] Avant de télécharger `nasm` (assembleur nécessaire pour un WebM rapide), demander l'accord de l'utilisateur. Accord donné le 24 octobre 2026 pour `nasm` (poste de développement) et pour la DLL OpenH264 2.6.0 de Cisco (test du secours).
-- [ ] Exports MP4 (Media Foundation ; secours OpenH264 2.6.0 téléchargé chez Cisco seulement si Media Foundation manque, empreinte vérifiée, mention et licence de Cisco affichées, désactivable et supprimable), GIF, WebP, WebM ; réglages de résolution et de vitesse ; durée estimée affichée avant l'export.
-- [ ] Narration : liste des micros, choix, niveau, enregistrement pendant relecture ou mode direct, son dans MP4 et WebM.
+- [x] Exports MP4 (Media Foundation ; secours OpenH264 2.6.0 téléchargé chez Cisco seulement si Media Foundation manque, empreinte vérifiée, mention et licence de Cisco affichées, désactivable et supprimable), GIF, WebP, WebM ; réglages de résolution et de vitesse ; durée estimée affichée avant l'export.
+- [x] Narration : liste des micros, choix, niveau, enregistrement pendant relecture ou mode direct, son dans MP4 et WebM.
 
 **Critères de fin** : `CHECK OK` ; un test produit les 4 formats animés à partir d'une note de référence et affiche, pour chacun, durée, dimensions et nombre d'images relus depuis le fichier ; l'export MP4 avec narration simulée contient une piste audio de la bonne durée ; le secours OpenH264 est testé en forçant son utilisation.
 
@@ -116,7 +116,7 @@ Règles permanentes :
 - [ ] Relecture complète par un agent relecteur ; corrections des problèmes bloquants et importants.
 - [ ] Performances (SPEC §8) mesurées et affichées.
 - [ ] Vérification automatique des licences de toutes les dépendances (aucune AGPL ni incompatible GPL v3) ; `THIRD-PARTY-NOTICES` et écran « À propos » (crédits Tuhi, mention Cisco).
-- [ ] Vérification qu'aucune donnée personnelle (notes, captures non anonymisées, jeton Inkspace) n'est dans l'historique git.
+- [x] Vérification qu'aucune donnée personnelle (notes, captures non anonymisées, jeton Inkspace) n'est dans l'historique git.
 - [ ] Guide utilisateur FR/EN, README, notes de version.
 - [ ] Archive de distribution (`ardoise.exe` + licence + guide).
 
