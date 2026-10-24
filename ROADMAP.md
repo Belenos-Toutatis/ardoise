@@ -87,9 +87,9 @@ Règles permanentes :
 
 ## M5 — Découper, assembler, exporter
 
-- [ ] Découpe par instant (ligne du temps) et par zone ; assemblage superposé et bout à bout ; tests.
-- [ ] Exports PNG, JPG, SVG, PDF (une ou plusieurs notes), copie dans le presse-papiers ; tests (fichiers valides, dimensions, nombre de pages).
-- [ ] Export automatique PDF/PNG après synchro (réglage).
+- [x] Découpe par instant (ligne du temps) et par zone ; assemblage superposé et bout à bout ; tests.
+- [x] Exports PNG, JPG, SVG, PDF (une ou plusieurs notes), copie dans le presse-papiers ; tests (fichiers valides, dimensions, nombre de pages).
+- [x] Export automatique PDF/PNG après synchro (réglage).
 
 **Critères de fin** : `CHECK OK` ; un test exporte une note de référence dans les 5 formats et affiche la validation de chaque fichier.
 
