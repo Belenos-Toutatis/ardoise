@@ -1,8 +1,9 @@
 /** Typed wrappers around the Rust commands of `app/src-tauri/src/commands.rs`. */
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
+import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic';
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
-import { mockInvoke } from './mock';
+import { mockDiagnosticStart, mockInvoke } from './mock';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
@@ -16,6 +17,8 @@ export interface AppState {
   library: string | null;
   systemLocale: string | null;
   selfTest: boolean;
+  /** The executable was started with `--diagnostic`: open the tablet test right away. */
+  openDiagnostic: boolean;
 }
 
 export interface LibraryInspection {
@@ -47,6 +50,20 @@ export const api = {
   inspectLibrary: (path: string) => call<LibraryInspection>('inspect_library', { path }),
   setLibrary: (path: string) => call<AppState>('set_library', { path }),
   selfTestReport: (report: UiSelfTestReport) => call<void>('self_test_report', { report }),
+  /**
+   * Starts the guided tablet test. Resolves as soon as the run has started; its progress then
+   * arrives through `onEvent` until a `done` (or `error`) event.
+   */
+  diagnosticStart: (options: DiagnosticOptions, onEvent: (event: DiagnosticEvent) => void) => {
+    if (!inDesktopApp()) return mockDiagnosticStart(options, onEvent);
+    const channel = new Channel<DiagnosticEvent>();
+    channel.onmessage = onEvent;
+    return invoke<void>('diagnostic_start', { options, onEvent: channel });
+  },
+  /** Answers the pending blocking prompt of the tablet test. */
+  diagnosticAnswer: (decision: Decision) => call<void>('diagnostic_answer', { decision }),
+  /** Stops the tablet test (a `done` event with `cancelled` follows). */
+  diagnosticCancel: () => call<void>('diagnostic_cancel'),
 };
 
 /**

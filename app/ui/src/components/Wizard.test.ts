@@ -20,6 +20,7 @@ const firstRun: AppState = {
   library: null,
   systemLocale: 'fr-FR',
   selfTest: false,
+  openDiagnostic: false,
 };
 
 let cleanup: (() => void) | null = null;

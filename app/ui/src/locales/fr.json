@@ -42,6 +42,85 @@
     "settingsFile": "Fichier de réglages",
     "version": "Version {version}"
   },
+  "diagnostic": {
+    "open": "Tester la tablette",
+    "title": "Test de la tablette",
+    "intro": "Ce test vérifie pas à pas la liaison avec la Bamboo Slate et enregistre tous les échanges dans la bibliothèque (dossier .ardoise/diagnostics) pour analyse. Durée : environ 5 minutes.",
+    "deleteAfterSync": "Effacer les pages de la tablette une fois enregistrées",
+    "simulated": "Simulation (sans tablette)",
+    "start": "Démarrer le test",
+    "again": "Recommencer le test",
+    "stepsLabel": "Étapes du test",
+    "steps": {
+      "adapter": "Adaptateur Bluetooth",
+      "referencePages": "Pages de référence",
+      "find": "Recherche de la tablette",
+      "connect": "Connexion",
+      "info": "Informations",
+      "sync": "Téléchargement des pages",
+      "live": "Mode direct",
+      "reconnect": "Reconnexion"
+    },
+    "status": {
+      "pending": "À faire",
+      "running": "En cours",
+      "passed": "Réussie",
+      "failed": "Échec",
+      "skipped": "Ignorée"
+    },
+    "actions": {
+      "continue": "C'est fait, continuer",
+      "skip": "Passer cette étape",
+      "stop": "Arrêter le test"
+    },
+    "instruction": {
+      "drawReferencePages": "Sur la tablette, dessinez {count} pages de référence. Après chaque page, appuyez brièvement sur le bouton de la tablette pour l'enregistrer.",
+      "referenceItem1": "un carré et un cercle, aussi grands que possible ;",
+      "referenceItem2": "écrivez « Ardoise 2026 » en écriture normale ;",
+      "referenceItem3": "trois traits horizontaux : très léger, normal, très appuyé.",
+      "pressButton": "Appuyez brièvement sur le bouton de la tablette.",
+      "holdButtonToRegister": "Maintenez le bouton de la tablette enfoncé environ 6 secondes, jusqu'à ce que le voyant clignote en bleu.",
+      "registerWarning": "Attention : la tablette ne fonctionnera plus avec l'application du téléphone ni avec Inkspace (il faudra l'y réenregistrer pour revenir en arrière).",
+      "pressButtonToConfirm": "Appuyez maintenant brièvement sur le bouton de la tablette pour confirmer l'enregistrement.",
+      "drawLive": "Dessinez sans vous arrêter sur la tablette pendant {seconds} secondes : traits, cercles, écriture, en appuyant plus ou moins fort."
+    },
+    "progress": {
+      "waiting": "En attente de la tablette…",
+      "page": "Page {page} sur {total}",
+      "live": "{samples} points reçus — {seconds} s"
+    },
+    "summary": "{passed} réussie(s), {failed} échec(s), {skipped} ignorée(s)",
+    "log": "Journal : {path}",
+    "cancelled": "Test arrêté avant la fin.",
+    "error": "Le test n'a pas pu aller au bout : {message}.",
+    "details": {
+      "name": "Nom",
+      "address": "Adresse",
+      "signal": "Signal",
+      "registerMode": "Mode d'enregistrement",
+      "mode": "Mode de connexion",
+      "identity": "Identité",
+      "firmware": "Micrologiciel",
+      "battery": "Batterie",
+      "size": "Dimensions",
+      "pages": "Pages",
+      "clockDrift": "Écart d'horloge",
+      "strokes": "Traits",
+      "points": "Points",
+      "deleted": "Pages effacées",
+      "folder": "Dossier",
+      "samples": "Points reçus",
+      "rate": "Cadence",
+      "xRange": "Plage X",
+      "yRange": "Plage Y",
+      "pressureMax": "Pression maximale",
+      "proximity": "Proximité",
+      "reconnections": "Reconnexions",
+      "result": "Résultat",
+      "error": "Erreur",
+      "adapter": "Adaptateur"
+    }
+  },
   "errors": {
     "settings": "Impossible de lire le fichier de réglages {path} : {message}. Il n'a pas été modifié ; corrigez-le ou supprimez-le, puis relancez Ardoise.",
     "library": "Impossible d'utiliser ce dossier : {message}",
@@ -50,6 +129,8 @@
   "errorCodes": {
     "settings": "le fichier de réglages ne peut pas être lu ou modifié ({detail})",
     "notAFolder": "le dossier « {detail} » n'existe pas",
-    "libraryInit": "impossible d'y créer le dossier .ardoise ({detail})"
+    "libraryInit": "impossible d'y créer le dossier .ardoise ({detail})",
+    "noLibrary": "aucune bibliothèque n'est choisie",
+    "diagnosticRunning": "un test est déjà en cours"
   }
 }

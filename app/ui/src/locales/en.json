@@ -42,6 +42,85 @@
     "settingsFile": "Settings file",
     "version": "Version {version}"
   },
+  "diagnostic": {
+    "open": "Test the tablet",
+    "title": "Tablet test",
+    "intro": "This test checks the link with the Bamboo Slate step by step and records every exchange in the library (.ardoise/diagnostics folder) for analysis. It takes about 5 minutes.",
+    "deleteAfterSync": "Delete pages from the tablet once saved",
+    "simulated": "Simulation (no tablet)",
+    "start": "Start the test",
+    "again": "Run the test again",
+    "stepsLabel": "Test steps",
+    "steps": {
+      "adapter": "Bluetooth adapter",
+      "referencePages": "Reference pages",
+      "find": "Finding the tablet",
+      "connect": "Connection",
+      "info": "Information",
+      "sync": "Page download",
+      "live": "Live mode",
+      "reconnect": "Reconnection"
+    },
+    "status": {
+      "pending": "To do",
+      "running": "Running",
+      "passed": "Passed",
+      "failed": "Failed",
+      "skipped": "Skipped"
+    },
+    "actions": {
+      "continue": "Done, continue",
+      "skip": "Skip this step",
+      "stop": "Stop the test"
+    },
+    "instruction": {
+      "drawReferencePages": "On the tablet, draw {count} reference pages. After each page, briefly press the tablet's button to save it.",
+      "referenceItem1": "a square and a circle, as large as possible;",
+      "referenceItem2": "write \"Ardoise 2026\" in normal handwriting;",
+      "referenceItem3": "three horizontal lines: very light, normal, very hard.",
+      "pressButton": "Briefly press the tablet's button.",
+      "holdButtonToRegister": "Hold the tablet's button down for about 6 seconds, until the light blinks blue.",
+      "registerWarning": "Warning: the tablet will no longer work with the phone app or with Inkspace (you will have to register it there again to go back).",
+      "pressButtonToConfirm": "Now briefly press the tablet's button to confirm the registration.",
+      "drawLive": "Draw on the tablet without stopping for {seconds} seconds: lines, circles, handwriting, pressing harder and softer."
+    },
+    "progress": {
+      "waiting": "Waiting for the tablet…",
+      "page": "Page {page} of {total}",
+      "live": "{samples} points received — {seconds} s"
+    },
+    "summary": "{passed} passed, {failed} failed, {skipped} skipped",
+    "log": "Log: {path}",
+    "cancelled": "Test stopped before the end.",
+    "error": "The test could not finish: {message}.",
+    "details": {
+      "name": "Name",
+      "address": "Address",
+      "signal": "Signal",
+      "registerMode": "Registration mode",
+      "mode": "Connection mode",
+      "identity": "Identity",
+      "firmware": "Firmware",
+      "battery": "Battery",
+      "size": "Size",
+      "pages": "Pages",
+      "clockDrift": "Clock drift",
+      "strokes": "Strokes",
+      "points": "Points",
+      "deleted": "Pages deleted",
+      "folder": "Folder",
+      "samples": "Points received",
+      "rate": "Rate",
+      "xRange": "X range",
+      "yRange": "Y range",
+      "pressureMax": "Maximum pressure",
+      "proximity": "Proximity",
+      "reconnections": "Reconnections",
+      "result": "Result",
+      "error": "Error",
+      "adapter": "Adapter"
+    }
+  },
   "errors": {
     "settings": "Cannot read the settings file {path}: {message}. It was left unchanged; fix or delete it, then restart Ardoise.",
     "library": "Cannot use this folder: {message}",
@@ -50,6 +129,8 @@
   "errorCodes": {
     "settings": "the settings file cannot be read or written ({detail})",
     "notAFolder": "the folder “{detail}” does not exist",
-    "libraryInit": "cannot create the .ardoise folder in it ({detail})"
+    "libraryInit": "cannot create the .ardoise folder in it ({detail})",
+    "noLibrary": "no library is chosen",
+    "diagnosticRunning": "a test is already running"
   }
 }
