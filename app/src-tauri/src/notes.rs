@@ -1,15 +1,22 @@
-//! Notes for the interface. The outlines the screen draws come from the same geometry
+//! Notes for the interface: the editor's commands (open, save, page background) and stroke
+//! outlines. The outlines the screen draws come from the same geometry
 //! (`ardoise_ink::outline`) as the PNG/PDF/video exports, so both always show the same strokes
 //! (SPEC §6.2).
 
 use std::path::Path;
 
 use ardoise_core::format::read_note;
-use ardoise_core::note::Note;
+use ardoise_core::library::{FileStamp, Library, LibraryError};
+use ardoise_core::note::{Background, Note, PageSize};
 use ardoise_ink::{Tool, outline};
+use ardoise_render::{RenderError, RenderOptions, encode_png, render_note};
 use serde::Serialize;
+use tauri::State;
 
-use crate::commands::CommandError;
+use crate::AppContext;
+use crate::commands::{CommandError, CommandResult};
+use crate::library::{blank_note, library_error, library_of, now_ms};
+use crate::thumbnails::{png_data_url, thumbnail_png};
 
 /// One stroke ready to draw: an SVG path to fill with the non-zero rule.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -65,11 +72,111 @@ pub fn note_outlines(path: String) -> Result<NoteOutlines, CommandError> {
     Ok(outlines_of(&file.note))
 }
 
+/// A note opened for editing, with the stamp to pass back when saving it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OpenedNote {
+    pub note: Note,
+    pub stamp: FileStamp,
+}
+
+pub fn open_in(library: &Library, path: &Path) -> Result<OpenedNote, LibraryError> {
+    let loaded = library.read(path)?;
+    Ok(OpenedNote {
+        note: loaded.file.note,
+        stamp: loaded.stamp,
+    })
+}
+
+/// Saves an edited note over its file: only the note changes (the tablet's `original.bin`,
+/// audio, background image, recognised text and anything unknown are kept), `modified` becomes
+/// now and the thumbnail is made again. Refused with `noteConflict` if the file is no longer
+/// the version of `stamp`. The note keeps its id and its file name.
+pub fn save_in(
+    library: &Library,
+    path: &Path,
+    mut note: Note,
+    stamp: &FileStamp,
+) -> Result<FileStamp, LibraryError> {
+    let loaded = library.read(path)?;
+    if loaded.stamp != *stamp {
+        return Err(LibraryError::Conflict { path: loaded.path });
+    }
+    let mut file = loaded.file;
+    note.id = file.note.id.clone();
+    note.modified = now_ms().max(file.note.modified);
+    file.thumbnail = thumbnail_png(&note);
+    file.note = note;
+    library.save(&loaded.path, &file, stamp)
+}
+
+/// Largest side of a rendered background, in pixels.
+pub const MAX_BACKGROUND_PX: u32 = 4096;
+
+/// PNG of a page background (paper, template, texture) `width_px` wide, both sides capped at
+/// [`MAX_BACKGROUND_PX`].
+pub fn background_png(
+    page: PageSize,
+    background: Background,
+    width_px: u32,
+) -> Result<Vec<u8>, CommandError> {
+    if page.width == 0 || page.height == 0 {
+        return Err(CommandError::new(
+            "noteInvalid",
+            format!("empty page ({} x {})", page.width, page.height),
+        ));
+    }
+    let width = width_px.clamp(1, MAX_BACKGROUND_PX) as f32;
+    let scale = (width / page.width as f32).min(MAX_BACKGROUND_PX as f32 / page.height as f32);
+    let mut note = blank_note("", "", 0);
+    note.page = page;
+    note.background = background;
+    let render_error = |error: RenderError| match error {
+        RenderError::Size { .. } => CommandError::new("noteInvalid", error),
+        _ => CommandError::new("render", error),
+    };
+    let image = render_note(
+        &note,
+        &RenderOptions {
+            scale,
+            background: true,
+        },
+    )
+    .map_err(render_error)?;
+    encode_png(&image).map_err(render_error)
+}
+
+#[tauri::command]
+pub async fn open_note(context: State<'_, AppContext>, path: String) -> CommandResult<OpenedNote> {
+    open_in(&library_of(&context)?, Path::new(&path)).map_err(library_error)
+}
+
+#[tauri::command]
+pub async fn save_note(
+    context: State<'_, AppContext>,
+    path: String,
+    note: Note,
+    stamp: FileStamp,
+) -> CommandResult<FileStamp> {
+    save_in(&library_of(&context)?, Path::new(&path), note, &stamp).map_err(library_error)
+}
+
+#[tauri::command]
+pub async fn render_background(
+    page: PageSize,
+    background: Background,
+    width_px: u32,
+) -> CommandResult<String> {
+    background_png(page, background, width_px).map(|png| png_data_url(&png))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ardoise_core::format::{NoteFile, write_note};
+    use crate::library::tests::{library, write_sample};
+    use crate::thumbnails::tests::png_of;
+    use ardoise_core::format::{BackgroundFile, Member, NoteFile, write_note};
     use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Origin, Timing};
+    use ardoise_core::note::{A4_PORTRAIT, Paper, Template};
     use ardoise_ink::{Point, Rgba, Stroke};
 
     fn stroke(layer: u32, color: Rgba) -> Stroke {
@@ -147,5 +254,122 @@ mod tests {
         assert_eq!(outlines.strokes.len(), 2);
         let missing = note_outlines(dir.path().join("absent.ardoise").display().to_string());
         assert!(missing.is_err());
+    }
+
+    #[test]
+    fn open_and_save_keep_every_other_member() {
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Essai");
+        // Give the file members the editor knows nothing about.
+        let mut file = library.read(&saved.path).unwrap().file;
+        file.original = Some(vec![1, 2, 3, 4]);
+        file.audio = Some(vec![9; 16]);
+        file.text = Some(br#"{"lines":[]}"#.to_vec());
+        file.background = Some(BackgroundFile {
+            extension: "png".into(),
+            bytes: vec![7; 8],
+        });
+        file.unknown_fields
+            .insert("future".into(), serde_json::json!({"x": 1}));
+        file.unknown_members.push(Member {
+            name: "future/data.bin".into(),
+            bytes: vec![5; 10],
+        });
+        let old_thumbnail = file.thumbnail.clone();
+        let stamp = library.save(&saved.path, &file, &saved.stamp).unwrap();
+
+        let opened = open_in(&library, &saved.path).unwrap();
+        assert_eq!(opened.stamp, stamp);
+        assert_eq!(opened.note, file.note);
+        let json = serde_json::to_value(&opened).unwrap();
+        assert!(json["note"]["strokes"][0]["points"][0]["pressure"].is_number());
+        assert!(json["stamp"]["modified"]["nanos_since_epoch"].is_u64());
+
+        // The editor removes the stroke and changes the paper.
+        let mut edited = opened.note.clone();
+        edited.strokes.clear();
+        edited.background.paper = Paper::Slate;
+        edited.id = "something else".into();
+        let new_stamp = save_in(&library, &saved.path, edited, &opened.stamp).unwrap();
+        assert_ne!(new_stamp, stamp);
+        assert_eq!(FileStamp::of(&saved.path).unwrap(), new_stamp);
+
+        let after = library.read(&saved.path).unwrap().file;
+        assert!(after.note.strokes.is_empty());
+        assert_eq!(after.note.background.paper, Paper::Slate);
+        assert_eq!(after.note.id, file.note.id, "the id never changes");
+        assert!(after.note.modified >= file.note.modified);
+        assert_eq!(after.original, file.original);
+        assert_eq!(after.audio, file.audio);
+        assert_eq!(after.text, file.text);
+        assert_eq!(after.background, file.background);
+        assert_eq!(after.unknown_fields, file.unknown_fields);
+        assert_eq!(after.unknown_members, file.unknown_members);
+        assert!(after.thumbnail.is_some());
+        assert_ne!(after.thumbnail, old_thumbnail, "thumbnail made again");
+
+        // A second save with the old stamp is a conflict and changes nothing.
+        let error = save_in(&library, &saved.path, opened.note.clone(), &opened.stamp).unwrap_err();
+        assert_eq!(error.code(), "noteConflict");
+        assert_eq!(FileStamp::of(&saved.path).unwrap(), new_stamp);
+    }
+
+    #[test]
+    fn invalid_notes_are_not_saved() {
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Essai");
+        let opened = open_in(&library, &saved.path).unwrap();
+        let mut broken = opened.note.clone();
+        broken.layers.clear();
+        let error = save_in(&library, &saved.path, broken, &opened.stamp).unwrap_err();
+        assert_eq!(error.code(), "noteInvalid");
+        assert_eq!(FileStamp::of(&saved.path).unwrap(), opened.stamp);
+
+        let outside = tempfile::tempdir().unwrap();
+        let elsewhere = outside.path().join("2026-10-24 X.ardoise");
+        assert_eq!(
+            open_in(&library, &elsewhere).unwrap_err().code(),
+            "notInLibrary"
+        );
+    }
+
+    #[test]
+    fn renders_backgrounds_at_the_requested_width() {
+        let background = Background {
+            paper: Paper::Cream,
+            template: Template::Seyes,
+            texture: true,
+        };
+        let url = render_background_url(A4_LANDSCAPE, background, 1200);
+        let image = ardoise_render::decode_png(&png_of(&url)).unwrap();
+        assert_eq!(image.width, 1200);
+        assert_eq!(
+            image.height,
+            (1200.0f32 * 21_600.0 / 29_700.0).round() as u32
+        );
+        // Cream, not white.
+        let [r, g, b, _] = image.pixel(5, 5).unwrap();
+        assert!(r > b && g > b, "{r} {g} {b}");
+
+        // Capped on both sides.
+        let huge = background_png(A4_PORTRAIT, background, 100_000).unwrap();
+        let image = ardoise_render::decode_png(&huge).unwrap();
+        assert!(image.width <= MAX_BACKGROUND_PX && image.height <= MAX_BACKGROUND_PX);
+        assert_eq!(image.height, MAX_BACKGROUND_PX);
+
+        let error = background_png(
+            PageSize {
+                width: 0,
+                height: 10,
+            },
+            background,
+            100,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "noteInvalid");
+    }
+
+    fn render_background_url(page: PageSize, background: Background, width: u32) -> String {
+        tauri::async_runtime::block_on(render_background(page, background, width)).unwrap()
     }
 }

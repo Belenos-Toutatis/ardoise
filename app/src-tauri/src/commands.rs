@@ -7,6 +7,8 @@ use ardoise_core::settings::{Language, Settings, SettingsError, SettingsStore, T
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
+use crate::watcher::LibraryWatch;
+
 use crate::AppContext;
 use crate::selftest::{self, UiReport};
 
@@ -25,6 +27,12 @@ impl CommandError {
             message: message.to_string(),
         }
     }
+
+    /// The error's stable identifier (`errorCodes.*`).
+    #[cfg(test)]
+    pub(crate) fn code(&self) -> &'static str {
+        self.code
+    }
 }
 
 impl From<SettingsError> for CommandError {
@@ -33,7 +41,7 @@ impl From<SettingsError> for CommandError {
     }
 }
 
-type CommandResult<T> = Result<T, CommandError>;
+pub(crate) type CommandResult<T> = Result<T, CommandError>;
 
 /// Everything the interface needs to draw its first screen.
 #[derive(Debug, Serialize)]
@@ -161,13 +169,21 @@ pub fn inspect_library(path: String) -> CommandResult<LibraryInspection> {
     })
 }
 
-/// Makes `path` this computer's library, creating `_ardoise/` there if needed.
+/// Makes `path` this computer's library, creating `_ardoise/` there if needed, and watches
+/// it from then on.
 #[tauri::command]
-pub fn set_library(context: State<'_, AppContext>, path: String) -> CommandResult<AppState> {
-    choose_library(&context, &path)
+pub fn set_library(
+    app: AppHandle,
+    context: State<'_, AppContext>,
+    watch: State<'_, LibraryWatch>,
+    path: String,
+) -> CommandResult<AppState> {
+    let state = choose_library(&context, &path)?;
+    watch.follow(&app, state.library());
+    Ok(state)
 }
 
-fn choose_library(context: &AppContext, path: &str) -> CommandResult<AppState> {
+pub(crate) fn choose_library(context: &AppContext, path: &str) -> CommandResult<AppState> {
     let folder = existing_folder(path)?;
     library::init(folder).map_err(|e| CommandError::new("libraryInit", e))?;
     let machine = store(context)?.machine().to_owned();
