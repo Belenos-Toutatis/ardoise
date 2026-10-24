@@ -1,8 +1,38 @@
-//! The user's library folder: an ordinary folder of notes plus a hidden `.ardoise/` folder.
+//! The user's library folder: an ordinary folder of notes plus a hidden `.ardoise/` folder
+//! (SPEC §3.2, §3.4).
+//!
+//! - One note = one `YYYY-MM-DD Title.ardoise` file; sub-folders are binders.
+//! - Every write is atomic ([`crate::fsutil`]); renames and moves never replace a file.
+//! - Saving checks the file's modification time and size against what was loaded: a note
+//!   changed meanwhile on another computer (and synced by Nextcloud) is never overwritten
+//!   silently ([`LibraryError::Conflict`]).
+//! - No lock file, no database: the folder can be synced by any tool.
 
+mod conflicts;
+mod names;
+mod trash;
+mod walk;
+mod watch;
+
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+
+use crate::format::{self, FormatError, NoteFile};
+use crate::fsutil::{rename_no_replace, write_atomic_metadata, write_atomic_new};
+
+pub use conflicts::{ConflictKind, ConflictName, parse_conflict_name};
+pub use names::{
+    MAX_NAME_CHARS, NOTE_EXTENSION, invalid_name_reason, local_date, note_file_stem, sanitize_name,
+};
+pub use trash::{TRASH_DIR, TRASH_RETENTION, TrashItem};
+pub use watch::{LibraryChange, LibraryWatcher};
+
+use names::{MAX_SUFFIX, exists, note_path, note_stem, stem_matches, with_suffix};
 
 /// Hidden folder that marks a library and holds its shared data (tablet registration,
 /// diagnostics, trash).
@@ -25,34 +55,625 @@ pub fn init(folder: &Path) -> io::Result<()> {
     fs::create_dir_all(folder.join(META_DIR))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Modification time and size of a note file, as last seen. Two different stamps mean the
+/// file was rewritten in between (by this app, another program, or Nextcloud bringing a
+/// version saved on another computer, which keeps that computer's modification time).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FileStamp {
+    pub modified: SystemTime,
+    pub len: u64,
+}
 
-    #[test]
-    fn init_creates_marker_and_keeps_content() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("note.txt"), "keep me").unwrap();
-        assert!(!is_library(dir.path()));
-
-        init(dir.path()).unwrap();
-        assert!(is_library(dir.path()));
-        assert_eq!(
-            fs::read_to_string(dir.path().join("note.txt")).unwrap(),
-            "keep me"
-        );
-
-        // Initialising twice is harmless.
-        init(dir.path()).unwrap();
-        assert!(is_library(dir.path()));
+impl FileStamp {
+    /// Stamp of a file's metadata.
+    pub fn from_metadata(metadata: &fs::Metadata) -> io::Result<FileStamp> {
+        Ok(FileStamp {
+            modified: metadata.modified()?,
+            len: metadata.len(),
+        })
     }
 
-    #[test]
-    fn init_refuses_missing_folder() {
-        let dir = tempfile::tempdir().unwrap();
-        let missing = dir.path().join("missing");
-        let err = init(&missing).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::NotFound);
-        assert!(!missing.exists());
+    /// Current stamp of the file at `path`.
+    pub fn of(path: &Path) -> io::Result<FileStamp> {
+        FileStamp::from_metadata(&fs::metadata(path)?)
     }
 }
+
+/// Failure of a library operation.
+#[derive(Debug, thiserror::Error)]
+pub enum LibraryError {
+    /// The folder is not a library (no `.ardoise/` folder).
+    #[error("{} is not an Ardoise library", path.display())]
+    NotALibrary {
+        /// Folder given.
+        path: PathBuf,
+    },
+    /// A file or folder could not be read or written.
+    #[error("cannot access {}: {source}", path.display())]
+    Io {
+        /// Path involved.
+        path: PathBuf,
+        /// Underlying error.
+        source: io::Error,
+    },
+    /// A note file cannot be read or written.
+    #[error("{}: {source}", path.display())]
+    Format {
+        /// Note file involved.
+        path: PathBuf,
+        /// What is wrong with it.
+        #[source]
+        source: FormatError,
+    },
+    /// The note changed on disk since it was loaded (probably saved on another computer and
+    /// synced): it was left untouched.
+    #[error(
+        "{} was changed elsewhere (probably on another computer) since it was opened; it was not overwritten",
+        path.display()
+    )]
+    Conflict {
+        /// Note file involved.
+        path: PathBuf,
+    },
+    /// The note no longer exists (deleted or moved, here or on another computer).
+    #[error("{} no longer exists", path.display())]
+    NotFound {
+        /// Path that was expected.
+        path: PathBuf,
+    },
+    /// The path is not a note file inside this library.
+    #[error("{} is not a note of this library", path.display())]
+    NotInLibrary {
+        /// Path given.
+        path: PathBuf,
+    },
+    /// A binder or file name cannot be used.
+    #[error("invalid name {name:?}: {reason}")]
+    InvalidName {
+        /// Name given.
+        name: String,
+        /// Why it is refused.
+        reason: &'static str,
+    },
+    /// Every ` (n)` variant of a name is taken.
+    #[error("no free file name for {}", path.display())]
+    NoFreeName {
+        /// First name tried.
+        path: PathBuf,
+    },
+    /// No trash item has this identifier.
+    #[error("{id} is not in the trash")]
+    NotInTrash {
+        /// Identifier given.
+        id: String,
+    },
+    /// The folder cannot be watched.
+    #[error("cannot watch {}: {message}", path.display())]
+    Watch {
+        /// Folder involved.
+        path: PathBuf,
+        /// Diagnostic from the system.
+        message: String,
+    },
+}
+
+impl LibraryError {
+    /// Stable identifier for the interface (`errorCodes.*`).
+    pub fn code(&self) -> &'static str {
+        match self {
+            LibraryError::NotALibrary { .. } => "notALibrary",
+            LibraryError::Io { .. } => "libraryAccess",
+            LibraryError::Format { source, .. } => source.code(),
+            LibraryError::Conflict { .. } => "noteConflict",
+            LibraryError::NotFound { .. } => "noteNotFound",
+            LibraryError::NotInLibrary { .. } => "notInLibrary",
+            LibraryError::InvalidName { .. } => "invalidName",
+            LibraryError::NoFreeName { .. } => "noFreeName",
+            LibraryError::NotInTrash { .. } => "notInTrash",
+            LibraryError::Watch { .. } => "libraryWatch",
+        }
+    }
+}
+
+fn io_error(path: &Path) -> impl FnOnce(io::Error) -> LibraryError + '_ {
+    move |source| LibraryError::Io {
+        path: path.to_path_buf(),
+        source,
+    }
+}
+
+fn format_error(path: &Path) -> impl FnOnce(FormatError) -> LibraryError + '_ {
+    move |source| LibraryError::Format {
+        path: path.to_path_buf(),
+        source,
+    }
+}
+
+/// Current time in Unix milliseconds.
+pub(crate) fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
+/// One note as listed: its `note.json` metadata and where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteEntry {
+    pub path: PathBuf,
+    /// Folder relative to the library root; empty for the root itself.
+    pub binder: PathBuf,
+    pub file_name: String,
+    pub id: String,
+    pub title: String,
+    /// Unix milliseconds.
+    pub created: i64,
+    /// Unix milliseconds.
+    pub modified: i64,
+    pub tags: Vec<String>,
+    /// To pass back to [`Library::save`].
+    pub stamp: FileStamp,
+    /// Set when the file is a sync client's conflict copy.
+    pub conflict: Option<ConflictName>,
+}
+
+/// A file that could not be listed (damaged, made by a newer version, unreadable folder…).
+#[derive(Debug)]
+pub struct ListProblem {
+    pub path: PathBuf,
+    pub error: LibraryError,
+}
+
+/// Result of [`Library::list`]: the readable notes, and what could not be read.
+#[derive(Debug, Default)]
+pub struct Listing {
+    /// Sorted by path.
+    pub notes: Vec<NoteEntry>,
+    pub problems: Vec<ListProblem>,
+}
+
+/// A tag and how many listed notes carry it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagCount {
+    pub tag: String,
+    pub count: usize,
+}
+
+/// A conflict copy and the note it was copied from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictCopy {
+    pub copy: PathBuf,
+    pub original: PathBuf,
+    /// Whether the original file is still there.
+    pub original_exists: bool,
+    pub kind: ConflictKind,
+    pub marker: String,
+}
+
+impl Listing {
+    /// Every tag, case-insensitively merged (the first spelling met wins), sorted.
+    pub fn tags(&self) -> Vec<TagCount> {
+        let mut tags: BTreeMap<String, TagCount> = BTreeMap::new();
+        for tag in self.notes.iter().flat_map(|n| &n.tags) {
+            tags.entry(tag.to_lowercase())
+                .or_insert_with(|| TagCount {
+                    tag: tag.clone(),
+                    count: 0,
+                })
+                .count += 1;
+        }
+        tags.into_values().collect()
+    }
+
+    /// Every conflict copy, with the note it belongs to.
+    pub fn conflicts(&self) -> Vec<ConflictCopy> {
+        self.notes
+            .iter()
+            .filter_map(|entry| {
+                let conflict = entry.conflict.as_ref()?;
+                let original = entry.path.with_file_name(&conflict.original_name);
+                Some(ConflictCopy {
+                    copy: entry.path.clone(),
+                    original_exists: original.is_file(),
+                    original,
+                    kind: conflict.kind,
+                    marker: conflict.marker.clone(),
+                })
+            })
+            .collect()
+    }
+}
+
+/// Normalises tags: spaces trimmed and collapsed, empty ones dropped, case-insensitive
+/// duplicates removed (the first spelling is kept), order kept.
+pub fn normalize_tags(tags: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    tags.iter()
+        .map(|t| t.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|t| !t.is_empty() && seen.insert(t.to_lowercase()))
+        .collect()
+}
+
+/// A note read from the library, with the stamp to pass back when saving it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadedNote {
+    pub path: PathBuf,
+    pub file: NoteFile,
+    pub stamp: FileStamp,
+}
+
+/// Where a note was written, and its new stamp.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedNote {
+    pub path: PathBuf,
+    pub stamp: FileStamp,
+}
+
+/// A library folder.
+#[derive(Debug, Clone)]
+pub struct Library {
+    root: PathBuf,
+}
+
+impl Library {
+    /// Opens the library at `root`, which must have been [`init`]ialised.
+    pub fn open(root: impl Into<PathBuf>) -> Result<Library, LibraryError> {
+        let root = root.into();
+        if !is_library(&root) {
+            return Err(LibraryError::NotALibrary { path: root });
+        }
+        Ok(Library { root })
+    }
+
+    /// The library folder.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// `.ardoise/` inside the library.
+    pub fn meta_dir(&self) -> PathBuf {
+        self.root.join(META_DIR)
+    }
+
+    /// Absolute folder of a binder given relative to the root (empty = the root). Each part
+    /// must be a valid, visible folder name.
+    pub fn binder_dir(&self, binder: &Path) -> Result<PathBuf, LibraryError> {
+        let mut dir = self.root.clone();
+        for component in binder.components() {
+            let Component::Normal(part) = component else {
+                return Err(LibraryError::InvalidName {
+                    name: binder.display().to_string(),
+                    reason: "a binder is a path relative to the library, without ..",
+                });
+            };
+            let part = part.to_str().ok_or_else(|| LibraryError::InvalidName {
+                name: binder.display().to_string(),
+                reason: "the name is not valid Unicode",
+            })?;
+            if let Some(reason) = invalid_name_reason(part) {
+                return Err(LibraryError::InvalidName {
+                    name: part.to_owned(),
+                    reason,
+                });
+            }
+            dir.push(part);
+        }
+        Ok(dir)
+    }
+
+    /// Checks that `path` (absolute, or relative to the root) is a note file of this library,
+    /// outside hidden folders such as `.ardoise/`, and returns it absolute.
+    pub fn note_path(&self, path: &Path) -> Result<PathBuf, LibraryError> {
+        let not_in_library = || LibraryError::NotInLibrary {
+            path: path.to_path_buf(),
+        };
+        let relative = if path.is_absolute() {
+            path.strip_prefix(&self.root)
+                .map_err(|_| not_in_library())?
+        } else {
+            path
+        };
+        let mut parts = Vec::new();
+        for component in relative.components() {
+            match component {
+                Component::Normal(part) => {
+                    let part = part.to_str().ok_or_else(not_in_library)?;
+                    if walk::is_skipped_name(part) {
+                        return Err(not_in_library());
+                    }
+                    parts.push(part);
+                }
+                _ => return Err(not_in_library()),
+            }
+        }
+        match parts.last() {
+            Some(name) if names::is_note_file_name(name) => {}
+            _ => return Err(not_in_library()),
+        }
+        Ok(parts.iter().fold(self.root.clone(), |p, part| p.join(part)))
+    }
+
+    /// Lists every note, reading only each file's `note.json`. Files that cannot be read are
+    /// reported in [`Listing::problems`] and do not stop the listing.
+    pub fn list(&self) -> Listing {
+        let mut found = Vec::new();
+        let walk_problems = walk::walk(&self.root, |f| {
+            if let walk::Found::Note { path, binder } = f {
+                found.push((path, binder));
+            }
+        });
+        let mut listing = Listing::default();
+        for (path, error) in walk_problems {
+            listing.problems.push(ListProblem {
+                error: LibraryError::Io {
+                    path: path.clone(),
+                    source: error,
+                },
+                path,
+            });
+        }
+        for (path, binder) in found {
+            match read_entry(&path, binder) {
+                Ok(entry) => listing.notes.push(entry),
+                Err(error) => listing.problems.push(ListProblem { path, error }),
+            }
+        }
+        listing.notes.sort_by(|a, b| a.path.cmp(&b.path));
+        listing.problems.sort_by(|a, b| a.path.cmp(&b.path));
+        listing
+    }
+
+    /// Every binder (sub-folder), relative to the root, sorted; empty ones included.
+    pub fn binders(&self) -> Vec<PathBuf> {
+        let mut binders = Vec::new();
+        walk::walk(&self.root, |f| {
+            if let walk::Found::Binder(binder) = f {
+                binders.push(binder);
+            }
+        });
+        binders.sort();
+        binders
+    }
+
+    /// Creates a binder (and its parents) if needed, and returns its folder.
+    pub fn create_binder(&self, binder: &Path) -> Result<PathBuf, LibraryError> {
+        let dir = self.binder_dir(binder)?;
+        fs::create_dir_all(&dir).map_err(io_error(&dir))?;
+        Ok(dir)
+    }
+
+    /// Every tag of every note, with counts.
+    pub fn all_tags(&self) -> Vec<TagCount> {
+        self.list().tags()
+    }
+
+    /// Reads a whole note, with the stamp to pass back to [`save`](Self::save).
+    pub fn read(&self, path: &Path) -> Result<LoadedNote, LibraryError> {
+        let path = self.note_path(path)?;
+        // The stamp must describe the bytes read: retry if the file is replaced meanwhile.
+        let mut attempts = 0;
+        loop {
+            let before = self.stamp_of(&path)?;
+            let file = format::read_note(&path).map_err(format_error(&path))?;
+            let after = self.stamp_of(&path)?;
+            attempts += 1;
+            if before == after || attempts == 3 {
+                return Ok(LoadedNote {
+                    path,
+                    file,
+                    stamp: after,
+                });
+            }
+        }
+    }
+
+    fn stamp_of(&self, path: &Path) -> Result<FileStamp, LibraryError> {
+        FileStamp::of(path).map_err(|source| match source.kind() {
+            io::ErrorKind::NotFound => LibraryError::NotFound {
+                path: path.to_path_buf(),
+            },
+            _ => LibraryError::Io {
+                path: path.to_path_buf(),
+                source,
+            },
+        })
+    }
+
+    fn check_stamp(&self, path: &Path, expected: &FileStamp) -> Result<(), LibraryError> {
+        if self.stamp_of(path)? == *expected {
+            Ok(())
+        } else {
+            Err(LibraryError::Conflict {
+                path: path.to_path_buf(),
+            })
+        }
+    }
+
+    /// Creates a new note file `YYYY-MM-DD Title.ardoise` in `binder` (created if needed),
+    /// adding ` (2)`, ` (3)`… if the name is taken. Never replaces an existing file.
+    pub fn create(&self, binder: &Path, file: &NoteFile) -> Result<SavedNote, LibraryError> {
+        let dir = self.binder_dir(binder)?;
+        let stem = note_file_stem(file.note.created, &file.note.title);
+        let first = note_path(&dir, &stem);
+        // Encoded first: an invalid note leaves no trace, not even an empty binder.
+        let bytes = format::to_bytes(file).map_err(format_error(&first))?;
+        fs::create_dir_all(&dir).map_err(io_error(&dir))?;
+        for n in 1..=MAX_SUFFIX {
+            let path = note_path(&dir, &with_suffix(&stem, n));
+            if exists(&path) {
+                continue;
+            }
+            match write_atomic_new(&path, &bytes) {
+                Ok(metadata) => {
+                    let stamp = FileStamp::from_metadata(&metadata).map_err(io_error(&path))?;
+                    return Ok(SavedNote { path, stamp });
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(io_error(&path)(e)),
+            }
+        }
+        Err(LibraryError::NoFreeName { path: first })
+    }
+
+    /// Saves a note over its file, unless the file changed since it was loaded with
+    /// `expected` ([`LibraryError::Conflict`]) or has disappeared
+    /// ([`LibraryError::NotFound`]). Returns the new stamp. The file name is not changed:
+    /// use [`retitle`](Self::retitle) for that.
+    pub fn save(
+        &self,
+        path: &Path,
+        file: &NoteFile,
+        expected: &FileStamp,
+    ) -> Result<FileStamp, LibraryError> {
+        let path = self.note_path(path)?;
+        // Encode first, so that the check happens right before the write.
+        let bytes = format::to_bytes(file).map_err(format_error(&path))?;
+        self.check_stamp(&path, expected)?;
+        let metadata = write_atomic_metadata(&path, &bytes).map_err(io_error(&path))?;
+        FileStamp::from_metadata(&metadata).map_err(io_error(&path))
+    }
+
+    /// Reads a note, applies `change` to it, and writes it back if the file has not changed
+    /// meanwhile (nor since `expected`, when given).
+    fn rewrite(
+        &self,
+        path: &Path,
+        expected: Option<&FileStamp>,
+        change: impl FnOnce(&mut NoteFile),
+    ) -> Result<(NoteFile, FileStamp), LibraryError> {
+        let loaded = self.read(path)?;
+        if let Some(expected) = expected
+            && loaded.stamp != *expected
+        {
+            return Err(LibraryError::Conflict { path: loaded.path });
+        }
+        let mut file = loaded.file;
+        change(&mut file);
+        file.note.modified = now_ms().max(file.note.modified);
+        let stamp = self.save(&loaded.path, &file, &loaded.stamp)?;
+        Ok((file, stamp))
+    }
+
+    /// Changes a note's title and renames its file to match (`YYYY-MM-DD New title.ardoise`,
+    /// with a ` (n)` suffix if taken).
+    pub fn retitle(
+        &self,
+        path: &Path,
+        title: &str,
+        expected: Option<&FileStamp>,
+    ) -> Result<SavedNote, LibraryError> {
+        let path = self.note_path(path)?;
+        let (file, stamp) = self.rewrite(&path, expected, |file| {
+            file.note.title = title.to_owned();
+        })?;
+        let desired = note_file_stem(file.note.created, &file.note.title);
+        let current_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        let current = note_stem(current_name);
+        if stem_matches(current, &desired) {
+            return Ok(SavedNote { path, stamp });
+        }
+        let dir = path.parent().unwrap_or(&self.root).to_path_buf();
+        let case_only = current.to_lowercase() == desired.to_lowercase();
+        let target = note_path(&dir, &desired);
+        let new_path = if case_only && rename_no_replace(&path, &target).is_ok() {
+            // Only the case changed: for Windows it is the same name, renamed in place.
+            target
+        } else {
+            self.move_unique(&path, &dir, &desired)?
+        };
+        Ok(SavedNote {
+            path: new_path,
+            stamp,
+        })
+    }
+
+    /// Moves `from` into `dir` as `stem.ardoise`, or `stem (n).ardoise` if taken. Never
+    /// replaces a file.
+    fn move_unique(&self, from: &Path, dir: &Path, stem: &str) -> Result<PathBuf, LibraryError> {
+        for n in 1..=MAX_SUFFIX {
+            let target = note_path(dir, &with_suffix(stem, n));
+            if exists(&target) {
+                continue;
+            }
+            match rename_no_replace(from, &target) {
+                Ok(()) => return Ok(target),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) if e.kind() == io::ErrorKind::NotFound && !exists(from) => {
+                    return Err(LibraryError::NotFound {
+                        path: from.to_path_buf(),
+                    });
+                }
+                Err(e) => return Err(io_error(from)(e)),
+            }
+        }
+        Err(LibraryError::NoFreeName {
+            path: note_path(dir, stem),
+        })
+    }
+
+    /// Moves a note to another binder (created if needed), keeping its file name (with a
+    /// ` (n)` suffix if taken there). The file is not rewritten, so its stamp stays valid.
+    pub fn move_to(&self, path: &Path, binder: &Path) -> Result<PathBuf, LibraryError> {
+        let path = self.note_path(path)?;
+        if !path.is_file() {
+            return Err(LibraryError::NotFound { path });
+        }
+        let dir = self.create_binder(binder)?;
+        // Windows folder names ignore case: "classe" is the binder "Classe".
+        let same_folder = path.parent().is_some_and(|parent| {
+            parent.to_string_lossy().to_lowercase() == dir.to_string_lossy().to_lowercase()
+        });
+        if same_folder {
+            return Ok(path);
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        self.move_unique(&path, &dir, note_stem(name))
+    }
+
+    /// Replaces a note's tags (normalised by [`normalize_tags`]). Returns the new stamp.
+    pub fn set_tags(
+        &self,
+        path: &Path,
+        tags: &[String],
+        expected: Option<&FileStamp>,
+    ) -> Result<FileStamp, LibraryError> {
+        let tags = normalize_tags(tags);
+        let (_, stamp) = self.rewrite(path, expected, |file| file.note.tags = tags)?;
+        Ok(stamp)
+    }
+}
+
+fn read_entry(path: &Path, binder: PathBuf) -> Result<NoteEntry, LibraryError> {
+    let stamp = FileStamp::of(path).map_err(io_error(path))?;
+    let header = format::read_header(path).map_err(format_error(path))?;
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_owned();
+    let note = header.note;
+    Ok(NoteEntry {
+        path: path.to_path_buf(),
+        binder,
+        conflict: parse_conflict_name(&file_name),
+        file_name,
+        id: note.id,
+        title: note.title,
+        created: note.created,
+        modified: note.modified,
+        tags: note.tags,
+        stamp,
+    })
+}
+
+#[cfg(test)]
+pub(crate) mod tests;

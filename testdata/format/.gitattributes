@@ -1,0 +1,2 @@
+# The committed .ardoise samples are ZIP archives: never convert line endings.
+*.ardoise binary
