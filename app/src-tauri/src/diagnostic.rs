@@ -180,6 +180,7 @@ impl Connector for Unavailable {
 /// A throwaway library for simulated runs, so that a simulated registration never replaces
 /// the real tablet's identity in the user's library.
 fn simulation_library() -> std::io::Result<PathBuf> {
+    remove_old_simulations();
     let dir = std::env::temp_dir().join(format!(
         "ardoise-simulation-{}-{}",
         std::process::id(),
@@ -188,6 +189,29 @@ fn simulation_library() -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(&dir)?;
     library::init(&dir)?;
     Ok(dir)
+}
+
+/// Simulated libraries are kept a day for inspection, then removed (best effort).
+fn remove_old_simulations() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > Duration::from_secs(24 * 3600));
+        if old
+            && entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("ardoise-simulation-")
+        {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 fn chrono_stamp() -> u128 {
@@ -321,7 +345,13 @@ pub fn diagnostic_start(
                 cancel: cancel.clone(),
             };
             let report = if options.simulated {
-                run_simulated(&library, options, language, cancel, Some(Box::new(operator)))
+                run_simulated(
+                    &library,
+                    options,
+                    language,
+                    cancel,
+                    Some(Box::new(operator)),
+                )
             } else {
                 run_ble(&library, options, language, cancel, operator)
             };

@@ -114,11 +114,31 @@
       "xRange": "X range",
       "yRange": "Y range",
       "pressureMax": "Maximum pressure",
-      "proximity": "Proximity",
+      "proximity": "Proximity (in / out)",
       "reconnections": "Reconnections",
       "result": "Result",
       "error": "Error",
-      "adapter": "Adapter"
+      "adapter": "Adapter",
+      "charging": "Charging"
+    },
+    "values": {
+      "simulatedAdapter": "none needed (simulated tablet)",
+      "existingRegistration": "existing registration",
+      "registeredNow": "registered now",
+      "registeredAgain": "registered again",
+      "savedInDeviceJson": "saved in .ardoise/device.json",
+      "yes": "yes",
+      "no": "no",
+      "reconnected": "connected again with the saved identity",
+      "noTabletFound": "no tablet found",
+      "needsPreviousStep": "needs the previous step",
+      "notConnected": "tablet not connected",
+      "noPenData": "no pen data received",
+      "missingReferencePages": "fewer pages than the reference pages asked for",
+      "pointsOutOfRange": "points outside the drawing area",
+      "clockNotSet": "the tablet clock could not be set",
+      "registrationRefused": "identity refused and tablet not seen in registration mode",
+      "noPagesFolder": "cannot save the pages (diagnostics folder unavailable): nothing was deleted"
     }
   },
   "errors": {

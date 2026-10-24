@@ -17,6 +17,7 @@ struct Labels {
     summary: fn(usize, usize, usize) -> String,
     step: fn(StepId) -> &'static str,
     detail: fn(&str) -> Option<&'static str>,
+    value: fn(&str) -> Option<&'static str>,
 }
 
 const FRENCH: Labels = Labels {
@@ -62,10 +63,35 @@ const FRENCH: Labels = Labels {
             "xRange" => "plage x",
             "yRange" => "plage y",
             "pressureMax" => "pression max",
-            "proximity" => "proximité",
+            "proximity" => "proximité (entrées / sorties)",
             "reconnections" => "reconnexions",
             "result" => "résultat",
             "error" => "erreur",
+            "charging" => "en charge",
+            _ => return None,
+        })
+    },
+    value: |key| {
+        Some(match key {
+            "simulatedAdapter" => "aucun (tablette simulée)",
+            "existingRegistration" => "enregistrement existant",
+            "registeredNow" => "enregistrée à l'instant",
+            "registeredAgain" => "enregistrée de nouveau",
+            "savedInDeviceJson" => "enregistrée dans .ardoise/device.json",
+            "yes" => "oui",
+            "no" => "non",
+            "reconnected" => "reconnectée avec l'identité enregistrée",
+            "noTabletFound" => "aucune tablette trouvée",
+            "needsPreviousStep" => "impossible sans l'étape précédente",
+            "notConnected" => "tablette non connectée",
+            "noPenData" => "aucun point reçu du stylet",
+            "missingReferencePages" => "moins de pages que les pages de référence demandées",
+            "pointsOutOfRange" => "points hors de la zone de dessin",
+            "clockNotSet" => "l'horloge de la tablette n'a pas pu être réglée",
+            "registrationRefused" => "identité refusée et tablette non vue en mode enregistrement",
+            "noPagesFolder" => {
+                "impossible d'enregistrer les pages (dossier des diagnostics inaccessible) : rien n'a été effacé"
+            }
             _ => return None,
         })
     },
@@ -114,10 +140,35 @@ const ENGLISH: Labels = Labels {
             "xRange" => "x range",
             "yRange" => "y range",
             "pressureMax" => "max pressure",
-            "proximity" => "proximity",
+            "proximity" => "proximity (in / out)",
             "reconnections" => "reconnections",
             "result" => "result",
             "error" => "error",
+            "charging" => "charging",
+            _ => return None,
+        })
+    },
+    value: |key| {
+        Some(match key {
+            "simulatedAdapter" => "none needed (simulated tablet)",
+            "existingRegistration" => "existing registration",
+            "registeredNow" => "registered now",
+            "registeredAgain" => "registered again",
+            "savedInDeviceJson" => "saved in .ardoise/device.json",
+            "yes" => "yes",
+            "no" => "no",
+            "reconnected" => "connected again with the saved identity",
+            "noTabletFound" => "no tablet found",
+            "needsPreviousStep" => "needs the previous step",
+            "notConnected" => "tablet not connected",
+            "noPenData" => "no pen data received",
+            "missingReferencePages" => "fewer pages than the reference pages asked for",
+            "pointsOutOfRange" => "points outside the drawing area",
+            "clockNotSet" => "the tablet clock could not be set",
+            "registrationRefused" => "identity refused and tablet not seen in registration mode",
+            "noPagesFolder" => {
+                "cannot save the pages (diagnostics folder unavailable): nothing was deleted"
+            }
             _ => return None,
         })
     },
@@ -147,7 +198,11 @@ pub fn render(report: &DiagnosticReport, language: &str) -> String {
         let _ = writeln!(text, "[{status}] {}", (labels.step)(outcome.step));
         for detail in &outcome.details {
             let key = (labels.detail)(&detail.key).unwrap_or(detail.key.as_str());
-            let _ = writeln!(text, "    {key} : {}", detail.value);
+            let value = match detail.value.strip_prefix('@') {
+                Some(key) => (labels.value)(key).unwrap_or(key).to_owned(),
+                None => detail.value.clone(),
+            };
+            let _ = writeln!(text, "    {key} : {value}");
         }
     }
     text.push('\n');
@@ -171,7 +226,7 @@ mod tests {
     use super::*;
     use crate::diagnostic::{Detail, StepOutcome};
 
-    const KEYS: [&str; 25] = [
+    const KEYS: [&str; 26] = [
         "adapter",
         "name",
         "address",
@@ -197,7 +252,52 @@ mod tests {
         "reconnections",
         "result",
         "error",
+        "charging",
     ];
+
+    /// Every `@key` value the runner writes, found in its source.
+    fn runner_values() -> Vec<String> {
+        let source = include_str!("runner.rs");
+        source
+            .split("\"@")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The interface shows the same keys and values: its catalogs must know them all.
+    #[test]
+    fn the_interface_translates_every_detail_key_and_value() {
+        for (language, catalog) in [
+            ("fr", include_str!("../../../app/ui/src/locales/fr.json")),
+            ("en", include_str!("../../../app/ui/src/locales/en.json")),
+        ] {
+            let catalog: serde_json::Value = serde_json::from_str(catalog).unwrap();
+            for key in KEYS {
+                assert!(
+                    catalog["diagnostic"]["details"][key].is_string(),
+                    "{language}: diagnostic.details.{key}"
+                );
+            }
+            for value in runner_values() {
+                assert!(
+                    catalog["diagnostic"]["values"][value.as_str()].is_string(),
+                    "{language}: diagnostic.values.{value}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_value_written_by_the_runner_is_translated_in_both_languages() {
+        let values = runner_values();
+        assert!(values.len() > 10, "{values:?}");
+        for value in values {
+            assert!((FRENCH.value)(&value).is_some(), "fr: {value}");
+            assert!((ENGLISH.value)(&value).is_some(), "en: {value}");
+        }
+    }
 
     #[test]
     fn every_detail_key_is_translated_in_both_languages() {

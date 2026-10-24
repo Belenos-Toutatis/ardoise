@@ -10,11 +10,17 @@ use crate::transport::{Advertisement, Channel, Transport, TransportError, Transp
 pub struct LoggingTransport {
     inner: Box<dyn Transport>,
     log: SharedLog,
+    /// The end of the link is already in the log.
+    closed: bool,
 }
 
 impl LoggingTransport {
     pub fn new(inner: Box<dyn Transport>, log: SharedLog) -> Self {
-        Self { inner, log }
+        Self {
+            inner,
+            log,
+            closed: false,
+        }
     }
 }
 
@@ -48,7 +54,10 @@ impl Transport for LoggingTransport {
             Ok(Some(TransportEvent::Notification { channel, data })) => {
                 lock(&self.log).rx(*channel, data, describe_received(*channel, data));
             }
-            Ok(Some(TransportEvent::Disconnected)) => lock(&self.log).event("disconnected"),
+            Ok(Some(TransportEvent::Disconnected)) => {
+                self.closed = true;
+                lock(&self.log).event("disconnected");
+            }
             Ok(None) => {}
             Err(error) => lock(&self.log).event(format!("receive failed: {error}")),
         }
@@ -56,7 +65,20 @@ impl Transport for LoggingTransport {
     }
 
     fn disconnect(&mut self) -> Result<(), TransportError> {
-        lock(&self.log).event("disconnect");
+        if !self.closed {
+            self.closed = true;
+            lock(&self.log).event("disconnect");
+        }
         self.inner.disconnect()
+    }
+}
+
+impl Drop for LoggingTransport {
+    fn drop(&mut self) {
+        // Dropping the transport closes the link: say so, so that connections stay delimited
+        // in the log (replay relies on it).
+        if !self.closed {
+            lock(&self.log).event("disconnect");
+        }
     }
 }

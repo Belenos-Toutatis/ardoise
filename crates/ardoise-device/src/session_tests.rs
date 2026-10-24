@@ -1,100 +1,7 @@
 //! Unit tests of [`Session`] against a scripted tablet, byte for byte (protocol.md).
 
 use super::*;
-use std::sync::Mutex;
-use std::sync::atomic::AtomicU64;
-use std::time::SystemTime;
-
-/// A clock that only moves when a wait times out.
-struct TestClock(AtomicU64);
-
-impl Clock for TestClock {
-    fn monotonic(&self) -> Duration {
-        Duration::from_millis(self.0.load(Ordering::SeqCst))
-    }
-    fn now(&self) -> SystemTime {
-        // 2026-10-24 12:00:00 UTC.
-        UNIX_EPOCH + Duration::from_secs(1_792_843_200) + self.monotonic()
-    }
-}
-
-fn hex(text: &str) -> Vec<u8> {
-    text.split_whitespace()
-        .map(|b| u8::from_str_radix(b, 16).unwrap())
-        .collect()
-}
-
-fn cmd(text: &str) -> TransportEvent {
-    TransportEvent::Notification {
-        channel: Channel::Command,
-        data: hex(text),
-    }
-}
-
-fn on(channel: Channel, data: Vec<u8>) -> TransportEvent {
-    TransportEvent::Notification { channel, data }
-}
-
-/// Plays the tablet: each host write must equal the next expected frame, which releases the
-/// scripted answers.
-struct Script {
-    peer: Advertisement,
-    clock: Arc<TestClock>,
-    steps: VecDeque<(Vec<u8>, Vec<TransportEvent>)>,
-    pending: VecDeque<TransportEvent>,
-    writes: Arc<Mutex<Vec<Vec<u8>>>>,
-}
-
-impl Transport for Script {
-    fn peer(&self) -> &Advertisement {
-        &self.peer
-    }
-    fn write(&mut self, frame: &[u8]) -> Result<(), TransportError> {
-        self.writes.lock().unwrap().push(frame.to_vec());
-        let (expected, answers) = self
-            .steps
-            .pop_front()
-            .unwrap_or_else(|| panic!("unexpected write {frame:02x?}"));
-        assert_eq!(frame, expected.as_slice(), "write");
-        self.pending.extend(answers);
-        Ok(())
-    }
-    fn recv(&mut self, timeout: Duration) -> Result<Option<TransportEvent>, TransportError> {
-        if let Some(event) = self.pending.pop_front() {
-            return Ok(Some(event));
-        }
-        let ms = u64::try_from(timeout.as_millis()).unwrap();
-        self.clock.0.fetch_add(ms, Ordering::SeqCst);
-        Ok(None)
-    }
-    fn disconnect(&mut self) -> Result<(), TransportError> {
-        Ok(())
-    }
-}
-
-struct Harness {
-    clock: Arc<TestClock>,
-    writes: Arc<Mutex<Vec<Vec<u8>>>>,
-}
-
-fn script(steps: Vec<(&str, Vec<TransportEvent>)>) -> (Box<dyn Transport>, Harness) {
-    let clock = Arc::new(TestClock(AtomicU64::new(0)));
-    let writes = Arc::new(Mutex::new(Vec::new()));
-    let transport = Script {
-        peer: Advertisement {
-            address: "E2:43:03:67:0E:01".into(),
-            name: Some("Bamboo Slate".into()),
-            rssi: None,
-            company_id: Some(0x4755),
-            manufacturer_data: vec![0; 7],
-        },
-        clock: clock.clone(),
-        steps: steps.into_iter().map(|(w, a)| (hex(w), a)).collect(),
-        pending: VecDeque::new(),
-        writes: writes.clone(),
-    };
-    (Box::new(transport), Harness { clock, writes })
-}
+use crate::testutil::*;
 
 const ID: HostId = HostId([0x89, 0xea, 0x78, 0x88, 0xff, 0xcb]);
 
@@ -327,23 +234,61 @@ fn a_page_is_not_deleted_when_it_cannot_be_saved() {
 }
 
 #[test]
-fn a_corrupted_transfer_is_detected_and_nothing_is_deleted() {
+fn a_corrupted_transfer_is_retried_once_then_reported_and_nothing_is_deleted() {
     let bytes = vec![1u8, 2, 3, 4];
-    let mut download = vec![cmd("c8 01 be")];
-    download.extend(page(&bytes[..3]));
-    download.push(end_marker(&bytes));
+    let corrupted = || {
+        let mut download = vec![cmd("c8 01 be")];
+        download.extend(page(&bytes[..3]));
+        download.push(end_marker(&bytes));
+        download
+    };
+    let info = || vec![cmd("cf 0a 04 00 00 00 26 10 24 09 30 00")];
+    // No `ca` in the script: a delete request would fail the test.
     let (mut session, _) = connected(vec![
         ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
         ("b1 01 01", vec![cmd("b3 01 00")]),
         ("c1 01 00", vec![cmd("c2 02 01 00")]),
-        ("cc 01 00", vec![cmd("cf 0a 04 00 00 00 26 10 24 09 30 00")]),
-        ("c3 01 00", download),
+        ("cc 01 00", info()),
+        ("c3 01 00", corrupted()),
+        ("cc 01 00", info()),
+        ("c3 01 00", corrupted()),
     ]);
     let result = session.sync(true, &mut |_, _, _| Ok(()));
     assert!(
         matches!(result, Err(DeviceError::CrcMismatch { .. })),
         "{result:?}"
     );
+}
+
+#[test]
+fn a_transfer_corrupted_once_succeeds_on_the_retry() {
+    let bytes = vec![1u8, 2, 3, 4];
+    let mut corrupted = vec![cmd("c8 01 be")];
+    corrupted.extend(page(&bytes[..3]));
+    corrupted.push(end_marker(&bytes));
+    let mut intact = vec![cmd("c8 01 be")];
+    intact.extend(page(&bytes));
+    intact.push(end_marker(&bytes));
+    let info = || vec![cmd("cf 0a 04 00 00 00 26 10 24 09 30 00")];
+    let (mut session, _) = connected(vec![
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 01 00")]),
+        ("cc 01 00", info()),
+        ("c3 01 00", corrupted),
+        ("cc 01 00", info()),
+        ("c3 01 00", intact),
+        ("ca 01 00", vec![cmd("b3 01 00")]),
+    ]);
+    let mut saved = Vec::new();
+    let summary = session
+        .sync(true, &mut |page, _, _| {
+            saved.push(page.bytes);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(summary.deleted, 1);
+    assert_eq!(saved, vec![bytes]);
 }
 
 #[test]
@@ -395,4 +340,50 @@ fn a_lost_link_is_reported() {
     assert_eq!(session.battery().err(), Some(DeviceError::Disconnected));
     assert!(!session.is_connected());
     assert_eq!(session.battery().err(), Some(DeviceError::Disconnected));
+}
+
+#[test]
+fn ignores_the_stray_chunk_after_a_name_without_line_feed() {
+    // Issue #117: the whole name without `0a`, then a stray `bc 09 00 "Bamboo " 0a`.
+    let (mut session, _) = connected(vec![(
+        "bb 01 00",
+        vec![
+            cmd("bc 12 42 61 6d 62 6f 6f 20 53 6c 61 74 65 20 53 6d 61 6c 6c"),
+            cmd("bc 09 00 42 61 6d 62 6f 6f 20 0a"),
+        ],
+    )]);
+    assert_eq!(session.name().unwrap(), "Bamboo Slate Small");
+}
+
+/// A link that is already gone: every write fails like the Bluetooth transport does.
+struct Gone(Advertisement);
+
+impl Transport for Gone {
+    fn peer(&self) -> &Advertisement {
+        &self.0
+    }
+    fn write(&mut self, _frame: &[u8]) -> Result<(), TransportError> {
+        Err(TransportError::NotConnected)
+    }
+    fn recv(&mut self, _timeout: Duration) -> Result<Option<TransportEvent>, TransportError> {
+        Ok(None)
+    }
+    fn disconnect(&mut self) -> Result<(), TransportError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_link_lost_before_writing_is_a_disconnection() {
+    let (_, harness) = script(vec![]);
+    let peer = Advertisement {
+        address: "E2:43:03:67:0E:01".into(),
+        name: None,
+        rssi: None,
+        company_id: Some(0x4755),
+        manufacturer_data: vec![0; 7],
+    };
+    let mut session = Session::new(Box::new(Gone(peer)), harness.clock);
+    assert_eq!(session.start_live().err(), Some(DeviceError::Disconnected));
+    assert!(!session.is_connected());
 }

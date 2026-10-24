@@ -17,4 +17,7 @@ mod runner;
 pub mod session;
 pub mod transport;
 
+#[cfg(test)]
+mod testutil;
+
 pub use report::render as render_report;
