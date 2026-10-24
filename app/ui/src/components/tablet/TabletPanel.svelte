@@ -31,6 +31,15 @@
   const device = $derived(status?.device ?? null);
   const sync = $derived(status?.sync ?? null);
   const lastSync = $derived(status?.lastSync ?? null);
+  /**
+   * Pages left on the tablet after a sync that deleted nothing: the tablet hands over only its
+   * oldest page, the next one is reachable once that one is deleted.
+   */
+  const pagesWaiting = $derived(
+    lastSync && lastSync.deleted === 0 && status?.options.deleteAfterImport === false && connection !== 'syncing'
+      ? (device?.storedPages ?? 0)
+      : 0,
+  );
   const name = $derived(device?.name ?? registered?.name ?? '');
   const canSync = $derived(connection === 'connected' || connection === 'searching' || connection === 'connecting');
   const canLive = $derived(connection !== 'syncing' && connection !== 'registering');
@@ -188,6 +197,11 @@
           {t('tablet.sync.never')}
         {/if}
       </p>
+      {#if pagesWaiting > 1}
+        <p class="banner notice" role="status" data-slot="pages-waiting">
+          {t('tablet.sync.pagesWaiting', { count: pagesWaiting, option: t('tablet.options.deleteAfterImport') })}
+        </p>
+      {/if}
     </section>
 
     <section class="block" aria-labelledby="tablet-live">

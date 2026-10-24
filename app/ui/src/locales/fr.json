@@ -218,7 +218,8 @@
       "savedMany": "{count} notes enregistrées.",
       "deletedOne": "1 page effacée de la tablette.",
       "deletedMany": "{count} pages effacées de la tablette.",
-      "never": "Aucune synchronisation depuis le lancement d'Ardoise."
+      "never": "Aucune synchronisation depuis le lancement d'Ardoise.",
+      "pagesWaiting": "{count} pages attendent sur la tablette : seule la plus ancienne peut être lue tant qu'elle n'est pas effacée. Activez « {option} » pour les récupérer."
     },
     "live": {
       "open": "Mode direct",
@@ -229,7 +230,7 @@
       "autoSync": "Synchroniser automatiquement à la connexion",
       "autoSyncHint": "Les pages de la tablette sont reçues dès qu'elle est à portée.",
       "deleteAfterImport": "Effacer de la tablette après import",
-      "deleteAfterImportHint": "Une page n'est effacée de la tablette qu'après l'écriture et la vérification de son fichier dans la bibliothèque : si quelque chose échoue, elle reste sur la tablette.",
+      "deleteAfterImportHint": "Une page n'est effacée de la tablette qu'après l'écriture et la vérification de son fichier dans la bibliothèque : si quelque chose échoue, elle reste sur la tablette. La tablette ne livre que sa page la plus ancienne : sans cette option, les autres pages restent illisibles tant que la première n'est pas effacée.",
       "button": "Bouton de la tablette en mode direct",
       "buttonNewPage": "Nouvelle page",
       "buttonNewLayer": "Nouveau calque",
@@ -700,6 +701,12 @@
       "many": "{count} notes enregistrées"
     },
     "commandFailed": "La commande n'a pas abouti : {message}",
+    "saveFailed": {
+      "one": "Une page n'a pas pu être enregistrée dans la bibliothèque.",
+      "many": "{count} pages n'ont pas pu être enregistrées dans la bibliothèque.",
+      "item": "Page {page} : {message}",
+      "advice": "Les pages restent en mémoire : vérifiez le dossier de la bibliothèque (espace disque, droits d'écriture, synchronisation). À la fermeture d'Ardoise, une copie de secours est écrite dans le dossier local d'Ardoise. Ce message disparaît dès qu'un enregistrement réussit."
+    },
     "dismiss": "Fermer le message",
     "toolbar": "Outils du mode direct",
     "style": "Style d'écriture",
@@ -753,8 +760,8 @@
       "label": "Latence",
       "value": "{ms} ms",
       "none": "—",
-      "detail": "Médiane des {count} derniers points ; 95 % sous {p95} ms ; part de l'interface : {ui} ms.",
-      "hint": "Temps entre la réception d'un point de la tablette et son affichage (objectif : moins de 30 ms)."
+      "detail": "Médiane des {count} derniers points ; 95 % sous {p95} ms ; part de l'interface (de l'arrivée du lot à la fin du dessin) : {ui} ms.",
+      "hint": "Temps entre la réception du point par l'ordinateur et le début de l'image suivante, après son dessin ; l'affichage de l'écran lui-même n'est pas compris (objectif : moins de 30 ms)."
     },
     "keys": {
       "title": "Clavier",

@@ -218,7 +218,8 @@
       "savedMany": "{count} notes saved.",
       "deletedOne": "1 page deleted from the tablet.",
       "deletedMany": "{count} pages deleted from the tablet.",
-      "never": "No sync since Ardoise started."
+      "never": "No sync since Ardoise started.",
+      "pagesWaiting": "{count} pages are waiting on the tablet: only the oldest one can be read until it is deleted. Turn on \"{option}\" to get them."
     },
     "live": {
       "open": "Live mode",
@@ -229,7 +230,7 @@
       "autoSync": "Sync automatically when connecting",
       "autoSyncHint": "The tablet's pages are received as soon as it is in range.",
       "deleteAfterImport": "Delete from the tablet after import",
-      "deleteAfterImportHint": "A page is deleted from the tablet only once its file has been written to the library and checked: if anything fails, it stays on the tablet.",
+      "deleteAfterImportHint": "A page is deleted from the tablet only once its file has been written to the library and checked: if anything fails, it stays on the tablet. The tablet hands over only its oldest page: without this option, the other pages stay unreadable until the first one is deleted.",
       "button": "Tablet button in live mode",
       "buttonNewPage": "New page",
       "buttonNewLayer": "New layer",
@@ -700,6 +701,12 @@
       "many": "{count} notes saved"
     },
     "commandFailed": "The command did not go through: {message}",
+    "saveFailed": {
+      "one": "A page could not be saved to the library.",
+      "many": "{count} pages could not be saved to the library.",
+      "item": "Page {page}: {message}",
+      "advice": "The pages stay in memory: check the library folder (disk space, write permission, sync). When Ardoise closes, a backup copy is written to Ardoise's local folder. This message goes away as soon as a save succeeds."
+    },
     "dismiss": "Dismiss the message",
     "toolbar": "Live mode tools",
     "style": "Writing style",
@@ -753,8 +760,8 @@
       "label": "Latency",
       "value": "{ms} ms",
       "none": "—",
-      "detail": "Median of the last {count} points; 95 % under {p95} ms; interface share: {ui} ms.",
-      "hint": "Time from the receipt of a point from the tablet to its display (target: under 30 ms)."
+      "detail": "Median of the last {count} points; 95 % under {p95} ms; interface share (from the batch's arrival to the end of the drawing): {ui} ms.",
+      "hint": "Time from the computer receiving a point to the start of the next frame after it was drawn; the screen's own scan-out is not included (target: under 30 ms)."
     },
     "keys": {
       "title": "Keyboard",

@@ -198,6 +198,27 @@ describe('live state: pages, layers, clearing', () => {
     live.receive(batch({ type: 'saved', paths: ['c'] }));
     expect(live.saved).toEqual(['a', 'b', 'c']);
   });
+
+  it('keeps the pages that could not be written until a save succeeds', () => {
+    const live = ready();
+    expect(live.saveErrors).toEqual([]);
+    live.receive(batch({ type: 'saveFailed', pageIndex: 1, message: 'disk full' }));
+    live.receive(batch({ type: 'saveFailed', pageIndex: 0, message: 'access denied' }));
+    expect(live.saveErrors).toEqual([
+      { pageIndex: 0, message: 'access denied' },
+      { pageIndex: 1, message: 'disk full' },
+    ]);
+    // The same page failing again shows its latest message, once.
+    live.receive(batch({ type: 'saveFailed', pageIndex: 1, message: 'disk still full' }));
+    expect(live.saveErrors).toHaveLength(2);
+    expect(live.saveErrors[1]).toEqual({ pageIndex: 1, message: 'disk still full' });
+    // Other events, even a snapshot, do not clear it.
+    live.receive(batch({ type: 'hover', x: 1, y: 1 }, { type: 'snapshot', snapshot: snapshot() }));
+    expect(live.saveErrors).toHaveLength(2);
+    // A successful save means that everything is written.
+    live.receive(batch({ type: 'saved', paths: ['a'] }));
+    expect(live.saveErrors).toEqual([]);
+  });
 });
 
 describe('live state: hover, view, presentation', () => {

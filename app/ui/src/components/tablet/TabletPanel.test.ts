@@ -194,6 +194,61 @@ describe('tablet panel: sync', () => {
     expect(q('[data-slot="last-sync"]')!.textContent).not.toContain('effacée');
   });
 
+  it('says that only the oldest page can be read when nothing is deleted', async () => {
+    const { q, action, click } = await render();
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, hand: 'right', button: 'newPage' });
+    await settle();
+    // Before any sync, nothing was read: no message yet.
+    expect(q('[data-slot="pages-waiting"]')).toBeNull();
+
+    await click(action('sync'));
+    await beat(3);
+    expect(q('[data-slot="last-sync"]')!.textContent).toContain('1 note enregistrée.');
+    expect(q('[data-slot="stored-pages"]')!.textContent).toBe('3');
+    const waiting = q('[data-slot="pages-waiting"]')!;
+    expect(waiting.textContent).toContain('3 pages attendent sur la tablette');
+    expect(waiting.textContent).toContain("seule la plus ancienne peut être lue tant qu'elle n'est pas effacée");
+    expect(waiting.textContent).toContain('« Effacer de la tablette après import »');
+
+    // The next sync finds nothing new, and the message stays.
+    await click(action('sync'));
+    await beat(3);
+    expect(q('[data-slot="last-sync"]')!.textContent).toContain('Aucune nouvelle page.');
+    expect(q('[data-slot="pages-waiting"]')).not.toBeNull();
+
+    // Turning deletion on hides it: the next sync gets the pages.
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, hand: 'right', button: 'newPage' });
+    await settle();
+    expect(q('[data-slot="pages-waiting"]')).toBeNull();
+  });
+
+  it('says nothing about waiting pages when at most one is left, or when pages are deleted', async () => {
+    const { q, action, click } = await render();
+    await click(action('sync'));
+    await beat(4);
+    expect(q('[data-slot="pages-waiting"]')).toBeNull();
+
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, hand: 'right', button: 'newPage' });
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a'], deleted: 0 }, device: { ...tablet.status!.device!, storedPages: 1 } });
+    await settle();
+    expect(q('[data-slot="pages-waiting"]')).toBeNull();
+    mockTabletPatch({ device: { ...tablet.status!.device!, storedPages: 2 } });
+    await settle();
+    expect(q('[data-slot="pages-waiting"]')!.textContent).toContain('2 pages attendent');
+  });
+
+  it('says it in English too', async () => {
+    const { q, action, click } = await render({ locale: 'en' });
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, hand: 'right', button: 'newPage' });
+    await settle();
+    await click(action('sync'));
+    await beat(3);
+    const text = q('[data-slot="pages-waiting"]')!.textContent!;
+    expect(text).toContain('3 pages are waiting on the tablet');
+    expect(text).toContain('only the oldest one can be read until it is deleted');
+    expect(text).toContain('"Delete from the tablet after import"');
+  });
+
   it('waits for the tablet when it is not connected yet', async () => {
     mockTablet.inRange = false;
     const { q, action, click } = await render({ connect: false });
@@ -242,6 +297,8 @@ describe('tablet panel: options', () => {
     expect(option(target, 'deleteAfterImport').getAttribute('role')).toBe('switch');
     const hint = target.querySelector(`#${option(target, 'deleteAfterImport').getAttribute('aria-describedby')}`);
     expect(hint?.textContent).toContain('si quelque chose échoue, elle reste sur la tablette');
+    // The protocol only hands over the oldest page: the option is how the others become readable.
+    expect(hint?.textContent).toContain('ne livre que sa page la plus ancienne');
   });
 
   it('saves each option as soon as it changes', async () => {
@@ -275,6 +332,7 @@ describe('tablet panel: options', () => {
     const { target } = await render({ locale: 'en' });
     expect(target.textContent).toContain('Delete from the tablet after import');
     expect(target.textContent).toContain('only once its file has been written to the library and checked');
+    expect(target.textContent).toContain('hands over only its oldest page');
     expect(target.textContent).toContain('Tablet button in live mode');
     expect(target.textContent).toContain('Left-handed');
   });

@@ -267,7 +267,9 @@ function writeNote(s: Sim, page: number): string {
 function startSync(s: Sim): void {
   const run = { cancelled: false };
   s.sync = run;
-  const pages = [...s.stored];
+  // Like the real tablet: it hands over its oldest page only, the next one is reachable once
+  // that one is deleted. Without deletion a sync therefore reads one page.
+  const pages = s.status.options.deleteAfterImport ? [...s.stored] : s.stored.slice(0, 1);
   const saved: string[] = [];
   let deleted = 0;
   update(s, {

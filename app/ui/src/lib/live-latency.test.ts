@@ -5,11 +5,14 @@
  * already holding 150 strokes, the projected area moved now and then) go through the same code
  * as the windows (`LiveState.receive`, `buildScene`, `LiveRenderer.paint` with the real
  * WebAssembly outlines) onto a fake 2D context, one frame right after each batch. The time from
- * a batch's arrival to the end of its drawing is printed (count, median, p95).
+ * a batch's arrival to the end of its drawing (the "interface part") is printed (count, median,
+ * p95).
  *
- * What this does not measure: the wait for the next display frame (up to 16.7 ms at 60 Hz), the
- * browser's own rasterisation, and the IPC. The end-to-end figure comes from the real window on
- * Windows (`window.__ardoiseLatency`, e2e journey).
+ * What this does not measure, and so does not claim: the end-to-end latency. That one runs from
+ * Rust's receipt of the point to the start of the animation frame after the one that drew it,
+ * so it also holds the Rust part, the IPC, the wait for the next display frame (up to 16.7 ms
+ * at 60 Hz) and the browser's own rasterisation. It comes from the real window on Windows
+ * (`window.__ardoiseLatency`, e2e journey and H2).
  */
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -65,6 +68,7 @@ describe('live latency, interface part', () => {
     let frames = 0;
     const frame = () => {
       renderer.paint(screen, buildScene(live, options));
+      // The end of the drawing, as LiveCanvas takes it (`presented` needs a real next frame).
       recorder.painted(live.takeUnpainted(), wallClock());
       screen.reset();
       frames += 1;
@@ -104,10 +108,12 @@ describe('live latency, interface part', () => {
     const median = recorder.uiMedian() ?? Number.NaN;
     const p95 = recorder.uiP95() ?? Number.NaN;
     console.log(
-      `live latency, interface part: ${ui.length} points in ${frames} frames, median ${median.toFixed(3)} ms, ` +
-        `p95 ${p95.toFixed(3)} ms; with the simulated Rust part: median ${(recorder.median() ?? Number.NaN).toFixed(3)} ms`,
+      `live latency, interface part only (batch arrival to end of drawing; no Rust part, no wait for the display): ` +
+        `${ui.length} points in ${frames} frames, median ${median.toFixed(3)} ms, p95 ${p95.toFixed(3)} ms`,
     );
     expect(ui.length).toBeGreaterThan(300);
+    // Nothing end to end is claimed here: no frame start was ever reported.
+    expect(recorder.samples()).toEqual([]);
     expect(median).toBeLessThan(30);
     // Every point was painted by the frame after its batch.
     expect(live.takeUnpainted()).toEqual([]);

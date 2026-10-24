@@ -136,7 +136,11 @@ Ce test vérifie le travail courant : la tablette se connecte toute seule, ses p
    - la grille de la bibliothèque contient **3 nouvelles notes** (sans titre, avec la date du jour) : les ouvrir et vérifier que les dessins sont reconnaissables, **à l'endroit**, et que la pression se voit (traits de plus en plus épais) ;
    - un nouveau clic sur **Synchroniser maintenant** répond « Aucune nouvelle page. »
 6. **Annulation** : dessiner 3 nouvelles pages (bouton après chacune), reconnecter la tablette, et cliquer sur **Annuler** pendant la synchro. Les pages déjà reçues restent des notes, les autres restent sur la tablette (**Pages en mémoire** le montre) ; un clic sur **Synchroniser maintenant** récupère le reste, sans doublon.
-7. **Sans effacement** : décocher **Effacer de la tablette après import**, dessiner 1 page, synchroniser : la note apparaît et **Pages en mémoire : 1**. Synchroniser encore : aucune note en double. Recocher l'option et synchroniser : « 1 page effacée de la tablette », **Pages en mémoire : 0**.
+7. **Sans effacement** : la tablette ne livre que sa page **la plus ancienne** ; la suivante n'est accessible qu'une fois la première effacée. Sans l'option d'effacement, **une seule page est donc lisible à la fois**. À vérifier :
+   - décocher **Effacer de la tablette après import** : l'astuce sous l'option doit le dire (« La tablette ne livre que sa page la plus ancienne… ») ;
+   - dessiner **2 pages** (bouton après chacune), reconnecter la tablette, synchroniser : **une seule** note apparaît (« 1 note enregistrée. »), **Pages en mémoire : 2**, et le panneau affiche le message « 2 pages attendent sur la tablette : seule la plus ancienne peut être lue tant qu'elle n'est pas effacée. Activez « Effacer de la tablette après import » pour les récupérer. » ;
+   - synchroniser encore : « Aucune nouvelle page. » et aucune note en double (c'est normal : la plus ancienne page est toujours la même) ;
+   - recocher l'option et synchroniser : la seconde page est enfin lue (une nouvelle note, sans copie en double de la première) et les deux pages sont effacées de la tablette ; **Pages en mémoire : 0** et le message d'attente disparaît. **Noter les textes exacts** affichés si ce n'est pas ce qui est décrit ici.
 8. Fermer Ardoise puis la relancer : la tablette se reconnecte d'elle-même quand on appuie sur son bouton. Noter si c'est plus rapide ou plus lent que la première fois.
 
 #### C. Réglages de la tablette
@@ -165,7 +169,7 @@ Dans le panneau, section **Réglages de la tablette** (la tablette doit être «
 
    Refaire l'essai en **maintenant** le bouton 2 secondes (sans aller jusqu'à 6 secondes), puis en changeant l'option **Bouton de la tablette en mode direct** (Nouvelle page / Nouveau calque).
 
-   Si Ardoise reconnaît le bouton, il fait ce que l'option indique. Sinon, les notifications reçues de la tablette sont notées dans le journal de diagnostic avec la mention `unclassified during live mode`, ce qui donnera la vraie signature du bouton ; mais ce journal n'est écrit dans `_ardoise\diagnostics\` qu'en cas d'erreur, d'où l'importance de **noter à la main** ce qui a été observé.
+   Si Ardoise reconnaît le bouton, il fait ce que l'option indique. Sinon, les notifications reçues de la tablette sont notées dans le journal de diagnostic avec la mention `unclassified during live mode`, ce qui donnera la vraie signature du bouton ; mais ce journal n'est pas réservé aux erreurs : une session de mode direct qui a reçu une notification inconnue est écrite dans `_ardoise\diagnostics\` **à l'arrêt du mode direct** (étape 6, bouton **Arrêter**), ou à la perte de la liaison. Il faut donc terminer proprement le mode direct après cet essai. Noter quand même **à la main** ce qui a été observé.
 6. Fermer le mode direct (bouton **Arrêter**). Vérifier que la session est devenue une **note** de la bibliothèque (une par page dessinée), dont le contenu est celui qu'on a vu à l'écran.
 7. **Reprise après coupure** : relancer le mode direct et dessiner, puis éloigner la tablette de l'ordinateur (autre pièce) pendant 10 secondes, puis la rapprocher. L'état « reconnexion » apparaît-il, puis le tracé reprend-il sans qu'il faille tout relancer ? Noter ce qui se passe.
 
@@ -187,10 +191,17 @@ Dans le panneau, section **Réglages de la tablette** (la tablette doit être «
 11. **Débrancher le projecteur pendant la présentation** (ou choisir Win + P → *Écran du PC uniquement*) : **noter ce qui arrive** à la fenêtre de présentation (elle disparaît ? elle reste sur le portable ? Ardoise plante ?), à la fenêtre de commande et au tracé en cours. Le mode direct continue-t-il d'enregistrer ? Rebrancher, refaire Win + P → *Étendre* et vérifier qu'on peut projeter de nouveau.
 12. Arrêter le mode direct. Vérifier que les pages dessinées pendant la présentation sont des notes de la bibliothèque.
 
+#### F. Tester la tablette pendant que le service tourne
+
+Le service de la tablette (connexion automatique, synchronisation, mode direct) tourne en permanence. Il est **mis en pause** pendant le test réel (**Tester la tablette…**, en bas du panneau) pour ne pas se disputer la liaison Bluetooth, puis **reprend** à la fin du test.
+
+1. Tablette « Connectée » et service actif, cliquer sur **Tester la tablette…** et lancer le test. Pendant le test, ne pas demander de synchronisation ni de mode direct. Noter si le bloc **Tablette** de la barre latérale change d'état.
+2. Terminer le test (ou **Arrêter le test**). Sans relancer Ardoise, le service doit **reprendre** : le bloc **Tablette** repasse par « Recherche de la tablette… » puis « Connectée » (au besoin après un appui bref sur le bouton), et **Synchroniser maintenant** fonctionne de nouveau. Noter le temps de reprise, ou si la tablette reste injoignable jusqu'au redémarrage d'Ardoise.
+
 ### Ce qui revient par Nextcloud
 
 - Dans la bibliothèque : les notes synchronisées (parties B et C) et celles du mode direct (D et E), avec leur date. Elles permettent de juger la fidélité des tracés, la pression et l'orientation gaucher.
-- Dans `<bibliothèque>\_ardoise\diagnostics\` : les journaux (`AAAA-MM-JJ_HHMMSS.jsonl` et `.txt`) **écrits à chaque erreur** de la tablette, de la synchronisation ou du mode direct. Une session qui se passe bien n'en laisse pas : l'absence de fichier n'est pas un problème.
+- Dans `<bibliothèque>\_ardoise\diagnostics\` : les journaux (`AAAA-MM-JJ_HHMMSS.jsonl` et `.txt`) **écrits à chaque erreur** de la tablette, de la synchronisation ou du mode direct, **et à l'arrêt d'une session de mode direct qui a reçu une notification inconnue** (`unclassified during live mode` : le bouton de la tablette par exemple), même sans erreur. Une session sans erreur ni notification inconnue n'en laisse pas : l'absence de fichier n'est pas un problème, mais après l'étape D5 il y en a un si Ardoise n'a pas reconnu le bouton.
 - Dans `<bibliothèque>\_ardoise\device.json` : l'enregistrement de la tablette (nom compris), partagé par tous les PC.
 - Dans `ardoise.toml` (à côté de l'exe) : la section `[tablet]` (options) et le dernier écran de projection de ce PC.
 
@@ -203,10 +214,12 @@ Ce qui ne revient pas tout seul :
 | Le texte exact de toute erreur affichée (enregistrement, synchronisation, mode direct, projection) et ce qu'elle proposait de faire | A, B, D, E |
 | Le temps entre l'appui sur le bouton et « Connectée » ; si la synchro automatique a démarré seule | B3, B4, B8 |
 | Une page perdue, en double, tronquée ou à l'envers (droitier comme gaucher) | B, C3 |
+| Sans effacement : le message « N pages attendent sur la tablette… » apparaît-il, et la seconde page est-elle bien récupérée une fois l'option recochée | B7 |
 | L'écart affiché après « Mettre à l'heure » ; si le nom et la batterie (avec « en charge ») sont corrects | C |
 | **Ce qui se passe à l'appui sur le bouton de la tablette pendant le mode direct** (rien / nouvelle page / nouveau calque / déconnexion / couleur du voyant), appui bref et appui de 2 secondes | D5 |
 | L'impression de latence (*instantané*, *léger retard*, *retard gênant*), la latence médiane affichée, les sauts ou points manquants | D2 |
 | Ce qui arrive à la coupure puis à la reprise de la liaison en mode direct | D7 |
+| Si le service de la tablette reprend seul après « Tester la tablette… » ; le temps de reprise | F |
 | Si le projecteur affiche la présentation sans interface ; sa résolution ; les bandes noires | E3 |
 | Si le pointeur laser, le tableau noir, le zoom et les pages (clavier et bouton) fonctionnent à la projection | E4 à E8 |
 | Ce qui arrive quand on débranche le projecteur pendant la présentation | E11 |
