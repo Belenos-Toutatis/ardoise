@@ -170,28 +170,31 @@ describe('mock tablet: sync', () => {
     expect(mockLibrary().notes.size).toBe(5);
   });
 
-  it('keeps the pages on the tablet when deleting is off, and does not import them twice', async () => {
+  it('reads only the oldest page when deleting is off, and does not import it twice', async () => {
+    // The tablet hands over its oldest page only; the next one needs that one to be deleted.
     await connectedWithoutSync({ deleteAfterImport: false });
     await api.tabletSync();
     await beat(3);
     let status = await api.tabletStatus();
     expect(status.lastSync).toMatchObject({ deleted: 0 });
-    expect(status.lastSync?.saved).toHaveLength(3);
+    expect(status.lastSync?.saved).toHaveLength(1);
     expect(status.device?.storedPages).toBe(3);
+    expect(mockLibrary().notes.size).toBe(4);
 
     await api.tabletSync();
     await beat(3);
     status = await api.tabletStatus();
     expect(status.lastSync?.saved).toHaveLength(0);
-    expect(mockLibrary().notes.size).toBe(6);
+    expect(status.device?.storedPages).toBe(3);
+    expect(mockLibrary().notes.size).toBe(4);
 
-    // Turning deletion on empties the tablet, still without a second copy.
+    // Turning deletion on empties the tablet, without a second copy of the first page.
     await api.tabletSetOptions({ ...OPTIONS, autoSync: false, deleteAfterImport: true });
     await api.tabletSync();
     await beat(3);
     status = await api.tabletStatus();
     expect(status.lastSync).toMatchObject({ deleted: 3 });
-    expect(status.lastSync?.saved).toHaveLength(0);
+    expect(status.lastSync?.saved).toHaveLength(2);
     expect(status.device?.storedPages).toBe(0);
     expect(mockLibrary().notes.size).toBe(6);
   });

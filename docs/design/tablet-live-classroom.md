@@ -199,8 +199,10 @@ MonitorInfo = { key: string; name: string; x: number; y: number; width: number; 
   the point came out of the transport (`Session` stamps it). `LiveBatch.sentAt` = wall-clock time when the batch was
   handed to the channel. **Rust part** = `sentAt - recv`.
 - **Interface part**: from the batch's arrival (`performance.timeOrigin + performance.now()`) to the end of the
-  drawing of its points (after the canvas calls, measured again just after the next `requestAnimationFrame` callback
-  that painted them). **End to end** (Windows, real window) = paint time − `recv`, both on the wall clock of the same PC.
+  drawing of its points (after the canvas calls of the `requestAnimationFrame` callback that painted them). **End to
+  end** (Windows, real window) = the start of the *next* animation frame (a point painted in frame k counts as
+  displayed when frame k+1 begins, the closest the page gets to the screen) − `recv`, both on the wall clock of the
+  same PC; the display's own scan-out is not included.
 - The interface keeps the last 2 000 end-to-end samples (`lib/latency.ts`), shows the median in the control window
   (`[data-latency-median]`, ms with one decimal) and exposes `window.__ardoiseLatency = { samples(), median() }` for
   the e2e journey.

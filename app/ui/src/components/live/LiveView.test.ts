@@ -246,8 +246,10 @@ describe('live view (control window)', () => {
     expect(shown.textContent).toMatch(/^-?\d+,\d ms$/);
     // The tooltip adds the p95 and the interface's share.
     const tooltip = view.target.querySelector<HTMLElement>('.latency')!.title;
-    expect(tooltip).toMatch(/95 % sous -?\d+,\d ms ; part de l'interface : -?\d+,\d ms\.$/);
+    expect(tooltip).toMatch(/95 % sous -?\d+,\d ms ; part de l'interface \(de l'arrivée du lot à la fin du dessin\) : -?\d+,\d ms\.$/);
     expect(tooltip).not.toContain('ms ms');
+    // The hint says what is measured: up to the frame after the drawing.
+    expect(tooltip).toContain("réception du point par l'ordinateur et le début de l'image suivante");
   });
 
   it('works from the keyboard', async () => {

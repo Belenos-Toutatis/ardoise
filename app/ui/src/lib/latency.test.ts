@@ -29,19 +29,23 @@ describe('latency statistics', () => {
     expect(recorder.median()).toBeNull();
   });
 
-  it('measures end to end from the receipt and the interface part from the arrival', () => {
+  it('measures the interface part at the end of the drawing and the end to end at the next frame', () => {
     const recorder = new LatencyRecorder();
-    recorder.painted(
-      [
-        { recv: 1000, arrival: 1002 },
-        { recv: 1001, arrival: 1002 },
-        { recv: Number.NaN, arrival: 1003 },
-      ],
-      1010,
-    );
-    expect(recorder.samples()).toEqual([10, 9]);
+    const points = [
+      { recv: 1000, arrival: 1002 },
+      { recv: 1001, arrival: 1002 },
+      { recv: Number.NaN, arrival: 1003 },
+    ];
+    // The frame ends its drawing at 1010: only the interface part (arrival to end) is known.
+    recorder.painted(points, 1010);
     expect(recorder.uiSamples()).toEqual([8, 8, 7]);
-    expect(recorder.p95()).toBeCloseTo(9.95, 9);
+    expect(recorder.samples()).toEqual([]);
+    expect(recorder.median()).toBeNull();
+    // The next frame begins at 1027 (16.7 ms later): the points count as displayed then.
+    recorder.presented(points, 1027);
+    expect(recorder.samples()).toEqual([27, 26]);
+    expect(recorder.size).toBe(2);
+    expect(recorder.p95()).toBeCloseTo(26.95, 9);
     expect(recorder.uiMedian()).toBe(8);
     expect(recorder.uiP95()).toBeCloseTo(8, 9);
   });

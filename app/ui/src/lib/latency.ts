@@ -2,10 +2,13 @@
  * Latency of live mode (SPEC §4.2: a point is on screen less than 30 ms after its receipt).
  * Contract: docs/design/tablet-live-classroom.md, "Latency".
  *
- * - End to end: wall-clock time when the frame that painted a point was drawn (taken in the
- *   `requestAnimationFrame` callback, after the canvas calls) minus `LivePoint.recv`, the
- *   wall-clock time when Rust received the point. Both clocks are the same PC's.
- * - Interface part: the same end minus the arrival of the batch in this window.
+ * - End to end: wall-clock time at the start of the animation frame that follows the frame which
+ *   drew a point (a point painted in frame k counts as displayed when frame k+1 begins, the
+ *   closest the page can get to the presentation on screen) minus `LivePoint.recv`, the
+ *   wall-clock time when Rust received the point. Both clocks are the same PC's. The display's
+ *   own scan-out after that frame is not included.
+ * - Interface part, kept apart: the end of the drawing (after the canvas calls of the frame
+ *   that painted the point) minus the arrival of its batch in this window.
  *
  * The recorder keeps the last 2 000 samples of each; the control window shows the median and
  * exposes `window.__ardoiseLatency` for the end-to-end journey.
@@ -70,7 +73,7 @@ class Ring {
   }
 }
 
-/** A point drawn on screen: when Rust received it and when its batch arrived here. */
+/** A point drawn on the canvas: when Rust received it and when its batch arrived here. */
 export interface PendingSample {
   /** Wall-clock ms when Rust received the point (`LivePoint.recv`). */
   recv: number;
@@ -87,15 +90,27 @@ export class LatencyRecorder {
     this.ui = new Ring(capacity);
   }
 
-  /** Records points painted by the frame drawn at `end` (wall clock). */
-  painted(points: readonly PendingSample[], end: number): void {
-    for (const p of points) this.record(end - p.recv, end - p.arrival);
+  /**
+   * Records the interface part of points whose drawing ended at `drawEnd` (wall clock): the
+   * time since their batch arrived. The end-to-end figure waits for `presented`.
+   */
+  painted(points: readonly PendingSample[], drawEnd: number): void {
+    for (const p of points) this.record(null, drawEnd - p.arrival);
   }
 
-  record(endToEnd: number, ui: number): void {
+  /**
+   * Records the end-to-end latency of points drawn by the previous frame, now that the next
+   * frame begins at `frameStart` (wall clock).
+   */
+  presented(points: readonly PendingSample[], frameStart: number): void {
+    for (const p of points) this.record(frameStart - p.recv, null);
+  }
+
+  /** Adds a sample of either kind (`null`: not measured). */
+  record(endToEnd: number | null, ui: number | null): void {
     // A point without a receipt stamp (or a broken clock) says nothing about the latency.
-    if (Number.isFinite(endToEnd)) this.total.push(endToEnd);
-    if (Number.isFinite(ui)) this.ui.push(ui);
+    if (endToEnd !== null && Number.isFinite(endToEnd)) this.total.push(endToEnd);
+    if (ui !== null && Number.isFinite(ui)) this.ui.push(ui);
   }
 
   /** End-to-end samples (ms), oldest first. */

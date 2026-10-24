@@ -7,7 +7,9 @@
    *
    * Drawing is `lib/live-render.ts`; this component sizes the canvas (CSS pixels ×
    * `devicePixelRatio`), loads the paper (`render_background`), and paints on the next
-   * animation frame after a change, then records the latency of the points it painted.
+   * animation frame after a change, then records the latency of the points it painted: the
+   * interface part when the drawing ends, the end-to-end figure at the start of the next frame
+   * (`lib/latency.ts`).
    * Attributes for tests: `data-strokes` (strokes of the page, the one in progress included),
    * `data-page` (`n/N`).
    */
@@ -70,6 +72,8 @@
   let scheduled = false;
   let destroyed = false;
   let drag: { id: number; offset: Vec } | null = null;
+  /** Bumped when the window is hidden or shown: frames awaited across that say nothing. */
+  let visibilityEpoch = 0;
 
   const renderer = new LiveRenderer(createSurface);
 
@@ -106,7 +110,10 @@
     requestAnimationFrame(paint);
   }
 
-  /** One frame: draw, then take the end time for the points it shows. */
+  /**
+   * One frame: draw, take the end of the drawing for the points it shows (interface part), and
+   * count them as displayed when the next frame begins (end to end).
+   */
   function paint() {
     scheduled = false;
     const el = canvas;
@@ -121,11 +128,29 @@
     if (el.width !== width) el.width = width;
     if (el.height !== height) el.height = height;
     renderer.paint(context, buildScene(live, { mode, viewport: size, pixelRatio, aspect, backgroundImage }));
-    const end = wallClock();
+    const drawEnd = wallClock();
     const painted = live.takeUnpainted();
     // Points drawn without their outline (geometry still loading) or in a hidden window say
     // nothing about the latency.
-    if (latency && ink && !document.hidden) latency.painted(painted, end);
+    if (!latency || !ink || document.hidden || painted.length === 0) return;
+    const recorder = latency;
+    recorder.painted(painted, drawEnd);
+    afterNextFrame(() => recorder.presented(painted, wallClock()));
+  }
+
+  /**
+   * Runs `then` at the start of the next animation frame, the closest the page gets to the
+   * moment the frame just drawn reaches the screen. Dropped if the window was hidden meanwhile.
+   */
+  function afterNextFrame(then: () => void) {
+    if (typeof requestAnimationFrame === 'undefined') {
+      then();
+      return;
+    }
+    const epoch = visibilityEpoch;
+    requestAnimationFrame(() => {
+      if (!destroyed && epoch === visibilityEpoch && !document.hidden) then();
+    });
   }
 
   // Every change of the session asks for a frame.
@@ -171,6 +196,7 @@
   // Back from a hidden window: the points received meanwhile are not latency samples.
   $effect(() => {
     const onvisibility = () => {
+      visibilityEpoch += 1;
       if (!document.hidden) {
         live.takeUnpainted();
         schedule();
