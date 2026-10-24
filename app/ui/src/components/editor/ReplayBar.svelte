@@ -132,8 +132,8 @@
     data-action="replay-seek"
     min="0"
     max={player.end}
-    step="1"
-    value={Math.round(player.position)}
+    step="any"
+    value={player.position}
     disabled={locked || player.end <= 0}
     aria-label={t('replay.timeline')}
     aria-valuetext={timeText}
