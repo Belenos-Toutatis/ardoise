@@ -10,13 +10,14 @@ mod common;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use ardoise_device::diagnostic::{
     self, Decision, DiagnosticConfig, DiagnosticReport, Instruction, Operator, Progress, StepId,
     StepOutcome, StepStatus,
 };
 use ardoise_device::render_report;
-use ardoise_sim::{SimTablet, SimulatedUser};
+use ardoise_sim::{SimConfig, SimTablet, SimulatedUser};
 
 fn config(library: &Path) -> DiagnosticConfig {
     let mut config = DiagnosticConfig::new(library.to_owned(), "sim");
@@ -115,11 +116,13 @@ fn the_guided_test_passes_every_step_against_the_simulated_tablet() {
 
     assert_eq!(
         detail(step(&report, StepId::Connect), "mode"),
-        "registered now"
+        "@registeredNow"
     );
-    assert_eq!(detail(step(&report, StepId::Find), "registerMode"), "yes");
+    assert_eq!(detail(step(&report, StepId::Find), "registerMode"), "@yes");
     let info = step(&report, StepId::Info);
     assert_eq!(detail(info, "firmware"), "B160805A-C170704A");
+    assert_eq!(detail(info, "battery"), "87 %");
+    assert_eq!(detail(info, "charging"), "@no");
     assert_eq!(detail(info, "pages"), "3");
     assert_eq!(detail(info, "clockDrift"), "+0 s");
     let sync = step(&report, StepId::Sync);
@@ -182,9 +185,9 @@ fn a_second_run_reuses_the_saved_registration() {
     assert_eq!(second.count(StepStatus::Passed), 8);
     assert_eq!(
         detail(step(&second, StepId::Connect), "mode"),
-        "existing registration"
+        "@existingRegistration"
     );
-    assert_eq!(detail(step(&second, StepId::Find), "registerMode"), "no");
+    assert_eq!(detail(step(&second, StepId::Find), "registerMode"), "@no");
     assert_ne!(first.log_path, second.log_path);
     assert_eq!(
         user.actions(),
@@ -194,7 +197,7 @@ fn a_second_run_reuses_the_saved_registration() {
             "drew live for 30 s"
         ]
     );
-    say!("second run: Connect step reports \"existing registration\"");
+    say!("second run: Connect step reports @existingRegistration");
 }
 
 #[test]
@@ -254,4 +257,29 @@ fn a_cancel_answer_stops_the_run() {
             .contains(&"prompt Find HoldButtonToRegister -> Cancel".to_owned())
     );
     assert!(report.report_path.unwrap().is_file());
+}
+
+#[test]
+fn the_guided_test_survives_a_tablet_that_drops_idle_links() {
+    let _report = common::report("the_guided_test_survives_a_tablet_that_drops_idle_links");
+    let config = SimConfig {
+        idle_timeout: Some(Duration::from_secs(10)),
+        ..SimConfig::slate_large()
+    };
+    let tablet = SimTablet::new(config);
+    let library = tempfile::tempdir().unwrap();
+    let mut user = SimulatedUser::autonomous(tablet.clone());
+    let report = run(&tablet, &mut user, library.path());
+    say_report(&report);
+    assert_eq!(report.failures(), 0, "{report:#?}");
+    let live = step(&report, StepId::Live);
+    // No write for 10 s during live mode: the tablet drops the link at 10 s and 20 s and the
+    // manager reconnects each time; the drop at 30 s comes when live mode is over.
+    assert_eq!(detail(live, "reconnections"), "2");
+    let samples: u64 = detail(live, "samples").parse().unwrap();
+    assert!((5_600..=6_000).contains(&samples), "{samples}");
+    say!(
+        "links lost by the tablet: {}; live mode reconnected twice; 0 failures",
+        tablet.stats().links_lost
+    );
 }

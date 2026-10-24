@@ -672,3 +672,44 @@ fn power_off_loses_the_link_and_hides_the_tablet() {
     say!("switched on again: registration kept");
     let _link = Link::authenticated(&tablet);
 }
+
+#[test]
+fn recv_zero_delivers_only_what_is_due_and_never_moves_the_clock() {
+    let _report = common::report("recv_zero_delivers_only_what_is_due_and_never_moves_the_clock");
+    let tablet = registered_tablet();
+    tablet.draw_live(
+        PenScript::new()
+            .away(Duration::from_millis(100))
+            .near(vec![pt(5000, 5000, 400)]),
+    );
+    let mut link = Link::authenticated(&tablet);
+    link.send("b1 01 00");
+    link.expect(Channel::Command, "b3 01 00");
+    let t0 = link.now_ms();
+    assert_eq!(link.next(Duration::ZERO), (t0, None));
+    assert_eq!(link.next(Duration::from_millis(60)), (t0 + 60, None));
+    assert_eq!(link.next(Duration::ZERO), (t0 + 60, None));
+    let (at, event) = link.next(Duration::from_millis(100));
+    assert_eq!(at, t0 + 100, "the a2 is due 100 ms after live mode started");
+    assert!(event.is_some());
+    say!("recv(0) before the pen comes near: nothing, clock unchanged; a2 delivered at t0+100 ms");
+
+    tablet.disconnect_after(Duration::from_millis(500));
+    // The a1 (sample + pen left) is due at t0+105.
+    assert_eq!(link.next(Duration::ZERO), (t0 + 100, None));
+    tablet.clock().advance(Duration::from_secs(1));
+    say!("1 s later (the link was lost at t0+600 ms): the a1 sent before, then the loss");
+    let (at, packet) = link.next(Duration::ZERO);
+    assert_eq!(at, t0 + 1100);
+    assert!(matches!(
+        packet,
+        Some(TransportEvent::Notification {
+            channel: Channel::Live,
+            ..
+        })
+    ));
+    assert_eq!(
+        link.next(Duration::ZERO),
+        (t0 + 1100, Some(TransportEvent::Disconnected))
+    );
+}

@@ -45,7 +45,8 @@
 //! the start of live mode, an `a1` notification being due with its last record. `recv` follows
 //! the rule of docs/design/device-stack.md: if the next event is due at or before
 //! `now + timeout` the clock jumps to its due time and it is delivered, otherwise the clock
-//! jumps by `timeout`.
+//! jumps by `timeout`. In particular `recv(Duration::ZERO)` delivers only what is due now and
+//! never moves the clock.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -196,7 +197,8 @@ struct State {
     next_link_id: u64,
     /// The link connected at this time is lost (fault injection).
     drop_at: Option<Duration>,
-    corrupt_next_transfer: bool,
+    /// Number of coming page downloads that send a corrupted byte.
+    corrupt_transfers: u32,
     stats: SimStats,
 }
 
@@ -269,7 +271,7 @@ impl SimTablet {
                     link: None,
                     next_link_id: 1,
                     drop_at: None,
-                    corrupt_next_transfer: false,
+                    corrupt_transfers: 0,
                     stats: SimStats::default(),
                 }),
             }),
@@ -420,8 +422,11 @@ impl SimTablet {
     }
 
     /// The next page download sends one corrupted byte (with the CRC of the right bytes).
+    /// Each call corrupts one more download: call it twice to corrupt a download and its
+    /// retry.
     pub fn corrupt_next_transfer(&self) {
-        self.state().corrupt_next_transfer = true;
+        let mut state = self.state();
+        state.corrupt_transfers = state.corrupt_transfers.saturating_add(1);
     }
 
     // --- inspection -----------------------------------------------------------------------
@@ -856,10 +861,11 @@ impl State {
         };
         let crc = ardoise_proto::crc32(&page.bytes);
         let mut data = page.bytes.clone();
-        if std::mem::take(&mut self.corrupt_next_transfer)
-            && let Some(byte) = data.get_mut(page.bytes.len() / 2)
-        {
-            *byte ^= 0x5a;
+        if self.corrupt_transfers > 0 {
+            self.corrupt_transfers -= 1;
+            if let Some(byte) = data.get_mut(page.bytes.len() / 2) {
+                *byte ^= 0x5a;
+            }
         }
         self.stats.downloads += 1;
         let mut out = vec![command(&Reply::DownloadStart { extra: Vec::new() })];

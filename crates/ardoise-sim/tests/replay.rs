@@ -13,6 +13,9 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use ardoise_device::diagnostic::{
+    self, Decision, DiagnosticConfig, Instruction, Operator, Progress, StepId, StepOutcome,
+};
 use ardoise_device::identity::{self, HostId};
 use ardoise_device::log::{self, DiagnosticLog, Direction, LogEntry, lock};
 use ardoise_device::manager::Manager;
@@ -20,7 +23,7 @@ use ardoise_device::session::DeviceError;
 use ardoise_device::transport::{Connector, TransportError};
 use ardoise_proto::live::{LivePacket, LiveRecord};
 use ardoise_sim::replay::first_difference;
-use ardoise_sim::{ReplayConnector, ReplayOptions, SimTablet, drawings};
+use ardoise_sim::{ReplayConnector, ReplayOptions, SimConfig, SimTablet, SimulatedUser, drawings};
 
 const WAIT: Duration = Duration::from_secs(10);
 const LIVE: Duration = Duration::from_secs(3);
@@ -281,4 +284,82 @@ fn a_real_capture_replays_with_another_set_time_only_in_lenient_mode() {
     say!("lenient: replayed to the end, outcome {replayed:?}");
     assert_eq!(replayed, recorded);
     assert_eq!(lenient.remaining(), 0);
+}
+
+/// Answers every prompt with "continue" and does nothing: a replay has no tablet to act on.
+struct Continue;
+
+impl Operator for Continue {
+    fn prompt(&mut self, _step: StepId, _instruction: &Instruction) -> Decision {
+        Decision::Continue
+    }
+    fn notify(&mut self, _step: StepId, _instruction: &Instruction) {}
+    fn progress(&mut self, _step: StepId, _progress: &Progress) {}
+    fn finished(&mut self, _outcome: &StepOutcome) {}
+    fn cancelled(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn a_recorded_guided_test_replays_identically() {
+    let _report = common::report("a_recorded_guided_test_replays_identically");
+    // A tablet that drops idle links, so the log holds reconnections too.
+    let tablet = SimTablet::new(SimConfig {
+        idle_timeout: Some(Duration::from_secs(10)),
+        ..SimConfig::slate_large()
+    });
+    let recorded_library = tempfile::tempdir().unwrap();
+    let config = DiagnosticConfig::new(recorded_library.path().to_owned(), "sim");
+    let mut user = SimulatedUser::autonomous(tablet.clone());
+    let recorded = diagnostic::run(Box::new(tablet.connector()), &mut user, &config, None);
+    assert_eq!(recorded.failures(), 0, "{recorded:#?}");
+    let recorded_path = recorded.log_path.clone().unwrap();
+    let id = identity::load(recorded_library.path())
+        .unwrap()
+        .unwrap()
+        .uuid;
+    let (_, recorded_entries) = log::read_log(&recorded_path).unwrap();
+    say!(
+        "guided test recorded against the simulator: {} log entries, {} links lost",
+        recorded_entries.len(),
+        tablet.stats().links_lost
+    );
+
+    let connector = ReplayConnector::from_file(&recorded_path, ReplayOptions::default()).unwrap();
+    let replay_library = tempfile::tempdir().unwrap();
+    let mut config = DiagnosticConfig::new(replay_library.path().to_owned(), "replay");
+    config.host_id = Some(id);
+    let replayed = diagnostic::run(Box::new(connector.clone()), &mut Continue, &config, None);
+    assert_eq!(connector.failure(), None);
+    assert_eq!(connector.remaining(), 0, "the whole log was replayed");
+
+    // Same outcome for every step (the pages folder differs, being in another library).
+    let summary = |report: &diagnostic::DiagnosticReport| {
+        report
+            .steps
+            .iter()
+            .map(|s| {
+                let details: Vec<_> = s
+                    .details
+                    .iter()
+                    .filter(|d| d.key != "folder")
+                    .map(|d| (d.key.clone(), d.value.clone()))
+                    .collect();
+                (s.step, s.status, details)
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(summary(&replayed), summary(&recorded));
+    let (_, replayed_entries) = log::read_log(&replayed.log_path.clone().unwrap()).unwrap();
+    assert_eq!(first_difference(&recorded_entries, &replayed_entries), None);
+    let times = |entries: &[LogEntry]| entries.iter().map(|e| e.t).collect::<Vec<_>>();
+    assert_eq!(times(&replayed_entries), times(&recorded_entries));
+    let pages = replayed.log_path.unwrap().with_extension("");
+    assert!(pages.join("page-3.bin").is_file());
+    say!(
+        "replayed through diagnostic::run with the recorded identity: same 8 step outcomes, \
+         same {} log entries and times, pages saved again",
+        replayed_entries.len()
+    );
 }

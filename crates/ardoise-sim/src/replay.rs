@@ -14,8 +14,12 @@
 //!   `t` (the virtual-time rule of the simulator), an `event: disconnected` becomes
 //!   [`TransportEvent::Disconnected`], and a pending `tx` means nothing to deliver (the clock
 //!   advances by the timeout).
-//! - `connected` / `disconnect` events delimit successive connections: `connect` must meet a
-//!   `connected` event, `disconnect` a `disconnect` event.
+//! - `connected` / `disconnect` / `disconnected` events delimit successive connections:
+//!   `connect` must meet a `connected` event, `disconnect` (or dropping the transport, which
+//!   the logging transport records as `disconnect` too) a `disconnect` event.
+//! - `recv(Duration::ZERO)` (the session drains what already arrived before each write)
+//!   delivers only an entry recorded at or before the current replay time and never moves
+//!   the clock.
 //! - The replay clock starts at the log's creation time (its `t` = 0), so a log produced by
 //!   the simulator replays with the same times, SET_TIME included.
 //!
@@ -336,6 +340,23 @@ impl Transport for ReplayTransport {
         }
         let expected = replay.describe_current();
         Err(replay.fail(format!("{expected}: the host disconnected instead")))
+    }
+}
+
+impl Drop for ReplayTransport {
+    /// A transport dropped without [`Transport::disconnect`] closes its link too; the logging
+    /// transport records that as a `disconnect` event, consumed here. Nothing is reported if
+    /// the log says otherwise: the next operation will meet the mismatch.
+    fn drop(&mut self) {
+        let mut replay = lock(&self.replay);
+        if replay.connection != self.connection || replay.failure.is_some() {
+            return;
+        }
+        replay.connection = 0;
+        replay.skip_ignored();
+        if let Some(Kind::Disconnect) = replay.current().map(kind) {
+            replay.next += 1;
+        }
     }
 }
 
@@ -677,6 +698,27 @@ mod tests {
             Err(TransportError::Backend("busy".into()))
         );
         second.disconnect().unwrap();
+        assert_eq!(connector.remaining(), 0);
+    }
+
+    #[test]
+    fn a_dropped_transport_consumes_its_disconnect_event() {
+        let text = log(&[
+            r#"{"t":0.0,"dir":"event","info":"connected"}"#,
+            r#"{"t":0.0,"dir":"tx","ch":"command","hex":"b9 01 00","info":"GET_BATTERY"}"#,
+            r#"{"t":0.0,"dir":"rx","ch":"command","hex":"ba 02 57 00","info":"BATTERY"}"#,
+            r#"{"t":0.0,"dir":"event","info":"disconnect"}"#,
+            r#"{"t":0.5,"dir":"event","info":"connected"}"#,
+        ]);
+        let mut connector = ReplayConnector::from_text(&text, ReplayOptions::default()).unwrap();
+        let mut link = connect(&mut connector);
+        link.write(&[0xb9, 0x01, 0x00]).unwrap();
+        assert!(link.recv(Duration::ZERO).unwrap().is_some());
+        // recv(0) never moves the clock, even with nothing to deliver.
+        assert_eq!(link.recv(Duration::ZERO).unwrap(), None);
+        assert_eq!(connector.replay_clock().monotonic(), Duration::ZERO);
+        drop(link);
+        let _second = connect(&mut connector);
         assert_eq!(connector.remaining(), 0);
     }
 
