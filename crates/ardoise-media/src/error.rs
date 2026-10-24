@@ -108,7 +108,9 @@ pub enum MediaError {
     #[error("the downloaded OpenH264 library is not the expected file: {0}")]
     CodecIntegrity(String),
 
-    /// The operation was cancelled by the user (the OpenH264 download); nothing was left behind.
+    // Shared by the export pipeline (`export`) and the OpenH264 download.
+    /// The user cancelled the operation (an export, or the OpenH264 download); nothing more
+    /// was written and the download left nothing behind.
     #[error("cancelled")]
     Cancelled,
 }

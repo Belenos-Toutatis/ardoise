@@ -1,0 +1,100 @@
+// @vitest-environment jsdom
+import { mount, tick, unmount } from 'svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppState } from '../lib/api';
+import { setLocale } from '../lib/i18n.svelte';
+import { resetMockLibrary } from '../lib/mock-data';
+import { resetMockTablet } from '../lib/mock-tablet';
+import { tablet } from '../lib/tablet-state.svelte';
+import Home from './Home.svelte';
+
+// The editor and the live view are tested on their own: here they are stand-ins that report a new
+// app state (the microphone chosen on their side) through the `onchange` they are given.
+interface DoubleProps {
+  onchange?: (next: AppState) => void;
+}
+
+function double(name: string) {
+  return function Double(anchor: Comment, props: DoubleProps) {
+    const button = document.createElement('button');
+    button.dataset.double = name;
+    button.textContent = name;
+    button.addEventListener('click', () => props.onchange?.({ ...app, microphone: 'mock-mic-2' }));
+    anchor.before(button);
+  };
+}
+
+vi.mock('./editor/Editor.svelte', () => ({ default: double('editor') }));
+vi.mock('./live/LiveView.svelte', () => ({ default: double('live') }));
+
+const app: AppState = {
+  version: '0.1.0',
+  machine: 'PC-TEST',
+  settingsPath: 'C:\\Ardoise\\ardoise.toml',
+  settingsError: null,
+  language: 'auto',
+  theme: 'system',
+  library: 'C:\\demo\\Ardoise',
+  systemLocale: 'fr-FR',
+  selfTest: false,
+  openDiagnostic: false,
+  autoExport: { format: 'off', folder: 'Exports' },
+  microphone: null,
+};
+
+let cleanup: (() => void) | null = null;
+
+beforeEach(() => {
+  resetMockLibrary();
+  resetMockTablet();
+  tablet.reset();
+  setLocale('fr');
+});
+
+afterEach(() => {
+  cleanup?.();
+  cleanup = null;
+  vi.restoreAllMocks();
+  resetMockTablet();
+});
+
+async function settle() {
+  for (let i = 0; i < 4; i++) {
+    await Promise.resolve();
+    await tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+async function render() {
+  const target = document.createElement('div');
+  document.body.append(target);
+  const onchange = vi.fn();
+  const component = mount(Home, { target, props: { app, onchange } });
+  cleanup = () => {
+    unmount(component);
+    target.remove();
+  };
+  await settle();
+  return { target, onchange };
+}
+
+describe('the main window gives the app state to the editor and the live view', () => {
+  it('takes the microphone chosen in the editor', async () => {
+    const { target, onchange } = await render();
+    target.querySelector<HTMLButtonElement>('.note-card .card-open')!.click();
+    await settle();
+    target.querySelector<HTMLButtonElement>('button[data-double="editor"]')!.click();
+    expect(onchange).toHaveBeenCalledWith(expect.objectContaining({ microphone: 'mock-mic-2' }));
+  });
+
+  it('takes the microphone chosen in the live view', async () => {
+    const { target, onchange } = await render();
+    target.querySelector<HTMLElement>('.tablet-status')!.click();
+    await settle();
+    target.querySelector<HTMLButtonElement>('.tablet-panel button[data-action="live"]')!.click();
+    await settle();
+    target.querySelector<HTMLButtonElement>('button[data-double="live"]')!.click();
+    expect(onchange).toHaveBeenCalledWith(expect.objectContaining({ microphone: 'mock-mic-2' }));
+  });
+});

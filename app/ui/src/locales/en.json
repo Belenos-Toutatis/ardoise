@@ -170,6 +170,10 @@
       "folderHint": "A path relative to the library, for example Exports.",
       "save": "Save",
       "saved": "Setting saved."
+    },
+    "microphone": {
+      "title": "Microphone",
+      "hint": "The microphone used for the narration of videos and live mode. The choice is remembered on this computer."
     }
   },
   "tablet": {
@@ -435,7 +439,21 @@
     "liveNotRunning": "Live mode is not running.",
     "noMonitor": "No screen available for the presentation.",
     "simulationOnly": "This command only works with the simulated tablet.",
-    "tablet": "Problem with the tablet: {detail}"
+    "tablet": "Problem with the tablet: {detail}",
+    "videoExportFailed": "the video could not be written ({detail}); choose another location and check that there is enough space left",
+    "invalidVideoSettings": "these video settings are not valid ({detail}); check the image size, the duration and the background",
+    "codecUnavailable": "Windows cannot write MP4 files on this PC (the H.264 encoder is missing): install the OpenH264 backup in the Settings, or choose WebM",
+    "microphoneNotFound": "the chosen microphone cannot be found: plug it in, or choose another one in the Settings",
+    "microphoneSilent": "Windows may be blocking access to the microphone: Settings > Privacy & security > Microphone > \"Let desktop apps access your microphone\"",
+    "microphoneFailed": "the microphone cannot be used ({detail}); check that no other program is using it",
+    "noMicrophone": "no microphone is connected to this computer",
+    "narrationBusy": "a narration recording is already running",
+    "noRecording": "no narration recording is running",
+    "openh264DownloadFailed": "the OpenH264 download failed ({detail}); check the internet connection, then try again",
+    "noNarration": "This note has no narration.",
+    "emptyRecording": "The microphone recorded nothing.",
+    "noPendingNarration": "No recording is waiting.",
+    "openh264RemoveFailed": "Windows is still using OpenH264: close and restart Ardoise, then remove it."
   },
   "editor": {
     "back": "Library",
@@ -621,6 +639,95 @@
     "export": {
       "button": "Export…",
       "hint": "Export the note as PNG, JPG, SVG or PDF"
+    },
+    "replay": {
+      "button": "Replay",
+      "hint": "Replay the strokes as they were written (R)",
+      "recordingBusy": "Stop or cancel the narration recording first."
+    },
+    "video": {
+      "button": "Video",
+      "hint": "Export the replay as a video (MP4, WebM) or an animated image (GIF, WebP)…"
+    }
+  },
+  "replay": {
+    "bar": "Replay controls",
+    "play": "Play",
+    "pause": "Pause",
+    "spaceKey": "Space",
+    "timeline": "Position in the replay",
+    "timeValue": "{current} of {total}",
+    "speed": "Speed",
+    "speedValue": "{speed}×",
+    "trim": "Remove dead time",
+    "trimDetail": "(pauses over {seconds} s)",
+    "withNarration": "Play with narration",
+    "narrationLocks": "Speed and dead time are those of the narration.",
+    "narrationLoading": "Loading the narration…",
+    "narrationFailed": "The narration cannot be played: {message}",
+    "audioFailed": "The narration sound cannot be played.",
+    "empty": "This note has no strokes to replay.",
+    "locked": "Recording: the replay runs on its own, without pausing or changing speed."
+  },
+  "narration": {
+    "title": "Narration",
+    "picker": {
+      "label": "Microphone",
+      "default": "Windows default microphone",
+      "missing": "Microphone missing (unplugged?)",
+      "none": "No microphone detected",
+      "refresh": "Refresh the list of microphones",
+      "level": "Microphone level",
+      "levelValue": "Level {rms}%, peak {peak}%"
+    },
+    "status": {
+      "starting": "Starting the microphone…",
+      "waiting": "Waiting for sound from the microphone…",
+      "receiving": "The microphone is working.",
+      "noData": "The microphone sends nothing. Check that it is plugged in properly, or choose another one.",
+      "failed": "The microphone failed: {detail}",
+      "failedUnknown": "The microphone is not working.",
+      "silent": "Windows may be blocking access to the microphone: open Settings > Privacy & security > Microphone and turn on \"Let desktop apps access your microphone\". A microphone mute switch gives the same result."
+    },
+    "record": {
+      "open": "Record a narration",
+      "openHint": "Talk while the replay plays: the sound is recorded in the note",
+      "close": "Close",
+      "replaces": "A new recording replaces the current narration.",
+      "settings": "The sound will follow the replay with its current settings: speed {speed}, {pauses}.",
+      "pausesTrimmed": "dead time removed",
+      "pausesKept": "dead time kept",
+      "start": "Start",
+      "stop": "Stop and save",
+      "cancel": "Cancel",
+      "elapsed": "Recording: {time}",
+      "afterEnd": "The replay is over; the recording goes on and the last image stays on screen.",
+      "saving": "Saving into the note…",
+      "saved": "Narration saved ({duration}).",
+      "failed": "The recording failed: {message}",
+      "saveNote": "The sound is added to the note as it is saved on disk: unsaved changes are not part of it.",
+      "unsavedWarning": "This note has unsaved changes. Save it first (Ctrl+S), otherwise they will not be kept with the narration."
+    },
+    "pending": {
+      "title": "Recording on hold",
+      "message": "The narration could not be added to the note, but it is kept. Fix the problem (for example by reopening the note or saving a copy), then try again.",
+      "messageElsewhere": "A recording could not be added to its note, but it is kept. Open a note in the editor to try again (Replay, then Record a narration), or discard it.",
+      "retry": "Try again",
+      "retrying": "Trying again…",
+      "discard": "Discard the recording",
+      "discardConfirm": "Discard this recording for good? The sound will be lost.",
+      "discardYes": "Yes, discard",
+      "discardNo": "No, keep it"
+    },
+    "stored": {
+      "info": "Narration saved in the note ({duration}).",
+      "none": "This note has no narration.",
+      "delete": "Delete the narration",
+      "deleteConfirm": "Permanently delete this note's narration?",
+      "deleteYes": "Yes, delete it",
+      "deleteNo": "No, keep it",
+      "deleted": "Narration deleted.",
+      "deleteFailed": "The narration could not be deleted: {message}"
     }
   },
   "export": {
@@ -732,6 +839,164 @@
     "pickFile": "Save the export",
     "pickFolder": "Choose the export folder",
     "defaultPdfName": "Notes"
+  },
+  "videoExport": {
+    "title": "Export as video",
+    "format": "Format",
+    "formats": {
+      "mp4": "MP4 (video)",
+      "gif": "Animated GIF",
+      "webp": "Animated WebP",
+      "webm": "WebM (video)"
+    },
+    "formatPros": {
+      "mp4": "Plays everywhere: Windows, phones, PowerPoint, school portals. With the sound of the narration.",
+      "gif": "Plays without a player: in an e-mail, a web page or a slide. Loops.",
+      "webp": "Like GIF, but smaller and sharper; transparent background possible.",
+      "webm": "Open format, with sound, small files. Plays in browsers and in Moodle."
+    },
+    "formatCons": {
+      "mp4": "No transparent background.",
+      "gif": "No sound, only 256 colours, large files.",
+      "webp": "No sound; some older programs cannot open it.",
+      "webm": "Slow export (AV1 encoding); some Windows players cannot open it."
+    },
+    "compare": {
+      "title": "Which format should I choose?",
+      "rows": {
+        "plays": {
+          "label": "Plays with",
+          "mp4": "Everything: Windows, phones, PowerPoint, school portals",
+          "gif": "Browser, e-mail, slide: no player needed",
+          "webp": "Browsers and recent programs",
+          "webm": "Browsers, Moodle, VLC"
+        },
+        "sound": {
+          "label": "Sound (narration)",
+          "mp4": "Yes",
+          "gif": "No",
+          "webp": "No",
+          "webm": "Yes"
+        },
+        "transparent": {
+          "label": "Transparent background possible",
+          "mp4": "No",
+          "gif": "Yes",
+          "webp": "Yes",
+          "webm": "No"
+        },
+        "size": {
+          "label": "File size",
+          "mp4": "Small",
+          "gif": "Large",
+          "webp": "Medium",
+          "webm": "Small"
+        },
+        "time": {
+          "label": "Export time",
+          "mp4": "Fast",
+          "gif": "Very fast",
+          "webp": "Long",
+          "webm": "The longest"
+        },
+        "bestFor": {
+          "label": "Best for",
+          "mp4": "A video lesson with my voice, PowerPoint, school portals",
+          "gif": "A short demonstration in an e-mail or a slide",
+          "webp": "A sharp animation on a web page, with transparency",
+          "webm": "Uploading to Moodle or a website, small file"
+        }
+      },
+      "advice": "When in doubt: MP4, which plays everywhere and carries the sound. GIF for a short animation that must show without a player."
+    },
+    "options": "Settings",
+    "resolution": "Image size",
+    "resolutions": {
+      "720p": "720p (1280 × 720)",
+      "1080p": "1080p (1920 × 1080)",
+      "4k": "4K (3840 × 2160)",
+      "page": "Page size"
+    },
+    "pageHint": "The video keeps the page's proportions, with 1920 pixels on the long side.",
+    "frameRate": "Frames per second",
+    "fps": "{count} frames/s",
+    "timing": "Length of the video",
+    "speed": "Speed",
+    "speedValue": "{speed}×",
+    "targetDuration": "Target duration",
+    "seconds": "seconds",
+    "trimPauses": "Remove dead time",
+    "trimPausesHint": "Long pauses between two strokes are shortened to half a second.",
+    "background": "Background",
+    "backgroundPaper": "With the paper",
+    "backgroundTransparent": "Transparent",
+    "backgroundFixed": "The background is always the paper: this format has no transparency.",
+    "holdEnd": "Freeze the last frame",
+    "narration": "Include the narration",
+    "narrationHint": "The sound recorded with the microphone is added to the video.",
+    "narrationLocked": "The narration keeps the speed it was recorded at ({speed}×): the speed, the target duration and the dead time cannot be changed.",
+    "narrationNoSound": "This note has a narration, but GIF and WebP have no sound: choose MP4 or WebM to include it.",
+    "invalidTiming": "The target duration must be between 1 and 3600 seconds.",
+    "invalidHold": "The last frame can stay on screen for 0 to 60 seconds.",
+    "estimate": {
+      "pending": "Working out the estimate…",
+      "size": "Image size: {width} × {height} pixels",
+      "length": "Video length: {duration} ({frames} frames)",
+      "speed": "Replay speed: {speed}×",
+      "narration": "Narration: {duration}",
+      "time": "Estimated export time: about {time}",
+      "long": "This export will take a while. To go faster, choose a smaller image size, fewer frames per second or another format (WebM is the slowest).",
+      "failed": "Cannot estimate the export: {message}"
+    },
+    "time": {
+      "lessThanSecond": "less than a second",
+      "seconds": "{seconds} s",
+      "minutes": "{minutes} min",
+      "minutesSeconds": "{minutes} min {seconds} s"
+    },
+    "destination": "You will then choose the file to create.",
+    "run": "Export…",
+    "again": "Export again…",
+    "running": "Exporting…",
+    "cancelRun": "Cancel the export",
+    "cancelling": "Cancelling…",
+    "closeBusy": "A video export is running: wait for it to finish or cancel it before closing the window.",
+    "finalizing": "Finalizing…",
+    "cancelled": "Export cancelled.",
+    "progress": "Frames: {done} of {total} ({percent}%)",
+    "progressLabel": "Export progress",
+    "done": "Export finished.",
+    "resultLength": "Length: {duration}",
+    "resultSound": "Sound: {sound}",
+    "soundYes": "yes (narration)",
+    "soundNo": "no",
+    "failed": "The export failed: {message}",
+    "pickFile": "Save the video"
+  },
+  "openh264": {
+    "title": "Backup video encoder (OpenH264)",
+    "intro": "To write MP4 videos, Ardoise uses the encoder built into Windows (Media Foundation). It is missing on Windows \"N\" editions installed without the Media Feature Pack: Ardoise can then download the OpenH264 encoder from Cisco and keep it in its local folder.",
+    "mediaFoundationOk": "Windows can write MP4 files on this PC: the backup is not needed.",
+    "mediaFoundationMissing": "Windows cannot write MP4 files on this PC. Install the backup below, or choose WebM for your videos.",
+    "status": {
+      "label": "Status",
+      "notInstalled": "Not installed",
+      "installed": "Installed ({size} MB, version {version})",
+      "damaged": "Damaged file: remove it, then download it again"
+    },
+    "download": "Download from Cisco",
+    "downloadHint": "The file comes from Cisco's server; its fingerprint is checked before it is installed. Its licence is shown below.",
+    "downloading": "Downloading…",
+    "downloadProgress": "{received} of {total} MB",
+    "downloadReceived": "{received} MB received",
+    "downloadProgressLabel": "Download progress",
+    "cancelDownload": "Cancel the download",
+    "cancelling": "Cancelling…",
+    "cancelled": "Download cancelled.",
+    "allow": "Allow Ardoise to use OpenH264 for MP4 files",
+    "allowHint": "Unticked, the file stays installed but is not used.",
+    "remove": "Remove",
+    "licenseTitle": "OpenH264 licence (Cisco)"
   },
   "live": {
     "title": "Live mode",
@@ -862,6 +1127,15 @@
           "action": "Finish (on the projected screen: close the presentation)"
         }
       }
+    },
+    "narration": {
+      "title": "Narration",
+      "open": "Record the narration",
+      "openHint": "Talk during the session: the sound is recorded with the pages",
+      "hint": "The sound is cut page by page and saved with each note; the note's replay plays it back.",
+      "savedOne": "Narration saved on 1 page.",
+      "savedMany": "Narration saved on {count} pages.",
+      "savedNone": "No page of the session has any strokes: the narration was not kept."
     }
   },
   "presentation": {

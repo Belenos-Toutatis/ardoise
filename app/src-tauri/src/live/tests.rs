@@ -11,6 +11,9 @@ use ardoise_core::note::{Origin, PageSize, Paper};
 use ardoise_core::settings::{Hand, LiveButton};
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
 use ardoise_ink::{Rgba, Tool};
+use ardoise_media::microphone::simulated_narration;
+use ardoise_media::replay::ReplayOptions;
+use ardoise_media::{Narration, NarrationBase, decode_narration};
 use ardoise_proto::live::LiveRecord;
 use ardoise_proto::stroke::Point as PenPoint;
 use serde_json::{Value, json};
@@ -24,8 +27,9 @@ use super::model::{
     LiveViewState,
 };
 use super::session::LiveSession;
-use crate::library::path_text;
 use crate::library::tests::library;
+use crate::library::{now_ms, path_text};
+use crate::narration::{PageChange, PageLog, give_to_hub};
 use crate::presentation::MonitorInfo;
 
 const A5: PageSize = PageSize {
@@ -1014,4 +1018,181 @@ fn simulator_service_hub_latency() {
         samples[(n * 95 / 100).min(n - 1)]
     );
     assert!(samples[n / 2] < 10.0);
+}
+
+// --- Narration recorded in live mode ------------------------------------------------------------
+
+fn note_narration(seconds: f64, start_ms: i64) -> Narration {
+    Narration {
+        clip: simulated_narration(Duration::from_secs_f64(seconds), 1),
+        base: NarrationBase::Note,
+        options: ReplayOptions::default(),
+        start_ms,
+    }
+}
+
+fn audio_of(library: &Library, path: &Path) -> Option<Vec<u8>> {
+    library.read(path).ok().and_then(|loaded| loaded.file.audio)
+}
+
+fn change(at: Duration, page: usize) -> PageChange {
+    PageChange { at, page }
+}
+
+#[test]
+fn the_position_and_time_origins_of_the_pages_are_known() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    assert_eq!(hub.page_position(), None, "never started");
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    let first = hub.page_position().unwrap();
+    assert!(first.running);
+    assert_eq!(first.page, 0);
+    // No stroke yet: no time origin.
+    assert_eq!(hub.page_origins(first.session), Some(vec![None]));
+    let before = now_ms();
+    stroke(&mut sink, 3000, 5);
+    let origin = hub.page_origins(first.session).unwrap()[0].unwrap();
+    // The first sample of a notification is timed 5 ms per record before its receipt.
+    assert!((before - 20..=now_ms()).contains(&origin), "{origin}");
+    assert_eq!(origin, hub.snapshot().page.created);
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    assert_eq!(
+        hub.page_origins(first.session),
+        Some(vec![Some(origin), None])
+    );
+    assert_eq!(hub.page_position().unwrap().page, 1);
+    assert_eq!(hub.page_origins(first.session + 1), None);
+    hub.stop().unwrap();
+    let stopped = hub.page_position().unwrap();
+    assert!(!stopped.running);
+    assert_eq!(stopped.session, first.session);
+}
+
+#[test]
+fn the_narration_of_a_page_is_written_with_it_and_kept_on_later_writes() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    let path = notes_in(&library).remove(0);
+    assert_eq!(audio_of(&library, &path), None);
+
+    // Ready-made bytes: what the hub writes, not what the encoder makes.
+    let audio = b"OggS narration of page 1".to_vec();
+    assert!(hub.set_page_audio(0, audio.clone()));
+    wait_until("the audio member", || {
+        audio_of(&library, &path).as_ref() == Some(&audio)
+    });
+    // Later writes of the page keep it.
+    stroke(&mut sink, 4000, 5);
+    wait_until("page 1 rewritten", || {
+        stroke_count(&library, &path) == Some(2)
+    });
+    assert_eq!(audio_of(&library, &path), Some(audio.clone()));
+    // A page without any stroke gets nothing.
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    assert!(!hub.set_page_audio(1, b"x".to_vec()));
+    let saved = hub.stop().unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(audio_of(&library, &path), Some(audio.clone()));
+
+    // A page that cannot be written keeps its narration in the backup copy.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Notes");
+    std::fs::create_dir(&root).unwrap();
+    ardoise_core::library::init(&root).unwrap();
+    let broken = Library::open(&root).unwrap();
+    let hub = LiveHub::new(config());
+    let mut sink = start(&hub, options(&broken, fixed(LiveButton::NewPage)));
+    break_folder(&root, true);
+    stroke(&mut sink, 3000, 5);
+    assert!(hub.set_page_audio(0, audio.clone()));
+    let copies = hub.back_up_unsaved(&dir.path().join("backup"));
+    assert_eq!(copies.len(), 1);
+    let copy = copies[0].1.as_ref().unwrap();
+    assert_eq!(
+        ardoise_core::format::read_note(copy).unwrap().audio,
+        Some(audio.clone())
+    );
+    // Written once the library is back, with its narration.
+    break_folder(&root, false);
+    let saved = hub.stop().unwrap();
+    assert_eq!(audio_of(&broken, Path::new(&saved[0])), Some(audio));
+}
+
+// --- With the media pipeline (Opus encoding, merging) ---
+
+#[test]
+fn live_narration_goes_to_its_pages_through_the_hub() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    let session = hub.page_position().unwrap().session;
+    stroke(&mut sink, 3000, 5);
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    stroke(&mut sink, 3000, 5);
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    let origins = hub.page_origins(session).unwrap();
+    let (first, second) = (origins[0].unwrap(), origins[1].unwrap());
+
+    // 3 s recorded from 1 s before page 1's first stroke: page 1, page 2, page 3 (no stroke).
+    let clip = simulated_narration(Duration::from_secs(3), 1);
+    let log = PageLog {
+        changes: vec![
+            change(Duration::ZERO, 0),
+            change(Duration::from_secs(1), 1),
+            change(Duration::from_secs(2), 2),
+        ],
+        anchor_ms: None,
+    };
+    let wall_start = (first - 1000) as f64;
+    let pages = give_to_hub(&hub, session, &log, wall_start, clip).unwrap();
+    assert_eq!(pages, 2);
+    let saved = hub.stop().unwrap();
+    assert_eq!(saved.len(), 2);
+    let narrations: Vec<Narration> = saved
+        .iter()
+        .map(|path| decode_narration(&audio_of(&library, Path::new(path)).unwrap()).unwrap())
+        .collect();
+    assert_eq!(narrations[0].base, NarrationBase::Note);
+    assert_eq!(narrations[0].start_ms, -1000);
+    assert_eq!(narrations[1].start_ms, first - second);
+    for narration in &narrations {
+        let ms = narration.duration().as_millis();
+        assert!((990..=1010).contains(&ms), "{ms}");
+    }
+
+    // A second recording on page 1 is merged with the first one (also after the stop).
+    assert!(
+        hub.attach_narration(session, 0, note_narration(1.0, 5_000))
+            .unwrap()
+    );
+    let saved = hub.stop().unwrap();
+    let merged = decode_narration(&audio_of(&library, Path::new(&saved[0])).unwrap()).unwrap();
+    assert_eq!(merged.start_ms, -1000);
+    let ms = merged.duration().as_millis();
+    assert!((6990..=7010).contains(&ms), "{ms}");
+    // Another session, or a page without any stroke: nothing attached.
+    assert!(
+        !hub.attach_narration(session + 1, 0, note_narration(1.0, 0))
+            .unwrap()
+    );
+    assert!(
+        !hub.attach_narration(session, 2, note_narration(1.0, 0))
+            .unwrap()
+    );
+
+    // The page keeps only the encoded narration, decoded again to merge: a page whose
+    // narration cannot be read again keeps it as it is.
+    let damaged = b"OggS damaged".to_vec();
+    assert!(hub.set_page_audio(1, damaged.clone()));
+    assert!(matches!(
+        hub.attach_narration(session, 1, note_narration(1.0, 0)),
+        Err(LiveError::Narration(_))
+    ));
+    let saved = hub.stop().unwrap();
+    assert_eq!(audio_of(&library, Path::new(&saved[1])), Some(damaged));
 }

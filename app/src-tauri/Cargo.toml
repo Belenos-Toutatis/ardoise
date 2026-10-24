@@ -29,6 +29,7 @@ ardoise-ble = { path = "../../crates/ardoise-ble" }
 ardoise-device = { path = "../../crates/ardoise-device" }
 ardoise-ink = { path = "../../crates/ardoise-ink" }
 ardoise-inkspace = { path = "../../crates/ardoise-inkspace" }
+ardoise-media = { path = "../../crates/ardoise-media" }
 ardoise-proto = { path = "../../crates/ardoise-proto" }
 ardoise-render = { path = "../../crates/ardoise-render" }
 ardoise-sim = { path = "../../crates/ardoise-sim" }

@@ -4,8 +4,9 @@
    * "Interface"). Starts live mode when it opens (`live_start`) and follows the session
    * (`live_subscribe`): toolbar (tool, colour, width), pages, layer, clear, blackboard, laser
    * pointer, the preview of the whole page with the projected area (drag to move it), zoom,
-   * the presentation window (screen, project / stop), the measured latency, and "Finish"
-   * (`live_stop`, then `onclose`).
+   * the presentation window (screen, project / stop), the measured latency, the narration (SPEC
+   * §4.5: record the microphone during the session; it is cut per page and saved with the notes),
+   * and "Finish" (the narration stops first, then `live_stop`, then `onclose`).
    */
   import { onMount } from 'svelte';
   import { api, errorMessage, type AppState } from '../../lib/api';
@@ -28,9 +29,21 @@
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
   import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
+  import type { NarrationSaved } from '../../lib/video';
+  import RecordPanel from '../narration/RecordPanel.svelte';
+  import { NarrationRecorder } from '../narration/recorder.svelte';
   import LiveCanvas from './LiveCanvas.svelte';
 
-  let { onclose }: { app: AppState; onclose: () => void } = $props();
+  let {
+    app,
+    onclose,
+    onchange,
+  }: {
+    app: AppState;
+    onclose: () => void;
+    /** The app state changed (the microphone chosen here): the screen holding it takes the new one. */
+    onchange?: (next: AppState) => void;
+  } = $props();
 
   /** Nominal width per ink tool (device units), as in the editor. */
   const DEFAULT_WIDTHS: Record<Tool, number> = {
@@ -48,12 +61,15 @@
     { color: { r: 255, g: 255, b: 255, a: 255 }, label: 'live.colors.white' },
     { color: { r: 255, g: 214, b: 0, a: 255 }, label: 'live.colors.yellow' },
   ];
+  /** Why stopping the narration may fail without anything being lost: there was no sound to keep. */
+  const NOTHING_TO_KEEP = ['emptyRecording', 'microphoneSilent'];
   /** How often the latency shown is refreshed. */
   const LATENCY_REFRESH_MS = 500;
   const KEYS = ['next', 'previous', 'clear', 'board', 'laser', 'zoom', 'whole', 'pan', 'leave'] as const;
 
   const live = new LiveState();
   const latency = new LatencyRecorder();
+  const recorder = new NarrationRecorder();
 
   let ink = $state.raw<Ink | null>(null);
   let starting = $state(true);
@@ -70,12 +86,27 @@
   let latencyP95 = $state<number | null>(null);
   let latencyUi = $state<number | null>(null);
   let latencyCount = $state(0);
+  let narrationOpen = $state(false);
+  /** What the last narration recording saved; null before one, or after a cancelled one. */
+  let narrated = $state.raw<NarrationSaved | null>(null);
+  /** The microphone chosen here, until the app state says so. */
+  let chosenMicrophone = $state<string | null | undefined>(undefined);
   /** Width last used per tool in this session. */
   const widths: Partial<Record<Tool, number>> = {};
 
   const sessionState = $derived(live.ready ? live.state : 'idle');
   const selectedMonitor = $derived(monitors.find((m) => m.key === monitorKey) ?? null);
   const aspect = $derived(aspectOf(live.presentation ?? selectedMonitor));
+  const microphone = $derived(chosenMicrophone === undefined ? app.microphone : chosenMicrophone);
+  const narratedText = $derived(
+    narrated === null
+      ? null
+      : narrated.pages === 0
+        ? t('live.narration.savedNone')
+        : narrated.pages === 1
+          ? t('live.narration.savedOne')
+          : t('live.narration.savedMany', { count: narrated.pages }),
+  );
   const savedCount = $derived(live.saved.length);
   const savedText = $derived(
     savedCount === 0 ? t('live.saved.none') : savedCount === 1 ? t('live.saved.one') : t('live.saved.many', { count: savedCount }),
@@ -124,6 +155,9 @@
       alive = false;
       clearInterval(timer);
       live.close();
+      recorder.dispose();
+      // A recording is never thrown away silently: the pages get the sound recorded so far.
+      if (recorder.phase === 'recording') void api.narrationStop(true, null, null, null).catch(() => {});
     };
   });
 
@@ -146,10 +180,47 @@
     latencyCount = latency.size;
   }
 
+  async function chooseMicrophone(device: string | null) {
+    chosenMicrophone = device;
+    try {
+      const next = await api.setMicrophone(device);
+      chosenMicrophone = next.microphone;
+      onchange?.(next);
+    } catch (error) {
+      chosenMicrophone = undefined;
+      notice = errorMessage(error);
+    }
+  }
+
+  async function startNarration() {
+    narrated = null;
+    await recorder.start(microphone, { kind: 'live' });
+  }
+
+  /** Stops the recording; saved, the sound is cut per page and written with the pages. */
+  async function stopNarration(save: boolean) {
+    // Closing the panel while it is still busy keeps its microphone picker from listening again.
+    if (save) narrationOpen = false;
+    const result = await recorder.stop(save, null);
+    if (result.ok) narrated = result.saved;
+  }
+
   async function finish() {
     if (stopping) return;
     stopping = true;
     stopError = null;
+    // The narration is handed to the session, which writes it with the pages: it stops first.
+    if (recorder.phase === 'recording') {
+      narrationOpen = false;
+      const result = await recorder.stop(true, null);
+      if (!result.ok && !NOTHING_TO_KEEP.includes(result.code ?? '')) {
+        stopError = recorder.error;
+        stopping = false;
+        return;
+      }
+      // A recording with nothing in it (silent or blocked microphone) is nothing to keep: leaving goes on.
+      narrated = result.saved;
+    }
     try {
       if (live.presentation) {
         await api.closePresentation().catch(() => {
@@ -478,6 +549,25 @@
         {/if}
         {#if projectionError}
           <p class="error small" role="alert">{projectionError}</p>
+        {/if}
+      </section>
+
+      <section class="side-block" aria-labelledby="live-narration-title" data-section="narration">
+        <h3 id="live-narration-title">{t('live.narration.title')}</h3>
+        <RecordPanel
+          bind:open={narrationOpen}
+          {recorder}
+          device={microphone}
+          ondevice={chooseMicrophone}
+          onstart={startNarration}
+          onstop={() => void stopNarration(true)}
+          oncancel={() => void stopNarration(false)}
+          openLabel={t('live.narration.open')}
+          openHint={t('live.narration.openHint')}
+          info={t('live.narration.hint')}
+        />
+        {#if narratedText}
+          <p class="small" role="status" data-slot="narration-saved" data-pages={narrated?.pages ?? 0}>{narratedText}</p>
         {/if}
       </section>
 

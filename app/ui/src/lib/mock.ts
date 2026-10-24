@@ -7,8 +7,10 @@ import { UNHANDLED, setMockAutoExportSettings } from './mock-data';
 import { checkAutoExport, mockExportInvoke } from './mock-export';
 import { mockLibraryInvoke } from './mock-library';
 import { mockLiveInvoke } from './mock-live';
+import { mockNarrationInvoke } from './mock-narration';
 import { mockNotesInvoke } from './mock-notes';
 import { mockTabletInvoke } from './mock-tablet';
+import { mockVideoInvoke } from './mock-video';
 
 export { mockOnLibraryChanged } from './mock-data';
 import {
@@ -35,6 +37,7 @@ const state: AppState = {
   selfTest: false,
   openDiagnostic: new URLSearchParams(location.search).has('diagnostic'),
   autoExport: { format: 'off', folder: 'Exports' },
+  microphone: null,
 };
 
 const libraries = new Set<string>();
@@ -56,6 +59,9 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
         return { ...state };
       case 'inspect_library':
         return { existing: libraries.has(args.path as string) };
+      case 'set_microphone':
+        state.microphone = (args.device as string | null) ?? null;
+        return { ...state };
       case 'set_library':
         libraries.add(args.path as string);
         state.library = args.path as string;
@@ -76,7 +82,15 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
         return undefined;
       default: {
         // Library, editor and export commands live in their own modules, over the demo library.
-        for (const handle of [mockLibraryInvoke, mockNotesInvoke, mockExportInvoke, mockTabletInvoke, mockLiveInvoke]) {
+        for (const handle of [
+          mockLibraryInvoke,
+          mockNotesInvoke,
+          mockExportInvoke,
+          mockTabletInvoke,
+          mockLiveInvoke,
+          mockVideoInvoke,
+          mockNarrationInvoke,
+        ]) {
           const handled = handle(command, args);
           if (handled !== UNHANDLED) return handled;
         }

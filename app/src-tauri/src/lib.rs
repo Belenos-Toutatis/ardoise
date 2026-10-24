@@ -8,6 +8,7 @@ compile_error!("release builds need `--features custom-protocol` (use `cargo xta
 
 mod autoexport;
 mod clipboard;
+mod codec;
 mod commands;
 mod console;
 mod demo;
@@ -16,12 +17,14 @@ mod export;
 mod import;
 mod library;
 mod live;
+mod narration;
 mod notes;
 mod operations;
 mod presentation;
 mod selftest;
 mod tablet;
 mod thumbnails;
+mod video;
 mod watcher;
 
 use std::path::PathBuf;
@@ -150,6 +153,9 @@ pub fn run() {
         .manage(export::ExportCancel::default())
         .manage(tablet::TabletRuntime::default())
         .manage(live::LiveRuntime::default())
+        .manage(video::VideoCancel::default())
+        .manage(narration::NarrationRuntime::default())
+        .manage(codec::CodecDownload::default())
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -205,6 +211,26 @@ pub fn run() {
             clipboard::copy_note_image,
             operations::split_note,
             operations::merge_notes,
+            video::estimate_video_export,
+            video::export_video,
+            video::cancel_video_export,
+            narration::list_microphones,
+            narration::set_microphone,
+            narration::microphone_monitor,
+            narration::microphone_monitor_stop,
+            narration::narration_start,
+            narration::narration_status,
+            narration::narration_stop,
+            narration::narration_retry,
+            narration::narration_discard,
+            narration::narration_info,
+            narration::narration_audio,
+            narration::delete_narration,
+            codec::openh264_state,
+            codec::openh264_download,
+            codec::openh264_cancel_download,
+            codec::openh264_remove,
+            codec::set_openh264_allowed,
         ])
         .setup(move |app| {
             if cli.self_test {

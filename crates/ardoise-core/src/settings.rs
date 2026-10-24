@@ -259,9 +259,21 @@ pub struct MachineSettings {
     /// Key of the screen last chosen for the presentation window (`name@x,y`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projector: Option<String>,
+    /// Microphone chosen for the narration (the stable id of the input device); the system's
+    /// default when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub microphone: Option<String>,
+    /// The user allows the OpenH264 fallback for MP4 on this computer (SPEC §4.5, §6.2: it is
+    /// downloaded on request, and can be turned off and removed).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub openh264: bool,
     /// Keys this version does not know about, kept verbatim.
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Contents of `ardoise.toml`.
@@ -296,6 +308,46 @@ impl Settings {
     /// Sets the library folder of `machine`, creating its section if needed.
     pub fn set_library(&mut self, machine: &str, path: PathBuf) {
         self.machines.entry(machine.to_owned()).or_default().library = Some(path);
+    }
+
+    /// Microphone chosen on `machine`, if any.
+    pub fn microphone_for(&self, machine: &str) -> Option<&str> {
+        self.machines.get(machine)?.microphone.as_deref()
+    }
+
+    /// Sets the microphone of `machine` (`None`: the system's default). A machine without a
+    /// section gets one only for a microphone.
+    pub fn set_microphone(&mut self, machine: &str, microphone: Option<String>) {
+        match self.machines.get_mut(machine) {
+            Some(settings) => settings.microphone = microphone,
+            None if microphone.is_some() => {
+                self.machines
+                    .entry(machine.to_owned())
+                    .or_default()
+                    .microphone = microphone;
+            }
+            None => {}
+        }
+    }
+
+    /// Whether the OpenH264 fallback is allowed on `machine` (not by default).
+    pub fn openh264_allowed(&self, machine: &str) -> bool {
+        self.machines.get(machine).is_some_and(|m| m.openh264)
+    }
+
+    /// Allows or disallows the OpenH264 fallback on `machine`. A machine without a section gets
+    /// one only to allow it.
+    pub fn set_openh264_allowed(&mut self, machine: &str, allowed: bool) {
+        match self.machines.get_mut(machine) {
+            Some(settings) => settings.openh264 = allowed,
+            None if allowed => {
+                self.machines
+                    .entry(machine.to_owned())
+                    .or_default()
+                    .openh264 = true;
+            }
+            None => {}
+        }
     }
 }
 
@@ -777,6 +829,71 @@ mod tests {
         // Known formats are active.
         assert!(AutoExportFormat::Pdf.is_active() && AutoExportFormat::Png.is_active());
         assert!(!AutoExportFormat::Off.is_active());
+    }
+
+    #[test]
+    fn microphone_and_openh264_are_per_machine_and_kept_with_unknown_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        fs::write(
+            store.path(),
+            "[machines.\"PC-A\"]\nlibrary = 'C:\\Lib'\nfuture = 3\n\n[machines.\"PC-B\"]\nmicrophone = \"wasapi:B\"\n",
+        )
+        .unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.microphone_for("PC-A"), None);
+        assert!(!loaded.openh264_allowed("PC-A"));
+        assert_eq!(loaded.microphone_for("PC-B"), Some("wasapi:B"));
+
+        let updated = store
+            .update(|s| {
+                s.set_microphone("PC-A", Some("wasapi:{0.0.1.00000000}.{abc}".into()));
+                s.set_openh264_allowed("PC-A", true);
+            })
+            .unwrap();
+        let reloaded = store.load().unwrap();
+        assert_eq!(reloaded, updated);
+        assert_eq!(
+            reloaded.microphone_for("PC-A"),
+            Some("wasapi:{0.0.1.00000000}.{abc}")
+        );
+        assert!(reloaded.openh264_allowed("PC-A"));
+        let machine = &reloaded.machines["PC-A"];
+        assert_eq!(machine.library.as_deref(), Some(Path::new(r"C:\Lib")));
+        assert_eq!(machine.extra["future"].as_integer(), Some(3));
+        // The other PC keeps its own choice and does not get the fallback.
+        assert_eq!(reloaded.microphone_for("PC-B"), Some("wasapi:B"));
+        assert!(!reloaded.openh264_allowed("PC-B"));
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("openh264 = true"), "{text}");
+
+        // Back to the defaults: the keys go away, the rest stays.
+        store
+            .update(|s| {
+                s.set_microphone("PC-A", None);
+                s.set_openh264_allowed("PC-A", false);
+            })
+            .unwrap();
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(!text.contains("openh264"), "{text}");
+        assert!(!text.contains("wasapi:{"), "{text}");
+        assert!(text.contains("future = 3"), "{text}");
+        let reloaded = store.load().unwrap();
+        assert_eq!(reloaded.microphone_for("PC-A"), None);
+        assert!(!reloaded.openh264_allowed("PC-A"));
+    }
+
+    #[test]
+    fn defaults_do_not_create_a_machine_section() {
+        let mut settings = Settings::default();
+        settings.set_microphone("PC-A", None);
+        settings.set_openh264_allowed("PC-A", false);
+        assert!(settings.machines.is_empty());
+        settings.set_openh264_allowed("PC-A", true);
+        assert!(settings.openh264_allowed("PC-A"));
+        settings.set_microphone("PC-C", Some("Micro USB".into()));
+        assert_eq!(settings.microphone_for("PC-C"), Some("Micro USB"));
+        assert_eq!(settings.machines.len(), 2);
     }
 
     #[test]

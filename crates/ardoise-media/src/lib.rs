@@ -21,10 +21,14 @@
 //! [`MediaError::Unsupported`]; the types and the colour conversion are available everywhere.
 
 mod error;
+mod estimate;
+mod export;
 mod gif;
 pub mod microphone;
 mod mp4;
+mod narration;
 pub mod nv12;
+mod ogg;
 mod openh264;
 mod opus;
 pub mod replay;
@@ -48,11 +52,18 @@ mod unsupported;
 pub use self::gif::{GifOptions, create_gif, probe_gif};
 pub use self::webm::{WebmOptions, create_webm, probe_webm};
 pub use error::MediaError;
+pub use estimate::estimate_export_time;
+pub use export::{
+    AnimationExport, ExportPlan, ExportProgress, FormatOptions, export_animation, page_frame_size,
+    plan_export,
+};
 pub use mp4::{
     CISCO_NOTICE, CodecStatus, Mp4Backend, Mp4Options, OPENH264_LICENSE, OPENH264_SHA256,
     OPENH264_URL, OPENH264_VERSION, OpenH264Codec, create_mp4, media_foundation_available,
     probe_mp4_animation,
 };
+pub use narration::{Narration, NarrationBase, decode_narration, encode_narration, wav_bytes};
+pub use narration::{NarrationHeader, narration_header};
 pub use opus::{OPUS_FRAME_SAMPLES, OpusEncoder, OpusHead, OpusPacket, default_opus_bitrate};
 pub use settings::{
     AAC_BITRATE, AudioSettings, AudioTrackProbe, AvailableEncoders, Codec, EncoderInfo, Mp4Probe,

@@ -140,6 +140,7 @@ dependencies = [
  "ardoise-device",
  "ardoise-ink",
  "ardoise-inkspace",
+ "ardoise-media",
  "ardoise-proto",
  "ardoise-render",
  "ardoise-sim",

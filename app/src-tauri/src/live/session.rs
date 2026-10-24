@@ -49,6 +49,10 @@ pub struct Page {
     /// Why the last write failed, once the windows were told (set by the hub): cleared by the
     /// next write that succeeds.
     pub save_error: Option<String>,
+    /// The narration recorded on this page in live mode (note time), as the note's `audio.opus`
+    /// member written with every version of the page. Only the encoded bytes stay in memory: a
+    /// later recording on the page decodes them again to merge with them.
+    pub audio: Option<Vec<u8>>,
     /// No stroke started yet: the note's time origin is still free.
     fresh: bool,
     /// Time of the page's last pen sample, ms since `note.created`.
@@ -65,9 +69,28 @@ impl Page {
             urgent: false,
             last_attempt: None,
             save_error: None,
+            audio: None,
             fresh: true,
             last_t: None,
         }
+    }
+
+    /// The page's time origin (`note.created`, the wall clock of its first stroke in Unix ms),
+    /// or `None` while it has no stroke: a narration has nothing to follow there.
+    pub fn time_origin(&self) -> Option<i64> {
+        (!self.note.strokes.is_empty()).then_some(self.note.created)
+    }
+
+    /// Gives the page its narration, as `audio.opus` bytes: it is written again at the next
+    /// pass. Refused (`false`) on a page without any stroke.
+    pub fn set_audio(&mut self, audio: Vec<u8>) -> bool {
+        if self.time_origin().is_none() {
+            return false;
+        }
+        self.audio = Some(audio);
+        self.touch();
+        self.urgent = true;
+        true
     }
 
     fn touch(&mut self) {
@@ -192,7 +215,7 @@ impl LiveSession {
         self.pages.get_mut(index)
     }
 
-    #[cfg(test)]
+    /// Index of the current page.
     pub fn current(&self) -> usize {
         self.current
     }

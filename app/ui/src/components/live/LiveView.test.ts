@@ -7,6 +7,7 @@ import { setLocale } from '../../lib/i18n.svelte';
 import { FakeContext } from '../../lib/live-fake-canvas';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import { mockLiveConfig, mockLiveTick, resetMockLive } from '../../lib/mock-live';
+import { mockNarration, resetMockNarration } from '../../lib/mock-narration';
 import LiveView from './LiveView.svelte';
 
 // The real stroke geometry, instantiated from the module's bytes (jsdom cannot fetch it).
@@ -31,6 +32,7 @@ const app: AppState = {
   selfTest: false,
   openDiagnostic: false,
   autoExport: { format: 'off', folder: 'Exports' },
+  microphone: null,
 };
 
 let cleanup: (() => void) | null = null;
@@ -38,6 +40,7 @@ const contexts: FakeContext[] = [];
 
 beforeEach(() => {
   resetMockLive();
+  resetMockNarration();
   resetMockLibrary();
   setLocale('fr');
   // jsdom has no canvas: every canvas draws on a recording fake.
@@ -62,7 +65,8 @@ function render() {
   const target = document.createElement('div');
   document.body.append(target);
   const onclose = vi.fn();
-  const component = mount(LiveView, { target, props: { app, onclose } });
+  const onchange = vi.fn();
+  const component = mount(LiveView, { target, props: { app, onclose, onchange } });
   cleanup = () => {
     unmount(component);
     target.remove();
@@ -77,7 +81,7 @@ function render() {
     return found;
   };
   const action = (name: string) => target.querySelector<HTMLButtonElement>(`button[data-action="${name}"]`)!;
-  return { target, onclose, root, canvas, button, action };
+  return { target, onclose, onchange, root, canvas, button, action };
 }
 
 async function live(view: ReturnType<typeof render>) {
@@ -372,5 +376,249 @@ describe('live view (control window)', () => {
     expect(view.onclose).not.toHaveBeenCalled();
     view.button('Fermer quand même').click();
     expect(view.onclose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('live view: narration', () => {
+  beforeEach(() => {
+    mockNarration.receivingAfterMs = 0;
+    mockNarration.silentAfterMs = 0;
+  });
+
+  const section = (view: ReturnType<typeof render>) => view.target.querySelector<HTMLElement>('[data-section="narration"]')!;
+  const savedText = (view: ReturnType<typeof render>) =>
+    view.target.querySelector('[data-slot="narration-saved"]')?.textContent?.trim();
+
+  it('records the microphone during the session and says on how many pages it was saved', async () => {
+    mockNarration.livePages = 2;
+    const monitor = vi.spyOn(api, 'microphoneMonitor');
+    const start = vi.spyOn(api, 'narrationStart');
+    const stop = vi.spyOn(api, 'narrationStop');
+    const setMicrophone = vi.spyOn(api, 'setMicrophone');
+    const view = render();
+    await live(view);
+    expect(section(view).querySelector('h3')?.textContent).toBe('Narration');
+    expect(monitor).not.toHaveBeenCalled();
+    view.action('narration-open').click();
+    await vi.waitFor(() => expect(monitor).toHaveBeenCalledWith(null));
+    const select = section(view).querySelector<HTMLSelectElement>('select[data-field="microphone"]')!;
+    await vi.waitFor(() => expect(select.options).toHaveLength(3));
+    select.value = 'mock-mic-1';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(setMicrophone).toHaveBeenCalledWith('mock-mic-1'));
+    // The app state that holds the choice is told, so that Settings and the editor show the same one.
+    await vi.waitFor(() => expect(view.onchange).toHaveBeenCalledWith(expect.objectContaining({ microphone: 'mock-mic-1' })));
+
+    view.action('narration-start').click();
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith('mock-mic-1', { kind: 'live' }));
+    await vi.waitFor(() => expect(view.action('narration-stop')).toBeTruthy());
+    await vi.waitFor(() => expect(section(view).querySelector('.elapsed')?.textContent).toContain('Enregistrement : 0:00'));
+    // The level shows while recording.
+    await vi.waitFor(() =>
+      expect(Number(section(view).querySelector('[role="meter"]')?.getAttribute('aria-valuenow'))).toBeGreaterThan(0),
+    );
+    // The session goes on meanwhile.
+    mockLiveTick(120);
+    await tick();
+    expect(Number(view.canvas().dataset.strokes)).toBeGreaterThan(0);
+
+    view.action('narration-stop').click();
+    await vi.waitFor(() => expect(savedText(view)).toBe('Narration enregistrée sur 2 pages.'));
+    expect(stop).toHaveBeenCalledWith(true, null, null, null);
+    // Ready for another take.
+    expect(view.action('narration-open')).toBeTruthy();
+    expect(view.root().dataset.state).toBe('live');
+  });
+
+  it('says when a single page, or none, got the narration', async () => {
+    const view = render();
+    await live(view);
+    const record = async () => {
+      view.action('narration-open').click();
+      await vi.waitFor(() => expect(view.action('narration-start')).toBeTruthy());
+      view.action('narration-start').click();
+      await vi.waitFor(() => expect(view.action('narration-stop')).toBeTruthy());
+      view.action('narration-stop').click();
+      await vi.waitFor(() => expect(view.action('narration-open')).toBeTruthy());
+    };
+    mockNarration.livePages = 1;
+    await record();
+    expect(savedText(view)).toBe('Narration enregistrée sur 1 page.');
+    mockNarration.livePages = 0;
+    await record();
+    expect(savedText(view)).toBe("Aucune page de la séance ne contient de tracé : la narration n'a pas été conservée.");
+  });
+
+  it('throws a cancelled recording away', async () => {
+    const stop = vi.spyOn(api, 'narrationStop');
+    const view = render();
+    await live(view);
+    view.action('narration-open').click();
+    await vi.waitFor(() => expect(view.action('narration-start')).toBeTruthy());
+    view.action('narration-start').click();
+    await vi.waitFor(() => expect(view.action('narration-cancel')).toBeTruthy());
+    view.action('narration-cancel').click();
+    await vi.waitFor(() => expect(view.action('narration-start')).toBeTruthy());
+    expect(stop).toHaveBeenCalledWith(false, null, null, null);
+    expect(savedText(view)).toBeUndefined();
+    expect((await api.narrationStatus()).state).not.toBe('recording');
+  });
+
+  it('stops the narration before leaving live mode, so that the pages are saved with it', async () => {
+    const stop = vi.spyOn(api, 'narrationStop');
+    const liveStop = vi.spyOn(api, 'liveStop');
+    const view = render();
+    await live(view);
+    view.action('narration-open').click();
+    await vi.waitFor(() => expect(view.action('narration-start')).toBeTruthy());
+    view.action('narration-start').click();
+    await vi.waitFor(() => expect(view.action('narration-stop')).toBeTruthy());
+    mockLiveTick(120);
+    view.action('stop-live').click();
+    await vi.waitFor(() => expect(view.onclose).toHaveBeenCalledTimes(1));
+    const saving = stop.mock.calls.findIndex(([save]) => save === true);
+    expect(saving).toBeGreaterThanOrEqual(0);
+    expect(stop.mock.calls[saving]).toEqual([true, null, null, null]);
+    expect(stop.mock.invocationCallOrder[saving]).toBeLessThan(liveStop.mock.invocationCallOrder[0]);
+    expect((await api.narrationStatus()).state).toBe('idle');
+  });
+
+  it('keeps live mode open when the narration cannot be saved', async () => {
+    const liveStop = vi.spyOn(api, 'liveStop');
+    const view = render();
+    await live(view);
+    view.action('narration-open').click();
+    await vi.waitFor(() => expect(view.action('narration-start')).toBeTruthy());
+    view.action('narration-start').click();
+    await vi.waitFor(() => expect(view.action('narration-stop')).toBeTruthy());
+    vi.spyOn(api, 'narrationStop').mockRejectedValueOnce({ code: 'microphoneFailed', message: 'device lost' });
+    view.action('stop-live').click();
+    await vi.waitFor(() => expect(view.target.textContent).toContain("Le mode direct ne s'est pas arrêté correctement."));
+    expect(view.onclose).not.toHaveBeenCalled();
+    expect(liveStop).not.toHaveBeenCalled();
+    // Nothing is left recording; a new try finishes the session.
+    view.action('stop-live').click();
+    await vi.waitFor(() => expect(view.onclose).toHaveBeenCalledTimes(1));
+    expect(liveStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers only to discard a replay recording kept from before: the retry belongs to the editor', async () => {
+    const path = [...mockLibrary().notes.keys()][0];
+    mockNarration.saveConflict = true;
+    await api.narrationStart(null, { kind: 'replay', path, speed: 1, maxPauseMs: null, startMs: 0 });
+    await expect(api.narrationStop(true, null, path, null)).rejects.toMatchObject({ code: 'noteConflict' });
+    const discard = vi.spyOn(api, 'narrationDiscard');
+    const view = render();
+    await live(view);
+    await vi.waitFor(() => expect(section(view).querySelector('[data-slot="narration-pending"]')).toBeTruthy());
+    expect(section(view).textContent).toContain('Ouvrez une note dans l');
+    expect(view.action('narration-retry')).toBeNull();
+    expect(view.action('narration-open')).toBeNull();
+    view.action('narration-discard').click();
+    await tick();
+    view.action('narration-discard-yes').click();
+    await vi.waitFor(() => expect(discard).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(view.action('narration-open')).toBeTruthy());
+  });
+
+  it('explains when Windows blocks the microphone', async () => {
+    mockNarration.silent = true;
+    const view = render();
+    await live(view);
+    view.action('narration-open').click();
+    await vi.waitFor(() => expect(section(view).querySelector('[data-capture="silent"]')).toBeTruthy());
+    expect(section(view).textContent).toContain("Windows bloque peut-être l'accès au micro");
+    view.action('narration-start').click();
+    await vi.waitFor(() => expect(view.action('narration-stop')).toBeTruthy());
+    await vi.waitFor(() => expect(section(view).querySelector('[data-capture="silent"]')).toBeTruthy());
+    expect(section(view).textContent).toContain('Un interrupteur de coupure du micro donne le même résultat.');
+  });
+
+  it('reports a recording that cannot start', async () => {
+    mockNarration.microphones = [];
+    const view = render();
+    await live(view);
+    view.action('narration-open').click();
+    await vi.waitFor(() => expect(section(view).textContent).toContain('Aucun micro détecté'));
+    view.action('narration-start').click();
+    await vi.waitFor(() => expect(section(view).querySelector('[data-slot="record-error"]')).toBeTruthy());
+    expect(view.action('narration-start')).toBeTruthy();
+  });
+
+  /** Starts a narration, then leaves live mode while stopping it fails with `code`. */
+  async function leaveWhileStoppingFails(code: string) {
+    const liveStop = vi.spyOn(api, 'liveStop');
+    const view = render();
+    await live(view);
+    view.action('narration-open').click();
+    await vi.waitFor(() => expect(view.action('narration-start')).toBeTruthy());
+    view.action('narration-start').click();
+    await vi.waitFor(() => expect(view.action('narration-stop')).toBeTruthy());
+    vi.spyOn(api, 'narrationStop').mockRejectedValueOnce({ code, message: 'nothing' });
+    view.action('stop-live').click();
+    return { view, liveStop };
+  }
+
+  it.each(['emptyRecording', 'microphoneSilent'])(
+    'leaves live mode anyway when the narration has nothing to keep (%s)',
+    async (code) => {
+      const { view, liveStop } = await leaveWhileStoppingFails(code);
+      await vi.waitFor(() => expect(view.onclose).toHaveBeenCalledTimes(1));
+      expect(liveStop).toHaveBeenCalledTimes(1);
+      expect(view.target.textContent).not.toContain("Le mode direct ne s'est pas arrêté correctement.");
+      expect((await api.narrationStatus()).state).toBe('idle');
+    },
+  );
+
+  it('leaves live mode when the mock recording is empty, as Rust says emptyRecording', async () => {
+    mockNarration.empty = true;
+    const liveStop = vi.spyOn(api, 'liveStop');
+    const view = render();
+    await live(view);
+    view.action('narration-open').click();
+    await vi.waitFor(() => expect(view.action('narration-start')).toBeTruthy());
+    view.action('narration-start').click();
+    await vi.waitFor(() => expect(view.action('narration-stop')).toBeTruthy());
+    view.action('stop-live').click();
+    await vi.waitFor(() => expect(view.onclose).toHaveBeenCalledTimes(1));
+    expect(liveStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps live mode open for any other failure of the narration', async () => {
+    const { view, liveStop } = await leaveWhileStoppingFails('noteConflict');
+    await vi.waitFor(() => expect(view.target.textContent).toContain("Le mode direct ne s'est pas arrêté correctement."));
+    expect(view.onclose).not.toHaveBeenCalled();
+    expect(liveStop).not.toHaveBeenCalled();
+  });
+
+  it('saves a recording left behind when the view goes away, instead of discarding it', async () => {
+    const stop = vi.spyOn(api, 'narrationStop');
+    const view = render();
+    await live(view);
+    view.action('narration-open').click();
+    await vi.waitFor(() => expect(view.action('narration-start')).toBeTruthy());
+    view.action('narration-start').click();
+    await vi.waitFor(() => expect(view.action('narration-stop')).toBeTruthy());
+    cleanup?.();
+    cleanup = null;
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledWith(true, null, null, null));
+    expect(stop).not.toHaveBeenCalledWith(false, null, null, null);
+    expect((await api.narrationStatus()).state).toBe('idle');
+  });
+
+  it('speaks English', async () => {
+    setLocale('en');
+    mockNarration.livePages = 3;
+    const view = render();
+    await live(view);
+    expect(view.action('narration-open').textContent?.trim()).toBe('Record the narration');
+    view.action('narration-open').click();
+    await vi.waitFor(() => expect(view.action('narration-start')).toBeTruthy());
+    expect(view.action('narration-start').textContent?.trim()).toBe('Start');
+    view.action('narration-start').click();
+    await vi.waitFor(() => expect(view.action('narration-stop')).toBeTruthy());
+    expect(view.action('narration-stop').textContent?.trim()).toBe('Stop and save');
+    view.action('narration-stop').click();
+    await vi.waitFor(() => expect(savedText(view)).toBe('Narration saved on 3 pages.'));
   });
 });

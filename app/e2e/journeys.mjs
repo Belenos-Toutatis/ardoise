@@ -1,6 +1,6 @@
 // The journeys of `cargo xtask e2e` (see run.mjs). Labels come from the interface's own
 // translation files, so the same journey runs in French and in English.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -216,6 +216,98 @@ export const journeys = [
         await app.click('button[data-action="stop-live"]');
         await app.waitFor(`document.querySelector('input.search') !== null`, 'the library');
         await app.waitFor(cards('>= 11'), 'the live note in the grid', 15_000);
+      });
+    },
+  },
+  {
+    // The replay of a demo note, played to the end, then exported as a GIF through the video dialog. The native
+    // "save as" dialog cannot be driven: the interface lets the journey script its answer
+    // (`window.__ardoiseE2eSavePath`, see `pickExportFile` in lib/dialogs.ts). The replay controls are found by
+    // their `data-action` (replay-toggle, replay-speed, replay-play, replay-seek, video-export); the end of the
+    // replay is the timeline slider reaching its maximum.
+    name: 'relecture d’une note puis export vidéo en GIF',
+    async run(app, check) {
+      const l = (key) => text(app.language, key);
+      const j = JSON.stringify;
+      const gif = join(app.dir, 'relecture.gif');
+      const DIALOG = '[role="dialog"]';
+      const SLIDER = 'input[type="range"][data-action="replay-seek"]';
+
+      await check('la bibliothèque de démonstration s’affiche (7 notes)', async () => {
+        await app.waitFor(`document.querySelectorAll('.note-card').length === 7`, 'the 7 demo notes');
+      });
+
+      await check('ouvrir une note de démonstration : l’éditeur dessine ses traits', async () => {
+        await app.click('.note-card .card-open');
+        await app.waitFor(`document.querySelectorAll(${j(STROKES)}).length > 0`, 'the strokes of the note');
+      });
+
+      await check(`entrer en relecture (« ${l('editor.replay.button')} »)`, async () => {
+        await app.click('button[data-action="replay-toggle"]');
+        await app.waitFor(`document.querySelector(${j(SLIDER)}) !== null`, 'the replay timeline');
+      });
+
+      await check(`lire à 16× jusqu’à la fin (« ${l('replay.play')} »)`, async () => {
+        await app.evaluate(
+          `(() => { const s = document.querySelector('select[data-action="replay-speed"]'); s.value = '16'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`,
+        );
+        await app.click('button[data-action="replay-play"]');
+        await app.waitFor(
+          `(() => { const r = document.querySelector(${j(SLIDER)}); return r !== null && Number(r.max) > 0 && Number(r.value) >= Number(r.max); })()`,
+          'the end of the replay',
+          60_000,
+        );
+      });
+
+      await check(`ouvrir la fenêtre d’export vidéo (« ${l('editor.video.button')} »)`, async () => {
+        await app.click('button[data-action="video-export"]');
+        await app.waitFor(
+          `document.querySelector(${j(`${DIALOG} h2`)})?.textContent === ${j(l('videoExport.title'))}`,
+          'the video export dialog',
+        );
+      });
+
+      await check('choisir le GIF : la carte est sélectionnée, le fond transparent devient possible', async () => {
+        await app.click(`${DIALOG} label.format-card`, l('videoExport.formats.gif'));
+        await app.waitFor(
+          `document.querySelector(${j(`${DIALOG} .format-card.selected`)})?.textContent.includes(${j(l('videoExport.formats.gif'))})`,
+          'the GIF card to be selected',
+        );
+        const transparent = await app.evaluate(
+          `[...document.querySelectorAll(${j(`${DIALOG} label.choice`)})].some((c) => c.textContent.trim() === ${j(l('videoExport.backgroundTransparent'))})`,
+        );
+        if (!transparent) throw new Error('the transparent background choice is missing for a GIF');
+      });
+
+      await check('l’estimation (taille, durée, temps d’export) s’affiche avant l’export', async () => {
+        const prefix = l('videoExport.estimate.time').split('{time}')[0];
+        await app.waitFor(
+          `document.querySelector(${j(`${DIALOG} .video-estimate`)})?.textContent.includes(${j(prefix)})`,
+          'the estimate',
+          15_000,
+        );
+      });
+
+      await check('exporter vers un fichier temporaire : le GIF est écrit', async () => {
+        await app.evaluate(`window.__ardoiseE2eSavePath = ${j(gif)}`);
+        await app.click(`${DIALOG} .actions button.primary`);
+        await app.waitFor(
+          `document.querySelector(${j(`${DIALOG} .export-result code`)})?.textContent === ${j(gif)}`,
+          'the export result',
+          120_000,
+        );
+      });
+
+      await check('le fichier est un GIF non vide (signature GIF89a)', async () => {
+        if (!existsSync(gif)) throw new Error(`${gif} was not written`);
+        if (statSync(gif).size <= 6) throw new Error(`${gif} is empty`);
+        const signature = readFileSync(gif).subarray(0, 6).toString('latin1');
+        if (signature !== 'GIF89a') throw new Error(`unexpected signature ${j(signature)}`);
+      });
+
+      await check('fermer la fenêtre', async () => {
+        await app.click(`${DIALOG} .actions button`, l('common.close'));
+        await app.waitFor(`document.querySelector(${j(DIALOG)}) === null`, 'the dialog to close');
       });
     },
   },

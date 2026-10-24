@@ -170,6 +170,10 @@
       "folderHint": "Un chemin relatif à la bibliothèque, par exemple Exports.",
       "save": "Enregistrer",
       "saved": "Réglage enregistré."
+    },
+    "microphone": {
+      "title": "Micro",
+      "hint": "Le micro utilisé pour la narration des vidéos et du mode direct. Le choix est mémorisé sur cet ordinateur."
     }
   },
   "tablet": {
@@ -435,7 +439,21 @@
     "liveNotRunning": "Le mode direct n'est pas lancé.",
     "noMonitor": "Aucun écran disponible pour la présentation.",
     "simulationOnly": "Commande réservée à la tablette simulée.",
-    "tablet": "Problème avec la tablette : {detail}"
+    "tablet": "Problème avec la tablette : {detail}",
+    "videoExportFailed": "la vidéo n'a pas pu être écrite ({detail}) ; choisissez un autre emplacement et vérifiez qu'il reste de la place",
+    "invalidVideoSettings": "ces réglages vidéo ne sont pas valides ({detail}) ; vérifiez la taille de l'image, la durée et le fond",
+    "codecUnavailable": "Windows ne peut pas écrire de MP4 sur ce PC (l'encodeur H.264 est absent) : installez le secours OpenH264 dans les Réglages, ou choisissez WebM",
+    "microphoneNotFound": "le micro choisi est introuvable : branchez-le, ou choisissez-en un autre dans les Réglages",
+    "microphoneSilent": "Windows bloque peut-être l'accès au micro : Paramètres > Confidentialité et sécurité > Microphone > « Autoriser les applications de bureau à accéder à votre microphone »",
+    "microphoneFailed": "le micro ne peut pas être utilisé ({detail}) ; vérifiez qu'un autre logiciel ne s'en sert pas",
+    "noMicrophone": "aucun micro n'est connecté à cet ordinateur",
+    "narrationBusy": "un enregistrement de narration est déjà en cours",
+    "noRecording": "aucun enregistrement de narration n'est en cours",
+    "openh264DownloadFailed": "le téléchargement d'OpenH264 a échoué ({detail}) ; vérifiez la connexion à internet puis réessayez",
+    "noNarration": "Cette note n'a pas de narration.",
+    "emptyRecording": "Le micro n'a rien enregistré.",
+    "noPendingNarration": "Aucun enregistrement n'est en attente.",
+    "openh264RemoveFailed": "Windows utilise encore OpenH264 : fermez puis relancez Ardoise, puis supprimez-le."
   },
   "editor": {
     "back": "Bibliothèque",
@@ -621,6 +639,95 @@
     "export": {
       "button": "Exporter…",
       "hint": "Exporter la note en PNG, JPG, SVG ou PDF"
+    },
+    "replay": {
+      "button": "Relecture",
+      "hint": "Rejouer le tracé comme il a été écrit (R)",
+      "recordingBusy": "Arrêtez ou annulez d'abord l'enregistrement de la narration."
+    },
+    "video": {
+      "button": "Vidéo",
+      "hint": "Exporter la relecture en vidéo (MP4, WebM) ou en image animée (GIF, WebP)…"
+    }
+  },
+  "replay": {
+    "bar": "Contrôles de la relecture",
+    "play": "Lecture",
+    "pause": "Pause",
+    "spaceKey": "Espace",
+    "timeline": "Position dans la relecture",
+    "timeValue": "{current} sur {total}",
+    "speed": "Vitesse",
+    "speedValue": "{speed}×",
+    "trim": "Supprimer les temps morts",
+    "trimDetail": "(pauses de plus de {seconds} s)",
+    "withNarration": "Lire avec la narration",
+    "narrationLocks": "La vitesse et les temps morts sont ceux de la narration.",
+    "narrationLoading": "Chargement de la narration…",
+    "narrationFailed": "La narration ne peut pas être lue : {message}",
+    "audioFailed": "Le son de la narration ne peut pas être lu.",
+    "empty": "Cette note ne contient aucun tracé à rejouer.",
+    "locked": "Enregistrement en cours : la relecture suit son cours, sans pause ni changement de vitesse."
+  },
+  "narration": {
+    "title": "Narration",
+    "picker": {
+      "label": "Micro",
+      "default": "Micro par défaut de Windows",
+      "missing": "Micro absent (débranché ?)",
+      "none": "Aucun micro détecté",
+      "refresh": "Actualiser la liste des micros",
+      "level": "Niveau du micro",
+      "levelValue": "Niveau {rms} %, crête {peak} %"
+    },
+    "status": {
+      "starting": "Démarrage du micro…",
+      "waiting": "En attente du son du micro…",
+      "receiving": "Le micro fonctionne.",
+      "noData": "Le micro ne transmet rien. Vérifiez qu'il est bien branché ou choisissez-en un autre.",
+      "failed": "Le micro a échoué : {detail}",
+      "failedUnknown": "Le micro ne fonctionne pas.",
+      "silent": "Windows bloque peut-être l'accès au micro : ouvrez Paramètres > Confidentialité et sécurité > Microphone et activez « Autoriser les applications de bureau à accéder à votre microphone ». Un interrupteur de coupure du micro donne le même résultat."
+    },
+    "record": {
+      "open": "Enregistrer une narration",
+      "openHint": "Raconter pendant que la relecture défile : le son est enregistré dans la note",
+      "close": "Fermer",
+      "replaces": "Un nouvel enregistrement remplace la narration actuelle.",
+      "settings": "Le son suivra la relecture avec ses réglages actuels : vitesse {speed}, {pauses}.",
+      "pausesTrimmed": "temps morts supprimés",
+      "pausesKept": "temps morts conservés",
+      "start": "Démarrer",
+      "stop": "Arrêter et enregistrer",
+      "cancel": "Annuler",
+      "elapsed": "Enregistrement : {time}",
+      "afterEnd": "La relecture est terminée ; l'enregistrement continue et la dernière image reste affichée.",
+      "saving": "Enregistrement dans la note…",
+      "saved": "Narration enregistrée ({duration}).",
+      "failed": "L'enregistrement a échoué : {message}",
+      "saveNote": "Le son est ajouté à la note telle qu'elle est enregistrée sur le disque : les modifications non enregistrées n'en font pas partie.",
+      "unsavedWarning": "Cette note a des modifications non enregistrées. Enregistrez-la d'abord (Ctrl+S), sinon elles ne seront pas conservées avec la narration."
+    },
+    "pending": {
+      "title": "Enregistrement en attente",
+      "message": "La narration n'a pas pu être ajoutée à la note, mais elle est conservée. Réglez le problème (par exemple en rouvrant la note ou en enregistrant une copie), puis réessayez.",
+      "messageElsewhere": "Un enregistrement n'a pas pu être ajouté à sa note, mais il est conservé. Ouvrez une note dans l'éditeur pour le réessayer (Relecture, puis Enregistrer une narration), ou abandonnez-le.",
+      "retry": "Réessayer",
+      "retrying": "Nouvel essai…",
+      "discard": "Abandonner l'enregistrement",
+      "discardConfirm": "Abandonner définitivement cet enregistrement ? Le son sera perdu.",
+      "discardYes": "Oui, abandonner",
+      "discardNo": "Non, le garder"
+    },
+    "stored": {
+      "info": "Narration enregistrée dans la note ({duration}).",
+      "none": "Cette note n'a pas de narration.",
+      "delete": "Supprimer la narration",
+      "deleteConfirm": "Supprimer définitivement la narration de cette note ?",
+      "deleteYes": "Oui, supprimer",
+      "deleteNo": "Non, la garder",
+      "deleted": "Narration supprimée.",
+      "deleteFailed": "La narration n'a pas pu être supprimée : {message}"
     }
   },
   "export": {
@@ -732,6 +839,164 @@
     "pickFile": "Enregistrer l'export",
     "pickFolder": "Choisir le dossier de l'export",
     "defaultPdfName": "Notes"
+  },
+  "videoExport": {
+    "title": "Exporter en vidéo",
+    "format": "Format",
+    "formats": {
+      "mp4": "MP4 (vidéo)",
+      "gif": "GIF animé",
+      "webp": "WebP animé",
+      "webm": "WebM (vidéo)"
+    },
+    "formatPros": {
+      "mp4": "Se lit partout : Windows, téléphones, PowerPoint, ENT. Avec le son de la narration.",
+      "gif": "Se lit sans lecteur : dans un courriel, une page web ou une diapositive. Tourne en boucle.",
+      "webp": "Comme le GIF, mais plus léger et plus net ; fond transparent possible.",
+      "webm": "Format ouvert, avec le son, fichiers légers. Se lit dans les navigateurs et dans Moodle."
+    },
+    "formatCons": {
+      "mp4": "Pas de fond transparent.",
+      "gif": "Pas de son, 256 couleurs seulement, fichiers volumineux.",
+      "webp": "Pas de son ; certains anciens logiciels ne l'ouvrent pas.",
+      "webm": "Export lent (encodage AV1) ; certains lecteurs Windows ne l'ouvrent pas."
+    },
+    "compare": {
+      "title": "Quel format choisir ?",
+      "rows": {
+        "plays": {
+          "label": "Se lit avec",
+          "mp4": "Tout : Windows, téléphone, PowerPoint, ENT",
+          "gif": "Navigateur, courriel, diapositive : sans lecteur",
+          "webp": "Navigateurs et logiciels récents",
+          "webm": "Navigateurs, Moodle, VLC"
+        },
+        "sound": {
+          "label": "Son (narration)",
+          "mp4": "Oui",
+          "gif": "Non",
+          "webp": "Non",
+          "webm": "Oui"
+        },
+        "transparent": {
+          "label": "Fond transparent possible",
+          "mp4": "Non",
+          "gif": "Oui",
+          "webp": "Oui",
+          "webm": "Non"
+        },
+        "size": {
+          "label": "Taille du fichier",
+          "mp4": "Petite",
+          "gif": "Grosse",
+          "webp": "Moyenne",
+          "webm": "Petite"
+        },
+        "time": {
+          "label": "Durée de l'export",
+          "mp4": "Rapide",
+          "gif": "Très rapide",
+          "webp": "Longue",
+          "webm": "La plus longue"
+        },
+        "bestFor": {
+          "label": "Idéal pour",
+          "mp4": "Un cours en vidéo avec ma voix, PowerPoint, ENT",
+          "gif": "Une courte démonstration dans un courriel ou une diapositive",
+          "webp": "Une animation nette sur une page web, avec transparence",
+          "webm": "Déposer sur Moodle ou un site web, fichier léger"
+        }
+      },
+      "advice": "En cas de doute : le MP4, qui se lit partout et porte le son. Le GIF pour une courte animation qui doit s'afficher sans lecteur."
+    },
+    "options": "Réglages",
+    "resolution": "Taille de l'image",
+    "resolutions": {
+      "720p": "720p (1280 × 720)",
+      "1080p": "1080p (1920 × 1080)",
+      "4k": "4K (3840 × 2160)",
+      "page": "Taille de la page"
+    },
+    "pageHint": "La vidéo garde les proportions de la page, avec 1920 pixels sur le grand côté.",
+    "frameRate": "Images par seconde",
+    "fps": "{count} images/s",
+    "timing": "Durée de la vidéo",
+    "speed": "Vitesse",
+    "speedValue": "{speed}×",
+    "targetDuration": "Durée cible",
+    "seconds": "secondes",
+    "trimPauses": "Supprimer les temps morts",
+    "trimPausesHint": "Les longues pauses entre deux traits sont raccourcies à une demi-seconde.",
+    "background": "Fond",
+    "backgroundPaper": "Avec le papier",
+    "backgroundTransparent": "Transparent",
+    "backgroundFixed": "Le fond est toujours celui du papier : ce format ne gère pas la transparence.",
+    "holdEnd": "Image finale figée",
+    "narration": "Inclure la narration",
+    "narrationHint": "Le son enregistré au micro est intégré à la vidéo.",
+    "narrationLocked": "La narration garde la vitesse avec laquelle elle a été enregistrée ({speed}×) : la vitesse, la durée cible et les temps morts ne peuvent pas être changés.",
+    "narrationNoSound": "Cette note a une narration, mais le GIF et le WebP n'ont pas de son : choisissez le MP4 ou le WebM pour l'inclure.",
+    "invalidTiming": "La durée cible doit être comprise entre 1 et 3600 secondes.",
+    "invalidHold": "L'image finale peut rester affichée de 0 à 60 secondes.",
+    "estimate": {
+      "pending": "Calcul de l'estimation…",
+      "size": "Taille de l'image : {width} × {height} pixels",
+      "length": "Durée de la vidéo : {duration} ({frames} images)",
+      "speed": "Vitesse de la relecture : {speed}×",
+      "narration": "Narration : {duration}",
+      "time": "Export estimé : environ {time}",
+      "long": "Cet export sera long. Pour aller plus vite, choisissez une taille d'image plus petite, moins d'images par seconde ou un autre format (le WebM est le plus lent).",
+      "failed": "Impossible d'estimer l'export : {message}"
+    },
+    "time": {
+      "lessThanSecond": "moins d'une seconde",
+      "seconds": "{seconds} s",
+      "minutes": "{minutes} min",
+      "minutesSeconds": "{minutes} min {seconds} s"
+    },
+    "destination": "Vous choisirez ensuite le fichier à créer.",
+    "run": "Exporter…",
+    "again": "Exporter de nouveau…",
+    "running": "Export en cours…",
+    "cancelRun": "Annuler l'export",
+    "cancelling": "Annulation…",
+    "closeBusy": "Un export vidéo est en cours : attendez la fin ou annulez-le avant de fermer la fenêtre.",
+    "finalizing": "Finalisation…",
+    "cancelled": "Export annulé.",
+    "progress": "Images : {done} sur {total} ({percent} %)",
+    "progressLabel": "Avancement de l'export",
+    "done": "Export terminé.",
+    "resultLength": "Durée : {duration}",
+    "resultSound": "Son : {sound}",
+    "soundYes": "oui (narration)",
+    "soundNo": "non",
+    "failed": "L'export a échoué : {message}",
+    "pickFile": "Enregistrer la vidéo"
+  },
+  "openh264": {
+    "title": "Encodeur vidéo de secours (OpenH264)",
+    "intro": "Pour écrire les vidéos MP4, Ardoise utilise l'encodeur intégré à Windows (Media Foundation). Il manque sur les éditions « N » de Windows installées sans le Media Feature Pack : Ardoise peut alors télécharger l'encodeur OpenH264 chez Cisco et le ranger dans son dossier local.",
+    "mediaFoundationOk": "Windows sait écrire les MP4 sur ce PC : le secours n'est pas nécessaire.",
+    "mediaFoundationMissing": "Windows ne sait pas écrire les MP4 sur ce PC. Installez le secours ci-dessous, ou choisissez le WebM pour vos vidéos.",
+    "status": {
+      "label": "État",
+      "notInstalled": "Non installé",
+      "installed": "Installé ({size} Mo, version {version})",
+      "damaged": "Fichier endommagé : supprimez-le, puis téléchargez-le de nouveau"
+    },
+    "download": "Télécharger depuis Cisco",
+    "downloadHint": "Le fichier vient du serveur de Cisco ; son empreinte est vérifiée avant l'installation. Sa licence figure ci-dessous.",
+    "downloading": "Téléchargement…",
+    "downloadProgress": "{received} sur {total} Mo",
+    "downloadReceived": "{received} Mo reçus",
+    "downloadProgressLabel": "Avancement du téléchargement",
+    "cancelDownload": "Annuler le téléchargement",
+    "cancelling": "Annulation…",
+    "cancelled": "Téléchargement annulé.",
+    "allow": "Autoriser Ardoise à utiliser OpenH264 pour les MP4",
+    "allowHint": "Décoché, le fichier reste installé mais n'est pas utilisé.",
+    "remove": "Supprimer",
+    "licenseTitle": "Licence d'OpenH264 (Cisco)"
   },
   "live": {
     "title": "Mode direct",
@@ -862,6 +1127,15 @@
           "action": "Terminer (sur l'écran projeté : fermer la présentation)"
         }
       }
+    },
+    "narration": {
+      "title": "Narration",
+      "open": "Enregistrer la narration",
+      "openHint": "Raconter pendant la séance : le son est enregistré avec les pages",
+      "hint": "Le son est découpé page par page et enregistré avec chaque note ; la relecture de la note le rejoue.",
+      "savedOne": "Narration enregistrée sur 1 page.",
+      "savedMany": "Narration enregistrée sur {count} pages.",
+      "savedNone": "Aucune page de la séance ne contient de tracé : la narration n'a pas été conservée."
     }
   },
   "presentation": {
