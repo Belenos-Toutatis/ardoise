@@ -3,13 +3,16 @@
 use std::path::{Path, PathBuf};
 
 use ardoise_core::library;
-use ardoise_core::settings::{Language, Settings, SettingsError, SettingsStore, Theme};
+use ardoise_core::settings::{
+    AutoExport, AutoExportFormat, Language, Settings, SettingsError, SettingsStore, Theme,
+};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::watcher::LibraryWatch;
 
 use crate::AppContext;
+use crate::library::slash_path;
 use crate::selftest::{self, UiReport};
 
 /// Error sent to the interface: `code` selects a translated message, `message` is the
@@ -43,6 +46,14 @@ impl From<SettingsError> for CommandError {
 
 pub(crate) type CommandResult<T> = Result<T, CommandError>;
 
+/// `AutoExportSettings` in `note.ts`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AutoExportState {
+    pub format: AutoExportFormat,
+    /// As stored, `/`-separated.
+    pub folder: String,
+}
+
 /// Everything the interface needs to draw its first screen.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +68,7 @@ pub struct AppState {
     system_locale: Option<String>,
     self_test: bool,
     open_diagnostic: bool,
+    auto_export: AutoExportState,
 }
 
 impl AppState {
@@ -78,6 +90,22 @@ impl AppState {
 
     pub fn library(&self) -> Option<&str> {
         self.library.as_deref()
+    }
+
+    pub fn auto_export(&self) -> &AutoExportState {
+        &self.auto_export
+    }
+}
+
+impl AutoExportState {
+    /// The folder relative to the library root as `a/b`, or `None` if the stored value is not
+    /// acceptable (a hand-edited settings file).
+    pub fn valid_folder(&self) -> Option<String> {
+        let auto_export = AutoExport {
+            folder: self.folder.clone(),
+            ..AutoExport::default()
+        };
+        auto_export.relative_folder().map(|path| slash_path(&path))
     }
 }
 
@@ -115,6 +143,10 @@ fn state_from(context: &AppContext, loaded: Result<Settings, SettingsError>) -> 
         system_locale: context.system_locale.clone(),
         self_test: context.self_test.is_some(),
         open_diagnostic: context.open_diagnostic,
+        auto_export: AutoExportState {
+            format: settings.auto_export.format,
+            folder: settings.auto_export.folder,
+        },
     }
 }
 
@@ -147,14 +179,29 @@ pub fn set_theme(context: State<'_, AppContext>, theme: Theme) -> CommandResult<
     update(&context, |settings| settings.theme = theme)
 }
 
-/// Sets the automatic export after a sync (`[auto_export]`, shared by every PC).
-/// Stub of the M5 contract: replaced by the implementation (validation, `AppState.autoExport`).
+/// Sets the automatic export after a sync (`[auto_export]`, shared by every PC). The folder
+/// must be a sub-folder of the library (`invalidFolder` otherwise); it is stored as `a/b`.
+/// Keys of the section this version does not know are kept.
+pub(crate) fn set_auto_export_in(
+    context: &AppContext,
+    auto_export: AutoExport,
+) -> CommandResult<AppState> {
+    let folder = auto_export
+        .relative_folder()
+        .map(|path| slash_path(&path))
+        .ok_or_else(|| CommandError::new("invalidFolder", &auto_export.folder))?;
+    update(context, |settings| {
+        settings.auto_export.format = auto_export.format;
+        settings.auto_export.folder = folder;
+    })
+}
+
 #[tauri::command]
 pub fn set_auto_export(
     context: State<'_, AppContext>,
-    auto_export: ardoise_core::settings::AutoExport,
+    auto_export: AutoExport,
 ) -> CommandResult<AppState> {
-    update(&context, |settings| settings.auto_export = auto_export)
+    set_auto_export_in(&context, auto_export)
 }
 
 #[derive(Debug, Serialize)]
@@ -278,5 +325,103 @@ mod tests {
         let error = choose_library(&context, &notes.path().display().to_string()).unwrap_err();
         assert_eq!(error.code, "settings");
         assert_eq!(fs::read_to_string(&file).unwrap(), "language = [broken");
+    }
+
+    fn auto_export(format: AutoExportFormat, folder: &str) -> AutoExport {
+        AutoExport {
+            format,
+            folder: folder.to_owned(),
+            ..AutoExport::default()
+        }
+    }
+
+    #[test]
+    fn auto_export_is_off_in_a_fresh_state() {
+        let settings = tempfile::tempdir().unwrap();
+        let state = current_state(&context(settings.path(), "PC-A"));
+        assert_eq!(state.auto_export().format, AutoExportFormat::Off);
+        assert_eq!(state.auto_export().folder, "Exports");
+        assert_eq!(
+            state.auto_export().valid_folder().as_deref(),
+            Some("Exports")
+        );
+    }
+
+    #[test]
+    fn auto_export_is_validated_normalised_and_stored() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path(), "PC-A");
+        let state = set_auto_export_in(
+            &context,
+            auto_export(AutoExportFormat::Pdf, "/Lecture\\Tel/"),
+        )
+        .unwrap();
+        assert_eq!(state.auto_export().format, AutoExportFormat::Pdf);
+        assert_eq!(state.auto_export().folder, "Lecture/Tel");
+        // Read back from disk, shared by every PC (not a machine section).
+        let other = self::context(settings.path(), "PC-B");
+        let state = current_state(&other);
+        assert_eq!(state.auto_export().format, AutoExportFormat::Pdf);
+        assert_eq!(state.auto_export().folder, "Lecture/Tel");
+        let text = fs::read_to_string(settings.path().join(SettingsStore::FILE_NAME)).unwrap();
+        assert!(text.contains("[auto_export]"), "{text}");
+        assert!(!text.contains("library"), "{text}");
+
+        let state =
+            set_auto_export_in(&context, auto_export(AutoExportFormat::Off, "Exports")).unwrap();
+        assert_eq!(state.auto_export().format, AutoExportFormat::Off);
+    }
+
+    #[test]
+    fn invalid_auto_export_folders_are_refused_without_touching_settings() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path(), "PC-A");
+        for bad in [
+            "",
+            " ",
+            "..",
+            "a/../b",
+            "C:/Exports",
+            "_ardoise",
+            "_ardoise/x",
+        ] {
+            let error =
+                set_auto_export_in(&context, auto_export(AutoExportFormat::Png, bad)).unwrap_err();
+            assert_eq!(error.code(), "invalidFolder", "{bad:?}");
+        }
+        assert!(!settings.path().join(SettingsStore::FILE_NAME).exists());
+    }
+
+    #[test]
+    fn setting_the_auto_export_keeps_unknown_keys() {
+        let settings = tempfile::tempdir().unwrap();
+        fs::write(
+            settings.path().join(SettingsStore::FILE_NAME),
+            "[auto_export]\nformat = \"png\"\nfuture = 3\n\n[other]\nkept = true\n",
+        )
+        .unwrap();
+        let context = context(settings.path(), "PC-A");
+        set_auto_export_in(&context, auto_export(AutoExportFormat::Pdf, "Lecture")).unwrap();
+        let text = fs::read_to_string(settings.path().join(SettingsStore::FILE_NAME)).unwrap();
+        assert!(text.contains("future = 3"), "{text}");
+        assert!(text.contains("kept = true"), "{text}");
+        assert!(text.contains("format = \"pdf\""), "{text}");
+    }
+
+    #[test]
+    fn app_state_json_has_the_auto_export_shape_of_the_interface() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path(), "PC-A");
+        let state =
+            set_auto_export_in(&context, auto_export(AutoExportFormat::Png, "Lecture")).unwrap();
+        let json = serde_json::to_value(&state).unwrap();
+        assert_eq!(
+            json["autoExport"],
+            serde_json::json!({ "format": "png", "folder": "Lecture" })
+        );
+        // The interface sends the same shape back.
+        let parsed: AutoExport = serde_json::from_value(json["autoExport"].clone()).unwrap();
+        assert_eq!(parsed.format, AutoExportFormat::Png);
+        assert_eq!(parsed.folder, "Lecture");
     }
 }
