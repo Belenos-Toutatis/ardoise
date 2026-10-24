@@ -1,8 +1,28 @@
 /** The export dialog's choices, remembered on this computer between two exports. */
-import type { ExportFormat, ExportOptions } from './note';
+import type { ExportFormat, ExportOptions, PageSize } from './note';
 
 export const DPI_CHOICES = [96, 150, 300] as const;
 export const FORMATS: readonly ExportFormat[] = ['png', 'jpg', 'svg', 'pdf'];
+
+/** Largest side of an exported image, in pixels (the renderer refuses more: `imageTooLarge`). */
+export const MAX_IMAGE_SIDE = 16_384;
+/** Device units (10 µm) in an inch. */
+const UNITS_PER_INCH = 2540;
+
+/** Side in pixels of a page side of `units` device units at `dpi`, as the renderer rounds it. */
+export function imageSide(units: number, dpi: number): number {
+  return Math.round((units / UNITS_PER_INCH) * dpi);
+}
+
+/** Whether the image of every page at `dpi` stays within `MAX_IMAGE_SIDE` on both sides. */
+export function dpiFits(pages: readonly PageSize[], dpi: number): boolean {
+  return pages.every((page) => imageSide(page.width, dpi) <= MAX_IMAGE_SIDE && imageSide(page.height, dpi) <= MAX_IMAGE_SIDE);
+}
+
+/** The first of `candidates` (best first) whose image fits; null when none does. */
+export function largestFittingDpi(pages: readonly PageSize[], candidates: readonly number[]): number | null {
+  return candidates.find((dpi) => dpiFits(pages, dpi)) ?? null;
+}
 
 export interface ExportChoice {
   format: ExportFormat;

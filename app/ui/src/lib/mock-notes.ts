@@ -59,7 +59,7 @@ export function mockNotesInvoke(command: string, args: Record<string, unknown>):
       const entry = stored(path);
       if (!sameStamp(entry.stamp, args.stamp as FileStamp)) throw { code: 'noteConflict', message: path };
       const library = mockLibrary();
-      entry.note = { ...entry.note, title: args.title as string };
+      entry.note = { ...entry.note, title: (args.title as string).trim() };
       entry.stamp = freshStamp();
       const next = notePath(library.root, entry.binder, fileName(entry.note));
       library.notes.delete(path);

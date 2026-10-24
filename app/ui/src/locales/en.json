@@ -302,7 +302,9 @@
     "nothingToSplit": "this split would leave nothing on one side; choose an instant or a zone that divides the note into two non-empty parts",
     "nothingToMerge": "at least two notes are needed to assemble them",
     "pageTooLarge": "the resulting page would be too large (over 100 m on a side); assemble fewer notes or overlay them",
-    "invalidFolder": "this folder can't be used: enter a folder inside the library, for example \"Exports\" (no \"..\", no drive letter, and not the _ardoise folder)"
+    "invalidFolder": "this folder can't be used: enter a folder inside the library, for example \"Exports\" (no \"..\", no drive letter, and not the _ardoise folder)",
+    "imageTooLarge": "the image would be larger than 16,384 pixels on a side; choose a lower resolution, or export as PDF or SVG",
+    "cancelled": "the export was cancelled"
   },
   "editor": {
     "back": "Library",
@@ -530,6 +532,12 @@
     "run": "Export…",
     "again": "Export again…",
     "running": "Exporting…",
+    "cancelRun": "Cancel the export",
+    "cancelling": "Cancelling…",
+    "cancelled": "Export cancelled.",
+    "dpiTooLarge": "{label}: image too large",
+    "rasterTooLarge": "Even at the lowest resolution this page would give an image over 16,384 pixels on a side. Export it as PDF or SVG instead.",
+    "dpiLimitHint": "Resolutions that would give an image over 16,384 pixels on a side are not offered; use PDF or SVG for the largest pages.",
     "done": "Files created: {count}",
     "failed": "The export failed: {message}",
     "pickFile": "Save the export",

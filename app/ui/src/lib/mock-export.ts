@@ -13,15 +13,46 @@ import type {
   FileStamp,
   MergeLayout,
   Note,
+  PageSize,
   SplitResult,
   SplitSpec,
   Stroke,
 } from './note';
-import { UNHANDLED, fileName, freshStamp, mockLibrary, notifyLibraryChanged, sameStamp } from './mock-data';
+import { dpiFits } from './export-options';
+import { UNHANDLED, fileName, freshStamp, mockLibrary, normalizeTags, notifyLibraryChanged, sameStamp } from './mock-data';
 import { baseName, failure, freePath, newId, summary } from './mock-library';
 
 /** Tests switch the clipboard off to see how the interface reports it. */
 export const mockClipboard = { available: true };
+
+/**
+ * How long a browser export takes, milliseconds. 0 (the default) answers at once; a test (or a
+ * developer) sets a delay to see the dialog under way and to cancel it.
+ */
+export const mockExport = { delayMs: 0 };
+
+/** Settles the export under way with `cancelled`; null while none is running. */
+let cancelRunning: (() => void) | null = null;
+
+/** Runs `result` after the mock delay, unless `cancel_export` comes first (`cancelled`). */
+function afterDelay<T>(result: () => T): T | Promise<T> {
+  if (mockExport.delayMs <= 0) return result();
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cancelRunning = null;
+      try {
+        resolve(result());
+      } catch (error) {
+        reject(error);
+      }
+    }, mockExport.delayMs);
+    cancelRunning = () => {
+      clearTimeout(timer);
+      cancelRunning = null;
+      reject({ code: 'cancelled', message: 'cancelled' });
+    };
+  });
+}
 
 /** Notes are plain JSON: a JSON round trip is a deep copy. */
 function copy<T>(value: T): T {
@@ -38,6 +69,11 @@ const EXTENSIONS: Record<ExportFormat, string> = { png: 'png', jpg: 'jpg', svg: 
 /** The note an export source stands for: its unsaved `note`, else the one stored at `path`. */
 function sourceNote(source: ExportSource): Note {
   return source.note ?? (mockLibrary().notes.get(source.path)?.note ?? failure('noteNotFound', source.path));
+}
+
+/** Like the renderer, a raster image over `MAX_IMAGE_SIDE` pixels on a side is refused. */
+function checkImageSize(pages: PageSize[], dpi: number): void {
+  if (!dpiFits(pages, dpi)) failure('imageTooLarge', `dpi ${dpi}`);
 }
 
 function checkOptions(options: ExportOptions, format: ExportFormat): void {
@@ -63,16 +99,17 @@ export function exportedPaths(sources: ExportSource[], format: ExportFormat, des
 
 // --- Merge ----------------------------------------------------------------------------------
 
-function lastTime(note: Note): number {
-  let last = 0;
-  for (const stroke of note.strokes) for (const p of stroke.points) last = Math.max(last, p.t);
-  return last;
-}
-
-function firstTime(note: Note): number {
+/** First and last sample time of a note; null when it has no sample. */
+function sampleSpan(note: Note): { first: number; last: number } | null {
   let first = Infinity;
-  for (const stroke of note.strokes) for (const p of stroke.points) first = Math.min(first, p.t);
-  return first === Infinity ? 0 : first;
+  let last = -Infinity;
+  for (const stroke of note.strokes) {
+    for (const p of stroke.points) {
+      if (p.t < first) first = p.t;
+      if (p.t > last) last = p.t;
+    }
+  }
+  return first <= last ? { first, last } : null;
 }
 
 /**
@@ -90,15 +127,17 @@ export function mergeNotesLogic(notes: Note[], layout: MergeLayout): Note {
   const layers: Note['layers'] = [];
   const strokes: Stroke[] = [];
   let y = 0;
-  let end = 0;
-  notes.forEach((note, k) => {
-    const dt = k === 0 ? 0 : end + MERGE_GAP_MS - firstTime(note);
-    end = lastTime(note) + dt;
+  // Where the previous note with samples ends; a note without samples moves nothing.
+  let previousEnd: number | null = null;
+  notes.forEach((note) => {
+    const span = sampleSpan(note);
+    const dt = span && previousEnd !== null ? previousEnd + MERGE_GAP_MS - span.first : 0;
+    if (span) previousEnd = span.last + dt;
     const base = layout === 'overlay' ? layers.length : 0;
     if (layout === 'overlay') {
       for (const layer of note.layers) {
         const several = note.layers.length > 1;
-        const name = several && note.title ? `${note.title} – ${layer.name}` : note.title || layer.name;
+        const name = several && note.title ? `${note.title} - ${layer.name}` : note.title || layer.name;
         layers.push({ name, visible: layer.visible });
       }
     } else {
@@ -111,7 +150,7 @@ export function mergeNotesLogic(notes: Note[], layout: MergeLayout): Note {
       strokes.push({
         ...stroke,
         layer: base + Math.min(stroke.layer, top),
-        points: stroke.points.map((p) => ({ ...p, y: p.y + y, t: p.t + dt })),
+        points: stroke.points.map((p) => ({ ...p, y: p.y + y, t: Math.max(0, p.t + dt) })),
       });
     }
     if (layout === 'endToEnd') y += note.page.height;
@@ -124,7 +163,7 @@ export function mergeNotesLogic(notes: Note[], layout: MergeLayout): Note {
     title: '',
     modified: Date.now(),
     page: { width, height },
-    tags: [...new Set(notes.flatMap((n) => n.tags))],
+    tags: normalizeTags(notes.flatMap((n) => n.tags)),
     favorite: false,
     layers,
     strokes,
@@ -160,13 +199,25 @@ export function mockExportInvoke(command: string, args: Record<string, unknown>)
       const sources = args.sources as ExportSource[];
       const format = args.format as ExportFormat;
       if (sources.length === 0) failure('exportFailed', 'no note');
-      sources.forEach(sourceNote);
-      checkOptions(args.options as ExportOptions, format);
-      return exportedPaths(sources, format, args.destination as string);
+      const notes = sources.map(sourceNote);
+      const options = args.options as ExportOptions;
+      checkOptions(options, format);
+      if (format === 'png' || format === 'jpg') {
+        checkImageSize(
+          notes.map((n) => n.page),
+          options.dpi,
+        );
+      }
+      return afterDelay(() => exportedPaths(sources, format, args.destination as string));
     }
 
+    case 'cancel_export':
+      cancelRunning?.();
+      return undefined;
+
     case 'copy_note_image': {
-      sourceNote(args.source as ExportSource);
+      const note = sourceNote(args.source as ExportSource);
+      checkImageSize([note.page], args.dpi as number);
       if (!mockClipboard.available) failure('clipboardUnavailable', 'browser');
       return undefined;
     }
@@ -176,8 +227,8 @@ export function mockExportInvoke(command: string, args: Record<string, unknown>)
       const path = args.path as string;
       const entry = library.notes.get(path) ?? failure('noteNotFound', path);
       if (!sameStamp(entry.stamp, args.stamp as FileStamp)) failure('noteConflict', path);
+      // Any title goes: only the file name is cleaned (`fileName`).
       const title = (args.title as string).trim();
-      if (/[\\/:*?"<>|]/.test(title)) failure('invalidName', title);
       const parts = applySplit(args.note as Note, args.split as SplitSpec) ?? failure('nothingToSplit', path);
 
       // The new note first, in the same binder; then the kept part over the original.
@@ -198,7 +249,6 @@ export function mockExportInvoke(command: string, args: Record<string, unknown>)
       const paths = args.paths as string[];
       const sources = paths.map((path) => library.notes.get(path) ?? failure('noteNotFound', path));
       const title = (args.title as string).trim();
-      if (/[\\/:*?"<>|]/.test(title)) failure('invalidName', title);
       const merged: Note = { ...mergeNotesLogic(sources.map((s) => s.note), args.layout as MergeLayout), id: newId(), title };
       const binder = sources[0].binder;
       const stored = { note: merged, stamp: freshStamp(JSON.stringify(merged).length), binder };

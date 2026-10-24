@@ -4,7 +4,7 @@
  * (opening and saving notes).
  */
 import type { InkPoint, Tool } from './ink';
-import type { FileStamp, Note, Rgba, Stroke, TrashEntry } from './note';
+import type { AutoExportSettings, FileStamp, Note, Rgba, Stroke, TrashEntry } from './note';
 
 /** Returned by a mock module for a command it does not handle. */
 export const UNHANDLED = Symbol('unhandled');
@@ -72,10 +72,63 @@ const BLACK: Rgba = { r: 0, g: 0, b: 0, a: 255 };
 const BLUE: Rgba = { r: 0x51, g: 0xa7, b: 0xf9, a: 255 };
 const RED: Rgba = { r: 0xd8, g: 0, b: 0, a: 255 };
 
+/** Longest title part of a file name (`MAX_NAME_CHARS` in the Rust library). */
+const MAX_NAME_CHARS = 80;
+
+/**
+ * A title as a file name part, like `sanitize_name` of the Rust library (without its rules for
+ * reserved and never-synchronised names): `/ \ | :` become `-`, `"` becomes `'`, `< > ? *` are
+ * dropped, control characters and runs of spaces become one space, leading and trailing dots
+ * and spaces go, at most 80 characters. The title itself is kept as typed.
+ */
+export function sanitizeName(text: string): string {
+  let out = '';
+  for (const c of text) {
+    if ('/\\|:'.includes(c)) out += '-';
+    else if (c === '"') out += "'";
+    else if ('<>?*'.includes(c)) continue;
+    else out += /\p{Cc}/u.test(c) ? ' ' : c;
+  }
+  const collapsed = out.split(/\s+/).filter(Boolean).join(' ');
+  return [...collapsed]
+    .slice(0, MAX_NAME_CHARS)
+    .join('')
+    .replace(/^[.\s]+|[.\s]+$/g, '');
+}
+
 /** File name like the Rust library: `YYYY-MM-DD Title.ardoise`. */
 export function fileName(note: Note): string {
   const date = new Date(note.created).toISOString().slice(0, 10);
-  return `${date}${note.title ? ' ' + note.title : ''}.ardoise`;
+  const title = sanitizeName(note.title);
+  return `${date}${title ? ' ' + title : ''}.ardoise`;
+}
+
+/**
+ * Tags as `normalize_tags` of the Rust library: spaces trimmed and collapsed, empty tags dropped,
+ * duplicates removed without regard to case (the first spelling stays).
+ */
+export function normalizeTags(tags: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags) {
+    const tag = raw.split(/\s+/).filter(Boolean).join(' ');
+    if (tag && !seen.has(tag.toLowerCase())) {
+      seen.add(tag.toLowerCase());
+      out.push(tag);
+    }
+  }
+  return out;
+}
+
+/** The automatic export setting the listing follows (it hides the export folder from binders). */
+let autoExport: AutoExportSettings = { format: 'off', folder: 'Exports' };
+
+export function mockAutoExportSettings(): AutoExportSettings {
+  return autoExport;
+}
+
+export function setMockAutoExportSettings(settings: AutoExportSettings): void {
+  autoExport = { ...settings };
 }
 
 export function notePath(root: string, binder: string, name: string): string {

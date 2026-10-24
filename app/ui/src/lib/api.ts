@@ -152,6 +152,11 @@ export const api = {
    */
   exportNotes: (sources: ExportSource[], format: ExportFormat, options: ExportOptions, destination: string) =>
     call<string[]>('export_notes', { sources, format, options, destination }),
+  /**
+   * Cancels the export under way: it then rejects with `cancelled`. Does nothing when no export
+   * is running.
+   */
+  cancelExport: () => call<void>('cancel_export'),
   /** Copies the note's image to the clipboard (Windows); rejects with `clipboardUnavailable` elsewhere. */
   copyNoteImage: (source: ExportSource, dpi: number) => call<void>('copy_note_image', { source, dpi }),
   /**

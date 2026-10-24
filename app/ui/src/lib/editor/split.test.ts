@@ -50,6 +50,31 @@ describe('split preview', () => {
     expect(canSplit(previewSplit(twoStrokes(), null))).toBe(false);
   });
 
+  it('does not count strokes without samples on the kept side (the desktop app would refuse)', () => {
+    const empty = line([]);
+    const base = { ...twoStrokes(), strokes: [empty, ...twoStrokes().strokes] };
+    // Everything with samples moves: only the empty stroke stays, which is not a note.
+    const all = previewAtTime(base, 0);
+    expect(all.keptCount).toBe(0);
+    expect(canSplit(all)).toBe(false);
+    expect(applySplit(base, { kind: 'time', at: 0 })).toBeNull();
+    const zone = previewZone(base, [
+      { x: 0, y: 0 },
+      { x: 30000, y: 0 },
+      { x: 30000, y: 30000 },
+      { x: 0, y: 30000 },
+    ]);
+    expect(zone.movedCount).toBe(2);
+    expect(canSplit(zone)).toBe(false);
+    // A real stroke staying is enough; the empty one stays too, uncounted.
+    const some = previewAtTime(base, 500);
+    expect(some.keptCount).toBe(1);
+    expect(canSplit(some)).toBe(true);
+    const parts = applySplit(base, { kind: 'time', at: 500 })!;
+    expect(parts.kept.strokes).toHaveLength(2);
+    expect(parts.extracted.strokes).toHaveLength(1);
+  });
+
   it('moves the strokes mostly inside the zone, only on visible layers', () => {
     const base = twoStrokes();
     const around = (y0: number, y1: number): [number, number][] => [
@@ -98,6 +123,15 @@ describe('applying a split', () => {
     expect(parts.extracted.strokes).toEqual([base.strokes[1]]);
     expect(parts.kept.strokes).toEqual([base.strokes[0]]);
     expect(parts.extracted.created).toBe(base.created);
+  });
+
+  it('handles a note with hundreds of thousands of samples (no argument-count overflow)', () => {
+    const points = Array.from({ length: 300_000 }, (_, i) => ({ x: i % 20000, y: 1000, pressure: 0.5, t: 1000 + i }));
+    const big = note([line([[0, 0], [10, 0]]), { ...line([]), points }]);
+    const parts = applySplit(big, { kind: 'time', at: 1000 })!;
+    expect(parts.extracted.strokes[0].points).toHaveLength(300_000);
+    expect(parts.extracted.strokes[0].points[0].t).toBe(0);
+    expect(parts.extracted.created).toBe(1000);
   });
 
   it('returns null when one side would be empty', () => {

@@ -44,7 +44,7 @@ export interface SplitPreview {
   moved: ReadonlySet<number>;
   /** Strokes cut in two at the instant: the part that stays and the part that moves. */
   cut: ReadonlyMap<number, { kept: Stroke; moved: Stroke }>;
-  /** Strokes with something left in this note (a cut stroke counts on both sides). */
+  /** Strokes with samples left in this note (a cut stroke counts on both sides). */
   keptCount: number;
   /** Strokes with something going to the new note. */
   movedCount: number;
@@ -58,12 +58,13 @@ export function canSplit(preview: SplitPreview): boolean {
 }
 
 function build(note: Note, moved: Set<number>, cut: Map<number, { kept: Stroke; moved: Stroke }>): SplitPreview {
-  return {
-    moved,
-    cut,
-    keptCount: note.strokes.length - moved.size,
-    movedCount: moved.size + cut.size,
-  };
+  // A stroke without samples stays where it is but does not count: the desktop app refuses the
+  // split (`nothingToSplit`) when every stroke that has samples moves.
+  let keptCount = 0;
+  note.strokes.forEach((stroke, i) => {
+    if (stroke.points.length > 0 && !moved.has(i)) keptCount++;
+  });
+  return { moved, cut, keptCount, movedCount: moved.size + cut.size };
 }
 
 /** The strokes that move when cutting at the instant `at` (ms since `created`). */
@@ -121,7 +122,9 @@ export function applySplit(note: Note, spec: SplitSpec): { kept: Note; extracted
   });
   let created = note.created;
   if (spec.kind === 'time') {
-    const first = Math.min(...movedStrokes.flatMap((s) => s.points.map((p) => p.t)));
+    // A loop, not `Math.min(...samples)`: a very large note would overflow the call's arguments.
+    let first = Infinity;
+    for (const stroke of movedStrokes) for (const p of stroke.points) if (p.t < first) first = p.t;
     created = note.created + first;
     movedStrokes = movedStrokes.map((s) => ({ ...s, points: s.points.map((p) => ({ ...p, t: p.t - first })) }));
   }

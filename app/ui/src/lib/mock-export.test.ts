@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from './api';
 import { hline, note } from './editor/test-fixtures';
 import { freshStamp, mockLibrary, mockOnLibraryChanged, resetMockLibrary } from './mock-data';
-import { checkAutoExport, exportedPaths, mergeNotesLogic, mockClipboard } from './mock-export';
+import { checkAutoExport, exportedPaths, mergeNotesLogic, mockClipboard, mockExport } from './mock-export';
 import type { ExportOptions, Note } from './note';
 
 const OPTIONS: ExportOptions = { dpi: 150, background: true, quality: 90, pdfPage: 'actual' };
@@ -68,6 +68,35 @@ describe('mock export', () => {
     expect(await code(api.exportNotes([], 'png', OPTIONS, 'C:\\x'))).toBe('exportFailed');
     expect(await code(api.exportNotes(source, 'png', { ...OPTIONS, dpi: 10 }, 'C:\\x'))).toBe('exportFailed');
     expect(await code(api.exportNotes(source, 'jpg', { ...OPTIONS, quality: 0 }, 'C:\\x'))).toBe('exportFailed');
+  });
+
+  it('refuses an image over 16 384 pixels on a side, for PNG, JPG and the clipboard', async () => {
+    const wide = { path: 'C:\\demo\\Ardoise\\Wide.ardoise', note: { ...note([]), page: { width: 300_000, height: 21600 } } };
+    // 3 000 mm at 150 dpi is 17 717 px; at 96 dpi 11 339 px.
+    expect(await code(api.exportNotes([wide], 'png', OPTIONS, 'C:\\out\\w.png'))).toBe('imageTooLarge');
+    expect(await code(api.exportNotes([wide], 'jpg', OPTIONS, 'C:\\out\\w.jpg'))).toBe('imageTooLarge');
+    expect(await code(api.copyNoteImage(wide, 150))).toBe('imageTooLarge');
+    await expect(api.exportNotes([wide], 'png', { ...OPTIONS, dpi: 96 }, 'C:\\out\\w.png')).resolves.toEqual(['C:\\out\\w.png']);
+    // Vector formats have no such limit.
+    await expect(api.exportNotes([wide], 'pdf', OPTIONS, 'C:\\out\\w.pdf')).resolves.toEqual(['C:\\out\\w.pdf']);
+    await expect(api.exportNotes([wide], 'svg', OPTIONS, 'C:\\out\\w.svg')).resolves.toEqual(['C:\\out\\w.svg']);
+  });
+
+  it('can cancel an export under way: it rejects with `cancelled`', async () => {
+    mockExport.delayMs = 1000;
+    try {
+      const running = api.exportNotes([{ path: pathOf('Liste de courses') }], 'png', OPTIONS, 'C:\\out\\a.png');
+      await api.cancelExport();
+      expect(await code(running)).toBe('cancelled');
+      // With nothing running, cancelling does nothing; the next export is not affected.
+      await expect(api.cancelExport()).resolves.toBeUndefined();
+      mockExport.delayMs = 5;
+      await expect(api.exportNotes([{ path: pathOf('Liste de courses') }], 'png', OPTIONS, 'C:\\out\\b.png')).resolves.toEqual([
+        'C:\\out\\b.png',
+      ]);
+    } finally {
+      mockExport.delayMs = 0;
+    }
   });
 
   it('copies an image, unless the clipboard is unavailable', async () => {
@@ -141,6 +170,14 @@ describe('mock split', () => {
     expect(mockLibrary().notes.get(path)!.stamp).toEqual(stamp);
   });
 
+  it('keeps a title with forbidden characters (trimmed) and cleans only the file name', async () => {
+    const { path, note, stamp } = await open('Cours de physique');
+    const result = await api.splitNote(path, note, stamp, { kind: 'time', at: 150 }, '  Suite: a/b "c"?  ');
+    expect(result.created.title).toBe('Suite: a/b "c"?');
+    expect(mockLibrary().notes.get(result.created.path)!.note.title).toBe('Suite: a/b "c"?');
+    expect(result.created.fileName).toBe("2026-10-20 Suite- a-b 'c'.ardoise");
+  });
+
   it('splits the editor note, not the stored one: unsaved changes are saved with the cut', async () => {
     const { path, note, stamp } = await open('Cours de physique');
     const edited: Note = { ...note, strokes: [...note.strokes, hline(1000, 1900, 9000)] };
@@ -162,7 +199,7 @@ describe('mock merge', () => {
   it('overlays: one page as large as the largest, layers appended and named after the notes', () => {
     const merged = mergeNotesLogic([a, b], 'overlay');
     expect(merged.page).toEqual({ width: 10000, height: 7000 });
-    expect(merged.layers.map((l) => l.name)).toEqual(['Alpha', 'Beta – L1', 'Beta – L2']);
+    expect(merged.layers.map((l) => l.name)).toEqual(['Alpha', 'Beta - L1', 'Beta - L2']);
     expect(merged.strokes.map((s) => s.layer)).toEqual([0, 1]);
     expect(merged.strokes[1].points[0].y).toBe(3000);
     expect(merged.tags).toEqual(['x', 'y']);
@@ -183,6 +220,34 @@ describe('mock merge', () => {
     const first = (i: number) => Math.min(...merged.strokes[i].points.map((p) => p.t));
     expect(first(0)).toBe(0);
     expect(first(1)).toBe(last(0) + 1000);
+  });
+
+  it('does not let a note without samples move the times of the next ones', () => {
+    const empty: Note = { ...note([]), id: 'e', title: 'Vide' };
+    const shifted = (s: Note): Note => ({
+      ...s,
+      strokes: s.strokes.map((st) => ({ ...st, points: st.points.map((p) => ({ ...p, t: p.t + 500 })) })),
+    });
+    const firstTimes = (merged: Note) => merged.strokes.map((s) => s.points[0].t);
+    // An empty first note: the next one keeps its own times.
+    expect(firstTimes(mergeNotesLogic([empty, shifted(a)], 'overlay'))).toEqual([500]);
+    // An empty note in the middle: the third note still starts 1 s after the first one ends.
+    const withHole = mergeNotesLogic([a, empty, b], 'overlay');
+    const withoutHole = mergeNotesLogic([a, b], 'overlay');
+    expect(firstTimes(withHole)).toEqual(firstTimes(withoutHole));
+  });
+
+  it('normalises the tags of the merged notes (spaces, case-insensitive duplicates, first spelling)', () => {
+    const tagged = (tags: string[]): Note => ({ ...a, tags });
+    const merged = mergeNotesLogic([tagged(['  Maths  ', 'a   b']), tagged(['maths', 'A B', 'Physique', ''])], 'overlay');
+    expect(merged.tags).toEqual(['Maths', 'a b', 'Physique']);
+  });
+
+  it('accepts a title with forbidden characters and trims it', async () => {
+    const paths = [pathOf('Cours de physique'), pathOf('Liste de courses')];
+    const created = await api.mergeNotes(paths, 'overlay', '  A/B: "C"  ');
+    expect(created.title).toBe('A/B: "C"');
+    expect(created.fileName).toBe("2026-10-20 A-B- 'C'.ardoise");
   });
 
   it('needs two notes and refuses pages above 100 m', () => {

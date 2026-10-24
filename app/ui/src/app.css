@@ -1504,6 +1504,12 @@ select {
   font-weight: 600;
 }
 
+/* A cancelled export is the user's own choice: a neutral line, not a red banner. */
+.export-notice {
+  margin: 0.5rem 0 0;
+  font-weight: 600;
+}
+
 .export-result code {
   display: block;
   margin-top: 0.25rem;
