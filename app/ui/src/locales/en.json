@@ -559,9 +559,132 @@
     "defaultPdfName": "Notes"
   },
   "live": {
-    "title": "Live mode"
+    "title": "Live mode",
+    "state": {
+      "idle": "Stopped",
+      "waiting": "Waiting for the tablet",
+      "live": "Live",
+      "reconnecting": "Reconnecting…"
+    },
+    "starting": "Starting live mode…",
+    "waiting": {
+      "title": "Press the tablet's button briefly to connect it.",
+      "hint": "Live mode starts as soon as the tablet is connected: what you write shows here and on the projected screen."
+    },
+    "reconnecting": "The link with the tablet was lost: reconnecting…",
+    "startFailed": "Live mode could not start.",
+    "retry": "Try again",
+    "stop": "Finish",
+    "stopping": "Saving…",
+    "stopHint": "Ends live mode: each page is saved as a note of the library.",
+    "stopFailed": "Live mode did not stop properly.",
+    "closeAnyway": "Close anyway",
+    "saved": {
+      "none": "No note saved yet",
+      "one": "1 note saved",
+      "many": "{count} notes saved"
+    },
+    "commandFailed": "The command did not go through: {message}",
+    "dismiss": "Dismiss the message",
+    "toolbar": "Live mode tools",
+    "style": "Writing style",
+    "tool": "Tool",
+    "color": "Colour",
+    "width": "Width",
+    "colors": {
+      "white": "Chalk white",
+      "yellow": "Yellow"
+    },
+    "pages": {
+      "label": "Pages",
+      "previous": "Previous page",
+      "next": "Next page",
+      "position": "Page {n} / {count}",
+      "new": "New page"
+    },
+    "layer": {
+      "new": "New layer",
+      "current": "Layer {n} / {count}"
+    },
+    "clear": "Clear the page",
+    "board": "Blackboard",
+    "laser": "Laser pointer",
+    "preview": {
+      "label": "Preview of page {page}; the blue rectangle shows the projected area",
+      "hint": "Drag the blue rectangle to move the projected area; the mouse wheel zooms."
+    },
+    "zoom": {
+      "label": "Zoom of the projected area",
+      "in": "Zoom in",
+      "out": "Zoom out",
+      "fit": "Whole page",
+      "level": "× {zoom}"
+    },
+    "projection": {
+      "title": "Projection",
+      "monitor": "Projection screen",
+      "screen": "Screen {n}",
+      "option": "{name} — {width} × {height}",
+      "primary": "{name} (main)",
+      "refresh": "Refresh the list of screens",
+      "project": "Project",
+      "stop": "Stop projecting",
+      "on": "Projected on {name}.",
+      "off": "Nothing is projected.",
+      "none": "No screen detected.",
+      "single": "Only one screen is detected: the presentation will cover this window. Press Esc to close it."
+    },
+    "latency": {
+      "label": "Latency",
+      "value": "{ms} ms",
+      "none": "—",
+      "detail": "Median of the last {count} points; 95 % under {p95} ms; interface share: {ui} ms.",
+      "hint": "Time from the receipt of a point from the tablet to its display (target: under 30 ms)."
+    },
+    "keys": {
+      "title": "Keyboard",
+      "list": {
+        "next": {
+          "keys": "→, Page Down, Space",
+          "action": "Next page"
+        },
+        "previous": {
+          "keys": "←, Page Up",
+          "action": "Previous page"
+        },
+        "clear": {
+          "keys": "Ctrl + Delete",
+          "action": "Clear the page"
+        },
+        "board": {
+          "keys": "B",
+          "action": "Blackboard"
+        },
+        "laser": {
+          "keys": "L",
+          "action": "Laser pointer"
+        },
+        "zoom": {
+          "keys": "+ / −",
+          "action": "Zoom the projected area in / out"
+        },
+        "whole": {
+          "keys": "0",
+          "action": "Whole page"
+        },
+        "pan": {
+          "keys": "Shift + arrows",
+          "action": "Move the projected area"
+        },
+        "leave": {
+          "keys": "Esc",
+          "action": "Finish (on the projected screen: close the presentation)"
+        }
+      }
+    }
   },
   "presentation": {
-    "title": "Presentation"
+    "title": "Presentation",
+    "canvas": "Projected page {page}"
   }
 }

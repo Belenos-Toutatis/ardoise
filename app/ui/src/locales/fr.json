@@ -559,9 +559,132 @@
     "defaultPdfName": "Notes"
   },
   "live": {
-    "title": "Mode direct"
+    "title": "Mode direct",
+    "state": {
+      "idle": "Arrêté",
+      "waiting": "En attente de la tablette",
+      "live": "En direct",
+      "reconnecting": "Reconnexion…"
+    },
+    "starting": "Démarrage du mode direct…",
+    "waiting": {
+      "title": "Appuyez brièvement sur le bouton de la tablette pour la connecter.",
+      "hint": "Le mode direct démarre dès que la tablette est connectée : ce que vous écrivez s'affiche ici et sur l'écran projeté."
+    },
+    "reconnecting": "La liaison avec la tablette est perdue : reconnexion en cours…",
+    "startFailed": "Le mode direct n'a pas pu démarrer.",
+    "retry": "Réessayer",
+    "stop": "Terminer",
+    "stopping": "Enregistrement…",
+    "stopHint": "Termine le mode direct : chaque page est enregistrée comme une note de la bibliothèque.",
+    "stopFailed": "Le mode direct ne s'est pas arrêté correctement.",
+    "closeAnyway": "Fermer quand même",
+    "saved": {
+      "none": "Aucune note enregistrée pour l'instant",
+      "one": "1 note enregistrée",
+      "many": "{count} notes enregistrées"
+    },
+    "commandFailed": "La commande n'a pas abouti : {message}",
+    "dismiss": "Fermer le message",
+    "toolbar": "Outils du mode direct",
+    "style": "Style d'écriture",
+    "tool": "Outil",
+    "color": "Couleur",
+    "width": "Épaisseur",
+    "colors": {
+      "white": "Blanc craie",
+      "yellow": "Jaune"
+    },
+    "pages": {
+      "label": "Pages",
+      "previous": "Page précédente",
+      "next": "Page suivante",
+      "position": "Page {n} / {count}",
+      "new": "Nouvelle page"
+    },
+    "layer": {
+      "new": "Nouveau calque",
+      "current": "Calque {n} / {count}"
+    },
+    "clear": "Effacer la page",
+    "board": "Tableau noir",
+    "laser": "Pointeur laser",
+    "preview": {
+      "label": "Aperçu de la page {page} ; le rectangle bleu montre la zone projetée",
+      "hint": "Faites glisser le rectangle bleu pour déplacer la zone projetée ; la molette zoome."
+    },
+    "zoom": {
+      "label": "Zoom de la zone projetée",
+      "in": "Agrandir",
+      "out": "Réduire",
+      "fit": "Page entière",
+      "level": "× {zoom}"
+    },
+    "projection": {
+      "title": "Projection",
+      "monitor": "Écran de projection",
+      "screen": "Écran {n}",
+      "option": "{name} — {width} × {height}",
+      "primary": "{name} (principal)",
+      "refresh": "Actualiser la liste des écrans",
+      "project": "Projeter",
+      "stop": "Arrêter la projection",
+      "on": "Projeté sur {name}.",
+      "off": "Rien n'est projeté.",
+      "none": "Aucun écran n'est détecté.",
+      "single": "Un seul écran est détecté : la présentation couvrira cette fenêtre. Appuyez sur Échap pour la fermer."
+    },
+    "latency": {
+      "label": "Latence",
+      "value": "{ms} ms",
+      "none": "—",
+      "detail": "Médiane des {count} derniers points ; 95 % sous {p95} ms ; part de l'interface : {ui} ms.",
+      "hint": "Temps entre la réception d'un point de la tablette et son affichage (objectif : moins de 30 ms)."
+    },
+    "keys": {
+      "title": "Clavier",
+      "list": {
+        "next": {
+          "keys": "→, Pg suiv, Espace",
+          "action": "Page suivante"
+        },
+        "previous": {
+          "keys": "←, Pg préc",
+          "action": "Page précédente"
+        },
+        "clear": {
+          "keys": "Ctrl + Suppr",
+          "action": "Effacer la page"
+        },
+        "board": {
+          "keys": "B",
+          "action": "Tableau noir"
+        },
+        "laser": {
+          "keys": "L",
+          "action": "Pointeur laser"
+        },
+        "zoom": {
+          "keys": "+ / −",
+          "action": "Agrandir / réduire la zone projetée"
+        },
+        "whole": {
+          "keys": "0",
+          "action": "Page entière"
+        },
+        "pan": {
+          "keys": "Maj + flèches",
+          "action": "Déplacer la zone projetée"
+        },
+        "leave": {
+          "keys": "Échap",
+          "action": "Terminer (sur l'écran projeté : fermer la présentation)"
+        }
+      }
+    }
   },
   "presentation": {
-    "title": "Présentation"
+    "title": "Présentation",
+    "canvas": "Page projetée {page}"
   }
 }
