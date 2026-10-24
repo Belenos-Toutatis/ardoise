@@ -25,6 +25,7 @@
   import { MIN_CROP } from '../../lib/editor/ops';
   import {
     addStroke,
+    canDraw,
     crop,
     erase,
     select,
@@ -54,6 +55,7 @@
     onchange,
     onselect,
     oncropped,
+    onblocked,
   }: {
     doc: Doc;
     tools: ToolSettings;
@@ -65,6 +67,8 @@
     /** A selection change (not an undo step). */
     onselect: (next: Doc) => void;
     oncropped?: () => void;
+    /** The pen was put down while the active layer is hidden: nothing is drawn. */
+    onblocked?: () => void;
   } = $props();
 
   /** Screen pixels per device unit at real size (96 dpi, 10 µm units). */
@@ -157,6 +161,11 @@
   export function fit() {
     measure();
     view = fitView(doc.note.page, viewport);
+  }
+
+  /** True while a gesture (stroke, erasing, lasso, move, crop, pan) is under way. */
+  export function dragging(): boolean {
+    return drag !== null;
   }
 
   export function zoomBy(factor: number) {
@@ -277,6 +286,10 @@
     const panRequested = e.button === 1 || (e.button === 0 && (spacePan || tools.mode === 'pan'));
     if (e.button !== 0 && !panRequested) return;
     e.preventDefault();
+    if (!panRequested && tools.mode === 'pen' && !canDraw(doc)) {
+      onblocked?.();
+      return;
+    }
     // A pending title or layer name edit is committed by leaving its field.
     if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
     const id = pointerId(e);
@@ -436,6 +449,7 @@
     {onpointermove}
     onpointerup={(e) => finish(e, false)}
     onpointercancel={(e) => finish(e, true)}
+    onlostpointercapture={(e) => finish(e, true)}
     onpointerleave={() => (hover = null)}
   >
     <rect class="sheet" x="0" y="0" width={page.width} height={page.height} />

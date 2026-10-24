@@ -15,6 +15,7 @@ import {
   addStroke,
   applyStyle,
   autoCrop,
+  canDraw,
   clearSelection,
   crop,
   deleteSelection,
@@ -158,6 +159,31 @@ describe('doc operations', () => {
     doc = mergeDown(doc, 2);
     expect(doc.activeLayer).toBe(1);
     expect(doc.note.layers).toHaveLength(2);
+  });
+
+  it('never puts new ink on a hidden layer', () => {
+    const hiddenTop = setLayerVisible(docFromNote(note([], 3)), 2, false).note;
+    // Opening: the top visible layer is active.
+    let doc = docFromNote(hiddenTop);
+    expect(doc.activeLayer).toBe(1);
+    // Hiding the active layer moves to the nearest visible one.
+    doc = setLayerVisible(doc, 1, false);
+    expect(doc.activeLayer).toBe(0);
+    doc = setLayerVisible(doc, 2, true);
+    doc = setActiveLayer(doc, 2);
+    doc = setLayerVisible(doc, 2, false);
+    expect(doc.activeLayer).toBe(0);
+    expect(addStroke(doc, pen(100)).note.strokes[0].layer).toBe(0);
+    // Hiding another layer leaves the active one alone.
+    doc = setLayerVisible(setLayerVisible(doc, 1, true), 1, false);
+    expect(doc.activeLayer).toBe(0);
+    // Nothing visible: the active layer stays, and drawing or pasting does nothing.
+    doc = setLayerVisible(doc, 0, false);
+    expect(doc.activeLayer).toBe(0);
+    expect(canDraw(doc)).toBe(false);
+    expect(addStroke(doc, pen(100))).toBe(doc);
+    expect(paste(doc, [hline(0, 1000, 100)])).toBe(doc);
+    expect(docFromNote(doc.note).activeLayer).toBe(2);
   });
 
   it('rotates and crops the page', () => {

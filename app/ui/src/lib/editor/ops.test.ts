@@ -167,6 +167,16 @@ describe('eraser', () => {
     expect(erasePartial(note([line([[0, 0], [100, 0]])]), [{ x: 100, y: 0 }], 80).strokes).toEqual([]);
   });
 
+  it('gives the samples it adds whole, non-negative times (Rust stores them as u32)', () => {
+    // 10 ms between two samples 1000 units apart: cuts every 50 units fall on fractions of a ms.
+    const n = note([line([[0, 0], [1000, 0], [1000, 700]])]);
+    const out = erasePartial(n, [{ x: 500, y: 0 }], 100);
+    expect(out.strokes.length).toBeGreaterThan(1);
+    const times = out.strokes.flatMap((s) => s.points.map((p) => p.t));
+    expect(times.length).toBeGreaterThan(10);
+    expect(times.every((t) => Number.isInteger(t) && t >= 0)).toBe(true);
+  });
+
   it('leaves untouched notes and hidden layers alone', () => {
     const n = note([hline(0, 900, 1000)]);
     expect(erasePartial(n, [{ x: 5000, y: 5000 }], 100)).toBe(n);
@@ -262,6 +272,27 @@ describe('page', () => {
     // Too small, or the whole page: nothing changes.
     expect(cropTo(n, { x: 0, y: 0, width: 500, height: 4000 })).toBe(n);
     expect(cropTo(n, { x: 0, y: 0, width: 29700, height: 21600 })).toBe(n);
+  });
+
+  it('keeps strokes on hidden layers when cropping, even outside the new page', () => {
+    const visibleOut = hline(20000, 22000, 15000, 100, 0);
+    const hiddenOut = hline(20000, 22000, 16000, 100, 1);
+    const hiddenIn = hline(2000, 3000, 3000, 100, 1);
+    const n = setLayerVisible(note([hline(2000, 4000, 3000, 100, 0), visibleOut, hiddenOut, hiddenIn], 2), 1, false);
+    const out = cropTo(n, { x: 1000, y: 2000, width: 5000, height: 4000 });
+    // Only the visible stroke outside the rectangle goes.
+    expect(out.strokes).toHaveLength(3);
+    expect(out.strokes.map((s) => s.layer)).toEqual([0, 1, 1]);
+    // Hidden strokes move with the page.
+    expect(out.strokes[1].points[0]).toMatchObject({ x: 19000, y: 14000 });
+    expect(out.strokes[2].points[0]).toMatchObject({ x: 1000, y: 1000 });
+  });
+
+  it('frames the automatic crop on visible strokes only, keeping hidden ones', () => {
+    const n = setLayerVisible(note([hline(2000, 4000, 3000, 100, 0), hline(20000, 22000, 15000, 100, 1)], 2), 1, false);
+    const rect = autoCropRect(n, 500)!;
+    expect(rect).toEqual(autoCropRect(note([hline(2000, 4000, 3000)]), 500));
+    expect(cropTo(n, rect).strokes).toHaveLength(2);
   });
 
   it('finds the automatic crop around the content', () => {

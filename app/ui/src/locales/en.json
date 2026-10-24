@@ -280,8 +280,18 @@
     "unsaved": "Unsaved changes",
     "saveError": "Cannot save the note: {message}",
     "conflictTitle": "Your changes were not saved",
-    "conflictHint": "Your changes are still shown here, but saving them would overwrite the other version. Go back to the library and reopen the note to see the latest version.",
+    "conflictHint": "Your changes are still shown here, but saving them would overwrite the other version. Save them as a copy to keep them, or go back to the library and reopen the note to see the latest version.",
     "dismiss": "Dismiss",
+    "saveCopy": "Save as a copy",
+    "copyTitle": "{title} (copy)",
+    "disk": {
+      "changedTitle": "This note was changed elsewhere",
+      "changedClean": "It was probably changed on another computer. Reload it to see the latest version.",
+      "changedDirty": "It was probably changed on another computer: saving now would be refused so as not to overwrite the other version. Save your changes as a copy.",
+      "missingTitle": "This note is no longer in the library",
+      "missing": "It may have been deleted or moved on another computer. Save it as a copy to keep it.",
+      "reload": "Reload"
+    },
     "undo": "Undo (Ctrl+Z)",
     "redo": "Redo (Ctrl+Y)",
     "toolbar": "Editing tools",
@@ -382,7 +392,8 @@
       "name": "Name of layer {n}",
       "up": "Move “{name}” up",
       "down": "Move “{name}” down",
-      "merge": "Merge “{name}” into the layer below"
+      "merge": "Merge “{name}” into the layer below",
+      "hiddenActive": "The active layer is hidden: show it or pick another layer to draw."
     },
     "zoom": {
       "label": "Zoom",
@@ -396,7 +407,9 @@
       "message": "This note has changes that have not been saved.",
       "save": "Save and go back",
       "discard": "Go back without saving",
-      "cancel": "Stay"
+      "cancel": "Stay",
+      "saveClose": "Save and close",
+      "discardClose": "Close without saving"
     }
   }
 }

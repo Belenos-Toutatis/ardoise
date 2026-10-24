@@ -200,8 +200,8 @@ export function pointInPolygon(p: Vec, polygon: readonly Vec[]): boolean {
 }
 
 /**
- * The samples with extra ones interpolated (position, pressure, time) so that no two
- * consecutive samples are more than `step` apart. Returns `points` itself when nothing is added.
+ * The samples with extra ones interpolated (position, pressure, time rounded to whole
+ * milliseconds) so that no two consecutive samples are more than `step` apart. Returns `points` itself when nothing is added.
  */
 export function densify(points: readonly InkPoint[], step: number): readonly InkPoint[] {
   if (step <= 0 || points.length < 2) return points;
@@ -217,7 +217,8 @@ export function densify(points: readonly InkPoint[], step: number): readonly Ink
         x: a.x + (b.x - a.x) * f,
         y: a.y + (b.y - a.y) * f,
         pressure: a.pressure + (b.pressure - a.pressure) * f,
-        t: a.t + (b.t - a.t) * f,
+        // Times are whole milliseconds (`u32` on the Rust side, which rejects fractions).
+        t: Math.max(0, Math.round(a.t + (b.t - a.t) * f)),
       });
       added = true;
     }
