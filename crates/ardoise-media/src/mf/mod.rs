@@ -111,6 +111,14 @@ pub(crate) struct MfSession {
 
 impl MfSession {
     pub(crate) fn start() -> Result<Self, MediaError> {
+        // The app delay-loads mfplat.dll and mfreadwrite.dll: calling into a missing one would
+        // stop the process (Windows N editions without the Media Feature Pack), so check first.
+        if !crate::media_foundation_available() {
+            return Err(MediaError::MediaFoundationUnavailable {
+                code: 0,
+                message: "mfplat.dll or mfreadwrite.dll is missing (Windows N edition without the Media Feature Pack?)".into(),
+            });
+        }
         let com = ComGuard::new()?;
         let mf = MfGuard::new()?;
         Ok(Self { _mf: mf, _com: com })

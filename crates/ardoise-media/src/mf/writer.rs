@@ -38,6 +38,10 @@ use crate::{AAC_BITRATE, AudioSettings, EncoderInfo, MediaError, Mp4Settings, Mp
 /// AAC-LC, profile level 2 (up to 48 kHz stereo), as `MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION`.
 const AAC_LC_LEVEL_2: u32 = 0x29;
 
+/// When the written audio ends more than this (100-ns units: 1 s) before a frame, the audio
+/// stream gets a stream tick (a gap) at that frame. Shorter gaps do not slow the sink writer.
+const AUDIO_GAP_BEFORE_TICK: i64 = 10_000_000;
+
 /// Writes an `.mp4` file holding H.264 video and optionally AAC audio.
 ///
 /// Usage: [`create`](Self::create), then [`push_frame`](Self::push_frame) and
@@ -183,7 +187,21 @@ impl Mp4Writer {
         self.last_timestamp = Some(timestamp);
         self.video_frames += 1;
         self.video_end = start.saturating_add(self.frame_period);
-        self.release_audio(Some(self.video_end))
+        self.release_audio(Some(self.video_end))?;
+        // The narration may stop long before the video ends: tell the sink writer the sound
+        // track has a gap, or it keeps waiting for audio and the export gets tens of times
+        // slower (measured: 42 s instead of 0.6 s for 5 s of video after the narration).
+        if let Some(audio) = &self.audio
+            && audio.pending.is_empty()
+        {
+            let audio_end = frames_to_hns(audio.written_frames, audio.settings.sample_rate);
+            if audio_end.saturating_add(AUDIO_GAP_BEFORE_TICK) < start {
+                // SAFETY: valid sink writer and audio stream index; writing has begun.
+                unsafe { self.writer.SendStreamTick(audio.stream, start) }
+                    .step("IMFSinkWriter::SendStreamTick")?;
+            }
+        }
+        Ok(())
     }
 
     /// Adds interleaved 16-bit PCM in the format given at creation. Audio is contiguous: its

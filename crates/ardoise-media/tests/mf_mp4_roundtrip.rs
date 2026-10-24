@@ -408,3 +408,41 @@ fn rejects_misuse() {
         })
     ));
 }
+
+/// A narration that stops seconds before the video: without a stream tick on the audio
+/// stream, the sink writer waits for audio and this took about 40 s instead of under 1 s.
+#[test]
+fn a_narration_shorter_than_the_video_does_not_stall_the_writer() {
+    let dir = tempfile::tempdir().expect("temporary folder");
+    let path = dir.path().join("short-narration.mp4");
+    let settings = Mp4Settings::new(640, 360, 30).with_audio(AudioSettings::new(SAMPLE_RATE, 1));
+    let mut writer = Mp4Writer::create(&path, &settings).expect("create");
+    let frame = vec![200u8; settings.rgba_frame_len()];
+    let started = Instant::now();
+    // 3 s of narration, pushed with the first frames; then 8 s of video.
+    writer
+        .push_audio(&vec![1000i16; 3 * SAMPLE_RATE as usize])
+        .expect("audio");
+    for k in 0..240u64 {
+        writer
+            .push_frame(&frame, Duration::from_micros(k * 1_000_000 / 30))
+            .expect("frame");
+    }
+    let summary = writer.finish().expect("finish");
+    let elapsed = started.elapsed();
+    println!("short narration: {elapsed:?} for 8 s of 640x360 video after 3 s of narration");
+    assert_eq!(summary.video_frames, 240);
+    assert_eq!(summary.audio_frames, 3 * u64::from(SAMPLE_RATE));
+    assert!(
+        elapsed < Duration::from_secs(15),
+        "the sink writer stalled: {elapsed:?}"
+    );
+    let probe = probe_mp4(&path, ProbeOptions::default()).expect("probe");
+    assert_eq!(probe.video.expect("video").frames, 240);
+    let audio = probe.audio.expect("audio");
+    assert!(
+        (audio.duration.as_secs_f64() - 3.0).abs() < 0.05,
+        "audio {:?}",
+        audio.duration
+    );
+}
