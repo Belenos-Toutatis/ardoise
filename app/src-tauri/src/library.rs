@@ -114,7 +114,12 @@ impl From<NoteEntry> for NoteSummary {
 }
 
 /// Summary of a note just written at `path`.
-fn summary_of(library: &Library, path: &Path, note: &Note, stamp: FileStamp) -> NoteSummary {
+pub(crate) fn summary_of(
+    library: &Library,
+    path: &Path,
+    note: &Note,
+    stamp: FileStamp,
+) -> NoteSummary {
     let file_name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -176,6 +181,31 @@ pub fn list(library: &Library) -> LibraryListing {
             .collect(),
         notes: listing.notes.into_iter().map(NoteSummary::from).collect(),
     }
+}
+
+/// Takes the automatic export folder (`folder`, relative and `/`-separated, as
+/// `AutoExportState::valid_folder` gives it) and its sub-folders out of the binders: they hold
+/// exported PDF and PNG files, not notes. A binder that does hold notes stays, so that a
+/// binder of the same name made by the user never hides its notes. Names are compared without
+/// regard to case, as Windows does.
+pub fn hide_export_folder(listing: &mut LibraryListing, folder: Option<&str>) {
+    let Some(folder) = folder else { return };
+    let within = |binder: &str, parent: &str| {
+        binder == parent
+            || binder
+                .strip_prefix(parent)
+                .is_some_and(|rest| rest.starts_with('/'))
+    };
+    let folder = folder.to_lowercase();
+    let note_binders: Vec<String> = listing
+        .notes
+        .iter()
+        .map(|note| note.binder.to_lowercase())
+        .collect();
+    listing.binders.retain(|binder| {
+        let binder = binder.to_lowercase();
+        !within(&binder, &folder) || note_binders.iter().any(|n| within(n, &binder))
+    });
 }
 
 /// Name of the first layer of a new note, in the interface language (`"fr"` or `"en"`).
@@ -289,6 +319,14 @@ pub fn retitle_in(
     })
 }
 
+/// The listing the interface shows: the whole library without the automatic export folder.
+fn list_for_interface(context: &AppContext) -> CommandResult<LibraryListing> {
+    let mut listing = list(&library_of(context)?);
+    let state = current_state(context);
+    hide_export_folder(&mut listing, state.auto_export().valid_folder().as_deref());
+    Ok(listing)
+}
+
 // --- Commands ---------------------------------------------------------------------------
 //
 // Async: Tauri runs them on a worker thread instead of the main thread, so disk access never
@@ -303,7 +341,7 @@ fn with_library<T>(
 
 #[tauri::command]
 pub async fn library_list(context: State<'_, AppContext>) -> CommandResult<LibraryListing> {
-    Ok(list(&library_of(&context)?))
+    list_for_interface(&context)
 }
 
 #[tauri::command]
@@ -727,5 +765,85 @@ pub(crate) mod tests {
         assert_eq!(binder_path("Classe/3e B"), Path::new("Classe").join("3e B"));
         assert_eq!(binder_path("a\\b/"), Path::new("a").join("b"));
         assert_eq!(slash_path(&Path::new("Classe").join("3e B")), "Classe/3e B");
+    }
+
+    fn binders(listing: &LibraryListing) -> Vec<&str> {
+        listing.binders.iter().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn the_automatic_export_folder_is_not_a_binder() {
+        let (dir, library) = library();
+        write_sample(&library, "Classe", "Cours");
+        fs::create_dir_all(dir.path().join("Exports").join("Classe")).unwrap();
+        fs::write(
+            dir.path().join("Exports").join("Classe").join("Cours.pdf"),
+            b"%PDF",
+        )
+        .unwrap();
+        library.create_binder(Path::new("Exports2")).unwrap();
+
+        let mut listing = list(&library);
+        assert_eq!(
+            binders(&listing),
+            ["Classe", "Exports", "Exports/Classe", "Exports2"]
+        );
+        hide_export_folder(&mut listing, Some("Exports"));
+        assert_eq!(binders(&listing), ["Classe", "Exports2"]);
+
+        // Case does not matter, no folder hides nothing.
+        let mut listing = list(&library);
+        hide_export_folder(&mut listing, Some("exports"));
+        assert_eq!(binders(&listing), ["Classe", "Exports2"]);
+        let mut listing = list(&library);
+        hide_export_folder(&mut listing, None);
+        assert_eq!(listing.binders.len(), 4);
+    }
+
+    #[test]
+    fn a_nested_export_folder_hides_only_itself_and_what_is_below() {
+        let (_dir, library) = library();
+        library
+            .create_binder(Path::new("Lecture/Tel/2026"))
+            .unwrap();
+        library.create_binder(Path::new("Lecture/Notes")).unwrap();
+        let mut listing = list(&library);
+        hide_export_folder(&mut listing, Some("Lecture/Tel"));
+        assert_eq!(binders(&listing), ["Lecture", "Lecture/Notes"]);
+    }
+
+    #[test]
+    fn a_binder_with_notes_is_never_hidden() {
+        let (_dir, library) = library();
+        write_sample(&library, "Exports", "Mes notes");
+        write_sample(&library, "Exports/Sous-dossier", "Autre");
+        library.create_binder(Path::new("Exports/Vide")).unwrap();
+        let mut listing = list(&library);
+        hide_export_folder(&mut listing, Some("Exports"));
+        assert_eq!(binders(&listing), ["Exports", "Exports/Sous-dossier"]);
+        assert_eq!(listing.notes.len(), 2);
+    }
+
+    #[test]
+    fn the_listing_command_follows_the_settings() {
+        let settings = tempfile::tempdir().unwrap();
+        let (dir, library) = library();
+        let context = context(settings.path());
+        crate::commands::choose_library(&context, &text(dir.path())).unwrap();
+        library.create_binder(Path::new("Exports")).unwrap();
+        library.create_binder(Path::new("Classe")).unwrap();
+
+        let hidden = |context: &AppContext| list_for_interface(context).unwrap().binders;
+        // The default folder is hidden even while the export is off: it holds no notes.
+        assert_eq!(hidden(&context), ["Classe"]);
+        crate::commands::set_auto_export_in(
+            &context,
+            ardoise_core::settings::AutoExport {
+                folder: "Classe".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(hidden(&context), ["Exports"]);
     }
 }

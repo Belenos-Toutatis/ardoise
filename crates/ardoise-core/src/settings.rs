@@ -566,4 +566,91 @@ mod tests {
         }
         assert_eq!(AutoExport::default().format, AutoExportFormat::Off);
     }
+
+    #[test]
+    fn auto_export_is_off_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        for text in [None, Some("theme = \"light\"\n"), Some("[auto_export]\n")] {
+            if let Some(text) = text {
+                fs::write(store.path(), text).unwrap();
+            }
+            let settings = store.load().unwrap();
+            assert_eq!(settings.auto_export.format, AutoExportFormat::Off);
+            assert_eq!(settings.auto_export.folder, DEFAULT_AUTO_EXPORT_FOLDER);
+            assert_eq!(settings.auto_export, AutoExport::default());
+        }
+    }
+
+    #[test]
+    fn auto_export_values_are_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        for (text, format) in [
+            ("off", AutoExportFormat::Off),
+            ("pdf", AutoExportFormat::Pdf),
+            ("png", AutoExportFormat::Png),
+        ] {
+            fs::write(
+                store.path(),
+                format!("[auto_export]\nformat = \"{text}\"\nfolder = \"Lecture/Tel\"\n"),
+            )
+            .unwrap();
+            let auto = store.load().unwrap().auto_export;
+            assert_eq!(auto.format, format);
+            assert_eq!(auto.folder, "Lecture/Tel");
+            assert_eq!(
+                auto.relative_folder(),
+                Some(Path::new("Lecture").join("Tel"))
+            );
+        }
+        // Only the format given: the folder keeps its default.
+        fs::write(store.path(), "[auto_export]\nformat = \"pdf\"\n").unwrap();
+        let auto = store.load().unwrap().auto_export;
+        assert_eq!(auto.format, AutoExportFormat::Pdf);
+        assert_eq!(auto.folder, DEFAULT_AUTO_EXPORT_FOLDER);
+        // A format this version does not know is an error, never silently "off".
+        fs::write(store.path(), "[auto_export]\nformat = \"docx\"\n").unwrap();
+        assert!(matches!(store.load(), Err(SettingsError::Parse { .. })));
+    }
+
+    #[test]
+    fn auto_export_round_trip_keeps_unknown_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        fs::write(
+            store.path(),
+            "future_flag = true\n\n[auto_export]\nformat = \"png\"\nfolder = \"Exports\"\nquality = 90\n\n[auto_export.future]\nanswer = 42\n",
+        )
+        .unwrap();
+
+        let updated = store
+            .update(|s| {
+                s.auto_export.format = AutoExportFormat::Pdf;
+                s.auto_export.folder = "Lecture".to_owned();
+            })
+            .unwrap();
+        assert_eq!(updated.auto_export.format, AutoExportFormat::Pdf);
+
+        let reloaded = store.load().unwrap();
+        assert_eq!(reloaded, updated);
+        assert_eq!(reloaded.auto_export.format, AutoExportFormat::Pdf);
+        assert_eq!(reloaded.auto_export.folder, "Lecture");
+        assert_eq!(reloaded.auto_export.extra["quality"].as_integer(), Some(90));
+        assert_eq!(
+            reloaded.auto_export.extra["future"]["answer"].as_integer(),
+            Some(42)
+        );
+        assert_eq!(reloaded.extra["future_flag"], toml::Value::Boolean(true));
+
+        // Written as the documented table, with lowercase values.
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("[auto_export]"), "{text}");
+        assert!(text.contains("format = \"pdf\""), "{text}");
+        assert!(text.contains("folder = \"Lecture\""), "{text}");
+
+        // Another setting changed later leaves the automatic export alone.
+        let later = store.update(|s| s.theme = Theme::Dark).unwrap();
+        assert_eq!(later.auto_export, reloaded.auto_export);
+    }
 }
