@@ -1,6 +1,6 @@
 [package]
 name = "ardoise-render"
-description = "Raster rendering of notes: ink tools, page backgrounds, templates and textures; PNG export."
+description = "Rendering and export of notes: ink tools, page backgrounds, templates and textures; PNG, JPG, SVG, PDF and clipboard images."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,10 +10,20 @@ publish.workspace = true
 [dependencies]
 ardoise-core = { path = "../ardoise-core" }
 ardoise-ink = { path = "../ardoise-ink" }
+# zlib streams of the PDF writer (the version the `png` crate already uses).
+miniz_oxide = "0.8"
+pdf-writer = "0.15"
 png = "0.18"
 thiserror = "2"
 # PNG files go through the `png` crate directly (the version already in the workspace).
 tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
+
+[dev-dependencies]
+# Independent readers, used only to validate the exports in tests.
+jpeg-decoder = { version = "0.3", default-features = false }
+lopdf = { version = "0.46", default-features = false }
+resvg = { version = "0.48", default-features = false }
+roxmltree = "0.21"
 
 [lints]
 workspace = true
