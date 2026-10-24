@@ -15,6 +15,7 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 - `cargo xtask licenses [--write]` : vérifie la licence de chaque dépendance Rust et npm (liste blanche compatible GPL v3, aucune AGPL ; se termine par `LICENSES OK`) et que `THIRD-PARTY-NOTICES` est à jour ; `--write` le régénère (à committer). `check` le lance.
 - `ardoise.exe --create-demo-library DOSSIER` : bibliothèque de démonstration (notes synthétiques).
 - Prérequis de compilation : la cible Rust `wasm32-unknown-unknown` (le calcul des contours des traits est compilé en WebAssembly pour l'écran ; `npm run wasm`, lancé automatiquement par les scripts npm).
+- Prérequis de compilation : `nasm` (assembleur de l'encodeur AV1 `rav1e`, pour le WebM). Sous Windows, le zip portable décompressé dans `%LOCALAPPDATA%\ArdoiseDev\nasm-<version>\` : `cargo xtask` le trouve tout seul ; pour une commande `cargo` directe, définir `NASM` (PowerShell : `$env:NASM="$env:LOCALAPPDATA\ArdoiseDev\nasm-3.02\nasm.exe"`). Sous Linux, le paquet apt `nasm`. Jamais nécessaire chez l'utilisateur.
 - `cargo fmt --all` avant de lancer la vérification.
 - Une compilation release de l'app exige `--features custom-protocol` (sinon Tauri chargerait l'interface depuis le serveur de développement au lieu de l'embarquer ; une garde `compile_error!` l'empêche). `cargo xtask check` le fait.
 - Interface seule (dans `app/`) : `npm run build`, `npm run check`, `npm test`. Application en développement : `npm run tauri dev` (dans `app/`).

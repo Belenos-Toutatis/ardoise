@@ -10,8 +10,8 @@
 RUST_VERSION=1.98.1
 NODE_VERSION=24.22.1
 NODE_DIR=/opt/node24
-# libasound2-dev: microphone capture (cpal uses ALSA on Linux).
-APT_PACKAGES="build-essential pkg-config file libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev"
+# libasound2-dev: microphone capture (cpal uses ALSA on Linux). nasm: rav1e's assembly (WebM).
+APT_PACKAGES="build-essential pkg-config file libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev nasm"
 export PATH="$NODE_DIR/bin:$HOME/.cargo/bin:$PATH"
 
 log() { echo "[cloud-setup] $*"; }

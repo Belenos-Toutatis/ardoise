@@ -24,9 +24,9 @@ use serde_json::Value;
 /// GPL-3.0-or-later (the licence of Ardoise, SPEC §9).
 ///
 /// * Permissive licences (MIT, MIT-0, BSD-2/3-Clause, ISC, Zlib, 0BSD, Unlicense, CC0-1.0,
-///   BSL-1.0, Unicode-3.0, Unicode-DFS-2016, BlueOak-1.0.0): no copyleft clause; the FSF lists
-///   them as GPL-compatible (BlueOak is the same kind of permissive text, only npm dev tools
-///   use it today).
+///   BSL-1.0, NCSA, Unicode-3.0, Unicode-DFS-2016, BlueOak-1.0.0): no copyleft clause; the FSF
+///   lists them as GPL-compatible (BlueOak is the same kind of permissive text, only npm dev
+///   tools use it today; NCSA comes with `libfuzzer-sys`, which rav1e only builds for fuzzing).
 /// * Apache-2.0: compatible with GPL-3.0 (not with GPL-2.0-only), one way.
 /// * MPL-2.0: compatible with GPL-3.0 through its "Secondary License" clause (MPL section 3.3).
 /// * LGPL-3.0 and LGPL-2.1-or-later: may be combined with and relicensed under GPL-3.0. Plain
@@ -53,6 +53,7 @@ const ALLOWED_LICENSES: &[&str] = &[
     "MIT",
     "MIT-0",
     "MPL-2.0",
+    "NCSA",
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Unlicense",

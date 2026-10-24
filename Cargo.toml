@@ -34,6 +34,20 @@ opt-level = 3
 [profile.release.package.ardoise-render]
 opt-level = 3
 
+# Video encoding: rav1e is generic over the pixel type, so most of the AV1 encoder is compiled
+# inside ardoise-media; at the size-oriented level a WebM export would be several times slower.
+[profile.release.package.ardoise-media]
+opt-level = 3
+
+[profile.release.package.rav1e]
+opt-level = 3
+
+[profile.dev.package.ardoise-media]
+opt-level = 3
+
+[profile.dev.package.rav1e]
+opt-level = 3
+
 # Keeps the rendering tests fast in debug builds.
 [profile.dev.package.tiny-skia]
 opt-level = 2
