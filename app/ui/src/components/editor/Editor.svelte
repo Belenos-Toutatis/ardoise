@@ -9,6 +9,10 @@
    * `lib/editor/state.ts`), tool settings beside it. The note is dirty while the present note
    * is not the object last saved. Every write to the note's file (save, rename, copy) goes
    * through one queue, so that each uses the path and stamp left by the previous one.
+   *
+   * Replay mode (milestone M6, SPEC §4.5): the page is read-only and shows the note as drawn at the
+   * playhead (`ReplayPlayer`, `lib/replay.ts`), with a bar of controls; the narration of the note
+   * plays along, and a new one is recorded while the replay runs (`NarrationRecorder`).
    */
   import { untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, type AppState } from '../../lib/api';
@@ -49,13 +53,20 @@
   } from '../../lib/editor/split';
   import { defaultWindowClose, type WindowClose } from '../../lib/editor/window-close';
   import { largestFittingDpi } from '../../lib/export-options';
-  import { t } from '../../lib/i18n.svelte';
+  import { currentLocale, t } from '../../lib/i18n.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
   import type { ExportSource, FileStamp, Note, Rgba, SplitSpec, Stroke } from '../../lib/note';
+  import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
+  import VideoExportDialog from '../VideoExportDialog.svelte';
+  import { clock } from '../narration/format';
+  import RecordPanel from '../narration/RecordPanel.svelte';
+  import { NarrationRecorder } from '../narration/recorder.svelte';
   import Canvas from './Canvas.svelte';
   import LayersPanel from './LayersPanel.svelte';
   import PagePanel from './PagePanel.svelte';
+  import ReplayBar from './ReplayBar.svelte';
+  import { ReplayPlayer } from './replay-player.svelte';
   import SplitPanel from './SplitPanel.svelte';
   import Toolbar from './Toolbar.svelte';
 
@@ -140,6 +151,23 @@
   let closing = $state(false);
   let spaceDown = $state(false);
   let canvas = $state<ReturnType<typeof Canvas>>();
+  /** What the video export dialog exports; null while it is closed. */
+  let video = $state.raw<ExportSource | null>(null);
+
+  // Replay mode.
+  const player = new ReplayPlayer();
+  const recorder = new NarrationRecorder();
+  let replaying = $state(false);
+  /** The narration stored in the note, while replaying. */
+  let narration = $state.raw<NarrationInfo | null>(null);
+  /** The narration's sound (a Blob URL) while it plays along. */
+  let narrationUrl = $state<string | null>(null);
+  let narrationLoading = $state(false);
+  let narrationError = $state<string | null>(null);
+  let recordOpen = $state(false);
+  let confirmDelete = $state(false);
+  /** The microphone chosen here, until the app state says so. */
+  let chosenMicrophone = $state<string | null | undefined>(undefined);
 
   const doc = $derived(history?.present ?? null);
   const dirty = $derived(!!doc && doc.note !== savedNote);
@@ -151,6 +179,22 @@
     return split.zone ? { kind: 'zone', polygon: split.zone.map(([x, y]): [number, number] => [x, y]) } : null;
   });
   const preview = $derived(doc && splitSpec ? previewSplit(doc.note, splitSpec) : EMPTY_PREVIEW);
+  /** The page as drawn at the playhead: nothing selected, nothing to edit. */
+  const replayDoc = $derived.by((): Doc | null => {
+    const shown = player.shown;
+    return replaying && doc && shown ? { note: shown, selection: [], activeLayer: doc.activeLayer } : null;
+  });
+  /** The pan tool: a drag moves the page and never draws. */
+  const replayTools = $derived<ToolSettings>({ ...tools, mode: 'pan' });
+  const microphone = $derived(chosenMicrophone === undefined ? app.microphone : chosenMicrophone);
+  const numberFormat = $derived(new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 2 }));
+  /** The replay options a recording would use, as a sentence. */
+  const recordInfo = $derived(
+    t('narration.record.settings', {
+      speed: t('replay.speedValue', { speed: numberFormat.format(player.options.speed) }),
+      pauses: t(player.trimmed ? 'narration.record.pausesTrimmed' : 'narration.record.pausesKept'),
+    }),
+  );
 
   /** False once the editor was closed or destroyed: late results call back no one. */
   let alive = true;
@@ -194,6 +238,11 @@
       alive = false;
       clearTimeout(noticeTimer);
       for (const stop of stops) stop();
+      player.dispose();
+      recorder.dispose();
+      // A capture left running would hold the microphone: discard it.
+      if (recorder.phase === 'recording') void api.narrationStop(false, null).catch(() => {});
+      dropNarrationSound();
     };
   });
 
@@ -205,6 +254,8 @@
     disk = null;
     split = null;
     exporting = null;
+    video = null;
+    resetReplay();
     try {
       const [opened, module] = await Promise.all([api.openNote(target), ink ?? loadInk()]);
       if (currentPath !== target) return;
@@ -336,6 +387,8 @@
         conflict = null;
         disk = null;
         notifySaved(created.path);
+        // The copy has no narration.
+        if (replaying) void loadNarration();
         return true;
       } catch (error) {
         if (gen === generation) saveError = errorMessage(error);
@@ -397,12 +450,18 @@
   }
 
   function back() {
+    if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
     if (dirty) leaving = true;
     else close();
   }
 
   /** The window is asked to close: true holds it back (unsaved changes, or a write under way). */
   function holdClose(): boolean {
+    if (alive && recorder.busy) {
+      // A narration being recorded would be lost: the window stays until it is stopped.
+      showNotice(t('editor.replay.recordingBusy'), true);
+      return true;
+    }
     if (!alive || (!dirty && pendingWrites === 0)) return false;
     if (windowClose.destroy) {
       if (dirty) {
@@ -542,6 +601,11 @@
     if (source) exporting = [source];
   }
 
+  function openVideo() {
+    const source = currentSource();
+    if (source) video = source;
+  }
+
   async function copyImage() {
     const source = currentSource();
     if (!source || copying) return;
@@ -631,6 +695,152 @@
     });
   }
 
+  // --- Replay and narration ---------------------------------------------------------------
+
+  function enterReplay() {
+    if (!doc || split || replaying || canvas?.dragging()) return;
+    player.load(doc.note);
+    narration = null;
+    narrationError = null;
+    replaying = true;
+    void loadNarration();
+  }
+
+  function leaveReplay() {
+    // Leaving would drop a narration being recorded: stop or cancel it first.
+    if (!replaying || recorder.busy) return;
+    resetReplay();
+  }
+
+  function toggleReplay() {
+    if (replaying) leaveReplay();
+    else enterReplay();
+  }
+
+  /** Back to editing (also when another note is opened): the replay, its sound and a recording are dropped. */
+  function resetReplay() {
+    player.pause();
+    replaying = false;
+    narration = null;
+    narrationError = null;
+    narrationLoading = false;
+    recordOpen = false;
+    confirmDelete = false;
+    dropNarrationSound();
+    // A recording of the note left behind is not kept.
+    if (recorder.phase === 'recording') void recorder.stop(false, null);
+  }
+
+  /** Reads the narration stored in the note (what the bar and the side panel show). */
+  async function loadNarration() {
+    const gen = generation;
+    try {
+      const info = await api.narrationInfo(currentPath);
+      if (gen !== generation || !replaying) return;
+      narration = info;
+      narrationError = null;
+      if (!info) dropNarrationSound();
+    } catch (error) {
+      if (gen !== generation || !replaying) return;
+      narration = null;
+      narrationError = t('replay.narrationFailed', { message: errorMessage(error) });
+      dropNarrationSound();
+    }
+  }
+
+  /** The "Lire avec la narration" switch: fetches the sound and takes the options it was recorded with. */
+  async function playAlong(on: boolean) {
+    const info = narration;
+    if (!on || !info) return dropNarrationSound();
+    const gen = generation;
+    narrationLoading = true;
+    narrationError = null;
+    try {
+      const wav = await api.narrationAudio(currentPath);
+      if (gen !== generation || !replaying || narration !== info) return;
+      const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
+      dropNarrationSound();
+      narrationUrl = url;
+      player.setOptions({ speed: info.speed, maxPauseMs: info.maxPauseMs });
+      player.extent = info.startMs + info.durationMs;
+    } catch (error) {
+      if (gen === generation) narrationError = t('replay.narrationFailed', { message: errorMessage(error) });
+    } finally {
+      if (gen === generation) narrationLoading = false;
+    }
+  }
+
+  /** The sound is no longer played along: the replay is as long as the drawing again. */
+  function dropNarrationSound() {
+    if (narrationUrl !== null) {
+      try {
+        URL.revokeObjectURL(narrationUrl);
+      } catch {
+        // Nothing to release.
+      }
+      narrationUrl = null;
+    }
+    player.extent = 0;
+    player.seek(player.position);
+  }
+
+  async function chooseMicrophone(device: string | null) {
+    chosenMicrophone = device;
+    try {
+      chosenMicrophone = (await api.setMicrophone(device)).microphone;
+    } catch (error) {
+      chosenMicrophone = undefined;
+      showNotice(errorMessage(error), true);
+    }
+  }
+
+  /** « Démarrer »: the replay plays from the start, with the options it has now, while the microphone records. */
+  async function startRecording() {
+    if (!replaying || recorder.busy) return;
+    dropNarrationSound();
+    player.pause();
+    const { speed, maxPauseMs } = player.options;
+    const started = await recorder.start(microphone, { kind: 'replay', path: currentPath, speed, maxPauseMs, startMs: 0 });
+    if (!started) return;
+    player.seek(0);
+    player.play();
+  }
+
+  /** Stops the recording; saved, it goes into the note's file and the note's stamp changes. */
+  async function stopRecording(save: boolean) {
+    if (recorder.phase !== 'recording') return;
+    // The replay ends with the recording. Closing the panel now, while it is still busy, keeps its
+    // microphone picker from listening again in between.
+    player.pause();
+    if (save) recordOpen = false;
+    const result = await enqueue(
+      async () => {
+        const outcome = await recorder.stop(save, stamp);
+        if (outcome.saved?.stamp) stamp = outcome.saved.stamp;
+        return outcome;
+      },
+      { ok: false, saved: null },
+    );
+    if (!result.ok || !result.saved) return;
+    showNotice(t('narration.record.saved', { duration: clock(result.saved.durationMs) }));
+    await loadNarration();
+  }
+
+  async function deleteNarration() {
+    confirmDelete = false;
+    await enqueue(async () => {
+      if (!stamp) return;
+      try {
+        stamp = await api.deleteNarration(currentPath, stamp);
+        dropNarrationSound();
+        showNotice(t('narration.stored.deleted'));
+      } catch (error) {
+        narrationError = t('narration.stored.deleteFailed', { message: errorMessage(error) });
+      }
+    }, undefined);
+    await loadNarration();
+  }
+
   // --- Keyboard ---------------------------------------------------------------------------
 
   function isTyping(target: EventTarget | null): boolean {
@@ -658,6 +868,38 @@
     return ['button', 'checkbox', 'radio', 'switch', 'link', 'tab', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio'].includes(role);
   }
 
+  /** In replay mode Space also works on the timeline (a range input); buttons and fields keep it. */
+  function spacePlays(target: EventTarget | null): boolean {
+    if (target instanceof HTMLInputElement && target.type === 'range') return true;
+    return !spaceActivates(target);
+  }
+
+  /** The keys of replay mode: R and Escape leave it, Space plays or pauses; nothing edits the note. */
+  function replayKey(e: KeyboardEvent, key: string, mod: boolean) {
+    if (mod) {
+      if (key === '0') {
+        e.preventDefault();
+        canvas?.fit();
+      }
+      return;
+    }
+    if (e.altKey) return;
+    switch (key) {
+      case 'r':
+      case 'Escape':
+        e.preventDefault();
+        leaveReplay();
+        break;
+      case ' ':
+        if (spacePlays(e.target)) {
+          e.preventDefault();
+          // The replay of a recording runs on its own.
+          if (!recorder.busy) player.toggle();
+        }
+        break;
+    }
+  }
+
   function onkeydown(e: KeyboardEvent) {
     if (!doc) return;
     const mod = e.ctrlKey || e.metaKey;
@@ -672,7 +914,7 @@
       return;
     }
     // A dialog or the split panel is open: the editing keys wait; Escape closes the panel.
-    if (exporting) return;
+    if (exporting || video) return;
     if (split) {
       if (key === 'Escape') {
         e.preventDefault();
@@ -685,6 +927,10 @@
     // (undo, redo, delete, paste, select all…) would be overwritten, so those keys wait.
     if (canvas?.dragging() && (mod || ['Delete', 'Backspace', 'Escape'].includes(key))) {
       e.preventDefault();
+      return;
+    }
+    if (replaying) {
+      replayKey(e, key, mod);
       return;
     }
     if (mod) {
@@ -735,6 +981,9 @@
       case 'h':
         setMode('pan');
         break;
+      case 'r':
+        enterReplay();
+        break;
     }
   }
 
@@ -779,7 +1028,7 @@
       <button
         type="button"
         class="button ghost"
-        disabled={!history || !canUndo(history)}
+        disabled={!history || !canUndo(history) || replaying}
         title={t('editor.undo')}
         aria-label={t('editor.undo')}
         onclick={doUndo}><span aria-hidden="true">↶</span></button
@@ -787,7 +1036,7 @@
       <button
         type="button"
         class="button ghost"
-        disabled={!history || !canRedo(history)}
+        disabled={!history || !canRedo(history) || replaying}
         title={t('editor.redo')}
         aria-label={t('editor.redo')}
         onclick={doRedo}><span aria-hidden="true">↷</span></button
@@ -851,17 +1100,32 @@
       oneraser={setEraser}
       onapplyall={applyAll}
       splitting={split !== null}
-      locked={split !== null}
+      locked={split !== null || replaying}
+      {replaying}
+      replayDisabled={split !== null || recorder.busy}
       {copying}
       onsplit={toggleSplit}
       oncopy={copyImage}
       onexport={openExport}
+      onreplay={toggleReplay}
+      onvideo={openVideo}
     />
+    {#if replaying}
+      <ReplayBar
+        {player}
+        {narration}
+        audioUrl={narrationUrl}
+        loading={narrationLoading}
+        locked={recorder.busy}
+        error={narrationError}
+        onnarration={playAlong}
+      />
+    {/if}
     <div class="editor-main">
       <Canvas
         bind:this={canvas}
-        {doc}
-        {tools}
+        doc={replayDoc ?? doc}
+        tools={replaying ? replayTools : tools}
         {ink}
         spacePan={spaceDown}
         onchange={change}
@@ -877,68 +1141,114 @@
         }}
       />
       <aside class="editor-side" aria-label={t('editor.sidePanel')}>
-        {#if split}
-          <SplitPanel
-            mode={split.mode}
-            {range}
-            at={split.at}
-            hasZone={split.zone !== null}
-            {preview}
-            bind:title={split.title}
-            dirty={dirty}
-            busy={split.busy}
-            error={split.error}
-            onmode={setSplitMode}
-            onat={(value) => {
-              if (split) split.at = value;
-            }}
-            onedittitle={() => {
-              if (split) split.titleEdited = true;
-            }}
-            onclearzone={() => {
-              if (split) split.zone = null;
-            }}
-            onconfirm={confirmSplit}
-            oncancel={cancelSplit}
+        {#if replaying}
+          <section class="side-section" aria-labelledby="editor-narration-heading" data-section="narration">
+            <h3 id="editor-narration-heading">{t('narration.title')}</h3>
+            {#if narration}
+              <p class="small" data-slot="narration-stored">
+                {t('narration.stored.info', { duration: clock(narration.durationMs) })}
+              </p>
+            {:else}
+              <p class="small muted">{t('narration.stored.none')}</p>
+            {/if}
+            <RecordPanel
+              bind:open={recordOpen}
+              {recorder}
+              device={microphone}
+              ondevice={chooseMicrophone}
+              onstart={startRecording}
+              onstop={() => void stopRecording(true)}
+              oncancel={() => void stopRecording(false)}
+              openLabel={t('narration.record.open')}
+              openHint={t('narration.record.openHint')}
+              replaces={narration !== null}
+              info={recordInfo}
+              duringInfo={player.playing ? null : t('narration.record.afterEnd')}
+            />
+            {#if narration && !recorder.busy}
+              {#if confirmDelete}
+                <div class="confirm-delete" role="alert">
+                  <p class="small">{t('narration.stored.deleteConfirm')}</p>
+                  <div class="buttons">
+                    <button type="button" class="button small-button danger" data-action="narration-delete-yes" onclick={deleteNarration}>
+                      {t('narration.stored.deleteYes')}
+                    </button>
+                    <button type="button" class="button small-button" onclick={() => (confirmDelete = false)}>
+                      {t('narration.stored.deleteNo')}
+                    </button>
+                  </div>
+                </div>
+              {:else}
+                <button type="button" class="button small-button danger" data-action="narration-delete" onclick={() => (confirmDelete = true)}>
+                  {t('narration.stored.delete')}
+                </button>
+              {/if}
+            {/if}
+          </section>
+        {:else}
+          {#if split}
+            <SplitPanel
+              mode={split.mode}
+              {range}
+              at={split.at}
+              hasZone={split.zone !== null}
+              {preview}
+              bind:title={split.title}
+              dirty={dirty}
+              busy={split.busy}
+              error={split.error}
+              onmode={setSplitMode}
+              onat={(value) => {
+                if (split) split.at = value;
+              }}
+              onedittitle={() => {
+                if (split) split.titleEdited = true;
+              }}
+              onclearzone={() => {
+                if (split) split.zone = null;
+              }}
+              onconfirm={confirmSplit}
+              oncancel={cancelSplit}
+            />
+          {/if}
+          {#if hasSelection}
+            <section class="side-section" aria-labelledby="editor-selection-heading">
+              <h3 id="editor-selection-heading">{t('editor.selection.label')}</h3>
+              <p class="small muted">{t('editor.selection.count', { count: doc.selection.length })}</p>
+              <div class="buttons">
+                <button type="button" class="button small-button" onclick={duplicate}>
+                  {t('editor.selection.duplicate')}
+                </button>
+                <button type="button" class="button small-button danger" onclick={() => change(deleteSelection(doc!))}>
+                  {t('editor.selection.delete')}
+                </button>
+                <button type="button" class="button small-button" onclick={() => reselect(clearSelection(doc!))}>
+                  {t('editor.selection.clear')}
+                </button>
+              </div>
+            </section>
+          {/if}
+          <PagePanel
+            background={doc.note.background}
+            cropping={tools.mode === 'crop'}
+            disabled={split !== null}
+            onbackground={(b) => change(setBackground(doc!, b))}
+            onrotate={(direction) => change(rotate(doc!, direction))}
+            onautocrop={() => change(autoCrop(doc!))}
+            onmanualcrop={() => setMode(tools.mode === 'crop' ? 'select' : 'crop')}
+          />
+          <LayersPanel
+            layers={doc.note.layers}
+            active={doc.activeLayer}
+            disabled={split !== null}
+            onactive={(i) => reselect(setActiveLayer(doc!, i))}
+            onvisible={(i, visible) => change(setLayerVisible(doc!, i, visible))}
+            onrename={(i, name) => change(renameLayer(doc!, i, name))}
+            onmove={(from, to) => change(moveLayer(doc!, from, to))}
+            onmerge={(i) => change(mergeDown(doc!, i))}
+            onadd={() => change(addLayer(doc!, t('editor.layers.defaultName', { n: doc!.note.layers.length + 1 })))}
           />
         {/if}
-        {#if hasSelection}
-          <section class="side-section" aria-labelledby="editor-selection-heading">
-            <h3 id="editor-selection-heading">{t('editor.selection.label')}</h3>
-            <p class="small muted">{t('editor.selection.count', { count: doc.selection.length })}</p>
-            <div class="buttons">
-              <button type="button" class="button small-button" onclick={duplicate}>
-                {t('editor.selection.duplicate')}
-              </button>
-              <button type="button" class="button small-button danger" onclick={() => change(deleteSelection(doc!))}>
-                {t('editor.selection.delete')}
-              </button>
-              <button type="button" class="button small-button" onclick={() => reselect(clearSelection(doc!))}>
-                {t('editor.selection.clear')}
-              </button>
-            </div>
-          </section>
-        {/if}
-        <PagePanel
-          background={doc.note.background}
-          cropping={tools.mode === 'crop'}
-          disabled={split !== null}
-          onbackground={(b) => change(setBackground(doc!, b))}
-          onrotate={(direction) => change(rotate(doc!, direction))}
-          onautocrop={() => change(autoCrop(doc!))}
-          onmanualcrop={() => setMode(tools.mode === 'crop' ? 'select' : 'crop')}
-        />
-        <LayersPanel
-          layers={doc.note.layers}
-          active={doc.activeLayer}
-          disabled={split !== null}
-          onactive={(i) => reselect(setActiveLayer(doc!, i))}
-          onvisible={(i, visible) => change(setLayerVisible(doc!, i, visible))}
-          onrename={(i, name) => change(renameLayer(doc!, i, name))}
-          onmove={(from, to) => change(moveLayer(doc!, from, to))}
-          onmerge={(i) => change(mergeDown(doc!, i))}
-          onadd={() => change(addLayer(doc!, t('editor.layers.defaultName', { n: doc!.note.layers.length + 1 })))}
-        />
       </aside>
     </div>
   {/if}
@@ -949,6 +1259,10 @@
       subject={t('export.subjectNote', { title: title.trim() || t('editor.untitled') })}
       onclose={() => (exporting = null)}
     />
+  {/if}
+
+  {#if video}
+    <VideoExportDialog source={video} subject={title.trim() || t('editor.untitled')} onclose={() => (video = null)} />
   {/if}
 
   {#if leaving}
