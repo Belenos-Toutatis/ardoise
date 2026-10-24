@@ -35,14 +35,14 @@ Règles permanentes :
 
 ## M1 — Protocole, simulateur et outil de diagnostic
 
-- [ ] `ardoise-proto` : codage/décodage de tous les messages du protocole (docs/research/protocol.md), sans aucune entrée/sortie ; tests pour chaque message.
-- [ ] Décodage des données de traits (pages stockées) et des paquets du mode direct ; tests avec les données d'exemple de Tuhi et des données synthétiques.
-- [ ] `ardoise-sim` : tablette simulée (enregistrement, connexion, infos, liste/téléchargement/suppression des pages, mode direct, bouton) + rejeu de captures `.jsonl`.
-- [ ] `ardoise-ble` : transport Bluetooth LE Windows (recherche, connexion, écriture, notifications, reconnexion) derrière la même interface que le simulateur.
-- [ ] Gestionnaire de tablette : enregistrement, connexion avec l'identifiant partagé (`.ardoise/device.json`), synchro, mode direct ; testé de bout en bout contre le simulateur.
-- [ ] Journal de diagnostic `.jsonl` (SPEC §4.8) ; un journal produit avec le simulateur se rejoue à l'identique.
-- [ ] Outil de test guidé accessible depuis l'application (ou `ardoise.exe --diagnostic`), avec rapport final.
-- [ ] `docs/hardware-tests.md` : procédure H1 pas à pas, en français, pour l'utilisateur.
+- [x] `ardoise-proto` : codage/décodage de tous les messages du protocole (docs/research/protocol.md), sans aucune entrée/sortie ; tests pour chaque message.
+- [x] Décodage des données de traits (pages stockées) et des paquets du mode direct ; tests avec les données d'exemple de Tuhi et des données synthétiques.
+- [x] `ardoise-sim` : tablette simulée (enregistrement, connexion, infos, liste/téléchargement/suppression des pages, mode direct, bouton) + rejeu de captures `.jsonl`.
+- [x] `ardoise-ble` : transport Bluetooth LE Windows (recherche, connexion, écriture, notifications, reconnexion) derrière la même interface que le simulateur.
+- [x] Gestionnaire de tablette : enregistrement, connexion avec l'identifiant partagé (`.ardoise/device.json`), synchro, mode direct ; testé de bout en bout contre le simulateur.
+- [x] Journal de diagnostic `.jsonl` (SPEC §4.8) ; un journal produit avec le simulateur se rejoue à l'identique.
+- [x] Outil de test guidé accessible depuis l'application (ou `ardoise.exe --diagnostic`), avec rapport final.
+- [x] `docs/hardware-tests.md` : procédure H1 pas à pas, en français, pour l'utilisateur.
 
 **Critères de fin** : `CHECK OK` ; la sortie des tests montre le scénario complet contre le simulateur (enregistrement → synchro de 3 pages → suppression → mode direct 30 s → déconnexion) réussi ; `ardoise.exe --diagnostic --simulated` produit un rapport « 0 échec ».
 
