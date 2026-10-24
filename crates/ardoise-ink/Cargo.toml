@@ -1,6 +1,6 @@
 [package]
 name = "ardoise-ink"
-description = "Stroke model and geometry (pressure-dependent outlines), shared by the UI (WebAssembly) and exports."
+description = "Stroke model and geometry (pressure-dependent outlines), shared by the display and the exports."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 
 [lints]
 workspace = true

@@ -84,6 +84,7 @@ dependencies = [
 name = "ardoise-core"
 version = "0.1.0"
 dependencies = [
+ "ardoise-ink",
  "serde",
  "tempfile",
  "thiserror 2.0.21",
@@ -111,6 +112,9 @@ version = "0.1.0"
 [[package]]
 name = "ardoise-ink"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "ardoise-inkspace"
@@ -131,6 +135,11 @@ dependencies = [
 [[package]]
 name = "ardoise-render"
 version = "0.1.0"
+dependencies = [
+ "ardoise-core",
+ "ardoise-ink",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "ardoise-sim"

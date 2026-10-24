@@ -2,4 +2,5 @@
 
 pub mod fsutil;
 pub mod library;
+pub mod note;
 pub mod settings;

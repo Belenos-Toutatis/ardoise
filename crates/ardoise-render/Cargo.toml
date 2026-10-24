@@ -1,6 +1,6 @@
 [package]
 name = "ardoise-render"
-description = "Raster rendering, page backgrounds and templates, PNG/JPG/SVG/PDF export."
+description = "Raster rendering of notes: ink tools, page backgrounds, templates and textures; PNG export."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +8,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+ardoise-core = { path = "../ardoise-core" }
+ardoise-ink = { path = "../ardoise-ink" }
+thiserror = "2"
 
 [lints]
 workspace = true
