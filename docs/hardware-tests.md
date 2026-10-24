@@ -39,3 +39,53 @@ Copier `ardoise.exe` (dossier `target\release\` du projet) dans un dossier synch
 | `bluetooth` | `on (…)` = le dongle est utilisable. `off` = Bluetooth désactivé dans Windows. `no adapter found` = dongle non reconnu. |
 
 **À me signaler** : seulement ce qui n'arrive pas par Nextcloud — un message de blocage (photo), ou le fait que la fenêtre ne s'est pas ouverte.
+
+---
+
+## H1 — La tablette parle-t-elle à Ardoise ?
+
+**Durée** : 10 minutes. **Tablette** : chargée. **Dongle Bluetooth** : branché. **Téléphone** : Bluetooth **coupé** pendant tout le test (sinon l'application du téléphone peut se connecter à la tablette à la place d'Ardoise et récupérer les pages).
+
+Ce test enregistre la tablette auprès d'Ardoise, lit ses informations, télécharge trois pages de référence, essaie le mode direct pendant 30 secondes puis vérifie la reconnexion. Chaque octet échangé est enregistré dans la bibliothèque, dans le dossier caché `.ardoise\diagnostics\` : tout revient à la maison par Nextcloud.
+
+> **Important** : une tablette ne reste enregistrée qu'auprès d'une seule application. Après ce test, l'application Wacom du téléphone (et Inkspace) ne verront plus la tablette. Pour revenir en arrière, il suffira de la réenregistrer dans l'application du téléphone (bouton maintenu 6 secondes).
+
+### À la maison, avant
+
+Remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version (Ardoise doit être fermé sur tous les PC pendant la copie).
+
+### Au travail
+
+1. Couper le Bluetooth du téléphone. Brancher le dongle. Vérifier que la synchronisation Nextcloud est active.
+2. Lancer `ardoise.exe` (double-clic). Cliquer sur **Tester la tablette** (en haut à droite).
+3. Laisser cochée la case **Effacer les pages de la tablette une fois enregistrées** (les pages sont d'abord enregistrées et vérifiées, ensuite seulement effacées). Ne pas cocher **Simulation**. Cliquer sur **Démarrer le test**.
+4. Suivre les consignes à l'écran. Après chaque action, cliquer sur **C'est fait, continuer**. En cas de blocage sur une étape, **Passer cette étape** permet d'aller à la suivante ; **Arrêter le test** termine tout de suite (le journal est quand même enregistré).
+
+| Étape à l'écran | Ce qu'il faut faire |
+|---|---|
+| Adaptateur Bluetooth | Rien : Ardoise vérifie que le dongle est vu et allumé. |
+| Pages de référence | Sur une feuille posée sur la tablette, dessiner les **3 pages de référence** ci-dessous, en appuyant brièvement sur le bouton de la tablette **après chaque page** pour l'enregistrer. |
+| Recherche de la tablette | La première fois : **maintenir le bouton enfoncé environ 6 secondes**, jusqu'à ce que le voyant **clignote en bleu**. Les fois suivantes : un appui bref suffit. |
+| Connexion | Quand Ardoise le demande, **appuyer brièvement sur le bouton** pour confirmer l'enregistrement (quelques secondes pour le faire). |
+| Informations | Rien : nom, version, batterie, taille et nombre de pages sont lus. |
+| Téléchargement des pages | Rien : les pages sont téléchargées, vérifiées, enregistrées, puis effacées de la tablette. |
+| Mode direct (30 s) | **Dessiner sans s'arrêter pendant 30 secondes** : traits, cercles, quelques mots, en appuyant plus ou moins fort. |
+| Reconnexion | Si Ardoise le demande, appuyer brièvement sur le bouton. |
+
+**Les 3 pages de référence** (une par feuille, ou sur la même feuille en appuyant sur le bouton entre deux) :
+1. un carré et un cercle, aussi grands que possible ;
+2. écrire `Ardoise 2026` en écriture normale ;
+3. trois traits horizontaux, le premier très léger, le deuxième normal, le troisième très appuyé.
+
+5. À la fin, Ardoise affiche le résumé (« N réussie(s), N échec(s), N ignorée(s) ») et l'emplacement du journal. Fermer Ardoise.
+
+### Ce qui revient par Nextcloud
+
+Dans `<bibliothèque>\.ardoise\diagnostics\` :
+- `AAAA-MM-JJ_HHMMSS.jsonl` : le journal complet des échanges Bluetooth ;
+- `AAAA-MM-JJ_HHMMSS.txt` : le rapport lisible ;
+- `AAAA-MM-JJ_HHMMSS\page-1.bin`, `page-2.bin`… : les pages brutes reçues de la tablette.
+
+Et dans `<bibliothèque>\.ardoise\device.json` : l'enregistrement de la tablette, partagé par tous les PC (pas besoin de réenregistrer la tablette sur un autre ordinateur).
+
+**À me signaler** : seulement ce que le journal ne peut pas contenir — la couleur du voyant à un moment surprenant, un message d'erreur de Windows (photo), une étape où la tablette n'a visiblement pas réagi.
