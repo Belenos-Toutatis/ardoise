@@ -263,7 +263,8 @@
     "invalidName": "ce nom n'est pas utilisable ({detail})",
     "noFreeName": "aucun nom de fichier libre n'a été trouvé ({detail})",
     "notInTrash": "cette note n'est plus dans la corbeille ({detail})",
-    "libraryWatch": "la surveillance du dossier de la bibliothèque a échoué ({detail})"
+    "libraryWatch": "la surveillance du dossier de la bibliothèque a échoué ({detail})",
+    "render": "le rendu de la note a échoué ({detail})"
   },
   "editor": {
     "back": "Bibliothèque",

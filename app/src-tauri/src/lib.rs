@@ -119,7 +119,12 @@ pub fn run() {
     // A library made before `.ardoise/` became `_ardoise/` is moved over once (best effort:
     // opening the library retries later).
     if let Some(library) = commands::current_state(&context).library() {
-        let _ = ardoise_core::library::migrate_legacy_meta_dir(std::path::Path::new(library));
+        let library = std::path::Path::new(library);
+        let _ = ardoise_core::library::migrate_legacy_meta_dir(library);
+        // SPEC §3.2: the trash keeps notes 30 days (best effort, never blocks the start).
+        if let Ok(opened) = ardoise_core::library::Library::open(library) {
+            let _ = opened.purge_expired();
+        }
     }
 
     if headless_diagnostic {

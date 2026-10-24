@@ -263,7 +263,8 @@
     "invalidName": "this name cannot be used ({detail})",
     "noFreeName": "no free file name was found ({detail})",
     "notInTrash": "this note is no longer in the trash ({detail})",
-    "libraryWatch": "watching the library folder failed ({detail})"
+    "libraryWatch": "watching the library folder failed ({detail})",
+    "render": "rendering the note failed ({detail})"
   },
   "editor": {
     "back": "Library",
