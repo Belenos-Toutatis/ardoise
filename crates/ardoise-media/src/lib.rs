@@ -16,6 +16,7 @@
 
 mod error;
 pub mod nv12;
+pub mod replay;
 mod settings;
 mod sink;
 // Only the Media Foundation back end needs it (tested everywhere).

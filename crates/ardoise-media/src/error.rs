@@ -55,4 +55,8 @@ pub enum MediaError {
     /// The file read back does not have the expected structure.
     #[error("unexpected media file content: {0}")]
     InvalidFile(String),
+
+    /// Drawing a replay frame failed (a page too small or too large for the frame size).
+    #[error("cannot draw the replay: {0}")]
+    Render(#[from] ardoise_render::RenderError),
 }

@@ -4,10 +4,10 @@
 
 use std::collections::HashMap;
 
-use ardoise_ink::{Outline, Stroke};
+use ardoise_ink::Outline;
 use tiny_skia::{
     BlendMode, Color, ColorU8, FillRule, FilterQuality, Paint, Path, PathBuilder, Pattern, Pixmap,
-    Shader, SpreadMode, Transform,
+    Rect, Shader, SpreadMode, Transform,
 };
 
 use crate::look::{Blend, Fill, GRAIN_TILE, Grain, Look, grain_alpha};
@@ -15,7 +15,43 @@ use crate::look::{Blend, Fill, GRAIN_TILE, Grain, Look, grain_alpha};
 /// Size of one grain cell, in millimetres (never smaller than a pixel).
 const GRAIN_MM: f32 = 0.18;
 
+/// The fills of a stroke with their paths in pixels (`None` for a fill off the page).
+#[derive(Debug, Clone)]
+pub(crate) struct Prepared {
+    pub(crate) fills: Vec<Fill>,
+    pub(crate) paths: Vec<Option<Path>>,
+}
+
+impl Prepared {
+    /// A stroke whose own outline (the last fill) is off the page is skipped entirely, halo
+    /// included.
+    pub(crate) fn is_drawn(&self) -> bool {
+        matches!(self.paths.last(), Some(Some(_)))
+    }
+
+    /// Bounds of what painting it touches, in pixels (`None` when nothing is drawn).
+    pub(crate) fn bounds(&self) -> Option<Rect> {
+        if !self.is_drawn() {
+            return None;
+        }
+        self.paths
+            .iter()
+            .flatten()
+            .map(Path::bounds)
+            .reduce(|a, b| {
+                Rect::from_ltrb(
+                    a.left().min(b.left()),
+                    a.top().min(b.top()),
+                    a.right().max(b.right()),
+                    a.bottom().max(b.bottom()),
+                )
+                .unwrap_or(a)
+            })
+    }
+}
+
 /// Draws strokes on one page. Keeps the grain tiles made so far (one per grain and colour).
+#[derive(Clone)]
 pub(crate) struct InkPainter {
     look: Look,
     /// Pixels per device unit.
@@ -63,14 +99,22 @@ impl InkPainter {
         builder.finish()
     }
 
-    pub(crate) fn draw(&mut self, pixmap: &mut Pixmap, stroke: &Stroke) {
-        let fills = self.look.fills(stroke);
-        let paths: Vec<Option<Path>> = fills.iter().map(|f| self.path(&f.outline)).collect();
-        // A stroke whose own outline is off the page is skipped entirely (halo included).
-        if !matches!(paths.last(), Some(Some(_))) {
+    /// The look strokes are drawn with (scale and paper).
+    pub(crate) fn look(&self) -> Look {
+        self.look
+    }
+
+    /// The fills with their paths in pixels, ready to paint (possibly several times).
+    pub(crate) fn prepare(&self, fills: Vec<Fill>) -> Prepared {
+        let paths = fills.iter().map(|f| self.path(&f.outline)).collect();
+        Prepared { fills, paths }
+    }
+
+    pub(crate) fn paint(&mut self, pixmap: &mut Pixmap, prepared: &Prepared) {
+        if !prepared.is_drawn() {
             return;
         }
-        for (fill, path) in fills.iter().zip(&paths) {
+        for (fill, path) in prepared.fills.iter().zip(&prepared.paths) {
             let Some(path) = path else {
                 continue;
             };
