@@ -4,11 +4,13 @@
 //! of the hardware checkpoint H2 shows it). The files reach the development PC through Nextcloud.
 //!
 //! The library is a synced folder: a log is written atomically, and rewritten (same file) when
-//! the same connection has more to say.
+//! the same connection has more to say. A log that grew too long is written by a thread of its
+//! own ([`Journal::roll`]), so that live mode is never held up by the disk.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use ardoise_core::fsutil::write_atomic;
 use ardoise_core::library::META_DIR;
@@ -31,6 +33,9 @@ pub(super) struct Journal {
     /// Reason of the last log written: a failure repeated at every retry (every 5 s) is
     /// written once, until a success.
     last_reason: Option<String>,
+    /// Files that a background write ([`Journal::roll`]) has not finished yet: never chosen for
+    /// another log meanwhile.
+    writing: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
 impl Journal {
@@ -43,6 +48,7 @@ impl Journal {
             reason: None,
             path: None,
             last_reason: None,
+            writing: Arc::default(),
         }
     }
 
@@ -79,43 +85,58 @@ impl Journal {
     /// Writes the log into `root`'s diagnostics folder if it must be. Best effort: a log that
     /// cannot be written is not worth failing anything.
     pub(super) fn write(&mut self, root: Option<&Path>) -> Option<PathBuf> {
-        let reason = self.reason.clone()?;
-        let root = root?;
-        if self.path.is_none() && self.last_reason.as_ref() == Some(&reason) {
-            return None;
-        }
-        let text = self.text();
-        let path = match &self.path {
-            Some(path) => path.clone(),
-            None => self.new_path(root)?,
-        };
+        let path = self.target(root)?;
+        let text = text_of(&lock(&self.shared));
         write_atomic(&path, text.as_bytes()).ok()?;
         self.path = Some(path.clone());
-        self.last_reason = Some(reason);
+        self.last_reason.clone_from(&self.reason);
         Some(path)
     }
 
-    /// Starts again when the log grew too long (written first if it must be).
+    /// Starts again when the log grew too long. The lines dropped are written first if the log
+    /// must be, on a thread of its own: thousands of lines to encode and write must not delay
+    /// the notifications that follow (live mode).
     pub(super) fn roll(&mut self, root: Option<&Path>) {
         if lock(&self.shared).entries().len() < MAX_ENTRIES {
             return;
         }
-        self.write(root);
-        self.begin();
+        let target = self.target(root);
+        let old = std::mem::replace(
+            &mut *lock(&self.shared),
+            DiagnosticLog::in_memory(self.transport, self.clock.clone()),
+        );
+        if let Some(path) = target {
+            self.last_reason.clone_from(&self.reason);
+            let writing = self.writing.clone();
+            reserved(&writing).insert(path.clone());
+            let spawned = std::thread::Builder::new()
+                .name("tablet-log".into())
+                .spawn(move || {
+                    // Best effort, like `write`.
+                    let _ = write_atomic(&path, text_of(&old).as_bytes());
+                    reserved(&writing).remove(&path);
+                });
+            if spawned.is_err() {
+                // The lines are lost (no thread to write them): their file name is free again.
+                reserved(&self.writing).clear();
+            }
+        }
+        self.reason = None;
+        self.path = None;
         self.note("earlier lines of this connection were dropped (log too long)");
     }
 
-    /// The `.jsonl` text of the log (docs/design/device-stack.md, "Diagnostic log").
-    fn text(&self) -> String {
-        let log = lock(&self.shared);
-        let mut text = String::new();
-        let lines = std::iter::once(serde_json::to_string(log.header()))
-            .chain(log.entries().iter().map(serde_json::to_string));
-        for line in lines.flatten() {
-            text.push_str(&line);
-            text.push('\n');
+    /// Where this log goes if it must be written now: the file it was already written to, or a
+    /// new one in `root`'s diagnostics folder. `None` when it need not be written: nothing went
+    /// wrong, no folder, or the same failure as the last log written.
+    fn target(&self, root: Option<&Path>) -> Option<PathBuf> {
+        let reason = self.reason.as_ref()?;
+        let root = root?;
+        match &self.path {
+            Some(path) => Some(path.clone()),
+            None if self.last_reason.as_ref() == Some(reason) => None,
+            None => self.new_path(root),
         }
-        text
     }
 
     /// A free `YYYY-MM-DD_HHMMSS.jsonl` (local time) in the diagnostics folder.
@@ -126,12 +147,29 @@ impl Journal {
         let stem = local.format("%Y-%m-%d_%H%M%S").to_string();
         let mut path = dir.join(format!("{stem}.jsonl"));
         let mut n = 2;
-        while path.exists() {
+        let writing = reserved(&self.writing);
+        while path.exists() || writing.contains(&path) {
             path = dir.join(format!("{stem}-{n}.jsonl"));
             n += 1;
         }
         Some(path)
     }
+}
+
+/// The `.jsonl` text of `log` (docs/design/device-stack.md, "Diagnostic log").
+fn text_of(log: &DiagnosticLog) -> String {
+    let mut text = String::new();
+    let lines = std::iter::once(serde_json::to_string(log.header()))
+        .chain(log.entries().iter().map(serde_json::to_string));
+    for line in lines.flatten() {
+        text.push_str(&line);
+        text.push('\n');
+    }
+    text
+}
+
+fn reserved(writing: &Mutex<HashSet<PathBuf>>) -> MutexGuard<'_, HashSet<PathBuf>> {
+    writing.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[cfg(test)]
@@ -140,6 +178,7 @@ mod tests {
     use crate::log::read_log;
     use crate::testutil::TestClock;
     use std::sync::atomic::AtomicU64;
+    use std::time::{Duration, Instant};
 
     fn journal() -> Journal {
         Journal::new("sim", Arc::new(TestClock(AtomicU64::new(0))))
@@ -184,5 +223,38 @@ mod tests {
         }
         journal.roll(None);
         assert_eq!(lock(&journal.shared()).entries().len(), 1);
+    }
+
+    #[test]
+    fn a_long_log_that_must_be_kept_is_written_by_another_thread() {
+        let root = tempfile::tempdir().unwrap();
+        let mut journal = journal();
+        journal.keep("unclassified notification during live mode");
+        for i in 1..MAX_ENTRIES {
+            journal.note(format!("line {i}"));
+        }
+        journal.roll(Some(root.path()));
+        // Started again at once.
+        assert_eq!(lock(&journal.shared()).entries().len(), 1);
+        // A log written meanwhile (the same second on this clock) never takes the same file.
+        journal.keep("tabletRefused");
+        let next = journal.write(Some(root.path())).unwrap();
+        assert_eq!(read_log(&next).unwrap().1.len(), 2);
+
+        // The background write ends by giving its file name back.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !reserved(&journal.writing).is_empty() {
+            assert!(Instant::now() < deadline, "the long log is not written");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let dir = root.path().join(META_DIR).join(DIAGNOSTICS_DIR);
+        let others: Vec<PathBuf> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| *path != next)
+            .collect();
+        assert_eq!(others.len(), 1, "{others:?}");
+        assert_eq!(read_log(&others[0]).unwrap().1.len(), MAX_ENTRIES);
     }
 }

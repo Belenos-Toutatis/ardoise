@@ -11,7 +11,8 @@
 //! step at a time (a scan slice, one page of a sync, one live notification...) and looks at its
 //! requests between steps; an interrupt flag (the `Manager`'s cancellation flag) cuts short a
 //! scan, a download or the registration when a request cannot wait (cancel, forget, another
-//! library, shutdown), or while the worker only searches for the tablet.
+//! library, shutdown), or while the worker only searches for the tablet. The flag stays raised
+//! as long as such a request waits in the channel ([`Interrupts`]).
 
 mod journal;
 mod worker;
@@ -355,6 +356,52 @@ impl From<&DeviceError> for StatusError {
 /// The answer to a blocking request.
 type Answer<T> = SyncSender<Result<T, DeviceError>>;
 
+/// The `Manager`'s cancellation flag, raised exactly while requests that must cut short what
+/// the worker waits for are in the channel: such a request is counted before it is sent and
+/// uncounted when the worker takes it. The worker therefore never lowers the flag for a request
+/// it has not taken yet, whatever the order in which the two threads run.
+struct Interrupts {
+    /// Interrupting requests sent and not taken yet.
+    waiting: Mutex<u32>,
+    flag: Arc<AtomicBool>,
+}
+
+impl Interrupts {
+    fn new() -> Self {
+        Self {
+            waiting: Mutex::new(0),
+            flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// The flag the `Manager` and the sessions look at.
+    fn flag(&self) -> Arc<AtomicBool> {
+        self.flag.clone()
+    }
+
+    /// An interrupting request is about to be sent.
+    fn raise(&self) {
+        let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
+        *waiting = waiting.saturating_add(1);
+        self.flag.store(true, Ordering::SeqCst);
+    }
+
+    /// The worker took an interrupting request.
+    fn taken(&self) {
+        let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
+        *waiting = waiting.saturating_sub(1);
+        if *waiting == 0 {
+            self.flag.store(false, Ordering::SeqCst);
+        }
+    }
+}
+
+/// A request as it travels to the worker: whether it was counted by [`Interrupts::raise`].
+struct Sent {
+    request: Request,
+    interrupting: bool,
+}
+
 /// What the handle asks the worker.
 enum Request {
     Register,
@@ -370,13 +417,14 @@ enum Request {
     Shutdown,
 }
 
-/// Handle to the worker. Dropping it stops the worker.
+/// Handle to the worker. Dropping it stops the worker. It can be shared between threads (an
+/// `Arc`): a blocking request waits without holding anything that others need.
 pub struct TabletService {
     status: Arc<Mutex<TabletStatus>>,
-    requests: Sender<Request>,
+    requests: Sender<Sent>,
     /// The `Manager`'s cancellation flag: cuts short what the worker waits for.
-    interrupt: Arc<AtomicBool>,
-    worker: Option<JoinHandle<()>>,
+    interrupts: Arc<Interrupts>,
+    worker: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl TabletService {
@@ -392,7 +440,7 @@ impl TabletService {
         on_status(&status);
         let status = Arc::new(Mutex::new(status));
         let (requests, receiver) = mpsc::channel();
-        let interrupt = Arc::new(AtomicBool::new(false));
+        let interrupts = Arc::new(Interrupts::new());
         let publisher = worker::Publisher::new(status.clone(), Arc::new(on_status));
         let failed = publisher.clone();
         let worker = worker::Worker::new(
@@ -402,7 +450,7 @@ impl TabletService {
             publisher,
             store_page,
             receiver,
-            interrupt.clone(),
+            interrupts.clone(),
         );
         let spawned = std::thread::Builder::new()
             .name("tablet-service".into())
@@ -422,8 +470,8 @@ impl TabletService {
         TabletService {
             status,
             requests,
-            interrupt,
-            worker,
+            interrupts,
+            worker: Mutex::new(worker),
         }
     }
 
@@ -436,14 +484,17 @@ impl TabletService {
     }
 
     /// Sends a request; `urgent` ones (and any request while the worker only searches for the
-    /// tablet) interrupt what the worker waits for. The flag is raised before the request is
-    /// sent, so that the worker never clears it after taking the request.
+    /// tablet) interrupt what the worker waits for, until it takes them ([`Interrupts`]).
     fn send(&self, request: Request, urgent: bool) -> Result<(), DeviceError> {
-        if urgent || self.status().connection == Connection::Searching {
-            self.interrupt.store(true, Ordering::SeqCst);
+        let interrupting = urgent || self.status().connection == Connection::Searching;
+        if interrupting {
+            self.interrupts.raise();
         }
         self.requests
-            .send(request)
+            .send(Sent {
+                request,
+                interrupting,
+            })
             .map_err(|_| DeviceError::Unexpected("the tablet service has stopped".into()))
     }
 
@@ -533,10 +584,16 @@ impl TabletService {
         let _ = self.send(Request::StopLive, false);
     }
 
-    /// Stops the worker and closes the link.
-    pub fn shutdown(mut self) {
-        let _ = self.send(Request::Shutdown, true);
-        if let Some(worker) = self.worker.take() {
+    /// Stops the worker and closes the link; returns once the worker has ended. A blocking
+    /// request still waiting on another thread then fails at once.
+    pub fn shutdown(&self) {
+        let worker = self
+            .worker
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(worker) = worker {
+            let _ = self.send(Request::Shutdown, true);
             let _ = worker.join();
         }
     }
@@ -545,7 +602,12 @@ impl TabletService {
 impl Drop for TabletService {
     fn drop(&mut self) {
         // Not joined: the worker finishes closing the link on its own.
-        if self.worker.take().is_some() {
+        let worker = self
+            .worker
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if worker.is_some() {
             let _ = self.send(Request::Shutdown, true);
         }
     }

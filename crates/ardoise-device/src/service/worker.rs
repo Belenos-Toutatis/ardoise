@@ -7,7 +7,7 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, UNIX_EPOCH};
@@ -18,10 +18,11 @@ use ardoise_proto::live::{self, LivePacket};
 
 use super::journal::Journal;
 use super::{
-    ADAPTER_RECHECK, BUTTON_TIMEOUT, Connection, ConnectorFactory, DeviceDetails, LastSync,
-    LiveInput, LiveSink, LiveState, PageContext, PageStore, Pending, REGISTER_SEARCH, RETRY_DELAY,
-    RegisterStep, RegisteredTablet, Request, SEARCH_SLICE, ServiceConfig, ServiceHooks,
-    StatusCallback, StatusError, SyncProgress, TabletOptions, TabletStatus, model_name,
+    ADAPTER_RECHECK, BUTTON_TIMEOUT, Connection, ConnectorFactory, DeviceDetails, Interrupts,
+    LastSync, LiveInput, LiveSink, LiveState, PageContext, PageStore, Pending, REGISTER_SEARCH,
+    RETRY_DELAY, RegisterStep, RegisteredTablet, Request, SEARCH_SLICE, Sent, ServiceConfig,
+    ServiceHooks, StatusCallback, StatusError, SyncProgress, TabletOptions, TabletStatus,
+    model_name,
 };
 use crate::identity::{self, DeviceRecord};
 use crate::manager::Manager;
@@ -41,6 +42,11 @@ const SEARCH_PAUSE: Duration = Duration::from_millis(20);
 const REGISTRATION_RECHECK: Duration = Duration::from_secs(10);
 /// Live notifications between two checks of the log's length.
 const ROLL_CHECK: u32 = 1000;
+/// While connected and idle: how often the number of stored pages is read again, so that a
+/// page finished while the tablet stays connected shows, and syncs (SPEC §4.1). The tablet may
+/// keep the link longer for these requests (supposed: protocol.md does not say what resets its
+/// idle timer; to watch at H2).
+pub(super) const PAGE_COUNT_INTERVAL: Duration = Duration::from_secs(30);
 /// Errors that disappear by themselves when their cause does (adapter, library).
 const CONDITION_ERRORS: [&str; 3] = ["bluetoothOff", "bluetoothMissing", "noLibrary"];
 
@@ -118,7 +124,9 @@ pub(super) struct Worker {
     hooks: Arc<dyn ServiceHooks>,
     publisher: Publisher,
     store_page: PageStore,
-    requests: Receiver<Request>,
+    requests: Receiver<Sent>,
+    interrupts: Arc<Interrupts>,
+    /// The `Manager`'s cancellation flag (raised by `interrupts`).
     interrupt: Arc<AtomicBool>,
     manager: Option<Manager>,
     journal: Option<Journal>,
@@ -128,6 +136,9 @@ pub(super) struct Worker {
     /// A sync waits (asked, automatic, or interrupted by a lost link).
     want_sync: bool,
     live: Option<LiveRun>,
+    /// When the page count was last read on this connection (the session clock's monotonic
+    /// time), `None` without a connection.
+    counted_at: Option<Duration>,
     stop: bool,
 }
 
@@ -138,8 +149,8 @@ impl Worker {
         hooks: Arc<dyn ServiceHooks>,
         publisher: Publisher,
         store_page: PageStore,
-        requests: Receiver<Request>,
-        interrupt: Arc<AtomicBool>,
+        requests: Receiver<Sent>,
+        interrupts: Arc<Interrupts>,
     ) -> Self {
         Self {
             config,
@@ -148,7 +159,8 @@ impl Worker {
             publisher,
             store_page,
             requests,
-            interrupt,
+            interrupt: interrupts.flag(),
+            interrupts,
             manager: None,
             journal: None,
             record: None,
@@ -156,6 +168,7 @@ impl Worker {
             sync: None,
             want_sync: false,
             live: None,
+            counted_at: None,
             stop: false,
         }
     }
@@ -177,14 +190,21 @@ impl Worker {
     /// Handles every request already sent, without waiting.
     fn take_requests(&mut self) {
         while !self.stop {
-            // Cleared before each look: a request sent after raising the flag is taken here.
-            self.interrupt.store(false, Ordering::SeqCst);
             match self.requests.try_recv() {
-                Ok(request) => self.handle(request),
+                Ok(sent) => self.take(sent),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => self.stop = true,
             }
         }
+    }
+
+    /// Handles a request taken from the channel. The interrupt flag is lowered only for a
+    /// request taken, and only when no other interrupting request waits ([`Interrupts`]).
+    fn take(&mut self, sent: Sent) {
+        if sent.interrupting {
+            self.interrupts.taken();
+        }
+        self.handle(sent.request);
     }
 
     /// Waits up to `timeout` (forever with `None`) for a request and handles it.
@@ -197,10 +217,7 @@ impl Worker {
             None => self.requests.recv().map_err(|_| true),
         };
         match received {
-            Ok(request) => {
-                self.interrupt.store(false, Ordering::SeqCst);
-                self.handle(request);
-            }
+            Ok(sent) => self.take(sent),
             Err(gone) => self.stop |= gone,
         }
     }
@@ -355,6 +372,7 @@ impl Worker {
             ));
         }
         self.remember_info(info);
+        self.counted_at = self.session_time();
         if self.config.options.auto_sync && pages > 0 {
             self.want_sync = true;
         }
@@ -399,6 +417,8 @@ impl Worker {
             self.live_step();
         } else if self.want_sync {
             self.start_sync();
+        } else if self.page_count_due() {
+            self.count_pages();
         } else {
             let result = match self.session.as_mut() {
                 Some(session) => session.idle(Duration::ZERO),
@@ -412,6 +432,44 @@ impl Worker {
                 Err(error) => self.session_failed(error),
             }
         }
+    }
+
+    /// Whether the page count is due again (connected and idle, [`PAGE_COUNT_INTERVAL`] after
+    /// the last time it was read).
+    fn page_count_due(&self) -> bool {
+        match (self.counted_at, self.session_time()) {
+            (Some(counted), Some(now)) => now.saturating_sub(counted) >= PAGE_COUNT_INTERVAL,
+            _ => false,
+        }
+    }
+
+    /// Reads the page count again: the status follows, and new pages are synced when the
+    /// automatic sync is on. A refusal or a lost link is handled as any failure of the idle
+    /// link.
+    fn count_pages(&mut self) {
+        self.counted_at = self.session_time();
+        let counted = match self.session.as_mut() {
+            Some(session) => session.stored_pages(),
+            None => return,
+        };
+        let pages = match counted {
+            Ok(pages) => pages,
+            Err(error) => return self.session_failed(error),
+        };
+        let before = self.stored_pages();
+        if pages != before {
+            self.note(format!("{pages} pages stored (were {before})"));
+        }
+        if self.config.options.auto_sync && pages > before {
+            self.want_sync = true;
+        }
+        let pending = self.pending();
+        self.publisher.update(|status| {
+            if let Some(device) = status.device.as_mut() {
+                device.stored_pages = pages;
+            }
+            status.pending = pending;
+        });
     }
 
     /// The session reported `error` outside a sync or live mode.
@@ -432,6 +490,7 @@ impl Worker {
     fn link_lost(&mut self) {
         self.note("the tablet disconnected");
         self.session = None;
+        self.counted_at = None;
         if let Some(run) = self.sync.take() {
             // The page in transfer stays on the tablet; the sync goes on at the next connection.
             self.want_sync = true;
@@ -651,6 +710,8 @@ impl Worker {
         ));
         let at = self.now_ms();
         let remaining = run.total.saturating_sub(run.deleted);
+        // The sync just counted the pages.
+        self.counted_at = self.session_time();
         let error = error.map(StatusError::from);
         let connection = if self.session.is_some() {
             Connection::Connected
@@ -863,6 +924,7 @@ impl Worker {
         if lost {
             self.link_lost();
         } else if self.session.is_some() {
+            self.counted_at = self.session_time();
             self.publish(Connection::Connected);
         } else {
             let pending = self.pending();
@@ -1111,6 +1173,7 @@ impl Worker {
     }
 
     fn close_session(&mut self) {
+        self.counted_at = None;
         if let Some(session) = self.session.take()
             && let Err(error) = session.disconnect()
         {
@@ -1202,6 +1265,13 @@ impl Worker {
             .get()
             .device
             .map_or(0, |device| device.stored_pages)
+    }
+
+    /// Monotonic time of the session's clock, `None` without a connection.
+    fn session_time(&self) -> Option<Duration> {
+        self.session
+            .as_ref()
+            .map(|session| session.clock().monotonic())
     }
 
     /// Unix milliseconds on the connector's clock (the system clock without connector).
