@@ -5,6 +5,7 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 - **Quoi construire** : [SPEC.md](SPEC.md)
 - **Dans quel ordre, et quand une étape est finie** : [ROADMAP.md](ROADMAP.md)
 - **Recherches qui justifient les choix** : [docs/research/](docs/research/) (protocole Bluetooth, plateforme Windows, vidéo/audio, format Inkspace, fonctions d'Inkspace)
+- **Conception technique** (pour les développeurs, en anglais) : [docs/design/](docs/design/) — `device-stack.md` : protocole, transport, simulateur, journal, outil de diagnostic
 
 ## Commandes
 
