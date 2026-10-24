@@ -48,7 +48,7 @@
     "collapse": "Replier {name}",
     "tabletStatus": "Tablette",
     "tabletNone": "Aucune tablette enregistrée",
-    "tabletState": "État de la connexion : bientôt disponible",
+    "tabletState": "Ouvrir ou fermer le panneau de la tablette",
     "search": "Rechercher une note",
     "searchPlaceholder": "Rechercher (titre, étiquette)…",
     "sort": "Trier les notes",
@@ -172,7 +172,122 @@
     }
   },
   "tablet": {
-    "title": "Tablette"
+    "title": "Tablette",
+    "loading": "Lecture de l'état de la tablette…",
+    "unavailableStatus": "L'état de la tablette n'est pas disponible.",
+    "simulated": "Tablette simulée : aucune vraie tablette n'est utilisée.",
+    "simulatedButton": "Appuyer sur le bouton de la tablette simulée",
+    "state": {
+      "unavailable": "Indisponible",
+      "notRegistered": "Non enregistrée",
+      "registering": "Enregistrement…",
+      "searching": "Recherche de la tablette…",
+      "connecting": "Connexion…",
+      "connected": "Connectée",
+      "syncing": "Synchronisation…",
+      "live": "Mode direct"
+    },
+    "hint": {
+      "searching": "Appuyez brièvement sur le bouton de la tablette pour la connecter, et gardez-la près de l'ordinateur.",
+      "pendingSync": "La synchronisation démarrera dès que la tablette sera connectée.",
+      "pendingLive": "Le mode direct démarrera dès que la tablette sera connectée."
+    },
+    "battery": "Batterie {percent} %",
+    "batteryCharging": "Batterie {percent} %, en charge",
+    "charging": "en charge",
+    "info": {
+      "title": "Informations",
+      "name": "Nom",
+      "battery": "Batterie",
+      "firmware": "Version du firmware",
+      "pages": "Pages en mémoire",
+      "model": "Modèle",
+      "size": "Zone de dessin",
+      "readAt": "Lue le",
+      "notRead": "La tablette n'a pas encore été lue : ses informations apparaîtront à la première connexion."
+    },
+    "sync": {
+      "title": "Synchronisation",
+      "now": "Synchroniser maintenant",
+      "cancel": "Annuler",
+      "progress": "Page {current} sur {total}",
+      "progressLabel": "Progression de la synchronisation",
+      "last": "Dernière synchronisation : {date}",
+      "savedNone": "Aucune nouvelle page.",
+      "savedOne": "1 note enregistrée.",
+      "savedMany": "{count} notes enregistrées.",
+      "deletedOne": "1 page effacée de la tablette.",
+      "deletedMany": "{count} pages effacées de la tablette.",
+      "never": "Aucune synchronisation depuis le lancement d'Ardoise."
+    },
+    "live": {
+      "open": "Mode direct",
+      "hint": "Dessinez sur la tablette et voyez le tracé apparaître tout de suite, y compris sur un vidéoprojecteur."
+    },
+    "options": {
+      "title": "Options",
+      "autoSync": "Synchroniser automatiquement à la connexion",
+      "autoSyncHint": "Les pages de la tablette sont reçues dès qu'elle est à portée.",
+      "deleteAfterImport": "Effacer de la tablette après import",
+      "deleteAfterImportHint": "Une page n'est effacée de la tablette qu'après l'écriture et la vérification de son fichier dans la bibliothèque : si quelque chose échoue, elle reste sur la tablette.",
+      "button": "Bouton de la tablette en mode direct",
+      "buttonNewPage": "Nouvelle page",
+      "buttonNewLayer": "Nouveau calque",
+      "hand": "Orientation de la tablette",
+      "handRight": "Droitier",
+      "handLeft": "Gaucher",
+      "handHint": "Gaucher : la tablette est utilisée à l'envers ; les tracés sont retournés d'un demi-tour pour apparaître à l'endroit."
+    },
+    "manage": {
+      "title": "Réglages de la tablette",
+      "name": "Nom de la tablette",
+      "nameHint": "1 à 15 caractères, sans accent.",
+      "rename": "Renommer",
+      "nameInvalid": "Le nom doit faire de 1 à 15 caractères, sans accent ni caractère spécial.",
+      "renamed": "Tablette renommée.",
+      "setTime": "Mettre à l'heure",
+      "timeSet": "Heure réglée (écart restant : {seconds} s).",
+      "timeHint": "Règle l'horloge de la tablette sur celle de l'ordinateur."
+    },
+    "register": {
+      "open": "Enregistrer la tablette",
+      "none": "Aucune tablette n'est enregistrée.",
+      "intro": "Enregistrez votre Bamboo Slate pour recevoir ses pages automatiquement et dessiner en direct.",
+      "title": "Enregistrer la tablette",
+      "warningTitle": "Avant de commencer",
+      "warning": "Une fois enregistrée dans Ardoise, la tablette ne fonctionnera plus avec l'application Wacom du téléphone ni avec Inkspace, jusqu'à ce que vous l'y enregistriez de nouveau.",
+      "warningPhone": "Coupez le Bluetooth de votre téléphone pendant l'enregistrement.",
+      "cancel": "Annuler",
+      "retry": "Réessayer",
+      "finish": "Terminer",
+      "drawingLabel": "Schéma de la tablette et de son bouton",
+      "step": {
+        "holdButton": {
+          "title": "Maintenez le bouton de la tablette",
+          "text": "Maintenez le bouton enfoncé environ 6 secondes, jusqu'à ce que le voyant clignote en bleu."
+        },
+        "searching": {
+          "title": "Recherche de la tablette",
+          "text": "Gardez la tablette près de l'ordinateur : cela peut prendre quelques secondes."
+        },
+        "connecting": {
+          "title": "Connexion à la tablette",
+          "text": "Ne bougez pas : Ardoise se présente à la tablette."
+        },
+        "pressButton": {
+          "title": "Appuyez brièvement sur le bouton",
+          "text": "Un appui bref sur le bouton de la tablette confirme l'enregistrement. Vous avez environ 30 secondes."
+        },
+        "done": {
+          "title": "Tablette enregistrée",
+          "text": "« {name} » est prête : ses pages seront reçues automatiquement dès qu'elle sera à portée."
+        }
+      },
+      "error": {
+        "title": "L'enregistrement n'a pas abouti",
+        "hint": "Vérifiez que le Bluetooth est activé, que la tablette est chargée et proche de l'ordinateur, puis recommencez : maintenez le bouton jusqu'au clignotement bleu."
+      }
+    }
   },
   "diagnostic": {
     "open": "Tester la tablette",

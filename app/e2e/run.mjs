@@ -33,8 +33,8 @@ if (newest(sources) > statSync(exe).mtimeMs) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Starts a portable copy of the app on a fresh demo library, in `language`. */
-async function startApp(language, port) {
+/** Starts a portable copy of the app on a fresh demo library, in `language`, with `args` on its command line. */
+async function startApp(language, port, args = []) {
   const dir = mkdtempSync(join(tmpdir(), `ardoise-e2e-${language}-`));
   const appExe = join(dir, 'ardoise.exe');
   copyFileSync(exe, appExe);
@@ -50,7 +50,7 @@ async function startApp(language, port) {
   // shared with the Ardoise of this PC or with another run.
   const local = join(dir, 'LocalAppData');
   mkdirSync(local);
-  const child = spawn(appExe, [], {
+  const child = spawn(appExe, args, {
     env: {
       ...process.env,
       LOCALAPPDATA: local,
@@ -64,7 +64,8 @@ async function startApp(language, port) {
     await sleep(250);
     try {
       const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-      target = list.find((t) => t.type === 'page');
+      // The main window: not the projector's presentation window, which may open later.
+      target = list.find((t) => t.type === 'page' && !t.url.includes('view=presentation'));
     } catch {
       // Not listening yet.
     }
@@ -161,12 +162,26 @@ async function startApp(language, port) {
     async type(text) {
       await send('Input.insertText', { text });
     },
-    /** A key press, e.g. key('z', { ctrl: true }) or key('Enter'). */
+    /** A key press, e.g. key('z', { ctrl: true }), key('Enter') or key('ArrowRight'). */
     async key(key, { ctrl = false, shift = false } = {}) {
       const modifiers = (ctrl ? 2 : 0) | (shift ? 8 : 0);
       const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
       const windowsVirtualKeyCode =
-        key.length === 1 ? key.toUpperCase().charCodeAt(0) : { Enter: 13, Escape: 27, Delete: 46, Backspace: 8 }[key];
+        key.length === 1
+          ? key.toUpperCase().charCodeAt(0)
+          : {
+              Enter: 13,
+              Escape: 27,
+              Delete: 46,
+              Backspace: 8,
+              Tab: 9,
+              PageUp: 33,
+              PageDown: 34,
+              ArrowLeft: 37,
+              ArrowUp: 38,
+              ArrowRight: 39,
+              ArrowDown: 40,
+            }[key];
       const base = { key, code, modifiers, windowsVirtualKeyCode };
       await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, text: key.length === 1 && !ctrl ? key : undefined });
       await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
@@ -194,7 +209,7 @@ let failures = 0;
 let port = 9400;
 for (const language of ['fr', 'en']) {
   for (const journey of journeys) {
-    const app = await startApp(language, port++);
+    const app = await startApp(language, port++, journey.args);
     const label = `[${language.toUpperCase()}] ${journey.name}`;
     console.log(`\n${label}`);
     let step = 0;
