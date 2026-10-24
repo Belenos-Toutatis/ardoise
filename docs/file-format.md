@@ -14,7 +14,7 @@ unzip tool:
 | `strokes.bin` | yes | every stroke, compact binary (§3) | deflate |
 | `original.bin` | no | the bytes received from the tablet, untouched ("back to the original") | deflate |
 | `thumb.png` | no | thumbnail, PNG | stored |
-| `audio.opus` | no | narration, Opus | stored |
+| `audio.opus` | no | narration, Ogg Opus (§4.1) | stored |
 | `background.<ext>` | no | background image or PDF; `<ext>` = 1–10 lowercase ASCII letters or digits (`png`, `jpg`, `pdf`…) | by extension (see below) |
 | `text.json` | no | recognised handwriting (written by the P2 recognition; opaque to the format) | deflate |
 | anything else | no | members of newer versions: kept byte for byte when the note is rewritten | by extension (see below) |
@@ -214,12 +214,40 @@ length and thousands of random corruptions).
 
 - `original.bin`: the tablet's raw data for this page, as received, never modified after import.
 - `thumb.png`: thumbnail, any size (the app decides).
-- `audio.opus`: narration recorded with the replay feature.
+- `audio.opus`: narration recorded during a replay or in live mode (§4.1).
 - `background.<ext>`: imported background (image or PDF). At most one is recognised (the first in the central
   directory); further `background.*` members are kept as unknown members. When a note is written, an unknown member
   with the very name of the background being written is dropped: the known background wins (a file read with
   `background.png` and an unknown `background.pdf`, then given a PDF background, is written with the new PDF only).
 - `text.json`: recognised text; its schema belongs to the recognition feature.
+
+### 4.1 `audio.opus`
+
+The narration is an ordinary **Ogg Opus** stream (RFC 3533 container, RFC 7845 mapping), so any player (VLC, a
+browser) plays the member once extracted. Ardoise writes 48 kHz mono (readers also accept stereo), 20 ms packets:
+
+- page 0: `OpusHead` alone (beginning of stream); page 1: `OpusTags`; then audio pages. Granule positions count
+  48 kHz samples including the `OpusHead` pre-skip; the last page (end of stream) carries pre-skip + the narration's
+  length, so a decoder trims the end exactly. Pages carry their CRC-32; a reader refuses a page whose CRC is wrong.
+- `OpusTags` vendor string `Ardoise`, and these user comments, which place the sound on the replay (all optional;
+  an Ogg Opus file from elsewhere, without them, plays from the start of a replay at speed 1):
+
+| Comment | Values | Default | Meaning |
+|---|---|---|---|
+| `ARDOISE_BASE` | `replay` or `note` | `replay` | recorded during a replay (replay time) or in live mode (note time) |
+| `ARDOISE_SPEED` | decimal number, 0.25 to 16 | 1 | speed of the replay it was recorded with (`note`: 1) |
+| `ARDOISE_MAX_PAUSE_MS` | integer, or `none` | `none` | pauses cut after this many milliseconds ("supprimer les temps morts") |
+| `ARDOISE_START_MS` | signed integer | 0 | replay instant, in that time base, of the first sample; negative when the recording began before the note's time origin (`created`) |
+
+The time base is the one of the replay: note time (`Point::t`) mapped through the speed and the cut pauses
+(`crates/ardoise-media/src/replay/timeline.rs`). A video export that includes the narration replays the note with the
+narration's speed and pauses, so that voice and drawing stay together; when the note is edited afterwards, the sound
+keeps its instants.
+
+The member has been listed since version 1.0 as opaque bytes, and readers of 1.0 and 1.1 keep it verbatim when they
+rewrite a note: specifying its content changes neither the major nor the minor version. Like the rest of the note,
+the narration is written atomically with the whole file and with the usual check that the file has not changed since
+it was read (§6).
 
 ## 5. Versioning rules
 
