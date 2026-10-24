@@ -180,6 +180,11 @@ dependencies = [
 [[package]]
 name = "ardoise-media"
 version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.21",
+ "windows",
+]
 
 [[package]]
 name = "ardoise-proto"
