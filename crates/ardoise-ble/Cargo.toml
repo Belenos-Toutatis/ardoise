@@ -8,10 +8,15 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+ardoise-device = { path = "../ardoise-device" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+uuid = "1"
 
 [target.'cfg(windows)'.dependencies]
+btleplug = "0.13.5"
+futures = "0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 windows = { version = "0.62", features = [
     "Devices_Bluetooth",
     "Devices_Radios",
