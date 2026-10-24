@@ -285,3 +285,145 @@ fn tune_width_factor() {
         }
     }
 }
+
+/// Rescales every drawn diameter of `note` by `scale`, re-deriving the nominal widths and the
+/// pressures like the importer does.
+fn rescale_all(note: &mut ardoise_core::note::Note, scale: f32) {
+    use ardoise_inkspace::width;
+    for stroke in &mut note.strokes {
+        let diameters: Vec<f32> = stroke
+            .points
+            .iter()
+            .map(|p| (scale * width::width_at(stroke.width, p.pressure)).max(1.0))
+            .collect();
+        stroke.width = width::stroke_width_for(diameters.iter().copied());
+        for (p, d) in stroke.points.iter_mut().zip(diameters) {
+            p.pressure = width::pressure_for_width(stroke.width, d);
+        }
+    }
+}
+
+/// Held-out check of the width calibration. The factors (1.0 timed, 1.1 untimed) were chosen
+/// by looking at these 22 notes, so scoring the same notes is not an independent proof. Here
+/// the notes are split in two halves (alternating by creation date); for each half, the
+/// factors are tuned from scratch (neutral widths = Inkspace's stored widths, best mean IoU
+/// per timing class over candidate factors) on the OTHER half only, then the held-out half is
+/// scored with them. Every held-out note must pass `THRESHOLDS`.
+#[test]
+fn width_calibration_holds_on_notes_it_was_not_tuned_on() {
+    use ardoise_inkspace::width::{TIMED_WIDTH_FACTOR, UNTIMED_WIDTH_FACTOR};
+    let Some(local_state) =
+        common::private_copy_or_skip("width_calibration_holds_on_notes_it_was_not_tuned_on")
+    else {
+        return;
+    };
+    let mut notes = import(&local_state).notes;
+    notes.sort_by_key(|n| n.note.created);
+    let reader = TrackedReader::new();
+    let candidates = [0.80f32, 0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15, 1.20];
+    let timed = |n: &ardoise_inkspace::ImportedNote| n.note.timing == Timing::Recorded;
+
+    // Scores of every note at every candidate factor, from neutral widths.
+    let scores: Vec<Vec<Scores>> = notes
+        .iter()
+        .map(|n| {
+            let preview = compare::load_preview(&reader, n.preview.as_deref().expect("preview"))
+                .expect("preview png");
+            let current = if timed(n) {
+                TIMED_WIDTH_FACTOR
+            } else {
+                UNTIMED_WIDTH_FACTOR
+            };
+            candidates
+                .iter()
+                .map(|&factor| {
+                    let mut note = n.note.clone();
+                    rescale_all(&mut note, factor / current);
+                    let rendered =
+                        ardoise_render::render_note(&note, &compare::preview_render_options())
+                            .expect("render");
+                    compare::compare_images(&rendered, &preview).expect("same size")
+                })
+                .collect()
+        })
+        .collect();
+
+    println!("two-fold cross-validation of the width factors (thresholds {THRESHOLDS:?})");
+    let mut failing = Vec::new();
+    for held_out in 0..2 {
+        let training: Vec<usize> = (0..notes.len()).filter(|i| i % 2 != held_out).collect();
+        // Best candidate per timing class, on the training half only.
+        let best = |want_timed: bool| -> usize {
+            (0..candidates.len())
+                .max_by(|&a, &b| {
+                    let mean = |c: usize| {
+                        let members: Vec<f64> = training
+                            .iter()
+                            .filter(|&&i| timed(&notes[i]) == want_timed)
+                            .map(|&i| scores[i][c].iou)
+                            .collect();
+                        members.iter().sum::<f64>() / members.len().max(1) as f64
+                    };
+                    mean(a).total_cmp(&mean(b))
+                })
+                .expect("candidates")
+        };
+        let (best_timed, best_untimed) = (best(true), best(false));
+        println!(
+            "fold {}: tuned on {} notes -> timed x{:.2}, untimed x{:.2}; held-out notes:",
+            held_out + 1,
+            training.len(),
+            candidates[best_timed],
+            candidates[best_untimed]
+        );
+        for i in (0..notes.len()).filter(|i| i % 2 == held_out) {
+            let s = &scores[i][if timed(&notes[i]) {
+                best_timed
+            } else {
+                best_untimed
+            }];
+            let pass = s.passes(&THRESHOLDS);
+            println!(
+                "  {}  {}  IoU {:.3}  render<=1 {:.4}  preview<=1 {:.4}  {}",
+                short(&notes[i].inkspace_id),
+                if timed(&notes[i]) {
+                    "timed  "
+                } else {
+                    "untimed"
+                },
+                s.iou,
+                s.render_within_1px,
+                s.preview_within_1px,
+                if pass { "OK" } else { "FAIL" }
+            );
+            if !pass {
+                failing.push(short(&notes[i].inkspace_id).to_owned());
+            }
+        }
+    }
+    // Without any tuning at all: Inkspace's stored widths drawn as they are (factor 1.0).
+    let neutral = candidates
+        .iter()
+        .position(|&c| c == 1.0)
+        .expect("factor 1.0");
+    let neutral_failing: Vec<String> = (0..notes.len())
+        .filter(|&i| !scores[i][neutral].passes(&THRESHOLDS))
+        .map(|i| short(&notes[i].inkspace_id).to_owned())
+        .collect();
+    let min_iou = (0..notes.len())
+        .map(|i| scores[i][neutral].iou)
+        .fold(f64::INFINITY, f64::min);
+    println!(
+        "no tuning (factor 1.0 for every note): min IoU {min_iou:.3}, {} of {} notes pass",
+        notes.len() - neutral_failing.len(),
+        notes.len()
+    );
+    assert!(
+        failing.is_empty(),
+        "held-out notes below the thresholds: {failing:?}"
+    );
+    assert!(
+        neutral_failing.is_empty(),
+        "notes below the thresholds without tuning: {neutral_failing:?}"
+    );
+}

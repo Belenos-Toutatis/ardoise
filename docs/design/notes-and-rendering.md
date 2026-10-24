@@ -93,7 +93,9 @@ app/src-tauri     ardoise.exe --import-inkspace [LocalState] [--library DIR] [--
   computed by `ardoise_ink::outline`, the function the renderer uses: the screen and the exports cannot diverge.
 - **Inkspace widths.** Tuned on `render_note` against Inkspace's previews: diameter = stored width × 1.0 for timed
   strokes, × 1.1 for untimed ones; the 22 notes of the development PC score IoU 0.942–0.969 with every ink pixel
-  within 1 px both ways (threshold 0.90 / 0.99).
+  within 1 px both ways (threshold 0.90 / 0.99). Not an artefact of tuning on the scored notes: a two-fold
+  cross-validation (tune on half the notes, score the other half) picks the same factors and every held-out note
+  passes, and the untuned mapping (factor 1.0 everywhere) passes too (min IoU 0.925).
 - **Release profile.** tiny-skia, ardoise-ink and ardoise-render are built with `opt-level = 3` (about 2× faster
   rendering) while the rest favours size; the executable is about 9 MB.
 - **Conflict copies.** Nextcloud's markers are not translated (`src/common/utility.cpp` in nextcloud/desktop):
