@@ -91,4 +91,10 @@ pub enum MediaError {
         codec: &'static str,
         message: String,
     },
+
+    // MP4 back ends (`mp4`).
+    /// No usable H.264 encoder for the MP4: Media Foundation is missing and the OpenH264
+    /// fallback is not installed, not allowed or not working.
+    #[error("no H.264 encoder for the MP4: {0}")]
+    CodecUnavailable(String),
 }

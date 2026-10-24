@@ -44,6 +44,43 @@ MediaError>` and `probe_<format>(path) -> Result<AnimationProbe, MediaError>`. E
 `lib.rs` and `Cargo.toml` are shared: add only your own `mod`/`pub use` lines and dependencies; the main session
 resolves the merge.
 
+## Status (2026-10-24) and the remaining work
+
+Done and merged: Media Foundation MP4 writer (`Mp4Writer`, `probe_mp4`), replay (`replay::Timeline`,
+`replay::FrameRenderer`, `ardoise_render::PageCanvas`), GIF/WebP/WebM sinks and probes, `OpusEncoder`, microphone
+(`microphone::Recorder`, `simulated_narration`).
+
+Contract for the rest (`crates/ardoise-media/src/mp4.rs`): `create_mp4(path, &VideoSettings, &Mp4Options,
+Option<&OpenH264Codec>)` (`Mp4Backend::{Auto, MediaFoundation, OpenH264}`; `None` = the user did not allow the
+fallback), `probe_mp4_animation`, `OpenH264Codec::{new(dir), status, download(progress, cancel), remove}`,
+`CISCO_NOTICE`, `OPENH264_VERSION`, `MediaError::CodecUnavailable`. The Media Foundation path works; the OpenH264
+path and the download answer `CodecUnavailable` until the MP4 work package fills them in.
+
+Two work packages run in parallel on disjoint files:
+
+1. **MP4 (Windows PC)**: `mp4.rs` + an `openh264/` folder: the fallback (Cisco download over HTTPS from
+   `ciscobinary.openh264.org`, bzip2, SHA-256 pinned, atomic install, `openh264` crate with `libloading`, MP4 muxing
+   with Opus sound), `probe_mp4_animation` reading both back ends, the delay-loading of `mfplat.dll` and
+   `mfreadwrite.dll` (`app/src-tauri/build.rs`, so that the exe starts on Windows N editions), and the M6
+   end-of-milestone test (`crates/ardoise-media/tests/`): a reference note replayed into the 4 formats, each read
+   back (duration, size, frames); an MP4 with `simulated_narration` whose sound track has the right length; the
+   OpenH264 fallback forced.
+2. **Interface (cloud session)**: everything else of M6 in `app/`:
+   - `crates/ardoise-media/src/export.rs`: the export pipeline (note + `ReplayOptions` + format options +
+     optional narration + final frame held N seconds → frames from `FrameRenderer` pushed with their audio into
+     the format's sink; progress; cancel), and `estimate.rs` (estimated export time shown before exporting, from
+     the speeds measured on the development PC at 1080p 30 fps: GIF ≈ 310 fps, WebP ≈ 24 fps, WebM ≈ 20 fps,
+     MP4 Media Foundation ≈ 100 fps hardware / ≈ 270 fps software, scaled by the pixel count; drawing is negligible).
+   - App commands (export with progress and cancel, estimate, microphones, narration recording with level and
+     status, OpenH264 status/download/remove and the setting that allows it), narration storage (next to the note,
+     atomic, Nextcloud-safe; documented in `docs/file-format.md` without breaking older readers).
+   - Editor replay (timeline, play/pause, speeds 0.25×–16×, trim pauses), the video export dialog (formats with
+     strengths, limits and a « Quel format choisir ? » table as in the image export dialog; resolution 720p /
+     1080p / 4K / page size; frames per second; target duration or speed; background or transparent for GIF/WebP;
+     final frame held N s; estimated time; progress and cancel), narration recording during replay and in live
+     mode (microphone choice, level meter, the « Windows bloque le micro » explanation), the OpenH264 setting with
+     `CISCO_NOTICE` and its licence. FR and EN texts; e2e steps for the replay and a GIF export.
+
 ## Replay semantics
 
 - Note time: `Point::t`, milliseconds from `Note::created`. Replay time: what the viewer sees.
