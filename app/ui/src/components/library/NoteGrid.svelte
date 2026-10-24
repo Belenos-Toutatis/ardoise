@@ -1,0 +1,139 @@
+<script lang="ts">
+  /** The note grid of the current view, with its heading, selection bar, empty states and problem list. */
+  import { tick } from 'svelte';
+  import { t } from '../../lib/i18n.svelte';
+  import type { LibraryState } from '../../lib/library-state.svelte';
+  import type { NoteSummary } from '../../lib/note';
+  import NoteCard from './NoteCard.svelte';
+  import SelectionBar from './SelectionBar.svelte';
+
+  let { lib, onopen, onnew }: { lib: LibraryState; onopen: (note: NoteSummary) => void; onnew: () => void } = $props();
+
+  let grid = $state<HTMLElement | null>(null);
+  let activeIndex = $state(0);
+
+  const notes = $derived(lib.visible);
+  const searching = $derived(lib.query.trim() !== '');
+  const heading = $derived.by(() => {
+    const view = lib.view;
+    switch (view.kind) {
+      case 'favorites':
+        return t('library.favorites');
+      case 'binder':
+        return view.binder.split('/').pop() ?? view.binder;
+      case 'tag':
+        return `# ${view.tag}`;
+      default:
+        return t('library.all');
+    }
+  });
+  const emptyKey = $derived.by(() => {
+    const kind = lib.view.kind;
+    return kind === 'favorites' ? 'library.empty.favorites' : kind === 'binder' ? 'library.empty.binder' : 'library.empty.tag';
+  });
+  const problems = $derived(lib.listing?.problems ?? []);
+  // Keeps the Tab stop inside the grid when notes disappear.
+  const tabStop = $derived(Math.min(activeIndex, Math.max(notes.length - 1, 0)));
+
+  function cards(): HTMLElement[] {
+    return [...(grid?.querySelectorAll<HTMLElement>('.card-open[data-index]') ?? [])];
+  }
+
+  function navigate(event: KeyboardEvent, index: number) {
+    const elements = cards();
+    const count = notes.length;
+    if (count === 0) return;
+    const first = elements[0]?.offsetTop ?? 0;
+    const columns = Math.max(1, elements.filter((el) => el.offsetTop === first).length);
+    let next = index;
+    switch (event.key) {
+      case 'ArrowLeft':
+        next = index - 1;
+        break;
+      case 'ArrowRight':
+        next = index + 1;
+        break;
+      case 'ArrowUp':
+        next = index - columns;
+        break;
+      case 'ArrowDown':
+        next = index + columns;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = count - 1;
+        break;
+    }
+    if (next < 0 || next >= count) next = event.key === 'ArrowUp' || event.key === 'ArrowDown' ? index : Math.min(Math.max(next, 0), count - 1);
+    event.preventDefault();
+    if (next === index) return;
+    if (event.shiftKey) {
+      if (!lib.hasAnchor) lib.toggle(notes[index].path);
+      lib.selectRange(notes[next].path);
+    }
+    activeIndex = next;
+    elements[next]?.focus();
+  }
+
+  async function focusPath(path: string) {
+    await tick();
+    const found = [...(grid?.querySelectorAll<HTMLElement>('.note-card') ?? [])].find((el) => el.dataset.path === path);
+    found?.querySelector<HTMLElement>('.card-open')?.focus();
+  }
+</script>
+
+<section class="library-section" aria-labelledby="library-heading">
+  <header class="section-header">
+    <h2 id="library-heading">{heading}</h2>
+    <span class="muted count">{notes.length}</span>
+  </header>
+
+  {#if lib.selected.length > 0}
+    <SelectionBar {lib} />
+  {/if}
+
+  {#if lib.listing === null}
+    <p class="loading">{t('common.loading')}</p>
+  {:else if notes.length === 0}
+    <div class="empty-state">
+      {#if searching}
+        <p class="lead">{t('library.empty.search', { query: lib.query.trim() })}</p>
+      {:else if lib.view.kind === 'all'}
+        <p class="lead">{t('home.empty')}</p>
+        <p class="muted">{t('home.emptyHint')}</p>
+        <button type="button" class="button primary" onclick={onnew}>{t('library.newNote')}</button>
+      {:else}
+        <p class="lead">{t(emptyKey)}</p>
+      {/if}
+    </div>
+  {:else}
+    <ul class="note-grid" class:selecting={lib.selected.length > 0} bind:this={grid} aria-label={t('library.notes')}>
+      {#each notes as note, index (note.path)}
+        <NoteCard
+          {note}
+          {lib}
+          {index}
+          active={index === tabStop}
+          {onopen}
+          onnavigate={navigate}
+          onfocuscard={(i) => (activeIndex = i)}
+          onrenamed={focusPath}
+        />
+      {/each}
+    </ul>
+  {/if}
+
+  {#if problems.length > 0}
+    <details class="problems">
+      <summary>{t('library.problems', { count: problems.length })}</summary>
+      <p class="muted small">{t('library.problemsHint')}</p>
+      <ul>
+        {#each problems as problem (problem.path)}
+          <li><code>{problem.path}</code> <span class="muted">{problem.message}</span></li>
+        {/each}
+      </ul>
+    </details>
+  {/if}
+</section>
