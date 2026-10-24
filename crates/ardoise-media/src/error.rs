@@ -55,4 +55,17 @@ pub enum MediaError {
     /// The file read back does not have the expected structure.
     #[error("unexpected media file content: {0}")]
     InvalidFile(String),
+
+    // Animated formats (GIF, WebP, WebM) and the Opus encoder.
+    /// Reading or writing the file failed.
+    #[error("file error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// An encoder or muxer of the animated formats failed (`codec`: "GIF", "WebP", "AV1",
+    /// "Opus", "WebM").
+    #[error("{codec} encoding failed: {message}")]
+    Encoding {
+        codec: &'static str,
+        message: String,
+    },
 }
