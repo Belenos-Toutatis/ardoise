@@ -300,3 +300,28 @@ Types in `lib/video.ts`, wrappers in `lib/api.ts` (both written with the contrac
 | App commands | `app/src-tauri/src/{video,narration,codec}.rs`, `lib.rs`, `commands.rs` (AppState), `live/`, `Cargo.toml`; `crates/ardoise-core/src/settings.rs` |
 | Editor replay and narration | `lib/replay.ts`, `lib/mock-narration.ts`, `components/editor/*`, `components/narration/*`, `components/live/*`; locale sections `replay`, `narration` |
 | Video export and settings | `lib/video.ts` helpers, `lib/mock-video.ts`, `components/VideoExportDialog.svelte`, `components/Settings.svelte`, `app/e2e/journeys.mjs`; locale sections `videoExport`, `openh264`, and every new `errorCodes.*` |
+
+### Decisions taken during the work (2026-10-24)
+
+Deviations from the contract above, kept after review of each agent's report:
+
+- `plan_export`: MP4 and WebM frames are at least 16 px a side (what their writers accept); GIF at most 16 384 px (the
+  frame renderer's limit). A video longer than 24 hours is refused (a damaged `ARDOISE_START_MS` cannot start an
+  endless export). An empty narration clip gives no sound track. `FormatOptions::format()` was added.
+- `Narration::merge`: two pieces more than 4 hours apart keep only the later one (no gigabytes of silence).
+- `export_animation` retries the final sync and rename while Windows reports the destination busy.
+- Live narration: `LiveHub::attach_narration(session, page, narration)` takes the session id (a recording never lands
+  on another session's page) and still accepts a narration after its session stopped; the hub also exposes
+  `page_position()` and `page_origins(session)`. A running live narration is saved by `live_stop`, when the main
+  window closes, and by `live_start` when the previous session ended on its own. The clock of the first audio sample
+  is the smallest "wall clock − audio received" seen by the 50 ms watcher (sound-card drift, about 0.2 s an hour, is
+  not corrected).
+- Error codes beyond the contract: a bad replay target → `invalidVideoSettings`; a recording that cannot be encoded →
+  `microphoneFailed`; an unreadable `audio.opus` → `noteDamaged`; `narration_audio` without narration and
+  `narration_stop` with nothing to save → `noRecording`. A replay narration saved with `stamp: null` is checked against
+  the version just read; saving or deleting a narration updates the note's `modified` time.
+- Interface: the replay controls carry `data-action` attributes (`replay-toggle`, `replay-play`, `replay-seek`,
+  `replay-speed`, `replay-trim`, `replay-narration`, `video-export`) used by the end-to-end journey; the dialogs'
+  "save as" answer can be scripted by the journey through `window.__ardoiseE2eSavePath`. The CSP allows `blob:` media
+  so the narration's WAV plays in an `<audio>` element.
+

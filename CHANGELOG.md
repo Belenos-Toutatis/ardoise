@@ -2,6 +2,16 @@
 
 ## Non publié
 
+### Ajouté (jalon M6 — relecture, vidéo et narration)
+
+- Relecture animée dans l'éditeur (bouton « Relecture » ou touche R) : ligne du temps, lecture et pause (Espace), vitesses de 0,25× à 16×, « Supprimer les temps morts » (pauses ramenées à 0,5 s) ; la page reste intacte pendant la relecture. Le calcul du temps est le même que celui des exports vidéo.
+- Export vidéo depuis l'éditeur (bouton « Vidéo ») en MP4, GIF, WebP ou WebM, avec une carte par format (atouts et limites) et un tableau « Quel format choisir ? » ; résolution 720p, 1080p, 4K ou taille de la page, images par seconde, vitesse ou durée cible, temps morts supprimés ou non, fond ou transparence (GIF et WebP), image finale figée ; taille, durée et temps d'export estimé affichés avant l'export ; progression et annulation ; le fichier n'apparaît qu'une fois complet.
+- Moteur commun aux quatre formats : images dessinées au fil de la relecture (même rendu que l'écran et les exports PNG/PDF), son de la narration placé à l'échantillon près dans les MP4 et WebM ; estimation du temps d'export à partir des vitesses mesurées.
+- Narration au micro : choix du micro (mémorisé sur chaque PC), niveau d'entrée, explication quand Windows bloque le micro pour les applications de bureau ; enregistrement pendant une relecture (rangé dans la note, à la vitesse de cette relecture) ou en mode direct (découpé page par page) ; écoute de la narration pendant la relecture ; suppression. La narration est intégrée aux exports MP4 et WebM.
+- La narration est stockée dans la note elle-même (`audio.opus`, flux Ogg Opus lisible par VLC), écrite de façon atomique avec la vérification habituelle contre l'écrasement d'une version plus récente ; les versions précédentes de l'application conservent ce fichier tel quel (format décrit dans `docs/file-format.md`).
+- Réglages : section « Micro » et section « Encodeur vidéo de secours (OpenH264) » : état, téléchargement chez Cisco avec progression, autoriser ou non, supprimer, mention « OpenH264 Video Codec provided by Cisco Systems, Inc. » et licence de Cisco affichées (le téléchargement lui-même arrive avec le paquet MP4).
+- Parcours de bout en bout « relecture d'une note puis export vidéo en GIF ».
+
 ### Ajouté (jalon M4 — synchro, mode direct et classe)
 
 - Tablette dans l'interface : état de connexion et batterie dans la barre latérale (avec la progression de la synchro), panneau de la tablette (nom, batterie et charge, firmware, pages en mémoire, modèle et taille), assistant d'enregistrement qui prévient d'abord que la tablette ne marchera plus avec l'appli du téléphone ni avec Inkspace, puis explique l'appui long sur le bouton par une animation.
