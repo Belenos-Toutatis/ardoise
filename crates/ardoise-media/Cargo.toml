@@ -8,6 +8,21 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+thiserror = "2"
+
+[target.'cfg(windows)'.dependencies]
+# Same version as `ardoise-ble`, so only one copy of the crate is compiled.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    # PROPVARIANT, for the container duration read by `probe_mp4`.
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

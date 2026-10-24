@@ -136,7 +136,7 @@ BtbN FFmpeg-Builds `latest` assets (Win64 zips, sizes read from the GitHub API o
 
 ### 7b. Windows Media Foundation (built into Windows 11)
 
-Via `windows` 0.62.2 you can drive `IMFSinkWriter` with the MPEG-4 sink: H.264 encoder MFT (hardware if available, else Microsoft's software encoder) plus AAC encoder MFT, producing a normal .mp4 with proper AAC, no download, no Cisco obligations, plays everywhere. Cons: large unsafe COM surface, less rate-control tuning than OpenH264, N editions need the Media Feature Pack, Windows-only (acceptable here). **[not verified here]**; worth a short spike because it also solves AAC-in-MP4.
+Via `windows` 0.62.2 you can drive `IMFSinkWriter` with the MPEG-4 sink: H.264 encoder MFT (hardware if available, else Microsoft's software encoder) plus AAC encoder MFT, producing a normal .mp4 with proper AAC, no download, no Cisco obligations, plays everywhere. Cons: large unsafe COM surface, less rate-control tuning than OpenH264, N editions need the Media Feature Pack, Windows-only (acceptable here). **Verified by a spike on 2026-10-24: see section 7c.**
 
 ### Comparison
 
@@ -151,13 +151,86 @@ Via `windows` 0.62.2 you can drive `IMFSinkWriter` with the MPEG-4 sink: H.264 e
 
 ---
 
+## 7c. Media Foundation spike: result (2026-10-24)
+
+**Verdict: it works.** On this PC (Windows 11 Home 10.0.26300, Intel Core i5-1235U, Intel Iris Xe, driver 32.0.101.7085) Rust writes a standard `.mp4` holding H.264 video and AAC-LC audio through `IMFSinkWriter`, with nothing downloaded, and the file reads back correctly through Media Foundation and in Windows Explorer. It is fit to be the default MP4 path planned by SPEC §6.2, provided the points under "What M6 must still do" are handled. The most important one is delay-loading the Media Foundation DLLs: without it `ardoise.exe` would not even start on a Windows "N" edition, so the OpenH264 fallback could never run.
+
+### What was built
+
+Reusable code in `crates/ardoise-media`, using `windows` 0.62.2 as already in `Cargo.lock` (new features `Win32_Foundation`, `Win32_Media_MediaFoundation`, `Win32_System_Com`, `Win32_System_Com_StructuredStorage`, `Win32_System_Variant`; no new crate, no download):
+
+- `Mp4Writer::create(path, &Mp4Settings)`, `push_frame(&[u8] RGBA, Duration)`, `push_audio(&[i16])`, `finish() -> Mp4Summary`. `Mp4Settings::new(width, height, frame_rate)`, plus `with_audio(AudioSettings::new(48_000, 2))`, `video_bitrate`, `hardware_acceleration`. H.264 High profile, no B-frames, a key frame every 2 s, default bitrate 0.08 bit per pixel and frame (2.2 Mbit/s at 720p30); AAC-LC at 128 kbit/s from 16-bit PCM, 44.1 or 48 kHz, mono or stereo.
+- `nv12::rgba_to_nv12`: the colour conversion, done in Rust on purpose: BT.709 matrix, limited range (Y 16-235, U/V 16-240), chroma = average of each 2×2 block, alpha ignored, packed planes (stride = width, UV plane right after the Y plane). The NV12 and H.264 media types carry the same colour description (`MF_MT_YUV_MATRIX`, `MF_MT_VIDEO_NOMINAL_RANGE`, primaries, transfer function), so encoder and players agree. Unit tests check reference colours against the BT.709 equations; they also run on Linux.
+- `probe_mp4(path, ProbeOptions)`: independent read-back through `IMFSourceReader`: container duration (`MF_PD_DURATION`), native subtypes, frame size, every video frame decoded to RGB32 by Media Foundation's own decoder and video processor, every audio sample decoded to PCM, optional capture of one frame and of the audio. Reusable for the M6 end criteria ("durée, dimensions et nombre d'images relus depuis le fichier").
+- `available_encoders()`: the H.264 and AAC encoders registered with Media Foundation (`MFTEnumEx`), for diagnostics and for deciding on the OpenH264 fallback.
+- RAII guards: `CoInitializeEx(COINIT_MULTITHREADED)` / `CoUninitialize` (left alone when the thread is already a single-threaded apartment, `RPC_E_CHANGED_MODE`), `MFStartup(MFSTARTUP_LITE)` / `MFShutdown`, buffer `Lock` / `Unlock`; COM objects are released before shutdown (field order). Typed errors (`MediaError`, with `EncoderUnavailable` for `MF_E_TOPO_CODEC_NOT_FOUND` and `MediaFoundationUnavailable` when `MFStartup` fails). Outside Windows every entry point returns `MediaError::Unsupported` (checked by building and linting for `wasm32-unknown-unknown`).
+- Test `crates/ardoise-media/tests/mf_mp4_roundtrip.rs` (Windows only): a 3 s 1280×720 30 fps animation (a stroke growing from left to right, a red square sliding below it) with a 440 Hz stereo tone, written under a temporary name (`.partial`) then renamed, once with hardware encoders allowed and once with the software encoder forced; each file is then read back with `probe_mp4` and asserted.
+
+### Measured
+
+Encoders registered on this PC. H.264: Intel Quick Sync Video H.264 Encoder MFT (hardware, listed twice), Microsoft AVC DX12 Encoder (hardware), H264 Encoder MFT (software). AAC: Microsoft AAC Audio Encoder MFT (software). With hardware allowed, the sink writer picked Intel Quick Sync.
+
+Read back with `IMFSourceReader` (debug build, `cargo test -p ardoise-media -- --nocapture`):
+
+| Property | Expected | Hardware (Quick Sync) | Software (H264 Encoder MFT) |
+|---|---|---|---|
+| Container duration | 3.000 s | 3.008 s | 3.008 s |
+| Video codec, size | H.264, 1280×720 | H.264, 1280×720 | H.264, 1280×720 |
+| Video frames decoded | 90 | 90 | 90 |
+| First / last frame time | 0.000 / 2.967 s | 0.000 / 2.967 s | 0.000 / 2.967 s |
+| Audio codec, channels, rate | AAC, 2, 48000 Hz | AAC, 2, 48000 Hz | AAC, 2, 48000 Hz |
+| Audio decoded | 3.000 s | 3.008 s (144 384 frames) | 3.008 s (144 384 frames) |
+| Tone frequency (zero crossings) | 440 Hz | 439.8 Hz | 439.8 Hz |
+| 5 decoded pixels of frame 45 | exact colours | max error 1/255 | max error 1/255 |
+| File size | | 602 536 bytes | 76 527 bytes |
+
+The pixels were chosen so that they identify frame 45 exactly (the stroke end moves 12 px per frame): frame order, timestamps, colour matrix and range all survive the round trip.
+
+Speed (writer only: `create` + pushes + `finish`, RGBA→NV12 included, drawing excluded; 90 frames and 3 s of audio):
+
+| Build | Hardware path | Software path |
+|---|---|---|
+| Release (4 runs) | 0.67-0.93 s = 97-134 frames/s overall. `create` 0.42-0.57 s (GPU encoder start-up), the 90 pushes 0.18-0.21 s (about 450 frames/s), `finish` 0.08-0.16 s | 0.26-0.33 s = 274-343 frames/s overall; `create` 0.06 s |
+| Debug (2 runs) | 2.34-2.40 s = 37-38 frames/s | 2.36-2.45 s = 37-38 frames/s |
+
+RGBA→NV12 alone takes 1.4-1.7 ms per 720p frame in release and 21.5-22.8 ms in debug, where it dominates. On this simple content the software encoder is as fast as the hardware one once started; the hardware encoder's half-second start-up only pays off on long exports. Both are far faster than real time.
+
+What Windows reports for both files (PowerShell `Shell.Application` `GetDetailsOf`, French UI): "Durée 00:00:03", "Largeur de trame 1280", "Hauteur de trame 720", "Fréquence d'images 30.00 trames/s", "Compression vidéo {34363248-0000-0010-8000-00AA00389B71}" (the H.264 subtype), audio "Débit binaire 129 Kbits/s", type "MPEG-4 Video"; video "Débit de données" 1471 kbit/s (hardware) and 68 kbit/s (software).
+
+### Pitfalls met
+
+- **Media types.** H.264 output type: major type, subtype, `MF_MT_AVG_BITRATE`, `MF_MT_FRAME_SIZE` and `MF_MT_FRAME_RATE` (two u32 packed in a u64), `MF_MT_INTERLACE_MODE` = progressive, `MF_MT_PIXEL_ASPECT_RATIO`, `MF_MT_MPEG2_PROFILE`. The NV12 input type repeats size, rate, interlace mode and aspect ratio, plus `MF_MT_DEFAULT_STRIDE`. The sink writer looks for the encoder in `SetInputMediaType`; a missing codec shows up there (`MF_E_TOPO_CODEC_NOT_FOUND`).
+- **Attributes.** Hardware encoders are only considered with `MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS` = TRUE; FALSE forces the software encoder (a useful user-facing fallback switch). `MF_TRANSCODE_CONTAINERTYPE` = MPEG-4 makes the container independent of the file extension, which atomic writes need (the test writes `*.mp4.partial`, then renames).
+- **Timestamps** are `i64` counts of 100 ns. Video: from the caller's `Duration`, each frame lasting one nominal period. Audio: the start of each chunk is computed from the total number of frames written (`frames × 10^7 / rate`), never by adding chunk durations, so there is no drift whatever the chunk sizes.
+- **NV12 stride.** With `MFCreateMemoryBuffer` the planes are packed: stride = width, and the UV plane (height/2 rows of width bytes, U and V interleaved) follows the Y plane directly. Width and height must be even. A fresh buffer per frame, because the sink writer may still hold earlier samples.
+- **AAC input constraints.** Microsoft's encoder takes 16-bit PCM at 44.1 or 48 kHz with 1, 2 or 6 channels. The output type's `MF_MT_AUDIO_AVG_BYTES_PER_SECOND` must be exactly 12000, 16000, 20000 or 24000 (96-192 kbit/s), and `MF_MT_AAC_PAYLOAD_TYPE` = 0 (raw AAC, as MP4 stores it). AAC pads to whole 1024-sample frames: 3 s became 141 frames = 3.008 s, which also sets the container duration. Any chunk size is accepted (the writer sends at most 100 ms per sample).
+- **Sink writer quirks.**
+  1. *Fast start (`MF_MPEG4SINK_MOOV_BEFORE_MDAT`) is unusable as is.* With the file the sink writer opens itself from the URL, `Finalize` fails with `E_ACCESSDENIED` (0x80070005): the file is write-only. With a read-write byte stream from `MFCreateFile(MF_ACCESSMODE_READWRITE, MF_OPENMODE_DELETE_IF_EXIST, MF_FILEFLAGS_NONE, ...)`, `Finalize` succeeds but the file is corrupt: `moov` is written at the front with chunk offsets for the final layout, but the media data stays duplicated at its old place and at the end (file twice as large, 0 decodable frames), with software and hardware encoders, with and without audio. `MF_FILEFLAGS_NOBUFFERING` made the writer hang. The writer therefore leaves the index at the end of the file (`ftyp, uuid, mdat, moov`), which every local player handles; browsers then need HTTP range requests to start before the download ends. If fast start is wanted, a small pure-Rust post-pass (move `moov` forward, add its size to every `stco`/`co64` offset) is the safe way.
+  2. *Interleaving.* The MPEG-4 sink interleaves the tracks and the sink writer stalls a stream that runs ahead: pushing all 90 frames before any audio took 24 s instead of 2.4 s (no deadlock, but ten times slower). Audio pushed ahead is fine: the writer buffers it and releases it in step with the frames. Rule for the export loop: push each frame's audio before (or with) the frame, or the whole narration up front.
+  3. *B-frames shift the video.* With default settings Microsoft's software encoder used B-frames, and since the MP4 sink writes no edit list every decoded frame came out one period late (first frame at 33 ms, last at 3.000 s): the video lagged the audio by one frame. Passing `CODECAPI_AVEncMPVDefaultBPictureCount` = 0 (and `CODECAPI_AVEncMPVGOPSize` = 2 s) as encoding parameters of `SetInputMediaType` fixed it, for both encoders.
+  4. *Rate control differs between encoders.* For the same 2.2 Mbit/s target, Quick Sync spent 1.47 Mbit/s on a nearly static picture (602 536 bytes for 3 s), the software encoder 68 kbit/s (76 527 bytes). For handwriting, quality-based VBR (`CODECAPI_AVEncCommonRateControlMode`, `CODECAPI_AVEncCommonQuality`) would make hardware files much smaller: to tune in M6.
+  5. *Identifying the encoder.* `IMFSinkWriterEx::GetTransformForStream` returns the encoder MFT. Hardware MFTs have an attribute store with `MFT_ENUM_HARDWARE_URL_Attribute`, a vendor id ("VEN_8086") and `MFT_TRANSFORM_CLSID_Attribute` but no friendly name (looked up by CLSID in the `MFTEnumEx` list). Microsoft's software encoder has no attribute store at all, so it is reported as "unnamed software encoder" (on this PC it can only be "H264 Encoder MFT").
+  6. The MPEG-4 sink closes the file itself in `Finalize`: the file can be renamed as soon as `finish` returns.
+- **DLL imports (important).** The `windows` crate links `mfplat.dll` and `mfreadwrite.dll` as ordinary load-time imports (`dumpbin /dependents` on the test binary). On a Windows N/KN edition without the Media Feature Pack these DLLs do not exist, so the whole executable would fail to start, not just the export. Delay-loading works with the crate's `raw-dylib` imports: built with `/DELAYLOAD:mfplat.dll /DELAYLOAD:mfreadwrite.dll delayimp.lib`, the test binary lists both DLLs under "delay load dependencies" and the tests still pass.
+- **Debug builds** convert colours about 15 times slower (about 22 ms per frame): add `ardoise-media` to the `opt-level` overrides of the root `Cargo.toml`, as for `ardoise-render`.
+
+### What M6 must still do
+
+1. In `app/src-tauri/build.rs`: `cargo:rustc-link-arg-bins=/DELAYLOAD:mfplat.dll`, the same for `mfreadwrite.dll`, and `cargo:rustc-link-arg-bins=delayimp.lib` (not `RUSTFLAGS`, which would replace the `+crt-static` flag of `.cargo/config.toml`). Before the first Media Foundation call, check that `mfplat.dll` loads (`LoadLibraryExW` with `LOAD_LIBRARY_SEARCH_SYSTEM32`); if it does not, offer the OpenH264 fallback.
+2. Run the export on a worker thread (COM multithreaded apartment); the single-threaded-apartment branch of the COM guard is untested.
+3. Follow the interleaving rule in the export loop; keep `hardware_acceleration` as a setting (software forced if a GPU driver misbehaves).
+4. Tune rate control for handwriting; decide whether fast start is worth a Rust post-pass.
+5. Not verified here: Windows N with the Media Feature Pack, other GPUs (NVIDIA, AMD), playback in the Media Player and Films & TV apps (decoding was verified through the same Media Foundation decoder they use), very long exports.
+
+---
+
 ## Recommended stack
 
 | Output / function | Crate (version) | License | Build needs | Status | Notes |
 |---|---|---|---|---|---|
 | H.264 | `openh264` 0.9.9, `default-features=false, features=["libloading"]` | BSD-2 | none | active (2026-10) | Download `openh264-2.6.0-win64.dll.bz2` from `ciscobinary.openh264.org`, verify SHA-256, bzip2-decompress, `OpenH264API::from_blob_path`. Show Cisco notice, enable/disable control |
 | MP4 mux | `muxide` 0.5.0 (fallbacks `shiguredo_mp4`, `mp4-atom`) | MIT/Apache-2.0 | none | active, young | H.264 Annex B + AAC (or Opus) |
-| AAC for MP4 | Windows Media Foundation AAC MFT via `windows` 0.62.2 (not fdk-aac) | MIT/Apache-2.0 (crate); OS codec | none | OS | spike needed; fallback Opus-in-MP4 (browser/VLC only), or ffmpeg download |
+| AAC for MP4 | Windows Media Foundation AAC MFT via `windows` 0.62.2 (not fdk-aac) | MIT/Apache-2.0 (crate); OS codec | none | OS | spike passed (section 7c); fallback Opus-in-MP4 (browser/VLC only), or ffmpeg download |
 | WebM video | `rav1e` 0.8.1, `default-features=false, features=["threading"]` | BSD-2 | none (nasm optional for big speedup) | stable, slow cadence | measured ~2.3 fps at 720p without asm |
 | WebM mux | `webm` 2.2.1 | MPL-2.0 | cc only (builds) | passively maintained | VP8/VP9/AV1 + Opus/Vorbis |
 | Opus | `ropus` 0.12.18 (fallback `opus` 0.4.0 + cmake) | BSD-3 | none | young, active | pure Rust |
@@ -175,7 +248,7 @@ Fallback decision: if the Media Foundation AAC spike fails or Opus-in-MP4 on sto
 
 1. **Cisco license compliance.** The DLL must be downloaded by the user's machine from Cisco, never bundled; need an enable/disable control, the exact notice string, and the license text. Breaking this voids patent coverage. Coverage is for Cisco's binary only, not other patent holders.
 2. **Crate whitelist pins OpenH264 2.6.0.** Newer Cisco releases (2.7.0 exists) fail `from_blob_path` until the crate updates; old DLL URLs could vanish. Pin version and hash; consider the unchecked loader with your own hash.
-3. **No Rust AAC encoder with a GPL-compatible license.** fdk-aac is GPL-incompatible. Must rely on Media Foundation (unverified spike; N editions need Media Feature Pack) or accept Opus-in-MP4, which reportedly fails in Windows 11 Media Player / Films & TV but works in browsers and VLC.
+3. **No Rust AAC encoder with a GPL-compatible license.** fdk-aac is GPL-incompatible. Must rely on Media Foundation (spike passed, section 7c; N editions need the Media Feature Pack, and the MF DLLs must be delay-loaded) or accept Opus-in-MP4, which reportedly fails in Windows 11 Media Player / Films & TV but works in browsers and VLC.
 4. **WebM is slow without nasm** (AV1 rav1e about 2.3 fps at 720p measured). VP8/VP9 via libvpx is not buildable here (needs system libvpx via pkg-config). Options: install nasm on the build machine only, lower resolution/fps for WebM, or use ffmpeg for VP9.
 5. **cmake needed for the `opus`/`audiopus_sys`/`libopus_sys` route** (confirmed failure here). Avoided by `ropus`, but it is a young 0.x port: validate by decoding in Chrome/VLC, and check the AVX2 baseline note.
 6. **`muxide` is young** (single author). Test output in Chrome, Edge, VLC, Windows Media Player (A/V sync, moov placement / fast-start, seeking); keep `shiguredo_mp4` or `mp4-atom` as fallbacks.
