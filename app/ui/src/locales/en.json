@@ -632,11 +632,68 @@
       "svg": "SVG (vector)",
       "pdf": "PDF"
     },
-    "formatHints": {
-      "png": "Lossless image, with an optional transparent background. Handy for Word, OneNote or a web page.",
-      "jpg": "Compact image without transparency. Good for photos and for sending by email.",
-      "svg": "Vector drawing that keeps the stroke width given by the pen pressure; it opens in Inkscape and in a browser.",
-      "pdf": "Vector document, sharp at any size; several notes make a single file."
+    "prosLabel": "Strengths:",
+    "consLabel": "Limits:",
+    "formatPros": {
+      "png": "Sharp and lossless, optional transparent background. Ideal for Word, OneNote or a slide.",
+      "jpg": "Opens everywhere and is accepted by every website and form (some accept only JPG).",
+      "svg": "Vector: sharp at any size, keeps the stroke width given by the pen pressure, editable in Inkscape.",
+      "pdf": "Vector and sharp when printed; several notes make a single file. Ideal for printing or sharing."
+    },
+    "formatCons": {
+      "png": "Gets blurry when enlarged a lot; heavier with a textured paper.",
+      "jpg": "No transparent background, slight blur around the strokes; often heavier than PNG for a note on plain paper.",
+      "svg": "Not accepted everywhere (school platforms, older software); heavy for a very full note.",
+      "pdf": "Less handy to insert into a document or to edit."
+    },
+    "compare": {
+      "title": "Which format should I choose?",
+      "criterion": "Criterion",
+      "rows": {
+        "zoom": {
+          "label": "Sharp when enlarged",
+          "png": "No",
+          "jpg": "No",
+          "svg": "Yes",
+          "pdf": "Yes"
+        },
+        "transparent": {
+          "label": "Transparent background possible",
+          "png": "Yes",
+          "jpg": "No (white background)",
+          "svg": "Yes",
+          "pdf": "No"
+        },
+        "size": {
+          "label": "File size",
+          "png": "Small (plain paper) to large (texture)",
+          "jpg": "Medium",
+          "svg": "Depends on the number of strokes",
+          "pdf": "Small"
+        },
+        "several": {
+          "label": "Several notes in one file",
+          "png": "No (one file per note)",
+          "jpg": "No (one file per note)",
+          "svg": "No (one file per note)",
+          "pdf": "Yes (one page per note)"
+        },
+        "opens": {
+          "label": "Opens with",
+          "png": "Any software",
+          "jpg": "Any software",
+          "svg": "Browser, Inkscape, recent Word",
+          "pdf": "Any PDF reader"
+        },
+        "bestFor": {
+          "label": "Ideal for",
+          "png": "Word, OneNote, slide",
+          "jpg": "A website or form that requires JPG",
+          "svg": "Editing the drawing",
+          "pdf": "Printing, sending, archiving"
+        }
+      },
+      "advice": "When in doubt: PDF to print or send a note, PNG to insert it into a document. JPG is only for when a website requires it."
     },
     "options": "Settings",
     "resolution": "Resolution",

@@ -1471,6 +1471,79 @@ select {
   gap: 0.35rem 1.25rem;
 }
 
+/* Export formats: one card per format, with its strengths and limits. */
+.export-choices:has(.format-card) {
+  display: grid;
+  /* Two columns even when the dialog shows its scroll bar. */
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.5rem;
+}
+
+/* `.choice` (defined further down) lays its content in a centred row: override it. */
+.choice.format-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.format-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.format-card .format-name {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+.format-card .format-pros,
+.format-card .format-cons {
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.format-card strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.format-compare {
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.format-compare summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.format-compare table {
+  width: 100%;
+  margin-top: 0.4rem;
+  border-collapse: collapse;
+}
+
+.format-compare th,
+.format-compare td {
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.format-compare tbody th {
+  font-weight: 600;
+}
+
 .export-row {
   display: flex;
   flex-wrap: wrap;

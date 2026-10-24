@@ -60,7 +60,10 @@ async function render(titles: string[], locale: 'fr' | 'en' = 'fr') {
     return found;
   };
   const radio = (label: string) => {
-    const found = [...target.querySelectorAll<HTMLLabelElement>('label.choice')].find((l) => l.textContent?.trim() === label);
+    // A format card holds its name and its strengths and limits: match the name only.
+    const found = [...target.querySelectorAll<HTMLLabelElement>('label.choice')].find(
+      (l) => (l.querySelector('.choice-name') ?? l).textContent?.trim() === label,
+    );
     const input = found?.querySelector('input');
     if (!input) throw new Error(`no choice "${label}"`);
     return input;
@@ -87,6 +90,49 @@ async function render(titles: string[], locale: 'fr' | 'en' = 'fr') {
 const DEFAULTS = { dpi: 150, background: true, quality: 90, pdfPage: 'actual' };
 
 describe('export dialog: options', () => {
+  it('gives the strengths and limits of every format, and compares them', async () => {
+    for (const locale of ['fr', 'en'] as const) {
+      const ui = await render(['Liste de courses'], locale);
+      const cards = [...ui.target.querySelectorAll<HTMLLabelElement>('label.format-card')];
+      expect(cards).toHaveLength(4);
+      for (const card of cards) {
+        const radio = card.querySelector('input')!;
+        // Named by the format alone, described by its strengths and limits.
+        const name = document.getElementById(radio.getAttribute('aria-labelledby')!)!.textContent!.trim();
+        expect(['PNG (image)', 'JPG (image)', 'SVG (vectoriel)', 'SVG (vector)', 'PDF']).toContain(name);
+        const described = radio
+          .getAttribute('aria-describedby')!
+          .split(' ')
+          .map((id) => document.getElementById(id)!.textContent!.trim());
+        expect(described).toHaveLength(2);
+        expect(described[0]).toMatch(locale === 'fr' ? /^Atouts :/ : /^Strengths:/);
+        expect(described[1]).toMatch(locale === 'fr' ? /^Limites :/ : /^Limits:/);
+      }
+      // The selected card is marked; choosing another one moves the mark.
+      expect(ui.target.querySelector('.format-card.selected .choice-name')!.textContent).toBe('PNG (image)');
+      await ui.choose('PDF');
+      expect(ui.target.querySelector('.format-card.selected .choice-name')!.textContent).toBe('PDF');
+
+      const compare = ui.target.querySelector('details.format-compare')!;
+      expect(compare.querySelector('summary')!.textContent).toBe(
+        locale === 'fr' ? 'Quel format choisir ?' : 'Which format should I choose?',
+      );
+      expect([...compare.querySelectorAll('thead th')].map((th) => th.textContent!.trim())).toEqual([
+        locale === 'fr' ? 'Critère' : 'Criterion',
+        'PNG',
+        'JPG',
+        'SVG',
+        'PDF',
+      ]);
+      const rows = [...compare.querySelectorAll('tbody tr')];
+      expect(rows).toHaveLength(6);
+      for (const row of rows) expect(row.querySelectorAll('td')).toHaveLength(4);
+      expect(rows.map((r) => r.querySelector('th')!.textContent)).toContain(locale === 'fr' ? 'Fond transparent possible' : 'Transparent background possible');
+      cleanup?.();
+      cleanup = null;
+    }
+  });
+
   it('shows the options that suit each format', async () => {
     const ui = await render(['Liste de courses']);
     expect(ui.dialog().getAttribute('aria-modal')).toBe('true');

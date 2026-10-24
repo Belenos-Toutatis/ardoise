@@ -632,11 +632,68 @@
       "svg": "SVG (vectoriel)",
       "pdf": "PDF"
     },
-    "formatHints": {
-      "png": "Image sans perte, avec un fond transparent possible. Pratique pour Word, OneNote ou une page web.",
-      "jpg": "Image compacte, sans transparence. Convient aux photos et aux envois par courriel.",
-      "svg": "Dessin vectoriel qui garde l'épaisseur du trait selon la pression ; il s'ouvre dans Inkscape et dans un navigateur.",
-      "pdf": "Document vectoriel, net à toutes les tailles ; plusieurs notes donnent un seul fichier."
+    "prosLabel": "Atouts :",
+    "consLabel": "Limites :",
+    "formatPros": {
+      "png": "Net et sans perte, fond transparent possible. Idéal pour Word, OneNote ou une diapositive.",
+      "jpg": "S'ouvre partout et accepté par tous les sites et formulaires (certains n'acceptent que le JPG).",
+      "svg": "Vectoriel : net à toutes les tailles, garde l'épaisseur du trait selon la pression, se retouche dans Inkscape.",
+      "pdf": "Vectoriel et net à l'impression ; plusieurs notes donnent un seul fichier. Idéal pour imprimer ou partager."
+    },
+    "formatCons": {
+      "png": "Devient flou si on l'agrandit beaucoup ; plus lourd avec un papier texturé.",
+      "jpg": "Pas de fond transparent, léger flou autour des traits ; souvent plus lourd que le PNG pour une note sur papier uni.",
+      "svg": "Pas accepté partout (ENT, anciens logiciels) ; lourd pour une note très chargée.",
+      "pdf": "Moins pratique à insérer dans un document ou à retoucher."
+    },
+    "compare": {
+      "title": "Quel format choisir ?",
+      "criterion": "Critère",
+      "rows": {
+        "zoom": {
+          "label": "Net quand on agrandit",
+          "png": "Non",
+          "jpg": "Non",
+          "svg": "Oui",
+          "pdf": "Oui"
+        },
+        "transparent": {
+          "label": "Fond transparent possible",
+          "png": "Oui",
+          "jpg": "Non (fond blanc)",
+          "svg": "Oui",
+          "pdf": "Non"
+        },
+        "size": {
+          "label": "Taille du fichier",
+          "png": "Petite (papier uni) à grosse (texture)",
+          "jpg": "Moyenne",
+          "svg": "Selon le nombre de traits",
+          "pdf": "Petite"
+        },
+        "several": {
+          "label": "Plusieurs notes dans un fichier",
+          "png": "Non (un fichier par note)",
+          "jpg": "Non (un fichier par note)",
+          "svg": "Non (un fichier par note)",
+          "pdf": "Oui (une page par note)"
+        },
+        "opens": {
+          "label": "S'ouvre avec",
+          "png": "Tous les logiciels",
+          "jpg": "Tous les logiciels",
+          "svg": "Navigateur, Inkscape, Word récent",
+          "pdf": "Tout lecteur PDF"
+        },
+        "bestFor": {
+          "label": "Idéal pour",
+          "png": "Word, OneNote, diapositive",
+          "jpg": "Site ou formulaire qui exige un JPG",
+          "svg": "Retoucher le dessin",
+          "pdf": "Imprimer, envoyer, archiver"
+        }
+      },
+      "advice": "En cas de doute : le PDF pour imprimer ou envoyer une note, le PNG pour l'insérer dans un document. Le JPG ne sert que si un site l'exige."
     },
     "options": "Réglages",
     "resolution": "Résolution",

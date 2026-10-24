@@ -621,7 +621,10 @@ describe('library: export and assemble the selection', () => {
     const dialog = ui.q('[role="dialog"]')!;
     expect(dialog.textContent).toContain('Notes sélectionnées : 3');
 
-    [...dialog.querySelectorAll<HTMLLabelElement>('label.choice')].find((l) => l.textContent?.trim() === 'PDF')!.querySelector('input')!.click();
+    [...dialog.querySelectorAll<HTMLLabelElement>('label.choice')]
+      .find((l) => (l.querySelector('.choice-name') ?? l).textContent?.trim() === 'PDF')!
+      .querySelector('input')!
+      .click();
     await ui.settle();
     await ui.click(ui.button('Exporter…', dialog));
     // The grid shows newest first: that is the page order, whatever the order of the clicks.

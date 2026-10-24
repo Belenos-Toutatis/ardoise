@@ -23,6 +23,11 @@
     onclose: () => void;
   } = $props();
 
+  /** Prefix of the element ids that tie each format to its description. */
+  const uid = $props.id();
+  /** Rows of the "Which format?" comparison, in `export.compare.rows`. */
+  const COMPARE_ROWS = ['zoom', 'transparent', 'size', 'several', 'opens', 'bestFor'] as const;
+
   const initial = loadChoice();
   let format = $state<ExportFormat>(initial.format);
   let options = $state<ExportOptions>({ ...initial.options });
@@ -144,13 +149,55 @@
       <legend>{t('export.format')}</legend>
       <div class="export-choices" role="radiogroup" aria-label={t('export.format')}>
         {#each FORMATS as value (value)}
-          <label class="choice">
-            <input type="radio" name="export-format" {value} bind:group={format} />
-            {t(`export.formats.${value}`)}
+          <!-- The whole card selects the format; the radio is named by the format alone and
+               described by its strengths and limits. -->
+          <label class="choice format-card" class:selected={format === value}>
+            <span class="format-name">
+              <input
+                type="radio"
+                name="export-format"
+                {value}
+                bind:group={format}
+                aria-labelledby="{uid}-{value}-name"
+                aria-describedby="{uid}-{value}-pros {uid}-{value}-cons"
+              />
+              <span class="choice-name" id="{uid}-{value}-name">{t(`export.formats.${value}`)}</span>
+            </span>
+            <span class="format-pros" id="{uid}-{value}-pros">
+              <strong>{t('export.prosLabel')}</strong>
+              {t(`export.formatPros.${value}`)}
+            </span>
+            <span class="format-cons" id="{uid}-{value}-cons">
+              <strong>{t('export.consLabel')}</strong>
+              {t(`export.formatCons.${value}`)}
+            </span>
           </label>
         {/each}
       </div>
-      <p class="muted small">{t(`export.formatHints.${format}`)}</p>
+      <details class="format-compare">
+        <summary>{t('export.compare.title')}</summary>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col"><span class="visually-hidden">{t('export.compare.criterion')}</span></th>
+              {#each FORMATS as value (value)}
+                <th scope="col">{value.toUpperCase()}</th>
+              {/each}
+            </tr>
+          </thead>
+          <tbody>
+            {#each COMPARE_ROWS as row (row)}
+              <tr>
+                <th scope="row">{t(`export.compare.rows.${row}.label`)}</th>
+                {#each FORMATS as value (value)}
+                  <td>{t(`export.compare.rows.${row}.${value}`)}</td>
+                {/each}
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        <p class="muted small">{t('export.compare.advice')}</p>
+      </details>
     </fieldset>
 
     <fieldset class="export-fieldset" disabled={running}>
