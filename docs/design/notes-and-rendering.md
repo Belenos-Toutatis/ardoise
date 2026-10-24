@@ -79,3 +79,24 @@ app/src-tauri     ardoise.exe --import-inkspace [LocalState] [--library DIR] [--
 - `ardoise.exe --import-inkspace [LocalState] [--library DIR] [--compare]`: imports every note into the library
   (binder `Inkspace`, original dates, Inkspace id kept to avoid duplicates on a second import) and prints a table and
   `N/N notes importées`.
+
+## Decisions made while building M2
+
+- **Width semantics.** `Stroke::width` is the full-pressure diameter for every tool (the major axis for the fountain
+  pen; nominal for the brush, which tapers, and chalk, which varies ±12 %). `diameter = width × (min + (1 − min) ×
+  pressure^gamma)` with per-tool `min`/`gamma` (`ardoise-ink/src/geometry.rs`); `pressure_for_width` is its exact
+  inverse. The ballpoint is linear (min 0.45), and its outline has exactly that diameter at each sample.
+- **Fill rule.** Outlines must be filled with the non-zero rule (tiny-skia `Winding`, SVG/canvas `nonzero`).
+- **Layers.** Strokes on hidden layers are not drawn; a stroke whose layer index has no entry is drawn on top rather
+  than lost (the file format refuses to write such a note anyway).
+- **Screen geometry.** `note_outlines(path)` (Tauri command, `app/src-tauri/src/notes.rs`) returns SVG path data
+  computed by `ardoise_ink::outline`, the function the renderer uses: the screen and the exports cannot diverge.
+- **Inkspace widths.** Tuned on `render_note` against Inkspace's previews: diameter = stored width × 1.0 for timed
+  strokes, × 1.1 for untimed ones; the 22 notes of the development PC score IoU 0.942–0.969 with every ink pixel
+  within 1 px both ways (threshold 0.90 / 0.99).
+- **Release profile.** tiny-skia, ardoise-ink and ardoise-render are built with `opt-level = 3` (about 2× faster
+  rendering) while the rest favours size; the executable is about 9 MB.
+- **Conflict copies.** Nextcloud's markers are not translated (`src/common/utility.cpp` in nextcloud/desktop):
+  `(conflicted copy [user ]YYYY-MM-DD HHMMSS)`, legacy `_conflict-YYYYMMDD-HHMMSS`, `(case clash from …)`; other
+  wordings (Dropbox, French "copie en conflit") are recognised by a conflict word plus a date in the last
+  parenthesised group.
