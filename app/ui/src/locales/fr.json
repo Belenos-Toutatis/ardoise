@@ -165,5 +165,138 @@
     "noFreeName": "aucun nom de fichier libre n'a été trouvé ({detail})",
     "notInTrash": "cette note n'est plus dans la corbeille ({detail})",
     "libraryWatch": "la surveillance du dossier de la bibliothèque a échoué ({detail})"
+  },
+  "editor": {
+    "back": "Bibliothèque",
+    "loading": "Ouverture de la note…",
+    "loadError": "Impossible d'ouvrir cette note : {message}",
+    "title": "Titre de la note",
+    "untitled": "Note sans titre",
+    "retitleError": "Impossible de renommer la note : {message}",
+    "save": "Enregistrer",
+    "saveShortcut": "Enregistrer (Ctrl+S)",
+    "saving": "Enregistrement…",
+    "saved": "Enregistrée",
+    "unsaved": "Modifications non enregistrées",
+    "saveError": "Impossible d'enregistrer la note : {message}",
+    "conflictTitle": "Vos modifications n'ont pas été enregistrées",
+    "conflictHint": "Vos modifications sont toujours affichées ici, mais les enregistrer écraserait l'autre version. Revenez à la bibliothèque et rouvrez la note pour voir sa dernière version.",
+    "dismiss": "Fermer",
+    "undo": "Annuler (Ctrl+Z)",
+    "redo": "Rétablir (Ctrl+Y)",
+    "toolbar": "Outils d'édition",
+    "canvas": "Page de la note",
+    "sidePanel": "Page, calques et sélection",
+    "modes": {
+      "label": "Outil",
+      "select": "Sélection",
+      "pen": "Stylo",
+      "eraser": "Gomme",
+      "pan": "Déplacer la page"
+    },
+    "eraser": {
+      "label": "Mode de la gomme",
+      "whole": "Traits entiers",
+      "partial": "Partielle",
+      "size": "Taille"
+    },
+    "ink": {
+      "label": "Encre",
+      "tools": {
+        "ballpoint": "Stylo à bille",
+        "fountainPen": "Stylo plume",
+        "feltTip": "Feutre",
+        "pencil": "Crayon",
+        "brush": "Pinceau",
+        "highlighter": "Surligneur",
+        "chalk": "Craie"
+      }
+    },
+    "color": {
+      "label": "Couleur",
+      "custom": "Choisir une autre couleur",
+      "customSwatch": "Couleur personnalisée {hex}"
+    },
+    "colors": {
+      "black": "Noir",
+      "blue": "Bleu",
+      "green": "Vert",
+      "purple": "Violet",
+      "red": "Rouge",
+      "orange": "Orange",
+      "grey": "Gris"
+    },
+    "width": {
+      "label": "Épaisseur",
+      "value": "{mm} mm"
+    },
+    "applyAll": {
+      "label": "Appliquer à toute la note :",
+      "selectionHint": "Les changements s'appliquent à la sélection.",
+      "color": "Couleur",
+      "tool": "Encre",
+      "width": "Épaisseur"
+    },
+    "selection": {
+      "label": "Sélection",
+      "count": "Traits sélectionnés : {count}",
+      "duplicate": "Dupliquer",
+      "delete": "Supprimer",
+      "clear": "Désélectionner"
+    },
+    "page": {
+      "label": "Page",
+      "paper": "Papier",
+      "template": "Modèle",
+      "texture": "Texture du papier",
+      "rotateCcw": "Tourner la page d'un quart de tour vers la gauche",
+      "rotateCcwShort": "Gauche",
+      "rotateCw": "Tourner la page d'un quart de tour vers la droite",
+      "rotateCwShort": "Droite",
+      "autoCrop": "Recadrer autour du contenu",
+      "manualCrop": "Recadrer à la main",
+      "cropHint": "Tracez sur la page le rectangle à garder."
+    },
+    "papers": {
+      "white": "Blanc",
+      "cream": "Crème",
+      "kraft": "Kraft",
+      "slate": "Ardoise noire",
+      "custom": "Personnalisé"
+    },
+    "templates": {
+      "blank": "Uni",
+      "lined": "Ligné",
+      "seyes": "Seyès",
+      "grid5mm": "Quadrillé 5 mm",
+      "millimetric": "Millimétré",
+      "dotted": "Pointillé",
+      "music": "Portées"
+    },
+    "layers": {
+      "label": "Calques",
+      "add": "Ajouter un calque",
+      "defaultName": "Calque {n}",
+      "active": "Dessiner sur « {name} »",
+      "visible": "Afficher « {name} »",
+      "name": "Nom du calque {n}",
+      "up": "Monter « {name} »",
+      "down": "Descendre « {name} »",
+      "merge": "Fusionner « {name} » avec le calque du dessous"
+    },
+    "zoom": {
+      "label": "Zoom",
+      "in": "Agrandir",
+      "out": "Réduire",
+      "fit": "Ajuster",
+      "level": "{percent} %"
+    },
+    "leave": {
+      "title": "Modifications non enregistrées",
+      "message": "Cette note a des modifications qui n'ont pas été enregistrées.",
+      "save": "Enregistrer et revenir",
+      "discard": "Revenir sans enregistrer",
+      "cancel": "Rester"
+    }
   }
 }

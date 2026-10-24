@@ -165,5 +165,138 @@
     "noFreeName": "no free file name was found ({detail})",
     "notInTrash": "this note is no longer in the trash ({detail})",
     "libraryWatch": "watching the library folder failed ({detail})"
+  },
+  "editor": {
+    "back": "Library",
+    "loading": "Opening the note…",
+    "loadError": "Cannot open this note: {message}",
+    "title": "Title of the note",
+    "untitled": "Untitled note",
+    "retitleError": "Cannot rename the note: {message}",
+    "save": "Save",
+    "saveShortcut": "Save (Ctrl+S)",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "unsaved": "Unsaved changes",
+    "saveError": "Cannot save the note: {message}",
+    "conflictTitle": "Your changes were not saved",
+    "conflictHint": "Your changes are still shown here, but saving them would overwrite the other version. Go back to the library and reopen the note to see the latest version.",
+    "dismiss": "Dismiss",
+    "undo": "Undo (Ctrl+Z)",
+    "redo": "Redo (Ctrl+Y)",
+    "toolbar": "Editing tools",
+    "canvas": "Note page",
+    "sidePanel": "Page, layers and selection",
+    "modes": {
+      "label": "Tool",
+      "select": "Select",
+      "pen": "Pen",
+      "eraser": "Eraser",
+      "pan": "Move the page"
+    },
+    "eraser": {
+      "label": "Eraser mode",
+      "whole": "Whole strokes",
+      "partial": "Partial",
+      "size": "Size"
+    },
+    "ink": {
+      "label": "Ink",
+      "tools": {
+        "ballpoint": "Ballpoint pen",
+        "fountainPen": "Fountain pen",
+        "feltTip": "Felt-tip pen",
+        "pencil": "Pencil",
+        "brush": "Brush",
+        "highlighter": "Highlighter",
+        "chalk": "Chalk"
+      }
+    },
+    "color": {
+      "label": "Colour",
+      "custom": "Choose another colour",
+      "customSwatch": "Custom colour {hex}"
+    },
+    "colors": {
+      "black": "Black",
+      "blue": "Blue",
+      "green": "Green",
+      "purple": "Purple",
+      "red": "Red",
+      "orange": "Orange",
+      "grey": "Grey"
+    },
+    "width": {
+      "label": "Width",
+      "value": "{mm} mm"
+    },
+    "applyAll": {
+      "label": "Apply to the whole note:",
+      "selectionHint": "Changes apply to the selection.",
+      "color": "Colour",
+      "tool": "Ink",
+      "width": "Width"
+    },
+    "selection": {
+      "label": "Selection",
+      "count": "Selected strokes: {count}",
+      "duplicate": "Duplicate",
+      "delete": "Delete",
+      "clear": "Deselect"
+    },
+    "page": {
+      "label": "Page",
+      "paper": "Paper",
+      "template": "Template",
+      "texture": "Paper texture",
+      "rotateCcw": "Rotate the page a quarter turn to the left",
+      "rotateCcwShort": "Left",
+      "rotateCw": "Rotate the page a quarter turn to the right",
+      "rotateCwShort": "Right",
+      "autoCrop": "Crop around the content",
+      "manualCrop": "Crop by hand",
+      "cropHint": "Draw on the page the rectangle to keep."
+    },
+    "papers": {
+      "white": "White",
+      "cream": "Cream",
+      "kraft": "Kraft",
+      "slate": "Black slate",
+      "custom": "Custom"
+    },
+    "templates": {
+      "blank": "Blank",
+      "lined": "Lined",
+      "seyes": "Seyès",
+      "grid5mm": "5 mm squares",
+      "millimetric": "Graph paper (mm)",
+      "dotted": "Dotted",
+      "music": "Music staves"
+    },
+    "layers": {
+      "label": "Layers",
+      "add": "Add a layer",
+      "defaultName": "Layer {n}",
+      "active": "Draw on “{name}”",
+      "visible": "Show “{name}”",
+      "name": "Name of layer {n}",
+      "up": "Move “{name}” up",
+      "down": "Move “{name}” down",
+      "merge": "Merge “{name}” into the layer below"
+    },
+    "zoom": {
+      "label": "Zoom",
+      "in": "Zoom in",
+      "out": "Zoom out",
+      "fit": "Fit",
+      "level": "{percent} %"
+    },
+    "leave": {
+      "title": "Unsaved changes",
+      "message": "This note has changes that have not been saved.",
+      "save": "Save and go back",
+      "discard": "Go back without saving",
+      "cancel": "Stay"
+    }
   }
 }
