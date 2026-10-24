@@ -335,6 +335,113 @@ fn live_mode_delivers_samples_received_before_the_acknowledgement() {
 }
 
 #[test]
+fn live_mode_keeps_every_notification_in_order_with_its_receipt_stamp() {
+    let before = SystemTime::now();
+    let sample = hex("a1 06 10 27 20 4e 00 04");
+    let (mut session, _) = connected(vec![
+        (
+            "b1 01 00",
+            vec![
+                cmd("b3 01 00"),
+                on(Channel::SysEvent, hex("f1 02 14 01")),
+                on(Channel::Live, sample.clone()),
+                cmd("99 01 00"),
+                on(Channel::Live, hex("10 02 2a 00")),
+            ],
+        ),
+        ("b1 01 02", vec![cmd("b3 01 00")]),
+    ]);
+    session.start_live().unwrap();
+    assert!(session.in_live_mode());
+    let mut seen = Vec::new();
+    while let Some(n) = session.next_live_event(Duration::from_millis(100)).unwrap() {
+        assert!(n.received >= before);
+        seen.push((n.channel, ardoise_proto::hex::encode(&n.data)));
+    }
+    assert_eq!(
+        seen,
+        [
+            (Channel::SysEvent, "f1 02 14 01".to_owned()),
+            (Channel::Live, "a1 06 10 27 20 4e 00 04".to_owned()),
+            (Channel::Command, "99 01 00".to_owned()),
+            (Channel::Live, "10 02 2a 00".to_owned()),
+        ]
+    );
+    session.stop_live().unwrap();
+    assert!(!session.in_live_mode());
+}
+
+#[test]
+fn next_live_skips_what_is_not_pen_data() {
+    let sample = hex("a1 06 10 27 20 4e 00 04");
+    let (mut session, _) = connected(vec![(
+        "b1 01 00",
+        vec![
+            cmd("b3 01 00"),
+            on(Channel::SysEvent, hex("f1 02 13 00")),
+            on(Channel::Live, sample.clone()),
+        ],
+    )]);
+    session.start_live().unwrap();
+    assert_eq!(
+        session.next_live(Duration::from_secs(1)).unwrap(),
+        Some(sample)
+    );
+}
+
+#[test]
+fn sysevents_outside_live_mode_are_not_kept() {
+    let (mut session, _) = connected(vec![(
+        "b9 01 00",
+        vec![
+            on(Channel::SysEvent, hex("f1 02 13 00")),
+            cmd("ba 02 3e 00"),
+        ],
+    )]);
+    assert_eq!(session.battery().unwrap(), (62, false));
+    assert_eq!(session.next_live_event(Duration::ZERO).unwrap(), None);
+}
+
+#[test]
+fn renames_the_tablet_with_a_line_feed() {
+    // protocol.md §4.1: `bb n+1 <ASCII name> 0a` -> `b3 01 00`.
+    let (mut session, harness) = connected(vec![(
+        "bb 0b 43 6c 61 73 73 65 20 33 65 42 0a",
+        vec![cmd("b3 01 00")],
+    )]);
+    session.set_name("Classe 3eB").unwrap();
+    assert_eq!(harness.writes.lock().unwrap().len(), 2);
+    for bad in ["", "Ardoise de la classe", "Tablette é", "tab\tle"] {
+        assert_eq!(
+            session.set_name(bad).err(),
+            Some(DeviceError::InvalidName(bad.to_owned())),
+            "{bad:?}"
+        );
+    }
+    assert_eq!(harness.writes.lock().unwrap().len(), 2, "nothing sent");
+    assert!(valid_name("Bamboo Slate A4"));
+    assert!(!valid_name("Bamboo Slate A4!!"));
+}
+
+#[test]
+fn idle_drops_stray_frames_and_notices_a_lost_link() {
+    let (mut session, _) = connected(vec![(
+        "b9 01 00",
+        vec![
+            cmd("ba 02 3e 00"),
+            cmd("bc 06 53 6c 61 74 65 0a"),
+            TransportEvent::Disconnected,
+        ],
+    )]);
+    assert_eq!(session.battery().unwrap(), (62, false));
+    assert_eq!(
+        session.idle(Duration::from_secs(1)).err(),
+        Some(DeviceError::Disconnected)
+    );
+    assert!(!session.is_connected());
+}
+
+#[test]
 fn a_lost_link_is_reported() {
     let (mut session, _) = connected(vec![("b9 01 00", vec![TransportEvent::Disconnected])]);
     assert_eq!(session.battery().err(), Some(DeviceError::Disconnected));

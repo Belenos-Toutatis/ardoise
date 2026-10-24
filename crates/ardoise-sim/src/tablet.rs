@@ -36,6 +36,9 @@
 //! - **Assumption:** a new connection starts in paper mode.
 //! - Right after a connection the tablet sends the sysevent `f1 02 13 00` (seen on a real
 //!   Slate, issue #212; meaning unknown).
+//! - **Assumption (to check at H2):** a button press while live mode streams sends the
+//!   sysevent [`LIVE_BUTTON_SYSEVENT`] (`f1 02 14 01`, invented: protocol.md does not say what
+//!   the Slate sends) and stores nothing.
 //! - One connection at a time: the tablet does not advertise while connected, and a second
 //!   `connect` times out. A host disconnection, a lost link or a dropped transport frees it.
 //!
@@ -65,6 +68,11 @@ use crate::pen::{self, PenEvent, PenScript, SAMPLE_INTERVAL, TimedPen};
 
 /// Sysevent a real Slate sends right after a connection (issue #212), meaning unknown.
 pub const CONNECT_SYSEVENT: [u8; 4] = [0xf1, 0x02, 0x13, 0x00];
+
+/// Sysevent the simulated tablet sends when its button is pressed while live mode streams.
+/// **Invented** (protocol.md says nothing about it): the device layer recognises it through
+/// `ardoise_proto::live::BUTTON_SYSEVENTS`, until the H2 log shows the real signature.
+pub const LIVE_BUTTON_SYSEVENT: [u8; 4] = [0xf1, 0x02, 0x14, 0x01];
 
 /// The Slate stroke-header clock is a 16-bit count of 5 ms ticks: it wraps after this long.
 const STROKE_CLOCK_WRAP_MS: u64 = 65_536 * 5;
@@ -162,6 +170,8 @@ pub struct SimStats {
     pub live_samples: u64,
     /// `a2` notifications streamed.
     pub proximity_in: u32,
+    /// Button presses sent as [`LIVE_BUTTON_SYSEVENT`] while live mode streamed.
+    pub live_buttons: u32,
 }
 
 /// Handle to one simulated tablet. Clones share the same tablet.
@@ -278,6 +288,12 @@ impl SimTablet {
         }
     }
 
+    /// A tablet whose clock follows the computer's clock (switched on, never registered, no
+    /// page), for [`RealTimeConnector`](crate::realtime::RealTimeConnector).
+    pub fn real_time(config: SimConfig) -> Self {
+        Self::with_clock(config, Arc::new(VirtualClock::following_real_time()))
+    }
+
     /// The default simulated tablet: a Bamboo Slate Large ([`SimConfig::slate_large`]).
     pub fn slate_large() -> Self {
         Self::new(SimConfig::slate_large())
@@ -318,7 +334,8 @@ impl SimTablet {
 
     /// Presses the button briefly. During a registration (a host sent `e7`) it confirms it:
     /// the identity is stored and `e4 01 00` sent. In registration mode without `e7` it does
-    /// nothing. Otherwise it stores the page drawn so far, if any.
+    /// nothing. While live mode streams it sends [`LIVE_BUTTON_SYSEVENT`] (assumption).
+    /// Otherwise it stores the page drawn so far, if any.
     pub fn press_button(&self) {
         let now = self.now();
         let wall = self.wall_seconds();
@@ -340,6 +357,18 @@ impl SimTablet {
             return;
         }
         if state.register_mode {
+            return;
+        }
+        if alive
+            && let Some(link) = state.link.as_mut()
+            && link.stream.is_some()
+        {
+            link.queue.push_back(Outgoing {
+                due: now,
+                channel: Channel::SysEvent,
+                data: LIVE_BUTTON_SYSEVENT.to_vec(),
+            });
+            state.stats.live_buttons += 1;
             return;
         }
         state.store_sketch(wall);
@@ -453,6 +482,13 @@ impl SimTablet {
     /// Whether the tablet waits to be registered (after [`SimTablet::hold_button`]).
     pub fn in_register_mode(&self) -> bool {
         self.state().register_mode
+    }
+
+    /// Whether live mode streams to a connected host.
+    pub fn is_streaming(&self) -> bool {
+        let now = self.now();
+        let state = self.state();
+        state.alive(now) && state.link.as_ref().is_some_and(|l| l.stream.is_some())
     }
 
     /// Whether a host is connected.
@@ -616,6 +652,25 @@ impl SimTablet {
                 Ok(None)
             }
         }
+    }
+
+    /// When the next event of link `id` is due (a notification, or the loss of the link), on
+    /// the virtual clock; `None` when nothing is planned. Events added later (a button press)
+    /// can come earlier.
+    pub(crate) fn link_next_due(&self, id: u64) -> Option<Duration> {
+        let state = self.state();
+        let Some(link) = state.link.as_ref().filter(|l| l.id == id) else {
+            return Some(Duration::ZERO);
+        };
+        let queued = link.queue.front().map(|o| o.due);
+        let live = link
+            .stream
+            .and_then(|stream| peek_live(&state.pen, stream))
+            .map(|item| item.due);
+        [queued, live, state.link_end(link)]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// The host closes link `id` (or drops its transport).

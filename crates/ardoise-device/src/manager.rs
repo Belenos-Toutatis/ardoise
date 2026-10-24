@@ -138,6 +138,7 @@ impl Manager {
     }
 
     /// Scans in slices (so that cancellation is noticed) until `filter` accepts a tablet.
+    /// Within a slice, cancellation ends the scan at the next advertisement received.
     fn scan(
         &mut self,
         timeout: Duration,
@@ -155,7 +156,13 @@ impl Manager {
                 return Ok(None);
             }
             let slice = (deadline - now).min(SCAN_SLICE);
-            if let Some(ad) = self.connector.find(slice, filter)? {
+            let found = self.connector.find(slice, &mut |ad: &Advertisement| {
+                cancel.load(Ordering::SeqCst) || filter(ad)
+            })?;
+            if cancel.load(Ordering::SeqCst) {
+                return Err(DeviceError::Cancelled);
+            }
+            if let Some(ad) = found {
                 self.note(format!(
                     "found {} at {} (rssi {:?}, manufacturer data {} bytes)",
                     ad.name.as_deref().unwrap_or("unnamed tablet"),

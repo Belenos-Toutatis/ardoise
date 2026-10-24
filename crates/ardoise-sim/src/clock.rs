@@ -5,9 +5,14 @@
 //! its timeout jumps the clock by that timeout, and an event due later than now moves the
 //! clock to its due time. A 30 s live session therefore runs in milliseconds of real time and
 //! a timeout elapses instantly, while every timestamp stays exactly reproducible.
+//!
+//! [`VirtualClock::following_real_time`] makes a clock that never lags behind the computer's
+//! clock (the simulated tablet of `ardoise.exe --simulated-tablet`, driven by
+//! [`RealTimeConnector`](crate::realtime::RealTimeConnector)): live mode then streams 200
+//! samples per second for real.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ardoise_device::transport::Clock;
 
@@ -26,8 +31,10 @@ pub fn sim_epoch() -> SystemTime {
 #[derive(Debug)]
 pub struct VirtualClock {
     origin: SystemTime,
-    /// Monotonic time since the origin, in nanoseconds.
+    /// Monotonic time since the origin, in nanoseconds (moved by `advance`).
     nanos: AtomicU64,
+    /// Real time at monotonic 0, for a clock that follows the computer's clock.
+    real: Option<Instant>,
 }
 
 impl VirtualClock {
@@ -42,7 +49,27 @@ impl VirtualClock {
         Self {
             origin,
             nanos: AtomicU64::new(0),
+            real: None,
         }
+    }
+
+    /// A clock whose monotonic time is at least the real time elapsed since now, and whose
+    /// wall clock starts at the computer's current time. Advancing it still works (it then
+    /// runs ahead of real time), so nothing that drives it may wait by advancing it: the
+    /// real-time connector waits for real instead.
+    pub fn following_real_time() -> Self {
+        Self {
+            // The simulated tablet's wall clock is the computer's: the time the app sets is
+            // the real one. This is a `Clock` implementation, like `SystemClock`.
+            origin: SystemTime::now(),
+            nanos: AtomicU64::new(0),
+            real: Some(Instant::now()),
+        }
+    }
+
+    /// Whether this clock follows the real time.
+    pub fn is_real_time(&self) -> bool {
+        self.real.is_some()
     }
 
     /// Wall-clock time at monotonic 0.
@@ -52,7 +79,16 @@ impl VirtualClock {
 
     /// Time elapsed since the origin.
     pub fn monotonic(&self) -> Duration {
-        Duration::from_nanos(self.nanos.load(Ordering::SeqCst))
+        Duration::from_nanos(self.current())
+    }
+
+    /// Monotonic nanoseconds: the stored time, or the real time elapsed if later.
+    fn current(&self) -> u64 {
+        let stored = self.nanos.load(Ordering::SeqCst);
+        match self.real {
+            Some(start) => stored.max(nanos(start.elapsed())),
+            None => stored,
+        }
     }
 
     /// Current wall-clock time: the origin plus [`VirtualClock::monotonic`].
@@ -63,11 +99,12 @@ impl VirtualClock {
     /// Moves the clock forward by `by`.
     pub fn advance(&self, by: Duration) {
         let by = nanos(by);
+        let real = self.real.map(|start| nanos(start.elapsed()));
         // The closure always returns `Some`, so the update cannot fail.
         let _ = self
             .nanos
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |now| {
-                Some(now.saturating_add(by))
+                Some(now.max(real.unwrap_or(0)).saturating_add(by))
             });
     }
 
@@ -126,6 +163,31 @@ mod tests {
         clock.advance_to(Duration::from_secs(2));
         assert_eq!(clock.monotonic(), Duration::from_secs(2));
         assert_eq!(unix_seconds(clock.now()), 1_788_249_602);
+    }
+
+    #[test]
+    fn a_real_time_clock_follows_the_computer() {
+        let clock = VirtualClock::following_real_time();
+        assert!(clock.is_real_time());
+        assert!(!VirtualClock::new().is_real_time());
+        let wall = SystemTime::now();
+        let gap = clock
+            .now()
+            .duration_since(wall)
+            .unwrap_or_else(|e| e.duration());
+        assert!(gap < Duration::from_secs(1), "{gap:?}");
+        let before = clock.monotonic();
+        std::thread::sleep(Duration::from_millis(20));
+        let after = clock.monotonic();
+        assert!(
+            after >= before + Duration::from_millis(20),
+            "{before:?} {after:?}"
+        );
+        // Advancing moves it ahead of real time, never back.
+        clock.advance(Duration::from_secs(60));
+        assert!(clock.monotonic() >= after + Duration::from_secs(60));
+        clock.advance_to(Duration::ZERO);
+        assert!(clock.monotonic() >= after + Duration::from_secs(60));
     }
 
     #[test]

@@ -4,18 +4,31 @@
 //! and reports a [`TabletStatus`] at every change.
 //!
 //! Contract: docs/design/tablet-live-classroom.md. The types and the public methods are fixed;
-//! the worker behind them is work package A.
+//! the worker behind them is in `service/worker.rs`.
+//!
+//! The handle sends requests to the worker over a channel; blocking requests (rename, set the
+//! clock, forget) wait for its answer up to [`REQUEST_TIMEOUT`]. The worker does one bounded
+//! step at a time (a scan slice, one page of a sync, one live notification...) and looks at its
+//! requests between steps; an interrupt flag (the `Manager`'s cancellation flag) cuts short a
+//! scan, a download or the registration when a request cannot wait (cancel, forget, another
+//! library, shutdown), or while the worker only searches for the tablet.
+
+mod journal;
+mod worker;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::SystemTime;
+use std::thread::JoinHandle;
+use std::time::{Duration, SystemTime};
 
 use ardoise_core::note::PageSize;
 use ardoise_core::settings::{Hand, LiveButton, TabletSettings};
 use ardoise_proto::live::LiveRecord;
 use serde::{Deserialize, Serialize};
 
-use crate::session::{DeviceError, DownloadedPage};
+use crate::session::{DeviceError, DownloadedPage, valid_name};
 use crate::transport::{Connector, TransportError};
 
 /// What the service is doing with the tablet.
@@ -298,13 +311,72 @@ pub trait LiveSink: Send {
     fn input(&mut self, input: LiveInput);
 }
 
+/// Longest scan for the registered tablet before the worker looks at its requests again
+/// (`Manager::find_registered`).
+pub const SEARCH_SLICE: Duration = Duration::from_secs(5);
+/// How long the wizard looks for a tablet in registration mode.
+pub const REGISTER_SEARCH: Duration = Duration::from_secs(60);
+/// How long the wizard waits for the button press that confirms the registration.
+pub const BUTTON_TIMEOUT: Duration = Duration::from_secs(30);
+/// Wait before trying again after a failed connection.
+pub const RETRY_DELAY: Duration = Duration::from_secs(5);
+/// How often a missing or switched-off Bluetooth adapter is checked again.
+pub const ADAPTER_RECHECK: Duration = Duration::from_secs(10);
+/// How long a blocking request (rename, set the clock, forget) waits for the worker.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The `errorCodes.*` key of a device error (the interface translates it).
+pub fn error_code(error: &DeviceError) -> &'static str {
+    match error {
+        DeviceError::Transport(TransportError::NoAdapter) => "bluetoothMissing",
+        DeviceError::Transport(TransportError::AdapterOff) => "bluetoothOff",
+        DeviceError::Transport(TransportError::Timeout | TransportError::NotFound(_))
+        | DeviceError::Timeout(_) => "tabletTimeout",
+        DeviceError::Disconnected | DeviceError::NotConnected => "tabletNotConnected",
+        DeviceError::NotRegistered | DeviceError::Refused(_) => "tabletRefused",
+        DeviceError::Busy => "tabletBusy",
+        DeviceError::NoTabletRegistered => "tabletNotRegistered",
+        DeviceError::NoLibrary => "noLibrary",
+        DeviceError::InvalidName(_) => "invalidName",
+        DeviceError::Storage(_) => "libraryAccess",
+        DeviceError::Transport(_)
+        | DeviceError::Unexpected(_)
+        | DeviceError::CrcMismatch { .. }
+        | DeviceError::Cancelled => "tablet",
+    }
+}
+
+impl From<&DeviceError> for StatusError {
+    fn from(error: &DeviceError) -> Self {
+        StatusError::new(error_code(error), error)
+    }
+}
+
+/// The answer to a blocking request.
+type Answer<T> = SyncSender<Result<T, DeviceError>>;
+
+/// What the handle asks the worker.
+enum Request {
+    Register,
+    SyncNow,
+    Cancel,
+    Rename(String, Answer<()>),
+    SetTime(Answer<i64>),
+    SetOptions(TabletOptions),
+    Forget(Answer<()>),
+    SetLibrary(Option<PathBuf>, Option<PathBuf>),
+    StartLive(Box<dyn LiveSink>),
+    StopLive,
+    Shutdown,
+}
+
 /// Handle to the worker. Dropping it stops the worker.
 pub struct TabletService {
     status: Arc<Mutex<TabletStatus>>,
-}
-
-fn not_ready() -> DeviceError {
-    DeviceError::Unexpected("the tablet service is not implemented yet".into())
+    requests: Sender<Request>,
+    /// The `Manager`'s cancellation flag: cuts short what the worker waits for.
+    interrupt: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
 }
 
 impl TabletService {
@@ -316,11 +388,42 @@ impl TabletService {
         on_status: StatusCallback,
         store_page: PageStore,
     ) -> TabletService {
-        let _ = (connector, hooks, store_page);
         let status = TabletStatus::initial(config.simulated, config.options);
         on_status(&status);
+        let status = Arc::new(Mutex::new(status));
+        let (requests, receiver) = mpsc::channel();
+        let interrupt = Arc::new(AtomicBool::new(false));
+        let publisher = worker::Publisher::new(status.clone(), Arc::new(on_status));
+        let failed = publisher.clone();
+        let worker = worker::Worker::new(
+            config,
+            connector,
+            hooks,
+            publisher,
+            store_page,
+            receiver,
+            interrupt.clone(),
+        );
+        let spawned = std::thread::Builder::new()
+            .name("tablet-service".into())
+            .spawn(move || worker.run());
+        let worker = match spawned {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                failed.update(|status| {
+                    status.error = Some(StatusError::new(
+                        "tablet",
+                        format!("cannot start the tablet service: {error}"),
+                    ));
+                });
+                None
+            }
+        };
         TabletService {
-            status: Arc::new(Mutex::new(status)),
+            status,
+            requests,
+            interrupt,
+            worker,
         }
     }
 
@@ -332,48 +435,121 @@ impl TabletService {
             .clone()
     }
 
+    /// Sends a request; `urgent` ones (and any request while the worker only searches for the
+    /// tablet) interrupt what the worker waits for. The flag is raised before the request is
+    /// sent, so that the worker never clears it after taking the request.
+    fn send(&self, request: Request, urgent: bool) -> Result<(), DeviceError> {
+        if urgent || self.status().connection == Connection::Searching {
+            self.interrupt.store(true, Ordering::SeqCst);
+        }
+        self.requests
+            .send(request)
+            .map_err(|_| DeviceError::Unexpected("the tablet service has stopped".into()))
+    }
+
+    /// Sends a blocking request and waits for the worker's answer.
+    fn ask<T>(
+        &self,
+        request: impl FnOnce(Answer<T>) -> Request,
+        urgent: bool,
+    ) -> Result<T, DeviceError> {
+        let (answer, receiver) = mpsc::sync_channel(1);
+        self.send(request(answer), urgent)?;
+        match receiver.recv_timeout(REQUEST_TIMEOUT) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => Err(DeviceError::Timeout("the tablet service")),
+            Err(RecvTimeoutError::Disconnected) => Err(DeviceError::Unexpected(
+                "the tablet service has stopped".into(),
+            )),
+        }
+    }
+
+    /// What the status says about a command that needs the connected, idle tablet (the
+    /// worker checks again).
+    fn check_connected(&self) -> Result<(), DeviceError> {
+        match self.status().connection {
+            Connection::Connected => Ok(()),
+            Connection::Syncing | Connection::Live | Connection::Registering => {
+                Err(DeviceError::Busy)
+            }
+            Connection::NotRegistered => Err(DeviceError::NoTabletRegistered),
+            Connection::Unavailable | Connection::Searching | Connection::Connecting => {
+                Err(DeviceError::NotConnected)
+            }
+        }
+    }
+
     /// Starts the registration wizard (progress in the status).
-    pub fn register(&self) {}
+    pub fn register(&self) {
+        let _ = self.send(Request::Register, false);
+    }
 
     /// Syncs now, or as soon as the tablet connects.
-    pub fn sync_now(&self) {}
+    pub fn sync_now(&self) {
+        let _ = self.send(Request::SyncNow, false);
+    }
 
     /// Cancels the registration or the sync under way.
-    pub fn cancel(&self) {}
+    pub fn cancel(&self) {
+        let _ = self.send(Request::Cancel, true);
+    }
 
     /// Renames the tablet (connected only).
     pub fn rename(&self, name: &str) -> Result<(), DeviceError> {
-        let _ = name;
-        Err(not_ready())
+        if !valid_name(name) {
+            return Err(DeviceError::InvalidName(name.to_owned()));
+        }
+        self.check_connected()?;
+        self.ask(|answer| Request::Rename(name.to_owned(), answer), false)
     }
 
     /// Sets the tablet clock (connected only); returns the drift left, in seconds.
     pub fn set_time(&self) -> Result<i64, DeviceError> {
-        Err(not_ready())
+        self.check_connected()?;
+        self.ask(Request::SetTime, false)
     }
 
     pub fn set_options(&self, options: TabletOptions) {
-        let _ = options;
+        let _ = self.send(Request::SetOptions(options), false);
     }
 
     /// Disconnects and forgets the registration (`device.json`).
     pub fn forget(&self) -> Result<(), DeviceError> {
-        Err(not_ready())
+        self.ask(Request::Forget, true)
     }
 
     /// Follows another library (or none).
     pub fn set_library(&self, library: Option<PathBuf>, identity_root: Option<PathBuf>) {
-        let _ = (library, identity_root);
+        let _ = self.send(Request::SetLibrary(library, identity_root), true);
     }
 
     /// Enters live mode now or as soon as the tablet connects; `sink` receives it.
     pub fn start_live(&self, sink: Box<dyn LiveSink>) {
-        let _ = sink;
+        let _ = self.send(Request::StartLive(sink), false);
     }
 
     /// Leaves live mode (the link stays open).
-    pub fn stop_live(&self) {}
+    pub fn stop_live(&self) {
+        let _ = self.send(Request::StopLive, false);
+    }
 
     /// Stops the worker and closes the link.
-    pub fn shutdown(self) {}
+    pub fn shutdown(mut self) {
+        let _ = self.send(Request::Shutdown, true);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
 }
+
+impl Drop for TabletService {
+    fn drop(&mut self) {
+        // Not joined: the worker finishes closing the link on its own.
+        if self.worker.take().is_some() {
+            let _ = self.send(Request::Shutdown, true);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

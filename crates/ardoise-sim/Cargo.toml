@@ -14,6 +14,8 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 thiserror = "2"
 
 [dev-dependencies]
+# The tablet service tests check the notes written in a library.
+ardoise-core = { path = "../ardoise-core" }
 tempfile = "3"
 
 [lints]
