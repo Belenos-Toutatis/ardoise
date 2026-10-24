@@ -131,7 +131,7 @@ fn save_into_library(library: &Path, report: &ImportReport) -> Result<Saved, Str
             continue;
         }
         let mut file = NoteFile::new(imported.note.clone());
-        file.thumbnail = thumbnail(&imported.note);
+        file.thumbnail = crate::thumbnails::thumbnail_png(&imported.note);
         // One note that cannot be written must not block the others.
         match library.create(Path::new(BINDER), &file) {
             Ok(_) => saved.written += 1,
@@ -141,16 +141,6 @@ fn save_into_library(library: &Path, report: &ImportReport) -> Result<Saved, Str
         }
     }
     Ok(saved)
-}
-
-/// Thumbnail width in pixels.
-const THUMBNAIL_WIDTH: u32 = 320;
-
-/// A PNG thumbnail of `note`, or `None` if it cannot be made (the note is saved anyway).
-fn thumbnail(note: &ardoise_core::note::Note) -> Option<Vec<u8>> {
-    let options = ardoise_render::RenderOptions::fit_width(note.page, THUMBNAIL_WIDTH);
-    let image = ardoise_render::render_note(note, &options).ok()?;
-    ardoise_render::encode_png(&image).ok()
 }
 
 fn short(id: &str) -> &str {

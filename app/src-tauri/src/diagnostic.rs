@@ -137,7 +137,7 @@ impl Operator for UiOperator {
 }
 
 /// `"fr"` or `"en"`, following the interface language.
-fn report_language(context: &AppContext) -> String {
+pub(crate) fn report_language(context: &AppContext) -> String {
     let french = match current_state(context).language() {
         Language::Fr => true,
         Language::En => false,

@@ -8,15 +8,20 @@ compile_error!("release builds need `--features custom-protocol` (use `cargo xta
 
 mod commands;
 mod console;
+mod demo;
 mod diagnostic;
 mod import;
+mod library;
 mod notes;
 mod selftest;
+mod tablet;
+mod thumbnails;
+mod watcher;
 
 use std::path::PathBuf;
 
 use ardoise_core::settings::SettingsStore;
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Command-line options. Normal launches have none.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -32,6 +37,9 @@ pub struct Cli {
     /// `--import-inkspace [LocalState] [--library DIR] [--compare]`: import Wacom Inkspace's
     /// notes without a window, print a table and exit with 0 (all imported) or 1.
     pub import_inkspace: Option<import::ImportArgs>,
+    /// `--create-demo-library DIR`: make DIR a library of synthetic notes without a window,
+    /// print what was created and exit (an empty path when DIR is missing).
+    pub create_demo_library: Option<PathBuf>,
 }
 
 impl Cli {
@@ -48,6 +56,10 @@ impl Cli {
                 "--import-inkspace" => import_inkspace = true,
                 "--compare" => import_args.compare = true,
                 "--library" => import_args.library = args.next().map(PathBuf::from),
+                "--create-demo-library" => {
+                    cli.create_demo_library =
+                        Some(args.next().map(PathBuf::from).unwrap_or_default());
+                }
                 other if !other.starts_with("--") && import_args.local_state.is_none() => {
                     import_args.local_state = Some(PathBuf::from(other));
                 }
@@ -82,12 +94,19 @@ fn webview_data_dir() -> Option<PathBuf> {
 pub fn run() {
     let cli = Cli::parse(std::env::args().skip(1));
     let headless_diagnostic = cli.diagnostic && cli.simulated;
-    if cli.self_test || headless_diagnostic || cli.import_inkspace.is_some() {
+    if cli.self_test
+        || headless_diagnostic
+        || cli.import_inkspace.is_some()
+        || cli.create_demo_library.is_some()
+    {
         console::attach_parent_console();
     }
 
     if let Some(import_args) = &cli.import_inkspace {
         std::process::exit(import::run_cli(import_args));
+    }
+    if let Some(dir) = &cli.create_demo_library {
+        std::process::exit(demo::run_cli(dir));
     }
 
     let context = AppContext {
@@ -111,6 +130,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(context)
         .manage(diagnostic::DiagnosticRuns::default())
+        .manage(thumbnails::ThumbnailCache::default_location())
+        .manage(watcher::LibraryWatch::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_state,
             commands::set_language,
@@ -122,6 +143,24 @@ pub fn run() {
             diagnostic::diagnostic_answer,
             diagnostic::diagnostic_cancel,
             notes::note_outlines,
+            library::library_list,
+            thumbnails::note_thumbnail,
+            library::create_note,
+            library::create_binder,
+            library::move_notes,
+            library::trash_notes,
+            library::trash_list,
+            library::trash_restore,
+            library::trash_purge,
+            library::trash_empty,
+            library::set_note_tags,
+            library::set_note_favorite,
+            library::retitle_note,
+            notes::open_note,
+            notes::save_note,
+            notes::render_background,
+            tablet::tablet_info,
+            tablet::forget_tablet,
         ])
         .setup(move |app| {
             if cli.self_test {
@@ -138,6 +177,12 @@ pub fn run() {
                 window = window.data_directory(dir);
             }
             window.build()?;
+            // Live refresh of the library; a failure is logged, the app works without it.
+            let library = commands::current_state(&app.state::<AppContext>())
+                .library()
+                .map(str::to_owned);
+            app.state::<watcher::LibraryWatch>()
+                .follow(app.handle(), library.as_deref());
             Ok(())
         })
         .run(tauri::generate_context!());
@@ -169,6 +214,17 @@ mod tests {
         assert!(simulated.diagnostic && simulated.simulated && !simulated.self_test);
         assert_eq!(parse(&["--unknown"]), Cli::default());
         assert_eq!(parse(&["C:\\somewhere"]).import_inkspace, None);
+    }
+
+    #[test]
+    fn parses_the_demo_library_mode() {
+        let demo = parse(&["--create-demo-library", "D:\\Démo"]);
+        assert_eq!(demo.create_demo_library, Some(PathBuf::from("D:\\Démo")));
+        assert_eq!(demo.import_inkspace, None);
+        assert_eq!(
+            parse(&["--create-demo-library"]).create_demo_library,
+            Some(PathBuf::new())
+        );
     }
 
     #[test]
