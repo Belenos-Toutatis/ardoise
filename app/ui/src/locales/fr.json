@@ -114,11 +114,31 @@
       "xRange": "Plage X",
       "yRange": "Plage Y",
       "pressureMax": "Pression maximale",
-      "proximity": "Proximité",
+      "proximity": "Proximité (entrées / sorties)",
       "reconnections": "Reconnexions",
       "result": "Résultat",
       "error": "Erreur",
-      "adapter": "Adaptateur"
+      "adapter": "Adaptateur",
+      "charging": "En charge"
+    },
+    "values": {
+      "simulatedAdapter": "aucun (tablette simulée)",
+      "existingRegistration": "enregistrement existant",
+      "registeredNow": "enregistrée à l'instant",
+      "registeredAgain": "enregistrée de nouveau",
+      "savedInDeviceJson": "enregistrée dans .ardoise/device.json",
+      "yes": "oui",
+      "no": "non",
+      "reconnected": "reconnectée avec l'identité enregistrée",
+      "noTabletFound": "aucune tablette trouvée",
+      "needsPreviousStep": "impossible sans l'étape précédente",
+      "notConnected": "tablette non connectée",
+      "noPenData": "aucun point reçu du stylet",
+      "missingReferencePages": "moins de pages que les pages de référence demandées",
+      "pointsOutOfRange": "points hors de la zone de dessin",
+      "clockNotSet": "l'horloge de la tablette n'a pas pu être réglée",
+      "registrationRefused": "identité refusée et tablette non vue en mode enregistrement",
+      "noPagesFolder": "impossible d'enregistrer les pages (dossier des diagnostics inaccessible) : rien n'a été effacé"
     }
   },
   "errors": {

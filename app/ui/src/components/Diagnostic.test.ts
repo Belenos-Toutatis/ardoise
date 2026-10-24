@@ -245,6 +245,33 @@ describe('tablet test panel', () => {
     expect(labels).toEqual(['Battery', 'mystery']);
     expect(target.querySelector('[data-step="info"]')?.textContent).toContain('Failed');
   });
+
+  it('translates fixed-phrase values and keeps the others', async () => {
+    setLocale('fr');
+    vi.spyOn(api, 'diagnosticStart').mockImplementation(async (_options, onEvent) => {
+      onEvent({ type: 'started', step: 'connect' });
+      onEvent({
+        type: 'finished',
+        outcome: {
+          step: 'connect',
+          status: 'passed',
+          details: [
+            { key: 'mode', value: '@registeredNow' },
+            { key: 'charging', value: '@no' },
+            { key: 'name', value: 'Bamboo Slate' },
+            { key: 'result', value: '@somethingNew' },
+          ],
+        },
+      });
+    });
+    const { target, button } = render();
+    button('Démarrer le test').click();
+    await vi.waitFor(() => expect(target.querySelector('[data-step="connect"] dl')).toBeTruthy());
+    const values = [...target.querySelectorAll('[data-step="connect"] dd')].map((n) => n.textContent);
+    expect(values).toEqual(["enregistrée à l'instant", 'non', 'Bamboo Slate', 'somethingNew']);
+    const labels = [...target.querySelectorAll('[data-step="connect"] dt')].map((n) => n.textContent);
+    expect(labels).toContain('En charge');
+  });
 });
 
 describe('home screen', () => {

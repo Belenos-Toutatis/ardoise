@@ -150,6 +150,14 @@
     const label = t(`diagnostic.details.${key}`);
     return label === `diagnostic.details.${key}` ? key : label;
   }
+
+  /** Detail values written `@key` are fixed phrases to translate; others are shown as they are. */
+  function detailValue(value: string): string {
+    if (!value.startsWith('@')) return value;
+    const key = `diagnostic.values.${value.slice(1)}`;
+    const text = t(key);
+    return text === key ? value.slice(1) : text;
+  }
 </script>
 
 {#snippet instructionText(instruction: Instruction)}
@@ -205,7 +213,7 @@
             <dl class="facts step-details">
               {#each details[id] ?? [] as detail (detail.key)}
                 <dt>{detailLabel(detail.key)}</dt>
-                <dd>{detail.value}</dd>
+                <dd>{detailValue(detail.value)}</dd>
               {/each}
             </dl>
           {/if}

@@ -19,6 +19,8 @@ use crate::transport::{Advertisement, Clock, Connector, Transport};
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// Tablet clocks further off than this are reported (protocol.md §4.4).
 pub const CLOCK_DRIFT_WARNING: i64 = 300;
+/// Length of one scan; between scans, cancellation is checked.
+const SCAN_SLICE: Duration = Duration::from_secs(5);
 
 /// A freshly registered tablet.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,9 +105,46 @@ impl Manager {
         } else {
             "looking for a tablet"
         });
+        self.scan(timeout, &mut |ad: &Advertisement| {
+            ad.is_wacom() && (!register_mode || ad.in_register_mode())
+        })
+    }
+
+    /// Waits up to `timeout` for the registered tablet. Its saved address is preferred (a
+    /// school may hold several Slates); if it is not seen within two thirds of the time, any
+    /// Wacom tablet is accepted, in case the address changed.
+    pub fn find_registered(
+        &mut self,
+        record: &DeviceRecord,
+        timeout: Duration,
+    ) -> Result<Option<Advertisement>, DeviceError> {
+        self.note(format!(
+            "looking for the registered tablet {}",
+            record.address
+        ));
+        let preferred = timeout * 2 / 3;
+        let address = record.address.clone();
+        let found = self.scan(preferred, &mut |ad: &Advertisement| {
+            ad.is_wacom() && ad.address.eq_ignore_ascii_case(&address)
+        })?;
+        if found.is_some() {
+            return Ok(found);
+        }
+        self.note("the registered address was not seen, accepting any tablet");
+        self.scan(
+            timeout.saturating_sub(preferred),
+            &mut |ad: &Advertisement| ad.is_wacom(),
+        )
+    }
+
+    /// Scans in slices (so that cancellation is noticed) until `filter` accepts a tablet.
+    fn scan(
+        &mut self,
+        timeout: Duration,
+        filter: &mut dyn FnMut(&Advertisement) -> bool,
+    ) -> Result<Option<Advertisement>, DeviceError> {
         let cancel = self.cancel.clone();
         let deadline = self.clock.monotonic() + timeout;
-        // Short scans in a loop, so that cancellation is noticed.
         loop {
             if cancel.load(Ordering::SeqCst) {
                 return Err(DeviceError::Cancelled);
@@ -115,11 +154,8 @@ impl Manager {
                 self.note("no tablet found");
                 return Ok(None);
             }
-            let slice = (deadline - now).min(Duration::from_secs(2));
-            let found = self.connector.find(slice, &mut |ad: &Advertisement| {
-                ad.is_wacom() && (!register_mode || ad.in_register_mode())
-            })?;
-            if let Some(ad) = found {
+            let slice = (deadline - now).min(SCAN_SLICE);
+            if let Some(ad) = self.connector.find(slice, filter)? {
                 self.note(format!(
                     "found {} at {} (rssi {:?}, manufacturer data {} bytes)",
                     ad.name.as_deref().unwrap_or("unnamed tablet"),
@@ -162,23 +198,33 @@ impl Manager {
             Some(self.cancel.clone()),
             waiting_for_button,
         )?;
-        let clock_drift = self.prepare(&mut session)?;
-        let info = session.info()?;
-        let record = DeviceRecord {
+        // From now on the tablet accepts only `id`, and the previous registration is dead:
+        // save it before anything else can fail, with provisional details.
+        let mut record = DeviceRecord {
             format: DEVICE_FORMAT,
             uuid: id,
             address: tablet.address.clone(),
-            name: info.name.clone(),
+            name: tablet.name.clone().unwrap_or_else(|| "Bamboo Slate".into()),
             protocol: "slate".into(),
-            width: info.width,
-            height: info.height,
+            width: ardoise_proto::SLATE_LARGE_WIDTH,
+            height: ardoise_proto::SLATE_LARGE_HEIGHT,
             registered: chrono::DateTime::<chrono::Local>::from(self.clock.now())
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
             extra: Default::default(),
         };
-        identity::save(&self.library, &record).map_err(|e| DeviceError::Storage(e.to_string()))?;
+        self.save(&record)?;
         self.note("registration saved in device.json");
+        let clock_drift = self.prepare(&mut session)?;
+        let info = session.info()?;
+        record.name = info.name.clone();
+        record.width = info.width;
+        record.height = info.height;
+        self.save(&record)?;
         Ok((session, Registration { info, clock_drift }))
+    }
+
+    fn save(&self, record: &DeviceRecord) -> Result<(), DeviceError> {
+        identity::save(&self.library, record).map_err(|e| DeviceError::Storage(e.to_string()))
     }
 
     /// Connects with the saved identity, to `address` or to the registered address.
@@ -207,8 +253,9 @@ impl Manager {
     }
 
     /// Runs live mode until the session clock reaches `until`, handing every decoded packet to
-    /// `on_packet`. A lost link is reopened with the saved identity and live mode resumed;
-    /// returns the number of reconnections.
+    /// `on_packet`. The tablet drops idle links by itself: a lost link (even before live mode
+    /// started) is reopened with the saved identity, retrying until `until`, and live mode
+    /// resumed. Returns the number of reconnections.
     pub fn live(
         &mut self,
         session: &mut Session,
@@ -217,30 +264,209 @@ impl Manager {
         on_packet: &mut dyn FnMut(&LivePacket),
     ) -> Result<u32, DeviceError> {
         let mut reconnections = 0;
-        session.start_live()?;
+        let mut live = false;
         loop {
+            if self.cancel.load(Ordering::SeqCst) {
+                return Err(DeviceError::Cancelled);
+            }
             let now = self.clock.monotonic();
             if now >= until {
                 break;
             }
-            match session.next_live((until - now).min(Duration::from_millis(250))) {
-                Ok(Some(raw)) => match live::decode(&raw) {
-                    Ok(packet) => on_packet(&packet),
-                    Err(error) => self.note(format!("malformed live packet: {error}")),
-                },
-                Ok(None) => {}
+            let result = if live {
+                session
+                    .next_live((until - now).min(Duration::from_millis(250)))
+                    .map(|raw| {
+                        if let Some(raw) = raw {
+                            match live::decode(&raw) {
+                                Ok(packet) => on_packet(&packet),
+                                Err(error) => self.note(format!("malformed live packet: {error}")),
+                            }
+                        }
+                    })
+            } else {
+                session.start_live().map(|()| live = true)
+            };
+            match result {
+                Ok(()) => {}
                 Err(DeviceError::Disconnected) => {
+                    live = false;
                     self.note("link lost during live mode, reconnecting");
-                    let address = session.peer().address.clone();
-                    let (mut fresh, _) = self.connect(record, Some(&address))?;
-                    fresh.start_live()?;
-                    *session = fresh;
+                    if !self.reconnect_until(session, record, until)? {
+                        break;
+                    }
                     reconnections += 1;
                 }
                 Err(error) => return Err(error),
             }
         }
-        session.stop_live()?;
+        if live && session.is_connected() {
+            // The samples are what matters: failing to leave live mode is only noted.
+            if let Err(error) = session.stop_live() {
+                self.note(format!("could not leave live mode: {error}"));
+            }
+        }
         Ok(reconnections)
+    }
+
+    /// Reopens `session` with the saved identity, retrying until `until`. Between attempts it
+    /// waits for the tablet to advertise again. `Ok(false)` when time ran out.
+    fn reconnect_until(
+        &mut self,
+        session: &mut Session,
+        record: &DeviceRecord,
+        until: Duration,
+    ) -> Result<bool, DeviceError> {
+        let address = session.peer().address.clone();
+        loop {
+            if self.cancel.load(Ordering::SeqCst) {
+                return Err(DeviceError::Cancelled);
+            }
+            let now = self.clock.monotonic();
+            if now >= until {
+                self.note("could not reconnect before the end of live mode");
+                return Ok(false);
+            }
+            match self.connect(record, Some(&address)) {
+                Ok((fresh, _)) => {
+                    *session = fresh;
+                    return Ok(true);
+                }
+                Err(error @ (DeviceError::Cancelled | DeviceError::NotRegistered)) => {
+                    return Err(error);
+                }
+                Err(error) => {
+                    self.note(format!("reconnection failed: {error}"));
+                    let wait = until.saturating_sub(self.clock.monotonic()).min(SCAN_SLICE);
+                    let wanted = address.clone();
+                    self.scan(wait, &mut |ad: &Advertisement| {
+                        ad.address.eq_ignore_ascii_case(&wanted)
+                    })?;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::log::DiagnosticLog;
+    use crate::testutil::{ScriptConnector, cmd};
+    use crate::transport::TransportEvent;
+
+    const ID: HostId = HostId([0x89, 0xea, 0x78, 0x88, 0xff, 0xcb]);
+    // 2026-10-24 12:00:00 UTC, the scripted clock's start.
+    const SET_TIME: &str = "b6 06 26 10 24 12 00 00";
+    const TIME: &str = "bd 06 26 10 24 12 00 00";
+
+    fn manager(connector: ScriptConnector, library: &Path) -> Manager {
+        let clock = connector.clock();
+        let log = DiagnosticLog::in_memory("test", clock).shared();
+        Manager::new(Box::new(connector), library.to_path_buf(), log).with_host_id(ID)
+    }
+
+    fn record() -> DeviceRecord {
+        DeviceRecord {
+            format: DEVICE_FORMAT,
+            uuid: ID,
+            address: "E2:43:03:67:0E:01".into(),
+            name: "Bamboo Slate".into(),
+            protocol: "slate".into(),
+            width: 29700,
+            height: 21600,
+            registered: "2026-10-24T14:00:00+02:00".into(),
+            extra: Default::default(),
+        }
+    }
+
+    #[test]
+    fn registration_is_saved_as_soon_as_the_tablet_confirms_it() {
+        let library = tempfile::tempdir().unwrap();
+        let connector = ScriptConnector::new(
+            vec![vec![
+                ("e7 06 89 ea 78 88 ff cb", vec![cmd("e4 01 00")]),
+                // The tablet then refuses to set its clock: the registration must survive.
+                (SET_TIME, vec![cmd("b3 01 02")]),
+            ]],
+            true,
+        );
+        let mut manager = manager(connector, library.path());
+        let tablet = manager.find(true, Duration::from_secs(5)).unwrap().unwrap();
+        let result = manager.register(&tablet, Duration::from_secs(10), &mut || {});
+        assert_eq!(
+            result.err(),
+            Some(DeviceError::Refused(
+                ardoise_proto::StatusCode::InvalidState
+            ))
+        );
+        let saved = manager.registration().unwrap().unwrap();
+        assert_eq!(saved.uuid, ID);
+        assert_eq!(saved.address, "E2:43:03:67:0E:01");
+    }
+
+    #[test]
+    fn live_mode_reconnects_when_the_idle_link_is_already_gone() {
+        let library = tempfile::tempdir().unwrap();
+        let sample = crate::testutil::hex("a1 06 10 27 20 4e 00 04");
+        let connector = ScriptConnector::new(
+            vec![
+                vec![
+                    ("e6 06 89 ea 78 88 ff cb", vec![cmd("b3 01 00")]),
+                    (SET_TIME, vec![cmd("b3 01 00")]),
+                    // The tablet drops the link right after: the loss is noticed later.
+                    ("b6 01 00", vec![cmd(TIME), TransportEvent::Disconnected]),
+                ],
+                vec![
+                    ("e6 06 89 ea 78 88 ff cb", vec![cmd("b3 01 00")]),
+                    (SET_TIME, vec![cmd("b3 01 00")]),
+                    ("b6 01 00", vec![cmd(TIME)]),
+                    (
+                        "b1 01 00",
+                        vec![
+                            cmd("b3 01 00"),
+                            TransportEvent::Notification {
+                                channel: crate::transport::Channel::Live,
+                                data: sample,
+                            },
+                        ],
+                    ),
+                    ("b1 01 02", vec![cmd("b3 01 00")]),
+                ],
+            ],
+            false,
+        );
+        let mut manager = manager(connector, library.path());
+        let record = record();
+        let (mut session, drift) = manager.connect(&record, None).unwrap();
+        assert_eq!(drift, 0);
+        let until = manager.clock().monotonic() + Duration::from_secs(1);
+        let mut packets = 0;
+        let reconnections = manager
+            .live(&mut session, &record, until, &mut |_| packets += 1)
+            .unwrap();
+        assert_eq!(reconnections, 1);
+        assert_eq!(packets, 1);
+    }
+
+    #[test]
+    fn prefers_the_registered_address() {
+        let library = tempfile::tempdir().unwrap();
+        let connector = ScriptConnector::new(vec![], false);
+        let mut manager = manager(connector, library.path());
+        let mut other = record();
+        other.address = "AA:BB:CC:DD:EE:FF".into();
+        // The scripted tablet has another address: it is only accepted after the preferred
+        // part of the wait.
+        let found = manager
+            .find_registered(&other, Duration::from_secs(3))
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.address, "E2:43:03:67:0E:01");
+        let found = manager
+            .find_registered(&record(), Duration::from_secs(3))
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.address, "E2:43:03:67:0E:01");
     }
 }

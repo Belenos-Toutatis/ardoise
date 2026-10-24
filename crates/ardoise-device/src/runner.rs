@@ -1,4 +1,8 @@
 //! The guided test itself: runs the steps of [`crate::diagnostic`] against a connector.
+//!
+//! Detail values that are fixed phrases are written as `@key`: the interface and the text
+//! report translate them (`diagnostic.values.key`). Numbers, names and technical error
+//! messages are written as they are.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,6 +11,7 @@ use std::time::Duration;
 
 use ardoise_core::fsutil::write_atomic;
 use ardoise_proto::live::{LivePacket, LiveRecord};
+use ardoise_proto::stroke::Point;
 
 use crate::diagnostic::{
     Decision, Detail, DiagnosticConfig, DiagnosticReport, Instruction, Operator, Progress, StepId,
@@ -14,7 +19,7 @@ use crate::diagnostic::{
 };
 use crate::identity::DeviceRecord;
 use crate::log::{DiagnosticLog, SharedLog, lock};
-use crate::manager::Manager;
+use crate::manager::{CLOCK_DRIFT_WARNING, Manager};
 use crate::session::{DeviceError, DeviceInfo, DownloadedPage, Session};
 use crate::transport::{Advertisement, Connector};
 use crate::{preview, report};
@@ -102,7 +107,12 @@ pub fn run(
             status,
             details,
         };
-        lock(&log).note(format!("step {step:?}: {status:?}"));
+        {
+            let mut log = lock(&log);
+            log.note(format!("step {step:?}: {status:?}"));
+            // A step boundary is a good moment to put the log on disk.
+            let _ = log.flush();
+        }
         run.operator.finished(&outcome);
         steps.push(outcome);
     }
@@ -159,6 +169,10 @@ fn detail(key: &str, value: impl Into<String>) -> Detail {
     }
 }
 
+fn yes_no(value: bool) -> &'static str {
+    if value { "@yes" } else { "@no" }
+}
+
 fn error_flow(error: DeviceError) -> Flow {
     match error {
         DeviceError::Cancelled => Flow::Cancelled,
@@ -191,6 +205,8 @@ impl Run<'_> {
 
     /// Asks the user; `Some(flow)` when the step must not run.
     fn ask(&mut self, step: StepId, instruction: Instruction) -> Option<Flow> {
+        // The user may take minutes: what happened so far must already be on disk.
+        let _ = lock(&self.log).flush();
         match self.operator.prompt(step, &instruction) {
             Decision::Continue if self.is_cancelled() => Some(Flow::Cancelled),
             Decision::Continue => None,
@@ -220,7 +236,7 @@ impl Run<'_> {
 
     fn adapter(&mut self) -> Flow {
         match self.adapter_check {
-            None => Flow::Passed(vec![detail("adapter", "not needed (simulated tablet)")]),
+            None => Flow::Passed(vec![detail("adapter", "@simulatedAdapter")]),
             Some(check) => match check() {
                 Ok(description) => Flow::Passed(vec![detail("adapter", description)]),
                 Err(reason) => Flow::Failed(vec![detail("error", reason)]),
@@ -245,72 +261,73 @@ impl Run<'_> {
             Ok(record) => record,
             Err(error) => return error_flow(error),
         };
-        let register = self.record.is_none();
-        let instruction = if register {
-            Instruction::HoldButtonToRegister
-        } else {
+        let instruction = if self.record.is_some() {
             Instruction::PressButton
+        } else {
+            Instruction::HoldButtonToRegister
         };
         if let Some(flow) = self.ask(StepId::Find, instruction) {
             return flow;
         }
         self.operator.progress(StepId::Find, &Progress::Waiting);
-        match self.manager.find(register, self.config.wait_timeout) {
+        let timeout = self.config.wait_timeout;
+        let found = match self.record.clone() {
+            Some(record) => self.manager.find_registered(&record, timeout),
+            None => self.manager.find(true, timeout),
+        };
+        match found {
             Ok(Some(found)) => {
                 let details = advertisement_details(&found);
                 self.found = Some(found);
                 Flow::Passed(details)
             }
-            Ok(None) => Flow::Failed(vec![detail(
-                "error",
-                format!(
-                    "no tablet found within {} s",
-                    self.config.wait_timeout.as_secs()
-                ),
-            )]),
+            Ok(None) => Flow::Failed(vec![detail("error", "@noTabletFound")]),
             Err(error) => error_flow(error),
         }
     }
 
     fn connect(&mut self) -> Flow {
         let Some(found) = self.found.clone() else {
-            return Flow::Skipped(vec![detail("error", "tablet not found")]);
+            return Flow::Skipped(vec![detail("error", "@needsPreviousStep")]);
         };
-        if let Some(record) = self.record.clone() {
-            match self.manager.connect(&record, Some(&found.address)) {
-                Ok((session, drift)) => {
-                    self.session = Some(session);
-                    self.clock_drift = drift;
-                    return Flow::Passed(vec![
-                        detail("mode", "existing registration"),
-                        detail("name", record.name),
-                    ]);
-                }
-                Err(DeviceError::NotRegistered) => {
-                    lock(&self.log).note("saved identity refused, registering again");
-                    if let Some(flow) = self.ask(StepId::Connect, Instruction::HoldButtonToRegister)
-                    {
-                        return flow;
-                    }
-                    self.operator.progress(StepId::Connect, &Progress::Waiting);
-                    match self.manager.find(true, self.config.wait_timeout) {
-                        Ok(Some(found)) => return self.register(&found, true),
-                        Ok(None) => {
-                            return Flow::Failed(vec![detail(
-                                "error",
-                                "the tablet refused the saved identity and was not seen in registration mode",
-                            )]);
-                        }
-                        Err(error) => return error_flow(error),
-                    }
-                }
-                Err(error) => return error_flow(error),
+        let Some(record) = self.record.clone() else {
+            return self.register(&found, false);
+        };
+        match self.manager.connect(&record, Some(&found.address)) {
+            Ok((session, drift)) => {
+                self.session = Some(session);
+                self.clock_drift = drift;
+                Flow::Passed(vec![
+                    detail("mode", "@existingRegistration"),
+                    detail("name", record.name),
+                ])
             }
+            Err(DeviceError::NotRegistered) => {
+                lock(&self.log).note("saved identity refused, registering again");
+                if let Some(flow) = self.ask(StepId::Connect, Instruction::HoldButtonToRegister) {
+                    return flow;
+                }
+                self.operator.progress(StepId::Connect, &Progress::Waiting);
+                match self.manager.find(true, self.config.wait_timeout) {
+                    Ok(Some(found)) => self.register(&found, true),
+                    Ok(None) => Flow::Failed(vec![detail("error", "@registrationRefused")]),
+                    Err(error) => error_flow(error),
+                }
+            }
+            Err(error) => error_flow(error),
         }
-        self.register(&found, false)
     }
 
     fn register(&mut self, found: &Advertisement, again: bool) -> Flow {
+        let mode = detail(
+            "mode",
+            if again {
+                "@registeredAgain"
+            } else {
+                "@registeredNow"
+            },
+        );
+        let previous = self.record.as_ref().map(|r| r.uuid);
         let operator = &mut *self.operator;
         operator.progress(StepId::Connect, &Progress::Waiting);
         let result = self
@@ -326,25 +343,48 @@ impl Run<'_> {
                 self.info = Some(registration.info);
                 self.record = self.manager.registration().ok().flatten();
                 Flow::Passed(vec![
-                    detail(
-                        "mode",
-                        if again {
-                            "registered again"
-                        } else {
-                            "registered now"
-                        },
-                    ),
+                    mode,
                     detail("name", name),
-                    detail("identity", "saved in .ardoise/device.json"),
+                    detail("identity", "@savedInDeviceJson"),
                 ])
             }
-            Err(error) => error_flow(error),
+            Err(DeviceError::Cancelled) => Flow::Cancelled,
+            Err(error) => {
+                // If the tablet confirmed the registration, the new identity is already saved:
+                // continue with it rather than losing the rest of the test.
+                let saved = self.manager.registration().ok().flatten();
+                match saved {
+                    Some(record) if Some(record.uuid) != previous => {
+                        lock(&self.log).note(format!(
+                            "registered, but reading the tablet failed ({error}); reconnecting"
+                        ));
+                        self.record = Some(record.clone());
+                        match self.manager.connect(&record, Some(&found.address)) {
+                            Ok((session, drift)) => {
+                                self.session = Some(session);
+                                self.clock_drift = drift;
+                                Flow::Passed(vec![
+                                    mode,
+                                    detail("identity", "@savedInDeviceJson"),
+                                    detail("result", "@reconnected"),
+                                ])
+                            }
+                            Err(second) => Flow::Failed(vec![
+                                mode,
+                                detail("identity", "@savedInDeviceJson"),
+                                detail("error", format!("{error}; {second}")),
+                            ]),
+                        }
+                    }
+                    _ => error_flow(error),
+                }
+            }
         }
     }
 
     fn info(&mut self) -> Flow {
         let Some(session) = self.session.as_mut() else {
-            return Flow::Skipped(vec![detail("error", "not connected")]);
+            return Flow::Skipped(vec![detail("error", "@notConnected")]);
         };
         let info = match self.info.take() {
             Some(info) => info,
@@ -360,14 +400,8 @@ impl Run<'_> {
         let mut details = vec![
             detail("name", info.name.clone()),
             detail("firmware", info.firmware.clone()),
-            detail(
-                "battery",
-                format!(
-                    "{} %{}",
-                    info.battery_percent,
-                    if info.charging { ", charging" } else { "" }
-                ),
-            ),
+            detail("battery", format!("{} %", info.battery_percent)),
+            detail("charging", yes_no(info.charging)),
             detail(
                 "size",
                 format!(
@@ -382,8 +416,8 @@ impl Run<'_> {
             detail("clockDrift", format!("{:+} s", self.clock_drift)),
         ];
         self.info = Some(info);
-        if self.clock_drift.abs() > crate::manager::CLOCK_DRIFT_WARNING {
-            details.push(detail("error", "the tablet clock could not be set"));
+        if self.clock_drift.abs() > CLOCK_DRIFT_WARNING {
+            details.push(detail("error", "@clockNotSet"));
             return Flow::Failed(details);
         }
         Flow::Passed(details)
@@ -391,7 +425,7 @@ impl Run<'_> {
 
     fn sync(&mut self) -> Flow {
         let Some(session) = self.session.as_mut() else {
-            return Flow::Skipped(vec![detail("error", "not connected")]);
+            return Flow::Skipped(vec![detail("error", "@notConnected")]);
         };
         let dir = self.pages_dir.clone();
         let (width, height) = self
@@ -411,21 +445,21 @@ impl Run<'_> {
                     total: u32::from(total),
                 },
             );
-            if let Some(dir) = &dir {
-                save_verified(&dir.join(format!("page-{index}.bin")), &page.bytes)?;
-            }
+            // Without a place to keep the page, it must stay on the tablet.
+            let Some(dir) = &dir else {
+                return Err("@noPagesFolder".into());
+            };
+            save_verified(&dir.join(format!("page-{index}.bin")), &page.bytes)?;
             match ardoise_proto::stroke::decode(&page.bytes) {
                 Ok(file) => {
                     strokes += file.strokes.len();
-                    points += file.strokes.iter().map(|s| s.points.len()).sum::<usize>();
-                    if let Some(dir) = &dir {
-                        let svg = preview::svg(&file, width, height);
-                        // A missing preview is not worth losing the page for.
-                        let _ =
-                            write_atomic(&dir.join(format!("page-{index}.svg")), svg.as_bytes());
-                    }
+                    points += file.point_count();
+                    let svg = preview::svg(&file, width, height);
+                    // A missing preview is not worth losing the page for.
+                    let _ = write_atomic(&dir.join(format!("page-{index}.svg")), svg.as_bytes());
                 }
                 Err(error) => {
+                    // The raw bytes are saved: a better decoder can read them later.
                     lock(&log).note(format!("page {index} cannot be decoded: {error}"));
                     decode_errors.push(format!("page {index}: {error}"));
                 }
@@ -434,6 +468,9 @@ impl Run<'_> {
         };
         let summary = match session.sync(self.config.delete_after_sync, &mut sink) {
             Ok(summary) => summary,
+            Err(DeviceError::Storage(reason)) if reason.starts_with('@') => {
+                return Flow::Failed(vec![detail("error", reason)]);
+            }
             Err(error) => return error_flow(error),
         };
         let mut details = vec![
@@ -458,30 +495,29 @@ impl Run<'_> {
             0
         };
         if summary.downloaded < expected {
-            details.push(detail(
-                "error",
-                format!("{expected} reference pages were expected"),
-            ));
+            details.push(detail("error", "@missingReferencePages"));
             return Flow::Failed(details);
         }
         Flow::Passed(details)
     }
 
     fn live(&mut self) -> Flow {
-        let (Some(session), Some(record)) = (self.session.as_mut(), self.record.clone()) else {
-            return Flow::Skipped(vec![detail("error", "not connected")]);
-        };
+        if self.session.is_none() || self.record.is_none() {
+            return Flow::Skipped(vec![detail("error", "@notConnected")]);
+        }
         let seconds = u32::try_from(self.config.live_duration.as_secs()).unwrap_or(u32::MAX);
-        match self
-            .operator
-            .prompt(StepId::Live, &Instruction::DrawLive { seconds })
-        {
-            Decision::Continue => {}
-            Decision::Skip => return Flow::Skipped(Vec::new()),
-            Decision::Cancel => {
-                self.config.cancel.store(true, Ordering::SeqCst);
-                return Flow::Cancelled;
-            }
+        if let Some(flow) = self.ask(StepId::Live, Instruction::DrawLive { seconds }) {
+            return flow;
+        }
+        let (Some(session), Some(record)) = (self.session.as_mut(), self.record.clone()) else {
+            return Flow::Skipped(vec![detail("error", "@notConnected")]);
+        };
+        // The tablet drops idle links by itself, typically while the user read the prompt:
+        // ask for a button press, the manager reconnects.
+        if matches!(session.battery(), Err(DeviceError::Disconnected)) {
+            lock(&self.log).note("the tablet disconnected while idle");
+            self.operator
+                .notify(StepId::Live, &Instruction::PressButton);
         }
         let clock = self.manager.clock();
         let start = clock.monotonic();
@@ -507,22 +543,23 @@ impl Run<'_> {
                 }
             },
         );
-        let reconnections = match result {
-            Ok(n) => n,
-            Err(error) => return error_flow(error),
-        };
         stats.finish(clock.monotonic());
         let mut details = stats.details();
-        details.push(detail("reconnections", reconnections.to_string()));
+        match result {
+            Ok(reconnections) => details.push(detail("reconnections", reconnections.to_string())),
+            Err(DeviceError::Cancelled) => return Flow::Cancelled,
+            // What was measured before the failure is still worth reporting.
+            Err(error) => {
+                details.push(detail("error", error.to_string()));
+                return Flow::Failed(details);
+            }
+        }
         if stats.samples == 0 {
-            details.push(detail("error", "no pen data received"));
+            details.push(detail("error", "@noPenData"));
             return Flow::Failed(details);
         }
         if stats.out_of_range > 0 {
-            details.push(detail(
-                "error",
-                format!("{} points outside the drawing area", stats.out_of_range),
-            ));
+            details.push(detail("error", "@pointsOutOfRange"));
             return Flow::Failed(details);
         }
         Flow::Passed(details)
@@ -530,15 +567,14 @@ impl Run<'_> {
 
     fn reconnect(&mut self) -> Flow {
         let (Some(session), Some(record)) = (self.session.take(), self.record.clone()) else {
-            return Flow::Skipped(vec![detail("error", "not connected")]);
+            return Flow::Skipped(vec![detail("error", "@notConnected")]);
         };
         let address = session.peer().address.clone();
         if let Err(error) = session.disconnect() {
             lock(&self.log).note(format!("disconnect failed: {error}"));
         }
         // The tablet may stop advertising once disconnected: retry after a button press.
-        let first = self.manager.connect(&record, Some(&address));
-        let result = match first {
+        let result = match self.manager.connect(&record, Some(&address)) {
             Ok(connected) => Ok(connected),
             Err(DeviceError::Cancelled) => return Flow::Cancelled,
             Err(error) => {
@@ -547,7 +583,10 @@ impl Run<'_> {
                     .notify(StepId::Reconnect, &Instruction::PressButton);
                 self.operator
                     .progress(StepId::Reconnect, &Progress::Waiting);
-                match self.manager.find(false, self.config.wait_timeout) {
+                match self
+                    .manager
+                    .find_registered(&record, self.config.wait_timeout)
+                {
                     Ok(Some(found)) => self.manager.connect(&record, Some(&found.address)),
                     Ok(None) => Err(DeviceError::Timeout("tablet advertisement")),
                     Err(error) => Err(error),
@@ -559,10 +598,7 @@ impl Run<'_> {
                 let battery = session.battery();
                 let _ = session.disconnect();
                 match battery {
-                    Ok(_) => Flow::Passed(vec![detail(
-                        "result",
-                        "connected again with the saved identity",
-                    )]),
+                    Ok(_) => Flow::Passed(vec![detail("result", "@reconnected")]),
                     Err(error) => error_flow(error),
                 }
             }
@@ -579,14 +615,7 @@ fn advertisement_details(found: &Advertisement) -> Vec<Detail> {
     if let Some(rssi) = found.rssi {
         details.push(detail("signal", format!("{rssi} dBm")));
     }
-    details.push(detail(
-        "registerMode",
-        if found.in_register_mode() {
-            "yes"
-        } else {
-            "no"
-        },
-    ));
+    details.push(detail("registerMode", yes_no(found.in_register_mode())));
     details
 }
 
@@ -647,10 +676,10 @@ impl LiveStats {
                 self.proximity_in += 1;
                 self.near_since.get_or_insert(now);
             }
-            LivePacket::Samples(samples) => {
-                for sample in samples {
-                    match *sample {
-                        LiveRecord::Pen(ardoise_proto::stroke::Point { x, y, pressure }) => {
+            LivePacket::Samples(records) => {
+                for record in records {
+                    match *record {
+                        LiveRecord::Pen(Point { x, y, pressure }) => {
                             self.samples += 1;
                             self.near_since.get_or_insert(now);
                             self.x = Some(widen(self.x, x));
@@ -697,7 +726,7 @@ impl LiveStats {
             detail("pressureMax", self.pressure_max.to_string()),
             detail(
                 "proximity",
-                format!("{} in, {} out", self.proximity_in, self.proximity_out),
+                format!("{} / {}", self.proximity_in, self.proximity_out),
             ),
         ]
     }
