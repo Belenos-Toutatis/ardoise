@@ -2,9 +2,10 @@
 //! tests (docs/design/tablet-live-classroom.md, "Simulated tablet in the app").
 //!
 //! - [`RealTimeConnector`]: a `Connector` over a [`SimTablet`] whose clock follows the
-//!   computer's ([`SimTablet::real_time`]). Nothing advances the clock: `recv` and `find` wait
-//!   for real, so live mode streams 200 samples per second for real and the receipt stamps of
-//!   the device layer measure a real latency.
+//!   computer's: `recv` and `find` wait for real, so live mode streams 200 samples per second
+//!   for real and the receipt stamps of the device layer measure a real latency. Best with
+//!   [`SimTablet::real_time`]; a tablet on a plain virtual clock is moved forward by the
+//!   connector as real time passes.
 //! - [`SimFactory`]: hands the tablet service connectors over one simulated tablet, in real
 //!   time or in virtual time (tests).
 //! - [`SimHooks`]: the person in front of the simulated tablet for the service: holds the
@@ -21,6 +22,7 @@ use ardoise_device::transport::{
     Advertisement, Clock, Connector, Transport, TransportError, TransportEvent,
 };
 
+use crate::clock::VirtualClock;
 use crate::drawings;
 use crate::tablet::{SimConfig, SimTablet};
 
@@ -55,17 +57,45 @@ fn deadline(duration: Duration) -> Instant {
         .unwrap_or_else(|| now + Duration::from_secs(365 * 24 * 3600))
 }
 
-/// Finds and connects to one simulated tablet whose clock follows the real time.
+/// Keeps the tablet's clock at least at the real time elapsed since the connector was made
+/// (nothing to do for a [`SimTablet::real_time`] clock, which follows by itself).
+#[derive(Debug, Clone)]
+struct Pace {
+    clock: Arc<VirtualClock>,
+    origin: Instant,
+    base: Duration,
+}
+
+impl Pace {
+    fn new(clock: Arc<VirtualClock>) -> Self {
+        let base = clock.monotonic();
+        Self {
+            clock,
+            origin: Instant::now(),
+            base,
+        }
+    }
+
+    fn sync(&self) {
+        if !self.clock.is_real_time() {
+            self.clock.advance_to(self.base + self.origin.elapsed());
+        }
+    }
+}
+
+/// Finds and connects to one simulated tablet, its clock following the real time.
 #[derive(Debug, Clone)]
 pub struct RealTimeConnector {
     tablet: SimTablet,
+    pace: Pace,
 }
 
 impl RealTimeConnector {
-    /// A connector over `tablet`, which should be made with [`SimTablet::real_time`] (with a
-    /// virtual clock, nothing planned ever becomes due).
+    /// A connector over `tablet`, preferably made with [`SimTablet::real_time`] (a virtual
+    /// clock is moved forward only while the connector or one of its links is used).
     pub fn new(tablet: SimTablet) -> Self {
-        Self { tablet }
+        let pace = Pace::new(tablet.clock());
+        Self { tablet, pace }
     }
 
     pub fn tablet(&self) -> &SimTablet {
@@ -85,6 +115,7 @@ impl Connector for RealTimeConnector {
     ) -> Result<Option<Advertisement>, TransportError> {
         let deadline = deadline(timeout);
         loop {
+            self.pace.sync();
             if let Some(advertisement) = self.tablet.advertisement()
                 && filter(&advertisement)
             {
@@ -108,7 +139,9 @@ impl Connector for RealTimeConnector {
         }
         // Switched off or busy: nothing answers until the timeout, waited for real.
         let deadline = deadline(timeout);
+        self.pace.sync();
         while self.tablet.advertisement().is_none() {
+            self.pace.sync();
             let now = Instant::now();
             if now >= deadline {
                 return Err(TransportError::Timeout);
@@ -119,6 +152,7 @@ impl Connector for RealTimeConnector {
         let (id, peer) = self.tablet.open_link(address, Duration::ZERO)?;
         Ok(Box::new(RealTimeTransport {
             tablet: self.tablet.clone(),
+            pace: self.pace.clone(),
             id,
             peer,
             closed: false,
@@ -130,6 +164,7 @@ impl Connector for RealTimeConnector {
 #[derive(Debug)]
 pub struct RealTimeTransport {
     tablet: SimTablet,
+    pace: Pace,
     id: u64,
     peer: Advertisement,
     closed: bool,
@@ -144,6 +179,7 @@ impl Transport for RealTimeTransport {
         if self.closed {
             return Err(TransportError::NotConnected);
         }
+        self.pace.sync();
         self.tablet.link_write(self.id, frame)
     }
 
@@ -155,6 +191,7 @@ impl Transport for RealTimeTransport {
         }
         let deadline = deadline(timeout);
         loop {
+            self.pace.sync();
             // A zero timeout delivers only what is due and never moves the clock.
             if let Some(event) = self.tablet.link_recv(self.id, Duration::ZERO)? {
                 if event == TransportEvent::Disconnected {
@@ -356,6 +393,41 @@ mod tests {
         assert!(started.elapsed() >= Duration::from_millis(40));
         // The clock never ran ahead of the real time.
         assert!(tablet.clock().monotonic() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_virtual_clock_is_moved_with_the_real_time() {
+        let tablet = SimTablet::slate_large();
+        tablet.set_registered_id(Some([1, 2, 3, 4, 5, 6]));
+        let mut connector = RealTimeConnector::new(tablet.clone());
+        let address = tablet.config().address;
+        let mut link = connector.connect(&address, Duration::from_secs(1)).unwrap();
+        let connect = Request::Connect {
+            uuid: [1, 2, 3, 4, 5, 6],
+        };
+        link.write(&connect.encode().unwrap()).unwrap();
+        link.write(
+            &Request::SetMode(ardoise_proto::Mode::Live)
+                .encode()
+                .unwrap(),
+        )
+        .unwrap();
+        tablet.draw_live(drawings::live_script(1, 29_700, 21_600));
+        // Pen data arrives over about a second of real time, not at once.
+        let started = Instant::now();
+        let mut live = 0;
+        while started.elapsed() < Duration::from_millis(300) {
+            if let Some(TransportEvent::Notification {
+                channel: ardoise_device::transport::Channel::Live,
+                ..
+            }) = link.recv(Duration::from_millis(10)).unwrap()
+            {
+                live += 1;
+            }
+        }
+        // 300 ms of a script streaming about 67 notifications per second.
+        assert!((5..=40).contains(&live), "{live} live notifications");
+        assert!(tablet.clock().monotonic() >= Duration::from_millis(300));
     }
 
     #[test]
