@@ -141,6 +141,7 @@ pub fn run() {
         .manage(diagnostic::DiagnosticRuns::default())
         .manage(thumbnails::ThumbnailCache::default_location())
         .manage(watcher::LibraryWatch::default())
+        .manage(export::ExportCancel::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_state,
             commands::set_language,
@@ -172,6 +173,7 @@ pub fn run() {
             tablet::forget_tablet,
             commands::set_auto_export,
             export::export_notes,
+            export::cancel_export,
             clipboard::copy_note_image,
             operations::split_note,
             operations::merge_notes,

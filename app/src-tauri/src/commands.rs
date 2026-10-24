@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ardoise_core::library;
+use ardoise_core::library::{self, NOTE_EXTENSION};
 use ardoise_core::settings::{
     AutoExport, AutoExportFormat, Language, Settings, SettingsError, SettingsStore, Theme,
 };
@@ -12,7 +12,7 @@ use tauri::{AppHandle, State};
 use crate::watcher::LibraryWatch;
 
 use crate::AppContext;
-use crate::library::slash_path;
+use crate::library::{library_of, slash_path};
 use crate::selftest::{self, UiReport};
 
 /// Error sent to the interface: `code` selects a translated message, `message` is the
@@ -49,6 +49,7 @@ pub(crate) type CommandResult<T> = Result<T, CommandError>;
 /// `AutoExportSettings` in `note.ts`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AutoExportState {
+    /// Only off / pdf / png: a value written by a newer version is reported as `off`.
     pub format: AutoExportFormat,
     /// As stored, `/`-separated.
     pub folder: String,
@@ -98,6 +99,11 @@ impl AppState {
 }
 
 impl AutoExportState {
+    /// Whether notes are exported automatically.
+    pub fn is_active(&self) -> bool {
+        self.format.is_active()
+    }
+
     /// The folder relative to the library root as `a/b`, or `None` if the stored value is not
     /// acceptable (a hand-edited settings file).
     pub fn valid_folder(&self) -> Option<String> {
@@ -144,7 +150,7 @@ fn state_from(context: &AppContext, loaded: Result<Settings, SettingsError>) -> 
         self_test: context.self_test.is_some(),
         open_diagnostic: context.open_diagnostic,
         auto_export: AutoExportState {
-            format: settings.auto_export.format,
+            format: settings.auto_export.format.known(),
             folder: settings.auto_export.folder,
         },
     }
@@ -179,9 +185,28 @@ pub fn set_theme(context: State<'_, AppContext>, theme: Theme) -> CommandResult<
     update(&context, |settings| settings.theme = theme)
 }
 
+/// Whether `dir` or a folder below it holds a note file.
+fn holds_notes(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        if path.is_dir() {
+            holds_notes(&path)
+        } else {
+            path.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case(NOTE_EXTENSION))
+        }
+    })
+}
+
 /// Sets the automatic export after a sync (`[auto_export]`, shared by every PC). The folder
 /// must be a sub-folder of the library (`invalidFolder` otherwise); it is stored as `a/b`.
-/// Keys of the section this version does not know are kept.
+/// With the export on, it must not be a binder that holds notes (`invalidFolder`), so that the
+/// exports never overwrite files of a real binder. Keys of the section this version does not
+/// know are kept, and so is a format written by a newer version while the interface says `off`
+/// (the same thing for this version).
 pub(crate) fn set_auto_export_in(
     context: &AppContext,
     auto_export: AutoExport,
@@ -190,8 +215,21 @@ pub(crate) fn set_auto_export_in(
         .relative_folder()
         .map(|path| slash_path(&path))
         .ok_or_else(|| CommandError::new("invalidFolder", &auto_export.folder))?;
+    let format = auto_export.format.known();
+    if format.is_active()
+        && let Ok(library) = library_of(context)
+        && holds_notes(&library.root().join(&folder))
+    {
+        return Err(CommandError::new(
+            "invalidFolder",
+            format!("{folder} holds notes"),
+        ));
+    }
     update(context, |settings| {
-        settings.auto_export.format = auto_export.format;
+        let stored = &mut settings.auto_export.format;
+        if format != AutoExportFormat::Off || !matches!(stored, AutoExportFormat::Unknown(_)) {
+            *stored = format;
+        }
         settings.auto_export.folder = folder;
     })
 }
@@ -390,6 +428,57 @@ mod tests {
             assert_eq!(error.code(), "invalidFolder", "{bad:?}");
         }
         assert!(!settings.path().join(SettingsStore::FILE_NAME).exists());
+    }
+
+    #[test]
+    fn a_binder_with_notes_is_refused_as_the_export_folder() {
+        let settings = tempfile::tempdir().unwrap();
+        let (dir, library) = crate::library::tests::library();
+        let context = context(settings.path(), "PC-A");
+        // Without a library there is nothing to check.
+        set_auto_export_in(&context, auto_export(AutoExportFormat::Pdf, "Classe")).unwrap();
+        choose_library(&context, &dir.path().display().to_string()).unwrap();
+        crate::library::tests::write_sample(&library, "Classe/3e B", "Cours");
+        library.create_binder(Path::new("Vide")).unwrap();
+
+        // The binder itself, or one above a note, with the export on.
+        for folder in ["Classe", "Classe/3e B", "Classe/3e B/"] {
+            let error = set_auto_export_in(&context, auto_export(AutoExportFormat::Png, folder))
+                .unwrap_err();
+            assert_eq!(error.code(), "invalidFolder", "{folder}");
+        }
+        assert_eq!(
+            current_state(&context).auto_export().format,
+            AutoExportFormat::Pdf
+        );
+        // An empty binder, a new folder, and the export off are fine.
+        for folder in ["Vide", "Nouveau"] {
+            set_auto_export_in(&context, auto_export(AutoExportFormat::Png, folder)).unwrap();
+        }
+        set_auto_export_in(&context, auto_export(AutoExportFormat::Off, "Classe")).unwrap();
+    }
+
+    #[test]
+    fn a_format_from_a_newer_version_is_off_for_the_interface_and_kept() {
+        let settings = tempfile::tempdir().unwrap();
+        let file = settings.path().join(SettingsStore::FILE_NAME);
+        fs::write(&file, "[auto_export]\nformat = \"jpg\"\nfolder = \"Tel\"\n").unwrap();
+        let context = context(settings.path(), "PC-A");
+        let state = current_state(&context);
+        assert_eq!(state.settings_error(), None);
+        assert_eq!(state.auto_export().format, AutoExportFormat::Off);
+        assert!(!state.auto_export().is_active());
+        let json = serde_json::to_value(&state).unwrap();
+        assert_eq!(json["autoExport"]["format"], "off");
+
+        // Saving "off" (another folder) keeps the value; a real choice replaces it.
+        set_auto_export_in(&context, auto_export(AutoExportFormat::Off, "Lecture")).unwrap();
+        let text = fs::read_to_string(&file).unwrap();
+        assert!(text.contains("format = \"jpg\""), "{text}");
+        assert!(text.contains("folder = \"Lecture\""), "{text}");
+        set_auto_export_in(&context, auto_export(AutoExportFormat::Pdf, "Lecture")).unwrap();
+        let text = fs::read_to_string(&file).unwrap();
+        assert!(text.contains("format = \"pdf\""), "{text}");
     }
 
     #[test]

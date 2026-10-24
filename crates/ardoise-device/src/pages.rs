@@ -154,6 +154,13 @@ pub fn note_from_page(
 /// Called once a synced note is safely in the library (automatic export).
 pub type AfterSave<'a> = Box<dyn FnMut(&SavedNote, &Note) + 'a>;
 
+/// Makes the PNG thumbnail (`thumb.png`) of a synced note, `None` if it cannot be made.
+pub type ThumbnailMaker<'a> = Box<dyn Fn(&Note) -> Option<Vec<u8>> + 'a>;
+
+/// Test hook run on the file just written, before it is read back.
+#[cfg(test)]
+type TamperHook<'a> = Box<dyn Fn(&std::path::Path) + 'a>;
+
 /// Stores synced pages as new notes of a library binder.
 pub struct LibrarySink<'a> {
     library: &'a Library,
@@ -162,6 +169,10 @@ pub struct LibrarySink<'a> {
     layer_name: String,
     now_ms: Box<dyn Fn() -> i64 + 'a>,
     after_save: Option<AfterSave<'a>>,
+    thumbnail: Option<ThumbnailMaker<'a>>,
+    /// Test hook run on the file just written, before it is read back.
+    #[cfg(test)]
+    tamper: Option<TamperHook<'a>>,
     /// Notes written so far, in order.
     pub saved: Vec<SavedNote>,
 }
@@ -183,6 +194,9 @@ impl<'a> LibrarySink<'a> {
             layer_name: layer_name.into(),
             now_ms: Box::new(now_ms),
             after_save: None,
+            thumbnail: None,
+            #[cfg(test)]
+            tamper: None,
             saved: Vec::new(),
         }
     }
@@ -193,24 +207,53 @@ impl<'a> LibrarySink<'a> {
         self
     }
 
+    /// Gives each note a thumbnail made by `maker` (SPEC §3.3: `thumb.png`).
+    pub fn with_thumbnail(mut self, maker: impl Fn(&Note) -> Option<Vec<u8>> + 'a) -> Self {
+        self.thumbnail = Some(Box::new(maker));
+        self
+    }
+
     /// Saves `page` as a new note and checks it reads back identical. An `Err` keeps the page
-    /// on the tablet (the session does not delete it). Fits `Session::sync`'s sink:
+    /// on the tablet (the session does not delete it) and moves the note just written to the
+    /// trash, so that the next sync does not leave a duplicate. Fits `Session::sync`'s sink:
     /// `&mut |page, _, _| sink.store(page).map(|_| ())`.
     pub fn store(&mut self, page: DownloadedPage) -> Result<SavedNote, String> {
         let id = new_note_id().map_err(|e| e.to_string())?;
-        let file = note_from_page(&page, self.size, id, &self.layer_name, (self.now_ms)())
+        let mut file = note_from_page(&page, self.size, id, &self.layer_name, (self.now_ms)())
             .map_err(|e| e.to_string())?;
+        if let Some(maker) = &self.thumbnail {
+            file.thumbnail = maker(&file.note);
+        }
         let saved = self
             .library
             .create(&self.binder, &file)
             .map_err(|e| e.to_string())?;
+        #[cfg(test)]
+        if let Some(tamper) = &self.tamper {
+            tamper(&saved.path);
+        }
         // What the file must hold: the note as the format stores it (pressures and positions
-        // are quantised), and the tablet's bytes untouched.
-        let expected = format::to_bytes(&file)
-            .and_then(|bytes| format::read_from_bytes(&bytes))
-            .map_err(|e| e.to_string())?;
-        let back = self.library.read(&saved.path).map_err(|e| e.to_string())?;
-        if back.file.note != expected.note || back.file.original != file.original {
+        // are quantised), the tablet's bytes untouched, the thumbnail given.
+        let expected =
+            match format::to_bytes(&file).and_then(|bytes| format::read_from_bytes(&bytes)) {
+                Ok(expected) => expected,
+                Err(error) => {
+                    self.discard(&saved);
+                    return Err(error.to_string());
+                }
+            };
+        let back = match self.library.read(&saved.path) {
+            Ok(back) => back,
+            Err(error) => {
+                self.discard(&saved);
+                return Err(error.to_string());
+            }
+        };
+        if back.file.note != expected.note
+            || back.file.original != file.original
+            || back.file.thumbnail != file.thumbnail
+        {
+            self.discard(&saved);
             return Err(format!(
                 "{} does not read back as written",
                 saved.path.display()
@@ -221,6 +264,12 @@ impl<'a> LibrarySink<'a> {
         }
         self.saved.push(saved.clone());
         Ok(saved)
+    }
+
+    /// Moves a note that failed verification to the trash (best effort: the page stays on the
+    /// tablet either way, and the next sync writes it again).
+    fn discard(&self, saved: &SavedNote) {
+        let _ = self.library.trash(&saved.path);
     }
 }
 
@@ -309,5 +358,48 @@ mod tests {
         };
         assert!(sink.store(bad).is_err());
         assert_eq!(library.list().notes.len(), 2);
+    }
+
+    #[test]
+    fn notes_get_a_thumbnail_when_a_maker_is_given() {
+        let dir = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(dir.path()).unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        let mut sink = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7)
+            .with_thumbnail(|note| Some(vec![0x89, b'P', note.strokes.len() as u8]));
+        let saved = sink.store(page(&[raw_stroke(0, 100, 5)])).unwrap();
+        let back = library.read(&saved.path).unwrap();
+        assert_eq!(back.file.thumbnail.as_deref(), Some(&[0x89, b'P', 1][..]));
+        // Without a maker, no thumbnail.
+        let mut plain = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7);
+        let saved = plain.store(page(&[raw_stroke(0, 100, 5)])).unwrap();
+        assert!(library.read(&saved.path).unwrap().file.thumbnail.is_none());
+    }
+
+    #[test]
+    fn a_note_that_fails_verification_goes_to_the_trash() {
+        let dir = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(dir.path()).unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        let mut sink = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7);
+        // Another program replaces the file between the write and the read-back.
+        sink.tamper = Some(Box::new(|path| {
+            let mut other = note_from_page(
+                &page(&[raw_stroke(0, 100, 5)]),
+                A4_LANDSCAPE,
+                "id".into(),
+                "L",
+                1,
+            )
+            .unwrap();
+            other.note.title = "Other".into();
+            std::fs::write(path, format::to_bytes(&other).unwrap()).unwrap();
+        }));
+        let error = sink.store(page(&[raw_stroke(0, 100, 5)])).unwrap_err();
+        assert!(error.contains("does not read back"), "{error}");
+        assert!(sink.saved.is_empty());
+        // No duplicate left in the library; the note is in the trash.
+        assert!(library.list().notes.is_empty());
+        assert_eq!(library.trash_items().unwrap().len(), 1);
     }
 }

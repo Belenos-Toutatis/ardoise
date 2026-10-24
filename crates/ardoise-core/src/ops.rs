@@ -230,8 +230,8 @@ fn overlay_layer_name(note: &Note, layer: &Layer) -> String {
 ///   at its top-left corner; the layers of each note are appended after those of the previous
 ///   one, named as [`overlay_layer_name`] says.
 /// - [`MergeLayout::EndToEnd`]: one long page (widest by the sum of the heights), the notes one
-///   below the other, left-aligned; layers merged by index (name and visibility from the first
-///   note that has the layer).
+///   below the other, left-aligned; layers merged by index (name from the first note that
+///   has the layer; visible if the layer is visible in any note that has it).
 ///
 /// Background (of the first note), tags (union) and `created` (of the first note) follow;
 /// timing is [`Timing::Synthesized`] if any note's is. Times are made sequential: the first note
@@ -278,8 +278,11 @@ pub fn merge(notes: &[Note], layout: MergeLayout, new: NewNote) -> Result<Note, 
                 y_offset.push(y);
                 y += note.page.height as f32;
                 for (i, layer) in note.layers.iter().enumerate() {
-                    if i >= layers.len() {
-                        layers.push(layer.clone());
+                    match layers.get_mut(i) {
+                        // Visible if it is in any note that has this layer, so that no note's
+                        // strokes vanish from the merged note and its exports.
+                        Some(merged) => merged.visible |= layer.visible,
+                        None => layers.push(layer.clone()),
                     }
                 }
             }

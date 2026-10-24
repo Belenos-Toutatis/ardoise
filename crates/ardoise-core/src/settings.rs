@@ -43,9 +43,12 @@ pub enum Theme {
     Dark,
 }
 
-/// File format of the automatic export after a sync (SPEC §3.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// File format of the automatic export after a sync (SPEC §3.2). Stored as `"off"`, `"pdf"` or
+/// `"png"`; any other value (written by a newer version on another PC) loads as
+/// [`Unknown`](Self::Unknown), which exports nothing and is written back verbatim, so the
+/// settings file shared by every PC stays readable and keeps what it holds.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum AutoExportFormat {
     /// No automatic export.
     #[default]
@@ -54,6 +57,46 @@ pub enum AutoExportFormat {
     Pdf,
     /// One PNG per synced note.
     Png,
+    /// A value this version does not know, kept as written.
+    Unknown(String),
+}
+
+impl AutoExportFormat {
+    /// Whether notes are exported (not for `Off`, nor for a value this version does not know).
+    pub fn is_active(&self) -> bool {
+        matches!(self, AutoExportFormat::Pdf | AutoExportFormat::Png)
+    }
+
+    /// The format for a program that only knows off / pdf / png: `Off` for an unknown value.
+    pub fn known(&self) -> AutoExportFormat {
+        if matches!(self, AutoExportFormat::Unknown(_)) {
+            AutoExportFormat::Off
+        } else {
+            self.clone()
+        }
+    }
+}
+
+impl From<String> for AutoExportFormat {
+    fn from(text: String) -> Self {
+        match text.as_str() {
+            "off" => AutoExportFormat::Off,
+            "pdf" => AutoExportFormat::Pdf,
+            "png" => AutoExportFormat::Png,
+            _ => AutoExportFormat::Unknown(text),
+        }
+    }
+}
+
+impl From<AutoExportFormat> for String {
+    fn from(format: AutoExportFormat) -> Self {
+        match format {
+            AutoExportFormat::Off => "off".to_owned(),
+            AutoExportFormat::Pdf => "pdf".to_owned(),
+            AutoExportFormat::Png => "png".to_owned(),
+            AutoExportFormat::Unknown(text) => text,
+        }
+    }
 }
 
 /// Default folder of the automatic exports, relative to the library root.
@@ -609,9 +652,31 @@ mod tests {
         let auto = store.load().unwrap().auto_export;
         assert_eq!(auto.format, AutoExportFormat::Pdf);
         assert_eq!(auto.folder, DEFAULT_AUTO_EXPORT_FOLDER);
-        // A format this version does not know is an error, never silently "off".
-        fs::write(store.path(), "[auto_export]\nformat = \"docx\"\n").unwrap();
-        assert!(matches!(store.load(), Err(SettingsError::Parse { .. })));
+    }
+
+    #[test]
+    fn an_unknown_auto_export_format_loads_as_off_and_is_written_back_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        // A newer version on another PC wrote a format this one does not know.
+        fs::write(
+            store.path(),
+            "[auto_export]\nformat = \"jpg\"\nfolder = \"Tel\"\n",
+        )
+        .unwrap();
+        let auto = store.load().unwrap().auto_export;
+        assert_eq!(auto.format, AutoExportFormat::Unknown("jpg".into()));
+        assert!(!auto.format.is_active());
+        assert_eq!(auto.format.known(), AutoExportFormat::Off);
+        assert_eq!(auto.folder, "Tel");
+
+        // Another setting changed: the value is still there.
+        store.update(|s| s.theme = Theme::Dark).unwrap();
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("format = \"jpg\""), "{text}");
+        // Known formats are active.
+        assert!(AutoExportFormat::Pdf.is_active() && AutoExportFormat::Png.is_active());
+        assert!(!AutoExportFormat::Off.is_active());
     }
 
     #[test]
