@@ -701,6 +701,12 @@
       "many": "{count} notes saved"
     },
     "commandFailed": "The command did not go through: {message}",
+    "saveFailed": {
+      "one": "A page could not be saved to the library.",
+      "many": "{count} pages could not be saved to the library.",
+      "item": "Page {page}: {message}",
+      "advice": "The pages stay in memory: check the library folder (disk space, write permission, sync). When Ardoise closes, a backup copy is written to Ardoise's local folder. This message goes away as soon as a save succeeds."
+    },
     "dismiss": "Dismiss the message",
     "toolbar": "Live mode tools",
     "style": "Writing style",

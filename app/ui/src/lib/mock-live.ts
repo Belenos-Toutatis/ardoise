@@ -39,6 +39,8 @@ export const mockLiveConfig = {
   pen: true,
   /** Fictitious screens offered (2: laptop + projector; 1; 0 for none). */
   monitors: 2,
+  /** A message makes every write of a page into the library fail with it (null: writes succeed). */
+  saveError: null as string | null,
 };
 
 /** Records per second of the Slate: one every 5 ms. */
@@ -142,6 +144,8 @@ interface Session {
   current: Stroke | null;
   /** Note id → path in the demo library. */
   saved: Map<string, string>;
+  /** Ids of the pages whose last write failed (reported once, written again by the next success). */
+  failed: Set<string>;
   /** Records since the session started. */
   record: number;
   /** Record at which each page was created (its `created` instant). */
@@ -237,15 +241,31 @@ function uniquePath(note: Note): string {
   return path;
 }
 
-/** Writes `page` into the demo library (once it has strokes); returns true when written. */
-function savePage(s: Session, page: Note): boolean {
-  const known = s.saved.get(page.id);
-  if (!known && page.strokes.length === 0) return false;
-  const path = known ?? uniquePath(page);
+function writePage(s: Session, page: Note): void {
+  const path = s.saved.get(page.id) ?? uniquePath(page);
   mockLibrary().notes.set(path, { note: copy({ ...page, modified: Date.now() }), stamp: freshStamp(), binder: '' });
   s.saved.set(page.id, path);
   notifyLibraryChanged();
-  return true;
+}
+
+/**
+ * Writes `page` into the demo library (once it has strokes). Returns the events to send:
+ * `saved` after a write (the pages whose write failed earlier are written again first, so it
+ * means that everything is written), `saveFailed` the first time a page fails (not again while
+ * the error repeats), nothing otherwise.
+ */
+function savePage(s: Session, page: Note): LiveEvent[] {
+  if (!s.saved.has(page.id) && page.strokes.length === 0) return [];
+  const failure = mockLiveConfig.saveError;
+  if (failure !== null) {
+    if (s.failed.has(page.id)) return [];
+    s.failed.add(page.id);
+    return [{ type: 'saveFailed', pageIndex: s.pages.indexOf(page), message: failure }];
+  }
+  for (const other of s.pages) if (s.failed.has(other.id)) writePage(s, other);
+  s.failed.clear();
+  writePage(s, page);
+  return [savedEvent(s)];
 }
 
 function savedEvent(s: Session): LiveEvent {
@@ -260,7 +280,7 @@ function endStroke(s: Session): LiveEvent[] {
   s.current = null;
   const events: LiveEvent[] = [{ type: 'strokeEnd', pageIndex: s.pageIndex }];
   // A page becomes a note when its first stroke ends.
-  if (!s.saved.has(page.id) && savePage(s, page)) events.push(savedEvent(s));
+  if (!s.saved.has(page.id)) events.push(...savePage(s, page));
   return events;
 }
 
@@ -332,7 +352,7 @@ function addPage(s: Session): void {
 function goTo(s: Session, index: number): LiveEvent[] {
   const events = endStroke(s);
   const leaving = s.pages[s.pageIndex];
-  if (s.saved.has(leaving.id) && savePage(s, leaving)) events.push(savedEvent(s));
+  if (s.saved.has(leaving.id)) events.push(...savePage(s, leaving));
   s.pageIndex = index;
   s.layer = s.pages[index].layers.length - 1;
   return events;
@@ -406,6 +426,7 @@ function startSession(): LiveSnapshot {
     hover: null,
     current: null,
     saved: new Map(),
+    failed: new Set(),
     record: 0,
     pageStart: new Map(),
     pen: new PenScript(),
@@ -426,10 +447,12 @@ function stopSession(): string[] {
   if (!s) return [];
   stopTimers(s);
   const events = endStroke(s);
-  for (const page of s.pages) savePage(s, page);
+  for (const page of s.pages) events.push(...savePage(s, page).filter((e) => e.type === 'saveFailed'));
   const paths = [...s.saved.values()];
+  // A `saved` after a failure means that everything is written: not sent while a page failed.
+  if (s.failed.size === 0) events.push({ type: 'saved', paths });
   session = null;
-  broadcast([...events, { type: 'saved', paths }, { type: 'snapshot', snapshot: snapshot() }]);
+  broadcast([...events, { type: 'snapshot', snapshot: snapshot() }]);
   return paths;
 }
 
@@ -503,7 +526,7 @@ export function resetMockLive(): void {
   presentation = null;
   savedMonitor = null;
   pageCounter = 0;
-  Object.assign(mockLiveConfig, { waitMs: 1200, tickMs: 15, pen: true, monitors: 2 });
+  Object.assign(mockLiveConfig, { waitMs: 1200, tickMs: 15, pen: true, monitors: 2, saveError: null });
 }
 
 /** Sends `events` to every subscriber as one batch. */

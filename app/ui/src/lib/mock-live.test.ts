@@ -207,6 +207,48 @@ describe('browser stand-in for live mode', () => {
     expect(sub.batches.length).toBe(count);
   });
 
+  it('reports a page that cannot be written once, keeps it in memory and writes it with the next success', async () => {
+    mockLiveConfig.waitMs = 0;
+    mockLiveConfig.saveError = 'The library is read-only';
+    const sub = await subscribe();
+    const before = mockLibrary().notes.size;
+    invoke('live_start');
+    vi.advanceTimersByTime(15 * 150);
+    const failures = () => sub.events().flatMap((e) => (e.type === 'saveFailed' ? [e] : []));
+    expect(failures()).toEqual([{ type: 'saveFailed', pageIndex: 0, message: 'The library is read-only' }]);
+    expect(sub.events().some((e) => e.type === 'saved')).toBe(false);
+    expect(mockLibrary().notes.size).toBe(before);
+
+    // The next page fails too: one report per page, not one per stroke.
+    invoke('live_command', { command: { kind: 'nextPage' } });
+    vi.advanceTimersByTime(15 * 150);
+    expect(failures().map((e) => e.pageIndex)).toEqual([0, 1]);
+
+    // The error goes away: the next save writes both pages and says that everything is written.
+    mockLiveConfig.saveError = null;
+    invoke('live_command', { command: { kind: 'previousPage' } });
+    vi.advanceTimersByTime(15);
+    const saved = sub.events().filter((e) => e.type === 'saved');
+    expect(saved.length).toBeGreaterThan(0);
+    expect(mockLibrary().notes.size).toBe(before + 2);
+    expect(failures()).toHaveLength(2);
+    const paths = invoke('live_stop') as string[];
+    expect(paths).toHaveLength(2);
+  });
+
+  it('does not say that everything is saved when stopping with a page that failed', async () => {
+    mockLiveConfig.waitMs = 0;
+    mockLiveConfig.saveError = 'disk full';
+    const sub = await subscribe();
+    invoke('live_start');
+    vi.advanceTimersByTime(15 * 150);
+    const count = sub.events().length;
+    invoke('live_stop');
+    const after = sub.events().slice(count);
+    expect(after.some((e) => e.type === 'saved')).toBe(false);
+    expect(after.some((e) => e.type === 'snapshot')).toBe(true);
+  });
+
   it('reconnects after a dropped link, and lets tests send their own events', async () => {
     mockLiveConfig.waitMs = 0;
     const sub = await subscribe();

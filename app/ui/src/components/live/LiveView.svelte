@@ -289,6 +289,19 @@
       <button type="button" class="button small-button" onclick={closeAnyway}>{t('live.closeAnyway')}</button>
     </div>
   {/if}
+  {#if live.saveErrors.length > 0}
+    <div class="banner error live-banner" role="alert" data-slot="save-failed">
+      <strong>
+        {live.saveErrors.length === 1 ? t('live.saveFailed.one') : t('live.saveFailed.many', { count: live.saveErrors.length })}
+      </strong>
+      <ul>
+        {#each live.saveErrors as error (error.pageIndex)}
+          <li>{t('live.saveFailed.item', { page: error.pageIndex + 1, message: error.message })}</li>
+        {/each}
+      </ul>
+      <p>{t('live.saveFailed.advice')}</p>
+    </div>
+  {/if}
   {#if notice}
     <div class="banner error live-banner" role="alert">
       <p>{notice}</p>
@@ -580,6 +593,12 @@
   .live-banner p {
     flex-basis: 100%;
     margin: 0;
+  }
+
+  .live-banner ul {
+    flex-basis: 100%;
+    margin: 0;
+    padding-left: 1.2rem;
   }
 
   .live-toolbar {

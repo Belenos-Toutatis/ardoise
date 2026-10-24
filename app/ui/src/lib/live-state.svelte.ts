@@ -5,7 +5,7 @@
  *
  * Two kinds of fields:
  * - reactive ones (`$state`) for the interface: session state, page number, style, view,
- *   presentation, saved notes, stroke count;
+ *   presentation, saved notes, pages that failed to save, stroke count;
  * - plain ones for the canvases, which are told of every change through `subscribe` and draw
  *   on the next animation frame: the finished strokes of the page (`strokes`, appended in
  *   place; `generation` changes when they are replaced), the stroke in progress (`current`,
@@ -36,6 +36,13 @@ import type {
 } from './live';
 import { roundView, sameView } from './live-view';
 import type { Background, Layer, PageSize, Rgba, Stroke } from './note';
+
+/** A page Rust failed to write into the library. */
+export interface SaveError {
+  /** 0-based. */
+  pageIndex: number;
+  message: string;
+}
 
 export const DEFAULT_STYLE: LiveStyle = { tool: 'ballpoint', color: { r: 0, g: 0, b: 0, a: 255 }, width: 60 };
 export const DEFAULT_VIEW: LiveViewState = { zoom: 1, x: 0, y: 0, board: false, laser: false };
@@ -103,6 +110,8 @@ export class LiveState {
   view = $state.raw<LiveViewState>(DEFAULT_VIEW);
   presentation = $state.raw<MonitorInfo | null>(null);
   saved = $state.raw<string[]>([]);
+  /** Pages that could not be written into the library, by page; cleared by the next `saved`. */
+  saveErrors = $state.raw<SaveError[]>([]);
   /** Strokes of the page, the one in progress included (`data-strokes`). */
   strokeCount = $state(0);
   /** The page: size, paper, layers (its strokes are `strokes`). */
@@ -227,6 +236,14 @@ export class LiveState {
         break;
       case 'saved':
         this.mergeSaved(event.paths);
+        // A successful save means that everything is written, the failed pages included.
+        if (this.saveErrors.length > 0) this.saveErrors = [];
+        break;
+      case 'saveFailed':
+        this.saveErrors = [
+          ...this.saveErrors.filter((e) => e.pageIndex !== event.pageIndex),
+          { pageIndex: event.pageIndex, message: event.message },
+        ].sort((a, b) => a.pageIndex - b.pageIndex);
         break;
     }
   }

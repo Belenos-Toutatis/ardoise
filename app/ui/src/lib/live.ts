@@ -87,7 +87,12 @@ export type LiveEvent =
   | { type: 'hover'; x: number; y: number }
   | { type: 'hoverEnd' }
   | { type: 'view'; view: LiveViewState }
-  | { type: 'saved'; paths: string[] };
+  | { type: 'saved'; paths: string[] }
+  /**
+   * A page could not be written into the library (sent once per page while the error repeats).
+   * The pages stay in memory; a later `saved` means that everything is written.
+   */
+  | { type: 'saveFailed'; pageIndex: number; message: string };
 
 export interface LiveBatch {
   events: LiveEvent[];

@@ -252,6 +252,56 @@ describe('live view (control window)', () => {
     expect(tooltip).toContain("réception du point par l'ordinateur et le début de l'image suivante");
   });
 
+  it('shows a banner when a page cannot be saved, until a save succeeds', async () => {
+    mockLiveConfig.saveError = 'Accès refusé (os error 5)';
+    const view = render();
+    await live(view);
+    expect(view.target.querySelector('[data-slot="save-failed"]')).toBeNull();
+    mockLiveTick(120);
+    await tick();
+    const banner = () => view.target.querySelector<HTMLElement>('[data-slot="save-failed"]');
+    await vi.waitFor(() => expect(banner()).not.toBeNull());
+    expect(banner()!.getAttribute('role')).toBe('alert');
+    const text = banner()!.textContent!;
+    expect(text).toContain("Une page n'a pas pu être enregistrée dans la bibliothèque.");
+    expect(text).toContain('Page 1 : Accès refusé (os error 5)');
+    expect(text).toContain('Les pages restent en mémoire');
+    expect(text).toContain('vérifiez le dossier de la bibliothèque');
+    expect(text).toContain("une copie de secours est écrite dans le dossier local d'Ardoise");
+    // It cannot be dismissed by mistake: nothing is saved while it shows.
+    expect(banner()!.querySelector('button')).toBeNull();
+    expect(view.target.querySelector('[data-saved]')?.textContent).toBe('Aucune note enregistrée pour l\'instant');
+
+    // The next page fails as well: two pages are listed.
+    view.button('Page suivante').click();
+    await tick();
+    mockLiveTick(120);
+    await tick();
+    await vi.waitFor(() => expect(banner()!.textContent).toContain('2 pages n'));
+    expect(banner()!.textContent).toContain('Page 2 : Accès refusé (os error 5)');
+
+    // The folder is fixed: the next save writes both pages and the banner goes away.
+    mockLiveConfig.saveError = null;
+    view.button('Page précédente').click();
+    await vi.waitFor(() => expect(banner()).toBeNull());
+    await vi.waitFor(() => expect(view.target.querySelector('[data-saved]')?.textContent).toBe('2 notes enregistrées'));
+  });
+
+  it('says it in English', async () => {
+    setLocale('en');
+    mockLiveConfig.saveError = 'disk full';
+    const view = render();
+    await live(view);
+    mockLiveTick(120);
+    await tick();
+    await vi.waitFor(() => expect(view.target.querySelector('[data-slot="save-failed"]')).not.toBeNull());
+    const text = view.target.querySelector('[data-slot="save-failed"]')!.textContent!;
+    expect(text).toContain('A page could not be saved to the library.');
+    expect(text).toContain('Page 1: disk full');
+    expect(text).toContain('The pages stay in memory');
+    expect(text).toContain("a backup copy is written to Ardoise's local folder");
+  });
+
   it('works from the keyboard', async () => {
     const view = render();
     await live(view);
