@@ -5,7 +5,8 @@
 //! Contract: docs/design/tablet-live-classroom.md (work package A).
 //!
 //! - [`TabletRuntime`] holds the service of the running app, the windows subscribed to its
-//!   status, and the simulated tablet of `--simulated-tablet`.
+//!   status, and the simulated tablet of `--simulated-tablet`. The guided test of the real
+//!   tablet stops the service while it runs ([`TabletPause`]).
 //! - The service writes each synced page through [`store_page_in`]: the note (thumbnail,
 //!   checked by reading it back) in the library root, then the automatic export as the settings
 //!   say at that moment.
@@ -21,8 +22,8 @@ use ardoise_core::settings::{Language, Settings, SettingsStore};
 use ardoise_device::identity::{self, IdentityError};
 use ardoise_device::pages::LibrarySink;
 use ardoise_device::service::{
-    self, ConnectorFactory, NoHooks, PageContext, PageStore, ServiceConfig, ServiceHooks,
-    StatusCallback, StatusError, TabletOptions, TabletService, TabletStatus,
+    self, Connection, ConnectorFactory, NoHooks, PageContext, PageStore, ServiceConfig,
+    ServiceHooks, StatusCallback, StatusError, TabletOptions, TabletService, TabletStatus,
 };
 use ardoise_device::session::{DeviceError, DownloadedPage, valid_name};
 use ardoise_device::transport::{Connector, TransportError};
@@ -30,7 +31,7 @@ use ardoise_sim::SimTablet;
 use ardoise_sim::realtime::{APP_HOOK_DELAY, SimFactory, SimHooks, app_tablet};
 use serde::Serialize;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager as _, State};
+use tauri::{AppHandle, Manager as _, State, Webview};
 
 use crate::AppContext;
 use crate::autoexport::{AutoExportReport, after_save_hook};
@@ -84,7 +85,8 @@ pub enum TabletEvent {
 /// subscriber is then dropped).
 pub type Subscriber = Box<dyn Fn(&TabletEvent) -> bool + Send + Sync>;
 
-type Subscribers = Arc<Mutex<Vec<Subscriber>>>;
+/// The subscribers with the label of their window: one per window, the latest.
+type Subscribers = Arc<Mutex<Vec<(String, Subscriber)>>>;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -95,7 +97,11 @@ fn broadcast(subscribers: &Subscribers, status: &TabletStatus) {
     let event = TabletEvent::Status {
         status: status.clone(),
     };
-    lock(subscribers).retain(|subscriber| subscriber(&event));
+    lock(subscribers).retain(|(_, subscriber)| subscriber(&event));
+}
+
+fn not_running() -> CommandError {
+    CommandError::new("tablet", "the tablet service is not running")
 }
 
 /// The simulated tablet replacing Bluetooth (`--simulated-tablet`).
@@ -222,25 +228,41 @@ pub fn store_page_in(
 /// The tablet service of the running app (see [`start_service`]).
 #[derive(Default)]
 pub struct TabletRuntime {
-    service: Mutex<Option<TabletService>>,
+    /// Shared, so that a command waiting for the tablet does not hold the lock.
+    service: Mutex<Option<Arc<TabletService>>>,
     subscribers: Subscribers,
     /// The simulated tablet, with `--simulated-tablet`.
     simulated: Mutex<Option<SimTablet>>,
     /// The simulated tablet's registration folder, which replaces the library's.
     identity_override: Mutex<Option<PathBuf>>,
+    /// The status shown while the guided test holds the real tablet (the service is stopped
+    /// meanwhile, see [`TabletRuntime::pause`]).
+    paused: Mutex<Option<TabletStatus>>,
 }
 
 impl TabletRuntime {
-    /// Runs `f` with the service; `tablet` error when it is not running.
+    /// Runs `f` with the service; `tablet` error when it is not running. The lock is released
+    /// before `f` runs: a request waiting for the tablet (up to `service::REQUEST_TIMEOUT`)
+    /// does not hold up the other commands.
     pub fn with_service<T>(&self, f: impl FnOnce(&TabletService) -> T) -> CommandResult<T> {
-        let guard = self.service.lock().unwrap_or_else(PoisonError::into_inner);
-        match guard.as_ref() {
-            Some(service) => Ok(f(service)),
-            None => Err(CommandError::new(
-                "tablet",
-                "the tablet service is not running",
-            )),
+        let service = lock(&self.service).clone();
+        match service {
+            Some(service) => Ok(f(&service)),
+            None => Err(not_running()),
         }
+    }
+
+    /// The status of the service, or the one shown while the guided test holds the tablet.
+    pub fn status(&self) -> CommandResult<TabletStatus> {
+        match self.with_service(TabletService::status) {
+            Ok(status) => Ok(status),
+            Err(error) => lock(&self.paused).clone().ok_or(error),
+        }
+    }
+
+    /// Started with `--simulated-tablet`.
+    fn is_simulated(&self) -> bool {
+        lock(&self.simulated).is_some()
     }
 
     /// Starts the service for this PC's library and `[tablet]` settings: Bluetooth, or the
@@ -248,6 +270,7 @@ impl TabletRuntime {
     pub fn start_in(&self, context: &AppContext, simulation: Option<Simulation>) {
         // Two services would compete for the tablet.
         self.stop();
+        *lock(&self.paused) = None;
         let library = current_state(context).library().map(PathBuf::from);
         let store = context.store.as_ref().ok().cloned();
         let settings = store
@@ -286,7 +309,7 @@ impl TabletRuntime {
             store_page_in(store.as_ref(), locale.as_deref(), root, page, context)
         });
         let service = TabletService::start(config, factory, hooks, on_status, store_page);
-        *lock(&self.service) = Some(service);
+        *lock(&self.service) = Some(Arc::new(service));
     }
 
     /// The library of this PC changed: the service follows it (the simulated tablet keeps its
@@ -301,9 +324,11 @@ impl TabletRuntime {
         self.with_service(|service| service.set_library(library, identity_root))
     }
 
-    /// Adds a window's subscriber.
-    pub fn subscribe(&self, subscriber: Subscriber) {
-        lock(&self.subscribers).push(subscriber);
+    /// Adds the subscriber of the window `label`, replacing the window's previous one.
+    pub fn subscribe(&self, label: &str, subscriber: Subscriber) {
+        let mut subscribers = lock(&self.subscribers);
+        subscribers.retain(|(window, _)| window != label);
+        subscribers.push((label.to_owned(), subscriber));
     }
 
     /// Stops the service (closes the link).
@@ -311,6 +336,74 @@ impl TabletRuntime {
         let service = lock(&self.service).take();
         if let Some(service) = service {
             service.shutdown();
+        }
+    }
+
+    /// Stops the service while the guided test talks to the real tablet: two programs cannot
+    /// hold it at once, and the test may register it again. The windows are told the tablet is
+    /// busy until [`resume_in`](Self::resume_in). Returns whether the service was stopped:
+    /// the simulated tablet (`--simulated-tablet`) does not use Bluetooth and keeps running.
+    pub fn pause(&self) -> bool {
+        if self.is_simulated() {
+            return false;
+        }
+        let Some(service) = lock(&self.service).take() else {
+            return false;
+        };
+        service.shutdown();
+        let mut status = service.status();
+        status.connection = Connection::Unavailable;
+        status.register_step = None;
+        status.sync = None;
+        status.pending = None;
+        status.error = Some(StatusError::new(
+            "tabletBusy",
+            "the guided tablet test is using the tablet",
+        ));
+        *lock(&self.paused) = Some(status.clone());
+        broadcast(&self.subscribers, &status);
+        true
+    }
+
+    /// Starts the service again after [`pause`](Self::pause), with the library and the
+    /// settings of now; it reads `device.json` again (the test may have registered the tablet).
+    pub fn resume_in(&self, context: &AppContext) {
+        let paused = lock(&self.paused).take().is_some();
+        if paused && lock(&self.service).is_none() {
+            self.start_in(context, None);
+        }
+    }
+}
+
+/// Keeps the tablet service stopped while the guided test uses the real tablet
+/// ([`TabletRuntime::pause`]); starts it again when dropped: the test ended, was cancelled,
+/// failed or panicked.
+pub struct TabletPause {
+    app: AppHandle,
+    paused: bool,
+}
+
+impl TabletPause {
+    pub fn new(app: &AppHandle) -> TabletPause {
+        let paused = app
+            .try_state::<TabletRuntime>()
+            .is_some_and(|runtime| runtime.pause());
+        TabletPause {
+            app: app.clone(),
+            paused,
+        }
+    }
+}
+
+impl Drop for TabletPause {
+    fn drop(&mut self) {
+        if self.paused
+            && let (Some(runtime), Some(context)) = (
+                self.app.try_state::<TabletRuntime>(),
+                self.app.try_state::<AppContext>(),
+            )
+        {
+            runtime.resume_in(&context);
         }
     }
 }
@@ -342,14 +435,16 @@ async fn blocking<T: Send + 'static>(
         .map_err(|error| CommandError::new("tablet", error))?
 }
 
+/// Subscribes the window `label` (replacing its previous subscription) and returns the status.
 pub fn tablet_subscribe_in(
     runtime: &TabletRuntime,
+    label: &str,
     subscriber: Subscriber,
 ) -> CommandResult<TabletStatus> {
-    runtime.with_service(|_| ())?;
+    runtime.status()?;
     // Subscribed first: a change right now is sent, never lost.
-    runtime.subscribe(subscriber);
-    runtime.with_service(TabletService::status)
+    runtime.subscribe(label, subscriber);
+    runtime.status()
 }
 
 pub fn tablet_rename_in(runtime: &TabletRuntime, name: &str) -> CommandResult<TabletStatus> {
@@ -403,26 +498,33 @@ pub fn sim_press_button_in(runtime: &TabletRuntime) -> CommandResult<()> {
 
 /// Forgets the registered tablet: through the service when it runs (it also closes the link;
 /// with the simulated tablet only its throwaway registration is forgotten), else in the
-/// library.
+/// library. With the simulated tablet the library's registration (the real tablet's) is never
+/// touched, even when the service is not running.
 pub fn forget_tablet_through(runtime: &TabletRuntime, context: &AppContext) -> CommandResult<()> {
     match runtime.with_service(TabletService::forget) {
         Ok(result) => result.map_err(device_error),
+        Err(_) if runtime.is_simulated() => match lock(&runtime.identity_override).clone() {
+            Some(root) => identity::forget(&root).map_err(identity_error),
+            None => Ok(()),
+        },
         Err(_) => forget_tablet_in(&library_of(context)?),
     }
 }
 
 #[tauri::command]
 pub async fn tablet_status(runtime: State<'_, TabletRuntime>) -> CommandResult<TabletStatus> {
-    runtime.with_service(TabletService::status)
+    runtime.status()
 }
 
 #[tauri::command]
 pub async fn tablet_subscribe(
+    webview: Webview,
     runtime: State<'_, TabletRuntime>,
     on_event: Channel<TabletEvent>,
 ) -> CommandResult<TabletStatus> {
     tablet_subscribe_in(
         &runtime,
+        webview.label(),
         Box::new(move |event| on_event.send(event.clone()).is_ok()),
     )
 }
@@ -691,6 +793,7 @@ mod tests {
         let sender = Mutex::new(sender);
         let first = tablet_subscribe_in(
             &runtime,
+            "main",
             Box::new(move |TabletEvent::Status { status }| {
                 lock(&sender).send(status.clone()).is_ok()
             }),
@@ -699,7 +802,7 @@ mod tests {
         assert!(first.simulated);
         wait_for(&events, |s| s.connection == Connection::NotRegistered);
         // A window that went away is dropped at the next status.
-        runtime.subscribe(Box::new(|_| false));
+        runtime.subscribe("gone", Box::new(|_| false));
         assert_eq!(lock(&runtime.subscribers).len(), 2);
 
         runtime.with_service(TabletService::register).unwrap();
@@ -766,6 +869,9 @@ mod tests {
         forget_tablet_through(&runtime, &context).unwrap();
         assert!(identity::load(throwaway.path()).unwrap().is_none());
         wait_for(&events, |s| s.connection == Connection::NotRegistered);
+        // The simulated tablet does not use Bluetooth: the guided test leaves it running.
+        assert!(!runtime.pause());
+        assert!(runtime.with_service(|_| ()).is_ok());
         runtime.stop();
         assert_eq!(
             sim_press_button_in(&TabletRuntime::default())
@@ -778,5 +884,103 @@ mod tests {
             "tablet",
             "the service is stopped"
         );
+        // The service stopped, forgetting still never touches the real tablet's registration.
+        let real = tempfile::tempdir().unwrap();
+        crate::commands::choose_library(&context, &real.path().display().to_string()).unwrap();
+        identity::save(real.path(), &record()).unwrap();
+        identity::save(throwaway.path(), &record()).unwrap();
+        forget_tablet_through(&runtime, &context).unwrap();
+        assert!(identity::load(real.path()).unwrap().is_some());
+        assert!(identity::load(throwaway.path()).unwrap().is_none());
+    }
+
+    fn record() -> DeviceRecord {
+        DeviceRecord {
+            format: DEVICE_FORMAT,
+            uuid: HostId([0x89, 0xea, 0x78, 0x88, 0xff, 0xcb]),
+            address: "E2:43:03:67:0E:01".into(),
+            name: "Bamboo Slate".into(),
+            protocol: "slate".into(),
+            width: 29700,
+            height: 21600,
+            registered: "2026-10-24T14:03:12+02:00".into(),
+            extra: Default::default(),
+        }
+    }
+
+    /// The guided test of the real tablet: the service stops while it runs (the windows are told
+    /// the tablet is busy), then starts again and reads `device.json` again.
+    #[test]
+    fn the_service_pauses_during_the_real_tablet_test() {
+        let settings = tempfile::tempdir().unwrap();
+        let notes_dir = tempfile::tempdir().unwrap();
+        let context = context(settings.path());
+        crate::commands::choose_library(&context, &notes_dir.path().display().to_string()).unwrap();
+        let runtime = TabletRuntime::default();
+        runtime.start_in(&context, None);
+        let (sender, events) = mpsc::channel();
+        let sender = Mutex::new(sender);
+        tablet_subscribe_in(
+            &runtime,
+            "main",
+            Box::new(move |TabletEvent::Status { status }| {
+                lock(&sender).send(status.clone()).is_ok()
+            }),
+        )
+        .unwrap();
+        // The same window subscribing again replaces its subscription.
+        let (sender, again) = mpsc::channel();
+        let sender = Mutex::new(sender);
+        tablet_subscribe_in(
+            &runtime,
+            "main",
+            Box::new(move |TabletEvent::Status { status }| {
+                lock(&sender).send(status.clone()).is_ok()
+            }),
+        )
+        .unwrap();
+        assert_eq!(lock(&runtime.subscribers).len(), 1);
+        assert_eq!(runtime.status().unwrap().registered, None);
+
+        assert!(runtime.pause());
+        assert!(runtime.with_service(|_| ()).is_err(), "stopped");
+        let busy = runtime.status().unwrap();
+        assert_eq!(busy.connection, Connection::Unavailable);
+        assert_eq!(busy.error.as_ref().unwrap().code, "tabletBusy");
+        wait_for(&again, |s| s == &busy);
+        // The replaced subscription was dropped (its channel is closed) before that.
+        assert!(events.iter().all(|s| s != busy));
+        assert!(!runtime.pause(), "already stopped");
+
+        // The test registered the tablet: the service started again knows it.
+        identity::save(notes_dir.path(), &record()).unwrap();
+        runtime.resume_in(&context);
+        assert!(runtime.with_service(|_| ()).is_ok());
+        let status = wait_for(&again, |s| s.registered.is_some());
+        assert_eq!(status.registered.unwrap().name, "Bamboo Slate");
+        assert_ne!(
+            runtime.status().unwrap().error.map(|e| e.code),
+            Some("tabletBusy".into())
+        );
+        // Resuming twice does not start a second service.
+        runtime.resume_in(&context);
+        runtime.stop();
+        runtime.resume_in(&context);
+        assert!(runtime.with_service(|_| ()).is_err());
+    }
+
+    /// A command waiting for the tablet does not hold the lock other commands need.
+    #[test]
+    fn the_lock_is_not_held_while_a_command_runs() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path());
+        let runtime = TabletRuntime::default();
+        runtime.start_in(&context, None);
+        // Before, the inner call waited forever for the outer one.
+        let inner = runtime
+            .with_service(|_| runtime.with_service(TabletService::status).is_ok())
+            .unwrap();
+        assert!(inner);
+        runtime.stop();
     }
 }
