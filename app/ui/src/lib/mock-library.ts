@@ -7,7 +7,9 @@ import {
   UNHANDLED,
   fileName,
   freshStamp,
+  mockAutoExportSettings,
   mockLibrary,
+  normalizeTags,
   notePath,
   notifyLibraryChanged,
   sameStamp,
@@ -124,6 +126,23 @@ function thumbnail(note: Note): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+/**
+ * The binders the interface lists: while the automatic export is on, its folder and sub-folders
+ * (PDF and PNG files, not notes) are left out, unless they hold notes (`hide_export_folder`).
+ */
+function visibleBinders(binders: Set<string>, notes: NoteSummary[]): string[] {
+  const { format, folder } = mockAutoExportSettings();
+  const all = [...binders].sort();
+  if (format === 'off') return all;
+  const hidden = folder.toLowerCase();
+  const within = (binder: string, parent: string) => binder === parent || binder.startsWith(`${parent}/`);
+  const noteBinders = notes.map((n) => n.binder.toLowerCase());
+  return all.filter((binder) => {
+    const lower = binder.toLowerCase();
+    return !within(lower, hidden) || noteBinders.some((n) => within(n, lower));
+  });
+}
+
 function listing(library: MockLibrary): LibraryListing {
   const notes = [...library.notes].map(([path, stored]) => summary(path, stored));
   const binders = new Set(library.binders);
@@ -134,7 +153,7 @@ function listing(library: MockLibrary): LibraryListing {
   const counts = new Map<string, number>();
   for (const note of notes) for (const tag of note.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
   const tags: TagCount[] = [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => a.tag.localeCompare(b.tag));
-  return { notes, binders: [...binders].sort(), tags, problems: [...mockProblems] };
+  return { notes, binders: visibleBinders(binders, notes), tags, problems: [...mockProblems] };
 }
 
 function modify(stored: StoredNote, change: (note: Note) => void): FileStamp {
@@ -262,7 +281,7 @@ export function mockLibraryInvoke(command: string, args: Record<string, unknown>
 
     case 'set_note_tags': {
       const stored = findFresh(mockLibrary(), args.path as string, args.stamp as FileStamp);
-      const tags = [...new Set((args.tags as string[]).map((t) => t.trim()).filter(Boolean))];
+      const tags = normalizeTags(args.tags as string[]);
       const stamp = modify(stored, (note) => (note.tags = tags));
       notifyLibraryChanged();
       return stamp;
@@ -279,8 +298,8 @@ export function mockLibraryInvoke(command: string, args: Record<string, unknown>
       const library = mockLibrary();
       const path = args.path as string;
       const stored = findFresh(library, path, args.stamp as FileStamp);
+      // Any title goes: only the file name is cleaned (`fileName`).
       const title = (args.title as string).trim();
-      if (/[\\/:*?"<>|]/.test(title)) failure('invalidName', title);
       const stamp = modify(stored, (note) => (note.title = title));
       library.notes.delete(path);
       const target = freePath(library, stored.binder, fileName(stored.note));

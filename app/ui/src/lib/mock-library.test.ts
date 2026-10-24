@@ -45,7 +45,42 @@ describe('browser stand-in for the library commands', () => {
     const renamed = await api.retitleNote(a.path, 'Courses', a.stamp);
     expect(renamed.path.endsWith('2026-10-22 Courses.ardoise')).toBe(true);
     expect(mockLibrary().notes.has(a.path)).toBe(false);
-    await expect(api.retitleNote(renamed.path, 'a/b', renamed.stamp)).rejects.toMatchObject({ code: 'invalidName' });
+  });
+
+  it('keeps a title with forbidden characters and cleans only the file name, like the library', async () => {
+    const { notes } = await api.libraryList();
+    const a = notes.find((n) => n.title === 'Liste de courses')!;
+    const renamed = await api.retitleNote(a.path, '  a/b: "c" <d>?*|  ', a.stamp);
+    expect(mockLibrary().notes.get(renamed.path)!.note.title).toBe('a/b: "c" <d>?*|');
+    expect(renamed.path.endsWith("2026-10-22 a-b- 'c' d-.ardoise")).toBe(true);
+  });
+
+  it('normalises tags: spaces collapsed, duplicates dropped without regard to case', async () => {
+    const { notes } = await api.libraryList();
+    const a = notes.find((n) => n.title === 'Liste de courses')!;
+    await api.setNoteTags(a.path, ['  Maths  ', 'maths', 'a   b', '', 'MATHS', 'A B'], a.stamp);
+    expect(mockLibrary().notes.get(a.path)!.note.tags).toEqual(['Maths', 'a b']);
+  });
+
+  it('hides the automatic export folder from the binders unless it holds notes', async () => {
+    const binders = async () => (await api.libraryList()).binders;
+    await api.createBinder('Exports/Perso');
+    await api.createBinder('Exports/Vide');
+    expect(await binders()).toContain('Exports');
+    try {
+      await api.setAutoExport({ format: 'pdf', folder: 'exports' });
+      expect(await binders()).toEqual(['Classe', 'Classe/3e B', 'Perso']);
+      // A note inside keeps its binder (and the ones above it) visible.
+      const { notes } = await api.libraryList();
+      await api.moveNotes([notes[0].path], 'Exports/Perso');
+      expect(await binders()).toEqual(expect.arrayContaining(['Exports', 'Exports/Perso']));
+      expect(await binders()).not.toContain('Exports/Vide');
+      // Off: the folder is an ordinary binder again.
+      await api.setAutoExport({ format: 'off', folder: 'Exports' });
+      expect(await binders()).toContain('Exports/Vide');
+    } finally {
+      await api.setAutoExport({ format: 'off', folder: 'Exports' });
+    }
   });
 
   it('creates binders and notes, and moves notes', async () => {

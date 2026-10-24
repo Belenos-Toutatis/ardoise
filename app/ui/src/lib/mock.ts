@@ -3,7 +3,7 @@
  * (`npm run dev`) so screens can be developed and tested without the desktop app.
  */
 import type { AppState, NoteOutlines } from './api';
-import { UNHANDLED } from './mock-data';
+import { UNHANDLED, setMockAutoExportSettings } from './mock-data';
 import { checkAutoExport, mockExportInvoke } from './mock-export';
 import { mockLibraryInvoke } from './mock-library';
 import { mockNotesInvoke } from './mock-notes';
@@ -50,6 +50,7 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
         return { ...state };
       case 'set_auto_export':
         state.autoExport = checkAutoExport(args.autoExport as AppState['autoExport']);
+        setMockAutoExportSettings(state.autoExport);
         return { ...state };
       case 'inspect_library':
         return { existing: libraries.has(args.path as string) };

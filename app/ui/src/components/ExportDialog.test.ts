@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../lib/api';
 import { setLocale } from '../lib/i18n.svelte';
 import { mockLibrary, resetMockLibrary } from '../lib/mock-data';
+import { mockExport } from '../lib/mock-export';
 import type { ExportSource } from '../lib/note';
 import ExportDialog from './ExportDialog.svelte';
 
@@ -120,6 +121,58 @@ describe('export dialog: options', () => {
     expect(ui.resolutionSelect()!.value).toBe('150');
   });
 
+  it('does not offer a resolution whose image would exceed 16 384 px, and moves to one that fits', async () => {
+    // 3 m wide: 17 717 px at 150 dpi (too much), 11 339 px at 96 dpi.
+    mockLibrary().notes.get(pathOf('Liste de courses'))!.note.page = { width: 300_000, height: 21600 };
+    const spy = vi.spyOn(api, 'exportNotes');
+    const ui = await render(['Liste de courses', 'Cours de physique']);
+    const options = [...ui.resolutionSelect()!.options];
+    expect(options.map((o) => [o.value, o.disabled])).toEqual([
+      ['96', false],
+      ['150', true],
+      ['300', true],
+    ]);
+    expect(options[1].textContent?.trim()).toBe('150 ppp (usuel) : image trop grande');
+    expect(ui.target.querySelector('.export-hint')?.textContent).toContain('ne sont pas proposées');
+    // The remembered 150 dpi gave way to the largest resolution that fits.
+    expect(ui.resolutionSelect()!.value).toBe('96');
+    ui.button('Exporter…').click();
+    await settle();
+    expect(spy.mock.calls[0][2].dpi).toBe(96);
+  });
+
+  it('blocks the raster export of a note given by the editor when no resolution fits, but not the PDF', async () => {
+    const path = pathOf('Liste de courses');
+    const { note } = await api.openNote(path);
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(ExportDialog, {
+      target,
+      props: { sources: [{ path, note: { ...note, page: { width: 600_000, height: 21600 } } }], subject: 'S', onclose: vi.fn() },
+    });
+    cleanup = () => {
+      unmount(component);
+      target.remove();
+    };
+    await settle();
+    // 6 m wide: 96 dpi still gives 22 677 px, nothing fits.
+    const options = [...target.querySelectorAll<HTMLOptionElement>('.export-row select option')];
+    expect(options.every((o) => o.disabled)).toBe(true);
+    expect(target.querySelector('.export-hint')?.textContent).toContain('PDF ou en SVG');
+    const run = [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Exporter…')!;
+    expect(run.disabled).toBe(true);
+    // Vector formats have no such limit.
+    target.querySelector<HTMLInputElement>('input[name="export-format"][value="pdf"]')!.click();
+    await settle();
+    expect(run.disabled).toBe(false);
+  });
+
+  it('shows no hint and disables nothing for an ordinary page', async () => {
+    const ui = await render(['Liste de courses']);
+    expect([...ui.resolutionSelect()!.options].some((o) => o.disabled)).toBe(false);
+    expect(ui.target.querySelector('.export-hint')).toBeNull();
+  });
+
   it('speaks English', async () => {
     const ui = await render(['Liste de courses'], 'en');
     expect(ui.dialog().querySelector('h2')?.textContent).toBe('Export');
@@ -217,7 +270,7 @@ describe('export dialog: exporting', () => {
     expect(spy.mock.calls[0][0][0].note?.title).toBe('Brouillon');
   });
 
-  it('disables the buttons while exporting, then shows the result', async () => {
+  it('disables the settings while exporting, then shows the result', async () => {
     let finish: (paths: string[]) => void = () => {};
     vi.spyOn(api, 'exportNotes').mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
     const ui = await render(['Liste de courses']);
@@ -225,16 +278,81 @@ describe('export dialog: exporting', () => {
     await settle();
     expect(ui.target.querySelector('[role="status"]')?.textContent).toBe('Export en cours…');
     expect(ui.button('Export en cours…').disabled).toBe(true);
-    expect(ui.button('Annuler').disabled).toBe(true);
+    expect(ui.button("Annuler l'export").disabled).toBe(false);
+    expect([...ui.target.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Fermer')).toBe(false);
     expect(ui.target.querySelector('fieldset')?.disabled).toBe(true);
-    // Escape does not close the dialog under the operation.
-    ui.dialog().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(ui.onclose).not.toHaveBeenCalled();
 
     finish(['C:\\x\\a.png']);
     await settle();
     expect(ui.target.querySelector('.export-result')?.textContent).toContain('Fichiers créés : 1');
     expect(ui.button('Fermer').disabled).toBe(false);
+  });
+
+  it('cancels the export with the button: a neutral notice, no red banner, and the dialog stays', async () => {
+    let fail: (reason: unknown) => void = () => {};
+    vi.spyOn(api, 'exportNotes').mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)));
+    const cancelSpy = vi.spyOn(api, 'cancelExport').mockResolvedValue(undefined);
+    const ui = await render(['Liste de courses']);
+    ui.button('Exporter…').click();
+    await settle();
+    ui.button("Annuler l'export").click();
+    await settle();
+    expect(cancelSpy).toHaveBeenCalledTimes(1);
+    // Waiting for the desktop app to stop: no second request, a visible state.
+    expect(ui.target.querySelector('.export-status')?.textContent).toBe('Annulation…');
+    expect(ui.button('Annulation…').disabled).toBe(true);
+
+    fail({ code: 'cancelled', message: 'cancelled' });
+    await settle();
+    expect(ui.target.querySelector('[role="alert"]')).toBeNull();
+    expect(ui.target.querySelector('.banner.error')).toBeNull();
+    expect(ui.target.querySelector('.export-notice')?.textContent).toBe('Export annulé.');
+    expect(ui.target.querySelector('.export-result')).toBeNull();
+    expect(ui.onclose).not.toHaveBeenCalled();
+    // Back to idle: export again, or close.
+    expect(ui.button('Exporter…').disabled).toBe(false);
+    expect(ui.button('Annuler').disabled).toBe(false);
+  });
+
+  it('cancels the export with Escape instead of closing the dialog', async () => {
+    vi.spyOn(api, 'exportNotes').mockImplementationOnce(() => new Promise(() => {}));
+    const cancelSpy = vi.spyOn(api, 'cancelExport').mockResolvedValue(undefined);
+    const ui = await render(['Liste de courses']);
+    ui.button('Exporter…').click();
+    await settle();
+    ui.dialog().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(cancelSpy).toHaveBeenCalledTimes(1);
+    expect(ui.onclose).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending export of the browser stand-in: it rejects and the notice shows', async () => {
+    mockExport.delayMs = 5000;
+    try {
+      const ui = await render(['Liste de courses'], 'en');
+      ui.button('Export…').click();
+      await settle();
+      expect(ui.target.querySelector('.export-status')?.textContent).toBe('Exporting…');
+      ui.button('Cancel the export').click();
+      await settle();
+      expect(ui.target.querySelector('.export-notice')?.textContent).toBe('Export cancelled.');
+      expect(ui.target.querySelector('[role="alert"]')).toBeNull();
+      expect(ui.button('Export…').disabled).toBe(false);
+    } finally {
+      mockExport.delayMs = 0;
+    }
+  });
+
+  it('reports a failure to cancel as an error', async () => {
+    vi.spyOn(api, 'exportNotes').mockImplementationOnce(() => new Promise(() => {}));
+    vi.spyOn(api, 'cancelExport').mockRejectedValueOnce({ code: 'exportFailed', message: 'x' });
+    const ui = await render(['Liste de courses']);
+    ui.button('Exporter…').click();
+    await settle();
+    ui.button("Annuler l'export").click();
+    await settle();
+    expect(ui.target.querySelector('[role="alert"]')).toBeTruthy();
+    expect(ui.button("Annuler l'export").disabled).toBe(false);
   });
 
   it('shows a translated error and lets the user try again', async () => {

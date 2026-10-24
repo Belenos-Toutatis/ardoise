@@ -1065,6 +1065,80 @@ describe('note editor: split, copy image and export', () => {
     expect(slider(target)).toBeNull();
   });
 
+  it('locks the page panel, the layers panel and the style controls while the split panel is open', async () => {
+    const { target, button } = await render('Cours de physique');
+    const section = (heading: string) => target.querySelector<HTMLElement>(`section[aria-labelledby="${heading}"]`)!;
+    const controls = (root: ParentNode) => [...root.querySelectorAll<HTMLElement>('button, input, select')];
+    const toolbarControls = () =>
+      controls(target.querySelector('.toolbar')!).filter((c) => !c.closest('.share'));
+    const locked = (items: HTMLElement[]) =>
+      items.every((c) => (c as HTMLButtonElement | HTMLInputElement | HTMLSelectElement).disabled);
+    const free = (items: HTMLElement[]) =>
+      items.every((c) => !(c as HTMLButtonElement | HTMLInputElement | HTMLSelectElement).disabled);
+
+    // Before: everything works (the layer buttons that cannot apply to the top layer excepted).
+    expect(toolbarControls().length).toBeGreaterThan(10);
+    expect(free(toolbarControls())).toBe(true);
+    expect(free(controls(section('editor-page-heading')))).toBe(true);
+    expect(controls(section('editor-layers-heading')).some((c) => (c as HTMLInputElement).disabled)).toBe(true);
+    expect(button('+ Ajouter un calque').disabled).toBe(false);
+
+    button('Découper').click();
+    await tick();
+    expect(panelOf(target)).toBeTruthy();
+    // Mode, tool, colours, width, "apply to all": all locked.
+    expect(toolbarControls().length).toBeGreaterThan(10);
+    expect(locked(toolbarControls())).toBe(true);
+    expect(locked(controls(section('editor-page-heading')))).toBe(true);
+    expect(controls(section('editor-page-heading')).length).toBe(7);
+    expect(locked(controls(section('editor-layers-heading')))).toBe(true);
+    // The split's own buttons, copy and export stay available.
+    expect(button('Découper').disabled).toBe(false);
+    expect(button("Copier l'image").disabled).toBe(false);
+    expect(button('Exporter…').disabled).toBe(false);
+
+    // Closing the panel gives everything back.
+    panelButton(target, 'Annuler').click();
+    await tick();
+    expect(panelOf(target)).toBeNull();
+    expect(free(toolbarControls())).toBe(true);
+    expect(free(controls(section('editor-page-heading')))).toBe(true);
+    expect(button('+ Ajouter un calque').disabled).toBe(false);
+  });
+
+  it('does not let a click on a locked control change the note while splitting', async () => {
+    const { target, button, status } = await render('Cours de physique');
+    button('Découper').click();
+    await tick();
+    button("Tourner la page d'un quart de tour vers la droite").click();
+    button('Recadrer autour du contenu').click();
+    button('+ Ajouter un calque').click();
+    await tick();
+    expect(status()).toBe('Enregistrée');
+    expect(target.querySelectorAll('[data-layer]')).toHaveLength(1);
+  });
+
+  it('copies the note as an image at 150 dpi, lower for a page that would exceed 16 384 px', async () => {
+    // 3 m wide: 17 717 px at 150 dpi, 11 339 px at 96 dpi; 5 m: only 72 dpi fits.
+    const wide = (width: number) => {
+      mockLibrary().notes.get(demoPath('Liste de courses'))!.note.page = { width, height: 21600 };
+    };
+    const copySpy = vi.spyOn(api, 'copyNoteImage');
+    wide(300_000);
+    const first = await render('Liste de courses');
+    first.button("Copier l'image").click();
+    await vi.waitFor(() => expect(copySpy).toHaveBeenCalledTimes(1));
+    expect(copySpy.mock.calls[0][1]).toBe(96);
+    cleanup?.();
+    cleanup = null;
+
+    wide(500_000);
+    const second = await render('Liste de courses');
+    second.button("Copier l'image").click();
+    await vi.waitFor(() => expect(copySpy).toHaveBeenCalledTimes(2));
+    expect(copySpy.mock.calls[1][1]).toBe(72);
+  });
+
   it('copies the note as an image at 150 dpi', async () => {
     const copySpy = vi.spyOn(api, 'copyNoteImage');
     const { path, target, button } = await render('Liste de courses');

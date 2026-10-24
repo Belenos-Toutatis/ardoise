@@ -18,6 +18,7 @@
     oneraser,
     onapplyall,
     splitting = false,
+    locked = false,
     copying = false,
     onsplit,
     oncopy,
@@ -36,6 +37,8 @@
     onapplyall: (what: 'color' | 'tool' | 'width') => void;
     /** The split panel is open. */
     splitting?: boolean;
+    /** Style and tool changes wait (the split panel is open: edits would be lost when it ends). */
+    locked?: boolean;
     /** The image is being copied to the clipboard. */
     copying?: boolean;
     onsplit: () => void;
@@ -66,6 +69,7 @@
         class="button tool"
         class:active={tools.mode === mode}
         aria-pressed={tools.mode === mode}
+        disabled={locked}
         title={t(`editor.modes.${mode}`)}
         onclick={() => onmode(mode)}
       >
@@ -83,6 +87,7 @@
             type="radio"
             name="eraser-mode"
             checked={tools.eraser === mode}
+            disabled={locked}
             onchange={() => oneraser({ mode })}
           />
           {t(`editor.eraser.${mode}`)}
@@ -97,6 +102,7 @@
         max="2000"
         step="10"
         value={tools.eraserRadius}
+        disabled={locked}
         oninput={(e) => oneraser({ radius: Number(e.currentTarget.value) })}
       />
       <span class="value">{t('editor.width.value', { mm: mm(tools.eraserRadius * 2) })}</span>
@@ -104,7 +110,7 @@
   {:else}
     <label class="group">
       <span class="label">{t('editor.ink.label')}</span>
-      <select value={tools.tool} onchange={(e) => ontool(e.currentTarget.value as Tool)}>
+      <select value={tools.tool} disabled={locked} onchange={(e) => ontool(e.currentTarget.value as Tool)}>
         {#each TOOLS as tool}
           <option value={tool}>{t(`editor.ink.tools.${tool}`)}</option>
         {/each}
@@ -119,6 +125,7 @@
           class:active={sameColor(color, tools.color)}
           style:background={cssColor(color)}
           aria-pressed={sameColor(color, tools.color)}
+          disabled={locked}
           aria-label={t(`editor.colors.${INKSPACE_COLOR_NAMES[i]}`)}
           title={t(`editor.colors.${INKSPACE_COLOR_NAMES[i]}`)}
           onclick={() => oncolor(color)}
@@ -131,6 +138,7 @@
           class:active={sameColor(color, tools.color)}
           style:background={cssColor(color)}
           aria-pressed={sameColor(color, tools.color)}
+          disabled={locked}
           aria-label={t('editor.color.customSwatch', { hex: toHex(color) })}
           title={t('editor.color.customSwatch', { hex: toHex(color) })}
           onclick={() => oncolor(color)}
@@ -138,7 +146,7 @@
       {/each}
       <label class="custom" title={t('editor.color.custom')}>
         <span class="visually-hidden">{t('editor.color.custom')}</span>
-        <input type="color" value={toHex(tools.color)} onchange={pickCustom} />
+        <input type="color" value={toHex(tools.color)} disabled={locked} onchange={pickCustom} />
       </label>
     </div>
 
@@ -150,6 +158,7 @@
         max="1000"
         step="5"
         value={tools.width}
+        disabled={locked}
         oninput={(e) => onwidth(Number(e.currentTarget.value), false)}
         onchange={(e) => onwidth(Number(e.currentTarget.value), true)}
       />
@@ -159,9 +168,9 @@
     <div class="group apply" role="group" aria-label={t('editor.applyAll.label')}>
       <span class="label">{hasSelection ? t('editor.applyAll.selectionHint') : t('editor.applyAll.label')}</span>
       {#if !hasSelection}
-        <button type="button" class="button small-button" onclick={() => onapplyall('color')}>{t('editor.applyAll.color')}</button>
-        <button type="button" class="button small-button" onclick={() => onapplyall('tool')}>{t('editor.applyAll.tool')}</button>
-        <button type="button" class="button small-button" onclick={() => onapplyall('width')}>{t('editor.applyAll.width')}</button>
+        <button type="button" class="button small-button" disabled={locked} onclick={() => onapplyall('color')}>{t('editor.applyAll.color')}</button>
+        <button type="button" class="button small-button" disabled={locked} onclick={() => onapplyall('tool')}>{t('editor.applyAll.tool')}</button>
+        <button type="button" class="button small-button" disabled={locked} onclick={() => onapplyall('width')}>{t('editor.applyAll.width')}</button>
       {/if}
     </div>
   {/if}

@@ -48,6 +48,7 @@
     type SplitMode,
   } from '../../lib/editor/split';
   import { defaultWindowClose, type WindowClose } from '../../lib/editor/window-close';
+  import { largestFittingDpi } from '../../lib/export-options';
   import { t } from '../../lib/i18n.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
   import type { ExportSource, FileStamp, Note, Rgba, SplitSpec, Stroke } from '../../lib/note';
@@ -87,8 +88,14 @@
   /** How long a short notice stays, milliseconds. */
   const NOTICE_MS = 4000;
 
-  /** Resolution of the image copied to the clipboard. */
-  const COPY_DPI = 150;
+  /** Resolutions tried for the image copied to the clipboard: the first whose image fits. */
+  const COPY_DPIS = [150, 96, 72];
+
+  /** The copied image's resolution: 150 dpi, lower for a page that would exceed the size limit. */
+  function copyDpi(source: ExportSource): number {
+    const page = source.note?.page;
+    return (page && largestFittingDpi([page], COPY_DPIS)) ?? COPY_DPIS[COPY_DPIS.length - 1];
+  }
 
   /** The split panel's settings. */
   interface SplitState {
@@ -540,7 +547,7 @@
     if (!source || copying) return;
     copying = true;
     try {
-      await api.copyNoteImage(source, COPY_DPI);
+      await api.copyNoteImage(source, copyDpi(source));
       showNotice(t('editor.copyImage.done'));
     } catch (error) {
       showNotice(t('editor.copyImage.failed', { message: errorMessage(error) }), true);
@@ -844,6 +851,7 @@
       oneraser={setEraser}
       onapplyall={applyAll}
       splitting={split !== null}
+      locked={split !== null}
       {copying}
       onsplit={toggleSplit}
       oncopy={copyImage}
@@ -914,6 +922,7 @@
         <PagePanel
           background={doc.note.background}
           cropping={tools.mode === 'crop'}
+          disabled={split !== null}
           onbackground={(b) => change(setBackground(doc!, b))}
           onrotate={(direction) => change(rotate(doc!, direction))}
           onautocrop={() => change(autoCrop(doc!))}
@@ -922,6 +931,7 @@
         <LayersPanel
           layers={doc.note.layers}
           active={doc.activeLayer}
+          disabled={split !== null}
           onactive={(i) => reselect(setActiveLayer(doc!, i))}
           onvisible={(i, visible) => change(setLayerVisible(doc!, i, visible))}
           onrename={(i, name) => change(renameLayer(doc!, i, name))}

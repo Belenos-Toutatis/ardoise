@@ -6,6 +6,7 @@
   let {
     layers,
     active,
+    disabled = false,
     onactive,
     onvisible,
     onrename,
@@ -15,6 +16,8 @@
   }: {
     layers: Layer[];
     active: number;
+    /** The split panel is open: the layers cannot change meanwhile. */
+    disabled?: boolean;
     onactive: (index: number) => void;
     onvisible: (index: number, visible: boolean) => void;
     onrename: (index: number, name: string) => void;
@@ -44,6 +47,7 @@
           type="radio"
           name="editor-active-layer"
           checked={index === active}
+          {disabled}
           aria-label={t('editor.layers.active', { name: layer.name })}
           title={t('editor.layers.active', { name: layer.name })}
           onchange={() => onactive(index)}
@@ -51,6 +55,7 @@
         <input
           type="checkbox"
           checked={layer.visible}
+          {disabled}
           aria-label={t('editor.layers.visible', { name: layer.name })}
           title={t('editor.layers.visible', { name: layer.name })}
           onchange={(e) => onvisible(index, e.currentTarget.checked)}
@@ -59,6 +64,7 @@
           class="name"
           type="text"
           value={layer.name}
+          {disabled}
           aria-label={t('editor.layers.name', { n })}
           onchange={(e) => rename(index, e.currentTarget)}
           onkeydown={(e) => {
@@ -68,7 +74,7 @@
         <button
           type="button"
           class="icon"
-          disabled={index === layers.length - 1}
+          disabled={disabled || index === layers.length - 1}
           aria-label={t('editor.layers.up', { name: layer.name })}
           title={t('editor.layers.up', { name: layer.name })}
           onclick={() => onmove(index, index + 1)}>↑</button
@@ -76,7 +82,7 @@
         <button
           type="button"
           class="icon"
-          disabled={index === 0}
+          disabled={disabled || index === 0}
           aria-label={t('editor.layers.down', { name: layer.name })}
           title={t('editor.layers.down', { name: layer.name })}
           onclick={() => onmove(index, index - 1)}>↓</button
@@ -84,7 +90,7 @@
         <button
           type="button"
           class="icon"
-          disabled={index === 0}
+          disabled={disabled || index === 0}
           aria-label={t('editor.layers.merge', { name: layer.name })}
           title={t('editor.layers.merge', { name: layer.name })}
           onclick={() => onmerge(index)}>⤓</button
@@ -92,5 +98,5 @@
       </li>
     {/each}
   </ul>
-  <button type="button" class="button small-button" onclick={onadd}>+ {t('editor.layers.add')}</button>
+  <button type="button" class="button small-button" {disabled} onclick={onadd}>+ {t('editor.layers.add')}</button>
 </section>

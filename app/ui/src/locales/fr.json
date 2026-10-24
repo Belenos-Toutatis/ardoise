@@ -302,7 +302,9 @@
     "nothingToSplit": "cette découpe ne laisserait rien d'un des deux côtés ; choisissez un instant ou une zone qui sépare la note en deux parties non vides",
     "nothingToMerge": "il faut au moins deux notes pour les assembler",
     "pageTooLarge": "la page obtenue serait trop grande (plus de 100 m de côté) ; assemblez moins de notes ou superposez-les",
-    "invalidFolder": "ce dossier n'est pas utilisable : indiquez un dossier à l'intérieur de la bibliothèque, par exemple « Exports » (sans « .. », sans lettre de lecteur, et pas le dossier _ardoise)"
+    "invalidFolder": "ce dossier n'est pas utilisable : indiquez un dossier à l'intérieur de la bibliothèque, par exemple « Exports » (sans « .. », sans lettre de lecteur, et pas le dossier _ardoise)",
+    "imageTooLarge": "l'image dépasserait 16 384 pixels de côté ; choisissez une résolution plus basse, ou exportez en PDF ou en SVG",
+    "cancelled": "l'export a été annulé"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -530,6 +532,12 @@
     "run": "Exporter…",
     "again": "Exporter de nouveau…",
     "running": "Export en cours…",
+    "cancelRun": "Annuler l'export",
+    "cancelling": "Annulation…",
+    "cancelled": "Export annulé.",
+    "dpiTooLarge": "{label} : image trop grande",
+    "rasterTooLarge": "Même à la résolution la plus basse, cette page donnerait une image de plus de 16 384 pixels de côté. Exportez-la plutôt en PDF ou en SVG.",
+    "dpiLimitHint": "Les résolutions qui donneraient une image de plus de 16 384 pixels de côté ne sont pas proposées ; utilisez le PDF ou le SVG pour les plus grandes pages.",
     "done": "Fichiers créés : {count}",
     "failed": "L'export a échoué : {message}",
     "pickFile": "Enregistrer l'export",
