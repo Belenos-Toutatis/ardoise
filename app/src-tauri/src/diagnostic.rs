@@ -3,7 +3,9 @@
 //! The run happens on its own thread. Its operator forwards every step event to the
 //! interface through a Tauri channel and blocks on the user's answers, which arrive through
 //! the `diagnostic_answer` command. `ardoise.exe --diagnostic --simulated` runs the same test
-//! without a window, against the simulated tablet, and prints the report.
+//! without a window, against the simulated tablet, and prints the report. A run on the real
+//! tablet stops the tablet service until it ends (`tablet::TabletPause`): both would otherwise
+//! connect to the tablet.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,11 +23,12 @@ use ardoise_device::transport::{
     Advertisement, Clock, Connector, SystemClock, Transport, TransportError,
 };
 use serde::{Deserialize, Serialize};
-use tauri::State;
 use tauri::ipc::Channel;
+use tauri::{AppHandle, State};
 
 use crate::AppContext;
 use crate::commands::{CommandError, current_state};
+use crate::tablet::TabletPause;
 
 /// What the interface receives during a run (see `app/ui/src/lib/diagnostic.ts`).
 #[derive(Debug, Clone, Serialize)]
@@ -179,7 +182,7 @@ impl Connector for Unavailable {
 
 /// A throwaway library for simulated runs, so that a simulated registration never replaces
 /// the real tablet's identity in the user's library.
-fn simulation_library() -> std::io::Result<PathBuf> {
+pub(crate) fn simulation_library() -> std::io::Result<PathBuf> {
     remove_old_simulations();
     let dir = std::env::temp_dir().join(format!(
         "ardoise-simulation-{}-{}",
@@ -301,6 +304,7 @@ pub fn run_simulated_cli(context: &AppContext) -> i32 {
 
 #[tauri::command]
 pub fn diagnostic_start(
+    app: AppHandle,
     context: State<'_, AppContext>,
     runs: State<'_, DiagnosticRuns>,
     options: DiagnosticOptions,
@@ -353,7 +357,12 @@ pub fn diagnostic_start(
                     Some(Box::new(operator)),
                 )
             } else {
-                run_ble(&library, options, language, cancel, operator)
+                // The tablet service lets go of the tablet during the test, and takes it back
+                // at the end, whatever the end (the guard also runs on a panic).
+                let pause = TabletPause::new(&app);
+                let report = run_ble(&library, options, language, cancel, operator);
+                drop(pause);
+                report
             };
             *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
             let _ = on_event.send(DiagnosticEvent::Done { report });

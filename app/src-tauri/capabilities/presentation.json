@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "presentation",
+  "description": "Permissions of the classroom's presentation window (live.rs, presentation.rs).",
+  "windows": ["presentation"],
+  "permissions": ["core:default"]
+}

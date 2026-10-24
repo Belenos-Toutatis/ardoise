@@ -13,11 +13,14 @@
 //! - [`replay`]: a connector that replays a recorded `.jsonl` diagnostic log.
 //! - [`drawings`]: reference pages and live handwriting.
 //! - [`pen`]: pen movement for live mode.
+//! - [`realtime`]: the simulated tablet in real time (`ardoise.exe --simulated-tablet`, latency
+//!   tests), the connector factory and the simulated user of the tablet service.
 
 pub mod clock;
 mod connector;
 pub mod drawings;
 pub mod pen;
+pub mod realtime;
 pub mod replay;
 mod tablet;
 mod user;
@@ -25,6 +28,9 @@ mod user;
 pub use clock::{SIM_EPOCH_UNIX, VirtualClock};
 pub use connector::{SimConnector, SimTransport};
 pub use pen::{PenScript, PenSegment};
+pub use realtime::{RealTimeConnector, SimFactory, SimHooks};
 pub use replay::{ReplayConnector, ReplayError, ReplayOptions};
-pub use tablet::{CONNECT_SYSEVENT, SimConfig, SimStats, SimTablet, StoredPage};
+pub use tablet::{
+    CONNECT_SYSEVENT, LIVE_BUTTON_SYSEVENT, SimConfig, SimStats, SimTablet, StoredPage,
+};
 pub use user::SimulatedUser;

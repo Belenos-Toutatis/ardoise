@@ -29,6 +29,23 @@ const STATUS_BUTTONS_OFFSET: usize = 10;
 /// Resolution of the proximity timestamp.
 const TICK_MS: u64 = 5;
 
+/// Sysevent notifications taken for a press of the tablet's button during live mode.
+///
+/// **Hypothesis, to check at the hardware checkpoint H2:** protocol.md does not say what the
+/// Slate sends when its button is pressed in live mode (§7.2 only knows the stylus button byte
+/// of the `10` report, which Tuhi ignores; §11 lists the sysevent characteristic as unknown).
+/// The working guess is a sysevent like the `f1 02 13 00` sent after each connection (issue
+/// #212). For now the list holds only the simulator's invented signature `f1 02 14 01`; the
+/// real one goes here once an H2 log shows it (every other notification received during live
+/// mode is logged as "unclassified during live mode" for that purpose).
+pub const BUTTON_SYSEVENTS: &[&[u8]] = &[&[0xf1, 0x02, 0x14, 0x01]];
+
+/// Whether a sysevent notification is a press of the tablet's button (see
+/// [`BUTTON_SYSEVENTS`]).
+pub fn is_button_sysevent(data: &[u8]) -> bool {
+    BUTTON_SYSEVENTS.contains(&data)
+}
+
 /// One record of a pen-samples notification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LiveRecord {
@@ -371,6 +388,16 @@ mod tests {
         assert_eq!(decoded, records);
         assert_eq!(MAX_RECORDS_PER_NOTIFICATION, 3);
         assert!(encode_samples(&[]).is_empty());
+    }
+
+    #[test]
+    fn button_sysevents_are_recognised_exactly() {
+        assert!(is_button_sysevent(&bytes("f1 02 14 01")));
+        // The connection sysevent (issue #212) is not the button.
+        assert!(!is_button_sysevent(&bytes("f1 02 13 00")));
+        assert!(!is_button_sysevent(&bytes("f1 02 14")));
+        assert!(!is_button_sysevent(&bytes("f1 02 14 01 00")));
+        assert!(!is_button_sysevent(&[]));
     }
 
     #[test]

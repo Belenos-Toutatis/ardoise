@@ -8,7 +8,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ardoise_proto::message::opcode;
 use ardoise_proto::{
@@ -33,6 +33,12 @@ const MAX_NAME_CHUNKS: usize = 8;
 const MAX_PAGE_BYTES: usize = 16 * 1024 * 1024;
 /// Granularity of the waits, so that cancellation is noticed quickly.
 const WAIT_SLICE: Duration = Duration::from_millis(250);
+/// Longest name [`Session::set_name`] sends: 15 characters keep the frame (`bb`, length, name,
+/// `0a`) within one 20-byte write (protocol.md §4.1 estimates about 17).
+pub const MAX_NAME_LEN: usize = 15;
+/// Notifications kept for [`Session::next_live_event`] while nobody reads them; older ones are
+/// dropped so that a tablet streaming unasked cannot exhaust memory.
+const MAX_LIVE_QUEUE: usize = 4096;
 
 /// Errors of a session.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -58,6 +64,21 @@ pub enum DeviceError {
     /// The caller could not store a downloaded page; nothing was deleted from the tablet.
     #[error("cannot save the page: {0}")]
     Storage(String),
+    /// The command needs a connected tablet (the tablet service).
+    #[error("the tablet is not connected")]
+    NotConnected,
+    /// The tablet is syncing or in live mode (the tablet service).
+    #[error("the tablet is busy (sync or live mode under way)")]
+    Busy,
+    /// No tablet is registered from this library (the tablet service).
+    #[error("no tablet is registered")]
+    NoTabletRegistered,
+    /// No library is chosen, so there is no registration to use (the tablet service).
+    #[error("no library is chosen")]
+    NoLibrary,
+    /// A tablet name must be 1 to 15 printable ASCII characters.
+    #[error("invalid tablet name {0:?}: 1 to 15 printable ASCII characters")]
+    InvalidName(String),
 }
 
 /// What the tablet says about itself.
@@ -84,6 +105,18 @@ pub struct DownloadedPage {
     pub announced_size: u32,
 }
 
+/// A notification received during live mode, stamped when it came out of the transport.
+///
+/// `received` is read from the system clock, not from the session [`Clock`]: it measures the
+/// real latency of live mode (docs/design/tablet-live-classroom.md, "Latency"), the one
+/// documented exception to "time comes from a `Clock`".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveNotification {
+    pub channel: Channel,
+    pub data: Vec<u8>,
+    pub received: SystemTime,
+}
+
 /// Outcome of a sync.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncSummary {
@@ -103,7 +136,11 @@ pub struct Session {
     commands: VecDeque<Vec<u8>>,
     page_data: Vec<u8>,
     last_page_data: Option<Duration>,
-    live: VecDeque<Vec<u8>>,
+    /// Live-mode notifications: pen data always, every other notification too while
+    /// `live_mode` is set (so that the caller can classify them).
+    live: VecDeque<LiveNotification>,
+    /// Live mode was entered with [`Session::start_live`] and not left.
+    live_mode: bool,
     connected: bool,
     reply_timeout: Duration,
 }
@@ -118,6 +155,7 @@ impl Session {
             page_data: Vec::new(),
             last_page_data: None,
             live: VecDeque::new(),
+            live_mode: false,
             connected: true,
             reply_timeout: REPLY_TIMEOUT,
         }
@@ -222,6 +260,15 @@ impl Session {
             };
         }
         Ok(name.finish())
+    }
+
+    /// Renames the tablet: `bb n+1 <ASCII name> 0a`, answered by `b3 01 00` (protocol.md
+    /// §4.1). The name must be 1 to [`MAX_NAME_LEN`] printable ASCII characters.
+    pub fn set_name(&mut self, name: &str) -> Result<(), DeviceError> {
+        if !valid_name(name) {
+            return Err(DeviceError::InvalidName(name.to_owned()));
+        }
+        self.expect_success(&Request::SetName(name.to_owned()))
     }
 
     /// Firmware version, `B160805A-C170704A` style.
@@ -419,35 +466,84 @@ impl Session {
         Ok(summary)
     }
 
-    /// Enters live mode: pen samples start flowing (see [`Session::next_live`]).
+    /// Enters live mode: pen samples start flowing (see [`Session::next_live_event`]).
     pub fn start_live(&mut self) -> Result<(), DeviceError> {
         self.live.clear();
-        self.set_mode(Mode::Live)
+        self.live_mode = false;
+        self.set_mode(Mode::Live)?;
+        // From now on every notification is kept for the caller, in arrival order.
+        self.live_mode = true;
+        Ok(())
     }
 
     /// Leaves live mode (idle mode, as the tablet expects).
     pub fn stop_live(&mut self) -> Result<(), DeviceError> {
-        self.set_mode(Mode::Idle)?;
+        let result = self.set_mode(Mode::Idle);
+        self.live_mode = false;
         self.live.clear();
-        Ok(())
+        result
     }
 
-    /// Next raw live-mode notification, waiting up to `timeout`.
+    /// Whether live mode was entered and not left.
+    pub fn in_live_mode(&self) -> bool {
+        self.live_mode
+    }
+
+    /// Next raw live-mode pen notification, waiting up to `timeout`. Other notifications
+    /// received meanwhile (sysevents…) are skipped: see [`Session::next_live_event`].
     pub fn next_live(&mut self, timeout: Duration) -> Result<Option<Vec<u8>>, DeviceError> {
-        if let Some(packet) = self.live.pop_front() {
-            return Ok(Some(packet));
-        }
         let deadline = self.clock.monotonic() + timeout;
         loop {
+            let now = self.clock.monotonic();
+            let left = deadline.saturating_sub(now);
+            match self.next_live_event(left)? {
+                Some(notification) if notification.channel == Channel::Live => {
+                    return Ok(Some(notification.data));
+                }
+                Some(_) => {}
+                None => return Ok(None),
+            }
+        }
+    }
+
+    /// Next notification received during live mode, waiting up to `timeout`: pen data
+    /// ([`Channel::Live`]) and, between [`Session::start_live`] and [`Session::stop_live`],
+    /// anything else the tablet sends (sysevents, unsolicited command frames…), in arrival
+    /// order, each stamped when it came out of the transport. With a zero `timeout` it takes
+    /// only what already arrived.
+    pub fn next_live_event(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<LiveNotification>, DeviceError> {
+        let deadline = self.clock.monotonic() + timeout;
+        loop {
+            if let Some(notification) = self.live.pop_front() {
+                return Ok(Some(notification));
+            }
             self.check_cancel()?;
             let now = self.clock.monotonic();
-            if now >= deadline {
+            let received = self.pump(deadline.saturating_sub(now).min(WAIT_SLICE))?;
+            if !received && now >= deadline {
                 return Ok(None);
             }
-            self.pump((deadline - now).min(WAIT_SLICE))?;
-            if let Some(packet) = self.live.pop_front() {
-                return Ok(Some(packet));
+        }
+    }
+
+    /// Keeps the link while nothing is asked, for up to `timeout`: frames received meanwhile
+    /// are dropped (nothing waits for them) and a lost link is reported as
+    /// [`DeviceError::Disconnected`]. With a zero `timeout` it only takes in what already
+    /// arrived.
+    pub fn idle(&mut self, timeout: Duration) -> Result<(), DeviceError> {
+        let deadline = self.clock.monotonic() + timeout;
+        loop {
+            while self.pump(Duration::ZERO)? {}
+            self.commands.clear();
+            self.live.clear();
+            let now = self.clock.monotonic();
+            if now >= deadline {
+                return Ok(());
             }
+            self.pump((deadline - now).min(WAIT_SLICE))?;
         }
     }
 
@@ -587,15 +683,28 @@ impl Session {
         let received = self.transport.recv(timeout);
         match self.link_result(received)? {
             None => return Ok(false),
-            Some(TransportEvent::Notification { channel, data }) => match channel {
-                Channel::Command => self.commands.push_back(data),
-                Channel::PageData => {
-                    self.page_data.extend_from_slice(&data);
-                    self.last_page_data = Some(self.clock.monotonic());
+            Some(TransportEvent::Notification { channel, data }) => {
+                // The latency stamp (system clock, see `LiveNotification`).
+                let received = SystemTime::now();
+                match channel {
+                    Channel::Command => self.commands.push_back(data.clone()),
+                    Channel::PageData => {
+                        self.page_data.extend_from_slice(&data);
+                        self.last_page_data = Some(self.clock.monotonic());
+                    }
+                    Channel::Live | Channel::SysEvent => {}
                 }
-                Channel::Live => self.live.push_back(data),
-                Channel::SysEvent => {}
-            },
+                if channel == Channel::Live || self.live_mode {
+                    if self.live.len() >= MAX_LIVE_QUEUE {
+                        self.live.pop_front();
+                    }
+                    self.live.push_back(LiveNotification {
+                        channel,
+                        data,
+                        received,
+                    });
+                }
+            }
             Some(TransportEvent::Disconnected) => {
                 self.connected = false;
                 return Err(DeviceError::Disconnected);
@@ -610,6 +719,11 @@ impl Session {
             _ => Ok(()),
         }
     }
+}
+
+/// 1 to [`MAX_NAME_LEN`] printable ASCII characters (space included).
+pub fn valid_name(name: &str) -> bool {
+    (1..=MAX_NAME_LEN).contains(&name.len()) && name.bytes().all(|b| (0x20..=0x7e).contains(&b))
 }
 
 fn is_name_chunk(reply: &Reply) -> bool {

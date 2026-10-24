@@ -6,11 +6,8 @@
 //! synced again: PDF at the note's actual size, or PNG at 150 dpi, with the paper. A page too
 //! large for a PNG at 150 dpi is exported at the highest lower resolution that fits (the report
 //! says so). A failed export never fails the sync (the note is safe in the library): the hook
-//! reports it to its caller, which logs it.
-
-// The automatic sync (milestone M4) goes through `LibrarySink` with this hook; until it is
-// wired, only the tests below call it.
-#![allow(dead_code)]
+//! reports it to its caller, which logs it (`tablet::store_page_in`, the tablet service's page
+//! store).
 
 use std::io;
 use std::path::{Path, PathBuf};

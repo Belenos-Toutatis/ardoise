@@ -115,7 +115,7 @@ impl AutoExportState {
     }
 }
 
-fn store(context: &AppContext) -> CommandResult<&SettingsStore> {
+pub(crate) fn store(context: &AppContext) -> CommandResult<&SettingsStore> {
     context
         .store
         .as_ref()
@@ -165,7 +165,10 @@ pub fn current_state(context: &AppContext) -> AppState {
     state_from(context, loaded)
 }
 
-fn update(context: &AppContext, change: impl FnOnce(&mut Settings)) -> CommandResult<AppState> {
+pub(crate) fn update(
+    context: &AppContext,
+    change: impl FnOnce(&mut Settings),
+) -> CommandResult<AppState> {
     let updated = store(context)?.update(change)?;
     Ok(state_from(context, Ok(updated)))
 }
@@ -275,6 +278,7 @@ pub fn set_library(
 ) -> CommandResult<AppState> {
     let state = choose_library(&context, &path)?;
     watch.follow(&app, state.library());
+    crate::tablet::library_changed(&app);
     Ok(state)
 }
 

@@ -6,7 +6,9 @@ import type { AppState, NoteOutlines } from './api';
 import { UNHANDLED, setMockAutoExportSettings } from './mock-data';
 import { checkAutoExport, mockExportInvoke } from './mock-export';
 import { mockLibraryInvoke } from './mock-library';
+import { mockLiveInvoke } from './mock-live';
 import { mockNotesInvoke } from './mock-notes';
+import { mockTabletInvoke } from './mock-tablet';
 
 export { mockOnLibraryChanged } from './mock-data';
 import {
@@ -74,7 +76,7 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
         return undefined;
       default: {
         // Library, editor and export commands live in their own modules, over the demo library.
-        for (const handle of [mockLibraryInvoke, mockNotesInvoke, mockExportInvoke]) {
+        for (const handle of [mockLibraryInvoke, mockNotesInvoke, mockExportInvoke, mockTabletInvoke, mockLiveInvoke]) {
           const handled = handle(command, args);
           if (handled !== UNHANDLED) return handled;
         }

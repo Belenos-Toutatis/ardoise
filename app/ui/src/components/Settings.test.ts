@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../lib/api';
 import { setLocale } from '../lib/i18n.svelte';
 import { resetMockLibrary } from '../lib/mock-data';
+import { resetMockTablet } from '../lib/mock-tablet';
+import { tablet } from '../lib/tablet-state.svelte';
 import Settings from './Settings.svelte';
 
 const app: AppState = {
@@ -24,6 +26,8 @@ let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
   resetMockLibrary();
+  resetMockTablet();
+  tablet.reset();
 });
 
 afterEach(() => {
@@ -110,6 +114,39 @@ describe('settings: tablet section', () => {
     const { button } = await render('fr', ontest);
     button('Tester la tablette…').click();
     expect(ontest).toHaveBeenCalledOnce();
+  });
+
+  it('shows the tablet options, delete-after-import on by default, and saves a change', async () => {
+    const { target } = await render('fr');
+    const section = target.querySelector('[aria-labelledby="settings-tablet"]')!;
+    const option = (name: string, value?: string) =>
+      section.querySelector<HTMLInputElement>(`input[data-option="${name}"]${value ? `[value="${value}"]` : ''}`)!;
+    expect(section.textContent).toContain('Effacer de la tablette après import');
+    expect(section.textContent).toContain("qu'après l'écriture et la vérification de son fichier");
+    expect(option('autoSync').checked).toBe(true);
+    expect(option('deleteAfterImport').checked).toBe(true);
+    expect(option('hand', 'right').checked).toBe(true);
+    expect(option('button', 'newPage').checked).toBe(true);
+
+    option('deleteAfterImport').click();
+    option('hand', 'left').click();
+    await settle();
+    const saved = (await api.tabletStatus()).options;
+    expect(saved).toEqual({ autoSync: true, deleteAfterImport: false, hand: 'left', button: 'newPage' });
+    expect(option('deleteAfterImport').checked).toBe(false);
+    expect(option('hand', 'left').checked).toBe(true);
+  });
+
+  it('shows no tablet options without a tablet', async () => {
+    await api.forgetTablet();
+    const { target } = await render('en');
+    expect(target.querySelector('[data-slot="tablet-options"]')).toBeNull();
+  });
+
+  it('speaks English in the tablet options', async () => {
+    const { target } = await render('en');
+    expect(target.textContent).toContain('Delete from the tablet after import');
+    expect(target.textContent).toContain('Left-handed');
   });
 
   it('still offers language, theme and library', async () => {

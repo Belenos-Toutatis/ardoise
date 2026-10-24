@@ -48,7 +48,7 @@
     "collapse": "Replier {name}",
     "tabletStatus": "Tablette",
     "tabletNone": "Aucune tablette enregistrée",
-    "tabletState": "État de la connexion : bientôt disponible",
+    "tabletState": "Ouvrir ou fermer le panneau de la tablette",
     "search": "Rechercher une note",
     "searchPlaceholder": "Rechercher (titre, étiquette)…",
     "sort": "Trier les notes",
@@ -169,6 +169,125 @@
       "folderHint": "Un chemin relatif à la bibliothèque, par exemple Exports.",
       "save": "Enregistrer",
       "saved": "Réglage enregistré."
+    }
+  },
+  "tablet": {
+    "title": "Tablette",
+    "loading": "Lecture de l'état de la tablette…",
+    "unavailableStatus": "L'état de la tablette n'est pas disponible.",
+    "simulated": "Tablette simulée : aucune vraie tablette n'est utilisée.",
+    "simulatedButton": "Appuyer sur le bouton de la tablette simulée",
+    "state": {
+      "unavailable": "Indisponible",
+      "notRegistered": "Non enregistrée",
+      "registering": "Enregistrement…",
+      "searching": "Recherche de la tablette…",
+      "connecting": "Connexion…",
+      "connected": "Connectée",
+      "syncing": "Synchronisation…",
+      "live": "Mode direct"
+    },
+    "hint": {
+      "searching": "Appuyez brièvement sur le bouton de la tablette pour la connecter, et gardez-la près de l'ordinateur.",
+      "pendingSync": "La synchronisation démarrera dès que la tablette sera connectée.",
+      "pendingLive": "Le mode direct démarrera dès que la tablette sera connectée."
+    },
+    "battery": "Batterie {percent} %",
+    "batteryCharging": "Batterie {percent} %, en charge",
+    "charging": "en charge",
+    "info": {
+      "title": "Informations",
+      "name": "Nom",
+      "battery": "Batterie",
+      "firmware": "Version du firmware",
+      "pages": "Pages en mémoire",
+      "model": "Modèle",
+      "size": "Zone de dessin",
+      "readAt": "Lue le",
+      "notRead": "La tablette n'a pas encore été lue : ses informations apparaîtront à la première connexion."
+    },
+    "sync": {
+      "title": "Synchronisation",
+      "now": "Synchroniser maintenant",
+      "cancel": "Annuler",
+      "progress": "Page {current} sur {total}",
+      "progressLabel": "Progression de la synchronisation",
+      "last": "Dernière synchronisation : {date}",
+      "savedNone": "Aucune nouvelle page.",
+      "savedOne": "1 note enregistrée.",
+      "savedMany": "{count} notes enregistrées.",
+      "deletedOne": "1 page effacée de la tablette.",
+      "deletedMany": "{count} pages effacées de la tablette.",
+      "never": "Aucune synchronisation depuis le lancement d'Ardoise.",
+      "pagesWaiting": "{count} pages attendent sur la tablette : seule la plus ancienne peut être lue tant qu'elle n'est pas effacée. Activez « {option} » pour les récupérer."
+    },
+    "live": {
+      "open": "Mode direct",
+      "hint": "Dessinez sur la tablette et voyez le tracé apparaître tout de suite, y compris sur un vidéoprojecteur."
+    },
+    "options": {
+      "title": "Options",
+      "autoSync": "Synchroniser automatiquement à la connexion",
+      "autoSyncHint": "Les pages de la tablette sont reçues dès qu'elle est à portée.",
+      "deleteAfterImport": "Effacer de la tablette après import",
+      "deleteAfterImportHint": "Une page n'est effacée de la tablette qu'après l'écriture et la vérification de son fichier dans la bibliothèque : si quelque chose échoue, elle reste sur la tablette. La tablette ne livre que sa page la plus ancienne : sans cette option, les autres pages restent illisibles tant que la première n'est pas effacée.",
+      "button": "Bouton de la tablette en mode direct",
+      "buttonNewPage": "Nouvelle page",
+      "buttonNewLayer": "Nouveau calque",
+      "hand": "Orientation de la tablette",
+      "handRight": "Droitier",
+      "handLeft": "Gaucher",
+      "handHint": "Gaucher : la tablette est utilisée à l'envers ; les tracés sont retournés d'un demi-tour pour apparaître à l'endroit."
+    },
+    "manage": {
+      "title": "Réglages de la tablette",
+      "name": "Nom de la tablette",
+      "nameHint": "1 à 15 caractères, sans accent.",
+      "rename": "Renommer",
+      "nameInvalid": "Le nom doit faire de 1 à 15 caractères, sans accent ni caractère spécial.",
+      "renamed": "Tablette renommée.",
+      "setTime": "Mettre à l'heure",
+      "timeSet": "Heure réglée (écart restant : {seconds} s).",
+      "timeHint": "Règle l'horloge de la tablette sur celle de l'ordinateur."
+    },
+    "register": {
+      "open": "Enregistrer la tablette",
+      "none": "Aucune tablette n'est enregistrée.",
+      "intro": "Enregistrez votre Bamboo Slate pour recevoir ses pages automatiquement et dessiner en direct.",
+      "title": "Enregistrer la tablette",
+      "warningTitle": "Avant de commencer",
+      "warning": "Une fois enregistrée dans Ardoise, la tablette ne fonctionnera plus avec l'application Wacom du téléphone ni avec Inkspace, jusqu'à ce que vous l'y enregistriez de nouveau.",
+      "warningPhone": "Coupez le Bluetooth de votre téléphone pendant l'enregistrement.",
+      "cancel": "Annuler",
+      "retry": "Réessayer",
+      "finish": "Terminer",
+      "drawingLabel": "Schéma de la tablette et de son bouton",
+      "step": {
+        "holdButton": {
+          "title": "Maintenez le bouton de la tablette",
+          "text": "Maintenez le bouton enfoncé environ 6 secondes, jusqu'à ce que le voyant clignote en bleu."
+        },
+        "searching": {
+          "title": "Recherche de la tablette",
+          "text": "Gardez la tablette près de l'ordinateur : cela peut prendre quelques secondes."
+        },
+        "connecting": {
+          "title": "Connexion à la tablette",
+          "text": "Ne bougez pas : Ardoise se présente à la tablette."
+        },
+        "pressButton": {
+          "title": "Appuyez brièvement sur le bouton",
+          "text": "Un appui bref sur le bouton de la tablette confirme l'enregistrement. Vous avez environ 30 secondes."
+        },
+        "done": {
+          "title": "Tablette enregistrée",
+          "text": "« {name} » est prête : ses pages seront reçues automatiquement dès qu'elle sera à portée."
+        }
+      },
+      "error": {
+        "title": "L'enregistrement n'a pas abouti",
+        "hint": "Vérifiez que le Bluetooth est activé, que la tablette est chargée et proche de l'ordinateur, puis recommencez : maintenez le bouton jusqu'au clignotement bleu."
+      }
     }
   },
   "diagnostic": {
@@ -304,7 +423,18 @@
     "pageTooLarge": "la page obtenue serait trop grande (plus de 100 m de côté) ; assemblez moins de notes ou superposez-les",
     "invalidFolder": "ce dossier n'est pas utilisable : indiquez un dossier à l'intérieur de la bibliothèque, par exemple « Exports » (sans « .. », sans lettre de lecteur, et pas le dossier _ardoise)",
     "imageTooLarge": "l'image dépasserait 16 384 pixels de côté ; choisissez une résolution plus basse, ou exportez en PDF ou en SVG",
-    "cancelled": "l'export a été annulé"
+    "cancelled": "l'export a été annulé",
+    "tabletNotConnected": "La tablette n'est pas connectée : appuyez brièvement sur son bouton pour la connecter.",
+    "tabletBusy": "La tablette est occupée (synchronisation ou mode direct en cours). Réessayez quand c'est terminé.",
+    "tabletNotRegistered": "Aucune tablette n'est enregistrée : lancez l'assistant d'enregistrement.",
+    "bluetoothOff": "Le Bluetooth est désactivé : activez-le dans les paramètres de Windows.",
+    "bluetoothMissing": "Aucun adaptateur Bluetooth trouvé : branchez le dongle Bluetooth, puis réessayez.",
+    "tabletTimeout": "La tablette ne répond pas : rapprochez-la de l'ordinateur et appuyez brièvement sur son bouton.",
+    "tabletRefused": "La tablette refuse la commande ({detail}). Si l'appli du téléphone ou Inkspace l'a enregistrée, enregistrez-la de nouveau dans Ardoise.",
+    "liveNotRunning": "Le mode direct n'est pas lancé.",
+    "noMonitor": "Aucun écran disponible pour la présentation.",
+    "simulationOnly": "Commande réservée à la tablette simulée.",
+    "tablet": "Problème avec la tablette : {detail}"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -543,5 +673,140 @@
     "pickFile": "Enregistrer l'export",
     "pickFolder": "Choisir le dossier de l'export",
     "defaultPdfName": "Notes"
+  },
+  "live": {
+    "title": "Mode direct",
+    "state": {
+      "idle": "Arrêté",
+      "waiting": "En attente de la tablette",
+      "live": "En direct",
+      "reconnecting": "Reconnexion…"
+    },
+    "starting": "Démarrage du mode direct…",
+    "waiting": {
+      "title": "Appuyez brièvement sur le bouton de la tablette pour la connecter.",
+      "hint": "Le mode direct démarre dès que la tablette est connectée : ce que vous écrivez s'affiche ici et sur l'écran projeté."
+    },
+    "reconnecting": "La liaison avec la tablette est perdue : reconnexion en cours…",
+    "startFailed": "Le mode direct n'a pas pu démarrer.",
+    "retry": "Réessayer",
+    "stop": "Terminer",
+    "stopping": "Enregistrement…",
+    "stopHint": "Termine le mode direct : chaque page est enregistrée comme une note de la bibliothèque.",
+    "stopFailed": "Le mode direct ne s'est pas arrêté correctement.",
+    "closeAnyway": "Fermer quand même",
+    "saved": {
+      "none": "Aucune note enregistrée pour l'instant",
+      "one": "1 note enregistrée",
+      "many": "{count} notes enregistrées"
+    },
+    "commandFailed": "La commande n'a pas abouti : {message}",
+    "saveFailed": {
+      "one": "Une page n'a pas pu être enregistrée dans la bibliothèque.",
+      "many": "{count} pages n'ont pas pu être enregistrées dans la bibliothèque.",
+      "item": "Page {page} : {message}",
+      "advice": "Les pages restent en mémoire : vérifiez le dossier de la bibliothèque (espace disque, droits d'écriture, synchronisation). À la fermeture d'Ardoise, une copie de secours est écrite dans le dossier local d'Ardoise. Ce message disparaît dès qu'un enregistrement réussit."
+    },
+    "dismiss": "Fermer le message",
+    "toolbar": "Outils du mode direct",
+    "style": "Style d'écriture",
+    "tool": "Outil",
+    "color": "Couleur",
+    "width": "Épaisseur",
+    "colors": {
+      "white": "Blanc craie",
+      "yellow": "Jaune"
+    },
+    "pages": {
+      "label": "Pages",
+      "previous": "Page précédente",
+      "next": "Page suivante",
+      "position": "Page {n} / {count}",
+      "new": "Nouvelle page"
+    },
+    "layer": {
+      "new": "Nouveau calque",
+      "current": "Calque {n} / {count}"
+    },
+    "clear": "Effacer la page",
+    "board": "Tableau noir",
+    "laser": "Pointeur laser",
+    "preview": {
+      "label": "Aperçu de la page {page} ; le rectangle bleu montre la zone projetée",
+      "hint": "Faites glisser le rectangle bleu pour déplacer la zone projetée ; la molette zoome."
+    },
+    "zoom": {
+      "label": "Zoom de la zone projetée",
+      "in": "Agrandir",
+      "out": "Réduire",
+      "fit": "Page entière",
+      "level": "× {zoom}"
+    },
+    "projection": {
+      "title": "Projection",
+      "monitor": "Écran de projection",
+      "screen": "Écran {n}",
+      "option": "{name} — {width} × {height}",
+      "primary": "{name} (principal)",
+      "refresh": "Actualiser la liste des écrans",
+      "project": "Projeter",
+      "stop": "Arrêter la projection",
+      "on": "Projeté sur {name}.",
+      "off": "Rien n'est projeté.",
+      "none": "Aucun écran n'est détecté.",
+      "single": "Un seul écran est détecté : la présentation couvrira cette fenêtre. Appuyez sur Échap pour la fermer."
+    },
+    "latency": {
+      "label": "Latence",
+      "value": "{ms} ms",
+      "none": "—",
+      "detail": "Médiane des {count} derniers points ; 95 % sous {p95} ms ; part de l'interface (de l'arrivée du lot à la fin du dessin) : {ui} ms.",
+      "hint": "Temps entre la réception du point par l'ordinateur et le début de l'image suivante, après son dessin ; l'affichage de l'écran lui-même n'est pas compris (objectif : moins de 30 ms)."
+    },
+    "keys": {
+      "title": "Clavier",
+      "list": {
+        "next": {
+          "keys": "→, Pg suiv, Espace",
+          "action": "Page suivante"
+        },
+        "previous": {
+          "keys": "←, Pg préc",
+          "action": "Page précédente"
+        },
+        "clear": {
+          "keys": "Ctrl + Suppr",
+          "action": "Effacer la page"
+        },
+        "board": {
+          "keys": "B",
+          "action": "Tableau noir"
+        },
+        "laser": {
+          "keys": "L",
+          "action": "Pointeur laser"
+        },
+        "zoom": {
+          "keys": "+ / −",
+          "action": "Agrandir / réduire la zone projetée"
+        },
+        "whole": {
+          "keys": "0",
+          "action": "Page entière"
+        },
+        "pan": {
+          "keys": "Maj + flèches",
+          "action": "Déplacer la zone projetée"
+        },
+        "leave": {
+          "keys": "Échap",
+          "action": "Terminer (sur l'écran projeté : fermer la présentation)"
+        }
+      }
+    }
+  },
+  "presentation": {
+    "title": "Présentation",
+    "canvas": "Page projetée {page}"
   }
 }

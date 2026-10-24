@@ -48,7 +48,7 @@
     "collapse": "Collapse {name}",
     "tabletStatus": "Tablet",
     "tabletNone": "No tablet registered",
-    "tabletState": "Connection status: coming soon",
+    "tabletState": "Open or close the tablet panel",
     "search": "Search notes",
     "searchPlaceholder": "Search (title, tag)…",
     "sort": "Sort notes",
@@ -169,6 +169,125 @@
       "folderHint": "A path relative to the library, for example Exports.",
       "save": "Save",
       "saved": "Setting saved."
+    }
+  },
+  "tablet": {
+    "title": "Tablet",
+    "loading": "Reading the tablet status…",
+    "unavailableStatus": "The tablet status is not available.",
+    "simulated": "Simulated tablet: no real tablet is being used.",
+    "simulatedButton": "Press the simulated tablet's button",
+    "state": {
+      "unavailable": "Unavailable",
+      "notRegistered": "Not registered",
+      "registering": "Registering…",
+      "searching": "Looking for the tablet…",
+      "connecting": "Connecting…",
+      "connected": "Connected",
+      "syncing": "Syncing…",
+      "live": "Live mode"
+    },
+    "hint": {
+      "searching": "Press the tablet's button briefly to connect it, and keep it close to the computer.",
+      "pendingSync": "Syncing will start as soon as the tablet is connected.",
+      "pendingLive": "Live mode will start as soon as the tablet is connected."
+    },
+    "battery": "Battery {percent}%",
+    "batteryCharging": "Battery {percent}%, charging",
+    "charging": "charging",
+    "info": {
+      "title": "Information",
+      "name": "Name",
+      "battery": "Battery",
+      "firmware": "Firmware version",
+      "pages": "Pages in memory",
+      "model": "Model",
+      "size": "Drawing area",
+      "readAt": "Read on",
+      "notRead": "The tablet has not been read yet: its information will appear at the first connection."
+    },
+    "sync": {
+      "title": "Sync",
+      "now": "Sync now",
+      "cancel": "Cancel",
+      "progress": "Page {current} of {total}",
+      "progressLabel": "Sync progress",
+      "last": "Last sync: {date}",
+      "savedNone": "No new pages.",
+      "savedOne": "1 note saved.",
+      "savedMany": "{count} notes saved.",
+      "deletedOne": "1 page deleted from the tablet.",
+      "deletedMany": "{count} pages deleted from the tablet.",
+      "never": "No sync since Ardoise started.",
+      "pagesWaiting": "{count} pages are waiting on the tablet: only the oldest one can be read until it is deleted. Turn on \"{option}\" to get them."
+    },
+    "live": {
+      "open": "Live mode",
+      "hint": "Draw on the tablet and see the stroke appear at once, on a projector too."
+    },
+    "options": {
+      "title": "Options",
+      "autoSync": "Sync automatically when connecting",
+      "autoSyncHint": "The tablet's pages are received as soon as it is in range.",
+      "deleteAfterImport": "Delete from the tablet after import",
+      "deleteAfterImportHint": "A page is deleted from the tablet only once its file has been written to the library and checked: if anything fails, it stays on the tablet. The tablet hands over only its oldest page: without this option, the other pages stay unreadable until the first one is deleted.",
+      "button": "Tablet button in live mode",
+      "buttonNewPage": "New page",
+      "buttonNewLayer": "New layer",
+      "hand": "Tablet orientation",
+      "handRight": "Right-handed",
+      "handLeft": "Left-handed",
+      "handHint": "Left-handed: the tablet is used upside down; strokes are turned half a turn so that they appear upright."
+    },
+    "manage": {
+      "title": "Tablet settings",
+      "name": "Tablet name",
+      "nameHint": "1 to 15 characters, no accents.",
+      "rename": "Rename",
+      "nameInvalid": "The name must be 1 to 15 characters long, without accents or special characters.",
+      "renamed": "Tablet renamed.",
+      "setTime": "Set the clock",
+      "timeSet": "Clock set (remaining drift: {seconds} s).",
+      "timeHint": "Sets the tablet's clock to the computer's."
+    },
+    "register": {
+      "open": "Register the tablet",
+      "none": "No tablet is registered.",
+      "intro": "Register your Bamboo Slate to receive its pages automatically and draw live.",
+      "title": "Register the tablet",
+      "warningTitle": "Before you start",
+      "warning": "Once registered in Ardoise, the tablet will no longer work with the Wacom phone app or with Inkspace, until you register it there again.",
+      "warningPhone": "Turn off your phone's Bluetooth while registering.",
+      "cancel": "Cancel",
+      "retry": "Try again",
+      "finish": "Done",
+      "drawingLabel": "Drawing of the tablet and its button",
+      "step": {
+        "holdButton": {
+          "title": "Hold the tablet's button",
+          "text": "Hold the button down for about 6 seconds, until the light blinks blue."
+        },
+        "searching": {
+          "title": "Looking for the tablet",
+          "text": "Keep the tablet close to the computer: this can take a few seconds."
+        },
+        "connecting": {
+          "title": "Connecting to the tablet",
+          "text": "Stay still: Ardoise is introducing itself to the tablet."
+        },
+        "pressButton": {
+          "title": "Press the button briefly",
+          "text": "A short press on the tablet's button confirms the registration. You have about 30 seconds."
+        },
+        "done": {
+          "title": "Tablet registered",
+          "text": "“{name}” is ready: its pages will be received automatically whenever it is in range."
+        }
+      },
+      "error": {
+        "title": "The registration did not succeed",
+        "hint": "Check that Bluetooth is on and that the tablet is charged and close to the computer, then start again: hold the button until it blinks blue."
+      }
     }
   },
   "diagnostic": {
@@ -304,7 +423,18 @@
     "pageTooLarge": "the resulting page would be too large (over 100 m on a side); assemble fewer notes or overlay them",
     "invalidFolder": "this folder can't be used: enter a folder inside the library, for example \"Exports\" (no \"..\", no drive letter, and not the _ardoise folder)",
     "imageTooLarge": "the image would be larger than 16,384 pixels on a side; choose a lower resolution, or export as PDF or SVG",
-    "cancelled": "the export was cancelled"
+    "cancelled": "the export was cancelled",
+    "tabletNotConnected": "The tablet is not connected: press its button briefly to connect it.",
+    "tabletBusy": "The tablet is busy (sync or live mode under way). Try again when it is finished.",
+    "tabletNotRegistered": "No tablet is registered: start the registration wizard.",
+    "bluetoothOff": "Bluetooth is switched off: switch it on in Windows settings.",
+    "bluetoothMissing": "No Bluetooth adapter found: plug in the Bluetooth dongle, then try again.",
+    "tabletTimeout": "The tablet does not answer: bring it closer to the computer and press its button briefly.",
+    "tabletRefused": "The tablet refused the command ({detail}). If the phone app or Inkspace registered it, register it again in Ardoise.",
+    "liveNotRunning": "Live mode is not running.",
+    "noMonitor": "No screen available for the presentation.",
+    "simulationOnly": "This command only works with the simulated tablet.",
+    "tablet": "Problem with the tablet: {detail}"
   },
   "editor": {
     "back": "Library",
@@ -543,5 +673,140 @@
     "pickFile": "Save the export",
     "pickFolder": "Choose the export folder",
     "defaultPdfName": "Notes"
+  },
+  "live": {
+    "title": "Live mode",
+    "state": {
+      "idle": "Stopped",
+      "waiting": "Waiting for the tablet",
+      "live": "Live",
+      "reconnecting": "Reconnecting…"
+    },
+    "starting": "Starting live mode…",
+    "waiting": {
+      "title": "Press the tablet's button briefly to connect it.",
+      "hint": "Live mode starts as soon as the tablet is connected: what you write shows here and on the projected screen."
+    },
+    "reconnecting": "The link with the tablet was lost: reconnecting…",
+    "startFailed": "Live mode could not start.",
+    "retry": "Try again",
+    "stop": "Finish",
+    "stopping": "Saving…",
+    "stopHint": "Ends live mode: each page is saved as a note of the library.",
+    "stopFailed": "Live mode did not stop properly.",
+    "closeAnyway": "Close anyway",
+    "saved": {
+      "none": "No note saved yet",
+      "one": "1 note saved",
+      "many": "{count} notes saved"
+    },
+    "commandFailed": "The command did not go through: {message}",
+    "saveFailed": {
+      "one": "A page could not be saved to the library.",
+      "many": "{count} pages could not be saved to the library.",
+      "item": "Page {page}: {message}",
+      "advice": "The pages stay in memory: check the library folder (disk space, write permission, sync). When Ardoise closes, a backup copy is written to Ardoise's local folder. This message goes away as soon as a save succeeds."
+    },
+    "dismiss": "Dismiss the message",
+    "toolbar": "Live mode tools",
+    "style": "Writing style",
+    "tool": "Tool",
+    "color": "Colour",
+    "width": "Width",
+    "colors": {
+      "white": "Chalk white",
+      "yellow": "Yellow"
+    },
+    "pages": {
+      "label": "Pages",
+      "previous": "Previous page",
+      "next": "Next page",
+      "position": "Page {n} / {count}",
+      "new": "New page"
+    },
+    "layer": {
+      "new": "New layer",
+      "current": "Layer {n} / {count}"
+    },
+    "clear": "Clear the page",
+    "board": "Blackboard",
+    "laser": "Laser pointer",
+    "preview": {
+      "label": "Preview of page {page}; the blue rectangle shows the projected area",
+      "hint": "Drag the blue rectangle to move the projected area; the mouse wheel zooms."
+    },
+    "zoom": {
+      "label": "Zoom of the projected area",
+      "in": "Zoom in",
+      "out": "Zoom out",
+      "fit": "Whole page",
+      "level": "× {zoom}"
+    },
+    "projection": {
+      "title": "Projection",
+      "monitor": "Projection screen",
+      "screen": "Screen {n}",
+      "option": "{name} — {width} × {height}",
+      "primary": "{name} (main)",
+      "refresh": "Refresh the list of screens",
+      "project": "Project",
+      "stop": "Stop projecting",
+      "on": "Projected on {name}.",
+      "off": "Nothing is projected.",
+      "none": "No screen detected.",
+      "single": "Only one screen is detected: the presentation will cover this window. Press Esc to close it."
+    },
+    "latency": {
+      "label": "Latency",
+      "value": "{ms} ms",
+      "none": "—",
+      "detail": "Median of the last {count} points; 95 % under {p95} ms; interface share (from the batch's arrival to the end of the drawing): {ui} ms.",
+      "hint": "Time from the computer receiving a point to the start of the next frame after it was drawn; the screen's own scan-out is not included (target: under 30 ms)."
+    },
+    "keys": {
+      "title": "Keyboard",
+      "list": {
+        "next": {
+          "keys": "→, Page Down, Space",
+          "action": "Next page"
+        },
+        "previous": {
+          "keys": "←, Page Up",
+          "action": "Previous page"
+        },
+        "clear": {
+          "keys": "Ctrl + Delete",
+          "action": "Clear the page"
+        },
+        "board": {
+          "keys": "B",
+          "action": "Blackboard"
+        },
+        "laser": {
+          "keys": "L",
+          "action": "Laser pointer"
+        },
+        "zoom": {
+          "keys": "+ / −",
+          "action": "Zoom the projected area in / out"
+        },
+        "whole": {
+          "keys": "0",
+          "action": "Whole page"
+        },
+        "pan": {
+          "keys": "Shift + arrows",
+          "action": "Move the projected area"
+        },
+        "leave": {
+          "keys": "Esc",
+          "action": "Finish (on the projected screen: close the presentation)"
+        }
+      }
+    }
+  },
+  "presentation": {
+    "title": "Presentation",
+    "canvas": "Projected page {page}"
   }
 }

@@ -156,12 +156,109 @@ impl AutoExport {
     }
 }
 
+/// Which hand writes on the tablet. A left-handed user turns the tablet half a turn, so every
+/// point is turned back (`x' = width - x`, `y' = height - y`). Stored as `"right"` or `"left"`;
+/// any other value loads as right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum Hand {
+    #[default]
+    Right,
+    Left,
+}
+
+impl From<String> for Hand {
+    fn from(text: String) -> Self {
+        if text == "left" {
+            Hand::Left
+        } else {
+            Hand::Right
+        }
+    }
+}
+
+impl From<Hand> for String {
+    fn from(hand: Hand) -> Self {
+        match hand {
+            Hand::Right => "right".to_owned(),
+            Hand::Left => "left".to_owned(),
+        }
+    }
+}
+
+/// What the tablet's button does in live mode (SPEC §4.2). Stored as `"newPage"` or
+/// `"newLayer"`; any other value loads as a new page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum LiveButton {
+    #[default]
+    NewPage,
+    NewLayer,
+}
+
+impl From<String> for LiveButton {
+    fn from(text: String) -> Self {
+        if text == "newLayer" {
+            LiveButton::NewLayer
+        } else {
+            LiveButton::NewPage
+        }
+    }
+}
+
+impl From<LiveButton> for String {
+    fn from(button: LiveButton) -> Self {
+        match button {
+            LiveButton::NewPage => "newPage".to_owned(),
+            LiveButton::NewLayer => "newLayer".to_owned(),
+        }
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// The tablet's options (SPEC §4.1, §4.2), shared by every computer like the library.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TabletSettings {
+    /// Sync the stored pages as soon as the tablet connects.
+    #[serde(default = "yes")]
+    pub auto_sync: bool,
+    /// Delete each page from the tablet once its note is written and checked.
+    #[serde(default = "yes")]
+    pub delete_after_import: bool,
+    #[serde(default)]
+    pub hand: Hand,
+    /// What the tablet's button does in live mode.
+    #[serde(default)]
+    pub button: LiveButton,
+    /// Keys this version does not know about, kept verbatim.
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
+impl Default for TabletSettings {
+    fn default() -> Self {
+        Self {
+            auto_sync: true,
+            delete_after_import: true,
+            hand: Hand::Right,
+            button: LiveButton::NewPage,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
 /// Settings that only make sense on one computer.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MachineSettings {
     /// Library folder on this computer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library: Option<PathBuf>,
+    /// Key of the screen last chosen for the presentation window (`name@x,y`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projector: Option<String>,
     /// Keys this version does not know about, kept verbatim.
     #[serde(flatten)]
     pub extra: toml::Table,
@@ -179,6 +276,9 @@ pub struct Settings {
     /// Automatic export after a sync.
     #[serde(default)]
     pub auto_export: AutoExport,
+    /// The tablet's options.
+    #[serde(default)]
+    pub tablet: TabletSettings,
     /// Per-computer settings, keyed by machine name.
     #[serde(default)]
     pub machines: BTreeMap<String, MachineSettings>,

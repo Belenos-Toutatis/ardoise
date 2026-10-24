@@ -1,0 +1,558 @@
+/**
+ * Browser stand-in for live mode and the classroom (`live_*`, `list_monitors`,
+ * `open_presentation`, `close_presentation`; docs/design/tablet-live-classroom.md): a simulated
+ * pen that writes lines of loops on an A4 Bamboo Slate page.
+ *
+ * Shaped like the Rust side: 200 records per second, one batch every 15 ms with 3 points
+ * (`recv` a little before `sentAt`, as if Rust took about a millisecond), strokes started,
+ * continued and ended, the hovering pen at most once per batch, `hoverEnd` when it leaves. The
+ * session keeps pages (each saved as a note of the demo library when its first stroke ends,
+ * when the page changes and at the end), layers, style, view (blackboard: slate paper and white
+ * chalk), and a presentation window on one of two fictitious screens.
+ *
+ * Deterministic: the pen follows a seeded script (no `Math.random`), so that a test under
+ * `vi.useFakeTimers` sees the same strokes every time.
+ */
+import type { InkPoint } from './ink';
+import { wallClock } from './latency';
+import type {
+  LiveBatch,
+  LiveCommand,
+  LiveEvent,
+  LivePoint,
+  LiveSessionState,
+  LiveSnapshot,
+  LiveStyle,
+  LiveViewState,
+  MonitorInfo,
+} from './live';
+import { fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, UNHANDLED } from './mock-data';
+import type { Note, Rgba, Stroke } from './note';
+
+/** Pace of the stand-in; tests change it (and `resetMockLive` restores it). */
+export const mockLiveConfig = {
+  /** From `live_start` to the first pen data (the user presses the tablet's button). */
+  waitMs: 1200,
+  /** One batch per tick. */
+  tickMs: 15,
+  /** The simulated pen writes once live (false: tests send their own events). */
+  pen: true,
+  /** Fictitious screens offered (2: laptop + projector; 1; 0 for none). */
+  monitors: 2,
+  /** A message makes every write of a page into the library fail with it (null: writes succeed). */
+  saveError: null as string | null,
+};
+
+/** Records per second of the Slate: one every 5 ms. */
+const RECORD_MS = 5;
+const PAGE = { width: 29700, height: 21600 };
+const BLACK: Rgba = { r: 0, g: 0, b: 0, a: 255 };
+const CHALK_WHITE: Rgba = { r: 255, g: 255, b: 255, a: 255 };
+const DEFAULT_STYLE: LiveStyle = { tool: 'ballpoint', color: BLACK, width: 60 };
+const CHALK_STYLE: LiveStyle = { tool: 'chalk', color: CHALK_WHITE, width: 150 };
+
+const MONITORS: Omit<MonitorInfo, 'chosen'>[] = [
+  { key: '\\\\.\\DISPLAY1@0,0', name: '\\\\.\\DISPLAY1', x: 0, y: 0, width: 1920, height: 1080, scale: 1.25, primary: true },
+  { key: '\\\\.\\DISPLAY2@1920,0', name: '\\\\.\\DISPLAY2', x: 1920, y: 0, width: 1280, height: 800, scale: 1, primary: false },
+];
+
+// --- The pen ------------------------------------------------------------------------------------
+
+type PenSample = { kind: 'down'; x: number; y: number; p: number } | { kind: 'hover'; x: number; y: number } | { kind: 'away' };
+
+/** A seeded pen: words of loops along lines, hovering between them, sometimes lifted away. */
+class PenScript {
+  private seed = 0x2545f491;
+  private queue: PenSample[] = [];
+  private x = 2000;
+  private y = 3000;
+  private strokes = 0;
+  /** Where the last stroke ended. */
+  private last: { x: number; y: number } | null = null;
+
+  private random(): number {
+    // xorshift32: small, deterministic.
+    let s = this.seed;
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    this.seed = s >>> 0;
+    return this.seed / 0x1_0000_0000;
+  }
+
+  private between(min: number, max: number): number {
+    return min + (max - min) * this.random();
+  }
+
+  next(): PenSample {
+    if (this.queue.length === 0) this.plan();
+    return this.queue.shift() ?? { kind: 'away' };
+  }
+
+  /** The next stroke and how the pen gets there. */
+  private plan(): void {
+    const length = Math.round(this.between(1500, 4000));
+    if (this.x + length > PAGE.width - 2000) {
+      this.x = 2000;
+      this.y += 1800;
+      if (this.y > PAGE.height - 1500) this.y = 3000;
+    }
+    this.strokes += 1;
+    if (this.strokes % 6 === 0) {
+      // Lifted away for 150 to 300 ms, then back near the page.
+      const away = Math.round(this.between(30, 60));
+      for (let i = 0; i < away; i++) this.queue.push({ kind: 'away' });
+    }
+    const start = { x: this.x, y: this.y };
+    const approach = Math.round(this.between(12, 30));
+    const origin = this.last ?? { x: start.x - 600, y: start.y - 400 };
+    for (let i = 1; i <= approach; i++) {
+      const u = i / approach;
+      this.queue.push({ kind: 'hover', x: origin.x + (start.x - origin.x) * u, y: origin.y + (start.y - origin.y) * u });
+    }
+    const records = Math.round(this.between(60, 140));
+    const loops = Math.round(this.between(2, 5));
+    const radius = this.between(250, 450);
+    for (let i = 0; i < records; i++) {
+      const u = i / (records - 1);
+      const angle = 2 * Math.PI * loops * u;
+      this.queue.push({
+        kind: 'down',
+        x: start.x + length * u - radius * Math.sin(angle),
+        y: start.y - radius * 0.9 * (1 - Math.cos(angle)),
+        p: 0.25 + 0.6 * Math.pow(Math.sin(Math.PI * u), 0.6),
+      });
+    }
+    const end = this.queue[this.queue.length - 1] as { x: number; y: number };
+    this.last = { x: end.x, y: end.y };
+    this.x += length + 500;
+  }
+}
+
+// --- The session ----------------------------------------------------------------------------------
+
+interface Session {
+  state: LiveSessionState;
+  pages: Note[];
+  pageIndex: number;
+  layer: number;
+  style: LiveStyle;
+  /** The style before the blackboard was switched on. */
+  styleBeforeBoard: LiveStyle | null;
+  view: LiveViewState;
+  hover: { x: number; y: number } | null;
+  current: Stroke | null;
+  /** Note id → path in the demo library. */
+  saved: Map<string, string>;
+  /** Ids of the pages whose last write failed (reported once, written again by the next success). */
+  failed: Set<string>;
+  /** Records since the session started. */
+  record: number;
+  /** Record at which each page was created (its `created` instant). */
+  pageStart: Map<string, number>;
+  pen: PenScript;
+  wait?: ReturnType<typeof setTimeout>;
+  tick?: ReturnType<typeof setInterval>;
+  reconnect?: ReturnType<typeof setTimeout>;
+}
+
+let session: Session | null = null;
+let pageCounter = 0;
+const subscribers = new Set<(batch: LiveBatch) => void>();
+let presentation: MonitorInfo | null = null;
+let savedMonitor: string | null = null;
+
+/** What crosses the IPC boundary is a copy. */
+function copy<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function blankPage(board: boolean): Note {
+  pageCounter += 1;
+  const created = Date.now();
+  return {
+    id: `00000000-0000-4000-8000-${pageCounter.toString(16).padStart(12, '0')}`,
+    title: '',
+    created,
+    modified: created,
+    page: { ...PAGE },
+    background: { paper: board ? 'slate' : 'white', template: 'blank', texture: false },
+    tags: [],
+    layers: [{ name: 'Calque 1', visible: true }],
+    strokes: [],
+    timing: 'recorded',
+    origin: { kind: 'live' },
+  };
+}
+
+const IDLE_VIEW: LiveViewState = { zoom: 1, x: PAGE.width / 2, y: PAGE.height / 2, board: false, laser: false };
+
+function snapshot(): LiveSnapshot {
+  const s = session;
+  if (!s) {
+    return copy({
+      state: 'idle',
+      page: { ...blankPage(false), id: '' },
+      pageIndex: 0,
+      pageCount: 1,
+      layer: 0,
+      style: DEFAULT_STYLE,
+      view: IDLE_VIEW,
+      hover: null,
+      presentation,
+      saved: [],
+    } satisfies LiveSnapshot);
+  }
+  return copy({
+    state: s.state,
+    page: s.pages[s.pageIndex],
+    pageIndex: s.pageIndex,
+    pageCount: s.pages.length,
+    layer: s.layer,
+    style: s.style,
+    view: s.view,
+    hover: s.hover,
+    presentation,
+    saved: [...s.saved.values()],
+  } satisfies LiveSnapshot);
+}
+
+function broadcast(events: LiveEvent[]): void {
+  if (events.length === 0) return;
+  const batch: LiveBatch = { events, sentAt: wallClock() };
+  for (const subscriber of [...subscribers]) subscriber(copy(batch));
+}
+
+function broadcastSnapshot(): void {
+  broadcast([{ type: 'snapshot', snapshot: snapshot() }]);
+}
+
+function running(): Session {
+  if (!session) throw { code: 'liveNotRunning', message: 'live mode is not running' };
+  return session;
+}
+
+/** A free file name in the library root, like `create_unique`. */
+function uniquePath(note: Note): string {
+  const library = mockLibrary();
+  const name = fileName(note).replace(/\.ardoise$/, '');
+  let path = notePath(library.root, '', `${name}.ardoise`);
+  for (let n = 2; library.notes.has(path); n++) path = notePath(library.root, '', `${name} (${n}).ardoise`);
+  return path;
+}
+
+function writePage(s: Session, page: Note): void {
+  const path = s.saved.get(page.id) ?? uniquePath(page);
+  mockLibrary().notes.set(path, { note: copy({ ...page, modified: Date.now() }), stamp: freshStamp(), binder: '' });
+  s.saved.set(page.id, path);
+  notifyLibraryChanged();
+}
+
+/**
+ * Writes `page` into the demo library (once it has strokes). Returns the events to send:
+ * `saved` after a write (the pages whose write failed earlier are written again first, so it
+ * means that everything is written), `saveFailed` the first time a page fails (not again while
+ * the error repeats), nothing otherwise.
+ */
+function savePage(s: Session, page: Note): LiveEvent[] {
+  if (!s.saved.has(page.id) && page.strokes.length === 0) return [];
+  const failure = mockLiveConfig.saveError;
+  if (failure !== null) {
+    if (s.failed.has(page.id)) return [];
+    s.failed.add(page.id);
+    return [{ type: 'saveFailed', pageIndex: s.pages.indexOf(page), message: failure }];
+  }
+  for (const other of s.pages) if (s.failed.has(other.id)) writePage(s, other);
+  s.failed.clear();
+  writePage(s, page);
+  return [savedEvent(s)];
+}
+
+function savedEvent(s: Session): LiveEvent {
+  return { type: 'saved', paths: [...s.saved.values()] };
+}
+
+/** Ends the stroke in progress (adds it to its page); returns the events to send. */
+function endStroke(s: Session): LiveEvent[] {
+  if (!s.current) return [];
+  const page = s.pages[s.pageIndex];
+  page.strokes.push(s.current);
+  s.current = null;
+  const events: LiveEvent[] = [{ type: 'strokeEnd', pageIndex: s.pageIndex }];
+  // A page becomes a note when its first stroke ends.
+  if (!s.saved.has(page.id)) events.push(...savePage(s, page));
+  return events;
+}
+
+/** Three records of the pen: one batch. */
+function tick(s: Session): void {
+  if (s.state !== 'live') return;
+  const events: LiveEvent[] = [];
+  const now = wallClock();
+  let hoverAt: { x: number; y: number } | null = null;
+  for (let j = 0; j < 3; j++) {
+    s.record += 1;
+    const sample = s.pen.next();
+    const page = s.pages[s.pageIndex];
+    if (sample.kind === 'down') {
+      hoverAt = null;
+      const point: LivePoint = {
+        x: Math.round(sample.x),
+        y: Math.round(sample.y),
+        p: Math.round(sample.p * 2047) / 2047,
+        t: (s.record - (s.pageStart.get(page.id) ?? 0)) * RECORD_MS,
+        // Received with the notification, a little before the batch left Rust.
+        recv: now - 0.4 - 0.3 * ((s.record * 7) % 5),
+      };
+      const ink: InkPoint = { x: point.x, y: point.y, pressure: point.p, t: point.t };
+      const last = events[events.length - 1];
+      if (!s.current) {
+        const { tool, color, width } = s.style;
+        s.current = { tool, color: { ...color }, width, layer: s.layer, points: [ink] };
+        events.push({ type: 'strokeStart', pageIndex: s.pageIndex, stroke: { tool, color: { ...color }, width, layer: s.layer, points: [point] } });
+      } else {
+        s.current.points.push(ink);
+        if (last?.type === 'strokeStart') last.stroke.points.push(point);
+        else if (last?.type === 'points') last.points.push(point);
+        else events.push({ type: 'points', pageIndex: s.pageIndex, points: [point] });
+      }
+    } else {
+      events.push(...endStroke(s));
+      if (sample.kind === 'hover') {
+        hoverAt = { x: Math.round(sample.x), y: Math.round(sample.y) };
+        s.hover = hoverAt;
+      } else if (s.hover) {
+        s.hover = null;
+        hoverAt = null;
+        events.push({ type: 'hoverEnd' });
+      }
+    }
+  }
+  if (hoverAt) events.push({ type: 'hover', ...hoverAt });
+  broadcast(events);
+}
+
+function startPen(s: Session): void {
+  clearInterval(s.tick);
+  if (mockLiveConfig.pen) s.tick = setInterval(() => tick(s), mockLiveConfig.tickMs);
+}
+
+function stopTimers(s: Session): void {
+  clearTimeout(s.wait);
+  clearInterval(s.tick);
+  clearTimeout(s.reconnect);
+}
+
+function addPage(s: Session): void {
+  const page = blankPage(s.view.board);
+  s.pages.push(page);
+  s.pageStart.set(page.id, s.record);
+}
+
+function goTo(s: Session, index: number): LiveEvent[] {
+  const events = endStroke(s);
+  const leaving = s.pages[s.pageIndex];
+  if (s.saved.has(leaving.id)) events.push(...savePage(s, leaving));
+  s.pageIndex = index;
+  s.layer = s.pages[index].layers.length - 1;
+  return events;
+}
+
+function runCommand(s: Session, command: LiveCommand): void {
+  let events: LiveEvent[] = [];
+  switch (command.kind) {
+    case 'nextPage':
+      if (s.pageIndex === s.pages.length - 1) addPage(s);
+      events = goTo(s, s.pageIndex + 1);
+      break;
+    case 'previousPage':
+      if (s.pageIndex === 0) return;
+      events = goTo(s, s.pageIndex - 1);
+      break;
+    case 'button':
+    case 'newPage':
+      addPage(s);
+      events = goTo(s, s.pages.length - 1);
+      break;
+    case 'newLayer': {
+      events = endStroke(s);
+      const page = s.pages[s.pageIndex];
+      page.layers.push({ name: `Calque ${page.layers.length + 1}`, visible: true });
+      s.layer = page.layers.length - 1;
+      break;
+    }
+    case 'clearPage':
+      s.current = null;
+      s.pages[s.pageIndex].strokes = [];
+      break;
+    default:
+      throw { code: 'invalidCommand', message: String((command as { kind: unknown }).kind) };
+  }
+  broadcast([...events, { type: 'snapshot', snapshot: snapshot() }]);
+}
+
+function setView(s: Session, requested: LiveViewState): void {
+  const zoom = Math.min(8, Math.max(1, Number.isFinite(requested.zoom) ? requested.zoom : 1));
+  const view = { ...requested, zoom };
+  const boardChanged = view.board !== s.view.board;
+  s.view = view;
+  if (!boardChanged) {
+    broadcast([{ type: 'view', view: copy(view) }]);
+    return;
+  }
+  // Blackboard: slate paper and white chalk; switched off, the paper and style come back.
+  const page = s.pages[s.pageIndex];
+  page.background = { ...page.background, paper: view.board ? 'slate' : 'white' };
+  if (view.board) {
+    s.styleBeforeBoard = s.style;
+    s.style = CHALK_STYLE;
+  } else {
+    s.style = s.styleBeforeBoard ?? DEFAULT_STYLE;
+    s.styleBeforeBoard = null;
+  }
+  broadcastSnapshot();
+}
+
+function startSession(): LiveSnapshot {
+  if (session) return snapshot();
+  const s: Session = {
+    state: 'waiting',
+    pages: [],
+    pageIndex: 0,
+    layer: 0,
+    style: DEFAULT_STYLE,
+    styleBeforeBoard: null,
+    view: { ...IDLE_VIEW },
+    hover: null,
+    current: null,
+    saved: new Map(),
+    failed: new Set(),
+    record: 0,
+    pageStart: new Map(),
+    pen: new PenScript(),
+  };
+  addPage(s);
+  session = s;
+  s.wait = setTimeout(() => {
+    s.state = 'live';
+    broadcastSnapshot();
+    startPen(s);
+  }, mockLiveConfig.waitMs);
+  broadcastSnapshot();
+  return snapshot();
+}
+
+function stopSession(): string[] {
+  const s = session;
+  if (!s) return [];
+  stopTimers(s);
+  const events = endStroke(s);
+  for (const page of s.pages) events.push(...savePage(s, page).filter((e) => e.type === 'saveFailed'));
+  const paths = [...s.saved.values()];
+  // A `saved` after a failure means that everything is written: not sent while a page failed.
+  if (s.failed.size === 0) events.push({ type: 'saved', paths });
+  session = null;
+  broadcast([...events, { type: 'snapshot', snapshot: snapshot() }]);
+  return paths;
+}
+
+function monitors(): MonitorInfo[] {
+  return MONITORS.slice(0, Math.max(0, mockLiveConfig.monitors)).map((m) => ({ ...m, chosen: m.key === savedMonitor }));
+}
+
+/** The screen of `open_presentation`, chosen like `presentation.rs`. */
+function chooseMonitor(requested: string | null): MonitorInfo {
+  const list = monitors();
+  const chosen =
+    list.find((m) => m.key === requested) ??
+    list.find((m) => m.key === savedMonitor) ??
+    list.find((m) => !m.primary) ??
+    list[0];
+  if (!chosen) throw { code: 'noMonitor', message: 'no monitor' };
+  return chosen;
+}
+
+export function mockLiveInvoke(command: string, args: Record<string, unknown>): unknown {
+  switch (command) {
+    case 'live_start':
+      return startSession();
+    case 'live_stop':
+      return stopSession();
+    case 'live_set_style': {
+      const s = running();
+      s.style = copy(args.style as LiveStyle);
+      broadcastSnapshot();
+      return undefined;
+    }
+    case 'live_command':
+      runCommand(running(), args.command as LiveCommand);
+      return undefined;
+    case 'live_set_view':
+      setView(running(), args.view as LiveViewState);
+      return undefined;
+    case 'list_monitors':
+      return monitors();
+    case 'open_presentation': {
+      const monitor = chooseMonitor((args.monitor as string | null) ?? null);
+      savedMonitor = monitor.key;
+      presentation = { ...monitor, chosen: true };
+      broadcastSnapshot();
+      return copy(presentation);
+    }
+    case 'close_presentation':
+      if (presentation) {
+        presentation = null;
+        broadcastSnapshot();
+      }
+      return undefined;
+    default:
+      return UNHANDLED;
+  }
+}
+
+/** `live_subscribe` in the browser: the current session, then every batch. */
+export async function mockLiveSubscribe(onBatch: (batch: LiveBatch) => void): Promise<LiveSnapshot> {
+  subscribers.add(onBatch);
+  return snapshot();
+}
+
+// --- For tests ----------------------------------------------------------------------------------
+
+/** Stops the session, forgets subscribers, screens and settings. */
+export function resetMockLive(): void {
+  if (session) stopTimers(session);
+  session = null;
+  subscribers.clear();
+  presentation = null;
+  savedMonitor = null;
+  pageCounter = 0;
+  Object.assign(mockLiveConfig, { waitMs: 1200, tickMs: 15, pen: true, monitors: 2, saveError: null });
+}
+
+/** Sends `events` to every subscriber as one batch. */
+export function mockLiveEmit(events: LiveEvent[]): void {
+  broadcast(events);
+}
+
+/** The tablet's link drops for `ms`, then comes back. */
+export function mockLiveReconnect(ms: number): void {
+  const s = running();
+  clearInterval(s.tick);
+  s.state = 'reconnecting';
+  broadcastSnapshot();
+  s.reconnect = setTimeout(() => {
+    s.state = 'live';
+    broadcastSnapshot();
+    startPen(s);
+  }, ms);
+}
+
+/** Pen ticks without timers (tests that drive the pen step by step). */
+export function mockLiveTick(count = 1): void {
+  const s = running();
+  for (let i = 0; i < count; i++) tick(s);
+}
+
+export function mockLiveSubscribers(): number {
+  return subscribers.size;
+}

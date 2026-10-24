@@ -2,6 +2,17 @@
 
 ## Non publié
 
+### Ajouté (jalon M4 — synchro, mode direct et classe)
+
+- Tablette dans l'interface : état de connexion et batterie dans la barre latérale (avec la progression de la synchro), panneau de la tablette (nom, batterie et charge, firmware, pages en mémoire, modèle et taille), assistant d'enregistrement qui prévient d'abord que la tablette ne marchera plus avec l'appli du téléphone ni avec Inkspace, puis explique l'appui long sur le bouton par une animation.
+- Connexion automatique à la tablette enregistrée dès qu'elle est à portée ; synchronisation à la connexion (désactivable) ou à la demande, avec progression et annulation ; « effacer de la tablette après import » activé par défaut, l'effacement n'ayant lieu qu'après l'écriture vérifiée de la note ; sans effacement, une page déjà importée ne l'est pas deux fois ; export automatique PDF/PNG branché sur la synchro.
+- Réglages de la tablette : renommer, mettre à l'heure, droitier ou gaucher (tablette retournée), action du bouton en mode direct, oublier la tablette.
+- Mode direct : le tracé s'affiche en temps réel avec l'outil, la couleur et l'épaisseur choisis ; chaque page devient une note (enregistrée au fil de l'eau) ; le bouton de la tablette crée une nouvelle page ou un nouveau calque, au choix ; latence mesurée et affichée.
+- Classe et vidéoprojecteur : fenêtre de présentation plein écran sur l'écran choisi, sans aucun élément d'interface ; fenêtre de commande avec outils, couleurs, pages, aperçu de la zone projetée ; zoom et déplacement, tableau noir (fond ardoise et craie), pointeur laser (le stylet en survol montre un point sans écrire), effacement rapide, page suivante ou précédente au clavier ou par le bouton de la tablette.
+- `ardoise.exe --simulated-tablet` : la tablette simulée remplace le Bluetooth (en temps réel, 3 pages en mémoire), sans jamais toucher à l'enregistrement de la vraie tablette ; parcours de bout en bout « synchro de 3 pages → 3 notes » et mode direct.
+- Journaux de diagnostic écrits automatiquement dans `_ardoise/diagnostics/` quand une connexion échoue, ou quand la tablette envoie en mode direct une notification encore inconnue (pour identifier le bouton au point de contrôle H2).
+- Procédure H2 dans `docs/hardware-tests.md`.
+
 ### Ajouté (jalon M5 — découper, assembler, exporter)
 
 - Exports PNG (fond transparent possible), JPG, SVG (vectoriel, calques Inkscape) et PDF (vectoriel, une page par note, taille réelle ou A4), résolution au choix ; depuis l'éditeur (note en cours, modifications non enregistrées comprises) ou depuis la sélection de la bibliothèque (un seul PDF pour plusieurs notes, ou un fichier par note dans un dossier, sans jamais écraser un fichier existant).

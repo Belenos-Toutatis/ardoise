@@ -10,7 +10,21 @@
   import type { LibraryState } from '../../lib/library-state.svelte';
   import TabletStatus from './TabletStatus.svelte';
 
-  let { lib, testOpen, ontest }: { lib: LibraryState; testOpen: boolean; ontest: () => void } = $props();
+  let {
+    lib,
+    testOpen,
+    ontest,
+    tabletOpen = false,
+    ontablet = () => {},
+  }: {
+    lib: LibraryState;
+    testOpen: boolean;
+    ontest: () => void;
+    /** The tablet panel is shown. */
+    tabletOpen?: boolean;
+    /** Opens or closes the tablet panel. */
+    ontablet?: () => void;
+  } = $props();
 
   const expanded = new SvelteSet<string>();
   /** Where a new binder is being named: the parent's path (`''` for the root), or null. */
@@ -248,7 +262,7 @@
   </ul>
 
   <div class="sidebar-foot">
-    <TabletStatus />
+    <TabletStatus open={tabletOpen} onopen={ontablet} />
     <button type="button" class="button" aria-expanded={testOpen} onclick={ontest}>{t('diagnostic.open')}</button>
   </div>
 </nav>
