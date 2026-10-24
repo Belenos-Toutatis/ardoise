@@ -222,32 +222,16 @@ export const journeys = [
   {
     // The replay of a demo note, played to the end, then exported as a GIF through the video dialog. The native
     // "save as" dialog cannot be driven: the interface lets the journey script its answer
-    // (`window.__ardoiseE2eSavePath`, see `pickExportFile` in lib/dialogs.ts). Labels are the translation keys
-    // `editor.replay`, `replay.play` and `editor.video`; the end of the replay is the timeline slider (an
-    // `input[type=range]` inside an element whose class contains "replay") reaching its maximum.
+    // (`window.__ardoiseE2eSavePath`, see `pickExportFile` in lib/dialogs.ts). The replay controls are found by
+    // their `data-action` (replay-toggle, replay-speed, replay-play, replay-seek, video-export); the end of the
+    // replay is the timeline slider reaching its maximum.
     name: 'relecture d’une note puis export vidéo en GIF',
     async run(app, check) {
       const l = (key) => text(app.language, key);
       const j = JSON.stringify;
       const gif = join(app.dir, 'relecture.gif');
       const DIALOG = '[role="dialog"]';
-      const SLIDER = '[class*="replay" i] input[type="range"]';
-
-      /** Clicks the visible button named `label` (its text, aria-label or tooltip). */
-      const clickNamed = async (label) => {
-        await app.waitFor(
-          `(() => {
-            document.querySelectorAll('[data-e2e-target]').forEach((e) => e.removeAttribute('data-e2e-target'));
-            const named = [...document.querySelectorAll('button, [role="button"]')].filter((e) =>
-              [e.getAttribute('aria-label'), e.getAttribute('title'), e.textContent.trim()].includes(${j(label)}) && e.offsetParent !== null && !e.disabled);
-            if (named.length === 0) return false;
-            named[0].setAttribute('data-e2e-target', '');
-            return true;
-          })()`,
-          `the button "${label}"`,
-        );
-        await app.click('[data-e2e-target]');
-      };
+      const SLIDER = 'input[type="range"][data-action="replay-seek"]';
 
       await check('la bibliothèque de démonstration s’affiche (7 notes)', async () => {
         await app.waitFor(`document.querySelectorAll('.note-card').length === 7`, 'the 7 demo notes');
@@ -258,13 +242,16 @@ export const journeys = [
         await app.waitFor(`document.querySelectorAll(${j(STROKES)}).length > 0`, 'the strokes of the note');
       });
 
-      await check(`entrer en relecture (« ${l('editor.replay')} »)`, async () => {
-        await clickNamed(l('editor.replay'));
+      await check(`entrer en relecture (« ${l('editor.replay.button')} »)`, async () => {
+        await app.click('button[data-action="replay-toggle"]');
         await app.waitFor(`document.querySelector(${j(SLIDER)}) !== null`, 'the replay timeline');
       });
 
-      await check(`lire jusqu’à la fin (« ${l('replay.play')} »)`, async () => {
-        await clickNamed(l('replay.play'));
+      await check(`lire à 16× jusqu’à la fin (« ${l('replay.play')} »)`, async () => {
+        await app.evaluate(
+          `(() => { const s = document.querySelector('select[data-action="replay-speed"]'); s.value = '16'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`,
+        );
+        await app.click('button[data-action="replay-play"]');
         await app.waitFor(
           `(() => { const r = document.querySelector(${j(SLIDER)}); return r !== null && Number(r.max) > 0 && Number(r.value) >= Number(r.max); })()`,
           'the end of the replay',
@@ -272,8 +259,8 @@ export const journeys = [
         );
       });
 
-      await check(`ouvrir la fenêtre d’export vidéo (« ${l('editor.video')} »)`, async () => {
-        await clickNamed(l('editor.video'));
+      await check(`ouvrir la fenêtre d’export vidéo (« ${l('editor.video.button')} »)`, async () => {
+        await app.click('button[data-action="video-export"]');
         await app.waitFor(
           `document.querySelector(${j(`${DIALOG} h2`)})?.textContent === ${j(l('videoExport.title'))}`,
           'the video export dialog',
