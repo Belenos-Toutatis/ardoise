@@ -1,15 +1,23 @@
 //! Page backgrounds: paper colour, printed templates (in millimetres, at any scale) and the
 //! optional paper texture.
 //!
-//! Template lines are snapped to whole pixels so that they stay crisp; a line thinner than
-//! a pixel is drawn one pixel wide and proportionally lighter, and a family of lines fades
-//! out when its spacing gets down to a few pixels (thumbnails), instead of turning grey.
+//! The template geometry ([`draw_template`]) is written once over [`TemplateCanvas`]:
+//!
+//! - the raster canvas snaps lines to whole pixels so that they stay crisp; a line thinner
+//!   than a pixel is drawn one pixel wide and proportionally lighter, and a family of lines
+//!   fades out when its spacing gets down to a few pixels (thumbnails), instead of turning
+//!   grey;
+//! - the vector collector keeps the exact positions and widths, without fading, as
+//!   rectangles and discs for the SVG and PDF writers ([`vector_background`]); the texture,
+//!   when on, becomes an image of the paper at a moderate resolution.
 
-use ardoise_core::note::{Background, Paper, Template};
+use ardoise_core::note::{Background, PageSize, Paper, Template};
 use ardoise_ink::Rgba;
 use tiny_skia::{Color, Paint, PathBuilder, Pixmap, Rect, Transform};
 
+use crate::look::UNITS_PER_INCH;
 use crate::noise::value_noise;
+use crate::{Image, MAX_SIDE, image_from};
 
 /// Device units per millimetre.
 const UNITS_PER_MM: f32 = 100.0;
@@ -109,6 +117,20 @@ impl Palette {
     }
 }
 
+/// Where template lines are drawn, in millimetres from the top-left corner of the page.
+trait TemplateCanvas {
+    /// Width and height of the page in millimetres.
+    fn size_mm(&self) -> (f32, f32);
+    /// Opacity factor for a family of lines `spacing_mm` apart (1 = fully drawn).
+    fn density(&self, spacing_mm: f32) -> f32;
+    /// A horizontal line centred on `y_mm`, from `x0_mm` to `x1_mm`.
+    fn hline(&mut self, y_mm: f32, x0_mm: f32, x1_mm: f32, line: Line, fade: f32);
+    /// A vertical line centred on `x_mm`, from `y0_mm` to `y1_mm`.
+    fn vline(&mut self, x_mm: f32, y0_mm: f32, y1_mm: f32, line: Line, fade: f32);
+    /// A dot of diameter `line.width_mm` centred on `(x_mm, y_mm)`.
+    fn dot(&mut self, x_mm: f32, y_mm: f32, line: Line, fade: f32);
+}
+
 /// Draws template lines on a pixmap, in millimetres.
 struct Canvas<'a> {
     pixmap: &'a mut Pixmap,
@@ -142,8 +164,14 @@ impl Canvas<'_> {
             ((pos - size / 2.0).round(), size, 1.0)
         }
     }
+}
 
-    /// Opacity factor for a family of lines `spacing_mm` apart: fades out below 4 px.
+impl TemplateCanvas for Canvas<'_> {
+    fn size_mm(&self) -> (f32, f32) {
+        (self.width_mm, self.height_mm)
+    }
+
+    /// Fades out below 4 px.
     fn density(&self, spacing_mm: f32) -> f32 {
         ((spacing_mm * self.px_per_mm - 1.5) / 2.5).clamp(0.0, 1.0)
     }
@@ -200,8 +228,8 @@ fn centred(size: f32, step: f32) -> f32 {
     (size - (size / step).floor() * step) / 2.0
 }
 
-fn draw_template(c: &mut Canvas, template: Template, p: &Palette) {
-    let (w, h) = (c.width_mm, c.height_mm);
+fn draw_template(c: &mut impl TemplateCanvas, template: Template, p: &Palette) {
+    let (w, h) = c.size_mm();
     match template {
         Template::Blank => {}
         Template::Lined => {
@@ -384,6 +412,153 @@ pub(crate) fn paint(pixmap: &mut Pixmap, background: &Background, scale: f32) {
     if background.texture {
         apply_texture(pixmap, background.paper, px_per_mm);
     }
+}
+
+/// Resolution of the paper texture image in vector exports: its finest grain is 0.25 mm.
+const TEXTURE_DPI: f32 = 100.0;
+
+/// A printed shape of the template, in device units (10 µm).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Shape {
+    Rect {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    },
+    Disc {
+        cx: f32,
+        cy: f32,
+        r: f32,
+    },
+}
+
+/// A shape with its colour.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Mark {
+    pub shape: Shape,
+    pub rgb: [u8; 3],
+    /// 0..1.
+    pub alpha: f32,
+}
+
+/// The page background for the vector formats.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct VectorBackground {
+    pub paper: Rgba,
+    /// Light ink shows best on it (the highlighter screens instead of multiplying).
+    pub dark: bool,
+    /// The template, in drawing order.
+    pub marks: Vec<Mark>,
+    /// The paper with its texture (no template), to stretch over the whole page; `None` when
+    /// the texture is off (or the image could not be made: the plain paper colour remains).
+    pub texture: Option<Image>,
+}
+
+/// Collects the template as exact shapes: no pixel snapping, no fading.
+struct Collector {
+    width_mm: f32,
+    height_mm: f32,
+    marks: Vec<Mark>,
+}
+
+impl Collector {
+    fn push(&mut self, shape: Shape, line: Line, fade: f32) {
+        let alpha = (line.alpha * fade).clamp(0.0, 1.0);
+        let visible = match shape {
+            Shape::Rect { width, height, .. } => width > 0.0 && height > 0.0,
+            Shape::Disc { r, .. } => r > 0.0,
+        };
+        if visible && alpha > 0.0 {
+            self.marks.push(Mark {
+                shape,
+                rgb: line.rgb,
+                alpha,
+            });
+        }
+    }
+}
+
+impl TemplateCanvas for Collector {
+    fn size_mm(&self) -> (f32, f32) {
+        (self.width_mm, self.height_mm)
+    }
+
+    fn density(&self, _spacing_mm: f32) -> f32 {
+        1.0
+    }
+
+    fn hline(&mut self, y_mm: f32, x0_mm: f32, x1_mm: f32, line: Line, fade: f32) {
+        let shape = Shape::Rect {
+            x: x0_mm * UNITS_PER_MM,
+            y: (y_mm - line.width_mm / 2.0) * UNITS_PER_MM,
+            width: (x1_mm - x0_mm) * UNITS_PER_MM,
+            height: line.width_mm * UNITS_PER_MM,
+        };
+        self.push(shape, line, fade);
+    }
+
+    fn vline(&mut self, x_mm: f32, y0_mm: f32, y1_mm: f32, line: Line, fade: f32) {
+        let shape = Shape::Rect {
+            x: (x_mm - line.width_mm / 2.0) * UNITS_PER_MM,
+            y: y0_mm * UNITS_PER_MM,
+            width: line.width_mm * UNITS_PER_MM,
+            height: (y1_mm - y0_mm) * UNITS_PER_MM,
+        };
+        self.push(shape, line, fade);
+    }
+
+    fn dot(&mut self, x_mm: f32, y_mm: f32, line: Line, fade: f32) {
+        let shape = Shape::Disc {
+            cx: x_mm * UNITS_PER_MM,
+            cy: y_mm * UNITS_PER_MM,
+            r: line.width_mm / 2.0 * UNITS_PER_MM,
+        };
+        self.push(shape, line, fade);
+    }
+}
+
+/// The background of a `page` for the vector formats: paper colour, the template as exact
+/// shapes (same geometry as the raster template) and, when on, the paper texture as an image.
+pub(crate) fn vector_background(background: &Background, page: PageSize) -> VectorBackground {
+    let dark = is_dark(background.paper);
+    let mut collector = Collector {
+        width_mm: page.width as f32 / UNITS_PER_MM,
+        height_mm: page.height as f32 / UNITS_PER_MM,
+        marks: Vec::new(),
+    };
+    draw_template(
+        &mut collector,
+        background.template,
+        &Palette::for_paper(dark),
+    );
+    let texture = if background.texture {
+        texture_image(background.paper, page)
+    } else {
+        None
+    };
+    VectorBackground {
+        paper: paper_color(background.paper),
+        dark,
+        marks: collector.marks,
+        texture,
+    }
+}
+
+/// The paper with its texture and no template, at [`TEXTURE_DPI`] (less if a side would
+/// exceed the largest image side).
+fn texture_image(paper: Paper, page: PageSize) -> Option<Image> {
+    let longest = page.width.max(page.height).max(1) as f32;
+    let scale = (TEXTURE_DPI / UNITS_PER_INCH).min(MAX_SIDE as f32 / longest);
+    let side = |units: u32| (units as f32 * scale).round().clamp(1.0, MAX_SIDE as f32) as u32;
+    let mut pixmap = Pixmap::new(side(page.width), side(page.height))?;
+    let plain = Background {
+        paper,
+        template: Template::Blank,
+        texture: true,
+    };
+    paint(&mut pixmap, &plain, scale);
+    Some(image_from(&pixmap))
 }
 
 #[cfg(test)]

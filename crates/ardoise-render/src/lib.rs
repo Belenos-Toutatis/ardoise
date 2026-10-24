@@ -1,25 +1,48 @@
-//! Raster rendering of notes: ink tools, page backgrounds, templates and textures (PNG export).
+//! Rendering and export of notes: ink tools, page backgrounds, templates and textures; PNG,
+//! JPG, SVG, PDF and the clipboard image (SPEC §4.6, `docs/design/exports-and-operations.md`).
 //!
 //! The public surface below is the contract used by the Inkspace import comparison, the
-//! exports and the thumbnails. [`render_note`] draws, with tiny-skia and anti-aliasing:
+//! exports and the thumbnails. Every format draws the same thing (SPEC §6.2):
 //!
 //! 1. the background ([`background`]): paper colour, template in millimetres, optional paper
-//!    texture; or plain white when [`RenderOptions::background`] is off;
+//!    texture; or plain white (transparent for [`render_note_transparent`], SVG and PDF) when
+//!    the background is off;
 //! 2. the strokes of visible layers, bottom layer first and in note order within a layer,
-//!    each filled from [`ardoise_ink::outline`] with its tool's look ([`ink`]).
+//!    each filled from [`ardoise_ink::outline`] with its tool's look ([`look`]): with
+//!    tiny-skia and anti-aliasing for images ([`render_note`], [`ink`]), as paths for
+//!    [`note_to_svg`] and [`notes_to_pdf`].
 //!
 //! Rendering is deterministic: every texture comes from a fixed or content-derived seed, so
 //! the same note and options always give the same bytes (the reference images rely on it).
 
 mod background;
+mod clipboard;
 mod ink;
+mod jpeg;
+pub mod look;
 mod noise;
+mod pdf;
+mod svg;
+mod vector;
 
 use ardoise_core::note::{Note, PageSize};
 use ardoise_ink::Stroke;
 use tiny_skia::{Color, Pixmap};
 
 pub use background::paper_color;
+pub use clipboard::{ClipboardImage, clipboard_image, clipboard_image_at};
+pub use look::{Blend, Fill, Grain, Look};
+pub use pdf::{PdfOptions, PdfPage, notes_to_pdf};
+pub use svg::{SvgOptions, note_to_svg};
+
+/// Smallest and largest resolution of the image exports, in dots per inch.
+pub const MIN_DPI: u32 = 72;
+pub const MAX_DPI: u32 = 600;
+
+/// Pixels per device unit (10 µm) at `dpi` dots per inch.
+pub fn scale_for_dpi(dpi: u32) -> f32 {
+    dpi as f32 / look::UNITS_PER_INCH
+}
 
 /// Largest image side, in pixels.
 const MAX_SIDE: u32 = 16_384;
@@ -39,6 +62,14 @@ impl RenderOptions {
         Self {
             scale: width_px as f32 / page.width.max(1) as f32,
             background: true,
+        }
+    }
+
+    /// Scale for a resolution of `dpi` dots per inch.
+    pub fn at_dpi(dpi: u32, background: bool) -> Self {
+        Self {
+            scale: scale_for_dpi(dpi),
+            background,
         }
     }
 }
@@ -78,7 +109,30 @@ pub enum RenderError {
 /// 16 384 px). Strokes on hidden layers are not drawn; a stroke whose layer index has no
 /// layer entry is drawn (above the others) rather than lost.
 pub fn render_note(note: &Note, options: &RenderOptions) -> Result<Image, RenderError> {
-    let scale = options.scale;
+    let page = if options.background {
+        Page::Paper
+    } else {
+        Page::White
+    };
+    render(note, options.scale, page)
+}
+
+/// Renders `note` like [`render_note`] without any paper: the strokes on a transparent page,
+/// alpha kept (PNG with a transparent background).
+pub fn render_note_transparent(note: &Note, scale: f32) -> Result<Image, RenderError> {
+    render(note, scale, Page::Transparent)
+}
+
+/// What is under the strokes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Page {
+    /// Paper colour, template, texture.
+    Paper,
+    White,
+    Transparent,
+}
+
+fn render(note: &Note, scale: f32, page: Page) -> Result<Image, RenderError> {
     let width = (note.page.width as f32 * scale).round() as u32;
     let height = (note.page.height as f32 * scale).round() as u32;
     let size_error = RenderError::Size { width, height };
@@ -86,12 +140,16 @@ pub fn render_note(note: &Note, options: &RenderOptions) -> Result<Image, Render
         return Err(size_error);
     }
     let mut pixmap = Pixmap::new(width, height).ok_or(size_error)?;
-    let dark = if options.background {
-        background::paint(&mut pixmap, &note.background, scale);
-        background::is_dark(note.background.paper)
-    } else {
-        pixmap.fill(Color::WHITE);
-        false
+    let dark = match page {
+        Page::Paper => {
+            background::paint(&mut pixmap, &note.background, scale);
+            background::is_dark(note.background.paper)
+        }
+        Page::White => {
+            pixmap.fill(Color::WHITE);
+            false
+        }
+        Page::Transparent => false,
     };
     let mut painter = ink::InkPainter::new(&pixmap, scale, dark);
     for stroke in visible_strokes(note) {
@@ -129,9 +187,8 @@ fn image_from(pixmap: &Pixmap) -> Image {
     }
 }
 
-/// PNG bytes of `image` (8-bit RGB when every pixel is opaque, which rendered notes are;
-/// RGBA otherwise).
-pub fn encode_png(image: &Image) -> Result<Vec<u8>, RenderError> {
+/// Checks that `image` is not empty and holds exactly `width × height` RGBA pixels.
+pub(crate) fn check_pixels(image: &Image) -> Result<(), RenderError> {
     let (width, height) = (image.width, image.height);
     if width == 0 || height == 0 {
         return Err(RenderError::Size { width, height });
@@ -143,12 +200,46 @@ pub fn encode_png(image: &Image) -> Result<Vec<u8>, RenderError> {
             image.pixels.len()
         )));
     }
+    Ok(())
+}
+
+/// A straight-alpha RGBA pixel composited over white.
+pub(crate) fn over_white([r, g, b, a]: [u8; 4]) -> [u8; 3] {
+    let a = u16::from(a);
+    let mix = |v: u8| ((u16::from(v) * a + 255 * (255 - a) + 127) / 255) as u8;
+    [mix(r), mix(g), mix(b)]
+}
+
+/// `dpi` in pixels per metre (PNG `pHYs`, BMP headers).
+pub(crate) fn pixels_per_metre(dpi: u32) -> u32 {
+    (f64::from(dpi) / 0.0254).round() as u32
+}
+
+/// PNG bytes of `image` (8-bit RGB when every pixel is opaque, which rendered notes are;
+/// RGBA otherwise).
+pub fn encode_png(image: &Image) -> Result<Vec<u8>, RenderError> {
+    encode_png_at(image, None)
+}
+
+/// Like [`encode_png`], recording a resolution of `dpi` (a `pHYs` chunk), so that programs
+/// that honour it show the note at its real size.
+pub fn encode_png_at(image: &Image, dpi: Option<u32>) -> Result<Vec<u8>, RenderError> {
+    check_pixels(image)?;
+    let (width, height) = (image.width, image.height);
     let opaque = image.pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255);
     let encode_error = |e: png::EncodingError| RenderError::Encode(e.to_string());
     let mut out = Vec::new();
     let mut encoder = png::Encoder::new(&mut out, width, height);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.set_compression(png::Compression::Balanced);
+    if let Some(dpi) = dpi.filter(|&d| d > 0) {
+        let ppm = pixels_per_metre(dpi);
+        encoder.set_pixel_dims(Some(png::PixelDimensions {
+            xppu: ppm,
+            yppu: ppm,
+            unit: png::Unit::Meter,
+        }));
+    }
     let rgb: Vec<u8>;
     let data = if opaque {
         encoder.set_color(png::ColorType::Rgb);
@@ -168,6 +259,21 @@ pub fn encode_png(image: &Image) -> Result<Vec<u8>, RenderError> {
     writer.write_image_data(data).map_err(encode_error)?;
     writer.finish().map_err(encode_error)?;
     Ok(out)
+}
+
+/// JPEG bytes of `image`: baseline, 8-bit, YCbCr (JFIF), `quality` 1..=100 (clamped), alpha
+/// flattened over white.
+pub fn encode_jpeg(image: &Image, quality: u8) -> Result<Vec<u8>, RenderError> {
+    jpeg::encode_image(image, quality, None)
+}
+
+/// Like [`encode_jpeg`], recording a resolution of `dpi` in the JFIF header.
+pub fn encode_jpeg_at(
+    image: &Image,
+    quality: u8,
+    dpi: Option<u32>,
+) -> Result<Vec<u8>, RenderError> {
+    jpeg::encode_image(image, quality, dpi)
 }
 
 /// Decodes a PNG file into an RGBA image (any colour type and bit depth is converted to
@@ -568,6 +674,264 @@ mod tests {
         assert!(matches!(
             decode_png(b"not a png"),
             Err(RenderError::Decode(_))
+        ));
+    }
+
+    #[test]
+    fn png_records_the_resolution() {
+        let image = Image {
+            width: 1,
+            height: 1,
+            pixels: vec![1, 2, 3, 255],
+        };
+        let bytes = encode_png_at(&image, Some(300)).unwrap();
+        let reader = png::Decoder::new(std::io::Cursor::new(&bytes))
+            .read_info()
+            .unwrap();
+        let dims = reader.info().pixel_dims.unwrap();
+        assert_eq!((dims.xppu, dims.yppu), (11_811, 11_811));
+        assert_eq!(dims.unit, png::Unit::Meter);
+        let plain = encode_png(&image).unwrap();
+        let reader = png::Decoder::new(std::io::Cursor::new(&plain))
+            .read_info()
+            .unwrap();
+        assert!(reader.info().pixel_dims.is_none());
+        assert_eq!(scale_for_dpi(254), 0.1);
+        assert_eq!(RenderOptions::at_dpi(254, false).scale, 0.1);
+    }
+
+    #[test]
+    fn the_transparent_render_keeps_only_the_ink() {
+        let ink = line(
+            Tool::Ballpoint,
+            Rgba::BLACK,
+            100.0,
+            0,
+            (500.0, 2000.0),
+            (4500.0, 2000.0),
+        );
+        let marker = line(
+            Tool::Highlighter,
+            Rgba::rgb(255, 230, 0),
+            500.0,
+            0,
+            (2500.0, 1000.0),
+            (2500.0, 3000.0),
+        );
+        let n = note(
+            SMALL,
+            bg(Paper::Slate, Template::Seyes, true),
+            vec![ink, marker],
+        );
+        let image = render_note_transparent(&n, 0.05).unwrap();
+        assert_eq!((image.width, image.height), (250, 200));
+        // No paper anywhere: away from the ink, fully transparent.
+        assert_eq!(image.pixel(10, 10), Some([0, 0, 0, 0]));
+        assert_eq!(image.pixel(50, 100), Some([0, 0, 0, 255]));
+        // The highlighter alone shows its colour (it multiplies nothing).
+        assert_eq!(image.pixel(125, 70), Some([255, 230, 0, 255]));
+        let opaque = image
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| p[3] == 255);
+        assert!(opaque.count() < 250 * 200 / 4);
+        assert!(render_note_transparent(&n, 0.0).is_err());
+    }
+
+    /// Mean absolute difference per channel between a JPEG and the image it encodes.
+    fn jpeg_error(image: &Image, quality: u8) -> f64 {
+        let bytes = encode_jpeg(image, quality).unwrap();
+        let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&bytes));
+        let decoded = decoder.decode().unwrap();
+        let info = decoder.info().unwrap();
+        assert_eq!(
+            (u32::from(info.width), u32::from(info.height)),
+            (image.width, image.height)
+        );
+        assert_eq!(info.pixel_format, jpeg_decoder::PixelFormat::RGB24);
+        let total: u64 = decoded
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .zip(image.pixels.as_chunks::<4>().0)
+            .map(|(d, p)| {
+                let o = over_white(*p);
+                (0..3).map(|c| u64::from(d[c].abs_diff(o[c]))).sum::<u64>()
+            })
+            .sum();
+        total as f64 / (f64::from(image.width) * f64::from(image.height) * 3.0)
+    }
+
+    #[test]
+    fn jpeg_decodes_close_to_the_image_at_every_size_and_quality() {
+        let strokes = Tool::ALL
+            .iter()
+            .enumerate()
+            .map(|(i, &tool)| {
+                let y = 400.0 + i as f32 * 500.0;
+                line(
+                    tool,
+                    Rgba::rgb(40, 60, 160),
+                    tool.default_width(),
+                    0,
+                    (300.0, y),
+                    (4700.0, y + 200.0),
+                )
+            })
+            .collect();
+        let n = note(SMALL, bg(Paper::Cream, Template::Grid5mm, false), strokes);
+        let image = render_note(&n, &opts(0.08)).unwrap();
+        // Full chroma from 90, subsampled below; lower qualities lose more. Measured: 0.97,
+        // 3.6 and 9.2, the errors of libjpeg (ImageMagick) at the same qualities on this
+        // line art within 1 %.
+        let fine = jpeg_error(&image, 95);
+        let usual = jpeg_error(&image, 75);
+        let rough = jpeg_error(&image, 10);
+        assert!(fine < 1.2, "{fine}");
+        assert!(usual < 4.5 && usual > fine, "{usual}");
+        assert!(rough < 11.0 && rough > usual, "{rough}");
+        // Sizes that are not multiples of the block size, and a flat colour.
+        for (width, height) in [(1, 1), (7, 9), (17, 15), (33, 2)] {
+            let flat = Image {
+                width,
+                height,
+                pixels: [200u8, 30, 60, 255].repeat((width * height) as usize),
+            };
+            for quality in [50, 95] {
+                assert!(jpeg_error(&flat, quality) < 2.0, "{width} x {height}");
+            }
+        }
+        // Transparent pixels become white.
+        let clear = Image {
+            width: 8,
+            height: 8,
+            pixels: vec![0; 256],
+        };
+        assert!(jpeg_error(&clear, 90) < 1.0);
+        let bytes = encode_jpeg(&clear, 90).unwrap();
+        let white = jpeg_decoder::Decoder::new(std::io::Cursor::new(&bytes))
+            .decode()
+            .unwrap();
+        assert!(white.iter().all(|&v| v >= 254), "{white:?}");
+        // Inconsistent images are refused.
+        let bad = Image {
+            width: 2,
+            height: 2,
+            pixels: vec![0; 3],
+        };
+        assert!(encode_jpeg(&bad, 90).is_err());
+        assert!(encode_jpeg_at(&image, 90, Some(300)).unwrap().len() > 1000);
+    }
+
+    #[test]
+    fn vector_templates_keep_exact_widths_and_positions() {
+        let page = PageSize {
+            width: 10_000,
+            height: 10_000,
+        };
+        let seyes = background::vector_background(&bg(Paper::White, Template::Seyes, false), page);
+        assert!(!seyes.dark && seyes.texture.is_none());
+        // The red margin: 0.25 mm wide, centred 32 mm from the left, full height.
+        let margin = seyes.marks.iter().find(|m| m.rgb == [220, 40, 70]).unwrap();
+        assert_eq!(
+            margin.shape,
+            background::Shape::Rect {
+                x: 3187.5,
+                y: 0.0,
+                width: 25.0,
+                height: 10_000.0
+            }
+        );
+        assert_eq!(margin.alpha, 0.75);
+        // No fading: every 2 mm line is there, even those a thumbnail would hide.
+        let horizontal = seyes
+            .marks
+            .iter()
+            .filter(
+                |m| matches!(m.shape, background::Shape::Rect { width, .. } if width == 10_000.0),
+            )
+            .count();
+        // From 16 mm to 100 mm every 2 mm.
+        assert_eq!(horizontal, 43);
+
+        let dots = background::vector_background(&bg(Paper::Slate, Template::Dotted, true), page);
+        assert!(dots.dark);
+        // Every 5 mm from 0 to 100 mm, both edges included (as in the raster).
+        assert_eq!(dots.marks.len(), 21 * 21);
+        assert!(dots.marks.iter().all(
+            |m| matches!(m.shape, background::Shape::Disc { r, .. } if (r - 30.0).abs() < 1e-3)
+        ));
+        // The texture image: 100 dpi, the page's proportions.
+        let texture = dots.texture.unwrap();
+        assert_eq!((texture.width, texture.height), (394, 394));
+        let blank = background::vector_background(&bg(Paper::Kraft, Template::Blank, false), page);
+        assert!(blank.marks.is_empty());
+        assert_eq!(blank.paper, paper_color(Paper::Kraft));
+    }
+
+    #[test]
+    fn pdf_pages_use_the_states_of_the_look() {
+        let strokes = vec![
+            line(
+                Tool::Highlighter,
+                Rgba::rgb(255, 230, 0),
+                300.0,
+                0,
+                (500.0, 500.0),
+                (4500.0, 500.0),
+            ),
+            line(
+                Tool::FeltTip,
+                Rgba::rgb(10, 10, 200),
+                100.0,
+                0,
+                (500.0, 1500.0),
+                (4500.0, 1500.0),
+            ),
+            line(
+                Tool::Ballpoint,
+                Rgba::BLACK,
+                60.0,
+                1,
+                (500.0, 2500.0),
+                (4500.0, 2500.0),
+            ),
+        ];
+        let n = note(SMALL, bg(Paper::White, Template::Blank, false), strokes);
+        let pdf = notes_to_pdf(&[&n, &n, &n], &PdfOptions::default()).unwrap();
+        let document = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(document.get_pages().len(), 3);
+        let text = String::from_utf8_lossy(&pdf);
+        assert!(text.contains("/BM /Multiply"), "highlighter blending");
+        assert!(text.contains("/ca 0.3"), "felt-tip halo");
+        assert!(text.contains("/ca 0.9"), "felt-tip core");
+        assert!(text.contains("/Producer (Ardoise)"));
+        // Three notes: no document title.
+        assert!(!text.contains("/Title"));
+        let (_, &first) = document.get_pages().iter().next().unwrap();
+        let content = document
+            .get_page_content_with_limit(first, 1 << 24)
+            .unwrap();
+        let ops = lopdf::content::Content::decode(&content)
+            .unwrap()
+            .operations;
+        // Paper + highlighter + halo + core; the hidden layer's stroke is not there.
+        assert_eq!(ops.iter().filter(|op| op.operator == "f").count(), 4);
+        // Deterministic.
+        assert_eq!(
+            pdf,
+            notes_to_pdf(&[&n, &n, &n], &PdfOptions::default()).unwrap()
+        );
+
+        let single = notes_to_pdf(&[&n], &PdfOptions::default()).unwrap();
+        assert!(String::from_utf8_lossy(&single).contains("/Title (test)"));
+        let mut empty = n.clone();
+        empty.page.width = 0;
+        assert!(matches!(
+            notes_to_pdf(&[&empty], &PdfOptions::default()),
+            Err(RenderError::Size { .. })
         ));
     }
 }
