@@ -88,7 +88,10 @@
       "favorite": "Add to favourites",
       "unfavorite": "Remove from favourites",
       "trash": "Move to trash",
-      "clear": "Deselect"
+      "clear": "Deselect",
+      "export": "Export…",
+      "assemble": "Assemble…",
+      "assembleNeeds": "Select at least two notes to assemble them."
     },
     "empty": {
       "favorites": "No favourites yet. Click a note's star to find it here.",
@@ -115,6 +118,21 @@
       "emptyAll": "Empty the trash",
       "confirmEmpty": "Delete the {count} notes in the trash for good? This cannot be undone.",
       "confirm": "Confirm"
+    },
+    "assemble": {
+      "title": "Assemble notes",
+      "intro": "Notes to assemble: {count}, from the oldest to the newest. The original notes are not changed.",
+      "layout": "Layout",
+      "overlay": "Overlay on one page",
+      "overlayHint": "All the notes on a single page, on top of each other, each on its own layers.",
+      "endToEnd": "Place end to end (long page)",
+      "endToEndHint": "One long page: the notes one below the other.",
+      "titleLabel": "Title of the new note",
+      "defaultTitle": "{title} (assembled)",
+      "run": "Assemble",
+      "running": "Assembling…",
+      "error": "Couldn't assemble the notes: {message}",
+      "done": "New note created: {title}"
     }
   },
   "settings": {
@@ -139,7 +157,19 @@
     "tabletForget": "Forget the tablet",
     "tabletForgetConfirm": "Forget the tablet “{name}”? It will have to be registered again, on every computer.",
     "tabletForgetYes": "Yes, forget it",
-    "tabletTest": "Test the tablet…"
+    "tabletTest": "Test the tablet…",
+    "autoExport": {
+      "title": "Automatic export after sync",
+      "hint": "Each page received from the tablet is also saved as a PDF or a PNG in a folder of the library, so you can read your notes on your phone with the Nextcloud app.",
+      "format": "Format",
+      "off": "Off",
+      "pdf": "PDF",
+      "png": "PNG (image)",
+      "folder": "Folder in the library",
+      "folderHint": "A path relative to the library, for example Exports.",
+      "save": "Save",
+      "saved": "Setting saved."
+    }
   },
   "diagnostic": {
     "open": "Test the tablet",
@@ -266,7 +296,13 @@
     "libraryWatch": "watching the library folder failed ({detail})",
     "render": "rendering the note failed ({detail})",
     "diagnostic": "the tablet test could not start ({detail})",
-    "unexpected": "unexpected error ({detail})"
+    "unexpected": "unexpected error ({detail})",
+    "exportFailed": "the export couldn't be written ({detail}); choose another location and check that there is enough space",
+    "clipboardUnavailable": "the clipboard isn't available ({detail}); close the program that is using it and try again, or export the image as a PNG",
+    "nothingToSplit": "this split would leave nothing on one side; choose an instant or a zone that divides the note into two non-empty parts",
+    "nothingToMerge": "at least two notes are needed to assemble them",
+    "pageTooLarge": "the resulting page would be too large (over 100 m on a side); assemble fewer notes or overlay them",
+    "invalidFolder": "this folder can't be used: enter a folder inside the library, for example \"Exports\" (no \"..\", no drive letter, and not the _ardoise folder)"
   },
   "editor": {
     "back": "Library",
@@ -412,6 +448,92 @@
       "cancel": "Stay",
       "saveClose": "Save and close",
       "discardClose": "Close without saving"
+    },
+    "share": {
+      "label": "Split, copy, export"
+    },
+    "split": {
+      "button": "Split",
+      "hint": "Move part of the note into a new note",
+      "title": "Split the note",
+      "mode": "How to split",
+      "modeTime": "At an instant",
+      "modeZone": "By zone",
+      "timeHint": "Everything written from this instant on moves to a new note. The strokes concerned are coloured on the page.",
+      "instant": "Instant of the split",
+      "instantAt": "Instant: {time} of {total}",
+      "zoneHint": "Trace the zone to cut out on the page, like with the lasso: the strokes that are mostly inside it move to the new note.",
+      "zoneTraced": "The coloured strokes move to the new note. Trace again to change the zone.",
+      "retrace": "Clear the zone",
+      "counts": "Strokes staying here: {kept} · strokes leaving: {moved}",
+      "nothing": "Nothing to split this way: each note must keep at least one stroke.",
+      "newTitle": "Title of the new note",
+      "titleTime": "{title} (continued)",
+      "titleZone": "{title} (excerpt)",
+      "dirtyHint": "Your unsaved changes will be saved along with the split.",
+      "error": "Couldn't split the note: {message}",
+      "confirm": "Split",
+      "running": "Splitting…",
+      "done": "New note created: {title}",
+      "empty": "This note is empty: there is nothing to split.",
+      "close": "Close"
+    },
+    "copyImage": {
+      "button": "Copy image",
+      "hint": "Copy the note as an image to the clipboard (for Word, OneNote…)",
+      "done": "Image copied: paste it into Word, OneNote or another program.",
+      "failed": "Couldn't copy the image: {message}"
+    },
+    "export": {
+      "button": "Export…",
+      "hint": "Export the note as PNG, JPG, SVG or PDF"
     }
+  },
+  "export": {
+    "title": "Export",
+    "subjectNote": "Note: {title}",
+    "subjectMany": "Selected notes: {count}",
+    "format": "Format",
+    "formats": {
+      "png": "PNG (image)",
+      "jpg": "JPG (image)",
+      "svg": "SVG (vector)",
+      "pdf": "PDF"
+    },
+    "formatHints": {
+      "png": "Lossless image, with an optional transparent background. Handy for Word, OneNote or a web page.",
+      "jpg": "Compact image without transparency. Good for photos and for sending by email.",
+      "svg": "Vector drawing that keeps the stroke width given by the pen pressure; it opens in Inkscape and in a browser.",
+      "pdf": "Vector document, sharp at any size; several notes make a single file."
+    },
+    "options": "Settings",
+    "resolution": "Resolution",
+    "dpi": {
+      "96": "96 dpi (screen)",
+      "150": "150 dpi (usual)",
+      "300": "300 dpi (print)"
+    },
+    "quality": "JPG quality",
+    "pdfPage": "PDF page",
+    "pdfActual": "The page's actual size",
+    "pdfA4": "A4 (note fitted and centred)",
+    "background": "Include the background (paper, lines, texture)",
+    "backgroundHints": {
+      "png": "Unchecked: the background is transparent, only the ink is exported.",
+      "jpg": "Unchecked: the background is white (JPG can't be transparent).",
+      "svg": "Unchecked: only the ink is exported, without paper.",
+      "pdf": "Unchecked: only the ink is exported, without paper."
+    },
+    "destinationFile": "You'll choose the file to create next.",
+    "destinationFolder": "Each note becomes one file, in the folder you'll choose. Existing files are never overwritten.",
+    "destinationPdfMany": "All the notes go into a single PDF, one page per note, in the order shown. You'll choose the file to create next.",
+    "run": "Export…",
+    "again": "Export again…",
+    "running": "Exporting…",
+    "done": "Files created: {count}",
+    "failed": "The export failed: {message}",
+    "pickFile": "Save the export",
+    "pickFolder": "Choose the export folder",
+    "defaultPdfName": "Notes"
   }
 }

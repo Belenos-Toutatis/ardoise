@@ -17,6 +17,11 @@
     onwidth,
     oneraser,
     onapplyall,
+    splitting = false,
+    copying = false,
+    onsplit,
+    oncopy,
+    onexport,
   }: {
     tools: ToolSettings;
     customColors: Rgba[];
@@ -29,6 +34,13 @@
     onwidth: (width: number, commit: boolean) => void;
     oneraser: (change: { mode?: EraserMode; radius?: number }) => void;
     onapplyall: (what: 'color' | 'tool' | 'width') => void;
+    /** The split panel is open. */
+    splitting?: boolean;
+    /** The image is being copied to the clipboard. */
+    copying?: boolean;
+    onsplit: () => void;
+    oncopy: () => void;
+    onexport: () => void;
   } = $props();
 
   const MODES: { mode: Mode; icon: string }[] = [
@@ -153,6 +165,21 @@
       {/if}
     </div>
   {/if}
+
+  <div class="group share" role="group" aria-label={t('editor.share.label')}>
+    <button type="button" class="button small-button" aria-pressed={splitting} class:active={splitting} title={t('editor.split.hint')} onclick={onsplit}>
+      <span aria-hidden="true">✂</span>
+      {t('editor.split.button')}
+    </button>
+    <button type="button" class="button small-button" disabled={copying} title={t('editor.copyImage.hint')} onclick={oncopy}>
+      <span aria-hidden="true">⧉</span>
+      {t('editor.copyImage.button')}
+    </button>
+    <button type="button" class="button small-button" title={t('editor.export.hint')} onclick={onexport}>
+      <span aria-hidden="true">⇪</span>
+      {t('editor.export.button')}
+    </button>
+  </div>
 </div>
 
 <style>
@@ -248,6 +275,10 @@
   .small-button {
     padding: 0.25rem 0.6rem;
     font-size: 0.875rem;
+  }
+
+  .share {
+    margin-left: auto;
   }
 
   .visually-hidden {

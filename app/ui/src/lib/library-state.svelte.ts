@@ -4,10 +4,12 @@
  * call its methods; the pure parts are in `library-logic.ts`.
  */
 import { api, errorMessage, onLibraryChanged } from './api';
-import { currentLocale } from './i18n.svelte';
+import { currentLocale, t } from './i18n.svelte';
 import {
   buildBinderTree,
+  displayTitle,
   mergeTags,
+  oldestFirst,
   parseTags,
   sameTag,
   sameView,
@@ -15,7 +17,7 @@ import {
   type LibraryView,
   type SortOrder,
 } from './library-logic';
-import type { FileStamp, LibraryListing, NoteSummary, TrashEntry } from './note';
+import type { FileStamp, LibraryListing, MergeLayout, NoteSummary, TrashEntry } from './note';
 
 const THUMBNAIL_CACHE_SIZE = 400;
 
@@ -31,6 +33,10 @@ export class LibraryState {
   selected = $state<string[]>([]);
   /** True while cards are being dragged (sidebar drop targets light up). */
   dragging = $state(false);
+  /** Confirmation of the last operation that created a note, shown in a banner. */
+  notice = $state<string | null>(null);
+  /** The export or assemble dialog, with the notes it was opened for (displayed order). */
+  dialog = $state<{ kind: 'export' | 'assemble'; notes: NoteSummary[] } | null>(null);
 
   /** Paths being dragged; kept here because a drag event's data is not readable until the drop. */
   private dragPaths: string[] = [];
@@ -42,6 +48,12 @@ export class LibraryState {
   readonly tree = $derived(buildBinderTree(this.listing?.binders ?? [], this.notes));
   readonly visible = $derived(visibleNotes(this.notes, this.view, this.query, this.order, currentLocale()));
   readonly selectedNotes = $derived(this.notes.filter((n) => this.selected.includes(n.path)));
+  /** The selected notes as the grid shows them; those the search hides come last. */
+  readonly selectedDisplayed = $derived.by(() => {
+    const shown = this.visible.filter((n) => this.selected.includes(n.path));
+    const rest = this.selectedNotes.filter((n) => !shown.includes(n));
+    return [...shown, ...rest];
+  });
 
   // --- Loading -------------------------------------------------------------------------------
 
@@ -113,6 +125,37 @@ export class LibraryState {
 
   dismissError(): void {
     this.error = null;
+  }
+
+  dismissNotice(): void {
+    this.notice = null;
+  }
+
+  /** Opens the export or assemble dialog over the notes selected now. */
+  openDialog(kind: 'export' | 'assemble'): void {
+    this.dialog = { kind, notes: [...this.selectedDisplayed] };
+  }
+
+  closeDialog(): void {
+    this.dialog = null;
+  }
+
+  /**
+   * Assembles notes (oldest first) into a new note, which becomes the selection. The error, if
+   * any, goes back to the caller (the dialog shows it).
+   */
+  async assemble(notes: NoteSummary[], layout: MergeLayout, title: string): Promise<NoteSummary> {
+    this.notice = null;
+    const created = await api.mergeNotes(
+      oldestFirst(notes).map((n) => n.path),
+      layout,
+      title.trim(),
+    );
+    await this.refresh();
+    this.selected = [created.path];
+    this.anchor = created.path;
+    this.notice = t('library.assemble.done', { title: displayTitle(created, currentLocale()) });
+    return created;
   }
 
   // --- View ----------------------------------------------------------------------------------

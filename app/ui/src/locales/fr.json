@@ -88,7 +88,10 @@
       "favorite": "Mettre en favoris",
       "unfavorite": "Retirer des favoris",
       "trash": "Mettre à la corbeille",
-      "clear": "Désélectionner"
+      "clear": "Désélectionner",
+      "export": "Exporter…",
+      "assemble": "Assembler…",
+      "assembleNeeds": "Sélectionnez au moins deux notes pour les assembler."
     },
     "empty": {
       "favorites": "Aucun favori pour l'instant. Cliquez sur l'étoile d'une note pour la retrouver ici.",
@@ -115,6 +118,21 @@
       "emptyAll": "Vider la corbeille",
       "confirmEmpty": "Supprimer définitivement les {count} notes de la corbeille ? Cette action est irréversible.",
       "confirm": "Confirmer"
+    },
+    "assemble": {
+      "title": "Assembler des notes",
+      "intro": "Notes à assembler : {count}, de la plus ancienne à la plus récente. Les notes d'origine ne sont pas modifiées.",
+      "layout": "Disposition",
+      "overlay": "Superposer sur une page",
+      "overlayHint": "Toutes les notes sur une seule page, les unes sur les autres, chacune sur ses propres calques.",
+      "endToEnd": "Mettre bout à bout (page longue)",
+      "endToEndHint": "Une page longue : les notes l'une sous l'autre.",
+      "titleLabel": "Titre de la nouvelle note",
+      "defaultTitle": "{title} (assemblage)",
+      "run": "Assembler",
+      "running": "Assemblage…",
+      "error": "Impossible d'assembler les notes : {message}",
+      "done": "Nouvelle note créée : {title}"
     }
   },
   "settings": {
@@ -139,7 +157,19 @@
     "tabletForget": "Oublier la tablette",
     "tabletForgetConfirm": "Oublier la tablette « {name} » ? Elle devra être enregistrée de nouveau, sur tous vos ordinateurs.",
     "tabletForgetYes": "Oui, l'oublier",
-    "tabletTest": "Tester la tablette…"
+    "tabletTest": "Tester la tablette…",
+    "autoExport": {
+      "title": "Export automatique après synchronisation",
+      "hint": "Chaque page reçue de la tablette est aussi enregistrée en PDF ou en PNG dans un dossier de la bibliothèque : vous pouvez ainsi lire vos notes sur votre téléphone avec l'application Nextcloud.",
+      "format": "Format",
+      "off": "Désactivé",
+      "pdf": "PDF",
+      "png": "PNG (image)",
+      "folder": "Dossier dans la bibliothèque",
+      "folderHint": "Un chemin relatif à la bibliothèque, par exemple Exports.",
+      "save": "Enregistrer",
+      "saved": "Réglage enregistré."
+    }
   },
   "diagnostic": {
     "open": "Tester la tablette",
@@ -266,7 +296,13 @@
     "libraryWatch": "la surveillance du dossier de la bibliothèque a échoué ({detail})",
     "render": "le rendu de la note a échoué ({detail})",
     "diagnostic": "le test de la tablette n'a pas pu démarrer ({detail})",
-    "unexpected": "erreur inattendue ({detail})"
+    "unexpected": "erreur inattendue ({detail})",
+    "exportFailed": "l'export n'a pas pu être écrit ({detail}) ; choisissez un autre emplacement et vérifiez qu'il reste de la place",
+    "clipboardUnavailable": "le presse-papiers n'est pas disponible ({detail}) ; fermez le logiciel qui l'utilise puis réessayez, ou exportez l'image en PNG",
+    "nothingToSplit": "cette découpe ne laisserait rien d'un des deux côtés ; choisissez un instant ou une zone qui sépare la note en deux parties non vides",
+    "nothingToMerge": "il faut au moins deux notes pour les assembler",
+    "pageTooLarge": "la page obtenue serait trop grande (plus de 100 m de côté) ; assemblez moins de notes ou superposez-les",
+    "invalidFolder": "ce dossier n'est pas utilisable : indiquez un dossier à l'intérieur de la bibliothèque, par exemple « Exports » (sans « .. », sans lettre de lecteur, et pas le dossier _ardoise)"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -412,6 +448,92 @@
       "cancel": "Rester",
       "saveClose": "Enregistrer et fermer",
       "discardClose": "Fermer sans enregistrer"
+    },
+    "share": {
+      "label": "Découper, copier, exporter"
+    },
+    "split": {
+      "button": "Découper",
+      "hint": "Détacher une partie de la note dans une nouvelle note",
+      "title": "Découper la note",
+      "mode": "Mode de découpe",
+      "modeTime": "À un instant",
+      "modeZone": "Selon une zone",
+      "timeHint": "Tout ce qui a été écrit à partir de cet instant passe dans une nouvelle note. Les traits concernés sont en couleur sur la page.",
+      "instant": "Instant de la découpe",
+      "instantAt": "Instant : {time} sur {total}",
+      "zoneHint": "Tracez sur la page, comme avec le lasso, la zone à détacher : les traits qui s'y trouvent en grande partie passeront dans la nouvelle note.",
+      "zoneTraced": "Les traits en couleur passeront dans la nouvelle note. Tracez de nouveau pour changer la zone.",
+      "retrace": "Effacer la zone",
+      "counts": "Traits qui restent ici : {kept} · traits qui partent : {moved}",
+      "nothing": "Rien à découper ainsi : chaque note doit garder au moins un trait.",
+      "newTitle": "Titre de la nouvelle note",
+      "titleTime": "{title} (suite)",
+      "titleZone": "{title} (extrait)",
+      "dirtyHint": "Vos modifications non enregistrées seront enregistrées avec la découpe.",
+      "error": "Impossible de découper la note : {message}",
+      "confirm": "Découper",
+      "running": "Découpe…",
+      "done": "Nouvelle note créée : {title}",
+      "empty": "Cette note est vide : il n'y a rien à découper.",
+      "close": "Fermer"
+    },
+    "copyImage": {
+      "button": "Copier l'image",
+      "hint": "Copier la note comme image dans le presse-papiers (pour Word, OneNote…)",
+      "done": "Image copiée : collez-la dans Word, OneNote ou un autre logiciel.",
+      "failed": "Impossible de copier l'image : {message}"
+    },
+    "export": {
+      "button": "Exporter…",
+      "hint": "Exporter la note en PNG, JPG, SVG ou PDF"
     }
+  },
+  "export": {
+    "title": "Exporter",
+    "subjectNote": "Note : {title}",
+    "subjectMany": "Notes sélectionnées : {count}",
+    "format": "Format",
+    "formats": {
+      "png": "PNG (image)",
+      "jpg": "JPG (image)",
+      "svg": "SVG (vectoriel)",
+      "pdf": "PDF"
+    },
+    "formatHints": {
+      "png": "Image sans perte, avec un fond transparent possible. Pratique pour Word, OneNote ou une page web.",
+      "jpg": "Image compacte, sans transparence. Convient aux photos et aux envois par courriel.",
+      "svg": "Dessin vectoriel qui garde l'épaisseur du trait selon la pression ; il s'ouvre dans Inkscape et dans un navigateur.",
+      "pdf": "Document vectoriel, net à toutes les tailles ; plusieurs notes donnent un seul fichier."
+    },
+    "options": "Réglages",
+    "resolution": "Résolution",
+    "dpi": {
+      "96": "96 ppp (écran)",
+      "150": "150 ppp (usuel)",
+      "300": "300 ppp (impression)"
+    },
+    "quality": "Qualité JPG",
+    "pdfPage": "Page du PDF",
+    "pdfActual": "Taille réelle de la page",
+    "pdfA4": "A4 (note ajustée et centrée)",
+    "background": "Inclure le fond (papier, lignes, texture)",
+    "backgroundHints": {
+      "png": "Décoché : le fond est transparent, seul le tracé est exporté.",
+      "jpg": "Décoché : le fond est blanc (le JPG ne gère pas la transparence).",
+      "svg": "Décoché : seul le tracé est exporté, sans papier.",
+      "pdf": "Décoché : seul le tracé est exporté, sans papier."
+    },
+    "destinationFile": "Vous choisirez ensuite le fichier à créer.",
+    "destinationFolder": "Chaque note donne un fichier, dans le dossier que vous choisirez. Aucun fichier existant n'est écrasé.",
+    "destinationPdfMany": "Toutes les notes vont dans un seul PDF, une page par note, dans l'ordre affiché. Vous choisirez ensuite le fichier à créer.",
+    "run": "Exporter…",
+    "again": "Exporter de nouveau…",
+    "running": "Export en cours…",
+    "done": "Fichiers créés : {count}",
+    "failed": "L'export a échoué : {message}",
+    "pickFile": "Enregistrer l'export",
+    "pickFolder": "Choisir le dossier de l'export",
+    "defaultPdfName": "Notes"
   }
 }

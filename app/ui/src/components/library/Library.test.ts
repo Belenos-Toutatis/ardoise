@@ -591,3 +591,174 @@ describe('library: opening notes and live refresh', () => {
     expect(ui.q('.panel')?.getAttribute('aria-label')).toBe('Réglages');
   });
 });
+
+describe('library: export and assemble the selection', () => {
+  beforeEach(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      // No storage: nothing to clear.
+    }
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const pathOf = (title: string) => {
+    const path = [...mockLibrary().notes.entries()].find(([, s]) => s.note.title === title)?.[0];
+    if (!path) throw new Error(`no note "${title}"`);
+    return path;
+  };
+
+  it('exports the selected notes into one PDF, a page per note in the displayed order', async () => {
+    const spy = vi.spyOn(api, 'exportNotes');
+    const ui = await render();
+    await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
+    await ui.click(ui.open('Cours de physique'), { ctrlKey: true });
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    await ui.click(ui.button('Exporter…'));
+    const dialog = ui.q('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('Notes sélectionnées : 3');
+
+    [...dialog.querySelectorAll<HTMLLabelElement>('label.choice')].find((l) => l.textContent?.trim() === 'PDF')!.querySelector('input')!.click();
+    await ui.settle();
+    await ui.click(ui.button('Exporter…', dialog));
+    // The grid shows newest first: that is the page order, whatever the order of the clicks.
+    expect(spy).toHaveBeenCalledWith(
+      ['Réunion parents', 'Liste de courses', 'Cours de physique'].map((title) => ({ path: pathOf(title) })),
+      'pdf',
+      expect.objectContaining({ pdfPage: 'actual' }),
+      'C:\\Users\\demo\\Exports\\Notes.pdf',
+    );
+    expect(dialog.textContent).toContain('Fichiers créés : 1');
+    await ui.click(ui.button('Fermer', dialog));
+    expect(ui.q('[role="dialog"]')).toBeNull();
+    // The selection is still there.
+    expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 3');
+  });
+
+  it('exports one selected note to a file named after it', async () => {
+    const spy = vi.spyOn(api, 'exportNotes');
+    const ui = await render();
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    await ui.click(ui.button('Exporter…'));
+    const dialog = ui.q('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('Note : Liste de courses');
+    await ui.click(ui.button('Exporter…', dialog));
+    expect(spy.mock.calls[0][0]).toEqual([{ path: pathOf('Liste de courses') }]);
+    expect(spy.mock.calls[0][3]).toBe('C:\\Users\\demo\\Exports\\2026-10-22 Liste de courses.png');
+  });
+
+  it('closes the export dialog with Escape', async () => {
+    const ui = await render();
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    await ui.click(ui.button('Exporter…'));
+    await ui.key(ui.q('[role="dialog"]')!, 'Escape');
+    expect(ui.q('[role="dialog"]')).toBeNull();
+  });
+
+  it('offers to assemble only from two notes', async () => {
+    const ui = await render();
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    expect(ui.button('Assembler…').disabled).toBe(true);
+    expect(ui.button('Assembler…').title).toBe('Sélectionnez au moins deux notes pour les assembler.');
+    await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
+    expect(ui.button('Assembler…').disabled).toBe(false);
+  });
+
+  it('assembles the oldest note first, end to end, and selects the new note', async () => {
+    const spy = vi.spyOn(api, 'mergeNotes');
+    const ui = await render();
+    // Clicked newest first; the assembly goes oldest first.
+    await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    await ui.click(ui.button('Assembler…'));
+    const dialog = ui.q('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('Notes à assembler : 2');
+    const title = dialog.querySelector<HTMLInputElement>('input[type="text"]')!;
+    expect(title.value).toBe('Liste de courses (assemblage)');
+    expect(dialog.querySelector<HTMLInputElement>('input[value="overlay"]')!.checked).toBe(true);
+
+    dialog.querySelector<HTMLInputElement>('input[value="endToEnd"]')!.click();
+    await ui.type(title, 'Deux pages');
+    await ui.click(ui.button('Assembler', dialog));
+
+    expect(spy).toHaveBeenCalledWith([pathOf('Liste de courses'), pathOf('Réunion parents')], 'endToEnd', 'Deux pages');
+    expect(ui.q('[role="dialog"]')).toBeNull();
+    await vi.waitFor(() => expect(ui.titles()).toContain('Deux pages'));
+    // The new note is the selection, and a confirmation says so.
+    expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 1');
+    expect(ui.card('Deux pages').classList.contains('selected')).toBe(true);
+    expect(ui.q('.notice')?.textContent).toContain('Nouvelle note créée : Deux pages');
+    // It lives in the first note's binder, and holds both notes' strokes on a long page.
+    const created = mockLibrary().notes.get(pathOf('Deux pages'))!;
+    expect(created.binder).toBe('');
+    expect(created.note.strokes).toHaveLength(2);
+    expect(created.note.page.height).toBe(43200);
+    // The sources are untouched.
+    expect(notesIn('Perso')).toEqual(['Réunion parents']);
+
+    await ui.click(ui.button('Fermer le message', ui.q('.notice')!));
+    expect(ui.q('.notice')).toBeNull();
+  });
+
+  it('overlays by default', async () => {
+    const spy = vi.spyOn(api, 'mergeNotes');
+    const ui = await render();
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    await ui.click(ui.open('Cours de physique'), { ctrlKey: true });
+    await ui.click(ui.button('Assembler…'));
+    const dialog = ui.q('[role="dialog"]')!;
+    expect(dialog.querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('Cours de physique (assemblage)');
+    await ui.click(ui.button('Assembler', dialog));
+    expect(spy.mock.calls[0][1]).toBe('overlay');
+    expect(spy.mock.calls[0][0]).toEqual([pathOf('Cours de physique'), pathOf('Liste de courses')]);
+    const created = mockLibrary().notes.get(pathOf('Cours de physique (assemblage)'))!.note;
+    expect(created.page).toEqual({ width: 29700, height: 21600 });
+    expect(created.layers.map((l) => l.name)).toEqual(['Cours de physique', 'Liste de courses']);
+  });
+
+  it('bases the proposed title on the date when the oldest note has no title, without a colon', async () => {
+    const ui = await render();
+    const untitled = await api.createNote('', '');
+    mockLibrary().notes.get(untitled.path)!.note.created = Date.UTC(2020, 0, 5, 10, 30);
+    notifyLibraryChanged();
+    await vi.waitFor(() => expect(ui.all('.note-card').length).toBe(4));
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    await ui.click(ui.all<HTMLElement>('.note-card .card-open').at(-1)!, { ctrlKey: true });
+    await ui.click(ui.button('Assembler…'));
+    const value = ui.q('[role="dialog"]')!.querySelector<HTMLInputElement>('input[type="text"]')!.value;
+    expect(value).toMatch(/2020 \(assemblage\)$/);
+    expect(value).not.toContain(':');
+  });
+
+  it('keeps the dialog open and explains a refusal', async () => {
+    vi.spyOn(api, 'mergeNotes').mockRejectedValueOnce({ code: 'pageTooLarge', message: '1 × 2' });
+    const ui = await render();
+    await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    await ui.click(ui.button('Assembler…'));
+    const dialog = ui.q('[role="dialog"]')!;
+    await ui.click(ui.button('Assembler', dialog));
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toContain("Impossible d'assembler les notes : la page obtenue serait trop grande");
+    expect(ui.q('[role="dialog"]')).toBeTruthy();
+    expect(ui.button('Assembler', dialog).disabled).toBe(false);
+    await ui.click(ui.button('Annuler', dialog));
+    expect(ui.q('[role="dialog"]')).toBeNull();
+    expect(ui.titles().length).toBe(3);
+  });
+
+  it('shows the export and assemble actions in English', async () => {
+    const ui = await render('en');
+    await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    expect(ui.button('Export…')).toBeTruthy();
+    await ui.click(ui.button('Assemble…'));
+    const dialog = ui.q('[role="dialog"]')!;
+    expect(dialog.querySelector('h2')?.textContent).toBe('Assemble notes');
+    expect(dialog.textContent).toContain('Overlay on one page');
+    expect(dialog.textContent).toContain('Place end to end (long page)');
+    expect(dialog.querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('Liste de courses (assembled)');
+  });
+});
