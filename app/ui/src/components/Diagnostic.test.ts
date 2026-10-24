@@ -97,7 +97,7 @@ describe('tablet test panel', () => {
 
     expect(target.textContent).toContain('8 réussie(s), 0 échec(s), 0 ignorée(s)');
     expect(STEP_IDS.every((id) => stepStatus(id) === 'passed')).toBe(true);
-    expect(target.textContent).toContain('Journal : C:\\demo\\.ardoise\\diagnostics');
+    expect(target.textContent).toContain('Journal : C:\\demo\\_ardoise\\diagnostics');
     expect(target.textContent).not.toContain('Test arrêté avant la fin.');
     // Details are translated, and the values shown.
     expect(target.textContent).toContain('Micrologiciel');

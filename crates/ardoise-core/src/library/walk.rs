@@ -17,11 +17,13 @@ pub(crate) enum Found {
     Note { path: PathBuf, binder: PathBuf },
 }
 
-/// Whether a file or folder name is skipped: hidden (leading dot, which covers `.ardoise/`,
-/// the `.part` files of atomic writes, Nextcloud's `.~` downloads and `.sync_*.db`), or a
-/// temporary `.part` file.
+/// Whether a file or folder name is skipped: the library's own folder `_ardoise/`, hidden
+/// names (leading dot, which covers the old `.ardoise/`, the `.part` files of atomic writes,
+/// Nextcloud's `.~` downloads and `.sync_*.db`), or a temporary `.part` file.
 pub(crate) fn is_skipped_name(name: &str) -> bool {
-    name.starts_with('.') || name.to_ascii_lowercase().ends_with(".part")
+    name.starts_with('.')
+        || name.eq_ignore_ascii_case(super::META_DIR)
+        || name.to_ascii_lowercase().ends_with(".part")
 }
 
 /// Folders Windows marks hidden or system (`$RECYCLE.BIN`, `System Volume Information`…).
@@ -100,7 +102,13 @@ mod tests {
     fn finds_notes_and_binders_and_skips_the_rest() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        for folder in [".ardoise/trash", "Classe/3e B", "Perso", ".cache"] {
+        for folder in [
+            "_ardoise/trash",
+            ".ardoise",
+            "Classe/3e B",
+            "Perso",
+            ".cache",
+        ] {
             fs::create_dir_all(root.join(folder)).unwrap();
         }
         for file in [
@@ -112,7 +120,8 @@ mod tests {
             "notes.txt",
             "Classe/3e B/c.ardoise",
             "Perso/d.ardoise",
-            ".ardoise/trash/e.ardoise",
+            "_ardoise/trash/e.ardoise",
+            ".ardoise/old.ardoise",
             ".cache/f.ardoise",
         ] {
             fs::write(root.join(file), b"x").unwrap();
@@ -160,6 +169,9 @@ mod tests {
     #[test]
     fn skipped_names() {
         assert!(is_skipped_name(".ardoise"));
+        assert!(is_skipped_name("_ardoise"));
+        assert!(is_skipped_name("_Ardoise"));
+        assert!(!is_skipped_name("_ardoise notes"));
         assert!(is_skipped_name(".x.ardoise.42.0.part"));
         assert!(is_skipped_name("x.ardoise.PART"));
         assert!(is_skipped_name(".sync_abc.db"));

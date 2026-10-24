@@ -1,4 +1,4 @@
-//! The trash: `.ardoise/trash/` in the library, so that it follows the notes to every
+//! The trash: `_ardoise/trash/` in the library, so that it follows the notes to every
 //! computer.
 //!
 //! A trashed note keeps its bytes untouched and is renamed `<deleted ms> <file name>`
@@ -20,7 +20,7 @@ use super::{Library, LibraryError, META_DIR, io_error, now_ms};
 use crate::format;
 use crate::fsutil::{remove_file_with_retry, rename_no_replace, write_atomic_new};
 
-/// Folder of the trash inside `.ardoise/`.
+/// Folder of the trash inside `_ardoise/`.
 pub const TRASH_DIR: &str = "trash";
 /// How long trashed notes are kept before [`Library::purge_expired`] removes them.
 pub const TRASH_RETENTION: Duration = Duration::from_secs(30 * 24 * 60 * 60);
@@ -69,7 +69,7 @@ fn relative_note_path(original: &str) -> Option<PathBuf> {
     let mut parts = 0;
     for component in path.components() {
         match component {
-            Component::Normal(part) if !part.to_str()?.starts_with('.') => parts += 1,
+            Component::Normal(part) if !super::walk::is_skipped_name(part.to_str()?) => parts += 1,
             _ => return None,
         }
     }
@@ -335,7 +335,9 @@ mod tests {
             "../evil.ardoise",
             "/abs.ardoise",
             "C:/abs.ardoise",
+            "_ardoise/trash/x.ardoise",
             ".ardoise/trash/x.ardoise",
+            "Classe/_Ardoise/x.ardoise",
             "x.exe",
             "",
             "a/../b.ardoise",

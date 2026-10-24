@@ -269,10 +269,13 @@ Sample files of version 1 (regenerate only when adding one:
 - Saving compares the file's modification time and size with those of the version loaded, before writing and again
   right before every attempt to rename the new version over the note, and refuses to overwrite a version that came
   meanwhile (conflict).
-- Ignored when listing: hidden names (leading dot: `.ardoise/`, the `.part` temporary files of atomic writes,
-  Nextcloud's `.~` downloads and `.sync_*.db`), names ending in `.part`, folders marked hidden or system by Windows,
-  links and junctions.
-- Trash: `.ardoise/trash/<deleted ms> <file name>` (unique), the note's bytes untouched, plus `<that name>.json`:
+- Ignored when listing: the library's own folder `_ardoise/` (any case; no binder may take that name), hidden names
+  (leading dot: the old `.ardoise/`, the `.part` temporary files of atomic writes, Nextcloud's `.~` downloads and
+  `.sync_*.db`), names ending in `.part`, folders marked hidden or system by Windows, links and junctions.
+- `_ardoise/` was first named `.ardoise/`; being hidden, Nextcloud's default settings did not sync it. Opening a
+  library (and `init`) moves an old `.ardoise/` to `_ardoise/`, or merges it into an existing `_ardoise/` without
+  overwriting anything (on a clash the `_ardoise/` file wins and the old one stays in `.ardoise/`).
+- Trash: `_ardoise/trash/<deleted ms> <file name>` (unique), the note's bytes untouched, plus `<that name>.json`:
   `{"original": "Classe/2026-10-24 Titre.ardoise", "deleted": 1792843200000, "title": "Titre", "id": "…"}`
   (`original` is relative to the library and `/`-separated; it is ignored if it is absolute or contains `..`).
   Purged after 30 days.

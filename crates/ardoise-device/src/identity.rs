@@ -1,4 +1,4 @@
-//! The tablet registration shared by every PC: `<library>/.ardoise/device.json` (SPEC §3.2).
+//! The tablet registration shared by every PC: `<library>/_ardoise/device.json` (SPEC §3.2).
 //!
 //! A Wacom smartpad remembers a single 6-byte identifier chosen by the host at registration
 //! and refuses any other one. Storing it in the synced library lets the work PC and the
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use ardoise_core::fsutil::write_atomic;
 use ardoise_core::library::META_DIR;
 
-/// File name inside `.ardoise/`.
+/// File name inside `_ardoise/`.
 pub const DEVICE_FILE: &str = "device.json";
 /// Version of the file format.
 pub const DEVICE_FORMAT: u32 = 1;

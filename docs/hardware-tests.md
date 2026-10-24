@@ -46,7 +46,7 @@ Copier `ardoise.exe` (dossier `target\release\` du projet) dans un dossier synch
 
 **Durée** : 10 minutes. **Tablette** : chargée. **Dongle Bluetooth** : branché. **Téléphone** : Bluetooth **coupé** pendant tout le test (sinon l'application du téléphone peut se connecter à la tablette à la place d'Ardoise et récupérer les pages).
 
-Ce test enregistre la tablette auprès d'Ardoise, lit ses informations, télécharge trois pages de référence, essaie le mode direct pendant 30 secondes puis vérifie la reconnexion. Chaque octet échangé est enregistré dans la bibliothèque, dans le dossier caché `.ardoise\diagnostics\` : tout revient à la maison par Nextcloud.
+Ce test enregistre la tablette auprès d'Ardoise, lit ses informations, télécharge trois pages de référence, essaie le mode direct pendant 30 secondes puis vérifie la reconnexion. Chaque octet échangé est enregistré dans la bibliothèque, dans le dossier `_ardoise\diagnostics\` : tout revient à la maison par Nextcloud.
 
 > **Important** : une tablette ne reste enregistrée qu'auprès d'une seule application. Après ce test, l'application Wacom du téléphone (et Inkspace) ne verront plus la tablette. Pour revenir en arrière, il suffira de la réenregistrer dans l'application du téléphone (bouton maintenu 6 secondes).
 
@@ -56,7 +56,7 @@ Remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version (Ardoi
 
 ### Au travail
 
-1. Couper le Bluetooth du téléphone. Brancher le dongle. Vérifier que la synchronisation Nextcloud est active **et que les fichiers cachés sont synchronisés** : dans le client Nextcloud, *Paramètres* → *Général* → *Modifier les fichiers ignorés* → case **Synchroniser les fichiers cachés** cochée (à faire aussi sur le PC de la maison). Sans elle, le dossier `.ardoise` — qui contient l'enregistrement de la tablette et les journaux du test — ne serait pas synchronisé.
+1. Couper le Bluetooth du téléphone. Brancher le dongle. Vérifier que la synchronisation Nextcloud est active.
 2. Lancer `ardoise.exe` (double-clic). Cliquer sur **Tester la tablette** (en haut à droite).
 3. Laisser cochée la case **Effacer les pages de la tablette une fois enregistrées** (les pages sont d'abord enregistrées et vérifiées, ensuite seulement effacées). Ne pas cocher **Simulation**. Cliquer sur **Démarrer le test**.
    > Les pages **déjà présentes** sur la tablette sont aussi téléchargées puis effacées. Elles ne sont pas perdues (fichiers `page-N.bin` dans le dossier des diagnostics, qu'Ardoise saura importer plus tard), mais elles n'apparaîtront pas encore comme des notes. Si la tablette contient des pages importantes, les récupérer d'abord avec l'application du téléphone.
@@ -82,11 +82,11 @@ Remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version (Ardoi
 
 ### Ce qui revient par Nextcloud
 
-Dans `<bibliothèque>\.ardoise\diagnostics\` :
+Dans `<bibliothèque>\_ardoise\diagnostics\` :
 - `AAAA-MM-JJ_HHMMSS.jsonl` : le journal complet des échanges Bluetooth ;
 - `AAAA-MM-JJ_HHMMSS.txt` : le rapport lisible ;
 - `AAAA-MM-JJ_HHMMSS\page-1.bin`, `page-1.svg`… : chaque page brute reçue de la tablette et son aperçu (ouvrable dans un navigateur).
 
-Et dans `<bibliothèque>\.ardoise\device.json` : l'enregistrement de la tablette, partagé par tous les PC (pas besoin de réenregistrer la tablette sur un autre ordinateur).
+Et dans `<bibliothèque>\_ardoise\device.json` : l'enregistrement de la tablette, partagé par tous les PC (pas besoin de réenregistrer la tablette sur un autre ordinateur).
 
 **À me signaler** : seulement ce que le journal ne peut pas contenir — la couleur du voyant à un moment surprenant, un message d'erreur de Windows (photo), une étape où la tablette n'a visiblement pas réagi.

@@ -48,7 +48,7 @@ Remplacer complètement Wacom Inkspace par une application **portable** pour Win
 
 - Un dossier ordinaire, lisible sans l'application. **Une note = un fichier `.ardoise`**, rangé dans des sous-dossiers qui servent de classeurs.
 - Nom de fichier lisible : `2026-10-24 Titre de la note.ardoise`. Renommer une note renomme le fichier.
-- Dossier caché `.ardoise/` à la racine de la bibliothèque :
+- Dossier `_ardoise/` à la racine de la bibliothèque, volontairement **non caché** : avec ses réglages par défaut, le client Nextcloud ne synchronise pas les dossiers cachés (nom commençant par un point). Une bibliothèque qui a encore l'ancien dossier `.ardoise/` est migrée automatiquement à l'ouverture. Contenu :
   - `device.json` : identifiant d'enregistrement de la tablette, **partagé par tous les PC** (enregistrer la tablette une seule fois suffit) ;
   - `diagnostics/` : journaux Bluetooth détaillés (§4.8) ;
   - `trash/` : corbeille (notes supprimées, vidée après 30 jours ou à la demande).
@@ -150,7 +150,7 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 
 La tablette est au travail alors que le développement se fait à la maison. L'application doit donc pouvoir produire elle-même tout ce qu'il faut pour diagnostiquer un problème :
 
-- journal détaillé de chaque échange Bluetooth (horodatage, sens, octets bruts, interprétation) dans `<bibliothèque>/.ardoise/diagnostics/AAAA-MM-JJ_HHMMSS.jsonl` — donc récupéré automatiquement à la maison par Nextcloud ;
+- journal détaillé de chaque échange Bluetooth (horodatage, sens, octets bruts, interprétation) dans `<bibliothèque>/_ardoise/diagnostics/AAAA-MM-JJ_HHMMSS.jsonl` — donc récupéré automatiquement à la maison par Nextcloud ;
 - **outil de test guidé** : une suite d'étapes (rechercher, enregistrer, lire les infos, télécharger les pages, mode direct pendant 30 s, dessins de référence à reproduire) qui produit un rapport ;
 - ces captures servent ensuite de **données de test** rejouées par le simulateur de tablette.
 

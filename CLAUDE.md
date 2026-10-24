@@ -37,7 +37,7 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 - Ne pas modifier `SPEC.md` sans l'accord de l'utilisateur. Une question ou une incohérence va dans `docs/questions.md`.
 - **Vie privée** : aucune note personnelle, capture non anonymisée ou donnée d'Inkspace dans git. Les tests qui en ont besoin lisent `testdata/private/` (ignoré par git). Ne jamais lire la clé `profile` de `LocalState\db` d'Inkspace (jeton d'accès et e-mail).
 - Ne jamais modifier le dossier d'Inkspace : travailler sur des copies.
-- La tablette n'est pas sur le poste de développement : tout ce qui la concerne doit être testable avec `ardoise-sim` ou des captures rejouées. Les tests réels passent par `docs/hardware-tests.md` ; les journaux de diagnostic reviennent par Nextcloud dans `<bibliothèque>/.ardoise/diagnostics/`.
+- La tablette n'est pas sur le poste de développement : tout ce qui la concerne doit être testable avec `ardoise-sim` ou des captures rejouées. Les tests réels passent par `docs/hardware-tests.md` ; les journaux de diagnostic reviennent par Nextcloud dans `<bibliothèque>/_ardoise/diagnostics/`.
 - Demander avant tout téléchargement d'outil (ex. `nasm`) ou installation globale.
 - Git : commits **locaux** autorisés, un par tâche cochée ou par groupe cohérent de changements, message en anglais. **Jamais de push** ni de publication sans accord explicite de l'utilisateur.
 

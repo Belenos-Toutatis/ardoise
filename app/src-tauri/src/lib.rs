@@ -97,6 +97,12 @@ pub fn run() {
         open_diagnostic: cli.diagnostic,
     };
 
+    // A library made before `.ardoise/` became `_ardoise/` is moved over once (best effort:
+    // opening the library retries later).
+    if let Some(library) = commands::current_state(&context).library() {
+        let _ = ardoise_core::library::migrate_legacy_meta_dir(std::path::Path::new(library));
+    }
+
     if headless_diagnostic {
         std::process::exit(diagnostic::run_simulated_cli(&context));
     }

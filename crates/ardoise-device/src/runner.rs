@@ -31,7 +31,7 @@ pub type AdapterCheck<'a> = &'a dyn Fn() -> Result<String, String>;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Runs the whole guided test and returns its report. The log, the downloaded pages and the
-/// text report are written in `<library>/.ardoise/diagnostics/`. Never panics on tablet
+/// text report are written in `<library>/_ardoise/diagnostics/`. Never panics on tablet
 /// errors: they become failed steps.
 pub fn run(
     connector: Box<dyn Connector>,
@@ -39,6 +39,8 @@ pub fn run(
     config: &DiagnosticConfig,
     adapter_check: Option<AdapterCheck<'_>>,
 ) -> DiagnosticReport {
+    // Libraries made before the folder was renamed still have `.ardoise/`.
+    let _ = ardoise_core::library::migrate_legacy_meta_dir(&config.library);
     let clock = connector.clock();
     let started = chrono::DateTime::<chrono::Local>::from(clock.now())
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, false);

@@ -45,7 +45,7 @@
   "diagnostic": {
     "open": "Tester la tablette",
     "title": "Test de la tablette",
-    "intro": "Ce test vérifie pas à pas la liaison avec la Bamboo Slate et enregistre tous les échanges dans la bibliothèque (dossier .ardoise/diagnostics) pour analyse. Durée : environ 5 minutes.",
+    "intro": "Ce test vérifie pas à pas la liaison avec la Bamboo Slate et enregistre tous les échanges dans la bibliothèque (dossier _ardoise/diagnostics) pour analyse. Durée : environ 5 minutes.",
     "deleteAfterSync": "Effacer les pages de la tablette une fois enregistrées",
     "simulated": "Simulation (sans tablette)",
     "start": "Démarrer le test",
@@ -126,7 +126,7 @@
       "existingRegistration": "enregistrement existant",
       "registeredNow": "enregistrée à l'instant",
       "registeredAgain": "enregistrée de nouveau",
-      "savedInDeviceJson": "enregistrée dans .ardoise/device.json",
+      "savedInDeviceJson": "enregistrée dans _ardoise/device.json",
       "yes": "oui",
       "no": "non",
       "reconnected": "reconnectée avec l'identité enregistrée",

@@ -1,6 +1,6 @@
 //! Diagnostic log of every exchange with the tablet (SPEC §4.8).
 //!
-//! One JSON object per line in `<library>/.ardoise/diagnostics/YYYY-MM-DD_HHMMSS.jsonl`, so the
+//! One JSON object per line in `<library>/_ardoise/diagnostics/YYYY-MM-DD_HHMMSS.jsonl`, so the
 //! logs written at work reach the development PC through Nextcloud. The first line is a
 //! [`LogHeader`], every other line a [`LogEntry`]. The same files are replayed by `ardoise-sim`
 //! as test data.
@@ -21,7 +21,7 @@ use ardoise_core::library::META_DIR;
 
 use crate::transport::{Channel, Clock};
 
-/// Sub-folder of `.ardoise/` holding the logs.
+/// Sub-folder of `_ardoise/` holding the logs.
 pub const DIAGNOSTICS_DIR: &str = "diagnostics";
 /// Version of the log format, written in the header.
 pub const LOG_FORMAT: u32 = 1;
@@ -117,7 +117,7 @@ pub fn lock(log: &SharedLog) -> MutexGuard<'_, DiagnosticLog> {
 }
 
 impl DiagnosticLog {
-    /// Starts a new log file in `<library>/.ardoise/diagnostics/`, named after the local time.
+    /// Starts a new log file in `<library>/_ardoise/diagnostics/`, named after the local time.
     pub fn create(library: &Path, transport: &str, clock: Arc<dyn Clock>) -> io::Result<Self> {
         let dir = library.join(META_DIR).join(DIAGNOSTICS_DIR);
         fs::create_dir_all(&dir)?;
@@ -351,7 +351,7 @@ mod tests {
         let clock = Arc::new(ManualClock(AtomicU64::new(0)));
         let mut log = DiagnosticLog::create(library.path(), "sim", clock.clone()).unwrap();
         let path = log.path().unwrap().to_owned();
-        assert!(path.starts_with(library.path().join(".ardoise").join("diagnostics")));
+        assert!(path.starts_with(library.path().join("_ardoise").join("diagnostics")));
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         assert_eq!(name.len(), "2026-10-24_140312.jsonl".len(), "{name}");
 

@@ -144,8 +144,8 @@ pub trait Operator {
 /// Settings of a test run.
 #[derive(Debug, Clone)]
 pub struct DiagnosticConfig {
-    /// Library holding `.ardoise/device.json` and receiving the log, the downloaded pages
-    /// (`.ardoise/diagnostics/<log name>/page-N.bin`) and the report.
+    /// Library holding `_ardoise/device.json` and receiving the log, the downloaded pages
+    /// (`_ardoise/diagnostics/<log name>/page-N.bin`) and the report.
     pub library: PathBuf,
     /// `"ble"`, `"sim"` or `"replay"`, written in the log header.
     pub transport: String,

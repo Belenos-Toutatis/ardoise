@@ -85,7 +85,7 @@ fn open_requires_a_library() {
     init(dir.path()).unwrap();
     let library = Library::open(dir.path()).unwrap();
     assert_eq!(library.root(), dir.path());
-    assert_eq!(library.meta_dir(), dir.path().join(".ardoise"));
+    assert_eq!(library.meta_dir(), dir.path().join("_ardoise"));
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn create_refuses_invalid_notes_and_binders() {
         );
         assert_eq!(error.code(), "invalidName");
     }
-    assert_eq!(names_in(dir.path()), [".ardoise"]);
+    assert_eq!(names_in(dir.path()), ["_ardoise"]);
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn save_rechecks_once_the_new_version_is_written() {
     assert_eq!(Some(fs::read(&saved.path).unwrap()), theirs);
     assert_eq!(
         names_in(dir.path()),
-        [".ardoise", "2026-10-24 Cours.ardoise"],
+        ["2026-10-24 Cours.ardoise", "_ardoise"],
         "temporary file left behind"
     );
 
@@ -333,7 +333,7 @@ fn save_rechecks_once_the_new_version_is_written() {
         })
         .unwrap_err();
     assert!(matches!(error, LibraryError::NotFound { .. }), "{error:?}");
-    assert_eq!(names_in(dir.path()), [".ardoise"]);
+    assert_eq!(names_in(dir.path()), ["_ardoise"]);
 }
 
 /// The file is replaced while it is read, again and again: the stamp returned must never be
@@ -414,7 +414,7 @@ fn save_rechecks_after_waiting_for_a_locked_file() {
     assert_eq!(fs::read(&saved.path).unwrap(), their_bytes);
     assert_eq!(
         names_in(dir.path()),
-        [".ardoise", "2026-10-24 Cours.ardoise"]
+        ["2026-10-24 Cours.ardoise", "_ardoise"]
     );
 }
 
@@ -461,7 +461,7 @@ fn paths_outside_the_library_are_refused() {
     let elsewhere = tempfile::tempdir().unwrap();
     for path in [
         elsewhere.path().join("x.ardoise"),
-        dir.path().join(".ardoise").join("x.ardoise"),
+        dir.path().join("_ardoise").join("x.ardoise"),
         dir.path().join("notes.txt"),
         dir.path().join("..").join("x.ardoise"),
         PathBuf::from("../x.ardoise"),
@@ -985,7 +985,7 @@ fn watch_reports_note_changes() {
     let mut watched = Watched::start(&library);
 
     // Things that must never be reported: written before the note, checked after.
-    fs::write(dir.path().join(".ardoise").join("diagnostics.log"), b"log").unwrap();
+    fs::write(dir.path().join("_ardoise").join("diagnostics.log"), b"log").unwrap();
     fs::write(dir.path().join(".tmp.ardoise.1.0.part"), b"partial").unwrap();
     fs::write(dir.path().join("notes.txt"), b"text").unwrap();
 
@@ -1090,4 +1090,71 @@ fn watching_stops_when_dropped() {
         missing.watch(DEBOUNCE, |_| {}),
         Err(LibraryError::Watch { .. })
     ));
+}
+
+#[test]
+fn an_old_hidden_meta_folder_is_renamed() {
+    let dir = tempfile::tempdir().unwrap();
+    let legacy = dir.path().join(LEGACY_META_DIR);
+    fs::create_dir_all(legacy.join("diagnostics")).unwrap();
+    fs::write(legacy.join("device.json"), b"{\"uuid\":\"x\"}").unwrap();
+    fs::write(legacy.join("diagnostics").join("a.jsonl"), b"log").unwrap();
+    assert!(
+        is_library(dir.path()),
+        "still recognised before the migration"
+    );
+
+    let library = Library::open(dir.path()).unwrap();
+    assert!(!legacy.exists());
+    let meta = library.meta_dir();
+    assert_eq!(
+        fs::read(meta.join("device.json")).unwrap(),
+        b"{\"uuid\":\"x\"}"
+    );
+    assert_eq!(
+        fs::read(meta.join("diagnostics").join("a.jsonl")).unwrap(),
+        b"log"
+    );
+    // Nothing left to do the second time.
+    assert!(!migrate_legacy_meta_dir(dir.path()).unwrap());
+}
+
+#[test]
+fn old_and_new_meta_folders_are_merged_without_overwriting() {
+    let dir = tempfile::tempdir().unwrap();
+    let legacy = dir.path().join(LEGACY_META_DIR);
+    let current = dir.path().join(META_DIR);
+    fs::create_dir_all(legacy.join("diagnostics")).unwrap();
+    fs::create_dir_all(current.join("diagnostics")).unwrap();
+    // The synced registration (current) wins over the one that never left this PC.
+    fs::write(legacy.join("device.json"), b"old").unwrap();
+    fs::write(current.join("device.json"), b"new").unwrap();
+    fs::write(legacy.join("diagnostics").join("from-this-pc.jsonl"), b"a").unwrap();
+    fs::write(
+        current.join("diagnostics").join("from-other-pc.jsonl"),
+        b"b",
+    )
+    .unwrap();
+
+    init(dir.path()).unwrap();
+
+    assert_eq!(fs::read(current.join("device.json")).unwrap(), b"new");
+    assert_eq!(
+        fs::read(current.join("diagnostics").join("from-this-pc.jsonl")).unwrap(),
+        b"a"
+    );
+    assert_eq!(
+        fs::read(current.join("diagnostics").join("from-other-pc.jsonl")).unwrap(),
+        b"b"
+    );
+    // The clashing file is kept where it was, nothing else remains there.
+    assert_eq!(fs::read(legacy.join("device.json")).unwrap(), b"old");
+    assert!(!legacy.join("diagnostics").exists());
+}
+
+#[test]
+fn a_binder_cannot_take_the_library_folder_name() {
+    let (_dir, library) = new_library();
+    assert!(library.create_binder(Path::new("_ardoise")).is_err());
+    assert!(library.create_binder(Path::new("Classe/_Ardoise")).is_err());
 }

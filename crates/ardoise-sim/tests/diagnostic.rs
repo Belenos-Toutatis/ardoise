@@ -147,7 +147,7 @@ fn the_guided_test_passes_every_step_against_the_simulated_tablet() {
     let log_path = report.log_path.clone().unwrap();
     let report_path = report.report_path.clone().unwrap();
     assert_eq!(log_path.extension().unwrap(), "jsonl");
-    assert!(log_path.starts_with(library.path().join(".ardoise").join("diagnostics")));
+    assert!(log_path.starts_with(library.path().join("_ardoise").join("diagnostics")));
     assert!(log_path.is_file());
     assert_eq!(report_path.extension().unwrap(), "txt");
     let written = std::fs::read_to_string(&report_path).unwrap();

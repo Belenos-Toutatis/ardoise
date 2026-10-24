@@ -144,7 +144,9 @@ fn fix_once(name: &str) -> String {
         name.pop();
     }
     let trimmed = name.trim_matches(|c: char| c == '.' || c.is_whitespace());
-    if is_reserved(trimmed) || SYNC_EXCLUDED_NAMES.contains(&trimmed.to_ascii_lowercase().as_str())
+    if is_reserved(trimmed)
+        || SYNC_EXCLUDED_NAMES.contains(&trimmed.to_ascii_lowercase().as_str())
+        || trimmed.eq_ignore_ascii_case(super::META_DIR)
     {
         // `aux.txt` is reserved as much as `aux`: the mark goes right after the device name.
         mark_stem(trimmed)
@@ -207,6 +209,8 @@ pub fn invalid_name_reason(name: &str) -> Option<&'static str> {
         Some("names starting with a dot are hidden")
     } else if name.ends_with('.') || name.ends_with(' ') {
         Some("Windows forbids names ending with a dot or a space")
+    } else if name.eq_ignore_ascii_case(super::META_DIR) {
+        Some("the name is reserved for Ardoise's own folder")
     } else if is_reserved(name) {
         Some("the name is reserved by Windows")
     } else if sync_excluded(name) {
@@ -414,6 +418,9 @@ mod tests {
         assert!(invalid_name_reason("").is_some());
         assert!(invalid_name_reason("a/b").is_some());
         assert!(invalid_name_reason(".ardoise").is_some());
+        assert!(invalid_name_reason("_ardoise").is_some());
+        assert!(invalid_name_reason("_ARDOISE").is_some());
+        assert_ne!(sanitize_name("_ardoise").to_ascii_lowercase(), "_ardoise");
         assert!(invalid_name_reason("fin.").is_some());
         assert!(invalid_name_reason("fin ").is_some());
         assert!(invalid_name_reason("LPT1").is_some());

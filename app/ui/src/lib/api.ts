@@ -22,7 +22,7 @@ export interface AppState {
 }
 
 export interface LibraryInspection {
-  /** The folder already holds an Ardoise library (`.ardoise/` present). */
+  /** The folder already holds an Ardoise library (`_ardoise/` present). */
   existing: boolean;
 }
 

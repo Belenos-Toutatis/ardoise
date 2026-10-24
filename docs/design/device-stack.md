@@ -55,14 +55,14 @@ Public surface (names may be refined, the shape must stay):
 
 - `transport.rs` (fixed contract): `Connector`, `Transport`, `Channel`, `TransportEvent`, `Advertisement`,
   `TransportError`, `Clock`, `SystemClock`.
-- Diagnostic log (SPEC §4.8): `<library>/.ardoise/diagnostics/YYYY-MM-DD_HHMMSS.jsonl` (local time).
+- Diagnostic log (SPEC §4.8): `<library>/_ardoise/diagnostics/YYYY-MM-DD_HHMMSS.jsonl` (local time).
   One JSON object per line. First line `{"type":"header","format":1,"app":"0.1.0","transport":"ble|sim|replay",
   "created":"<RFC 3339>"}`; then `{"t":12.345,"dir":"tx|rx|event|note","ch":"command|page_data|live|sys_event",
   "hex":"e6 06 …","info":"CONNECT uuid=…"}` (`t` = seconds on the session clock; `ch`/`hex` absent for
   event/note). A `LoggingTransport` decorator records every write and every received event, so the log is the
   same whatever the transport. Writes to the library must be atomic (SPEC §3.4): keep the lines in memory and
   rewrite the whole file with `ardoise_core::fsutil::write_atomic` at most every 2 s while dirty and at the end.
-- `device.json` in `<library>/.ardoise/` (shared by every PC): `format`, `uuid` (12 hex chars), `address`, `name`,
+- `device.json` in `<library>/_ardoise/` (shared by every PC): `format`, `uuid` (12 hex chars), `address`, `name`,
   `protocol` ("slate"), `width`, `height`, `registered` (RFC 3339). Atomic write. A fresh uuid is 6 random bytes.
 - `Session` over a `Box<dyn Transport>` implements the flows of protocol.md §3–§7: register (e7, wait e4 up to
   a configurable time, then set time, read back, ec, name, dimensions, firmware, battery), connect (e6; `b3 01 07`

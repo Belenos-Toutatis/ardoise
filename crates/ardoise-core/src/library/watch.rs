@@ -5,7 +5,7 @@
 //! something happened. After a quiet period (the debounce), the watcher rescans the tree —
 //! names, modification times and sizes, no file content — and compares it with the previous
 //! scan. The result is deduplicated (one change per file per batch) and immune to lost or
-//! reordered notifications; temporary `.part` files, hidden files and `.ardoise/` never show
+//! reordered notifications; temporary `.part` files, hidden files and `_ardoise/` never show
 //! up, and events that only touch them do not even trigger a rescan.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -116,7 +116,7 @@ fn scan(root: &Path) -> Snapshot {
     snapshot
 }
 
-/// Whether an event may concern a note: not only hidden files, `.part` files or `.ardoise/`.
+/// Whether an event may concern a note: not only hidden files, `.part` files or `_ardoise/`.
 fn is_relevant(root: &Path, event: &notify::Event) -> bool {
     if event.need_rescan() || event.paths.is_empty() {
         return true;
@@ -452,6 +452,7 @@ mod tests {
         };
         assert!(is_relevant(root, &event("2026-10-24 Note.ardoise")));
         assert!(is_relevant(root, &event("Classe")));
+        assert!(!is_relevant(root, &event("_ardoise/diagnostics/log.txt")));
         assert!(!is_relevant(root, &event(".ardoise/diagnostics/log.txt")));
         assert!(!is_relevant(
             root,

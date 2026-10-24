@@ -161,7 +161,7 @@ pub fn inspect_library(path: String) -> CommandResult<LibraryInspection> {
     })
 }
 
-/// Makes `path` this computer's library, creating `.ardoise/` there if needed.
+/// Makes `path` this computer's library, creating `_ardoise/` there if needed.
 #[tauri::command]
 pub fn set_library(context: State<'_, AppContext>, path: String) -> CommandResult<AppState> {
     choose_library(&context, &path)

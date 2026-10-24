@@ -39,7 +39,7 @@ Règles permanentes :
 - [x] Décodage des données de traits (pages stockées) et des paquets du mode direct ; tests avec les données d'exemple de Tuhi et des données synthétiques.
 - [x] `ardoise-sim` : tablette simulée (enregistrement, connexion, infos, liste/téléchargement/suppression des pages, mode direct, bouton) + rejeu de captures `.jsonl`.
 - [x] `ardoise-ble` : transport Bluetooth LE Windows (recherche, connexion, écriture, notifications, reconnexion) derrière la même interface que le simulateur.
-- [x] Gestionnaire de tablette : enregistrement, connexion avec l'identifiant partagé (`.ardoise/device.json`), synchro, mode direct ; testé de bout en bout contre le simulateur.
+- [x] Gestionnaire de tablette : enregistrement, connexion avec l'identifiant partagé (`_ardoise/device.json`), synchro, mode direct ; testé de bout en bout contre le simulateur.
 - [x] Journal de diagnostic `.jsonl` (SPEC §4.8) ; un journal produit avec le simulateur se rejoue à l'identique.
 - [x] Outil de test guidé accessible depuis l'application (ou `ardoise.exe --diagnostic`), avec rapport final.
 - [x] `docs/hardware-tests.md` : procédure H1 pas à pas, en français, pour l'utilisateur.

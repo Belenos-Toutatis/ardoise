@@ -57,7 +57,7 @@ app/src-tauri     ardoise.exe --import-inkspace [LocalState] [--library DIR] [--
   refuses a newer major version with a clear error, and keeps unknown members/fields of newer minor versions.
 - Library (SPEC §3.2, §3.4): notes are `YYYY-MM-DD Title.ardoise` files in a folder tree (sub-folders = binders);
   list/read, create (unique file names), save with a modification-time check (a note changed on another PC is not
-  overwritten silently), rename (renames the file), move, tags, trash in `.ardoise/trash/` with restore and purge after
+  overwritten silently), rename (renames the file), move, tags, trash in `_ardoise/trash/` with restore and purge after
   30 days, folder watching (debounced events), detection of Nextcloud conflict copies
   (`… (conflicted copy YYYY-MM-DD HHMMSS).ardoise` and the localised variants), temporary `.part` files ignored.
 

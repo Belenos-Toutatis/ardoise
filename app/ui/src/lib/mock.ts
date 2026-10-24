@@ -199,7 +199,7 @@ async function scriptedDiagnostic(
           detail('strokes', '41'),
           detail('points', '5210'),
           detail('deleted', options.deleteAfterSync ? '3' : '0'),
-          detail('folder', '.ardoise\\diagnostics\\2026-10-24_14-02-11'),
+          detail('folder', '_ardoise\\diagnostics\\2026-10-24_14-02-11'),
         ]);
         break;
       case 'live': {
@@ -243,8 +243,8 @@ async function scriptedDiagnostic(
       transport: options.simulated ? 'sim' : 'ble',
       started: new Date().toISOString(),
       steps: outcomes,
-      logPath: `${folder}\\.ardoise\\diagnostics\\2026-10-24_14-02-11.jsonl`,
-      reportPath: `${folder}\\.ardoise\\diagnostics\\2026-10-24_14-02-11.txt`,
+      logPath: `${folder}\\_ardoise\\diagnostics\\2026-10-24_14-02-11.jsonl`,
+      reportPath: `${folder}\\_ardoise\\diagnostics\\2026-10-24_14-02-11.txt`,
       cancelled,
     },
   });

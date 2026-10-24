@@ -1,4 +1,4 @@
-//! The user's library folder: an ordinary folder of notes plus a hidden `.ardoise/` folder
+//! The user's library folder: an ordinary folder of notes plus an `_ardoise/` folder
 //! (SPEC §3.2, §3.4).
 //!
 //! - One note = one `YYYY-MM-DD Title.ardoise` file; sub-folders are binders.
@@ -35,13 +35,18 @@ pub use watch::{LibraryChange, LibraryWatcher};
 
 use names::{MAX_SUFFIX, exists, note_path, note_stem, stem_matches, with_suffix};
 
-/// Hidden folder that marks a library and holds its shared data (tablet registration,
-/// diagnostics, trash).
-pub const META_DIR: &str = ".ardoise";
+/// Folder that marks a library and holds its shared data (tablet registration, diagnostics,
+/// trash). Not hidden: Nextcloud does not sync hidden folders unless told to.
+pub const META_DIR: &str = "_ardoise";
 
-/// Whether `folder` already holds an Ardoise library.
+/// The first name of [`META_DIR`]. Being hidden (leading dot), Nextcloud's default settings
+/// left it out of the sync; libraries that still have it are migrated by
+/// [`migrate_legacy_meta_dir`].
+pub const LEGACY_META_DIR: &str = ".ardoise";
+
+/// Whether `folder` already holds an Ardoise library (under the current or the old name).
 pub fn is_library(folder: &Path) -> bool {
-    folder.join(META_DIR).is_dir()
+    folder.join(META_DIR).is_dir() || folder.join(LEGACY_META_DIR).is_dir()
 }
 
 /// Makes `folder` a library, keeping anything already there. The folder itself must exist,
@@ -53,7 +58,47 @@ pub fn init(folder: &Path) -> io::Result<()> {
             format!("{} is not an existing folder", folder.display()),
         ));
     }
+    migrate_legacy_meta_dir(folder)?;
     fs::create_dir_all(folder.join(META_DIR))
+}
+
+/// Moves the content of an old `.ardoise/` folder into `_ardoise/`: a plain rename when
+/// `_ardoise/` does not exist yet, otherwise a merge in which nothing is overwritten (on a
+/// name clash the `_ardoise/` file wins and the old one stays in `.ardoise/`, which is then
+/// kept). Returns whether anything was moved. Safe to call at every start.
+pub fn migrate_legacy_meta_dir(folder: &Path) -> io::Result<bool> {
+    let legacy = folder.join(LEGACY_META_DIR);
+    if !legacy.is_dir() {
+        return Ok(false);
+    }
+    let current = folder.join(META_DIR);
+    if !current.exists() {
+        fs::rename(&legacy, &current)?;
+        return Ok(true);
+    }
+    let moved = merge_dir(&legacy, &current)?;
+    // Only an emptied folder goes; anything left (clashes) is kept for the user.
+    let _ = fs::remove_dir(&legacy);
+    Ok(moved)
+}
+
+/// Moves every entry of `from` into `to` without replacing anything; returns whether
+/// something moved. Folders present on both sides are merged recursively.
+fn merge_dir(from: &Path, to: &Path) -> io::Result<bool> {
+    let mut moved = false;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        if !target.exists() {
+            rename_no_replace(&source, &target)?;
+            moved = true;
+        } else if source.is_dir() && target.is_dir() {
+            moved |= merge_dir(&source, &target)?;
+            let _ = fs::remove_dir(&source);
+        }
+    }
+    Ok(moved)
 }
 
 /// Modification time and size of a note file, as last seen. Two different stamps mean the
@@ -83,7 +128,7 @@ impl FileStamp {
 /// Failure of a library operation.
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
-    /// The folder is not a library (no `.ardoise/` folder).
+    /// The folder is not a library (no `_ardoise/` folder).
     #[error("{} is not an Ardoise library", path.display())]
     NotALibrary {
         /// Folder given.
@@ -326,6 +371,7 @@ impl Library {
         if !is_library(&root) {
             return Err(LibraryError::NotALibrary { path: root });
         }
+        migrate_legacy_meta_dir(&root).map_err(io_error(&root))?;
         Ok(Library { root })
     }
 
@@ -334,7 +380,7 @@ impl Library {
         &self.root
     }
 
-    /// `.ardoise/` inside the library.
+    /// `_ardoise/` inside the library.
     pub fn meta_dir(&self) -> PathBuf {
         self.root.join(META_DIR)
     }
@@ -366,7 +412,7 @@ impl Library {
     }
 
     /// Checks that `path` (absolute, or relative to the root) is a note file of this library,
-    /// outside hidden folders such as `.ardoise/`, and returns it absolute.
+    /// outside hidden folders and `_ardoise/`, and returns it absolute.
     pub fn note_path(&self, path: &Path) -> Result<PathBuf, LibraryError> {
         let not_in_library = || LibraryError::NotInLibrary {
             path: path.to_path_buf(),
