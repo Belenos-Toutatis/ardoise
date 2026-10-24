@@ -25,6 +25,9 @@ use crate::video::{PROGRESS_INTERVAL, Throttle};
 
 /// Error code of a download that failed (network, checksum, disk).
 pub const OPENH264_DOWNLOAD_FAILED: &str = "openh264DownloadFailed";
+/// Error code of a removal that failed: Windows keeps a DLL loaded by the app locked, so the
+/// interface says to restart Ardoise and remove it again.
+pub const OPENH264_REMOVE_FAILED: &str = "openh264RemoveFailed";
 
 /// Cisco's licence for the OpenH264 binary, reproduced as Cisco requires.
 pub const LICENSE: &str = include_str!("openh264-license.txt");
@@ -140,6 +143,20 @@ pub fn download_error(error: MediaError) -> CommandError {
     }
 }
 
+/// Deletes the library of `codec`, if there is one (`openh264RemoveFailed` when it cannot be
+/// deleted).
+pub fn remove_in(codec: &OpenH264Codec) -> CommandResult<()> {
+    if codec.status() == CodecStatus::NotInstalled {
+        return Ok(());
+    }
+    codec.remove().map_err(remove_error)
+}
+
+/// Error for the interface from a removal.
+pub fn remove_error(error: MediaError) -> CommandError {
+    CommandError::new(OPENH264_REMOVE_FAILED, error)
+}
+
 /// The download under way: its cancel flag, and whether one runs.
 #[derive(Debug, Default)]
 pub struct CodecDownload {
@@ -221,16 +238,13 @@ pub fn openh264_cancel_download(download: State<'_, CodecDownload>) {
     download.cancel.store(true, Ordering::Relaxed);
 }
 
-/// Disallows the fallback, then deletes the library.
+/// Disallows the fallback, then deletes the library (`openh264RemoveFailed` when Windows still
+/// holds it: the fallback stays disallowed).
 #[tauri::command]
 pub async fn openh264_remove(context: State<'_, AppContext>) -> CommandResult<OpenH264State> {
     set_allowed_in(&context, false)?;
     let codec = OpenH264Codec::new(codec_dir());
-    if codec.status() != CodecStatus::NotInstalled {
-        codec
-            .remove()
-            .map_err(|error| CommandError::new("unexpected", error))?;
-    }
+    remove_in(&codec)?;
     Ok(current(&context, &codec))
 }
 
@@ -349,6 +363,25 @@ mod tests {
             download_error(MediaError::Io(std::io::Error::other("disk full"))).code(),
             OPENH264_DOWNLOAD_FAILED
         );
+    }
+
+    #[test]
+    fn removal_errors_get_their_own_code() {
+        // Windows refuses to delete a DLL the app still has loaded.
+        let locked = std::io::Error::from_raw_os_error(5);
+        assert_eq!(
+            remove_error(MediaError::Io(locked)).code(),
+            OPENH264_REMOVE_FAILED
+        );
+        assert_eq!(
+            remove_error(MediaError::CodecUnavailable("x".into())).code(),
+            "openh264RemoveFailed"
+        );
+        // Nothing installed: nothing to delete, never an error.
+        let empty = tempfile::tempdir().unwrap();
+        let codec = OpenH264Codec::new(empty.path());
+        assert_eq!(codec.status(), CodecStatus::NotInstalled);
+        remove_in(&codec).unwrap();
     }
 
     #[cfg(not(windows))]

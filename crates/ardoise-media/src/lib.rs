@@ -59,6 +59,7 @@ pub use mp4::{
     probe_mp4_animation,
 };
 pub use narration::{Narration, NarrationBase, decode_narration, encode_narration, wav_bytes};
+pub use narration::{NarrationHeader, narration_header};
 pub use opus::{OPUS_FRAME_SAMPLES, OpusEncoder, OpusHead, OpusPacket, default_opus_bitrate};
 pub use settings::{
     AAC_BITRATE, AudioSettings, AudioTrackProbe, AvailableEncoders, Codec, EncoderInfo, Mp4Probe,

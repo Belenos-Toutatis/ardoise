@@ -1081,7 +1081,7 @@ fn the_narration_of_a_page_is_written_with_it_and_kept_on_later_writes() {
 
     // Ready-made bytes: what the hub writes, not what the encoder makes.
     let audio = b"OggS narration of page 1".to_vec();
-    assert!(hub.set_page_audio(0, note_narration(0.5, -200), audio.clone()));
+    assert!(hub.set_page_audio(0, audio.clone()));
     wait_until("the audio member", || {
         audio_of(&library, &path).as_ref() == Some(&audio)
     });
@@ -1093,7 +1093,7 @@ fn the_narration_of_a_page_is_written_with_it_and_kept_on_later_writes() {
     assert_eq!(audio_of(&library, &path), Some(audio.clone()));
     // A page without any stroke gets nothing.
     hub.command(LiveCommandKind::NextPage).unwrap();
-    assert!(!hub.set_page_audio(1, note_narration(0.5, 0), b"x".to_vec()));
+    assert!(!hub.set_page_audio(1, b"x".to_vec()));
     let saved = hub.stop().unwrap();
     assert_eq!(saved.len(), 1);
     assert_eq!(audio_of(&library, &path), Some(audio.clone()));
@@ -1108,7 +1108,7 @@ fn the_narration_of_a_page_is_written_with_it_and_kept_on_later_writes() {
     let mut sink = start(&hub, options(&broken, fixed(LiveButton::NewPage)));
     break_folder(&root, true);
     stroke(&mut sink, 3000, 5);
-    assert!(hub.set_page_audio(0, note_narration(0.5, 0), audio.clone()));
+    assert!(hub.set_page_audio(0, audio.clone()));
     let copies = hub.back_up_unsaved(&dir.path().join("backup"));
     assert_eq!(copies.len(), 1);
     let copy = copies[0].1.as_ref().unwrap();
@@ -1149,7 +1149,7 @@ fn live_narration_goes_to_its_pages_through_the_hub() {
         anchor_ms: None,
     };
     let wall_start = (first - 1000) as f64;
-    let pages = give_to_hub(&hub, session, &log, wall_start, &clip).unwrap();
+    let pages = give_to_hub(&hub, session, &log, wall_start, clip).unwrap();
     assert_eq!(pages, 2);
     let saved = hub.stop().unwrap();
     assert_eq!(saved.len(), 2);
@@ -1184,4 +1184,15 @@ fn live_narration_goes_to_its_pages_through_the_hub() {
         !hub.attach_narration(session, 2, note_narration(1.0, 0))
             .unwrap()
     );
+
+    // The page keeps only the encoded narration, decoded again to merge: a page whose
+    // narration cannot be read again keeps it as it is.
+    let damaged = b"OggS damaged".to_vec();
+    assert!(hub.set_page_audio(1, damaged.clone()));
+    assert!(matches!(
+        hub.attach_narration(session, 1, note_narration(1.0, 0)),
+        Err(LiveError::Narration(_))
+    ));
+    let saved = hub.stop().unwrap();
+    assert_eq!(audio_of(&library, Path::new(&saved[1])), Some(damaged));
 }
