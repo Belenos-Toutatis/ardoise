@@ -28,6 +28,7 @@ ardoise-core = { path = "../../crates/ardoise-core" }
 ardoise-ble = { path = "../../crates/ardoise-ble" }
 ardoise-device = { path = "../../crates/ardoise-device" }
 ardoise-inkspace = { path = "../../crates/ardoise-inkspace" }
+ardoise-render = { path = "../../crates/ardoise-render" }
 ardoise-sim = { path = "../../crates/ardoise-sim" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tauri = { version = "2.12", features = [] }

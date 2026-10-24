@@ -1,8 +1,11 @@
 //! `ardoise.exe --import-inkspace [LocalState] [--library DIR] [--compare]`: imports the
 //! notes of Wacom Inkspace without a window and prints a table.
 
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
+use ardoise_core::format::NoteFile;
+use ardoise_core::library::Library;
 use ardoise_core::note::Timing;
 use ardoise_inkspace::{
     ImportReport, ImportedNote, Scores, THRESHOLDS, TrackedReader, compare_with_preview,
@@ -52,24 +55,84 @@ pub fn run_cli(args: &ImportArgs) -> i32 {
 
     let all_pass = print_table(&report, &reader, args.compare);
 
-    // TODO(integration): save every `imported.note` into the library (`args.library`, else the
-    // configured one) in the binder `Inkspace` through ardoise-core's library API (atomic
-    // writes, original dates in the file name), skipping notes whose
-    // `Origin::Inkspace { id }` is already in the library, once the `.ardoise` format exists.
-    if let Some(library) = &args.library {
-        println!(
-            "Remarque : l'enregistrement dans la bibliothèque ({}) n'est pas encore disponible ; \
-             aucune note n'a été écrite.",
-            library.display()
-        );
-    }
+    let saved = match &args.library {
+        Some(library) => match save_into_library(library, &report) {
+            Ok(saved) => {
+                println!(
+                    "Bibliothèque {} : {} note(s) enregistrée(s) dans le classeur « {BINDER} », \
+                     {} déjà présente(s)",
+                    library.display(),
+                    saved.written,
+                    saved.skipped
+                );
+                true
+            }
+            Err(error) => {
+                println!("Échec de l'enregistrement dans la bibliothèque : {error}");
+                false
+            }
+        },
+        None => {
+            println!("Aucune bibliothèque indiquée (--library) : rien n'a été enregistré.");
+            true
+        }
+    };
 
     println!("{}/{} notes importées", report.notes.len(), report.total());
-    if report.failures.is_empty() && all_pass {
+    if report.failures.is_empty() && all_pass && saved {
         0
     } else {
         1
     }
+}
+
+/// Binder receiving imported notes.
+const BINDER: &str = "Inkspace";
+
+struct Saved {
+    written: usize,
+    skipped: usize,
+}
+
+/// Writes every imported note into `library` (binder [`BINDER`], atomic writes, original dates
+/// in the file names). Notes already imported (same id, derived from Inkspace's) are skipped,
+/// so importing twice adds nothing.
+fn save_into_library(library: &Path, report: &ImportReport) -> Result<Saved, String> {
+    ardoise_core::library::init(library).map_err(|e| e.to_string())?;
+    let library = Library::open(library).map_err(|e| e.to_string())?;
+    let existing: HashSet<String> = library
+        .list()
+        .notes
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    let mut saved = Saved {
+        written: 0,
+        skipped: 0,
+    };
+    for imported in &report.notes {
+        if existing.contains(&imported.note.id) {
+            saved.skipped += 1;
+            continue;
+        }
+        let mut file = NoteFile::new(imported.note.clone());
+        file.thumbnail = thumbnail(&imported.note);
+        library
+            .create(Path::new(BINDER), &file)
+            .map_err(|e| format!("{}: {e}", short(&imported.inkspace_id)))?;
+        saved.written += 1;
+    }
+    Ok(saved)
+}
+
+/// Thumbnail width in pixels.
+const THUMBNAIL_WIDTH: u32 = 320;
+
+/// A PNG thumbnail of `note`, or `None` if it cannot be made (the note is saved anyway).
+fn thumbnail(note: &ardoise_core::note::Note) -> Option<Vec<u8>> {
+    let options = ardoise_render::RenderOptions::fit_width(note.page, THUMBNAIL_WIDTH);
+    let image = ardoise_render::render_note(note, &options).ok()?;
+    ardoise_render::encode_png(&image).ok()
 }
 
 fn short(id: &str) -> &str {

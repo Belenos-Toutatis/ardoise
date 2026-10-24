@@ -2,6 +2,14 @@
 
 ## Non publié
 
+### Ajouté (jalon M2 — notes, bibliothèque, rendu, import Inkspace)
+
+- Modèle de note et format de fichier `.ardoise` (archive ZIP : `note.json`, `strokes.bin`, original de la tablette, miniature…), versionné et décrit dans `docs/file-format.md`.
+- Bibliothèque : notes rangées en classeurs (sous-dossiers), noms de fichiers lisibles, étiquettes, corbeille avec restauration, surveillance du dossier, détection des copies en conflit de Nextcloud, protection contre l'écrasement d'une note modifiée sur un autre PC.
+- Géométrie des traits (contour à épaisseur variable selon la pression), commune à l'écran et aux exports.
+- Rendu des notes : stylo à bille, stylo plume, feutre, crayon, pinceau, surligneur, craie ; papiers blanc, crème, kraft, ardoise ; modèles ligné, Seyès, quadrillé 5 mm, millimétré, pointillé, portée ; texture de papier. Images de référence vérifiées par les tests.
+- Import des notes Wacom Inkspace (`ardoise.exe --import-inkspace`), sans jamais lire le jeton de connexion d'Inkspace, avec comparaison chiffrée de chaque note à l'aperçu d'Inkspace.
+
 ### Ajouté (jalon M1 — protocole, simulateur, outil de diagnostic)
 
 - `ardoise-proto` : codage et décodage de tous les messages de la Bamboo Slate, des pages stockées (format Slate, et Intuos Pro pour les données d'exemple de Tuhi) et des paquets du mode direct, sans aucune entrée/sortie.

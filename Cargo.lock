@@ -55,6 +55,7 @@ dependencies = [
  "ardoise-core",
  "ardoise-device",
  "ardoise-inkspace",
+ "ardoise-render",
  "ardoise-sim",
  "chrono",
  "serde",
