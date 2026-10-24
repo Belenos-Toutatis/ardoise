@@ -15,3 +15,6 @@ Thumbs.db
 .claude/settings.local.json
 # Personal notes used for local tests - never commit
 /testdata/private/
+
+# Git worktrees of subagents
+/.claude/worktrees/

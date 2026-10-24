@@ -49,7 +49,7 @@ Règles permanentes :
 ### Point de contrôle H1 [matériel]
 
 - [ ] [matériel] L'utilisateur suit `docs/hardware-tests.md` (H1) au travail ; les journaux arrivent via Nextcloud.
-- [ ] Analyse des journaux, corrections du protocole, ajout des captures réelles aux tests de non-régression.
+- [ ] [matériel] Analyse des journaux reçus, corrections du protocole, ajout des captures réelles aux tests de non-régression (nécessite les journaux de H1).
 
 ## M2 — Notes, bibliothèque, rendu et import Inkspace
 

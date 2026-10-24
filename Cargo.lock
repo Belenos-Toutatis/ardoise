@@ -87,7 +87,12 @@ dependencies = [
 name = "ardoise-device"
 version = "0.1.0"
 dependencies = [
+ "ardoise-core",
+ "chrono",
+ "getrandom 0.3.4",
  "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
