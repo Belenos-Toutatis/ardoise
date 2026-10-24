@@ -1,5 +1,7 @@
 //! Project automation: `cargo xtask check [--quick]`, `cargo xtask selftest`, `cargo xtask e2e` and
-//! `cargo xtask golden`.
+//! `cargo xtask golden`, `cargo xtask licenses`.
+
+mod licenses;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +14,9 @@ Commands:
   check [--quick]  frontend build, fmt, clippy, tests, frontend checks, release build
                    (--quick skips the release build)
   selftest         run target/release/ardoise.exe --self-test and check its size
+  licenses [--write]
+                   check every dependency licence (no AGPL, GPL-3.0-compatible only) and that
+                   THIRD-PARTY-NOTICES is up to date (--write regenerates it)
   golden           regenerate the reference images in testdata/golden, then check them
   e2e              end-to-end tests of the main journeys, in French and English, on the
                    release executable (run `cargo xtask check` first)";
@@ -34,6 +39,8 @@ fn main() -> ExitCode {
         ["check"] => check(false),
         ["check", "--quick"] => check(true),
         ["selftest"] => selftest(),
+        ["licenses"] => licenses_command(false),
+        ["licenses", "--write"] => licenses_command(true),
         ["golden"] => golden(),
         ["e2e"] => e2e(),
         _ => {
@@ -48,6 +55,15 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
+}
+
+/// Runs the licence check (and rewrites THIRD-PARTY-NOTICES with `--write`).
+fn licenses_command(write: bool) -> ExitCode {
+    if licenses::run(&root(), write) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 /// Runs a program with inherited stdio in `dir`; true if it exited with 0.
@@ -105,6 +121,10 @@ fn check(quick: bool) -> ExitCode {
         Step {
             name: "npm ci (frontend deps)",
             action: Box::new(move || frontend_deps(a)),
+        },
+        Step {
+            name: "licenses (cargo xtask licenses)",
+            action: Box::new(move || licenses::run(r, false)),
         },
         Step {
             name: "npm run build",

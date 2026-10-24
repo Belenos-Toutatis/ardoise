@@ -12,6 +12,7 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 - `cargo xtask check` : vérification complète (dépendances npm, compilation de l'interface, formatage, clippy sans avertissement, tests Rust, svelte-check + vitest, compilation release). Se termine par `CHECK OK`. `--quick` saute la compilation release.
 - `cargo xtask selftest` : taille de `target\release\ardoise.exe` (< 30 Mo) puis `ardoise.exe --self-test`. Se termine par `SELFTEST OK`.
 - `cargo xtask e2e` : parcours de bout en bout sur l'exe de production (bibliothèque de démonstration, fenêtre pilotée par le port de débogage de WebView2), en français et en anglais. Se termine par `E2E OK`. Lancer `cargo xtask check` avant.
+- `cargo xtask licenses [--write]` : vérifie la licence de chaque dépendance Rust et npm (liste blanche compatible GPL v3, aucune AGPL ; se termine par `LICENSES OK`) et que `THIRD-PARTY-NOTICES` est à jour ; `--write` le régénère (à committer). `check` le lance.
 - `ardoise.exe --create-demo-library DOSSIER` : bibliothèque de démonstration (notes synthétiques).
 - Prérequis de compilation : la cible Rust `wasm32-unknown-unknown` (le calcul des contours des traits est compilé en WebAssembly pour l'écran ; `npm run wasm`, lancé automatiquement par les scripts npm).
 - `cargo fmt --all` avant de lancer la vérification.
