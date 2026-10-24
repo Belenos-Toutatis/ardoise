@@ -134,7 +134,8 @@
       }
     });
     return () => {
-      enqueue(() => api.narrationStop(false, null));
+      // Only a level-only capture: a recording that took the microphone over is never touched.
+      enqueue(() => api.microphoneMonitorStop());
     };
   });
 

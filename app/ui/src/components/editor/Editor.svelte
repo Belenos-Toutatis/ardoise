@@ -12,7 +12,9 @@
    *
    * Replay mode (milestone M6, SPEC §4.5): the page is read-only and shows the note as drawn at the
    * playhead (`ReplayPlayer`, `lib/replay.ts`), with a bar of controls; the narration of the note
-   * plays along, and a new one is recorded while the replay runs (`NarrationRecorder`).
+   * plays along, and a new one is recorded while the replay runs (`NarrationRecorder`). While it
+   * records, the note cannot be renamed, copied or reloaded (the recording is saved into the note
+   * at its current path when it stops); a recording that cannot be saved is kept for a retry.
    */
   import { untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, type AppState } from '../../lib/api';
@@ -75,12 +77,15 @@
     app,
     onclose,
     onsaved,
+    onchange,
     windowClose = defaultWindowClose(),
   }: {
     path: string;
     app: AppState;
     onclose: () => void;
     onsaved?: (path: string) => void;
+    /** The app state changed (the microphone chosen here): the screen holding it takes the new one. */
+    onchange?: (next: AppState) => void;
     /** How a window close is held back while there are unsaved changes (tests replace it). */
     windowClose?: WindowClose;
   } = $props();
@@ -153,6 +158,8 @@
   let canvas = $state<ReturnType<typeof Canvas>>();
   /** What the video export dialog exports; null while it is closed. */
   let video = $state.raw<ExportSource | null>(null);
+  /** The video export dialog is exporting: the window must not close under it. */
+  let videoRunning = $state(false);
 
   // Replay mode.
   const player = new ReplayPlayer();
@@ -168,6 +175,8 @@
   let confirmDelete = $state(false);
   /** The microphone chosen here, until the app state says so. */
   let chosenMicrophone = $state<string | null | undefined>(undefined);
+  /** `Date.now()` when the recording's replay was at instant 0 and playing; places the sound in the replay. */
+  let replayStartedAt: number | null = null;
 
   const doc = $derived(history?.present ?? null);
   const dirty = $derived(!!doc && doc.note !== savedNote);
@@ -240,13 +249,15 @@
       for (const stop of stops) stop();
       player.dispose();
       recorder.dispose();
-      // A capture left running would hold the microphone: discard it.
-      if (recorder.phase === 'recording') void api.narrationStop(false, null).catch(() => {});
+      // A recording is never thrown away silently: it goes into its note (or stays pending).
+      salvageRecording();
       dropNarrationSound();
     };
   });
 
   async function open(target: string) {
+    // Another note is opened: the recording of this one is saved before the editor moves on.
+    salvageRecording();
     generation += 1;
     currentPath = target;
     loadError = null;
@@ -254,7 +265,7 @@
     disk = null;
     split = null;
     exporting = null;
-    video = null;
+    closeVideo();
     resetReplay();
     try {
       const [opened, module] = await Promise.all([api.openNote(target), ink ?? loadInk()]);
@@ -306,8 +317,9 @@
 
   function save(): Promise<boolean> {
     if (!doc) return Promise.resolve(false);
-    // A title typed but not committed yet (Ctrl+S in the field) is renamed first.
-    if (titleDraft.trim() !== targetTitle) void retitle();
+    // A title typed but not committed yet (Ctrl+S in the field) is renamed first, unless a
+    // recording is under way: the note keeps its name until it is stopped.
+    if (!recorder.busy && titleDraft.trim() !== targetTitle) void retitle();
     return enqueue(writeNote, false);
   }
 
@@ -451,6 +463,7 @@
 
   function back() {
     if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
+    if (videoRunning) return showNotice(t('videoExport.closeBusy'), true);
     if (dirty) leaving = true;
     else close();
   }
@@ -460,6 +473,11 @@
     if (alive && recorder.busy) {
       // A narration being recorded would be lost: the window stays until it is stopped.
       showNotice(t('editor.replay.recordingBusy'), true);
+      return true;
+    }
+    if (alive && videoRunning) {
+      // A video being written would be cut short: the window stays until it is done or cancelled.
+      showNotice(t('videoExport.closeBusy'), true);
       return true;
     }
     if (!alive || (!dirty && pendingWrites === 0)) return false;
@@ -601,6 +619,12 @@
     if (source) exporting = [source];
   }
 
+  function closeVideo() {
+    video = null;
+    // A dialog that goes away takes its export with it (or ends it): the window is free again.
+    videoRunning = false;
+  }
+
   function openVideo() {
     const source = currentSource();
     if (source) video = source;
@@ -727,8 +751,16 @@
     recordOpen = false;
     confirmDelete = false;
     dropNarrationSound();
-    // A recording of the note left behind is not kept.
-    if (recorder.phase === 'recording') void recorder.stop(false, null);
+  }
+
+  /**
+   * The editor lets go of a recording nobody stopped (it is closed, or opens another note): it is
+   * saved into the note it was made for. If that fails Rust keeps it, pending, with a backup.
+   */
+  function salvageRecording() {
+    if (recorder.phase !== 'recording') return;
+    player.pause();
+    void recorder.stop(true, stamp, currentPath, replayStartedAt);
   }
 
   /** Reads the narration stored in the note (what the bar and the side panel show). */
@@ -762,7 +794,8 @@
       dropNarrationSound();
       narrationUrl = url;
       player.setOptions({ speed: info.speed, maxPauseMs: info.maxPauseMs });
-      player.extent = info.startMs + info.durationMs;
+      // A sound that begins before instant 0 (live recordings do) gets a lead-in on the timeline.
+      player.setNarrationSpan(Math.max(0, -info.startMs), info.startMs + info.durationMs);
     } catch (error) {
       if (gen === generation) narrationError = t('replay.narrationFailed', { message: errorMessage(error) });
     } finally {
@@ -780,14 +813,15 @@
       }
       narrationUrl = null;
     }
-    player.extent = 0;
-    player.seek(player.position);
+    player.setNarrationSpan(0, 0);
   }
 
   async function chooseMicrophone(device: string | null) {
     chosenMicrophone = device;
     try {
-      chosenMicrophone = (await api.setMicrophone(device)).microphone;
+      const next = await api.setMicrophone(device);
+      chosenMicrophone = next.microphone;
+      onchange?.(next);
     } catch (error) {
       chosenMicrophone = undefined;
       showNotice(errorMessage(error), true);
@@ -804,6 +838,8 @@
     if (!started) return;
     player.seek(0);
     player.play();
+    // The replay is at instant 0 and playing from now on (a position other than 0 is allowed for).
+    replayStartedAt = Date.now() - player.position;
   }
 
   /** Stops the recording; saved, it goes into the note's file and the note's stamp changes. */
@@ -815,7 +851,13 @@
     if (save) recordOpen = false;
     const result = await enqueue(
       async () => {
-        const outcome = await recorder.stop(save, stamp);
+        // The note's current path (it may have been renamed) and stamp, and the replay's time origin.
+        const outcome = await recorder.stop(
+          save,
+          save ? stamp : null,
+          save ? currentPath : null,
+          save ? replayStartedAt : null,
+        );
         if (outcome.saved?.stamp) stamp = outcome.saved.stamp;
         return outcome;
       },
@@ -823,6 +865,19 @@
     );
     if (!result.ok || !result.saved) return;
     showNotice(t('narration.record.saved', { duration: clock(result.saved.durationMs) }));
+    await loadNarration();
+  }
+
+  /** « Réessayer »: the kept recording goes into the note as it is now (its current path and stamp). */
+  async function retryRecording() {
+    const saved = await enqueue(async () => {
+      const result = await recorder.retry(currentPath, stamp);
+      if (result?.stamp) stamp = result.stamp;
+      return result;
+    }, null);
+    if (!saved) return;
+    recordOpen = false;
+    showNotice(t('narration.record.saved', { duration: clock(saved.durationMs) }));
     await loadNarration();
   }
 
@@ -1006,7 +1061,7 @@
         type="text"
         bind:value={titleDraft}
         placeholder={t('editor.untitled')}
-        disabled={!doc}
+        disabled={!doc || recorder.busy}
         onblur={retitle}
         onkeydown={(e) => {
           if (e.key === 'Enter') e.currentTarget.blur();
@@ -1052,7 +1107,7 @@
       <strong>{t('editor.conflictTitle')}</strong>
       <p>{conflict}</p>
       <p>{t('editor.conflictHint')}</p>
-      <button type="button" class="button small-button primary" disabled={saving} onclick={saveCopy}>{t('editor.saveCopy')}</button>
+      <button type="button" class="button small-button primary" disabled={saving || recorder.busy} onclick={saveCopy}>{t('editor.saveCopy')}</button>
       <button type="button" class="button small-button" onclick={() => (conflict = null)}>{t('editor.dismiss')}</button>
     </div>
   {:else if disk}
@@ -1060,9 +1115,9 @@
       <strong>{disk === 'missing' ? t('editor.disk.missingTitle') : t('editor.disk.changedTitle')}</strong>
       <p>{disk === 'missing' ? t('editor.disk.missing') : dirty ? t('editor.disk.changedDirty') : t('editor.disk.changedClean')}</p>
       {#if disk === 'changed' && !dirty}
-        <button type="button" class="button small-button primary" onclick={reload}>{t('editor.disk.reload')}</button>
+        <button type="button" class="button small-button primary" disabled={recorder.busy} onclick={reload}>{t('editor.disk.reload')}</button>
       {:else}
-        <button type="button" class="button small-button primary" disabled={saving} onclick={saveCopy}>{t('editor.saveCopy')}</button>
+        <button type="button" class="button small-button primary" disabled={saving || recorder.busy} onclick={saveCopy}>{t('editor.saveCopy')}</button>
       {/if}
       <button type="button" class="button small-button" onclick={() => (disk = null)}>{t('editor.dismiss')}</button>
     </div>
@@ -1159,10 +1214,13 @@
               onstart={startRecording}
               onstop={() => void stopRecording(true)}
               oncancel={() => void stopRecording(false)}
+              onretry={() => void retryRecording()}
               openLabel={t('narration.record.open')}
               openHint={t('narration.record.openHint')}
               replaces={narration !== null}
               info={recordInfo}
+              saveNote={t('narration.record.saveNote')}
+              warning={dirty ? t('narration.record.unsavedWarning') : null}
               duringInfo={player.playing ? null : t('narration.record.afterEnd')}
             />
             {#if narration && !recorder.busy}
@@ -1262,7 +1320,12 @@
   {/if}
 
   {#if video}
-    <VideoExportDialog source={video} subject={title.trim() || t('editor.untitled')} onclose={() => (video = null)} />
+    <VideoExportDialog
+      source={video}
+      subject={title.trim() || t('editor.untitled')}
+      onclose={closeVideo}
+      onrunning={(running) => (videoRunning = running)}
+    />
   {/if}
 
   {#if leaving}

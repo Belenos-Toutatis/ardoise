@@ -3,6 +3,7 @@
    * Exports the replay of a note to MP4, GIF, WebP or WebM. The format is chosen among cards that
    * say what each one is good for and what it cannot do; the estimate (size, length, export time)
    * is refreshed after every change; the destination is asked last, with the native dialog.
+   * `onrunning` tells the caller while an export is under way (the window must not close then).
    */
   import { onMount } from 'svelte';
   import { api, errorMessage } from '../lib/api';
@@ -40,12 +41,15 @@
     source,
     subject,
     onclose,
+    onrunning,
   }: {
     /** The note (with the editor's unsaved strokes) and its file, which holds the narration. */
     source: ExportSource;
     /** The note's title, as a sentence part. */
     subject: string;
     onclose: () => void;
+    /** Called with true when an export starts and false when it ends (or the dialog goes away). */
+    onrunning?: (running: boolean) => void;
   } = $props();
 
   /** Prefix of the element ids that tie each format to its description. */
@@ -218,7 +222,8 @@
 
   /** Asks the desktop app to stop the export; `run` then ends with the `cancelled` rejection. */
   async function cancel() {
-    if (!running || cancelling) return;
+    // Once every frame is written the file is being finalised: it is too late to cancel.
+    if (!running || cancelling || finalizing) return;
     cancelling = true;
     try {
       await api.cancelVideoExport();
@@ -237,6 +242,19 @@
   const percent = $derived(
     progress && progress.framesTotal > 0 ? Math.floor((100 * progress.framesDone) / progress.framesTotal) : 0,
   );
+  /** Every frame is written: the file is being finalised, and cancelling no longer makes sense. */
+  const finalizing = $derived(
+    progress !== null && progress.framesTotal > 0 && progress.framesDone >= progress.framesTotal,
+  );
+
+  // The caller holds the window close while this runs.
+  $effect(() => {
+    const active = running;
+    onrunning?.(active);
+    return () => {
+      if (active) onrunning?.(false);
+    };
+  });
 </script>
 
 <Modal title={t('videoExport.title')} onclose={close}>
@@ -442,7 +460,9 @@
 
     {#if running}
       <div class="video-progress" role="status">
-        <p class="export-status">{cancelling ? t('videoExport.cancelling') : t('videoExport.running')}</p>
+        <p class="export-status">
+          {cancelling ? t('videoExport.cancelling') : finalizing ? t('videoExport.finalizing') : t('videoExport.running')}
+        </p>
         {#if progress}
           <progress
             max={progress.framesTotal}
@@ -477,8 +497,8 @@
         {phase === 'done' ? t('videoExport.again') : running ? t('videoExport.running') : t('videoExport.run')}
       </button>
       {#if running}
-        <button type="button" class="button" disabled={cancelling} onclick={cancel}>
-          {cancelling ? t('videoExport.cancelling') : t('videoExport.cancelRun')}
+        <button type="button" class="button" disabled={cancelling || finalizing} onclick={cancel}>
+          {cancelling ? t('videoExport.cancelling') : finalizing ? t('videoExport.finalizing') : t('videoExport.cancelRun')}
         </button>
       {:else}
         <button type="button" class="button" onclick={onclose}>

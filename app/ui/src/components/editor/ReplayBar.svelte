@@ -66,9 +66,10 @@
     const current = playback;
     return () => current?.stop();
   });
-  // ...and follows the playhead (every frame while playing, and at every seek).
+  // ...and follows the playhead (every frame while playing, and at every seek), in replay instants:
+  // the sound that begins before instant 0 is heard during the timeline's lead-in.
   $effect(() => {
-    playback?.sync(player.position, player.playing);
+    playback?.sync(player.instant, player.playing);
   });
 
   // The switch shows what is true, not what was clicked: fetching the sound may fail.

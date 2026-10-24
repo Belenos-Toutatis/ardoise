@@ -3,6 +3,11 @@
  * the animation frames, the options (speed, trimmed pauses) and the note as drawn at the position.
  * The mapping itself is `lib/replay.ts`; this class only moves the playhead. The clock is
  * injected so that tests can drive it.
+ *
+ * The position counts from the start of the timeline. That is the replay's instant 0, unless a
+ * narration began before it (a live recording starts before the first stroke): the timeline then
+ * opens with a lead-in, a still page while the sound is heard, and the replay instant of the
+ * position is `position - leadIn` (negative during the lead-in), as in the video export.
  */
 import { DEFAULT_REPLAY, ReplayTimeline, type ReplayOptions } from '../../lib/replay';
 import type { Note } from '../../lib/note';
@@ -34,14 +39,18 @@ export class ReplayPlayer {
   options = $state.raw<ReplayOptions>(DEFAULT_REPLAY);
   /** The replay goes on until at least this instant (a narration longer than the drawing), ms. */
   extent = $state(0);
+  /** Time before the replay's instant 0 at the start of the timeline: a narration that begins before it, ms. */
+  leadIn = $state(0);
   position = $state(0);
   playing = $state(false);
 
   readonly timeline = $derived(this.note ? new ReplayTimeline(this.note, this.options) : null);
-  /** Length of the whole replay: the drawing, or the narration if it is longer. */
-  readonly end = $derived(Math.max(this.timeline?.duration ?? 0, this.extent));
-  /** The note as drawn at the position (null before a note is loaded). */
-  readonly shown = $derived(this.timeline ? this.timeline.noteAt(this.position) : null);
+  /** Length of the whole timeline: the lead-in, then the drawing or the narration if it is longer. */
+  readonly end = $derived(this.leadIn + Math.max(this.timeline?.duration ?? 0, this.extent));
+  /** Replay instant of the position: negative during the lead-in. */
+  readonly instant = $derived(this.position - this.leadIn);
+  /** The note as drawn at the position (null before a note is loaded); the first image during the lead-in. */
+  readonly shown = $derived(this.timeline ? this.timeline.noteAt(Math.max(0, this.instant)) : null);
   readonly trimmed = $derived(this.options.maxPauseMs !== null);
 
   readonly #clock: FrameClock;
@@ -57,7 +66,22 @@ export class ReplayPlayer {
     this.pause();
     this.note = note;
     this.extent = 0;
+    this.leadIn = 0;
     this.position = 0;
+  }
+
+  /**
+   * Makes room for a narration: it ends at replay instant `extent` and begins `leadIn` before
+   * instant 0. The playhead stays on the same replay instant (or at the start of the timeline if
+   * that instant is no longer part of it); at the start of the timeline it stays there, so that
+   * the narration is heard from its first sample.
+   */
+  setNarrationSpan(leadIn: number, extent: number): void {
+    const instant = this.instant;
+    const atStart = this.position === 0;
+    this.leadIn = Math.max(0, leadIn);
+    this.extent = Math.max(0, extent);
+    this.position = atStart ? 0 : Math.min(this.end, Math.max(0, instant + this.leadIn));
   }
 
   /** Plays from the position; from the start when it is at the end. */
@@ -96,13 +120,16 @@ export class ReplayPlayer {
       this.options = options;
       return;
     }
-    const atEnd = this.position >= before.duration;
-    const moment = before.toNote(this.position);
+    // Replay instants: the lead-in is not part of the mapping.
+    const instant = this.instant;
+    const atEnd = instant >= before.duration;
+    const moment = before.toNote(Math.max(0, instant));
     this.options = options;
     // `timeline` is derived: read it again after the options changed.
     const after = this.timeline;
-    if (after && !atEnd) this.position = Math.min(this.end, after.toReplay(moment));
-    else if (after) this.position = Math.min(this.end, Math.max(this.position, after.duration));
+    if (after && instant < 0) return;
+    if (after && !atEnd) this.position = Math.min(this.end, this.leadIn + after.toReplay(moment));
+    else if (after) this.position = Math.min(this.end, Math.max(this.position, this.leadIn + after.duration));
   }
 
   setSpeed(speed: number): void {

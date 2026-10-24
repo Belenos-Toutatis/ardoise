@@ -1,10 +1,11 @@
 /**
  * Browser stand-in for the microphone and narration commands (`list_microphones`,
- * `microphone_monitor`, `narration_*`, `delete_narration`; `set_microphone` is in `mock.ts`, with
+ * `microphone_monitor*`, `narration_*`, `delete_narration`; `set_microphone` is in `mock.ts`, with
  * the app state). Two fake microphones, a level that moves with the time, the states of the real
  * capture (waiting, receiving, silent, no data, failed), and narrations stored per note (by note
  * id, so that a rename keeps them) whose saving and deletion change the note's stamp like the
- * Rust commands do.
+ * Rust commands do. A replay recording that cannot be saved stays pending, as in Rust, until it is
+ * retried or discarded.
  */
 import { UNHANDLED, freshStamp, mockLibrary, notifyLibraryChanged, sameStamp } from './mock-data';
 import type { FileStamp } from './note';
@@ -13,7 +14,9 @@ import type { Microphone, NarrationInfo, NarrationSaved, NarrationStatus, Narrat
 /**
  * Switches for tests and for development. `silent` makes the capture deliver exact digital silence
  * (Windows blocks the microphone, or a hardware mute), `noData` that nothing arrives at all,
- * `failure` that the capture fails with that detail. Delays are in milliseconds since the start.
+ * `failure` that the capture fails with that detail, `empty` that saving finds nothing recorded
+ * (`emptyRecording`), `saveConflict` that saving a replay recording fails with `noteConflict`
+ * (as if the note changed on disk). Delays are in milliseconds since the start.
  */
 export const mockNarration = {
   microphones: [
@@ -23,6 +26,8 @@ export const mockNarration = {
   silent: false,
   noData: false,
   failure: null as string | null,
+  empty: false,
+  saveConflict: false,
   /** How long the capture is "waiting" before the first samples arrive. */
   receivingAfterMs: 200,
   /** How long exact silence lasts before the capture reports `silent`. */
@@ -47,13 +52,25 @@ interface Capture {
 
 let capture: Capture | null = null;
 
+/** A replay recording whose saving failed: kept until retried or discarded. */
+interface Pending {
+  target: Extract<NarrationTarget, { kind: 'replay' }>;
+  durationMs: number;
+  startMs: number;
+}
+
+let pending: Pending | null = null;
+
 /** Forgets the capture and the stored narrations, and restores the switches (tests). */
 export function resetMockNarration(): void {
   capture = null;
+  pending = null;
   stored.clear();
   mockNarration.silent = false;
   mockNarration.noData = false;
   mockNarration.failure = null;
+  mockNarration.empty = false;
+  mockNarration.saveConflict = false;
   mockNarration.receivingAfterMs = 200;
   mockNarration.silentAfterMs = 1000;
   mockNarration.livePages = 1;
@@ -99,11 +116,19 @@ function begin(kind: Capture['kind'], device: string | null, target: NarrationTa
 /** Status of the capture under way: a level that moves with the time, or the switch's state. */
 function status(): NarrationStatus {
   if (!capture) {
-    return { state: 'idle', capture: null, level: { peak: 0, rms: 0 }, elapsedMs: 0, device: null, failure: null };
+    return {
+      state: 'idle',
+      capture: null,
+      level: { peak: 0, rms: 0 },
+      elapsedMs: 0,
+      device: null,
+      failure: null,
+      pending: pending !== null,
+    };
   }
   const elapsedMs = Math.max(0, Date.now() - capture.startedAt);
   const device = microphoneNamed(capture.device).name;
-  const base = { state: capture.kind, elapsedMs, device };
+  const base = { state: capture.kind, elapsedMs, device, pending: pending !== null };
   const none = { peak: 0, rms: 0 };
   if (mockNarration.failure !== null) {
     return { ...base, capture: 'failed', level: none, failure: mockNarration.failure };
@@ -159,6 +184,23 @@ function checkStamp(path: string, stamp: FileStamp | null): void {
   if (!stamp || !sameStamp(entry.stamp, stamp)) failure('noteConflict', path);
 }
 
+/** Writes a replay recording into the note at `path`, like `Library::save` with the stamp. */
+function saveReplay(
+  target: Extract<NarrationTarget, { kind: 'replay' }>,
+  path: string,
+  stamp: FileStamp | null,
+  durationMs: number,
+  startMs: number,
+): NarrationSaved {
+  if (mockNarration.saveConflict) failure('noteConflict', path);
+  checkStamp(path, stamp);
+  const id = noteOf(path).note.id;
+  stored.set(id, {
+    info: { durationMs, base: 'replay', speed: target.speed, maxPauseMs: target.maxPauseMs, startMs },
+  });
+  return { stamp: newStamp(path), durationMs, pages: 0 };
+}
+
 export function mockNarrationInvoke(command: string, args: Record<string, unknown>): unknown {
   switch (command) {
     case 'list_microphones':
@@ -166,9 +208,14 @@ export function mockNarrationInvoke(command: string, args: Record<string, unknow
     case 'microphone_monitor':
       begin('monitoring', (args.device as string | null) ?? null, null);
       return undefined;
+    case 'microphone_monitor_stop':
+      // Only a level-only capture: a recording is never touched.
+      if (capture?.kind === 'monitoring') capture = null;
+      return undefined;
     case 'narration_start': {
       const target = args.target as NarrationTarget;
       if (target.kind === 'replay') noteOf(target.path);
+      if (pending) failure('narrationBusy', 'a recording is waiting to be saved or discarded');
       // A monitor gives way to the recording.
       if (capture?.kind === 'monitoring') capture = null;
       begin('recording', (args.device as string | null) ?? null, target);
@@ -184,34 +231,52 @@ export function mockNarrationInvoke(command: string, args: Record<string, unknow
         return null;
       }
       if (!args.save) return null;
+      if (mockNarration.empty) failure('emptyRecording', 'nothing was recorded');
       const durationMs = Math.max(0, Date.now() - current.startedAt);
       const target = current.target;
       if (target?.kind === 'replay') {
-        checkStamp(target.path, (args.stamp as FileStamp | null) ?? null);
-        const id = noteOf(target.path).note.id;
-        stored.set(id, {
-          info: {
-            durationMs,
-            base: 'replay',
-            speed: target.speed,
-            maxPauseMs: target.maxPauseMs,
-            startMs: target.startMs,
-          },
-        });
-        return { stamp: newStamp(target.path), durationMs, pages: 0 } satisfies NarrationSaved;
+        // The replay instant of the first sample: the recording started this long after the
+        // replay was at instant 0 (negative when it started before).
+        const at = args.replayStartedAtMs as number | null | undefined;
+        const startMs = typeof at === 'number' ? Math.round(current.startedAt - at) : target.startMs;
+        try {
+          const path = (args.path as string | null) ?? target.path;
+          return saveReplay(target, path, (args.stamp as FileStamp | null) ?? null, durationMs, startMs);
+        } catch (error) {
+          // Kept, not lost: the user retries or discards.
+          pending = { target, durationMs, startMs };
+          throw error;
+        }
       }
       return { stamp: null, durationMs, pages: mockNarration.livePages } satisfies NarrationSaved;
     }
+    case 'narration_retry': {
+      if (!pending) failure('noPendingNarration', 'no recording is waiting');
+      const saved = saveReplay(
+        pending.target,
+        args.path as string,
+        (args.stamp as FileStamp | null) ?? null,
+        pending.durationMs,
+        pending.startMs,
+      );
+      pending = null;
+      return saved;
+    }
+    case 'narration_discard':
+      if (!pending) failure('noPendingNarration', 'no recording is waiting');
+      pending = null;
+      return undefined;
     case 'narration_info':
       return mockNarrationOf(args.path as string);
     case 'narration_audio': {
       const info = mockNarrationOf(args.path as string);
-      if (!info) failure('noRecording', args.path as string);
+      if (!info) failure('noNarration', args.path as string);
       return silentWav(info.durationMs);
     }
     case 'delete_narration': {
       const path = args.path as string;
       checkStamp(path, args.stamp as FileStamp);
+      if (!stored.has(noteOf(path).note.id)) failure('noNarration', path);
       stored.delete(noteOf(path).note.id);
       return newStamp(path);
     }

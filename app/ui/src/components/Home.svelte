@@ -89,11 +89,12 @@
 <svelte:window onkeydown={shortcuts} />
 
 {#if liveOpen}
-  <LiveView {app} onclose={closeLive} />
+  <LiveView {app} {onchange} onclose={closeLive} />
 {:else if openPath}
   <Editor
     path={openPath}
     {app}
+    {onchange}
     onclose={closeEditor}
     onsaved={(path) => {
       // A rename moves the file: keep following the note under its new name, unless the

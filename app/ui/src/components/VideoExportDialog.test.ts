@@ -68,7 +68,8 @@ async function render(locale: 'fr' | 'en' = 'fr', title = TITLE) {
   const target = document.createElement('div');
   document.body.append(target);
   const onclose = vi.fn();
-  const mountIt = () => mount(VideoExportDialog, { target, props: { source, subject: 'Sujet', onclose } });
+  const onrunning = vi.fn();
+  const mountIt = () => mount(VideoExportDialog, { target, props: { source, subject: 'Sujet', onclose, onrunning } });
   let component = mountIt();
   cleanup = () => {
     unmount(component);
@@ -126,7 +127,7 @@ async function render(locale: 'fr' | 'en' = 'fr', title = TITLE) {
     component = mountIt();
     await settle();
   };
-  return { target, source, onclose, dialog, button, hasButton, radio, hasChoice, choose, field, set, checkbox, hasCheckbox, remount };
+  return { target, source, onclose, onrunning, dialog, button, hasButton, radio, hasChoice, choose, field, set, checkbox, hasCheckbox, remount };
 }
 
 const DEFAULTS: VideoExportOptions = {
@@ -600,6 +601,77 @@ describe('video export dialog: exporting', () => {
     expect(ui.target.querySelector('progress')).toBeNull();
     expect(ui.target.querySelector('.export-result')?.textContent).toContain('Durée : 4 s');
     expect(ui.button('Fermer').disabled).toBe(false);
+  });
+
+  it('cannot be cancelled once every frame is written: it says it is finalising', async () => {
+    let report: (progress: VideoProgress) => void = () => {};
+    let finish: (result: Awaited<ReturnType<typeof api.exportVideo>>) => void = () => {};
+    vi.spyOn(api, 'exportVideo').mockImplementationOnce((_s, _o, _d, onProgress) => {
+      report = onProgress;
+      return new Promise((resolve) => (finish = resolve));
+    });
+    const cancelSpy = vi.spyOn(api, 'cancelVideoExport').mockResolvedValue(undefined);
+    const ui = await render('fr');
+    ui.button('Exporter…').click();
+    await settle();
+    report({ framesDone: 119, framesTotal: 120, elapsedMs: 1000 });
+    await settle();
+    expect(ui.button("Annuler l'export").disabled).toBe(false);
+    expect(ui.target.querySelector('.video-progress .export-status')?.textContent?.trim()).toBe('Export en cours…');
+
+    report({ framesDone: 120, framesTotal: 120, elapsedMs: 1100 });
+    await settle();
+    expect(ui.target.querySelector('.video-progress .export-status')?.textContent?.trim()).toBe('Finalisation…');
+    const cancelButton = ui.button('Finalisation…');
+    expect(cancelButton.textContent?.trim()).toBe('Finalisation…');
+    expect(cancelButton.disabled).toBe(true);
+    // Neither the button nor Escape asks Rust to cancel any more.
+    cancelButton.click();
+    ui.dialog().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(cancelSpy).not.toHaveBeenCalled();
+    expect(ui.onclose).not.toHaveBeenCalled();
+
+    finish({ path: 'C:\\x\\a.mp4', frames: 120, durationMs: 4000, audio: false, encoder: 'Media Foundation' });
+    await settle();
+    expect(ui.target.querySelector('.export-result')).toBeTruthy();
+  });
+
+  it('says in English that it is finalizing', async () => {
+    let report: (progress: VideoProgress) => void = () => {};
+    vi.spyOn(api, 'exportVideo').mockImplementationOnce((_s, _o, _d, onProgress) => {
+      report = onProgress;
+      return new Promise(() => {});
+    });
+    const ui = await render('en');
+    ui.button('Export…').click();
+    await settle();
+    report({ framesDone: 10, framesTotal: 10, elapsedMs: 10 });
+    await settle();
+    expect(ui.target.querySelector('.video-progress .export-status')?.textContent?.trim()).toBe('Finalizing…');
+    expect(ui.button('Finalizing…').disabled).toBe(true);
+  });
+
+  it('tells its caller while an export is running, and when it is over or the dialog goes away', async () => {
+    let finish: (result: Awaited<ReturnType<typeof api.exportVideo>>) => void = () => {};
+    vi.spyOn(api, 'exportVideo').mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    const ui = await render('fr');
+    expect(ui.onrunning).not.toHaveBeenCalledWith(true);
+    ui.button('Exporter…').click();
+    await settle();
+    expect(ui.onrunning).toHaveBeenLastCalledWith(true);
+    finish({ path: 'C:\\x\\a.mp4', frames: 12, durationMs: 400, audio: false, encoder: 'Media Foundation' });
+    await settle();
+    expect(ui.onrunning).toHaveBeenLastCalledWith(false);
+
+    // Destroyed while exporting: the caller is released.
+    vi.spyOn(api, 'exportVideo').mockImplementationOnce(() => new Promise(() => {}));
+    ui.button('Exporter de nouveau…').click();
+    await settle();
+    expect(ui.onrunning).toHaveBeenLastCalledWith(true);
+    cleanup?.();
+    cleanup = null;
+    expect(ui.onrunning).toHaveBeenLastCalledWith(false);
   });
 
   it('shows the progress of the browser stand-in', async () => {

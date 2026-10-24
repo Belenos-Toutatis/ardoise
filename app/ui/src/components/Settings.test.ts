@@ -413,6 +413,18 @@ describe('settings: OpenH264 backup encoder', () => {
     expect(sectionButton(target, 'Télécharger depuis Cisco').disabled).toBe(false);
   });
 
+  it('explains in plain words that Windows still uses OpenH264 when it cannot be removed', async () => {
+    setMockOpenH264({ status: 'installed', bytes: 860_000, allowed: true });
+    mockVideo.removeFails = true;
+    const { target } = await render('fr');
+    sectionButton(target, 'Supprimer').click();
+    await settle();
+    expect(section(target).querySelector('[role="alert"]')?.textContent).toContain(
+      'Windows utilise encore OpenH264 : fermez puis relancez Ardoise, puis supprimez-le.',
+    );
+    expect((await api.openH264State()).status).toBe('installed');
+  });
+
   it('allows, disallows and re-allows the installed encoder', async () => {
     setMockOpenH264({ status: 'installed', bytes: 860_000, allowed: true });
     const spy = vi.spyOn(api, 'setOpenH264Allowed');
