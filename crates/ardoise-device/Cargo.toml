@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 ardoise-core = { path = "../ardoise-core" }
+ardoise-proto = { path = "../ardoise-proto" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }

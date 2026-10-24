@@ -6,6 +6,8 @@
 //! simulated user who presses the simulated tablet's button at the right moments.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 /// The steps, in the order they run.
@@ -45,7 +47,11 @@ impl StepId {
 
 /// What the user is asked to do. The interface turns each variant into a translated sentence.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Instruction {
     /// Draw `count` reference pages on paper, pressing the tablet's button after each one.
     DrawReferencePages { count: u32 },
@@ -74,7 +80,11 @@ pub enum Decision {
 
 /// Live information while a step runs.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Progress {
     /// Waiting for the tablet (scan, button press…).
     Waiting,
@@ -147,6 +157,12 @@ pub struct DiagnosticConfig {
     pub delete_after_sync: bool,
     /// How long the tablet is looked for, and how long a button press is awaited.
     pub wait_timeout: Duration,
+    /// Language of the text report: `"fr"` or `"en"`.
+    pub language: String,
+    /// Set from another thread to stop the run as soon as possible.
+    pub cancel: Arc<AtomicBool>,
+    /// Identity for a registration (random when `None`); set to replay a recorded run.
+    pub host_id: Option<crate::identity::HostId>,
 }
 
 impl DiagnosticConfig {
@@ -158,9 +174,14 @@ impl DiagnosticConfig {
             live_duration: Duration::from_secs(30),
             delete_after_sync: true,
             wait_timeout: Duration::from_secs(60),
+            language: "en".into(),
+            cancel: Arc::new(AtomicBool::new(false)),
+            host_id: None,
         }
     }
 }
+
+pub use crate::runner::run;
 
 /// Everything a test run produced.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -186,5 +207,80 @@ impl DiagnosticReport {
 
     pub fn failures(&self) -> usize {
         self.count(StepStatus::Failed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The interface reads these shapes (`app/ui/src/lib/diagnostic.ts`).
+    #[test]
+    fn serializes_as_the_interface_expects() {
+        let value = |v: &dyn erased::Serialize| v.to_json();
+        assert_eq!(value(&StepId::ReferencePages), json!("referencePages"));
+        assert_eq!(
+            value(&Instruction::DrawLive { seconds: 30 }),
+            json!({"kind": "drawLive", "seconds": 30})
+        );
+        assert_eq!(
+            value(&Instruction::HoldButtonToRegister),
+            json!({"kind": "holdButtonToRegister"})
+        );
+        assert_eq!(
+            value(&Progress::Live {
+                samples: 12,
+                elapsed_ms: 500
+            }),
+            json!({"kind": "live", "samples": 12, "elapsedMs": 500})
+        );
+        assert_eq!(
+            value(&Progress::Downloading { page: 1, total: 3 }),
+            json!({"kind": "downloading", "page": 1, "total": 3})
+        );
+        assert_eq!(value(&StepStatus::Skipped), json!("skipped"));
+        assert_eq!(
+            serde_json::from_value::<Decision>(json!("continue")).unwrap(),
+            Decision::Continue
+        );
+        let report = DiagnosticReport {
+            app_version: "0.1.0".into(),
+            transport: "sim".into(),
+            started: "x".into(),
+            steps: vec![],
+            log_path: None,
+            report_path: None,
+            cancelled: false,
+        };
+        let keys: Vec<String> = value(&report)
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        for key in [
+            "appVersion",
+            "transport",
+            "started",
+            "steps",
+            "logPath",
+            "reportPath",
+            "cancelled",
+        ] {
+            assert!(keys.contains(&key.to_owned()), "{key}");
+        }
+    }
+
+    /// Lets the test above take any serializable value.
+    mod erased {
+        pub trait Serialize {
+            fn to_json(&self) -> serde_json::Value;
+        }
+        impl<T: serde::Serialize> Serialize for T {
+            fn to_json(&self) -> serde_json::Value {
+                serde_json::to_value(self).unwrap()
+            }
+        }
     }
 }

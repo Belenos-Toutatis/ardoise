@@ -8,6 +8,7 @@ compile_error!("release builds need `--features custom-protocol` (use `cargo xta
 
 mod commands;
 mod console;
+mod diagnostic;
 mod selftest;
 
 use std::path::PathBuf;
@@ -16,19 +17,27 @@ use ardoise_core::settings::SettingsStore;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 /// Command-line options. Normal launches have none.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Cli {
     /// `--self-test`: load the interface in a hidden window, check the environment,
     /// print a report and exit with 0 (ok) or 1 (failure).
     pub self_test: bool,
+    /// `--diagnostic`: open the guided tablet test right away.
+    pub diagnostic: bool,
+    /// With `--diagnostic`: run the test without a window against the simulated tablet,
+    /// print the report and exit with 0 (no failure) or 1.
+    pub simulated: bool,
 }
 
 impl Cli {
     pub fn parse(args: impl IntoIterator<Item = String>) -> Cli {
         let mut cli = Cli::default();
         for arg in args {
-            if arg == "--self-test" {
-                cli.self_test = true;
+            match arg.as_str() {
+                "--self-test" => cli.self_test = true,
+                "--diagnostic" => cli.diagnostic = true,
+                "--simulated" => cli.simulated = true,
+                _ => {}
             }
         }
         cli
@@ -41,6 +50,8 @@ pub struct AppContext {
     pub store: Result<SettingsStore, String>,
     pub system_locale: Option<String>,
     pub self_test: Option<selftest::SelfTest>,
+    /// Started with `--diagnostic`: the interface opens the tablet test.
+    pub open_diagnostic: bool,
 }
 
 /// WebView2 keeps caches in this folder: always local to the PC, never next to a portable
@@ -53,7 +64,8 @@ fn webview_data_dir() -> Option<PathBuf> {
 
 pub fn run() {
     let cli = Cli::parse(std::env::args().skip(1));
-    if cli.self_test {
+    let headless_diagnostic = cli.diagnostic && cli.simulated;
+    if cli.self_test || headless_diagnostic {
         console::attach_parent_console();
     }
 
@@ -61,11 +73,17 @@ pub fn run() {
         store: SettingsStore::open_default().map_err(|e| e.to_string()),
         system_locale: sys_locale::get_locale(),
         self_test: cli.self_test.then(selftest::SelfTest::start),
+        open_diagnostic: cli.diagnostic,
     };
+
+    if headless_diagnostic {
+        std::process::exit(diagnostic::run_simulated_cli(&context));
+    }
 
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(context)
+        .manage(diagnostic::DiagnosticRuns::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_state,
             commands::set_language,
@@ -73,6 +91,9 @@ pub fn run() {
             commands::inspect_library,
             commands::set_library,
             commands::self_test_report,
+            diagnostic::diagnostic_start,
+            diagnostic::diagnostic_answer,
+            diagnostic::diagnostic_cancel,
         ])
         .setup(move |app| {
             if cli.self_test {
@@ -99,5 +120,25 @@ pub fn run() {
         }
         eprintln!("Ardoise could not start: {error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::parse(args.iter().map(|a| a.to_string()))
+    }
+
+    #[test]
+    fn parses_command_line_modes() {
+        assert_eq!(parse(&[]), Cli::default());
+        assert!(parse(&["--self-test"]).self_test);
+        let diagnostic = parse(&["--diagnostic"]);
+        assert!(diagnostic.diagnostic && !diagnostic.simulated);
+        let simulated = parse(&["--diagnostic", "--simulated"]);
+        assert!(simulated.diagnostic && simulated.simulated && !simulated.self_test);
+        assert_eq!(parse(&["--unknown"]), Cli::default());
     }
 }

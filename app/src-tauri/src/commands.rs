@@ -19,7 +19,7 @@ pub struct CommandError {
 }
 
 impl CommandError {
-    fn new(code: &'static str, message: impl ToString) -> Self {
+    pub(crate) fn new(code: &'static str, message: impl ToString) -> Self {
         CommandError {
             code,
             message: message.to_string(),
@@ -48,6 +48,7 @@ pub struct AppState {
     library: Option<String>,
     system_locale: Option<String>,
     self_test: bool,
+    open_diagnostic: bool,
 }
 
 impl AppState {
@@ -61,6 +62,10 @@ impl AppState {
 
     pub fn settings_error(&self) -> Option<&str> {
         self.settings_error.as_deref()
+    }
+
+    pub fn language(&self) -> Language {
+        self.language
     }
 
     pub fn library(&self) -> Option<&str> {
@@ -101,6 +106,7 @@ fn state_from(context: &AppContext, loaded: Result<Settings, SettingsError>) -> 
         theme: settings.theme,
         system_locale: context.system_locale.clone(),
         self_test: context.self_test.is_some(),
+        open_diagnostic: context.open_diagnostic,
     }
 }
 
@@ -192,6 +198,7 @@ mod tests {
             store: Ok(SettingsStore::locate(settings_dir, settings_dir, machine)),
             system_locale: Some("fr-FR".to_owned()),
             self_test: None,
+            open_diagnostic: false,
         }
     }
 

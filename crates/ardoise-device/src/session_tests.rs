@@ -1,0 +1,398 @@
+//! Unit tests of [`Session`] against a scripted tablet, byte for byte (protocol.md).
+
+use super::*;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::time::SystemTime;
+
+/// A clock that only moves when a wait times out.
+struct TestClock(AtomicU64);
+
+impl Clock for TestClock {
+    fn monotonic(&self) -> Duration {
+        Duration::from_millis(self.0.load(Ordering::SeqCst))
+    }
+    fn now(&self) -> SystemTime {
+        // 2026-10-24 12:00:00 UTC.
+        UNIX_EPOCH + Duration::from_secs(1_792_843_200) + self.monotonic()
+    }
+}
+
+fn hex(text: &str) -> Vec<u8> {
+    text.split_whitespace()
+        .map(|b| u8::from_str_radix(b, 16).unwrap())
+        .collect()
+}
+
+fn cmd(text: &str) -> TransportEvent {
+    TransportEvent::Notification {
+        channel: Channel::Command,
+        data: hex(text),
+    }
+}
+
+fn on(channel: Channel, data: Vec<u8>) -> TransportEvent {
+    TransportEvent::Notification { channel, data }
+}
+
+/// Plays the tablet: each host write must equal the next expected frame, which releases the
+/// scripted answers.
+struct Script {
+    peer: Advertisement,
+    clock: Arc<TestClock>,
+    steps: VecDeque<(Vec<u8>, Vec<TransportEvent>)>,
+    pending: VecDeque<TransportEvent>,
+    writes: Arc<Mutex<Vec<Vec<u8>>>>,
+}
+
+impl Transport for Script {
+    fn peer(&self) -> &Advertisement {
+        &self.peer
+    }
+    fn write(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        self.writes.lock().unwrap().push(frame.to_vec());
+        let (expected, answers) = self
+            .steps
+            .pop_front()
+            .unwrap_or_else(|| panic!("unexpected write {frame:02x?}"));
+        assert_eq!(frame, expected.as_slice(), "write");
+        self.pending.extend(answers);
+        Ok(())
+    }
+    fn recv(&mut self, timeout: Duration) -> Result<Option<TransportEvent>, TransportError> {
+        if let Some(event) = self.pending.pop_front() {
+            return Ok(Some(event));
+        }
+        let ms = u64::try_from(timeout.as_millis()).unwrap();
+        self.clock.0.fetch_add(ms, Ordering::SeqCst);
+        Ok(None)
+    }
+    fn disconnect(&mut self) -> Result<(), TransportError> {
+        Ok(())
+    }
+}
+
+struct Harness {
+    clock: Arc<TestClock>,
+    writes: Arc<Mutex<Vec<Vec<u8>>>>,
+}
+
+fn script(steps: Vec<(&str, Vec<TransportEvent>)>) -> (Box<dyn Transport>, Harness) {
+    let clock = Arc::new(TestClock(AtomicU64::new(0)));
+    let writes = Arc::new(Mutex::new(Vec::new()));
+    let transport = Script {
+        peer: Advertisement {
+            address: "E2:43:03:67:0E:01".into(),
+            name: Some("Bamboo Slate".into()),
+            rssi: None,
+            company_id: Some(0x4755),
+            manufacturer_data: vec![0; 7],
+        },
+        clock: clock.clone(),
+        steps: steps.into_iter().map(|(w, a)| (hex(w), a)).collect(),
+        pending: VecDeque::new(),
+        writes: writes.clone(),
+    };
+    (Box::new(transport), Harness { clock, writes })
+}
+
+const ID: HostId = HostId([0x89, 0xea, 0x78, 0x88, 0xff, 0xcb]);
+
+fn connected(steps: Vec<(&str, Vec<TransportEvent>)>) -> (Session, Harness) {
+    let mut all = vec![("e6 06 89 ea 78 88 ff cb", vec![cmd("b3 01 00")])];
+    all.extend(steps);
+    let (transport, harness) = script(all);
+    let clock: Arc<dyn Clock> = harness.clock.clone();
+    (Session::connect(transport, clock, ID).unwrap(), harness)
+}
+
+#[test]
+fn connects_with_the_saved_identity() {
+    let (session, harness) = connected(vec![]);
+    assert!(session.is_connected());
+    assert_eq!(harness.writes.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_refused_identity_means_registration_needed() {
+    let (transport, harness) = script(vec![("e6 06 89 ea 78 88 ff cb", vec![cmd("b3 01 07")])]);
+    let result = Session::connect(transport, harness.clock, ID);
+    assert_eq!(result.err(), Some(DeviceError::NotRegistered));
+}
+
+#[test]
+fn registers_when_the_button_is_pressed() {
+    let (transport, harness) = script(vec![("e7 06 89 ea 78 88 ff cb", vec![cmd("e4 01 00")])]);
+    let mut told = 0;
+    let session = Session::register(
+        transport,
+        harness.clock,
+        ID,
+        Duration::from_secs(10),
+        None,
+        &mut || told += 1,
+    );
+    assert!(session.is_ok());
+    assert_eq!(told, 1);
+}
+
+#[test]
+fn registration_times_out_without_button_press() {
+    let (transport, harness) = script(vec![("e7 06 89 ea 78 88 ff cb", vec![])]);
+    let clock = harness.clock.clone();
+    let result = Session::register(
+        transport,
+        harness.clock,
+        ID,
+        Duration::from_secs(10),
+        None,
+        &mut || {},
+    );
+    assert_eq!(
+        result.err(),
+        Some(DeviceError::Timeout("registration button"))
+    );
+    assert!(clock.monotonic() >= Duration::from_secs(10));
+}
+
+#[test]
+fn cancellation_interrupts_the_button_wait() {
+    let (transport, harness) = script(vec![("e7 06 89 ea 78 88 ff cb", vec![])]);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = cancel.clone();
+    let result = Session::register(
+        transport,
+        harness.clock,
+        ID,
+        Duration::from_secs(10),
+        Some(cancel),
+        &mut || flag.store(true, Ordering::SeqCst),
+    );
+    assert_eq!(result.err(), Some(DeviceError::Cancelled));
+}
+
+#[test]
+fn reads_a_name_sent_in_chunks_among_unrelated_frames() {
+    let (mut session, _) = connected(vec![(
+        "bb 01 00",
+        vec![
+            on(Channel::SysEvent, hex("f1 02 13 00")),
+            cmd("bc 07 42 61 6d 62 6f 6f 20"),
+            cmd("99 01 00"),
+            cmd("bc 06 53 6c 61 74 65 0a"),
+        ],
+    )]);
+    assert_eq!(session.name().unwrap(), "Bamboo Slate");
+}
+
+#[test]
+fn reads_a_name_without_final_line_feed() {
+    let (mut session, _) = connected(vec![(
+        "bb 01 00",
+        vec![cmd(
+            "bc 12 42 61 6d 62 6f 6f 20 53 6c 61 74 65 20 53 6d 61 6c 6c",
+        )],
+    )]);
+    assert_eq!(session.name().unwrap(), "Bamboo Slate Small");
+}
+
+#[test]
+fn reads_device_information() {
+    let (mut session, _) = connected(vec![
+        (
+            "bb 01 00",
+            vec![cmd("bc 0d 42 61 6d 62 6f 6f 20 53 6c 61 74 65 0a")],
+        ),
+        ("b7 01 00", vec![cmd("b8 09 00 42 31 36 30 38 30 35 41")]),
+        ("b7 01 01", vec![cmd("b8 09 01 43 31 37 30 37 30 34 41")]),
+        ("b9 01 00", vec![cmd("ba 02 57 01")]),
+        ("ea 02 03 00", vec![cmd("eb 06 03 00 04 74 00 00")]),
+        ("ea 02 04 00", vec![cmd("eb 06 04 00 60 54 00 00")]),
+    ]);
+    let info = session.info().unwrap();
+    assert_eq!(
+        info,
+        DeviceInfo {
+            name: "Bamboo Slate".into(),
+            firmware: "B160805A-C170704A".into(),
+            battery_percent: 87,
+            charging: true,
+            width: 29700,
+            height: 21600,
+        }
+    );
+}
+
+#[test]
+fn an_error_status_is_the_answer() {
+    let (mut session, _) = connected(vec![("ea 02 03 00", vec![cmd("b3 01 02")])]);
+    assert_eq!(
+        session.dimensions().err(),
+        Some(DeviceError::Refused(StatusCode::InvalidState))
+    );
+}
+
+#[test]
+fn sets_and_reads_the_clock() {
+    // 2026-10-24 12:00:00 UTC in BCD.
+    let (mut session, _) = connected(vec![
+        ("b6 06 26 10 24 12 00 00", vec![cmd("b3 01 00")]),
+        ("b6 01 00", vec![cmd("bd 06 26 10 24 12 00 05")]),
+    ]);
+    session.set_time().unwrap();
+    assert_eq!(session.read_time().unwrap(), 1_792_843_205);
+}
+
+fn page(bytes: &[u8]) -> Vec<TransportEvent> {
+    bytes
+        .chunks(20)
+        .map(|chunk| on(Channel::PageData, chunk.to_vec()))
+        .collect()
+}
+
+fn end_marker(bytes: &[u8]) -> TransportEvent {
+    let crc = ardoise_proto::crc32(bytes).to_le_bytes();
+    TransportEvent::Notification {
+        channel: Channel::Command,
+        data: vec![0xc8, 0x05, 0xed, crc[0], crc[1], crc[2], crc[3]],
+    }
+}
+
+#[test]
+fn syncs_every_page_and_deletes_each_once_saved() {
+    let first: Vec<u8> = (0..45u8).collect();
+    let second: Vec<u8> = (100..130u8).collect();
+    let mut download_first = vec![cmd("c8 01 be")];
+    download_first.extend(page(&first));
+    download_first.push(end_marker(&first));
+    // For the second page, the end marker overtakes the last chunk.
+    let mut download_second = vec![cmd("c8 01 be")];
+    let mut chunks = page(&second);
+    let last = chunks.pop().unwrap();
+    download_second.extend(chunks);
+    download_second.push(end_marker(&second));
+    download_second.push(last);
+
+    let (mut session, harness) = connected(vec![
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 02 00")]),
+        ("cc 01 00", vec![cmd("cf 0a 2d 00 00 00 26 10 24 09 30 00")]),
+        ("c3 01 00", download_first),
+        ("ca 01 00", vec![cmd("b3 01 00")]),
+        ("cc 01 00", vec![cmd("cf 0a 1e 00 00 00 26 10 24 09 31 00")]),
+        ("c3 01 00", download_second),
+        ("ca 01 00", vec![cmd("b3 01 00")]),
+    ]);
+    let mut received = Vec::new();
+    let summary = session
+        .sync(true, &mut |page, index, total| {
+            received.push((page, index, total));
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        summary,
+        SyncSummary {
+            available: 2,
+            downloaded: 2,
+            deleted: 2
+        }
+    );
+    assert_eq!(received[0].0.bytes, first);
+    assert_eq!(received[0].0.announced_size, 45);
+    // 2026-10-24 09:30:00 UTC.
+    assert_eq!(received[0].0.timestamp, Some(1_792_834_200));
+    assert_eq!((received[0].1, received[0].2), (1, 2));
+    assert_eq!(received[1].0.bytes, second);
+    assert_eq!(harness.writes.lock().unwrap().len(), 10);
+}
+
+#[test]
+fn a_page_is_not_deleted_when_it_cannot_be_saved() {
+    let bytes = vec![1u8, 2, 3];
+    let mut download = vec![cmd("c8 01 be")];
+    download.extend(page(&bytes));
+    download.push(end_marker(&bytes));
+    // No `ca` in the script: a delete request would fail the test.
+    let (mut session, _) = connected(vec![
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 01 00")]),
+        ("cc 01 00", vec![cmd("cf 0a 03 00 00 00 26 10 24 09 30 00")]),
+        ("c3 01 00", download),
+    ]);
+    let result = session.sync(true, &mut |_, _, _| Err("disk full".into()));
+    assert_eq!(result.err(), Some(DeviceError::Storage("disk full".into())));
+}
+
+#[test]
+fn a_corrupted_transfer_is_detected_and_nothing_is_deleted() {
+    let bytes = vec![1u8, 2, 3, 4];
+    let mut download = vec![cmd("c8 01 be")];
+    download.extend(page(&bytes[..3]));
+    download.push(end_marker(&bytes));
+    let (mut session, _) = connected(vec![
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 01 00")]),
+        ("cc 01 00", vec![cmd("cf 0a 04 00 00 00 26 10 24 09 30 00")]),
+        ("c3 01 00", download),
+    ]);
+    let result = session.sync(true, &mut |_, _, _| Ok(()));
+    assert!(
+        matches!(result, Err(DeviceError::CrcMismatch { .. })),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn without_deletion_only_the_oldest_page_is_read() {
+    let bytes = vec![9u8; 5];
+    let mut download = vec![cmd("c8 01 be")];
+    download.extend(page(&bytes));
+    download.push(end_marker(&bytes));
+    let (mut session, _) = connected(vec![
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 03 00")]),
+        ("cc 01 00", vec![cmd("cf 0a 05 00 00 00 26 10 24 09 30 00")]),
+        ("c3 01 00", download),
+    ]);
+    let summary = session.sync(false, &mut |_, _, _| Ok(())).unwrap();
+    assert_eq!(
+        summary,
+        SyncSummary {
+            available: 3,
+            downloaded: 1,
+            deleted: 0
+        }
+    );
+}
+
+#[test]
+fn live_mode_delivers_samples_received_before_the_acknowledgement() {
+    let sample = hex("a1 06 10 27 20 4e 00 04");
+    let (mut session, _) = connected(vec![
+        (
+            "b1 01 00",
+            vec![on(Channel::Live, sample.clone()), cmd("b3 01 00")],
+        ),
+        ("b1 01 02", vec![cmd("b3 01 00")]),
+    ]);
+    session.start_live().unwrap();
+    assert_eq!(
+        session.next_live(Duration::from_secs(1)).unwrap(),
+        Some(sample)
+    );
+    assert_eq!(session.next_live(Duration::from_secs(1)).unwrap(), None);
+    session.stop_live().unwrap();
+}
+
+#[test]
+fn a_lost_link_is_reported() {
+    let (mut session, _) = connected(vec![("b9 01 00", vec![TransportEvent::Disconnected])]);
+    assert_eq!(session.battery().err(), Some(DeviceError::Disconnected));
+    assert!(!session.is_connected());
+    assert_eq!(session.battery().err(), Some(DeviceError::Disconnected));
+}

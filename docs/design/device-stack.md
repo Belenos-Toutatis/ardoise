@@ -91,3 +91,27 @@ Public surface (names may be refined, the shape must stay):
   delivered in order. A log produced against the simulator must replay identically (same tx/rx sequence).
 - A simulated user for the diagnostic runner (presses the button at the right moment, draws the reference pages
   and 30 s of live strokes), used by `ardoise.exe --diagnostic --simulated` and by the tests.
+
+## Decisions made while building M1
+
+- **Virtual time (simulator and replay).** Every event a simulated transport will deliver carries a virtual
+  timestamp. `recv(timeout)`: if the next event is due at or before `now + timeout`, set `now = max(now, due)` and
+  deliver it; otherwise advance `now` by `timeout` and return `None`. Command replies are due at the time of the
+  request; live records are due 5 ms apart from the start of live mode (3 records per `a1` notification). The
+  virtual clock's wall-clock origin is a fixed constant, so simulated sessions (and their logs) are reproducible.
+- **Replay rules.** Entries are consumed in log order, ignoring `note` lines. On `write`, the next pending entry must
+  be a `tx` with the same bytes (SET_TIME payload exempt only in lenient mode, for real captures); anything else is
+  `TransportError::Replay`. On `recv`, a pending `rx` entry is delivered when the replay clock reaches its recorded
+  `t` (same rule as virtual time; `t` is relative to the log creation, and the replay clock starts at the same
+  origin), an `event: disconnected` becomes `TransportEvent::Disconnected`, and a pending `tx` means nothing to
+  deliver (the clock advances by `timeout`). `connected` / `disconnect` events delimit successive connections. A
+  recorded registration is replayed by giving the recorded identity to `Manager::with_host_id` (or
+  `DiagnosticConfig::host_id`).
+- **Simulated user.** `SimulatedUser` performs the physical actions on the simulated tablet: draws the reference pages
+  on `DrawReferencePages`, holds the button on `HoldButtonToRegister`, presses it on `PressButtonToConfirm` and
+  `PressButton`, queues pen movement on `DrawLive`. Wrapping another operator (the interface), it first forwards the
+  prompt and acts only if the answer is `Continue`; alone, it always continues.
+- **Simulated runs never touch the user's library**: `--diagnostic --simulated` and the interface's simulation option
+  use a fresh library in `%TEMP%`, so a simulated registration cannot replace the real tablet's `device.json`.
+- **Log size (to revisit in M4).** The whole log is rewritten at most every 2 s. Fine for diagnostic sessions; for
+  hours of live mode in class, rotate files (e.g. every 1 MiB) so Nextcloud does not re-upload a growing file.

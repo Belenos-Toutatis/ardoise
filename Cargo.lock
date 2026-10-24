@@ -53,6 +53,8 @@ version = "0.1.0"
 dependencies = [
  "ardoise-ble",
  "ardoise-core",
+ "ardoise-device",
+ "ardoise-sim",
  "serde",
  "serde_json",
  "sys-locale",
@@ -93,6 +95,7 @@ name = "ardoise-device"
 version = "0.1.0"
 dependencies = [
  "ardoise-core",
+ "ardoise-proto",
  "chrono",
  "getrandom 0.3.4",
  "serde",

@@ -1,0 +1,535 @@
+//! One authenticated conversation with a tablet: the flows of protocol.md §3–§7.
+//!
+//! A [`Session`] owns a [`Transport`] and turns requests into replies. Notifications are
+//! sorted into per-channel queues as they arrive, so page bytes or live samples received while
+//! waiting for a command reply are never lost, and unsolicited frames (a stray name chunk,
+//! sysevents) are skipped instead of being taken for the expected answer.
+
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, UNIX_EPOCH};
+
+use ardoise_proto::{BcdTime, Dimension, FirmwarePart, Mode, Reply, Request, StatusCode};
+
+use crate::identity::HostId;
+use crate::transport::{Advertisement, Channel, Clock, Transport, TransportError, TransportEvent};
+
+/// Default wait for the reply to a command (protocol.md §2.3).
+pub const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+/// A download is abandoned when no page byte arrived for this long (protocol.md §5.1).
+pub const DATA_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+/// After the end-of-download marker, page bytes may still be in flight on their own
+/// characteristic: they are awaited this long before the CRC is declared wrong.
+pub const DATA_DRAIN_TIMEOUT: Duration = Duration::from_millis(1000);
+/// Name chunks are collected until a line feed, or until this much silence after a chunk.
+const NAME_CHUNK_TIMEOUT: Duration = Duration::from_millis(500);
+/// Granularity of the waits, so that cancellation is noticed quickly.
+const WAIT_SLICE: Duration = Duration::from_millis(250);
+
+/// Errors of a session.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DeviceError {
+    #[error(transparent)]
+    Transport(#[from] TransportError),
+    #[error("the tablet disconnected")]
+    Disconnected,
+    #[error("no answer from the tablet ({0})")]
+    Timeout(&'static str),
+    /// `b3 01 07`: the tablet is registered with another application (or another identity).
+    #[error("the tablet refused our identity: it must be registered again")]
+    NotRegistered,
+    /// Any other error status, e.g. `InvalidState` when the tablet is not in the right mode.
+    #[error("the tablet refused the command ({0:?})")]
+    Refused(StatusCode),
+    #[error("unexpected answer from the tablet: {0}")]
+    Unexpected(String),
+    #[error("page transfer corrupted (CRC {actual:08x} instead of {expected:08x})")]
+    CrcMismatch { expected: u32, actual: u32 },
+    #[error("cancelled")]
+    Cancelled,
+    /// The caller could not store a downloaded page; nothing was deleted from the tablet.
+    #[error("cannot save the page: {0}")]
+    Storage(String),
+}
+
+/// What the tablet says about itself.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    pub name: String,
+    pub firmware: String,
+    pub battery_percent: u8,
+    pub charging: bool,
+    /// Drawing area in device units (10 µm).
+    pub width: u32,
+    pub height: u32,
+}
+
+/// A stored page as received, before any interpretation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadedPage {
+    /// The file bytes, CRC verified.
+    pub bytes: Vec<u8>,
+    /// When the page was stored on the tablet (unix seconds, from the file-info reply).
+    pub timestamp: Option<i64>,
+    /// Size announced by the tablet before the transfer (informative only).
+    pub announced_size: u32,
+}
+
+/// Outcome of a sync.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SyncSummary {
+    /// Pages stored on the tablet when the sync started.
+    pub available: u16,
+    /// Pages downloaded and accepted by the sink.
+    pub downloaded: u16,
+    /// Pages deleted from the tablet after being saved.
+    pub deleted: u16,
+}
+
+/// An authenticated link to a tablet.
+pub struct Session {
+    transport: Box<dyn Transport>,
+    clock: Arc<dyn Clock>,
+    cancel: Option<Arc<AtomicBool>>,
+    commands: VecDeque<Vec<u8>>,
+    page_data: Vec<u8>,
+    last_page_data: Option<Duration>,
+    live: VecDeque<Vec<u8>>,
+    connected: bool,
+    reply_timeout: Duration,
+}
+
+impl Session {
+    fn new(transport: Box<dyn Transport>, clock: Arc<dyn Clock>) -> Self {
+        Self {
+            transport,
+            clock,
+            cancel: None,
+            commands: VecDeque::new(),
+            page_data: Vec::new(),
+            last_page_data: None,
+            live: VecDeque::new(),
+            connected: true,
+            reply_timeout: REPLY_TIMEOUT,
+        }
+    }
+
+    /// Authenticates with an identity registered earlier (`e6`).
+    pub fn connect(
+        transport: Box<dyn Transport>,
+        clock: Arc<dyn Clock>,
+        id: HostId,
+    ) -> Result<Self, DeviceError> {
+        let mut session = Self::new(transport, clock);
+        session
+            .expect_success(&Request::Connect { uuid: id.0 })
+            .map_err(|error| match error {
+                DeviceError::Refused(StatusCode::AuthorizationError) => DeviceError::NotRegistered,
+                other => other,
+            })?;
+        Ok(session)
+    }
+
+    /// Registers `id` with a tablet in registration mode (`e7`), then waits up to
+    /// `button_timeout` for the user to confirm with the button. `waiting_for_button` is called
+    /// once the request is sent, to tell the user to press it.
+    pub fn register(
+        transport: Box<dyn Transport>,
+        clock: Arc<dyn Clock>,
+        id: HostId,
+        button_timeout: Duration,
+        cancel: Option<Arc<AtomicBool>>,
+        waiting_for_button: &mut dyn FnMut(),
+    ) -> Result<Self, DeviceError> {
+        let mut session = Self::new(transport, clock);
+        session.cancel = cancel;
+        session.send(&Request::RegisterPressButton { uuid: id.0 })?;
+        waiting_for_button();
+        session.wait_reply(button_timeout, "registration button", |reply| {
+            matches!(reply, Reply::RegisterButtonPressed)
+        })?;
+        Ok(session)
+    }
+
+    /// Lets the caller interrupt long waits (button, download, live mode).
+    pub fn set_cancel_flag(&mut self, cancel: Arc<AtomicBool>) {
+        self.cancel = Some(cancel);
+    }
+
+    /// The tablet at the other end.
+    pub fn peer(&self) -> &Advertisement {
+        self.transport.peer()
+    }
+
+    /// Whether the link is still up.
+    pub fn is_connected(&self) -> bool {
+        self.connected
+    }
+
+    /// The clock of this session.
+    pub fn clock(&self) -> &Arc<dyn Clock> {
+        &self.clock
+    }
+
+    /// Sets the tablet's clock to the current UTC time.
+    pub fn set_time(&mut self) -> Result<(), DeviceError> {
+        let now = unix_seconds(&*self.clock);
+        let time = BcdTime::from_unix(now)
+            .map_err(|e| DeviceError::Unexpected(format!("cannot encode the time: {e}")))?;
+        self.expect_success(&Request::SetTime(time))
+    }
+
+    /// Reads the tablet's clock, in unix seconds.
+    pub fn read_time(&mut self) -> Result<i64, DeviceError> {
+        match self.exchange(&Request::GetTime, "time", |r| matches!(r, Reply::Time(_)))? {
+            Reply::Time(time) => Ok(time.to_unix()),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Tells the tablet to send page bytes on the page-data characteristic (once per session,
+    /// before any download).
+    pub fn set_file_transfer_reporting(&mut self) -> Result<(), DeviceError> {
+        self.expect_success(&Request::SetFileTransferReportingType)
+    }
+
+    /// The tablet's name. Long names may come in several chunks ending with a line feed.
+    pub fn name(&mut self) -> Result<String, DeviceError> {
+        let mut bytes = match self.exchange(&Request::GetName, "name", is_name_chunk)? {
+            Reply::NameChunk(chunk) => chunk,
+            other => return Err(unexpected(&other)),
+        };
+        while bytes.last() != Some(&b'\n') {
+            match self.wait_reply(NAME_CHUNK_TIMEOUT, "name", is_name_chunk) {
+                Ok(Reply::NameChunk(chunk)) => bytes.extend(chunk),
+                Ok(other) => return Err(unexpected(&other)),
+                // Some tablets send the whole name without the final line feed.
+                Err(DeviceError::Timeout(_)) => break,
+                Err(error) => return Err(error),
+            }
+        }
+        let name: String = bytes.iter().map(|&b| char::from(b)).collect();
+        Ok(name.trim_end_matches(['\n', '\r', '\0']).trim().to_owned())
+    }
+
+    /// Firmware version, `B160805A-C170704A` style.
+    pub fn firmware(&mut self) -> Result<String, DeviceError> {
+        let mut parts = Vec::with_capacity(2);
+        for part in [FirmwarePart::High, FirmwarePart::Low] {
+            let reply = self.exchange(
+                &Request::GetFirmware { part },
+                "firmware",
+                |r| matches!(r, Reply::Firmware { part: p, .. } if *p == part),
+            )?;
+            if let Reply::Firmware { text, .. } = reply {
+                parts.push(text.trim_end_matches('\0').trim().to_owned());
+            }
+        }
+        Ok(parts.join("-"))
+    }
+
+    /// Battery level in percent and whether it is charging.
+    pub fn battery(&mut self) -> Result<(u8, bool), DeviceError> {
+        match self.exchange(&Request::GetBattery, "battery", |r| {
+            matches!(r, Reply::Battery { .. })
+        })? {
+            Reply::Battery { percent, charging } => Ok((percent, charging)),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Width and height of the drawing area, in device units. The Slate exists in two sizes
+    /// that report the same name, so this must always be asked.
+    pub fn dimensions(&mut self) -> Result<(u32, u32), DeviceError> {
+        let mut read = |dimension: Dimension| -> Result<u32, DeviceError> {
+            match self.exchange(
+                &Request::GetDimension(dimension),
+                "dimensions",
+                |r| matches!(r, Reply::Dimension { which, .. } if *which == dimension),
+            )? {
+                Reply::Dimension { value, .. } => Ok(value),
+                other => Err(unexpected(&other)),
+            }
+        };
+        Ok((read(Dimension::Width)?, read(Dimension::Height)?))
+    }
+
+    /// Name, firmware, battery and size.
+    pub fn info(&mut self) -> Result<DeviceInfo, DeviceError> {
+        let name = self.name()?;
+        let firmware = self.firmware()?;
+        let (battery_percent, charging) = self.battery()?;
+        let (width, height) = self.dimensions()?;
+        Ok(DeviceInfo {
+            name,
+            firmware,
+            battery_percent,
+            charging,
+            width,
+            height,
+        })
+    }
+
+    /// Switches the tablet to a mode (`b1`).
+    pub fn set_mode(&mut self, mode: Mode) -> Result<(), DeviceError> {
+        self.expect_success(&Request::SetMode(mode))
+    }
+
+    /// Number of pages stored on the tablet. Switches it to paper mode first.
+    pub fn stored_pages(&mut self) -> Result<u16, DeviceError> {
+        self.set_mode(Mode::Paper)?;
+        match self.exchange(&Request::AvailableFilesCount, "page count", |r| {
+            matches!(r, Reply::FilesCount(_))
+        })? {
+            Reply::FilesCount(count) => Ok(count),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Downloads the oldest stored page without deleting it. Requires paper mode and the
+    /// file-transfer reporting type (see [`Session::stored_pages`] and
+    /// [`Session::set_file_transfer_reporting`]).
+    pub fn download_oldest(&mut self) -> Result<DownloadedPage, DeviceError> {
+        let (announced_size, timestamp) =
+            match self.exchange(&Request::GetFileInfo, "page info", |r| {
+                matches!(r, Reply::FileInfo { .. })
+            })? {
+                Reply::FileInfo { size, time } => (size, Some(time.to_unix())),
+                other => return Err(unexpected(&other)),
+            };
+
+        self.page_data.clear();
+        self.last_page_data = None;
+        self.exchange(&Request::DownloadOldestFile, "download start", |r| {
+            matches!(r, Reply::DownloadStart { .. })
+        })?;
+
+        // The end marker can take long for a big page: keep waiting while bytes flow.
+        let crc = loop {
+            match self.wait_reply(DATA_IDLE_TIMEOUT, "end of download", |r| {
+                matches!(r, Reply::DownloadEnd { .. })
+            }) {
+                Ok(Reply::DownloadEnd { crc }) => break crc,
+                Ok(other) => return Err(unexpected(&other)),
+                Err(DeviceError::Timeout(what)) => {
+                    let flowing = self.last_page_data.is_some_and(|last| {
+                        self.clock.monotonic().saturating_sub(last) < DATA_IDLE_TIMEOUT
+                    });
+                    if !flowing {
+                        return Err(DeviceError::Timeout(what));
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        };
+
+        // The last chunks travel on another characteristic than the end marker.
+        let deadline = self.clock.monotonic() + DATA_DRAIN_TIMEOUT;
+        let mut actual = ardoise_proto::crc32(&self.page_data);
+        while actual != crc {
+            let now = self.clock.monotonic();
+            if now >= deadline {
+                return Err(DeviceError::CrcMismatch {
+                    expected: crc,
+                    actual,
+                });
+            }
+            self.pump((deadline - now).min(WAIT_SLICE))?;
+            actual = ardoise_proto::crc32(&self.page_data);
+        }
+        Ok(DownloadedPage {
+            bytes: std::mem::take(&mut self.page_data),
+            timestamp,
+            announced_size,
+        })
+    }
+
+    /// Deletes the oldest stored page (the one [`Session::download_oldest`] returns).
+    pub fn delete_oldest(&mut self) -> Result<(), DeviceError> {
+        self.expect_success(&Request::DeleteOldestFile)
+    }
+
+    /// Downloads every stored page, oldest first. Each page goes to `sink` with its 1-based
+    /// index and the total; only once the sink returned `Ok` (page safely stored) is it deleted
+    /// from the tablet, when `delete` is set. Without deletion only the oldest page can be read
+    /// (the tablet has no other way to reach the next one).
+    pub fn sync(
+        &mut self,
+        delete: bool,
+        sink: &mut dyn FnMut(DownloadedPage, u16, u16) -> Result<(), String>,
+    ) -> Result<SyncSummary, DeviceError> {
+        self.set_file_transfer_reporting()?;
+        let available = self.stored_pages()?;
+        let mut summary = SyncSummary {
+            available,
+            ..SyncSummary::default()
+        };
+        let to_read = if delete { available } else { available.min(1) };
+        for index in 1..=to_read {
+            self.check_cancel()?;
+            let page = self.download_oldest()?;
+            sink(page, index, available).map_err(DeviceError::Storage)?;
+            summary.downloaded += 1;
+            if delete {
+                self.delete_oldest()?;
+                summary.deleted += 1;
+            }
+        }
+        Ok(summary)
+    }
+
+    /// Enters live mode: pen samples start flowing (see [`Session::next_live`]).
+    pub fn start_live(&mut self) -> Result<(), DeviceError> {
+        self.live.clear();
+        self.set_mode(Mode::Live)
+    }
+
+    /// Leaves live mode (idle mode, as the tablet expects).
+    pub fn stop_live(&mut self) -> Result<(), DeviceError> {
+        self.set_mode(Mode::Idle)?;
+        self.live.clear();
+        Ok(())
+    }
+
+    /// Next raw live-mode notification, waiting up to `timeout`.
+    pub fn next_live(&mut self, timeout: Duration) -> Result<Option<Vec<u8>>, DeviceError> {
+        if let Some(packet) = self.live.pop_front() {
+            return Ok(Some(packet));
+        }
+        let deadline = self.clock.monotonic() + timeout;
+        loop {
+            self.check_cancel()?;
+            let now = self.clock.monotonic();
+            if now >= deadline {
+                return Ok(None);
+            }
+            self.pump((deadline - now).min(WAIT_SLICE))?;
+            if let Some(packet) = self.live.pop_front() {
+                return Ok(Some(packet));
+            }
+        }
+    }
+
+    /// Closes the link.
+    pub fn disconnect(mut self) -> Result<(), DeviceError> {
+        self.connected = false;
+        self.transport.disconnect().map_err(DeviceError::from)
+    }
+
+    // --- plumbing -------------------------------------------------------------------------
+
+    fn send(&mut self, request: &Request) -> Result<(), DeviceError> {
+        if !self.connected {
+            return Err(DeviceError::Disconnected);
+        }
+        let bytes = request
+            .encode()
+            .map_err(|e| DeviceError::Unexpected(format!("cannot encode {request:?}: {e}")))?;
+        self.transport.write(&bytes)?;
+        Ok(())
+    }
+
+    fn exchange(
+        &mut self,
+        request: &Request,
+        what: &'static str,
+        accept: impl Fn(&Reply) -> bool,
+    ) -> Result<Reply, DeviceError> {
+        self.send(request)?;
+        self.wait_reply(self.reply_timeout, what, accept)
+    }
+
+    fn expect_success(&mut self, request: &Request) -> Result<(), DeviceError> {
+        self.send(request)?;
+        self.wait_reply(self.reply_timeout, "acknowledgement", |r| {
+            matches!(r, Reply::Status(StatusCode::Success))
+        })
+        .map(|_| ())
+    }
+
+    /// Waits for a command reply accepted by `accept`. An error status is the tablet's
+    /// answer to the request and ends the wait; other unexpected frames are skipped.
+    fn wait_reply(
+        &mut self,
+        timeout: Duration,
+        what: &'static str,
+        accept: impl Fn(&Reply) -> bool,
+    ) -> Result<Reply, DeviceError> {
+        let deadline = self.clock.monotonic() + timeout;
+        loop {
+            while let Some(bytes) = self.commands.pop_front() {
+                // Malformed frames are in the log; they cannot be the expected answer.
+                let Ok(reply) = Reply::decode(&bytes) else {
+                    continue;
+                };
+                if accept(&reply) {
+                    return Ok(reply);
+                }
+                if let Reply::Status(code) = reply
+                    && code != StatusCode::Success
+                {
+                    return Err(DeviceError::Refused(code));
+                }
+            }
+            self.check_cancel()?;
+            let now = self.clock.monotonic();
+            if now >= deadline {
+                return Err(DeviceError::Timeout(what));
+            }
+            self.pump((deadline - now).min(WAIT_SLICE))?;
+        }
+    }
+
+    /// Receives at most one event and files it in its queue.
+    fn pump(&mut self, timeout: Duration) -> Result<(), DeviceError> {
+        if !self.connected {
+            return Err(DeviceError::Disconnected);
+        }
+        match self.transport.recv(timeout)? {
+            None => {}
+            Some(TransportEvent::Notification { channel, data }) => match channel {
+                Channel::Command => self.commands.push_back(data),
+                Channel::PageData => {
+                    self.page_data.extend_from_slice(&data);
+                    self.last_page_data = Some(self.clock.monotonic());
+                }
+                Channel::Live => self.live.push_back(data),
+                Channel::SysEvent => {}
+            },
+            Some(TransportEvent::Disconnected) => {
+                self.connected = false;
+                return Err(DeviceError::Disconnected);
+            }
+        }
+        Ok(())
+    }
+
+    fn check_cancel(&self) -> Result<(), DeviceError> {
+        match &self.cancel {
+            Some(flag) if flag.load(Ordering::SeqCst) => Err(DeviceError::Cancelled),
+            _ => Ok(()),
+        }
+    }
+}
+
+fn is_name_chunk(reply: &Reply) -> bool {
+    matches!(reply, Reply::NameChunk(_))
+}
+
+fn unexpected(reply: &Reply) -> DeviceError {
+    DeviceError::Unexpected(format!("{reply:?}"))
+}
+
+/// Current time of `clock` in unix seconds.
+pub fn unix_seconds(clock: &dyn Clock) -> i64 {
+    match clock.now().duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX),
+        Err(before) => -i64::try_from(before.duration().as_secs()).unwrap_or(i64::MAX),
+    }
+}
+
+#[cfg(test)]
+#[path = "session_tests.rs"]
+mod tests;
