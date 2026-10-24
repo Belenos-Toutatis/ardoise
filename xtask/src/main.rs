@@ -1,4 +1,4 @@
-//! Project automation: `cargo xtask check [--quick]`, `cargo xtask selftest` and
+//! Project automation: `cargo xtask check [--quick]`, `cargo xtask selftest`, `cargo xtask e2e` and
 //! `cargo xtask golden`.
 
 use std::fs;
@@ -12,7 +12,9 @@ Commands:
   check [--quick]  frontend build, fmt, clippy, tests, frontend checks, release build
                    (--quick skips the release build)
   selftest         run target/release/ardoise.exe --self-test and check its size
-  golden           regenerate the reference images in testdata/golden, then check them";
+  golden           regenerate the reference images in testdata/golden, then check them
+  e2e              end-to-end tests of the main journeys, in French and English, on the
+                   release executable (run `cargo xtask check` first)";
 
 /// Maximum accepted size of the release executable, in bytes.
 const MAX_EXE_BYTES: u64 = 30 * 1024 * 1024;
@@ -31,6 +33,7 @@ fn main() -> ExitCode {
         ["check", "--quick"] => check(true),
         ["selftest"] => selftest(),
         ["golden"] => golden(),
+        ["e2e"] => e2e(),
         _ => {
             println!("{USAGE}");
             ExitCode::from(2)
@@ -260,6 +263,32 @@ fn golden() -> ExitCode {
         ExitCode::SUCCESS
     } else {
         println!("GOLDEN FAILED");
+        ExitCode::FAILURE
+    }
+}
+
+/// Runs the end-to-end journeys (`app/e2e/run.mjs`) on the release executable: a demo library
+/// is created in a temporary folder and the real window is driven through WebView2's DevTools
+/// protocol, once in French and once in English.
+fn e2e() -> ExitCode {
+    let root = root();
+    let exe = root.join("target").join("release").join("ardoise.exe");
+    if !exe.exists() {
+        eprintln!(
+            "{} not found: run `cargo xtask check` first.",
+            exe.display()
+        );
+        println!("E2E FAILED: ardoise.exe missing");
+        return ExitCode::FAILURE;
+    }
+    let script = root.join("app").join("e2e").join("run.mjs");
+    let exe = exe.display().to_string();
+    let script = script.display().to_string();
+    if run(&root, "node", &[script.as_str(), exe.as_str()]) {
+        println!("E2E OK");
+        ExitCode::SUCCESS
+    } else {
+        println!("E2E FAILED");
         ExitCode::FAILURE
     }
 }
