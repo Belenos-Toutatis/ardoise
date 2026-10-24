@@ -5,7 +5,7 @@
 node_modules/
 dist/
 # Tauri
-src-tauri/gen/
+/app/src-tauri/gen/
 # Local artefacts
 *.log
 *.tmp

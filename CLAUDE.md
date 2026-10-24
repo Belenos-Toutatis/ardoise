@@ -8,9 +8,20 @@ Application portable pour Windows (Rust + Tauri 2) qui remplace Wacom Inkspace p
 
 ## Commandes
 
-*À compléter pendant le jalon M0.*
+- `cargo xtask check` : vérification complète (dépendances npm, compilation de l'interface, formatage, clippy sans avertissement, tests Rust, svelte-check + vitest, compilation release). Se termine par `CHECK OK`. `--quick` saute la compilation release.
+- `cargo xtask selftest` : taille de `target\release\ardoise.exe` (< 30 Mo) puis `ardoise.exe --self-test`. Se termine par `SELFTEST OK`.
+- `cargo fmt --all` avant de lancer la vérification.
+- Une compilation release de l'app exige `--features custom-protocol` (sinon Tauri chargerait l'interface depuis le serveur de développement au lieu de l'embarquer ; une garde `compile_error!` l'empêche). `cargo xtask check` le fait.
+- Interface seule (dans `app/`) : `npm run build`, `npm run check`, `npm test`. Application en développement : `npm run tauri dev` (dans `app/`).
+- Les crates se testent une par une : `cargo test -p ardoise-core`.
 
-- `cargo xtask check` : vérification complète (formatage, clippy sans avertissement, tests Rust, tests et compilation de l'interface, compilation release). Se termine par `CHECK OK`.
+## Structure
+
+- `crates/ardoise-*` : bibliothèques Rust (rôle de chacune : SPEC §6.1 et en tête de chaque `lib.rs`).
+- `app/src-tauri/` : l'exécutable `ardoise` (fenêtres, commandes appelées par l'interface, `--self-test`).
+- `app/ui/src/` : interface Svelte 5 + TypeScript ; textes dans `locales/fr.json` et `locales/en.json` ; appels à Rust regroupés dans `lib/api.ts`.
+- `xtask/` : automatisation (`check`, `selftest`).
+- Erreurs envoyées à l'interface : `{ code, message }` ; le code choisit une phrase traduite `errorCodes.*`.
 
 ## Conventions
 

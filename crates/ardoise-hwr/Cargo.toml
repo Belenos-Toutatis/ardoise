@@ -1,0 +1,13 @@
+[package]
+name = "ardoise-hwr"
+description = "Offline handwriting recognition through Windows."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

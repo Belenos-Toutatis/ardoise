@@ -1,0 +1,55 @@
+{
+  "app": {
+    "name": "Ardoise",
+    "tagline": "Vos pages Bamboo Slate, sur tous vos ordinateurs."
+  },
+  "common": {
+    "continue": "Continuer",
+    "change": "Changer",
+    "close": "Fermer",
+    "loading": "Chargement…"
+  },
+  "language": {
+    "fr": "Français",
+    "en": "English"
+  },
+  "wizard": {
+    "title": "Bienvenue dans Ardoise",
+    "intro": "Choisissez le dossier où Ardoise rangera vos notes.",
+    "syncHint": "Choisissez de préférence un dossier synchronisé (Nextcloud, OneDrive…) : vous retrouverez vos notes sur tous vos ordinateurs.",
+    "machineHint": "Ce choix ne concerne que cet ordinateur ({machine}). Sur un autre ordinateur, Ardoise vous demandera où se trouve ce même dossier.",
+    "choose": "Choisir un dossier…",
+    "pickerTitle": "Dossier de la bibliothèque Ardoise",
+    "chosen": "Dossier choisi",
+    "existing": "Ce dossier contient déjà une bibliothèque Ardoise : elle sera utilisée telle quelle.",
+    "new": "Une nouvelle bibliothèque sera créée dans ce dossier."
+  },
+  "home": {
+    "library": "Bibliothèque",
+    "empty": "Aucune note pour l'instant.",
+    "emptyHint": "Les pages de votre tablette apparaîtront ici après la première synchronisation."
+  },
+  "settings": {
+    "title": "Réglages",
+    "language": "Langue",
+    "languageAuto": "Automatique (langue de Windows)",
+    "theme": "Thème",
+    "themeSystem": "Comme Windows",
+    "themeLight": "Clair",
+    "themeDark": "Sombre",
+    "library": "Dossier de la bibliothèque",
+    "machine": "Cet ordinateur",
+    "settingsFile": "Fichier de réglages",
+    "version": "Version {version}"
+  },
+  "errors": {
+    "settings": "Impossible de lire le fichier de réglages {path} : {message}. Il n'a pas été modifié ; corrigez-le ou supprimez-le, puis relancez Ardoise.",
+    "library": "Impossible d'utiliser ce dossier : {message}",
+    "generic": "Une erreur est survenue : {message}"
+  },
+  "errorCodes": {
+    "settings": "le fichier de réglages ne peut pas être lu ou modifié ({detail})",
+    "notAFolder": "le dossier « {detail} » n'existe pas",
+    "libraryInit": "impossible d'y créer le dossier .ardoise ({detail})"
+  }
+}

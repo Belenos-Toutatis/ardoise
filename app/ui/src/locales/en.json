@@ -1,0 +1,55 @@
+{
+  "app": {
+    "name": "Ardoise",
+    "tagline": "Your Bamboo Slate pages, on all your computers."
+  },
+  "common": {
+    "continue": "Continue",
+    "change": "Change",
+    "close": "Close",
+    "loading": "Loading…"
+  },
+  "language": {
+    "fr": "Français",
+    "en": "English"
+  },
+  "wizard": {
+    "title": "Welcome to Ardoise",
+    "intro": "Choose the folder where Ardoise will keep your notes.",
+    "syncHint": "Preferably pick a synced folder (Nextcloud, OneDrive…): your notes will then be available on all your computers.",
+    "machineHint": "This choice only applies to this computer ({machine}). On another computer, Ardoise will ask where that same folder is.",
+    "choose": "Choose a folder…",
+    "pickerTitle": "Ardoise library folder",
+    "chosen": "Selected folder",
+    "existing": "This folder already contains an Ardoise library: it will be used as is.",
+    "new": "A new library will be created in this folder."
+  },
+  "home": {
+    "library": "Library",
+    "empty": "No notes yet.",
+    "emptyHint": "Pages from your tablet will appear here after the first sync."
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "languageAuto": "Automatic (Windows language)",
+    "theme": "Theme",
+    "themeSystem": "Same as Windows",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "library": "Library folder",
+    "machine": "This computer",
+    "settingsFile": "Settings file",
+    "version": "Version {version}"
+  },
+  "errors": {
+    "settings": "Cannot read the settings file {path}: {message}. It was left unchanged; fix or delete it, then restart Ardoise.",
+    "library": "Cannot use this folder: {message}",
+    "generic": "Something went wrong: {message}"
+  },
+  "errorCodes": {
+    "settings": "the settings file cannot be read or written ({detail})",
+    "notAFolder": "the folder “{detail}” does not exist",
+    "libraryInit": "cannot create the .ardoise folder in it ({detail})"
+  }
+}

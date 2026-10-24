@@ -6,7 +6,7 @@ Légende : **[matériel]** = nécessite la vraie tablette, donc l'utilisateur au
 
 ## Vérification commune à tous les jalons
 
-`cargo xtask check` lance dans l'ordre : formatage (`cargo fmt --check`), `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, les tests et la compilation de l'interface, puis `cargo build --release`. Il se termine par la ligne `CHECK OK` (code de sortie 0) ou par la liste des échecs.
+`cargo xtask check` lance dans l'ordre : installation des dépendances et compilation de l'interface (nécessaire avant de compiler l'application), formatage (`cargo fmt --check`), `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, les vérifications et tests de l'interface, puis `cargo build --release`. Il se termine par la ligne `CHECK OK` (code de sortie 0) ou par la liste des échecs.
 
 Règles permanentes :
 - Ne jamais modifier `SPEC.md` sans l'accord de l'utilisateur ; une incohérence découverte est notée dans `docs/questions.md`.
@@ -17,15 +17,15 @@ Règles permanentes :
 
 ## M0 — Fondations
 
-- [ ] Espace de travail Cargo : `crates/` (voir SPEC §6), `app/` (Tauri 2 + interface Svelte/TypeScript), `xtask/`.
-- [ ] `cargo xtask check` opérationnel, avec la ligne finale `CHECK OK`.
-- [ ] `CLAUDE.md` : commandes, structure, conventions de code, règles des sous-agents.
-- [ ] Fenêtre Tauri vide qui s'ouvre ; option `ardoise.exe --self-test` : démarre, vérifie que l'interface est chargée, indique si un adaptateur Bluetooth LE est présent et allumé, quitte avec le code 0.
-- [ ] Exécutable autonome : CRT lié statiquement, interface embarquée, dossier WebView2 fixé dans `%LOCALAPPDATA%\Ardoise\webview` (SPEC §6.2).
-- [ ] `LICENSE` (GPL-3.0-or-later) ; `testdata/private/` ignoré par git.
-- [ ] Traductions FR/EN branchées (bibliothèque i18n, un texte de test dans chaque langue, test qui échoue si une clé manque dans une langue).
-- [ ] Réglages portables `ardoise.toml` (SPEC §3.1) avec tests : lecture, écriture atomique, section par machine, repli sur `%APPDATA%`.
-- [ ] Assistant de premier lancement : choix du dossier de bibliothèque.
+- [x] Espace de travail Cargo : `crates/` (voir SPEC §6), `app/` (Tauri 2 + interface Svelte/TypeScript), `xtask/`.
+- [x] `cargo xtask check` opérationnel, avec la ligne finale `CHECK OK`.
+- [x] `CLAUDE.md` : commandes, structure, conventions de code, règles des sous-agents.
+- [x] Fenêtre Tauri vide qui s'ouvre ; option `ardoise.exe --self-test` : démarre, vérifie que l'interface est chargée, indique si un adaptateur Bluetooth LE est présent et allumé, quitte avec le code 0.
+- [x] Exécutable autonome : CRT lié statiquement, interface embarquée, dossier WebView2 fixé dans `%LOCALAPPDATA%\Ardoise\webview` (SPEC §6.2).
+- [x] `LICENSE` (GPL-3.0-or-later) ; `testdata/private/` ignoré par git.
+- [x] Traductions FR/EN branchées (bibliothèque i18n, un texte de test dans chaque langue, test qui échoue si une clé manque dans une langue).
+- [x] Réglages portables `ardoise.toml` (SPEC §3.1) avec tests : lecture, écriture atomique, section par machine, repli sur `%APPDATA%`.
+- [x] Assistant de premier lancement : choix du dossier de bibliothèque.
 
 **Critères de fin** : `cargo xtask check` affiche `CHECK OK` ; `target\release\ardoise.exe --self-test` affiche `SELF-TEST OK` et sort avec le code 0 ; l'exécutable fait moins de 30 Mo (taille affichée).
 
