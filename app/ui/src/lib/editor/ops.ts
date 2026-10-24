@@ -275,8 +275,9 @@ export const MIN_CROP = 1000;
 
 /**
  * Crops the page to `rect` (page coordinates): the page takes its size (rounded to whole
- * units) and its top-left corner becomes the origin. Strokes entirely outside are removed;
- * the others are kept whole.
+ * units) and its top-left corner becomes the origin. Visible strokes entirely outside are
+ * removed; the others are kept whole. Strokes on hidden layers are always kept (moved with the
+ * page, even outside it): the user cannot see them, so a crop must not delete them silently.
  */
 export function cropTo(note: Note, rect: Rect): Note {
   const x = Math.round(rect.x);
@@ -289,7 +290,7 @@ export function cropTo(note: Note, rect: Rect): Note {
   const strokes: Stroke[] = [];
   for (const stroke of note.strokes) {
     const bounds = strokeBounds(stroke);
-    if (!bounds || !overlaps(bounds, area)) continue;
+    if (layerVisible(note, stroke.layer) && (!bounds || !overlaps(bounds, area))) continue;
     strokes.push({ ...stroke, points: stroke.points.map((p) => ({ ...p, x: p.x - x, y: p.y - y })) });
   }
   return { ...note, page: { width, height }, strokes };

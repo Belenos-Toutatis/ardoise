@@ -282,8 +282,18 @@
     "unsaved": "Modifications non enregistrées",
     "saveError": "Impossible d'enregistrer la note : {message}",
     "conflictTitle": "Vos modifications n'ont pas été enregistrées",
-    "conflictHint": "Vos modifications sont toujours affichées ici, mais les enregistrer écraserait l'autre version. Revenez à la bibliothèque et rouvrez la note pour voir sa dernière version.",
+    "conflictHint": "Vos modifications sont toujours affichées ici, mais les enregistrer écraserait l'autre version. Enregistrez-les comme une copie pour ne rien perdre, ou revenez à la bibliothèque et rouvrez la note pour voir sa dernière version.",
     "dismiss": "Fermer",
+    "saveCopy": "Enregistrer comme copie",
+    "copyTitle": "{title} (copie)",
+    "disk": {
+      "changedTitle": "Cette note a été modifiée ailleurs",
+      "changedClean": "Elle a sans doute été modifiée sur un autre ordinateur. Rechargez-la pour voir sa dernière version.",
+      "changedDirty": "Elle a sans doute été modifiée sur un autre ordinateur : l'enregistrer maintenant serait refusé pour ne pas écraser l'autre version. Enregistrez vos modifications comme une copie.",
+      "missingTitle": "Cette note n'est plus dans la bibliothèque",
+      "missing": "Elle a peut-être été supprimée ou déplacée sur un autre ordinateur. Enregistrez-la comme une copie pour la garder.",
+      "reload": "Recharger"
+    },
     "undo": "Annuler (Ctrl+Z)",
     "redo": "Rétablir (Ctrl+Y)",
     "toolbar": "Outils d'édition",
@@ -384,7 +394,8 @@
       "name": "Nom du calque {n}",
       "up": "Monter « {name} »",
       "down": "Descendre « {name} »",
-      "merge": "Fusionner « {name} » avec le calque du dessous"
+      "merge": "Fusionner « {name} » avec le calque du dessous",
+      "hiddenActive": "Le calque actif est masqué : affichez-le ou choisissez un autre calque pour dessiner."
     },
     "zoom": {
       "label": "Zoom",
@@ -398,7 +409,9 @@
       "message": "Cette note a des modifications qui n'ont pas été enregistrées.",
       "save": "Enregistrer et revenir",
       "discard": "Revenir sans enregistrer",
-      "cancel": "Rester"
+      "cancel": "Rester",
+      "saveClose": "Enregistrer et fermer",
+      "discardClose": "Fermer sans enregistrer"
     }
   }
 }

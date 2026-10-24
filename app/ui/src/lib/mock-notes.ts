@@ -16,6 +16,21 @@ function stored(path: string) {
   return entry;
 }
 
+const isU32 = (value: unknown) => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 0xffff_ffff;
+
+/**
+ * What the desktop app's deserialisation refuses before the command runs: stroke layers and
+ * sample times are `u32` in Rust, and serde rejects fractions and negative numbers.
+ */
+function checkNote(note: Note): void {
+  for (const stroke of note.strokes) {
+    const bad = !isU32(stroke.layer) ? stroke.layer : stroke.points.find((p) => !isU32(p.t))?.t;
+    if (bad !== undefined) {
+      throw `invalid args \`note\` for command \`save_note\`: invalid value: \`${bad}\`, expected u32`;
+    }
+  }
+}
+
 export function mockNotesInvoke(command: string, args: Record<string, unknown>): unknown {
   switch (command) {
     case 'open_note': {
@@ -25,8 +40,11 @@ export function mockNotesInvoke(command: string, args: Record<string, unknown>):
     case 'save_note': {
       const path = args.path as string;
       const entry = stored(path);
+      checkNote(args.note as Note);
       if (!sameStamp(entry.stamp, args.stamp as FileStamp)) throw { code: 'noteConflict', message: path };
       const note = copy(args.note as Note);
+      // Like `save_in`: the file keeps its own id.
+      note.id = entry.note.id;
       note.modified = Date.now();
       entry.note = note;
       entry.stamp = freshStamp(JSON.stringify(note).length);

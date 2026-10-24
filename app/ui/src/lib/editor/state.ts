@@ -45,10 +45,27 @@ export const DEFAULT_TOOLS: ToolSettings = {
 /** Offset of pasted copies, device units (4 mm). */
 export const PASTE_OFFSET = 400;
 
-/** A note ready for editing: at least one layer, drawing on the top one. */
+/** A note ready for editing: at least one layer, drawing on the top visible one. */
 export function docFromNote(note: Note, defaultLayerName = 'Layer 1'): Doc {
   const fixed = note.layers.length > 0 ? note : { ...note, layers: [{ name: defaultLayerName, visible: true }] };
-  return { note: fixed, selection: [], activeLayer: fixed.layers.length - 1 };
+  const top = fixed.layers.length - 1;
+  return { note: fixed, selection: [], activeLayer: nearestVisibleLayer(fixed, top) ?? top };
+}
+
+/** The visible layer closest to `index` (itself if visible; the upper one on a tie), or null. */
+export function nearestVisibleLayer(note: Note, index: number): number | null {
+  const count = note.layers.length;
+  for (let d = 0; d < count; d++) {
+    for (const i of [index + d, index - d]) {
+      if (i >= 0 && i < count && note.layers[i].visible) return i;
+    }
+  }
+  return null;
+}
+
+/** New ink goes on the active layer only while it is visible (never on a hidden layer). */
+export function canDraw(doc: Doc): boolean {
+  return doc.note.layers[doc.activeLayer]?.visible ?? true;
 }
 
 export function initialState(note: Note, tools: ToolSettings = DEFAULT_TOOLS): EditorState {
@@ -87,8 +104,9 @@ export function setActiveLayer(doc: Doc, layer: number): Doc {
   return { ...doc, activeLayer: layer };
 }
 
-/** A new stroke drawn with the tool settings on the active layer. */
+/** A new stroke drawn with the tool settings on the active layer (none if it is hidden). */
 export function addStroke(doc: Doc, stroke: Omit<Stroke, 'layer'>): Doc {
+  if (!canDraw(doc)) return doc;
   return withNote(doc, ops.addStroke(doc.note, { ...stroke, layer: doc.activeLayer }), []);
 }
 
@@ -114,8 +132,12 @@ export function selectedStrokes(doc: Doc): Stroke[] {
   return doc.selection.map((i) => doc.note.strokes[i]).filter((s): s is Stroke => s !== undefined);
 }
 
-/** Pastes copies of `strokes` on the active layer, shifted; the copies become the selection. */
+/**
+ * Pastes copies of `strokes` on the active layer, shifted; the copies become the selection.
+ * Nothing happens while the active layer is hidden.
+ */
 export function paste(doc: Doc, strokes: readonly Stroke[], offset: Vec = { x: PASTE_OFFSET, y: PASTE_OFFSET }): Doc {
+  if (!canDraw(doc)) return doc;
   const { note, indices } = ops.insertCopies(doc.note, strokes, offset, doc.activeLayer);
   return withNote(doc, note, indices);
 }
@@ -140,7 +162,10 @@ export function setLayerVisible(doc: Doc, index: number, visible: boolean): Doc 
   if (note === doc.note) return doc;
   // Hidden strokes cannot stay selected.
   const selection = visible ? doc.selection : doc.selection.filter((i) => doc.note.strokes[i]?.layer !== index);
-  return withNote(doc, note, selection);
+  // New ink must not land on a hidden layer: draw on the nearest visible one instead.
+  const activeLayer =
+    !visible && index === doc.activeLayer ? (nearestVisibleLayer(note, index) ?? doc.activeLayer) : doc.activeLayer;
+  return { ...withNote(doc, note, selection), activeLayer };
 }
 
 export function renameLayer(doc: Doc, index: number, name: string): Doc {

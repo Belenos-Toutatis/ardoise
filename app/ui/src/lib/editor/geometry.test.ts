@@ -97,6 +97,15 @@ describe('geometry', () => {
     expect(dense[1].t).toBe(25);
     expect(densify(points, 200)).toBe(points);
   });
+
+  it('interpolates whole milliseconds only', () => {
+    const points = [
+      { x: 0, y: 0, pressure: 0, t: 0 },
+      { x: 90, y: 0, pressure: 1, t: 10 },
+    ];
+    const dense = densify(points, 30);
+    expect(dense.map((p) => p.t)).toEqual([0, 3, 7, 10]);
+  });
 });
 
 describe('zoom and pan', () => {

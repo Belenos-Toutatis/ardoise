@@ -42,6 +42,19 @@ describe('editor commands in the browser stand-in', () => {
     expect(mockNotesInvoke('save_note', { path: path(), note, stamp: next })).toBeTruthy();
   });
 
+  it("keeps the file's own id, and refuses what Rust cannot read (fractional times)", () => {
+    const { note, stamp } = mockNotesInvoke('open_note', { path: path() }) as OpenedNote;
+    const id = note.id;
+    note.id = 'another-id';
+    const next = mockNotesInvoke('save_note', { path: path(), note, stamp }) as FileStamp;
+    expect(mockLibrary().notes.get(path())!.note.id).toBe(id);
+    note.strokes[0].points[1].t = 12.5;
+    expect(() => mockNotesInvoke('save_note', { path: path(), note, stamp: next })).toThrow(/expected u32/);
+    note.strokes[0].points[1].t = 12;
+    note.strokes[0].layer = -1;
+    expect(() => mockNotesInvoke('save_note', { path: path(), note, stamp: next })).toThrow(/expected u32/);
+  });
+
   it('renders backgrounds as SVG data URLs with the paper and template', () => {
     const page = { width: 29700, height: 21600 };
     const url = mockNotesInvoke('render_background', {
