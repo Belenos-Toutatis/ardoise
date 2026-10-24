@@ -47,7 +47,7 @@ resolves the merge.
 ## Replay semantics
 
 - Note time: `Point::t`, milliseconds from `Note::created`. Replay time: what the viewer sees.
-- `speed` (0.25 to 8) divides durations. Trimming pauses ("suppression des temps morts") caps every gap between
+- `speed` (0.25 to 16, SPEC §4.5) divides durations. Trimming pauses ("suppression des temps morts") caps every gap between
   two strokes at `max_pause` (e.g. 0.5 s) before applying the speed; gaps inside a stroke are kept.
 - The replay of a note with `Timing::Synthesized` is approximate (imported Inkspace notes): same rules.
 - Hidden layers are not drawn. A stroke appears point by point; outlines come from `ardoise-ink` exactly as on
@@ -56,6 +56,19 @@ resolves the merge.
   and will reuse it through the WebAssembly build if needed.
 - Narration keeps the time base it was recorded in (replay time with its options, or note time in live mode);
   the export plays it back in that base. Wiring comes with the interface, after M4.
+
+## Export dialog: help to choose a format
+
+The user asked (2026-10-24) for help choosing between formats, images and videos alike. Each format in the export
+dialogs shows what it is good for **and** its drawbacks, readable without hovering (the app is also used with a
+pen or a touch screen): a short line under each choice, plus a "Quel format choisir ?" panel comparing them
+(plays where, sound, transparency, file size, export time). FR and EN texts. Points to cover for the videos:
+
+- MP4: plays everywhere (Windows, phones, PowerPoint, ENT), sound; no transparency.
+- GIF: plays without a player (e-mail, web page, slide), loops; no sound, 256 colours, large files.
+- WebP: like GIF but smaller and sharper, transparency; no sound, some older programs do not open it.
+- WebM: open format, sound, small files, plays in browsers and Moodle; slow export (AV1), not every Windows
+  player opens it.
 
 ## Performance (SPEC §8)
 
