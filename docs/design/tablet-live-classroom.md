@@ -304,8 +304,8 @@ Live session and presentation (package B):
 - Sends and file writes happen outside the hub's lock (a window or the disk never delays the tablet's input); within
   a batch, points are grouped and only the last `hover` is kept.
 - Full screen uses `set_fullscreen_on_monitor` at the monitor's physical position (safer with mixed DPI); the
-  presentation window does not take the focus. `capabilities/presentation.json` grants `core:default` and
-  `core:window:allow-close` to it.
+  presentation window does not take the focus. `capabilities/presentation.json` grants `core:default` only (Esc goes
+  through `close_presentation`).
 - The 4 ms batching delay uses `thread::sleep` (to measure on Windows at H2: a timed wait on a condition variable
   would follow the 15.6 ms system tick).
 
@@ -318,3 +318,30 @@ Interface (packages C and D):
 - `window.__ardoiseLatency = { samples, median, p95, uiSamples, uiMedian }`; `median()` is `null` without samples.
 - The e2e journey checks that the tablet is empty from the sync result ("3 pages deleted"), and clicks "Sync now" if
   the automatic sync did not bring 10 notes within 20 s.
+
+Review fixes (after the independent review of M4):
+
+- **A copy that failed its check never counts as imported.** `LibrarySink::discard` deletes for good a file holding
+  exactly the bytes written (nothing is lost: the page stays on the tablet), moves anything else to the trash, and
+  leaves an unreadable file in place; `in_trash` only counts a trashed note that reads back with the page's id and
+  its exact `original.bin`.
+- **The guided test and the service share the tablet.** A real (not simulated) guided test pauses the service
+  (`TabletRuntime::pause`: status `unavailable` with `tabletBusy`); a guard restarts a fresh service when the test
+  ends, even on cancel, error or panic, so `device.json` is read again.
+- **Live pages that cannot be written.** `LiveEvent::SaveFailed { pageIndex, message }` is sent once per page while
+  the error repeats; a later successful write sends `saved`, after which the pages still failing are announced again.
+  The control window shows a persistent banner. When the main window closes, a page that cannot be written to the
+  library is backed up (complete `.ardoise`, atomic, new id) in `%LOCALAPPDATA%\Ardoise\live-backup\` (the temporary
+  folder without `LOCALAPPDATA`), and the path is logged in `live-backup.log` there.
+- After `live_stop`, `clearPage`, `newLayer` (also through the button) and the blackboard are refused
+  (`liveNotRunning`): they would rewrite notes already saved. Paging, view and style stay allowed.
+- While the tablet stays connected and idle, its page count is read again every 30 s (status up to date, automatic
+  sync when it grew; assumed harmless for the tablet, to check at H2).
+- `TabletRuntime` keeps the service in an `Arc` and never holds its lock while a request waits; tablet subscribers are
+  keyed by window label; the interrupt flag stays up while an interrupting request waits (`Interrupts` counter);
+  a long live log is written by a detached thread.
+- Without "delete after import" only the oldest page can be read: the option's hint says so, and the panel says how
+  many pages wait after such a sync.
+- With `--simulated-tablet`, forgetting the tablet never falls back on the library's `device.json`.
+- Known limit: the receipt stamp is taken when the session takes the notification out of the transport, so a wait
+  between the Bluetooth thread and the session is not in the measured latency (with the simulator there is none).
