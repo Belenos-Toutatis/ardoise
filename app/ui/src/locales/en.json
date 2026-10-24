@@ -48,7 +48,7 @@
     "collapse": "Collapse {name}",
     "tabletStatus": "Tablet",
     "tabletNone": "No tablet registered",
-    "tabletState": "Connection status: coming soon",
+    "tabletState": "Open or close the tablet panel",
     "search": "Search notes",
     "searchPlaceholder": "Search (title, tag)…",
     "sort": "Sort notes",
@@ -172,7 +172,122 @@
     }
   },
   "tablet": {
-    "title": "Tablet"
+    "title": "Tablet",
+    "loading": "Reading the tablet status…",
+    "unavailableStatus": "The tablet status is not available.",
+    "simulated": "Simulated tablet: no real tablet is being used.",
+    "simulatedButton": "Press the simulated tablet's button",
+    "state": {
+      "unavailable": "Unavailable",
+      "notRegistered": "Not registered",
+      "registering": "Registering…",
+      "searching": "Looking for the tablet…",
+      "connecting": "Connecting…",
+      "connected": "Connected",
+      "syncing": "Syncing…",
+      "live": "Live mode"
+    },
+    "hint": {
+      "searching": "Press the tablet's button briefly to connect it, and keep it close to the computer.",
+      "pendingSync": "Syncing will start as soon as the tablet is connected.",
+      "pendingLive": "Live mode will start as soon as the tablet is connected."
+    },
+    "battery": "Battery {percent}%",
+    "batteryCharging": "Battery {percent}%, charging",
+    "charging": "charging",
+    "info": {
+      "title": "Information",
+      "name": "Name",
+      "battery": "Battery",
+      "firmware": "Firmware version",
+      "pages": "Pages in memory",
+      "model": "Model",
+      "size": "Drawing area",
+      "readAt": "Read on",
+      "notRead": "The tablet has not been read yet: its information will appear at the first connection."
+    },
+    "sync": {
+      "title": "Sync",
+      "now": "Sync now",
+      "cancel": "Cancel",
+      "progress": "Page {current} of {total}",
+      "progressLabel": "Sync progress",
+      "last": "Last sync: {date}",
+      "savedNone": "No new pages.",
+      "savedOne": "1 note saved.",
+      "savedMany": "{count} notes saved.",
+      "deletedOne": "1 page deleted from the tablet.",
+      "deletedMany": "{count} pages deleted from the tablet.",
+      "never": "No sync since Ardoise started."
+    },
+    "live": {
+      "open": "Live mode",
+      "hint": "Draw on the tablet and see the stroke appear at once, on a projector too."
+    },
+    "options": {
+      "title": "Options",
+      "autoSync": "Sync automatically when connecting",
+      "autoSyncHint": "The tablet's pages are received as soon as it is in range.",
+      "deleteAfterImport": "Delete from the tablet after import",
+      "deleteAfterImportHint": "A page is deleted from the tablet only once its file has been written to the library and checked: if anything fails, it stays on the tablet.",
+      "button": "Tablet button in live mode",
+      "buttonNewPage": "New page",
+      "buttonNewLayer": "New layer",
+      "hand": "Tablet orientation",
+      "handRight": "Right-handed",
+      "handLeft": "Left-handed",
+      "handHint": "Left-handed: the tablet is used upside down; strokes are turned half a turn so that they appear upright."
+    },
+    "manage": {
+      "title": "Tablet settings",
+      "name": "Tablet name",
+      "nameHint": "1 to 15 characters, no accents.",
+      "rename": "Rename",
+      "nameInvalid": "The name must be 1 to 15 characters long, without accents or special characters.",
+      "renamed": "Tablet renamed.",
+      "setTime": "Set the clock",
+      "timeSet": "Clock set (remaining drift: {seconds} s).",
+      "timeHint": "Sets the tablet's clock to the computer's."
+    },
+    "register": {
+      "open": "Register the tablet",
+      "none": "No tablet is registered.",
+      "intro": "Register your Bamboo Slate to receive its pages automatically and draw live.",
+      "title": "Register the tablet",
+      "warningTitle": "Before you start",
+      "warning": "Once registered in Ardoise, the tablet will no longer work with the Wacom phone app or with Inkspace, until you register it there again.",
+      "warningPhone": "Turn off your phone's Bluetooth while registering.",
+      "cancel": "Cancel",
+      "retry": "Try again",
+      "finish": "Done",
+      "drawingLabel": "Drawing of the tablet and its button",
+      "step": {
+        "holdButton": {
+          "title": "Hold the tablet's button",
+          "text": "Hold the button down for about 6 seconds, until the light blinks blue."
+        },
+        "searching": {
+          "title": "Looking for the tablet",
+          "text": "Keep the tablet close to the computer: this can take a few seconds."
+        },
+        "connecting": {
+          "title": "Connecting to the tablet",
+          "text": "Stay still: Ardoise is introducing itself to the tablet."
+        },
+        "pressButton": {
+          "title": "Press the button briefly",
+          "text": "A short press on the tablet's button confirms the registration. You have about 30 seconds."
+        },
+        "done": {
+          "title": "Tablet registered",
+          "text": "“{name}” is ready: its pages will be received automatically whenever it is in range."
+        }
+      },
+      "error": {
+        "title": "The registration did not succeed",
+        "hint": "Check that Bluetooth is on and that the tablet is charged and close to the computer, then start again: hold the button until it blinks blue."
+      }
+    }
   },
   "diagnostic": {
     "open": "Test the tablet",

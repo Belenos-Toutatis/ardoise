@@ -90,3 +90,124 @@ Dans `<bibliothèque>\_ardoise\diagnostics\` :
 Et dans `<bibliothèque>\_ardoise\device.json` : l'enregistrement de la tablette, partagé par tous les PC (pas besoin de réenregistrer la tablette sur un autre ordinateur).
 
 **À me signaler** : seulement ce que le journal ne peut pas contenir — la couleur du voyant à un moment surprenant, un message d'erreur de Windows (photo), une étape où la tablette n'a visiblement pas réagi.
+
+---
+
+## H2 — Synchronisation, mode direct et projecteur
+
+**Durée** : 45 minutes à 1 heure. **Tablette** : chargée. **Dongle Bluetooth** : branché. **Téléphone** : Bluetooth **coupé** pendant tout le test. **Pour la dernière partie** : un second écran ou un vidéoprojecteur branché au PC (un simple deuxième écran suffit pour tout vérifier, sauf le débranchement du projecteur).
+
+Ce test vérifie le travail courant : la tablette se connecte toute seule, ses pages deviennent des notes, les réglages tiennent, le mode direct suit le stylet, et la présentation s'affiche sur l'écran choisi. Tout se fait avec l'interface d'Ardoise (« Tester la tablette » ne sert plus que si une étape échoue). Les libellés des boutons du mode direct sont ceux de la fenêtre ; ceux donnés ici sont indicatifs.
+
+### À la maison, avant
+
+1. Fermer Ardoise sur tous les PC, puis remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version.
+2. Ne **pas** utiliser l'option `--simulated-tablet` (elle sert aux essais sans tablette).
+
+### Au travail
+
+#### A. Préparation et enregistrement
+
+1. Couper le Bluetooth du téléphone. Brancher le dongle. Vérifier que la synchronisation Nextcloud est active.
+2. Lancer `ardoise.exe`. Dans la barre latérale (en bas à gauche), le bloc **Tablette** donne le nom de la tablette, un point de couleur et l'état de la connexion.
+   - **Si H1 a déjà enregistré la tablette** : le bloc affiche son nom et « Recherche de la tablette… ». Passer directement à la partie B.
+   - **Sinon** : le bloc affiche « Aucune tablette enregistrée ». Cliquer dessus pour ouvrir le panneau, puis sur **Enregistrer la tablette**.
+3. L'assistant commence par un **avertissement** : la tablette ne fonctionnera plus avec l'application du téléphone ni avec Inkspace. Le lire, puis cliquer sur **Continuer**.
+4. Suivre l'animation, qui montre le dessin de la tablette :
+
+| Étape de l'assistant | Ce qu'il faut faire |
+|---|---|
+| Maintenez le bouton de la tablette | **Maintenir le bouton enfoncé environ 6 secondes**, jusqu'à ce que le voyant **clignote en bleu**. L'anneau du dessin se remplit pendant ce temps, puis le voyant du dessin clignote : comparer avec la vraie tablette. |
+| Recherche, puis connexion | Rien : garder la tablette près de l'ordinateur. |
+| Appuyez brièvement sur le bouton | **Un appui bref** sur le bouton (environ 30 secondes pour le faire). |
+| Tablette enregistrée | Lire le résumé (nom, batterie, firmware, modèle, taille). Cliquer sur **Terminer**. |
+
+5. Vérifier aussi que **Annuler** est présent à chaque étape. Facultatif : cliquer sur **Annuler** pendant la recherche et constater que la tablette reste « Non enregistrée », puis recommencer jusqu'au bout. Si une erreur s'affiche, **noter son texte exact**, puis cliquer sur **Réessayer**.
+
+#### B. Synchronisation réelle
+
+1. Ouvrir le panneau de la tablette (clic sur le bloc **Tablette**). Laisser cochés **Synchroniser automatiquement à la connexion** et **Effacer de la tablette après import** (c'est l'état par défaut).
+2. **Sur la tablette, avec une feuille posée dessus, dessiner 3 pages** reconnaissables (par exemple : un carré et un cercle ; le mot `Ardoise` ; trois traits horizontaux de pression différente). **Appuyer brièvement sur le bouton après chaque page** pour l'enregistrer dans la mémoire de la tablette.
+   > Un appui bref seulement : maintenu 6 secondes, le bouton remettrait la tablette en mode enregistrement.
+3. Appuyer brièvement sur le bouton une dernière fois pour réveiller la tablette. Observer le bloc **Tablette** : « Recherche de la tablette… », puis « Connexion… », puis « Connectée ». **Noter le temps** entre l'appui et « Connectée ».
+4. Comme la synchro automatique est activée et que des pages attendent, la synchronisation démarre seule : barre de progression dans la barre latérale et dans le panneau (« Page 1 sur 3 »…). Si elle ne démarre pas au bout d'une minute, cliquer sur **Synchroniser maintenant** et le noter.
+5. **Vérifier** à la fin :
+   - le panneau indique « 3 notes enregistrées. 3 pages effacées de la tablette. » et **Pages en mémoire : 0** ;
+   - la grille de la bibliothèque contient **3 nouvelles notes** (sans titre, avec la date du jour) : les ouvrir et vérifier que les dessins sont reconnaissables, **à l'endroit**, et que la pression se voit (traits de plus en plus épais) ;
+   - un nouveau clic sur **Synchroniser maintenant** répond « Aucune nouvelle page. »
+6. **Annulation** : dessiner 3 nouvelles pages (bouton après chacune), reconnecter la tablette, et cliquer sur **Annuler** pendant la synchro. Les pages déjà reçues restent des notes, les autres restent sur la tablette (**Pages en mémoire** le montre) ; un clic sur **Synchroniser maintenant** récupère le reste, sans doublon.
+7. **Sans effacement** : décocher **Effacer de la tablette après import**, dessiner 1 page, synchroniser : la note apparaît et **Pages en mémoire : 1**. Synchroniser encore : aucune note en double. Recocher l'option et synchroniser : « 1 page effacée de la tablette », **Pages en mémoire : 0**.
+8. Fermer Ardoise puis la relancer : la tablette se reconnecte d'elle-même quand on appuie sur son bouton. Noter si c'est plus rapide ou plus lent que la première fois.
+
+#### C. Réglages de la tablette
+
+Dans le panneau, section **Réglages de la tablette** (la tablette doit être « Connectée » pour les deux premiers réglages) :
+
+1. **Renommer** : écrire `Classe 3B`, cliquer sur **Renommer** : le nom change dans le panneau et dans la barre latérale. Essayer `Éléphant` (accent) et un nom de plus de 15 caractères : le message « Le nom doit faire de 1 à 15 caractères… » apparaît et rien n'est envoyé. Fermer et relancer Ardoise, reconnecter la tablette : le nom est conservé. Remettre `Bamboo Slate` à la fin.
+2. **Mettre à l'heure** : cliquer, puis **noter l'écart restant** affiché (moins d'une seconde est normal).
+3. **Gaucher** : cocher **Gaucher**. **Retourner la tablette d'un demi-tour**, dessiner une page avec le mot `Ardoise` écrit normalement, appuyer brièvement sur le bouton, reconnecter, synchroniser. La note doit apparaître **à l'endroit**. Si le mot est à l'envers ou en miroir, le noter. Repasser ensuite en **Droitier**.
+4. **Batterie** : noter le pourcentage affiché. Brancher la tablette en USB : l'indication « en charge » (éclair) apparaît-elle à côté du pourcentage ?
+5. **Oublier la tablette** (en dernier) : un message de confirmation demande « Oublier la tablette… ? » ; **Annuler** ne fait rien, « Oui, l'oublier » oublie la tablette, et le panneau propose alors **Enregistrer la tablette**. Réenregistrer par l'assistant (partie A) avant de continuer.
+
+#### D. Mode direct (sans projecteur)
+
+1. Dans le panneau, cliquer sur **Mode direct**. L'état est « en attente » puis « direct » dès que la tablette envoie des points. Si besoin, appuyer brièvement sur le bouton pour la réveiller.
+2. **Dessiner** sur la tablette : le tracé doit apparaître à l'écran pendant qu'on dessine.
+   - **Impression de latence** : le tracé suit-il le stylet sans retard visible ? Choisir : *instantané* / *léger retard* / *retard gênant*. Noter aussi la **latence médiane** affichée dans la fenêtre de commande (objectif : moins de 30 ms).
+   - Essayer des traits rapides, des courbes, une écriture, en appuyant plus ou moins fort : l'épaisseur suit-elle la pression ? Y a-t-il des sauts ou des points manquants ?
+3. **Outil, couleur, texture** : changer d'outil (stylo bille, plume, feutre, crayon, pinceau, surligneur, craie), de couleur et d'épaisseur : le prochain trait en tient compte, les traits précédents ne changent pas.
+4. **Pages et calques** : créer une page, revenir à la précédente (boutons, ou touches ← →), ajouter un calque, effacer la page (`Ctrl + Suppr`).
+5. **Le bouton de la tablette pendant le mode direct** *(hypothèse à vérifier : on ne sait pas ce qu'envoie la Bamboo Slate)*. Le mode direct étant ouvert, **appuyer brièvement sur le bouton de la tablette 3 fois, en laissant passer quelques secondes entre deux appuis**. **Noter exactement ce qui se passe** :
+   - une nouvelle page (ou un nouveau calque, selon l'option **Bouton de la tablette en mode direct** du panneau) apparaît-elle ?
+   - rien ne se passe ?
+   - le tracé s'arrête, la tablette se déconnecte, l'état de la barre latérale change ?
+   - le voyant de la tablette change-t-il de couleur ?
+
+   Refaire l'essai en **maintenant** le bouton 2 secondes (sans aller jusqu'à 6 secondes), puis en changeant l'option **Bouton de la tablette en mode direct** (Nouvelle page / Nouveau calque).
+
+   Si Ardoise reconnaît le bouton, il fait ce que l'option indique. Sinon, les notifications reçues de la tablette sont notées dans le journal de diagnostic avec la mention `unclassified during live mode`, ce qui donnera la vraie signature du bouton ; mais ce journal n'est écrit dans `_ardoise\diagnostics\` qu'en cas d'erreur, d'où l'importance de **noter à la main** ce qui a été observé.
+6. Fermer le mode direct (bouton **Arrêter**). Vérifier que la session est devenue une **note** de la bibliothèque (une par page dessinée), dont le contenu est celui qu'on a vu à l'écran.
+7. **Reprise après coupure** : relancer le mode direct et dessiner, puis éloigner la tablette de l'ordinateur (autre pièce) pendant 10 secondes, puis la rapprocher. L'état « reconnexion » apparaît-il, puis le tracé reprend-il sans qu'il faille tout relancer ? Noter ce qui se passe.
+
+#### E. Projecteur (bureau étendu)
+
+1. Brancher le projecteur (ou le second écran). Appuyer sur **Win + P** et choisir **Étendre**. Vérifier dans Windows que les deux écrans ont chacun leur bureau.
+2. Dans Ardoise, ouvrir le **Mode direct**. Dans la fenêtre de commande (sur l'écran du portable), **choisir l'écran** du projecteur dans la liste, puis cliquer sur **Projeter**.
+3. Vérifier :
+   - la fenêtre de présentation s'ouvre **en plein écran sur l'écran choisi**, **sans aucun élément d'interface** (ni barre de titre, ni boutons, ni curseur de souris après 2 secondes d'immobilité) ;
+   - la fenêtre de commande reste **sur le portable** avec les outils, les couleurs, les pages et l'aperçu de ce qui est projeté ;
+   - le tracé fait sur la tablette apparaît sur les deux écrans ; l'image projetée est nette et bien cadrée (noter la résolution du projecteur et les bandes noires éventuelles).
+4. **Zoom et déplacement** : zoomer (boutons **+** / **−**, ou touches `+` et `-`), déplacer la zone projetée (glisser dans l'aperçu, ou `Maj` + flèches), revenir à la page entière (touche `0` ou bouton **1:1**). Le projecteur suit-il ? L'aperçu montre-t-il le rectangle projeté ?
+5. **Tableau noir** : activer (touche `B` ou bouton) : fond ardoise, craie blanche par défaut. Désactiver : retour au fond blanc.
+6. **Pointeur laser** : activer (touche `L` ou bouton). **Approcher le stylet de la tablette sans la toucher** : un point rouge suit le stylet sur le projecteur, **sans rien écrire**. Éloigner le stylet : le point disparaît. Toucher la tablette : on écrit de nouveau.
+7. **Pages au clavier et au bouton** : `→`, `Espace` ou `Page suivante` passent à la page suivante ; `←` ou `Page précédente` reviennent. Faire de même **avec le bouton de la tablette** (selon l'option du panneau et ce qui a été constaté en D5). Le changement de page apparaît-il tout de suite sur le projecteur ?
+8. **Effacement rapide** : `Ctrl + Suppr` efface la page en cours, sur les deux écrans ; les autres pages restent intactes.
+9. **Changer d'écran** : cliquer sur **Arrêter la projection**, puis reprojeter sur l'écran du portable lui-même : la présentation le recouvre alors, et `Échap` dans cette fenêtre la ferme. Reprojeter ensuite sur le projecteur.
+10. **Mémoire du choix** : quitter le mode direct, fermer Ardoise, la relancer et rouvrir le mode direct : l'écran du projecteur est-il proposé par défaut ?
+11. **Débrancher le projecteur pendant la présentation** (ou choisir Win + P → *Écran du PC uniquement*) : **noter ce qui arrive** à la fenêtre de présentation (elle disparaît ? elle reste sur le portable ? Ardoise plante ?), à la fenêtre de commande et au tracé en cours. Le mode direct continue-t-il d'enregistrer ? Rebrancher, refaire Win + P → *Étendre* et vérifier qu'on peut projeter de nouveau.
+12. Arrêter le mode direct. Vérifier que les pages dessinées pendant la présentation sont des notes de la bibliothèque.
+
+### Ce qui revient par Nextcloud
+
+- Dans la bibliothèque : les notes synchronisées (parties B et C) et celles du mode direct (D et E), avec leur date. Elles permettent de juger la fidélité des tracés, la pression et l'orientation gaucher.
+- Dans `<bibliothèque>\_ardoise\diagnostics\` : les journaux (`AAAA-MM-JJ_HHMMSS.jsonl` et `.txt`) **écrits à chaque erreur** de la tablette, de la synchronisation ou du mode direct. Une session qui se passe bien n'en laisse pas : l'absence de fichier n'est pas un problème.
+- Dans `<bibliothèque>\_ardoise\device.json` : l'enregistrement de la tablette (nom compris), partagé par tous les PC.
+- Dans `ardoise.toml` (à côté de l'exe) : la section `[tablet]` (options) et le dernier écran de projection de ce PC.
+
+### À me signaler
+
+Ce qui ne revient pas tout seul :
+
+| Quoi | Où |
+|---|---|
+| Le texte exact de toute erreur affichée (enregistrement, synchronisation, mode direct, projection) et ce qu'elle proposait de faire | A, B, D, E |
+| Le temps entre l'appui sur le bouton et « Connectée » ; si la synchro automatique a démarré seule | B3, B4, B8 |
+| Une page perdue, en double, tronquée ou à l'envers (droitier comme gaucher) | B, C3 |
+| L'écart affiché après « Mettre à l'heure » ; si le nom et la batterie (avec « en charge ») sont corrects | C |
+| **Ce qui se passe à l'appui sur le bouton de la tablette pendant le mode direct** (rien / nouvelle page / nouveau calque / déconnexion / couleur du voyant), appui bref et appui de 2 secondes | D5 |
+| L'impression de latence (*instantané*, *léger retard*, *retard gênant*), la latence médiane affichée, les sauts ou points manquants | D2 |
+| Ce qui arrive à la coupure puis à la reprise de la liaison en mode direct | D7 |
+| Si le projecteur affiche la présentation sans interface ; sa résolution ; les bandes noires | E3 |
+| Si le pointeur laser, le tableau noir, le zoom et les pages (clavier et bouton) fonctionnent à la projection | E4 à E8 |
+| Ce qui arrive quand on débranche le projecteur pendant la présentation | E11 |
+| Une photo du message de Windows s'il y en a un (pare-feu, Bluetooth, écran) | partout |

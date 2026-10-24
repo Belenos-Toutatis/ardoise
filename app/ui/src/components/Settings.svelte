@@ -4,8 +4,9 @@
   import { currentLocale, t } from '../lib/i18n.svelte';
   import { pickFolder } from '../lib/library';
   import { formatDate } from '../lib/library-logic';
-  import type { TabletInfo } from '../lib/note';
+  import { sizeInMillimetres, tablet } from '../lib/tablet-state.svelte';
   import LanguagePicker from './LanguagePicker.svelte';
+  import TabletOptions from './tablet/TabletOptions.svelte';
 
   let { app, onchange, onclose, ontest }: {
     app: AppState;
@@ -16,8 +17,8 @@
   } = $props();
 
   let error = $state<string | null>(null);
-  /** The registered tablet; undefined while loading. */
-  let tablet = $state<TabletInfo | null | undefined>(undefined);
+  /** The registered tablet (from the window's shared tablet status); undefined while loading. */
+  const registered = $derived(tablet.status ? tablet.status.registered : undefined);
   let confirmingForget = $state(false);
 
   /** The automatic export as being edited; saved with its button. */
@@ -27,25 +28,12 @@
   let autoSaving = $state(false);
   const autoChanged = $derived(autoDraft.format !== app.autoExport.format || autoDraft.folder !== app.autoExport.folder);
 
-  onMount(() => {
-    api.tabletInfo().then(
-      (info) => (tablet = info),
-      (e) => {
-        tablet = null;
-        error = errorMessage(e);
-      },
-    );
-  });
+  onMount(() => tablet.start());
 
   async function forgetTablet() {
     error = null;
-    try {
-      await api.forgetTablet();
-      tablet = null;
-    } catch (e) {
-      error = errorMessage(e);
-    }
     confirmingForget = false;
+    if (!(await tablet.forget())) error = tablet.actionError;
   }
 
   async function run(action: () => Promise<AppState>) {
@@ -109,20 +97,22 @@
 
   <section class="settings-section" aria-labelledby="settings-tablet">
     <h3 id="settings-tablet">{t('settings.tablet')}</h3>
-    {#if tablet}
+    {#if registered}
       <dl class="facts">
         <dt>{t('settings.tabletName')}</dt>
-        <dd>{tablet.name}</dd>
+        <dd>{registered.name}</dd>
         <dt>{t('settings.tabletAddress')}</dt>
-        <dd><code>{tablet.address}</code></dd>
+        <dd><code>{registered.address}</code></dd>
         <dt>{t('settings.tabletRegistered')}</dt>
-        <dd>{formatDate(Date.parse(tablet.registered), currentLocale())}</dd>
+        <dd>{formatDate(Date.parse(registered.registered), currentLocale())}</dd>
         <dt>{t('settings.tabletSize')}</dt>
-        <dd>{Math.round(tablet.width / 100)} × {Math.round(tablet.height / 100)} mm</dd>
+        <dd>{sizeInMillimetres(registered.width, registered.height)}</dd>
       </dl>
+      <h4 class="options-title">{t('tablet.options.title')}</h4>
+      <TabletOptions />
       {#if confirmingForget}
         <div class="confirm" role="alertdialog" aria-label={t('settings.tabletForget')}>
-          <p>{t('settings.tabletForgetConfirm', { name: tablet.name })}</p>
+          <p>{t('settings.tabletForgetConfirm', { name: registered.name })}</p>
           <div class="actions">
             <button class="button danger" onclick={forgetTablet}>{t('settings.tabletForgetYes')}</button>
             <button class="button" onclick={() => (confirmingForget = false)}>{t('settings.cancel')}</button>
@@ -133,7 +123,7 @@
           <button class="button danger" onclick={() => (confirmingForget = true)}>{t('settings.tabletForget')}</button>
         </div>
       {/if}
-    {:else if tablet === null}
+    {:else if registered === null}
       <p class="muted">{t('settings.tabletNone')}</p>
     {/if}
     {#if ontest}
@@ -202,3 +192,10 @@
     <p class="error" role="alert">{t('errors.generic', { message: error })}</p>
   {/if}
 </aside>
+
+<style>
+  .options-title {
+    margin: 1rem 0 0.4rem;
+    font-size: 0.9rem;
+  }
+</style>
