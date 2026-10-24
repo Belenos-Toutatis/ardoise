@@ -8,6 +8,19 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+ardoise-core = { path = "../ardoise-core" }
+ardoise-ink = { path = "../ardoise-ink" }
+ardoise-render = { path = "../ardoise-render" }
+png = "0.18"
+# Without the default "fs" feature the crate has no disk environment at all: the database is
+# only ever opened from memory, so it cannot write next to Inkspace's data.
+rusty-leveldb = { version = "4.0.2", default-features = false }
+thiserror = "2"
+uuid = { version = "1", features = ["v5"] }
+
+[dev-dependencies]
+tempfile = "3"
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 
 [lints]
 workspace = true

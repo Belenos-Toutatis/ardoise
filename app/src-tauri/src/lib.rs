@@ -9,6 +9,7 @@ compile_error!("release builds need `--features custom-protocol` (use `cargo xta
 mod commands;
 mod console;
 mod diagnostic;
+mod import;
 mod selftest;
 
 use std::path::PathBuf;
@@ -17,7 +18,7 @@ use ardoise_core::settings::SettingsStore;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 /// Command-line options. Normal launches have none.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Cli {
     /// `--self-test`: load the interface in a hidden window, check the environment,
     /// print a report and exit with 0 (ok) or 1 (failure).
@@ -27,18 +28,33 @@ pub struct Cli {
     /// With `--diagnostic`: run the test without a window against the simulated tablet,
     /// print the report and exit with 0 (no failure) or 1.
     pub simulated: bool,
+    /// `--import-inkspace [LocalState] [--library DIR] [--compare]`: import Wacom Inkspace's
+    /// notes without a window, print a table and exit with 0 (all imported) or 1.
+    pub import_inkspace: Option<import::ImportArgs>,
 }
 
 impl Cli {
     pub fn parse(args: impl IntoIterator<Item = String>) -> Cli {
         let mut cli = Cli::default();
-        for arg in args {
+        let mut import_inkspace = false;
+        let mut import_args = import::ImportArgs::default();
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--self-test" => cli.self_test = true,
                 "--diagnostic" => cli.diagnostic = true,
                 "--simulated" => cli.simulated = true,
+                "--import-inkspace" => import_inkspace = true,
+                "--compare" => import_args.compare = true,
+                "--library" => import_args.library = args.next().map(PathBuf::from),
+                other if !other.starts_with("--") && import_args.local_state.is_none() => {
+                    import_args.local_state = Some(PathBuf::from(other));
+                }
                 _ => {}
             }
+        }
+        if import_inkspace {
+            cli.import_inkspace = Some(import_args);
         }
         cli
     }
@@ -65,8 +81,12 @@ fn webview_data_dir() -> Option<PathBuf> {
 pub fn run() {
     let cli = Cli::parse(std::env::args().skip(1));
     let headless_diagnostic = cli.diagnostic && cli.simulated;
-    if cli.self_test || headless_diagnostic {
+    if cli.self_test || headless_diagnostic || cli.import_inkspace.is_some() {
         console::attach_parent_console();
+    }
+
+    if let Some(import_args) = &cli.import_inkspace {
+        std::process::exit(import::run_cli(import_args));
     }
 
     let context = AppContext {
@@ -140,5 +160,31 @@ mod tests {
         let simulated = parse(&["--diagnostic", "--simulated"]);
         assert!(simulated.diagnostic && simulated.simulated && !simulated.self_test);
         assert_eq!(parse(&["--unknown"]), Cli::default());
+        assert_eq!(parse(&["C:\\somewhere"]).import_inkspace, None);
+    }
+
+    #[test]
+    fn parses_the_inkspace_import() {
+        let default = parse(&["--import-inkspace"]);
+        assert_eq!(default.import_inkspace, Some(import::ImportArgs::default()));
+        let full = parse(&[
+            "--import-inkspace",
+            "D:\\copy\\LocalState",
+            "--library",
+            "E:\\Notes",
+            "--compare",
+        ]);
+        assert_eq!(
+            full.import_inkspace,
+            Some(import::ImportArgs {
+                local_state: Some(PathBuf::from("D:\\copy\\LocalState")),
+                library: Some(PathBuf::from("E:\\Notes")),
+                compare: true,
+            })
+        );
+        let reordered = parse(&["--compare", "--import-inkspace", "X"]);
+        let args = reordered.import_inkspace.unwrap();
+        assert!(args.compare && args.local_state == Some(PathBuf::from("X")));
+        assert!(!reordered.self_test && !reordered.diagnostic);
     }
 }
