@@ -74,6 +74,7 @@
   <button type="button" class="button ghost" onclick={() => lib.clearSelection()}>
     {t('library.selection.clear')}
   </button>
+  <p class="selection-help muted small">{t('library.selection.help')}</p>
 
   {#if panel === 'move'}
     <div class="selection-panel" role="group" aria-label={t('library.selection.moveTo')}>

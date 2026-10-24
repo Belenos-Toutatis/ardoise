@@ -89,6 +89,7 @@
       "unfavorite": "Remove from favourites",
       "trash": "Move to trash",
       "clear": "Deselect",
+      "help": "Ctrl+click: add or remove a note · Shift+click: select a range · Esc: deselect all",
       "export": "Export…",
       "assemble": "Assemble…",
       "assembleNeeds": "Select at least two notes to assemble them."

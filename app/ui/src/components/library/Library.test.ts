@@ -257,6 +257,10 @@ describe('library: selection, moving, trash', () => {
     expect(ui.q('.selection-bar')).toBeNull();
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
     expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 1');
+    // The bar says how to change the selection.
+    expect(ui.q('.selection-help')?.textContent).toBe(
+      'Ctrl+clic : ajouter ou retirer une note · Maj+clic : sélectionner une plage · Échap : tout désélectionner',
+    );
     await ui.click(ui.open('Cours de physique'), { shiftKey: true });
     expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 3');
     expect(ui.all('.note-card.selected').length).toBe(3);

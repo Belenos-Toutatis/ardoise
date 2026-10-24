@@ -89,6 +89,7 @@
       "unfavorite": "Retirer des favoris",
       "trash": "Mettre à la corbeille",
       "clear": "Désélectionner",
+      "help": "Ctrl+clic : ajouter ou retirer une note · Maj+clic : sélectionner une plage · Échap : tout désélectionner",
       "export": "Exporter…",
       "assemble": "Assembler…",
       "assembleNeeds": "Sélectionnez au moins deux notes pour les assembler."

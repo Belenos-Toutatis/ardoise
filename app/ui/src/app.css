@@ -810,6 +810,12 @@ select {
   box-shadow: var(--shadow);
 }
 
+/* How to change the selection, on its own line under the buttons. */
+.selection-help {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .selection-count {
   margin-right: 0.5rem;
 }
