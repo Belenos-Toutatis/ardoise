@@ -16,6 +16,7 @@ pub mod session;
 #[cfg(test)]
 mod tests;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ardoise_core::note::PageSize;
@@ -56,7 +57,7 @@ impl LiveError {
     /// Error for the interface.
     fn command_error(self) -> CommandError {
         match self {
-            LiveError::NotRunning => CommandError::new("liveNotRunning", self),
+            LiveError::NotRunning | LiveError::Stopped => CommandError::new("liveNotRunning", self),
             LiveError::Library(error) => library_error(error),
         }
     }
@@ -86,15 +87,71 @@ fn button_setting(context: &AppContext) -> ButtonSetting {
 }
 
 /// The main window went away (the app ends): live mode stops and every page is written, so that
-/// closing the app without "Stop" loses nothing.
+/// closing the app without "Stop" loses nothing; a page the library cannot take is kept in
+/// [`backup_dir`].
 pub fn main_window_closed(app: &AppHandle) {
     if let Some(tablet) = app.try_state::<TabletRuntime>() {
         let _ = tablet.with_service(TabletService::stop_live);
     }
-    if let Some(runtime) = app.try_state::<LiveRuntime>()
-        && let Err(error) = runtime.hub.stop()
-    {
-        eprintln!("live mode: cannot write the pages when closing: {error}");
+    if let Some(runtime) = app.try_state::<LiveRuntime>() {
+        close_session(&runtime.hub, &backup_dir());
+    }
+}
+
+/// Where the pages that could not be written to the library go when the app ends:
+/// `%LOCALAPPDATA%\Ardoise\live-backup` (local to this PC, outside the library); under the
+/// temporary folder when `LOCALAPPDATA` is not set (Linux).
+pub fn backup_dir() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .filter(|dir| !dir.is_empty())
+        .map_or_else(std::env::temp_dir, PathBuf::from)
+        .join("Ardoise")
+        .join("live-backup")
+}
+
+/// Stops the session and writes its pages to the library; every page that cannot be written
+/// there gets a complete copy in `backup`, whose path is logged (standard error, and
+/// `live-backup.log` next to the copies, since a windowed app has no console). Returns the
+/// copies.
+fn close_session(hub: &LiveHub, backup: &Path) -> Vec<PathBuf> {
+    if let Err(error) = hub.stop() {
+        eprintln!("live mode: cannot write the pages to the library when closing: {error}");
+    }
+    let mut copies = Vec::new();
+    for (index, copy) in hub.back_up_unsaved(backup) {
+        let line = match &copy {
+            Ok(path) => format!(
+                "page {} could not be written to the library; backup copy: {}",
+                index + 1,
+                path.display()
+            ),
+            Err(error) => format!(
+                "page {} could not be written to the library, nor its backup copy: {error}",
+                index + 1
+            ),
+        };
+        eprintln!("live mode: {line}");
+        log_backup(backup, &line);
+        if let Ok(path) = copy {
+            copies.push(path);
+        }
+    }
+    copies
+}
+
+/// Appends `line` (with the time) to `live-backup.log` in `dir`. Best effort.
+fn log_backup(dir: &Path, line: &str) {
+    use std::io::Write as _;
+    let written = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("live-backup.log"))
+        .and_then(|mut log| {
+            let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+            writeln!(log, "{now} {line}")
+        });
+    if let Err(error) = written {
+        eprintln!("live mode: cannot write live-backup.log: {error}");
     }
 }
 

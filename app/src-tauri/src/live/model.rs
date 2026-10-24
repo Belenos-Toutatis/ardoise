@@ -233,8 +233,16 @@ pub enum LiveEvent {
         view: LiveViewState,
     },
     /// Paths of the notes saved so far in this session (the whole list, as in the snapshot).
+    /// Pages still failing to be written are announced again right after it (`saveFailed`).
     Saved {
         paths: Vec<String>,
+    },
+    /// Page `page_index` (0-based) could not be written to the library: sent once until a write
+    /// of it succeeds, again after every `saved` while it keeps failing, and to a window that
+    /// subscribes meanwhile. Its changes stay in memory and are tried again.
+    SaveFailed {
+        page_index: usize,
+        message: String,
     },
 }
 

@@ -4,14 +4,16 @@
 //!
 //! A synced note's id is derived from the page ([`page_note_id`]), so that a page synced again
 //! (sync without deletion, or a deletion that failed after the save) is recognised
-//! ([`ImportedPages`]) instead of being stored twice. Points are turned for a left-handed user
-//! ([`orient`]), in synced pages and in live mode alike.
+//! ([`ImportedPages`]) instead of being stored twice. A copy that failed its check never counts
+//! as imported ([`LibrarySink::store`]). Points are turned for a left-handed user ([`orient`]),
+//! in synced pages and in live mode alike.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ardoise_core::format::{self, NoteFile};
-use ardoise_core::library::{Library, SavedNote};
+use ardoise_core::fsutil::remove_file_with_retry;
+use ardoise_core::library::{Library, LoadedNote, SavedNote};
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Timing};
 use ardoise_core::settings::Hand;
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
@@ -129,7 +131,8 @@ pub fn orient_record(record: LiveRecord, width: u32, height: u32, hand: Hand) ->
 #[derive(Debug, Default)]
 pub struct ImportedPages {
     listed: HashMap<String, PathBuf>,
-    trashed: HashSet<String>,
+    /// Files of the trash by note id (a note may have been trashed more than once).
+    trashed: HashMap<String, Vec<PathBuf>>,
 }
 
 impl ImportedPages {
@@ -141,12 +144,12 @@ impl ImportedPages {
             .into_iter()
             .map(|entry| (entry.id, entry.path))
             .collect();
-        let trashed = library
-            .trash_items()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|item| item.note_id)
-            .collect();
+        let mut trashed: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        for item in library.trash_items().unwrap_or_default() {
+            if let Some(id) = item.note_id {
+                trashed.entry(id).or_default().push(item.path);
+            }
+        }
         Self { listed, trashed }
     }
 
@@ -159,9 +162,21 @@ impl ImportedPages {
     }
 
     /// Whether the note of `page` is in the trash: the user deleted it, so a page kept on the
-    /// tablet is not imported again.
+    /// tablet is not imported again. Only a complete copy counts: a trashed file that does not
+    /// read back with the page's id and exactly its bytes (`original.bin`), such as a copy that
+    /// failed its check and was put aside ([`LibrarySink::store`]), never makes the page count
+    /// as imported (it would never be imported, and without deletion it would hide every later
+    /// page of the tablet).
     pub fn in_trash(&self, page: &DownloadedPage) -> bool {
-        self.trashed.contains(&page_note_id(page))
+        let id = page_note_id(page);
+        let Some(paths) = self.trashed.get(&id) else {
+            return false;
+        };
+        paths.iter().any(|path| {
+            format::read_note(path).is_ok_and(|file| {
+                file.note.id == id && file.original.as_deref() == Some(page.bytes.as_slice())
+            })
+        })
     }
 
     /// Records the note just saved at `path` from the page whose [`page_note_id`] is `id`.
@@ -299,6 +314,10 @@ pub struct LibrarySink<'a> {
     /// Test hook run on the file just written, before it is read back.
     #[cfg(test)]
     tamper: Option<TamperHook<'a>>,
+    /// Test hook: this many reads of the file just written fail, as when a sync client or an
+    /// antivirus holds it a moment.
+    #[cfg(test)]
+    locked_reads: std::cell::Cell<u32>,
     /// Notes written so far, in order.
     pub saved: Vec<SavedNote>,
 }
@@ -324,6 +343,8 @@ impl<'a> LibrarySink<'a> {
             thumbnail: None,
             #[cfg(test)]
             tamper: None,
+            #[cfg(test)]
+            locked_reads: std::cell::Cell::new(0),
             saved: Vec::new(),
         }
     }
@@ -347,9 +368,10 @@ impl<'a> LibrarySink<'a> {
     }
 
     /// Saves `page` as a new note (id: [`page_note_id`]) and checks it reads back identical.
-    /// An `Err` keeps the page on the tablet (the session does not delete it) and moves the
-    /// note just written to the trash, so that the next sync does not leave a duplicate. Fits
-    /// `Session::sync`'s sink: `&mut |page, _, _| sink.store(page).map(|_| ())`.
+    /// An `Err` keeps the page on the tablet (the session does not delete it) and puts the copy
+    /// just written aside ([`discard`](Self::discard)) so that it never counts as imported: the
+    /// next sync writes the page again. Fits `Session::sync`'s sink:
+    /// `&mut |page, _, _| sink.store(page).map(|_| ())`.
     pub fn store(&mut self, page: DownloadedPage) -> Result<SavedNote, String> {
         let id = page_note_id(&page);
         let mut file = note_from_page(
@@ -364,6 +386,12 @@ impl<'a> LibrarySink<'a> {
         if let Some(maker) = &self.thumbnail {
             file.thumbnail = maker(&file.note);
         }
+        // The bytes `Library::create` writes (the encoding is deterministic), and what the file
+        // must hold: the note as the format stores it (pressures and positions are quantised),
+        // the tablet's bytes untouched, the thumbnail given. Encoded first: a note that cannot
+        // be encoded leaves no file.
+        let written = format::to_bytes(&file).map_err(|e| e.to_string())?;
+        let expected = format::read_from_bytes(&written).map_err(|e| e.to_string())?;
         let saved = self
             .library
             .create(&self.binder, &file)
@@ -372,28 +400,18 @@ impl<'a> LibrarySink<'a> {
         if let Some(tamper) = &self.tamper {
             tamper(&saved.path);
         }
-        // What the file must hold: the note as the format stores it (pressures and positions
-        // are quantised), the tablet's bytes untouched, the thumbnail given.
-        let expected =
-            match format::to_bytes(&file).and_then(|bytes| format::read_from_bytes(&bytes)) {
-                Ok(expected) => expected,
-                Err(error) => {
-                    self.discard(&saved);
-                    return Err(error.to_string());
-                }
-            };
-        let back = match self.library.read(&saved.path) {
+        let back = match self.read_back(&saved.path) {
             Ok(back) => back,
             Err(error) => {
-                self.discard(&saved);
-                return Err(error.to_string());
+                self.discard(&saved, &written);
+                return Err(error);
             }
         };
         if back.file.note != expected.note
             || back.file.original != file.original
             || back.file.thumbnail != file.thumbnail
         {
-            self.discard(&saved);
+            self.discard(&saved, &written);
             return Err(format!(
                 "{} does not read back as written",
                 saved.path.display()
@@ -406,10 +424,52 @@ impl<'a> LibrarySink<'a> {
         Ok(saved)
     }
 
-    /// Moves a note that failed verification to the trash (best effort: the page stays on the
-    /// tablet either way, and the next sync writes it again).
-    fn discard(&self, saved: &SavedNote) {
-        let _ = self.library.trash(&saved.path);
+    /// Reads back the note just written.
+    fn read_back(&self, path: &Path) -> Result<LoadedNote, String> {
+        #[cfg(test)]
+        if self.locked() {
+            return Err(format!("{} is locked", path.display()));
+        }
+        self.library.read(path).map_err(|e| e.to_string())
+    }
+
+    /// The bytes of the file just written, as they are on the disk.
+    fn bytes_on_disk(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+        #[cfg(test)]
+        if self.locked() {
+            return Err(std::io::Error::other("locked"));
+        }
+        std::fs::read(path)
+    }
+
+    /// Test hook: whether this read fails as if the file were held by another program.
+    #[cfg(test)]
+    fn locked(&self) -> bool {
+        let left = self.locked_reads.get();
+        self.locked_reads.set(left.saturating_sub(1));
+        left > 0
+    }
+
+    /// Puts aside a copy that failed its check (`written`: the bytes it was written with), so
+    /// that it never counts as imported. Best effort: the page stays on the tablet either way.
+    ///
+    /// - The file holds exactly `written` (the read-back failed, e.g. a sync client held the
+    ///   file a moment): it is this copy, deleted for good; nothing is lost.
+    /// - It holds something else (replaced by another program, or damaged): moved to the
+    ///   trash, never destroyed; it does not count as imported there
+    ///   ([`ImportedPages::in_trash`] wants the page's id and bytes).
+    /// - It cannot be read at all: left where it is. The next sync recognises it if it turns out
+    ///   to be the complete copy ([`ImportedPages::find`]), else writes the page again.
+    fn discard(&self, saved: &SavedNote, written: &[u8]) {
+        match self.bytes_on_disk(&saved.path) {
+            Ok(bytes) if bytes == written => {
+                let _ = remove_file_with_retry(&saved.path);
+            }
+            Ok(_) => {
+                let _ = self.library.trash(&saved.path);
+            }
+            Err(_) => {}
+        }
     }
 }
 
@@ -540,9 +600,73 @@ mod tests {
         let error = sink.store(page(&[raw_stroke(0, 100, 5)])).unwrap_err();
         assert!(error.contains("does not read back"), "{error}");
         assert!(sink.saved.is_empty());
-        // No duplicate left in the library; the note is in the trash.
+        // No duplicate left in the library; the file, which is not ours, is kept in the trash.
         assert!(library.list().notes.is_empty());
         assert_eq!(library.trash_items().unwrap().len(), 1);
+    }
+
+    /// The copies that failed their check, as a sync without deletion meets them next time:
+    /// none counts as imported, so the page is written again (it would otherwise never be
+    /// imported, and hide every later page of the tablet).
+    #[test]
+    fn a_copy_that_failed_its_check_never_counts_as_imported() {
+        let fresh = || {
+            let dir = tempfile::tempdir().unwrap();
+            ardoise_core::library::init(dir.path()).unwrap();
+            let library = Library::open(dir.path()).unwrap();
+            (dir, library)
+        };
+        let oldest = page(&[raw_stroke(0, 100, 5)]);
+
+        // The read-back fails (a sync client holds the file a moment): the file holds exactly
+        // what was written, so it is deleted for good, not trashed...
+        let (_dir, library) = fresh();
+        let mut sink = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7);
+        sink.locked_reads.set(1);
+        let error = sink.store(oldest.clone()).unwrap_err();
+        assert!(error.contains("locked"), "{error}");
+        assert!(library.list().notes.is_empty());
+        assert!(library.trash_items().unwrap().is_empty());
+        let imported = ImportedPages::scan(&library);
+        assert_eq!(imported.find(&library, &oldest), None);
+        assert!(!imported.in_trash(&oldest));
+        // ...and the next sync writes the page again.
+        let saved = sink.store(oldest.clone()).unwrap();
+        let imported = ImportedPages::scan(&library);
+        assert_eq!(imported.find(&library, &oldest), Some(saved.path));
+
+        // Replaced meanwhile by a note with the page's id but other bytes: kept in the trash,
+        // where it does not count.
+        let (_dir, library) = fresh();
+        let other = page(&[raw_stroke(0, 900, 9)]);
+        let mut sink = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7);
+        let id = page_note_id(&oldest);
+        sink.tamper = Some(Box::new(move |path| {
+            let mut file =
+                note_from_page(&other, A4_LANDSCAPE, Hand::Right, id.clone(), "L", 1).unwrap();
+            file.note.title = "Other".into();
+            std::fs::write(path, format::to_bytes(&file).unwrap()).unwrap();
+        }));
+        assert!(sink.store(oldest.clone()).is_err());
+        let trashed = library.trash_items().unwrap();
+        assert_eq!(trashed.len(), 1);
+        assert_eq!(
+            trashed[0].note_id.as_deref(),
+            Some(page_note_id(&oldest).as_str())
+        );
+        assert!(!ImportedPages::scan(&library).in_trash(&oldest));
+
+        // Neither the read-back nor the look at the bytes on disk can read the file: it stays
+        // in the library, and the next sync recognises it once it can be read.
+        let (_dir, library) = fresh();
+        let mut sink = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7);
+        sink.locked_reads.set(2);
+        assert!(sink.store(oldest.clone()).is_err());
+        let left = library.list().notes;
+        assert_eq!(left.len(), 1);
+        assert!(library.trash_items().unwrap().is_empty());
+        let imported = ImportedPages::scan(&library);
+        assert_eq!(imported.find(&library, &oldest), Some(left[0].path.clone()));
     }
 
     #[test]

@@ -264,6 +264,128 @@ impl ConnectorFactory for OneLink {
 }
 
 #[test]
+fn the_interrupt_flag_stays_up_while_an_interrupting_request_waits() {
+    let interrupts = Interrupts::new();
+    let flag = interrupts.flag();
+    assert!(!flag.load(Ordering::SeqCst));
+    // Two requests sent: the worker takes the first, the second still waits.
+    interrupts.raise();
+    interrupts.raise();
+    interrupts.taken();
+    assert!(flag.load(Ordering::SeqCst), "a request still waits");
+    interrupts.taken();
+    assert!(!flag.load(Ordering::SeqCst));
+    // A request counted while the worker takes another one keeps the flag up, whatever the
+    // order of the two threads.
+    interrupts.raise();
+    interrupts.raise();
+    interrupts.taken();
+    interrupts.raise();
+    interrupts.taken();
+    assert!(flag.load(Ordering::SeqCst));
+    interrupts.taken();
+    assert!(!flag.load(Ordering::SeqCst));
+    // Never below zero.
+    interrupts.taken();
+    interrupts.raise();
+    assert!(flag.load(Ordering::SeqCst));
+}
+
+/// The scripted Slate's connection: authentication, clock, name, firmware, battery, size, page
+/// count (`pages`, two hex bytes).
+fn connection_script(pages: &'static str) -> Script {
+    use crate::testutil::cmd;
+    vec![
+        ("e6 06 89 ea 78 88 ff cb", vec![cmd("b3 01 00")]),
+        // 2026-10-24 12:00:00 UTC, the scripted clock.
+        ("b6 06 26 10 24 12 00 00", vec![cmd("b3 01 00")]),
+        ("b6 01 00", vec![cmd("bd 06 26 10 24 12 00 00")]),
+        (
+            "bb 01 00",
+            vec![cmd("bc 0d 42 61 6d 62 6f 6f 20 53 6c 61 74 65 0a")],
+        ),
+        ("b7 01 00", vec![cmd("b8 09 00 42 31 36 30 38 30 35 41")]),
+        ("b7 01 01", vec![cmd("b8 09 01 43 31 37 30 37 30 34 41")]),
+        ("b9 01 00", vec![cmd("ba 02 57 00")]),
+        ("ea 02 03 00", vec![cmd("eb 06 03 00 04 74 00 00")]),
+        ("ea 02 04 00", vec![cmd("eb 06 04 00 60 54 00 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd(pages)]),
+    ]
+}
+
+/// Hands out one scripted connection whose clock the test moves.
+struct Handed(Option<ScriptConnector>);
+
+impl ConnectorFactory for Handed {
+    fn connector(&mut self) -> Result<Box<dyn Connector>, TransportError> {
+        match self.0.take() {
+            Some(connector) => Ok(Box::new(connector)),
+            None => Err(TransportError::Timeout),
+        }
+    }
+}
+
+#[test]
+fn the_page_count_is_read_again_while_the_tablet_stays_connected() {
+    use crate::testutil::cmd;
+    let library = tempfile::tempdir().unwrap();
+    crate::identity::save(library.path(), &scripted_record()).unwrap();
+    let mut script = connection_script("c2 02 00 00");
+    // 30 s later: a page was finished on the tablet; the automatic sync starts, and finds the
+    // page gone (the script keeps it short).
+    script.extend([
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 01 00")]),
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 00 00")]),
+    ]);
+    let connector = ScriptConnector::new(vec![script], false);
+    let clock = connector.clock.clone();
+    let (sender, statuses) = mpsc::channel();
+    let sender = std::sync::Mutex::new(sender);
+    let config = ServiceConfig {
+        library: Some(library.path().to_owned()),
+        identity_root: Some(library.path().to_owned()),
+        options: TabletOptions::default(),
+        simulated: false,
+    };
+    let service = TabletService::start(
+        config,
+        Box::new(Handed(Some(connector))),
+        Arc::new(NoHooks),
+        Box::new(move |status| {
+            let _ = sender
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .send(status.clone());
+        }),
+        Box::new(|_, _, _| Err("no page expected".into())),
+    );
+    let status = wait_for(&statuses, |s| s.connection == Connection::Connected);
+    assert_eq!(status.device.unwrap().stored_pages, 0);
+    assert!(status.last_sync.is_none(), "nothing to sync");
+    // Connected and idle: nothing is asked before the interval...
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(service.status().last_sync.is_none());
+    // ...then the count is read again.
+    clock.0.fetch_add(
+        u64::try_from(worker::PAGE_COUNT_INTERVAL.as_millis()).unwrap(),
+        Ordering::SeqCst,
+    );
+    let status = wait_for(&statuses, |s| {
+        s.device.as_ref().is_some_and(|d| d.stored_pages == 1)
+    });
+    assert_eq!(status.connection, Connection::Connected);
+    let status = wait_for(&statuses, |s| s.last_sync.is_some());
+    assert_eq!(status.connection, Connection::Connected);
+    assert_eq!(status.device.unwrap().stored_pages, 0);
+    assert_eq!(status.error, None);
+    service.shutdown();
+}
+
+#[test]
 fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
     use crate::testutil::{cmd, hex, on};
     use crate::transport::Channel;

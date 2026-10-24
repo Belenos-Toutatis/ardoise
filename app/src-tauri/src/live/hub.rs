@@ -12,11 +12,12 @@
 //! Neither thread does its slow work (sending, writing files) while holding the session lock,
 //! so the tablet's input is never held up by a window or by the disk.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use ardoise_core::format::NoteFile;
+use ardoise_core::fsutil::write_atomic_new;
 use ardoise_core::library::{Library, LibraryError};
 use ardoise_core::note::{Note, PageSize};
 use ardoise_core::settings::LiveButton;
@@ -69,6 +70,9 @@ pub type ButtonSetting = Arc<dyn Fn() -> LiveButton + Send + Sync>;
 pub enum LiveError {
     #[error("live mode was never started")]
     NotRunning,
+    /// The session was stopped: its notes are in the library, they are not changed any more.
+    #[error("live mode is stopped: its pages are not changed any more")]
+    Stopped,
     #[error(transparent)]
     Library(#[from] LibraryError),
 }
@@ -495,8 +499,9 @@ impl Shared {
             match result {
                 Ok(written) => self.written(&mut state, &job, written),
                 Err(error) => {
+                    self.write_failed(&mut state, &job, &error);
                     drop(state);
-                    eprintln!("live mode: cannot write a page: {error}");
+                    eprintln!("live mode: cannot write page {}: {error}", job.page + 1);
                     first_error.get_or_insert(error);
                 }
             }
@@ -504,7 +509,8 @@ impl Shared {
         first_error.map_or(Ok(()), Err)
     }
 
-    /// Records a page written; tells the windows when a note appeared.
+    /// Records a page written; tells the windows when a note appeared, or when a page whose
+    /// write had failed is safe again (then the pages still failing are announced again).
     fn written(&self, state: &mut HubState, job: &SaveJob, written: Written) {
         if state.session.id() != job.session {
             return;
@@ -516,9 +522,58 @@ impl Shared {
         page.file = Some(written.file);
         page.note.id = written.id;
         page.saved_version = job.version;
+        let recovered = page.save_error.take().is_some();
         let after = state.session.saved();
-        if after != before {
-            self.publish(state, vec![LiveEvent::Saved { paths: after }]);
+        if after != before || recovered {
+            let mut events = vec![LiveEvent::Saved { paths: after }];
+            events.extend(state.session.save_failures());
+            self.publish(state, events);
+        }
+    }
+
+    /// A page could not be written: the windows are told once, until a write of it succeeds.
+    fn write_failed(&self, state: &mut HubState, job: &SaveJob, error: &LibraryError) {
+        if state.session.id() != job.session {
+            return;
+        }
+        let Some(page) = state.session.page_mut(job.page) else {
+            return;
+        };
+        if page.save_error.is_some() {
+            return;
+        }
+        let message = error.to_string();
+        page.save_error = Some(message.clone());
+        self.publish(
+            state,
+            vec![LiveEvent::SaveFailed {
+                page_index: job.page,
+                message,
+            }],
+        );
+    }
+}
+
+/// A free `<time> page <n>.ardoise` in `dir` (`-2`, `-3`... when taken), written atomically.
+fn write_backup(dir: &Path, page_index: usize, bytes: &[u8]) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let stem = format!(
+        "{} page {}",
+        chrono::Local::now().format("%Y-%m-%d_%H%M%S"),
+        page_index + 1
+    );
+    let mut n = 1;
+    loop {
+        let name = if n == 1 {
+            format!("{stem}.ardoise")
+        } else {
+            format!("{stem}-{n}.ardoise")
+        };
+        let path = dir.join(name);
+        match write_atomic_new(&path, bytes) {
+            Ok(_) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && n < 1000 => n += 1,
+            Err(error) => return Err(error),
         }
     }
 }
@@ -584,6 +639,7 @@ impl LiveHub {
             snapshot: Box::new(snapshot.clone()),
         }];
         queue.extend(state.session.in_progress());
+        queue.extend(state.session.save_failures());
         let id = state.next_subscriber;
         state.next_subscriber += 1;
         state.subscribers.retain(|s| s.label != label);
@@ -696,14 +752,20 @@ impl LiveHub {
     }
 
     /// Runs `change` on the session and sends what it emitted; [`LiveError::NotRunning`] before
-    /// the first start.
+    /// the first start. Once the session is stopped its notes are in the library: a change that
+    /// would rewrite one (`rewrites` says so) is refused ([`LiveError::Stopped`]), while paging
+    /// through the pages and moving the view are still allowed.
     fn change(
         &self,
+        rewrites: impl FnOnce(&LiveSession) -> bool,
         change: impl FnOnce(&mut LiveSession, &mut Vec<LiveEvent>),
     ) -> Result<(), LiveError> {
         let mut state = self.shared.lock();
         if !state.started {
             return Err(LiveError::NotRunning);
+        }
+        if !state.session.is_running() && rewrites(&state.session) {
+            return Err(LiveError::Stopped);
         }
         let mut out = Vec::new();
         change(&mut state.session, &mut out);
@@ -716,17 +778,65 @@ impl LiveHub {
             let setting = self.shared.lock().button.clone();
             setting()
         });
-        self.change(|session, out| {
-            session.command(kind, button.unwrap_or_default(), now_ms(), out);
-        })
+        // What the button does depends on the settings.
+        let effective = match (kind, button) {
+            (LiveCommandKind::Button, Some(LiveButton::NewLayer)) => LiveCommandKind::NewLayer,
+            (LiveCommandKind::Button, _) => LiveCommandKind::NewPage,
+            (kind, _) => kind,
+        };
+        self.change(
+            |_| {
+                matches!(
+                    effective,
+                    LiveCommandKind::NewLayer | LiveCommandKind::ClearPage
+                )
+            },
+            |session, out| {
+                session.command(kind, button.unwrap_or_default(), now_ms(), out);
+            },
+        )
     }
 
     pub fn set_style(&self, style: LiveStyle) -> Result<(), LiveError> {
-        self.change(|session, out| session.set_style(style, out))
+        self.change(|_| false, |session, out| session.set_style(style, out))
     }
 
+    /// The shared view; turning the blackboard on or off changes the current page's paper.
     pub fn set_view(&self, view: LiveViewState) -> Result<(), LiveError> {
-        self.change(|session, out| session.set_view(view, out))
+        self.change(
+            |session| view.board != session.view().board,
+            |session, out| session.set_view(view, out),
+        )
+    }
+
+    /// Writes into `dir` a complete copy (`.ardoise`, atomic, a new note id) of every page whose
+    /// changes are not in the library: the end of the app when the library cannot be written,
+    /// so that nothing drawn is lost. Returns each page (0-based) with its copy or the error.
+    pub fn back_up_unsaved(&self, dir: &Path) -> Vec<(usize, std::io::Result<PathBuf>)> {
+        let pages: Vec<(usize, Note)> = {
+            let state = self.shared.lock();
+            state
+                .session
+                .pages()
+                .iter()
+                .enumerate()
+                .filter(|(_, page)| page.needs_write())
+                .map(|(index, page)| (index, page.note.clone()))
+                .collect()
+        };
+        pages
+            .into_iter()
+            .map(|(index, note)| {
+                let mut file = NoteFile::new(note);
+                file.note.id = uuid::Uuid::new_v4().to_string();
+                file.note.modified = now_ms().max(file.note.created);
+                file.thumbnail = thumbnail_png(&file.note);
+                let copy = ardoise_core::format::to_bytes(&file)
+                    .map_err(std::io::Error::other)
+                    .and_then(|bytes| write_backup(dir, index, &bytes));
+                (index, copy)
+            })
+            .collect()
     }
 
     /// The presentation window opened on `monitor`, or closed (`None`).

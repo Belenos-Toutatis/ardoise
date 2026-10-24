@@ -435,6 +435,154 @@ fn commands_need_a_session_and_stop_can_be_repeated() {
 }
 
 #[test]
+fn a_stopped_session_no_longer_changes_its_notes() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewLayer)));
+    stroke(&mut sink, 3000, 5);
+    let saved = hub.stop().unwrap();
+    assert_eq!(saved.len(), 1);
+    let path = Path::new(&saved[0]);
+    let written = std::fs::read(path).unwrap();
+
+    // Clearing, a new layer (also through the button) and the blackboard would rewrite it.
+    for kind in [
+        LiveCommandKind::ClearPage,
+        LiveCommandKind::NewLayer,
+        LiveCommandKind::Button,
+    ] {
+        assert!(
+            matches!(hub.command(kind), Err(LiveError::Stopped)),
+            "{kind:?}"
+        );
+    }
+    let mut view = hub.snapshot().view;
+    view.board = true;
+    assert!(matches!(hub.set_view(view), Err(LiveError::Stopped)));
+    // Paging through, moving the view and the style are still allowed.
+    let mut view = hub.snapshot().view;
+    view.zoom = 2.0;
+    view.laser = true;
+    hub.set_view(view).unwrap();
+    hub.set_style(LiveStyle::chalk()).unwrap();
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    hub.command(LiveCommandKind::PreviousPage).unwrap();
+    let snapshot = hub.snapshot();
+    assert_eq!((snapshot.page_count, snapshot.page_index), (2, 0));
+    assert_eq!(snapshot.page.strokes.len(), 1);
+    assert_eq!(snapshot.page.layers.len(), 1);
+    assert_eq!(snapshot.page.background.paper, Paper::White);
+    assert_eq!(hub.stop().unwrap(), saved);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        std::fs::read(path).unwrap(),
+        written,
+        "the note is unchanged"
+    );
+
+    // The button set to a new page only pages.
+    let hub = LiveHub::new(config());
+    start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    hub.stop().unwrap();
+    hub.command(LiveCommandKind::Button).unwrap();
+    assert_eq!(hub.snapshot().page_count, 2);
+}
+
+/// Makes the folder of `library` unusable (a file takes its place), or usable again.
+fn break_folder(root: &Path, broken: bool) {
+    if broken {
+        std::fs::rename(root, root.with_extension("away")).unwrap();
+        std::fs::write(root, b"not a folder").unwrap();
+    } else {
+        std::fs::remove_file(root).unwrap();
+        std::fs::rename(root.with_extension("away"), root).unwrap();
+    }
+}
+
+fn save_failures(window: &Window) -> Vec<usize> {
+    window
+        .events()
+        .iter()
+        .filter_map(|e| match e {
+            LiveEvent::SaveFailed { page_index, .. } => Some(*page_index),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_page_that_cannot_be_written_is_shown_and_backed_up_when_the_app_closes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Notes");
+    std::fs::create_dir(&root).unwrap();
+    ardoise_core::library::init(&root).unwrap();
+    let library = Library::open(&root).unwrap();
+    let hub = LiveHub::new(config());
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+
+    // The library cannot be written: the windows are told once, however often it is retried.
+    break_folder(&root, true);
+    stroke(&mut sink, 3000, 5);
+    wait_until("the failure", || !save_failures(&window).is_empty());
+    std::thread::sleep(config().save_interval * 4);
+    assert_eq!(save_failures(&window), [0]);
+    let message = window
+        .events()
+        .iter()
+        .find_map(|e| match e {
+            LiveEvent::SaveFailed { message, .. } => Some(message.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(!message.is_empty());
+    // A window opened meanwhile learns it too.
+    let late = Arc::new(Window::default());
+    hub.subscribe("presentation", late.clone());
+    wait_until("the failure in the late window", || {
+        save_failures(&late) == [0]
+    });
+
+    // It can be written again: `saved` follows, the failure is over.
+    break_folder(&root, false);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    wait_until("the saved event", || {
+        window.has(|e| matches!(e, LiveEvent::Saved { paths } if paths.len() == 1))
+    });
+
+    // It fails again: told again (once); a page written meanwhile does not hide it.
+    break_folder(&root, true);
+    stroke(&mut sink, 4000, 5);
+    wait_until("the second failure", || save_failures(&window) == [0, 0]);
+    std::thread::sleep(config().save_interval * 3);
+    assert_eq!(save_failures(&window), [0, 0]);
+
+    // The app closes: the page goes to the backup folder, complete, and the path is logged.
+    let backup = dir.path().join("live-backup");
+    let copies = super::close_session(&hub, &backup);
+    assert_eq!(copies.len(), 1);
+    assert_eq!(copies[0].parent(), Some(backup.as_path()));
+    let copy = ardoise_core::format::read_note(&copies[0]).unwrap().note;
+    assert_eq!(copy.strokes.len(), 2);
+    assert_eq!(copy.origin, Origin::Live);
+    assert_ne!(copy.id, hub.snapshot().page.id, "a copy, with its own id");
+    let log = std::fs::read_to_string(backup.join("live-backup.log")).unwrap();
+    assert!(log.contains(&copies[0].display().to_string()), "{log}");
+    assert_eq!(
+        std::fs::read_dir(&backup).unwrap().count(),
+        2,
+        "the copy and the log: the atomic write leaves nothing behind"
+    );
+
+    // Nothing left to save: nothing backed up.
+    break_folder(&root, false);
+    assert_eq!(hub.stop().unwrap().len(), 1);
+    assert!(super::close_session(&hub, &backup).is_empty());
+    assert!(super::backup_dir().ends_with(Path::new("Ardoise").join("live-backup")));
+}
+
+#[test]
 fn the_tablet_button_does_what_the_settings_say() {
     let (_dir, library) = library();
     let hub = LiveHub::new(config());
@@ -547,6 +695,10 @@ fn the_json_has_the_shapes_of_live_ts() {
     out.push(LiveEvent::Saved {
         paths: vec!["C:\\Notes\\2026-10-24.ardoise".into()],
     });
+    out.push(LiveEvent::SaveFailed {
+        page_index: 1,
+        message: "disk full".into(),
+    });
     let json: Vec<Value> = out
         .iter()
         .map(|e| serde_json::to_value(e).unwrap())
@@ -565,7 +717,8 @@ fn the_json_has_the_shapes_of_live_ts() {
             "hover",
             "view",
             "hoverEnd",
-            "saved"
+            "saved",
+            "saveFailed"
         ]
     );
 
@@ -646,6 +799,10 @@ fn the_json_has_the_shapes_of_live_ts() {
     assert_eq!(
         json[10],
         json!({ "type": "saved", "paths": ["C:\\Notes\\2026-10-24.ardoise"] })
+    );
+    assert_eq!(
+        json[11],
+        json!({ "type": "saveFailed", "pageIndex": 1, "message": "disk full" })
     );
     let batch = serde_json::to_value(LiveBatch {
         events: vec![LiveEvent::HoverEnd],
