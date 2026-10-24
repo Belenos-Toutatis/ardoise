@@ -22,23 +22,31 @@ use super::walk::{self, Found, is_skipped_name};
 use super::{FileStamp, Library, LibraryError};
 
 /// A change to a note file, reported by [`LibraryWatcher`].
+///
+/// `stamp` is the file's stamp as the rescan found it. Compared with the stamp returned by
+/// [`Library::save`] or [`Library::create`] (or held for an open note), it tells the
+/// application's own writes from changes made elsewhere (another program, or Nextcloud
+/// bringing another computer's version).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum LibraryChange {
     Created {
         path: PathBuf,
+        stamp: FileStamp,
     },
     Changed {
         path: PathBuf,
+        stamp: FileStamp,
     },
     Removed {
         path: PathBuf,
     },
-    /// Renamed or moved (also when its binder was renamed). A `Changed` for `to` follows in
-    /// the same batch if the content changed too.
+    /// Renamed or moved (also when its binder was renamed); `stamp` is the file's at `to`.
+    /// A `Changed` for `to` follows in the same batch if the content changed too.
     Renamed {
         from: PathBuf,
         to: PathBuf,
+        stamp: FileStamp,
     },
 }
 
@@ -46,10 +54,20 @@ impl LibraryChange {
     /// The path the note has now (or had, for `Removed`).
     pub fn path(&self) -> &Path {
         match self {
-            LibraryChange::Created { path }
-            | LibraryChange::Changed { path }
+            LibraryChange::Created { path, .. }
+            | LibraryChange::Changed { path, .. }
             | LibraryChange::Removed { path } => path,
             LibraryChange::Renamed { to, .. } => to,
+        }
+    }
+
+    /// The file's stamp after the change (`None` for `Removed`).
+    pub fn stamp(&self) -> Option<FileStamp> {
+        match self {
+            LibraryChange::Created { stamp, .. }
+            | LibraryChange::Changed { stamp, .. }
+            | LibraryChange::Renamed { stamp, .. } => Some(*stamp),
+            LibraryChange::Removed { .. } => None,
         }
     }
 }
@@ -196,13 +214,15 @@ fn diff(old: &Snapshot, new: &Snapshot, hints: &[(PathBuf, PathBuf)]) -> Vec<Lib
     let mut changes = Vec::new();
     renames.sort();
     for (from, to) in renames {
-        let content_changed = old[&from] != new[&to];
+        let stamp = new[&to];
+        let content_changed = old[&from] != stamp;
         changes.push(LibraryChange::Renamed {
             from,
             to: to.clone(),
+            stamp,
         });
         if content_changed {
-            changes.push(LibraryChange::Changed { path: to });
+            changes.push(LibraryChange::Changed { path: to, stamp });
         }
     }
     changes.extend(
@@ -210,15 +230,17 @@ fn diff(old: &Snapshot, new: &Snapshot, hints: &[(PathBuf, PathBuf)]) -> Vec<Lib
             .into_iter()
             .map(|p| LibraryChange::Removed { path: p.clone() }),
     );
-    changes.extend(
-        created
-            .into_iter()
-            .map(|p| LibraryChange::Created { path: p.clone() }),
-    );
+    changes.extend(created.into_iter().map(|p| LibraryChange::Created {
+        path: p.clone(),
+        stamp: new[p],
+    }));
     changes.extend(
         new.iter()
             .filter(|(path, stamp)| old.get(*path).is_some_and(|before| before != *stamp))
-            .map(|(path, _)| LibraryChange::Changed { path: path.clone() }),
+            .map(|(path, stamp)| LibraryChange::Changed {
+                path: path.clone(),
+                stamp: *stamp,
+            }),
     );
     changes
 }
@@ -349,14 +371,23 @@ mod tests {
             ("r/b", stamp(9, 2)),
             ("r/d", stamp(4, 4)),
         ]);
+        let changes = diff(&old, &new, &[]);
         assert_eq!(
-            diff(&old, &new, &[]),
+            changes,
             [
                 LibraryChange::Removed { path: p("r/c") },
-                LibraryChange::Created { path: p("r/d") },
-                LibraryChange::Changed { path: p("r/b") },
+                LibraryChange::Created {
+                    path: p("r/d"),
+                    stamp: stamp(4, 4)
+                },
+                LibraryChange::Changed {
+                    path: p("r/b"),
+                    stamp: stamp(9, 2)
+                },
             ]
         );
+        let stamps: Vec<Option<FileStamp>> = changes.iter().map(LibraryChange::stamp).collect();
+        assert_eq!(stamps, [None, Some(stamp(4, 4)), Some(stamp(9, 2))]);
         assert!(diff(&new, &new, &[]).is_empty());
     }
 
@@ -370,12 +401,17 @@ mod tests {
             [
                 LibraryChange::Renamed {
                     from: p("r/a"),
-                    to: p("r/a2")
+                    to: p("r/a2"),
+                    stamp: stamp(5, 1)
                 },
-                LibraryChange::Changed { path: p("r/a2") },
+                LibraryChange::Changed {
+                    path: p("r/a2"),
+                    stamp: stamp(5, 1)
+                },
                 LibraryChange::Renamed {
                     from: p("r/b"),
-                    to: p("r/sub/b")
+                    to: p("r/sub/b"),
+                    stamp: stamp(2, 2)
                 },
             ]
         );
@@ -392,11 +428,13 @@ mod tests {
             [
                 LibraryChange::Renamed {
                     from: p("r/old/a"),
-                    to: p("r/new/a")
+                    to: p("r/new/a"),
+                    stamp: same
                 },
                 LibraryChange::Renamed {
                     from: p("r/old/b"),
-                    to: p("r/new/b")
+                    to: p("r/new/b"),
+                    stamp: same
                 },
             ]
         );

@@ -3,9 +3,10 @@
 //!
 //! - One note = one `YYYY-MM-DD Title.ardoise` file; sub-folders are binders.
 //! - Every write is atomic ([`crate::fsutil`]); renames and moves never replace a file.
-//! - Saving checks the file's modification time and size against what was loaded: a note
-//!   changed meanwhile on another computer (and synced by Nextcloud) is never overwritten
-//!   silently ([`LibraryError::Conflict`]).
+//! - Saving checks the file's modification time and size against what was loaded, before
+//!   writing and again right before the new version replaces the file: a note changed
+//!   meanwhile on another computer (and synced by Nextcloud) is never overwritten silently
+//!   ([`LibraryError::Conflict`]).
 //! - No lock file, no database: the folder can be synced by any tool.
 
 mod conflicts;
@@ -23,7 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::format::{self, FormatError, NoteFile};
-use crate::fsutil::{rename_no_replace, write_atomic_metadata, write_atomic_new};
+use crate::fsutil::{CheckedWriteError, rename_no_replace, write_atomic_checked, write_atomic_new};
 
 pub use conflicts::{ConflictKind, ConflictName, parse_conflict_name};
 pub use names::{
@@ -452,21 +453,37 @@ impl Library {
 
     /// Reads a whole note, with the stamp to pass back to [`save`](Self::save).
     pub fn read(&self, path: &Path) -> Result<LoadedNote, LibraryError> {
+        self.read_with(path, |_| {})
+    }
+
+    /// [`read`](Self::read), calling `after_read` between reading the file and checking that
+    /// it did not change meanwhile (tests use it to replace the file at that moment).
+    fn read_with(
+        &self,
+        path: &Path,
+        mut after_read: impl FnMut(&Path),
+    ) -> Result<LoadedNote, LibraryError> {
+        const ATTEMPTS: u32 = 3;
         let path = self.note_path(path)?;
-        // The stamp must describe the bytes read: retry if the file is replaced meanwhile.
-        let mut attempts = 0;
+        // The stamp must describe the bytes read: retry while the file is replaced meanwhile.
+        let mut attempt = 1;
         loop {
             let before = self.stamp_of(&path)?;
             let file = format::read_note(&path).map_err(format_error(&path))?;
+            after_read(&path);
             let after = self.stamp_of(&path)?;
-            attempts += 1;
-            if before == after || attempts == 3 {
+            if before == after || attempt == ATTEMPTS {
+                // Still changing at the last attempt: the bytes read belong to the version of
+                // `before` or to a later one, never to an earlier one. `before` is the stamp a
+                // save may safely compare with: if the file is no longer exactly that version,
+                // the save is refused as a conflict rather than overwriting what came since.
                 return Ok(LoadedNote {
                     path,
                     file,
-                    stamp: after,
+                    stamp: before,
                 });
             }
+            attempt += 1;
         }
     }
 
@@ -522,17 +539,42 @@ impl Library {
     /// `expected` ([`LibraryError::Conflict`]) or has disappeared
     /// ([`LibraryError::NotFound`]). Returns the new stamp. The file name is not changed:
     /// use [`retitle`](Self::retitle) for that.
+    ///
+    /// The file's stamp is checked before anything is written, then again once the new
+    /// version is completely written next to it, right before every attempt to rename it over
+    /// the note (the rename waits while a sync client or an antivirus holds the file open). A
+    /// version brought by Nextcloud meanwhile is therefore left untouched; only the instant
+    /// between the last check and the rename system call stays uncovered.
     pub fn save(
         &self,
         path: &Path,
         file: &NoteFile,
         expected: &FileStamp,
     ) -> Result<FileStamp, LibraryError> {
+        self.save_with(path, file, expected, || {})
+    }
+
+    /// [`save`](Self::save), calling `before_check` right before each check made once the new
+    /// version is written (tests use it to land another version at the worst moment).
+    fn save_with(
+        &self,
+        path: &Path,
+        file: &NoteFile,
+        expected: &FileStamp,
+        mut before_check: impl FnMut(),
+    ) -> Result<FileStamp, LibraryError> {
         let path = self.note_path(path)?;
-        // Encode first, so that the check happens right before the write.
         let bytes = format::to_bytes(file).map_err(format_error(&path))?;
+        // A save that is refused anyway writes nothing, not even a temporary file.
         self.check_stamp(&path, expected)?;
-        let metadata = write_atomic_metadata(&path, &bytes).map_err(io_error(&path))?;
+        let metadata = write_atomic_checked(&path, &bytes, || {
+            before_check();
+            self.check_stamp(&path, expected)
+        })
+        .map_err(|error| match error {
+            CheckedWriteError::Refused(error) => error,
+            CheckedWriteError::Io(source) => io_error(&path)(source),
+        })?;
         FileStamp::from_metadata(&metadata).map_err(io_error(&path))
     }
 

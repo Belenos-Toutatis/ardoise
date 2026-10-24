@@ -37,7 +37,9 @@ case) are already compressed and are stored; all others are deflated.
 - Sizes and CRC-32 are in the local headers (no data descriptor). ZIP64 is only used for a member of 4 GiB or more,
   which the limits below exclude.
 - A name ending in `/` with no data is a directory entry. None is written by version 1; unknown ones are kept.
-- If a name appears twice (damaged or hostile file), the first one wins.
+- Names are unique. A file in which a name appears twice in the central directory (damaged or hostile file; also
+  two spellings that decode to the same name) is refused as damaged (code `noteDamaged`), when listing as well as
+  when opening, and is never rewritten.
 
 Limits enforced by readers on the *decompressed* size, whatever the archive claims (protection against ZIP bombs):
 
@@ -46,7 +48,10 @@ Limits enforced by readers on the *decompressed* size, whatever the archive clai
 | `note.json` | 16 MiB |
 | `strokes.bin` | 128 MiB (an hour of continuous live writing is about 6 MB) |
 | any other member | 1 GiB |
-| number of members | 4096 |
+| all members together | 1.5 GiB |
+| number of members | 4096 (counted in the central directory, repeated names included) |
+
+A member that crosses a limit, its own or what is left of the total, makes the file "damaged" (`MemberTooLarge`).
 
 ## 2. `note.json`
 
@@ -209,8 +214,10 @@ length and thousands of random corruptions).
 - `original.bin`: the tablet's raw data for this page, as received, never modified after import.
 - `thumb.png`: thumbnail, any size (the app decides).
 - `audio.opus`: narration recorded with the replay feature.
-- `background.<ext>`: imported background (image or PDF). At most one is recognised; further `background.*`
-  members are kept as unknown members.
+- `background.<ext>`: imported background (image or PDF). At most one is recognised (the first in the central
+  directory); further `background.*` members are kept as unknown members. When a note is written, an unknown member
+  with the very name of the background being written is dropped: the known background wins (a file read with
+  `background.png` and an unknown `background.pdf`, then given a PDF background, is written with the new PDF only).
 - `text.json`: recognised text; its schema belongs to the recognition feature.
 
 ## 5. Versioning rules
@@ -249,6 +256,19 @@ Sample files of version 1 (regenerate only when adding one:
   and runs of spaces become one space, leading and trailing dots and spaces are removed, at most 80 characters, and
   `_` follows a reserved device name (`CON`, `NUL`, `COM1`…). A taken name gets ` (2)`, ` (3)`… An empty title gives
   `YYYY-MM-DD.ardoise`. Renaming the note renames the file.
+- Names Nextcloud's desktop client never synchronises (its default `sync-exclude.lst` and built-in rules, compared
+  ignoring case) are refused for binders and avoided in titles: names ending with `~`, `.part`, `.filepart`,
+  `.crdownload`, `.kate-swp`, `.unison`, `.idlk`, `.prlock`, `.dwl`, `.dwl2` or `.textClipping`; starting with `~$`;
+  `~….tmp`; `#…#`; containing `.~`, `.sb-`, `.gnucash.tmp-`, `_conflict-`, `(conflicted copy` or
+  `(case clash from`; `Thumbs.db`, `photothumb.db`, `desktop.ini`, `System Volume Information`; more than 254
+  UTF-16 units. In a title, the smallest change is made: `Plan.part` → `Plan_part`, `Brouillon~` → `Brouillon`,
+  `~$Budget` → `$Budget`, `a.~b` → `a-~b`, `Thumbs.db` → `Thumbs_.db`, `#idée#` → `#idée` (rules in
+  `crates/ardoise-core/src/library/names.rs`).
+- Atomic writes go through a temporary file `.<name>.<process id>.<counter>.part` next to the target (hidden, and
+  ignored by Nextcloud); `<name>` is shortened when needed so that the temporary name stays within 255 UTF-16 units.
+- Saving compares the file's modification time and size with those of the version loaded, before writing and again
+  right before every attempt to rename the new version over the note, and refuses to overwrite a version that came
+  meanwhile (conflict).
 - Ignored when listing: hidden names (leading dot: `.ardoise/`, the `.part` temporary files of atomic writes,
   Nextcloud's `.~` downloads and `.sync_*.db`), names ending in `.part`, folders marked hidden or system by Windows,
   links and junctions.

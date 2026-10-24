@@ -31,10 +31,137 @@ fn is_reserved(name: &str) -> bool {
         && (rest[0].is_ascii_digit() || matches!(rest[0], '¹' | '²' | '³'))
 }
 
+// Names Nextcloud's desktop client never synchronises: the patterns of its default
+// `sync-exclude.lst` (https://github.com/nextcloud/desktop/blob/master/sync-exclude.lst, as of
+// October 2026, plus `#*#` from older releases) and its built-in rules
+// (`src/csync/csync_exclude.cpp`: `desktop.ini`, names over 254 UTF-16 units, and conflict
+// files, which are not uploaded unless the server asks for them). Such a file stays on one
+// computer without any warning. Only patterns a visible name can match are listed: names
+// starting with a dot (`.~lock.*`, `._*`, `.DS_Store`, `.nfs*`…) or holding a control
+// character (`Icon\r`) are refused anyway, and so are names ending with a dot
+// (`My Saved Places.`). On Windows the client compares names ignoring case and lets `*` match
+// any character.
+
+/// `*.ext` patterns, plus `*~` (which also covers `*~lock~`).
+const SYNC_EXCLUDED_ENDINGS: [&str; 11] = [
+    "~",
+    ".part",
+    ".filepart",
+    ".crdownload",
+    ".kate-swp",
+    ".unison",
+    ".idlk",
+    ".prlock",
+    ".dwl",
+    ".dwl2",
+    ".textclipping",
+];
+
+/// `*text*` patterns and conflict markers, with the position of the character the sanitising
+/// replaces by `-` to break them.
+const SYNC_EXCLUDED_MARKERS: [(&str, usize); 6] = [
+    (".~", 0),
+    (".gnucash.tmp-", 0),
+    (".sb-", 0),
+    ("_conflict-", 0),
+    ("(conflicted copy", 11),
+    ("(case clash from", 5),
+];
+
+/// Whole names.
+const SYNC_EXCLUDED_NAMES: [&str; 4] = [
+    "thumbs.db",
+    "photothumb.db",
+    "desktop.ini",
+    "system volume information",
+];
+
+/// Folds a character as Nextcloud's case-insensitive matching does, as far as the (ASCII)
+/// patterns are concerned: the Kelvin sign and the long s match `k` and `s`.
+fn fold(c: char) -> char {
+    match c {
+        '\u{212A}' => 'k',
+        '\u{17F}' => 's',
+        c => c.to_ascii_lowercase(),
+    }
+}
+
+/// Whether Nextcloud would never synchronise a file or folder called `name`.
+pub(crate) fn sync_excluded(name: &str) -> bool {
+    let folded: String = name.chars().map(fold).collect();
+    SYNC_EXCLUDED_ENDINGS.iter().any(|e| folded.ends_with(e))
+        || SYNC_EXCLUDED_MARKERS
+            .iter()
+            .any(|(marker, _)| folded.contains(marker))
+        || SYNC_EXCLUDED_NAMES.contains(&folded.as_str())
+        || folded.starts_with("~$")
+        || (folded.starts_with('~') && folded.ends_with(".tmp"))
+        || (folded.len() >= 2 && folded.starts_with('#') && folded.ends_with('#'))
+}
+
+/// Inserts `_` after the part of `name` before its first dot (`aux.txt` → `aux_.txt`).
+fn mark_stem(name: &str) -> String {
+    let stem_end = name.find('.').unwrap_or(name.len());
+    let (stem, rest) = name.split_at(stem_end);
+    format!("{}_{rest}", stem.trim_end())
+}
+
+/// One round of fixes making `name` acceptable (see [`sanitize_name`]). `name` holds no
+/// character [`fold`] maps to another letter, so its ASCII-lowercased form has the same
+/// characters at the same places.
+fn fix_once(name: &str) -> String {
+    let mut chars: Vec<char> = name.chars().collect();
+    for (marker, at) in SYNC_EXCLUDED_MARKERS {
+        let marker: Vec<char> = marker.chars().collect();
+        let mut start = 0;
+        while start + marker.len() <= chars.len() {
+            let window = &chars[start..start + marker.len()];
+            if window
+                .iter()
+                .zip(&marker)
+                .all(|(c, m)| c.to_ascii_lowercase() == *m)
+            {
+                chars[start + at] = '-';
+            }
+            start += 1;
+        }
+    }
+    let mut name: String = chars.into_iter().collect();
+    let lower = name.to_ascii_lowercase();
+    if lower.starts_with("~$") || (lower.starts_with('~') && lower.ends_with(".tmp")) {
+        name = name.trim_start_matches('~').to_owned();
+    }
+    name = name.trim_end_matches('~').to_owned();
+    let lower = name.to_ascii_lowercase();
+    if let Some(ending) = SYNC_EXCLUDED_ENDINGS
+        .iter()
+        .find(|e| e.starts_with('.') && lower.ends_with(*e))
+    {
+        // `Plan.part` → `Plan_part`.
+        name.replace_range(name.len() - ending.len()..=name.len() - ending.len(), "_");
+    }
+    if name.len() >= 2 && name.starts_with('#') && name.ends_with('#') {
+        name.pop();
+    }
+    let trimmed = name.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    if is_reserved(trimmed) || SYNC_EXCLUDED_NAMES.contains(&trimmed.to_ascii_lowercase().as_str())
+    {
+        // `aux.txt` is reserved as much as `aux`: the mark goes right after the device name.
+        mark_stem(trimmed)
+    } else {
+        trimmed.to_owned()
+    }
+}
+
 /// Turns any text into a valid Windows file or folder name (possibly empty): forbidden
 /// characters replaced (`/ \ | :` by `-`, `"` by `'`) or dropped (`< > ? *`), control
 /// characters and runs of spaces turned into one space, leading and trailing dots and spaces
 /// removed, at most [`MAX_NAME_CHARS`] characters, `_` appended to reserved device names.
+/// Names Nextcloud would never synchronise are changed as little as possible: trailing `~`
+/// and the `~` of a leading `~$` dropped, the dot of an excluded extension turned into `_`
+/// (`Plan.part` → `Plan_part`), `.~`, `.sb-`, `.gnucash.tmp-` and conflict markers broken with
+/// a `-`, `_` after the stem of `Thumbs.db`, `desktop.ini`…, the last `#` of `#…#` dropped.
+/// The result also never makes a note file name (`date title.ardoise`) Nextcloud excludes.
 pub fn sanitize_name(text: &str) -> String {
     let replaced: String = text
         .chars()
@@ -42,28 +169,34 @@ pub fn sanitize_name(text: &str) -> String {
             '/' | '\\' | '|' | ':' => Some('-'),
             '"' => Some('\''),
             '<' | '>' | '?' | '*' => None,
+            // Letters Nextcloud matches as `K` and `s`: spelled so, the fixes below see them.
+            '\u{212A}' => Some('K'),
+            '\u{17F}' => Some('s'),
             c if c.is_control() => Some(' '),
             c => Some(c),
         })
         .collect();
     let collapsed = replaced.split_whitespace().collect::<Vec<_>>().join(" ");
-    let truncated: String = collapsed.chars().take(MAX_NAME_CHARS).collect();
-    let name = truncated.trim_matches(|c: char| c == '.' || c.is_whitespace());
-    if is_reserved(name) {
-        // `aux.txt` is reserved as much as `aux`: the mark goes right after the device name.
-        let stem_end = name.find('.').unwrap_or(name.len());
-        let (stem, rest) = name.split_at(stem_end);
-        format!("{}_{rest}", stem.trim_end())
-    } else {
-        name.to_owned()
+    let mut name: String = collapsed.chars().take(MAX_NAME_CHARS).collect();
+    // Every round removes characters, turns a `.`, `_` or space into `_` or `-` (never the
+    // other way), or marks a reserved name for good: this ends after a few rounds; the bound
+    // is only a safety net.
+    for _ in 0..=name.len() * 2 + 2 {
+        let fixed = fix_once(&name);
+        if fixed == name {
+            break;
+        }
+        name = fixed;
     }
+    name
 }
 
 /// Why `name` cannot be a folder or file name in the library, if it cannot.
 pub fn invalid_name_reason(name: &str) -> Option<&'static str> {
     if name.is_empty() {
         Some("the name is empty")
-    } else if name.chars().count() > 255 {
+    } else if name.encode_utf16().count() > 254 {
+        // Nextcloud's limit; NTFS accepts 255.
         Some("the name is too long")
     } else if name
         .chars()
@@ -76,6 +209,8 @@ pub fn invalid_name_reason(name: &str) -> Option<&'static str> {
         Some("Windows forbids names ending with a dot or a space")
     } else if is_reserved(name) {
         Some("the name is reserved by Windows")
+    } else if sync_excluded(name) {
+        Some("Nextcloud never synchronises files or folders named like this")
     } else {
         None
     }
@@ -230,6 +365,48 @@ mod tests {
                 assert_eq!(invalid_name_reason(&name), None, "{text:?} -> {name:?}");
             }
         }
+        // Pieces of the names Nextcloud never synchronises, assembled at random.
+        let tokens = [
+            ".",
+            "~",
+            "$",
+            "#",
+            " ",
+            "a",
+            "part",
+            "filepart",
+            "sb-",
+            "tmp",
+            "db",
+            "thumbs",
+            "desktop",
+            "ini",
+            "con",
+            "_conflict-",
+            "(conflicted copy",
+            "(case clash from",
+            "gnucash",
+            "idl",
+            "\u{212A}",
+            "\u{17F}",
+            "dwl2",
+            "kate-swp",
+            "*",
+            "/",
+        ];
+        for _ in 0..5000 {
+            let count = rng.below(8) as usize;
+            let text: String = (0..count)
+                .map(|_| tokens[rng.below(tokens.len() as u64) as usize])
+                .collect();
+            let name = sanitize_name(&text);
+            if !name.is_empty() {
+                assert_eq!(invalid_name_reason(&name), None, "{text:?} -> {name:?}");
+            }
+            // Inside a note file name too.
+            let file_name = format!("{}.{NOTE_EXTENSION}", note_file_stem(0, &text));
+            assert!(!sync_excluded(&file_name), "{text:?} -> {file_name:?}");
+        }
     }
 
     #[test]
@@ -242,6 +419,87 @@ mod tests {
         assert!(invalid_name_reason("LPT1").is_some());
         assert!(invalid_name_reason(&"x".repeat(256)).is_some());
         assert_eq!(invalid_name_reason("Classe de 3e B"), None);
+    }
+
+    /// Names Nextcloud's desktop client never synchronises (`sync-exclude.lst`, built-in rules).
+    const NEVER_SYNCED: [&str; 27] = [
+        "Brouillon~",
+        "Cours~lock~",
+        "~$Budget",
+        "~classe.tmp",
+        "Cours.~1",
+        "a.~",
+        "Classe.part",
+        "Classe.PART",
+        "Export.filepart",
+        "Image.crdownload",
+        "x.kate-swp",
+        "x.unison",
+        "Plan.idlk",
+        "Plan.prlock",
+        "Plan.dwl",
+        "Plan.dwl2",
+        "Lien.textClipping",
+        "a.gnucash.tmp-1",
+        "a.sb-12-b",
+        "#brouillon#",
+        "Thumbs.db",
+        "photothumb.db",
+        "desktop.ini",
+        "System Volume Information",
+        "Cours (conflicted copy 2026-10-24 101530)",
+        "Cours_conflict-20261024-101530",
+        "Cours (case clash from 2026-10-24 101530)",
+    ];
+
+    #[test]
+    fn names_nextcloud_never_syncs_are_refused() {
+        for name in NEVER_SYNCED {
+            assert!(invalid_name_reason(name).is_some(), "{name}");
+        }
+        assert!(invalid_name_reason(&"x".repeat(255)).is_some());
+        assert_eq!(invalid_name_reason(&"x".repeat(254)), None);
+        for fine in [
+            "~ environ 3 km",
+            "Cours ~ suite",
+            "Notes.partiel",
+            "a.sb",
+            "#3e B",
+            "C#",
+            "Thumbs",
+            "Partie 2 - copie",
+            "Conflit de dates",
+        ] {
+            assert_eq!(invalid_name_reason(fine), None, "{fine}");
+        }
+    }
+
+    #[test]
+    fn sanitize_avoids_names_nextcloud_never_syncs() {
+        for name in NEVER_SYNCED {
+            let sanitized = sanitize_name(name);
+            assert!(!sanitized.is_empty(), "{name}");
+            assert_eq!(
+                invalid_name_reason(&sanitized),
+                None,
+                "{name} -> {sanitized}"
+            );
+        }
+        assert_eq!(sanitize_name("Brouillon~"), "Brouillon");
+        assert_eq!(sanitize_name("~$Budget"), "$Budget");
+        assert_eq!(sanitize_name("Cours.~1"), "Cours-~1");
+        assert_eq!(sanitize_name("Classe.part"), "Classe_part");
+        assert_eq!(sanitize_name("Thumbs.db"), "Thumbs_.db");
+        assert_eq!(sanitize_name("#brouillon#"), "#brouillon");
+        assert_eq!(sanitize_name("~ environ 3 km"), "~ environ 3 km");
+        // Characters that Nextcloud's case-insensitive matching folds to ASCII letters.
+        assert_eq!(sanitize_name("Plan.idl\u{212A}"), "Plan_idlK");
+        assert_eq!(sanitize_name("a.\u{17F}b-1"), "a-sb-1");
+        // Fixes that uncover another problem are applied until none is left.
+        assert_eq!(sanitize_name("x.part~"), "x_part");
+        assert_eq!(sanitize_name("a.~ ~"), "a-");
+        assert_eq!(sanitize_name("CON~"), "CON_");
+        assert_eq!(sanitize_name("~.tmp"), "tmp");
     }
 
     #[test]
