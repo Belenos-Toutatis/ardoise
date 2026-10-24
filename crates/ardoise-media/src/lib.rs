@@ -14,6 +14,8 @@
 //!   [`probe_gif`] (`gif` + NeuQuant), [`create_webp`] / [`probe_webp`] (libwebp),
 //!   [`create_webm`] / [`probe_webm`] (AV1 by rav1e, Opus sound, libwebm muxer).
 //! - [`OpusEncoder`]: narration to Opus packets (pure Rust), for WebM and the MP4 fallback.
+//! - [`create_mp4`] / [`probe_mp4_animation`]: MP4 through Media Foundation or, when it is
+//!   missing, Cisco's OpenH264 downloaded on request ([`OpenH264Codec`]), read back in pure Rust.
 //!
 //! On platforms other than Windows the Media Foundation entry points return
 //! [`MediaError::Unsupported`]; the types and the colour conversion are available everywhere.
@@ -23,6 +25,7 @@ mod gif;
 pub mod microphone;
 mod mp4;
 pub mod nv12;
+mod openh264;
 mod opus;
 pub mod replay;
 mod settings;
@@ -46,7 +49,8 @@ pub use self::gif::{GifOptions, create_gif, probe_gif};
 pub use self::webm::{WebmOptions, create_webm, probe_webm};
 pub use error::MediaError;
 pub use mp4::{
-    CISCO_NOTICE, CodecStatus, Mp4Backend, Mp4Options, OPENH264_VERSION, OpenH264Codec, create_mp4,
+    CISCO_NOTICE, CodecStatus, Mp4Backend, Mp4Options, OPENH264_LICENSE, OPENH264_SHA256,
+    OPENH264_URL, OPENH264_VERSION, OpenH264Codec, create_mp4, media_foundation_available,
     probe_mp4_animation,
 };
 pub use opus::{OPUS_FRAME_SAMPLES, OpusEncoder, OpusHead, OpusPacket, default_opus_bitrate};
