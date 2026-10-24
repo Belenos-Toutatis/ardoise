@@ -15,6 +15,7 @@
 //! [`MediaError::Unsupported`]; the types and the colour conversion are available everywhere.
 
 mod error;
+pub mod microphone;
 pub mod nv12;
 mod settings;
 mod sink;

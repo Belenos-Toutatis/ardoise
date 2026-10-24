@@ -9,6 +9,9 @@ publish.workspace = true
 
 [dependencies]
 thiserror = "2"
+# Microphone capture (WASAPI on Windows) and resampling to the 48 kHz narration rate.
+cpal = "0.18"
+rubato = "5"
 
 [target.'cfg(windows)'.dependencies]
 # Same version as `ardoise-ble`, so only one copy of the crate is compiled.

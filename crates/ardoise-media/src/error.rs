@@ -55,4 +55,23 @@ pub enum MediaError {
     /// The file read back does not have the expected structure.
     #[error("unexpected media file content: {0}")]
     InvalidFile(String),
+
+    // --- Microphone capture (`microphone`) ---
+    /// The microphone delivered nothing but digital silence (exact zeros) for a second or
+    /// more. On Windows this is what a desktop app gets when "Let desktop apps access your
+    /// microphone" is off (Settings > Privacy & security > Microphone); a hardware mute
+    /// switch gives the same. A quiet room is not silence in this sense: it has low,
+    /// non-zero noise.
+    #[error(
+        "the microphone delivers only silence: Windows may be blocking desktop apps from using it"
+    )]
+    MicrophoneSilent,
+
+    /// No input device matches the requested id or name.
+    #[error("no microphone matches \"{0}\"")]
+    MicrophoneNotFound(String),
+
+    /// Listing, opening or reading the microphone failed, or the audio could not be converted.
+    #[error("microphone: {step} failed: {message}")]
+    Microphone { step: &'static str, message: String },
 }
