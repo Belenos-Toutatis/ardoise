@@ -110,6 +110,10 @@ version = "0.1.0"
 [[package]]
 name = "ardoise-proto"
 version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "ardoise-render"
