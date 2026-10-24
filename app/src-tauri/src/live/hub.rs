@@ -1,0 +1,753 @@
+//! The live hub: one [`LiveSession`] shared by the tablet service's thread (live input), the
+//! commands of every window, and two threads of its own:
+//!
+//! - the **flusher** sends the pending events to every subscribed window as soon as there are
+//!   some, but not more often than every 4 ms (SPEC §6.2: grouped sending through a `Channel`);
+//!   each window has its own queue, so a window that subscribes in the middle of a stroke gets
+//!   exactly what follows its snapshot;
+//! - the **saver** writes the pages to the library: a page becomes a note when its first stroke
+//!   ends, then is rewritten atomically at most every 5 s while it changes, and at once when it
+//!   is left or when live mode stops.
+//!
+//! Neither thread does its slow work (sending, writing files) while holding the session lock,
+//! so the tablet's input is never held up by a window or by the disk.
+
+use std::path::Path;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
+
+use ardoise_core::format::NoteFile;
+use ardoise_core::library::{Library, LibraryError};
+use ardoise_core::note::{Note, PageSize};
+use ardoise_core::settings::LiveButton;
+use ardoise_device::service::{LiveInput, LiveSink, LiveState};
+use tauri::ipc::Channel;
+
+use super::model::{
+    LiveBatch, LiveCommandKind, LiveEvent, LiveSessionState, LiveSnapshot, LiveStyle,
+    LiveViewState, wall_ms, wall_now_ms,
+};
+use super::session::{LiveSession, Page, SavedFile};
+use crate::library::now_ms;
+use crate::presentation::MonitorInfo;
+use crate::thumbnails::thumbnail_png;
+
+/// Timing of the hub (shortened by the tests).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HubConfig {
+    /// Least time between two batches (SPEC §6.2; 4 ms leaves room for a 60 or 120 Hz screen).
+    pub flush_interval: Duration,
+    /// Least time between two writes of a page that keeps changing.
+    pub save_interval: Duration,
+}
+
+impl Default for HubConfig {
+    fn default() -> Self {
+        Self {
+            flush_interval: Duration::from_millis(4),
+            save_interval: Duration::from_secs(5),
+        }
+    }
+}
+
+/// Where batches go: a window's channel (or a test double). An error drops the subscriber.
+pub trait BatchSink: Send + Sync {
+    fn send(&self, batch: LiveBatch) -> Result<(), String>;
+}
+
+impl BatchSink for Channel<LiveBatch> {
+    fn send(&self, batch: LiveBatch) -> Result<(), String> {
+        Channel::send(self, batch).map_err(|error| error.to_string())
+    }
+}
+
+/// Reads what the tablet's button does (`[tablet] button`), when it is pressed.
+pub type ButtonSetting = Arc<dyn Fn() -> LiveButton + Send + Sync>;
+
+/// Failure of a live command.
+#[derive(Debug, thiserror::Error)]
+pub enum LiveError {
+    #[error("live mode was never started")]
+    NotRunning,
+    #[error(transparent)]
+    Library(#[from] LibraryError),
+}
+
+/// What a new session needs.
+pub struct StartOptions {
+    /// Where its pages go (the library root).
+    pub library: Library,
+    /// Layer names in French.
+    pub french: bool,
+    /// Drawing area of the tablet, if known (else the Slate A4's).
+    pub size: PageSize,
+    pub button: ButtonSetting,
+}
+
+/// Result of [`LiveHub::start`].
+pub enum Start {
+    /// A session is already running: its snapshot.
+    Running(LiveSnapshot),
+    /// A new session waits for the tablet: hand `sink` to the tablet service.
+    New {
+        snapshot: LiveSnapshot,
+        sink: HubSink,
+    },
+}
+
+/// One window receiving batches.
+struct Subscriber {
+    id: u64,
+    /// Label of its window: a window has one subscription, the latest.
+    label: String,
+    sink: Arc<dyn BatchSink>,
+    /// Events not sent yet.
+    queue: Vec<LiveEvent>,
+}
+
+/// A page to write, taken from the session.
+struct SaveJob {
+    session: u64,
+    page: usize,
+    version: u64,
+    note: Note,
+    file: Option<SavedFile>,
+}
+
+/// What a write produced.
+struct Written {
+    file: SavedFile,
+    /// The note's id as written: a new one when the note had to be written again next to a
+    /// version changed elsewhere.
+    id: String,
+}
+
+struct HubState {
+    session: LiveSession,
+    /// Id of the session whose tablet input is accepted.
+    accepting: Option<u64>,
+    /// A session was started at least once since the app started.
+    started: bool,
+    next_session: u64,
+    library: Option<Library>,
+    button: ButtonSetting,
+    subscribers: Vec<Subscriber>,
+    next_subscriber: u64,
+    last_flush: Option<Instant>,
+    shutdown: bool,
+}
+
+struct Shared {
+    config: HubConfig,
+    state: Mutex<HubState>,
+    /// Wakes the flusher: events are pending, or shutdown.
+    flush_wake: Condvar,
+    /// Wakes the saver: a page changed, or shutdown.
+    save_wake: Condvar,
+    /// Held during a save pass, so that two passes never write the same page twice.
+    saving: Mutex<()>,
+}
+
+/// The hub of the running app (see the module documentation). Dropping it stops its threads.
+pub struct LiveHub {
+    shared: Arc<Shared>,
+}
+
+/// The live input of one session, for the tablet service. Input of a session that was stopped
+/// or replaced is ignored.
+pub struct HubSink {
+    shared: Arc<Shared>,
+    session: u64,
+}
+
+impl LiveSink for HubSink {
+    fn input(&mut self, input: LiveInput) {
+        self.shared.input(self.session, input);
+    }
+}
+
+impl HubSink {
+    /// Id of the session it feeds.
+    pub fn session(&self) -> u64 {
+        self.session
+    }
+}
+
+fn default_size() -> PageSize {
+    ardoise_core::note::A4_LANDSCAPE
+}
+
+/// Adds `event` to a window's queue, merging what does not need to be sent twice: points join
+/// the stroke they continue, only the latest hover position and view are kept.
+fn enqueue(queue: &mut Vec<LiveEvent>, event: LiveEvent) {
+    match event {
+        LiveEvent::Points { page_index, points } => match queue.last_mut() {
+            Some(LiveEvent::Points {
+                page_index: pending_page,
+                points: pending,
+            }) if *pending_page == page_index => pending.extend(points),
+            Some(LiveEvent::StrokeStart {
+                page_index: pending_page,
+                stroke,
+            }) if *pending_page == page_index => stroke.points.extend(points),
+            _ => queue.push(LiveEvent::Points { page_index, points }),
+        },
+        LiveEvent::Hover { .. } | LiveEvent::HoverEnd => {
+            queue.retain(|e| !matches!(e, LiveEvent::Hover { .. }));
+            queue.push(event);
+        }
+        LiveEvent::View { .. } => {
+            queue.retain(|e| !matches!(e, LiveEvent::View { .. }));
+            queue.push(event);
+        }
+        LiveEvent::Saved { .. } => {
+            queue.retain(|e| !matches!(e, LiveEvent::Saved { .. }));
+            queue.push(event);
+        }
+        event => queue.push(event),
+    }
+}
+
+/// When `page` is due to be written: now when it is urgent or never tried, else one interval
+/// after the last attempt; `None` when it has nothing to write.
+fn page_due(page: &Page, now: Instant, interval: Duration) -> Option<Instant> {
+    if !page.needs_write() {
+        return None;
+    }
+    Some(match page.last_attempt {
+        Some(last) if !page.urgent => last + interval,
+        _ => now,
+    })
+}
+
+/// Whether `events` may have made a page worth writing (a stroke ended, a page changed).
+fn may_need_save(events: &[LiveEvent]) -> bool {
+    events
+        .iter()
+        .any(|e| matches!(e, LiveEvent::StrokeEnd { .. } | LiveEvent::Snapshot { .. }))
+}
+
+/// Writes a page: a new note in the library root the first time, then over its file. A file
+/// moved meanwhile (same note, untouched) is followed; one deleted or changed elsewhere is left
+/// alone and the page becomes a new note next to it, so that nothing is ever overwritten.
+fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError> {
+    let mut file = NoteFile::new(job.note.clone());
+    file.note.modified = now_ms().max(file.note.created);
+    file.thumbnail = thumbnail_png(&file.note);
+    let Some(previous) = &job.file else {
+        let saved = library.create(Path::new(""), &file)?;
+        return Ok(Written {
+            file: SavedFile {
+                path: saved.path,
+                stamp: saved.stamp,
+            },
+            id: file.note.id,
+        });
+    };
+    match library.save(&previous.path, &file, &previous.stamp) {
+        Ok(stamp) => Ok(Written {
+            file: SavedFile {
+                path: previous.path.clone(),
+                stamp,
+            },
+            id: file.note.id,
+        }),
+        Err(LibraryError::NotFound { .. }) => {
+            let moved = library
+                .list()
+                .notes
+                .into_iter()
+                .find(|entry| entry.id == file.note.id && entry.stamp == previous.stamp);
+            match moved {
+                Some(entry) => {
+                    let stamp = library.save(&entry.path, &file, &entry.stamp)?;
+                    Ok(Written {
+                        file: SavedFile {
+                            path: entry.path,
+                            stamp,
+                        },
+                        id: file.note.id,
+                    })
+                }
+                None => write_as_new(library, file),
+            }
+        }
+        Err(LibraryError::Conflict { .. }) => write_as_new(library, file),
+        Err(error) => Err(error),
+    }
+}
+
+fn write_as_new(library: &Library, mut file: NoteFile) -> Result<Written, LibraryError> {
+    file.note.id = uuid::Uuid::new_v4().to_string();
+    let saved = library.create(Path::new(""), &file)?;
+    Ok(Written {
+        file: SavedFile {
+            path: saved.path,
+            stamp: saved.stamp,
+        },
+        id: file.note.id,
+    })
+}
+
+impl Shared {
+    fn lock(&self) -> MutexGuard<'_, HubState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Queues `events` for every window and wakes the threads that have work.
+    fn publish(&self, state: &mut HubState, events: Vec<LiveEvent>) {
+        if events.is_empty() {
+            return;
+        }
+        if may_need_save(&events) {
+            self.save_wake.notify_all();
+        }
+        if state.subscribers.is_empty() {
+            return;
+        }
+        if let Some((last, others)) = state.subscribers.split_last_mut() {
+            for subscriber in others {
+                for event in &events {
+                    enqueue(&mut subscriber.queue, event.clone());
+                }
+            }
+            for event in events {
+                enqueue(&mut last.queue, event);
+            }
+        }
+        self.flush_wake.notify_all();
+    }
+
+    fn input(&self, session: u64, input: LiveInput) {
+        // The setting is read (a small file) without holding the lock.
+        let button = matches!(input, LiveInput::Button).then(|| {
+            let setting = self.lock().button.clone();
+            setting()
+        });
+        let mut state = self.lock();
+        if state.accepting != Some(session) || state.session.id() != session {
+            return;
+        }
+        let mut out = Vec::new();
+        let session = &mut state.session;
+        match input {
+            LiveInput::Started { width, height, .. } => session.started(width, height, &mut out),
+            LiveInput::Records { records, received } => {
+                session.records(&records, wall_ms(received), &mut out);
+            }
+            LiveInput::ProximityIn { .. } => {}
+            LiveInput::Button => session.command(
+                LiveCommandKind::Button,
+                button.unwrap_or_default(),
+                now_ms(),
+                &mut out,
+            ),
+            LiveInput::State(LiveState::Waiting) => {
+                session.set_state(LiveSessionState::Waiting, &mut out);
+            }
+            LiveInput::State(LiveState::Live) => {
+                session.set_state(LiveSessionState::Live, &mut out);
+            }
+            LiveInput::State(LiveState::Reconnecting) => {
+                session.set_state(LiveSessionState::Reconnecting, &mut out);
+            }
+            LiveInput::State(LiveState::Stopped) => {
+                session.set_state(LiveSessionState::Idle, &mut out);
+                session.mark_all_urgent();
+            }
+        }
+        self.publish(&mut state, out);
+    }
+
+    /// Sends what is pending, at most every `flush_interval`, until shutdown.
+    fn flush_loop(&self) {
+        let mut state = self.lock();
+        loop {
+            if state.shutdown {
+                return;
+            }
+            if state.subscribers.iter().all(|s| s.queue.is_empty()) {
+                state = self
+                    .flush_wake
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+                continue;
+            }
+            let now = Instant::now();
+            if let Some(last) = state.last_flush {
+                let due = last + self.config.flush_interval;
+                if now < due {
+                    // Not a timed wait on the condition variable: on Windows it follows the
+                    // system timer (15.6 ms by default), while `sleep` uses a high-resolution
+                    // timer (to be confirmed at H2). Events keep arriving in the queues meanwhile.
+                    drop(state);
+                    std::thread::sleep(due - now);
+                    state = self.lock();
+                    continue;
+                }
+            }
+            let batches: Vec<(u64, Arc<dyn BatchSink>, Vec<LiveEvent>)> = state
+                .subscribers
+                .iter_mut()
+                .filter(|s| !s.queue.is_empty())
+                .map(|s| (s.id, s.sink.clone(), std::mem::take(&mut s.queue)))
+                .collect();
+            state.last_flush = Some(now);
+            drop(state);
+            let mut failed = Vec::new();
+            for (id, sink, events) in batches {
+                let batch = LiveBatch {
+                    events,
+                    sent_at: wall_now_ms(),
+                };
+                if sink.send(batch).is_err() {
+                    failed.push(id);
+                }
+            }
+            state = self.lock();
+            if !failed.is_empty() {
+                state.subscribers.retain(|s| !failed.contains(&s.id));
+            }
+        }
+    }
+
+    /// When the next page is due to be written (`None`: nothing to write).
+    fn next_save(&self, state: &HubState, now: Instant) -> Option<Instant> {
+        state.library.as_ref()?;
+        state
+            .session
+            .pages()
+            .iter()
+            .filter_map(|page| page_due(page, now, self.config.save_interval))
+            .min()
+    }
+
+    /// Writes the pages that are due, until shutdown.
+    fn save_loop(&self) {
+        let mut state = self.lock();
+        loop {
+            if state.shutdown {
+                return;
+            }
+            let now = Instant::now();
+            match self.next_save(&state, now) {
+                Some(due) if due <= now => {
+                    drop(state);
+                    // A failure is logged and retried after the save interval.
+                    let _ = self.save_pass(false);
+                    state = self.lock();
+                }
+                Some(due) => {
+                    state = self
+                        .save_wake
+                        .wait_timeout(state, due - now)
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .0;
+                }
+                None => {
+                    state = self
+                        .save_wake
+                        .wait(state)
+                        .unwrap_or_else(PoisonError::into_inner);
+                }
+            }
+        }
+    }
+
+    /// Writes the pages that are due (`force`: every page with changes). Returns the first
+    /// failure; the other pages are written anyway.
+    fn save_pass(&self, force: bool) -> Result<(), LibraryError> {
+        let _saving = self.saving.lock().unwrap_or_else(PoisonError::into_inner);
+        let (library, jobs) = {
+            let mut state = self.lock();
+            let now = Instant::now();
+            let Some(library) = state.library.clone() else {
+                return Ok(());
+            };
+            let session_id = state.session.id();
+            let mut jobs = Vec::new();
+            for index in 0..state.session.pages().len() {
+                let Some(page) = state.session.page_mut(index) else {
+                    continue;
+                };
+                let Some(due) = page_due(page, now, self.config.save_interval) else {
+                    continue;
+                };
+                if !force && due > now {
+                    continue;
+                }
+                page.urgent = false;
+                page.last_attempt = Some(now);
+                jobs.push(SaveJob {
+                    session: session_id,
+                    page: index,
+                    version: page.version,
+                    note: page.note.clone(),
+                    file: page.file.clone(),
+                });
+            }
+            (library, jobs)
+        };
+        let mut first_error = None;
+        for job in jobs {
+            let result = write_page(&library, &job);
+            let mut state = self.lock();
+            match result {
+                Ok(written) => self.written(&mut state, &job, written),
+                Err(error) => {
+                    drop(state);
+                    eprintln!("live mode: cannot write a page: {error}");
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    /// Records a page written; tells the windows when a note appeared.
+    fn written(&self, state: &mut HubState, job: &SaveJob, written: Written) {
+        if state.session.id() != job.session {
+            return;
+        }
+        let before = state.session.saved();
+        let Some(page) = state.session.page_mut(job.page) else {
+            return;
+        };
+        page.file = Some(written.file);
+        page.note.id = written.id;
+        page.saved_version = job.version;
+        let after = state.session.saved();
+        if after != before {
+            self.publish(state, vec![LiveEvent::Saved { paths: after }]);
+        }
+    }
+}
+
+impl LiveHub {
+    /// A hub with an idle session, and its two threads.
+    pub fn new(config: HubConfig) -> LiveHub {
+        let size = default_size();
+        let shared = Arc::new(Shared {
+            config,
+            state: Mutex::new(HubState {
+                session: LiveSession::new(
+                    0,
+                    size,
+                    LiveStyle::default(),
+                    LiveViewState::whole(size),
+                    false,
+                    now_ms(),
+                ),
+                accepting: None,
+                started: false,
+                next_session: 1,
+                library: None,
+                button: Arc::new(LiveButton::default),
+                subscribers: Vec::new(),
+                next_subscriber: 1,
+                last_flush: None,
+                shutdown: false,
+            }),
+            flush_wake: Condvar::new(),
+            save_wake: Condvar::new(),
+            saving: Mutex::new(()),
+        });
+        for (name, work) in [
+            ("live-flush", Shared::flush_loop as fn(&Shared)),
+            ("live-save", Shared::save_loop as fn(&Shared)),
+        ] {
+            let shared = shared.clone();
+            if let Err(error) = std::thread::Builder::new()
+                .name(name.to_owned())
+                .spawn(move || work(&shared))
+            {
+                eprintln!("live mode: cannot start the {name} thread: {error}");
+            }
+        }
+        LiveHub { shared }
+    }
+
+    /// The session as it is now.
+    #[cfg(test)]
+    pub fn snapshot(&self) -> LiveSnapshot {
+        self.shared.lock().session.snapshot()
+    }
+
+    /// Sends the session's batches to `sink` from now on, replacing the window's previous
+    /// subscription. The first batch starts with the returned snapshot (and the stroke in
+    /// progress), so a window may apply the batches in order whatever the order in which the
+    /// command's answer and the first batch arrive.
+    pub fn subscribe(&self, label: &str, sink: Arc<dyn BatchSink>) -> LiveSnapshot {
+        let mut state = self.shared.lock();
+        let snapshot = state.session.snapshot();
+        let mut queue = vec![LiveEvent::Snapshot {
+            snapshot: Box::new(snapshot.clone()),
+        }];
+        queue.extend(state.session.in_progress());
+        let id = state.next_subscriber;
+        state.next_subscriber += 1;
+        state.subscribers.retain(|s| s.label != label);
+        state.subscribers.push(Subscriber {
+            id,
+            label: label.to_owned(),
+            sink,
+            queue,
+        });
+        self.shared.flush_wake.notify_all();
+        snapshot
+    }
+
+    /// The window `label` went away.
+    pub fn unsubscribe(&self, label: &str) {
+        self.shared.lock().subscribers.retain(|s| s.label != label);
+    }
+
+    /// Number of windows subscribed.
+    #[cfg(test)]
+    pub fn subscriber_count(&self) -> usize {
+        self.shared.lock().subscribers.len()
+    }
+
+    /// Starts a session (or returns the running one). The previous session's changes are
+    /// written first; if that fails nothing starts. The style and the view (blackboard, laser)
+    /// carry over; the view shows the whole page again.
+    pub fn start(&self, options: StartOptions) -> Result<Start, LiveError> {
+        // The previous session is replaced only once everything in it is written (a command may
+        // change it between the write and the lock: a few attempts, then it is replaced).
+        let mut attempts = 0;
+        let mut state = loop {
+            {
+                let state = self.shared.lock();
+                if state.session.is_running() {
+                    return Ok(Start::Running(state.session.snapshot()));
+                }
+            }
+            self.shared.save_pass(true)?;
+            let state = self.shared.lock();
+            attempts += 1;
+            let unsaved = state.library.is_some()
+                && state.session.pages().iter().any(|page| page.needs_write());
+            if !unsaved || attempts >= 3 {
+                break state;
+            }
+        };
+        if state.session.is_running() {
+            return Ok(Start::Running(state.session.snapshot()));
+        }
+        let id = state.next_session;
+        state.next_session += 1;
+        let size = if options.size.width > 0 && options.size.height > 0 {
+            options.size
+        } else {
+            default_size()
+        };
+        let old = &state.session;
+        let view = LiveViewState {
+            board: old.view().board,
+            laser: old.view().laser,
+            ..LiveViewState::whole(size)
+        };
+        let mut session = LiveSession::new(id, size, old.style(), view, options.french, now_ms());
+        session.set_presentation(old.presentation().cloned(), &mut Vec::new());
+        let mut out = Vec::new();
+        session.set_state(LiveSessionState::Waiting, &mut out);
+        state.session = session;
+        state.accepting = Some(id);
+        state.started = true;
+        state.library = Some(options.library);
+        state.button = options.button;
+        let snapshot = state.session.snapshot();
+        self.shared.publish(&mut state, out);
+        Ok(Start::New {
+            snapshot,
+            sink: HubSink {
+                shared: self.shared.clone(),
+                session: id,
+            },
+        })
+    }
+
+    /// The tablet service could not start session `id`: it goes back to idle.
+    pub fn abort_start(&self, id: u64) {
+        let mut state = self.shared.lock();
+        if state.session.id() != id {
+            return;
+        }
+        state.accepting = None;
+        let mut out = Vec::new();
+        state.session.set_state(LiveSessionState::Idle, &mut out);
+        self.shared.publish(&mut state, out);
+    }
+
+    /// Stops the session: the stroke in progress ends, the tablet's input is ignored from now
+    /// on, and every page with changes is written. Returns the paths of the notes of the
+    /// session. The stopped session stays shown until the next start.
+    pub fn stop(&self) -> Result<Vec<String>, LiveError> {
+        {
+            let mut state = self.shared.lock();
+            state.accepting = None;
+            let mut out = Vec::new();
+            state.session.set_state(LiveSessionState::Idle, &mut out);
+            state.session.mark_all_urgent();
+            self.shared.publish(&mut state, out);
+        }
+        self.shared.save_pass(true)?;
+        Ok(self.shared.lock().session.saved())
+    }
+
+    /// Runs `change` on the session and sends what it emitted; [`LiveError::NotRunning`] before
+    /// the first start.
+    fn change(
+        &self,
+        change: impl FnOnce(&mut LiveSession, &mut Vec<LiveEvent>),
+    ) -> Result<(), LiveError> {
+        let mut state = self.shared.lock();
+        if !state.started {
+            return Err(LiveError::NotRunning);
+        }
+        let mut out = Vec::new();
+        change(&mut state.session, &mut out);
+        self.shared.publish(&mut state, out);
+        Ok(())
+    }
+
+    pub fn command(&self, kind: LiveCommandKind) -> Result<(), LiveError> {
+        let button = (kind == LiveCommandKind::Button).then(|| {
+            let setting = self.shared.lock().button.clone();
+            setting()
+        });
+        self.change(|session, out| {
+            session.command(kind, button.unwrap_or_default(), now_ms(), out);
+        })
+    }
+
+    pub fn set_style(&self, style: LiveStyle) -> Result<(), LiveError> {
+        self.change(|session, out| session.set_style(style, out))
+    }
+
+    pub fn set_view(&self, view: LiveViewState) -> Result<(), LiveError> {
+        self.change(|session, out| session.set_view(view, out))
+    }
+
+    /// The presentation window opened on `monitor`, or closed (`None`).
+    pub fn set_presentation(&self, monitor: Option<MonitorInfo>) {
+        let mut state = self.shared.lock();
+        let mut out = Vec::new();
+        state.session.set_presentation(monitor, &mut out);
+        self.shared.publish(&mut state, out);
+    }
+
+    /// The presentation window `label` was closed.
+    pub fn presentation_closed(&self, label: &str) {
+        self.unsubscribe(label);
+        self.set_presentation(None);
+    }
+}
+
+impl Drop for LiveHub {
+    fn drop(&mut self) {
+        self.shared.lock().shutdown = true;
+        self.shared.flush_wake.notify_all();
+        self.shared.save_wake.notify_all();
+    }
+}

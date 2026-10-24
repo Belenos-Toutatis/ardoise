@@ -150,6 +150,8 @@ pub fn run() {
         .manage(export::ExportCancel::default())
         .manage(tablet::TabletRuntime::default())
         .manage(live::LiveRuntime::default())
+        // The presentation window closing, and the main one taking it along.
+        .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::app_state,
             commands::set_language,
