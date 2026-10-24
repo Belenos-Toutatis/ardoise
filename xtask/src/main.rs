@@ -1,7 +1,8 @@
 //! Project automation: `cargo xtask check [--quick]`, `cargo xtask selftest`, `cargo xtask e2e` and
-//! `cargo xtask golden`, `cargo xtask licenses`.
+//! `cargo xtask golden`, `cargo xtask licenses` and `cargo xtask privacy`.
 
 mod licenses;
+mod privacy;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,8 @@ Commands:
   licenses [--write]
                    check every dependency licence (no AGPL, GPL-3.0-compatible only) and that
                    THIRD-PARTY-NOTICES is up to date (--write regenerates it)
+  privacy          scan the whole git history for personal data (paths, e-mail addresses, tokens,
+                   Bluetooth addresses, markers from testdata/private); lists commit identities
   golden           regenerate the reference images in testdata/golden, then check them
   e2e              end-to-end tests of the main journeys, in French and English, on the
                    release executable (run `cargo xtask check` first)";
@@ -42,6 +45,7 @@ fn main() -> ExitCode {
         ["selftest"] => selftest(),
         ["licenses"] => licenses_command(false),
         ["licenses", "--write"] => licenses_command(true),
+        ["privacy"] => privacy_command(),
         ["golden"] => golden(),
         ["e2e"] => e2e(),
         _ => {
@@ -61,6 +65,15 @@ fn root() -> PathBuf {
 /// Runs the licence check (and rewrites THIRD-PARTY-NOTICES with `--write`).
 fn licenses_command(write: bool) -> ExitCode {
     if licenses::run(&root(), write) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// Scans the git history for personal data.
+fn privacy_command() -> ExitCode {
+    if privacy::run(&root()) {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
@@ -179,6 +192,10 @@ fn check(quick: bool) -> ExitCode {
         Step {
             name: "licenses (cargo xtask licenses)",
             action: Box::new(move || licenses::run(r, false)),
+        },
+        Step {
+            name: "privacy (cargo xtask privacy)",
+            action: Box::new(move || privacy::run(r)),
         },
         Step {
             name: "npm run build",
