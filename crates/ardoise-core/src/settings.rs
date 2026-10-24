@@ -87,6 +87,32 @@ impl Default for AutoExport {
     }
 }
 
+impl AutoExport {
+    /// The folder as a path relative to the library root, or `None` if it is not acceptable:
+    /// empty, with a `.` or `..` part, a drive letter or stream (`:`), or inside the library's
+    /// own `_ardoise/` folder. Leading, doubled and trailing separators are ignored.
+    pub fn relative_folder(&self) -> Option<PathBuf> {
+        let mut path = PathBuf::new();
+        for part in self.folder.split(['/', '\\']) {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            if part == "." || part == ".." || part.contains(':') {
+                return None;
+            }
+            if path.as_os_str().is_empty()
+                && (part.eq_ignore_ascii_case(crate::library::META_DIR)
+                    || part.eq_ignore_ascii_case(crate::library::LEGACY_META_DIR))
+            {
+                return None;
+            }
+            path.push(part);
+        }
+        (!path.as_os_str().is_empty()).then_some(path)
+    }
+}
+
 /// Settings that only make sense on one computer.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MachineSettings {
@@ -510,5 +536,34 @@ mod tests {
     #[test]
     fn machine_name_is_never_empty() {
         assert!(!machine_name().is_empty());
+    }
+
+    #[test]
+    fn auto_export_folders_stay_inside_the_library() {
+        let folder = |text: &str| {
+            AutoExport {
+                folder: text.into(),
+                ..AutoExport::default()
+            }
+            .relative_folder()
+        };
+        assert_eq!(folder("Exports"), Some(PathBuf::from("Exports")));
+        assert_eq!(
+            folder("/Exports\\PDF/"),
+            Some(PathBuf::from("Exports").join("PDF"))
+        );
+        for bad in [
+            "",
+            " / ",
+            "..",
+            "a/../b",
+            "C:/x",
+            "_ardoise",
+            "_Ardoise/x",
+            ".ardoise",
+        ] {
+            assert_eq!(folder(bad), None, "{bad}");
+        }
+        assert_eq!(AutoExport::default().format, AutoExportFormat::Off);
     }
 }
