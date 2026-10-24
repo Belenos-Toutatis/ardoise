@@ -5,12 +5,14 @@
 //! - [`library`]: the user's folder of notes: listing, binders, tags, trash, conflict copies,
 //!   folder watching.
 //! - [`fsutil`]: atomic writes and no-clobber renames.
+//! - [`ops`]: split and merge notes (pure functions on [`note::Note`]).
 //! - [`settings`]: portable `ardoise.toml`.
 
 pub mod format;
 pub mod fsutil;
 pub mod library;
 pub mod note;
+pub mod ops;
 pub mod settings;
 
 #[cfg(test)]
