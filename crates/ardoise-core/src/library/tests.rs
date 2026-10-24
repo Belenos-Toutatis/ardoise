@@ -32,10 +32,15 @@ fn names_in(dir: &Path) -> Vec<String> {
 
 /// Rewrites a file as another computer would, with a distinct modification time.
 fn edit_elsewhere(path: &Path, title: &str) {
+    edit_elsewhere_ahead(path, title, Duration::from_secs(3));
+}
+
+/// [`edit_elsewhere`], with a modification time `ahead` of now.
+fn edit_elsewhere_ahead(path: &Path, title: &str, ahead: Duration) {
     let mut file = crate::format::read_note(path).unwrap();
     file.note.title = title.to_owned();
     fs::write(path, crate::format::to_bytes(&file).unwrap()).unwrap();
-    let later = SystemTime::now() + Duration::from_secs(3);
+    let later = SystemTime::now() + ahead;
     File::options()
         .write(true)
         .open(path)
@@ -144,7 +149,20 @@ fn create_refuses_invalid_notes_and_binders() {
         library.create(Path::new("Nouveau"), &bad),
         Err(LibraryError::Format { .. })
     ));
-    for binder in ["..", "../outside", ".hidden", "CON", "a:b", "fin."] {
+    // Including names Nextcloud never synchronises: a binder ending in `.part` would also be
+    // skipped by the listing, and its notes would vanish from the app.
+    for binder in [
+        "..",
+        "../outside",
+        ".hidden",
+        "CON",
+        "a:b",
+        "fin.",
+        "Classe.part",
+        "Classe/3e.PART",
+        "Brouillon~",
+        "Thumbs.db",
+    ] {
         let error = library
             .create(Path::new(binder), &note_file("a", "x"))
             .unwrap_err();
@@ -270,6 +288,167 @@ fn save_checks_the_modification_time() {
     assert!(matches!(error, LibraryError::NotFound { .. }));
     assert_eq!(error.code(), "noteNotFound");
     assert!(!saved.path.exists());
+}
+
+/// Nextcloud brings another computer's version after the first check, once the new version
+/// is written next to the note but before it is renamed over it: the save must notice.
+#[test]
+fn save_rechecks_once_the_new_version_is_written() {
+    let (dir, library) = new_library();
+    let saved = library
+        .create(Path::new(""), &note_file("a", "Cours"))
+        .unwrap();
+    let loaded = library.read(&saved.path).unwrap();
+    let mut ours = loaded.file.clone();
+    ours.note.title = "Ma version".to_owned();
+
+    let mut theirs: Option<Vec<u8>> = None;
+    let error = library
+        .save_with(&loaded.path, &ours, &loaded.stamp, || {
+            if theirs.is_none() {
+                // Our new version is complete and waiting to be renamed.
+                let pending: Vec<String> = names_in(dir.path())
+                    .into_iter()
+                    .filter(|n| n.ends_with(".part"))
+                    .collect();
+                assert_eq!(pending.len(), 1, "{pending:?}");
+                edit_elsewhere(&saved.path, "Version de l'autre PC");
+                theirs = Some(fs::read(&saved.path).unwrap());
+            }
+        })
+        .unwrap_err();
+    assert!(matches!(error, LibraryError::Conflict { .. }), "{error:?}");
+    assert_eq!(Some(fs::read(&saved.path).unwrap()), theirs);
+    assert_eq!(
+        names_in(dir.path()),
+        [".ardoise", "2026-10-24 Cours.ardoise"],
+        "temporary file left behind"
+    );
+
+    // Deleted at that moment: reported as such, nothing recreated.
+    let loaded = library.read(&saved.path).unwrap();
+    let error = library
+        .save_with(&loaded.path, &ours, &loaded.stamp, || {
+            let _ = fs::remove_file(&saved.path);
+        })
+        .unwrap_err();
+    assert!(matches!(error, LibraryError::NotFound { .. }), "{error:?}");
+    assert_eq!(names_in(dir.path()), [".ardoise"]);
+}
+
+/// The file is replaced while it is read, again and again: the stamp returned must never be
+/// newer than the content, or a later save would overwrite the newer version.
+#[test]
+fn read_never_returns_a_stamp_newer_than_its_content() {
+    let (_dir, library) = new_library();
+    let saved = library
+        .create(Path::new(""), &note_file("a", "Version 0"))
+        .unwrap();
+    let mut version = 0;
+    let loaded = library
+        .read_with(&saved.path, |path| {
+            version += 1;
+            edit_elsewhere_ahead(
+                path,
+                &format!("Version {version}"),
+                Duration::from_secs(3 + version),
+            );
+        })
+        .unwrap();
+    assert_eq!(version, 3, "attempts");
+    // The last attempt read version 2 while version 3 was landing.
+    assert_eq!(loaded.file.note.title, "Version 2");
+    assert_ne!(loaded.stamp, FileStamp::of(&saved.path).unwrap());
+    let error = library
+        .save(&loaded.path, &loaded.file, &loaded.stamp)
+        .unwrap_err();
+    assert!(matches!(error, LibraryError::Conflict { .. }), "{error:?}");
+    assert_eq!(
+        library.read(&saved.path).unwrap().file.note.title,
+        "Version 3"
+    );
+}
+
+/// Nextcloud brings another computer's version while the save waits for a sync client or an
+/// antivirus to release the file: the save must not replace it.
+#[cfg(windows)]
+#[test]
+fn save_rechecks_after_waiting_for_a_locked_file() {
+    use std::io::{Seek, Write};
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let (dir, library) = new_library();
+    let saved = library
+        .create(Path::new(""), &note_file("a", "Cours"))
+        .unwrap();
+    let loaded = library.read(&saved.path).unwrap();
+    let mut theirs = loaded.file.clone();
+    theirs.note.title = "Version de l'autre PC".to_owned();
+    theirs.note.tags = vec!["leur version".to_owned()];
+    let their_bytes = crate::format::to_bytes(&theirs).unwrap();
+
+    // A handle that shares nothing, as a sync client writing the file holds.
+    let mut lock = File::options()
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(&saved.path)
+        .unwrap();
+    let writer_bytes = their_bytes.clone();
+    let writer = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        lock.set_len(0).unwrap();
+        lock.rewind().unwrap();
+        lock.write_all(&writer_bytes).unwrap();
+        lock.set_modified(SystemTime::now() + Duration::from_secs(3))
+            .unwrap();
+        drop(lock);
+    });
+    let mut ours = loaded.file.clone();
+    ours.note.title = "Ma version".to_owned();
+    let error = library
+        .save(&loaded.path, &ours, &loaded.stamp)
+        .unwrap_err();
+    writer.join().unwrap();
+    assert!(matches!(error, LibraryError::Conflict { .. }), "{error:?}");
+    assert_eq!(fs::read(&saved.path).unwrap(), their_bytes);
+    assert_eq!(
+        names_in(dir.path()),
+        [".ardoise", "2026-10-24 Cours.ardoise"]
+    );
+}
+
+/// Every operation works in a binder whose path is over 300 characters long.
+#[test]
+fn long_paths_work_for_every_operation() {
+    let (dir, library) = new_library();
+    let mut binder = PathBuf::new();
+    while dir.path().join(&binder).to_string_lossy().chars().count() < 300 {
+        binder.push("Classeur au nom très long pour dépasser les deux cent soixante caractères");
+    }
+    let mut other = binder.clone();
+    other.push("Autre");
+
+    let saved = library.create(&binder, &note_file("a", "Cours")).unwrap();
+    assert!(saved.path.as_os_str().len() > 300);
+    let twin = library.create(&binder, &note_file("b", "Cours")).unwrap();
+    assert!(twin.path.ends_with("2026-10-24 Cours (2).ardoise"));
+    let loaded = library.read(&saved.path).unwrap();
+    library
+        .save(&saved.path, &loaded.file, &loaded.stamp)
+        .unwrap();
+    let renamed = library.retitle(&saved.path, "Cours final", None).unwrap();
+    assert!(renamed.path.ends_with("2026-10-24 Cours final.ardoise"));
+    let cased = library.retitle(&renamed.path, "COURS FINAL", None).unwrap();
+    assert!(cased.path.ends_with("2026-10-24 COURS FINAL.ardoise"));
+    let moved = library.move_to(&cased.path, &other).unwrap();
+    assert_eq!(moved.parent(), Some(dir.path().join(&other).as_path()));
+    let item = library.trash(&moved).unwrap();
+    assert!(!moved.exists());
+    let restored = library.restore(&item.id).unwrap();
+    assert_eq!(restored, moved);
+    assert_eq!(library.read(&restored).unwrap().file.note.id, "a");
+    assert_eq!(library.list().notes.len(), 2);
 }
 
 #[test]
@@ -763,8 +942,18 @@ impl Watched {
 
     /// Collects changes until `wanted` has been seen; returns everything seen meanwhile.
     fn wait_for(&mut self, wanted: &LibraryChange) -> Vec<LibraryChange> {
+        self.wait_until(wanted, |c| c == wanted)
+    }
+
+    /// Collects changes until one satisfies `wanted` (described by `what`); returns
+    /// everything seen meanwhile.
+    fn wait_until(
+        &mut self,
+        what: &dyn std::fmt::Debug,
+        wanted: impl Fn(&LibraryChange) -> bool,
+    ) -> Vec<LibraryChange> {
         let deadline = std::time::Instant::now() + PATIENCE;
-        while !self.seen.contains(wanted) {
+        while !self.seen.iter().any(&wanted) {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             match self.changes.recv_timeout(left) {
                 Ok(batch) => {
@@ -780,7 +969,7 @@ impl Watched {
                     assert_eq!(before, paths.len(), "duplicates in {batch:?}");
                     self.seen.extend(batch);
                 }
-                Err(_) => panic!("{wanted:?} not reported; seen {:?}", self.seen),
+                Err(_) => panic!("{what:?} not reported; seen {:?}", self.seen),
             }
         }
         std::mem::take(&mut self.seen)
@@ -803,8 +992,11 @@ fn watch_reports_note_changes() {
     let created = library
         .create(Path::new("Classe"), &note_file("a", "Cours"))
         .unwrap();
+    // Every change carries the file's stamp: equal to the one our own write returned, it
+    // tells the application that the change is its own.
     let seen = watched.wait_for(&LibraryChange::Created {
         path: created.path.clone(),
+        stamp: created.stamp,
     });
     assert!(
         seen.iter().all(|c| c.path() == created.path),
@@ -813,11 +1005,13 @@ fn watch_reports_note_changes() {
 
     // Saved (atomically replaced).
     let loaded = library.read(&created.path).unwrap();
-    library
+    let stamp = library
         .save(&created.path, &loaded.file, &loaded.stamp)
         .unwrap();
+    assert_ne!(stamp, created.stamp);
     watched.wait_for(&LibraryChange::Changed {
         path: created.path.clone(),
+        stamp,
     });
 
     // Retitled: renamed (and rewritten).
@@ -825,6 +1019,7 @@ fn watch_reports_note_changes() {
     watched.wait_for(&LibraryChange::Renamed {
         from: created.path.clone(),
         to: renamed.path.clone(),
+        stamp: renamed.stamp,
     });
 
     // Trashed: removed from the library's point of view.
@@ -852,12 +1047,17 @@ fn watch_follows_renamed_binders_and_external_copies() {
     watched.wait_for(&LibraryChange::Renamed {
         from: a.path.clone(),
         to: moved.clone(),
+        stamp: a.stamp,
     });
 
-    // A file dropped in by another program (or synced by Nextcloud).
+    // A file dropped in by another program (or synced by Nextcloud). It may be seen while it
+    // is being written, so only its path is awaited.
     let copy = dir.path().join("Copie.ardoise");
     fs::copy(&moved, &copy).unwrap();
-    watched.wait_for(&LibraryChange::Created { path: copy.clone() });
+    watched.wait_until(
+        &copy,
+        |c| matches!(c, LibraryChange::Created { path, .. } if *path == copy),
+    );
     fs::remove_file(&copy).unwrap();
     watched.wait_for(&LibraryChange::Removed { path: copy });
 }

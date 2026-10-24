@@ -54,6 +54,8 @@ pub const MAX_NOTE_JSON_BYTES: u64 = 16 << 20;
 pub const MAX_STROKES_BYTES: u64 = 128 << 20;
 /// Largest optional or unknown member accepted.
 pub const MAX_MEMBER_BYTES: u64 = 1 << 30;
+/// Largest total of all the members of one archive, decompressed (1.5 GiB).
+pub const MAX_TOTAL_BYTES: u64 = 3 << 29;
 /// Largest number of members in one archive.
 pub const MAX_MEMBERS: usize = 4096;
 
@@ -116,7 +118,9 @@ pub struct NoteFile {
     pub text: Option<Vec<u8>>,
     /// Top-level fields of `note.json` this version does not know, kept verbatim.
     pub unknown_fields: Map<String, Value>,
-    /// Members this version does not know, kept verbatim in archive order.
+    /// Members this version does not know, kept verbatim in archive order. When the file is
+    /// written, one named like [`background`](Self::background) is dropped: the known
+    /// background wins.
     pub unknown_members: Vec<Member>,
 }
 
@@ -164,12 +168,14 @@ pub enum FormatError {
     /// A required member is missing.
     #[error("not a valid .ardoise file: {0} is missing")]
     MissingMember(&'static str),
-    /// A member is larger than this version accepts (damaged or hostile file).
+    /// A member is larger than this version accepts, or than what is left of the archive's
+    /// total budget ([`MAX_TOTAL_BYTES`]) (damaged or hostile file).
     #[error("member {name} is larger than {limit} bytes")]
     MemberTooLarge {
         /// Member name.
         name: String,
-        /// Limit in bytes.
+        /// Limit that applied, in bytes: the member's own limit, or what was left of the
+        /// archive's total budget once the members before it were read.
         limit: u64,
     },
     /// The archive has more members than this version accepts.
@@ -418,37 +424,135 @@ fn read_member_at<R: Read + Seek>(
     Ok((name, is_dir, bytes))
 }
 
+/// What may still be decompressed from one archive: with [`MAX_MEMBERS`] members of up to
+/// [`MAX_MEMBER_BYTES`] each, an archive of a few megabytes could otherwise expand to
+/// terabytes.
+struct Budget(u64);
+
+impl Budget {
+    /// [`read_member_at`], with `limit` lowered to what is left of the budget.
+    fn read<R: Read + Seek>(
+        &mut self,
+        archive: &mut ZipArchive<R>,
+        index: usize,
+        limit: u64,
+    ) -> Result<(String, bool, Vec<u8>), FormatError> {
+        let member = read_member_at(archive, index, limit.min(self.0))?;
+        self.0 = self.0.saturating_sub(member.2.len() as u64);
+        Ok(member)
+    }
+}
+
 fn read_named<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &'static str,
     limit: u64,
+    budget: &mut Budget,
 ) -> Result<Option<Vec<u8>>, FormatError> {
     match archive.index_for_name(name) {
-        Some(index) => Ok(Some(read_member_at(archive, index, limit)?.2)),
+        Some(index) => Ok(Some(budget.read(archive, index, limit)?.2)),
         None => Ok(None),
     }
 }
 
-fn open_archive<R: Read + Seek>(reader: R) -> Result<ZipArchive<R>, FormatError> {
+fn duplicate_name(name: &str) -> FormatError {
+    FormatError::Archive(format!("the member name {name:?} appears twice"))
+}
+
+/// Signature of a file header in the central directory.
+const CENTRAL_HEADER_SIGNATURE: [u8; 4] = 0x0201_4b50_u32.to_le_bytes();
+
+/// Reads the central directory's file headers, starting at `directory_start`, and refuses a
+/// name that appears twice. The zip library keeps only one entry per name (the position of
+/// the first, the data of the last), so a repeated name can only be seen here. Counting the
+/// headers also applies [`MAX_MEMBERS`] to the members as written, repeats included.
+fn check_unique_names<R: Read + Seek>(
+    reader: &mut R,
+    directory_start: u64,
+) -> Result<(), FormatError> {
+    let damaged = |e: io::Error| FormatError::Archive(format!("central directory: {e}"));
+    reader
+        .seek(io::SeekFrom::Start(directory_start))
+        .map_err(damaged)?;
+    let mut names: HashSet<Vec<u8>> = HashSet::new();
+    loop {
+        let mut signature = [0; 4];
+        match reader.read_exact(&mut signature) {
+            Ok(()) if signature == CENTRAL_HEADER_SIGNATURE => {}
+            // The end of central directory record (or a ZIP64 one) follows the last header.
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(e) => return Err(damaged(e)),
+        }
+        // Fixed part of the header after the signature (APPNOTE 4.3.12); the lengths of the
+        // name, extra field and comment are at offsets 24, 26 and 28.
+        let mut fixed = [0; 42];
+        reader.read_exact(&mut fixed).map_err(damaged)?;
+        let length = |at: usize| u16::from_le_bytes([fixed[at], fixed[at + 1]]);
+        let mut name = vec![0; usize::from(length(24))];
+        reader.read_exact(&mut name).map_err(damaged)?;
+        let skip = u64::from(length(26)) + u64::from(length(28));
+        let skipped =
+            io::copy(&mut reader.by_ref().take(skip), &mut io::sink()).map_err(damaged)?;
+        if skipped != skip {
+            return Err(FormatError::Archive(
+                "central directory: truncated header".to_owned(),
+            ));
+        }
+        if names.contains(&name) {
+            return Err(duplicate_name(&String::from_utf8_lossy(&name)));
+        }
+        names.insert(name);
+        if names.len() > MAX_MEMBERS {
+            return Err(FormatError::TooManyMembers(names.len()));
+        }
+    }
+}
+
+fn open_archive<R: Read + Seek>(mut reader: R) -> Result<ZipArchive<R>, FormatError> {
+    // The central directory is parsed twice (it is small): the zip library lends its reader to
+    // nobody, and the check of repeated names needs it.
+    let directory_start = {
+        let archive = ZipArchive::new(&mut reader).map_err(archive_error)?;
+        if archive.len() > MAX_MEMBERS {
+            return Err(FormatError::TooManyMembers(archive.len()));
+        }
+        archive.central_directory_start()
+    };
+    check_unique_names(&mut reader, directory_start)?;
     let archive = ZipArchive::new(reader).map_err(archive_error)?;
-    if archive.len() > MAX_MEMBERS {
-        return Err(FormatError::TooManyMembers(archive.len()));
+    // Different bytes may decode to the same name (a CP437 and a UTF-8 spelling).
+    let mut names: HashSet<String> = HashSet::new();
+    for index in 0..archive.len() {
+        if let Some(name) = archive.name_for_index(index) {
+            let name = name.map_err(archive_error)?;
+            if !names.insert(name.clone().into_owned()) {
+                return Err(duplicate_name(&name));
+            }
+        }
     }
     Ok(archive)
 }
 
 fn read_header_from_archive<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
+    budget: &mut Budget,
 ) -> Result<ParsedJson, FormatError> {
-    let json = read_named(archive, NOTE_JSON, MAX_NOTE_JSON_BYTES)?
+    let json = read_named(archive, NOTE_JSON, MAX_NOTE_JSON_BYTES, budget)?
         .ok_or(FormatError::MissingMember(NOTE_JSON))?;
     parse_note_json(&json)
 }
 
 fn read_archive<R: Read + Seek>(reader: R) -> Result<NoteFile, FormatError> {
+    read_archive_within(reader, MAX_TOTAL_BYTES)
+}
+
+/// [`read_archive`], decompressing at most `budget` bytes in all.
+fn read_archive_within<R: Read + Seek>(reader: R, budget: u64) -> Result<NoteFile, FormatError> {
+    let mut budget = Budget(budget);
     let mut archive = open_archive(reader)?;
-    let parsed = read_header_from_archive(&mut archive)?;
-    let strokes_bytes = read_named(&mut archive, STROKES_BIN, MAX_STROKES_BYTES)?
+    let parsed = read_header_from_archive(&mut archive, &mut budget)?;
+    let strokes_bytes = read_named(&mut archive, STROKES_BIN, MAX_STROKES_BYTES, &mut budget)?
         .ok_or(FormatError::MissingMember(STROKES_BIN))?;
     let mut note = parsed.note;
     note.strokes = strokes::decode(&strokes_bytes)?;
@@ -456,17 +560,14 @@ fn read_archive<R: Read + Seek>(reader: R) -> Result<NoteFile, FormatError> {
 
     let mut file = NoteFile::new(note);
     file.unknown_fields = parsed.unknown_fields;
-    let mut seen: HashSet<String> = HashSet::new();
     for index in 0..archive.len() {
-        let name = match archive.name_for_index(index) {
-            Some(name) => name.map_err(archive_error)?.into_owned(),
-            None => continue,
-        };
-        // Already read; and a damaged or hostile archive may repeat a name: the first wins.
-        if name == NOTE_JSON || name == STROKES_BIN || !seen.insert(name) {
-            continue;
+        // Names are unique ([`open_archive`]); these two are already read.
+        match archive.name_for_index(index) {
+            Some(Ok(name)) if name != NOTE_JSON && name != STROKES_BIN => {}
+            Some(Err(error)) => return Err(archive_error(error)),
+            _ => continue,
         }
-        let (name, is_dir, bytes) = read_member_at(&mut archive, index, MAX_MEMBER_BYTES)?;
+        let (name, is_dir, bytes) = budget.read(&mut archive, index, MAX_MEMBER_BYTES)?;
         let slot = match name.as_str() {
             _ if is_dir => None,
             ORIGINAL_BIN => Some(&mut file.original),
@@ -507,7 +608,7 @@ pub fn read_header_from_bytes(bytes: &[u8]) -> Result<NoteHeader, FormatError> {
 
 fn header_of<R: Read + Seek>(reader: R) -> Result<NoteHeader, FormatError> {
     let mut archive = open_archive(reader)?;
-    let parsed = read_header_from_archive(&mut archive)?;
+    let parsed = read_header_from_archive(&mut archive, &mut Budget(MAX_TOTAL_BYTES))?;
     Ok(NoteHeader {
         format: parsed.format,
         writer: parsed.writer,
@@ -536,7 +637,12 @@ pub fn read_thumbnail(path: &Path) -> Result<Option<Vec<u8>>, FormatError> {
     let file = open_file(path)?;
     guarded(|| {
         let mut archive = open_archive(file)?;
-        read_named(&mut archive, THUMB_PNG, MAX_MEMBER_BYTES)
+        read_named(
+            &mut archive,
+            THUMB_PNG,
+            MAX_MEMBER_BYTES,
+            &mut Budget(MAX_TOTAL_BYTES),
+        )
     })
 }
 
@@ -575,6 +681,16 @@ fn zip_time(unix_ms: i64) -> zip::DateTime {
         .unwrap_or_default()
 }
 
+/// The unknown members written with `file`. One named like the background the file has is
+/// dropped: the known background wins. (A file read with `background.png` and an unknown
+/// `background.pdf` must stay writable once the app gives it a PDF background.)
+fn unknown_members_to_write(file: &NoteFile) -> impl Iterator<Item = &Member> {
+    let background = file.background.as_ref().map(BackgroundFile::member_name);
+    file.unknown_members
+        .iter()
+        .filter(move |member| background.as_deref() != Some(member.name.as_str()))
+}
+
 fn check_member_names(file: &NoteFile) -> Result<(), FormatError> {
     if let Some(background) = &file.background
         && !is_valid_background_extension(&background.extension)
@@ -598,7 +714,7 @@ fn check_member_names(file: &NoteFile) -> Result<(), FormatError> {
     if let Some(name) = &background_name {
         names.insert(name);
     }
-    for member in &file.unknown_members {
+    for member in unknown_members_to_write(file) {
         if member.name.is_empty() || !names.insert(&member.name) {
             return Err(FormatError::InvalidNote(format!(
                 "member name {:?} is empty or used twice",
@@ -653,7 +769,7 @@ fn to_bytes_as(file: &NoteFile, version: FormatVersion) -> Result<Vec<u8>, Forma
     if let Some(background) = &file.background {
         add_member(&mut zip, &background.member_name(), &background.bytes, time)?;
     }
-    for member in &file.unknown_members {
+    for member in unknown_members_to_write(file) {
         if member.name.ends_with('/') && member.bytes.is_empty() {
             let options = SimpleFileOptions::default().last_modified_time(time);
             zip.add_directory(member.name.as_str(), options)

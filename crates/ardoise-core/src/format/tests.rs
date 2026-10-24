@@ -516,6 +516,42 @@ fn zip_bombs_are_refused() {
 }
 
 #[test]
+fn many_compressible_members_are_refused_beyond_the_total_budget() {
+    let json = note_json(&NoteFile::new(blank_note("a", "b")), FormatVersion::CURRENT).unwrap();
+    let strokes = strokes::encode(&[]).unwrap();
+    let zeros = vec![0_u8; 64 << 10];
+    let names: Vec<String> = (0..5).map(|i| format!("bomb{i}.bin")).collect();
+    let mut members: Vec<(&str, &[u8])> = vec![(NOTE_JSON, &json), (STROKES_BIN, &strokes)];
+    for name in &names {
+        members.push((name, &zeros));
+    }
+    let bytes = raw_archive(&members);
+    assert!(bytes.len() < zeros.len() / 4, "{} bytes", bytes.len());
+
+    // A small budget stands in for MAX_TOTAL_BYTES, so that the test stays fast: three members
+    // fit, the fourth crosses the budget, whatever the per-member limit allows.
+    let read = (json.len() + strokes.len()) as u64;
+    let budget = read + 3 * zeros.len() as u64 + 100;
+    let error = read_archive_within(Cursor::new(&bytes), budget).unwrap_err();
+    assert!(
+        matches!(error, FormatError::MemberTooLarge { ref name, limit: 100 } if name == "bomb3.bin"),
+        "{error:?}"
+    );
+    assert_eq!(error.code(), "noteDamaged");
+    let exact = read + 5 * zeros.len() as u64;
+    assert_eq!(
+        read_archive_within(Cursor::new(&bytes), exact)
+            .unwrap()
+            .unknown_members
+            .len(),
+        5
+    );
+    // The real budget: 1.5 GiB.
+    assert_eq!(MAX_TOTAL_BYTES, 1536 << 20);
+    assert_eq!(read_from_bytes(&bytes).unwrap().unknown_members.len(), 5);
+}
+
+#[test]
 fn member_names_are_checked_on_write() {
     let mut file = NoteFile::new(blank_note("a", "b"));
     file.unknown_members.push(Member {
@@ -567,6 +603,94 @@ fn duplicate_or_odd_members_in_a_file_are_kept_safely() {
         .collect();
     assert_eq!(names, ["background.pdf", "background.Bad Ext"]);
     assert_eq!(read_from_bytes(&to_bytes(&file).unwrap()).unwrap(), file);
+}
+
+/// A valid note archive in which `name` appears twice, holding `first` then `second` (the zip
+/// writer refuses to make one: it is written with a placeholder name of the same length,
+/// then patched in the local headers and the central directory).
+fn archive_with_duplicate(name: &str, first: &[u8], second: &[u8]) -> Vec<u8> {
+    let json = note_json(&NoteFile::new(blank_note("a", "b")), FormatVersion::CURRENT).unwrap();
+    let strokes = strokes::encode(&[]).unwrap();
+    let placeholder = format!("§{}", &name[2..]);
+    assert_eq!(placeholder.len(), name.len());
+    let mut members: Vec<(&str, &[u8])> = vec![(name, first), (&placeholder, second)];
+    for (known, bytes) in [(NOTE_JSON, &json), (STROKES_BIN, &strokes)] {
+        if known != name {
+            members.insert(0, (known, bytes));
+        }
+    }
+    let mut bytes = raw_archive(&members);
+    let (from, to) = (placeholder.as_bytes(), name.as_bytes());
+    let mut patched = 0;
+    let mut i = 0;
+    while i + from.len() <= bytes.len() {
+        if &bytes[i..i + from.len()] == from {
+            bytes[i..i + from.len()].copy_from_slice(to);
+            patched += 1;
+        }
+        i += 1;
+    }
+    assert_eq!(patched, 2, "local header and central directory");
+    bytes
+}
+
+#[test]
+fn duplicate_member_names_are_refused() {
+    let json = note_json(&NoteFile::new(blank_note("a", "b")), FormatVersion::CURRENT).unwrap();
+    let mut other = NoteFile::new(blank_note("other", "Other"));
+    other.note.tags = vec!["x".to_owned()];
+    let other_json = note_json(&other, FormatVersion::CURRENT).unwrap();
+    let strokes = strokes::encode(&[]).unwrap();
+    let cases = [
+        archive_with_duplicate("x.bin", b"first", b"second"),
+        archive_with_duplicate("background.png", b"first", b"second"),
+        archive_with_duplicate(THUMB_PNG, b"first", b"second"),
+        archive_with_duplicate(NOTE_JSON, &json, &other_json),
+        archive_with_duplicate(STROKES_BIN, &strokes, &strokes),
+    ];
+    for bytes in cases {
+        let error = read_from_bytes(&bytes).unwrap_err();
+        assert!(matches!(error, FormatError::Archive(_)), "{error:?}");
+        assert_eq!(error.code(), "noteDamaged");
+        assert!(error.to_string().contains("twice"), "{error}");
+        // Listing refuses it too, so that a note shown in the list can always be opened.
+        assert!(read_header_from_bytes(&bytes).is_err());
+    }
+}
+
+#[test]
+fn a_new_background_replaces_an_unknown_member_of_the_same_name() {
+    let json = note_json(&NoteFile::new(blank_note("a", "b")), FormatVersion::CURRENT).unwrap();
+    let strokes = strokes::encode(&[]).unwrap();
+    let bytes = raw_archive(&[
+        (NOTE_JSON, &json),
+        (STROKES_BIN, &strokes),
+        ("background.png", b"png"),
+        ("background.pdf", b"old pdf"),
+        ("background.jpg", b"old jpg"),
+    ]);
+    let mut file = read_from_bytes(&bytes).unwrap();
+    assert_eq!(file.unknown_members.len(), 2);
+
+    // The app sets a PDF background: the known background wins over the unknown member.
+    file.background = Some(BackgroundFile {
+        extension: "pdf".to_owned(),
+        bytes: b"new pdf".to_vec(),
+    });
+    let written = to_bytes(&file).unwrap();
+    assert_eq!(
+        member_names(&written),
+        [NOTE_JSON, STROKES_BIN, "background.pdf", "background.jpg"]
+    );
+    let back = read_from_bytes(&written).unwrap();
+    assert_eq!(back.background, file.background);
+    assert_eq!(
+        back.unknown_members,
+        [Member {
+            name: "background.jpg".to_owned(),
+            bytes: b"old jpg".to_vec()
+        }]
+    );
 }
 
 #[test]
