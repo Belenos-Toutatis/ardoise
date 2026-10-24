@@ -82,6 +82,16 @@
   );
   const pageLabel = $derived(t('live.pages.position', { n: live.pageIndex + 1, count: live.pageCount }));
   const decimal = $derived(new Intl.NumberFormat(currentLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  /** p95 and the interface's share, in the latency's tooltip. */
+  const latencyDetail = $derived(
+    latencyMedian === null
+      ? ''
+      : t('live.latency.detail', {
+          count: latencyCount,
+          p95: latencyP95 === null ? t('live.latency.none') : decimal.format(latencyP95),
+          ui: latencyUi === null ? t('live.latency.none') : decimal.format(latencyUi),
+        }),
+  );
 
   const actions: LiveActions = {
     live,
@@ -244,13 +254,11 @@
       <span class="dot" aria-hidden="true"></span>
       {starting && !live.ready ? t('live.starting') : t(`live.state.${sessionState}`)}
     </span>
-    <span class="latency" title={t('live.latency.hint')}>
+    <span class="latency" title={latencyDetail ? `${t('live.latency.hint')} ${latencyDetail}` : t('live.latency.hint')}>
       <span class="muted">{t('live.latency.label')}</span>
       <strong data-latency-median={latencyMedian === null ? '' : latencyMedian.toFixed(1)}>{ms(latencyMedian)}</strong>
-      {#if latencyMedian !== null}
-        <span class="visually-hidden">
-          {t('live.latency.detail', { count: latencyCount, p95: ms(latencyP95), ui: ms(latencyUi) })}
-        </span>
+      {#if latencyDetail}
+        <span class="visually-hidden">{latencyDetail}</span>
       {/if}
     </span>
     <span class="saved muted" data-saved={savedCount}>{savedText}</span>

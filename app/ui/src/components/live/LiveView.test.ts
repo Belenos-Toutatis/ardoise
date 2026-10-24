@@ -244,6 +244,10 @@ describe('live view (control window)', () => {
     const shown = view.target.querySelector<HTMLElement>('[data-latency-median]')!;
     expect(shown.dataset.latencyMedian).toMatch(/^-?\d+\.\d$/);
     expect(shown.textContent).toMatch(/^-?\d+,\d ms$/);
+    // The tooltip adds the p95 and the interface's share.
+    const tooltip = view.target.querySelector<HTMLElement>('.latency')!.title;
+    expect(tooltip).toMatch(/95 % sous -?\d+,\d ms ; part de l'interface : -?\d+,\d ms\.$/);
+    expect(tooltip).not.toContain('ms ms');
   });
 
   it('works from the keyboard', async () => {
