@@ -1,9 +1,21 @@
 /** Typed wrappers around the Rust commands of `app/src-tauri/src/commands.rs`. */
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic';
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
-import { mockDiagnosticStart, mockInvoke } from './mock';
+import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
+import type {
+  Background,
+  FileStamp,
+  LibraryListing,
+  Note,
+  NoteSummary,
+  OpenedNote,
+  PageSize,
+  TabletInfo,
+  TrashEntry,
+} from './note';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
@@ -82,7 +94,62 @@ export const api = {
   diagnosticAnswer: (decision: Decision) => call<void>('diagnostic_answer', { decision }),
   /** Stops the tablet test (a `done` event with `cancelled` follows). */
   diagnosticCancel: () => call<void>('diagnostic_cancel'),
+
+  // --- Library (milestone M3; Rust side: app/src-tauri/src/library.rs) ---------------------
+
+  /** Every note of this computer's library, its binders and tags. */
+  libraryList: () => call<LibraryListing>('library_list'),
+  /** PNG data URL of a note's thumbnail (cached on this PC), or null if none can be made. */
+  noteThumbnail: (path: string, stamp: FileStamp) => call<string | null>('note_thumbnail', { path, stamp }),
+  /** A new blank note (A4 landscape, white) in `binder`; returns its summary. */
+  createNote: (binder: string, title: string) => call<NoteSummary>('create_note', { binder, title }),
+  createBinder: (binder: string) => call<void>('create_binder', { binder }),
+  /** Moves notes into `binder`; returns their new paths, in order. */
+  moveNotes: (paths: string[], binder: string) => call<string[]>('move_notes', { paths, binder }),
+  /** Moves notes to the trash. */
+  trashNotes: (paths: string[]) => call<void>('trash_notes', { paths }),
+  trashList: () => call<TrashEntry[]>('trash_list'),
+  /** Restores a trashed note; returns its path. */
+  trashRestore: (id: string) => call<string>('trash_restore', { id }),
+  trashPurge: (id: string) => call<void>('trash_purge', { id }),
+  /** Empties the trash; returns how many notes were deleted for good. */
+  trashEmpty: () => call<number>('trash_empty'),
+  setNoteTags: (path: string, tags: string[], stamp: FileStamp) =>
+    call<FileStamp>('set_note_tags', { path, tags, stamp }),
+  setNoteFavorite: (path: string, favorite: boolean, stamp: FileStamp) =>
+    call<FileStamp>('set_note_favorite', { path, favorite, stamp }),
+  /** Changes a note's title, which renames its file. */
+  retitleNote: (path: string, title: string, stamp: FileStamp) =>
+    call<{ path: string; stamp: FileStamp }>('retitle_note', { path, title, stamp }),
+
+  // --- Editor -------------------------------------------------------------------------------
+
+  openNote: (path: string) => call<OpenedNote>('open_note', { path }),
+  /**
+   * Saves an edited note (thumbnail regenerated, tablet original and other members kept);
+   * rejects with code `noteConflict` if the file changed since `stamp`.
+   */
+  saveNote: (path: string, note: Note, stamp: FileStamp) => call<FileStamp>('save_note', { path, note, stamp }),
+  /** PNG data URL of a page background (paper, template, texture) `widthPx` pixels wide. */
+  renderBackground: (page: PageSize, background: Background, widthPx: number) =>
+    call<string>('render_background', { page, background, widthPx }),
+
+  // --- Settings: tablet ---------------------------------------------------------------------
+
+  /** The tablet registered from this library, if any. */
+  tabletInfo: () => call<TabletInfo | null>('tablet_info'),
+  /** Forgets the registered tablet (it must then be registered again). */
+  forgetTablet: () => call<void>('forget_tablet'),
 };
+
+/**
+ * Calls `handler` whenever notes change on disk (another PC through Nextcloud, or this app).
+ * Returns a function that stops listening.
+ */
+export async function onLibraryChanged(handler: () => void): Promise<() => void> {
+  if (!inDesktopApp()) return mockOnLibraryChanged(handler);
+  return listen('library-changed', () => handler());
+}
 
 /**
  * Text of an error thrown by a command. Rust sends `{ code, message }`: the code picks a

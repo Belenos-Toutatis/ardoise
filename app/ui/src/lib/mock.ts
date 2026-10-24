@@ -3,6 +3,11 @@
  * (`npm run dev`) so screens can be developed and tested without the desktop app.
  */
 import type { AppState, NoteOutlines } from './api';
+import { UNHANDLED } from './mock-data';
+import { mockLibraryInvoke } from './mock-library';
+import { mockNotesInvoke } from './mock-notes';
+
+export { mockOnLibraryChanged } from './mock-data';
 import {
   STEP_IDS,
   type Decision,
@@ -61,8 +66,14 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
       case 'diagnostic_cancel':
         cancelMockRun();
         return undefined;
-      default:
+      default: {
+        // Library and editor commands live in their own modules, over the demo library.
+        for (const handle of [mockLibraryInvoke, mockNotesInvoke]) {
+          const handled = handle(command, args);
+          if (handled !== UNHANDLED) return handled;
+        }
         throw { code: 'unknownCommand', message: command };
+      }
     }
   })();
   return result as T;
