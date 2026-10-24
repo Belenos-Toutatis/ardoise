@@ -165,7 +165,10 @@ pub fn current_state(context: &AppContext) -> AppState {
     state_from(context, loaded)
 }
 
-pub(crate) fn update(context: &AppContext, change: impl FnOnce(&mut Settings)) -> CommandResult<AppState> {
+pub(crate) fn update(
+    context: &AppContext,
+    change: impl FnOnce(&mut Settings),
+) -> CommandResult<AppState> {
     let updated = store(context)?.update(change)?;
     Ok(state_from(context, Ok(updated)))
 }
