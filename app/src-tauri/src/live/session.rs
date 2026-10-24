@@ -46,6 +46,9 @@ pub struct Page {
     pub urgent: bool,
     /// Last write attempt (set by the hub).
     pub last_attempt: Option<Instant>,
+    /// Why the last write failed, once the windows were told (set by the hub): cleared by the
+    /// next write that succeeds.
+    pub save_error: Option<String>,
     /// No stroke started yet: the note's time origin is still free.
     fresh: bool,
     /// Time of the page's last pen sample, ms since `note.created`.
@@ -61,6 +64,7 @@ impl Page {
             file: None,
             urgent: false,
             last_attempt: None,
+            save_error: None,
             fresh: true,
             last_t: None,
         }
@@ -204,6 +208,21 @@ impl LiveSession {
     #[cfg(test)]
     pub fn size(&self) -> PageSize {
         self.size
+    }
+
+    /// A `saveFailed` event for every page whose last write failed.
+    pub fn save_failures(&self) -> Vec<LiveEvent> {
+        self.pages
+            .iter()
+            .enumerate()
+            .filter_map(|(page_index, page)| {
+                let message = page.save_error.clone()?;
+                Some(LiveEvent::SaveFailed {
+                    page_index,
+                    message,
+                })
+            })
+            .collect()
     }
 
     /// Paths of the notes written so far, in page order.

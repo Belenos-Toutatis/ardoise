@@ -3,5 +3,5 @@
   "identifier": "presentation",
   "description": "Permissions of the classroom's presentation window (live.rs, presentation.rs).",
   "windows": ["presentation"],
-  "permissions": ["core:default", "core:window:allow-close"]
+  "permissions": ["core:default"]
 }
