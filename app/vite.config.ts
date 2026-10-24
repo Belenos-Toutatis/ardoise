@@ -10,5 +10,7 @@ export default defineConfig(({ mode }) => ({
   build: { outDir: 'dist', emptyOutDir: true, target: 'es2022' },
   // Component tests mount Svelte components, which needs the browser build of Svelte.
   resolve: mode === 'test' ? { conditions: ['browser'] } : undefined,
-  test: { include: ['ui/src/**/*.test.ts'], environment: 'node' },
+  // Half the processors: with one worker per core (the default), workers starting all at once
+  // on a busy PC timed out ("Timeout waiting for worker to respond") during `cargo xtask check`.
+  test: { include: ['ui/src/**/*.test.ts'], environment: 'node', maxWorkers: '50%' },
 }));
