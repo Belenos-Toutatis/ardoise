@@ -138,12 +138,13 @@ fn many_layers_extreme_coordinates_and_long_times() {
 fn note_json_layout() {
     let mut note = blank_note("4f1c-uuid", "Cours");
     note.tags = vec!["maths".to_owned()];
+    note.favorite = true;
     note.origin = Origin::Inkspace {
         id: "abc".to_owned(),
     };
     let value = note_json_value(&NoteFile::new(note));
     assert_eq!(value["format"]["version"], 1);
-    assert_eq!(value["format"]["minor"], 0);
+    assert_eq!(value["format"]["minor"], FormatVersion::CURRENT.minor);
     assert_eq!(
         value["format"]["writer"],
         format!("Ardoise {}", env!("CARGO_PKG_VERSION"))
@@ -260,7 +261,7 @@ fn unknown_fields_and_members_survive_a_rewrite() {
     assert_eq!(value["futureField"]["nested"][2]["deep"], "yes");
     assert_eq!(value["title"], "Modifiée");
     // The format object is this version's own.
-    assert_eq!(value["format"]["minor"], 0);
+    assert_eq!(value["format"]["minor"], FormatVersion::CURRENT.minor);
     let names = member_names(&bytes);
     assert!(names.contains(&"future/extra.bin".to_owned()));
     assert!(names.contains(&"future/".to_owned()));
@@ -963,4 +964,25 @@ fn v1_fixtures_are_read() {
     assert_eq!(future.unknown_members[1].bytes, [0xde, 0xad, 0xbe, 0xef]);
     let rewritten = read_from_bytes(&to_bytes(&future).unwrap()).unwrap();
     assert_eq!(rewritten, future);
+}
+
+#[test]
+fn favorite_is_written_only_when_set_and_old_files_read_as_not_favorite() {
+    let plain = blank_note("fav-0", "Ordinaire");
+    let value = note_json_value(&NoteFile::new(plain.clone()));
+    assert!(value.get("favorite").is_none(), "{value}");
+
+    let mut starred = plain.clone();
+    starred.favorite = true;
+    let value = note_json_value(&NoteFile::new(starred.clone()));
+    assert_eq!(value["favorite"], true);
+    let read = read_from_bytes(&to_bytes(&NoteFile::new(starred)).unwrap()).unwrap();
+    assert!(read.note.favorite);
+
+    // A 1.0 file (no `favorite` field at all) is not a favourite.
+    let old = read_from_bytes(
+        &to_bytes_as(&NoteFile::new(plain), FormatVersion { major: 1, minor: 0 }).unwrap(),
+    )
+    .unwrap();
+    assert!(!old.note.favorite);
 }

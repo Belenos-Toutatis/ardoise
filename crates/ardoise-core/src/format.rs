@@ -72,7 +72,7 @@ pub struct FormatVersion {
 
 impl FormatVersion {
     /// The version this code writes, and the newest it reads.
-    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 0 };
+    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 1 };
 }
 
 impl fmt::Display for FormatVersion {
@@ -273,6 +273,7 @@ fn metadata_only(note: &Note) -> Note {
         page: note.page,
         background: note.background,
         tags: note.tags.clone(),
+        favorite: note.favorite,
         layers: note.layers.clone(),
         strokes: Vec::new(),
         timing: note.timing,

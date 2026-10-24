@@ -234,6 +234,7 @@ mod tests {
             page,
             background,
             tags: vec![],
+            favorite: false,
             layers: vec![
                 Layer {
                     name: "1".into(),

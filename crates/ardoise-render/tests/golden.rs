@@ -185,6 +185,7 @@ fn note(page: PageSize, background: Background, strokes: Vec<Stroke>) -> Note {
         page,
         background,
         tags: vec![],
+        favorite: false,
         layers: vec![Layer {
             name: "Calque 1".into(),
             visible: true,

@@ -293,6 +293,7 @@ pub(crate) fn convert_page(
         page: page_size,
         background: Background::default(),
         tags: Vec::new(),
+        favorite: false,
         layers,
         strokes,
         timing: stats.timing,

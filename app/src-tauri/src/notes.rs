@@ -98,6 +98,7 @@ mod tests {
             page: A4_LANDSCAPE,
             background: Background::default(),
             tags: vec![],
+            favorite: false,
             layers: vec![
                 Layer {
                     name: "Calque 1".into(),

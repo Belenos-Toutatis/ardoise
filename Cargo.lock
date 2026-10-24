@@ -126,6 +126,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ardoise-ink-wasm"
+version = "0.1.0"
+dependencies = [
+ "ardoise-ink",
+]
+
+[[package]]
 name = "ardoise-inkspace"
 version = "0.1.0"
 dependencies = [

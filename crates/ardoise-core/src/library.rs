@@ -257,6 +257,7 @@ pub struct NoteEntry {
     /// Unix milliseconds.
     pub modified: i64,
     pub tags: Vec<String>,
+    pub favorite: bool,
     /// To pass back to [`Library::save`].
     pub stamp: FileStamp,
     /// Set when the file is a sync client's conflict copy.
@@ -738,6 +739,17 @@ impl Library {
         let (_, stamp) = self.rewrite(path, expected, |file| file.note.tags = tags)?;
         Ok(stamp)
     }
+
+    /// Marks or unmarks a note as a favourite. Returns the new stamp.
+    pub fn set_favorite(
+        &self,
+        path: &Path,
+        favorite: bool,
+        expected: Option<&FileStamp>,
+    ) -> Result<FileStamp, LibraryError> {
+        let (_, stamp) = self.rewrite(path, expected, |file| file.note.favorite = favorite)?;
+        Ok(stamp)
+    }
 }
 
 fn read_entry(path: &Path, binder: PathBuf) -> Result<NoteEntry, LibraryError> {
@@ -759,6 +771,7 @@ fn read_entry(path: &Path, binder: PathBuf) -> Result<NoteEntry, LibraryError> {
         created: note.created,
         modified: note.modified,
         tags: note.tags,
+        favorite: note.favorite,
         stamp,
     })
 }

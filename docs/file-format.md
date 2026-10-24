@@ -1,7 +1,7 @@
 # The `.ardoise` file format
 
 > Developer document, written in English (the planning documents are in French). It describes format
-> **version 1.0** byte by byte. Requirements: SPEC §3.3 and §3.4. Code: `crates/ardoise-core/src/format.rs`
+> **version 1.1** byte by byte (1.1 = 1.0 plus the optional `favorite` field). Requirements: SPEC §3.3 and §3.4. Code: `crates/ardoise-core/src/format.rs`
 > (container, `note.json`) and `crates/ardoise-core/src/format/strokes.rs` (`strokes.bin`). Model: `note.rs`
 > (`ardoise-core`) and `model.rs` (`ardoise-ink`). Committed sample files: `testdata/format/v1/`.
 
@@ -55,12 +55,12 @@ A member that crosses a limit, its own or what is left of the total, makes the f
 
 ## 2. `note.json`
 
-A UTF-8 JSON object. Version 1.0 writes it indented with two spaces, `format` first and the other keys in
+A UTF-8 JSON object. Version 1.1 writes it indented with two spaces, `format` first and the other keys in
 alphabetical order; **key order and whitespace are not significant**.
 
 ```json
 {
-  "format": { "version": 1, "minor": 0, "writer": "Ardoise 0.1.0" },
+  "format": { "version": 1, "minor": 1, "writer": "Ardoise 0.1.0" },
   "background": { "paper": "cream", "template": "seyes", "texture": true },
   "created": 1792843200000,
   "id": "6f0c9a52-3d7e-4f0a-9a43-1c2b5e8d7f10",
@@ -88,6 +88,7 @@ alphabetical order; **key order and whitespace are not significant**.
 | `background.template` | `"blank"`, `"lined"`, `"seyes"`, `"grid5mm"`, `"millimetric"`, `"dotted"`, `"music"` | printed guide lines. |
 | `background.texture` | boolean | subtle paper grain. |
 | `tags` | array of strings | tags, in the user's order. |
+| `favorite` | boolean, optional (1.1) | `true` when the note is a favourite; absent otherwise. Absent in 1.0 files: not a favourite. |
 | `layers` | array of `{"name": string, "visible": boolean}` | at least one; strokes refer to layers by index (0 = first). |
 | `timing` | `"recorded"` or `"synthesized"` | whether point times were measured or made up (imported notes without timing). |
 | `origin` | `{"kind": "tablet"}`, `{"kind": "live"}`, `{"kind": "ardoise"}` or `{"kind": "inkspace", "id": string}` | where the note comes from (`id` = Inkspace's note UUID). |

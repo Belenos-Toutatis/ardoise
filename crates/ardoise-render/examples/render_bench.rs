@@ -71,6 +71,7 @@ fn page(tools: bool, background: Background) -> Note {
         page: A4_LANDSCAPE,
         background,
         tags: vec![],
+        favorite: false,
         layers: vec![Layer {
             name: "1".into(),
             visible: true,

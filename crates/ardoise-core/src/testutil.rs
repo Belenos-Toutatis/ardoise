@@ -125,6 +125,7 @@ impl Lcg {
             tags: (0..self.below(4))
                 .map(|i| format!("tag{i}-{}", self.below(100)))
                 .collect(),
+            favorite: self.below(2) == 0,
             layers: (0..layers)
                 .map(|i| Layer {
                     name: format!("Calque {}", i + 1),
@@ -159,6 +160,7 @@ pub fn blank_note(id: &str, title: &str) -> Note {
         page: A4_LANDSCAPE,
         background: Background::default(),
         tags: Vec::new(),
+        favorite: false,
         layers: vec![Layer {
             name: "Calque 1".to_owned(),
             visible: true,

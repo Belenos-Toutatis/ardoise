@@ -123,6 +123,9 @@ pub struct Note {
     pub page: PageSize,
     pub background: Background,
     pub tags: Vec<String>,
+    /// Marked as a favourite (format 1.1; absent from older files, written only when set).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub favorite: bool,
     /// At least one layer.
     pub layers: Vec<Layer>,
     pub strokes: Vec<Stroke>,

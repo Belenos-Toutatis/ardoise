@@ -1,0 +1,17 @@
+[package]
+name = "ardoise-ink-wasm"
+description = "WebAssembly entry points of ardoise-ink for the interface (plain exports, no wasm-bindgen)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ardoise-ink = { path = "../ardoise-ink" }
+
+[lints]
+workspace = true

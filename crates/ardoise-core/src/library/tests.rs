@@ -1158,3 +1158,25 @@ fn a_binder_cannot_take_the_library_folder_name() {
     assert!(library.create_binder(Path::new("_ardoise")).is_err());
     assert!(library.create_binder(Path::new("Classe/_Ardoise")).is_err());
 }
+
+#[test]
+fn favourites_are_set_listed_and_cleared() {
+    let (_dir, library) = new_library();
+    let note = library
+        .create(Path::new(""), &note_file("f", "Fav"))
+        .unwrap();
+    assert!(!library.list().notes[0].favorite);
+    let stamp = library
+        .set_favorite(&note.path, true, Some(&note.stamp))
+        .unwrap();
+    assert!(library.list().notes[0].favorite);
+    library
+        .set_favorite(&note.path, false, Some(&stamp))
+        .unwrap();
+    assert!(!library.list().notes[0].favorite);
+    // A stale stamp is a conflict, like every other change.
+    assert!(matches!(
+        library.set_favorite(&note.path, true, Some(&stamp)),
+        Err(LibraryError::Conflict { .. })
+    ));
+}

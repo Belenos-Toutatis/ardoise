@@ -18,3 +18,6 @@ Thumbs.db
 
 # Git worktrees of subagents
 /.claude/worktrees/
+
+# Built from crates/ardoise-ink-wasm by app/scripts/build-wasm.mjs
+/app/ui/src/assets/ardoise_ink.wasm
