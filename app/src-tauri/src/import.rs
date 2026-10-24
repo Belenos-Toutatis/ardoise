@@ -212,6 +212,12 @@ fn print_table(report: &ImportReport, reader: &TrackedReader, compare: bool) -> 
             failure.error
         );
     }
+    if compare {
+        println!(
+            "Seuils : IoU ≥ {:.2} ; encre à moins d'1 px (dans les deux sens) ≥ {:.2}",
+            THRESHOLDS.iou, THRESHOLDS.within_1px
+        );
+    }
     all_pass
 }
 
