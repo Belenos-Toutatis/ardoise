@@ -70,6 +70,8 @@ pub struct AppState {
     self_test: bool,
     open_diagnostic: bool,
     auto_export: AutoExportState,
+    /// Microphone chosen on this computer for the narration (`None`: the system's default).
+    microphone: Option<String>,
 }
 
 impl AppState {
@@ -95,6 +97,11 @@ impl AppState {
 
     pub fn auto_export(&self) -> &AutoExportState {
         &self.auto_export
+    }
+
+    #[cfg(test)]
+    pub fn microphone(&self) -> Option<&str> {
+        self.microphone.as_deref()
     }
 }
 
@@ -141,6 +148,7 @@ fn state_from(context: &AppContext, loaded: Result<Settings, SettingsError>) -> 
         library: settings
             .library_for(&machine)
             .map(|p| p.display().to_string()),
+        microphone: settings.microphone_for(&machine).map(str::to_owned),
         machine,
         settings_path,
         settings_error,
@@ -499,6 +507,28 @@ mod tests {
         assert!(text.contains("future = 3"), "{text}");
         assert!(text.contains("kept = true"), "{text}");
         assert!(text.contains("format = \"pdf\""), "{text}");
+    }
+
+    #[test]
+    fn app_state_carries_this_machine_s_microphone() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path(), "PC-A");
+        let json = serde_json::to_value(current_state(&context)).unwrap();
+        assert_eq!(json["microphone"], serde_json::Value::Null);
+
+        let state = update(&context, |s| {
+            s.set_microphone("PC-A", Some("wasapi:micro".into()));
+            s.set_microphone("PC-B", Some("wasapi:other".into()));
+        })
+        .unwrap();
+        assert_eq!(state.microphone(), Some("wasapi:micro"));
+        let json = serde_json::to_value(&state).unwrap();
+        assert_eq!(json["microphone"], "wasapi:micro");
+        // Read back from disk, per machine.
+        let other = self::context(settings.path(), "PC-B");
+        assert_eq!(current_state(&other).microphone(), Some("wasapi:other"));
+        let third = self::context(settings.path(), "PC-C");
+        assert_eq!(current_state(&third).microphone(), None);
     }
 
     #[test]

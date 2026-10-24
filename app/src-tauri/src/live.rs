@@ -31,8 +31,10 @@ use crate::diagnostic::report_language;
 use crate::library::{library_error, library_of};
 use crate::tablet::TabletRuntime;
 
-pub use hub::{ButtonSetting, HubConfig, LiveError, LiveHub, Start, StartOptions};
+pub use hub::{ButtonSetting, HubConfig, LiveError, LiveHub, PagePosition, Start, StartOptions};
 pub use model::{LiveBatch, LiveCommand, LiveSnapshot, LiveStyle, LiveViewState};
+
+use crate::narration::{self, NarrationRuntime};
 
 /// The live session of the running app.
 pub struct LiveRuntime {
@@ -55,11 +57,21 @@ impl LiveRuntime {
 
 impl LiveError {
     /// Error for the interface.
-    fn command_error(self) -> CommandError {
+    pub(crate) fn command_error(self) -> CommandError {
         match self {
             LiveError::NotRunning | LiveError::Stopped => CommandError::new("liveNotRunning", self),
             LiveError::Library(error) => library_error(error),
+            LiveError::Narration(error) => narration::narration_error(error),
         }
+    }
+}
+
+/// A narration recorded in live mode goes to its pages before they are written for the last
+/// time (live mode stops, the app closes, a new session starts). A failure is logged: leaving
+/// live mode must not fail because of the microphone.
+fn finish_live_narration(narration: &NarrationRuntime, hub: &LiveHub) {
+    if let Some(Err(error)) = narration::finish_live(narration, hub) {
+        eprintln!("live mode: the narration could not be kept: {error:?}");
     }
 }
 
@@ -90,6 +102,12 @@ fn button_setting(context: &AppContext) -> ButtonSetting {
 /// closing the app without "Stop" loses nothing; a page the library cannot take is kept in
 /// [`backup_dir`].
 pub fn main_window_closed(app: &AppHandle) {
+    if let (Some(narration), Some(runtime)) = (
+        app.try_state::<NarrationRuntime>(),
+        app.try_state::<LiveRuntime>(),
+    ) {
+        finish_live_narration(&narration, &runtime.hub);
+    }
     if let Some(tablet) = app.try_state::<TabletRuntime>() {
         let _ = tablet.with_service(TabletService::stop_live);
     }
@@ -173,8 +191,14 @@ pub async fn live_start(
     context: State<'_, AppContext>,
     tablet: State<'_, TabletRuntime>,
     runtime: State<'_, LiveRuntime>,
+    narration: State<'_, NarrationRuntime>,
 ) -> CommandResult<LiveSnapshot> {
     let library = library_of(&context)?;
+    // A narration still recording for a session that stopped by itself (the tablet's service
+    // left live mode) belongs to that session's pages, not to the new one.
+    if !runtime.hub.page_position().is_some_and(|p| p.running) {
+        finish_live_narration(&narration, &runtime.hub);
+    }
     let size = tablet
         .with_service(|service| tablet_size(&service.status()))
         .ok()
@@ -206,12 +230,15 @@ pub async fn live_start(
     }
 }
 
-/// Leaves live mode and writes every page; returns the paths of the session's notes.
+/// Leaves live mode and writes every page; returns the paths of the session's notes. A
+/// narration recording in live mode is stopped first and goes with its pages.
 #[tauri::command]
 pub async fn live_stop(
     tablet: State<'_, TabletRuntime>,
     runtime: State<'_, LiveRuntime>,
+    narration: State<'_, NarrationRuntime>,
 ) -> CommandResult<Vec<String>> {
+    finish_live_narration(&narration, &runtime.hub);
     // Without a running service there is nothing to stop on the tablet's side.
     let _ = tablet.with_service(TabletService::stop_live);
     runtime.hub.stop().map_err(LiveError::command_error)
