@@ -30,7 +30,7 @@
 //!   `boundingBox` origin, × 25: page coordinates as displayed, device units.
 //! - **Layers**: in stored order, all visible, named "Calque 1", "Calque 2"…
 //! - **Ink**: `Tool::Ballpoint`, colour from the RGBA int. The stored diameter of each point
-//!   is scaled by [`width::width_factor`] (0.8 for timed strokes, 1.0 for untimed ones, tuned
+//!   is scaled by [`width::width_factor`] (1.0 for timed strokes, 1.1 for untimed ones, tuned
 //!   against Inkspace's previews) and × 25, then stored as a pressure through the ballpoint's
 //!   inverse response ([`width::pressure_for_width`]), with the stroke's nominal width = its
 //!   largest diameter / full-pressure ratio, so every point maps into 0..=1.

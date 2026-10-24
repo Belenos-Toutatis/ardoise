@@ -22,6 +22,8 @@ const MAX_MEAN_DIFFERENCE: f64 = 0.5;
 /// [`PIXEL_THRESHOLD`].
 const MAX_DIFFERING_SHARE: f64 = 0.002;
 const PIXEL_THRESHOLD: u8 = 16;
+/// Largest accepted share of differing pixels within a single row or column.
+const MAX_LINE_SHARE: f64 = 0.25;
 
 // Inkspace's colours (research §5.2) and a few more.
 const BLACK: Rgba = Rgba::BLACK;
@@ -730,17 +732,38 @@ fn golden_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/golden")
 }
 
-/// Mean absolute difference per channel and share of pixels differing by more than
-/// [`PIXEL_THRESHOLD`] on some channel.
-fn compare(a: &Image, b: &Image) -> (f64, f64) {
+/// Differences between a fresh render and its reference image.
+struct Difference {
+    /// Mean absolute difference per channel (0..255).
+    mean: f64,
+    /// Share of pixels with a channel differing by more than [`PIXEL_THRESHOLD`].
+    share: f64,
+    /// Largest such share within one row or one column: a lost 1-px template line hardly
+    /// moves `share` but fills its whole row or column.
+    line_share: f64,
+}
+
+impl Difference {
+    fn ok(&self) -> bool {
+        self.mean <= MAX_MEAN_DIFFERENCE
+            && self.share <= MAX_DIFFERING_SHARE
+            && self.line_share <= MAX_LINE_SHARE
+    }
+}
+
+fn compare(a: &Image, b: &Image) -> Difference {
+    let (width, height) = (a.width as usize, a.height as usize);
     let mut total = 0u64;
     let mut differing = 0u64;
-    for (pa, pb) in a
+    let mut per_row = vec![0u32; height];
+    let mut per_column = vec![0u32; width];
+    for (i, (pa, pb)) in a
         .pixels
         .as_chunks::<4>()
         .0
         .iter()
         .zip(b.pixels.as_chunks::<4>().0.iter())
+        .enumerate()
     {
         let mut worst = 0u8;
         for (&x, &y) in pa.iter().zip(pb) {
@@ -750,10 +773,18 @@ fn compare(a: &Image, b: &Image) -> (f64, f64) {
         }
         if worst > PIXEL_THRESHOLD {
             differing += 1;
+            per_row[i / width.max(1)] += 1;
+            per_column[i % width.max(1)] += 1;
         }
     }
     let pixels = (a.pixels.len() / 4).max(1) as f64;
-    (total as f64 / (pixels * 4.0), differing as f64 / pixels)
+    let worst_row = per_row.iter().max().copied().unwrap_or(0) as f64 / width.max(1) as f64;
+    let worst_column = per_column.iter().max().copied().unwrap_or(0) as f64 / height.max(1) as f64;
+    Difference {
+        mean: total as f64 / (pixels * 4.0),
+        share: differing as f64 / pixels,
+        line_share: worst_row.max(worst_column),
+    }
 }
 
 #[test]
@@ -762,8 +793,9 @@ fn golden_images_match() {
     let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("golden");
     let mut failures = Vec::new();
     println!(
-        "{:<28} {:>11} {:>10} {:>10}  (limits: mean {MAX_MEAN_DIFFERENCE}, share {MAX_DIFFERING_SHARE})",
-        "image", "size", "mean diff", "share >16"
+        "{:<28} {:>11} {:>10} {:>10} {:>10}  (limits: mean {MAX_MEAN_DIFFERENCE}, share \
+         {MAX_DIFFERING_SHARE}, line {MAX_LINE_SHARE})",
+        "image", "size", "mean diff", "share >16", "worst line"
     );
     for (name, note, options) in cases() {
         let image = render_note(&note, &options).expect("render");
@@ -786,11 +818,14 @@ fn golden_images_match() {
             ));
             continue;
         }
-        let (mean, share) = compare(&image, &reference);
-        let ok = mean <= MAX_MEAN_DIFFERENCE && share <= MAX_DIFFERING_SHARE;
+        let diff = compare(&image, &reference);
+        let ok = diff.ok();
         println!(
-            "{name:<28} {:>11} {mean:>10.4} {share:>10.5}  {}",
+            "{name:<28} {:>11} {:>10.4} {:>10.5} {:>10.4}  {}",
             format!("{}x{}", image.width, image.height),
+            diff.mean,
+            diff.share,
+            diff.line_share,
             if ok { "ok" } else { "DIFFERENT" }
         );
         if !ok {
@@ -798,8 +833,11 @@ fn golden_images_match() {
             let fresh = out.join(format!("{name}.png"));
             fs::write(&fresh, encode_png(&image).expect("encode")).expect("write");
             failures.push(format!(
-                "{name}: mean difference {mean:.4}, {:.3} % of pixels differ (new render: {})",
-                share * 100.0,
+                "{name}: mean difference {:.4}, {:.3} % of pixels differ, worst line {:.1} % \
+                 (new render: {})",
+                diff.mean,
+                diff.share * 100.0,
+                diff.line_share * 100.0,
                 fresh.display()
             ));
         }
@@ -833,4 +871,48 @@ fn regenerate_golden_images() {
         );
     }
     println!("total {:.1} KB in {}", total as f64 / 1024.0, dir.display());
+}
+
+/// The comparison must catch a template line that disappears although it is a tiny share of
+/// the image: here the vertical margin of the Seyès ruling (about 0.16 % of the pixels).
+#[test]
+fn a_lost_one_pixel_line_is_caught() {
+    let (_, note, options) = cases()
+        .into_iter()
+        .find(|(name, ..)| *name == "seyes_cream_texture")
+        .expect("seyes_cream_texture case");
+    let image = render_note(&note, &options).expect("render");
+    let (width, height) = (image.width as usize, image.height as usize);
+    let pixel = |img: &Image, x: usize, y: usize| {
+        let i = (y * width + x) * 4;
+        [img.pixels[i], img.pixels[i + 1], img.pixels[i + 2]]
+    };
+    // The margin is the column where most pixels are clearly red.
+    let reddish = |x: usize| {
+        (0..height)
+            .filter(|&y| {
+                let [r, g, _] = pixel(&image, x, y);
+                i32::from(r) - i32::from(g) > 40
+            })
+            .count()
+    };
+    let margin = (1..width).max_by_key(|&x| reddish(x)).expect("a column");
+    assert!(reddish(margin) > height / 2, "no margin line found");
+    let mut damaged = image.clone();
+    for y in 0..height {
+        let left = pixel(&image, margin - 4, y);
+        let i = (y * width + margin) * 4;
+        damaged.pixels[i..i + 3].copy_from_slice(&left);
+    }
+
+    let diff = compare(&damaged, &image);
+    println!(
+        "margin column {margin} erased: mean {:.4}, share {:.5}, worst line {:.3}",
+        diff.mean, diff.share, diff.line_share
+    );
+    assert!(
+        diff.share <= MAX_DIFFERING_SHARE,
+        "the global share alone would miss it"
+    );
+    assert!(!diff.ok(), "the per-line check must catch it");
 }

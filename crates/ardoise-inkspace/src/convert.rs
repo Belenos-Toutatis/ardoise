@@ -8,6 +8,7 @@
 //! - timing: `creationDate` + i·1000/`pointsPerSecond` when every stroke has both, otherwise
 //!   synthesised for the whole note (200 Hz, fixed gap) and marked `Timing::Synthesized`.
 
+use ardoise_core::format::strokes::MAX_COORD;
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Timing};
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use uuid::Uuid;
@@ -248,9 +249,20 @@ pub(crate) fn convert_page(
                 if !width::is_representable(stroke_width, diameter) {
                     stats.clipped_widths += 1;
                 }
+                let x = ((px - bbox.x) * UNITS_PER_PAGE_UNIT) as f32;
+                let y = ((py - bbox.y) * UNITS_PER_PAGE_UNIT) as f32;
+                // The note file refuses such points: report the note as not importable rather
+                // than failing later when it is saved.
+                if !(x.is_finite() && y.is_finite() && x.abs() <= MAX_COORD && y.abs() <= MAX_COORD)
+                {
+                    return Err(DecodeError::Invalid {
+                        what: "point coordinates",
+                        value: format!("{x}, {y}"),
+                    });
+                }
                 points.push(Point {
-                    x: ((px - bbox.x) * UNITS_PER_PAGE_UNIT) as f32,
-                    y: ((py - bbox.y) * UNITS_PER_PAGE_UNIT) as f32,
+                    x,
+                    y,
                     pressure: width::pressure_for_width(stroke_width, diameter),
                     t,
                 });

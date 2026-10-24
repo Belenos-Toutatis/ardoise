@@ -65,7 +65,10 @@ pub fn run_cli(args: &ImportArgs) -> i32 {
                     saved.written,
                     saved.skipped
                 );
-                true
+                for failure in &saved.failed {
+                    println!("Non enregistrée : {failure}");
+                }
+                saved.failed.is_empty()
             }
             Err(error) => {
                 println!("Échec de l'enregistrement dans la bibliothèque : {error}");
@@ -92,6 +95,8 @@ const BINDER: &str = "Inkspace";
 struct Saved {
     written: usize,
     skipped: usize,
+    /// Notes that could not be written, with the reason.
+    failed: Vec<String>,
 }
 
 /// Writes every imported note into `library` (binder [`BINDER`], atomic writes, original dates
@@ -100,15 +105,25 @@ struct Saved {
 fn save_into_library(library: &Path, report: &ImportReport) -> Result<Saved, String> {
     ardoise_core::library::init(library).map_err(|e| e.to_string())?;
     let library = Library::open(library).map_err(|e| e.to_string())?;
-    let existing: HashSet<String> = library
+    // Notes in the trash count as present: the user deleted them, importing again must not
+    // bring them back.
+    let mut existing: HashSet<String> = library
         .list()
         .notes
         .into_iter()
         .map(|entry| entry.id)
         .collect();
+    existing.extend(
+        library
+            .trash_items()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter_map(|item| item.note_id),
+    );
     let mut saved = Saved {
         written: 0,
         skipped: 0,
+        failed: Vec::new(),
     };
     for imported in &report.notes {
         if existing.contains(&imported.note.id) {
@@ -117,10 +132,13 @@ fn save_into_library(library: &Path, report: &ImportReport) -> Result<Saved, Str
         }
         let mut file = NoteFile::new(imported.note.clone());
         file.thumbnail = thumbnail(&imported.note);
-        library
-            .create(Path::new(BINDER), &file)
-            .map_err(|e| format!("{}: {e}", short(&imported.inkspace_id)))?;
-        saved.written += 1;
+        // One note that cannot be written must not block the others.
+        match library.create(Path::new(BINDER), &file) {
+            Ok(_) => saved.written += 1,
+            Err(error) => saved
+                .failed
+                .push(format!("{}: {error}", short(&imported.inkspace_id))),
+        }
     }
     Ok(saved)
 }
