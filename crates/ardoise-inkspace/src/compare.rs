@@ -31,10 +31,11 @@ pub struct Thresholds {
     pub iou: f64,
 }
 
-/// Thresholds of the import test (research §7: geometry exact, thickness close).
+/// Thresholds of the import test: geometry exact (research §7) and thickness close. With the
+/// real renderer the 22 notes of this PC score IoU 0.942–0.969, so 0.90 leaves a margin.
 pub const THRESHOLDS: Thresholds = Thresholds {
     within_1px: 0.99,
-    iou: 0.80,
+    iou: 0.90,
 };
 
 /// Scores of one comparison.

@@ -3,26 +3,20 @@
 //! diameter. The importer picks the nominal width so that the round trip reproduces the
 //! stored diameters (scaled by [`width_factor`]).
 
-/// Thinnest ballpoint line, as a share of the nominal width (pressure 0).
-const MIN_RATIO: f32 = 0.45;
+use ardoise_ink::Tool;
 
 /// Diameter of the ballpoint at `pressure` (0..=1) for a stroke of nominal width
-/// `stroke_width`.
-///
-/// A linear stand-in for the ink crate's ballpoint response.
-/// TODO(integration): `ardoise_ink::Tool::Ballpoint.width_at(stroke_width, pressure)`.
+/// `stroke_width`: exactly what the renderer draws at each sample.
 pub fn width_at(stroke_width: f32, pressure: f32) -> f32 {
-    stroke_width * (MIN_RATIO + (1.0 - MIN_RATIO) * pressure.clamp(0.0, 1.0))
+    Tool::Ballpoint.width_at(stroke_width, pressure)
 }
 
 /// Exact inverse of [`width_at`]: the pressure that draws `diameter`, clamped to 0..=1.
-///
-/// TODO(integration): `ardoise_ink::Tool::Ballpoint.pressure_for_width(stroke_width, diameter)`.
 pub fn pressure_for_width(stroke_width: f32, diameter: f32) -> f32 {
     if stroke_width <= 0.0 || !diameter.is_finite() {
         return 0.0;
     }
-    ((diameter / stroke_width - MIN_RATIO) / (1.0 - MIN_RATIO)).clamp(0.0, 1.0)
+    Tool::Ballpoint.pressure_for_width(stroke_width, diameter)
 }
 
 /// Nominal width for a stroke whose diameters are `diameters`: the smallest width whose
@@ -46,12 +40,12 @@ pub fn is_representable(stroke_width: f32, diameter: f32) -> bool {
 
 /// Scale from Inkspace's stored width to the diameter Ardoise draws, per stroke.
 ///
-/// Inkspace draws timed strokes (`pointsPerSecond > 0`: synced from the Slate at 200 pps, or
-/// drawn in the app at 60 pps) about 20 % thinner than "diameter = stored width", and untimed
-/// strokes (no or zero `pointsPerSecond`) at the stored width. Tuned with the tests'
-/// reference renderer on the private copy of 22 notes against Inkspace's previews (mean IoU
-/// per class, scale × offset grid): timed 200 pps peak at 0.80 (IoU 0.944), 60 pps at 0.80
-/// (0.946), untimed at 1.00 (0.977); an affine width (scale + offset) gained < 0.003.
+/// Tuned with `ardoise_render::render_note` (the ballpoint fills one outline whose diameter is
+/// exactly `width_at` at each sample) on the private copy of 22 notes against Inkspace's
+/// previews: timed strokes (`pointsPerSecond > 0`: synced from the Slate at 200 pps, or drawn
+/// in the app at 60 pps) match best at the stored width (factor 1.0, IoU 0.942–0.966), untimed
+/// strokes (no or zero `pointsPerSecond`) slightly thicker (1.1, IoU 0.955–0.969). Factors
+/// 0.95/1.1 and 1.0/1.2 were worse (mean IoU 0.93 and 0.915).
 pub fn width_factor(points_per_second: Option<f64>) -> f32 {
     match points_per_second {
         Some(pps) if pps > 0.0 => TIMED_WIDTH_FACTOR,
@@ -60,9 +54,9 @@ pub fn width_factor(points_per_second: Option<f64>) -> f32 {
 }
 
 /// See [`width_factor`].
-pub const TIMED_WIDTH_FACTOR: f32 = 0.8;
+pub const TIMED_WIDTH_FACTOR: f32 = 1.0;
 /// See [`width_factor`].
-pub const UNTIMED_WIDTH_FACTOR: f32 = 1.0;
+pub const UNTIMED_WIDTH_FACTOR: f32 = 1.1;
 
 #[cfg(test)]
 mod tests {

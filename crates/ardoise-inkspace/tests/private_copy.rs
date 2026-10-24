@@ -7,7 +7,7 @@
 mod common;
 
 use ardoise_core::note::Timing;
-use ardoise_inkspace::compare::{self, PREVIEW_SCALE};
+use ardoise_inkspace::compare;
 use ardoise_inkspace::{ImportReport, Scores, THRESHOLDS, TrackedReader, import_local_state};
 
 /// Research §9: 22 notes, 3874 strokes, 238 062 control points.
@@ -149,38 +149,9 @@ fn print_scores(label: &str, rows: &[(String, Scores)]) {
     );
 }
 
-/// Geometry check with the reference renderer of the tests (what the ballpoint will draw):
-/// validates axes, transform, units and the width factor before the real renderer exists.
-#[test]
-fn reference_render_matches_inkspace_previews() {
-    let Some(local_state) =
-        common::private_copy_or_skip("reference_render_matches_inkspace_previews")
-    else {
-        return;
-    };
-    let report = import(&local_state);
-    let reader = TrackedReader::new();
-    let mut rows = Vec::new();
-    for n in &report.notes {
-        let preview_path = n.preview.as_deref().expect("preview");
-        let preview = compare::load_preview(&reader, preview_path).expect("preview png");
-        let rendered = common::reference_render(&n.note, PREVIEW_SCALE);
-        let scores = compare::compare_images(&rendered, &preview).expect("same size");
-        rows.push((n.inkspace_id.clone(), scores));
-    }
-    print_scores("reference renderer vs Inkspace previews", &rows);
-    let failing: Vec<_> = rows
-        .iter()
-        .filter(|(_, s)| !s.passes(&THRESHOLDS))
-        .map(|(id, s)| format!("{} {s:?}", short(id)))
-        .collect();
-    assert!(failing.is_empty(), "below thresholds: {failing:#?}");
-}
-
-/// The import test of ROADMAP M2: `ardoise_render::render_note` against Inkspace's previews.
-///
-/// EXPECTED TO FAIL until the real renderer lands in `ardoise-render` (it is a placeholder
-/// that returns a blank page): the failure message says so.
+/// The import test of ROADMAP M2: every note imported from the private copy, rendered by
+/// `ardoise_render::render_note`, must match Inkspace's own preview (geometry within 1 px both
+/// ways, ink masks overlapping with IoU above the threshold).
 #[test]
 fn renderer_matches_inkspace_previews() {
     let Some(local_state) = common::private_copy_or_skip("renderer_matches_inkspace_previews")
@@ -200,19 +171,12 @@ fn renderer_matches_inkspace_previews() {
         .filter(|(_, s)| !s.passes(&THRESHOLDS))
         .map(|(id, s)| format!("{} {s:?}", short(id)))
         .collect();
-    let blank = rows.iter().all(|(_, s)| s.render_ink == 0);
     assert!(
         failing.is_empty(),
-        "{} of {} notes below the thresholds {:?}{}: {failing:#?}",
+        "{} of {} notes below the thresholds {:?}: {failing:#?}",
         failing.len(),
         rows.len(),
-        THRESHOLDS,
-        if blank {
-            " - EXPECTED until the real renderer lands: ardoise_render::render_note is still \
-             the placeholder that returns a blank page"
-        } else {
-            ""
-        }
+        THRESHOLDS
     );
 }
 
@@ -308,7 +272,9 @@ fn tune_width_factor() {
                 for &i in &members {
                     let mut note = report.notes[i].note.clone();
                     rescale(&mut note, class, scale, offset);
-                    let rendered = common::reference_render(&note, PREVIEW_SCALE);
+                    let rendered =
+                        ardoise_render::render_note(&note, &compare::preview_render_options())
+                            .expect("render");
                     sum += compare::compare_images(&rendered, &previews[i])
                         .expect("same size")
                         .iou;
