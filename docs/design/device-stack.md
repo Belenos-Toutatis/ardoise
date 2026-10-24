@@ -115,3 +115,14 @@ Public surface (names may be refined, the shape must stay):
   use a fresh library in `%TEMP%`, so a simulated registration cannot replace the real tablet's `device.json`.
 - **Log size (to revisit in M4).** The whole log is rewritten at most every 2 s. Fine for diagnostic sessions; for
   hours of live mode in class, rotate files (e.g. every 1 MiB) so Nextcloud does not re-upload a growing file.
+- **Draining before each write.** `Session` calls `recv(Duration::ZERO)` until nothing is left before every
+  write: a lost link is noticed before writing, and command frames already received (late answers to an earlier,
+  timed-out request) are discarded. Virtual-time transports deliver on `recv(0)` only events already due and never
+  advance the clock.
+- **Connection boundaries in the log.** `LoggingTransport` logs `event: disconnect` on an explicit `disconnect()`
+  and also when it is dropped without one (never twice); `disconnected` is logged when the link is lost. Replay
+  uses these events as connection boundaries.
+- **BLE notification loss (to check in H1).** btleplug's WinRT backend buffers 16 notifications per peripheral and
+  drops the rest silently if our task falls behind. A page download then fails its CRC (retried once, nothing is
+  deleted); live mode would show gaps. If H1 shows it, move the notification handler to direct WinRT
+  `ValueChanged` callbacks feeding an unbounded channel (the plan B of SPEC §6.2).
