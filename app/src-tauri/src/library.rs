@@ -319,11 +319,15 @@ pub fn retitle_in(
     })
 }
 
-/// The listing the interface shows: the whole library without the automatic export folder.
+/// The listing the interface shows: the whole library, without the automatic export folder
+/// while the automatic export is on.
 fn list_for_interface(context: &AppContext) -> CommandResult<LibraryListing> {
     let mut listing = list(&library_of(context)?);
     let state = current_state(context);
-    hide_export_folder(&mut listing, state.auto_export().valid_folder().as_deref());
+    // Only while the export is on: with it off, the folder is an ordinary binder.
+    if state.auto_export().is_active() {
+        hide_export_folder(&mut listing, state.auto_export().valid_folder().as_deref());
+    }
     Ok(listing)
 }
 
@@ -834,16 +838,26 @@ pub(crate) mod tests {
         library.create_binder(Path::new("Classe")).unwrap();
 
         let hidden = |context: &AppContext| list_for_interface(context).unwrap().binders;
-        // The default folder is hidden even while the export is off: it holds no notes.
-        assert_eq!(hidden(&context), ["Classe"]);
+        // The export is off: an empty binder named like the default folder stays visible.
+        assert_eq!(hidden(&context), ["Classe", "Exports"]);
+        let auto_export = |format, folder: &str| ardoise_core::settings::AutoExport {
+            format,
+            folder: folder.into(),
+            ..Default::default()
+        };
+        use ardoise_core::settings::AutoExportFormat;
         crate::commands::set_auto_export_in(
             &context,
-            ardoise_core::settings::AutoExport {
-                folder: "Classe".into(),
-                ..Default::default()
-            },
+            auto_export(AutoExportFormat::Pdf, "Exports"),
         )
         .unwrap();
+        assert_eq!(hidden(&context), ["Classe"]);
+        crate::commands::set_auto_export_in(&context, auto_export(AutoExportFormat::Png, "Classe"))
+            .unwrap();
         assert_eq!(hidden(&context), ["Exports"]);
+        // Off again: everything is visible.
+        crate::commands::set_auto_export_in(&context, auto_export(AutoExportFormat::Off, "Classe"))
+            .unwrap();
+        assert_eq!(hidden(&context), ["Classe", "Exports"]);
     }
 }

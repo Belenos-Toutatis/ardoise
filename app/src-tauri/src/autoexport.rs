@@ -3,9 +3,10 @@
 //! so that the notes can be read from a phone through the Nextcloud app.
 //!
 //! One file per note, named like the note file and rewritten atomically when the note is
-//! synced again: PDF at the note's actual size, or PNG at 150 dpi, with the paper. A failed
-//! export never fails the sync (the note is safe in the library): the hook reports it to its
-//! caller, which logs it.
+//! synced again: PDF at the note's actual size, or PNG at 150 dpi, with the paper. A page too
+//! large for a PNG at 150 dpi is exported at the highest lower resolution that fits (the report
+//! says so). A failed export never fails the sync (the note is safe in the library): the hook
+//! reports it to its caller, which logs it.
 
 // The automatic sync (milestone M4) goes through `LibrarySink` with this hook; until it is
 // wired, only the tests below call it.
@@ -24,6 +25,9 @@ use ardoise_render::{
 
 /// Resolution of the automatic PNG exports: sharp on a phone, about 1 MB per page.
 pub const AUTO_EXPORT_DPI: u32 = 150;
+/// A page too large at [`AUTO_EXPORT_DPI`] is tried again at this fraction (numerator,
+/// denominator) of the resolution, until it fits.
+const DPI_STEP: (u32, u32) = (3, 4);
 
 /// Why a note was not exported.
 #[derive(Debug, thiserror::Error)]
@@ -46,7 +50,7 @@ pub fn export_path(
     note_path: &Path,
 ) -> Result<Option<PathBuf>, AutoExportError> {
     let extension = match settings.format {
-        AutoExportFormat::Off => return Ok(None),
+        AutoExportFormat::Off | AutoExportFormat::Unknown(_) => return Ok(None),
         AutoExportFormat::Pdf => "pdf",
         AutoExportFormat::Png => "png",
     };
@@ -65,22 +69,61 @@ pub fn export_path(
     Ok(Some(library.root().join(folder).join(binder).join(name)))
 }
 
-/// The file of `note` in the automatic export format, `None` when it is off.
-pub fn export_bytes(format: AutoExportFormat, note: &Note) -> Result<Option<Vec<u8>>, RenderError> {
+/// The file of a note in the automatic export format.
+#[derive(Debug, PartialEq)]
+pub struct ExportedBytes {
+    pub bytes: Vec<u8>,
+    /// Resolution of a PNG (lower than [`AUTO_EXPORT_DPI`] for a page that is too large).
+    pub dpi: Option<u32>,
+}
+
+/// `note` as a PNG at [`AUTO_EXPORT_DPI`], or at the highest lower resolution whose image is
+/// not too large (never fails for size, except for a page with no usable size at all).
+fn png_bytes(note: &Note) -> Result<ExportedBytes, RenderError> {
+    let mut dpi = AUTO_EXPORT_DPI;
+    loop {
+        match render_note(note, &RenderOptions::at_dpi(dpi, true)) {
+            Ok(image) => {
+                let bytes = encode_png_at(&image, Some(dpi))?;
+                return Ok(ExportedBytes {
+                    bytes,
+                    dpi: Some(dpi),
+                });
+            }
+            Err(RenderError::Size { .. }) if dpi > 1 => {
+                dpi = (dpi * DPI_STEP.0 / DPI_STEP.1).max(1).min(dpi - 1);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// The file of `note` in the automatic export format, `None` when it is off (or a format this
+/// version does not know).
+pub fn export_bytes(
+    format: &AutoExportFormat,
+    note: &Note,
+) -> Result<Option<ExportedBytes>, RenderError> {
     match format {
-        AutoExportFormat::Off => Ok(None),
+        AutoExportFormat::Off | AutoExportFormat::Unknown(_) => Ok(None),
         AutoExportFormat::Pdf => {
             let options = PdfOptions {
                 page: PdfPage::Actual,
                 background: true,
             };
-            notes_to_pdf(&[note], &options).map(Some)
+            let bytes = notes_to_pdf(&[note], &options)?;
+            Ok(Some(ExportedBytes { bytes, dpi: None }))
         }
-        AutoExportFormat::Png => {
-            let image = render_note(note, &RenderOptions::at_dpi(AUTO_EXPORT_DPI, true))?;
-            encode_png_at(&image, Some(AUTO_EXPORT_DPI)).map(Some)
-        }
+        AutoExportFormat::Png => png_bytes(note).map(Some),
     }
+}
+
+/// A file written by the automatic export.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoExported {
+    pub path: PathBuf,
+    /// Resolution of a PNG.
+    pub dpi: Option<u32>,
 }
 
 /// Exports `note`, just saved at `saved.path`, as the settings say. Returns the file written,
@@ -90,11 +133,11 @@ pub fn auto_export(
     library: &Library,
     saved: &SavedNote,
     note: &Note,
-) -> Result<Option<PathBuf>, AutoExportError> {
+) -> Result<Option<AutoExported>, AutoExportError> {
     let Some(path) = export_path(settings, library, &saved.path)? else {
         return Ok(None);
     };
-    let Some(bytes) = export_bytes(settings.format, note)? else {
+    let Some(ExportedBytes { bytes, dpi }) = export_bytes(&settings.format, note)? else {
         return Ok(None);
     };
     let write_error = |source| AutoExportError::Write {
@@ -105,7 +148,7 @@ pub fn auto_export(
         std::fs::create_dir_all(dir).map_err(write_error)?;
     }
     fsutil::write_atomic(&path, &bytes).map_err(write_error)?;
-    Ok(Some(path))
+    Ok(Some(AutoExported { path, dpi }))
 }
 
 /// What the automatic export did during one sync.
@@ -113,6 +156,9 @@ pub fn auto_export(
 pub struct AutoExportReport {
     /// Files written, in order.
     pub written: Vec<PathBuf>,
+    /// PNG files written at a lower resolution than [`AUTO_EXPORT_DPI`] because the page is too
+    /// large for it, with the resolution used.
+    pub lowered: Vec<(PathBuf, u32)>,
     /// Notes not exported, with the reason.
     pub failures: Vec<(PathBuf, String)>,
 }
@@ -121,10 +167,15 @@ impl AutoExportReport {
     pub fn record(
         &mut self,
         saved: &SavedNote,
-        outcome: &Result<Option<PathBuf>, AutoExportError>,
+        outcome: &Result<Option<AutoExported>, AutoExportError>,
     ) {
         match outcome {
-            Ok(Some(path)) => self.written.push(path.clone()),
+            Ok(Some(exported)) => {
+                self.written.push(exported.path.clone());
+                if let Some(dpi) = exported.dpi.filter(|&dpi| dpi < AUTO_EXPORT_DPI) {
+                    self.lowered.push((exported.path.clone(), dpi));
+                }
+            }
             Ok(None) => {}
             Err(error) => self.failures.push((saved.path.clone(), error.to_string())),
         }
@@ -137,7 +188,7 @@ impl AutoExportReport {
 pub fn after_save_hook<'a>(
     settings: &'a AutoExport,
     library: &'a Library,
-    mut on_outcome: impl FnMut(&SavedNote, &Result<Option<PathBuf>, AutoExportError>) + 'a,
+    mut on_outcome: impl FnMut(&SavedNote, &Result<Option<AutoExported>, AutoExportError>) + 'a,
 ) -> impl FnMut(&SavedNote, &Note) + 'a {
     move |saved, note| {
         let outcome = auto_export(settings, library, saved, note);
@@ -208,7 +259,8 @@ mod tests {
             &note,
         )
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .path;
         let expected = library
             .root()
             .join("Exports")
@@ -229,6 +281,8 @@ mod tests {
         )
         .unwrap()
         .unwrap();
+        assert_eq!(png.dpi, Some(AUTO_EXPORT_DPI));
+        let png = png.path;
         assert!(png.starts_with(library.root().join("Partage").join("Téléphone")));
         let image = ardoise_render::decode_png(&fs::read(&png).unwrap()).unwrap();
         assert_eq!((image.width, image.height), (1754, 1276));
@@ -254,7 +308,8 @@ mod tests {
         let settings = settings(AutoExportFormat::Pdf, "Exports");
         let first = auto_export(&settings, &library, &saved, &note)
             .unwrap()
-            .unwrap();
+            .unwrap()
+            .path;
         let before = fs::read(&first).unwrap();
         note.page = PageSize {
             width: 14_800,
@@ -262,7 +317,8 @@ mod tests {
         };
         let second = auto_export(&settings, &library, &saved, &note)
             .unwrap()
-            .unwrap();
+            .unwrap()
+            .path;
         assert_eq!(first, second);
         let after = fs::read(&second).unwrap();
         assert_ne!(before, after);
@@ -270,6 +326,64 @@ mod tests {
         // No temporary file left next to it.
         let dir = second.parent().unwrap();
         assert_eq!(fs::read_dir(dir).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_page_too_large_for_a_png_at_150_dpi_is_exported_at_a_lower_resolution() {
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Longue");
+        let mut note = library.read(&saved.path).unwrap().file.note;
+        // A long roll: 1 m high is 5 906 px at 150 dpi, 3 m is 17 717 px, too many.
+        note.page = PageSize {
+            width: 2_000,
+            height: 300_000,
+        };
+        let png = settings(AutoExportFormat::Png, "Exports");
+        let exported = auto_export(&png, &library, &saved, &note).unwrap().unwrap();
+        let dpi = exported.dpi.unwrap();
+        assert!((1..AUTO_EXPORT_DPI).contains(&dpi), "{dpi}");
+        let image = ardoise_render::decode_png(&fs::read(&exported.path).unwrap()).unwrap();
+        assert!(
+            image.height <= 16_384 && image.height > 16_384 * 3 / 4 - 1,
+            "{}",
+            image.height
+        );
+        // The report says so.
+        let mut report = AutoExportReport::default();
+        report.record(&saved, &Ok(Some(exported.clone())));
+        assert_eq!(report.written, std::slice::from_ref(&exported.path));
+        assert_eq!(report.lowered, [(exported.path, dpi)]);
+        assert!(report.failures.is_empty());
+        // A page that fits is not reported.
+        let mut report = AutoExportReport::default();
+        let normal = library.read(&saved.path).unwrap().file.note;
+        let outcome = auto_export(&png, &library, &saved, &normal);
+        report.record(&saved, &outcome);
+        assert_eq!(report.written.len(), 1);
+        assert!(report.lowered.is_empty());
+        // PDF has no resolution.
+        let pdf = auto_export(
+            &settings(AutoExportFormat::Pdf, "Exports"),
+            &library,
+            &saved,
+            &normal,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(pdf.dpi, None);
+    }
+
+    #[test]
+    fn an_unknown_format_exports_nothing() {
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Essai");
+        let note = library.read(&saved.path).unwrap().file.note;
+        let unknown = settings(AutoExportFormat::Unknown("jpg".into()), "Exports");
+        assert_eq!(
+            auto_export(&unknown, &library, &saved, &note).unwrap(),
+            None
+        );
+        assert!(!library.root().join("Exports").exists());
     }
 
     #[test]
@@ -368,11 +482,12 @@ mod tests {
             };
             assert_eq!(page, A4_LANDSCAPE);
 
-            let settings = settings(format, "Exports");
+            let settings = settings(format.clone(), "Exports");
             let mut report = AutoExportReport::default();
             let (summary, saved) = {
                 let mut sink =
                     LibrarySink::new(&library, "Tablette", page, "Calque 1", || 1_792_843_200_000)
+                        .with_thumbnail(crate::thumbnails::thumbnail_png)
                         .with_after_save(after_save_hook(&settings, &library, |saved, outcome| {
                             report.record(saved, outcome)
                         }));
@@ -395,6 +510,13 @@ mod tests {
                     .all(|n| n.binder == Path::new("Tablette"))
             );
             assert!(report.failures.is_empty(), "{:?}", report.failures);
+            // Every synced note holds its thumbnail (SPEC §3.3).
+            for note in &saved {
+                let thumbnail = library.read(&note.path).unwrap().file.thumbnail;
+                let thumbnail =
+                    ardoise_render::decode_png(&thumbnail.expect("a thumbnail")).unwrap();
+                assert_eq!(thumbnail.width, crate::thumbnails::THUMBNAIL_WIDTH);
+            }
             let exports = library.root().join("Exports").join("Tablette");
             if format == AutoExportFormat::Off {
                 assert!(report.written.is_empty());

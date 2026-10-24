@@ -6,10 +6,15 @@
 //!   named like the note file, ` (2)` added rather than overwriting anything.
 //!
 //! Every file is written atomically (`ardoise_core::fsutil`). Rendering, encoding and writing
-//! failures are `exportFailed`; reading a note of the library fails with the library's codes.
+//! failures are `exportFailed` (`imageTooLarge` when the image would exceed the size limit);
+//! reading a note of the library fails with the library's codes. The export can be cancelled
+//! (`cancel_export`): it then stops between two notes and before any write, keeping the files
+//! already written in a folder, and fails with `cancelled`.
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ardoise_core::fsutil;
 use ardoise_core::library::{Library, note_file_stem};
@@ -27,6 +32,10 @@ use crate::library::{library_error, library_of, path_text};
 
 /// Error code of every rendering, encoding or writing failure.
 pub const EXPORT_FAILED: &str = "exportFailed";
+/// Error code when an image would be larger than the renderer allows.
+pub const IMAGE_TOO_LARGE: &str = "imageTooLarge";
+/// Error code of an export stopped by the user.
+pub const CANCELLED: &str = "cancelled";
 /// Highest ` (n)` tried for a free file name in a folder.
 const MAX_SUFFIX: u32 = 999;
 
@@ -105,8 +114,28 @@ pub(crate) fn export_error(message: impl ToString) -> CommandError {
     CommandError::new(EXPORT_FAILED, message)
 }
 
-fn render_error(error: RenderError) -> CommandError {
-    export_error(error)
+/// A rendering or encoding failure: `imageTooLarge` when the image side would exceed the limit,
+/// else `exportFailed`.
+pub(crate) fn render_error(error: RenderError) -> CommandError {
+    match error {
+        RenderError::Size { width, height } if width > 0 && height > 0 => {
+            CommandError::new(IMAGE_TOO_LARGE, RenderError::Size { width, height })
+        }
+        other => export_error(other),
+    }
+}
+
+/// The flag of the export under way, set by `cancel_export`.
+#[derive(Debug, Default, Clone)]
+pub struct ExportCancel(pub Arc<AtomicBool>);
+
+/// `cancelled` once the user asked to stop.
+fn check_cancelled(cancel: &AtomicBool) -> CommandResult<()> {
+    if cancel.load(Ordering::Relaxed) {
+        Err(CommandError::new(CANCELLED, "export cancelled"))
+    } else {
+        Ok(())
+    }
 }
 
 fn write_error(path: &Path) -> impl FnOnce(io::Error) -> CommandError + '_ {
@@ -240,24 +269,30 @@ pub fn write_new_file(
 }
 
 /// Exports `sources` to `destination` (see the module documentation); returns the paths
-/// written, in the order of the sources.
+/// written, in the order of the sources. `cancel` is checked between notes and before each
+/// write: once set, nothing more is written (a single file or a PDF is not written at all;
+/// the files of a folder already written stay) and the error is `cancelled`.
 pub fn export(
     sources: &[LoadedSource],
     format: ExportFormat,
     options: &ExportOptions,
     destination: &Path,
+    cancel: &AtomicBool,
 ) -> CommandResult<Vec<PathBuf>> {
     check_options(format, options)?;
+    check_cancelled(cancel)?;
     match sources {
         [] => Err(export_error("nothing to export")),
         _ if format == ExportFormat::Pdf => {
             let notes: Vec<&Note> = sources.iter().map(|s| &s.note).collect();
             let pdf = notes_to_pdf(&notes, &pdf_options(options)).map_err(render_error)?;
+            check_cancelled(cancel)?;
             fsutil::write_atomic(destination, &pdf).map_err(write_error(destination))?;
             Ok(vec![destination.to_path_buf()])
         }
         [single] => {
             let bytes = image_bytes(&single.note, format, options)?;
+            check_cancelled(cancel)?;
             fsutil::write_atomic(destination, &bytes).map_err(write_error(destination))?;
             Ok(vec![destination.to_path_buf()])
         }
@@ -266,7 +301,9 @@ pub fn export(
             several
                 .iter()
                 .map(|source| {
+                    check_cancelled(cancel)?;
                     let bytes = image_bytes(&source.note, format, options)?;
+                    check_cancelled(cancel)?;
                     write_new_file(destination, &source.stem, format.extension(), &bytes)
                         .map_err(write_error(destination))
                 })
@@ -282,11 +319,13 @@ pub fn export_sources(
     format: ExportFormat,
     options: &ExportOptions,
     destination: &Path,
+    cancel: &AtomicBool,
 ) -> CommandResult<Vec<PathBuf>> {
     // Refuse bad options before reading any note.
     check_options(format, options)?;
+    check_cancelled(cancel)?;
     let loaded = load_sources(library, sources)?;
-    export(&loaded, format, options, destination)
+    export(&loaded, format, options, destination, cancel)
 }
 
 /// The library, if one of `sources` must be read from it.
@@ -301,17 +340,26 @@ pub(crate) fn library_for(
     }
 }
 
+/// Asks the export under way to stop (`export_notes` then fails with `cancelled`).
+#[tauri::command]
+pub fn cancel_export(cancel: State<'_, ExportCancel>) {
+    cancel.0.store(true, Ordering::Relaxed);
+}
+
 /// Exports `sources` to `destination` (a file, or a folder for several notes in an image
 /// format); returns the paths written.
 #[tauri::command]
 pub async fn export_notes(
     context: State<'_, AppContext>,
+    cancel: State<'_, ExportCancel>,
     sources: Vec<ExportSource>,
     format: ExportFormat,
     options: ExportOptions,
     destination: String,
 ) -> CommandResult<Vec<String>> {
     let library = library_for(&context, &sources)?;
+    let flag = Arc::clone(&cancel.0);
+    flag.store(false, Ordering::Relaxed);
     // Rendering at 600 dpi takes seconds: keep it off the async runtime's threads.
     let written = tauri::async_runtime::spawn_blocking(move || {
         export_sources(
@@ -320,6 +368,7 @@ pub async fn export_notes(
             format,
             &options,
             Path::new(&destination),
+            &flag,
         )
     })
     .await
@@ -332,6 +381,8 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    static NOT_CANCELLED: AtomicBool = AtomicBool::new(false);
     use crate::library::tests::{library, sample_note, write_sample};
     use ardoise_ink::{Point, Rgba, Stroke, Tool};
 
@@ -409,6 +460,7 @@ mod tests {
                 format,
                 &options(150, true),
                 &destination,
+                &NOT_CANCELLED,
             )
             .unwrap();
             assert_eq!(written, std::slice::from_ref(&destination));
@@ -449,6 +501,7 @@ mod tests {
             ExportFormat::Svg,
             &options(150, true),
             &destination,
+            &NOT_CANCELLED,
         )
         .unwrap();
         assert!(
@@ -482,6 +535,7 @@ mod tests {
             ExportFormat::Png,
             &options(72, false),
             &folder,
+            &NOT_CANCELLED,
         )
         .unwrap();
         let names: Vec<String> = written
@@ -528,6 +582,7 @@ mod tests {
             ExportFormat::Pdf,
             &a4,
             &destination,
+            &NOT_CANCELLED,
         )
         .unwrap();
         assert_eq!(written, std::slice::from_ref(&destination));
@@ -603,6 +658,7 @@ mod tests {
                 format,
                 options,
                 &out.path().join("x"),
+                &NOT_CANCELLED,
             )
             .unwrap_err()
             .code()
@@ -627,6 +683,7 @@ mod tests {
                 ExportFormat::Svg,
                 &options(0, true),
                 &out.path().join("ok.svg"),
+                &NOT_CANCELLED,
             )
             .is_ok()
         );
@@ -667,14 +724,75 @@ mod tests {
             ExportFormat::Svg,
             &options(150, true),
             &blocked.join("inside.svg"),
+            &NOT_CANCELLED,
         )
         .unwrap_err();
         assert_eq!(error.code(), EXPORT_FAILED);
-        // A page too large to render.
+        // A page too large to render has its own code (the message is about the resolution).
         let mut huge = sample_note("Énorme");
         huge.page.height = 10_000_000;
-        let error = image_bytes(&huge, ExportFormat::Png, &options(600, true)).unwrap_err();
+        for format in [ExportFormat::Png, ExportFormat::Jpg] {
+            let error = image_bytes(&huge, format, &options(600, true)).unwrap_err();
+            assert_eq!(error.code(), IMAGE_TOO_LARGE, "{format:?}");
+        }
+        let error = image_bytes(&huge, ExportFormat::Png, &options(600, false)).unwrap_err();
+        assert_eq!(error.code(), IMAGE_TOO_LARGE);
+        // An empty page is not "too large".
+        let mut empty = sample_note("Vide");
+        empty.page.width = 0;
+        let error = image_bytes(&empty, ExportFormat::Png, &options(150, true)).unwrap_err();
         assert_eq!(error.code(), EXPORT_FAILED);
+    }
+
+    #[test]
+    fn a_cancelled_export_writes_nothing_more() {
+        let (_dir, library) = library();
+        let a = write_sample(&library, "", "Un");
+        let b = write_sample(&library, "Classe", "Deux");
+        let out = tempfile::tempdir().unwrap();
+        let cancelled = AtomicBool::new(true);
+        let sources = || vec![from_library(&a.path), from_library(&b.path)];
+        for (format, destination) in [
+            (ExportFormat::Pdf, "all.pdf"),
+            (ExportFormat::Png, "folder"),
+        ] {
+            let error = export_sources(
+                Some(&library),
+                sources(),
+                format,
+                &options(72, true),
+                &out.path().join(destination),
+                &cancelled,
+            )
+            .unwrap_err();
+            assert_eq!(error.code(), CANCELLED, "{format:?}");
+        }
+        let error = export_sources(
+            Some(&library),
+            vec![from_library(&a.path)],
+            ExportFormat::Svg,
+            &options(72, true),
+            &out.path().join("one.svg"),
+            &cancelled,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), CANCELLED);
+        assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
+
+        // The command's flag is a plain shared boolean: reset, the same export succeeds.
+        let cancel = ExportCancel::default();
+        cancel.0.store(true, Ordering::Relaxed);
+        cancel.0.store(false, Ordering::Relaxed);
+        let written = export_sources(
+            Some(&library),
+            sources(),
+            ExportFormat::Png,
+            &options(72, true),
+            &out.path().join("folder"),
+            &cancel.0,
+        )
+        .unwrap();
+        assert_eq!(written.len(), 2);
     }
 
     #[test]

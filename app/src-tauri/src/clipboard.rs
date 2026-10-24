@@ -14,7 +14,7 @@ use tauri::State;
 
 use crate::AppContext;
 use crate::commands::{CommandError, CommandResult};
-use crate::export::{ExportSource, check_dpi, export_error, load_sources};
+use crate::export::{ExportSource, check_dpi, export_error, load_sources, render_error};
 
 /// Error code when the clipboard cannot be used (another program holds it, or not Windows).
 pub const CLIPBOARD_UNAVAILABLE: &str = "clipboardUnavailable";
@@ -38,8 +38,8 @@ pub fn clipboard_payload(
         return Err(export_error("nothing to copy"));
     };
     let image =
-        render_note(&source.note, &RenderOptions::at_dpi(dpi, true)).map_err(export_error)?;
-    clipboard_image_at(&image, Some(dpi)).map_err(export_error)
+        render_note(&source.note, &RenderOptions::at_dpi(dpi, true)).map_err(render_error)?;
+    clipboard_image_at(&image, Some(dpi)).map_err(render_error)
 }
 
 /// The clipboard calls the copy needs (used on Windows; a fake in the tests).

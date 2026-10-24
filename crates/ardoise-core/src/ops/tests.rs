@@ -674,12 +674,38 @@ fn merge_end_to_end_merges_layers_by_index() {
         merged.layers,
         [
             layer("Texte", true),
-            layer("Figures", false),
+            // Hidden in A, visible in B: visible.
+            layer("Figures", true),
             layer("Troisième", true)
         ]
     );
     let layers: Vec<u32> = merged.strokes.iter().map(|s| s.layer).collect();
     assert_eq!(layers, [0, 1, 0, 2]);
+}
+
+#[test]
+fn merge_end_to_end_hides_a_layer_only_when_every_note_hides_it() {
+    let mut a = note_with("A", vec![stroke(1, &[(1.0, 1.0, 0)])]);
+    a.layers = vec![layer("Texte", true), layer("Brouillon", false)];
+    let mut b = note_with("B", vec![stroke(1, &[(2.0, 2.0, 0)])]);
+    b.layers = vec![layer("Texte", false), layer("Autre", true)];
+    let mut c = note_with("C", vec![stroke(0, &[(3.0, 3.0, 0)])]);
+    c.layers = vec![layer("Texte", false), layer("Brouillon", false)];
+
+    let merged = merge(&[a, b, c], MergeLayout::EndToEnd, new_note("M")).unwrap();
+    // Names from the first note; layer 0 visible in A, layer 1 visible in B.
+    assert_eq!(
+        merged.layers,
+        [layer("Texte", true), layer("Brouillon", true)]
+    );
+
+    // Hidden everywhere: hidden.
+    let mut d = note_with("D", vec![]);
+    d.layers = vec![layer("Texte", false)];
+    let mut e = note_with("E", vec![]);
+    e.layers = vec![layer("Texte", false)];
+    let merged = merge(&[d, e], MergeLayout::EndToEnd, new_note("M")).unwrap();
+    assert_eq!(merged.layers, [layer("Texte", false)]);
 }
 
 #[test]

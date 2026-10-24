@@ -111,7 +111,11 @@ Pure functions on `Note` (no I/O); ids, titles and dates of new notes come from 
   returned (nothing is lost either way). `merge_notes` never changes its sources; the new note goes into the
   binder of the first one.
 - Error codes (translated in `errorCodes.*`): `exportFailed`, `clipboardUnavailable`, `nothingToSplit`,
-  `nothingToMerge`, `pageTooLarge`, `invalidFolder`, plus the existing library codes.
+  `nothingToMerge`, `pageTooLarge`, `invalidFolder`, `imageTooLarge` (an image side above 16 384 px: lower the
+  resolution or use PDF/SVG), `cancelled` (the user stopped an export), plus the existing library codes.
+- `cancel_export` (no arguments, returns nothing) sets a shared flag; `export_notes` resets it when it starts and
+  checks it between notes and before each write. A cancelled export writes nothing more (a single file or a PDF
+  is not written at all; the files of a folder already written stay) and fails with `cancelled`.
 - Settings: `[auto_export]` in `ardoise.toml` (`format = "off"|"pdf"|"png"`, `folder = "Exports"`), shared by
   every PC (the library is shared). The folder is relative to the library root (no `..`, not `_ardoise`); it is
   not listed as a binder. One file per note: `<folder>/<binder>/<note file stem>.pdf|.png`, rewritten
@@ -147,9 +151,14 @@ Pure functions on `Note` (no I/O); ids, titles and dates of new notes come from 
   the stamp before creating anything, copies the page background file to the new note, and returns the note and
   stamp read back from disk.
 - **Merge.** `created` of the first note; overlay layers named `Title - Layer` (several layers) or `Title`; end to
-  end: left-aligned, layer names and visibility from the first note having that index; a stroke on a missing layer
+  end: left-aligned, layer names from the first note having that index, a layer visible when it is visible in any
+  note that has it (no note's strokes vanish from the merged note); a stroke on a missing layer
   goes to its note's last layer; tags merged by `normalize_tags`.
-- **Auto-export folder.** Hidden from the binders of the interface listing whenever valid, unless it holds notes
-  (a user's own binder with that name stays visible). `autoexport::after_save_hook` is ready; M4 plugs it into the
+- **Auto-export folder.** Hidden from the binders of the interface listing only while the export is on (format
+  pdf or png) and the folder is valid, and never when it holds notes (a user's own binder with that name stays
+  visible). `set_auto_export` refuses (`invalidFolder`), with the export on, a folder that is an existing binder
+  holding notes. A format this version does not know (written by a newer one) loads as off, is reported as `off`
+  to the interface and is written back verbatim. A PNG too large at 150 dpi is exported at a lower resolution
+  that fits (`AutoExportReport::lowered`). `autoexport::after_save_hook` is ready; M4 plugs it into the
   automatic sync (the app has no sync command yet), and its simulator test proves the chain
   (`autoexport::tests::synced_pages_are_exported_automatically`).
