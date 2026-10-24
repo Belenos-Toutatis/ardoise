@@ -1,4 +1,5 @@
-//! Project automation: `cargo xtask check [--quick]` and `cargo xtask selftest`.
+//! Project automation: `cargo xtask check [--quick]`, `cargo xtask selftest` and
+//! `cargo xtask golden`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,7 +11,8 @@ const USAGE: &str = "Usage: cargo xtask <command>
 Commands:
   check [--quick]  frontend build, fmt, clippy, tests, frontend checks, release build
                    (--quick skips the release build)
-  selftest         run target/release/ardoise.exe --self-test and check its size";
+  selftest         run target/release/ardoise.exe --self-test and check its size
+  golden           regenerate the reference images in testdata/golden, then check them";
 
 /// Maximum accepted size of the release executable, in bytes.
 const MAX_EXE_BYTES: u64 = 30 * 1024 * 1024;
@@ -28,6 +30,7 @@ fn main() -> ExitCode {
         ["check"] => check(false),
         ["check", "--quick"] => check(true),
         ["selftest"] => selftest(),
+        ["golden"] => golden(),
         _ => {
             println!("{USAGE}");
             ExitCode::from(2)
@@ -223,5 +226,40 @@ fn selftest() -> ExitCode {
         ExitCode::SUCCESS
     } else {
         fail(&format!("ardoise.exe exited with {status}"))
+    }
+}
+
+/// Regenerates the rendering reference images (`testdata/golden/*.png`) from the synthetic
+/// notes in `crates/ardoise-render/tests/golden.rs`, then runs the comparison test.
+fn golden() -> ExitCode {
+    let root = root();
+    let regenerate = [
+        "test",
+        "-p",
+        "ardoise-render",
+        "--test",
+        "golden",
+        "--",
+        "--ignored",
+        "--exact",
+        "regenerate_golden_images",
+        "--nocapture",
+    ];
+    let compare = [
+        "test",
+        "-p",
+        "ardoise-render",
+        "--test",
+        "golden",
+        "--",
+        "--nocapture",
+    ];
+    if run(&root, "cargo", &regenerate) && run(&root, "cargo", &compare) {
+        println!("Look at the images in testdata/golden before committing them.");
+        println!("GOLDEN OK");
+        ExitCode::SUCCESS
+    } else {
+        println!("GOLDEN FAILED");
+        ExitCode::FAILURE
     }
 }

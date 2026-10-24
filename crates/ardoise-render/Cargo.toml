@@ -10,7 +10,10 @@ publish.workspace = true
 [dependencies]
 ardoise-core = { path = "../ardoise-core" }
 ardoise-ink = { path = "../ardoise-ink" }
+png = "0.18"
 thiserror = "2"
+# PNG files go through the `png` crate directly (the version already in the workspace).
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
 
 [lints]
 workspace = true
