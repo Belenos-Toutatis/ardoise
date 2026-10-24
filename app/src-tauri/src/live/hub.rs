@@ -7,7 +7,8 @@
 //!   exactly what follows its snapshot;
 //! - the **saver** writes the pages to the library: a page becomes a note when its first stroke
 //!   ends, then is rewritten atomically at most every 5 s while it changes, and at once when it
-//!   is left or when live mode stops.
+//!   is left or when live mode stops. A page's narration (recorded in live mode, cut per page
+//!   by `narration.rs`) is attached to it here and written with it, as its `audio.opus`.
 //!
 //! Neither thread does its slow work (sending, writing files) while holding the session lock,
 //! so the tablet's input is never held up by a window or by the disk.
@@ -22,6 +23,7 @@ use ardoise_core::library::{Library, LibraryError};
 use ardoise_core::note::{Note, PageSize};
 use ardoise_core::settings::LiveButton;
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
+use ardoise_media::{MediaError, Narration, encode_narration};
 use tauri::ipc::Channel;
 
 use super::model::{
@@ -75,6 +77,9 @@ pub enum LiveError {
     Stopped,
     #[error(transparent)]
     Library(#[from] LibraryError),
+    /// A narration could not be encoded for its page (nothing was changed).
+    #[error("cannot store the narration of the page: {0}")]
+    Narration(MediaError),
 }
 
 /// What a new session needs.
@@ -115,7 +120,20 @@ struct SaveJob {
     page: usize,
     version: u64,
     note: Note,
+    /// The page's narration (`audio.opus`), encoded once when it was attached.
+    audio: Option<Vec<u8>>,
     file: Option<SavedFile>,
+}
+
+/// Where live mode stands, for the narration's page watcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PagePosition {
+    /// Id of the session shown (the last one started).
+    pub session: u64,
+    /// Its current page, 0-based.
+    pub page: usize,
+    /// Started and not stopped.
+    pub running: bool,
 }
 
 /// What a write produced.
@@ -150,6 +168,9 @@ struct Shared {
     save_wake: Condvar,
     /// Held during a save pass, so that two passes never write the same page twice.
     saving: Mutex<()>,
+    /// Held while a narration is merged and encoded for a page (outside the state lock), so
+    /// that two narrations given to the same page never lose one another.
+    narrating: Mutex<()>,
 }
 
 /// The hub of the running app (see the module documentation). Dropping it stops its threads.
@@ -238,6 +259,7 @@ fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError>
     let mut file = NoteFile::new(job.note.clone());
     file.note.modified = now_ms().max(file.note.created);
     file.thumbnail = thumbnail_png(&file.note);
+    file.audio = job.audio.clone();
     let Some(previous) = &job.file else {
         let saved = library.create(Path::new(""), &file)?;
         return Ok(Written {
@@ -487,6 +509,7 @@ impl Shared {
                     page: index,
                     version: page.version,
                     note: page.note.clone(),
+                    audio: page.audio.clone(),
                     file: page.file.clone(),
                 });
             }
@@ -606,6 +629,7 @@ impl LiveHub {
             flush_wake: Condvar::new(),
             save_wake: Condvar::new(),
             saving: Mutex::new(()),
+            narrating: Mutex::new(()),
         });
         for (name, work) in [
             ("live-flush", Shared::flush_loop as fn(&Shared)),
@@ -813,7 +837,8 @@ impl LiveHub {
     /// changes are not in the library: the end of the app when the library cannot be written,
     /// so that nothing drawn is lost. Returns each page (0-based) with its copy or the error.
     pub fn back_up_unsaved(&self, dir: &Path) -> Vec<(usize, std::io::Result<PathBuf>)> {
-        let pages: Vec<(usize, Note)> = {
+        type Unsaved = (usize, Note, Option<Vec<u8>>);
+        let pages: Vec<Unsaved> = {
             let state = self.shared.lock();
             state
                 .session
@@ -821,22 +846,108 @@ impl LiveHub {
                 .iter()
                 .enumerate()
                 .filter(|(_, page)| page.needs_write())
-                .map(|(index, page)| (index, page.note.clone()))
+                .map(|(index, page)| (index, page.note.clone(), page.audio.clone()))
                 .collect()
         };
         pages
             .into_iter()
-            .map(|(index, note)| {
+            .map(|(index, note, audio)| {
                 let mut file = NoteFile::new(note);
                 file.note.id = uuid::Uuid::new_v4().to_string();
                 file.note.modified = now_ms().max(file.note.created);
                 file.thumbnail = thumbnail_png(&file.note);
+                file.audio = audio;
                 let copy = ardoise_core::format::to_bytes(&file)
                     .map_err(std::io::Error::other)
                     .and_then(|bytes| write_backup(dir, index, &bytes));
                 (index, copy)
             })
             .collect()
+    }
+
+    /// The session shown and its current page; `None` before the first start.
+    pub fn page_position(&self) -> Option<PagePosition> {
+        let state = self.shared.lock();
+        state.started.then(|| PagePosition {
+            session: state.session.id(),
+            page: state.session.current(),
+            running: state.session.is_running(),
+        })
+    }
+
+    /// The time origin of every page of session `session` (`Page::time_origin`: `None` for a
+    /// page without any stroke); `None` when another session replaced it.
+    pub fn page_origins(&self, session: u64) -> Option<Vec<Option<i64>>> {
+        let state = self.shared.lock();
+        (state.session.id() == session).then(|| {
+            state
+                .session
+                .pages()
+                .iter()
+                .map(Page::time_origin)
+                .collect()
+        })
+    }
+
+    /// Merges `narration` (recorded in live mode: note time) into the narration of page `page`
+    /// of session `session`, encodes the result to `audio.opus` once (outside the session
+    /// lock), and writes it with the page at the next pass. The hub stays the only writer of
+    /// live pages, so their stamps stay right. Also after a stop: the narration of a session
+    /// is saved even when live mode was left first. Returns `false` when nothing changed: a
+    /// page without any stroke, or a session or page that no longer exists.
+    pub fn attach_narration(
+        &self,
+        session: u64,
+        page: usize,
+        narration: Narration,
+    ) -> Result<bool, LiveError> {
+        let _attaching = self
+            .shared
+            .narrating
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let existing = {
+            let state = self.shared.lock();
+            if state.session.id() != session {
+                return Ok(false);
+            }
+            match state.session.pages().get(page) {
+                Some(target) if target.time_origin().is_some() => target.narration.clone(),
+                _ => return Ok(false),
+            }
+        };
+        let merged = match existing {
+            Some(earlier) => earlier.merge(narration),
+            None => narration,
+        };
+        let audio = encode_narration(&merged).map_err(LiveError::Narration)?;
+        let mut state = self.shared.lock();
+        if state.session.id() != session {
+            return Ok(false);
+        }
+        let attached = state
+            .session
+            .page_mut(page)
+            .is_some_and(|target| target.set_narration(merged, audio));
+        if attached {
+            self.shared.save_wake.notify_all();
+        }
+        Ok(attached)
+    }
+
+    /// Gives page `page` of the current session a narration with ready-made `audio` bytes (no
+    /// encoding, no merge): the tests of what the hub writes.
+    #[cfg(test)]
+    pub fn set_page_audio(&self, page: usize, narration: Narration, audio: Vec<u8>) -> bool {
+        let mut state = self.shared.lock();
+        let attached = state
+            .session
+            .page_mut(page)
+            .is_some_and(|target| target.set_narration(narration, audio));
+        if attached {
+            self.shared.save_wake.notify_all();
+        }
+        attached
     }
 
     /// The presentation window opened on `monitor`, or closed (`None`).
