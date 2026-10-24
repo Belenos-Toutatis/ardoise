@@ -7,6 +7,7 @@ import {
   matchesSearch,
   normalize,
   notesOfView,
+  oldestFirst,
   originalBinder,
   parseTags,
   mergeTags,
@@ -134,5 +135,13 @@ describe('tags ignore case', () => {
     expect(sameTag('Physique', 'physique')).toBe(true);
     expect(sameTag('Physique', 'chimie')).toBe(false);
     expect(mergeTags(['physique'], ['Physique', 'chimie'])).toEqual(['physique', 'chimie']);
+  });
+});
+
+describe('assembly order', () => {
+  it('puts the oldest note first, breaking ties by path, without touching the input', () => {
+    const tie = [note({ path: 'z', created: 100 }), note({ path: 'y', created: 100 }), note({ path: 'x', created: 50 })];
+    expect(oldestFirst(tie).map((n) => n.path)).toEqual(['x', 'y', 'z']);
+    expect(tie.map((n) => n.path)).toEqual(['z', 'y', 'x']);
   });
 });

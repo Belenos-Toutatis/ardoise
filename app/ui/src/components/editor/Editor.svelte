@@ -40,13 +40,22 @@
     type Mode,
     type ToolSettings,
   } from '../../lib/editor/state';
+  import {
+    EMPTY_PREVIEW,
+    canSplit,
+    previewSplit,
+    timeRange,
+    type SplitMode,
+  } from '../../lib/editor/split';
   import { defaultWindowClose, type WindowClose } from '../../lib/editor/window-close';
   import { t } from '../../lib/i18n.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
-  import type { FileStamp, Note, Rgba, Stroke } from '../../lib/note';
+  import type { ExportSource, FileStamp, Note, Rgba, SplitSpec, Stroke } from '../../lib/note';
+  import ExportDialog from '../ExportDialog.svelte';
   import Canvas from './Canvas.svelte';
   import LayersPanel from './LayersPanel.svelte';
   import PagePanel from './PagePanel.svelte';
+  import SplitPanel from './SplitPanel.svelte';
   import Toolbar from './Toolbar.svelte';
 
   let {
@@ -78,6 +87,24 @@
   /** How long a short notice stays, milliseconds. */
   const NOTICE_MS = 4000;
 
+  /** Resolution of the image copied to the clipboard. */
+  const COPY_DPI = 150;
+
+  /** The split panel's settings. */
+  interface SplitState {
+    mode: SplitMode;
+    /** Instant of the cut, ms since `created`. */
+    at: number;
+    /** The traced zone, page units. */
+    zone: [number, number][] | null;
+    /** Title of the new note. */
+    title: string;
+    /** The user typed the title: it no longer follows the mode. */
+    titleEdited: boolean;
+    busy: boolean;
+    error: string | null;
+  }
+
   let currentPath = $state('');
   let loadError = $state<string | null>(null);
   let ink = $state.raw<Ink | null>(null);
@@ -96,6 +123,11 @@
   let titleError = $state<string | null>(null);
   let disk = $state<DiskChange | null>(null);
   let notice = $state<string | null>(null);
+  let noticeError = $state(false);
+  let split = $state<SplitState | null>(null);
+  /** What the export dialog exports; null while it is closed. */
+  let exporting = $state.raw<ExportSource[] | null>(null);
+  let copying = $state(false);
   let leaving = $state(false);
   /** The leave dialog was opened by a window close (not by the Back button). */
   let closing = $state(false);
@@ -105,6 +137,13 @@
   const doc = $derived(history?.present ?? null);
   const dirty = $derived(!!doc && doc.note !== savedNote);
   const hasSelection = $derived((doc?.selection.length ?? 0) > 0);
+  const range = $derived(doc ? timeRange(doc.note) : null);
+  const splitSpec = $derived.by((): SplitSpec | null => {
+    if (!split) return null;
+    if (split.mode === 'time') return { kind: 'time', at: split.at };
+    return split.zone ? { kind: 'zone', polygon: split.zone.map(([x, y]): [number, number] => [x, y]) } : null;
+  });
+  const preview = $derived(doc && splitSpec ? previewSplit(doc.note, splitSpec) : EMPTY_PREVIEW);
 
   /** False once the editor was closed or destroyed: late results call back no one. */
   let alive = true;
@@ -157,6 +196,8 @@
     loadError = null;
     history = null;
     disk = null;
+    split = null;
+    exporting = null;
     try {
       const [opened, module] = await Promise.all([api.openNote(target), ink ?? loadInk()]);
       if (currentPath !== target) return;
@@ -400,8 +441,9 @@
 
   // --- Tools and style -------------------------------------------------------------------
 
-  function showNotice(text: string) {
+  function showNotice(text: string, isError = false) {
     notice = text;
+    noticeError = isError;
     clearTimeout(noticeTimer);
     noticeTimer = setTimeout(() => (notice = null), NOTICE_MS);
   }
@@ -456,11 +498,11 @@
   }
 
   function doUndo() {
-    if (history) history = undo(history);
+    if (history && !split?.busy) history = undo(history);
   }
 
   function doRedo() {
-    if (history) history = redo(history);
+    if (history && !split?.busy) history = redo(history);
   }
 
   function copySelection() {
@@ -479,6 +521,107 @@
     if (!doc) return;
     if (!canDraw(doc)) return hiddenLayerNotice();
     change(duplicateSelection(doc));
+  }
+
+  // --- Export, copy, split ----------------------------------------------------------------
+
+  /** The note as the user sees it, with the title shown in the title field. */
+  function currentSource(): ExportSource | null {
+    return doc ? { path: currentPath, note: { ...doc.note, title } } : null;
+  }
+
+  function openExport() {
+    const source = currentSource();
+    if (source) exporting = [source];
+  }
+
+  async function copyImage() {
+    const source = currentSource();
+    if (!source || copying) return;
+    copying = true;
+    try {
+      await api.copyNoteImage(source, COPY_DPI);
+      showNotice(t('editor.copyImage.done'));
+    } catch (error) {
+      showNotice(t('editor.copyImage.failed', { message: errorMessage(error) }), true);
+    } finally {
+      copying = false;
+    }
+  }
+
+  function defaultSplitTitle(mode: SplitMode): string {
+    const base = title.trim() || t('editor.untitled');
+    return t(mode === 'time' ? 'editor.split.titleTime' : 'editor.split.titleZone', { title: base });
+  }
+
+  /** The split button: opens the panel, or closes it. */
+  function toggleSplit() {
+    if (!doc) return;
+    if (split) return cancelSplit();
+    if (hasSelection) reselect(clearSelection(doc));
+    const span = timeRange(doc.note);
+    split = {
+      mode: 'time',
+      at: span ? Math.round((span.min + span.max) / 2) : 0,
+      zone: null,
+      title: defaultSplitTitle('time'),
+      titleEdited: false,
+      busy: false,
+      error: null,
+    };
+  }
+
+  function cancelSplit() {
+    if (split && !split.busy) split = null;
+  }
+
+  function setSplitMode(mode: SplitMode) {
+    if (!split || split.busy) return;
+    split.mode = mode;
+    split.error = null;
+    if (!split.titleEdited) split.title = defaultSplitTitle(mode);
+  }
+
+  /**
+   * Splits the note: the new note is created in the same binder and the kept part is saved over
+   * this one (unsaved changes included). The editor then shows the kept part, saved, with a fresh
+   * undo history.
+   */
+  function confirmSplit() {
+    const state = split;
+    const spec = splitSpec;
+    if (!state || !spec || state.busy || !canSplit(preview)) return;
+    state.busy = true;
+    state.error = null;
+    void enqueue(async () => {
+      const present = history?.present;
+      if (!present || !stamp) return;
+      const gen = generation;
+      const target = currentPath;
+      saving = true;
+      try {
+        const result = await api.splitNote(target, { ...present.note, title }, stamp, spec, state.title.trim());
+        if (gen !== generation) return;
+        const start = docFromNote(result.note, t('editor.layers.defaultName', { n: 1 }));
+        history = createHistory(start);
+        savedNote = start.note;
+        stamp = result.stamp;
+        conflict = null;
+        saveError = null;
+        disk = null;
+        split = null;
+        showNotice(t('editor.split.done', { title: result.created.title }));
+        notifySaved(target);
+      } catch (error) {
+        if (gen === generation) state.error = errorMessage(error);
+      } finally {
+        saving = false;
+        state.busy = false;
+      }
+    }, undefined).then(() => {
+      // Skipped (another note was opened meanwhile): nothing is left to wait for.
+      state.busy = false;
+    });
   }
 
   // --- Keyboard ---------------------------------------------------------------------------
@@ -519,6 +662,15 @@
     }
     if (leaving) {
       if (key === 'Escape') stay();
+      return;
+    }
+    // A dialog or the split panel is open: the editing keys wait; Escape closes the panel.
+    if (exporting) return;
+    if (split) {
+      if (key === 'Escape') {
+        e.preventDefault();
+        cancelSplit();
+      }
       return;
     }
     if (isTyping(e.target)) return;
@@ -666,7 +818,7 @@
     </div>
   {/if}
   {#if notice}
-    <p class="banner editor-banner editor-notice" role="status">{notice}</p>
+    <p class="banner editor-banner editor-notice" class:error={noticeError} role={noticeError ? 'alert' : 'status'}>{notice}</p>
   {/if}
   {#if titleError}
     <div class="banner error editor-banner" role="alert">
@@ -691,6 +843,11 @@
       onwidth={setWidth}
       oneraser={setEraser}
       onapplyall={applyAll}
+      splitting={split !== null}
+      {copying}
+      onsplit={toggleSplit}
+      oncopy={copyImage}
+      onexport={openExport}
     />
     <div class="editor-main">
       <Canvas
@@ -703,8 +860,40 @@
         onselect={reselect}
         oncropped={() => setMode('select')}
         onblocked={hiddenLayerNotice}
+        split={split ? { preview, tracing: split.mode === 'zone' && !split.busy, zone: split.mode === 'zone' ? split.zone : null } : null}
+        onzone={(polygon) => {
+          if (split && split.mode === 'zone') {
+            split.zone = polygon;
+            split.error = null;
+          }
+        }}
       />
       <aside class="editor-side" aria-label={t('editor.sidePanel')}>
+        {#if split}
+          <SplitPanel
+            mode={split.mode}
+            {range}
+            at={split.at}
+            hasZone={split.zone !== null}
+            {preview}
+            bind:title={split.title}
+            dirty={dirty}
+            busy={split.busy}
+            error={split.error}
+            onmode={setSplitMode}
+            onat={(value) => {
+              if (split) split.at = value;
+            }}
+            onedittitle={() => {
+              if (split) split.titleEdited = true;
+            }}
+            onclearzone={() => {
+              if (split) split.zone = null;
+            }}
+            onconfirm={confirmSplit}
+            oncancel={cancelSplit}
+          />
+        {/if}
         {#if hasSelection}
           <section class="side-section" aria-labelledby="editor-selection-heading">
             <h3 id="editor-selection-heading">{t('editor.selection.label')}</h3>
@@ -742,6 +931,14 @@
         />
       </aside>
     </div>
+  {/if}
+
+  {#if exporting}
+    <ExportDialog
+      sources={exporting}
+      subject={t('export.subjectNote', { title: title.trim() || t('editor.untitled') })}
+      onclose={() => (exporting = null)}
+    />
   {/if}
 
   {#if leaving}

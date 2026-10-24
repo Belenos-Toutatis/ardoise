@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { api, errorMessage, type AppState, type ThemePreference } from '../lib/api';
   import { currentLocale, t } from '../lib/i18n.svelte';
   import { pickFolder } from '../lib/library';
@@ -19,6 +19,13 @@
   /** The registered tablet; undefined while loading. */
   let tablet = $state<TabletInfo | null | undefined>(undefined);
   let confirmingForget = $state(false);
+
+  /** The automatic export as being edited; saved with its button. */
+  let autoDraft = $state(untrack(() => ({ ...app.autoExport })));
+  let autoError = $state<string | null>(null);
+  let autoSaved = $state(false);
+  let autoSaving = $state(false);
+  const autoChanged = $derived(autoDraft.format !== app.autoExport.format || autoDraft.folder !== app.autoExport.folder);
 
   onMount(() => {
     api.tabletInfo().then(
@@ -47,6 +54,22 @@
       onchange(await action());
     } catch (e) {
       error = errorMessage(e);
+    }
+  }
+
+  async function saveAutoExport() {
+    autoError = null;
+    autoSaved = false;
+    autoSaving = true;
+    try {
+      const next = await api.setAutoExport({ format: autoDraft.format, folder: autoDraft.folder });
+      autoDraft = { ...next.autoExport };
+      onchange(next);
+      autoSaved = true;
+    } catch (e) {
+      autoError = errorMessage(e);
+    } finally {
+      autoSaving = false;
     }
   }
 
@@ -117,6 +140,53 @@
       <div class="actions">
         <button class="button" onclick={ontest}>{t('settings.tabletTest')}</button>
       </div>
+    {/if}
+  </section>
+
+  <section class="settings-section" aria-labelledby="settings-auto-export">
+    <h3 id="settings-auto-export">{t('settings.autoExport.title')}</h3>
+    <p class="muted small">{t('settings.autoExport.hint')}</p>
+    <form
+      onsubmit={(event) => {
+        event.preventDefault();
+        void saveAutoExport();
+      }}
+    >
+      <div class="field" role="radiogroup" aria-label={t('settings.autoExport.format')}>
+        <span>{t('settings.autoExport.format')}</span>
+        {#each ['off', 'pdf', 'png'] as const as format (format)}
+          <label class="choice">
+            <input
+              type="radio"
+              name="auto-export-format"
+              value={format}
+              bind:group={autoDraft.format}
+              oninput={() => (autoSaved = false)}
+            />
+            {t(`settings.autoExport.${format}`)}
+          </label>
+        {/each}
+      </div>
+      <label class="field">
+        <span>{t('settings.autoExport.folder')}</span>
+        <input
+          class="text-input"
+          type="text"
+          bind:value={autoDraft.folder}
+          aria-describedby="settings-auto-export-folder-hint"
+          oninput={() => (autoSaved = false)}
+        />
+        <span id="settings-auto-export-folder-hint" class="muted small field-hint">{t('settings.autoExport.folderHint')}</span>
+      </label>
+      <div class="actions">
+        <button type="submit" class="button primary" disabled={!autoChanged || autoSaving}>{t('settings.autoExport.save')}</button>
+      </div>
+    </form>
+    {#if autoSaved}
+      <p class="muted small" role="status">{t('settings.autoExport.saved')}</p>
+    {/if}
+    {#if autoError}
+      <p class="error" role="alert">{t('errors.generic', { message: autoError })}</p>
     {/if}
   </section>
 

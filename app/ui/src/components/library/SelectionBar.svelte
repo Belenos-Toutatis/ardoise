@@ -1,5 +1,5 @@
 <script lang="ts">
-  /** Actions on the selected notes: move to a binder, tags, favourite, trash. */
+  /** Actions on the selected notes: move to a binder, tags, export, assemble, favourite, trash. */
   import { t } from '../../lib/i18n.svelte';
   import { flattenTree, tagsOfNotes } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
@@ -52,6 +52,18 @@
   </button>
   <button type="button" class="button" aria-expanded={panel === 'tags'} onclick={() => toggle('tags')}>
     {t('library.selection.tags')}
+  </button>
+  <button type="button" class="button" onclick={() => lib.openDialog('export')}>
+    {t('library.selection.export')}
+  </button>
+  <button
+    type="button"
+    class="button"
+    disabled={notes.length < 2}
+    title={notes.length < 2 ? t('library.selection.assembleNeeds') : undefined}
+    onclick={() => lib.openDialog('assemble')}
+  >
+    {t('library.selection.assemble')}
   </button>
   <button type="button" class="button" onclick={() => lib.setFavorite(notes, !allFavorite)}>
     {allFavorite ? t('library.selection.unfavorite') : t('library.selection.favorite')}

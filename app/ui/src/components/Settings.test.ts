@@ -43,7 +43,8 @@ async function render(locale: 'fr' | 'en', ontest?: () => void) {
   setLocale(locale);
   const target = document.createElement('div');
   document.body.append(target);
-  const component = mount(Settings, { target, props: { app, onchange: vi.fn(), onclose: vi.fn(), ontest } });
+  const onchange = vi.fn();
+  const component = mount(Settings, { target, props: { app, onchange, onclose: vi.fn(), ontest } });
   cleanup = () => {
     unmount(component);
     target.remove();
@@ -54,7 +55,7 @@ async function render(locale: 'fr' | 'en', ontest?: () => void) {
     return found;
   };
   await settle();
-  return { target, button };
+  return { target, button, onchange };
 }
 
 describe('settings: tablet section', () => {
@@ -115,5 +116,94 @@ describe('settings: tablet section', () => {
     const { target } = await render('fr');
     expect(target.querySelectorAll('select').length).toBe(2);
     expect(target.textContent).toContain('C:\\demo\\Ardoise');
+  });
+});
+
+describe('settings: automatic export', () => {
+  afterEach(async () => {
+    await api.setAutoExport({ format: 'off', folder: 'Exports' });
+  });
+
+  const section = (target: HTMLElement) => target.querySelector<HTMLElement>('[aria-labelledby="settings-auto-export"]')!;
+  const radio = (target: HTMLElement, label: string) => {
+    const found = [...section(target).querySelectorAll<HTMLLabelElement>('label.choice')].find((l) => l.textContent?.trim() === label);
+    if (!found) throw new Error(`no choice "${label}"`);
+    return found.querySelector('input')!;
+  };
+  const folder = (target: HTMLElement) => section(target).querySelector<HTMLInputElement>('input[type="text"]')!;
+  const type = async (input: HTMLInputElement, value: string) => {
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+  };
+  const save = (target: HTMLElement) =>
+    [...section(target).querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Enregistrer')!;
+
+  it('explains the feature and shows the current choice', async () => {
+    const { target } = await render('fr');
+    expect(section(target).querySelector('h3')?.textContent).toBe('Export automatique après synchronisation');
+    expect(section(target).textContent).toContain('application Nextcloud');
+    expect(radio(target, 'Désactivé').checked).toBe(true);
+    expect(radio(target, 'PDF').checked).toBe(false);
+    expect(folder(target).value).toBe('Exports');
+    expect(save(target).disabled).toBe(true);
+  });
+
+  it('saves the format and folder, reports the new state, and confirms', async () => {
+    const spy = vi.spyOn(api, 'setAutoExport');
+    const { target, onchange } = await render('fr');
+    radio(target, 'PDF').click();
+    await settle();
+    await type(folder(target), ' /Téléphone\\PDF/ ');
+    expect(save(target).disabled).toBe(false);
+    save(target).click();
+    await settle();
+    expect(spy).toHaveBeenCalledWith({ format: 'pdf', folder: ' /Téléphone\\PDF/ ' });
+    expect(onchange).toHaveBeenCalledWith(expect.objectContaining({ autoExport: { format: 'pdf', folder: 'Téléphone/PDF' } }));
+    // The field shows the folder as the app stored it.
+    expect(folder(target).value).toBe('Téléphone/PDF');
+    expect(section(target).textContent).toContain('Réglage enregistré.');
+    expect((await api.appState()).autoExport).toEqual({ format: 'pdf', folder: 'Téléphone/PDF' });
+  });
+
+  it('refuses a folder outside the library with an actionable message', async () => {
+    const { target, onchange } = await render('fr');
+    radio(target, 'PNG (image)').click();
+    await settle();
+    await type(folder(target), '../dehors');
+    save(target).click();
+    await settle();
+    const alert = section(target).querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain("ce dossier n'est pas utilisable");
+    expect(alert.textContent).toContain('par exemple « Exports »');
+    expect(onchange).not.toHaveBeenCalled();
+    expect(section(target).textContent).not.toContain('Réglage enregistré.');
+    expect((await api.appState()).autoExport.format).toBe('off');
+
+    // Fixing the folder works, and clears the message.
+    await type(folder(target), 'Exports');
+    save(target).click();
+    await settle();
+    expect(section(target).querySelector('[role="alert"]')).toBeNull();
+    expect(onchange).toHaveBeenCalledOnce();
+  });
+
+  it('refuses the library\'s own folder', async () => {
+    const { target } = await render('fr');
+    await type(folder(target), '_ardoise/exports');
+    save(target).click();
+    await settle();
+    expect(section(target).querySelector('[role="alert"]')?.textContent).toContain("ce dossier n'est pas utilisable");
+  });
+
+  it('speaks English', async () => {
+    const { target } = await render('en');
+    expect(section(target).querySelector('h3')?.textContent).toBe('Automatic export after sync');
+    expect(radio(target, 'Off').checked).toBe(true);
+    expect(section(target).textContent).toContain('Nextcloud app');
+    await type(folder(target), '..');
+    [...section(target).querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Save')!.click();
+    await settle();
+    expect(section(target).querySelector('[role="alert"]')?.textContent).toContain("this folder can't be used");
   });
 });

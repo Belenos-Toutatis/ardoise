@@ -2,9 +2,10 @@
 /// <reference types="node" />
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppState } from '../../lib/api';
+import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { freshStamp, mockLibrary, notifyLibraryChanged, resetMockLibrary } from '../../lib/mock-data';
+import { mockClipboard } from '../../lib/mock-export';
 import { bigNote } from '../../lib/editor/test-fixtures';
 import type { WindowClose } from '../../lib/editor/window-close';
 import Editor from './Editor.svelte';
@@ -798,5 +799,318 @@ describe('note editor', () => {
     };
     await vi.waitFor(() => expect(target.querySelector('[role="alert"]')).toBeTruthy());
     expect(target.textContent).toContain("Impossible d'ouvrir cette note");
+  });
+});
+
+describe('note editor: split, copy image and export', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    mockClipboard.available = true;
+  });
+
+  const panelOf = (target: HTMLElement) => target.querySelector<HTMLElement>('.split-panel');
+  const slider = (target: HTMLElement) => target.querySelector<HTMLInputElement>('.split-panel input[type="range"]')!;
+  const titleField = (target: HTMLElement) => target.querySelector<HTMLInputElement>('.split-panel input[type="text"]')!;
+  const moved = (target: HTMLElement) => target.querySelectorAll('g.ink path.split-moved');
+  const kept = (target: HTMLElement) => target.querySelectorAll('g.ink path.split-kept');
+  const notice = (target: HTMLElement) => target.querySelector('.editor-notice');
+  const panelButton = (target: HTMLElement, label: string) => {
+    const found = [...target.querySelectorAll<HTMLButtonElement>('.split-panel button')].find((b) => b.textContent?.trim() === label);
+    if (!found) throw new Error(`no panel button "${label}"`);
+    return found;
+  };
+  const setAt = async (target: HTMLElement, value: number) => {
+    const input = slider(target);
+    input.value = String(value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await tick();
+  };
+  const chooseZone = async (target: HTMLElement) => {
+    [...target.querySelectorAll<HTMLLabelElement>('.split-panel label.choice')]
+      .find((l) => /Selon une zone|By zone/.test(l.textContent ?? ''))!
+      .querySelector('input')!
+      .click();
+    await tick();
+  };
+  /** The mock library's notes other than the three demo ones. */
+  const created = () => [...mockLibrary().notes.values()].filter((s) => !s.note.id.startsWith('b1f0c6c2'));
+
+  it('splits at an instant: live highlight, new note, kept part shown saved with a fresh history', async () => {
+    const splitSpy = vi.spyOn(api, 'splitNote');
+    const { path, target, paths, button, drag, status, onsaved } = await render('Cours de physique');
+    // An unsaved stroke written after the two demo ones (their samples end at 295 ms).
+    await drag(line(5000, 15000, 15000));
+    expect(status()).toBe('Modifications non enregistrées');
+    expect(panelOf(target)).toBeNull();
+
+    button('Découper').click();
+    await tick();
+    expect(panelOf(target)).toBeTruthy();
+    expect(slider(target).min).toBe('0');
+    expect(Number(slider(target).max)).toBeGreaterThanOrEqual(795);
+    expect(panelOf(target)!.textContent).toContain('enregistrées avec la découpe');
+
+    // At 150 ms the two demo strokes are cut in two and the drawn stroke leaves entirely.
+    await setAt(target, 150);
+    expect(target.querySelector('.split-time')?.textContent).toContain('0:00.1');
+    expect(moved(target)).toHaveLength(3);
+    expect(kept(target)).toHaveLength(2);
+    expect(target.querySelector('.split-counts')?.textContent).toBe('Traits qui restent ici : 2 · traits qui partent : 3');
+    expect(titleField(target).value).toBe('Cours de physique (suite)');
+
+    // Moving the slider moves the highlight: past the demo strokes only the drawn one leaves.
+    await setAt(target, 400);
+    expect(moved(target)).toHaveLength(1);
+    expect(kept(target)).toHaveLength(2);
+    await setAt(target, 150);
+
+    panelButton(target, 'Découper').click();
+    await vi.waitFor(() => expect(panelOf(target)).toBeNull());
+    expect(splitSpy).toHaveBeenCalledTimes(1);
+    expect(splitSpy).toHaveBeenCalledWith(
+      path,
+      expect.objectContaining({ title: 'Cours de physique' }),
+      expect.anything(),
+      { kind: 'time', at: 150 },
+      'Cours de physique (suite)',
+    );
+    // The editor shows what is kept, saved, with nothing left to undo.
+    expect(paths()).toHaveLength(2);
+    expect(moved(target)).toHaveLength(0);
+    expect(status()).toBe('Enregistrée');
+    expect(button('Annuler (Ctrl+Z)').disabled).toBe(true);
+    expect(notice(target)?.textContent).toBe('Nouvelle note créée : Cours de physique (suite)');
+    expect(onsaved).toHaveBeenCalledWith(path);
+
+    const stored = mockLibrary().notes.get(path)!.note;
+    expect(stored.strokes.map((s) => s.points.length)).toEqual([30, 30]);
+    const [other] = created();
+    expect(other.note.title).toBe('Cours de physique (suite)');
+    expect(other.note.strokes).toHaveLength(3);
+    expect(other.binder).toBe('Classe/3e B');
+  });
+
+  it('proposes English titles in English', async () => {
+    setLocale('en');
+    const { target, button } = await render('Cours de physique');
+    button('Split').click();
+    await tick();
+    expect(titleField(target).value).toBe('Cours de physique (continued)');
+    await chooseZone(target);
+    expect(titleField(target).value).toBe('Cours de physique (excerpt)');
+    expect(panelOf(target)!.textContent).toContain('Trace the zone to cut out');
+  });
+
+  it('keeps a title the user typed when the mode changes', async () => {
+    const { target, button } = await render('Cours de physique');
+    button('Découper').click();
+    await tick();
+    const field = titleField(target);
+    field.value = 'Ma suite';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    await chooseZone(target);
+    expect(titleField(target).value).toBe('Ma suite');
+  });
+
+  it('splits by zone with the lasso rule', async () => {
+    const splitSpy = vi.spyOn(api, 'splitNote');
+    const { path, target, paths, button, drag } = await render('Cours de physique');
+    button('Découper').click();
+    await tick();
+    await chooseZone(target);
+    expect(slider(target)).toBeNull();
+    expect(titleField(target).value).toBe('Cours de physique (extrait)');
+    // Nothing traced yet: nothing highlighted, the confirm button waits.
+    expect(moved(target)).toHaveLength(0);
+    expect(kept(target)).toHaveLength(0);
+    expect(panelButton(target, 'Découper').disabled).toBe(true);
+
+    // The zone encloses the first demo stroke (a wave around y = 3000) only.
+    await drag([
+      [1500, 2000],
+      [23000, 2000],
+      [23000, 4500],
+      [1500, 4500],
+      [1500, 2000],
+    ]);
+    expect(target.querySelector('polygon.split-zone')).toBeTruthy();
+    expect(moved(target)).toHaveLength(1);
+    expect(moved(target)[0].getAttribute('data-stroke')).toBe('0');
+    expect(kept(target)).toHaveLength(1);
+
+    panelButton(target, 'Découper').click();
+    await vi.waitFor(() => expect(panelOf(target)).toBeNull());
+    const spec = splitSpy.mock.calls[0][3];
+    expect(spec.kind).toBe('zone');
+    expect(spec.kind === 'zone' && spec.polygon).toHaveLength(5);
+    expect(splitSpy.mock.calls[0][4]).toBe('Cours de physique (extrait)');
+    expect(paths()).toHaveLength(1);
+    expect(mockLibrary().notes.get(path)!.note.strokes.map((s) => s.tool)).toEqual(['fountainPen']);
+    expect(created()[0].note.strokes.map((s) => s.tool)).toEqual(['ballpoint']);
+  });
+
+  it('keeps the page read-only while the panel is open', async () => {
+    const { target, paths, button, drag } = await render('Cours de physique');
+    button('Découper').click();
+    await tick();
+    const before = paths().length;
+    await drag(line(5000, 15000, 15000));
+    expect(paths()).toHaveLength(before);
+    expect(target.querySelector('g.ink path.live')).toBeNull();
+    button('Annuler (Ctrl+Z)').click();
+    await tick();
+    expect(button('Enregistrer').disabled).toBe(true);
+  });
+
+  it('refuses a cut that leaves one side empty and explains why', async () => {
+    const splitSpy = vi.spyOn(api, 'splitNote');
+    const { target, button } = await render('Cours de physique');
+    button('Découper').click();
+    await tick();
+    await setAt(target, 0);
+    expect(panelButton(target, 'Découper').disabled).toBe(true);
+    expect(panelOf(target)!.textContent).toContain('Rien à découper ainsi');
+    await setAt(target, 100);
+    expect(panelButton(target, 'Découper').disabled).toBe(false);
+    expect(panelOf(target)!.textContent).not.toContain('Rien à découper ainsi');
+    expect(splitSpy).not.toHaveBeenCalled();
+  });
+
+  it('cancels with Escape or the cancel button, leaving everything untouched', async () => {
+    const splitSpy = vi.spyOn(api, 'splitNote');
+    const { target, paths, button, key, status } = await render('Cours de physique');
+    const before = mockLibrary().notes.size;
+    button('Découper').click();
+    await tick();
+    await setAt(target, 150);
+    expect(moved(target).length).toBeGreaterThan(0);
+    await key('Escape');
+    expect(panelOf(target)).toBeNull();
+    expect(moved(target)).toHaveLength(0);
+    expect(kept(target)).toHaveLength(0);
+
+    button('Découper').click();
+    await tick();
+    panelButton(target, 'Annuler').click();
+    await tick();
+    expect(panelOf(target)).toBeNull();
+    expect(paths()).toHaveLength(2);
+    expect(status()).toBe('Enregistrée');
+    expect(splitSpy).not.toHaveBeenCalled();
+    expect(mockLibrary().notes.size).toBe(before);
+  });
+
+  it('closes the panel from the toolbar button too', async () => {
+    const { target, button } = await render('Cours de physique');
+    button('Découper').click();
+    await tick();
+    expect(button('Découper').getAttribute('aria-pressed')).toBe('true');
+    button('Découper').click();
+    await tick();
+    expect(panelOf(target)).toBeNull();
+  });
+
+  it('ignores the editing keys while the panel is open', async () => {
+    const { target, paths, button, drag, key } = await render('Cours de physique');
+    await drag(line(5000, 15000, 15000));
+    expect(paths()).toHaveLength(3);
+    button('Découper').click();
+    await tick();
+    await key('z', { ctrlKey: true });
+    expect(paths()).toHaveLength(3);
+    expect(panelOf(target)).toBeTruthy();
+  });
+
+  it('keeps the note and says why when the file changed meanwhile', async () => {
+    const { path, target, paths, button, status } = await render('Cours de physique');
+    button('Découper').click();
+    await tick();
+    await setAt(target, 150);
+    // Someone else saved the note: its stamp is no longer the one the editor knows.
+    mockLibrary().notes.get(path)!.stamp = freshStamp();
+    const before = mockLibrary().notes.size;
+    panelButton(target, 'Découper').click();
+    await vi.waitFor(() => expect(panelOf(target)!.querySelector('[role="alert"]')).toBeTruthy());
+    expect(panelOf(target)!.querySelector('[role="alert"]')!.textContent).toContain(
+      'Impossible de découper la note : la note a été modifiée entre-temps',
+    );
+    expect(panelButton(target, 'Découper').disabled).toBe(false);
+    // Still showing the preview of the same note, which was not touched.
+    expect(moved(target)).toHaveLength(2);
+    expect(paths()).toHaveLength(4);
+    expect(status()).toBe('Enregistrée');
+    expect(mockLibrary().notes.size).toBe(before);
+    expect(mockLibrary().notes.get(path)!.note.strokes.map((s) => s.points.length)).toEqual([60, 60]);
+  });
+
+  it('shows the refusal of the desktop app when nothing can be split', async () => {
+    vi.spyOn(api, 'splitNote').mockRejectedValueOnce({ code: 'nothingToSplit', message: 'x' });
+    const { target, button } = await render('Cours de physique');
+    button('Découper').click();
+    await tick();
+    panelButton(target, 'Découper').click();
+    await vi.waitFor(() => expect(panelOf(target)!.querySelector('[role="alert"]')).toBeTruthy());
+    expect(panelOf(target)!.querySelector('[role="alert"]')!.textContent).toContain('cette découpe ne laisserait rien');
+  });
+
+  it('says so when the note is empty', async () => {
+    const { target, button, key } = await render('Cours de physique');
+    button('Sélection').click();
+    await tick();
+    await key('a', { ctrlKey: true });
+    await key('Delete');
+    button('Découper').click();
+    await tick();
+    expect(panelOf(target)!.textContent).toContain('Cette note est vide');
+    expect(slider(target)).toBeNull();
+  });
+
+  it('copies the note as an image at 150 dpi', async () => {
+    const copySpy = vi.spyOn(api, 'copyNoteImage');
+    const { path, target, button } = await render('Liste de courses');
+    button("Copier l'image").click();
+    await vi.waitFor(() => expect(notice(target)?.textContent).toContain('Image copiée'));
+    expect(copySpy).toHaveBeenCalledWith({ path, note: expect.objectContaining({ title: 'Liste de courses' }) }, 150);
+    expect(notice(target)?.getAttribute('role')).toBe('status');
+  });
+
+  it('says in plain words when the clipboard is unavailable', async () => {
+    mockClipboard.available = false;
+    const { target, button } = await render('Liste de courses');
+    button("Copier l'image").click();
+    await vi.waitFor(() => expect(notice(target)).toBeTruthy());
+    expect(notice(target)?.getAttribute('role')).toBe('alert');
+    expect(notice(target)?.textContent).toContain("Impossible de copier l'image : le presse-papiers n'est pas disponible");
+  });
+
+  it('exports the note as it is in the editor, unsaved changes included', async () => {
+    const exportSpy = vi.spyOn(api, 'exportNotes');
+    const { path, target, drag, button, key, paths } = await render('Liste de courses');
+    await drag(line(5000, 15000, 15000));
+    button('Exporter…').click();
+    await tick();
+    const dialog = target.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.textContent).toContain('Note : Liste de courses');
+
+    // The editing keys wait while the dialog is open.
+    await key('a', { ctrlKey: true });
+    await key('Delete');
+    expect(paths()).toHaveLength(2);
+
+    [...dialog.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Exporter…')!.click();
+    await vi.waitFor(() => expect(exportSpy).toHaveBeenCalled());
+    const [sources, format, options, destination] = exportSpy.mock.calls[0];
+    expect(sources[0].path).toBe(path);
+    expect(sources[0].note?.strokes).toHaveLength(2);
+    expect(format).toBe('png');
+    expect(options).toEqual({ dpi: 150, background: true, quality: 90, pdfPage: 'actual' });
+    expect(destination).toMatch(/Liste de courses\.png$/);
+    await vi.waitFor(() => expect(dialog.textContent).toContain('Fichiers créés : 1'));
+
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await tick();
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(paths()).toHaveLength(2);
   });
 });

@@ -169,6 +169,11 @@ export function displayTitle(note: { title: string; created: number }, locale: s
   return note.title.trim() || formatDate(note.created, locale);
 }
 
+/** The notes oldest first (by creation date, then by path), as an assembly puts them. */
+export function oldestFirst(notes: NoteSummary[]): NoteSummary[] {
+  return [...notes].sort((a, b) => a.created - b.created || a.path.localeCompare(b.path));
+}
+
 /** Tags of `notes` with how many of the notes carry each. */
 export function tagsOfNotes(notes: NoteSummary[]): TagCount[] {
   const counts = new Map<string, number>();

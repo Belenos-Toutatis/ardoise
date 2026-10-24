@@ -23,6 +23,7 @@
   } from '../../lib/editor/geometry';
   import { drawingOrder, hitStroke, selectInLasso } from '../../lib/editor/hit';
   import { MIN_CROP } from '../../lib/editor/ops';
+  import type { SplitPreview } from '../../lib/editor/split';
   import {
     addStroke,
     canDraw,
@@ -56,6 +57,8 @@
     onselect,
     oncropped,
     onblocked,
+    split = null,
+    onzone,
   }: {
     doc: Doc;
     tools: ToolSettings;
@@ -69,6 +72,13 @@
     oncropped?: () => void;
     /** The pen was put down while the active layer is hidden: nothing is drawn. */
     onblocked?: () => void;
+    /**
+     * The split panel is open: the page is read-only, the strokes that would move to the new
+     * note are highlighted (the others dimmed), and with `tracing` a drag traces the zone
+     * (reported to `onzone`, drawn as `zone`).
+     */
+    split?: { preview: SplitPreview; tracing: boolean; zone: readonly (readonly [number, number])[] | null } | null;
+    onzone?: (polygon: [number, number][]) => void;
   } = $props();
 
   /** Screen pixels per device unit at real size (96 dpi, 10 µm units). */
@@ -80,6 +90,7 @@
     | { kind: 'pen'; id: number; points: InkPoint[]; t0: number; base: number }
     | { kind: 'eraser'; id: number; last: Vec }
     | { kind: 'lasso'; id: number; points: Vec[]; add: boolean }
+    | { kind: 'zone'; id: number; points: Vec[] }
     | { kind: 'move'; id: number; start: Vec }
     | { kind: 'scale'; id: number; anchor: Vec; start: Vec }
     | { kind: 'crop'; id: number; start: Vec };
@@ -118,19 +129,32 @@
     return d;
   }
 
+  /** Which note the stroke goes to while splitting; null when not splitting. */
+  type Side = 'kept' | 'moved' | null;
+
   const items = $derived.by(() => {
     const note = shown.note;
     const selected = new Set(shown.selection);
-    return drawingOrder(note).map((i) => {
+    // Nothing to highlight yet (no zone traced): the page stays as it is.
+    const preview = split && split.preview.movedCount > 0 ? split.preview : null;
+    const out: { i: number; d: string; fill: string; highlighter: boolean; selected: boolean; side: Side }[] = [];
+    for (const i of drawingOrder(note)) {
       const stroke = note.strokes[i];
-      return {
+      const base = {
         i,
-        d: outline(stroke),
         fill: cssColor(stroke.color),
         highlighter: stroke.tool === 'highlighter',
         selected: selected.has(i),
       };
-    });
+      const part = preview?.cut.get(i);
+      if (part) {
+        // Cut at the instant: the two parts are drawn apart (not cached, a few strokes at most).
+        out.push({ ...base, d: ink.path(part.kept), side: 'kept' }, { ...base, d: ink.path(part.moved), side: 'moved' });
+      } else {
+        out.push({ ...base, d: outline(stroke), side: !preview ? null : preview.moved.has(i) ? 'moved' : 'kept' });
+      }
+    }
+    return out;
   });
 
   const selectionBox = $derived.by(() => {
@@ -286,7 +310,9 @@
     const panRequested = e.button === 1 || (e.button === 0 && (spacePan || tools.mode === 'pan'));
     if (e.button !== 0 && !panRequested) return;
     e.preventDefault();
-    if (!panRequested && tools.mode === 'pen' && !canDraw(doc)) {
+    // Splitting: the page is read-only, except for tracing the zone.
+    if (split && !panRequested && !split.tracing) return;
+    if (!split && !panRequested && tools.mode === 'pen' && !canDraw(doc)) {
       onblocked?.();
       return;
     }
@@ -300,6 +326,11 @@
     }
     if (panRequested) return begin({ kind: 'pan', id, start: local(e), view });
     const p = pagePoint(e);
+    if (split) {
+      begin({ kind: 'zone', id, points: [p] });
+      lasso = [p];
+      return;
+    }
     switch (tools.mode) {
       case 'pen': {
         const d = { t0: e.timeStamp, base: lastTime(doc.note) + 500 };
@@ -357,6 +388,7 @@
         break;
       }
       case 'lasso':
+      case 'zone':
         drag.points.push(pagePoint(e));
         lasso = [...drag.points];
         break;
@@ -412,6 +444,14 @@
         onselect(select(doc, d.add ? [...doc.selection, ...picked] : picked));
         break;
       }
+      case 'zone': {
+        lasso = null;
+        const bounds = boundsOfPoints(d.points);
+        if (!cancelled && d.points.length >= 3 && bounds && Math.max(bounds.width, bounds.height) * view.scale >= 8) {
+          onzone?.(d.points.map((p): [number, number] => [p.x, p.y]));
+        }
+        break;
+      }
       case 'move':
       case 'scale':
         if (!cancelled && dragAffine) onchange(transformSelection(doc, dragAffine));
@@ -435,7 +475,7 @@
 <div class="stage" bind:this={stage}>
   <svg
     bind:this={svg}
-    class="canvas mode-{tools.mode}"
+    class="canvas mode-{split?.tracing ? 'zone' : tools.mode}"
     class:space={spacePan}
     class:dragging={dragKind === 'pan'}
     role="application"
@@ -464,6 +504,8 @@
           fill-rule="nonzero"
           data-stroke={item.i}
           class:highlighter={item.highlighter}
+          class:split-kept={item.side === 'kept'}
+          class:split-moved={item.side === 'moved'}
           transform={item.selected && dragAffine ? svgMatrix(dragAffine) : undefined}
         />
       {/each}
@@ -503,7 +545,10 @@
     {#if cropRect}
       <rect class="crop" x={cropRect.x} y={cropRect.y} width={cropRect.width} height={cropRect.height} />
     {/if}
-    {#if hover && tools.mode === 'eraser'}
+    {#if split?.zone}
+      <polygon class="split-zone" points={split.zone.map(([x, y]) => `${x},${y}`).join(' ')} />
+    {/if}
+    {#if hover && tools.mode === 'eraser' && !split}
       <circle class="eraser" cx={hover.x} cy={hover.y} r={tools.eraserRadius} />
     {/if}
   </svg>
@@ -534,7 +579,8 @@
   }
 
   .mode-pen,
-  .mode-crop {
+  .mode-crop,
+  .mode-zone {
     cursor: crosshair;
   }
 
@@ -573,6 +619,25 @@
 
   .crop {
     fill: rgb(47 111 223 / 12%);
+  }
+
+  .split-kept {
+    opacity: 0.3;
+  }
+
+  .split-moved {
+    stroke: var(--accent);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .split-zone {
+    fill: rgb(47 111 223 / 10%);
+    stroke: var(--accent);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
   }
 
   .handle {

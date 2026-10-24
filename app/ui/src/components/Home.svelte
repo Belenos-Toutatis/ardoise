@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { AppState } from '../lib/api';
-  import { t } from '../lib/i18n.svelte';
-  import { SORT_ORDERS, type SortOrder } from '../lib/library-logic';
+  import { currentLocale, t } from '../lib/i18n.svelte';
+  import { SORT_ORDERS, displayTitle, type SortOrder } from '../lib/library-logic';
   import { LibraryState } from '../lib/library-state.svelte';
   import type { NoteSummary } from '../lib/note';
   import Diagnostic from './Diagnostic.svelte';
+  import ExportDialog from './ExportDialog.svelte';
   import Editor from './editor/Editor.svelte';
+  import AssembleDialog from './library/AssembleDialog.svelte';
   import NoteGrid from './library/NoteGrid.svelte';
   import Sidebar from './library/Sidebar.svelte';
   import TrashView from './library/TrashView.svelte';
@@ -134,6 +136,14 @@
               </button>
             </div>
           {/if}
+          {#if lib.notice}
+            <div class="banner inline-banner notice" role="status">
+              <span>{lib.notice}</span>
+              <button type="button" class="button ghost" onclick={() => lib.dismissNotice()}>
+                {t('library.dismiss')}
+              </button>
+            </div>
+          {/if}
           {#if inTrash}
             <TrashView {lib} />
           {:else}
@@ -148,4 +158,16 @@
       </main>
     </div>
   </div>
+
+  {#if lib.dialog?.kind === 'export'}
+    <ExportDialog
+      sources={lib.dialog.notes.map((n) => ({ path: n.path }))}
+      subject={lib.dialog.notes.length === 1
+        ? t('export.subjectNote', { title: displayTitle(lib.dialog.notes[0], currentLocale()) })
+        : t('export.subjectMany', { count: lib.dialog.notes.length })}
+      onclose={() => lib.closeDialog()}
+    />
+  {:else if lib.dialog?.kind === 'assemble'}
+    <AssembleDialog {lib} notes={lib.dialog.notes} onclose={() => lib.closeDialog()} />
+  {/if}
 {/if}
