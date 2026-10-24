@@ -85,11 +85,14 @@
   const REAL_SIZE = 96 / 25.4 / 100;
   const HANDLE_PX = 10;
 
+  /** What a lasso does to the selection: replace it, add to it (Shift), remove from it (Ctrl). */
+  type Combine = 'replace' | 'add' | 'remove';
+
   type Drag =
     | { kind: 'pan'; id: number; start: Vec; view: View }
     | { kind: 'pen'; id: number; points: InkPoint[]; t0: number; base: number }
     | { kind: 'eraser'; id: number; last: Vec }
-    | { kind: 'lasso'; id: number; points: Vec[]; add: boolean }
+    | { kind: 'lasso'; id: number; points: Vec[]; combine: Combine }
     | { kind: 'zone'; id: number; points: Vec[] }
     | { kind: 'move'; id: number; start: Vec }
     | { kind: 'scale'; id: number; anchor: Vec; start: Vec }
@@ -104,6 +107,8 @@
   let transient = $state.raw<Doc | null>(null);
   let dragAffine = $state.raw<Affine | null>(null);
   let lasso = $state.raw<Vec[] | null>(null);
+  /** The lasso removes from the selection (drawn in the danger colour). */
+  let lassoRemoves = $state(false);
   let cropRect = $state.raw<Rect | null>(null);
   let livePath = $state('');
   let hover = $state.raw<Vec | null>(null);
@@ -329,6 +334,7 @@
     if (split) {
       begin({ kind: 'zone', id, points: [p] });
       lasso = [p];
+      lassoRemoves = false;
       return;
     }
     switch (tools.mode) {
@@ -343,12 +349,15 @@
         begin({ kind: 'eraser', id, last: p });
         break;
       case 'select': {
-        const anchor = handleAt(local(e));
+        // With Shift or Ctrl the gesture is always a lasso, even on the selection's frame.
+        const combine: Combine = e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace';
+        const anchor = combine === 'replace' ? handleAt(local(e)) : null;
         if (anchor) begin({ kind: 'scale', id, anchor, start: p });
-        else if (selectionBox && containsPoint(selectionBox, p)) begin({ kind: 'move', id, start: p });
+        else if (combine === 'replace' && selectionBox && containsPoint(selectionBox, p)) begin({ kind: 'move', id, start: p });
         else {
-          begin({ kind: 'lasso', id, points: [p], add: e.shiftKey });
+          begin({ kind: 'lasso', id, points: [p], combine });
           lasso = [p];
+          lassoRemoves = combine === 'remove';
         }
         break;
       }
@@ -441,7 +450,13 @@
         } else {
           picked = selectInLasso(doc.note, d.points);
         }
-        onselect(select(doc, d.add ? [...doc.selection, ...picked] : picked));
+        const next =
+          d.combine === 'add'
+            ? [...doc.selection, ...picked]
+            : d.combine === 'remove'
+              ? doc.selection.filter((i) => !picked.includes(i))
+              : picked;
+        onselect(select(doc, next));
         break;
       }
       case 'zone': {
@@ -540,7 +555,7 @@
       {/if}
     {/if}
     {#if lasso}
-      <polyline class="lasso" points={lasso.map((p) => `${p.x},${p.y}`).join(' ')} />
+      <polyline class="lasso" class:removing={lassoRemoves} points={lasso.map((p) => `${p.x},${p.y}`).join(' ')} />
     {/if}
     {#if cropRect}
       <rect class="crop" x={cropRect.x} y={cropRect.y} width={cropRect.width} height={cropRect.height} />
@@ -654,6 +669,11 @@
     stroke-width: 1.5px;
     stroke-dasharray: 4 3;
     vector-effect: non-scaling-stroke;
+  }
+
+  .lasso.removing {
+    fill: rgb(180 35 24 / 8%);
+    stroke: var(--danger);
   }
 
   .eraser {

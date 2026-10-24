@@ -114,7 +114,7 @@ async function render(title: string, extra: { windowClose?: WindowClose } = {}) 
     const [scale, vx, vy] = (svg.getAttribute('data-view') ?? '1 0 0').split(' ').map(Number);
     return { x: x * scale + vx, y: y * scale + vy };
   };
-  const pointer = (type: string, x: number, y: number, init: { button?: number; shiftKey?: boolean } = {}) => {
+  const pointer = (type: string, x: number, y: number, init: { button?: number; shiftKey?: boolean; ctrlKey?: boolean } = {}) => {
     const at = client(x, y);
     const options = {
       bubbles: true,
@@ -124,6 +124,7 @@ async function render(title: string, extra: { windowClose?: WindowClose } = {}) 
       button: init.button ?? 0,
       buttons: 1,
       shiftKey: init.shiftKey ?? false,
+      ctrlKey: init.ctrlKey ?? false,
       pointerId: 1,
       pressure: 0.5,
     };
@@ -135,7 +136,7 @@ async function render(title: string, extra: { windowClose?: WindowClose } = {}) 
     svg.dispatchEvent(event);
   };
   /** A drag through page points. */
-  const drag = async (points: [number, number][], init: { shiftKey?: boolean } = {}) => {
+  const drag = async (points: [number, number][], init: { shiftKey?: boolean; ctrlKey?: boolean } = {}) => {
     const [first, ...rest] = points;
     pointer('pointerdown', first[0], first[1], init);
     for (const [x, y] of rest) pointer('pointermove', x, y, init);
@@ -370,6 +371,37 @@ describe('note editor', () => {
     expect(paths()).toHaveLength(2);
     await key('Escape');
     expect(target.querySelector('rect.selection')).toBeNull();
+  });
+
+  it('removes strokes from the selection with Ctrl+lasso, even started on its frame', async () => {
+    const { path, target, button, drag, key } = await render('Liste de courses');
+    button('Sélection').click();
+    await tick();
+    // The Selection tool explains its gestures.
+    expect(target.querySelector('.select-help')?.textContent).toBe(
+      'Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Échap : tout désélectionner',
+    );
+    await key('a', { ctrlKey: true });
+    expect(target.textContent).toContain('Traits sélectionnés : 1');
+    const before = structuredClone(mockLibrary().notes.get(path)!.note.strokes[0].points[0]);
+    const around: [number, number][] = [
+      [7500, 3000],
+      [13000, 3000],
+      [13000, 5000],
+      [2000, 5000],
+      [2000, 3000],
+      [7500, 3000],
+    ];
+    // Shift+lasso started inside the frame: a lasso adding what is already selected, not a move.
+    await drag(around, { shiftKey: true });
+    expect(target.textContent).toContain('Traits sélectionnés : 1');
+    expect(target.querySelector('polyline.lasso')).toBeNull();
+    // Ctrl+lasso started inside the frame: the stroke leaves the selection.
+    await drag(around, { ctrlKey: true });
+    expect(target.querySelector('rect.selection')).toBeNull();
+    // Nothing moved.
+    await key('s', { ctrlKey: true });
+    expect(mockLibrary().notes.get(path)!.note.strokes[0].points[0]).toEqual(before);
   });
 
   it('moves the selection by dragging it, in one undo step', async () => {

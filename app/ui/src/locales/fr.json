@@ -518,6 +518,7 @@
       "tool": "Encre",
       "width": "Épaisseur"
     },
+    "selectHelp": "Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Échap : tout désélectionner",
     "selection": {
       "label": "Sélection",
       "count": "Traits sélectionnés : {count}",

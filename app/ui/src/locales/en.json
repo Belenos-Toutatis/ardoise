@@ -518,6 +518,7 @@
       "tool": "Ink",
       "width": "Width"
     },
+    "selectHelp": "Lasso: select · Shift+lasso: add · Ctrl+lasso: remove · Esc: deselect all",
     "selection": {
       "label": "Selection",
       "count": "Selected strokes: {count}",

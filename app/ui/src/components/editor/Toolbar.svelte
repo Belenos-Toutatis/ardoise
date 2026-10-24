@@ -173,6 +173,9 @@
         <button type="button" class="button small-button" disabled={locked} onclick={() => onapplyall('width')}>{t('editor.applyAll.width')}</button>
       {/if}
     </div>
+    {#if tools.mode === 'select'}
+      <p class="group label select-help">{t('editor.selectHelp')}</p>
+    {/if}
   {/if}
 
   <div class="group share" role="group" aria-label={t('editor.share.label')}>
@@ -214,6 +217,11 @@
   .slider > span:first-child {
     color: var(--muted);
     font-size: 0.875rem;
+  }
+
+  .select-help {
+    margin: 0;
+    font-size: 0.8rem;
   }
 
   .tool {
