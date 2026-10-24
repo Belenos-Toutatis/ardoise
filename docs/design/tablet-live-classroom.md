@@ -27,7 +27,8 @@ ROADMAP M4. Builds on [device-stack.md](device-stack.md) (Session, Manager, simu
 default. Per machine: `[machines."PC"] projector = "<monitor key>"` (the last screen chosen for the presentation).
 
 Left hand (`hand = "left"`): the tablet is used upside down, so every point (synced pages and live mode) is turned
-half a turn: `x' = width - x`, `y' = height - y` (`ardoise_device::pages::orient`).
+half a turn: `x' = width - x`, `y' = height - y` (`ardoise_device::pages::orient`, applied by the service and by the
+page store). Settings are written through `commands::update` (`pub(crate)`).
 
 ## ardoise-device::service (work package A)
 
@@ -58,7 +59,8 @@ Behaviour:
   When the tablet is not connected, `sync_now()` waits for it (connection `searching`, `pending = "sync"`).
 - **Live mode**: `start_live(sink)` enters live mode when connected (or as soon as the tablet connects: `pending =
   "live"`), calls `hooks.live_started()`, then forwards every notification to `sink` as `LiveInput` (decoded records
-  with the receipt stamp, proximity, button, state changes). Lost links are reopened (`Manager` logic) and reported
+  with the receipt stamp, proximity, button, state changes). **Records are delivered already oriented** (left hand:
+  `pages::orient` applied by the service), so the hub uses them as page coordinates; `Started.hand` is informational. Lost links are reopened (`Manager` logic) and reported
   as `LiveInput::State(Reconnecting)` then `Live`. `stop_live()` leaves live mode (`b1 02`) and stays connected.
 - **Button in live mode**: protocol.md does not say what the Slate sends. Working hypothesis, to be checked at H2:
   a sysevent notification. `ardoise_proto::live::BUTTON_SYSEVENTS` lists the known signatures (for now the
