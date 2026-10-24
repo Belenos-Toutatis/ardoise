@@ -53,12 +53,12 @@ Règles permanentes :
 
 ## M2 — Notes, bibliothèque, rendu et import Inkspace
 
-- [ ] Modèle de note et format `.ardoise` (SPEC §3.3) + `docs/file-format.md` ; tests d'aller-retour et de compatibilité de version.
-- [ ] Bibliothèque : lecture, écriture atomique, classeurs, étiquettes, corbeille, surveillance du dossier, détection des copies en conflit Nextcloud ; tests.
-- [ ] Géométrie des traits (contour à épaisseur variable selon la pression) partagée par l'écran et les exports.
-- [ ] Rendu : outils d'encre, couleurs, fonds, modèles de page, textures ; images de référence et test de comparaison.
-- [ ] Import Inkspace (SPEC §6.3, `docs/research/inkspace-format.md`) : les 22 notes de cet ordinateur importées depuis une copie placée dans `testdata/private/` ; pour chacune, comparaison chiffrée avec l'aperçu PNG d'Inkspace (score de similarité affiché, seuil fixé dans le test).
-- [ ] Test qui prouve que l'import ne lit jamais la clé `profile` de `LocalState\db` (jeton d'accès et e-mail).
+- [x] Modèle de note et format `.ardoise` (SPEC §3.3) + `docs/file-format.md` ; tests d'aller-retour et de compatibilité de version.
+- [x] Bibliothèque : lecture, écriture atomique, classeurs, étiquettes, corbeille, surveillance du dossier, détection des copies en conflit Nextcloud ; tests.
+- [x] Géométrie des traits (contour à épaisseur variable selon la pression) partagée par l'écran et les exports.
+- [x] Rendu : outils d'encre, couleurs, fonds, modèles de page, textures ; images de référence et test de comparaison.
+- [x] Import Inkspace (SPEC §6.3, `docs/research/inkspace-format.md`) : les 22 notes de cet ordinateur importées depuis une copie placée dans `testdata/private/` ; pour chacune, comparaison chiffrée avec l'aperçu PNG d'Inkspace (score de similarité affiché, seuil fixé dans le test).
+- [x] Test qui prouve que l'import ne lit jamais la clé `profile` de `LocalState\db` (jeton d'accès et e-mail).
 
 **Critères de fin** : `CHECK OK` ; la commande d'import sur une copie des données Inkspace affiche « 22/22 notes importées » et le tableau des scores de similarité, tous au-dessus du seuil.
 
