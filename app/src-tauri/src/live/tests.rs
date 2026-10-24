@@ -494,13 +494,28 @@ fn a_stopped_session_no_longer_changes_its_notes() {
 
 /// Makes the folder of `library` unusable (a file takes its place), or usable again.
 fn break_folder(root: &Path, broken: bool) {
+    let away = root.with_extension("away");
     if broken {
-        std::fs::rename(root, root.with_extension("away")).unwrap();
+        std::fs::rename(root, &away).unwrap();
         std::fs::write(root, b"not a folder").unwrap();
-    } else {
-        std::fs::remove_file(root).unwrap();
-        std::fs::rename(root.with_extension("away"), root).unwrap();
+        return;
     }
+    std::fs::remove_file(root).unwrap();
+    // The live writer keeps retrying in the background and may recreate the folder (and write
+    // the page into it) between the two calls: move what it wrote into the real folder, retry.
+    for _ in 0..50 {
+        match std::fs::rename(&away, root) {
+            Ok(()) => return,
+            Err(_) if root.is_dir() => {
+                for entry in std::fs::read_dir(root).unwrap().flatten() {
+                    let _ = std::fs::rename(entry.path(), away.join(entry.file_name()));
+                }
+                let _ = std::fs::remove_dir(root);
+            }
+            Err(error) => panic!("cannot put the library folder back: {error}"),
+        }
+    }
+    panic!("the library folder kept being recreated");
 }
 
 fn save_failures(window: &Window) -> Vec<usize> {
