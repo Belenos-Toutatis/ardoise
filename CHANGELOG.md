@@ -2,6 +2,19 @@
 
 ## Non publié
 
+### Ajouté (jalon M5 — découper, assembler, exporter)
+
+- Exports PNG (fond transparent possible), JPG, SVG (vectoriel, calques Inkscape) et PDF (vectoriel, une page par note, taille réelle ou A4), résolution au choix ; depuis l'éditeur (note en cours, modifications non enregistrées comprises) ou depuis la sélection de la bibliothèque (un seul PDF pour plusieurs notes, ou un fichier par note dans un dossier, sans jamais écraser un fichier existant).
+- Copie de l'image d'une note dans le presse-papiers de Windows (formats « PNG » et image classique), pour la coller dans Word ou OneNote.
+- Tous les formats dessinent les traits avec le même contour (`ardoise-ink`) et le même aspect de chaque outil que l'écran et les miniatures.
+- Découper une note à un instant de la ligne du temps (tout ce qui a été écrit ensuite passe dans une nouvelle note) ou selon une zone tracée, avec aperçu des traits qui partent.
+- Assembler plusieurs notes sélectionnées : superposées sur une seule page ou bout à bout (page longue), sans modifier les notes d'origine.
+- Export automatique PDF ou PNG de chaque page synchronisée dans un sous-dossier de la bibliothèque (réglage, dossier `Exports` par défaut, masqué de la liste des classeurs), pour lire les notes sur le téléphone avec l'appli Nextcloud ; branché à l'endroit où chaque page synchronisée devient une note (vérifiée avant effacement de la tablette).
+
+### Corrigé
+
+- Deux tests de `ardoise-core` passent aussi sous Linux (sessions cloud) : noms de fichiers longs, chemins de corbeille avec lettre de lecteur (un nom contenant `:` est refusé sur tous les systèmes).
+
 ### Ajouté (jalon M3 — interface : bibliothèque et éditeur)
 
 - Bibliothèque : grille de miniatures (cache local à chaque PC), tri par date ou titre, classeurs en arborescence, glisser-déposer, étiquettes, favoris, recherche sans accents ni majuscules, sélection multiple (déplacer, étiqueter, favori, corbeille), corbeille avec restauration, rafraîchissement automatique quand une note change sur un autre PC.

@@ -126,3 +126,30 @@ Pure functions on `Note` (no I/O); ids, titles and dates of new notes come from 
 - Settings: automatic export after sync (off / PDF / PNG, folder).
 - Browser stand-in: the new commands are routed in `lib/mock.ts` (export returns fake paths, split and merge
   work on the demo store).
+
+## Decisions made while building M5
+
+- **One look per tool.** `ardoise_render::look` turns a stroke into fills (outline, colour, opacity, blend, grain,
+  seed); `Look::raster(px_per_unit, dark)` feeds tiny-skia, `Look::vector(dark)` feeds SVG and PDF (grain as its
+  mean coverage, felt-tip halo sized for 300 dpi). The golden images did not change by a single pixel.
+- **Vector background.** `draw_template` works over a `TemplateCanvas` trait: the raster canvas keeps its pixel
+  snapping and fading, the vector one keeps exact rectangles and discs. The paper texture is embedded as a 100 dpi
+  JPEG under the template in SVG and PDF.
+- **JPEG.** No GPL-compatible pure-Rust encoder without the IJG DCT code was found, so a baseline encoder was
+  written from ITU-T T.81 (Annex K tables): error within 1 % of libjpeg at quality 10–95, files ~9 % larger.
+- **PDF.** `pdf-writer` (MIT/Apache-2.0). A4: margins stay white, the note is clipped to its page; pages longer
+  than ~5 m use `/UserUnit`. **SVG**: one Inkscape layer per note layer, the background in a locked layer.
+- **Clipboard.** `copy_note_image` also receives the window (its HWND owns the clipboard, as `OpenClipboard`
+  recommends); the steps (open with 10 tries, empty, "PNG" best effort, `CF_DIB` required, free what the system
+  refused, always close) are written once over a small trait and tested with a fake on Linux.
+- **Split.** Each sample goes by `t < at`, so non-monotonic times lose nothing; a stroke without samples stays in
+  `kept`. The zone rule is `inside > 0 && 2 × inside ≥ samples`, computed in f64 like `hit.ts`. `split_note` checks
+  the stamp before creating anything, copies the page background file to the new note, and returns the note and
+  stamp read back from disk.
+- **Merge.** `created` of the first note; overlay layers named `Title - Layer` (several layers) or `Title`; end to
+  end: left-aligned, layer names and visibility from the first note having that index; a stroke on a missing layer
+  goes to its note's last layer; tags merged by `normalize_tags`.
+- **Auto-export folder.** Hidden from the binders of the interface listing whenever valid, unless it holds notes
+  (a user's own binder with that name stays visible). `autoexport::after_save_hook` is ready; M4 plugs it into the
+  automatic sync (the app has no sync command yet), and its simulator test proves the chain
+  (`autoexport::tests::synced_pages_are_exported_automatically`).
