@@ -7,15 +7,19 @@
 //! 1. the background ([`background`]): paper colour, template in millimetres, optional paper
 //!    texture; or plain white (transparent for [`render_note_transparent`], SVG and PDF) when
 //!    the background is off;
-//! 2. the strokes of visible layers, bottom layer first and in note order within a layer,
-//!    each filled from [`ardoise_ink::outline`] with its tool's look ([`look`]): with
-//!    tiny-skia and anti-aliasing for images ([`render_note`], [`ink`]), as paths for
-//!    [`note_to_svg`] and [`notes_to_pdf`].
+//! 2. the strokes of visible layers, bottom layer first and in note order within a layer
+//!    ([`drawing_order`]), each filled from [`ardoise_ink::outline`] with its tool's look
+//!    ([`look`]): with tiny-skia and anti-aliasing for images ([`render_note`], [`ink`]), as
+//!    paths for [`note_to_svg`] and [`notes_to_pdf`].
+//!
+//! [`PageCanvas`] is the raster drawing itself, one stroke at a time: [`render_note`] is built
+//! on it, and the replay frames (`ardoise-media`) draw a page incrementally with it.
 //!
 //! Rendering is deterministic: every texture comes from a fixed or content-derived seed, so
 //! the same note and options always give the same bytes (the reference images rely on it).
 
 mod background;
+mod canvas;
 mod clipboard;
 mod ink;
 mod jpeg;
@@ -27,9 +31,10 @@ mod vector;
 
 use ardoise_core::note::{Note, PageSize};
 use ardoise_ink::Stroke;
-use tiny_skia::{Color, Pixmap};
+use tiny_skia::Pixmap;
 
 pub use background::paper_color;
+pub use canvas::{Backdrop, PageCanvas, PixelRect, PreparedStroke, image_size};
 pub use clipboard::{ClipboardImage, clipboard_image, clipboard_image_at};
 pub use look::{Blend, Fill, Grain, Look};
 pub use pdf::{PdfOptions, PdfPage, notes_to_pdf};
@@ -103,74 +108,63 @@ pub enum RenderError {
     Encode(String),
     #[error("cannot decode the image: {0}")]
     Decode(String),
+    /// A page written into a frame buffer that cannot hold it ([`PageCanvas::write_rgba`]).
+    #[error("cannot place the page in the frame: {0}")]
+    Frame(String),
 }
 
 /// Renders `note` to an image of `page × scale` pixels (each side rounded, at most
 /// 16 384 px). Strokes on hidden layers are not drawn; a stroke whose layer index has no
 /// layer entry is drawn (above the others) rather than lost.
 pub fn render_note(note: &Note, options: &RenderOptions) -> Result<Image, RenderError> {
-    let page = if options.background {
-        Page::Paper
+    let backdrop = if options.background {
+        Backdrop::Paper
     } else {
-        Page::White
+        Backdrop::White
     };
-    render(note, options.scale, page)
+    render(note, options.scale, backdrop)
 }
 
 /// Renders `note` like [`render_note`] without any paper: the strokes on a transparent page,
 /// alpha kept (PNG with a transparent background).
 pub fn render_note_transparent(note: &Note, scale: f32) -> Result<Image, RenderError> {
-    render(note, scale, Page::Transparent)
+    render(note, scale, Backdrop::Transparent)
 }
 
-/// What is under the strokes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Page {
-    /// Paper colour, template, texture.
-    Paper,
-    White,
-    Transparent,
-}
-
-fn render(note: &Note, scale: f32, page: Page) -> Result<Image, RenderError> {
-    let width = (note.page.width as f32 * scale).round() as u32;
-    let height = (note.page.height as f32 * scale).round() as u32;
-    let size_error = RenderError::Size { width, height };
-    if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
-        return Err(size_error);
-    }
-    let mut pixmap = Pixmap::new(width, height).ok_or(size_error)?;
-    let dark = match page {
-        Page::Paper => {
-            background::paint(&mut pixmap, &note.background, scale);
-            background::is_dark(note.background.paper)
-        }
-        Page::White => {
-            pixmap.fill(Color::WHITE);
-            false
-        }
-        Page::Transparent => false,
-    };
-    let mut painter = ink::InkPainter::new(&pixmap, scale, dark);
+fn render(note: &Note, scale: f32, backdrop: Backdrop) -> Result<Image, RenderError> {
+    let mut canvas = PageCanvas::new(note, scale, backdrop)?;
     for stroke in visible_strokes(note) {
-        painter.draw(&mut pixmap, stroke);
+        canvas.draw_stroke(stroke);
     }
-    Ok(image_from(&pixmap))
+    Ok(canvas.to_image())
 }
 
-/// Strokes to draw, bottom layer first, in note order within a layer.
-fn visible_strokes(note: &Note) -> Vec<&Stroke> {
-    let mut strokes: Vec<&Stroke> = note
+/// Indices into `note.strokes` of the strokes every format draws, in drawing order: visible
+/// layers only (a stroke whose layer index has no layer entry counts as visible), bottom
+/// layer first, in note order within a layer.
+pub fn drawing_order(note: &Note) -> Vec<usize> {
+    let mut order: Vec<(u32, usize)> = note
         .strokes
         .iter()
-        .filter(|s| {
+        .enumerate()
+        .filter(|(_, s)| {
             note.layers
                 .get(s.layer as usize)
                 .is_none_or(|layer| layer.visible)
         })
+        .map(|(i, s)| (s.layer, i))
         .collect();
-    strokes.sort_by_key(|s| s.layer);
-    strokes
+    // Stable: note order within a layer.
+    order.sort_by_key(|&(layer, _)| layer);
+    order.into_iter().map(|(_, i)| i).collect()
+}
+
+/// Strokes to draw, in [`drawing_order`].
+fn visible_strokes(note: &Note) -> Vec<&Stroke> {
+    drawing_order(note)
+        .into_iter()
+        .filter_map(|i| note.strokes.get(i))
+        .collect()
 }
 
 /// Straight-alpha RGBA copy of a (premultiplied) pixmap.

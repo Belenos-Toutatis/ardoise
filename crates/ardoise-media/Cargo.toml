@@ -8,6 +8,10 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The replay: notes, strokes and their drawing (the same as every other export).
+ardoise-core = { path = "../ardoise-core" }
+ardoise-ink = { path = "../ardoise-ink" }
+ardoise-render = { path = "../ardoise-render" }
 thiserror = "2"
 # Microphone capture (WASAPI on Windows) and resampling to the 48 kHz narration rate.
 cpal = "0.18"

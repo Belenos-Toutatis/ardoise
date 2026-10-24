@@ -74,4 +74,8 @@ pub enum MediaError {
     /// Listing, opening or reading the microphone failed, or the audio could not be converted.
     #[error("microphone: {step} failed: {message}")]
     Microphone { step: &'static str, message: String },
+
+    /// Drawing a replay frame failed (a page too small or too large for the frame size).
+    #[error("cannot draw the replay: {0}")]
+    Render(#[from] ardoise_render::RenderError),
 }

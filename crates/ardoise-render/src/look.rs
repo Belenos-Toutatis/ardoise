@@ -126,6 +126,31 @@ impl Look {
     /// own outline (the felt-tip halo lies under it). An outline can be empty (a stroke
     /// without a usable sample): writers skip those ([`Outline::is_empty`]).
     pub fn fills(&self, stroke: &Stroke) -> Vec<Fill> {
+        self.fills_with(stroke, stroke_seed(stroke), mean_pressure(stroke))
+    }
+
+    /// The fills of the first `points` samples of `stroke` while it is being written (the
+    /// replay): the outline of those samples, with the grain position and the pencil opacity
+    /// of the complete stroke, so that a growing stroke keeps its look instead of shimmering
+    /// from one frame to the next. With every sample (or more), the same as
+    /// [`Look::fills`]. Only the grain tools differ from the fills of the cut stroke.
+    pub fn partial_fills(&self, stroke: &Stroke, points: usize) -> Vec<Fill> {
+        let prefix = match stroke.points.get(..points) {
+            Some(prefix) if points < stroke.points.len() => prefix,
+            _ => return self.fills(stroke),
+        };
+        let shape = Stroke {
+            tool: stroke.tool,
+            color: stroke.color,
+            width: stroke.width,
+            layer: stroke.layer,
+            points: prefix.to_vec(),
+        };
+        self.fills_with(&shape, stroke_seed(stroke), mean_pressure(stroke))
+    }
+
+    /// The fills of `stroke` with the given grain seed and mean pressure.
+    fn fills_with(&self, stroke: &Stroke, seed: u32, pressure: f32) -> Vec<Fill> {
         let c = stroke.color;
         let alpha = f32::from(c.a) / 255.0;
         let rgb = [c.r, c.g, c.b];
@@ -135,7 +160,7 @@ impl Look {
             opacity: opacity.clamp(0.0, 1.0),
             blend,
             grain,
-            seed: stroke_seed(stroke),
+            seed,
         };
         match stroke.tool {
             Tool::Ballpoint | Tool::FountainPen | Tool::Brush => {
@@ -160,7 +185,6 @@ impl Look {
                 vec![fill(outline(stroke), alpha, blend, None)]
             }
             Tool::Pencil => {
-                let pressure = mean_pressure(stroke);
                 let opacity = alpha * (PENCIL_LIGHT + (PENCIL_FULL - PENCIL_LIGHT) * pressure);
                 vec![fill(
                     outline(stroke),
@@ -357,5 +381,51 @@ mod tests {
         let chalk = look.fills(&stroke(Tool::Chalk, Rgba::WHITE));
         assert_eq!(chalk[0].grain, Some(Grain::Chalk));
         assert!(chalk[0].flat_opacity() < CHALK_OPACITY);
+    }
+
+    #[test]
+    fn a_growing_stroke_keeps_the_look_of_the_complete_one() {
+        let look = Look::raster(0.1, false);
+        for tool in Tool::ALL {
+            let mut full = stroke(tool, Rgba::rgb(10, 20, 30));
+            for (i, point) in full.points.iter_mut().enumerate() {
+                point.pressure = 0.1 * i as f32;
+            }
+            let cut = Stroke {
+                points: full.points[..4].to_vec(),
+                ..full.clone()
+            };
+            let partial = look.partial_fills(&full, 4);
+            let alone = look.fills(&cut);
+            let complete = look.fills(&full);
+            assert_eq!(partial.len(), alone.len(), "{tool:?}");
+            for ((p, a), c) in partial.iter().zip(&alone).zip(&complete) {
+                // The shape of the samples written so far...
+                assert_eq!(p.outline, a.outline, "{tool:?}");
+                // ...with the grain and the opacity of the whole stroke.
+                assert_eq!((p.seed, p.opacity), (c.seed, c.opacity), "{tool:?}");
+            }
+            // Only the grain tools look different from the cut stroke on its own (the seed
+            // places the grain and is not used without one).
+            let drawn_alike = |p: &Fill, a: &Fill| {
+                (&p.outline, p.rgb, p.opacity, p.blend, p.grain)
+                    == (&a.outline, a.rgb, a.opacity, a.blend, a.grain)
+                    && (p.grain.is_none() || p.seed == a.seed)
+            };
+            let same = partial.iter().zip(&alone).all(|(p, a)| drawn_alike(p, a));
+            assert_eq!(
+                same,
+                !matches!(tool, Tool::Pencil | Tool::Chalk),
+                "{tool:?}"
+            );
+            // Every sample (or more): the complete stroke.
+            assert_eq!(look.partial_fills(&full, 10), complete, "{tool:?}");
+            assert_eq!(look.partial_fills(&full, 99), complete, "{tool:?}");
+            assert!(
+                look.partial_fills(&full, 0)
+                    .iter()
+                    .all(|f| f.outline.is_empty())
+            );
+        }
     }
 }
