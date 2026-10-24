@@ -757,102 +757,104 @@ fn hub_latency() {
 }
 
 // End to end on the Rust side: simulated tablet in real time → tablet service → hub → window.
-// It needs work package A (the service's worker and `ardoise_sim::realtime`), which does not
-// exist on this branch: the test is kept in this comment, written against the contract, and is
-// to be uncommented (and the `#[ignore]` removed) once package A is merged.
-//
-// /// The whole Rust part of the latency: the simulator streams 10 s of handwriting in real time
-// /// through the tablet service (registration included) to the hub; prints the median and the
-// /// 95th percentile of `sentAt − recv`.
-// #[test]
-// #[ignore = "needs the tablet service (work package A)"]
-// fn simulator_service_hub_latency() {
-//     use ardoise_device::service::{
-//         ConnectorFactory, PageStore, ServiceConfig, ServiceHooks, TabletOptions, TabletService,
-//     };
-//     use ardoise_device::transport::{Connector, TransportError};
-//     use ardoise_sim::SimTablet;
-//     use ardoise_sim::realtime::RealTimeConnector;
-//
-//     struct Factory(SimTablet);
-//     impl ConnectorFactory for Factory {
-//         fn connector(&mut self) -> Result<Box<dyn Connector>, TransportError> {
-//             Ok(Box::new(RealTimeConnector::new(self.0.clone())))
-//         }
-//     }
-//     /// The person in front of the simulated tablet.
-//     struct Hands(SimTablet);
-//     impl ServiceHooks for Hands {
-//         fn registration_started(&self) {
-//             self.0.hold_button();
-//         }
-//         fn waiting_for_button(&self) {
-//             self.0.press_button();
-//         }
-//         fn live_started(&self) {
-//             self.0.draw_live(ardoise_sim::drawings::live_script(10, 29_700, 21_600));
-//         }
-//     }
-//
-//     let (dir, library) = library();
-//     let identity = tempfile::tempdir().unwrap();
-//     let tablet = SimTablet::slate_large();
-//     let status = Arc::new(Mutex::new(None));
-//     let on_status = {
-//         let status = status.clone();
-//         Box::new(move |s: &ardoise_device::service::TabletStatus| {
-//             *status.lock().unwrap() = Some(s.clone());
-//         })
-//     };
-//     let store_page: PageStore = Box::new(|_, _, _| Err("no page expected".into()));
-//     let service = TabletService::start(
-//         ServiceConfig {
-//             library: Some(dir.path().to_path_buf()),
-//             identity_root: Some(identity.path().to_path_buf()),
-//             options: TabletOptions::default(),
-//             simulated: true,
-//         },
-//         Box::new(Factory(tablet.clone())),
-//         Arc::new(Hands(tablet.clone())),
-//         on_status,
-//         store_page,
-//     );
-//     service.register();
-//     wait_until("the registration", || {
-//         status.lock().unwrap().as_ref().is_some_and(|s| s.registered.is_some())
-//     });
-//
-//     let hub = LiveHub::new(HubConfig::default());
-//     let window = Arc::new(Window::default());
-//     hub.subscribe("main", window.clone());
-//     let Start::New { sink, .. } = hub.start(options(&library, fixed(LiveButton::NewPage))).unwrap()
-//     else {
-//         panic!("already running");
-//     };
-//     service.start_live(Box::new(sink));
-//     std::thread::sleep(Duration::from_secs(11));
-//     service.stop_live();
-//     hub.stop().unwrap();
-//     service.shutdown();
-//
-//     let mut samples: Vec<f64> = window
-//         .batches
-//         .lock()
-//         .unwrap()
-//         .iter()
-//         .flat_map(|batch| {
-//             points_of(&batch.events)
-//                 .into_iter()
-//                 .map(move |point| batch.sent_at - point.recv)
-//         })
-//         .collect();
-//     samples.sort_by(f64::total_cmp);
-//     let n = samples.len();
-//     assert!(n > 500, "{n} points");
-//     println!(
-//         "simulator -> service -> hub latency (sentAt - recv): {n} points, median {:.3} ms, p95 {:.3} ms",
-//         samples[n / 2],
-//         samples[(n * 95 / 100).min(n - 1)]
-//     );
-//     assert!(samples[n / 2] < 10.0);
-// }
+/// The whole Rust part of the latency: the simulator streams 10 s of handwriting in real time
+/// through the tablet service (registration included) to the hub; prints the median and the
+/// 95th percentile of `sentAt − recv`.
+#[test]
+fn simulator_service_hub_latency() {
+    use ardoise_device::service::{
+        ConnectorFactory, PageStore, ServiceConfig, ServiceHooks, TabletOptions, TabletService,
+    };
+    use ardoise_device::transport::{Connector, TransportError};
+    use ardoise_sim::SimTablet;
+    use ardoise_sim::realtime::RealTimeConnector;
+
+    struct Factory(SimTablet);
+    impl ConnectorFactory for Factory {
+        fn connector(&mut self) -> Result<Box<dyn Connector>, TransportError> {
+            Ok(Box::new(RealTimeConnector::new(self.0.clone())))
+        }
+    }
+    /// The person in front of the simulated tablet.
+    struct Hands(SimTablet);
+    impl ServiceHooks for Hands {
+        fn registration_started(&self) {
+            self.0.hold_button();
+        }
+        fn waiting_for_button(&self) {
+            self.0.press_button();
+        }
+        fn live_started(&self) {
+            self.0
+                .draw_live(ardoise_sim::drawings::live_script(10, 29_700, 21_600));
+        }
+    }
+
+    let (dir, library) = library();
+    let identity = tempfile::tempdir().unwrap();
+    let tablet = SimTablet::slate_large();
+    let status = Arc::new(Mutex::new(None));
+    let on_status = {
+        let status = status.clone();
+        Box::new(move |s: &ardoise_device::service::TabletStatus| {
+            *status.lock().unwrap() = Some(s.clone());
+        })
+    };
+    let store_page: PageStore = Box::new(|_, _, _| Err("no page expected".into()));
+    let service = TabletService::start(
+        ServiceConfig {
+            library: Some(dir.path().to_path_buf()),
+            identity_root: Some(identity.path().to_path_buf()),
+            options: TabletOptions::default(),
+            simulated: true,
+        },
+        Box::new(Factory(tablet.clone())),
+        Arc::new(Hands(tablet.clone())),
+        on_status,
+        store_page,
+    );
+    service.register();
+    wait_until("the registration", || {
+        status
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|s| s.registered.is_some())
+    });
+
+    let hub = LiveHub::new(HubConfig::default());
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let Start::New { sink, .. } = hub
+        .start(options(&library, fixed(LiveButton::NewPage)))
+        .unwrap()
+    else {
+        panic!("already running");
+    };
+    service.start_live(Box::new(sink));
+    std::thread::sleep(Duration::from_secs(11));
+    service.stop_live();
+    hub.stop().unwrap();
+    service.shutdown();
+
+    let mut samples: Vec<f64> = window
+        .batches
+        .lock()
+        .unwrap()
+        .iter()
+        .flat_map(|batch| {
+            points_of(&batch.events)
+                .into_iter()
+                .map(move |point| batch.sent_at - point.recv)
+        })
+        .collect();
+    samples.sort_by(f64::total_cmp);
+    let n = samples.len();
+    assert!(n > 500, "{n} points");
+    println!(
+        "simulator -> service -> hub latency (sentAt - recv): {n} points, median {:.3} ms, p95 {:.3} ms",
+        samples[n / 2],
+        samples[(n * 95 / 100).min(n - 1)]
+    );
+    assert!(samples[n / 2] < 10.0);
+}
