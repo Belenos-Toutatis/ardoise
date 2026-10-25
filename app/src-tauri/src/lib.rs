@@ -20,6 +20,7 @@ mod live;
 mod narration;
 mod notes;
 mod operations;
+mod original;
 mod presentation;
 mod selftest;
 mod tablet;
@@ -185,6 +186,7 @@ pub fn run() {
             notes::open_note,
             notes::save_note,
             notes::render_background,
+            original::note_original,
             tablet::tablet_info,
             tablet::forget_tablet,
             tablet::tablet_status,

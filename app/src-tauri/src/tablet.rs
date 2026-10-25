@@ -168,7 +168,7 @@ fn adapter_check(info: Result<AdapterInfo, BleError>) -> Result<(), StatusError>
 }
 
 /// `"fr"` or `"en"`, as the interface (and `diagnostic::report_language`) chooses it.
-fn interface_language(settings: &Settings, system_locale: Option<&str>) -> &'static str {
+pub(crate) fn interface_language(settings: &Settings, system_locale: Option<&str>) -> &'static str {
     let french = match settings.language {
         Language::Fr => true,
         Language::En => false,
