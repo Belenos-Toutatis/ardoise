@@ -1,10 +1,10 @@
 //! What the vector formats (SVG, PDF) draw for a note, computed once for both: the page
-//! background as shapes and the visible strokes' fills, grouped by layer.
-
-use ardoise_core::note::Note;
+//! background as shapes (with the background image, embedded as a raster), and the visible
+//! strokes' fills, grouped by layer.
 
 use crate::background::{VectorBackground, vector_background};
 use crate::look::{Fill, Look};
+use crate::picture::{NoteView, PlacedPicture};
 use crate::visible_strokes;
 
 /// The strokes of one layer, in drawing order.
@@ -19,19 +19,24 @@ pub(crate) struct LayerFills {
 }
 
 /// A note ready for a vector writer.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Scene {
+#[derive(Debug, Clone)]
+pub(crate) struct Scene<'a> {
     /// Page size in device units.
     pub width: f32,
     pub height: f32,
     /// `None` when the background is off (transparent page).
     pub background: Option<VectorBackground>,
+    /// The background image, over the background and under the strokes; only with the
+    /// background.
+    pub picture: Option<PlacedPicture<'a>>,
     /// Visible layers holding strokes, bottom first.
     pub layers: Vec<LayerFills>,
 }
 
-impl Scene {
-    pub(crate) fn of(note: &Note, background: bool) -> Scene {
+impl<'a> Scene<'a> {
+    pub(crate) fn of(view: NoteView<'a>, background: bool) -> Scene<'a> {
+        let note = view.note;
+        let picture = if background { view.placed() } else { None };
         let background = background.then(|| vector_background(&note.background, note.page));
         let look = Look::vector(background.as_ref().is_some_and(|b| b.dark));
         let mut layers: Vec<LayerFills> = Vec::new();
@@ -57,6 +62,7 @@ impl Scene {
             width: note.page.width as f32,
             height: note.page.height as f32,
             background,
+            picture,
             layers,
         }
     }
@@ -71,7 +77,7 @@ impl Scene {
 mod tests {
     use super::*;
     use crate::look::Blend;
-    use ardoise_core::note::{Background, Layer, Origin, PageSize, Paper, Template, Timing};
+    use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Template, Timing};
     use ardoise_ink::{Point, Rgba, Stroke, Tool};
 
     fn stroke(tool: Tool, layer: u32, points: usize) -> Stroke {
@@ -142,7 +148,7 @@ mod tests {
                 stroke(Tool::Highlighter, 2, 5),
             ],
         );
-        let scene = Scene::of(&n, true);
+        let scene = Scene::of((&n).into(), true);
         let summary: Vec<(u32, Option<&str>, usize)> = scene
             .layers
             .iter()
@@ -159,14 +165,14 @@ mod tests {
                 .as_ref()
                 .is_some_and(|b| !b.marks.is_empty())
         );
-        assert!(Scene::of(&n, false).background.is_none());
+        assert!(Scene::of((&n).into(), false).background.is_none());
     }
 
     #[test]
     fn dark_paper_turns_the_highlighter_to_screen() {
         let marker = |paper, background| {
             let n = note(paper, vec![stroke(Tool::Highlighter, 0, 5)]);
-            Scene::of(&n, background).layers[0].fills[0].blend
+            Scene::of((&n).into(), background).layers[0].fills[0].blend
         };
         assert_eq!(marker(Paper::White, true), Blend::Multiply);
         assert_eq!(marker(Paper::Slate, true), Blend::Screen);

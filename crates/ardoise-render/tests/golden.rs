@@ -1,19 +1,25 @@
 //! Reference images: synthetic notes covering every tool, colour and pressure range, every
-//! paper and template, texture on and off, a landscape and a portrait page and a hidden
-//! layer, rendered and compared with `testdata/golden/*.png`.
+//! paper and template, texture on and off, a landscape and a portrait page, a hidden layer and
+//! a background image (turned, translucent, reaching beyond the page), rendered and compared
+//! with `testdata/golden/*.png`.
 //!
 //! `cargo xtask golden` regenerates the images (it runs the ignored test
 //! `regenerate_golden_images`); look at them before committing.
+
+#![allow(clippy::expect_used)]
 
 use std::f32::consts::TAU;
 use std::fs;
 use std::path::PathBuf;
 
 use ardoise_core::note::{
-    A4_LANDSCAPE, A4_PORTRAIT, Background, Layer, Note, Origin, PageSize, Paper, Template, Timing,
+    A4_LANDSCAPE, A4_PORTRAIT, Background, BackgroundImage, ImageRect, Layer, Note, Origin,
+    PageSize, Paper, Template, Timing,
 };
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
-use ardoise_render::{Image, RenderOptions, decode_png, encode_png, render_note};
+use ardoise_render::{
+    Image, NoteView, Picture, RenderOptions, decode_png, encode_png, render_note,
+};
 
 /// Largest accepted mean absolute difference per channel (0..255) between a fresh render and
 /// its reference image.
@@ -709,25 +715,108 @@ fn background_off() -> Note {
 }
 
 /// Every reference image: file name (without `.png`), note and options.
-fn cases() -> Vec<(&'static str, Note, RenderOptions)> {
+/// A synthetic picture for the background image case: a 300 × 200 sheet with a soft colour
+/// gradient, a dark grid every 20 pixels, a disc and a transparent band.
+fn worksheet_picture() -> Picture {
+    let (width, height) = (300u32, 200u32);
+    let pixels = (0..height)
+        .flat_map(|y| (0..width).map(move |x| (x, y)))
+        .flat_map(|(x, y)| {
+            let (dx, dy) = (x as f32 - 210.0, y as f32 - 90.0);
+            if x % 20 == 0 || y % 20 == 0 {
+                [40, 50, 90, 255]
+            } else if dx * dx + dy * dy < 45.0 * 45.0 {
+                [220, 60, 50, 255]
+            } else if (120..150).contains(&y) {
+                [30, 160, 90, 90]
+            } else {
+                [
+                    (200 + x * 50 / width) as u8,
+                    (215 + y * 30 / height) as u8,
+                    235,
+                    255,
+                ]
+            }
+        })
+        .collect();
+    let image = Image {
+        width,
+        height,
+        pixels,
+    };
+    Picture::decode(encode_png(&image).expect("encode")).expect("decode")
+}
+
+/// Seyès paper under a turned, translucent worksheet reaching beyond the left and bottom
+/// edges, with writing over it.
+fn background_image() -> (Note, Picture) {
+    let mut n = small_page(
+        bg(Paper::Cream, Template::Seyes, false),
+        vec![
+            stroke(
+                Tool::Ballpoint,
+                NAVY,
+                60.0,
+                cursive(2600.0, 3600.0, 600.0, 7, 41, 0.7),
+            ),
+            stroke(
+                Tool::Highlighter,
+                YELLOW_MARKER,
+                500.0,
+                segment((900.0, 2400.0), (6500.0, 2400.0), 1.0),
+            ),
+        ],
+    );
+    n.background_image = Some(BackgroundImage {
+        name: "fiche.png".into(),
+        pdf_page: None,
+        rect: ImageRect {
+            x: -800.0,
+            y: 1200.0,
+            width: 6000.0,
+            height: 9000.0,
+        },
+        quarter_turns: 1,
+        opacity: 0.85,
+    });
+    (n, worksheet_picture())
+}
+
+fn cases() -> Vec<(&'static str, Note, RenderOptions, Option<Picture>)> {
     let plain = RenderOptions {
         scale: 0.04,
         background: false,
     };
+    let (with_image, picture) = background_image();
     vec![
-        ("tools", tools_sheet(), at(0.05)),
-        ("tools_close_up", tools_close_up(), at(0.2)),
-        ("slate_seyes_texture", slate(), at(0.06)),
-        ("lined_white", lined_white(), at(0.06)),
-        ("seyes_cream_texture", seyes_cream(), at(0.06)),
-        ("grid_kraft_texture", grid_kraft(), at(0.06)),
-        ("millimetric_white", millimetric_white(), at(0.06)),
-        ("dotted_custom", dotted_custom(), at(0.06)),
-        ("music_cream", music_cream(), at(0.06)),
-        ("a4_landscape_lined_texture", a4_landscape(), at(0.025)),
-        ("a4_portrait_hidden_layer", a4_portrait_layers(), at(0.025)),
-        ("background_off", background_off(), plain),
+        ("tools", tools_sheet(), at(0.05), None),
+        ("tools_close_up", tools_close_up(), at(0.2), None),
+        ("slate_seyes_texture", slate(), at(0.06), None),
+        ("lined_white", lined_white(), at(0.06), None),
+        ("seyes_cream_texture", seyes_cream(), at(0.06), None),
+        ("grid_kraft_texture", grid_kraft(), at(0.06), None),
+        ("millimetric_white", millimetric_white(), at(0.06), None),
+        ("dotted_custom", dotted_custom(), at(0.06), None),
+        ("music_cream", music_cream(), at(0.06), None),
+        (
+            "a4_landscape_lined_texture",
+            a4_landscape(),
+            at(0.025),
+            None,
+        ),
+        (
+            "a4_portrait_hidden_layer",
+            a4_portrait_layers(),
+            at(0.025),
+            None,
+        ),
+        ("background_off", background_off(), plain, None),
+        ("background_image", with_image, at(0.06), Some(picture)),
     ]
+}
+
+fn render_case(note: &Note, options: &RenderOptions, picture: Option<&Picture>) -> Image {
+    render_note(NoteView::new(note, picture), options).expect("render")
 }
 
 fn golden_dir() -> PathBuf {
@@ -799,8 +888,8 @@ fn golden_images_match() {
          {MAX_DIFFERING_SHARE}, line {MAX_LINE_SHARE})",
         "image", "size", "mean diff", "share >16", "worst line"
     );
-    for (name, note, options) in cases() {
-        let image = render_note(&note, &options).expect("render");
+    for (name, note, options, picture) in cases() {
+        let image = render_case(&note, &options, picture.as_ref());
         let path = dir.join(format!("{name}.png"));
         let reference = match fs::read(&path).map(|bytes| decode_png(&bytes)) {
             Ok(Ok(reference)) => reference,
@@ -860,8 +949,8 @@ fn regenerate_golden_images() {
     let dir = golden_dir();
     fs::create_dir_all(&dir).expect("golden dir");
     let mut total = 0;
-    for (name, note, options) in cases() {
-        let image = render_note(&note, &options).expect("render");
+    for (name, note, options, picture) in cases() {
+        let image = render_case(&note, &options, picture.as_ref());
         let bytes = encode_png(&image).expect("encode");
         total += bytes.len();
         fs::write(dir.join(format!("{name}.png")), &bytes).expect("write");
@@ -879,7 +968,7 @@ fn regenerate_golden_images() {
 /// the image: here the vertical margin of the Seyès ruling (about 0.16 % of the pixels).
 #[test]
 fn a_lost_one_pixel_line_is_caught() {
-    let (_, note, options) = cases()
+    let (_, note, options, _) = cases()
         .into_iter()
         .find(|(name, ..)| *name == "seyes_cream_texture")
         .expect("seyes_cream_texture case");

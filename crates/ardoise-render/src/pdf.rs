@@ -1,6 +1,8 @@
 //! PDF export (SPEC §4.6): one page per note, strokes as vector paths filled with the
 //! non-zero rule ([`crate::look`]), opacity and blending through ExtGState (`/ca`, `/BM`), the
-//! background as for SVG (paper, template shapes, texture as a JPEG image).
+//! background as for SVG (paper, template shapes, texture as a JPEG image) and the background
+//! image as an image XObject: a JPEG passed through as it is (`/DCTDecode`), other pixels
+//! deflated, with a soft mask (`/SMask`) for their transparency.
 //!
 //! Page sizes: `Actual` is the note's own size (1 device unit = 72 / 2540 pt); `A4` is
 //! 210 × 297 mm in the note's orientation, the note scaled to fit and centred (the margins
@@ -8,13 +10,13 @@
 
 use std::collections::HashMap;
 
-use ardoise_core::note::Note;
 use pdf_writer::types::BlendMode;
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, TextStr};
 
 use crate::RenderError;
 use crate::background::{Shape, VectorBackground};
 use crate::look::{Blend, UNITS_PER_INCH};
+use crate::picture::{DctColor, NoteView, PlacedPicture};
 use crate::svg::TEXTURE_QUALITY;
 use crate::vector::Scene;
 
@@ -56,8 +58,12 @@ impl Default for PdfOptions {
     }
 }
 
-/// A PDF document with one page per note, in order.
-pub fn notes_to_pdf(notes: &[&Note], options: &PdfOptions) -> Result<Vec<u8>, RenderError> {
+/// A PDF document with one page per note, in order (`&Note`s, or [`NoteView`]s for notes
+/// with a background image).
+pub fn notes_to_pdf<'a, V>(notes: &[V], options: &PdfOptions) -> Result<Vec<u8>, RenderError>
+where
+    V: Into<NoteView<'a>> + Copy,
+{
     if notes.is_empty() {
         return Err(RenderError::Encode("no note to put in the PDF".into()));
     }
@@ -71,13 +77,14 @@ pub fn notes_to_pdf(notes: &[&Note], options: &PdfOptions) -> Result<Vec<u8>, Re
     let pages: Vec<Ref> = notes.iter().map(|_| next.bump()).collect();
     pdf.catalog(catalog).pages(tree);
     pdf.pages(tree).kids(pages.iter().copied()).count(count);
-    for (note, &page) in notes.iter().zip(&pages) {
-        write_page(&mut pdf, &mut next, tree, page, note, options)?;
+    for (&view, &page) in notes.iter().zip(&pages) {
+        write_page(&mut pdf, &mut next, tree, page, view.into(), options)?;
     }
     let mut document = pdf.document_info(info);
     document.producer(TextStr("Ardoise"));
-    if let [note] = notes {
-        let title = note.title.trim();
+    if let [view] = notes {
+        let view: NoteView<'_> = (*view).into();
+        let title = view.note.title.trim();
         if !title.is_empty() {
             document.title(TextStr(title));
         }
@@ -153,6 +160,16 @@ impl Painter {
 
     /// Sets the fill colour, opacity and blending for the next fill.
     fn style(&mut self, rgb: [u8; 3], opacity: f32, blend: Blend) {
+        self.alpha(opacity, blend);
+        if self.rgb != Some(rgb) {
+            let [r, g, b] = rgb.map(|c| f32::from(c) / 255.0);
+            self.content.set_fill_rgb(r, g, b);
+            self.rgb = Some(rgb);
+        }
+    }
+
+    /// Sets the opacity and blending (of fills and images) for what is painted next.
+    fn alpha(&mut self, opacity: f32, blend: Blend) {
         let opacity = if opacity.is_finite() {
             opacity.clamp(0.0, 1.0)
         } else {
@@ -166,11 +183,25 @@ impl Painter {
                 .set_parameters(Name(format!("G{index}").as_bytes()));
             self.state = key;
         }
-        if self.rgb != Some(rgb) {
-            let [r, g, b] = rgb.map(|c| f32::from(c) / 255.0);
-            self.content.set_fill_rgb(r, g, b);
-            self.rgb = Some(rgb);
-        }
+    }
+
+    /// The background image (the XObject `/Im1`), with its opacity, at its place. The page is
+    /// already clipped to the note.
+    fn picture(&mut self, placed: &PlacedPicture<'_>) {
+        // Outside the saved state, so that the state this painter tracks stays the real one.
+        self.alpha(placed.opacity, Blend::Normal);
+        let (w, h) = (
+            placed.picture.width() as f32,
+            placed.picture.height() as f32,
+        );
+        let [a, b, c, d, e, f] = placed.matrix;
+        // An image fills the unit square with its first row at the top: (s, t) is the pixel
+        // (s w, (1 - t) h), which the image's own map then puts on the page.
+        self.content.save_state();
+        self.content
+            .transform([a * w, b * w, -c * h, -d * h, c * h + e, d * h + f]);
+        self.content.x_object(Name(b"Im1"));
+        self.content.restore_state();
     }
 
     fn shape(&mut self, shape: Shape) {
@@ -255,14 +286,14 @@ fn write_page(
     next: &mut Ref,
     tree: Ref,
     page_id: Ref,
-    note: &Note,
+    view: NoteView<'_>,
     options: &PdfOptions,
 ) -> Result<(), RenderError> {
-    let (width, height) = (note.page.width, note.page.height);
+    let (width, height) = (view.note.page.width, view.note.page.height);
     if width == 0 || height == 0 {
         return Err(RenderError::Size { width, height });
     }
-    let scene = Scene::of(note, options.background);
+    let scene = Scene::of(view, options.background);
     let place = Placement::of(scene.width, scene.height, options.page);
 
     let mut painter = Painter::new();
@@ -281,6 +312,9 @@ fn write_page(
     painter.content.end_path();
     if let Some(background) = &scene.background {
         painter.background(background, scene.width, scene.height);
+    }
+    if let Some(placed) = &scene.picture {
+        painter.picture(placed);
     }
     for fill in scene.fills() {
         painter.style(fill.rgb, fill.flat_opacity(), fill.blend);
@@ -343,6 +377,10 @@ fn write_page(
         }
         None => None,
     };
+    let picture = match &scene.picture {
+        Some(placed) => Some(write_picture(pdf, next, placed)?),
+        None => None,
+    };
 
     let mut page = pdf.page(page_id);
     page.parent(tree)
@@ -360,12 +398,79 @@ fn write_page(
         }
         dict.finish();
     }
-    if let Some(id) = texture {
-        resources.x_objects().pair(Name(b"Im0"), id);
+    if texture.is_some() || picture.is_some() {
+        let mut objects = resources.x_objects();
+        if let Some(id) = texture {
+            objects.pair(Name(b"Im0"), id);
+        }
+        if let Some(id) = picture {
+            objects.pair(Name(b"Im1"), id);
+        }
+        objects.finish();
     }
     resources.finish();
     page.finish();
     Ok(())
+}
+
+/// Writes the background image's XObject (and its soft mask); returns its reference. A JPEG
+/// in grey or colour goes in as it is; anything else as deflated RGB samples, with an 8-bit
+/// soft mask when some pixels are not opaque.
+fn write_picture(
+    pdf: &mut Pdf,
+    next: &mut Ref,
+    placed: &PlacedPicture<'_>,
+) -> Result<Ref, RenderError> {
+    let picture = placed.picture;
+    let (width, height) = (picture.width(), picture.height());
+    let side = |v: u32| i32::try_from(v).map_err(|_| RenderError::Size { width, height });
+    let (w, h) = (side(width)?, side(height)?);
+    let id = next.bump();
+    if let Some(color) = picture.dct() {
+        let mut image = pdf.image_xobject(id, picture.bytes());
+        image.filter(Filter::DctDecode);
+        image.width(w);
+        image.height(h);
+        match color {
+            DctColor::Gray => image.color_space().device_gray(),
+            DctColor::Rgb => image.color_space().device_rgb(),
+        }
+        image.bits_per_component(8);
+        image.interpolate(true);
+        image.finish();
+        return Ok(id);
+    }
+    let pixels = picture.image().pixels.as_chunks::<4>().0;
+    let rgb: Vec<u8> = pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let mask = if pixels.iter().any(|p| p[3] != 255) {
+        let alpha: Vec<u8> = pixels.iter().map(|p| p[3]).collect();
+        let mask_id = next.bump();
+        let data = miniz_oxide::deflate::compress_to_vec_zlib(&alpha, DEFLATE_LEVEL);
+        let mut mask = pdf.image_xobject(mask_id, &data);
+        mask.filter(Filter::FlateDecode);
+        mask.width(w);
+        mask.height(h);
+        mask.color_space().device_gray();
+        mask.bits_per_component(8);
+        mask.interpolate(true);
+        mask.finish();
+        Some(mask_id)
+    } else {
+        None
+    };
+    let data = miniz_oxide::deflate::compress_to_vec_zlib(&rgb, DEFLATE_LEVEL);
+    let mut image = pdf.image_xobject(id, &data);
+    image.filter(Filter::FlateDecode);
+    image.width(w);
+    image.height(h);
+    image.color_space().device_rgb();
+    image.bits_per_component(8);
+    image.interpolate(true);
+    if let Some(mask_id) = mask {
+        image.s_mask(mask_id);
+    }
+    image.finish();
+    Ok(id)
 }
 
 #[cfg(test)]
@@ -409,7 +514,7 @@ mod tests {
     #[test]
     fn no_note_no_pdf() {
         assert!(matches!(
-            notes_to_pdf(&[], &PdfOptions::default()),
+            notes_to_pdf::<NoteView<'_>>(&[], &PdfOptions::default()),
             Err(RenderError::Encode(_))
         ));
     }

@@ -11,11 +11,12 @@
 //! [`PageCanvas::prepare_stroke`]) and send only that region on
 //! ([`PageCanvas::write_rgba_rect`]).
 
-use ardoise_core::note::{Note, PageSize};
+use ardoise_core::note::PageSize;
 use ardoise_ink::Stroke;
 use tiny_skia::{Color, Pixmap, Rect};
 
 use crate::ink::{InkPainter, Prepared};
+use crate::picture::{self, NoteView};
 use crate::{Image, MAX_SIDE, RenderError, background, image_from};
 
 /// A rectangle of pixels: columns `x .. x + width`, rows `y .. y + height`.
@@ -108,7 +109,8 @@ impl PreparedStroke {
 /// What is under the strokes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Backdrop {
-    /// The note's paper colour, template and texture (`RenderOptions::background` on).
+    /// The note's paper colour, template and texture, and its background image when the view
+    /// has its pixels (`RenderOptions::background` on).
     Paper,
     /// A plain white page (`RenderOptions::background` off).
     White,
@@ -137,9 +139,16 @@ pub struct PageCanvas {
 }
 
 impl PageCanvas {
-    /// The background of `note` (nothing for [`Backdrop::Transparent`]) on a page of
-    /// [`image_size`] pixels, at most 16 384 px a side.
-    pub fn new(note: &Note, scale: f32, backdrop: Backdrop) -> Result<Self, RenderError> {
+    /// The background of the note (nothing for [`Backdrop::Transparent`]; with
+    /// [`Backdrop::Paper`], its background image over the paper when the view has its pixels)
+    /// on a page of [`image_size`] pixels, at most 16 384 px a side.
+    pub fn new<'a>(
+        view: impl Into<NoteView<'a>>,
+        scale: f32,
+        backdrop: Backdrop,
+    ) -> Result<Self, RenderError> {
+        let view = view.into();
+        let note = view.note;
         let (width, height) = image_size(note.page, scale);
         let size_error = RenderError::Size { width, height };
         if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
@@ -149,6 +158,9 @@ impl PageCanvas {
         let dark = match backdrop {
             Backdrop::Paper => {
                 background::paint(&mut pixmap, &note.background, scale);
+                if let Some(placed) = view.placed() {
+                    picture::paint(&mut pixmap, &placed, scale);
+                }
                 background::is_dark(note.background.paper)
             }
             Backdrop::White => {
@@ -352,7 +364,7 @@ impl PageCanvas {
 mod tests {
     use super::*;
     use crate::{RenderOptions, drawing_order, render_note, render_note_transparent};
-    use ardoise_core::note::{Background, Layer, Origin, Paper, Template, Timing};
+    use ardoise_core::note::{Background, Layer, Note, Origin, Paper, Template, Timing};
     use ardoise_ink::{Point, Rgba, Tool};
 
     const PAGE: PageSize = PageSize {

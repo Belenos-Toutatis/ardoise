@@ -1,13 +1,13 @@
 //! SVG export (SPEC §4.6): the page in millimetres, coordinates in device units (10 µm), one
 //! `<path>` per fill of each visible stroke ([`crate::look`]), each note layer as an Inkscape
-//! layer. Opens in Inkscape and in browsers.
+//! layer; the background image as an `<image>` holding its file (PNG or JPEG) in a data URI,
+//! placed by a matrix and clipped to the page. Opens in Inkscape and in browsers.
 
 use std::fmt::Write;
 
-use ardoise_core::note::Note;
-
 use crate::background::{Mark, Shape, VectorBackground};
 use crate::look::{Blend, Fill};
+use crate::picture::{NoteView, PlacedPicture};
 use crate::vector::Scene;
 
 /// JPEG quality of the embedded paper texture (a faint grain).
@@ -26,10 +26,14 @@ impl Default for SvgOptions {
     }
 }
 
-/// The note as an SVG document.
-pub fn note_to_svg(note: &Note, options: &SvgOptions) -> String {
-    let scene = Scene::of(note, options.background);
-    let mut out = String::with_capacity(4096 + scene.fills().count() * 512);
+/// The note as an SVG document (with its background image when the view has its pixels and
+/// the background is on).
+pub fn note_to_svg<'a>(view: impl Into<NoteView<'a>>, options: &SvgOptions) -> String {
+    let view = view.into();
+    let note = view.note;
+    let scene = Scene::of(view, options.background);
+    let image_len = scene.picture.map_or(0, |p| p.picture.bytes().len() * 4 / 3);
+    let mut out = String::with_capacity(4096 + scene.fills().count() * 512 + image_len);
     let (w, h) = (scene.width, scene.height);
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
     out.push_str(
@@ -51,7 +55,7 @@ pub fn note_to_svg(note: &Note, options: &SvgOptions) -> String {
         let _ = writeln!(out, "<title>{title}</title>");
     }
     if let Some(background) = &scene.background {
-        write_background(&mut out, background, w, h);
+        write_background(&mut out, background, scene.picture.as_ref(), w, h);
     }
     for layer in &scene.layers {
         let label = match &layer.name {
@@ -72,8 +76,14 @@ pub fn note_to_svg(note: &Note, options: &SvgOptions) -> String {
     out
 }
 
-/// The paper, its texture and the template, in a locked Inkscape layer.
-fn write_background(out: &mut String, background: &VectorBackground, w: f32, h: f32) {
+/// The paper, its texture, the template and the background image, in a locked Inkscape layer.
+fn write_background(
+    out: &mut String,
+    background: &VectorBackground,
+    picture: Option<&PlacedPicture<'_>>,
+    w: f32,
+    h: f32,
+) {
     out.push_str(
         "<g id=\"background\" inkscape:groupmode=\"layer\" inkscape:label=\"Background\" \
          sodipodi:insensitive=\"true\">\n",
@@ -119,7 +129,59 @@ fn write_background(out: &mut String, background: &VectorBackground, w: f32, h: 
     if style.is_some() {
         out.push_str("</g>\n");
     }
+    if let Some(picture) = picture {
+        write_picture(out, picture, w, h);
+    }
     out.push_str("</g>\n");
+}
+
+/// The background image: its stored pixels (`width × height` user units) mapped onto the page
+/// by its matrix, clipped to the page (it may reach beyond it).
+fn write_picture(out: &mut String, placed: &PlacedPicture<'_>, w: f32, h: f32) {
+    let picture = placed.picture;
+    let _ = writeln!(
+        out,
+        "<clipPath id=\"page-clip\"><rect width=\"{}\" height=\"{}\"/></clipPath>",
+        number(w),
+        number(h)
+    );
+    out.push_str("<g clip-path=\"url(#page-clip)\">\n");
+    let matrix = placed
+        .matrix
+        .iter()
+        .map(|&v| precise(v))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let _ = write!(
+        out,
+        "<image width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\" \
+         transform=\"matrix({matrix})\"",
+        picture.width(),
+        picture.height()
+    );
+    write_opacity(out, "opacity", placed.opacity);
+    let _ = writeln!(
+        out,
+        " xlink:href=\"data:{};base64,{}\"/>",
+        picture.format().mime(),
+        base64(picture.bytes())
+    );
+    out.push_str("</g>\n");
+}
+
+/// `value` with up to six decimals (a matrix's scale factors are small numbers), no trailing
+/// zeros, `0` for anything not finite.
+fn precise(value: f32) -> String {
+    if !value.is_finite() {
+        return "0".into();
+    }
+    let text = format!("{value:.6}");
+    let text = trim_decimals(&text);
+    if text == "-0" {
+        "0".into()
+    } else {
+        text.into()
+    }
 }
 
 fn write_mark(out: &mut String, mark: &Mark) {
@@ -247,7 +309,7 @@ fn base64(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ardoise_core::note::{Background, Layer, Origin, PageSize, Paper, Template, Timing};
+    use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Template, Timing};
     use ardoise_ink::{Point, Rgba, Stroke, Tool};
 
     fn note(strokes: Vec<Stroke>, background: Background) -> Note {

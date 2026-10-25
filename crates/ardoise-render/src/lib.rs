@@ -5,8 +5,9 @@
 //! exports and the thumbnails. Every format draws the same thing (SPEC §6.2):
 //!
 //! 1. the background ([`background`]): paper colour, template in millimetres, optional paper
-//!    texture; or plain white (transparent for [`render_note_transparent`], SVG and PDF) when
-//!    the background is off;
+//!    texture, then the note's background image ([`picture`]) when the renderer is given its
+//!    pixels ([`NoteView`]); or plain white (transparent for [`render_note_transparent`], SVG
+//!    and PDF) when the background is off;
 //! 2. the strokes of visible layers, bottom layer first and in note order within a layer
 //!    ([`drawing_order`]), each filled from [`ardoise_ink::outline`] with its tool's look
 //!    ([`look`]): with tiny-skia and anti-aliasing for images ([`render_note`], [`ink`]), as
@@ -26,6 +27,7 @@ mod jpeg;
 pub mod look;
 mod noise;
 mod pdf;
+pub mod picture;
 mod svg;
 mod vector;
 
@@ -38,6 +40,7 @@ pub use canvas::{Backdrop, PageCanvas, PixelRect, PreparedStroke, image_size};
 pub use clipboard::{ClipboardImage, clipboard_image, clipboard_image_at};
 pub use look::{Blend, Fill, Grain, Look};
 pub use pdf::{PdfOptions, PdfPage, notes_to_pdf};
+pub use picture::{NoteView, Picture, PictureError, PictureFormat, StoredImage};
 pub use svg::{SvgOptions, note_to_svg};
 
 /// Smallest and largest resolution of the image exports, in dots per inch.
@@ -57,7 +60,8 @@ const MAX_SIDE: u32 = 16_384;
 pub struct RenderOptions {
     /// Pixels per device unit (10 µm). 0.04 gives 1 px = 0.25 mm (Inkspace's previews).
     pub scale: f32,
-    /// Draw the paper colour, template and texture; otherwise a plain white page.
+    /// Draw the paper colour, template, texture and background image; otherwise a plain white
+    /// page.
     pub background: bool,
 }
 
@@ -113,27 +117,31 @@ pub enum RenderError {
     Frame(String),
 }
 
-/// Renders `note` to an image of `page × scale` pixels (each side rounded, at most
-/// 16 384 px). Strokes on hidden layers are not drawn; a stroke whose layer index has no
-/// layer entry is drawn (above the others) rather than lost.
-pub fn render_note(note: &Note, options: &RenderOptions) -> Result<Image, RenderError> {
+/// Renders a note (`&Note`, or a [`NoteView`] with its background image's pixels) to an image
+/// of `page × scale` pixels (each side rounded, at most 16 384 px). Strokes on hidden layers
+/// are not drawn; a stroke whose layer index has no layer entry is drawn (above the others)
+/// rather than lost.
+pub fn render_note<'a>(
+    view: impl Into<NoteView<'a>>,
+    options: &RenderOptions,
+) -> Result<Image, RenderError> {
     let backdrop = if options.background {
         Backdrop::Paper
     } else {
         Backdrop::White
     };
-    render(note, options.scale, backdrop)
+    render(view.into(), options.scale, backdrop)
 }
 
 /// Renders `note` like [`render_note`] without any paper: the strokes on a transparent page,
 /// alpha kept (PNG with a transparent background).
 pub fn render_note_transparent(note: &Note, scale: f32) -> Result<Image, RenderError> {
-    render(note, scale, Backdrop::Transparent)
+    render(note.into(), scale, Backdrop::Transparent)
 }
 
-fn render(note: &Note, scale: f32, backdrop: Backdrop) -> Result<Image, RenderError> {
-    let mut canvas = PageCanvas::new(note, scale, backdrop)?;
-    for stroke in visible_strokes(note) {
+fn render(view: NoteView<'_>, scale: f32, backdrop: Backdrop) -> Result<Image, RenderError> {
+    let mut canvas = PageCanvas::new(view, scale, backdrop)?;
+    for stroke in visible_strokes(view.note) {
         canvas.draw_stroke(stroke);
     }
     Ok(canvas.to_image())
@@ -320,10 +328,15 @@ pub fn decode_png(bytes: &[u8]) -> Result<Image, RenderError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Origin, Paper, Template, Timing};
     use ardoise_ink::{Point, Rgba, Tool};
+
+    /// An empty note on a small white page.
+    pub(crate) fn blank_note() -> Note {
+        note(SMALL, Background::default(), vec![])
+    }
 
     fn note(page: PageSize, background: Background, strokes: Vec<Stroke>) -> Note {
         Note {
