@@ -87,11 +87,13 @@ export const journeys = [
         await search(app, '');
         await app.click('.topbar button', l('settings.title'));
         await app.waitFor(`document.querySelector('[data-slot="recognizers"] li') !== null`, 'the installed recognizers');
-        await app.waitFor(
-          `document.querySelector('[data-slot="status"]')?.textContent === ${j(l('handwriting.status.idle').replace('{total}', '8'))}`,
-          'every demo note read',
-          60_000,
-        );
+        const idle = l('handwriting.status.idle').replace('{total}', '8');
+        try {
+          await app.waitFor(`document.querySelector('[data-slot="status"]')?.textContent === ${j(idle)}`, 'every demo note read', 60_000);
+        } catch (error) {
+          const shown = await app.evaluate(`document.querySelector('[data-slot="status"]')?.textContent ?? null`);
+          throw new Error(`${error.message}: the status says ${j(shown)}, expected ${j(idle)}`);
+        }
         await app.click('.topbar button', l('settings.title'));
       });
 
@@ -99,7 +101,7 @@ export const journeys = [
         await search(app, 'lumiere');
         await onlyTheOpticsNote(app, 'the note to open', 15_000);
         await app.click('.note-card .card-open');
-        await app.waitFor(`document.querySelector('.editor') !== null`, 'the editor');
+        await app.waitFor(`document.querySelector('.editor .toolbar') !== null`, 'the editor and its toolbar', 30_000);
         await app.click('.toolbar button', l('editor.export.button'));
         await app.waitFor(`document.querySelector('[role="dialog"] .text-export') !== null`, 'the text export of the dialog');
         await app.evaluate(`window.__ardoiseE2eSavePath = ${j(txt)}`);

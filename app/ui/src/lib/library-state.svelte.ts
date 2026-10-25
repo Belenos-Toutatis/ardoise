@@ -3,7 +3,7 @@
  * selection, and every operation on notes (each followed by a refresh). Components read it and
  * call its methods; the pure parts are in `library-logic.ts`.
  */
-import { api, errorMessage, onHandwritingStatus, onLibraryChanged } from './api';
+import { api, errorMessage, followHandwritingStatus, onLibraryChanged } from './api';
 import type { HandwritingHit, IndexStatus } from './handwriting';
 import { currentLocale, t } from './i18n.svelte';
 import {
@@ -94,30 +94,20 @@ export class LibraryState {
   start(): () => void {
     let stopped = false;
     let unlisten: (() => void) | null = null;
-    let unlistenHandwriting: (() => void) | null = null;
     void this.refresh();
     void onLibraryChanged(() => void this.refresh()).then((stop) => {
       if (stopped) stop();
       else unlisten = stop;
     });
-    void api
-      .handwritingStatus()
-      .then((status) => {
-        if (!stopped) this.handwriting ??= status;
-      })
-      .catch(() => {});
     // More notes become searchable as the indexing goes on.
-    void onHandwritingStatus((status) => {
+    const unfollow = followHandwritingStatus((status) => {
       this.handwriting = status;
       if (queryWords(this.#query).length > 0) this.searchHandwritingSoon(false);
-    }).then((stop) => {
-      if (stopped) stop();
-      else unlistenHandwriting = stop;
     });
     return () => {
       stopped = true;
       unlisten?.();
-      unlistenHandwriting?.();
+      unfollow();
       if (this.#searchTimer) clearTimeout(this.#searchTimer);
     };
   }

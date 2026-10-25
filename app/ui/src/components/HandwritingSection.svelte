@@ -5,7 +5,7 @@
    * language (Ardoise never downloads it), and the background indexing with its stop button.
    */
   import { onMount } from 'svelte';
-  import { api, errorMessage, onHandwritingStatus } from '../lib/api';
+  import { api, errorMessage, followHandwritingStatus } from '../lib/api';
   import {
     HANDWRITING_SETTINGS,
     missingRecognizer,
@@ -28,7 +28,9 @@
 
   onMount(() => {
     let alive = true;
-    let unlisten: (() => void) | null = null;
+    const unfollow = followHandwritingStatus((next) => {
+      status = next;
+    });
     api
       .handwritingInfo()
       .then((next) => {
@@ -39,15 +41,9 @@
       .catch((e) => {
         if (alive) error = errorMessage(e);
       });
-    void onHandwritingStatus((next) => {
-      status = next;
-    }).then((stop) => {
-      if (alive) unlisten = stop;
-      else stop();
-    });
     return () => {
       alive = false;
-      unlisten?.();
+      unfollow();
     };
   });
 

@@ -346,6 +346,35 @@ export async function onHandwritingStatus(handler: (status: IndexStatus) => void
 }
 
 /**
+ * Calls `handler` with the indexing status now and at every change, without missing a change
+ * that happens while listening starts. Returns a function that stops.
+ */
+export function followHandwritingStatus(handler: (status: IndexStatus) => void): () => void {
+  let stopped = false;
+  let events = 0;
+  let unlisten: (() => void) | null = null;
+  void onHandwritingStatus((status) => {
+    events += 1;
+    if (!stopped) handler(status);
+  }).then((stop) => {
+    if (stopped) return stop();
+    unlisten = stop;
+    // Read once listening: a status that changed before is not lost, a newer event wins.
+    const before = events;
+    api
+      .handwritingStatus()
+      .then((status) => {
+        if (!stopped && events === before) handler(status);
+      })
+      .catch(() => {});
+  });
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
+}
+
+/**
  * Calls `handler` whenever notes change on disk (another PC through Nextcloud, or this app).
  * Returns a function that stops listening.
  */
