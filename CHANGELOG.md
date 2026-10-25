@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Ajouté (jalon M7 — fonctions en plus)
+
+- Glisser une note vers l'Explorateur, bureau, Word, OneNote ou un e-mail : la poignée qui apparaît sur chaque carte de la bibliothèque dépose une image PNG de la note, nommée comme elle (une image par note quand plusieurs sont sélectionnées), rendue comme l'export PNG dans un dossier temporaire d'Ardoise nettoyé ensuite. Le glisser de cartes vers un classeur est inchangé.
+
 ### Ajouté (jalon M6 — relecture, vidéo et narration)
 
 - Relecture animée dans l'éditeur (bouton « Relecture » ou touche R) : ligne du temps, lecture et pause (Espace), vitesses de 0,25× à 16×, « Supprimer les temps morts » (pauses ramenées à 0,5 s) ; la page reste intacte pendant la relecture. Le calcul du temps est le même que celui des exports vidéo.

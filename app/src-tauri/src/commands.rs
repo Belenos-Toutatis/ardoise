@@ -36,6 +36,11 @@ impl CommandError {
     pub(crate) fn code(&self) -> &'static str {
         self.code
     }
+
+    /// Whether this is the error `code`.
+    pub(crate) fn is_code(&self, code: &str) -> bool {
+        self.code == code
+    }
 }
 
 impl From<SettingsError> for CommandError {

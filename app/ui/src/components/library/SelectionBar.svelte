@@ -75,6 +75,9 @@
     {t('library.selection.clear')}
   </button>
   <p class="selection-help muted small">{t('library.selection.help')}</p>
+  {#if lib.dragOutSupported}
+    <p class="selection-help muted small">{t('library.drag.help')}</p>
+  {/if}
 
   {#if panel === 'move'}
     <div class="selection-panel" role="group" aria-label={t('library.selection.moveTo')}>

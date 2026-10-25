@@ -73,6 +73,13 @@
       "trash": "Move to trash",
       "filterTag": "Show notes tagged {tag}"
     },
+    "drag": {
+      "handle": "Drag to Explorer, Word, an email… (PNG image of the note)",
+      "handleMany": "Drag the {count} selected notes to Explorer, Word, an email… (one PNG image per note)",
+      "preparing": "Preparing the image… keep the button pressed",
+      "preparingMany": "Preparing {count} images… keep the button pressed",
+      "help": "To send the selected notes to Explorer, Word or an email (one PNG image per note), drag them by the handle that appears on a card."
+    },
     "selection": {
       "bar": "Actions on the selection",
       "count": "Selected: {count}",
@@ -422,6 +429,7 @@
     "diagnostic": "the tablet test could not start ({detail})",
     "unexpected": "unexpected error ({detail})",
     "exportFailed": "the export couldn't be written ({detail}); choose another location and check that there is enough space",
+    "dragUnavailable": "dragging to another program isn't possible ({detail})",
     "clipboardUnavailable": "the clipboard isn't available ({detail}); close the program that is using it and try again, or export the image as a PNG",
     "nothingToSplit": "this split would leave nothing on one side; choose an instant or a zone that divides the note into two non-empty parts",
     "nothingToMerge": "at least two notes are needed to assemble them",
