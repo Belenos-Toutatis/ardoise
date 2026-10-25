@@ -1,6 +1,5 @@
-// Proposed end-to-end journey of the handwriting recognition (milestone M7), not wired into
-// run.mjs yet: the integrator adds `...journeys` from this file to the list of run.mjs after
-// merging. Same patterns as journeys.mjs (labels from the translation files, so it runs in French
+// End-to-end journey of the handwriting recognition (milestone M7), run by run.mjs after the
+// main journeys. Same patterns as journeys.mjs (labels from the translation files, so it runs in French
 // and in English).
 //
 // The demo library holds « Cours d'optique », whose ink is the French sentence « la lumière se

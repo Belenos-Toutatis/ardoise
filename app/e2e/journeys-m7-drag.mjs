@@ -1,5 +1,4 @@
-// M7 journey "drag a note out of the library" (not wired into run.mjs: the integrator adds
-// `...dragJourneys` to the list of journeys after merging).
+// M7 journey "drag a note out of the library" (run by run.mjs after the other journeys).
 //
 // The system drag itself (OLE `DoDragDrop`) needs the real mouse button to be down, which the
 // DevTools protocol's synthetic mouse events do not give: the app then cancels the drag at once

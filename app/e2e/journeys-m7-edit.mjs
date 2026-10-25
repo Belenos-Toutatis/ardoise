@@ -1,6 +1,5 @@
 // Milestone M7, part "edit": straighten shapes, then back to the original. Same pattern as
-// journeys.mjs (labels from the translation files); not wired into run.mjs yet: the integrator
-// adds `...editJourneys` to the list of journeys after merging.
+// journeys.mjs (labels from the translation files); run by run.mjs after the main journeys.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

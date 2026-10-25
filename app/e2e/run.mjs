@@ -12,7 +12,13 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, wr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { journeys } from './journeys.mjs';
+import { journeys as mainJourneys } from './journeys.mjs';
+import { dragJourneys } from './journeys-m7-drag.mjs';
+import { editJourneys } from './journeys-m7-edit.mjs';
+import { journeys as handwritingJourneys } from './journeys-m7-hwr.mjs';
+
+// Milestone M7 journeys live in files of their own.
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...dragJourneys];
 
 const exe = process.argv[2];
 if (!exe) {
