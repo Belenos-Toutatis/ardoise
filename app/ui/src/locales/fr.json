@@ -50,7 +50,7 @@
     "tabletNone": "Aucune tablette enregistrée",
     "tabletState": "Ouvrir ou fermer le panneau de la tablette",
     "search": "Rechercher une note",
-    "searchPlaceholder": "Rechercher (titre, étiquette)…",
+    "searchPlaceholder": "Rechercher (titre, étiquette, écriture)…",
     "sort": "Trier les notes",
     "sortOptions": {
       "date-desc": "Date : la plus récente d'abord",
@@ -462,7 +462,10 @@
     "noNarration": "Cette note n'a pas de narration.",
     "emptyRecording": "Le micro n'a rien enregistré.",
     "noPendingNarration": "Aucun enregistrement n'est en attente.",
-    "openh264RemoveFailed": "Windows utilise encore OpenH264 : fermez puis relancez Ardoise, puis supprimez-le."
+    "openh264RemoveFailed": "Windows utilise encore OpenH264 : fermez puis relancez Ardoise, puis supprimez-le.",
+    "handwritingUnsupported": "la reconnaissance d'écriture n'est disponible que sous Windows",
+    "handwritingNoRecognizer": "aucun module de reconnaissance d'écriture de Windows n'est installé pour cette langue (voir les paramètres)",
+    "handwritingFailed": "la reconnaissance d'écriture a échoué ({detail})"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -1174,5 +1177,64 @@
   "presentation": {
     "title": "Présentation",
     "canvas": "Page projetée {page}"
+  },
+  "handwriting": {
+    "languages": {
+      "fr": "Français",
+      "en": "Anglais"
+    },
+    "search": {
+      "label": "Résultats dans l'écriture manuscrite",
+      "found": "Trouvé dans l'écriture manuscrite : {count}",
+      "open": "Ouvrir « {title} »",
+      "indexing": "La lecture de l'écriture manuscrite est en cours (notes lues : {done} sur {total}) : d'autres résultats peuvent encore apparaître.",
+      "paused": "La lecture de l'écriture manuscrite est en pause pendant le mode direct ou la présentation (notes lues : {done} sur {total}) : la recherche ne voit pas encore toutes les notes.",
+      "stopped": "La lecture de l'écriture manuscrite est arrêtée (notes lues : {done} sur {total}) : reprenez-la dans les paramètres pour chercher dans toutes les notes.",
+      "noRecognizer": "L'écriture manuscrite n'est pas recherchée : aucun module de reconnaissance d'écriture de Windows n'est installé pour cette langue (voir les paramètres).",
+      "unsupported": "La recherche dans l'écriture manuscrite n'est possible que sous Windows."
+    },
+    "settings": {
+      "title": "Reconnaissance d'écriture",
+      "intro": "Ardoise lit votre écriture manuscrite pour la recherche dans la bibliothèque et l'export en texte. Tout se fait sur ce PC, sans connexion, avec la reconnaissance d'écriture de Windows.",
+      "language": "Langue de l'écriture",
+      "auto": "Automatique ({language})",
+      "autoHint": "Automatique : la langue de l'interface si son module est installé sur ce PC, sinon le premier module installé. Ce choix vaut pour tous vos PC.",
+      "installed": "Modules installés sur ce PC",
+      "none": "Aucun",
+      "missing": "Le module d'écriture manuscrite de cette langue ({language}) n'est pas installé dans Windows sur ce PC.",
+      "install": {
+        "fr": "Pour l'ajouter : Paramètres de Windows > Heure et langue > Langue et région ; ajoutez le français s'il n'est pas dans la liste, puis « … » > Options de langue > Écriture manuscrite > Télécharger. Redémarrez ensuite Ardoise. Ardoise ne télécharge rien lui-même.",
+        "en": "Pour l'ajouter : Paramètres de Windows > Heure et langue > Langue et région ; ajoutez l'anglais s'il n'est pas dans la liste, puis « … » > Options de langue > Écriture manuscrite > Télécharger. Redémarrez ensuite Ardoise. Ardoise ne télécharge rien lui-même."
+      },
+      "unsupported": "La reconnaissance d'écriture n'est disponible que sous Windows.",
+      "stop": "Arrêter la lecture",
+      "resume": "Reprendre la lecture",
+      "privacy": "Le texte reconnu reste sur ce PC (dans son dossier local) : il n'est jamais écrit dans vos notes ni synchronisé."
+    },
+    "status": {
+      "idle": "Toutes les notes sont lues (notes : {total}).",
+      "idleFailed": "Notes lues : {done} sur {total} ; {failed} n'ont pas pu être lues.",
+      "indexing": "Lecture de l'écriture en cours (notes lues : {done} sur {total}).",
+      "paused": "En pause pendant le mode direct ou la présentation (notes lues : {done} sur {total}).",
+      "stopped": "Lecture arrêtée (notes lues : {done} sur {total}).",
+      "unsupported": "Indisponible : la reconnaissance d'écriture demande Windows.",
+      "noRecognizer": "Aucune note n'est lue : pas de module de reconnaissance pour cette langue.",
+      "noLibrary": "Aucune bibliothèque n'est choisie sur ce PC."
+    },
+    "export": {
+      "title": "Texte reconnu (écriture manuscrite)",
+      "hint": "L'écriture de la note (ou des notes choisies) lue par Windows, en texte brut : chaque note avec son titre, l'une après l'autre. La reconnaissance peut se tromper : relisez le texte.",
+      "save": "Enregistrer en .txt…",
+      "copy": "Copier le texte",
+      "working": "Lecture de l'écriture…",
+      "saved": "Texte enregistré :",
+      "copied": "Texte copié dans le presse-papiers.",
+      "failed": "Le texte n'a pas pu être exporté : {message}",
+      "preview": "Aperçu du texte reconnu",
+      "previewLoading": "Lecture de l'écriture…",
+      "empty": "Aucun texte reconnu dans cette note.",
+      "pickFile": "Enregistrer le texte reconnu",
+      "defaultName": "Texte reconnu"
+    }
   }
 }

@@ -4,6 +4,7 @@
   import { t } from '../../lib/i18n.svelte';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import type { NoteSummary } from '../../lib/note';
+  import HandwritingResults from './HandwritingResults.svelte';
   import NoteCard from './NoteCard.svelte';
   import SelectionBar from './SelectionBar.svelte';
 
@@ -92,6 +93,10 @@
 
   {#if lib.selected.length > 0}
     <SelectionBar {lib} />
+  {/if}
+
+  {#if searching}
+    <HandwritingResults {lib} {onopen} />
   {/if}
 
   {#if lib.listing === null}

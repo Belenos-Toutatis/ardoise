@@ -8,6 +8,31 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Notes (visible layers) and strokes.
+ardoise-core = { path = "../ardoise-core" }
+ardoise-ink = { path = "../ardoise-ink" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+# Accent-blind comparison of words (the reference test, the search of the app).
+unicode-normalization = "0.1"
+
+[target.'cfg(windows)'.dependencies]
+# `Windows.UI.Input.Inking` (InkRecognizerContainer, InkStrokeBuilder); the same version as
+# `ardoise-ble` and `ardoise-media`, so only one copy of the crate is compiled. The collections
+# and numerics crates are the ones `windows` itself uses (it does not re-export them).
+windows = { version = "0.62", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "UI_Input_Inking",
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_WinRT",
+] }
+windows-collections = "0.3"
+windows-numerics = "0.3"
+
+[dev-dependencies]
+serde_json = "1"
 
 [lints]
 workspace = true

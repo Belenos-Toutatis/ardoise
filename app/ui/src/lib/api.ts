@@ -24,6 +24,8 @@ import type {
 } from './video';
 import { mockOpenH264Download, mockVideoExport } from './mock-video';
 import type { NoteOriginal } from './original';
+import type { HandwritingHit, HandwritingInfo, HandwritingSetting, IndexStatus, NoteText } from './handwriting';
+import { mockOnHandwritingStatus } from './mock-handwriting';
 import type {
   AutoExportSettings,
   Background,
@@ -329,7 +331,66 @@ export const api = {
   /** Deletes the library and disallows the fallback. */
   openH264Remove: () => call<OpenH264State>('openh264_remove'),
   setOpenH264Allowed: (allowed: boolean) => call<OpenH264State>('set_openh264_allowed', { allowed }),
+
+  // --- Handwriting recognition (milestone M7; Rust side: handwriting.rs) ----------------------
+
+  /** The recognizers of this PC, the language setting and the language it gives, the indexing. */
+  handwritingInfo: () => call<HandwritingInfo>('handwriting_info'),
+  /** Sets the recognition language (shared by every PC) and indexes again. */
+  setHandwritingLanguage: (language: HandwritingSetting) =>
+    call<HandwritingInfo>('set_handwriting_language', { language }),
+  handwritingStatus: () => call<IndexStatus>('handwriting_status'),
+  /** The notes whose handwriting has words of `query`, each with an excerpt. */
+  handwritingSearch: (query: string) => call<HandwritingHit[]>('handwriting_search', { query }),
+  /** Stops the background indexing until `handwritingResume`. */
+  handwritingStop: () => call<IndexStatus>('handwriting_stop'),
+  handwritingResume: () => call<void>('handwriting_resume'),
+  /** The recognised text of each source (recognised now when it is not indexed yet). */
+  handwritingText: (sources: ExportSource[]) => call<NoteText[]>('handwriting_text', { sources }),
+  /** Saves the recognised text of `sources`, one note after the other, as UTF-8; returns the path. */
+  exportHandwritingText: (sources: ExportSource[], destination: string) =>
+    call<string>('export_handwriting_text', { sources, destination }),
+  /** Copies the recognised text to the clipboard (Windows; `clipboardUnavailable` elsewhere). */
+  copyHandwritingText: (sources: ExportSource[]) => call<void>('copy_handwriting_text', { sources }),
 };
+
+/**
+ * Calls `handler` at every change of the handwriting indexing (progress, pause, end). Returns a
+ * function that stops listening.
+ */
+export async function onHandwritingStatus(handler: (status: IndexStatus) => void): Promise<() => void> {
+  if (!inDesktopApp()) return mockOnHandwritingStatus(handler);
+  return listen<IndexStatus>('handwriting-status', (event) => handler(event.payload));
+}
+
+/**
+ * Calls `handler` with the indexing status now and at every change, without missing a change
+ * that happens while listening starts. Returns a function that stops.
+ */
+export function followHandwritingStatus(handler: (status: IndexStatus) => void): () => void {
+  let stopped = false;
+  let events = 0;
+  let unlisten: (() => void) | null = null;
+  void onHandwritingStatus((status) => {
+    events += 1;
+    if (!stopped) handler(status);
+  }).then((stop) => {
+    if (stopped) return stop();
+    unlisten = stop;
+    // Read once listening: a status that changed before is not lost, a newer event wins.
+    const before = events;
+    api
+      .handwritingStatus()
+      .then((status) => {
+        if (!stopped && events === before) handler(status);
+      })
+      .catch(() => {});
+  });
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
+}
 
 /**
  * Calls `handler` whenever notes change on disk (another PC through Nextcloud, or this app).

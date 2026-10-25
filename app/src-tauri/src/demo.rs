@@ -1,6 +1,8 @@
 //! `ardoise.exe --create-demo-library DIR`: makes DIR a library holding a few synthetic notes,
 //! for demonstrations and end-to-end tests. Everything is generated (deterministic
-//! handwriting-like curves): nothing comes from a real note.
+//! handwriting-like curves): nothing comes from a real note. One note holds a real French
+//! sentence ([`HANDWRITTEN_SENTENCE`]), written with the synthetic glyphs of
+//! `ardoise_hwr::synthetic`, so that the handwriting search finds it by a word.
 
 use std::collections::HashSet;
 use std::f32::consts::TAU;
@@ -12,6 +14,7 @@ use ardoise_core::library::{self, Library};
 use ardoise_core::note::{
     A4_LANDSCAPE, A4_PORTRAIT, Background, Layer, Note, Origin, PageSize, Paper, Template, Timing,
 };
+use ardoise_hwr::synthetic::Hand as Writer;
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 
 use crate::library::{binder_path, slash_path};
@@ -20,6 +23,10 @@ use crate::thumbnails::thumbnail_png;
 /// 2026-09-07 07:30 UTC: the first demo note; the others follow over about four weeks.
 const FIRST_DAY_MS: i64 = 1_788_766_200_000;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// The sentence handwritten in the demo note "Cours d'optique" (none of its words is in a title,
+/// a tag or a binder of the demo library: the search finds it through the handwriting).
+pub const HANDWRITTEN_SENTENCE: &str = "la lumière se propage\nen ligne droite";
 
 const BLACK: Rgba = Rgba::BLACK;
 const BLUE: Rgba = Rgba::rgb(0x51, 0xa7, 0xf9);
@@ -587,6 +594,51 @@ fn demo_notes() -> Vec<DemoNote> {
     note.strokes = hand.strokes;
     notes.push(DemoNote { binder: "", note });
 
+    // 8. A real sentence in handwriting (synthetic glyphs) and a ray of light: the handwriting
+    // search finds this note by its words.
+    let mut note = base_note(
+        8,
+        "Cours d'optique",
+        14,
+        A4_LANDSCAPE,
+        background(Paper::White, Template::Lined, false),
+        &["optique"],
+        &["Calque 1"],
+        Origin::Live,
+    );
+    let writer = Writer {
+        left: 3000.0,
+        baseline: 4800.0,
+        width: 24_000.0,
+        x_height: 420.0,
+        line_gap: 1600.0,
+        seed: 8,
+        jitter: 0.8,
+        tool: Tool::FountainPen,
+        color: BLUE,
+        width_units: 55.0,
+        ..Writer::default()
+    };
+    let mut strokes = writer.write(HANDWRITTEN_SENTENCE);
+    let mut hand = Hand::new(8);
+    hand.t = strokes
+        .iter()
+        .filter_map(|s| s.points.last())
+        .map(|p| p.t + 400)
+        .max()
+        .unwrap_or(400);
+    hand.arrow(
+        pen(Tool::FeltTip, ORANGE, 90.0),
+        (4000.0, 12_500.0),
+        (20_000.0, 9500.0),
+    );
+    strokes.append(&mut hand.strokes);
+    note.strokes = strokes;
+    notes.push(DemoNote {
+        binder: "Classe/3e B",
+        note,
+    });
+
     notes
 }
 
@@ -671,12 +723,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("Démo");
         let report = create_demo_library(&root).unwrap();
-        assert_eq!(report.created.len(), 7);
+        assert_eq!(report.created.len(), 8);
         assert_eq!(report.skipped, 0);
 
         let library = Library::open(&root).unwrap();
         let listing = crate::library::list(&library);
-        assert_eq!(listing.notes.len(), 7);
+        assert_eq!(listing.notes.len(), 8);
         assert!(listing.problems.is_empty());
         assert_eq!(listing.binders, ["Classe", "Classe/3e B", "Perso"]);
         assert_eq!(
@@ -718,12 +770,39 @@ mod tests {
         }
         assert_eq!(tools.len(), Tool::ALL.len(), "{tools:?}");
         assert!(papers.len() >= 5 && templates.len() >= 6);
-        assert_eq!(days.len(), 7);
+        assert_eq!(days.len(), 8);
 
         // Again: nothing added.
         let again = create_demo_library(&root).unwrap();
         assert!(again.created.is_empty());
-        assert_eq!(again.skipped, 7);
+        assert_eq!(again.skipped, 8);
+    }
+
+    #[test]
+    fn the_handwritten_sentence_is_not_in_the_metadata() {
+        let notes = demo_notes();
+        let note = notes
+            .iter()
+            .map(|d| &d.note)
+            .find(|n| n.title == "Cours d'optique")
+            .unwrap();
+        assert!(ardoise_hwr::synthetic::can_write(HANDWRITTEN_SENTENCE));
+        // Every word could only be found in the handwriting.
+        let metadata: Vec<String> = notes
+            .iter()
+            .flat_map(|d| {
+                let mut texts = vec![d.note.title.clone(), d.binder.to_owned()];
+                texts.extend(d.note.tags.iter().cloned());
+                texts
+            })
+            .map(|t| ardoise_hwr::text::fold(&t))
+            .collect();
+        for word in ardoise_hwr::text::folded_words(HANDWRITTEN_SENTENCE) {
+            if word.len() > 2 {
+                assert!(!metadata.iter().any(|m| m.contains(&word)), "{word}");
+            }
+        }
+        assert!(note.strokes.len() > 30);
     }
 
     #[test]

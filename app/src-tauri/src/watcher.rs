@@ -31,8 +31,11 @@ impl LibraryWatch {
     /// is logged and leaves the app without live refresh, never stops it.
     pub fn follow(&self, app: &AppHandle, library: Option<&str>) {
         let app = app.clone();
+        // The handwriting index follows the library, and every change in it.
+        crate::handwriting::refresh(&app);
         let result = self.follow_with(library.map(Path::new), move |changes| {
             let _ = app.emit_to("main", LIBRARY_CHANGED, changes);
+            crate::handwriting::refresh(&app);
         });
         if let Err(error) = result {
             eprintln!("Ardoise: {error}");

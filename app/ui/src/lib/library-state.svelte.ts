@@ -3,8 +3,9 @@
  * selection, and every operation on notes (each followed by a refresh). Components read it and
  * call its methods; the pure parts are in `library-logic.ts`.
  */
-import { api, errorMessage, onLibraryChanged } from './api';
+import { api, errorMessage, followHandwritingStatus, onLibraryChanged } from './api';
 import { dragOutSupported } from './drag-out';
+import type { HandwritingHit, IndexStatus } from './handwriting';
 import { currentLocale, t } from './i18n.svelte';
 import {
   buildBinderTree,
@@ -12,6 +13,7 @@ import {
   mergeTags,
   oldestFirst,
   parseTags,
+  queryWords,
   sameTag,
   sameView,
   visibleNotes,
@@ -22,13 +24,23 @@ import type { FileStamp, LibraryListing, MergeLayout, NoteSummary, TrashEntry } 
 
 const THUMBNAIL_CACHE_SIZE = 400;
 
+/** Pause after a keystroke before the handwriting is searched; tests set it to 0. */
+export const handwritingSearch = { delayMs: 120 };
+
+const NO_HITS: ReadonlyMap<string, HandwritingHit> = new Map();
+
+/** Whether two queries have the same words (case, accents and spaces aside). */
+function sameWords(a: string, b: string): boolean {
+  return queryWords(a).join(' ') === queryWords(b).join(' ');
+}
+
 export class LibraryState {
   listing = $state<LibraryListing | null>(null);
   trash = $state<TrashEntry[]>([]);
   /** Message of the last failed operation, shown in a banner. */
   error = $state<string | null>(null);
   view = $state<LibraryView>({ kind: 'all' });
-  query = $state('');
+  #query = $state('');
   order = $state<SortOrder>('date-desc');
   /** Paths of the selected notes. */
   selected = $state<string[]>([]);
@@ -47,9 +59,20 @@ export class LibraryState {
   private sequence = 0;
   private thumbnails = new Map<string, Promise<string | null>>();
 
+  // Handwriting search (milestone M7): the desktop app says which query words the handwriting
+  // of each note has; the search of titles, tags and binders combines them (`matchesSearch`).
+  /** The background indexing of the handwriting; null until known. */
+  handwriting = $state<IndexStatus | null>(null);
+  #hitsFound = $state.raw<ReadonlyMap<string, HandwritingHit>>(NO_HITS);
+  #hitsQuery = $state('');
+  #searchTimer: ReturnType<typeof setTimeout> | null = null;
+  #searchSequence = 0;
+  /** What the handwriting search found for the current query, by path (none while it runs). */
+  readonly hits = $derived(sameWords(this.#hitsQuery, this.#query) ? this.#hitsFound : NO_HITS);
+
   readonly notes = $derived(this.listing?.notes ?? []);
   readonly tree = $derived(buildBinderTree(this.listing?.binders ?? [], this.notes));
-  readonly visible = $derived(visibleNotes(this.notes, this.view, this.query, this.order, currentLocale()));
+  readonly visible = $derived(visibleNotes(this.notes, this.view, this.#query, this.order, currentLocale(), this.hits));
   readonly selectedNotes = $derived(this.notes.filter((n) => this.selected.includes(n.path)));
   /** The selected notes as the grid shows them; those the search hides come last. */
   readonly selectedDisplayed = $derived.by(() => {
@@ -59,6 +82,16 @@ export class LibraryState {
   });
 
   // --- Loading -------------------------------------------------------------------------------
+
+  /** The search text; changing it searches the handwriting too, after a short pause. */
+  get query(): string {
+    return this.#query;
+  }
+
+  set query(value: string) {
+    this.#query = value;
+    this.searchHandwritingSoon();
+  }
 
   /** Loads the library and starts following changes on disk. Returns the function that stops it. */
   start(): () => void {
@@ -70,10 +103,51 @@ export class LibraryState {
       if (stopped) stop();
       else unlisten = stop;
     });
+    // More notes become searchable as the indexing goes on.
+    const unfollow = followHandwritingStatus((status) => {
+      this.handwriting = status;
+      if (queryWords(this.#query).length > 0) this.searchHandwritingSoon(false);
+    });
     return () => {
       stopped = true;
       unlisten?.();
+      unfollow();
+      if (this.#searchTimer) clearTimeout(this.#searchTimer);
     };
+  }
+
+  /**
+   * Asks the desktop app, after a short pause, what the handwriting has of the query. A typed
+   * query restarts the pause; a change of the library or of the indexing (`restart` false) keeps
+   * a search already planned, so that frequent changes cannot put it off for ever.
+   */
+  private searchHandwritingSoon(restart = true): void {
+    if (this.#searchTimer && !restart) return;
+    if (this.#searchTimer) clearTimeout(this.#searchTimer);
+    this.#searchTimer = null;
+    const query = this.#query;
+    if (queryWords(query).length === 0) {
+      this.#searchSequence += 1;
+      this.#hitsFound = NO_HITS;
+      this.#hitsQuery = '';
+      return;
+    }
+    this.#searchTimer = setTimeout(() => {
+      this.#searchTimer = null;
+      void this.searchHandwriting(this.#query);
+    }, handwritingSearch.delayMs);
+  }
+
+  private async searchHandwriting(query: string): Promise<void> {
+    const mine = ++this.#searchSequence;
+    try {
+      const hits = await api.handwritingSearch(query);
+      if (mine !== this.#searchSequence) return;
+      this.#hitsFound = new Map(hits.map((hit) => [hit.path, hit]));
+      this.#hitsQuery = query;
+    } catch {
+      // No recognition: the search keeps to titles, tags and binders (the notice says why).
+    }
   }
 
   async refresh(): Promise<void> {
@@ -90,6 +164,8 @@ export class LibraryState {
       const view = this.view;
       if (view.kind === 'binder' && !this.hasBinder(view.binder)) this.view = { kind: 'all' };
       if (view.kind === 'tag' && !listing.tags.some((t) => sameTag(t.tag, view.tag))) this.view = { kind: 'all' };
+      // Notes may have moved or changed: their handwriting hits too.
+      if (queryWords(this.#query).length > 0) this.searchHandwritingSoon(false);
     } catch (error) {
       if (mine === this.sequence) this.error = errorMessage(error);
     }
