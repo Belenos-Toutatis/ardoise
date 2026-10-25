@@ -1171,10 +1171,10 @@
       "failed": "Impossible de mettre ce fichier en fond : {message}"
     },
     "fits": {
-      "contain": "Entière dans la page",
-      "cover": "Remplir la page",
-      "stretch": "Étirer à la page",
-      "custom": "Déplacée (recadrage)"
+      "contain": "Entière",
+      "cover": "Pleine page",
+      "stretch": "Étirée",
+      "custom": "Déplacée"
     },
     "library": {
       "open": "Depuis un PDF ou une image…",

@@ -1171,10 +1171,10 @@
       "failed": "This file cannot be put in the background: {message}"
     },
     "fits": {
-      "contain": "Whole, within the page",
+      "contain": "Whole",
       "cover": "Fill the page",
-      "stretch": "Stretch to the page",
-      "custom": "Moved (cropped)"
+      "stretch": "Stretched",
+      "custom": "Moved"
     },
     "library": {
       "open": "From a PDF or an image…",
