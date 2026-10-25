@@ -5,6 +5,7 @@
  */
 import type { InkPoint, Tool } from './ink';
 import type { AutoExportSettings, FileStamp, Note, Rgba, Stroke, TrashEntry } from './note';
+import type { NoteOriginal } from './original';
 
 /** Returned by a mock module for a command it does not handle. */
 export const UNHANDLED = Symbol('unhandled');
@@ -14,6 +15,8 @@ export interface StoredNote {
   stamp: FileStamp;
   /** Relative, `/`-separated; empty for the root. */
   binder: string;
+  /** The ink before the first edit ("Revenir à l'original"), kept by the first save that changes it. */
+  original?: NoteOriginal;
 }
 
 export interface MockLibrary {
@@ -138,7 +141,10 @@ export function notePath(root: string, binder: string, name: string): string {
 function seed(root: string): MockLibrary {
   const library: MockLibrary = { root, notes: new Map(), binders: new Set(['Classe', 'Classe/3e B', 'Perso']), trash: new Map() };
   const add = (binder: string, note: Note) => {
-    library.notes.set(notePath(root, binder, fileName(note)), { note, stamp: freshStamp(), binder });
+    // A tablet note keeps the tablet's page (`original.bin`): its original from the start.
+    const { page, layers, strokes } = JSON.parse(JSON.stringify(note)) as Note;
+    const original = note.origin.kind === 'tablet' ? { source: 'tablet' as const, page, layers, strokes } : undefined;
+    library.notes.set(notePath(root, binder, fileName(note)), { note, stamp: freshStamp(), binder, original });
   };
   add(
     'Classe/3e B',

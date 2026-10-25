@@ -27,6 +27,7 @@
     onexport,
     onreplay,
     onvideo,
+    onstraighten,
   }: {
     tools: ToolSettings;
     customColors: Rgba[];
@@ -54,6 +55,8 @@
     onexport: () => void;
     onreplay: () => void;
     onvideo: () => void;
+    /** "Redresser les formes" on the selection. */
+    onstraighten?: () => void;
   } = $props();
 
   const MODES: { mode: Mode; icon: string }[] = [
@@ -184,6 +187,19 @@
       {/if}
     </div>
     {#if tools.mode === 'select'}
+      <div class="group">
+        <button
+          type="button"
+          class="button small-button"
+          data-action="straighten"
+          disabled={locked || !hasSelection}
+          title={hasSelection ? t('editor.straighten.hint') : t('editor.straighten.disabledHint')}
+          onclick={() => onstraighten?.()}
+        >
+          <span aria-hidden="true">△</span>
+          {t('editor.straighten.button')}
+        </button>
+      </div>
       <p class="group label select-help">{t('editor.selectHelp')}</p>
     {/if}
   {/if}

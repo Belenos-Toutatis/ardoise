@@ -409,6 +409,7 @@
     "noteNewerVersion": "this note was made by a newer version of Ardoise; update Ardoise ({detail})",
     "noteInvalid": "this note holds inconsistent data ({detail})",
     "noteDamaged": "the note file is damaged ({detail})",
+    "originalDamaged": "the original of this note cannot be read ({detail})",
     "notALibrary": "this folder is not an Ardoise library ({detail})",
     "libraryAccess": "the library cannot be read or changed ({detail})",
     "noteConflict": "the note was changed meanwhile, probably on another computer; open it again before changing it ({detail})",
@@ -536,13 +537,21 @@
       "tool": "Ink",
       "width": "Width"
     },
-    "selectHelp": "Lasso: select · Shift+lasso: add · Ctrl+lasso: remove · Esc: deselect all",
+    "selectHelp": "Lasso: select · Shift+lasso: add · Ctrl+lasso: remove · F: straighten shapes · Esc: deselect all",
     "selection": {
       "label": "Selection",
       "count": "Selected strokes: {count}",
       "duplicate": "Duplicate",
       "delete": "Delete",
       "clear": "Deselect"
+    },
+    "straighten": {
+      "button": "Straighten shapes",
+      "hint": "Turns the selected strokes that look like a line, a circle, an ellipse, a rectangle or an arrow into clean shapes (F key). Other strokes, handwriting included, stay as they are.",
+      "disabledHint": "Select strokes with the lasso first, then straighten them.",
+      "doneOne": "1 shape straightened (Ctrl+Z to undo).",
+      "doneMany": "{count} shapes straightened (Ctrl+Z to undo).",
+      "none": "No shape recognised in the selection. Ardoise straightens lines, circles, ellipses, rectangles and arrows at least 1 cm long, drawn clearly enough; the rest stays as it is."
     },
     "page": {
       "label": "Page",
@@ -556,6 +565,22 @@
       "autoCrop": "Crop around the content",
       "manualCrop": "Crop by hand",
       "cropHint": "Draw on the page the rectangle to keep."
+    },
+    "original": {
+      "label": "Original",
+      "button": "Back to the original",
+      "helpTablet": "Get the ink back as it came from the tablet, without your edits.",
+      "helpFirst": "Get the ink back as it was before its first edit in Ardoise.",
+      "none": "No original yet: Ardoise keeps the note's ink as it was when you save its first edit.",
+      "loading": "Looking for the original…",
+      "confirmTitle": "Go back to the original?",
+      "confirmLost": "Your edits of the ink are lost: strokes added, erased, moved, straightened or recoloured, layers, page rotation and cropping.",
+      "confirmKept": "The title, tags, favourite, page background and narration stay as they are.",
+      "confirmUndo": "You can still undo (Ctrl+Z); save to keep the result.",
+      "confirm": "Back to the original",
+      "cancel": "Cancel",
+      "done": "Original ink restored: save to keep it, or Ctrl+Z to undo.",
+      "failed": "The original could not be read: {message}"
     },
     "papers": {
       "white": "White",

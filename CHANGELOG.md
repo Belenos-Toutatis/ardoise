@@ -2,6 +2,11 @@
 
 ## Non publié
 
+### Ajouté (jalon M7 — édition)
+
+- « Redresser les formes » sur la sélection de l'éditeur (bouton de l'outil Sélection, panneau de la sélection ou touche F) : les droites, cercles, ellipses, rectangles (même tournés) et flèches (en un ou plusieurs traits) tracés à main levée deviennent des formes nettes, en une seule étape annulable, avec le même outil, la même couleur et la même épaisseur ; l'écriture et les traits qui ne sont pas clairement une forme ne changent pas, et l'éditeur le dit quand rien n'est reconnu.
+- « Revenir à l'original » dans l'éditeur : l'encre telle qu'elle est arrivée de la tablette, ou telle qu'elle était avant la première modification enregistrée (gardée une fois pour toutes dans la note, `original.ardoise`) ; confirmation qui précise ce qui est perdu (l'encre modifiée) et ce qui reste (titre, étiquettes, fond, narration), une seule étape annulable.
+
 ### Ajouté (jalon M6 — relecture, vidéo et narration)
 
 - Relecture animée dans l'éditeur (bouton « Relecture » ou touche R) : ligne du temps, lecture et pause (Espace), vitesses de 0,25× à 16×, « Supprimer les temps morts » (pauses ramenées à 0,5 s) ; la page reste intacte pendant la relecture. Le calcul du temps est le même que celui des exports vidéo.

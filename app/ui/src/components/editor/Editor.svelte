@@ -15,11 +15,18 @@
    * plays along, and a new one is recorded while the replay runs (`NarrationRecorder`). While it
    * records, the note cannot be renamed, copied or reloaded (the recording is saved into the note
    * at its current path when it stops); a recording that cannot be saved is kept for a retry.
+   *
+   * Milestone M7: "Redresser les formes" straightens the shapes of the selection
+   * (`lib/editor/shapes.ts`, the WebAssembly geometry); "Revenir à l'original" puts back the ink
+   * the note had when it came from the tablet or before its first edit (`note_original`,
+   * `lib/editor/original.ts`). Both are one undoable step, saved like any edit.
    */
   import { untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, type AppState } from '../../lib/api';
   import { loadCustomColors, rememberCustomColor } from '../../lib/editor/colors';
   import { binderOf, diskChange, type DiskChange } from '../../lib/editor/disk';
+  import { revertToOriginal } from '../../lib/editor/original';
+  import { straightenSelection } from '../../lib/editor/shapes';
   import { canRedo, canUndo, commit, createHistory, redo, replacePresent, undo, type History } from '../../lib/editor/history';
   import {
     DEFAULT_TOOLS,
@@ -58,6 +65,7 @@
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
   import type { ExportSource, FileStamp, Note, Rgba, SplitSpec, Stroke } from '../../lib/note';
+  import type { NoteOriginal } from '../../lib/original';
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
   import VideoExportDialog from '../VideoExportDialog.svelte';
@@ -66,6 +74,7 @@
   import { NarrationRecorder } from '../narration/recorder.svelte';
   import Canvas from './Canvas.svelte';
   import LayersPanel from './LayersPanel.svelte';
+  import OriginalPanel from './OriginalPanel.svelte';
   import PagePanel from './PagePanel.svelte';
   import ReplayBar from './ReplayBar.svelte';
   import { ReplayPlayer } from './replay-player.svelte';
@@ -160,6 +169,11 @@
   let video = $state.raw<ExportSource | null>(null);
   /** The video export dialog is exporting: the window must not close under it. */
   let videoRunning = $state(false);
+  /** What "Revenir à l'original" would bring back; null while it is looked for. */
+  let original = $state.raw<NoteOriginal | null>(null);
+  let originalError = $state<string | null>(null);
+  /** Bumped by each look for the original: only the latest answer counts. */
+  let originalRequest = 0;
 
   // Replay mode.
   const player = new ReplayPlayer();
@@ -267,6 +281,8 @@
     exporting = null;
     closeVideo();
     resetReplay();
+    original = null;
+    originalError = null;
     try {
       const [opened, module] = await Promise.all([api.openNote(target), ink ?? loadInk()]);
       if (currentPath !== target) return;
@@ -280,8 +296,29 @@
       targetTitle = opened.note.title;
       conflict = null;
       saveError = null;
+      void refreshOriginal(true);
     } catch (error) {
       if (currentPath === target) loadError = errorMessage(error);
+    }
+  }
+
+  /**
+   * Looks for the note's original. Unless `force`, only while it has none: the first save that
+   * changes the ink of a note keeps one, and it never changes afterwards.
+   */
+  async function refreshOriginal(force = false) {
+    if (!force && original !== null && original.source !== 'none') return;
+    const request = ++originalRequest;
+    const gen = generation;
+    try {
+      const found = await api.noteOriginal(currentPath);
+      if (request !== originalRequest || gen !== generation) return;
+      original = found;
+      originalError = null;
+    } catch (error) {
+      if (request !== originalRequest || gen !== generation) return;
+      original = { source: 'none' };
+      originalError = t('editor.original.failed', { message: errorMessage(error) });
     }
   }
 
@@ -338,6 +375,7 @@
       stamp = next;
       savedNote = present.note;
       notifySaved(target);
+      void refreshOriginal();
       return true;
     } catch (error) {
       if (gen === generation) writeFailed(error);
@@ -399,6 +437,8 @@
         conflict = null;
         disk = null;
         notifySaved(created.path);
+        // The copy has no original until its own first edit.
+        void refreshOriginal(true);
         // The copy has no narration.
         if (replaying) void loadNarration();
         return true;
@@ -607,6 +647,25 @@
     change(duplicateSelection(doc));
   }
 
+  /** "Redresser les formes": one undoable step, or a notice saying why nothing changed. */
+  function straighten() {
+    if (!doc || !ink || split || replaying) return;
+    if (!hasSelection) return showNotice(t('editor.straighten.disabledHint'));
+    const { doc: next, shapes } = straightenSelection(doc, ink);
+    if (shapes === 0) return showNotice(t('editor.straighten.none'));
+    change(next);
+    showNotice(shapes === 1 ? t('editor.straighten.doneOne') : t('editor.straighten.doneMany', { count: shapes }));
+  }
+
+  /** "Revenir à l'original", confirmed: the original's ink, as one undoable step. */
+  function revertOriginal() {
+    if (!doc || !original || original.source === 'none' || split || replaying) return;
+    const next = revertToOriginal(doc, original);
+    if (next === doc) return;
+    change(next);
+    showNotice(t('editor.original.done'));
+  }
+
   // --- Export, copy, split ----------------------------------------------------------------
 
   /** The note as the user sees it, with the title shown in the title field. */
@@ -707,6 +766,7 @@
         split = null;
         showNotice(t('editor.split.done', { title: result.created.title }));
         notifySaved(target);
+        void refreshOriginal();
       } catch (error) {
         if (gen === generation) state.error = errorMessage(error);
       } finally {
@@ -1039,6 +1099,9 @@
       case 'r':
         enterReplay();
         break;
+      case 'f':
+        straighten();
+        break;
     }
   }
 
@@ -1164,6 +1227,7 @@
       onexport={openExport}
       onreplay={toggleReplay}
       onvideo={openVideo}
+      onstraighten={straighten}
     />
     {#if replaying}
       <ReplayBar
@@ -1277,6 +1341,15 @@
                 <button type="button" class="button small-button" onclick={duplicate}>
                   {t('editor.selection.duplicate')}
                 </button>
+                <button
+                  type="button"
+                  class="button small-button"
+                  data-action="straighten-selection"
+                  title={t('editor.straighten.hint')}
+                  onclick={straighten}
+                >
+                  {t('editor.straighten.button')}
+                </button>
                 <button type="button" class="button small-button danger" onclick={() => change(deleteSelection(doc!))}>
                   {t('editor.selection.delete')}
                 </button>
@@ -1295,6 +1368,9 @@
             onautocrop={() => change(autoCrop(doc!))}
             onmanualcrop={() => setMode(tools.mode === 'crop' ? 'select' : 'crop')}
           />
+          {#key currentPath}
+            <OriginalPanel {original} error={originalError} disabled={split !== null} onrevert={revertOriginal} />
+          {/key}
           <LayersPanel
             layers={doc.note.layers}
             active={doc.activeLayer}

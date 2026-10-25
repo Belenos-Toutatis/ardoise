@@ -1,9 +1,19 @@
 /**
- * Browser stand-in for the editor commands (`open_note`, `save_note`, `render_background`), over
- * the demo library of `mock-data.ts`.
+ * Browser stand-in for the editor commands (`open_note`, `save_note`, `note_original`,
+ * `render_background`), over the demo library of `mock-data.ts`.
  */
 import type { Background, FileStamp, Note, OpenedNote, PageSize, Paper, Rgba } from './note';
-import { UNHANDLED, fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, sameStamp } from './mock-data';
+import type { NoteOriginal } from './original';
+import {
+  UNHANDLED,
+  fileName,
+  freshStamp,
+  mockLibrary,
+  notePath,
+  notifyLibraryChanged,
+  sameStamp,
+  type StoredNote,
+} from './mock-data';
 
 /** Notes are plain JSON: a JSON round trip is a deep copy. */
 function copy<T>(value: T): T {
@@ -31,6 +41,23 @@ function checkNote(note: Note): void {
   }
 }
 
+/**
+ * Like `original::keep_original`: the first save that changes the ink keeps the version before
+ * it (never an empty page). A tablet note stands for its `original.bin`.
+ */
+function keepOriginal(entry: StoredNote, next: Note): void {
+  const before = entry.note;
+  if (entry.original || before.strokes.length === 0) return;
+  const ink = (n: Note) => JSON.stringify([n.page, n.layers, n.strokes]);
+  if (ink(before) === ink(next)) return;
+  entry.original = copy({
+    source: before.origin.kind === 'tablet' ? 'tablet' : 'firstVersion',
+    page: before.page,
+    layers: before.layers,
+    strokes: before.strokes,
+  });
+}
+
 export function mockNotesInvoke(command: string, args: Record<string, unknown>): unknown {
   switch (command) {
     case 'open_note': {
@@ -43,6 +70,7 @@ export function mockNotesInvoke(command: string, args: Record<string, unknown>):
       checkNote(args.note as Note);
       if (!sameStamp(entry.stamp, args.stamp as FileStamp)) throw { code: 'noteConflict', message: path };
       const note = copy(args.note as Note);
+      keepOriginal(entry, note);
       // Like `save_in`: the file keeps its own id.
       note.id = entry.note.id;
       note.modified = Date.now();
@@ -50,6 +78,10 @@ export function mockNotesInvoke(command: string, args: Record<string, unknown>):
       entry.stamp = freshStamp(JSON.stringify(note).length);
       notifyLibraryChanged();
       return copy(entry.stamp);
+    }
+    case 'note_original': {
+      const entry = stored(args.path as string);
+      return copy(entry.original ?? { source: 'none' }) satisfies NoteOriginal;
     }
     case 'render_background':
       return backgroundDataUrl(args.page as PageSize, args.background as Background, args.widthPx as number);
