@@ -5,6 +5,8 @@
 ### Ajouté (jalon M7 — fonctions en plus)
 
 - Glisser une note vers l'Explorateur, bureau, Word, OneNote ou un e-mail : la poignée qui apparaît sur chaque carte de la bibliothèque dépose une image PNG de la note, nommée comme elle (une image par note quand plusieurs sont sélectionnées), rendue comme l'export PNG dans un dossier temporaire d'Ardoise nettoyé ensuite. Le glisser de cartes vers un classeur est inchangé.
+- « Redresser les formes » sur la sélection de l'éditeur (bouton de l'outil Sélection, panneau de la sélection ou touche F) : les droites, cercles, ellipses, rectangles (même tournés) et flèches (en un ou plusieurs traits) tracés à main levée deviennent des formes nettes, en une seule étape annulable, avec le même outil, la même couleur et la même épaisseur ; l'écriture et les traits qui ne sont pas clairement une forme ne changent pas, et l'éditeur le dit quand rien n'est reconnu.
+- « Revenir à l'original » dans l'éditeur : l'encre telle qu'elle est arrivée de la tablette, ou telle qu'elle était avant la première modification enregistrée (gardée une fois pour toutes dans la note, `original.ardoise`) ; confirmation qui précise ce qui est perdu (l'encre modifiée) et ce qui reste (titre, étiquettes, fond, narration), une seule étape annulable.
 
 ### Ajouté (jalon M6 — relecture, vidéo et narration)
 

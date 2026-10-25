@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { TOOLS, instantiateInk, type InkStroke } from './ink';
+import { TOOLS, instantiateInk, type InkStroke, type ShapeStroke } from './ink';
 
 const bytes = readFileSync(new URL('../assets/ardoise_ink.wasm', import.meta.url));
 
@@ -48,5 +48,31 @@ describe('stroke geometry in WebAssembly', () => {
     expect(d.endsWith('Z')).toBe(true);
     expect(ink.contours({ tool: 'pencil', width: 35, points: [] })).toEqual([]);
     expect(ink.path({ tool: 'pencil', width: 35, points: [] })).toBe('');
+  });
+
+  it("straightens shapes exactly as the Rust code does, keeping each stroke's style", async () => {
+    const ink = await instantiateInk(bytes);
+    const ring: ShapeStroke = {
+      tool: 'highlighter',
+      color: { r: 250, g: 200, b: 10, a: 128 },
+      width: 400,
+      layer: 2,
+      points: Array.from({ length: 100 }, (_, i) => {
+        const a = (i / 96) * 2 * Math.PI;
+        return { x: 9000 + 3000 * Math.cos(a), y: 9000 + 2000 * Math.sin(a) + 30 * Math.sin(5 * a), pressure: 0.3 + i / 300, t: 1000 + 5 * i };
+      }),
+    };
+    const small: ShapeStroke = { ...ring, points: ring.points.slice(0, 3) };
+    const [group, ...rest] = ink.straighten([small, ring]);
+    expect(rest).toEqual([]);
+    expect(group.shape).toBe('ellipse');
+    expect(group.sources).toEqual([1]);
+    const [made] = group.strokes;
+    expect(made).toMatchObject({ tool: 'highlighter', color: ring.color, width: 400, layer: 2 });
+    expect(made.points[0].t).toBe(1000);
+    expect(made.points[made.points.length - 1].t).toBe(1000 + 5 * 99);
+    expect(new Set(made.points.map((p) => p.pressure)).size).toBe(1);
+    expect(ink.straighten([])).toEqual([]);
+    expect(ink.straighten([small])).toEqual([]);
   });
 });

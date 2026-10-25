@@ -416,6 +416,7 @@
     "noteNewerVersion": "cette note a été créée par une version plus récente d'Ardoise ; mettez Ardoise à jour ({detail})",
     "noteInvalid": "cette note contient des données incohérentes ({detail})",
     "noteDamaged": "le fichier de la note est endommagé ({detail})",
+    "originalDamaged": "l'original de cette note est illisible ({detail})",
     "notALibrary": "ce dossier n'est pas une bibliothèque Ardoise ({detail})",
     "libraryAccess": "la bibliothèque ne peut pas être lue ou modifiée ({detail})",
     "noteConflict": "la note a été modifiée entre-temps, sans doute sur un autre ordinateur ; rouvrez-la avant de la modifier ({detail})",
@@ -544,13 +545,21 @@
       "tool": "Encre",
       "width": "Épaisseur"
     },
-    "selectHelp": "Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Échap : tout désélectionner",
+    "selectHelp": "Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · F : redresser les formes · Échap : tout désélectionner",
     "selection": {
       "label": "Sélection",
       "count": "Traits sélectionnés : {count}",
       "duplicate": "Dupliquer",
       "delete": "Supprimer",
       "clear": "Désélectionner"
+    },
+    "straighten": {
+      "button": "Redresser les formes",
+      "hint": "Transforme les traits sélectionnés qui ressemblent à une droite, un cercle, une ellipse, un rectangle ou une flèche en formes nettes (touche F). Les autres traits, dont l'écriture, ne changent pas.",
+      "disabledHint": "Sélectionnez d'abord des traits avec le lasso, puis redressez-les.",
+      "doneOne": "1 forme redressée (Ctrl+Z pour annuler).",
+      "doneMany": "{count} formes redressées (Ctrl+Z pour annuler).",
+      "none": "Aucune forme reconnue dans la sélection. Ardoise redresse les droites, cercles, ellipses, rectangles et flèches d'au moins 1 cm, tracés assez nettement ; le reste ne change pas."
     },
     "page": {
       "label": "Page",
@@ -564,6 +573,22 @@
       "autoCrop": "Recadrer autour du contenu",
       "manualCrop": "Recadrer à la main",
       "cropHint": "Tracez sur la page le rectangle à garder."
+    },
+    "original": {
+      "label": "Original",
+      "button": "Revenir à l'original",
+      "helpTablet": "Retrouvez l'encre telle qu'elle est arrivée de la tablette, sans vos modifications.",
+      "helpFirst": "Retrouvez l'encre telle qu'elle était avant sa première modification dans Ardoise.",
+      "none": "Pas encore d'original : Ardoise garde l'encre de la note telle qu'elle était quand vous enregistrez sa première modification.",
+      "loading": "Recherche de l'original…",
+      "confirmTitle": "Revenir à l'original ?",
+      "confirmLost": "Vos modifications de l'encre sont perdues : traits ajoutés, effacés, déplacés, redressés ou recolorés, calques, rotation et recadrage de la page.",
+      "confirmKept": "Le titre, les étiquettes, le favori, le fond de page et la narration restent tels quels.",
+      "confirmUndo": "Vous pourrez encore annuler (Ctrl+Z) ; enregistrez pour garder le résultat.",
+      "confirm": "Revenir à l'original",
+      "cancel": "Annuler",
+      "done": "Encre de l'original rétablie : enregistrez pour la garder, ou Ctrl+Z pour annuler.",
+      "failed": "L'original n'a pas pu être lu : {message}"
     },
     "papers": {
       "white": "Blanc",

@@ -23,6 +23,7 @@ import type {
   VideoProgress,
 } from './video';
 import { mockOpenH264Download, mockVideoExport } from './mock-video';
+import type { NoteOriginal } from './original';
 import type {
   AutoExportSettings,
   Background,
@@ -162,6 +163,11 @@ export const api = {
   /** PNG data URL of a page background (paper, template, texture) `widthPx` pixels wide. */
   renderBackground: (page: PageSize, background: Background, widthPx: number) =>
     call<string>('render_background', { page, background, widthPx }),
+  /**
+   * The ink the note can go back to ("Revenir à l'original"): `{ source: 'none' }` when there is
+   * nothing to go back to; rejects with `originalDamaged` when the original cannot be read.
+   */
+  noteOriginal: (path: string) => call<NoteOriginal>('note_original', { path }),
 
   // --- Exports, split, merge (milestone M5; Rust side: export.rs, clipboard.rs, operations.rs) ---
 
