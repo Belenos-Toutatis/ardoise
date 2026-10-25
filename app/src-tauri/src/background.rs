@@ -31,6 +31,7 @@ use ardoise_render::picture::{self, MAX_STORED_SIDE};
 use ardoise_render::{NoteView, Picture, PictureError, StoredImage};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tauri::ipc::Channel;
 
 use crate::AppContext;
 use crate::commands::{CommandError, CommandResult};
@@ -38,7 +39,7 @@ use crate::library::{
     NoteSummary, binder_path, blank_note, first_layer_name, library_error, library_of, now_ms,
     summary_of,
 };
-use crate::pdf_pages::{self, PdfError, PdfPageSize};
+use crate::pdf_pages::{self, PdfError, PdfFile, PdfPageSize};
 use crate::thumbnails::{file_thumbnail, thumbnail_view};
 
 /// Resolution a PDF page is rendered at (less when its long side would exceed
@@ -218,17 +219,29 @@ fn import(bytes: &[u8], kind: SourceKind, page: Option<u32>) -> CommandResult<St
     match kind {
         SourceKind::Image => picture::import_image(bytes).map_err(picture_error),
         SourceKind::Pdf => {
-            let sizes = pdf_pages::page_sizes(bytes).map_err(pdf_error)?;
+            let pdf = PdfFile::load(bytes).map_err(pdf_error)?;
+            let sizes = pdf.page_sizes().map_err(pdf_error)?;
             let number = page.unwrap_or(1);
-            let size = number
-                .checked_sub(1)
-                .and_then(|i| sizes.get(i as usize))
-                .ok_or_else(|| pdf_error(PdfError::NoSuchPage(number)))?;
-            let (width, height) = render_size(*size);
-            let png = pdf_pages::render_page(bytes, number, width, height).map_err(pdf_error)?;
-            picture::import_page(&png).map_err(picture_error)
+            import_pdf_page(&pdf, page_size(&sizes, number)?, number)
         }
     }
+}
+
+/// The size of page `number` (from 1) among `sizes`, or `pdfNoSuchPage`.
+fn page_size(sizes: &[PdfPageSize], number: u32) -> CommandResult<PdfPageSize> {
+    number
+        .checked_sub(1)
+        .and_then(|i| sizes.get(i as usize))
+        .copied()
+        .ok_or_else(|| pdf_error(PdfError::NoSuchPage(number)))
+}
+
+/// Page `number` (from 1) of a loaded PDF, of `size`, rendered at [`PDF_DPI`] and ready to
+/// store.
+fn import_pdf_page(pdf: &PdfFile, size: PdfPageSize, number: u32) -> CommandResult<StoredImage> {
+    let (width, height) = render_size(size);
+    let png = pdf.render_page(number, width, height).map_err(pdf_error)?;
+    picture::import_page(&png).map_err(picture_error)
 }
 
 // --- Staging ------------------------------------------------------------------------------
@@ -599,6 +612,28 @@ pub fn notes_from_file_in(
     pages: Option<&[u32]>,
     layer_name: &str,
 ) -> CommandResult<Vec<NoteSummary>> {
+    notes_from_file_with_progress(library, binder, path, pages, layer_name, &mut |_| {})
+}
+
+/// How far the creation of notes from a file is (`NotesProgress` in `api.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct NotesProgress {
+    /// Notes made so far.
+    pub done: usize,
+    /// Notes to make.
+    pub total: usize,
+}
+
+/// [`notes_from_file_in`], telling `progress` before the first note and after each one. A PDF
+/// is loaded once, and each chosen page is rendered from it.
+pub fn notes_from_file_with_progress(
+    library: &Library,
+    binder: &str,
+    path: &Path,
+    pages: Option<&[u32]>,
+    layer_name: &str,
+    progress: &mut dyn FnMut(NotesProgress),
+) -> CommandResult<Vec<NoteSummary>> {
     let (bytes, kind) = read_source(path)?;
     let name = file_name(path);
     let binder = binder_path(binder);
@@ -611,26 +646,25 @@ pub fn notes_from_file_in(
     };
     match kind {
         SourceKind::Image => {
+            progress(NotesProgress { done: 0, total: 1 });
             let stored = picture::import_image(&bytes).map_err(picture_error)?;
             let page = page_for_image(stored.width, stored.height);
             let title = note_title(&name, None, 1);
             create(&note_with_image(
                 &title, layer_name, now, page, &name, None, stored,
             ))?;
+            progress(NotesProgress { done: 1, total: 1 });
         }
         SourceKind::Pdf => {
-            let sizes = pdf_pages::page_sizes(&bytes).map_err(pdf_error)?;
+            let pdf = PdfFile::load(&bytes).map_err(pdf_error)?;
+            let sizes = pdf.page_sizes().map_err(pdf_error)?;
             let all: Vec<u32> = (1..=sizes.len() as u32).collect();
             let chosen = pages.unwrap_or(&all);
+            let total = chosen.len();
+            progress(NotesProgress { done: 0, total });
             for (i, &number) in chosen.iter().enumerate() {
-                let size = number
-                    .checked_sub(1)
-                    .and_then(|index| sizes.get(index as usize))
-                    .ok_or_else(|| pdf_error(PdfError::NoSuchPage(number)))?;
-                let (width, height) = render_size(*size);
-                let png =
-                    pdf_pages::render_page(&bytes, number, width, height).map_err(pdf_error)?;
-                let stored = picture::import_page(&png).map_err(picture_error)?;
+                let size = page_size(&sizes, number)?;
+                let stored = import_pdf_page(&pdf, size, number)?;
                 let title = note_title(&name, Some(number), sizes.len());
                 // One millisecond apart: sorted by date, the pages keep their order.
                 let created = now.saturating_add(i as i64);
@@ -638,11 +672,12 @@ pub fn notes_from_file_in(
                     &title,
                     layer_name,
                     created,
-                    page_for_pdf(*size),
+                    page_for_pdf(size),
                     &name,
                     Some(number),
                     stored,
                 ))?;
+                progress(NotesProgress { done: i + 1, total });
             }
         }
     }
@@ -709,11 +744,22 @@ pub async fn create_notes_from_file(
     binder: String,
     path: String,
     pages: Option<Vec<u32>>,
+    on_progress: Channel<NotesProgress>,
 ) -> CommandResult<Vec<NoteSummary>> {
     let library = library_of(&context)?;
     let layer = first_layer_name(&crate::diagnostic::report_language(&context));
     blocking(move || {
-        notes_from_file_in(&library, &binder, Path::new(&path), pages.as_deref(), layer)
+        notes_from_file_with_progress(
+            &library,
+            &binder,
+            Path::new(&path),
+            pages.as_deref(),
+            layer,
+            &mut |progress| {
+                // The interface may have gone: the notes are made anyway.
+                let _ = on_progress.send(progress);
+            },
+        )
     })
     .await
 }
@@ -1491,8 +1537,17 @@ pub(crate) mod tests {
         );
 
         let (_dir, library) = library();
-        let made = notes_from_file_in(&library, "Fiches", &pdf, None, "Calque 1").unwrap();
+        let mut steps = Vec::new();
+        let loads = pdf_pages::LOADS.with(std::cell::Cell::get);
+        let made =
+            notes_from_file_with_progress(&library, "Fiches", &pdf, None, "Calque 1", &mut |p| {
+                steps.push((p.done, p.total))
+            })
+            .unwrap();
         assert_eq!(made.len(), 2);
+        assert_eq!(steps, [(0, 2), (1, 2), (2, 2)]);
+        // The PDF was loaded once for both pages.
+        assert_eq!(pdf_pages::LOADS.with(std::cell::Cell::get), loads + 1);
         assert_eq!(made[0].title, "fiche - page 1");
         assert_eq!(made[1].title, "fiche - page 2");
         assert_eq!(made[0].binder, "Fiches");
@@ -1536,25 +1591,32 @@ pub(crate) mod tests {
         );
     }
 
-    /// A PDF that needs a password is refused with its own code.
+    /// `two_page_pdf` encrypted by `lopdf` (RC4 128 bits), with these passwords and permissions.
     #[cfg(windows)]
-    #[test]
-    fn a_pdf_with_a_password_is_refused() {
-        use lopdf::{Document, EncryptionState, EncryptionVersion, Object, Permissions};
+    fn encrypted_pdf(user_password: &str, permissions: lopdf::Permissions) -> Vec<u8> {
+        use lopdf::{Document, EncryptionState, EncryptionVersion, Object};
         let mut document = Document::load_mem(&two_page_pdf()).unwrap();
         let id = Object::String(b"0123456789abcdef".to_vec(), lopdf::StringFormat::Literal);
         document.trailer.set("ID", vec![id.clone(), id]);
         let version = EncryptionVersion::V2 {
             document: &document,
             owner_password: "propriétaire",
-            user_password: "secret",
+            user_password,
             key_length: 128,
-            permissions: Permissions::all(),
+            permissions,
         };
         let state = EncryptionState::try_from(version).unwrap();
         document.encrypt(&state).unwrap();
         let mut bytes = Vec::new();
         document.save_to(&mut bytes).unwrap();
+        bytes
+    }
+
+    /// A PDF that needs a password to be opened is refused with its own code.
+    #[cfg(windows)]
+    #[test]
+    fn a_pdf_with_a_password_is_refused() {
+        let bytes = encrypted_pdf("secret", lopdf::Permissions::all());
         let (_d, pdf) = user_file("protégé.pdf", &bytes);
         assert_eq!(inspect(&pdf).unwrap_err().code(), "pdfEncrypted");
         let staging = Staging::default();
@@ -1565,6 +1627,30 @@ pub(crate) mod tests {
         // A damaged PDF.
         let (_d2, broken) = user_file("cassé.pdf", b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog");
         assert_eq!(inspect(&broken).unwrap_err().code(), "backgroundDamaged");
+    }
+
+    /// A PDF protected only by an owner password (permissions: no copy, no change, no
+    /// printing) opens without one, like in any reader: its pages are listed and rendered.
+    #[cfg(windows)]
+    #[test]
+    fn a_pdf_with_only_an_owner_password_is_read() {
+        let bytes = encrypted_pdf("", lopdf::Permissions::COPYABLE_FOR_ACCESSIBILITY);
+        let (_d, pdf) = user_file("restreint.pdf", &bytes);
+        let source = inspect(&pdf).unwrap();
+        assert_eq!(source.pages.len(), 2);
+        let staging = Staging::default();
+        let staged = stage_file(&staging, &pdf, Some(1)).unwrap();
+        println!(
+            "owner-password PDF: page 1 rendered at {} x {} px",
+            staged.width, staged.height
+        );
+        // The page's black stroke at x = 20 mm is drawn (the content was decrypted).
+        let picture = staging.picture(&staged.key).unwrap();
+        let x = (20.0 / 297.0 * staged.width as f32) as u32;
+        let dark = (0..staged.height)
+            .filter_map(|y| picture.image().pixel(x, y))
+            .any(|[r, g, b, _]| r < 60 && g < 60 && b < 60);
+        assert!(dark, "the page's content is drawn");
     }
 
     /// Elsewhere than on Windows, PDF files are refused with their own code.
@@ -1586,8 +1672,17 @@ pub(crate) mod tests {
     fn an_image_becomes_one_note_of_its_proportions() {
         let (_dir, library) = library();
         let (_d, image) = user_file("Tableau.png", &encode_png(&halves(400, 300)).unwrap());
-        let made = notes_from_file_in(&library, "", &image, None, "Layer 1").unwrap();
+        let mut steps = Vec::new();
+        let made = notes_from_file_with_progress(&library, "", &image, None, "Layer 1", &mut |p| {
+            steps.push((p.done, p.total));
+        })
+        .unwrap();
         assert_eq!(made.len(), 1);
+        assert_eq!(steps, [(0, 1), (1, 1)]);
+        assert_eq!(
+            serde_json::to_value(NotesProgress { done: 1, total: 3 }).unwrap(),
+            serde_json::json!({ "done": 1, "total": 3 })
+        );
         assert_eq!(made[0].title, "Tableau");
         let file = library.read(Path::new(&made[0].path)).unwrap().file;
         assert_eq!(file.note.page, page_for_image(400, 300));

@@ -1,7 +1,7 @@
 /** Typed wrappers around the Rust commands of `app/src-tauri/src/commands.rs`. */
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { BackgroundSource, StagedBackground } from './background';
+import type { BackgroundSource, NotesProgress, StagedBackground } from './background';
 import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic';
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
@@ -355,9 +355,21 @@ export const api = {
   stageNoteBackground: (path: string) => call<StagedBackground | null>('stage_note_background', { path }),
   /** Forgets every staged image (the editor closes or opens another note). */
   releaseBackgroundImages: () => call<void>('release_background_images'),
-  /** New notes in `binder`: one per page of a PDF (`pages` from 1, all when absent) or one for an image. */
-  createNotesFromFile: (binder: string, path: string, pages?: number[]) =>
-    call<NoteSummary[]>('create_notes_from_file', { binder, path, pages }),
+  /**
+   * New notes in `binder`: one per page of a PDF (`pages` from 1, all when absent) or one for an
+   * image; `onProgress` hears how many are made, before the first one and after each.
+   */
+  createNotesFromFile: (
+    binder: string,
+    path: string,
+    pages?: number[],
+    onProgress: (progress: NotesProgress) => void = () => {},
+  ) => {
+    if (!inDesktopApp()) return call<NoteSummary[]>('create_notes_from_file', { binder, path, pages, onProgress });
+    const channel = new Channel<NotesProgress>();
+    channel.onmessage = onProgress;
+    return invoke<NoteSummary[]>('create_notes_from_file', { binder, path, pages, onProgress: channel });
+  },
   /** The background image's name of each note (null without one). */
   backgroundImageNames: (paths: string[]) => call<(string | null)[]>('background_image_names', { paths }),
 

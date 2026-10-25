@@ -1290,6 +1290,7 @@
       "otherFile": "Another file…",
       "reading": "Reading the file…",
       "running": "Creating the notes…",
+      "progress": "Creating the notes: {done} of {total}…",
       "error": "The notes cannot be created: {message}",
       "done": "Notes created: {count}"
     },

@@ -66,11 +66,33 @@ describe('new notes from a PDF or an image', () => {
     expect(document.body.textContent).toContain('Notes à créer : 2');
     button('Créer les 2 notes').click();
     await vi.waitFor(() => expect(oncreated).toHaveBeenCalledTimes(1));
-    expect(create).toHaveBeenCalledWith('Classe', 'C:\\Documents\\fiche.pdf', [2, 3]);
+    expect(create).toHaveBeenCalledWith('Classe', 'C:\\Documents\\fiche.pdf', [2, 3], expect.any(Function));
     const made = oncreated.mock.lastCall?.[0] as NoteSummary[];
     expect(made.map((n) => n.title)).toEqual(['fiche - page 2', 'fiche - page 3']);
     const pages = made.map((n) => mockLibrary().notes.get(n.path)?.note.backgroundImage?.pdfPage);
     expect(pages).toEqual([2, 3]);
+  });
+
+  it('says how many notes are made while a PDF of many pages is imported', async () => {
+    (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\\Documents\\fiche.pdf';
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => (finish = resolve));
+    const create = api.createNotesFromFile;
+    vi.spyOn(api, 'createNotesFromFile').mockImplementation(async (binder, path, pages, onProgress) => {
+      onProgress?.({ done: 0, total: 3 });
+      onProgress?.({ done: 1, total: 3 });
+      await gate;
+      return create(binder, path, pages);
+    });
+    const oncreated = vi.fn();
+    const { button } = place(NewFromFileDialog, { binder: '', onclose: vi.fn(), oncreated });
+    await vi.waitFor(() => expect(button('Créer les 3 notes').disabled).toBe(false));
+    button('Créer les 3 notes').click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="status"]')?.textContent).toContain('Création des notes : 1 sur 3…'),
+    );
+    finish();
+    await vi.waitFor(() => expect(oncreated).toHaveBeenCalledTimes(1));
   });
 
   it('makes one note from an image, and closes when no file is chosen', async () => {

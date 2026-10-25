@@ -3,7 +3,7 @@
  * in `.pdf` is a PDF of three A4 portrait pages, anything else a 1600 × 1200 photo. Staged images
  * are only keys and sizes (the browser draws a placeholder where the image goes, `mock-notes.ts`).
  */
-import type { BackgroundSource, StagedBackground } from './background';
+import type { BackgroundSource, NotesProgress, StagedBackground } from './background';
 import { fitRect } from './background';
 import { UNHANDLED, mockLibrary, notifyLibraryChanged } from './mock-data';
 import { mockLibraryInvoke } from './mock-library';
@@ -52,11 +52,17 @@ function stagedOfNote(path: string): StagedBackground | null {
   return { key: `mock-note-${++staged}`, name: image.name, pdfPage: image.pdfPage, ...pixels };
 }
 
-function createFromFile(binder: string, path: string, pages?: number[]): NoteSummary[] {
+function createFromFile(
+  binder: string,
+  path: string,
+  pages?: number[],
+  onProgress?: (progress: NotesProgress) => void,
+): NoteSummary[] {
   const source = inspect(path);
   const stem = source.name.replace(/\.[^.]*$/, '');
   const chosen = source.kind === 'pdf' ? (pages ?? Array.from({ length: PDF_PAGES }, (_, i) => i + 1)) : [0];
   const made: NoteSummary[] = [];
+  onProgress?.({ done: 0, total: chosen.length });
   for (const page of chosen) {
     if (source.kind === 'pdf' && (page < 1 || page > PDF_PAGES)) throw { code: 'pdfNoSuchPage', message: String(page) };
     const title = source.kind === 'pdf' ? `${stem} - page ${page}` : stem;
@@ -75,6 +81,7 @@ function createFromFile(binder: string, path: string, pages?: number[]): NoteSum
       };
     }
     made.push(summary);
+    onProgress?.({ done: made.length, total: chosen.length });
   }
   notifyLibraryChanged();
   return made;
@@ -91,7 +98,12 @@ export function mockBackgroundInvoke(command: string, args: Record<string, unkno
     case 'release_background_images':
       return undefined;
     case 'create_notes_from_file':
-      return createFromFile(args.binder as string, args.path as string, args.pages as number[] | undefined);
+      return createFromFile(
+        args.binder as string,
+        args.path as string,
+        args.pages as number[] | undefined,
+        args.onProgress as ((progress: NotesProgress) => void) | undefined,
+      );
     case 'background_image_names':
       return (args.paths as string[]).map((path) => mockLibrary().notes.get(path)?.note.backgroundImage?.name ?? null);
     default:
