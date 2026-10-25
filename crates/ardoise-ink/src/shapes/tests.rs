@@ -1070,7 +1070,12 @@ fn the_same_input_gives_the_same_output() {
 fn a_gentle_wave_is_no_line() {
     // ±3 mm over 9 cm, a period and a half: visibly curved.
     let ideal: Vec<V> = (0..60)
-        .map(|i| v(3000.0 + 9000.0 * f64::from(i) / 59.0, 4000.0 + 300.0 * (f64::from(i) / 6.0).sin()))
+        .map(|i| {
+            v(
+                3000.0 + 9000.0 * f64::from(i) / 59.0,
+                4000.0 + 300.0 * (f64::from(i) / 6.0).sin(),
+            )
+        })
         .collect();
     let mut rng = Lcg::new(15);
     assert!(straighten(&[hand(&ideal, &mut rng, 0.0, 0.0, 0)]).is_empty());
