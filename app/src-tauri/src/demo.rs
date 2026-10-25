@@ -260,6 +260,7 @@ fn base_note(
         modified: created + (index as i64 + 1) * 3 * 60 * 60 * 1000,
         page,
         background,
+        background_image: None,
         tags: tags.iter().map(|t| (*t).to_owned()).collect(),
         favorite: false,
         layers: layers

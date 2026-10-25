@@ -226,6 +226,7 @@ pub fn blank_note(title: &str, layer_name: &str, now: i64) -> Note {
         modified: now,
         page: A4_LANDSCAPE,
         background: Background::default(),
+        background_image: None,
         tags: Vec::new(),
         favorite: false,
         layers: vec![Layer {

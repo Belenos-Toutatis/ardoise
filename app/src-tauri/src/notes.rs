@@ -210,6 +210,7 @@ mod tests {
             modified: 1_792_843_200_000,
             page: A4_LANDSCAPE,
             background: Background::default(),
+            background_image: None,
             tags: vec![],
             favorite: false,
             layers: vec![

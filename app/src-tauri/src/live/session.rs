@@ -308,6 +308,7 @@ impl LiveSession {
                 paper,
                 ..Background::default()
             },
+            background_image: None,
             tags: Vec::new(),
             favorite: false,
             layers: vec![Layer {
