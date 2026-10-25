@@ -13,7 +13,7 @@
 //!   closes or opens another note.
 //! - **Saving** ([`settle`]): `notes::save_in` writes the staged member the command chose
 //!   ([`with_staged`]) and drops the member of a note that no longer has an image.
-//! - **New notes** ([`notes_from_file_in`]): one note per chosen PDF page at the size of the
+//! - **New notes** ([`notes_from_file_with_progress`]): one note per chosen PDF page at the size of the
 //!   page, or one note for an image, A4-sized in the image's proportions.
 
 use std::cell::RefCell;
@@ -604,7 +604,8 @@ fn note_with_image(
 
 /// Makes new notes in `binder` from the file at `path`: one per page of `pages` (from 1; all
 /// pages when `None`) for a PDF, one for an image. Stops at the first page that fails; the
-/// notes made before it stay in the library (each is complete).
+/// notes made before it stay in the library (each is complete). Without progress: for tests.
+#[cfg(test)]
 pub fn notes_from_file_in(
     library: &Library,
     binder: &str,

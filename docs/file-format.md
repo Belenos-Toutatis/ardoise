@@ -232,9 +232,13 @@ length and thousands of random corruptions).
 
 - `original.bin`: the tablet's raw data for this page, as received, never modified after import.
 - `original.ardoise` (1.2): for a note without `original.bin` (live mode, Inkspace import, made in Ardoise), the note as
-  it was before its first edit in Ardoise: a complete `.ardoise` archive (this format, current version) holding only
-  `note.json` and `strokes.bin`. Written once, when an edited note is first saved, and never changed afterwards;
-  "back to the original" restores its page, layers and strokes.
+  it was before its first edit of the ink in Ardoise: a complete `.ardoise` archive (this format, current version)
+  holding only `note.json` and `strokes.bin`. Written once, when a save first changes the ink (page, layers or
+  strokes) of a note whose version on disk has ink, and never changed afterwards; "back to the original" restores its
+  page, layers and strokes. Its `note.json` is the whole note of that version, so it may describe a
+  `backgroundImage` whose member (`background.*`) is not inside it: readers never draw that image from the inner
+  archive; they take only its placement (`rect`, `quarterTurns`), for the image of the outer file when it is the
+  same image (same `name` and `pdfPage`).
 - `thumb.png`: thumbnail, any size (the app decides).
 - `audio.opus`: narration recorded during a replay or in live mode (§4.1).
 - `background.<ext>`: pixels of `backgroundImage` (Ardoise writes `png` or `jpg`; a PDF page is turned into an image
