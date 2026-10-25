@@ -112,13 +112,36 @@ pub struct Picture {
 impl Picture {
     /// Decodes a PNG or JPEG file (a note file's background member). Refuses anything else,
     /// damaged data and images of more than [`MAX_SOURCE_PIXELS`] pixels.
+    ///
+    /// Ardoise never stores more than [`MAX_STORED_SIDE`] pixels on a side, so a larger member
+    /// (another program's, or a hostile file) is not decoded at full size: a JPEG is decoded at
+    /// 1/2, 1/4 or 1/8 of its size by the decoder (then reduced to fit, if even 1/8 is too
+    /// large; its bytes are then no longer embedded as they are in a PDF), and a PNG, which
+    /// cannot be decoded smaller, is refused before any pixel is decoded.
     pub fn decode(bytes: Vec<u8>) -> Result<Picture, PictureError> {
         let format = PictureFormat::sniff(&bytes).ok_or(PictureError::Unsupported)?;
         let (image, dct) = match format {
-            PictureFormat::Png => (decode_png_limited(&bytes)?, None),
+            PictureFormat::Png => {
+                let (width, height) = dimensions(&bytes)?;
+                if width.max(height) > MAX_STORED_SIDE {
+                    return Err(too_large(width, height));
+                }
+                (decode_png_limited(&bytes)?, None)
+            }
             PictureFormat::Jpeg => {
-                let decoded = decode_jpeg_limited(&bytes, None)?;
-                (decoded.image, decoded.dct)
+                let (width, height) = dimensions(&bytes)?;
+                // The smallest scale that keeps at least half of the largest stored side: the
+                // result is at most that side (unless even 1/8 is larger).
+                let reduce = (width.max(height) > MAX_STORED_SIDE).then_some(MAX_STORED_SIDE / 2);
+                let decoded = decode_jpeg_limited(&bytes, reduce)?;
+                if (decoded.image.width, decoded.image.height) == decoded.full {
+                    (decoded.image, decoded.dct)
+                } else {
+                    // Reduced: the stored bytes no longer match the pixels' size.
+                    let image = decoded.image;
+                    let (width, height) = fitted(image.width, image.height, MAX_STORED_SIDE);
+                    (area_resize(&image, width, height), None)
+                }
             }
         };
         Ok(Picture {
@@ -1069,6 +1092,44 @@ pub(crate) mod tests {
             let _ = import_image(&jpeg[..len]);
         }
         assert!(import_page(&jpeg).is_err());
+    }
+
+    #[test]
+    fn members_larger_than_ardoise_stores_are_not_decoded_at_full_size() {
+        // A PNG member of more than 4096 px a side: refused at the header (its pixels are not
+        // even there), while an import of the same size goes on to decode it.
+        assert!(matches!(
+            Picture::decode(png_header(5000, 10)),
+            Err(PictureError::TooLarge {
+                width: 5000,
+                height: 10
+            })
+        ));
+        assert!(matches!(
+            import_image(&png_header(5000, 10)),
+            Err(PictureError::Damaged(_))
+        ));
+        // A JPEG member of 5000 px: decoded at half its size by the decoder, and no longer
+        // embedded as it is in a PDF (its bytes are larger than its pixels); its bytes stay.
+        let wide = image(5000, 16, |x, _| {
+            if x < 2500 {
+                [220, 30, 30, 255]
+            } else {
+                [30, 40, 220, 255]
+            }
+        });
+        let jpeg = encode_jpeg(&wide, 90).unwrap();
+        let picture = Picture::decode(jpeg.clone()).unwrap();
+        assert_eq!((picture.width(), picture.height()), (2500, 8));
+        assert_eq!(picture.dct(), None);
+        assert_eq!(picture.bytes(), jpeg.as_slice());
+        let [r, _, b, _] = picture.image().pixel(100, 4).unwrap();
+        assert!(r > 180 && b < 80, "{r} {b}");
+        // At most 4096 px: decoded whole, as Ardoise stored it.
+        let stored = encode_jpeg(&noise(4096, 8), 90).unwrap();
+        let picture = Picture::decode(stored).unwrap();
+        assert_eq!((picture.width(), picture.height()), (4096, 8));
+        assert_eq!(picture.dct(), Some(DctColor::Rgb));
     }
 
     #[test]

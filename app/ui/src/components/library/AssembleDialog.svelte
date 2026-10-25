@@ -75,7 +75,9 @@
     </fieldset>
 
     {#if droppedImages > 0}
-      <p class="muted small" data-slot="assemble-dropped-images">{t('background.assemble.dropped', { count: droppedImages })}</p>
+      <p class="muted small" data-slot="assemble-dropped-images">{droppedImages === 1
+          ? t('background.assemble.droppedOne')
+          : t('background.assemble.droppedMany', { count: droppedImages })}</p>
     {/if}
 
     <label class="field">

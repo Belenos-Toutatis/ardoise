@@ -17,8 +17,8 @@ recognised words printed.
     (`background.png` or `background.jpg`). `ImageRect::fit(page, pixels, ImageFit)` computes the rectangle of an
     import (contain / cover / stretch); the note keeps only the rectangle, so that page operations can move the image
     exactly like the strokes.
-  - `NoteFile::original_note` (member `original.ardoise`): the note before its first edit, a complete `.ardoise`
-    archive (read it with `read_from_bytes`), for notes that have no `original.bin`.
+  - `NoteFile::original_note` (member `original.ardoise`): the note before its first edit of the ink, a complete
+    `.ardoise` archive (read it with `read_from_bytes`), for notes that have no `original.bin`.
 - TypeScript mirror: `BackgroundImage`, `ImageRect`, `Note.backgroundImage?` in `app/ui/src/lib/note.ts`. The
   interface never holds the image's pixels: Rust renders the page background with them.
 
@@ -129,9 +129,32 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   the function the synchronisation uses), else `original.ardoise`.
 - `save_in` (`app/src-tauri/src/notes.rs`) writes `original.ardoise` once: when it saves over a file that has neither
   member, it first keeps the version on disk. Never rewritten afterwards.
-- Command `note_original(path)`: the original's page, layers and strokes (title, tags, favourite, background,
-  narration stay). Editor: "Revenir à l'original" with a confirmation, as one undoable step (saving keeps the
-  history's behaviour); absent when the note has no original.
+- Command `note_original(path)`: the original's page, layers and strokes, and for a first version the placement of
+  the background image it had (`backgroundImage`; title, tags, favourite, paper and narration stay). Editor:
+  "Revenir à l'original" with a confirmation, as one undoable step (saving keeps the history's behaviour); absent
+  when the note has no original.
+- **What the original is.** `save_in` keeps the version on disk when a save changes the ink (page, layers or
+  strokes) of a file that has neither member and whose version on disk has ink. So for a note created empty in
+  Ardoise (or the blank file of a "save as a copy"), the original is the first version saved with ink, not the
+  empty page; the help text says "la première version enregistrée qui en contenait".
+- **The background image on the way back** (`lib/editor/original.ts`, `imageForOriginal`). The image itself (its
+  pixels) never comes back from the original: `original.ardoise` describes the image the note had, but does not hold
+  its member, and a tablet page has none. The current image stays, placed for the restored page:
+  - the same image as the original's (same `name` and `pdfPage`): its `rect` and `quarterTurns` become the
+    original's, so that a rotation or a crop followed by a save and a revert puts it back exactly; its opacity stays;
+  - any other case (another image, an original without one, a tablet original): page turns are the only thing that
+    turn an image, and the revert undoes them, so "the same image, unrotated" means the image upright as its file
+    shows it, `quarterTurns` 0. When it was turned or the page size changes, it is placed again on the restored
+    page with the placement `currentFit` recognises on the current page (contain, cover or stretch), or contained
+    when a crop moved it; otherwise it stays where it is. Without the pixels' size (the image could not be staged),
+    its rectangle turned back stands for it;
+  - an image removed since stays removed.
+  The confirmation says so in a sentence.
+- **Limit of a tablet original.** `original.bin` is decoded again with today's settings: the hand (orientation) of
+  the settings and the drawing area of the tablet registered in the library (the Bamboo Slate's when none is). A
+  note synced with the other hand, or from a tablet of another size, comes back turned or scaled in today's
+  geometry. The format is not changed for this (the bytes alone do not say how they were decoded); the help text
+  says in a few words that the orientation chosen in the settings is used.
 
 ## Background image or PDF (`background`)
 
@@ -169,13 +192,19 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   decoded (`backgroundTooLarge`); large JPEGs are first reduced by the decoder's 1/2–1/8 scaling. EXIF
   orientations are undone. Stored pixels: at most 4096 px on the long side; JPEG (quality 90) for an opaque image
   of more than 256 colours, PNG otherwise; a JPEG that needs no change keeps its own bytes; a rendered PDF page is
-  always PNG.
+  always PNG. A note's member is never larger, so `Picture::decode` (members read from a note file) does not
+  decode one of more than 4096 px a side at full size: a JPEG is decoded at 1/2 to 1/8 by the decoder (then
+  reduced if still too large, and embedded in a PDF as RGB rather than as its JPEG bytes), a PNG is refused at its
+  header. The import keeps its own limits (50 megapixels).
 - **PDF pages** (`app/src-tauri/src/pdf_pages.rs`): `Windows.Data.Pdf` reads the PDF from memory. `PdfPage::Size`
   is in DIPs (1/96 in), turned into points. `PdfPageRenderOptions` sizes are DIPs too, multiplied by the
   display's scale: a 100-DIP render first measures that scale, so that a page comes out at 300 dpi (at most
   4096 px) whatever the screen (verified at the PC's scale: 2551 × 3508 px for an A4 portrait page). A PDF that
-  needs a password gives `pdfEncrypted` (`HRESULT_FROM_WIN32(ERROR_WRONG_PASSWORD)`, tested with a PDF encrypted
-  by `lopdf`); elsewhere than on Windows, `pdfUnsupported`.
+  needs a password to be opened fails to load: `pdfEncrypted` (`HRESULT_FROM_WIN32(ERROR_WRONG_PASSWORD)`, tested
+  with a PDF encrypted by `lopdf`). A PDF protected only by an owner password (permissions) loads and renders, as in
+  any reader (tested on Windows 11: `IsPasswordProtected` is false then; the check of that property after the load
+  was dropped, it could only refuse such PDFs). A PDF is loaded once (`PdfFile`) for all the pages an import
+  renders. Elsewhere than on Windows, `pdfUnsupported`.
 - **The editor's staging area and its undo history** (`app/src-tauri/src/background.rs`, `lib/editor/image.ts`).
   The interface never holds pixels. Rust keeps, in memory, every image the editor imported (`stage_background_image`)
   and the image of the note it opened (`stage_note_background`), under a key: a hash of the stored bytes. The
@@ -185,16 +214,25 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   export, copy and video sources (`ExportSource.imageKey`). Nothing is written to the library before the user
   saves. On save, `save_in`'s thumbnail line calls `background::settle`: a note whose image was removed loses the
   member, a note with an image gets the staged member of its key (`backgroundMissing` when the key is no longer
-  staged, checked before anything is written), a save without a key keeps the file's own member, and a member
-  no image describes (written by another version) is kept. Replacing an image, saving, undoing and saving again
+  staged, checked before anything is written; the thumbnail is drawn from the staging area's decoded pixels, not
+  by decoding the member again), a save without a key keeps the file's own member, and a member no image
+  describes (written by another version) is kept. A save (or split) without a key happens only when the editor
+  could not stage the note's image (member missing or unreadable): it may describe the same image as the file
+  (same `name` and `pdfPage`) placed anywhere and at any opacity, and is refused with `backgroundMissing` when it
+  describes another image or an image the file does not have (a "save as a copy" into the blank file, for
+  instance). Replacing an image, saving, undoing and saving again
   therefore writes the first image back from its key. The editor empties the staging area when it opens another
-  note and when it closes (after its writes are done). `save_in` keeps its signature (the snapshot block of
+  note and when it goes away, in both cases once its queued writes are done (a "save as a copy" queued just before
+  leaving still finds its pixels); going back to the library also waits for them, and an editor opening a note
+  waits for the release of the one torn down before it. A copy whose save fails sends its blank new file to the
+  trash. The commands that read, decode or write a note (`save_note`, `split_note`, `merge_notes`,
+  `note_original`, `open_note`, `note_outlines`, `note_thumbnail`) run on blocking threads. `save_in` keeps its signature (the snapshot block of
   "back to the original" shares it): the command's choice reaches `settle` through `background::with_staged`, a
   thread-local set for the duration of the call; after merging, it can become a parameter of `save_in`.
 - **Page operations.** Editor: `rotateQuarter` turns the rectangle like the points and adds a quarter turn,
   `cropTo` shifts it (`lib/background.ts`); a split gives both notes the image (`split_in` writes the staged
-  member, or the file's, into the new note, and saves the kept part with the same key), "save as a copy" saves the
-  copy with the same key. Assembly: the first note's image, which does not move (the first note stays at the
+  member, or the file's, into the new note, and saves the kept part with the same key; a new note without an
+  image, because the editor removed it, gets no member), "save as a copy" saves the copy with the same key. Assembly: the first note's image, which does not move (the first note stays at the
   top-left corner); when it reaches beyond the first note's page on a page that grew (end to end, or an overlay of
   pages of different sizes), its pixels are cut to that page (`picture::crop_to`, rounded out to whole pixels) so
   that it does not cover another note. The dialog says how many other notes' images are left out
@@ -204,10 +242,13 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   `<file name> - page <n>` (without the page number for a one-page PDF), one millisecond apart so that the
   library sorts them in page order; an image gives one note as large as fits in an A4 sheet of its orientation,
   in its proportions, titled after the file. The image fills the page (`ImageFit::Contain` on a page of its
-  proportions). Stops at the first page that fails; the notes made before stay (each is complete). One note is
-  opened in the editor right away; several are announced.
-- **Error codes** (`errorCodes.*`): `backgroundUnsupported`, `backgroundTooLarge`, `backgroundDamaged`,
-  `backgroundUnreadable`, `backgroundMissing`, `pdfUnsupported`, `pdfEncrypted`, `pdfNoSuchPage`.
+  proportions). Stops at the first page that fails; the notes made before stay (each is complete). The command
+  reports its progress through a channel (`{ done, total }`, before the first note and after each), shown by the
+  dialog for more than one note. One note is opened in the editor right away; several are announced.
+- **Error codes** (`errorCodes.*`): `backgroundUnsupported`, `backgroundTooLarge` (an image of more than 50
+  megapixels or 256 MB, a PDF of more than 512 MB or 10 000 pages: its sentence names both),
+  `backgroundDamaged`, `backgroundUnreadable`, `backgroundMissing`, `pdfUnsupported`, `pdfEncrypted`,
+  `pdfNoSuchPage`.
 
 ## Drag a note out (`drag`)
 
@@ -225,7 +266,7 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   it directly (about 150 lines of code), plus `windows-core` for the `implement` macro (same version, no new crate in
   `THIRD-PARTY-NOTICES`).
 - **Two commands** (`app/src-tauri/src/drag.rs`). `prepare_note_drag(paths)` renders each note with `export::image_bytes`
-  (PNG, 150 dpi, paper; 96 then 72 dpi for a note too large for 150) into a fresh `%TEMP%\Ardoise\drag\<uuid>\`, named
+  (PNG, 150 dpi, paper and background image; 96 then 72 dpi for a note too large for 150) into a fresh `%TEMP%\Ardoise\drag\<uuid>\`, named
   like the export of several notes (`export::load_sources` stem, `write_new_file`: ` (2)` for duplicates), on a blocking
   thread. `start_note_drag(files)` refuses any file that is not directly inside a drag folder, then runs
   `drag_windows::drag_files` on the main thread (`run_on_main_thread`) and answers `dropped` / `cancelled` when the OLE

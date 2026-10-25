@@ -245,9 +245,15 @@ pub async fn note_thumbnail(
 ) -> CommandResult<Option<String>> {
     let _ = stamp;
     let library = library_of(&context)?;
-    thumbnail_of(&library, &cache, Path::new(&path))
-        .map(|png| png.as_deref().map(png_data_url))
-        .map_err(library_error)
+    let cache = ThumbnailCache::clone(&cache);
+    // A thumbnail missing from the cache is rendered, background image included: off the async
+    // runtime's threads.
+    crate::notes::blocking(move || {
+        thumbnail_of(&library, &cache, Path::new(&path))
+            .map(|png| png.as_deref().map(png_data_url))
+            .map_err(library_error)
+    })
+    .await
 }
 
 #[cfg(test)]

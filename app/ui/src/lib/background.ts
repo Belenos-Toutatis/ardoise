@@ -39,6 +39,14 @@ export interface BackgroundSource {
   pages: { width: number; height: number }[];
 }
 
+/** How far the creation of notes from a file is (`NotesProgress` in `background.rs`). */
+export interface NotesProgress {
+  /** Notes made so far. */
+  done: number;
+  /** Notes to make. */
+  total: number;
+}
+
 /** The size as displayed: width and height swapped by an odd number of quarter turns. */
 export function displayedSize(pixels: PixelSize, quarterTurns = 0): PixelSize {
   return quarterTurns % 2 === 1 ? { width: pixels.height, height: pixels.width } : pixels;

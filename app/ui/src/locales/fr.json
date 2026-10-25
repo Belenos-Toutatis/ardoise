@@ -467,7 +467,7 @@
     "handwritingNoRecognizer": "aucun module de reconnaissance d'écriture de Windows n'est installé pour cette langue (voir les paramètres)",
     "handwritingFailed": "la reconnaissance d'écriture a échoué ({detail})",
     "backgroundUnsupported": "ce fichier n'est ni un PDF ni une image PNG ou JPEG",
-    "backgroundTooLarge": "ce fichier est trop grand (au plus 50 millions de pixels pour une image) ({detail})",
+    "backgroundTooLarge": "ce fichier est trop grand (une image : au plus 50 millions de pixels et 256 Mo ; un PDF : au plus 512 Mo et 10 000 pages) ({detail})",
     "backgroundDamaged": "ce fichier est endommagé ou illisible ({detail})",
     "backgroundUnreadable": "ce fichier ne peut pas être ouvert ({detail})",
     "backgroundMissing": "l'image de fond n'est plus en mémoire ; rouvrez la note et choisissez l'image de nouveau",
@@ -588,13 +588,13 @@
     "original": {
       "label": "Original",
       "button": "Revenir à l'original",
-      "helpTablet": "Retrouvez l'encre telle qu'elle est arrivée de la tablette, sans vos modifications.",
-      "helpFirst": "Retrouvez l'encre telle qu'elle était avant sa première modification dans Ardoise.",
-      "none": "Pas encore d'original : Ardoise garde l'encre de la note telle qu'elle était quand vous enregistrez sa première modification.",
+      "helpTablet": "Retrouvez l'encre telle qu'elle est arrivée de la tablette, sans vos modifications (avec l'orientation de la tablette choisie actuellement dans les réglages).",
+      "helpFirst": "Retrouvez l'encre de la première version enregistrée qui en contenait, sans les modifications faites ensuite.",
+      "none": "Pas encore d'original : la première fois que vous enregistrez une modification de l'encre, Ardoise garde la version précédente, si elle contenait de l'encre.",
       "loading": "Recherche de l'original…",
       "confirmTitle": "Revenir à l'original ?",
-      "confirmLost": "Vos modifications de l'encre sont perdues : traits ajoutés, effacés, déplacés, redressés ou recolorés, calques, rotation et recadrage de la page.",
-      "confirmKept": "Le titre, les étiquettes, le favori, le fond de page et la narration restent tels quels.",
+      "confirmLost": "Vos modifications de l'encre seront perdues : traits ajoutés, effacés, déplacés, redressés ou recolorés, calques, rotation et recadrage de la page.",
+      "confirmKept": "Le titre, les étiquettes, le favori, le papier et la narration restent tels quels. L'image de fond reste aussi : elle reprend sa place d'origine si la note l'avait déjà, sinon elle est replacée à l'endroit sur la page rétablie.",
       "confirmUndo": "Vous pourrez encore annuler (Ctrl+Z) ; enregistrez pour garder le résultat.",
       "confirm": "Revenir à l'original",
       "cancel": "Annuler",
@@ -1290,11 +1290,13 @@
       "otherFile": "Autre fichier…",
       "reading": "Lecture du fichier…",
       "running": "Création des notes…",
+      "progress": "Création des notes : {done} sur {total}…",
       "error": "Impossible de créer les notes : {message}",
       "done": "Notes créées : {count}"
     },
     "assemble": {
-      "dropped": "Seule l'image de fond de la première note est gardée. Images de fond des autres notes non reprises : {count}."
+      "droppedOne": "Seule l'image de fond de la première note est gardée : celle d'une autre note ne sera pas reprise.",
+      "droppedMany": "Seule l'image de fond de la première note est gardée : celles de {count} autres notes ne seront pas reprises."
     }
   }
 }

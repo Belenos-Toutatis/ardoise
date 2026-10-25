@@ -1,3 +1,12 @@
+<script lang="ts" module>
+  /**
+   * Done once the editor last torn down has finished its writes and released its background
+   * images: an editor opening a note waits for it, so that this late release never empties the
+   * staging area it has just filled.
+   */
+  let lastRelease: Promise<void> = Promise.resolve();
+</script>
+
 <script lang="ts">
   /**
    * The note editor (milestone M3). Contract used by the library screen: it opens the note at
@@ -8,7 +17,10 @@
    * State: an undo/redo history of immutable `Doc` snapshots (note + selection + active layer,
    * `lib/editor/state.ts`), tool settings beside it. The note is dirty while the present note
    * is not the object last saved. Every write to the note's file (save, rename, copy) goes
-   * through one queue, so that each uses the path and stamp left by the previous one.
+   * through one queue, so that each uses the path and stamp left by the previous one. Going back
+   * to the library waits for the writes still queued (a "save as a copy" needs the background
+   * image's pixels, which Rust keeps only while the editor is there); the editor releases those
+   * pixels when it goes away, once its writes are done.
    *
    * Replay mode (milestone M6, SPEC §4.5): the page is read-only and shows the note as drawn at the
    * playhead (`ReplayPlayer`, `lib/replay.ts`), with a bar of controls; the narration of the note
@@ -268,9 +280,12 @@
       // A recording is never thrown away silently: it goes into its note (or stays pending).
       salvageRecording();
       dropNarrationSound();
-      // The background images imported or opened here are no longer needed (a write still under
-      // way already has its pixels; the next editor stages its own after this).
-      void api.releaseBackgroundImages().catch(() => {});
+      // The background images imported or opened here are no longer needed once the writes
+      // still queued (a "save as a copy" started just before leaving) have used their pixels;
+      // the next editor waits for this before it stages its own.
+      lastRelease = settled()
+        .then(() => api.releaseBackgroundImages())
+        .catch(() => {});
     };
   });
 
@@ -292,6 +307,7 @@
       // The previous note's background images go; this note's image is kept in memory by Rust
       // (its key goes into the history with the note, `lib/editor/image.ts`).
       await settled();
+      await lastRelease;
       await api.releaseBackgroundImages().catch(() => {});
       const [opened, module] = await Promise.all([api.openNote(target), ink ?? loadInk()]);
       if (currentPath !== target) return;
@@ -439,7 +455,14 @@
         // `save_note` keeps the new file's own id; the content is the edited note's.
         const note: Note = { ...present.note, title: copyTitle, created: created.created, origin: { kind: 'ardoise' } };
         // The copy gets the background image too (the same staged pixels).
-        const next = await api.saveNote(created.path, note, created.stamp, present.backgroundPixels?.key);
+        let next: FileStamp;
+        try {
+          next = await api.saveNote(created.path, note, created.stamp, present.backgroundPixels?.key);
+        } catch (error) {
+          // No blank "Copie de …" note is left behind (it goes to the trash, best effort).
+          await api.trashNotes([created.path]).catch(() => {});
+          throw error;
+        }
         if (gen !== generation) return false;
         currentPath = created.path;
         stamp = next;
@@ -509,7 +532,23 @@
 
   // --- Leaving ----------------------------------------------------------------------------
 
+  /** Set while leaving waits for the queued writes. */
+  let closeAfterWrites = false;
+
+  /**
+   * Back to the library, once the queued writes are done (a "save as a copy" still under way
+   * needs the background image's pixels, which the editor releases when it goes away).
+   */
   function close() {
+    if (pendingWrites > 0) {
+      if (closeAfterWrites) return;
+      closeAfterWrites = true;
+      void settled().then(() => {
+        closeAfterWrites = false;
+        if (alive) close();
+      });
+      return;
+    }
     alive = false;
     onclose();
   }

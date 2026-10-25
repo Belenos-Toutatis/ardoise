@@ -8,7 +8,7 @@
    */
   import { onMount } from 'svelte';
   import { api, errorMessage } from '../../lib/api';
-  import { pageMillimetres, parsePageList, type BackgroundSource } from '../../lib/background';
+  import { pageMillimetres, parsePageList, type BackgroundSource, type NotesProgress } from '../../lib/background';
   import { pickBackgroundFile } from '../../lib/dialogs';
   import { t } from '../../lib/i18n.svelte';
   import type { NoteSummary } from '../../lib/note';
@@ -32,6 +32,8 @@
   let pageList = $state('');
   let running = $state(false);
   let error = $state<string | null>(null);
+  /** How far the creation is, while notes are made. */
+  let progress = $state.raw<NotesProgress | null>(null);
 
   const count = $derived(source?.pages.length ?? 0);
   const chosen = $derived(which === 'all' || !source ? null : parsePageList(pageList, count));
@@ -64,13 +66,15 @@
     if (!ready || !path || !source) return;
     running = true;
     error = null;
+    progress = null;
     try {
       const pages = source.kind === 'pdf' && which === 'some' && chosen ? chosen : undefined;
-      const made = await api.createNotesFromFile(binder, path, pages);
+      const made = await api.createNotesFromFile(binder, path, pages, (next) => (progress = next));
       oncreated(made);
     } catch (e) {
       error = errorMessage(e);
       running = false;
+      progress = null;
     }
   }
 
@@ -128,7 +132,13 @@
     {/if}
 
     {#if running}
-      <p class="muted small" role="status">{source ? t('background.library.running') : t('background.library.reading')}</p>
+      <p class="muted small" role="status">
+        {!source
+          ? t('background.library.reading')
+          : progress && progress.total > 1
+            ? t('background.library.progress', { done: progress.done, total: progress.total })
+            : t('background.library.running')}
+      </p>
     {/if}
     {#if error}
       <p class="banner error inline" role="alert">{t('background.library.error', { message: error })}</p>

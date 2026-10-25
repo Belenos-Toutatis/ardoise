@@ -13,7 +13,7 @@
 //!   closes or opens another note.
 //! - **Saving** ([`settle`]): `notes::save_in` writes the staged member the command chose
 //!   ([`with_staged`]) and drops the member of a note that no longer has an image.
-//! - **New notes** ([`notes_from_file_in`]): one note per chosen PDF page at the size of the
+//! - **New notes** ([`notes_from_file_with_progress`]): one note per chosen PDF page at the size of the
 //!   page, or one note for an image, A4-sized in the image's proportions.
 
 use std::cell::RefCell;
@@ -31,6 +31,7 @@ use ardoise_render::picture::{self, MAX_STORED_SIDE};
 use ardoise_render::{NoteView, Picture, PictureError, StoredImage};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tauri::ipc::Channel;
 
 use crate::AppContext;
 use crate::commands::{CommandError, CommandResult};
@@ -38,7 +39,7 @@ use crate::library::{
     NoteSummary, binder_path, blank_note, first_layer_name, library_error, library_of, now_ms,
     summary_of,
 };
-use crate::pdf_pages::{self, PdfError, PdfPageSize};
+use crate::pdf_pages::{self, PdfError, PdfFile, PdfPageSize};
 use crate::thumbnails::{file_thumbnail, thumbnail_view};
 
 /// Resolution a PDF page is rendered at (less when its long side would exceed
@@ -218,17 +219,29 @@ fn import(bytes: &[u8], kind: SourceKind, page: Option<u32>) -> CommandResult<St
     match kind {
         SourceKind::Image => picture::import_image(bytes).map_err(picture_error),
         SourceKind::Pdf => {
-            let sizes = pdf_pages::page_sizes(bytes).map_err(pdf_error)?;
+            let pdf = PdfFile::load(bytes).map_err(pdf_error)?;
+            let sizes = pdf.page_sizes().map_err(pdf_error)?;
             let number = page.unwrap_or(1);
-            let size = number
-                .checked_sub(1)
-                .and_then(|i| sizes.get(i as usize))
-                .ok_or_else(|| pdf_error(PdfError::NoSuchPage(number)))?;
-            let (width, height) = render_size(*size);
-            let png = pdf_pages::render_page(bytes, number, width, height).map_err(pdf_error)?;
-            picture::import_page(&png).map_err(picture_error)
+            import_pdf_page(&pdf, page_size(&sizes, number)?, number)
         }
     }
+}
+
+/// The size of page `number` (from 1) among `sizes`, or `pdfNoSuchPage`.
+fn page_size(sizes: &[PdfPageSize], number: u32) -> CommandResult<PdfPageSize> {
+    number
+        .checked_sub(1)
+        .and_then(|i| sizes.get(i as usize))
+        .copied()
+        .ok_or_else(|| pdf_error(PdfError::NoSuchPage(number)))
+}
+
+/// Page `number` (from 1) of a loaded PDF, of `size`, rendered at [`PDF_DPI`] and ready to
+/// store.
+fn import_pdf_page(pdf: &PdfFile, size: PdfPageSize, number: u32) -> CommandResult<StoredImage> {
+    let (width, height) = render_size(size);
+    let png = pdf.render_page(number, width, height).map_err(pdf_error)?;
+    picture::import_page(&png).map_err(picture_error)
 }
 
 // --- Staging ------------------------------------------------------------------------------
@@ -402,38 +415,51 @@ pub fn staged(staging: &Staging, key: &str) -> CommandResult<Arc<Staged>> {
 
 // --- Saving -------------------------------------------------------------------------------
 
-thread_local! {
-    /// The member `settle` writes, chosen by the command that saves ([`with_staged`]).
-    static CHOSEN: RefCell<Option<Arc<Staged>>> = const { RefCell::new(None) };
+/// The background member a save writes, chosen by the command ([`chosen_for_save`]), with its
+/// decoded pixels for the thumbnail (the staging area usually has them decoded already: the
+/// editor's page was drawn with them).
+#[derive(Debug, Clone)]
+pub struct Chosen {
+    pub staged: Arc<Staged>,
+    pub picture: Option<Arc<Picture>>,
 }
 
-/// Runs `save` (a `notes::save_in`, possibly within a split) with `staged` as the background
+thread_local! {
+    /// The member `settle` writes, chosen by the command that saves ([`with_staged`]).
+    static CHOSEN: RefCell<Option<Chosen>> = const { RefCell::new(None) };
+}
+
+/// Runs `save` (a `notes::save_in`, possibly within a split) with `chosen` as the background
 /// member to write when the saved note has an image. `None` keeps the file's own member.
 ///
 /// `save_in` keeps its signature (another part of M7 shares that function), so the choice
 /// reaches [`settle`] through this thread's state, set for the duration of the call.
-pub fn with_staged<T>(staged: Option<Arc<Staged>>, save: impl FnOnce() -> T) -> T {
-    let previous = CHOSEN.with(|chosen| chosen.replace(staged));
+pub fn with_staged<T>(chosen: Option<Chosen>, save: impl FnOnce() -> T) -> T {
+    let previous = CHOSEN.with(|current| current.replace(chosen));
     let result = save();
-    CHOSEN.with(|chosen| *chosen.borrow_mut() = previous);
+    CHOSEN.with(|current| *current.borrow_mut() = previous);
     result
 }
 
 /// Puts the right background member in `file` (as read, still holding the note it was read
 /// with), about to be written with `note`, and returns the note's thumbnail (with its image).
 /// A note whose image was removed loses the member; a note with an image gets the member chosen
-/// by [`with_staged`], else keeps the file's own. A member the note never described (written by
-/// another version) is kept as it is.
+/// by [`with_staged`] (whose decoded pixels draw the thumbnail), else keeps the file's own. A
+/// member the note never described (written by another version) is kept as it is.
 pub fn settle(file: &mut NoteFile, note: &Note) -> Option<Vec<u8>> {
-    if note.background_image.is_none() {
+    let chosen = CHOSEN.with(|current| current.borrow().clone());
+    let picture = if note.background_image.is_none() {
         if file.note.background_image.is_some() {
             file.background = None;
         }
-    } else if let Some(staged) = CHOSEN.with(|chosen| chosen.borrow().clone()) {
-        file.background = Some(staged.file.clone());
-    }
-    let picture = picture_of(note, file.background.as_ref());
-    thumbnail_view(NoteView::new(note, picture.as_ref()))
+        None
+    } else if let Some(chosen) = chosen {
+        file.background = Some(chosen.staged.file.clone());
+        chosen.picture
+    } else {
+        picture_of(note, file.background.as_ref()).map(Arc::new)
+    };
+    thumbnail_view(NoteView::new(note, picture.as_deref()))
 }
 
 /// The decoded pixels of a note's background member; `None` when the note has no image, or
@@ -443,17 +469,44 @@ pub fn picture_of(note: &Note, member: Option<&BackgroundFile>) -> Option<Pictur
     Picture::decode(member?.bytes.clone()).ok()
 }
 
-/// The staged member a save of `note` writes: the one under `key` when the note has an image
-/// and a key (refused with `backgroundMissing` when it is not staged: the note would be
-/// written with the wrong pixels); `None` keeps the file's own member.
+/// The staged member a save of `note` writes, with its pixels: the one under `key` when the
+/// note has an image and a key (refused with `backgroundMissing` when it is not staged: the
+/// note would be written with the wrong pixels); `None` keeps the file's own member (see
+/// [`check_keyless`]).
 pub fn chosen_for_save(
     staging: &Staging,
     note: &Note,
     key: Option<&str>,
-) -> CommandResult<Option<Arc<Staged>>> {
+) -> CommandResult<Option<Chosen>> {
     match (note.background_image.as_ref(), key) {
-        (Some(_), Some(key)) => staged(staging, key).map(Some),
+        (Some(_), Some(key)) => {
+            let staged = staged(staging, key)?;
+            Ok(Some(Chosen {
+                staged,
+                picture: staging.picture(key),
+            }))
+        }
         _ => Ok(None),
+    }
+}
+
+/// A save without staged pixels keeps the file's own member (the editor could not stage the
+/// note's image: its member is missing or unreadable). That member shows the image the file
+/// describes, so the saved note may only describe the same image (the same file name and PDF
+/// page), placed anywhere (rectangle, quarter turns: page operations move it) and at any
+/// opacity; another image, or an image the file does not have, is refused with
+/// `backgroundMissing` (its pixels are not here).
+pub fn check_keyless(on_disk: &Note, note: &Note) -> CommandResult<()> {
+    match (&note.background_image, &on_disk.background_image) {
+        (None, _) => Ok(()),
+        (Some(new), Some(old)) if new.name == old.name && new.pdf_page == old.pdf_page => Ok(()),
+        (Some(new), _) => Err(CommandError::new(
+            "backgroundMissing",
+            format!(
+                "the pixels of the background image {} are not given",
+                new.name
+            ),
+        )),
     }
 }
 
@@ -551,13 +604,36 @@ fn note_with_image(
 
 /// Makes new notes in `binder` from the file at `path`: one per page of `pages` (from 1; all
 /// pages when `None`) for a PDF, one for an image. Stops at the first page that fails; the
-/// notes made before it stay in the library (each is complete).
+/// notes made before it stay in the library (each is complete). Without progress: for tests.
+#[cfg(test)]
 pub fn notes_from_file_in(
     library: &Library,
     binder: &str,
     path: &Path,
     pages: Option<&[u32]>,
     layer_name: &str,
+) -> CommandResult<Vec<NoteSummary>> {
+    notes_from_file_with_progress(library, binder, path, pages, layer_name, &mut |_| {})
+}
+
+/// How far the creation of notes from a file is (`NotesProgress` in `api.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct NotesProgress {
+    /// Notes made so far.
+    pub done: usize,
+    /// Notes to make.
+    pub total: usize,
+}
+
+/// [`notes_from_file_in`], telling `progress` before the first note and after each one. A PDF
+/// is loaded once, and each chosen page is rendered from it.
+pub fn notes_from_file_with_progress(
+    library: &Library,
+    binder: &str,
+    path: &Path,
+    pages: Option<&[u32]>,
+    layer_name: &str,
+    progress: &mut dyn FnMut(NotesProgress),
 ) -> CommandResult<Vec<NoteSummary>> {
     let (bytes, kind) = read_source(path)?;
     let name = file_name(path);
@@ -571,26 +647,25 @@ pub fn notes_from_file_in(
     };
     match kind {
         SourceKind::Image => {
+            progress(NotesProgress { done: 0, total: 1 });
             let stored = picture::import_image(&bytes).map_err(picture_error)?;
             let page = page_for_image(stored.width, stored.height);
             let title = note_title(&name, None, 1);
             create(&note_with_image(
                 &title, layer_name, now, page, &name, None, stored,
             ))?;
+            progress(NotesProgress { done: 1, total: 1 });
         }
         SourceKind::Pdf => {
-            let sizes = pdf_pages::page_sizes(&bytes).map_err(pdf_error)?;
+            let pdf = PdfFile::load(&bytes).map_err(pdf_error)?;
+            let sizes = pdf.page_sizes().map_err(pdf_error)?;
             let all: Vec<u32> = (1..=sizes.len() as u32).collect();
             let chosen = pages.unwrap_or(&all);
+            let total = chosen.len();
+            progress(NotesProgress { done: 0, total });
             for (i, &number) in chosen.iter().enumerate() {
-                let size = number
-                    .checked_sub(1)
-                    .and_then(|index| sizes.get(index as usize))
-                    .ok_or_else(|| pdf_error(PdfError::NoSuchPage(number)))?;
-                let (width, height) = render_size(*size);
-                let png =
-                    pdf_pages::render_page(&bytes, number, width, height).map_err(pdf_error)?;
-                let stored = picture::import_page(&png).map_err(picture_error)?;
+                let size = page_size(&sizes, number)?;
+                let stored = import_pdf_page(&pdf, size, number)?;
                 let title = note_title(&name, Some(number), sizes.len());
                 // One millisecond apart: sorted by date, the pages keep their order.
                 let created = now.saturating_add(i as i64);
@@ -598,11 +673,12 @@ pub fn notes_from_file_in(
                     &title,
                     layer_name,
                     created,
-                    page_for_pdf(*size),
+                    page_for_pdf(size),
                     &name,
                     Some(number),
                     stored,
                 ))?;
+                progress(NotesProgress { done: i + 1, total });
             }
         }
     }
@@ -669,11 +745,22 @@ pub async fn create_notes_from_file(
     binder: String,
     path: String,
     pages: Option<Vec<u32>>,
+    on_progress: Channel<NotesProgress>,
 ) -> CommandResult<Vec<NoteSummary>> {
     let library = library_of(&context)?;
     let layer = first_layer_name(&crate::diagnostic::report_language(&context));
     blocking(move || {
-        notes_from_file_in(&library, &binder, Path::new(&path), pages.as_deref(), layer)
+        notes_from_file_with_progress(
+            &library,
+            &binder,
+            Path::new(&path),
+            pages.as_deref(),
+            layer,
+            &mut |progress| {
+                // The interface may have gone: the notes are made anyway.
+                let _ = on_progress.send(progress);
+            },
+        )
     })
     .await
 }
@@ -706,6 +793,7 @@ pub(crate) mod tests {
     use ardoise_render::{Image, RenderOptions, encode_jpeg, encode_png, render_note};
 
     use super::*;
+    use crate::library::list;
     use crate::library::tests::{library, write_sample};
     use crate::notes::{background_png, save_in};
     use crate::operations::{MergeLayout, SplitSpec, merge_in, split_in};
@@ -1038,6 +1126,152 @@ pub(crate) mod tests {
         assert_eq!(file.note.background_image.map(|i| i.opacity), Some(0.5));
     }
 
+    /// A note of the library with the red and blue `rouge.png` as its background image.
+    fn with_red_image(library: &Library) -> (PathBuf, FileStamp, Note, Arc<Staged>) {
+        let staging = Staging::default();
+        let saved = write_sample(library, "", "Fiche");
+        let (_d, image) = user_file("rouge.png", &encode_png(&halves(40, 20)).unwrap());
+        let red = stage_file(&staging, &image, None).unwrap();
+        let mut note = library.read(&saved.path).unwrap().file.note;
+        note.background_image = Some(placed("rouge.png", note.page, &red));
+        let chosen = chosen_for_save(&staging, &note, Some(&red.key)).unwrap();
+        let stamp = with_staged(chosen, || {
+            save_in(library, &saved.path, note.clone(), &saved.stamp)
+        })
+        .unwrap();
+        (saved.path, stamp, note, staging.get(&red.key).unwrap())
+    }
+
+    #[test]
+    fn a_save_without_a_key_may_not_describe_another_image() {
+        use crate::notes::save_with_key;
+        let (_dir, library) = library();
+        let (path, stamp, note, red) = with_red_image(&library);
+
+        // The same image, moved by a quarter turn and fainter: its member is the file's.
+        let mut turned = note.clone();
+        if let Some(image) = turned.background_image.as_mut() {
+            image.quarter_turns = 1;
+            image.rect.x += 100.0;
+            image.opacity = 0.5;
+        }
+        let stamp = save_with_key(&library, &path, turned, &stamp, None).unwrap();
+        assert_eq!(
+            library.read(&path).unwrap().file.background,
+            Some(red.file.clone())
+        );
+
+        // Another file, or another page of it: its pixels are not given, nothing is written.
+        for other in [
+            BackgroundImage {
+                name: "bleu.png".into(),
+                ..note.background_image.clone().unwrap()
+            },
+            BackgroundImage {
+                pdf_page: Some(2),
+                ..note.background_image.clone().unwrap()
+            },
+        ] {
+            let mut changed = note.clone();
+            changed.background_image = Some(other);
+            let error = save_with_key(&library, &path, changed.clone(), &stamp, None).unwrap_err();
+            assert_eq!(error.code(), "backgroundMissing");
+            assert_eq!(FileStamp::of(&path).unwrap(), stamp);
+            // A split without a key is refused the same way, before anything is created.
+            let count = list(&library).notes.len();
+            let error = split_in(
+                &library,
+                &path,
+                changed,
+                &stamp,
+                &SplitSpec::Time { at: 120 },
+                "Suite",
+                None,
+            )
+            .unwrap_err();
+            assert_eq!(error.code(), "backgroundMissing");
+            assert_eq!(list(&library).notes.len(), count);
+        }
+
+        // "Save as a copy" without a key: the blank file has no image, so neither its pixels.
+        let blank = library
+            .create(
+                Path::new(""),
+                &NoteFile::new(blank_note("Fiche (copie)", "Calque 1", 1)),
+            )
+            .unwrap();
+        let error =
+            save_with_key(&library, &blank.path, note.clone(), &blank.stamp, None).unwrap_err();
+        assert_eq!(error.code(), "backgroundMissing");
+
+        // Without its image: saved, and the member goes.
+        let mut removed = note;
+        removed.background_image = None;
+        save_with_key(&library, &path, removed, &stamp, None).unwrap();
+        assert_eq!(library.read(&path).unwrap().file.background, None);
+    }
+
+    #[test]
+    fn a_split_after_the_image_was_removed_gives_the_new_note_no_member() {
+        let (_dir, library) = library();
+        let (path, stamp, mut note, _red) = with_red_image(&library);
+        // The editor removed the image (not saved), then splits.
+        note.background_image = None;
+        let result = split_in(
+            &library,
+            &path,
+            note,
+            &stamp,
+            &SplitSpec::Time { at: 120 },
+            "Suite",
+            None,
+        )
+        .unwrap();
+        let created = library.read(Path::new(&result.created.path)).unwrap().file;
+        assert_eq!(
+            (created.note.background_image, created.background),
+            (None, None)
+        );
+        let kept = library.read(&path).unwrap().file;
+        assert_eq!((kept.note.background_image, kept.background), (None, None));
+    }
+
+    #[test]
+    fn the_thumbnail_of_a_save_uses_the_decoded_staged_pixels() {
+        let staging = Staging::default();
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Fiche");
+        let (_d, image) = user_file("rouge.png", &encode_png(&halves(40, 20)).unwrap());
+        let red = stage_file(&staging, &image, None).unwrap();
+        let mut note = library.read(&saved.path).unwrap().file.note;
+        note.background_image = Some(placed("rouge.png", note.page, &red));
+        // The pixels decoded once by the staging area (here, blue ones stand for them): the
+        // save draws the thumbnail with them instead of decoding the member again.
+        let blue = Image {
+            pixels: [10, 10, 200, 255].repeat(16),
+            width: 4,
+            height: 4,
+        };
+        let mut chosen = chosen_for_save(&staging, &note, Some(&red.key))
+            .unwrap()
+            .unwrap();
+        assert!(chosen.picture.is_some());
+        chosen.picture = Some(Arc::new(
+            Picture::decode(encode_png(&blue).unwrap()).unwrap(),
+        ));
+        with_staged(Some(chosen), || {
+            save_in(&library, &saved.path, note, &saved.stamp)
+        })
+        .unwrap();
+        let file = library.read(&saved.path).unwrap().file;
+        assert_eq!(
+            file.background,
+            Some(staging.get(&red.key).unwrap().file.clone())
+        );
+        let thumbnail = ardoise_render::decode_png(file.thumbnail.as_ref().unwrap()).unwrap();
+        assert!(close(rgb(&thumbnail, 5, 100), [10, 10, 200]));
+    }
+
     #[test]
     fn the_editor_page_and_the_exports_draw_the_staged_image() {
         let staging = staging();
@@ -1304,8 +1538,17 @@ pub(crate) mod tests {
         );
 
         let (_dir, library) = library();
-        let made = notes_from_file_in(&library, "Fiches", &pdf, None, "Calque 1").unwrap();
+        let mut steps = Vec::new();
+        let loads = pdf_pages::LOADS.with(std::cell::Cell::get);
+        let made =
+            notes_from_file_with_progress(&library, "Fiches", &pdf, None, "Calque 1", &mut |p| {
+                steps.push((p.done, p.total))
+            })
+            .unwrap();
         assert_eq!(made.len(), 2);
+        assert_eq!(steps, [(0, 2), (1, 2), (2, 2)]);
+        // The PDF was loaded once for both pages.
+        assert_eq!(pdf_pages::LOADS.with(std::cell::Cell::get), loads + 1);
         assert_eq!(made[0].title, "fiche - page 1");
         assert_eq!(made[1].title, "fiche - page 2");
         assert_eq!(made[0].binder, "Fiches");
@@ -1349,25 +1592,32 @@ pub(crate) mod tests {
         );
     }
 
-    /// A PDF that needs a password is refused with its own code.
+    /// `two_page_pdf` encrypted by `lopdf` (RC4 128 bits), with these passwords and permissions.
     #[cfg(windows)]
-    #[test]
-    fn a_pdf_with_a_password_is_refused() {
-        use lopdf::{Document, EncryptionState, EncryptionVersion, Object, Permissions};
+    fn encrypted_pdf(user_password: &str, permissions: lopdf::Permissions) -> Vec<u8> {
+        use lopdf::{Document, EncryptionState, EncryptionVersion, Object};
         let mut document = Document::load_mem(&two_page_pdf()).unwrap();
         let id = Object::String(b"0123456789abcdef".to_vec(), lopdf::StringFormat::Literal);
         document.trailer.set("ID", vec![id.clone(), id]);
         let version = EncryptionVersion::V2 {
             document: &document,
             owner_password: "propriétaire",
-            user_password: "secret",
+            user_password,
             key_length: 128,
-            permissions: Permissions::all(),
+            permissions,
         };
         let state = EncryptionState::try_from(version).unwrap();
         document.encrypt(&state).unwrap();
         let mut bytes = Vec::new();
         document.save_to(&mut bytes).unwrap();
+        bytes
+    }
+
+    /// A PDF that needs a password to be opened is refused with its own code.
+    #[cfg(windows)]
+    #[test]
+    fn a_pdf_with_a_password_is_refused() {
+        let bytes = encrypted_pdf("secret", lopdf::Permissions::all());
         let (_d, pdf) = user_file("protégé.pdf", &bytes);
         assert_eq!(inspect(&pdf).unwrap_err().code(), "pdfEncrypted");
         let staging = Staging::default();
@@ -1378,6 +1628,30 @@ pub(crate) mod tests {
         // A damaged PDF.
         let (_d2, broken) = user_file("cassé.pdf", b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog");
         assert_eq!(inspect(&broken).unwrap_err().code(), "backgroundDamaged");
+    }
+
+    /// A PDF protected only by an owner password (permissions: no copy, no change, no
+    /// printing) opens without one, like in any reader: its pages are listed and rendered.
+    #[cfg(windows)]
+    #[test]
+    fn a_pdf_with_only_an_owner_password_is_read() {
+        let bytes = encrypted_pdf("", lopdf::Permissions::COPYABLE_FOR_ACCESSIBILITY);
+        let (_d, pdf) = user_file("restreint.pdf", &bytes);
+        let source = inspect(&pdf).unwrap();
+        assert_eq!(source.pages.len(), 2);
+        let staging = Staging::default();
+        let staged = stage_file(&staging, &pdf, Some(1)).unwrap();
+        println!(
+            "owner-password PDF: page 1 rendered at {} x {} px",
+            staged.width, staged.height
+        );
+        // The page's black stroke at x = 20 mm is drawn (the content was decrypted).
+        let picture = staging.picture(&staged.key).unwrap();
+        let x = (20.0 / 297.0 * staged.width as f32) as u32;
+        let dark = (0..staged.height)
+            .filter_map(|y| picture.image().pixel(x, y))
+            .any(|[r, g, b, _]| r < 60 && g < 60 && b < 60);
+        assert!(dark, "the page's content is drawn");
     }
 
     /// Elsewhere than on Windows, PDF files are refused with their own code.
@@ -1399,8 +1673,17 @@ pub(crate) mod tests {
     fn an_image_becomes_one_note_of_its_proportions() {
         let (_dir, library) = library();
         let (_d, image) = user_file("Tableau.png", &encode_png(&halves(400, 300)).unwrap());
-        let made = notes_from_file_in(&library, "", &image, None, "Layer 1").unwrap();
+        let mut steps = Vec::new();
+        let made = notes_from_file_with_progress(&library, "", &image, None, "Layer 1", &mut |p| {
+            steps.push((p.done, p.total));
+        })
+        .unwrap();
         assert_eq!(made.len(), 1);
+        assert_eq!(steps, [(0, 1), (1, 1)]);
+        assert_eq!(
+            serde_json::to_value(NotesProgress { done: 1, total: 3 }).unwrap(),
+            serde_json::json!({ "done": 1, "total": 3 })
+        );
         assert_eq!(made[0].title, "Tableau");
         let file = library.read(Path::new(&made[0].path)).unwrap().file;
         assert_eq!(file.note.page, page_for_image(400, 300));

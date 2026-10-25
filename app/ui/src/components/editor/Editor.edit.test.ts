@@ -251,7 +251,7 @@ describe('back to the original', () => {
     // An edit of the ink and of the title is saved: the version before it is kept.
     await drag(wobblyLine(3000, 15000, 15000, 15000));
     await save();
-    await vi.waitFor(() => expect(originalSection().textContent).toContain('avant sa première modification'));
+    await vi.waitFor(() => expect(originalSection().textContent).toContain('première version enregistrée qui en contenait'));
     const button = originalSection().querySelector<HTMLButtonElement>('[data-action="original"]')!;
     expect(button.disabled).toBe(false);
     expect(button.textContent).toContain("Revenir à l'original");
@@ -260,11 +260,19 @@ describe('back to the original', () => {
     button.click();
     await tick();
     const dialog = originalSection().querySelector('[role="alertdialog"]')!;
-    expect(dialog.textContent).toContain("Vos modifications de l'encre sont perdues");
-    expect(dialog.textContent).toContain('Le titre, les étiquettes, le favori, le fond de page et la narration restent tels quels.');
-    [...dialog.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Annuler')!.click();
+    expect(dialog.textContent).toContain("Vos modifications de l'encre seront perdues");
+    expect(dialog.textContent).toContain('Le titre, les étiquettes, le favori, le papier et la narration restent tels quels.');
+    expect(dialog.textContent).toContain("L'image de fond reste aussi");
+    // The focus goes to its harmless button, and back to the button when it is cancelled.
+    const cancel = originalSection().querySelector<HTMLButtonElement>('[data-action="original-cancel"]')!;
+    expect(cancel.textContent?.trim()).toBe('Annuler');
+    await vi.waitFor(() => expect(document.activeElement).toBe(cancel));
+    cancel.click();
     await tick();
     expect(paths()).toHaveLength(2);
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(originalSection().querySelector('[data-action="original"]')),
+    );
 
     originalSection().querySelector<HTMLButtonElement>('[data-action="original"]')!.click();
     await tick();

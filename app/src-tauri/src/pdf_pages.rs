@@ -4,9 +4,14 @@
 //!
 //! WinRT operations are completed with `.join()`, which blocks: call these functions from a
 //! blocking task, never from the interface's thread. The document is read from memory, so the
-//! user's file is opened once, read-only. Elsewhere (`cfg(not(windows))`, the cloud sessions'
-//! Linux) every call answers [`PdfError::Unsupported`]; the logic around it is tested there
-//! with images.
+//! user's file is opened once, read-only, and a [`PdfFile`] loaded once renders as many pages as
+//! wanted. Elsewhere (`cfg(not(windows))`, the cloud sessions' Linux) every call answers
+//! [`PdfError::Unsupported`]; the logic around it is tested there with images.
+//!
+//! A PDF that needs a password to be opened (a user password) fails to load with
+//! `ERROR_WRONG_PASSWORD`: [`PdfError::Encrypted`]. A PDF protected only by an owner password
+//! (permissions) loads and renders like in any reader (checked on Windows 11 with a PDF that
+//! `lopdf` encrypted: `IsPasswordProtected` is false then, and the page is drawn).
 
 /// Largest PDF read, in bytes (a scanned book of a few hundred pages stays below).
 pub const MAX_PDF_BYTES: usize = 512 << 20;
@@ -41,24 +46,48 @@ pub enum PdfError {
     Damaged(String),
 }
 
-/// The size of each page of the PDF `bytes`, in order.
-pub fn page_sizes(bytes: &[u8]) -> Result<Vec<PdfPageSize>, PdfError> {
-    if bytes.len() > MAX_PDF_BYTES {
-        return Err(PdfError::TooLarge);
-    }
-    imp::page_sizes(bytes)
+#[cfg(test)]
+thread_local! {
+    /// PDFs loaded by this thread (tests check that an import loads its PDF once).
+    pub static LOADS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Page `page` (from 1) of the PDF `bytes`, rendered on white to a PNG of `width × height`
-/// pixels.
-pub fn render_page(bytes: &[u8], page: u32, width: u32, height: u32) -> Result<Vec<u8>, PdfError> {
-    if bytes.len() > MAX_PDF_BYTES {
-        return Err(PdfError::TooLarge);
+/// A PDF loaded by Windows, ready to give its pages.
+pub struct PdfFile {
+    document: imp::Document,
+}
+
+impl PdfFile {
+    /// Loads the PDF `bytes` (refused when larger than [`MAX_PDF_BYTES`], with more than
+    /// [`MAX_PDF_PAGES`] pages, or needing a password).
+    pub fn load(bytes: &[u8]) -> Result<PdfFile, PdfError> {
+        if bytes.len() > MAX_PDF_BYTES {
+            return Err(PdfError::TooLarge);
+        }
+        #[cfg(test)]
+        LOADS.with(|loads| loads.set(loads.get() + 1));
+        Ok(PdfFile {
+            document: imp::Document::load(bytes)?,
+        })
     }
-    if page == 0 {
-        return Err(PdfError::NoSuchPage(page));
+
+    /// The size of each page, in order.
+    pub fn page_sizes(&self) -> Result<Vec<PdfPageSize>, PdfError> {
+        self.document.page_sizes()
     }
-    imp::render_page(bytes, page, width.max(1), height.max(1))
+
+    /// Page `page` (from 1), rendered on white to a PNG of `width × height` pixels.
+    pub fn render_page(&self, page: u32, width: u32, height: u32) -> Result<Vec<u8>, PdfError> {
+        if page == 0 {
+            return Err(PdfError::NoSuchPage(page));
+        }
+        self.document.render_page(page, width.max(1), height.max(1))
+    }
+}
+
+/// The size of each page of the PDF `bytes`, in order.
+pub fn page_sizes(bytes: &[u8]) -> Result<Vec<PdfPageSize>, PdfError> {
+    PdfFile::load(bytes)?.page_sizes()
 }
 
 #[cfg(windows)]
@@ -79,76 +108,78 @@ mod imp {
         PdfError::Damaged(error.message())
     }
 
-    fn load(bytes: &[u8]) -> Result<PdfDocument, PdfError> {
-        let stream = InMemoryRandomAccessStream::new().map_err(damaged)?;
-        let writer = DataWriter::CreateDataWriter(&stream).map_err(damaged)?;
-        writer.WriteBytes(bytes).map_err(damaged)?;
-        writer
-            .StoreAsync()
-            .map_err(damaged)?
-            .join()
-            .map_err(damaged)?;
-        writer
-            .FlushAsync()
-            .map_err(damaged)?
-            .join()
-            .map_err(damaged)?;
-        writer.DetachStream().map_err(damaged)?;
-        stream.Seek(0).map_err(damaged)?;
-        let document = PdfDocument::LoadFromStreamAsync(&stream)
-            .and_then(|operation| operation.join())
-            .map_err(|error| {
-                if error.code() == WRONG_PASSWORD {
-                    PdfError::Encrypted
-                } else {
-                    damaged(error)
-                }
-            })?;
-        if document.IsPasswordProtected().unwrap_or(false) {
-            return Err(PdfError::Encrypted);
-        }
-        let count = document.PageCount().map_err(damaged)?;
-        if count > MAX_PDF_PAGES {
-            return Err(PdfError::TooLarge);
-        }
-        Ok(document)
-    }
+    /// A loaded document.
+    pub(super) struct Document(PdfDocument);
 
-    pub(super) fn page_sizes(bytes: &[u8]) -> Result<Vec<PdfPageSize>, PdfError> {
-        let document = load(bytes)?;
-        let count = document.PageCount().map_err(damaged)?;
-        (0..count)
-            .map(|index| {
-                let page = document.GetPage(index).map_err(damaged)?;
-                let size = page.Size().map_err(damaged)?;
-                let _ = page.Close();
-                Ok(PdfPageSize {
-                    width: size.Width * POINTS_PER_DIP,
-                    height: size.Height * POINTS_PER_DIP,
+    impl Document {
+        pub(super) fn load(bytes: &[u8]) -> Result<Document, PdfError> {
+            let stream = InMemoryRandomAccessStream::new().map_err(damaged)?;
+            let writer = DataWriter::CreateDataWriter(&stream).map_err(damaged)?;
+            writer.WriteBytes(bytes).map_err(damaged)?;
+            writer
+                .StoreAsync()
+                .map_err(damaged)?
+                .join()
+                .map_err(damaged)?;
+            writer
+                .FlushAsync()
+                .map_err(damaged)?
+                .join()
+                .map_err(damaged)?;
+            writer.DetachStream().map_err(damaged)?;
+            stream.Seek(0).map_err(damaged)?;
+            // No password is given: a PDF that needs one to be opened fails here; one that
+            // only restricts permissions (owner password) loads.
+            let document = PdfDocument::LoadFromStreamAsync(&stream)
+                .and_then(|operation| operation.join())
+                .map_err(|error| {
+                    if error.code() == WRONG_PASSWORD {
+                        PdfError::Encrypted
+                    } else {
+                        damaged(error)
+                    }
+                })?;
+            let count = document.PageCount().map_err(damaged)?;
+            if count > MAX_PDF_PAGES {
+                return Err(PdfError::TooLarge);
+            }
+            Ok(Document(document))
+        }
+
+        pub(super) fn page_sizes(&self) -> Result<Vec<PdfPageSize>, PdfError> {
+            let count = self.0.PageCount().map_err(damaged)?;
+            (0..count)
+                .map(|index| {
+                    let page = self.0.GetPage(index).map_err(damaged)?;
+                    let size = page.Size().map_err(damaged)?;
+                    let _ = page.Close();
+                    Ok(PdfPageSize {
+                        width: size.Width * POINTS_PER_DIP,
+                        height: size.Height * POINTS_PER_DIP,
+                    })
                 })
-            })
-            .collect()
+                .collect()
+        }
+
+        pub(super) fn render_page(
+            &self,
+            number: u32,
+            width: u32,
+            height: u32,
+        ) -> Result<Vec<u8>, PdfError> {
+            let count = self.0.PageCount().map_err(damaged)?;
+            if number > count {
+                return Err(PdfError::NoSuchPage(number));
+            }
+            let page = self.0.GetPage(number - 1).map_err(damaged)?;
+            let rendered = render_scaled(&page, width, height);
+            let _ = page.Close();
+            rendered
+        }
     }
 
     /// Side, in DIPs, of the small render that measures the display scale.
     const PROBE_DIPS: u32 = 100;
-
-    pub(super) fn render_page(
-        bytes: &[u8],
-        number: u32,
-        width: u32,
-        height: u32,
-    ) -> Result<Vec<u8>, PdfError> {
-        let document = load(bytes)?;
-        let count = document.PageCount().map_err(damaged)?;
-        if number > count {
-            return Err(PdfError::NoSuchPage(number));
-        }
-        let page = document.GetPage(number - 1).map_err(damaged)?;
-        let rendered = render_scaled(&page, width, height);
-        let _ = page.Close();
-        rendered
-    }
 
     /// The page rendered `width × height` pixels. The renderer's sizes are in DIPs, which it
     /// multiplies by the display's scale (1.5 at 150 %): a small render first measures that
@@ -192,16 +223,26 @@ mod imp {
 mod imp {
     use super::{PdfError, PdfPageSize};
 
-    pub(super) fn page_sizes(_bytes: &[u8]) -> Result<Vec<PdfPageSize>, PdfError> {
-        Err(PdfError::Unsupported)
-    }
+    /// Never made: loading fails.
+    #[allow(dead_code)]
+    pub(super) struct Document;
 
-    pub(super) fn render_page(
-        _bytes: &[u8],
-        _number: u32,
-        _width: u32,
-        _height: u32,
-    ) -> Result<Vec<u8>, PdfError> {
-        Err(PdfError::Unsupported)
+    impl Document {
+        pub(super) fn load(_bytes: &[u8]) -> Result<Document, PdfError> {
+            Err(PdfError::Unsupported)
+        }
+
+        pub(super) fn page_sizes(&self) -> Result<Vec<PdfPageSize>, PdfError> {
+            Err(PdfError::Unsupported)
+        }
+
+        pub(super) fn render_page(
+            &self,
+            _number: u32,
+            _width: u32,
+            _height: u32,
+        ) -> Result<Vec<u8>, PdfError> {
+            Err(PdfError::Unsupported)
+        }
     }
 }
