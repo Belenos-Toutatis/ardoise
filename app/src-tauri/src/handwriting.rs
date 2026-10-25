@@ -508,6 +508,278 @@ mod tests {
         indexer.shutdown();
     }
 
+    // --- Indexing and live mode together ---------------------------------------------------------
+
+    /// A recognizer that notes when each recognition starts and ends.
+    struct Timed {
+        engine: Arc<dyn ardoise_hwr::Recognizer>,
+        calls: std::sync::Mutex<Vec<(std::time::Instant, std::time::Instant)>>,
+    }
+
+    impl ardoise_hwr::Recognizer for Timed {
+        fn recognizers(&self) -> Result<Vec<RecognizerInfo>, HwrError> {
+            self.engine.recognizers()
+        }
+
+        fn recognize(
+            &self,
+            strokes: &[ardoise_ink::Stroke],
+            language: Language,
+        ) -> Result<ardoise_hwr::Recognition, HwrError> {
+            let start = std::time::Instant::now();
+            let result = self.engine.recognize(strokes, language);
+            self.calls
+                .lock()
+                .unwrap()
+                .push((start, std::time::Instant::now()));
+            result
+        }
+    }
+
+    /// Stands for the engine where Windows' French recognizer is missing: keeps a core busy
+    /// for 150 ms per note, then reads nothing.
+    struct Busy;
+
+    impl ardoise_hwr::Recognizer for Busy {
+        fn recognizers(&self) -> Result<Vec<RecognizerInfo>, HwrError> {
+            Ok(vec![RecognizerInfo {
+                name: "Busy".into(),
+                language: Some(Language::Fr),
+            }])
+        }
+
+        fn recognize(
+            &self,
+            _: &[ardoise_ink::Stroke],
+            language: Language,
+        ) -> Result<ardoise_hwr::Recognition, HwrError> {
+            let until = std::time::Instant::now() + Duration::from_millis(150);
+            let mut spin = 0u64;
+            while std::time::Instant::now() < until {
+                spin = std::hint::black_box(spin.wrapping_add(1));
+            }
+            Ok(ardoise_hwr::Recognition::empty(language))
+        }
+    }
+
+    /// The engine of this PC (background priority, as in the app), or [`Busy`] without a
+    /// French recognizer (and outside Windows).
+    fn engine() -> (Arc<dyn ardoise_hwr::Recognizer>, &'static str) {
+        let system = SystemRecognizer::background();
+        let installed = ardoise_hwr::Recognizer::recognizers(&system).unwrap_or_default();
+        if ardoise_hwr::recognizer_for(&installed, Language::Fr).is_some() {
+            (Arc::new(system), "the French recognizer of Windows")
+        } else {
+            (
+                Arc::new(Busy),
+                "a stand-in keeping a core busy 150 ms per note",
+            )
+        }
+    }
+
+    /// A library of `count` notes of four lines of synthetic handwriting each.
+    fn handwritten_library(count: usize) -> (tempfile::TempDir, ardoise_core::library::Library) {
+        let (dir, library) = library();
+        let lines = [
+            "le chat dort sur le canapé",
+            "nous étudions la lumière et les ondes",
+            "la forêt est très calme ce matin",
+            "les élèves préparent une expérience",
+        ];
+        for i in 0..count {
+            let mut note = sample_note(&format!("Cours {i}"));
+            note.id = format!("note-{i}");
+            note.strokes = ardoise_hwr::synthetic::Hand {
+                seed: i as u64 + 1,
+                ..ardoise_hwr::synthetic::Hand::default()
+            }
+            .write(&lines.join("\n"));
+            library
+                .create(Path::new(""), &ardoise_core::format::NoteFile::new(note))
+                .unwrap();
+        }
+        (dir, library)
+    }
+
+    /// What one run measured.
+    struct Run {
+        latency: Vec<f64>,
+        /// Recognitions (start, end).
+        calls: Vec<(std::time::Instant, std::time::Instant)>,
+        live_from: std::time::Instant,
+        /// When the indexing reported its pause.
+        paused_at: Option<std::time::Instant>,
+        indexer: Option<Indexer>,
+        _folders: Vec<tempfile::TempDir>,
+    }
+
+    /// Streams `seconds` of simulated live mode; with `notes`, an indexer works meanwhile on a
+    /// library of that many notes with a fresh cache, its `busy` read from the hub
+    /// (`ignore_live`: never busy, to measure what recognising during live mode would cost).
+    fn live_with_indexing(seconds: u32, notes: Option<usize>, ignore_live: bool) -> Run {
+        use std::time::Instant;
+        let hub = crate::live::LiveHub::new(crate::live::HubConfig::default());
+        let (live_dir, live_library) = library();
+        let mut folders = vec![live_dir];
+        let mut timed = None;
+        let indexer = notes.map(|count| {
+            let (dir, library) = handwritten_library(count);
+            let cache = tempfile::tempdir().unwrap();
+            let recorder = Arc::new(Timed {
+                engine: engine().0,
+                calls: std::sync::Mutex::new(Vec::new()),
+            });
+            timed = Some(recorder.clone());
+            let activity = hub.activity();
+            let root = library.root().to_path_buf();
+            let indexer = Indexer::start(Services {
+                background: recorder.clone(),
+                on_demand: recorder,
+                config: Box::new(move || IndexConfig {
+                    library: Some(root.clone()),
+                    setting: HandwritingLanguage::Fr,
+                    interface: Language::Fr,
+                }),
+                busy: Box::new(move || !ignore_live && activity.busy()),
+                notify: Box::new(|_| {}),
+                cache_dir: cache.path().to_path_buf(),
+                pause_poll: PAUSE_POLL,
+            });
+            folders.push(dir);
+            folders.push(cache);
+            // Live mode starts while the indexing is well under way.
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while indexer.status().done < 3 {
+                assert!(Instant::now() < deadline, "{:?}", indexer.status());
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            indexer
+        });
+        let mut live_from = Instant::now();
+        let mut paused_at = None;
+        let latency =
+            crate::live::tests::stream_simulated_live(&hub, &live_library, seconds, || {
+                live_from = Instant::now();
+                let Some(indexer) = &indexer else { return };
+                let deadline = live_from + Duration::from_secs(5);
+                while Instant::now() < deadline {
+                    if indexer.status().state == indexer::IndexState::Paused {
+                        paused_at = Some(Instant::now());
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            });
+        let calls = timed.map_or_else(Vec::new, |t| t.calls.lock().unwrap().clone());
+        Run {
+            latency,
+            calls,
+            live_from,
+            paused_at,
+            indexer,
+            _folders: folders,
+        }
+    }
+
+    fn print_latency(label: &str, samples: &[f64]) {
+        let (median, p95, max) = crate::live::tests::figures(samples);
+        println!(
+            "{label}: {} points, latency (sentAt - recv) median {median:.3} ms, p95 {p95:.3} ms, max {max:.3} ms",
+            samples.len()
+        );
+    }
+
+    /// The indexing pauses as soon as live mode starts (at most the note under way finishes),
+    /// live mode's latency stays within its budget meanwhile, and the indexing ends afterwards.
+    /// With the engine of Windows on Windows; `-- --nocapture` prints the figures.
+    #[test]
+    fn indexing_pauses_while_live_mode_runs_and_its_latency_holds() {
+        const NOTES: usize = 24;
+        println!("engine: {}", engine().1);
+        let run = live_with_indexing(6, Some(NOTES), false);
+        let longest = run
+            .calls
+            .iter()
+            .map(|(start, end)| *end - *start)
+            .max()
+            .unwrap_or_default();
+        let overlapping: Vec<_> = run
+            .calls
+            .iter()
+            .filter(|(_, end)| *end > run.live_from)
+            .collect();
+        let overlap = overlapping
+            .iter()
+            .map(|(_, end)| *end - run.live_from)
+            .max()
+            .unwrap_or_default();
+        let paused_after = run.paused_at.map(|at| at - run.live_from);
+        print_latency("live mode while the indexing pauses", &run.latency);
+        println!(
+            "indexing: {} notes recognised (longest {longest:?}), paused {paused_after:?} after live mode started, recognition overlapping live mode {overlap:?}",
+            run.calls.len()
+        );
+        assert!(
+            overlapping.len() <= 1,
+            "only the note under way may finish during live mode: {overlapping:?}"
+        );
+        let paused_after = paused_after.expect("the indexing paused");
+        assert!(
+            paused_after <= longest + Duration::from_millis(500),
+            "paused after {paused_after:?}"
+        );
+        let n = run.latency.len();
+        assert!(n > 300, "{n} points");
+        let (median, p95, _) = crate::live::tests::figures(&run.latency);
+        assert!(median < 10.0, "median {median} ms");
+        assert!(p95 < 30.0, "95th percentile {p95} ms");
+
+        // Live mode ended: the indexing resumes and ends.
+        let indexer = run.indexer.as_ref().expect("an indexer");
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        loop {
+            let status = indexer.status();
+            if status.state == indexer::IndexState::Idle && status.total == NOTES {
+                assert_eq!((status.done, status.failed), (NOTES, 0));
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "indexing too slow: {status:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        indexer.shutdown();
+    }
+
+    /// What recognising during live mode would cost: live mode alone, with the indexing paused
+    /// (the app), and with the indexing going on regardless. A measurement:
+    /// `cargo test -p ardoise live_latency_with_and_without -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "measurement: run with --ignored --nocapture"]
+    fn live_latency_with_and_without_indexing() {
+        println!("engine: {}", engine().1);
+        let alone = live_with_indexing(10, None, false);
+        print_latency("live mode alone", &alone.latency);
+        let paused = live_with_indexing(10, Some(60), false);
+        print_latency("indexing paused (the app)", &paused.latency);
+        let during = live_with_indexing(10, Some(60), true);
+        let recognised = during
+            .calls
+            .iter()
+            .filter(|(start, _)| *start > during.live_from)
+            .count();
+        print_latency(
+            &format!("indexing during live mode ({recognised} notes recognised meanwhile)"),
+            &during.latency,
+        );
+        for run in [paused, during] {
+            if let Some(indexer) = &run.indexer {
+                indexer.shutdown();
+            }
+        }
+    }
+
     /// No engine, as outside Windows.
     struct Unsupported;
 

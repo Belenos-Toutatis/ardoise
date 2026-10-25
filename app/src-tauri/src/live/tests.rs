@@ -997,11 +997,16 @@ fn hub_latency() {
 }
 
 // End to end on the Rust side: simulated tablet in real time → tablet service → hub → window.
-/// The whole Rust part of the latency: the simulator streams 10 s of handwriting in real time
-/// through the tablet service (registration included) to the hub; prints the median and the
-/// 95th percentile of `sentAt − recv`.
-#[test]
-fn simulator_service_hub_latency() {
+/// Registers a simulated tablet, then streams `seconds` of handwriting in real time through the
+/// tablet service into `hub` (live mode started and stopped as the app does). `while_live` runs
+/// on the calling thread once the stream has started; the stream stops one second after its
+/// end. Returns `sentAt − recv` of every point the window got, sorted (milliseconds).
+pub(crate) fn stream_simulated_live(
+    hub: &LiveHub,
+    library: &Library,
+    seconds: u32,
+    while_live: impl FnOnce(),
+) -> Vec<f64> {
     use ardoise_device::service::{
         ConnectorFactory, PageStore, ServiceConfig, ServiceHooks, TabletOptions, TabletService,
     };
@@ -1016,7 +1021,7 @@ fn simulator_service_hub_latency() {
         }
     }
     /// The person in front of the simulated tablet.
-    struct Hands(SimTablet);
+    struct Hands(SimTablet, u32);
     impl ServiceHooks for Hands {
         fn registration_started(&self) {
             self.0.hold_button();
@@ -1026,11 +1031,10 @@ fn simulator_service_hub_latency() {
         }
         fn live_started(&self) {
             self.0
-                .draw_live(ardoise_sim::drawings::live_script(10, 29_700, 21_600));
+                .draw_live(ardoise_sim::drawings::live_script(self.1, 29_700, 21_600));
         }
     }
 
-    let (dir, library) = library();
     let identity = tempfile::tempdir().unwrap();
     let tablet = SimTablet::slate_large();
     let status = Arc::new(Mutex::new(None));
@@ -1043,13 +1047,13 @@ fn simulator_service_hub_latency() {
     let store_page: PageStore = Box::new(|_, _, _| Err("no page expected".into()));
     let service = TabletService::start(
         ServiceConfig {
-            library: Some(dir.path().to_path_buf()),
+            library: Some(library.root().to_path_buf()),
             identity_root: Some(identity.path().to_path_buf()),
             options: TabletOptions::default(),
             simulated: true,
         },
         Box::new(Factory(tablet.clone())),
-        Arc::new(Hands(tablet.clone())),
+        Arc::new(Hands(tablet.clone(), seconds)),
         on_status,
         store_page,
     );
@@ -1062,20 +1066,25 @@ fn simulator_service_hub_latency() {
             .is_some_and(|s| s.registered.is_some())
     });
 
-    let hub = LiveHub::new(HubConfig::default());
     let window = Arc::new(Window::default());
     hub.subscribe("main", window.clone());
     let Start::New { sink, .. } = hub
-        .start(options(&library, fixed(LiveButton::NewPage)))
+        .start(options(library, fixed(LiveButton::NewPage)))
         .unwrap()
     else {
         panic!("already running");
     };
     service.start_live(Box::new(sink));
-    std::thread::sleep(Duration::from_secs(11));
+    let begin = Instant::now();
+    while_live();
+    std::thread::sleep(
+        (begin + Duration::from_secs(u64::from(seconds) + 1))
+            .saturating_duration_since(Instant::now()),
+    );
     service.stop_live();
     hub.stop().unwrap();
     service.shutdown();
+    hub.unsubscribe("main");
 
     let mut samples: Vec<f64> = window
         .batches
@@ -1089,14 +1098,35 @@ fn simulator_service_hub_latency() {
         })
         .collect();
     samples.sort_by(f64::total_cmp);
+    samples
+}
+
+/// Median, 95th percentile and maximum of sorted `samples`.
+pub(crate) fn figures(samples: &[f64]) -> (f64, f64, f64) {
+    let n = samples.len();
+    assert!(n > 0, "no samples");
+    (
+        samples[n / 2],
+        samples[(n * 95 / 100).min(n - 1)],
+        samples[n - 1],
+    )
+}
+
+/// The whole Rust part of the latency: the simulator streams 10 s of handwriting in real time
+/// through the tablet service (registration included) to the hub; prints the median and the
+/// 95th percentile of `sentAt − recv`.
+#[test]
+fn simulator_service_hub_latency() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(HubConfig::default());
+    let samples = stream_simulated_live(&hub, &library, 10, || {});
     let n = samples.len();
     assert!(n > 500, "{n} points");
+    let (median, p95, _) = figures(&samples);
     println!(
-        "simulator -> service -> hub latency (sentAt - recv): {n} points, median {:.3} ms, p95 {:.3} ms",
-        samples[n / 2],
-        samples[(n * 95 / 100).min(n - 1)]
+        "simulator -> service -> hub latency (sentAt - recv): {n} points, median {median:.3} ms, p95 {p95:.3} ms",
     );
-    assert!(samples[n / 2] < 10.0);
+    assert!(median < 10.0);
 }
 
 // --- Narration recorded in live mode ------------------------------------------------------------

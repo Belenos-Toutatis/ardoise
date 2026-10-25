@@ -13,7 +13,7 @@
 //! of its CPU work on a thread of the WinRT thread pool and on the engine's own inference
 //! threads, at normal priority. What keeps recognition away from live mode is that the indexer
 //! starts none while live mode or the presentation runs. Cancelling a recognition under way
-//! (`IAsyncInfo::Cancel`) is not used: it answers within about 150 ms, but releasing the
+//! (`IAsyncInfo::Cancel`) is not used: it answers within 100 to 250 ms, but releasing the
 //! container afterwards crashed the process (access violation) in the same measurement.
 
 use ardoise_ink::Stroke;
