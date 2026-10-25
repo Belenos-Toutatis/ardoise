@@ -44,14 +44,53 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   language when its recognizer is installed, else the first installed one). The English recognizer exists only if
   Windows' English handwriting pack is installed: say so, with where to install it, never download anything.
 - `ardoise-hwr`: a `Recognizer` trait (so that the indexing logic is tested on Linux with a fake), the Windows
-  implementation, `cfg(not(windows))` → "unsupported". Recognition runs on a background thread of its own (WinRT
-  async completed with `.get()`), never on the UI thread.
+  implementation, `cfg(not(windows))` → "unsupported". Recognition runs on a worker thread of its own (WinRT
+  async completed with `.get()`), never on the UI thread (threads and priorities: below).
 - **The notes are not written for recognition.** Results are a per-PC cache in `%LOCALAPPDATA%\Ardoise\handwriting\`,
   keyed by note id and a hash of the strokes (+ language), so a note edited on another PC is recognised again and
   two PCs never compete to rewrite the same file through Nextcloud (conflict copies). The `text.json` member stays
   unused (reserved).
-- Indexing: in the background, at low priority, notes whose cache entry is missing or stale; paused while live mode
-  or the presentation runs (their latency budget is 30 ms); progress visible; cancellable; never blocks the library.
+- Indexing: in the background, notes whose cache entry is missing or stale; paused while live mode or the
+  presentation runs (their latency budget is 30 ms); progress visible; cancellable; never blocks the library.
+- **Threads and locks** (review fix I1 of M7: a priority inversion between the indexer and live mode):
+  - Windows' locks (`SRWLock`, behind `std::sync::Mutex`) have no priority inheritance, and Windows boosts a starved
+    thread only after seconds. So a lowered priority is only for a thread that takes no lock shared with others.
+  - The indexer's thread (`ardoise-handwriting-index`) runs at **normal** priority: it takes locks that the
+    interface's commands take too (its status and cache locks; Tauri's state manager and the settings when it reads
+    them; the main window when it reports its progress). The engine's worker thread (`ardoise-handwriting` of
+    `SystemRecognizer::background`) runs at background priority (`THREAD_MODE_BACKGROUND_BEGIN`, CPU and disk): it
+    only talks through channels.
+  - "Live mode or the presentation runs" is read without any lock from `live::Activity` (atomics): the hub sets
+    `live` in `Shared::publish`, which every change of the session goes through (start, stop by the user, the
+    tablet service leaving live mode, a failed start, the app closing, a stop whose writes fail); the presentation
+    window takes a token when it is created and gives it back on its own `Destroyed` event (a late event of an old
+    window cannot clear a new one; a new window that cannot be placed is destroyed rather than left hidden). The
+    indexer asks before every note (and while reading cache entries back after a restart), and every 500 ms while
+    paused.
+  - No indexer lock is held across a disk access, a recognition or a call into the app: the cache is split into its
+    memory state (`HandwritingCache`, behind the lock) and its disk access (`CacheDir`); `files.json` is read on
+    the indexer's thread, not on the main thread at start-up. In debug builds a per-thread lock counter checks it
+    before each of these calls (`unlocked`), and the tests run every path. The UI-thread commands
+    (`handwriting_status`, `handwriting_stop`, `handwriting_resume`) only take the status lock, never held long.
+  - Where the engine works (measured on this PC, Windows 11, 12 logical processors,
+    `cargo test -p ardoise-hwr --test engine_threads -- --ignored --nocapture`): `RecognizeAsync` does about 10–20 %
+    of the CPU work on the calling worker thread, the rest on a WinRT thread-pool thread and on the engine's own
+    inference threads (`session-N-intra-op-K`), all at **normal** priority. A 4-line note takes about 250 ms and
+    140 ms of CPU, a dense 16-line page 3–6 s (about 1.2 processors busy on average). The worker's background
+    priority therefore does little; what keeps recognition away from live mode is that **no recognition starts
+    while live mode or the presentation runs**, so at most the note under way finishes after live mode starts.
+    Cancelling it (`IAsyncInfo::Cancel`) was tried: it answers within 100–250 ms, but releasing the
+    `InkRecognizerContainer` afterwards crashed the process (access violation), so it is not used. Lowering the
+    priority of the engine's threads from outside (they are not ours, and the thread pool is shared with WinRT's
+    Bluetooth callbacks) or running the engine in a background-priority child process were not retained; the
+    latter remains the option if weaker PCs show contention.
+  - Measured (`handwriting::tests`, simulated tablet → tablet service → hub, real engine): with 24 notes being
+    indexed when live mode starts, the indexing paused 234 ms later (the note under way, 227 ms of overlap), live
+    latency median 0.15 ms, p95 0.31 ms, max 2.6 ms; afterwards the indexing resumed and ended. The ignored
+    `live_latency_with_and_without_indexing` compares 10 s of live mode alone (median 0.13 ms, p95 0.19 ms),
+    with the indexing paused (0.13 / 0.19 ms) and with the indexing going on regardless (37 notes recognised
+    meanwhile: 0.08 / 0.12 ms): on this PC the Rust side does not feel the engine; the pause protects the
+    interface's drawing and smaller PCs.
 - Search: the library search also matches the recognised text (accents and case ignored, like titles), shows why a
   note matched (a short excerpt), and says when indexing is still running or when no recognizer is installed.
 - Text export: a note's (or a selection's) recognised text, as `.txt` (UTF-8) or copied to the clipboard, from the

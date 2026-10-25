@@ -26,6 +26,7 @@ use ardoise_device::service::{LiveInput, LiveSink, LiveState};
 use ardoise_media::{MediaError, Narration, decode_narration, encode_narration};
 use tauri::ipc::Channel;
 
+use super::activity::Activity;
 use super::model::{
     LiveBatch, LiveCommandKind, LiveEvent, LiveSessionState, LiveSnapshot, LiveStyle,
     LiveViewState, wall_ms, wall_now_ms,
@@ -163,6 +164,8 @@ struct HubState {
 struct Shared {
     config: HubConfig,
     state: Mutex<HubState>,
+    /// Whether the session runs, readable without the lock (set by [`Shared::publish`]).
+    activity: Activity,
     /// Wakes the flusher: events are pending, or shutdown.
     flush_wake: Condvar,
     /// Wakes the saver: a page changed, or shutdown.
@@ -321,8 +324,11 @@ impl Shared {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Queues `events` for every window and wakes the threads that have work.
+    /// Queues `events` for every window and wakes the threads that have work. Every change of
+    /// the session ends here (even one without events), which keeps [`Activity::live`] up to
+    /// date.
     fn publish(&self, state: &mut HubState, events: Vec<LiveEvent>) {
+        self.activity.set_live(state.session.is_running());
         if events.is_empty() {
             return;
         }
@@ -608,6 +614,7 @@ impl LiveHub {
         let size = default_size();
         let shared = Arc::new(Shared {
             config,
+            activity: Activity::default(),
             state: Mutex::new(HubState {
                 session: LiveSession::new(
                     0,
@@ -864,6 +871,12 @@ impl LiveHub {
                 (index, copy)
             })
             .collect()
+    }
+
+    /// Whether live mode runs or the presentation window is open, readable without any lock
+    /// (shared: the presentation window sets its part).
+    pub fn activity(&self) -> Activity {
+        self.shared.activity.clone()
     }
 
     /// The session shown and its current page; `None` before the first start.

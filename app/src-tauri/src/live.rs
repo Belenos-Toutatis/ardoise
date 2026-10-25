@@ -7,14 +7,17 @@
 //! - [`model`]: the shapes the interface receives and sends (`app/ui/src/lib/live.ts`);
 //! - [`session`]: the session itself, pure (strokes, hover, pages, layers, view);
 //! - [`hub`]: the session shared between threads, the batches sent to the windows, the pages
-//!   written to the library.
+//!   written to the library;
+//! - [`activity`]: whether live mode runs or the presentation window is open, without a lock
+//!   (background work waits meanwhile).
 
+pub mod activity;
 pub mod hub;
 pub mod model;
 pub mod session;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,6 +34,7 @@ use crate::diagnostic::report_language;
 use crate::library::{library_error, library_of};
 use crate::tablet::TabletRuntime;
 
+pub use activity::Activity;
 pub use hub::{ButtonSetting, HubConfig, LiveError, LiveHub, PagePosition, Start, StartOptions};
 pub use model::{LiveBatch, LiveCommand, LiveSnapshot, LiveStyle, LiveViewState};
 

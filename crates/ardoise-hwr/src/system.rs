@@ -4,17 +4,28 @@
 //! `InkRecognizerContainer` is not agile: it is created and used on one thread. That thread
 //! joins the multithreaded apartment, so that blocking on the asynchronous recognition (WinRT's
 //! `.get()`, `join()` in the `windows` crate) cannot deadlock. Recognition is never on the
-//! interface's thread; the background indexing runs at background priority
-//! ([`SystemRecognizer::background`]) so that it never competes with live mode.
+//! interface's thread.
+//!
+//! [`SystemRecognizer::background`] runs its worker at background priority. That thread shares
+//! no lock with the rest of the app, so lowering it cannot make anyone wait (Windows' locks
+//! have no priority inheritance). It only covers part of the work, though: measured on
+//! Windows 11 (`docs/design/extras.md`, "Handwriting recognition"), `RecognizeAsync` does most
+//! of its CPU work on a thread of the WinRT thread pool and on the engine's own inference
+//! threads, at normal priority. What keeps recognition away from live mode is that the indexer
+//! starts none while live mode or the presentation runs. Cancelling a recognition under way
+//! (`IAsyncInfo::Cancel`) is not used: it answers within 100 to 250 ms, but releasing the
+//! container afterwards crashed the process (access violation) in the same measurement.
 
 use ardoise_ink::Stroke;
 
 use crate::ink::Scale;
 use crate::{HwrError, Language, Recognition, Recognizer, RecognizerInfo};
 
-/// Lowers the priority of the calling thread (CPU and disk) for background work. Does nothing
-/// outside Windows.
-pub fn lower_thread_priority() {
+/// Lowers the priority of the calling thread (CPU and disk) for background work: only for a
+/// thread that takes no lock shared with other threads (a starved thread holding one would
+/// hold up everyone waiting for it). Does nothing outside Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn lower_thread_priority() {
     #[cfg(windows)]
     {
         use windows::Win32::System::Threading::{
@@ -112,8 +123,8 @@ mod windows_impl {
             SystemRecognizer::start(Scale::default(), false)
         }
 
-        /// The engine for background work: its thread runs at background priority (CPU and
-        /// disk), so that it yields to everything else.
+        /// The engine for background work: its worker thread runs at background priority (CPU
+        /// and disk); the engine's own threads do not (see the module documentation).
         pub fn background() -> SystemRecognizer {
             SystemRecognizer::start(Scale::default(), true)
         }
