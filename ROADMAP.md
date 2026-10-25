@@ -105,10 +105,12 @@ Règles permanentes :
 
 ## M7 — Fonctions supplémentaires (P2)
 
-- [ ] Reconnaissance d'écriture FR/EN hors ligne, recherche dans le texte, export texte.
-- [ ] Redressement des formes ; fond image/PDF ; revenir à l'original ; glisser une note vers l'Explorateur.
+- [x] Reconnaissance d'écriture FR/EN hors ligne, recherche dans le texte, export texte.
+- [x] Redressement des formes ; fond image/PDF ; revenir à l'original ; glisser une note vers l'Explorateur.
 
 **Critères de fin** : `CHECK OK` ; tests de chaque fonction réussis (reconnaissance vérifiée sur des notes de référence avec le taux de mots reconnus affiché).
+
+Vérifié sous Windows le 2026-10-25 : `CHECK OK`, `E2E OK` (14 parcours, FR et EN), reconnaissance en français 100 % des mots des notes de référence. Restent à essayer à la main, faute de pouvoir les automatiser ici : l'anglais (le module d'écriture anglais de Windows n'est pas installé sur ce PC), un vrai dépôt d'une note glissée dans l'Explorateur, Word ou OneNote, et la pause de la lecture de l'écriture pendant la présentation.
 
 ## M8 — Finition et publication
 
