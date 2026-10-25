@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Ajouté (jalon M7 — fonctions supplémentaires)
+
+- Reconnaissance de l'écriture manuscrite hors ligne avec la reconnaissance d'écriture de Windows (français ; anglais si le module d'écriture anglais de Windows est installé, les réglages expliquent où l'ajouter) : la recherche de la bibliothèque trouve aussi les notes par les mots écrits à la main (accents et majuscules ignorés), avec un extrait qui montre pourquoi la note correspond ; lecture des notes en arrière-plan, en pause pendant le mode direct et la présentation ; texte reconnu enregistré en `.txt` ou copié depuis la fenêtre d'export (éditeur et sélection) ; le texte reconnu reste dans un cache sur chaque PC, jamais dans les notes. Note de démonstration « Cours d'optique » écrite à la main (glyphes de synthèse).
+
 ### Ajouté (jalon M6 — relecture, vidéo et narration)
 
 - Relecture animée dans l'éditeur (bouton « Relecture » ou touche R) : ligne du temps, lecture et pause (Espace), vitesses de 0,25× à 16×, « Supprimer les temps morts » (pauses ramenées à 0,5 s) ; la page reste intacte pendant la relecture. Le calcul du temps est le même que celui des exports vidéo.

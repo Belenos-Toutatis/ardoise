@@ -34,8 +34,8 @@ export const journeys = [
       let strokeCount;
       let drawnFill;
 
-      await check('la bibliothèque de démonstration s’affiche (7 notes)', async () => {
-        await app.waitFor(`document.querySelectorAll('.note-card').length === 7`, 'the 7 demo notes');
+      await check('la bibliothèque de démonstration s’affiche (8 notes)', async () => {
+        await app.waitFor(`document.querySelectorAll('.note-card').length === 8`, 'the 8 demo notes');
       });
 
       await check('la recherche « energie » (sans accent) trouve « Énergie cinétique »', async () => {
@@ -133,8 +133,8 @@ export const journeys = [
       const LIVE_CANVAS = 'canvas.live-canvas';
       const canvasData = (field) => `document.querySelector(${j(LIVE_CANVAS)})?.dataset.${field}`;
 
-      await check('la bibliothèque de démonstration s’affiche (7 notes)', async () => {
-        await app.waitFor(cards('=== 7'), 'the 7 demo notes');
+      await check('la bibliothèque de démonstration s’affiche (8 notes)', async () => {
+        await app.waitFor(cards('=== 8'), 'the 8 demo notes');
       });
 
       await check('la tablette simulée n’est pas encore enregistrée : le panneau propose l’assistant', async () => {
@@ -168,13 +168,13 @@ export const journeys = [
         );
       });
 
-      await check('la synchronisation importe 3 pages : 10 notes dans la grille', async () => {
+      await check('la synchronisation importe 3 pages : 11 notes dans la grille', async () => {
         // Automatic on connecting; "Sync now" takes over if it did not start by itself.
         try {
-          await app.waitFor(cards('=== 10'), 'the 3 synced pages in the grid', 20_000);
+          await app.waitFor(cards('=== 11'), 'the 3 synced pages in the grid', 20_000);
         } catch {
           await app.click('.tablet-panel button[data-action="sync"]');
-          await app.waitFor(cards('=== 10'), 'the 3 synced pages in the grid after "Sync now"', 40_000);
+          await app.waitFor(cards('=== 11'), 'the 3 synced pages in the grid after "Sync now"', 40_000);
         }
       });
 
@@ -212,10 +212,10 @@ export const journeys = [
         await app.waitFor(`${canvasData('page')} === '2/2'`, 'page 2/2');
       });
 
-      await check('arrêter le mode direct enregistre la session : au moins 11 notes dans la grille', async () => {
+      await check('arrêter le mode direct enregistre la session : au moins 12 notes dans la grille', async () => {
         await app.click('button[data-action="stop-live"]');
         await app.waitFor(`document.querySelector('input.search') !== null`, 'the library');
-        await app.waitFor(cards('>= 11'), 'the live note in the grid', 15_000);
+        await app.waitFor(cards('>= 12'), 'the live note in the grid', 15_000);
       });
     },
   },
@@ -233,8 +233,8 @@ export const journeys = [
       const DIALOG = '[role="dialog"]';
       const SLIDER = 'input[type="range"][data-action="replay-seek"]';
 
-      await check('la bibliothèque de démonstration s’affiche (7 notes)', async () => {
-        await app.waitFor(`document.querySelectorAll('.note-card').length === 7`, 'the 7 demo notes');
+      await check('la bibliothèque de démonstration s’affiche (8 notes)', async () => {
+        await app.waitFor(`document.querySelectorAll('.note-card').length === 8`, 'the 8 demo notes');
       });
 
       await check('ouvrir une note de démonstration : l’éditeur dessine ses traits', async () => {
