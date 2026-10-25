@@ -50,7 +50,7 @@
     "tabletNone": "No tablet registered",
     "tabletState": "Open or close the tablet panel",
     "search": "Search notes",
-    "searchPlaceholder": "Search (title, tag)…",
+    "searchPlaceholder": "Search (title, tag, handwriting)…",
     "sort": "Sort notes",
     "sortOptions": {
       "date-desc": "Date: newest first",

@@ -50,7 +50,7 @@
     "tabletNone": "Aucune tablette enregistrée",
     "tabletState": "Ouvrir ou fermer le panneau de la tablette",
     "search": "Rechercher une note",
-    "searchPlaceholder": "Rechercher (titre, étiquette)…",
+    "searchPlaceholder": "Rechercher (titre, étiquette, écriture)…",
     "sort": "Trier les notes",
     "sortOptions": {
       "date-desc": "Date : la plus récente d'abord",

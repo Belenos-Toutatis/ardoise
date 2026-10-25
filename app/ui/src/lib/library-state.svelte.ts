@@ -109,7 +109,7 @@ export class LibraryState {
     // More notes become searchable as the indexing goes on.
     void onHandwritingStatus((status) => {
       this.handwriting = status;
-      if (queryWords(this.#query).length > 0) this.searchHandwritingSoon();
+      if (queryWords(this.#query).length > 0) this.searchHandwritingSoon(false);
     }).then((stop) => {
       if (stopped) stop();
       else unlistenHandwriting = stop;
@@ -122,8 +122,13 @@ export class LibraryState {
     };
   }
 
-  /** Asks the desktop app, after a short pause, what the handwriting has of the query. */
-  private searchHandwritingSoon(): void {
+  /**
+   * Asks the desktop app, after a short pause, what the handwriting has of the query. A typed
+   * query restarts the pause; a change of the library or of the indexing (`restart` false) keeps
+   * a search already planned, so that frequent changes cannot put it off for ever.
+   */
+  private searchHandwritingSoon(restart = true): void {
+    if (this.#searchTimer && !restart) return;
     if (this.#searchTimer) clearTimeout(this.#searchTimer);
     this.#searchTimer = null;
     const query = this.#query;
@@ -133,7 +138,10 @@ export class LibraryState {
       this.#hitsQuery = '';
       return;
     }
-    this.#searchTimer = setTimeout(() => void this.searchHandwriting(query), handwritingSearch.delayMs);
+    this.#searchTimer = setTimeout(() => {
+      this.#searchTimer = null;
+      void this.searchHandwriting(this.#query);
+    }, handwritingSearch.delayMs);
   }
 
   private async searchHandwriting(query: string): Promise<void> {
@@ -163,7 +171,7 @@ export class LibraryState {
       if (view.kind === 'binder' && !this.hasBinder(view.binder)) this.view = { kind: 'all' };
       if (view.kind === 'tag' && !listing.tags.some((t) => sameTag(t.tag, view.tag))) this.view = { kind: 'all' };
       // Notes may have moved or changed: their handwriting hits too.
-      if (queryWords(this.#query).length > 0) this.searchHandwritingSoon();
+      if (queryWords(this.#query).length > 0) this.searchHandwritingSoon(false);
     } catch (error) {
       if (mine === this.sequence) this.error = errorMessage(error);
     }
