@@ -254,8 +254,9 @@
       // A recording is never thrown away silently: it goes into its note (or stays pending).
       salvageRecording();
       dropNarrationSound();
-      // The background images imported or opened here are no longer needed.
-      void settled().then(() => api.releaseBackgroundImages().catch(() => {}));
+      // The background images imported or opened here are no longer needed (a write still under
+      // way already has its pixels; the next editor stages its own after this).
+      void api.releaseBackgroundImages().catch(() => {});
     };
   });
 

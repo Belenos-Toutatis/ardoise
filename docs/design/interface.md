@@ -33,8 +33,8 @@ Tauri maps camelCase arguments to snake_case parameters (`widthPx` → `width_px
 | `set_note_tags` / `set_note_favorite` | `path`, `tags` or `favorite`, `stamp` | new stamp |
 | `retitle_note` | `path`, `title`, `stamp` | `{ path, stamp }` |
 | `open_note` | `path` | `{ note, stamp }` |
-| `save_note` | `path`, `note`, `stamp` | new stamp; keeps `original.bin`, audio and unknown members; regenerates `thumb.png`; `noteConflict` if changed meanwhile |
-| `render_background` | `page`, `background`, `widthPx` | PNG data URL of the paper/template/texture |
+| `save_note` | `path`, `note`, `stamp`, `imageKey?` | new stamp; keeps `original.bin`, audio and unknown members; writes the background image staged under `imageKey` (M7, `extras.md`); regenerates `thumb.png`; `noteConflict` if changed meanwhile |
+| `render_background` | `page`, `background`, `widthPx`, `image?` | PNG data URL of the paper/template/texture, with the background image `{ image, key }` (M7) |
 | `tablet_info` / `forget_tablet` | – | `TabletInfo` or null / – |
 
 The library is the one configured for this PC. A `LibraryWatcher` runs while the app is open and emits
