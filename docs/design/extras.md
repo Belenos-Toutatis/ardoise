@@ -97,6 +97,65 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   dropped, and the dialog says so). Every note file created from another copies the `background.*` member.
 - The editor's undo history stays consistent with the file (no orphan image that reappears, no image lost on save).
 
+### How it is built
+
+- **Pixels and the renderer.** `ardoise_render::picture` decodes a note file's `background.*` member once into a
+  `Picture` (the encoded bytes and the RGBA pixels). The renderer takes `NoteView { note, picture }` wherever it took
+  a note (`render_note`, `PageCanvas::new`, `note_to_svg`, `notes_to_pdf`, `FrameRenderer::with_picture`,
+  `export_animation`); a plain `&Note` converts into a view without pixels, so callers that never have an image
+  (golden images, Inkspace comparison, tablet pages, live notes) did not change. The image is part of the page
+  background: drawn only with the paper (`Backdrop::Paper`, `background: true`), never on a transparent PNG or
+  with the background off. Raster: a tiny-skia pattern over the visible part of the rectangle, after the stored
+  pixels are reduced by area averaging when they are more than 1.5× larger than drawn (thumbnails do not
+  shimmer). SVG: the stored file (PNG or JPEG) in a data URI, mapped by a `matrix()` from its pixels to the page,
+  in a group clipped to the page (drawn back by resvg in the tests). PDF: a JPEG in grey or RGB is embedded as it
+  is (`/DCTDecode`), anything else as deflated RGB with an 8-bit `/SMask` when some pixels are not opaque; the
+  opacity is the ExtGState `/ca`.
+- **Import** (`picture::import_image`, `import_page`): PNG and JPEG are decoded in pure Rust (`png`, `jpeg-decoder`)
+  after their header is checked: an empty image or one of more than 50 megapixels is refused before any pixel is
+  decoded (`backgroundTooLarge`); large JPEGs are first reduced by the decoder's 1/2–1/8 scaling. EXIF
+  orientations are undone. Stored pixels: at most 4096 px on the long side; JPEG (quality 90) for an opaque image
+  of more than 256 colours, PNG otherwise; a JPEG that needs no change keeps its own bytes; a rendered PDF page is
+  always PNG.
+- **PDF pages** (`app/src-tauri/src/pdf_pages.rs`): `Windows.Data.Pdf` reads the PDF from memory. `PdfPage::Size`
+  is in DIPs (1/96 in), turned into points. `PdfPageRenderOptions` sizes are DIPs too, multiplied by the
+  display's scale: a 100-DIP render first measures that scale, so that a page comes out at 300 dpi (at most
+  4096 px) whatever the screen (verified at the PC's scale: 2551 × 3508 px for an A4 portrait page). A PDF that
+  needs a password gives `pdfEncrypted` (`HRESULT_FROM_WIN32(ERROR_WRONG_PASSWORD)`, tested with a PDF encrypted
+  by `lopdf`); elsewhere than on Windows, `pdfUnsupported`.
+- **The editor's staging area and its undo history** (`app/src-tauri/src/background.rs`, `lib/editor/image.ts`).
+  The interface never holds pixels. Rust keeps, in memory, every image the editor imported (`stage_background_image`)
+  and the image of the note it opened (`stage_note_background`), under a key: a hash of the stored bytes. The
+  editor's `Doc` (what undo and redo restore) holds the note and `backgroundPixels { key, width, height }`
+  together, so every image in the history comes with its own pixels. The key goes back to Rust with everything
+  that needs them: `render_background` (the editor's and the replay's page), `save_note`, `split_note`, and the
+  export, copy and video sources (`ExportSource.imageKey`). Nothing is written to the library before the user
+  saves. On save, `save_in`'s thumbnail line calls `background::settle`: a note whose image was removed loses the
+  member, a note with an image gets the staged member of its key (`backgroundMissing` when the key is no longer
+  staged, checked before anything is written), a save without a key keeps the file's own member, and a member
+  no image describes (written by another version) is kept. Replacing an image, saving, undoing and saving again
+  therefore writes the first image back from its key. The editor empties the staging area when it opens another
+  note and when it closes (after its writes are done). `save_in` keeps its signature (the snapshot block of
+  "back to the original" shares it): the command's choice reaches `settle` through `background::with_staged`, a
+  thread-local set for the duration of the call; after merging, it can become a parameter of `save_in`.
+- **Page operations.** Editor: `rotateQuarter` turns the rectangle like the points and adds a quarter turn,
+  `cropTo` shifts it (`lib/background.ts`); a split gives both notes the image (`split_in` writes the staged
+  member, or the file's, into the new note, and saves the kept part with the same key), "save as a copy" saves the
+  copy with the same key. Assembly: the first note's image, which does not move (the first note stays at the
+  top-left corner); when it reaches beyond the first note's page on a page that grew (end to end, or an overlay of
+  pages of different sizes), its pixels are cut to that page (`picture::crop_to`, rounded out to whole pixels) so
+  that it does not cover another note. The dialog says how many other notes' images are left out
+  (`background_image_names`).
+- **New notes from a file** (`create_notes_from_file`): a PDF gives one note per chosen page (all by default, or a
+  list such as `1-3, 5`), at the page's size (1 pt = 2540/72 device units, kept between 1 cm and 100 m), titled
+  `<file name> - page <n>` (without the page number for a one-page PDF), one millisecond apart so that the
+  library sorts them in page order; an image gives one note as large as fits in an A4 sheet of its orientation,
+  in its proportions, titled after the file. The image fills the page (`ImageFit::Contain` on a page of its
+  proportions). Stops at the first page that fails; the notes made before stay (each is complete). One note is
+  opened in the editor right away; several are announced.
+- **Error codes** (`errorCodes.*`): `backgroundUnsupported`, `backgroundTooLarge`, `backgroundDamaged`,
+  `backgroundUnreadable`, `backgroundMissing`, `pdfUnsupported`, `pdfEncrypted`, `pdfNoSuchPage`.
+
 ## Drag a note out (`drag`)
 
 - A native drag source (OLE `DoDragDrop`, files `CF_HDROP`), so that a note dropped on the Explorer, the desktop, Word,

@@ -1008,6 +1008,16 @@ pub(crate) mod tests {
         assert_eq!(picture.bytes(), png.as_slice());
         assert_eq!(picture.image(), &noise(3, 2));
         assert_eq!(picture.dct(), None);
+        assert_eq!(dimensions(&png).unwrap(), (3, 2));
+        assert_eq!(dimensions(&jpeg).unwrap(), (3, 2));
+        assert!(matches!(
+            dimensions(b"%PDF-1.7"),
+            Err(PictureError::Unsupported)
+        ));
+        assert!(matches!(
+            dimensions(&png[..20]),
+            Err(PictureError::Damaged(_))
+        ));
         let picture = Picture::decode(jpeg).unwrap();
         assert_eq!(picture.format(), PictureFormat::Jpeg);
         assert_eq!(picture.dct(), Some(DctColor::Rgb));

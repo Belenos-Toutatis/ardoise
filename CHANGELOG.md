@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Ajouté (jalon M7 — image ou PDF de fond)
+
+- Image ou PDF de fond sous l'écriture, pour annoter une fiche, un document ou une photo : dans l'éditeur (section « Image ou PDF de fond » du panneau Page : choix du fichier et de la page du PDF, placement entière / remplir / étirer, opacité, retirer, le tout annulable), et depuis la bibliothèque (« Depuis un PDF ou une image » : une note par page choisie du PDF, à la taille de la page, ou une note pour une image). Les pages des PDF sont rendues par Windows à 300 dpi ; l'image suit les rotations, recadrages, découpes et assemblages, et figure dans les miniatures, les exports PNG, JPG, SVG et PDF, le presse-papiers, l'export automatique et les vidéos.
+
 ### Ajouté (jalon M6 — relecture, vidéo et narration)
 
 - Relecture animée dans l'éditeur (bouton « Relecture » ou touche R) : ligne du temps, lecture et pause (Espace), vitesses de 0,25× à 16×, « Supprimer les temps morts » (pauses ramenées à 0,5 s) ; la page reste intacte pendant la relecture. Le calcul du temps est le même que celui des exports vidéo.
