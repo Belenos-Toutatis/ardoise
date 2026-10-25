@@ -681,6 +681,29 @@ fn orient(image: Image, orientation: u16) -> Image {
     }
 }
 
+/// Width and height of a PNG or JPEG file, read from its header only (no pixel is decoded).
+pub fn dimensions(bytes: &[u8]) -> Result<(u32, u32), PictureError> {
+    match PictureFormat::sniff(bytes).ok_or(PictureError::Unsupported)? {
+        PictureFormat::Png => {
+            let mut decoder = png::Decoder::new(Cursor::new(bytes));
+            let header = decoder
+                .read_header_info()
+                .map_err(|e| PictureError::Damaged(e.to_string()))?;
+            Ok((header.width, header.height))
+        }
+        PictureFormat::Jpeg => {
+            let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(bytes));
+            decoder
+                .read_info()
+                .map_err(|e| PictureError::Damaged(e.to_string()))?;
+            let info = decoder
+                .info()
+                .ok_or_else(|| PictureError::Damaged("no image header".into()))?;
+            Ok((u32::from(info.width), u32::from(info.height)))
+        }
+    }
+}
+
 // --- Import ---------------------------------------------------------------------------------
 
 /// A background image ready to be stored as the note file's `background.<extension>`.

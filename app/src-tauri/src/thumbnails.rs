@@ -16,10 +16,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ardoise_core::format;
+use ardoise_core::format::{self, NoteFile};
 use ardoise_core::fsutil::write_atomic;
 use ardoise_core::library::{FileStamp, Library, LibraryError};
 use ardoise_core::note::Note;
+use ardoise_render::NoteView;
 use tauri::State;
 
 use crate::AppContext;
@@ -36,11 +37,23 @@ const MAX_AGE: Duration = Duration::from_secs(60 * 24 * 3600);
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
-/// A PNG thumbnail of `note`, or `None` if it cannot be made (the note is saved anyway).
+/// A PNG thumbnail of `note`, or `None` if it cannot be made (the note is saved anyway). For a
+/// note that has a background image, [`file_thumbnail`] draws it.
 pub fn thumbnail_png(note: &Note) -> Option<Vec<u8>> {
-    let options = ardoise_render::RenderOptions::fit_width(note.page, THUMBNAIL_WIDTH);
-    let image = ardoise_render::render_note(note, &options).ok()?;
+    thumbnail_view(note.into())
+}
+
+/// A PNG thumbnail of a note with the pixels of its background image.
+pub fn thumbnail_view(view: NoteView<'_>) -> Option<Vec<u8>> {
+    let options = ardoise_render::RenderOptions::fit_width(view.note.page, THUMBNAIL_WIDTH);
+    let image = ardoise_render::render_note(view, &options).ok()?;
     ardoise_render::encode_png(&image).ok()
+}
+
+/// A PNG thumbnail of the note stored in `file`, with its background image.
+pub fn file_thumbnail(file: &NoteFile) -> Option<Vec<u8>> {
+    let picture = crate::background::picture_of(&file.note, file.background.as_ref());
+    thumbnail_view(NoteView::new(&file.note, picture.as_ref()))
 }
 
 fn is_png(bytes: &[u8]) -> bool {
@@ -211,7 +224,7 @@ pub fn thumbnail_of(
         Some(png) if is_png(&png) => png,
         _ => {
             let file = format::read_note(&path).map_err(format_error)?;
-            match thumbnail_png(&file.note) {
+            match file_thumbnail(&file) {
                 Some(png) => png,
                 None => return Ok(None),
             }

@@ -7,6 +7,7 @@
 compile_error!("release builds need `--features custom-protocol` (use `cargo xtask check`)");
 
 mod autoexport;
+mod background;
 mod clipboard;
 mod codec;
 mod commands;
@@ -20,6 +21,7 @@ mod live;
 mod narration;
 mod notes;
 mod operations;
+mod pdf_pages;
 mod presentation;
 mod selftest;
 mod tablet;
@@ -231,6 +233,12 @@ pub fn run() {
             codec::openh264_cancel_download,
             codec::openh264_remove,
             codec::set_openh264_allowed,
+            background::inspect_background_file,
+            background::stage_background_image,
+            background::stage_note_background,
+            background::release_background_images,
+            background::create_notes_from_file,
+            background::background_image_names,
         ])
         .setup(move |app| {
             if cli.self_test {

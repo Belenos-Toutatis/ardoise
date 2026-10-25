@@ -17,16 +17,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ardoise_core::fsutil;
-use ardoise_core::library::{Library, note_file_stem};
+use ardoise_core::library::{Library, LibraryError, note_file_stem};
 use ardoise_core::note::Note;
 use ardoise_render::{
-    MAX_DPI, MIN_DPI, PdfOptions, PdfPage, RenderError, RenderOptions, SvgOptions, encode_jpeg_at,
-    encode_png_at, note_to_svg, notes_to_pdf, render_note, render_note_transparent, scale_for_dpi,
+    MAX_DPI, MIN_DPI, NoteView, PdfOptions, PdfPage, Picture, RenderError, RenderOptions,
+    SvgOptions, encode_jpeg_at, encode_png_at, note_to_svg, notes_to_pdf, render_note,
+    render_note_transparent, scale_for_dpi,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::AppContext;
+use crate::background;
 use crate::commands::{CommandError, CommandResult};
 use crate::library::{library_error, library_of, path_text};
 
@@ -94,20 +96,33 @@ pub struct ExportOptions {
 }
 
 /// A note to export: the note at `path`, or the editor's current `note` (unsaved changes
-/// included). `path` also names the output file.
+/// included). `path` also names the output file. `image_key` names the staged pixels of the
+/// editor note's background image (`background::Staging`); without it they come from the file
+/// at `path`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportSource {
     pub path: String,
     #[serde(default)]
     pub note: Option<Note>,
+    #[serde(default)]
+    pub image_key: Option<String>,
 }
 
-/// A note ready to export, with the file name (without extension) its export takes.
+/// A note ready to export, with the file name (without extension) its export takes and the
+/// pixels of its background image.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoadedSource {
     pub note: Note,
     pub stem: String,
+    pub picture: Option<Arc<Picture>>,
+}
+
+impl LoadedSource {
+    /// The note with its pixels, as the renderer takes it.
+    pub fn view(&self) -> NoteView<'_> {
+        NoteView::new(&self.note, self.picture.as_deref())
+    }
 }
 
 pub(crate) fn export_error(message: impl ToString) -> CommandError {
@@ -167,8 +182,14 @@ fn check_options(format: ExportFormat, options: &ExportOptions) -> CommandResult
     Ok(())
 }
 
+fn no_library() -> CommandError {
+    CommandError::new("noLibrary", "no library is chosen on this computer")
+}
+
 /// The notes of `sources`: the note given with a source, or else the note at its path, which
-/// must be a note of `library` (`noLibrary` when a note must be read and there is none).
+/// must be a note of `library` (`noLibrary` when a note must be read and there is none). The
+/// pixels of a note's background image are the staged ones of its key, or else the file's
+/// (an editor note not saved yet has none).
 pub fn load_sources(
     library: Option<&Library>,
     sources: Vec<ExportSource>,
@@ -177,13 +198,31 @@ pub fn load_sources(
         .into_iter()
         .map(|source| {
             let path = Path::new(&source.path);
-            let note = match source.note {
-                Some(note) => note,
+            let key = source.image_key.as_deref();
+            let (note, picture) = match source.note {
+                Some(note) => {
+                    let member = match (&note.background_image, key, library) {
+                        (Some(_), None, Some(library)) if !source.path.is_empty() => {
+                            match library.read(path) {
+                                Ok(loaded) => loaded.file.background,
+                                Err(LibraryError::NotFound { .. }) => None,
+                                Err(error) => return Err(library_error(error)),
+                            }
+                        }
+                        _ => None,
+                    };
+                    let picture = background::source_picture(&note, key, member.as_ref())?;
+                    (note, picture)
+                }
                 None => {
-                    let library = library.ok_or_else(|| {
-                        CommandError::new("noLibrary", "no library is chosen on this computer")
-                    })?;
-                    library.read(path).map_err(library_error)?.file.note
+                    let file = library
+                        .ok_or_else(no_library)?
+                        .read(path)
+                        .map_err(library_error)?
+                        .file;
+                    let picture =
+                        background::source_picture(&file.note, None, file.background.as_ref())?;
+                    (file.note, picture)
                 }
             };
             let stem = path
@@ -191,46 +230,53 @@ pub fn load_sources(
                 .map(|s| s.to_string_lossy().trim().to_owned())
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| note_file_stem(note.created, &note.title));
-            Ok(LoadedSource { note, stem })
+            Ok(LoadedSource {
+                note,
+                stem,
+                picture,
+            })
         })
         .collect()
 }
 
-/// The file of `note` in an image format (PNG, JPG, SVG).
-pub fn image_bytes(
-    note: &Note,
+/// The file of a note (`&Note`, or a view with its background image's pixels) in an image
+/// format (PNG, JPG, SVG).
+pub fn image_bytes<'a>(
+    view: impl Into<NoteView<'a>>,
     format: ExportFormat,
     options: &ExportOptions,
 ) -> CommandResult<Vec<u8>> {
+    let view = view.into();
     let dpi = Some(options.dpi);
     match format {
         ExportFormat::Png if options.background => {
-            let image = render_note(note, &RenderOptions::at_dpi(options.dpi, true))
+            let image = render_note(view, &RenderOptions::at_dpi(options.dpi, true))
                 .map_err(render_error)?;
             encode_png_at(&image, dpi).map_err(render_error)
         }
         ExportFormat::Png => {
-            let image =
-                render_note_transparent(note, scale_for_dpi(options.dpi)).map_err(render_error)?;
+            // No paper, no background image: the strokes alone.
+            let image = render_note_transparent(view.note, scale_for_dpi(options.dpi))
+                .map_err(render_error)?;
             encode_png_at(&image, dpi).map_err(render_error)
         }
         ExportFormat::Jpg => {
             // Without the paper, a white page (JPG has no transparency).
             let image = render_note(
-                note,
+                view,
                 &RenderOptions::at_dpi(options.dpi, options.background),
             )
             .map_err(render_error)?;
             encode_jpeg_at(&image, options.quality, dpi).map_err(render_error)
         }
         ExportFormat::Svg => Ok(note_to_svg(
-            note,
+            view,
             &SvgOptions {
                 background: options.background,
             },
         )
         .into_bytes()),
-        ExportFormat::Pdf => notes_to_pdf(&[note], &pdf_options(options)).map_err(render_error),
+        ExportFormat::Pdf => notes_to_pdf(&[view], &pdf_options(options)).map_err(render_error),
     }
 }
 
@@ -284,14 +330,14 @@ pub fn export(
     match sources {
         [] => Err(export_error("nothing to export")),
         _ if format == ExportFormat::Pdf => {
-            let notes: Vec<&Note> = sources.iter().map(|s| &s.note).collect();
+            let notes: Vec<NoteView<'_>> = sources.iter().map(LoadedSource::view).collect();
             let pdf = notes_to_pdf(&notes, &pdf_options(options)).map_err(render_error)?;
             check_cancelled(cancel)?;
             fsutil::write_atomic(destination, &pdf).map_err(write_error(destination))?;
             Ok(vec![destination.to_path_buf()])
         }
         [single] => {
-            let bytes = image_bytes(&single.note, format, options)?;
+            let bytes = image_bytes(single.view(), format, options)?;
             check_cancelled(cancel)?;
             fsutil::write_atomic(destination, &bytes).map_err(write_error(destination))?;
             Ok(vec![destination.to_path_buf()])
@@ -302,7 +348,7 @@ pub fn export(
                 .iter()
                 .map(|source| {
                     check_cancelled(cancel)?;
-                    let bytes = image_bytes(&source.note, format, options)?;
+                    let bytes = image_bytes(source.view(), format, options)?;
                     check_cancelled(cancel)?;
                     write_new_file(destination, &source.stem, format.extension(), &bytes)
                         .map_err(write_error(destination))
@@ -328,12 +374,18 @@ pub fn export_sources(
     export(&loaded, format, options, destination, cancel)
 }
 
-/// The library, if one of `sources` must be read from it.
+/// The library, if one of `sources` must be read from it (a note not given, or the pixels of a
+/// given note's background image when they are not staged).
 pub(crate) fn library_for(
     context: &AppContext,
     sources: &[ExportSource],
 ) -> CommandResult<Option<Library>> {
-    if sources.iter().all(|s| s.note.is_some()) {
+    let given = |s: &ExportSource| {
+        s.note
+            .as_ref()
+            .is_some_and(|note| note.background_image.is_none() || s.image_key.is_some())
+    };
+    if sources.iter().all(given) {
         Ok(None)
     } else {
         library_of(context).map(Some)
@@ -399,6 +451,7 @@ mod tests {
         ExportSource {
             path: path_text(path),
             note: None,
+            image_key: None,
         }
     }
 
@@ -577,6 +630,7 @@ mod tests {
                 ExportSource {
                     path: String::new(),
                     note: Some(portrait),
+                    image_key: None,
                 },
             ],
             ExportFormat::Pdf,
@@ -617,6 +671,7 @@ mod tests {
             vec![ExportSource {
                 path: path_text(&saved.path),
                 note: Some(edited),
+                image_key: None,
             }],
         )
         .unwrap();
@@ -625,7 +680,7 @@ mod tests {
             loaded[0].stem,
             saved.path.file_stem().unwrap().to_string_lossy()
         );
-        let svg = image_bytes(&loaded[0].note, ExportFormat::Svg, &options(150, true)).unwrap();
+        let svg = image_bytes(loaded[0].view(), ExportFormat::Svg, &options(150, true)).unwrap();
         let svg = String::from_utf8(svg).unwrap();
         assert_eq!(svg.matches("<path ").count(), 2);
         assert!(svg.contains("mix-blend-mode:multiply"));
@@ -636,6 +691,7 @@ mod tests {
             vec![ExportSource {
                 path: String::new(),
                 note: Some(sample_note("Brouillon")),
+                image_key: None,
             }],
         )
         .unwrap();

@@ -43,6 +43,13 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
+# PDF pages rendered by Windows for background images (pdf_pages.rs): Windows.Data.Pdf, read
+# from and rendered into in-memory streams.
+windows = { version = "0.62", features = [
+    "Data_Pdf",
+    "Foundation",
+    "Storage_Streams",
+] }
 # Console: attach to the parent console. DataExchange, Memory, Ole: the clipboard (clipboard.rs).
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",

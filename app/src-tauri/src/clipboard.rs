@@ -38,7 +38,7 @@ pub fn clipboard_payload(
         return Err(export_error("nothing to copy"));
     };
     let image =
-        render_note(&source.note, &RenderOptions::at_dpi(dpi, true)).map_err(render_error)?;
+        render_note(source.view(), &RenderOptions::at_dpi(dpi, true)).map_err(render_error)?;
     clipboard_image_at(&image, Some(dpi)).map_err(render_error)
 }
 
@@ -417,6 +417,7 @@ mod tests {
         let source = ExportSource {
             path: path_text(&saved.path),
             note: None,
+            image_key: None,
         };
         let payload = clipboard_payload(Some(&library), source.clone(), 96).unwrap();
         let image = ardoise_render::decode_png(&payload.png).unwrap();

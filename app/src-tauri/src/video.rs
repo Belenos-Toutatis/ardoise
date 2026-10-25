@@ -24,12 +24,13 @@ use ardoise_media::{
     Mp4Options, Narration, OpenH264Codec, WebmOptions, WebpOptions, decode_narration,
     estimate_export_time, export_animation, page_frame_size, plan_export,
 };
-use ardoise_render::Backdrop;
+use ardoise_render::{Backdrop, NoteView, Picture};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri::ipc::Channel;
 
 use crate::AppContext;
+use crate::background;
 use crate::codec::{codec_dir, openh264_allowed};
 use crate::commands::{CommandError, CommandResult};
 use crate::export::{CANCELLED, ExportSource};
@@ -180,10 +181,11 @@ impl VideoCancel {
     }
 }
 
-/// A note to replay and the narration that goes with it.
+/// A note to replay, the pixels of its background image and the narration that goes with it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoSource {
     pub note: Note,
+    pub picture: Option<Arc<Picture>>,
     pub narration: Option<Narration>,
 }
 
@@ -304,13 +306,24 @@ pub fn animation_export(
     })
 }
 
-/// Whether loading `source` reads the library: the note is not given, or its narration is
-/// wanted from its file.
-pub fn needs_library(source: &ExportSource, options: &VideoExportOptions) -> bool {
-    source.note.is_none() || (wants_narration(options) && !source.path.is_empty())
+/// Whether the background image of the given note must be read from its file (its pixels are
+/// not staged).
+fn image_from_file(source: &ExportSource) -> bool {
+    source.note.as_ref().is_some_and(|note| {
+        note.background_image.is_some() && source.image_key.is_none() && !source.path.is_empty()
+    })
 }
 
-/// The note to replay (the one given, else the one at `source.path`) and, when `narration`,
+/// Whether loading `source` reads the library: the note is not given, or its narration or the
+/// pixels of its background image are wanted from its file.
+pub fn needs_library(source: &ExportSource, options: &VideoExportOptions) -> bool {
+    source.note.is_none()
+        || (wants_narration(options) && !source.path.is_empty())
+        || image_from_file(source)
+}
+
+/// The note to replay (the one given, else the one at `source.path`), the pixels of its
+/// background image (staged under `source.image_key`, else in its file) and, when `narration`,
 /// the narration stored in the file at `source.path`. A note without narration, or an unsaved
 /// note whose file does not exist, has none; one that cannot be read is an error
 /// (`videoExportFailed`).
@@ -320,21 +333,28 @@ pub fn load_video_source(
     narration: bool,
 ) -> CommandResult<VideoSource> {
     let path = Path::new(&source.path);
-    let wants_file = source.note.is_none() || (narration && !source.path.is_empty());
-    let (note, audio) = match (source.note, wants_file) {
-        (Some(note), false) => (note, None),
+    let wants_file =
+        source.note.is_none() || (narration && !source.path.is_empty()) || image_from_file(&source);
+    let key = source.image_key;
+    let (note, audio, member) = match (source.note, wants_file) {
+        (Some(note), false) => (note, None, None),
         (given, _) => {
             let library = library.ok_or_else(|| {
                 CommandError::new("noLibrary", "no library is chosen on this computer")
             })?;
             match (library.read(path), given) {
-                (Ok(loaded), given) => (given.unwrap_or(loaded.file.note), loaded.file.audio),
+                (Ok(loaded), given) => (
+                    given.unwrap_or(loaded.file.note),
+                    loaded.file.audio,
+                    loaded.file.background,
+                ),
                 // The editor's note, not saved yet: no narration either.
-                (Err(LibraryError::NotFound { .. }), Some(note)) => (note, None),
+                (Err(LibraryError::NotFound { .. }), Some(note)) => (note, None, None),
                 (Err(error), _) => return Err(library_error(error)),
             }
         }
     };
+    let picture = background::source_picture(&note, key.as_deref(), member.as_ref())?;
     let narration = match audio {
         Some(bytes) if narration => Some(decode_narration(&bytes).map_err(|error| {
             CommandError::new(
@@ -344,7 +364,11 @@ pub fn load_video_source(
         })?),
         _ => None,
     };
-    Ok(VideoSource { note, narration })
+    Ok(VideoSource {
+        note,
+        picture,
+        narration,
+    })
 }
 
 /// What the export of `source` with `options` would be (nothing is written).
@@ -456,7 +480,7 @@ pub fn export_video_in(
         }
     };
     let summary = export_animation(
-        &source.note,
+        NoteView::new(&source.note, source.picture.as_deref()),
         &export,
         source.narration.as_ref(),
         destination,
@@ -580,6 +604,7 @@ mod tests {
         ExportSource {
             path: path_text(path),
             note: None,
+            image_key: None,
         }
     }
 
@@ -889,6 +914,7 @@ mod tests {
         let with_note = ExportSource {
             path: path_text(&saved.path),
             note: Some(edited.clone()),
+            image_key: None,
         };
         assert!(needs_library(&with_note, &options(VideoFormat::Webm)));
         assert!(!needs_library(&with_note, &options(VideoFormat::Gif)));
@@ -908,6 +934,7 @@ mod tests {
         let unsaved = ExportSource {
             path: path_text(&library.root().join("2026-10-24 Pas encore.ardoise")),
             note: Some(sample_note("Pas encore")),
+            image_key: None,
         };
         assert_eq!(
             load_video_source(Some(&library), unsaved, true)

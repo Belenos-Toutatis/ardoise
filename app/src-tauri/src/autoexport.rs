@@ -17,7 +17,8 @@ use ardoise_core::library::{Library, SavedNote};
 use ardoise_core::note::Note;
 use ardoise_core::settings::{AutoExport, AutoExportFormat};
 use ardoise_render::{
-    PdfOptions, PdfPage, RenderError, RenderOptions, encode_png_at, notes_to_pdf, render_note,
+    NoteView, PdfOptions, PdfPage, RenderError, RenderOptions, encode_png_at, notes_to_pdf,
+    render_note,
 };
 
 /// Resolution of the automatic PNG exports: sharp on a phone, about 1 MB per page.
@@ -74,12 +75,12 @@ pub struct ExportedBytes {
     pub dpi: Option<u32>,
 }
 
-/// `note` as a PNG at [`AUTO_EXPORT_DPI`], or at the highest lower resolution whose image is
+/// The note as a PNG at [`AUTO_EXPORT_DPI`], or at the highest lower resolution whose image is
 /// not too large (never fails for size, except for a page with no usable size at all).
-fn png_bytes(note: &Note) -> Result<ExportedBytes, RenderError> {
+fn png_bytes(view: NoteView<'_>) -> Result<ExportedBytes, RenderError> {
     let mut dpi = AUTO_EXPORT_DPI;
     loop {
-        match render_note(note, &RenderOptions::at_dpi(dpi, true)) {
+        match render_note(view, &RenderOptions::at_dpi(dpi, true)) {
             Ok(image) => {
                 let bytes = encode_png_at(&image, Some(dpi))?;
                 return Ok(ExportedBytes {
@@ -95,12 +96,13 @@ fn png_bytes(note: &Note) -> Result<ExportedBytes, RenderError> {
     }
 }
 
-/// The file of `note` in the automatic export format, `None` when it is off (or a format this
-/// version does not know).
-pub fn export_bytes(
+/// The file of a note (`&Note`, or a view with its background image's pixels) in the automatic
+/// export format, `None` when it is off (or a format this version does not know).
+pub fn export_bytes<'a>(
     format: &AutoExportFormat,
-    note: &Note,
+    note: impl Into<NoteView<'a>>,
 ) -> Result<Option<ExportedBytes>, RenderError> {
+    let note = note.into();
     match format {
         AutoExportFormat::Off | AutoExportFormat::Unknown(_) => Ok(None),
         AutoExportFormat::Pdf => {
@@ -134,7 +136,15 @@ pub fn auto_export(
     let Some(path) = export_path(settings, library, &saved.path)? else {
         return Ok(None);
     };
-    let Some(ExportedBytes { bytes, dpi }) = export_bytes(&settings.format, note)? else {
+    // A synced page has no background image; a note that has one is drawn with its pixels.
+    let picture = match &note.background_image {
+        Some(_) => library.read(&saved.path).ok().and_then(|loaded| {
+            crate::background::picture_of(note, loaded.file.background.as_ref())
+        }),
+        None => None,
+    };
+    let view = NoteView::new(note, picture.as_ref());
+    let Some(ExportedBytes { bytes, dpi }) = export_bytes(&settings.format, view)? else {
         return Ok(None);
     };
     let write_error = |source| AutoExportError::Write {

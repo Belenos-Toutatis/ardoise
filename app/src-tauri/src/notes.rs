@@ -6,16 +6,17 @@
 use std::path::Path;
 
 use ardoise_core::library::{FileStamp, Library, LibraryError};
-use ardoise_core::note::{Background, Note, PageSize};
+use ardoise_core::note::{Background, BackgroundImage, Note, PageSize};
 use ardoise_ink::{Tool, outline};
-use ardoise_render::{RenderError, RenderOptions, encode_png, render_note};
+use ardoise_render::{NoteView, Picture, RenderError, RenderOptions, encode_png, render_note};
 use serde::Serialize;
 use tauri::State;
 
 use crate::AppContext;
+use crate::background::{self, PlacedImage};
 use crate::commands::{CommandError, CommandResult};
 use crate::library::{blank_note, library_error, library_of, now_ms};
-use crate::thumbnails::{png_data_url, thumbnail_png};
+use crate::thumbnails::png_data_url;
 
 /// One stroke ready to draw: an SVG path to fill with the non-zero rule.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -110,7 +111,7 @@ pub fn save_in(
     let mut file = loaded.file;
     note.id = file.note.id.clone();
     note.modified = now_ms().max(file.note.modified);
-    file.thumbnail = thumbnail_png(&note);
+    file.thumbnail = background::settle(&mut file, &note);
     file.note = note;
     library.save(&loaded.path, &file, stamp)
 }
@@ -118,12 +119,13 @@ pub fn save_in(
 /// Largest side of a rendered background, in pixels.
 pub const MAX_BACKGROUND_PX: u32 = 4096;
 
-/// PNG of a page background (paper, template, texture) `width_px` wide, both sides capped at
-/// [`MAX_BACKGROUND_PX`].
+/// PNG of a page background (paper, template, texture, and the background image when its
+/// pixels are given) `width_px` wide, both sides capped at [`MAX_BACKGROUND_PX`].
 pub fn background_png(
     page: PageSize,
     background: Background,
     width_px: u32,
+    image: Option<(BackgroundImage, &Picture)>,
 ) -> Result<Vec<u8>, CommandError> {
     if page.width == 0 || page.height == 0 {
         return Err(CommandError::new(
@@ -136,12 +138,16 @@ pub fn background_png(
     let mut note = blank_note("", "", 0);
     note.page = page;
     note.background = background;
+    let picture = image.map(|(image, picture)| {
+        note.background_image = Some(image);
+        picture
+    });
     let render_error = |error: RenderError| match error {
         RenderError::Size { .. } => CommandError::new("noteInvalid", error),
         _ => CommandError::new("render", error),
     };
     let image = render_note(
-        &note,
+        NoteView::new(&note, picture),
         &RenderOptions {
             scale,
             background: true,
@@ -156,23 +162,42 @@ pub async fn open_note(context: State<'_, AppContext>, path: String) -> CommandR
     open_in(&library_of(&context)?, Path::new(&path)).map_err(library_error)
 }
 
+/// Saves the editor's note. `image_key` names the staged pixels of its background image
+/// (`background::Staging`); without it the file's own image member is kept.
 #[tauri::command]
 pub async fn save_note(
     context: State<'_, AppContext>,
     path: String,
     note: Note,
     stamp: FileStamp,
+    image_key: Option<String>,
 ) -> CommandResult<FileStamp> {
-    save_in(&library_of(&context)?, Path::new(&path), note, &stamp).map_err(library_error)
+    let library = library_of(&context)?;
+    let staged = background::chosen_for_save(background::staging(), &note, image_key.as_deref())?;
+    background::with_staged(staged, || save_in(&library, Path::new(&path), note, &stamp))
+        .map_err(library_error)
 }
 
+/// The page background as a PNG data URL; with `image`, the background image staged under its
+/// key is drawn over the paper (an image whose pixels are not staged is left out).
 #[tauri::command]
 pub async fn render_background(
     page: PageSize,
     background: Background,
     width_px: u32,
+    image: Option<PlacedImage>,
 ) -> CommandResult<String> {
-    background_png(page, background, width_px).map(|png| png_data_url(&png))
+    tauri::async_runtime::spawn_blocking(move || {
+        let picture = image
+            .as_ref()
+            .and_then(|placed| background::staging().picture(&placed.key));
+        let image = image
+            .zip(picture.as_deref())
+            .map(|(placed, picture)| (placed.image, picture));
+        background_png(page, background, width_px, image).map(|png| png_data_url(&png))
+    })
+    .await
+    .map_err(|error| CommandError::new("render", error))?
 }
 
 #[cfg(test)]
@@ -374,7 +399,7 @@ mod tests {
         assert!(r > b && g > b, "{r} {g} {b}");
 
         // Capped on both sides.
-        let huge = background_png(A4_PORTRAIT, background, 100_000).unwrap();
+        let huge = background_png(A4_PORTRAIT, background, 100_000, None).unwrap();
         let image = ardoise_render::decode_png(&huge).unwrap();
         assert!(image.width <= MAX_BACKGROUND_PX && image.height <= MAX_BACKGROUND_PX);
         assert_eq!(image.height, MAX_BACKGROUND_PX);
@@ -386,12 +411,13 @@ mod tests {
             },
             background,
             100,
+            None,
         )
         .unwrap_err();
         assert_eq!(error.code(), "noteInvalid");
     }
 
     fn render_background_url(page: PageSize, background: Background, width: u32) -> String {
-        tauri::async_runtime::block_on(render_background(page, background, width)).unwrap()
+        tauri::async_runtime::block_on(render_background(page, background, width, None)).unwrap()
     }
 }

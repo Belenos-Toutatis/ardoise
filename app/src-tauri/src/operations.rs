@@ -6,19 +6,22 @@
 //! its sources alone. Nothing is lost whichever step fails.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use ardoise_core::format::NoteFile;
+use ardoise_core::format::{BackgroundFile, NoteFile};
 use ardoise_core::library::{FileStamp, Library, LibraryError};
-use ardoise_core::note::Note;
+use ardoise_core::note::{ImageRect, Note, PageSize};
 use ardoise_core::ops::{self, NewNote, OpsError};
+use ardoise_render::picture;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::AppContext;
+use crate::background::{self, Staged};
 use crate::commands::{CommandError, CommandResult};
 use crate::library::{NoteSummary, library_error, library_of, now_ms, summary_of};
 use crate::notes::save_in;
-use crate::thumbnails::thumbnail_png;
+use crate::thumbnails::file_thumbnail;
 
 /// `SplitSpec` in `note.ts`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -89,7 +92,8 @@ fn binder_of(library: &Library, path: &Path) -> Result<PathBuf, LibraryError> {
 /// Splits `note` (the editor's current content of the note at `path`, `stamp` being the version
 /// of the file it was opened from). The new note goes into the same binder, titled `title`; the
 /// kept part is then saved over `path` with the stamp check. If that save fails, the new note is
-/// moved to the trash and the error is returned.
+/// moved to the trash and the error is returned. Both notes keep the background image, with
+/// the pixels `image` (staged by the editor), else those of the file.
 pub fn split_in(
     library: &Library,
     path: &Path,
@@ -97,6 +101,7 @@ pub fn split_in(
     stamp: &FileStamp,
     split: &SplitSpec,
     title: &str,
+    image: Option<Arc<Staged>>,
 ) -> CommandResult<SplitResult> {
     let binder = binder_of(library, path).map_err(library_error)?;
     // Refused early, before anything is created, if the file has changed since it was opened.
@@ -113,12 +118,17 @@ pub fn split_in(
     .map_err(ops_error)?;
 
     let mut extracted = NoteFile::new(parts.extracted);
-    // A page background image or PDF belongs to the page, so it goes with the new note too.
-    extracted.background = loaded.file.background.clone();
-    extracted.thumbnail = thumbnail_png(&extracted.note);
+    // A page background image or PDF belongs to the page, so it goes with the new note too (a
+    // member the note does not describe goes along unchanged, as the kept part keeps it).
+    extracted.background = match (&extracted.note.background_image, &image) {
+        (Some(_), Some(staged)) => Some(staged.file.clone()),
+        _ => loaded.file.background.clone(),
+    };
+    extracted.thumbnail = file_thumbnail(&extracted);
     let created = library.create(&binder, &extracted).map_err(library_error)?;
 
-    if let Err(error) = save_in(library, path, parts.kept, stamp) {
+    let kept = background::with_staged(image, || save_in(library, path, parts.kept, stamp));
+    if let Err(error) = kept {
         // The new note is not wanted without the other half: take it back (best effort, it is
         // a complete note either way).
         let _ = library.trash(&created.path);
@@ -153,11 +163,49 @@ pub fn merge_in(
     let merged = ops::merge(&notes, layout.into(), new_note(title)).map_err(ops_error)?;
 
     let mut file = NoteFile::new(merged);
-    // The merged note takes the first note's background, image or PDF included.
-    file.background = loaded.swap_remove(0).file.background;
-    file.thumbnail = thumbnail_png(&file.note);
+    // The merged note takes the first note's background, image or PDF included (the others'
+    // images are dropped: the dialog says so).
+    let first = loaded.swap_remove(0).file;
+    file.background = first.background;
+    keep_on_first_page(&mut file, first.note.page);
+    file.thumbnail = file_thumbnail(&file);
     let saved = library.create(&binder, &file).map_err(library_error)?;
     Ok(summary_of(library, &saved.path, &file.note, saved.stamp))
+}
+
+/// Cuts the merged note's background image to the first note's page (top left of the merged
+/// page) when it reaches beyond it on a page that grew: it would otherwise cover another note.
+/// An image that cannot be decoded or cut is left as it is.
+fn keep_on_first_page(file: &mut NoteFile, first: PageSize) {
+    let Some(image) = file.note.background_image.clone() else {
+        return;
+    };
+    let area = ImageRect {
+        x: 0.0,
+        y: 0.0,
+        width: first.width as f32,
+        height: first.height as f32,
+    };
+    if file.note.page == first || picture::fits_in(&image, area) {
+        return;
+    }
+    let Some(pixels) = background::picture_of(&file.note, file.background.as_ref()) else {
+        return;
+    };
+    match picture::crop_to(&image, &pixels, area) {
+        Ok(Some((cropped, stored))) => {
+            file.note.background_image = Some(cropped);
+            file.background = Some(BackgroundFile {
+                extension: stored.extension().to_owned(),
+                bytes: stored.bytes,
+            });
+        }
+        Ok(None) => {
+            file.note.background_image = None;
+            file.background = None;
+        }
+        Err(_) => {}
+    }
 }
 
 // --- Commands ---------------------------------------------------------------------------
@@ -170,7 +218,9 @@ pub async fn split_note(
     stamp: FileStamp,
     split: SplitSpec,
     title: String,
+    image_key: Option<String>,
 ) -> CommandResult<SplitResult> {
+    let image = background::chosen_for_save(background::staging(), &note, image_key.as_deref())?;
     split_in(
         &library_of(&context)?,
         Path::new(&path),
@@ -178,6 +228,7 @@ pub async fn split_note(
         &stamp,
         &split,
         &title,
+        image,
     )
 }
 
@@ -250,6 +301,7 @@ mod tests {
             &opened.stamp,
             &SplitSpec::Time { at: 120 },
             " Suite ",
+            None,
         )
         .unwrap();
 
@@ -303,6 +355,7 @@ mod tests {
             &opened.stamp,
             &SplitSpec::Time { at: 1500 },
             "Fin",
+            None,
         )
         .unwrap();
         // The unsaved stroke at 1000 ms is in the kept part, the one at 2000 ms moved.
@@ -334,6 +387,7 @@ mod tests {
             &opened.stamp,
             &SplitSpec::Zone { polygon },
             "Zone",
+            None,
         )
         .unwrap();
         assert_eq!(result.note.strokes.len(), 1);
@@ -367,6 +421,7 @@ mod tests {
                 &opened.stamp,
                 &split,
                 "X",
+                None,
             )
             .unwrap_err();
             assert_eq!(error.code(), "nothingToSplit", "{split:?}");
@@ -392,6 +447,7 @@ mod tests {
             &opened.stamp,
             &SplitSpec::Time { at: 120 },
             "Suite",
+            None,
         )
         .unwrap_err();
         assert_eq!(error.code(), "noteConflict");
@@ -417,6 +473,7 @@ mod tests {
             &stamp,
             &SplitSpec::Time { at: 100 },
             "Suite",
+            None,
         )
         .unwrap_err();
         assert_eq!(error.code(), "noteInvalid");
@@ -446,6 +503,7 @@ mod tests {
             &stamp,
             &SplitSpec::Time { at: 10 },
             "Y",
+            None,
         )
         .unwrap_err();
         assert_eq!(error.code(), "notInLibrary");
@@ -457,6 +515,7 @@ mod tests {
             &stamp,
             &SplitSpec::Time { at: 10 },
             "Y",
+            None,
         )
         .unwrap_err();
         assert_eq!(error.code(), "noteNotFound");
@@ -479,6 +538,7 @@ mod tests {
             &opened.stamp,
             &SplitSpec::Time { at: 120 },
             "Suite",
+            None,
         )
         .unwrap();
         let created = read_note(Path::new(&result.created.path)).unwrap();
@@ -636,6 +696,7 @@ mod tests {
             &opened.stamp,
             &SplitSpec::Time { at: 120 },
             "Suite",
+            None,
         )
         .unwrap();
         let json = serde_json::to_value(&result).unwrap();
