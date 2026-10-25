@@ -6,6 +6,7 @@
 //! `cargo test -p ardoise-hwr --test engine_threads -- --ignored --nocapture`
 
 #![cfg(windows)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -101,7 +102,7 @@ fn measure(label: &str, recognizer: &SystemRecognizer) {
         })
         .filter(|(cpu, ..)| *cpu > 0)
         .collect();
-    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    rows.sort_by_key(|row| std::cmp::Reverse(row.0));
     let total: u64 = rows.iter().map(|row| row.0).sum();
     println!(
         "{label}: 5 recognitions of 4 lines in {wall:?}, {:.0} ms of CPU",
