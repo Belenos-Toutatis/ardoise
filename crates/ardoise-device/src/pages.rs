@@ -276,6 +276,7 @@ pub fn note_from_page(
         modified: now_ms.max(created),
         page: size,
         background: Background::default(),
+        background_image: None,
         tags: Vec::new(),
         favorite: false,
         layers: vec![Layer {

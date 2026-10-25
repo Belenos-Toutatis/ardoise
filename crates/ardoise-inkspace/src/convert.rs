@@ -292,6 +292,7 @@ pub(crate) fn convert_page(
         modified,
         page: page_size,
         background: Background::default(),
+        background_image: None,
         tags: Vec::new(),
         favorite: false,
         layers,

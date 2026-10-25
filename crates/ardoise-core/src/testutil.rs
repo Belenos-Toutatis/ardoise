@@ -122,6 +122,7 @@ impl Lcg {
                 ][self.below(7) as usize],
                 texture: self.below(2) == 0,
             },
+            background_image: None,
             tags: (0..self.below(4))
                 .map(|i| format!("tag{i}-{}", self.below(100)))
                 .collect(),
@@ -159,6 +160,7 @@ pub fn blank_note(id: &str, title: &str) -> Note {
         modified: 1_792_843_200_000,
         page: A4_LANDSCAPE,
         background: Background::default(),
+        background_image: None,
         tags: Vec::new(),
         favorite: false,
         layers: vec![Layer {

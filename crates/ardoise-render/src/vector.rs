@@ -106,6 +106,7 @@ mod tests {
                 template: Template::Grid5mm,
                 texture: false,
             },
+            background_image: None,
             tags: vec![],
             favorite: false,
             layers: vec![

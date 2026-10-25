@@ -333,6 +333,7 @@ mod tests {
             modified: 0,
             page,
             background,
+            background_image: None,
             tags: vec![],
             favorite: false,
             layers: vec![

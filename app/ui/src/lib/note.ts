@@ -31,6 +31,32 @@ export interface Background {
   texture: boolean;
 }
 
+/** Page coordinates in device units (10 µm); may reach outside the page. */
+export interface ImageRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * An imported image or PDF page drawn over the paper, under the strokes (format 1.2). Its pixels
+ * are the note file's `background.png`/`background.jpg` member, which the interface never holds:
+ * Rust renders the page background with it (`ardoise_core::note::BackgroundImage`).
+ */
+export interface BackgroundImage {
+  /** Name of the imported file, for display. */
+  name: string;
+  /** Page of the PDF it comes from, from 1; absent for an image. */
+  pdfPage?: number;
+  /** Where the image is stretched to, after its quarter turns. */
+  rect: ImageRect;
+  /** Clockwise quarter turns of the stored pixels (0–3); absent means 0. */
+  quarterTurns?: number;
+  /** 0 to 1; absent means 1. */
+  opacity?: number;
+}
+
 export interface Layer {
   name: string;
   visible: boolean;
@@ -54,6 +80,8 @@ export interface Note {
   modified: number;
   page: PageSize;
   background: Background;
+  /** Imported image or PDF page under the strokes (format 1.2); absent when there is none. */
+  backgroundImage?: BackgroundImage;
   tags: string[];
   /** Absent means false (format 1.0 files). */
   favorite?: boolean;

@@ -1,7 +1,8 @@
 # The `.ardoise` file format
 
 > Developer document, written in English (the planning documents are in French). It describes format
-> **version 1.1** byte by byte (1.1 = 1.0 plus the optional `favorite` field). Requirements: SPEC §3.3 and §3.4. Code: `crates/ardoise-core/src/format.rs`
+> **version 1.2** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
+> `backgroundImage` field and `original.ardoise` member). Requirements: SPEC §3.3 and §3.4. Code: `crates/ardoise-core/src/format.rs`
 > (container, `note.json`) and `crates/ardoise-core/src/format/strokes.rs` (`strokes.bin`). Model: `note.rs`
 > (`ardoise-core`) and `model.rs` (`ardoise-ink`). Committed sample files: `testdata/format/v1/`.
 
@@ -13,22 +14,23 @@ unzip tool:
 | `note.json` | yes | format version and note metadata (§2) | deflate |
 | `strokes.bin` | yes | every stroke, compact binary (§3) | deflate |
 | `original.bin` | no | the bytes received from the tablet, untouched ("back to the original") | deflate |
+| `original.ardoise` | no (1.2) | the note before its first edit in Ardoise, for notes without `original.bin` (§4) | stored |
 | `thumb.png` | no | thumbnail, PNG | stored |
 | `audio.opus` | no | narration, Ogg Opus (§4.1) | stored |
-| `background.<ext>` | no | background image or PDF; `<ext>` = 1–10 lowercase ASCII letters or digits (`png`, `jpg`, `pdf`…) | by extension (see below) |
+| `background.<ext>` | no | background image (pixels of `backgroundImage`); `<ext>` = 1–10 lowercase ASCII letters or digits; Ardoise writes `png` or `jpg` | by extension (see below) |
 | `text.json` | no | recognised handwriting (written by the P2 recognition; opaque to the format) | deflate |
 | anything else | no | members of newer versions: kept byte for byte when the note is rewritten | by extension (see below) |
 
 The optional members are opaque bytes for the format code: it reads and writes them without looking inside.
-Members whose name ends in `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.opus`, `.ogg`, `.mp3`, `.mp4` or `.zip` (any
-case) are already compressed and are stored; all others are deflated.
+Members whose name ends in `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.opus`, `.ogg`, `.mp3`, `.mp4`, `.zip` or
+`.ardoise` (any case) are already compressed and are stored; all others are deflated.
 
 ## 1. ZIP container
 
 - Plain ZIP (PKWARE APPNOTE): local file headers, central directory, end of central directory record. No encryption,
   no archive comment, no spanning. Writers use only **stored** (method 0) and **deflate** (method 8); readers refuse
   other methods (the member cannot be decoded: "damaged file").
-- Member order written: `note.json`, `strokes.bin`, then `original.bin`, `thumb.png`, `audio.opus`, `text.json`,
+- Member order written: `note.json`, `strokes.bin`, then `original.bin`, `original.ardoise`, `thumb.png`, `audio.opus`, `text.json`,
   `background.<ext>`, then unknown members in the order they were read. **Readers must not depend on the order**;
   they find members by name through the central directory. Names are case-sensitive, `/`-separated, UTF-8 (the
   "language encoding" flag, bit 11, is set when a name is not ASCII).
@@ -55,12 +57,12 @@ A member that crosses a limit, its own or what is left of the total, makes the f
 
 ## 2. `note.json`
 
-A UTF-8 JSON object. Version 1.1 writes it indented with two spaces, `format` first and the other keys in
+A UTF-8 JSON object. Version 1.2 writes it indented with two spaces, `format` first and the other keys in
 alphabetical order; **key order and whitespace are not significant**.
 
 ```json
 {
-  "format": { "version": 1, "minor": 1, "writer": "Ardoise 0.1.0" },
+  "format": { "version": 1, "minor": 2, "writer": "Ardoise 0.1.0" },
   "background": { "paper": "cream", "template": "seyes", "texture": true },
   "created": 1792843200000,
   "id": "6f0c9a52-3d7e-4f0a-9a43-1c2b5e8d7f10",
@@ -87,11 +89,27 @@ alphabetical order; **key order and whitespace are not significant**.
 | `background.paper` | `"white"`, `"cream"`, `"kraft"`, `"slate"` or `{"custom": {"r": u8, "g": u8, "b": u8, "a": u8}}` | paper colour. |
 | `background.template` | `"blank"`, `"lined"`, `"seyes"`, `"grid5mm"`, `"millimetric"`, `"dotted"`, `"music"` | printed guide lines. |
 | `background.texture` | boolean | subtle paper grain. |
+| `backgroundImage` | object, optional (1.2) | imported image or PDF page drawn over the paper and template, under the strokes; absent when there is none (see below). |
 | `tags` | array of strings | tags, in the user's order. |
 | `favorite` | boolean, optional (1.1) | `true` when the note is a favourite; absent otherwise. Absent in 1.0 files: not a favourite. |
 | `layers` | array of `{"name": string, "visible": boolean}` | at least one; strokes refer to layers by index (0 = first). |
 | `timing` | `"recorded"` or `"synthesized"` | whether point times were measured or made up (imported notes without timing). |
 | `origin` | `{"kind": "tablet"}`, `{"kind": "live"}`, `{"kind": "ardoise"}` or `{"kind": "inkspace", "id": string}` | where the note comes from (`id` = Inkspace's note UUID). |
+
+`backgroundImage` (1.2):
+
+| Key | Type | Meaning |
+|---|---|---|
+| `name` | string | name of the imported file, for display (`fiche.pdf`). |
+| `pdfPage` | integer ≥ 1, optional | page of the PDF the image was made from; absent for an image file. |
+| `rect` | `{"x": f32, "y": f32, "width": f32, "height": f32}` | where the image is stretched to, page coordinates in device units; may reach outside the page (not drawn there). |
+| `quarterTurns` | integer, optional (default 0) | clockwise quarter turns applied to the stored pixels before stretching (taken modulo 4). |
+| `opacity` | number, optional (default 1) | 0 = invisible, 1 = as imported; clamped to 0–1 when drawing. |
+
+The pixels are the `background.png` or `background.jpg` member; when it is missing (or is not an image Ardoise can
+decode), nothing is drawn. Page operations move the image with the strokes: a quarter turn turns `rect` and adds one
+to `quarterTurns`, cropping shifts `rect`. (A 1.1 reader keeps the key verbatim but does not move it: a note with a
+background image rotated or cropped by Ardoise 1.1 has its image misplaced.)
 
 Strokes are not in `note.json` (a `strokes` key, if present, is ignored). Any other top-level key is **unknown**: a
 reader keeps it with its value and writes it back unchanged when it saves the note (a key it knows always takes the
@@ -213,9 +231,14 @@ length and thousands of random corruptions).
 ## 4. Optional members
 
 - `original.bin`: the tablet's raw data for this page, as received, never modified after import.
+- `original.ardoise` (1.2): for a note without `original.bin` (live mode, Inkspace import, made in Ardoise), the note as
+  it was before its first edit in Ardoise: a complete `.ardoise` archive (this format, current version) holding only
+  `note.json` and `strokes.bin`. Written once, when an edited note is first saved, and never changed afterwards;
+  "back to the original" restores its page, layers and strokes.
 - `thumb.png`: thumbnail, any size (the app decides).
 - `audio.opus`: narration recorded during a replay or in live mode (§4.1).
-- `background.<ext>`: imported background (image or PDF). At most one is recognised (the first in the central
+- `background.<ext>`: pixels of `backgroundImage` (Ardoise writes `png` or `jpg`; a PDF page is turned into an image
+  when it is imported; files of 1.0/1.1 may hold any extension). At most one is recognised (the first in the central
   directory); further `background.*` members are kept as unknown members. When a note is written, an unknown member
   with the very name of the background being written is dropped: the known background wins (a file read with
   `background.png` and an unknown `background.pdf`, then given a PDF background, is written with the new PDF only).
@@ -277,6 +300,7 @@ Sample files of version 1 (regenerate only when adding one:
 | `testdata/format/v1/minimal.ardoise` | empty note, one layer |
 | `testdata/format/v1/full.ardoise` | every tool, two layers, custom paper, tags, Inkspace origin, every optional member |
 | `testdata/format/v1/future-minor.ardoise` | format 1.3 with an unknown top-level key and unknown members |
+| `testdata/format/v1/full-1.2.ardoise` | format 1.2: a turned, translucent background image from a PDF page, and `original.ardoise` |
 
 ## 6. Library conventions (not part of the file)
 

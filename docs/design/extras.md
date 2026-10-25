@@ -1,0 +1,116 @@
+# Extra features (milestone M7, P2)
+
+Developer document (English). Requirements: SPEC §4.3 (search in recognised text), §4.4 (straighten shapes,
+background image or PDF, back to the original), §4.6 (drag a note out of the app), §4.7 (offline handwriting
+recognition, French and English), §6.2 ("Écriture" row). The Windows pen (tablet as a system pen) was dropped at the
+user's request on 2026-10-25: there is no `ardoise-winpen` any more.
+
+Done criteria (ROADMAP M7): `CHECK OK`; every feature tested; recognition checked on reference notes with the rate of
+recognised words printed.
+
+## Shared contract (committed before the work started)
+
+- **Format 1.2** (`docs/file-format.md`, fixture `testdata/format/v1/full-1.2.ardoise`):
+  - `Note::background_image: Option<BackgroundImage>` (`crates/ardoise-core/src/note.rs`): file name, PDF page,
+    `rect` (where the image is stretched to, page coordinates, may reach outside the page), `quarter_turns`
+    (clockwise, applied to the stored pixels first), `opacity`. The pixels are `NoteFile::background`
+    (`background.png` or `background.jpg`). `ImageRect::fit(page, pixels, ImageFit)` computes the rectangle of an
+    import (contain / cover / stretch); the note keeps only the rectangle, so that page operations can move the image
+    exactly like the strokes.
+  - `NoteFile::original_note` (member `original.ardoise`): the note before its first edit, a complete `.ardoise`
+    archive (read it with `read_from_bytes`), for notes that have no `original.bin`.
+- TypeScript mirror: `BackgroundImage`, `ImageRect`, `Note.backgroundImage?` in `app/ui/src/lib/note.ts`. The
+  interface never holds the image's pixels: Rust renders the page background with them.
+
+## Ownership (parallel work, one worktree each)
+
+| Part | Owner | Files (main ones) |
+|---|---|---|
+| Handwriting recognition, search, text export | agent `hwr` | `crates/ardoise-hwr/`, `app/src-tauri/src/handwriting.rs` (new), settings field, library search, text export |
+| Straighten shapes; back to the original | agent `edit` | `crates/ardoise-ink/src/shapes.rs` (new), `crates/ardoise-ink-wasm/`, editor actions, `save_in` snapshot, `note_original` command |
+| Background image or PDF | agent `background` | import (image decode, PDF pages), `ardoise-render` (PNG/JPG/SVG/PDF/canvas), `ardoise-media` frames, thumbnails, page operations (Rust `ops.rs` and `lib/editor/ops.ts`), page panel, "new note from a PDF or an image" |
+| Drag a note out | agent `drag` | native drag source, library card handle |
+
+Shared files everyone may append to (merged by hand): `app/src-tauri/src/lib.rs` (command list), `app/ui/src/lib/api.ts`
+and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each part adds keys under its own section),
+`CHANGELOG.md` (one line per feature). Nobody else edits another part's main files.
+
+## Handwriting recognition (`hwr`)
+
+- Engine: Windows' `InkRecognizerContainer` (`Windows.UI.Input.Inking`, works in desktop apps). Strokes are built
+  with `InkStrokeBuilder` from the note's points (page units → DIPs; pressure kept), recognised with
+  `InkRecognitionTarget::All`; each result gives words with candidates and a bounding box. Language: the installed
+  recognizers (`GetRecognizers`) are listed; the user picks French or English in the settings (default: the interface
+  language when its recognizer is installed, else the first installed one). The English recognizer exists only if
+  Windows' English handwriting pack is installed: say so, with where to install it, never download anything.
+- `ardoise-hwr`: a `Recognizer` trait (so that the indexing logic is tested on Linux with a fake), the Windows
+  implementation, `cfg(not(windows))` → "unsupported". Recognition runs on a background thread of its own (WinRT
+  async completed with `.get()`), never on the UI thread.
+- **The notes are not written for recognition.** Results are a per-PC cache in `%LOCALAPPDATA%\Ardoise\handwriting\`,
+  keyed by note id and a hash of the strokes (+ language), so a note edited on another PC is recognised again and
+  two PCs never compete to rewrite the same file through Nextcloud (conflict copies). The `text.json` member stays
+  unused (reserved).
+- Indexing: in the background, at low priority, notes whose cache entry is missing or stale; paused while live mode
+  or the presentation runs (their latency budget is 30 ms); progress visible; cancellable; never blocks the library.
+- Search: the library search also matches the recognised text (accents and case ignored, like titles), shows why a
+  note matched (a short excerpt), and says when indexing is still running or when no recognizer is installed.
+- Text export: a note's (or a selection's) recognised text, as `.txt` (UTF-8) or copied to the clipboard, from the
+  same places as the other exports.
+- Test: reference notes with known text (publishable, synthetic: handwriting-like single-stroke glyphs, never the
+  user's notes), French and English; a Windows test prints the rate of recognised words per language, with a
+  threshold written in the test. On a PC without a recognizer for a language, that language is skipped with a message.
+
+## Straighten shapes (`edit`)
+
+- `ardoise_ink::shapes`: recognise a hand-drawn stroke as a straight line, circle or ellipse, rectangle (possibly
+  turned) or arrow (shaft and head, in one stroke or in the strokes of the selection), and return the straightened
+  stroke(s): same tool, colour, width, layer, a pressure that keeps the stroke's look, times spread over the original
+  duration (the replay still draws it). A stroke that is no clear shape is left as it is. Pure Rust, deterministic,
+  exposed through `ardoise-ink-wasm` so the editor applies it synchronously and it is one undoable step.
+- Editor: "Redresser les formes" on the selection (Selection tool), with its help text; nothing selected = the
+  action is disabled with an explanation.
+
+## Back to the original (`edit`)
+
+- Source of the original: `original.bin` (tablet pages: decoded again with `ardoise_device::pages::note_from_page`,
+  the function the synchronisation uses), else `original.ardoise`.
+- `save_in` (`app/src-tauri/src/notes.rs`) writes `original.ardoise` once: when it saves over a file that has neither
+  member, it first keeps the version on disk. Never rewritten afterwards.
+- Command `note_original(path)`: the original's page, layers and strokes (title, tags, favourite, background,
+  narration stay). Editor: "Revenir à l'original" with a confirmation, as one undoable step (saving keeps the
+  history's behaviour); absent when the note has no original.
+
+## Background image or PDF (`background`)
+
+- Import: PNG and JPEG (decoded in pure Rust so that the tests run on Linux), PDF pages through Windows'
+  `Windows.Data.Pdf` (`cfg(not(windows))` → "unsupported"), rasterised once at import. Stored pixels: at most
+  4096 px on the long side; `jpg` for photos, `png` otherwise (transparency, few colours). A PDF page keeps its own
+  aspect ratio; "new note from a PDF or an image" makes one note per chosen page with the page size of the PDF page
+  (1 pt = 1/72 in), and the editor can put an image or a PDF page under an existing note (contain / cover / stretch,
+  opacity, remove).
+- Drawn everywhere the background is drawn, in this order: paper colour, template, image (with its opacity), strokes:
+  the editor and live view (`render_background`), thumbnails, PNG/JPG/SVG/PDF exports (SVG/PDF embed the raster),
+  clipboard, automatic export, video frames, presentation if it shows a note's background.
+- Page operations move it with the strokes, in Rust (`ardoise_core::ops`, `app/src-tauri/src/operations.rs`) and in
+  the editor (`lib/editor/ops.ts`): quarter turn (rect turned, `quarter_turns` + 1), crop (rect shifted), split (the
+  new note gets the image and its member), assembly (the first note's image, moved like its strokes; the others' are
+  dropped, and the dialog says so). Every note file created from another copies the `background.*` member.
+- The editor's undo history stays consistent with the file (no orphan image that reappears, no image lost on save).
+
+## Drag a note out (`drag`)
+
+- A native drag source (OLE `DoDragDrop`, files `CF_HDROP`), so that a note dropped on the Explorer, the desktop, Word,
+  OneNote or a mail becomes a PNG of the note, named after it (rendered to a temporary folder of the app, cleaned up
+  later). Several selected notes give several files.
+- The library's internal drag (moving notes to a binder) keeps working: the drag out starts from its own handle on
+  the card (with a tooltip), or from wherever the agent shows is unambiguous; explain the gesture in the interface.
+- `cfg(not(windows))`: the handle is hidden (or does nothing) and the logic that prepares the files is tested on Linux.
+
+## Verification on Windows (before ticking M7)
+
+- `cargo xtask check` and `cargo xtask e2e` on the merged branch.
+- Recognition: the reference-notes test with the printed rates; a real note of the demo library found by a word in
+  its handwriting.
+- Background: a PDF of several pages imported, annotated, rotated, exported (PNG, PDF, video); a photo as background.
+- Original: a tablet note (simulator) and a live note, edited, then back to the original.
+- Drag: a card dropped into an Explorer folder gives the PNG (checked by hand or by a test that reads the data object).

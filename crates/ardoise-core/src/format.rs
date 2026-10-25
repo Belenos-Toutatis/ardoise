@@ -6,8 +6,8 @@
 //!   [`Note`] metadata without its strokes. Top-level fields this version does not know (added
 //!   by a newer minor version) are kept and written back.
 //! - `strokes.bin` (required): the strokes, see [`strokes`].
-//! - `original.bin`, `thumb.png`, `audio.opus`, `background.<ext>`, `text.json` (optional):
-//!   opaque bytes.
+//! - `original.bin`, `original.ardoise`, `thumb.png`, `audio.opus`, `background.<ext>`,
+//!   `text.json` (optional): opaque bytes.
 //! - anything else: kept verbatim when the note is rewritten.
 //!
 //! Versioning: a reader accepts every older version and every minor version of its own major
@@ -39,6 +39,11 @@ pub const NOTE_JSON: &str = "note.json";
 pub const STROKES_BIN: &str = "strokes.bin";
 /// Optional member: the bytes received from the tablet, untouched.
 pub const ORIGINAL_BIN: &str = "original.bin";
+/// Optional member (format 1.2): the note as it was before its first edit in Ardoise, as a
+/// complete `.ardoise` archive holding only `note.json` and `strokes.bin`. Kept for notes
+/// without `original.bin` (live mode, Inkspace import, notes made in Ardoise), for "back to
+/// the original".
+pub const ORIGINAL_NOTE: &str = "original.ardoise";
 /// Optional member: thumbnail (PNG).
 pub const THUMB_PNG: &str = "thumb.png";
 /// Optional member: narration (Opus).
@@ -72,7 +77,7 @@ pub struct FormatVersion {
 
 impl FormatVersion {
     /// The version this code writes, and the newest it reads.
-    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 1 };
+    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 2 };
 }
 
 impl fmt::Display for FormatVersion {
@@ -109,6 +114,9 @@ pub struct NoteFile {
     pub note: Note,
     /// The bytes received from the tablet, untouched ("back to the original").
     pub original: Option<Vec<u8>>,
+    /// The note before its first edit, a complete `.ardoise` archive ([`ORIGINAL_NOTE`]); only
+    /// for notes without [`original`](Self::original). Read it with [`read_from_bytes`].
+    pub original_note: Option<Vec<u8>>,
     /// PNG thumbnail.
     pub thumbnail: Option<Vec<u8>>,
     /// Narration (Opus).
@@ -130,6 +138,7 @@ impl NoteFile {
         NoteFile {
             note,
             original: None,
+            original_note: None,
             thumbnail: None,
             audio: None,
             background: None,
@@ -272,6 +281,7 @@ fn metadata_only(note: &Note) -> Note {
         modified: note.modified,
         page: note.page,
         background: note.background,
+        background_image: note.background_image.clone(),
         tags: note.tags.clone(),
         favorite: note.favorite,
         layers: note.layers.clone(),
@@ -572,6 +582,7 @@ fn read_archive_within<R: Read + Seek>(reader: R, budget: u64) -> Result<NoteFil
         let slot = match name.as_str() {
             _ if is_dir => None,
             ORIGINAL_BIN => Some(&mut file.original),
+            ORIGINAL_NOTE => Some(&mut file.original_note),
             THUMB_PNG => Some(&mut file.thumbnail),
             AUDIO_OPUS => Some(&mut file.audio),
             TEXT_JSON => Some(&mut file.text),
@@ -651,8 +662,8 @@ pub fn read_thumbnail(path: &Path) -> Result<Option<Vec<u8>>, FormatError> {
 // Writing
 
 /// Extensions of already-compressed data, stored without deflate.
-const STORED_EXTENSIONS: [&str; 10] = [
-    "png", "jpg", "jpeg", "webp", "gif", "opus", "ogg", "mp3", "mp4", "zip",
+const STORED_EXTENSIONS: [&str; 11] = [
+    "png", "jpg", "jpeg", "webp", "gif", "opus", "ogg", "mp3", "mp4", "zip", "ardoise",
 ];
 
 fn compression_for(name: &str) -> CompressionMethod {
@@ -705,6 +716,7 @@ fn check_member_names(file: &NoteFile) -> Result<(), FormatError> {
         NOTE_JSON,
         STROKES_BIN,
         ORIGINAL_BIN,
+        ORIGINAL_NOTE,
         THUMB_PNG,
         AUDIO_OPUS,
         TEXT_JSON,
@@ -758,6 +770,7 @@ fn to_bytes_as(file: &NoteFile, version: FormatVersion) -> Result<Vec<u8>, Forma
     add_member(&mut zip, STROKES_BIN, &strokes, time)?;
     let optional = [
         (ORIGINAL_BIN, &file.original),
+        (ORIGINAL_NOTE, &file.original_note),
         (THUMB_PNG, &file.thumbnail),
         (AUDIO_OPUS, &file.audio),
         (TEXT_JSON, &file.text),

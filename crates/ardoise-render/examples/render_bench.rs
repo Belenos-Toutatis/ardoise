@@ -70,6 +70,7 @@ fn page(tools: bool, background: Background) -> Note {
         modified: 0,
         page: A4_LANDSCAPE,
         background,
+        background_image: None,
         tags: vec![],
         favorite: false,
         layers: vec![Layer {

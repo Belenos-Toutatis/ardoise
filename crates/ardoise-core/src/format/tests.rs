@@ -8,7 +8,9 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use super::*;
-use crate::note::{A4_PORTRAIT, Background, Layer, Origin, Paper, Template, Timing};
+use crate::note::{
+    A4_PORTRAIT, Background, BackgroundImage, ImageRect, Layer, Origin, Paper, Template, Timing,
+};
 use crate::testutil::{Lcg, blank_note};
 
 /// What a save/load cycle makes of a note: points snapped to the stored precision.
@@ -28,6 +30,7 @@ fn random_file(rng: &mut Lcg) -> NoteFile {
         (rng.below(2) == 0).then(|| (0..rng.below(300)).map(|_| rng.next_u32() as u8).collect())
     };
     file.original = blob(rng);
+    file.original_note = blob(rng);
     file.thumbnail = blob(rng);
     file.audio = blob(rng);
     file.text = blob(rng);
@@ -888,7 +891,54 @@ fn fixture_future_minor() -> NoteFile {
     file
 }
 
-fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 3] {
+/// Format 1.2: a background image placed on the page and the note before its first edit.
+fn fixture_full_1_2() -> NoteFile {
+    let mut original = blank_note("00000000-0000-4000-8000-000000000004", "Avant retouche");
+    original.strokes = vec![Stroke {
+        tool: Tool::Ballpoint,
+        color: Rgba::BLACK,
+        width: 40.0,
+        layer: 0,
+        points: vec![
+            Point {
+                x: 100.0,
+                y: 200.0,
+                pressure: 0.5,
+                t: 0,
+            },
+            Point {
+                x: 900.0,
+                y: 250.0,
+                pressure: 0.75,
+                t: 40,
+            },
+        ],
+    }];
+    let mut note = original.clone();
+    note.title = "Fond « PDF »".to_owned();
+    note.strokes.clear();
+    note.background_image = Some(BackgroundImage {
+        name: "fiche d'exercices.pdf".to_owned(),
+        pdf_page: Some(2),
+        rect: ImageRect {
+            x: 4_000.5,
+            y: -250.0,
+            width: 21_700.0,
+            height: 22_100.25,
+        },
+        quarter_turns: 1,
+        opacity: 0.6,
+    });
+    let mut file = NoteFile::new(note);
+    file.background = Some(BackgroundFile {
+        extension: "png".to_owned(),
+        bytes: TINY_PNG.to_vec(),
+    });
+    file.original_note = Some(to_bytes(&NoteFile::new(original)).unwrap());
+    file
+}
+
+fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 4] {
     [
         (
             "minimal.ardoise",
@@ -905,6 +955,11 @@ fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 3] {
             fixture_future_minor(),
             FormatVersion { major: 1, minor: 3 },
         ),
+        (
+            "full-1.2.ardoise",
+            fixture_full_1_2(),
+            FormatVersion { major: 1, minor: 2 },
+        ),
     ]
 }
 
@@ -914,6 +969,10 @@ fn generate_v1_fixtures() {
     let dir = fixtures_dir();
     fs::create_dir_all(&dir).unwrap();
     for (name, file, version) in fixtures() {
+        // A committed fixture is never rewritten: later versions must read it as it was.
+        if dir.join(name).exists() {
+            continue;
+        }
         let bytes = to_bytes_with_version(&file, version).unwrap();
         fs::write(dir.join(name), bytes).unwrap();
     }
@@ -959,6 +1018,14 @@ fn v1_fixtures_are_read() {
         Some("pdf")
     );
 
+    let with_image = read_note(&dir.join("full-1.2.ardoise")).unwrap();
+    let image = with_image.note.background_image.as_ref().unwrap();
+    assert_eq!((image.pdf_page, image.quarter_turns), (Some(2), 1));
+    assert_eq!(image.rect.height, 22_100.25);
+    let original = read_from_bytes(with_image.original_note.as_deref().unwrap()).unwrap();
+    assert_eq!(original.note.title, "Avant retouche");
+    assert_eq!(original.note.strokes[0].points[1].x, 900.0);
+
     let future = read_note(&dir.join("future-minor.ardoise")).unwrap();
     assert_eq!(future.unknown_fields["stickers"][0]["kind"], "star");
     assert_eq!(future.unknown_members[1].bytes, [0xde, 0xad, 0xbe, 0xef]);
@@ -985,4 +1052,33 @@ fn favorite_is_written_only_when_set_and_old_files_read_as_not_favorite() {
     )
     .unwrap();
     assert!(!old.note.favorite);
+}
+
+#[test]
+fn background_image_and_original_note_are_written_only_when_set() {
+    let plain = blank_note("img-0", "Sans fond");
+    let value = note_json_value(&NoteFile::new(plain.clone()));
+    assert!(value.get("backgroundImage").is_none(), "{value}");
+    let bytes = to_bytes(&NoteFile::new(plain.clone())).unwrap();
+    let archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+    assert!(archive.index_for_name(ORIGINAL_NOTE).is_none());
+
+    let file = fixture_full_1_2();
+    let value = note_json_value(&file);
+    assert_eq!(value["backgroundImage"]["pdfPage"], 2);
+    assert_eq!(value["backgroundImage"]["quarterTurns"], 1);
+    let bytes = to_bytes(&file).unwrap();
+    let mut archive = ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+    // A nested archive is already compressed.
+    let member = archive.by_name(ORIGINAL_NOTE).unwrap();
+    assert_eq!(member.compression(), CompressionMethod::Stored);
+    drop(member);
+    assert_eq!(read_from_bytes(&bytes).unwrap(), file);
+
+    // A 1.1 file has neither: no image, no original note.
+    let old = read_from_bytes(
+        &to_bytes_as(&NoteFile::new(plain), FormatVersion { major: 1, minor: 1 }).unwrap(),
+    )
+    .unwrap();
+    assert!(old.note.background_image.is_none() && old.original_note.is_none());
 }

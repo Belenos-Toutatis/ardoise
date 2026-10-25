@@ -261,6 +261,7 @@ mod tests {
                 height: 4000,
             },
             background,
+            background_image: None,
             tags: vec![],
             favorite: false,
             layers: vec![Layer {

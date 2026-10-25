@@ -62,6 +62,7 @@ fn note(strokes: Vec<Stroke>) -> Note {
             template: Template::Lined,
             texture: false,
         },
+        background_image: None,
         tags: vec![],
         favorite: false,
         layers: vec![Layer {

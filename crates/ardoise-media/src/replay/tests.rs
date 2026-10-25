@@ -82,6 +82,7 @@ fn note(strokes: Vec<Stroke>, visible: &[bool]) -> Note {
             template: Template::Seyes,
             texture: true,
         },
+        background_image: None,
         tags: vec![],
         favorite: false,
         layers: visible

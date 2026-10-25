@@ -184,6 +184,7 @@ fn note(page: PageSize, background: Background, strokes: Vec<Stroke>) -> Note {
         modified: 1_761_300_000_000,
         page,
         background,
+        background_image: None,
         tags: vec![],
         favorite: false,
         layers: vec![Layer {
