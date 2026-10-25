@@ -187,8 +187,15 @@ pub fn app_state(context: State<'_, AppContext>) -> AppState {
 }
 
 #[tauri::command]
-pub fn set_language(context: State<'_, AppContext>, language: Language) -> CommandResult<AppState> {
-    update(&context, |settings| settings.language = language)
+pub fn set_language(
+    app: AppHandle,
+    context: State<'_, AppContext>,
+    language: Language,
+) -> CommandResult<AppState> {
+    let state = update(&context, |settings| settings.language = language)?;
+    // An `auto` handwriting language follows the interface's.
+    crate::handwriting::refresh(&app);
+    Ok(state)
 }
 
 #[tauri::command]

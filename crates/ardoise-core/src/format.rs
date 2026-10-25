@@ -48,7 +48,9 @@ pub const ORIGINAL_NOTE: &str = "original.ardoise";
 pub const THUMB_PNG: &str = "thumb.png";
 /// Optional member: narration (Opus).
 pub const AUDIO_OPUS: &str = "audio.opus";
-/// Optional member: recognised text (JSON).
+/// Optional member, reserved for recognised text (JSON). Ardoise does not write it: the
+/// handwriting recognition keeps its results in a cache on each PC (`app/src-tauri/src/
+/// handwriting.rs`), so that two PCs never rewrite a note through Nextcloud for it. Kept as read.
 pub const TEXT_JSON: &str = "text.json";
 /// Prefix of the optional background member (`background.png`, `background.pdf`…).
 pub const BACKGROUND_PREFIX: &str = "background.";
@@ -122,7 +124,7 @@ pub struct NoteFile {
     /// Narration (Opus).
     pub audio: Option<Vec<u8>>,
     pub background: Option<BackgroundFile>,
-    /// Recognised text (JSON, written by the handwriting recognition).
+    /// Reserved for recognised text ([`TEXT_JSON`]): never written by Ardoise, kept as read.
     pub text: Option<Vec<u8>>,
     /// Top-level fields of `note.json` this version does not know, kept verbatim.
     pub unknown_fields: Map<String, Value>,

@@ -14,6 +14,7 @@ mod console;
 mod demo;
 mod diagnostic;
 mod export;
+mod handwriting;
 mod import;
 mod library;
 mod live;
@@ -156,6 +157,7 @@ pub fn run() {
         .manage(video::VideoCancel::default())
         .manage(narration::NarrationRuntime::default())
         .manage(codec::CodecDownload::default())
+        .manage(handwriting::HandwritingRuntime::default())
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -231,6 +233,15 @@ pub fn run() {
             codec::openh264_cancel_download,
             codec::openh264_remove,
             codec::set_openh264_allowed,
+            handwriting::handwriting_info,
+            handwriting::set_handwriting_language,
+            handwriting::handwriting_status,
+            handwriting::handwriting_search,
+            handwriting::handwriting_stop,
+            handwriting::handwriting_resume,
+            handwriting::handwriting_text,
+            handwriting::export_handwriting_text,
+            handwriting::copy_handwriting_text,
         ])
         .setup(move |app| {
             if cli.self_test {
@@ -247,6 +258,9 @@ pub fn run() {
                 window = window.data_directory(dir);
             }
             window.build()?;
+            // Handwriting recognition of the library, in the background.
+            app.state::<handwriting::HandwritingRuntime>()
+                .start(app.handle());
             // Live refresh of the library; a failure is logged, the app works without it.
             let library = commands::current_state(&app.state::<AppContext>())
                 .library()

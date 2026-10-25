@@ -138,6 +138,7 @@ dependencies = [
  "ardoise-ble",
  "ardoise-core",
  "ardoise-device",
+ "ardoise-hwr",
  "ardoise-ink",
  "ardoise-inkspace",
  "ardoise-media",
