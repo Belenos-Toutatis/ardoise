@@ -16,7 +16,7 @@ and contributors (https://github.com/tuhiproject/tuhi, GPL-2.0-or-later).
 Ardoise does not contain Tuhi code: the protocol is a clean-room
 reimplementation written from our own protocol notes and captures.
 
-2. Rust packages: 268
+2. Rust packages: 269
 ------------------------------------------------------------------------------
 
 name version | licence | repository
@@ -240,6 +240,7 @@ transpose 0.2.3 | MIT OR Apache-2.0 | https://github.com/ejmahler/transpose
 typed-path 0.12.4 | MIT OR Apache-2.0 | https://github.com/chipsenkbeil/typed-path
 typeid 1.0.3 | MIT OR Apache-2.0 | https://github.com/dtolnay/typeid
 typenum 1.20.1 | MIT OR Apache-2.0 | https://github.com/paholg/typenum
+unicode-normalization 0.1.26 | (MIT OR Apache-2.0) AND Unicode-3.0 | https://github.com/unicode-rs/unicode-normalization
 unicode-segmentation 1.13.3 | MIT OR Apache-2.0 | https://github.com/unicode-rs/unicode-segmentation
 ureq 3.5.0 | MIT OR Apache-2.0 | https://github.com/algesten/ureq
 ureq-proto 0.6.5 | MIT OR Apache-2.0 | https://github.com/algesten/ureq-proto
@@ -317,7 +318,7 @@ magic-string 0.30.21 | MIT | https://github.com/Rich-Harris/magic-string
 svelte 5.57.2 | MIT | https://github.com/sveltejs/svelte
 zimmerframe 1.1.5 | MIT | https://github.com/sveltejs/zimmerframe
 
-4. Licence texts: 216
+4. Licence texts: 217
 ------------------------------------------------------------------------------
 
 Each distinct text appears once, followed by the packages it covers. A
@@ -325,7 +326,7 @@ package may be covered by several texts (for example one per licence of a
 dual-licensed package, or a separate NOTICE file).
 
 ==============================================================================
-Licence text 1 of 216
+Licence text 1 of 217
 ==============================================================================
 
 Covers:
@@ -355,7 +356,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 2 of 216
+Licence text 2 of 217
 ==============================================================================
 
 Covers:
@@ -382,7 +383,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 3 of 216
+Licence text 3 of 217
 ==============================================================================
 
 Covers:
@@ -412,7 +413,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 4 of 216
+Licence text 4 of 217
 ==============================================================================
 
 Covers:
@@ -611,7 +612,7 @@ Covers:
    END OF TERMS AND CONDITIONS
 
 ==============================================================================
-Licence text 5 of 216
+Licence text 5 of 217
 ==============================================================================
 
 Covers:
@@ -646,7 +647,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 6 of 216
+Licence text 6 of 217
 ==============================================================================
 
 Covers:
@@ -674,7 +675,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/tauri.git
 Creator: Person: Daniel Thompson-Yvetot
 
 ==============================================================================
-Licence text 7 of 216
+Licence text 7 of 217
 ==============================================================================
 
 Covers:
@@ -704,7 +705,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/tauri.git
 Creator: Person: Daniel Thompson-Yvetot
 
 ==============================================================================
-Licence text 8 of 216
+Licence text 8 of 217
 ==============================================================================
 
 Covers:
@@ -747,7 +748,7 @@ Covers:
     SOFTWARE
 
 ==============================================================================
-Licence text 9 of 216
+Licence text 9 of 217
 ==============================================================================
 
 Covers:
@@ -776,7 +777,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Licence text 10 of 216
+Licence text 10 of 217
 ==============================================================================
 
 Covers:
@@ -985,7 +986,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 11 of 216
+Licence text 11 of 217
 ==============================================================================
 
 Covers:
@@ -1005,7 +1006,7 @@ AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
 OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ==============================================================================
-Licence text 12 of 216
+Licence text 12 of 217
 ==============================================================================
 
 Covers:
@@ -1052,7 +1053,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 13 of 216
+Licence text 13 of 217
 ==============================================================================
 
 Covers:
@@ -1110,6 +1111,7 @@ Covers:
   - serde_with 3.24.0
   - smallvec 1.16.4
   - stable_deref_trait 1.2.1
+  - unicode-normalization 0.1.26
   - unicode-segmentation 1.13.3
   - url 2.5.8
   - uuid 1.29.0
@@ -1321,7 +1323,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 14 of 216
+Licence text 14 of 217
 ==============================================================================
 
 Covers:
@@ -1354,7 +1356,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 15 of 216
+Licence text 15 of 217
 ==============================================================================
 
 Covers:
@@ -1386,7 +1388,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Licence text 16 of 216
+Licence text 16 of 217
 ==============================================================================
 
 Covers:
@@ -1423,7 +1425,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 For more information, please refer to <http://unlicense.org/>
 
 ==============================================================================
-Licence text 17 of 216
+Licence text 17 of 217
 ==============================================================================
 
 Covers:
@@ -1439,7 +1441,7 @@ This project is dual-licensed under the Unlicense and MIT licenses.
 You may use this code under the terms of either license.
 
 ==============================================================================
-Licence text 18 of 216
+Licence text 18 of 217
 ==============================================================================
 
 Covers:
@@ -1472,7 +1474,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 19 of 216
+Licence text 19 of 217
 ==============================================================================
 
 Covers:
@@ -1501,7 +1503,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 20 of 216
+Licence text 20 of 217
 ==============================================================================
 
 Covers:
@@ -1523,7 +1525,7 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 21 of 216
+Licence text 21 of 217
 ==============================================================================
 
 Covers:
@@ -1722,7 +1724,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 END OF TERMS AND CONDITIONS
 
 ==============================================================================
-Licence text 22 of 216
+Licence text 22 of 217
 ==============================================================================
 
 Covers:
@@ -1932,7 +1934,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 23 of 216
+Licence text 23 of 217
 ==============================================================================
 
 Covers:
@@ -1966,7 +1968,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 24 of 216
+Licence text 24 of 217
 ==============================================================================
 
 Covers:
@@ -1999,7 +2001,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 25 of 216
+Licence text 25 of 217
 ==============================================================================
 
 Covers:
@@ -2032,7 +2034,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 26 of 216
+Licence text 26 of 217
 ==============================================================================
 
 Covers:
@@ -2054,7 +2056,7 @@ OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 
 ==============================================================================
-Licence text 27 of 216
+Licence text 27 of 217
 ==============================================================================
 
 Covers:
@@ -2277,7 +2279,7 @@ Covers:
    limitations under the License.
 
 ==============================================================================
-Licence text 28 of 216
+Licence text 28 of 217
 ==============================================================================
 
 Covers:
@@ -2306,7 +2308,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 29 of 216
+Licence text 29 of 217
 ==============================================================================
 
 Covers:
@@ -2322,7 +2324,7 @@ This crate is dual-licensed under either of:
 You may choose either license, at your option.
 
 ==============================================================================
-Licence text 30 of 216
+Licence text 30 of 217
 ==============================================================================
 
 Covers:
@@ -2351,7 +2353,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 31 of 216
+Licence text 31 of 217
 ==============================================================================
 
 Covers:
@@ -2384,7 +2386,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 32 of 216
+Licence text 32 of 217
 ==============================================================================
 
 Covers:
@@ -2413,7 +2415,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Licence text 33 of 216
+Licence text 33 of 217
 ==============================================================================
 
 Covers:
@@ -2629,7 +2631,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 34 of 216
+Licence text 34 of 217
 ==============================================================================
 
 Covers:
@@ -2663,7 +2665,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 35 of 216
+Licence text 35 of 217
 ==============================================================================
 
 Covers:
@@ -2706,7 +2708,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 36 of 216
+Licence text 36 of 217
 ==============================================================================
 
 Covers:
@@ -2739,7 +2741,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 37 of 216
+Licence text 37 of 217
 ==============================================================================
 
 Covers:
@@ -2772,7 +2774,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 38 of 216
+Licence text 38 of 217
 ==============================================================================
 
 Covers:
@@ -2805,7 +2807,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 39 of 216
+Licence text 39 of 217
 ==============================================================================
 
 Covers:
@@ -2832,7 +2834,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Licence text 40 of 216
+Licence text 40 of 217
 ==============================================================================
 
 Covers:
@@ -3138,7 +3140,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 41 of 216
+Licence text 41 of 217
 ==============================================================================
 
 Covers:
@@ -3209,7 +3211,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 42 of 216
+Licence text 42 of 217
 ==============================================================================
 
 Covers:
@@ -3229,7 +3231,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 3. This notice may not be removed or altered from any source distribution.
 
 ==============================================================================
-Licence text 43 of 216
+Licence text 43 of 217
 ==============================================================================
 
 Covers:
@@ -3246,7 +3248,7 @@ The above copyright notice and this permission notice (including the next paragr
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 44 of 216
+Licence text 44 of 217
 ==============================================================================
 
 Covers:
@@ -3279,7 +3281,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 45 of 216
+Licence text 45 of 217
 ==============================================================================
 
 Covers:
@@ -3308,7 +3310,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 46 of 216
+Licence text 46 of 217
 ==============================================================================
 
 Covers:
@@ -3337,7 +3339,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 47 of 216
+Licence text 47 of 217
 ==============================================================================
 
 Covers:
@@ -3370,7 +3372,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 48 of 216
+Licence text 48 of 217
 ==============================================================================
 
 Covers:
@@ -3617,7 +3619,7 @@ limitations under the License.
 ~~~~
 
 ==============================================================================
-Licence text 49 of 216
+Licence text 49 of 217
 ==============================================================================
 
 Covers:
@@ -3634,7 +3636,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 50 of 216
+Licence text 50 of 217
 ==============================================================================
 
 Covers:
@@ -3663,7 +3665,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 51 of 216
+Licence text 51 of 217
 ==============================================================================
 
 Covers:
@@ -3873,7 +3875,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 52 of 216
+Licence text 52 of 217
 ==============================================================================
 
 Covers:
@@ -3907,7 +3909,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 53 of 216
+Licence text 53 of 217
 ==============================================================================
 
 Covers:
@@ -3940,7 +3942,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 54 of 216
+Licence text 54 of 217
 ==============================================================================
 
 Covers:
@@ -4154,7 +4156,7 @@ Covers:
    limitations under the License.
 
 ==============================================================================
-Licence text 55 of 216
+Licence text 55 of 217
 ==============================================================================
 
 Covers:
@@ -4183,7 +4185,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 56 of 216
+Licence text 56 of 217
 ==============================================================================
 
 Covers:
@@ -4784,7 +4786,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 57 of 216
+Licence text 57 of 217
 ==============================================================================
 
 Covers:
@@ -4822,7 +4824,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 58 of 216
+Licence text 58 of 217
 ==============================================================================
 
 Covers:
@@ -4855,7 +4857,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 59 of 216
+Licence text 59 of 217
 ==============================================================================
 
 Covers:
@@ -5066,7 +5068,7 @@ Apache License
    limitations under the License.
 
 ==============================================================================
-Licence text 60 of 216
+Licence text 60 of 217
 ==============================================================================
 
 Covers:
@@ -5080,7 +5082,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 61 of 216
+Licence text 61 of 217
 ==============================================================================
 
 Covers:
@@ -5109,7 +5111,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 62 of 216
+Licence text 62 of 217
 ==============================================================================
 
 Covers:
@@ -5142,7 +5144,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 63 of 216
+Licence text 63 of 217
 ==============================================================================
 
 Covers:
@@ -5351,7 +5353,7 @@ Covers:
    limitations under the License.
 
 ==============================================================================
-Licence text 64 of 216
+Licence text 64 of 217
 ==============================================================================
 
 Covers:
@@ -5378,7 +5380,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 65 of 216
+Licence text 65 of 217
 ==============================================================================
 
 Covers:
@@ -5393,7 +5395,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 66 of 216
+Licence text 66 of 217
 ==============================================================================
 
 Covers:
@@ -5426,7 +5428,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 67 of 216
+Licence text 67 of 217
 ==============================================================================
 
 Covers:
@@ -5609,7 +5611,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
    of your accepting any such warranty or additional liability.
 
 ==============================================================================
-Licence text 68 of 216
+Licence text 68 of 217
 ==============================================================================
 
 Covers:
@@ -5637,7 +5639,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 69 of 216
+Licence text 69 of 217
 ==============================================================================
 
 Covers:
@@ -5696,7 +5698,7 @@ have been licensed under extremely permissive terms.
 ------------------------------------------------------------------------------
 
 ==============================================================================
-Licence text 70 of 216
+Licence text 70 of 217
 ==============================================================================
 
 Covers:
@@ -5825,7 +5827,7 @@ express Statement of Purpose.
     this CC0 or use of the Work.
 
 ==============================================================================
-Licence text 71 of 216
+Licence text 71 of 217
 ==============================================================================
 
 Covers:
@@ -5860,7 +5862,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 72 of 216
+Licence text 72 of 217
 ==============================================================================
 
 Covers:
@@ -5889,7 +5891,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 73 of 216
+Licence text 73 of 217
 ==============================================================================
 
 Covers:
@@ -5922,7 +5924,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 74 of 216
+Licence text 74 of 217
 ==============================================================================
 
 Covers:
@@ -5937,7 +5939,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 75 of 216
+Licence text 75 of 217
 ==============================================================================
 
 Covers:
@@ -5952,7 +5954,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 76 of 216
+Licence text 76 of 217
 ==============================================================================
 
 Covers:
@@ -5987,7 +5989,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 77 of 216
+Licence text 77 of 217
 ==============================================================================
 
 Covers:
@@ -6020,7 +6022,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 78 of 216
+Licence text 78 of 217
 ==============================================================================
 
 Covers:
@@ -6053,7 +6055,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 79 of 216
+Licence text 79 of 217
 ==============================================================================
 
 Covers:
@@ -6086,7 +6088,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 80 of 216
+Licence text 80 of 217
 ==============================================================================
 
 Covers:
@@ -6119,7 +6121,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 81 of 216
+Licence text 81 of 217
 ==============================================================================
 
 Covers:
@@ -6336,7 +6338,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 82 of 216
+Licence text 82 of 217
 ==============================================================================
 
 Covers:
@@ -6377,7 +6379,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 83 of 216
+Licence text 83 of 217
 ==============================================================================
 
 Covers:
@@ -6406,7 +6408,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 84 of 216
+Licence text 84 of 217
 ==============================================================================
 
 Covers:
@@ -6618,7 +6620,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 85 of 216
+Licence text 85 of 217
 ==============================================================================
 
 Covers:
@@ -6652,7 +6654,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 86 of 216
+Licence text 86 of 217
 ==============================================================================
 
 Covers:
@@ -6686,7 +6688,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 87 of 216
+Licence text 87 of 217
 ==============================================================================
 
 Covers:
@@ -6720,7 +6722,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 88 of 216
+Licence text 88 of 217
 ==============================================================================
 
 Covers:
@@ -6749,7 +6751,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 89 of 216
+Licence text 89 of 217
 ==============================================================================
 
 Covers:
@@ -6784,11 +6786,12 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 90 of 216
+Licence text 90 of 217
 ==============================================================================
 
 Covers:
   - heck 0.5.0
+  - unicode-normalization 0.1.26
   - unicode-segmentation 1.13.3
 
 Copyright (c) 2015 The Rust Project Developers
@@ -6818,7 +6821,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 91 of 216
+Licence text 91 of 217
 ==============================================================================
 
 Covers:
@@ -7027,7 +7030,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 92 of 216
+Licence text 92 of 217
 ==============================================================================
 
 Covers:
@@ -7060,7 +7063,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 93 of 216
+Licence text 93 of 217
 ==============================================================================
 
 Covers:
@@ -7087,7 +7090,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Licence text 94 of 216
+Licence text 94 of 217
 ==============================================================================
 
 Covers:
@@ -7155,7 +7158,7 @@ Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
 ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
 
 ==============================================================================
-Licence text 95 of 216
+Licence text 95 of 217
 ==============================================================================
 
 Covers:
@@ -7190,7 +7193,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 96 of 216
+Licence text 96 of 217
 ==============================================================================
 
 Covers:
@@ -7223,7 +7226,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 97 of 216
+Licence text 97 of 217
 ==============================================================================
 
 Covers:
@@ -7256,7 +7259,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 98 of 216
+Licence text 98 of 217
 ==============================================================================
 
 Covers:
@@ -7285,7 +7288,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 99 of 216
+Licence text 99 of 217
 ==============================================================================
 
 Covers:
@@ -7316,7 +7319,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 100 of 216
+Licence text 100 of 217
 ==============================================================================
 
 Covers:
@@ -7345,7 +7348,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 101 of 216
+Licence text 101 of 217
 ==============================================================================
 
 Covers:
@@ -7554,7 +7557,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 102 of 216
+Licence text 102 of 217
 ==============================================================================
 
 Covers:
@@ -7583,7 +7586,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 103 of 216
+Licence text 103 of 217
 ==============================================================================
 
 Covers:
@@ -7610,7 +7613,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Licence text 104 of 216
+Licence text 104 of 217
 ==============================================================================
 
 Covers:
@@ -7643,7 +7646,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 105 of 216
+Licence text 105 of 217
 ==============================================================================
 
 Covers:
@@ -7663,7 +7666,7 @@ NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE US
 THIS SOFTWARE.
 
 ==============================================================================
-Licence text 106 of 216
+Licence text 106 of 217
 ==============================================================================
 
 Covers:
@@ -7683,7 +7686,7 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 107 of 216
+Licence text 107 of 217
 ==============================================================================
 
 Covers:
@@ -7718,7 +7721,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 108 of 216
+Licence text 108 of 217
 ==============================================================================
 
 Covers:
@@ -7733,7 +7736,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 109 of 216
+Licence text 109 of 217
 ==============================================================================
 
 Covers:
@@ -7942,7 +7945,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 110 of 216
+Licence text 110 of 217
 ==============================================================================
 
 Covers:
@@ -7975,7 +7978,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 111 of 216
+Licence text 111 of 217
 ==============================================================================
 
 Covers:
@@ -8000,7 +8003,7 @@ freely, subject to the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 
 ==============================================================================
-Licence text 112 of 216
+Licence text 112 of 217
 ==============================================================================
 
 Covers:
@@ -8029,7 +8032,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 113 of 216
+Licence text 113 of 217
 ==============================================================================
 
 Covers:
@@ -8056,7 +8059,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Licence text 114 of 216
+Licence text 114 of 217
 ==============================================================================
 
 Covers:
@@ -8079,7 +8082,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 3. This notice may not be removed or altered from any source distribution.
 
 ==============================================================================
-Licence text 115 of 216
+Licence text 115 of 217
 ==============================================================================
 
 Covers:
@@ -8113,7 +8116,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 116 of 216
+Licence text 116 of 217
 ==============================================================================
 
 Covers:
@@ -8146,7 +8149,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 117 of 216
+Licence text 117 of 217
 ==============================================================================
 
 Covers:
@@ -8527,7 +8530,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 
 ==============================================================================
-Licence text 118 of 216
+Licence text 118 of 217
 ==============================================================================
 
 Covers:
@@ -8556,7 +8559,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 119 of 216
+Licence text 119 of 217
 ==============================================================================
 
 Covers:
@@ -8583,7 +8586,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/muda.git
 Creator: Person: Daniel Thompson-Yvetot
 
 ==============================================================================
-Licence text 120 of 216
+Licence text 120 of 217
 ==============================================================================
 
 Covers:
@@ -8610,7 +8613,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 121 of 216
+Licence text 121 of 217
 ==============================================================================
 
 Covers:
@@ -8643,7 +8646,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 122 of 216
+Licence text 122 of 217
 ==============================================================================
 
 Covers:
@@ -8670,7 +8673,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 123 of 216
+Licence text 123 of 217
 ==============================================================================
 
 Covers:
@@ -8698,7 +8701,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 124 of 216
+Licence text 124 of 217
 ==============================================================================
 
 Covers:
@@ -8747,7 +8750,7 @@ For these and/or other purposes and motivations, and without any expectation of 
      d. Affirmer understands and acknowledges that Creative Commons is not a party to this document and has no duty or obligation with respect to this CC0 or use of the Work.
 
 ==============================================================================
-Licence text 125 of 216
+Licence text 125 of 217
 ==============================================================================
 
 Covers:
@@ -8956,7 +8959,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 126 of 216
+Licence text 126 of 217
 ==============================================================================
 
 Covers:
@@ -8989,7 +8992,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 127 of 216
+Licence text 127 of 217
 ==============================================================================
 
 Covers:
@@ -9016,7 +9019,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 128 of 216
+Licence text 128 of 217
 ==============================================================================
 
 Covers:
@@ -9397,7 +9400,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 
 ==============================================================================
-Licence text 129 of 216
+Licence text 129 of 217
 ==============================================================================
 
 Covers:
@@ -9424,7 +9427,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 130 of 216
+Licence text 130 of 217
 ==============================================================================
 
 Covers:
@@ -9457,7 +9460,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 131 of 216
+Licence text 131 of 217
 ==============================================================================
 
 Covers:
@@ -9486,7 +9489,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 132 of 216
+Licence text 132 of 217
 ==============================================================================
 
 Covers:
@@ -9513,7 +9516,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 133 of 216
+Licence text 133 of 217
 ==============================================================================
 
 Covers:
@@ -9546,7 +9549,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 134 of 216
+Licence text 134 of 217
 ==============================================================================
 
 Covers:
@@ -9755,7 +9758,7 @@ Covers:
    limitations under the License.
 
 ==============================================================================
-Licence text 135 of 216
+Licence text 135 of 217
 ==============================================================================
 
 Covers:
@@ -9782,7 +9785,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 136 of 216
+Licence text 136 of 217
 ==============================================================================
 
 Covers:
@@ -9991,7 +9994,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 137 of 216
+Licence text 137 of 217
 ==============================================================================
 
 Covers:
@@ -10024,7 +10027,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 138 of 216
+Licence text 138 of 217
 ==============================================================================
 
 Covers:
@@ -10057,7 +10060,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 139 of 216
+Licence text 139 of 217
 ==============================================================================
 
 Covers:
@@ -10088,7 +10091,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Licence text 140 of 216
+Licence text 140 of 217
 ==============================================================================
 
 Covers:
@@ -10272,7 +10275,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 END OF TERMS AND CONDITIONS
 
 ==============================================================================
-Licence text 141 of 216
+Licence text 141 of 217
 ==============================================================================
 
 Covers:
@@ -10308,7 +10311,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 142 of 216
+Licence text 142 of 217
 ==============================================================================
 
 Covers:
@@ -10503,7 +10506,7 @@ APPENDIX: How to apply the Apache License to your work.
    identification within third-party archives.
 
 ==============================================================================
-Licence text 143 of 216
+Licence text 143 of 217
 ==============================================================================
 
 Covers:
@@ -10536,7 +10539,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 144 of 216
+Licence text 144 of 217
 ==============================================================================
 
 Covers:
@@ -10555,7 +10558,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 3. This notice may not be removed or altered from any source distribution.
 
 ==============================================================================
-Licence text 145 of 216
+Licence text 145 of 217
 ==============================================================================
 
 Covers:
@@ -10584,7 +10587,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 146 of 216
+Licence text 146 of 217
 ==============================================================================
 
 Covers:
@@ -10613,7 +10616,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 147 of 216
+Licence text 147 of 217
 ==============================================================================
 
 Covers:
@@ -10667,7 +10670,7 @@ Broadcom Corporation:
 https://datatracker.ietf.org/ipr/1526/
 
 ==============================================================================
-Licence text 148 of 216
+Licence text 148 of 217
 ==============================================================================
 
 Covers:
@@ -10876,7 +10879,7 @@ Covers:
    limitations under the License.
 
 ==============================================================================
-Licence text 149 of 216
+Licence text 149 of 217
 ==============================================================================
 
 Covers:
@@ -10903,7 +10906,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 150 of 216
+Licence text 150 of 217
 ==============================================================================
 
 Covers:
@@ -10917,7 +10920,7 @@ This project is dual-licensed under either of:
 You may choose either license, at your option.
 
 ==============================================================================
-Licence text 151 of 216
+Licence text 151 of 217
 ==============================================================================
 
 Covers:
@@ -10945,7 +10948,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 152 of 216
+Licence text 152 of 217
 ==============================================================================
 
 Covers:
@@ -11154,7 +11157,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 153 of 216
+Licence text 153 of 217
 ==============================================================================
 
 Covers:
@@ -11187,7 +11190,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 154 of 216
+Licence text 154 of 217
 ==============================================================================
 
 Covers:
@@ -11216,7 +11219,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 155 of 216
+Licence text 155 of 217
 ==============================================================================
 
 Covers:
@@ -11247,7 +11250,7 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 156 of 216
+Licence text 156 of 217
 ==============================================================================
 
 Covers:
@@ -11268,7 +11271,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 3. This notice may not be removed or altered from any source distribution.
 
 ==============================================================================
-Licence text 157 of 216
+Licence text 157 of 217
 ==============================================================================
 
 Covers:
@@ -11286,7 +11289,7 @@ The above copyright notice and this permission notice (including the next paragr
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 158 of 216
+Licence text 158 of 217
 ==============================================================================
 
 Covers:
@@ -11316,7 +11319,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Licence text 159 of 216
+Licence text 159 of 217
 ==============================================================================
 
 Covers:
@@ -11331,7 +11334,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 160 of 216
+Licence text 160 of 217
 ==============================================================================
 
 Covers:
@@ -11364,7 +11367,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 161 of 216
+Licence text 161 of 217
 ==============================================================================
 
 Covers:
@@ -11577,7 +11580,7 @@ Covers:
    limitations under the License.
 
 ==============================================================================
-Licence text 162 of 216
+Licence text 162 of 217
 ==============================================================================
 
 Covers:
@@ -11608,7 +11611,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 163 of 216
+Licence text 163 of 217
 ==============================================================================
 
 Covers:
@@ -11637,7 +11640,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 164 of 216
+Licence text 164 of 217
 ==============================================================================
 
 Covers:
@@ -11705,7 +11708,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 165 of 216
+Licence text 165 of 217
 ==============================================================================
 
 Covers:
@@ -11740,7 +11743,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 166 of 216
+Licence text 166 of 217
 ==============================================================================
 
 Covers:
@@ -11769,7 +11772,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 167 of 216
+Licence text 167 of 217
 ==============================================================================
 
 Covers:
@@ -11784,7 +11787,7 @@ http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 option.
 
 ==============================================================================
-Licence text 168 of 216
+Licence text 168 of 217
 ==============================================================================
 
 Covers:
@@ -11809,7 +11812,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 169 of 216
+Licence text 169 of 217
 ==============================================================================
 
 Covers:
@@ -11842,7 +11845,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 170 of 216
+Licence text 170 of 217
 ==============================================================================
 
 Covers:
@@ -11875,7 +11878,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 171 of 216
+Licence text 171 of 217
 ==============================================================================
 
 Covers:
@@ -11910,7 +11913,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 172 of 216
+Licence text 172 of 217
 ==============================================================================
 
 Covers:
@@ -12119,7 +12122,7 @@ Apache License
    limitations under the License.
 
 ==============================================================================
-Licence text 173 of 216
+Licence text 173 of 217
 ==============================================================================
 
 Covers:
@@ -12146,7 +12149,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 174 of 216
+Licence text 174 of 217
 ==============================================================================
 
 Covers:
@@ -12179,7 +12182,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 175 of 216
+Licence text 175 of 217
 ==============================================================================
 
 Covers:
@@ -12208,7 +12211,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 176 of 216
+Licence text 176 of 217
 ==============================================================================
 
 Covers:
@@ -12235,7 +12238,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Licence text 177 of 216
+Licence text 177 of 217
 ==============================================================================
 
 Covers:
@@ -12250,7 +12253,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 178 of 216
+Licence text 178 of 217
 ==============================================================================
 
 Covers:
@@ -12279,7 +12282,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 179 of 216
+Licence text 179 of 217
 ==============================================================================
 
 Covers:
@@ -12305,7 +12308,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/tao.git
 Creator: Person: Daniel Thompson-Yvetot
 
 ==============================================================================
-Licence text 180 of 216
+Licence text 180 of 217
 ==============================================================================
 
 Covers:
@@ -12333,7 +12336,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 181 of 216
+Licence text 181 of 217
 ==============================================================================
 
 Covers:
@@ -12372,7 +12375,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 182 of 216
+Licence text 182 of 217
 ==============================================================================
 
 Covers:
@@ -12403,7 +12406,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 183 of 216
+Licence text 183 of 217
 ==============================================================================
 
 Covers:
@@ -12437,7 +12440,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 184 of 216
+Licence text 184 of 217
 ==============================================================================
 
 Covers:
@@ -12646,7 +12649,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 185 of 216
+Licence text 185 of 217
 ==============================================================================
 
 Covers:
@@ -12679,7 +12682,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 186 of 216
+Licence text 186 of 217
 ==============================================================================
 
 Covers:
@@ -12888,7 +12891,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ==============================================================================
-Licence text 187 of 216
+Licence text 187 of 217
 ==============================================================================
 
 Covers:
@@ -12897,7 +12900,7 @@ Covers:
 MIT OR Apache-2.0
 
 ==============================================================================
-Licence text 188 of 216
+Licence text 188 of 217
 ==============================================================================
 
 Covers:
@@ -12926,7 +12929,54 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 189 of 216
+Licence text 189 of 217
+==============================================================================
+
+Covers:
+  - unicode-normalization 0.1.26
+
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 1991-2023 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.
+
+==============================================================================
+Licence text 190 of 217
 ==============================================================================
 
 Covers:
@@ -12955,7 +13005,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 190 of 216
+Licence text 191 of 217
 ==============================================================================
 
 Covers:
@@ -12970,7 +13020,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 191 of 216
+Licence text 192 of 217
 ==============================================================================
 
 Covers:
@@ -12999,7 +13049,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 192 of 216
+Licence text 193 of 217
 ==============================================================================
 
 Covers:
@@ -13032,7 +13082,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 193 of 216
+Licence text 194 of 217
 ==============================================================================
 
 Covers:
@@ -13066,7 +13116,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 194 of 216
+Licence text 195 of 217
 ==============================================================================
 
 Covers:
@@ -13099,7 +13149,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 195 of 216
+Licence text 196 of 217
 ==============================================================================
 
 Covers:
@@ -13308,7 +13358,7 @@ Covers:
    limitations under the License.
 
 ==============================================================================
-Licence text 196 of 216
+Licence text 197 of 217
 ==============================================================================
 
 Covers:
@@ -13337,7 +13387,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 197 of 216
+Licence text 198 of 217
 ==============================================================================
 
 Covers:
@@ -13374,7 +13424,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 198 of 216
+Licence text 199 of 217
 ==============================================================================
 
 Covers:
@@ -13403,7 +13453,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 199 of 216
+Licence text 200 of 217
 ==============================================================================
 
 Covers:
@@ -13612,7 +13662,7 @@ Covers:
    limitations under the License.
 
 ==============================================================================
-Licence text 200 of 216
+Licence text 201 of 217
 ==============================================================================
 
 Covers:
@@ -13637,7 +13687,7 @@ misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 
 ==============================================================================
-Licence text 201 of 216
+Licence text 202 of 217
 ==============================================================================
 
 Covers:
@@ -13666,7 +13716,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 202 of 216
+Licence text 203 of 217
 ==============================================================================
 
 Covers:
@@ -13695,7 +13745,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 203 of 216
+Licence text 204 of 217
 ==============================================================================
 
 Covers:
@@ -13722,7 +13772,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/window-vibrancy.git
 Creator: Person: Daniel Thompson-Yvetot
 
 ==============================================================================
-Licence text 204 of 216
+Licence text 205 of 217
 ==============================================================================
 
 Covers:
@@ -13749,7 +13799,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 205 of 216
+Licence text 206 of 217
 ==============================================================================
 
 Covers:
@@ -13971,7 +14021,7 @@ Covers:
    limitations under the License.
 
 ==============================================================================
-Licence text 206 of 216
+Licence text 207 of 217
 ==============================================================================
 
 Covers:
@@ -13997,7 +14047,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 207 of 216
+Licence text 208 of 217
 ==============================================================================
 
 Covers:
@@ -14026,7 +14076,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 208 of 216
+Licence text 209 of 217
 ==============================================================================
 
 Covers:
@@ -14054,7 +14104,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/wry.git
 Creator: Person: Daniel Thompson-Yvetot
 
 ==============================================================================
-Licence text 209 of 216
+Licence text 210 of 217
 ==============================================================================
 
 Covers:
@@ -14084,7 +14134,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 210 of 216
+Licence text 211 of 217
 ==============================================================================
 
 Covers:
@@ -14293,7 +14343,7 @@ Covers:
    limitations under the License.
 
 ==============================================================================
-Licence text 211 of 216
+Licence text 212 of 217
 ==============================================================================
 
 Covers:
@@ -14325,7 +14375,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Licence text 212 of 216
+Licence text 213 of 217
 ==============================================================================
 
 Covers:
@@ -14358,7 +14408,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 213 of 216
+Licence text 214 of 217
 ==============================================================================
 
 Covers:
@@ -14391,7 +14441,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-Licence text 214 of 216
+Licence text 215 of 217
 ==============================================================================
 
 Covers:
@@ -14420,7 +14470,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 215 of 216
+Licence text 216 of 217
 ==============================================================================
 
 Covers:
@@ -14449,7 +14499,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Licence text 216 of 216
+Licence text 217 of 217
 ==============================================================================
 
 Covers:

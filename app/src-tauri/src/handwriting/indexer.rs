@@ -397,6 +397,10 @@ fn run(shared: &Shared) {
 
 /// One pass over the library (see the module documentation).
 fn pass(shared: &Shared, generation: u64) {
+    // Not even the listing of the library while live mode runs.
+    if !shared.wait_while_busy(generation) {
+        return;
+    }
     let config = (shared.services.config)();
     let language = match shared.services.background.recognizers() {
         Err(HwrError::Unsupported) => return shared.unavailable(UNSUPPORTED, None),
