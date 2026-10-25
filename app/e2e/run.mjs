@@ -18,8 +18,12 @@ import { dragJourneys } from './journeys-m7-drag.mjs';
 import { editJourneys } from './journeys-m7-edit.mjs';
 import { journeys as handwritingJourneys } from './journeys-m7-hwr.mjs';
 
-// Milestone M7 journeys live in files of their own.
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys];
+// Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
+// name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
+const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys].filter(
+  (journey) => !only || only.some((part) => journey.name.includes(part)),
+);
 
 const exe = process.argv[2];
 if (!exe) {

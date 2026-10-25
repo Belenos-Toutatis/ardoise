@@ -106,8 +106,8 @@ export const backgroundJourneys = [
       const SECTION = '[data-section="background-image"]';
       writeFileSync(pdf, twoPagePdf());
 
-      await check('la bibliothèque de démonstration s’affiche (7 notes)', async () => {
-        await app.waitFor(`document.querySelectorAll('.note-card').length === 7`, 'the 7 demo notes');
+      await check('la bibliothèque de démonstration s’affiche (8 notes)', async () => {
+        await app.waitFor(`document.querySelectorAll('.note-card').length === 8`, 'the 8 demo notes');
       });
 
       await check(`« ${l('background.library.open')} » lit le PDF : deux pages`, async () => {
@@ -121,10 +121,10 @@ export const backgroundJourneys = [
         await app.waitFor(`document.querySelector(${j(DIALOG)}).textContent.includes(${j(all)})`, 'its two pages');
       });
 
-      await check('créer les deux notes : 9 notes dans la grille', async () => {
+      await check('créer les deux notes : 10 notes dans la grille', async () => {
         await app.click(`${DIALOG} .actions button.primary`);
         await app.waitFor(`document.querySelector(${j(DIALOG)}) === null`, 'the dialog to close', 30_000);
-        await app.waitFor(`document.querySelectorAll('.note-card').length === 9`, 'the two new notes', 15_000);
+        await app.waitFor(`document.querySelectorAll('.note-card').length === 10`, 'the two new notes', 15_000);
       });
 
       await check('ouvrir « fiche-e2e - page 1 » : l’éditeur montre son image de fond', async () => {

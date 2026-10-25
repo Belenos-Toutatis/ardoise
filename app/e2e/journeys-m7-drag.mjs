@@ -57,13 +57,17 @@ export const dragJourneys = [
     async run(app, check) {
       const l = (key) => text(app.language, key);
       mkdirSync(dragRoot(), { recursive: true });
-      let titles = [];
+      // A PNG takes the name of the note's file, as the image export does (an untitled note shows its
+      // date on its card, its file is named after the day).
+      let stems = [];
 
       await check('chaque carte a une poignée avec son infobulle', async () => {
-        await app.waitFor(`document.querySelectorAll('.note-card .drag-handle').length === 7`, 'a handle on the 7 cards');
+        await app.waitFor(`document.querySelectorAll('.note-card .drag-handle').length === 8`, 'a handle on the 8 cards');
         const tooltips = await app.evaluate(`[...document.querySelectorAll('.note-card .drag-handle')].map((h) => h.title)`);
         if (!tooltips.every((tip) => tip === l('library.drag.handle'))) throw new Error(`unexpected tooltips ${tooltips}`);
-        titles = await app.evaluate(`[...document.querySelectorAll('.note-card .card-title')].map((e) => e.textContent.trim())`);
+        stems = await app.evaluate(
+          `[...document.querySelectorAll('.note-card')].map((c) => c.dataset.path.split(/[\\\\/]/).pop().replace(/\\.ardoise$/, ''))`,
+        );
       });
 
       await check('glisser une note par sa poignée : son PNG est rendu, nommé comme elle', async () => {
@@ -71,7 +75,7 @@ export const dragJourneys = [
         await dragHandle(app, 0);
         const files = await newDragFiles(before, 1);
         const [name, bytes] = [...files][0];
-        if (!name.endsWith(`${titles[0]}.png`)) throw new Error(`"${name}" is not named after "${titles[0]}"`);
+        if (name !== `${stems[0]}.png`) throw new Error(`"${name}" is not named after "${stems[0]}"`);
         if (!bytes.subarray(0, 8).equals(PNG_SIGNATURE) || bytes.length < 2000) throw new Error('not a real PNG');
       });
 
@@ -94,8 +98,8 @@ export const dragJourneys = [
         await dragHandle(app, 0);
         const files = await newDragFiles(before, 2);
         const names = [...files.keys()];
-        for (const title of [titles[0], titles[1]]) {
-          if (!names.some((n) => n.endsWith(`${title}.png`))) throw new Error(`no file for "${title}" among ${names}`);
+        for (const stem of [stems[0], stems[1]]) {
+          if (!names.includes(`${stem}.png`)) throw new Error(`no file for "${stem}" among ${names}`);
         }
         for (const bytes of files.values()) {
           if (!bytes.subarray(0, 8).equals(PNG_SIGNATURE)) throw new Error('not a PNG');
