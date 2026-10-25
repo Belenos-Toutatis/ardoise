@@ -207,6 +207,17 @@ dependencies = [
 [[package]]
 name = "ardoise-hwr"
 version = "0.1.0"
+dependencies = [
+ "ardoise-core",
+ "ardoise-ink",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "unicode-normalization",
+ "windows",
+ "windows-collections",
+ "windows-numerics",
+]
 
 [[package]]
 name = "ardoise-ink"
