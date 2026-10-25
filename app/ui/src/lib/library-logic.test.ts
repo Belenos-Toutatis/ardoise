@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import type { HandwritingHit } from './handwriting';
 import {
   ancestorsOf,
   buildBinderTree,
   flattenTree,
+  handwritingMatches,
   isInBinder,
   matchesSearch,
   normalize,
@@ -11,6 +13,7 @@ import {
   originalBinder,
   parseTags,
   mergeTags,
+  queryWords,
   sameTag,
   sortNotes,
   tagsOfNotes,
@@ -58,6 +61,43 @@ describe('search', () => {
     expect(matchesSearch(notes[1], 'physique 3e')).toBe(true);
     expect(matchesSearch(notes[1], 'physique chimie')).toBe(false);
     expect(matchesSearch(notes[1], '   ')).toBe(true);
+  });
+});
+
+describe('search in the handwriting', () => {
+  /** What the desktop app answers for a note whose handwriting has `words` of the query. */
+  const hit = (path: string, words: string[]): HandwritingHit => ({
+    path,
+    words,
+    excerpt: { before: 'la ', word: 'lumière', after: ' se propage' },
+  });
+
+  it('splits the query like the desktop app: folded words at white space', () => {
+    expect(queryWords('  La LUMIÈRE  ')).toEqual(['la', 'lumiere']);
+    expect(queryWords('   ')).toEqual([]);
+  });
+
+  it('matches a word found in the handwriting, and mixes it with the title', () => {
+    expect(matchesSearch(notes[2], 'lumiere')).toBe(false);
+    expect(matchesSearch(notes[2], 'lumiere', hit('c', ['lumiere']))).toBe(true);
+    // One word in the title, the other in the handwriting.
+    expect(matchesSearch(notes[2], 'zebre lumiere', hit('c', ['lumiere']))).toBe(true);
+    // Every word must be found somewhere.
+    expect(matchesSearch(notes[2], 'lumiere ondes', hit('c', ['lumiere']))).toBe(false);
+    expect(matchesSearch(notes[2], 'lumiere', null)).toBe(false);
+  });
+
+  it('shows the notes found in the handwriting, in the order of the grid', () => {
+    const hits = new Map([
+      ['c', hit('c', ['lumiere'])],
+      ['a', hit('a', ['lumiere'])],
+    ]);
+    const shown = visibleNotes(notes, { kind: 'all' }, 'LUMIÈRE', 'title-asc', 'fr', hits);
+    expect(shown.map((n) => n.path)).toEqual(['a', 'c']);
+    expect(handwritingMatches(shown, hits).map((m) => m.note.path)).toEqual(['a', 'c']);
+    // Without hits, the existing search is unchanged.
+    expect(visibleNotes(notes, { kind: 'all' }, 'lumiere', 'title-asc', 'fr')).toEqual([]);
+    expect(handwritingMatches(notes, new Map())).toEqual([]);
   });
 });
 

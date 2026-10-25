@@ -1,4 +1,5 @@
 /** Pure helpers of the library screen: search, sort, binder tree, display text. */
+import type { HandwritingHit } from './handwriting';
 import type { NoteSummary, TagCount } from './note';
 
 /** What the content area shows. */
@@ -18,12 +19,32 @@ export function normalize(text: string): string {
   return text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase();
 }
 
-/** True when every word of `query` appears in the note's title, tags or binder. */
-export function matchesSearch(note: NoteSummary, query: string): boolean {
-  const words = normalize(query).split(/\s+/).filter(Boolean);
+/** The words of a search query: lower case, without accents, split at white space. */
+export function queryWords(query: string): string[] {
+  return normalize(query).split(/\s+/).filter(Boolean);
+}
+
+/**
+ * True when every word of `query` appears in the note's title, tags or binder, or in its
+ * handwriting: `hit` holds the query words the desktop app found in the recognised text (where a
+ * recognised word begins with them; see `handwriting/search.rs`).
+ */
+export function matchesSearch(note: NoteSummary, query: string, hit?: HandwritingHit | null): boolean {
+  const words = queryWords(query);
   if (words.length === 0) return true;
   const haystack = normalize([note.title, ...note.tags, note.binder].join('\n'));
-  return words.every((word) => haystack.includes(word));
+  return words.every((word) => haystack.includes(word) || (hit?.words.includes(word) ?? false));
+}
+
+/** The shown notes that the handwriting search found, each with its hit (in display order). */
+export function handwritingMatches(
+  notes: NoteSummary[],
+  hits: ReadonlyMap<string, HandwritingHit>,
+): { note: NoteSummary; hit: HandwritingHit }[] {
+  return notes.flatMap((note) => {
+    const hit = hits.get(note.path);
+    return hit ? [{ note, hit }] : [];
+  });
 }
 
 export function sameView(a: LibraryView, b: LibraryView): boolean {
@@ -69,16 +90,17 @@ export function sortNotes(notes: NoteSummary[], order: SortOrder, locale: string
   return [...notes].sort((a, b) => sign * compare(a, b) || a.path.localeCompare(b.path));
 }
 
-/** The notes shown for a view, search and order. */
+/** The notes shown for a view, search (with what the handwriting search found) and order. */
 export function visibleNotes(
   notes: NoteSummary[],
   view: LibraryView,
   query: string,
   order: SortOrder,
   locale: string,
+  hits: ReadonlyMap<string, HandwritingHit> = new Map(),
 ): NoteSummary[] {
   return sortNotes(
-    notesOfView(notes, view).filter((n) => matchesSearch(n, query)),
+    notesOfView(notes, view).filter((n) => matchesSearch(n, query, hits.get(n.path))),
     order,
     locale,
   );

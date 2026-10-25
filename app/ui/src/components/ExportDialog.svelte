@@ -11,6 +11,7 @@
   import { t } from '../lib/i18n.svelte';
   import type { ExportFormat, ExportOptions, ExportSource, PageSize } from '../lib/note';
   import Modal from './Modal.svelte';
+  import TextExportSection from './TextExportSection.svelte';
 
   let {
     sources,
@@ -289,5 +290,8 @@
         </button>
       {/if}
     </div>
+
+    <!-- The recognised handwriting, as text (milestone M7). -->
+    <TextExportSection {sources} disabled={running} />
   </div>
 </Modal>

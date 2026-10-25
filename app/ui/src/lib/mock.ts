@@ -5,6 +5,7 @@
 import type { AppState, NoteOutlines } from './api';
 import { UNHANDLED, setMockAutoExportSettings } from './mock-data';
 import { checkAutoExport, mockExportInvoke } from './mock-export';
+import { mockHandwritingInvoke } from './mock-handwriting';
 import { mockLibraryInvoke } from './mock-library';
 import { mockLiveInvoke } from './mock-live';
 import { mockNarrationInvoke } from './mock-narration';
@@ -90,6 +91,7 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
           mockLiveInvoke,
           mockVideoInvoke,
           mockNarrationInvoke,
+          mockHandwritingInvoke,
         ]) {
           const handled = handle(command, args);
           if (handled !== UNHANDLED) return handled;

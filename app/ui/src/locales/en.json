@@ -453,7 +453,10 @@
     "noNarration": "This note has no narration.",
     "emptyRecording": "The microphone recorded nothing.",
     "noPendingNarration": "No recording is waiting.",
-    "openh264RemoveFailed": "Windows is still using OpenH264: close and restart Ardoise, then remove it."
+    "openh264RemoveFailed": "Windows is still using OpenH264: close and restart Ardoise, then remove it.",
+    "handwritingUnsupported": "handwriting recognition is only available on Windows",
+    "handwritingNoRecognizer": "no Windows handwriting recognizer is installed for this language (see the settings)",
+    "handwritingFailed": "handwriting recognition failed ({detail})"
   },
   "editor": {
     "back": "Library",
@@ -1141,5 +1144,64 @@
   "presentation": {
     "title": "Presentation",
     "canvas": "Projected page {page}"
+  },
+  "handwriting": {
+    "languages": {
+      "fr": "French",
+      "en": "English"
+    },
+    "search": {
+      "label": "Results in the handwriting",
+      "found": "Found in the handwriting: {count}",
+      "open": "Open “{title}”",
+      "indexing": "Reading the handwriting is under way ({done} of {total} notes): more results may still appear.",
+      "paused": "Reading the handwriting is paused during live mode or the presentation ({done} of {total} notes): the search does not see every note yet.",
+      "stopped": "Reading the handwriting is stopped ({done} of {total} notes): resume it in the settings to search every note.",
+      "noRecognizer": "The handwriting is not searched: no Windows handwriting recognizer is installed for this language (see the settings).",
+      "unsupported": "Searching the handwriting is only possible on Windows."
+    },
+    "settings": {
+      "title": "Handwriting recognition",
+      "intro": "Ardoise reads your handwriting for the library search and the text export. Everything happens on this PC, offline, with Windows' own handwriting recognition.",
+      "language": "Handwriting language",
+      "auto": "Automatic ({language})",
+      "autoHint": "Automatic: the interface language when its recognizer is installed on this PC, else the first one installed. This choice applies to all your PCs.",
+      "installed": "Recognizers installed on this PC",
+      "none": "None",
+      "missing": "Windows' handwriting pack for this language ({language}) is not installed on this PC.",
+      "install": {
+        "fr": "To add it: Windows Settings > Time & language > Language & region; add French if it is not in the list, then “…” > Language options > Handwriting > Download. Then restart Ardoise. Ardoise never downloads anything itself.",
+        "en": "To add it: Windows Settings > Time & language > Language & region; add English if it is not in the list, then “…” > Language options > Handwriting > Download. Then restart Ardoise. Ardoise never downloads anything itself."
+      },
+      "unsupported": "Handwriting recognition is only available on Windows.",
+      "stop": "Stop reading",
+      "resume": "Resume reading",
+      "privacy": "The recognised text stays on this PC (in its local folder): it is never written into your notes nor synchronised."
+    },
+    "status": {
+      "idle": "Every note has been read ({total}).",
+      "idleFailed": "Notes read: {done} of {total}; {failed} could not be read.",
+      "indexing": "Reading the handwriting: {done} of {total} notes.",
+      "paused": "Paused during live mode or the presentation ({done} of {total} notes).",
+      "stopped": "Reading stopped ({done} of {total} notes).",
+      "unsupported": "Unavailable: handwriting recognition needs Windows.",
+      "noRecognizer": "No note is read: there is no recognizer for this language.",
+      "noLibrary": "No library is chosen on this PC."
+    },
+    "export": {
+      "title": "Recognised text (handwriting)",
+      "hint": "The handwriting of the note (or of the selected notes) read by Windows, as plain text: each note with its title, one after the other. Recognition can make mistakes: read the text over.",
+      "save": "Save as .txt…",
+      "copy": "Copy the text",
+      "working": "Reading the handwriting…",
+      "saved": "Text saved:",
+      "copied": "Text copied to the clipboard.",
+      "failed": "The text could not be exported: {message}",
+      "preview": "Preview of the recognised text",
+      "previewLoading": "Reading the handwriting…",
+      "empty": "No text recognised in this note.",
+      "pickFile": "Save the recognised text",
+      "defaultName": "Recognised text"
+    }
   }
 }

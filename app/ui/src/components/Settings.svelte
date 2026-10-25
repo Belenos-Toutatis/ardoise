@@ -7,6 +7,7 @@
   import { sizeInMillimetres, tablet } from '../lib/tablet-state.svelte';
   import LanguagePicker from './LanguagePicker.svelte';
   import MicrophonePicker from './narration/MicrophonePicker.svelte';
+  import HandwritingSection from './HandwritingSection.svelte';
   import OpenH264Section from './OpenH264Section.svelte';
   import TabletOptions from './tablet/TabletOptions.svelte';
 
@@ -189,6 +190,8 @@
   </section>
 
   <OpenH264Section />
+
+  <HandwritingSection />
 
   <dl class="facts">
     <dt>{t('settings.machine')}</dt>
