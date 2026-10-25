@@ -42,7 +42,7 @@
 //! | `RECT_COHERENCE` | 0.55 | how consistently the edges of a rectangle run along two perpendicular directions (1 = perfectly, 0 for a circle) |
 //! | `SNAP_RATIO` | 0.9 | an ellipse or rectangle this close to round or square becomes a circle or a square |
 //! | `SNAP_ANGLE` | 4° | a line, shaft, rectangle or ellipse axis this close to horizontal or vertical becomes exactly so |
-//! | `LINE_MAX_DEV` / `LINE_RMS_DEV` | 0.06 / 0.025 | largest and root-mean-square distance to the straight line, × its length |
+//! | `LINE_MAX_DEV` / `LINE_RMS_DEV` | 0.05 / 0.018 | largest and root-mean-square distance to the straight line, × its length |
 //! | `SEG_EPS` | 0.02 (≥ 25) | tolerance of the split of a stroke into straight pieces, × its bounding-box diagonal |
 //! | `HOOK_SHARE` / `HOOK_MAX` | 0.08 / 200 | a piece at an end shorter than both (× the longest piece / units) is a pen hook, ignored |
 //! | barbs | 0.04–0.55 × shaft, ≥ 250 | length of an arrow's barbs; at 12°–70° from the shaft, on both sides, starting within 0.35 × their length (≥ 120) of the tip |
@@ -85,8 +85,8 @@ const FIT_SAMPLES: usize = 96;
 const CHECK_SAMPLES: usize = 128;
 
 /// Largest and root-mean-square distance to a straight line, × its length.
-const LINE_MAX_DEV: f64 = 0.06;
-const LINE_RMS_DEV: f64 = 0.025;
+const LINE_MAX_DEV: f64 = 0.05;
+const LINE_RMS_DEV: f64 = 0.018;
 /// Longest path along a line, × its length (a line drawn back and forth is no line).
 const LINE_MAX_PATH: f64 = 1.3;
 
