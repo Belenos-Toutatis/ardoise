@@ -169,7 +169,8 @@ describe('settings: tablet section', () => {
 
   it('still offers language, theme and library', async () => {
     const { target } = await render('fr');
-    expect(target.querySelectorAll('select').length).toBe(2);
+    // Interface language, theme, and the handwriting language (its own section).
+    expect(target.querySelectorAll('select').length).toBe(3);
     expect(target.textContent).toContain('C:\\demo\\Ardoise');
   });
 });

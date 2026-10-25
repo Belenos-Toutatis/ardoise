@@ -1,5 +1,4 @@
-// Proposed end-to-end journey of M7's background image or PDF (not wired into run.mjs: the
-// integrator adds `backgroundJourneys` to the list of `journeys.mjs` after merging).
+// End-to-end journey of M7's background image or PDF (run by run.mjs after the main journeys).
 //
 // A two-page PDF is written next to the run (a hand-made, valid PDF: page 1 has a black square in
 // its top-left corner, page 2 one in its bottom-right corner), imported from the library as two

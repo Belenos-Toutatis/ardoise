@@ -96,7 +96,8 @@ pub fn open_in(library: &Library, path: &Path) -> Result<OpenedNote, LibraryErro
 
 /// Saves an edited note over its file: only the note changes (the tablet's `original.bin`,
 /// audio, background image, recognised text and anything unknown are kept), `modified` becomes
-/// now and the thumbnail is made again. Refused with `noteConflict` if the file is no longer
+/// now and the thumbnail is made again. The first save that changes the ink of a note without
+/// an original keeps the version on disk as `original.ardoise` (`original::keep_original`). Refused with `noteConflict` if the file is no longer
 /// the version of `stamp`. The note keeps its id and its file name.
 pub fn save_in(
     library: &Library,
@@ -111,6 +112,11 @@ pub fn save_in(
     let mut file = loaded.file;
     note.id = file.note.id.clone();
     note.modified = now_ms().max(file.note.modified);
+    // "Back to the original": the version on disk is kept once, before its first edit.
+    crate::original::keep_original(&mut file, &note).map_err(|source| LibraryError::Format {
+        path: loaded.path.clone(),
+        source,
+    })?;
     file.thumbnail = background::settle(&mut file, &note);
     file.note = note;
     library.save(&loaded.path, &file, stamp)

@@ -14,13 +14,18 @@ mod commands;
 mod console;
 mod demo;
 mod diagnostic;
+mod drag;
+#[cfg(windows)]
+mod drag_windows;
 mod export;
+mod handwriting;
 mod import;
 mod library;
 mod live;
 mod narration;
 mod notes;
 mod operations;
+mod original;
 mod pdf_pages;
 mod presentation;
 mod selftest;
@@ -131,6 +136,9 @@ pub fn run() {
         open_diagnostic: cli.diagnostic,
     };
 
+    // Leftovers of the drags out of the app (PNG files for other programs), removed once old.
+    drag::start_cleaning();
+
     // A library made before `.ardoise/` became `_ardoise/` is moved over once (best effort:
     // opening the library retries later).
     if let Some(library) = commands::current_state(&context).library() {
@@ -158,6 +166,7 @@ pub fn run() {
         .manage(video::VideoCancel::default())
         .manage(narration::NarrationRuntime::default())
         .manage(codec::CodecDownload::default())
+        .manage(handwriting::HandwritingRuntime::default())
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -187,6 +196,7 @@ pub fn run() {
             notes::open_note,
             notes::save_note,
             notes::render_background,
+            original::note_original,
             tablet::tablet_info,
             tablet::forget_tablet,
             tablet::tablet_status,
@@ -211,6 +221,9 @@ pub fn run() {
             export::export_notes,
             export::cancel_export,
             clipboard::copy_note_image,
+            drag::prepare_note_drag,
+            drag::start_note_drag,
+            drag::note_drag_supported,
             operations::split_note,
             operations::merge_notes,
             video::estimate_video_export,
@@ -239,6 +252,15 @@ pub fn run() {
             background::release_background_images,
             background::create_notes_from_file,
             background::background_image_names,
+            handwriting::handwriting_info,
+            handwriting::set_handwriting_language,
+            handwriting::handwriting_status,
+            handwriting::handwriting_search,
+            handwriting::handwriting_stop,
+            handwriting::handwriting_resume,
+            handwriting::handwriting_text,
+            handwriting::export_handwriting_text,
+            handwriting::copy_handwriting_text,
         ])
         .setup(move |app| {
             if cli.self_test {
@@ -255,6 +277,9 @@ pub fn run() {
                 window = window.data_directory(dir);
             }
             window.build()?;
+            // Handwriting recognition of the library, in the background.
+            app.state::<handwriting::HandwritingRuntime>()
+                .start(app.handle());
             // Live refresh of the library; a failure is logged, the app works without it.
             let library = commands::current_state(&app.state::<AppContext>())
                 .library()

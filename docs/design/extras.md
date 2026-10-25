@@ -165,6 +165,42 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   the card (with a tooltip), or from wherever the agent shows is unambiguous; explain the gesture in the interface.
 - `cfg(not(windows))`: the handle is hidden (or does nothing) and the logic that prepares the files is tested on Linux.
 
+### As built
+
+- **Choice: own OLE source, not `tauri-plugin-drag`.** The plugin would add new crates, a JS package and a capability
+  (not in the offline cache, so unchecked here), and we want control of the guard against a released button, of the data object and of the drag image. The workspace already compiles `windows` 0.62 (BLE, media): `drag_windows.rs` uses
+  it directly (about 150 lines of code), plus `windows-core` for the `implement` macro (same version, no new crate in
+  `THIRD-PARTY-NOTICES`).
+- **Two commands** (`app/src-tauri/src/drag.rs`). `prepare_note_drag(paths)` renders each note with `export::image_bytes`
+  (PNG, 150 dpi, paper; 96 then 72 dpi for a note too large for 150) into a fresh `%TEMP%\Ardoise\drag\<uuid>\`, named
+  like the export of several notes (`export::load_sources` stem, `write_new_file`: ` (2)` for duplicates), on a blocking
+  thread. `start_note_drag(files)` refuses any file that is not directly inside a drag folder, then runs
+  `drag_windows::drag_files` on the main thread (`run_on_main_thread`) and answers `dropped` / `cancelled` when the OLE
+  drag ends. Other platforms: `note_drag_supported` is false and `start_note_drag` fails with `dragUnavailable`.
+- **Why two steps.** `DoDragDrop` must start while the button is down, and rendering takes time. The interface
+  (`lib/drag-out.ts`) calls `prepare_note_drag` when the pointer goes down on the handle, starts the system drag when
+  the pointer has moved 6 px **and** the files exist, shows "Préparation…" on the card while it waits, and does
+  nothing if the button is released first. `drag_files` itself cancels at once when the main button is not down (and its
+  drop source cancels if the first `QueryContinueDrag` sees no button): a drag must never drop under a released pointer.
+- **Data object**: the shell's own (`SHCreateDataObject` over the files' item IDs): `CF_HDROP`, "Shell IDList Array",
+  file names, and storage for the drag image. Copy only (`DROPEFFECT_COPY`). The pointer carries the first note's picture
+  (128 px, `IDragSourceHelper::InitializeFromBitmap`), best effort.
+- **Clean-up**: `drag::start_cleaning` removes drag folders older than one hour at the start and every ten minutes.
+  Nothing is deleted during or right after a drag. The files are never in the library.
+- **Interface**: the handle is a button of its own on the card (not inside the draggable `.card-open`, so the HTML5 drag
+  to a binder is untouched), visible on hover/selection, with a tooltip naming the destinations; on a selected card it
+  carries the whole selection (`LibraryState.dragOutPaths`). The selection bar's second help line explains it.
+
+#### Checking a drop by hand (Windows)
+
+1. Open the demo library (`ardoise.exe --create-demo-library DIR`), hover a card, press its handle and drag onto an
+   Explorer folder: `<note file name>.png` appears, a real image of the note.
+2. Select two cards, drag one's handle: two files. Drop on the desktop, into a Word document (inline picture), a mail
+   draft (attachments) and OneNote.
+3. Escape during the drag, or release over a program that refuses files: nothing is copied, no error shows.
+4. Press the handle and release at once: nothing is dragged. Drag a card by its thumbnail onto a binder: still moves it.
+5. `%TEMP%\Ardoise\drag\` holds one folder per drag; they disappear within about an hour and a restart.
+
 ## Verification on Windows (before ticking M7)
 
 - `cargo xtask check` and `cargo xtask e2e` on the merged branch.

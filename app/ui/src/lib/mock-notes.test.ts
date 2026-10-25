@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { UNHANDLED, freshStamp, mockLibrary, mockOnLibraryChanged, resetMockLibrary, sameStamp } from './mock-data';
 import { backgroundDataUrl, mockNotesInvoke } from './mock-notes';
 import type { FileStamp, OpenedNote } from './note';
+import type { NoteOriginal } from './original';
 
 const path = () => [...mockLibrary().notes.keys()].find((p) => p.includes('Liste de courses'))!;
 
@@ -83,4 +84,32 @@ describe('editor commands in the browser stand-in', () => {
   it('leaves other commands to the other stand-ins', () => {
     expect(mockNotesInvoke('library_list', {})).toBe(UNHANDLED);
   });
+
+  it('keeps the first version of a note at its first change of ink, like save_in', () => {
+    const entry = mockLibrary().notes.get(path())!;
+    // A tablet note has its original from the start.
+    expect((mockNotesInvoke('note_original', { path: path() }) as NoteOriginal).source).toBe('tablet');
+    entry.note = { ...entry.note, origin: { kind: 'live' } };
+    delete entry.original;
+    const first = structuredClone(entry.note.strokes);
+    expect(mockNotesInvoke('note_original', { path: path() })).toEqual({ source: 'none' });
+
+    // Only the paper changes: nothing kept yet.
+    let { note, stamp } = mockNotesInvoke('open_note', { path: path() }) as OpenedNote;
+    note.background = { ...note.background, paper: 'cream' };
+    stamp = mockNotesInvoke('save_note', { path: path(), note, stamp }) as FileStamp;
+    expect(mockNotesInvoke('note_original', { path: path() })).toEqual({ source: 'none' });
+
+    // The ink changes twice: the original is the ink before the first change.
+    for (let i = 0; i < 2; i++) {
+      note = structuredClone(note);
+      note.strokes = note.strokes.slice(0, 0);
+      note.strokes.push({ ...first[0], color: { r: i, g: 0, b: 0, a: 255 } });
+      stamp = mockNotesInvoke('save_note', { path: path(), note, stamp }) as FileStamp;
+    }
+    const original = mockNotesInvoke('note_original', { path: path() }) as NoteOriginal;
+    expect(original.source).toBe('firstVersion');
+    expect(original.source !== 'none' && original.strokes).toEqual(first);
+  });
 });
+

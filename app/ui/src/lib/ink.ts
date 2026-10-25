@@ -27,6 +27,26 @@ export interface InkStroke {
   points: InkPoint[];
 }
 
+/** A whole stroke, as notes store it (`Stroke` in `note.ts`). */
+export interface ShapeStroke extends InkStroke {
+  color: { r: number; g: number; b: number; a: number };
+  layer: number;
+}
+
+/** What `straighten` recognises (`ardoise_ink::Shape`, in the order of `Shape::ALL`). */
+export type Shape = 'line' | 'ellipse' | 'rectangle' | 'arrow';
+
+export const SHAPES: Shape[] = ['line', 'ellipse', 'rectangle', 'arrow'];
+
+/** Strokes recognised as one shape and their straightened replacement. */
+export interface Straightened {
+  /** Indices of the strokes given to `straighten` that this replaces, ascending. */
+  sources: number[];
+  shape: Shape;
+  /** The new strokes (same tool, colour, width and layer as their sources). */
+  strokes: ShapeStroke[];
+}
+
 export interface Ink {
   /** Closed contours, each a flat `[x0, y0, x1, y1…]` list. */
   contours(stroke: InkStroke): Float32Array[];
@@ -36,6 +56,11 @@ export interface Ink {
   widthAt(tool: Tool, width: number, pressure: number): number;
   /** Inverse of `widthAt`. */
   pressureForWidth(tool: Tool, width: number, diameter: number): number;
+  /**
+   * The clear shapes (line, ellipse, rectangle, arrow) among `strokes`, straightened
+   * (`ardoise_ink::shapes`). Strokes that are no clear shape are in no result.
+   */
+  straighten(strokes: readonly ShapeStroke[]): Straightened[];
 }
 
 interface Exports {
@@ -46,6 +71,8 @@ interface Exports {
   ink_result(): number;
   ink_width_at(tool: number, width: number, pressure: number): number;
   ink_pressure_for_width(tool: number, width: number, diameter: number): number;
+  ink_straighten(ptr: number, words: number): number;
+  ink_straighten_result(): number;
 }
 
 function toolCode(tool: Tool): number {
@@ -89,8 +116,69 @@ export async function instantiateInk(bytes: BufferSource): Promise<Ink> {
     }
   }
 
+  function straighten(strokes: readonly ShapeStroke[]): Straightened[] {
+    const words = 1 + strokes.reduce((sum, s) => sum + 5 + 4 * s.points.length, 0);
+    const ptr = wasm.ink_alloc(words);
+    try {
+      const floats = new Float32Array(wasm.memory.buffer, ptr, words);
+      const ints = new Uint32Array(wasm.memory.buffer, ptr, words);
+      let at = 0;
+      ints[at++] = strokes.length;
+      for (const stroke of strokes) {
+        const { r, g, b, a } = stroke.color;
+        ints[at++] = toolCode(stroke.tool);
+        ints[at++] = ((r & 255) << 24) | ((g & 255) << 16) | ((b & 255) << 8) | (a & 255);
+        floats[at++] = stroke.width;
+        ints[at++] = stroke.layer;
+        ints[at++] = stroke.points.length;
+        for (const p of stroke.points) {
+          floats[at++] = p.x;
+          floats[at++] = p.y;
+          floats[at++] = p.pressure;
+          ints[at++] = Math.max(0, Math.min(0xffffffff, Math.round(p.t)));
+        }
+      }
+      const len = wasm.ink_straighten(ptr, words);
+      // Copied out: the next call replaces the result.
+      const result = new Uint32Array(wasm.memory.buffer, wasm.ink_straighten_result(), len).slice();
+      const asFloat = new Float32Array(result.buffer);
+      let i = 0;
+      const next = () => result[i++];
+      const groups: Straightened[] = [];
+      for (let g = next(); g > 0; g--) {
+        const sources = Array.from({ length: next() }, next);
+        const shape = SHAPES[next()] ?? 'line';
+        const made: ShapeStroke[] = [];
+        for (let s = next(); s > 0; s--) {
+          const tool = TOOLS[next()] ?? 'ballpoint';
+          const color = next();
+          const width = asFloat[i++];
+          const layer = next();
+          const count = next();
+          const points = Array.from({ length: count }, () => {
+            const point = { x: asFloat[i], y: asFloat[i + 1], pressure: asFloat[i + 2], t: result[i + 3] };
+            i += 4;
+            return point;
+          });
+          made.push({
+            tool,
+            color: { r: color >>> 24, g: (color >>> 16) & 255, b: (color >>> 8) & 255, a: color & 255 },
+            width,
+            layer,
+            points,
+          });
+        }
+        groups.push({ sources, shape, strokes: made });
+      }
+      return groups;
+    } finally {
+      wasm.ink_free(ptr, words);
+    }
+  }
+
   return {
     contours,
+    straighten,
     path(stroke) {
       return contours(stroke)
         .map((c) => {

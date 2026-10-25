@@ -18,7 +18,7 @@ unzip tool:
 | `thumb.png` | no | thumbnail, PNG | stored |
 | `audio.opus` | no | narration, Ogg Opus (§4.1) | stored |
 | `background.<ext>` | no | background image (pixels of `backgroundImage`); `<ext>` = 1–10 lowercase ASCII letters or digits; Ardoise writes `png` or `jpg` | by extension (see below) |
-| `text.json` | no | recognised handwriting (written by the P2 recognition; opaque to the format) | deflate |
+| `text.json` | no | reserved for recognised handwriting (not written: the recognition keeps a cache on each PC; opaque to the format) | deflate |
 | anything else | no | members of newer versions: kept byte for byte when the note is rewritten | by extension (see below) |
 
 The optional members are opaque bytes for the format code: it reads and writes them without looking inside.
@@ -242,7 +242,9 @@ length and thousands of random corruptions).
   directory); further `background.*` members are kept as unknown members. When a note is written, an unknown member
   with the very name of the background being written is dropped: the known background wins (a file read with
   `background.png` and an unknown `background.pdf`, then given a PDF background, is written with the new PDF only).
-- `text.json`: recognised text; its schema belongs to the recognition feature.
+- `text.json`: reserved for recognised text; its schema would belong to the recognition feature. Ardoise does not
+  write it: the handwriting recognition (M7) keeps its results in a cache on each PC (`%LOCALAPPDATA%\Ardoise\handwriting`),
+  so that two PCs never rewrite the same note through Nextcloud for it. A member found in a file is kept as it is.
 
 ### 4.1 `audio.opus`
 

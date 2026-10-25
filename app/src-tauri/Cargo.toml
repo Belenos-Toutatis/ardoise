@@ -27,6 +27,7 @@ tauri-build = { version = "2.5", features = [] }
 ardoise-core = { path = "../../crates/ardoise-core" }
 ardoise-ble = { path = "../../crates/ardoise-ble" }
 ardoise-device = { path = "../../crates/ardoise-device" }
+ardoise-hwr = { path = "../../crates/ardoise-hwr" }
 ardoise-ink = { path = "../../crates/ardoise-ink" }
 ardoise-inkspace = { path = "../../crates/ardoise-inkspace" }
 ardoise-media = { path = "../../crates/ardoise-media" }
@@ -43,13 +44,6 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
-# PDF pages rendered by Windows for background images (pdf_pages.rs): Windows.Data.Pdf, read
-# from and rendered into in-memory streams.
-windows = { version = "0.62", features = [
-    "Data_Pdf",
-    "Foundation",
-    "Storage_Streams",
-] }
 # Console: attach to the parent console. DataExchange, Memory, Ole: the clipboard (clipboard.rs).
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
@@ -58,6 +52,29 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Memory",
     "Win32_System_Ole",
 ] }
+# Same version as `ardoise-ble` and `ardoise-media`: one copy compiled.
+# - Data_Pdf, Foundation, Storage_Streams: PDF pages rendered by Windows for background images
+#   (pdf_pages.rs), read from and rendered into in-memory streams.
+# - Win32_*: the drag of notes out of the app to other programs (drag_windows.rs), OLE drag and
+#   drop and the shell's data object.
+windows = { version = "0.62", features = [
+    "Data_Pdf",
+    "Foundation",
+    "Storage_Streams",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_SystemServices",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# The `implement` macro of the `windows` crate expands to paths through this crate's name.
+windows-core = "0.62"
 
 [lints]
 workspace = true

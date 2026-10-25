@@ -250,6 +250,66 @@ impl Default for TabletSettings {
     }
 }
 
+/// Language of the handwriting recognition (SPEC §4.7). Stored as `"auto"`, `"fr"` or `"en"`;
+/// any other value (written by a newer version on another PC) loads as
+/// [`Unknown`](Self::Unknown), which works as `auto` and is written back verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HandwritingLanguage {
+    /// The interface language when its recognizer is installed on the PC, else the first
+    /// installed one (each PC decides with its own recognizers).
+    #[default]
+    Auto,
+    Fr,
+    En,
+    /// A value this version does not know, kept as written.
+    Unknown(String),
+}
+
+impl HandwritingLanguage {
+    /// The choice for a program that only knows auto / fr / en: `Auto` for an unknown value.
+    pub fn known(&self) -> HandwritingLanguage {
+        if matches!(self, HandwritingLanguage::Unknown(_)) {
+            HandwritingLanguage::Auto
+        } else {
+            self.clone()
+        }
+    }
+}
+
+impl From<String> for HandwritingLanguage {
+    fn from(text: String) -> Self {
+        match text.as_str() {
+            "auto" => HandwritingLanguage::Auto,
+            "fr" => HandwritingLanguage::Fr,
+            "en" => HandwritingLanguage::En,
+            _ => HandwritingLanguage::Unknown(text),
+        }
+    }
+}
+
+impl From<HandwritingLanguage> for String {
+    fn from(language: HandwritingLanguage) -> Self {
+        match language {
+            HandwritingLanguage::Auto => "auto".to_owned(),
+            HandwritingLanguage::Fr => "fr".to_owned(),
+            HandwritingLanguage::En => "en".to_owned(),
+            HandwritingLanguage::Unknown(text) => text,
+        }
+    }
+}
+
+/// Handwriting recognition (SPEC §4.7), shared by every computer. Its results are a cache on
+/// each PC, never in this file nor in the library.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct HandwritingSettings {
+    #[serde(default)]
+    pub language: HandwritingLanguage,
+    /// Keys this version does not know about, kept verbatim.
+    #[serde(flatten)]
+    pub extra: toml::Table,
+}
+
 /// Settings that only make sense on one computer.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MachineSettings {
@@ -291,6 +351,9 @@ pub struct Settings {
     /// The tablet's options.
     #[serde(default)]
     pub tablet: TabletSettings,
+    /// Handwriting recognition.
+    #[serde(default)]
+    pub handwriting: HandwritingSettings,
     /// Per-computer settings, keyed by machine name.
     #[serde(default)]
     pub machines: BTreeMap<String, MachineSettings>,
@@ -894,6 +957,49 @@ mod tests {
         settings.set_microphone("PC-C", Some("Micro USB".into()));
         assert_eq!(settings.microphone_for("PC-C"), Some("Micro USB"));
         assert_eq!(settings.machines.len(), 2);
+    }
+
+    #[test]
+    fn the_handwriting_language_is_shared_and_keeps_unknown_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        assert_eq!(
+            store.load().unwrap().handwriting.language,
+            HandwritingLanguage::Auto
+        );
+        store
+            .update(|s| s.handwriting.language = HandwritingLanguage::En)
+            .unwrap();
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("[handwriting]"), "{text}");
+        assert!(text.contains("language = \"en\""), "{text}");
+        // Not per machine: another PC reads the same choice.
+        let other = SettingsStore::locate(dir.path(), dir.path(), "PC-B");
+        assert_eq!(
+            other.load().unwrap().handwriting.language,
+            HandwritingLanguage::En
+        );
+
+        // A value of a newer version works as auto and survives another change.
+        fs::write(
+            store.path(),
+            "[handwriting]\nlanguage = \"de\"\nengine = \"x\"\n",
+        )
+        .unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(
+            loaded.handwriting.language,
+            HandwritingLanguage::Unknown("de".into())
+        );
+        assert_eq!(
+            loaded.handwriting.language.known(),
+            HandwritingLanguage::Auto
+        );
+        store.update(|s| s.theme = Theme::Dark).unwrap();
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("language = \"de\""), "{text}");
+        assert!(text.contains("engine = \"x\""), "{text}");
+        assert_eq!(HandwritingLanguage::Fr.known(), HandwritingLanguage::Fr);
     }
 
     #[test]

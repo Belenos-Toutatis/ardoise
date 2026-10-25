@@ -24,6 +24,9 @@ import type {
   VideoProgress,
 } from './video';
 import { mockOpenH264Download, mockVideoExport } from './mock-video';
+import type { NoteOriginal } from './original';
+import type { HandwritingHit, HandwritingInfo, HandwritingSetting, IndexStatus, NoteText } from './handwriting';
+import { mockOnHandwritingStatus } from './mock-handwriting';
 import type {
   AutoExportSettings,
   Background,
@@ -174,6 +177,11 @@ export const api = {
     widthPx: number,
     image?: { image: BackgroundImage; key: string },
   ) => call<string>('render_background', { page, background, widthPx, image }),
+  /**
+   * The ink the note can go back to ("Revenir à l'original"): `{ source: 'none' }` when there is
+   * nothing to go back to; rejects with `originalDamaged` when the original cannot be read.
+   */
+  noteOriginal: (path: string) => call<NoteOriginal>('note_original', { path }),
 
   // --- Exports, split, merge (milestone M5; Rust side: export.rs, clipboard.rs, operations.rs) ---
 
@@ -191,6 +199,18 @@ export const api = {
   cancelExport: () => call<void>('cancel_export'),
   /** Copies the note's image to the clipboard (Windows); rejects with `clipboardUnavailable` elsewhere. */
   copyNoteImage: (source: ExportSource, dpi: number) => call<void>('copy_note_image', { source, dpi }),
+  /** Whether notes can be dragged out of the app to other programs (Windows). */
+  noteDragSupported: () => call<boolean>('note_drag_supported'),
+  /**
+   * Renders the notes as PNG files named after them, in a temporary folder of the app, for a
+   * drag out (drag-out.ts); returns the files, one per note, in order.
+   */
+  prepareNoteDrag: (paths: string[]) => call<string[]>('prepare_note_drag', { paths }),
+  /**
+   * Starts the system drag over files from `prepareNoteDrag` (the mouse button must be down) and
+   * resolves when it ends.
+   */
+  startNoteDrag: (files: string[]) => call<'dropped' | 'cancelled'>('start_note_drag', { files }),
   /**
    * Splits the editor's current `note`: the new note (titled `title`, same binder) is created
    * first, then the kept part is saved over `path` (`noteConflict` if the file changed since
@@ -340,7 +360,66 @@ export const api = {
     call<NoteSummary[]>('create_notes_from_file', { binder, path, pages }),
   /** The background image's name of each note (null without one). */
   backgroundImageNames: (paths: string[]) => call<(string | null)[]>('background_image_names', { paths }),
+
+  // --- Handwriting recognition (milestone M7; Rust side: handwriting.rs) ----------------------
+
+  /** The recognizers of this PC, the language setting and the language it gives, the indexing. */
+  handwritingInfo: () => call<HandwritingInfo>('handwriting_info'),
+  /** Sets the recognition language (shared by every PC) and indexes again. */
+  setHandwritingLanguage: (language: HandwritingSetting) =>
+    call<HandwritingInfo>('set_handwriting_language', { language }),
+  handwritingStatus: () => call<IndexStatus>('handwriting_status'),
+  /** The notes whose handwriting has words of `query`, each with an excerpt. */
+  handwritingSearch: (query: string) => call<HandwritingHit[]>('handwriting_search', { query }),
+  /** Stops the background indexing until `handwritingResume`. */
+  handwritingStop: () => call<IndexStatus>('handwriting_stop'),
+  handwritingResume: () => call<void>('handwriting_resume'),
+  /** The recognised text of each source (recognised now when it is not indexed yet). */
+  handwritingText: (sources: ExportSource[]) => call<NoteText[]>('handwriting_text', { sources }),
+  /** Saves the recognised text of `sources`, one note after the other, as UTF-8; returns the path. */
+  exportHandwritingText: (sources: ExportSource[], destination: string) =>
+    call<string>('export_handwriting_text', { sources, destination }),
+  /** Copies the recognised text to the clipboard (Windows; `clipboardUnavailable` elsewhere). */
+  copyHandwritingText: (sources: ExportSource[]) => call<void>('copy_handwriting_text', { sources }),
 };
+
+/**
+ * Calls `handler` at every change of the handwriting indexing (progress, pause, end). Returns a
+ * function that stops listening.
+ */
+export async function onHandwritingStatus(handler: (status: IndexStatus) => void): Promise<() => void> {
+  if (!inDesktopApp()) return mockOnHandwritingStatus(handler);
+  return listen<IndexStatus>('handwriting-status', (event) => handler(event.payload));
+}
+
+/**
+ * Calls `handler` with the indexing status now and at every change, without missing a change
+ * that happens while listening starts. Returns a function that stops.
+ */
+export function followHandwritingStatus(handler: (status: IndexStatus) => void): () => void {
+  let stopped = false;
+  let events = 0;
+  let unlisten: (() => void) | null = null;
+  void onHandwritingStatus((status) => {
+    events += 1;
+    if (!stopped) handler(status);
+  }).then((stop) => {
+    if (stopped) return stop();
+    unlisten = stop;
+    // Read once listening: a status that changed before is not lost, a newer event wins.
+    const before = events;
+    api
+      .handwritingStatus()
+      .then((status) => {
+        if (!stopped && events === before) handler(status);
+      })
+      .catch(() => {});
+  });
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
+}
 
 /**
  * Calls `handler` whenever notes change on disk (another PC through Nextcloud, or this app).

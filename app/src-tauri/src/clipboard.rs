@@ -86,14 +86,7 @@ pub(crate) fn put_on_clipboard<A: ClipboardApi>(
     payload: &ClipboardImage,
     retry_delay: Duration,
 ) -> Result<(), String> {
-    let mut attempt = 1;
-    while !api.open() {
-        if attempt >= OPEN_ATTEMPTS {
-            return Err("another program is using the clipboard".into());
-        }
-        attempt += 1;
-        std::thread::sleep(retry_delay);
-    }
+    open_with_retries(api, retry_delay)?;
     let result = if !api.empty() {
         Err("cannot empty the clipboard".into())
     } else {
@@ -109,6 +102,19 @@ pub(crate) fn put_on_clipboard<A: ClipboardApi>(
     };
     api.close();
     result
+}
+
+/// Opens the clipboard, trying again for a while when another program holds it.
+fn open_with_retries<A: ClipboardApi>(api: &mut A, retry_delay: Duration) -> Result<(), String> {
+    let mut attempt = 1;
+    while !api.open() {
+        if attempt >= OPEN_ATTEMPTS {
+            return Err("another program is using the clipboard".into());
+        }
+        attempt += 1;
+        std::thread::sleep(retry_delay);
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -236,6 +242,59 @@ pub async fn copy_note_image(
     #[cfg(not(windows))]
     {
         let _ = (window, context, source, dpi);
+        Err(CommandError::new(
+            CLIPBOARD_UNAVAILABLE,
+            "the clipboard copy is only available on Windows",
+        ))
+    }
+}
+
+// --- Text: the handwriting text export (handwriting.rs) -------------------------------------
+
+/// `CF_UNICODETEXT`: UTF-16 text ending with a NUL, which every program reads.
+const UNICODE_TEXT_FORMAT: u32 = 13;
+
+/// `text` as `CF_UNICODETEXT` data: UTF-16 little-endian, NUL-terminated.
+fn unicode_text(text: &str) -> Vec<u8> {
+    text.encode_utf16()
+        .chain(std::iter::once(0))
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
+/// Puts `text` on the clipboard as `CF_UNICODETEXT`. The clipboard is always closed once opened.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn put_text_on_clipboard<A: ClipboardApi>(
+    api: &mut A,
+    text: &str,
+    retry_delay: Duration,
+) -> Result<(), String> {
+    open_with_retries(api, retry_delay)?;
+    let result = if !api.empty() {
+        Err("cannot empty the clipboard".into())
+    } else if place(api, UNICODE_TEXT_FORMAT, &unicode_text(text)) {
+        Ok(())
+    } else {
+        Err("cannot put the text on the clipboard".into())
+    };
+    api.close();
+    result
+}
+
+/// Copies `text` to the clipboard, owned by the window `owner` (an `HWND` as an address, 0 for
+/// none). `clipboardUnavailable` outside Windows.
+pub fn copy_text(text: &str, owner: usize) -> CommandResult<()> {
+    #[cfg(windows)]
+    {
+        let mut api = system::Win32Clipboard {
+            owner: owner as windows_sys::Win32::Foundation::HWND,
+        };
+        put_text_on_clipboard(&mut api, text, OPEN_RETRY_DELAY)
+            .map_err(|message| CommandError::new(CLIPBOARD_UNAVAILABLE, message))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (text, owner);
         Err(CommandError::new(
             CLIPBOARD_UNAVAILABLE,
             "the clipboard copy is only available on Windows",
@@ -408,6 +467,28 @@ mod tests {
         assert!(put(&mut fake).is_err());
         assert_eq!(fake.calls.len(), OPEN_ATTEMPTS as usize);
         assert!(fake.calls.iter().all(|c| c == "open"));
+    }
+
+    #[test]
+    fn text_goes_as_nul_terminated_utf16() {
+        assert_eq!(unicode_text("é"), [0xe9, 0, 0, 0]);
+        let mut fake = Fake {
+            busy_opens: 1,
+            ..Fake::default()
+        };
+        put_text_on_clipboard(&mut fake, "forêt\r\n", Duration::ZERO).unwrap();
+        assert_eq!(
+            fake.calls,
+            ["open", "open", "empty", "alloc 16", "set 13", "close"]
+        );
+        assert!(fake.live.is_empty());
+        let mut fake = Fake {
+            refuse: vec![13],
+            ..Fake::default()
+        };
+        assert!(put_text_on_clipboard(&mut fake, "x", Duration::ZERO).is_err());
+        assert!(fake.live.is_empty(), "refused memory freed");
+        assert_eq!(fake.calls.last().map(String::as_str), Some("close"));
     }
 
     #[test]

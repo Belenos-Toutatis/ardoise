@@ -36,6 +36,11 @@ impl CommandError {
     pub(crate) fn code(&self) -> &'static str {
         self.code
     }
+
+    /// Whether this is the error `code`.
+    pub(crate) fn is_code(&self, code: &str) -> bool {
+        self.code == code
+    }
 }
 
 impl From<SettingsError> for CommandError {
@@ -187,8 +192,15 @@ pub fn app_state(context: State<'_, AppContext>) -> AppState {
 }
 
 #[tauri::command]
-pub fn set_language(context: State<'_, AppContext>, language: Language) -> CommandResult<AppState> {
-    update(&context, |settings| settings.language = language)
+pub fn set_language(
+    app: AppHandle,
+    context: State<'_, AppContext>,
+    language: Language,
+) -> CommandResult<AppState> {
+    let state = update(&context, |settings| settings.language = language)?;
+    // An `auto` handwriting language follows the interface's.
+    crate::handwriting::refresh(&app);
+    Ok(state)
 }
 
 #[tauri::command]

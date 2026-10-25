@@ -13,13 +13,21 @@
 //! 4. `ink_free(ptr, 4 × n)` releases the points.
 //!
 //! Tool codes are indices into [`Tool::ALL`]; an unknown code means the ballpoint.
+//!
+//! Straightening shapes ([`ardoise_ink::straighten`]): the caller writes strokes into words
+//! reserved by `ink_alloc` (see [`decode_strokes`]) and calls `ink_straighten(ptr, words)`,
+//! which returns the length in words of the result, at `ink_straighten_result()` until the next
+//! call: `[group count, then for each group: source count, the sources (indices of the given
+//! strokes), shape code (index into Shape::ALL), stroke count, the strokes]`, the strokes
+//! encoded like the input.
 
 use std::cell::RefCell;
 
-use ardoise_ink::{Point, Rgba, Stroke, Tool, outline};
+use ardoise_ink::{Point, Rgba, Shape, Stroke, Tool, outline, straighten};
 
 thread_local! {
     static RESULT: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+    static SHAPES: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
 }
 
 /// The tool for a code (index into [`Tool::ALL`]).
@@ -59,6 +67,89 @@ pub fn outline_words(words: &[u32], tool: u32, width: f32) -> Vec<f32> {
         flat.extend(contour.iter().flatten());
     }
     flat
+}
+
+/// The code of a tool (index into [`Tool::ALL`]).
+pub fn tool_code(tool: Tool) -> u32 {
+    Tool::ALL.iter().position(|&t| t == tool).unwrap_or(0) as u32
+}
+
+/// Strokes from words: `[count, then for each stroke: tool code, colour (0xRRGGBBAA), width
+/// (f32 bits), layer, point count, then four words per point as for an outline]`. Input that
+/// ends early gives the strokes complete so far.
+pub fn decode_strokes(words: &[u32]) -> Vec<Stroke> {
+    let mut rest = words;
+    let mut take = |n: usize| -> Option<&[u32]> {
+        let (head, tail) = rest.split_at_checked(n)?;
+        rest = tail;
+        Some(head)
+    };
+    let Some(&[count]) = take(1) else {
+        return Vec::new();
+    };
+    let mut strokes = Vec::new();
+    for _ in 0..count {
+        let Some(&[tool, color, width, layer, points]) = take(5) else {
+            break;
+        };
+        let Some(points) = (points as usize).checked_mul(4).and_then(&mut take) else {
+            break;
+        };
+        strokes.push(Stroke {
+            tool: tool_from_code(tool),
+            color: Rgba::from_rgba_u32(color),
+            width: f32::from_bits(width),
+            layer,
+            points: points
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|w| Point {
+                    x: f32::from_bits(w[0]),
+                    y: f32::from_bits(w[1]),
+                    pressure: f32::from_bits(w[2]),
+                    t: w[3],
+                })
+                .collect(),
+        });
+    }
+    strokes
+}
+
+/// Appends `stroke` encoded as [`decode_strokes`] reads it (without the count).
+pub fn encode_stroke(out: &mut Vec<u32>, stroke: &Stroke) {
+    out.extend([
+        tool_code(stroke.tool),
+        stroke.color.to_rgba_u32(),
+        stroke.width.to_bits(),
+        stroke.layer,
+        stroke.points.len() as u32,
+    ]);
+    for p in &stroke.points {
+        out.extend([p.x.to_bits(), p.y.to_bits(), p.pressure.to_bits(), p.t]);
+    }
+}
+
+/// The shapes recognised among the strokes in `words`, encoded as described in the module
+/// documentation.
+pub fn straighten_words(words: &[u32]) -> Vec<u32> {
+    let groups = straighten(&decode_strokes(words));
+    let mut out = vec![groups.len() as u32];
+    for group in &groups {
+        out.push(group.sources.len() as u32);
+        out.extend(group.sources.iter().map(|&i| i as u32));
+        out.push(
+            Shape::ALL
+                .iter()
+                .position(|&s| s == group.shape)
+                .unwrap_or(0) as u32,
+        );
+        out.push(group.strokes.len() as u32);
+        for stroke in &group.strokes {
+            encode_stroke(&mut out, stroke);
+        }
+    }
+    out
 }
 
 /// Reserves `words` 32-bit words and returns their address (null for 0).
@@ -113,6 +204,31 @@ pub unsafe extern "C" fn ink_outline(
 #[unsafe(no_mangle)]
 pub extern "C" fn ink_result() -> *const f32 {
     RESULT.with(|result| result.borrow().as_ptr())
+}
+
+/// Straightens the strokes held in the `count` words at `words` (see [`decode_strokes`]);
+/// returns the length of the result (see [`ink_straighten_result`]).
+///
+/// # Safety
+/// `words` must point to `count` initialised words (from [`ink_alloc`]).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ink_straighten(words: *const u32, count: usize) -> usize {
+    let words = if words.is_null() || count == 0 {
+        &[][..]
+    } else {
+        // SAFETY: the caller guarantees `count` initialised words at `words`.
+        unsafe { std::slice::from_raw_parts(words, count) }
+    };
+    let result = straighten_words(words);
+    let len = result.len();
+    SHAPES.with(|shapes| *shapes.borrow_mut() = result);
+    len
+}
+
+/// Address of the last result of [`ink_straighten`].
+#[unsafe(no_mangle)]
+pub extern "C" fn ink_straighten_result() -> *const u32 {
+    SHAPES.with(|shapes| shapes.borrow().as_ptr())
 }
 
 /// Line diameter of `tool` for a stroke of nominal `width` at `pressure`.
@@ -187,6 +303,59 @@ mod tests {
         assert_eq!(ink_width_at(0, 50.0, 1.0), 50.0);
         let p = ink_pressure_for_width(0, 50.0, ink_width_at(0, 50.0, 0.3));
         assert!((p - 0.3).abs() < 1e-5);
+    }
+
+    #[test]
+    fn straightens_through_memory_exactly_like_the_native_code() {
+        // A wobbly line on layer 2 and a short stroke that stays as it is.
+        let mut line = stroke(Tool::Highlighter);
+        line.layer = 2;
+        line.color = Rgba::from_rgba_u32(0xffd4_0080);
+        for (i, p) in line.points.iter_mut().enumerate() {
+            p.y = 2000.0 + 15.0 * (i as f32 * 0.9).sin();
+        }
+        let mut short = stroke(Tool::Pencil);
+        short.points.truncate(3);
+        let strokes = [short, line];
+        let mut data = vec![2];
+        for s in &strokes {
+            encode_stroke(&mut data, s);
+        }
+        assert_eq!(decode_strokes(&data), strokes);
+
+        let ptr = ink_alloc(data.len());
+        // SAFETY: ptr holds `data.len()` words reserved just above.
+        let result = unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+            let len = ink_straighten(ptr, data.len());
+            let result = std::slice::from_raw_parts(ink_straighten_result(), len).to_vec();
+            ink_free(ptr, data.len());
+            result
+        };
+        let native = straighten(&strokes);
+        assert_eq!(native.len(), 1);
+        let mut expected = vec![1, 1, 1, 0, 1];
+        encode_stroke(&mut expected, &native[0].strokes[0]);
+        assert_eq!(result, expected);
+        assert_eq!(native[0].strokes[0].layer, 2);
+        assert_eq!(native[0].strokes[0].tool, Tool::Highlighter);
+    }
+
+    #[test]
+    fn truncated_stroke_words_are_harmless() {
+        let mut data = vec![3];
+        encode_stroke(&mut data, &stroke(Tool::Ballpoint));
+        encode_stroke(&mut data, &stroke(Tool::Chalk));
+        data.truncate(data.len() - 7);
+        assert_eq!(decode_strokes(&data).len(), 1);
+        assert!(decode_strokes(&[]).is_empty());
+        assert_eq!(straighten_words(&[]), [0]);
+        assert_eq!(straighten_words(&[5, 1, 2]), [0]);
+        // SAFETY: a null pointer with no words is accepted.
+        assert_eq!(unsafe { ink_straighten(std::ptr::null(), 0) }, 1);
+        for tool in Tool::ALL {
+            assert_eq!(tool_from_code(tool_code(tool)), tool);
+        }
     }
 
     #[test]
