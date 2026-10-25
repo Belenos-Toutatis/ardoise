@@ -3,6 +3,7 @@
  * (`npm run dev`) so screens can be developed and tested without the desktop app.
  */
 import type { AppState, NoteOutlines } from './api';
+import { mockBackgroundInvoke } from './mock-background';
 import { UNHANDLED, setMockAutoExportSettings } from './mock-data';
 import { checkAutoExport, mockExportInvoke } from './mock-export';
 import { mockLibraryInvoke } from './mock-library';
@@ -90,6 +91,7 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
           mockLiveInvoke,
           mockVideoInvoke,
           mockNarrationInvoke,
+          mockBackgroundInvoke,
         ]) {
           const handled = handle(command, args);
           if (handled !== UNHANDLED) return handled;

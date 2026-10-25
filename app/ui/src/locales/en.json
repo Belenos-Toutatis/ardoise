@@ -453,7 +453,15 @@
     "noNarration": "This note has no narration.",
     "emptyRecording": "The microphone recorded nothing.",
     "noPendingNarration": "No recording is waiting.",
-    "openh264RemoveFailed": "Windows is still using OpenH264: close and restart Ardoise, then remove it."
+    "openh264RemoveFailed": "Windows is still using OpenH264: close and restart Ardoise, then remove it.",
+    "backgroundUnsupported": "this file is neither a PDF nor a PNG or JPEG image",
+    "backgroundTooLarge": "this file is too large (at most 50 million pixels for an image) ({detail})",
+    "backgroundDamaged": "this file is damaged or unreadable ({detail})",
+    "backgroundUnreadable": "this file cannot be opened ({detail})",
+    "backgroundMissing": "the background image is no longer in memory; reopen the note and choose the image again",
+    "pdfUnsupported": "PDF files can only be read on Windows",
+    "pdfEncrypted": "this PDF is protected by a password; save a copy without a password",
+    "pdfNoSuchPage": "this PDF has no such page ({detail})"
   },
   "editor": {
     "back": "Library",
@@ -815,7 +823,7 @@
     "pdfPage": "PDF page",
     "pdfActual": "The page's actual size",
     "pdfA4": "A4 (note fitted and centred)",
-    "background": "Include the background (paper, lines, texture)",
+    "background": "Include the background (paper, lines, texture, background image)",
     "backgroundHints": {
       "png": "Unchecked: the background is transparent, only the ink is exported.",
       "jpg": "Unchecked: the background is white (JPG can't be transparent).",
@@ -1141,5 +1149,57 @@
   "presentation": {
     "title": "Presentation",
     "canvas": "Projected page {page}"
+  },
+  "background": {
+    "fileFilter": "PDF or image (PNG, JPEG)",
+    "editor": {
+      "title": "Background image or PDF",
+      "hint": "To annotate a worksheet, a document or a photo: the image or PDF page goes under the writing.",
+      "choose": "Choose a PDF or an image…",
+      "pickTitle": "Image or PDF to put in the background",
+      "pdfPages": "{name}: {count} pages. Which one goes in the background?",
+      "page": "Page",
+      "place": "Put in the background",
+      "cancel": "Cancel",
+      "pdfPageName": "{name}, page {page}",
+      "unreadable": "This note's image cannot be read, so it is not shown.",
+      "fit": "Placement",
+      "opacity": "Opacity",
+      "replace": "Replace…",
+      "remove": "Remove the image",
+      "importing": "Importing…",
+      "failed": "This file cannot be put in the background: {message}"
+    },
+    "fits": {
+      "contain": "Whole, within the page",
+      "cover": "Fill the page",
+      "stretch": "Stretch to the page",
+      "custom": "Moved (cropped)"
+    },
+    "library": {
+      "open": "From a PDF or an image…",
+      "openHint": "New note from a PDF or an image: one note per PDF page, to write over",
+      "title": "New note from a PDF or an image",
+      "pickTitle": "PDF or image to annotate",
+      "intro": "Each PDF page becomes a note of its size, with the page in the background; an image becomes a note the size of an A4 sheet.",
+      "pdfInfo": "{count} page(s), the first one {width} × {height} mm.",
+      "pages": "Pages",
+      "allPages": "All pages ({count})",
+      "somePages": "Some pages",
+      "pageList": "Pages to import",
+      "pageListInvalid": "Type page numbers from 1 to {count}, for example 1-3, 5.",
+      "pageListCount": "Notes to create: {count}",
+      "imageInfo": "One note will be created with this image in the background.",
+      "createOne": "Create the note",
+      "createMany": "Create {count} notes",
+      "otherFile": "Another file…",
+      "reading": "Reading the file…",
+      "running": "Creating the notes…",
+      "error": "The notes cannot be created: {message}",
+      "done": "Notes created: {count}"
+    },
+    "assemble": {
+      "dropped": "Only the first note's background image is kept. Background images of the other notes left out: {count}."
+    }
   }
 }

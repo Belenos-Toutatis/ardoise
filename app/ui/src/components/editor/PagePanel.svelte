@@ -1,5 +1,6 @@
 <script lang="ts">
-  /** Paper, template, texture, quarter-turn rotation and crop. */
+  /** Paper, template, texture, quarter-turn rotation and crop; then `children` (the background image). */
+  import type { Snippet } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
   import type { Background, Paper, Template } from '../../lib/note';
 
@@ -11,6 +12,7 @@
     onrotate,
     onautocrop,
     onmanualcrop,
+    children,
   }: {
     background: Background;
     cropping: boolean;
@@ -20,6 +22,7 @@
     onrotate: (direction: 'cw' | 'ccw') => void;
     onautocrop: () => void;
     onmanualcrop: () => void;
+    children?: Snippet;
   } = $props();
 
   const PAPERS = ['white', 'cream', 'kraft', 'slate'] as const;
@@ -86,4 +89,5 @@
   {#if cropping}
     <p class="muted small">{t('editor.page.cropHint')}</p>
   {/if}
+  {@render children?.()}
 </section>

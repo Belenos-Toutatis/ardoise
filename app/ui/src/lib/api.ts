@@ -1,6 +1,7 @@
 /** Typed wrappers around the Rust commands of `app/src-tauri/src/commands.rs`. */
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { BackgroundSource, StagedBackground } from './background';
 import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic';
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
@@ -26,6 +27,7 @@ import { mockOpenH264Download, mockVideoExport } from './mock-video';
 import type {
   AutoExportSettings,
   Background,
+  BackgroundImage,
   ExportFormat,
   ExportOptions,
   ExportSource,
@@ -156,12 +158,22 @@ export const api = {
   openNote: (path: string) => call<OpenedNote>('open_note', { path }),
   /**
    * Saves an edited note (thumbnail regenerated, tablet original and other members kept);
-   * rejects with code `noteConflict` if the file changed since `stamp`.
+   * rejects with code `noteConflict` if the file changed since `stamp`. `imageKey`: the staged
+   * pixels of the note's background image (`backgroundMissing` if they are gone); without it the
+   * file's own image is kept.
    */
-  saveNote: (path: string, note: Note, stamp: FileStamp) => call<FileStamp>('save_note', { path, note, stamp }),
-  /** PNG data URL of a page background (paper, template, texture) `widthPx` pixels wide. */
-  renderBackground: (page: PageSize, background: Background, widthPx: number) =>
-    call<string>('render_background', { page, background, widthPx }),
+  saveNote: (path: string, note: Note, stamp: FileStamp, imageKey?: string) =>
+    call<FileStamp>('save_note', { path, note, stamp, imageKey }),
+  /**
+   * PNG data URL of a page background (paper, template, texture) `widthPx` pixels wide, with the
+   * background image `image` over the paper (its pixels staged under `key`).
+   */
+  renderBackground: (
+    page: PageSize,
+    background: Background,
+    widthPx: number,
+    image?: { image: BackgroundImage; key: string },
+  ) => call<string>('render_background', { page, background, widthPx, image }),
 
   // --- Exports, split, merge (milestone M5; Rust side: export.rs, clipboard.rs, operations.rs) ---
 
@@ -184,8 +196,8 @@ export const api = {
    * first, then the kept part is saved over `path` (`noteConflict` if the file changed since
    * `stamp`; the new note is then moved to the trash).
    */
-  splitNote: (path: string, note: Note, stamp: FileStamp, split: SplitSpec, title: string) =>
-    call<SplitResult>('split_note', { path, note, stamp, split, title }),
+  splitNote: (path: string, note: Note, stamp: FileStamp, split: SplitSpec, title: string, imageKey?: string) =>
+    call<SplitResult>('split_note', { path, note, stamp, split, title, imageKey }),
   /** Assembles notes (oldest first) into a new note in the first one's binder; sources unchanged. */
   mergeNotes: (paths: string[], layout: MergeLayout, title: string) =>
     call<NoteSummary>('merge_notes', { paths, layout, title }),
@@ -311,6 +323,23 @@ export const api = {
   /** Deletes the library and disallows the fallback. */
   openH264Remove: () => call<OpenH264State>('openh264_remove'),
   setOpenH264Allowed: (allowed: boolean) => call<OpenH264State>('set_openh264_allowed', { allowed }),
+
+  // --- Background image or PDF (M7; Rust side: background.rs, docs/design/extras.md) ----------
+
+  /** What a file chosen by the user holds: an image, or a PDF with its pages' sizes. */
+  inspectBackgroundFile: (path: string) => call<BackgroundSource>('inspect_background_file', { path }),
+  /** Imports an image, or page `pdfPage` of a PDF, for the editor; nothing is written yet. */
+  stageBackgroundImage: (path: string, pdfPage?: number) =>
+    call<StagedBackground>('stage_background_image', { path, pdfPage }),
+  /** Stages the background image of the note at `path` (null when it has none). */
+  stageNoteBackground: (path: string) => call<StagedBackground | null>('stage_note_background', { path }),
+  /** Forgets every staged image (the editor closes or opens another note). */
+  releaseBackgroundImages: () => call<void>('release_background_images'),
+  /** New notes in `binder`: one per page of a PDF (`pages` from 1, all when absent) or one for an image. */
+  createNotesFromFile: (binder: string, path: string, pages?: number[]) =>
+    call<NoteSummary[]>('create_notes_from_file', { binder, path, pages }),
+  /** The background image's name of each note (null without one). */
+  backgroundImageNames: (paths: string[]) => call<(string | null)[]>('background_image_names', { paths }),
 };
 
 /**

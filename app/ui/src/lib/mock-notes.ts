@@ -2,7 +2,7 @@
  * Browser stand-in for the editor commands (`open_note`, `save_note`, `render_background`), over
  * the demo library of `mock-data.ts`.
  */
-import type { Background, FileStamp, Note, OpenedNote, PageSize, Paper, Rgba } from './note';
+import type { Background, BackgroundImage, FileStamp, Note, OpenedNote, PageSize, Paper, Rgba } from './note';
 import { UNHANDLED, fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, sameStamp } from './mock-data';
 
 /** Notes are plain JSON: a JSON round trip is a deep copy. */
@@ -52,7 +52,12 @@ export function mockNotesInvoke(command: string, args: Record<string, unknown>):
       return copy(entry.stamp);
     }
     case 'render_background':
-      return backgroundDataUrl(args.page as PageSize, args.background as Background, args.widthPx as number);
+      return backgroundDataUrl(
+        args.page as PageSize,
+        args.background as Background,
+        args.widthPx as number,
+        (args.image as { image: BackgroundImage } | undefined)?.image,
+      );
     case 'retitle_note': {
       // Fallback only: the library's stand-in (`mock-library.ts`) handles it first when it does.
       const path = args.path as string;
@@ -166,7 +171,19 @@ function templateSvg(background: Background, w: number, h: number, dark: boolean
 }
 
 /** An SVG data URL of the page background, `widthPx` pixels wide. */
-export function backgroundDataUrl(page: PageSize, background: Background, widthPx: number): string {
+/** Where the desktop app draws a background image: a placeholder with the file's name. */
+function imageSvg(image: BackgroundImage | undefined): string {
+  if (!image) return '';
+  const { x, y, width, height } = image.rect;
+  const [rx, ry, rw, rh] = [x, y, width, height].map((v) => v / 100);
+  const name = image.name.replace(/[<>&"]/g, '');
+  return (
+    `<g opacity="${image.opacity ?? 1}"><rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="#dbe6f5" stroke="#7a95c4"/>` +
+    `<text x="${rx + rw / 2}" y="${ry + rh / 2}" font-size="${Math.max(4, rh / 20)}" text-anchor="middle" fill="#4a6496">${name}</text></g>`
+  );
+}
+
+export function backgroundDataUrl(page: PageSize, background: Background, widthPx: number, image?: BackgroundImage): string {
   const w = page.width / 100;
   const h = page.height / 100;
   const { css, dark } = paperColor(background.paper);
@@ -179,6 +196,6 @@ export function backgroundDataUrl(page: PageSize, background: Background, widthP
     : '';
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
-    `<rect width="${w}" height="${h}" fill="${css}"/>${texture}${templateSvg(background, w, h, dark)}</svg>`;
+    `<rect width="${w}" height="${h}" fill="${css}"/>${texture}${templateSvg(background, w, h, dark)}${imageSvg(image)}</svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }

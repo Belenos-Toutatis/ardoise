@@ -22,6 +22,7 @@
     type Vec,
   } from '../../lib/editor/geometry';
   import { drawingOrder, hitStroke, selectInLasso } from '../../lib/editor/hit';
+  import { placedImage } from '../../lib/editor/image';
   import { MIN_CROP } from '../../lib/editor/ops';
   import type { SplitPreview } from '../../lib/editor/split';
   import {
@@ -117,7 +118,8 @@
   const shown = $derived(transient ?? doc);
   const page = $derived(shown.note.page);
   const pageKey = $derived(`${doc.note.page.width}x${doc.note.page.height}`);
-  const backgroundKey = $derived(JSON.stringify(doc.note.background));
+  // The paper and the background image with the key of its pixels (undo can bring another back).
+  const backgroundKey = $derived(JSON.stringify([doc.note.background, placedImage(doc) ?? null]));
   const pixelRatio = typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
   const bgWidth = $derived(backgroundWidth(doc.note.page, view.scale, pixelRatio));
   const box = $derived(visibleRect(view, viewport));
@@ -222,15 +224,17 @@
     return () => observer.disconnect();
   });
 
-  // The background, re-rendered when the page, the paper or the zoom bucket changes.
+  // The background, re-rendered when the page, the paper, the background image or the zoom
+  // bucket changes.
   $effect(() => {
     void pageKey;
     void backgroundKey;
     const width = bgWidth;
-    const note = untrack(() => doc.note);
+    const current = untrack(() => doc);
+    const note = current.note;
     let cancelled = false;
     api
-      .renderBackground(note.page, note.background, width)
+      .renderBackground(note.page, note.background, width, placedImage(current))
       .then((url) => {
         if (!cancelled) background = url;
       })

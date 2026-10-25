@@ -139,3 +139,18 @@ describe('applying a split', () => {
     expect(applySplit(note([line([[0, 0]])]), { kind: 'time', at: 5 })).toBeNull();
   });
 });
+
+describe('split and the background image', () => {
+  it('gives both notes the page background image', () => {
+    const image = { name: 'fiche.pdf', pdfPage: 3, rect: { x: 0, y: 0, width: 29700, height: 21600 }, quarterTurns: 1, opacity: 0.5 };
+    const source = { ...twoStrokes(), backgroundImage: image };
+    for (const spec of [
+      { kind: 'time', at: 500 } as const,
+      { kind: 'zone', polygon: [[0, 7000], [3000, 7000], [3000, 9000], [0, 9000]] as [number, number][] } as const,
+    ]) {
+      const parts = applySplit(source, spec);
+      expect(parts?.kept.backgroundImage).toEqual(image);
+      expect(parts?.extracted.backgroundImage).toEqual(image);
+    }
+  });
+});

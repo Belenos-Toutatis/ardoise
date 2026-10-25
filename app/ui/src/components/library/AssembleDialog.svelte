@@ -3,8 +3,8 @@
    * Assembles the selected notes (at least two, oldest first) into a new note: one on top of the
    * other on a single page, or end to end on a long page. The original notes are not changed.
    */
-  import { untrack } from 'svelte';
-  import { errorMessage } from '../../lib/api';
+  import { onMount, untrack } from 'svelte';
+  import { api, errorMessage } from '../../lib/api';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { formatDate, oldestFirst } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
@@ -19,6 +19,17 @@
     const base = first.title.trim() || formatDate(first.created, currentLocale(), false);
     return t('library.assemble.defaultTitle', { title: base });
   }
+
+  /** Background images of the notes after the oldest, which the assembly does not keep. */
+  let droppedImages = $state(0);
+  onMount(() => {
+    api
+      .backgroundImageNames(oldestFirst(notes).map((n) => n.path))
+      .then((names) => (droppedImages = names.slice(1).filter((name) => name !== null).length))
+      .catch(() => {
+        // Not known: nothing to say.
+      });
+  });
 
   let layout = $state<MergeLayout>('overlay');
   let title = $state(untrack(defaultTitle));
@@ -62,6 +73,10 @@
       </label>
       <p class="muted small export-hint">{t('library.assemble.endToEndHint')}</p>
     </fieldset>
+
+    {#if droppedImages > 0}
+      <p class="muted small" data-slot="assemble-dropped-images">{t('background.assemble.dropped', { count: droppedImages })}</p>
+    {/if}
 
     <label class="field">
       <span>{t('library.assemble.titleLabel')}</span>

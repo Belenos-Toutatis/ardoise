@@ -19,6 +19,7 @@ import {
   strokesBounds,
   transformStrokes,
 } from './ops';
+import type { Note } from '../note';
 import { scalingAround, translation } from './geometry';
 import { RED, hline, line, note } from './test-fixtures';
 
@@ -304,5 +305,44 @@ describe('page', () => {
     const cropped = cropTo(n, autoCropRect(n, 500)!);
     expect(cropped.page).toEqual({ width: 8060, height: 6060 });
     expect(cropped.strokes[0].points[0]).toMatchObject({ x: 530, y: 530 });
+  });
+});
+
+describe('the background image follows page operations', () => {
+  const withImage = (): Note => ({
+    ...note([hline(1000, 4000, 3000)]),
+    backgroundImage: {
+      name: 'fiche.pdf',
+      pdfPage: 1,
+      rect: { x: -500, y: 1000, width: 12_000, height: 9_000 },
+      quarterTurns: 0,
+      opacity: 0.8,
+    },
+  });
+
+  it('turns with the strokes, a quarter turn more each time', () => {
+    const n = withImage();
+    const cw = rotateQuarter(n, 'cw');
+    expect(cw.backgroundImage?.quarterTurns).toBe(1);
+    // The corner of the rectangle under a sample moves exactly as the sample does.
+    const corner = { x: -500, y: 1000 };
+    const moved = { x: n.page.height - corner.y, y: corner.x };
+    const r = cw.backgroundImage!.rect;
+    expect({ x: r.x + r.width, y: r.y }).toEqual(moved);
+    expect(rotateQuarter(cw, 'ccw')).toEqual(n);
+    const full = [0, 1, 2, 3].reduce((acc) => rotateQuarter(acc, 'cw'), n);
+    expect(full).toEqual(n);
+    expect(rotateQuarter(n, 'ccw').backgroundImage?.quarterTurns).toBe(3);
+    // A note without an image gets none.
+    expect('backgroundImage' in rotateQuarter(note([]), 'cw')).toBe(false);
+  });
+
+  it('is shifted by a crop, like the strokes', () => {
+    const n = withImage();
+    const out = cropTo(n, { x: 800, y: 2000, width: 5000, height: 4000 });
+    expect(out.backgroundImage?.rect).toEqual({ x: -1300, y: -1000, width: 12_000, height: 9_000 });
+    expect(out.strokes[0].points[0]).toMatchObject({ x: 200, y: 1000 });
+    expect(out.backgroundImage?.opacity).toBe(0.8);
+    expect('backgroundImage' in cropTo(note([hline(1000, 4000, 3000)]), { x: 800, y: 2000, width: 5000, height: 4000 })).toBe(false);
   });
 });

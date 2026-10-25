@@ -11,6 +11,7 @@
   import ExportDialog from './ExportDialog.svelte';
   import Editor from './editor/Editor.svelte';
   import AssembleDialog from './library/AssembleDialog.svelte';
+  import NewFromFileDialog from './library/NewFromFileDialog.svelte';
   import NoteGrid from './library/NoteGrid.svelte';
   import Sidebar from './library/Sidebar.svelte';
   import TrashView from './library/TrashView.svelte';
@@ -48,6 +49,17 @@
   async function newNote() {
     const note = await lib.createNote();
     if (note) openPath = note.path;
+  }
+
+  /** « Nouvelle note depuis un PDF ou une image » is open. */
+  let fromFile = $state(false);
+
+  /** One note made from a file is opened; several are announced. */
+  function createdFromFile(notes: NoteSummary[]) {
+    fromFile = false;
+    void lib.refresh();
+    if (notes.length === 1) openPath = notes[0].path;
+    else if (notes.length > 1) lib.notice = t('background.library.done', { count: notes.length });
   }
 
   function openLive() {
@@ -130,6 +142,9 @@
         {/each}
       </select>
       <button type="button" class="button primary" onclick={newNote}>{t('library.newNote')}</button>
+      <button type="button" class="button" data-action="new-from-file" title={t('background.library.openHint')} onclick={() => (fromFile = true)}>
+        {t('background.library.open')}
+      </button>
       <button
         type="button"
         class="button ghost"
@@ -194,5 +209,8 @@
     />
   {:else if lib.dialog?.kind === 'assemble'}
     <AssembleDialog {lib} notes={lib.dialog.notes} onclose={() => lib.closeDialog()} />
+  {/if}
+  {#if fromFile}
+    <NewFromFileDialog binder={lib.currentBinder} onclose={() => (fromFile = false)} oncreated={createdFromFile} />
   {/if}
 {/if}

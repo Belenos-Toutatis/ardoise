@@ -20,6 +20,7 @@
   import { api, errorMessage, onLibraryChanged, type AppState } from '../../lib/api';
   import { loadCustomColors, rememberCustomColor } from '../../lib/editor/colors';
   import { binderOf, diskChange, type DiskChange } from '../../lib/editor/disk';
+  import { pixelsOf, removeBackgroundImage, setBackgroundImage, setImageFit, setImageOpacity } from '../../lib/editor/image';
   import { canRedo, canUndo, commit, createHistory, redo, replacePresent, undo, type History } from '../../lib/editor/history';
   import {
     DEFAULT_TOOLS,
@@ -64,6 +65,7 @@
   import { clock } from '../narration/format';
   import RecordPanel from '../narration/RecordPanel.svelte';
   import { NarrationRecorder } from '../narration/recorder.svelte';
+  import BackgroundImageSection from './BackgroundImageSection.svelte';
   import Canvas from './Canvas.svelte';
   import LayersPanel from './LayersPanel.svelte';
   import PagePanel from './PagePanel.svelte';
@@ -191,7 +193,7 @@
   /** The page as drawn at the playhead: nothing selected, nothing to edit. */
   const replayDoc = $derived.by((): Doc | null => {
     const shown = player.shown;
-    return replaying && doc && shown ? { note: shown, selection: [], activeLayer: doc.activeLayer } : null;
+    return replaying && doc && shown ? { ...doc, note: shown, selection: [] } : null;
   });
   /** The pan tool: a drag moves the page and never draws. */
   const replayTools = $derived<ToolSettings>({ ...tools, mode: 'pan' });
@@ -252,6 +254,8 @@
       // A recording is never thrown away silently: it goes into its note (or stays pending).
       salvageRecording();
       dropNarrationSound();
+      // The background images imported or opened here are no longer needed.
+      void settled().then(() => api.releaseBackgroundImages().catch(() => {}));
     };
   });
 
@@ -268,9 +272,16 @@
     closeVideo();
     resetReplay();
     try {
+      // The previous note's background images go; this note's image is kept in memory by Rust
+      // (its key goes into the history with the note, `lib/editor/image.ts`).
+      await settled();
+      await api.releaseBackgroundImages().catch(() => {});
       const [opened, module] = await Promise.all([api.openNote(target), ink ?? loadInk()]);
       if (currentPath !== target) return;
-      const start = docFromNote(opened.note, t('editor.layers.defaultName', { n: 1 }));
+      const staged = opened.note.backgroundImage ? await api.stageNoteBackground(target).catch(() => null) : null;
+      if (currentPath !== target) return;
+      const fresh = docFromNote(opened.note, t('editor.layers.defaultName', { n: 1 }));
+      const start = staged ? { ...fresh, backgroundPixels: pixelsOf(staged) } : fresh;
       ink = module;
       history = createHistory(start);
       savedNote = start.note;
@@ -333,7 +344,7 @@
     saveError = null;
     conflict = null;
     try {
-      const next = await api.saveNote(target, { ...present.note, title }, stamp);
+      const next = await api.saveNote(target, { ...present.note, title }, stamp, present.backgroundPixels?.key);
       if (gen !== generation) return false;
       stamp = next;
       savedNote = present.note;
@@ -388,7 +399,8 @@
         const created = await api.createNote(binderOf(currentPath, app.library), copyTitle);
         // `save_note` keeps the new file's own id; the content is the edited note's.
         const note: Note = { ...present.note, title: copyTitle, created: created.created, origin: { kind: 'ardoise' } };
-        const next = await api.saveNote(created.path, note, created.stamp);
+        // The copy gets the background image too (the same staged pixels).
+        const next = await api.saveNote(created.path, note, created.stamp, present.backgroundPixels?.key);
         if (gen !== generation) return false;
         currentPath = created.path;
         stamp = next;
@@ -611,7 +623,7 @@
 
   /** The note as the user sees it, with the title shown in the title field. */
   function currentSource(): ExportSource | null {
-    return doc ? { path: currentPath, note: { ...doc.note, title } } : null;
+    return doc ? { path: currentPath, note: { ...doc.note, title }, imageKey: doc.backgroundPixels?.key } : null;
   }
 
   function openExport() {
@@ -695,9 +707,19 @@
       const target = currentPath;
       saving = true;
       try {
-        const result = await api.splitNote(target, { ...present.note, title }, stamp, spec, state.title.trim());
+        const result = await api.splitNote(
+          target,
+          { ...present.note, title },
+          stamp,
+          spec,
+          state.title.trim(),
+          present.backgroundPixels?.key,
+        );
         if (gen !== generation) return;
-        const start = docFromNote(result.note, t('editor.layers.defaultName', { n: 1 }));
+        const fresh = docFromNote(result.note, t('editor.layers.defaultName', { n: 1 }));
+        // The kept part has the same background image, with the same pixels.
+        const pixels = result.note.backgroundImage ? present.backgroundPixels : undefined;
+        const start = pixels ? { ...fresh, backgroundPixels: pixels } : fresh;
         history = createHistory(start);
         savedNote = start.note;
         stamp = result.stamp;
@@ -1294,7 +1316,18 @@
             onrotate={(direction) => change(rotate(doc!, direction))}
             onautocrop={() => change(autoCrop(doc!))}
             onmanualcrop={() => setMode(tools.mode === 'crop' ? 'select' : 'crop')}
-          />
+          >
+            <BackgroundImageSection
+              page={doc.note.page}
+              image={doc.note.backgroundImage}
+              pixels={doc.backgroundPixels}
+              disabled={split !== null}
+              onset={(image, pixels) => change(setBackgroundImage(doc!, image, pixels))}
+              onfit={(fit) => change(setImageFit(doc!, fit))}
+              onopacity={(opacity) => change(setImageOpacity(doc!, opacity))}
+              onremove={() => change(removeBackgroundImage(doc!))}
+            />
+          </PagePanel>
           <LayersPanel
             layers={doc.note.layers}
             active={doc.activeLayer}

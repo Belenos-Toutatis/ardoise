@@ -171,11 +171,13 @@ export interface ExportOptions {
 
 /**
  * A note to export: the note at `path`, or the editor's current `note` (unsaved changes
- * included). `path` also names the output file.
+ * included). `path` also names the output file. `imageKey`: the staged pixels of the editor
+ * note's background image (`lib/background.ts`); without it they come from the file.
  */
 export interface ExportSource {
   path: string;
   note?: Note;
+  imageKey?: string;
 }
 
 /** How to split a note: at an instant (ms since `created`), or by a traced zone (page units). */

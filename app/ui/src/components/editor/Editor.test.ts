@@ -917,6 +917,8 @@ describe('note editor: split, copy image and export', () => {
       expect.anything(),
       { kind: 'time', at: 150 },
       'Cours de physique (suite)',
+      // No background image: no staged pixels.
+      undefined,
     );
     // The editor shows what is kept, saved, with nothing left to undo.
     expect(paths()).toHaveLength(2);
@@ -1134,7 +1136,8 @@ describe('note editor: split, copy image and export', () => {
     expect(toolbarControls().length).toBeGreaterThan(10);
     expect(locked(toolbarControls())).toBe(true);
     expect(locked(controls(section('editor-page-heading')))).toBe(true);
-    expect(controls(section('editor-page-heading')).length).toBe(7);
+    // Paper, template, texture, two turns, two crops, and the background image's button.
+    expect(controls(section('editor-page-heading')).length).toBe(8);
     expect(locked(controls(section('editor-layers-heading')))).toBe(true);
     // The split's own buttons, copy and export stay available.
     expect(button('Découper').disabled).toBe(false);

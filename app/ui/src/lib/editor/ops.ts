@@ -2,6 +2,7 @@
  * Pure operations on a note. Each returns a new note (or the same object when nothing changed)
  * and keeps every untouched stroke object, so that cached outlines and bounds stay valid.
  */
+import { rotateImage, shiftImage } from '../background';
 import type { InkPoint, Tool } from '../ink';
 import type { Background, Layer, Note, Rgba, Stroke } from '../note';
 import {
@@ -255,7 +256,8 @@ export function setBackground(note: Note, background: Background): Note {
 
 /**
  * Turns the page a quarter turn (clockwise or counter-clockwise, as seen on screen with y
- * down): exact arithmetic, page width and height swapped.
+ * down): exact arithmetic, page width and height swapped. The background image turns with the
+ * strokes.
  */
 export function rotateQuarter(note: Note, direction: 'cw' | 'ccw'): Note {
   const { width, height } = note.page;
@@ -263,11 +265,13 @@ export function rotateQuarter(note: Note, direction: 'cw' | 'ccw'): Note {
     direction === 'cw'
       ? (p: InkPoint): InkPoint => ({ ...p, x: height - p.y, y: p.x })
       : (p: InkPoint): InkPoint => ({ ...p, x: p.y, y: width - p.x });
-  return {
+  const turned: Note = {
     ...note,
     page: { width: height, height: width },
     strokes: note.strokes.map((stroke) => ({ ...stroke, points: stroke.points.map(map) })),
   };
+  if (note.backgroundImage) turned.backgroundImage = rotateImage(note.backgroundImage, note.page, direction);
+  return turned;
 }
 
 /** Smallest page side accepted by a crop, device units (1 cm). */
@@ -278,6 +282,7 @@ export const MIN_CROP = 1000;
  * units) and its top-left corner becomes the origin. Visible strokes entirely outside are
  * removed; the others are kept whole. Strokes on hidden layers are always kept (moved with the
  * page, even outside it): the user cannot see them, so a crop must not delete them silently.
+ * The background image moves with the strokes (what falls outside the page is not drawn).
  */
 export function cropTo(note: Note, rect: Rect): Note {
   const x = Math.round(rect.x);
@@ -293,7 +298,9 @@ export function cropTo(note: Note, rect: Rect): Note {
     if (layerVisible(note, stroke.layer) && (!bounds || !overlaps(bounds, area))) continue;
     strokes.push({ ...stroke, points: stroke.points.map((p) => ({ ...p, x: p.x - x, y: p.y - y })) });
   }
-  return { ...note, page: { width, height }, strokes };
+  const cropped: Note = { ...note, page: { width, height }, strokes };
+  if (note.backgroundImage) cropped.backgroundImage = shiftImage(note.backgroundImage, x, y);
+  return cropped;
 }
 
 /**

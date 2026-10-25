@@ -3,6 +3,7 @@
  * `Doc`, what undo/redo restores), and the tool settings (not part of the history: undo never
  * changes the pen). Doc operations keep the selection and the active layer consistent.
  */
+import type { PixelsRef } from '../background';
 import type { Tool } from '../ink';
 import { INKSPACE_COLORS, type Background, type Note, type Rgba, type Stroke } from '../note';
 import { type Affine, type Rect, type Vec } from './geometry';
@@ -27,6 +28,12 @@ export interface Doc {
   /** Indices of selected strokes, ascending. */
   readonly selection: readonly number[];
   readonly activeLayer: number;
+  /**
+   * The pixels of the note's background image, kept by Rust under their key (`lib/editor/image.ts`);
+   * absent when the note has no image (or its pixels cannot be read). Undo brings them back with
+   * the image.
+   */
+  readonly backgroundPixels?: PixelsRef;
 }
 
 export interface EditorState extends Doc {
@@ -154,7 +161,7 @@ export function selectionBounds(doc: Doc): Rect | null {
 
 export function addLayer(doc: Doc, name: string): Doc {
   const note = ops.addLayer(doc.note, name);
-  return { note, selection: doc.selection, activeLayer: note.layers.length - 1 };
+  return { ...doc, note, activeLayer: note.layers.length - 1 };
 }
 
 export function setLayerVisible(doc: Doc, index: number, visible: boolean): Doc {
@@ -175,14 +182,14 @@ export function renameLayer(doc: Doc, index: number, name: string): Doc {
 export function moveLayer(doc: Doc, from: number, to: number): Doc {
   const note = ops.moveLayer(doc.note, from, to);
   if (note === doc.note) return doc;
-  return { note, selection: doc.selection, activeLayer: ops.moveIndex(doc.activeLayer, from, to) };
+  return { ...doc, note, activeLayer: ops.moveIndex(doc.activeLayer, from, to) };
 }
 
 export function mergeDown(doc: Doc, index: number): Doc {
   const note = ops.mergeDown(doc.note, index);
   if (note === doc.note) return doc;
   const active = doc.activeLayer >= index ? doc.activeLayer - 1 : doc.activeLayer;
-  return { note, selection: [], activeLayer: Math.max(0, active) };
+  return { ...doc, note, selection: [], activeLayer: Math.max(0, active) };
 }
 
 // --- Page ---------------------------------------------------------------------------------

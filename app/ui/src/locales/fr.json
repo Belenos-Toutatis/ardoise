@@ -453,7 +453,15 @@
     "noNarration": "Cette note n'a pas de narration.",
     "emptyRecording": "Le micro n'a rien enregistré.",
     "noPendingNarration": "Aucun enregistrement n'est en attente.",
-    "openh264RemoveFailed": "Windows utilise encore OpenH264 : fermez puis relancez Ardoise, puis supprimez-le."
+    "openh264RemoveFailed": "Windows utilise encore OpenH264 : fermez puis relancez Ardoise, puis supprimez-le.",
+    "backgroundUnsupported": "ce fichier n'est ni un PDF ni une image PNG ou JPEG",
+    "backgroundTooLarge": "ce fichier est trop grand (au plus 50 millions de pixels pour une image) ({detail})",
+    "backgroundDamaged": "ce fichier est endommagé ou illisible ({detail})",
+    "backgroundUnreadable": "ce fichier ne peut pas être ouvert ({detail})",
+    "backgroundMissing": "l'image de fond n'est plus en mémoire ; rouvrez la note et choisissez l'image de nouveau",
+    "pdfUnsupported": "les PDF ne peuvent être lus que sous Windows",
+    "pdfEncrypted": "ce PDF est protégé par un mot de passe ; enregistrez-en une copie sans mot de passe",
+    "pdfNoSuchPage": "ce PDF n'a pas cette page ({detail})"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -815,7 +823,7 @@
     "pdfPage": "Page du PDF",
     "pdfActual": "Taille réelle de la page",
     "pdfA4": "A4 (note ajustée et centrée)",
-    "background": "Inclure le fond (papier, lignes, texture)",
+    "background": "Inclure le fond (papier, lignes, texture, image de fond)",
     "backgroundHints": {
       "png": "Décoché : le fond est transparent, seul le tracé est exporté.",
       "jpg": "Décoché : le fond est blanc (le JPG ne gère pas la transparence).",
@@ -1141,5 +1149,57 @@
   "presentation": {
     "title": "Présentation",
     "canvas": "Page projetée {page}"
+  },
+  "background": {
+    "fileFilter": "PDF ou image (PNG, JPEG)",
+    "editor": {
+      "title": "Image ou PDF de fond",
+      "hint": "Pour annoter une fiche, un document ou une photo : l'image ou la page du PDF se place sous l'écriture.",
+      "choose": "Choisir un PDF ou une image…",
+      "pickTitle": "Image ou PDF à mettre en fond",
+      "pdfPages": "{name} : {count} pages. Laquelle mettre en fond ?",
+      "page": "Page",
+      "place": "Mettre en fond",
+      "cancel": "Annuler",
+      "pdfPageName": "{name}, page {page}",
+      "unreadable": "L'image de cette note ne peut pas être lue : elle n'est pas affichée.",
+      "fit": "Placement",
+      "opacity": "Opacité",
+      "replace": "Remplacer…",
+      "remove": "Retirer l'image",
+      "importing": "Import en cours…",
+      "failed": "Impossible de mettre ce fichier en fond : {message}"
+    },
+    "fits": {
+      "contain": "Entière dans la page",
+      "cover": "Remplir la page",
+      "stretch": "Étirer à la page",
+      "custom": "Déplacée (recadrage)"
+    },
+    "library": {
+      "open": "Depuis un PDF ou une image…",
+      "openHint": "Nouvelle note depuis un PDF ou une image : une note par page du PDF, à écrire par-dessus",
+      "title": "Nouvelle note depuis un PDF ou une image",
+      "pickTitle": "PDF ou image à annoter",
+      "intro": "Chaque page du PDF devient une note à sa taille, avec la page en fond ; une image devient une note de la taille d'une feuille A4.",
+      "pdfInfo": "{count} page(s), la première de {width} × {height} mm.",
+      "pages": "Pages",
+      "allPages": "Toutes les pages ({count})",
+      "somePages": "Certaines pages",
+      "pageList": "Pages à importer",
+      "pageListInvalid": "Écrivez des numéros de 1 à {count}, par exemple 1-3, 5.",
+      "pageListCount": "Notes à créer : {count}",
+      "imageInfo": "Une note sera créée avec cette image en fond.",
+      "createOne": "Créer la note",
+      "createMany": "Créer les {count} notes",
+      "otherFile": "Autre fichier…",
+      "reading": "Lecture du fichier…",
+      "running": "Création des notes…",
+      "error": "Impossible de créer les notes : {message}",
+      "done": "Notes créées : {count}"
+    },
+    "assemble": {
+      "dropped": "Seule l'image de fond de la première note est gardée. Images de fond des autres notes non reprises : {count}."
+    }
   }
 }
