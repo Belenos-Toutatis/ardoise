@@ -105,11 +105,10 @@ Règles permanentes :
 
 ## M7 — Fonctions supplémentaires (P2)
 
-- [ ] Tablette comme stylet Windows (avec pression) sur l'écran choisi.
 - [ ] Reconnaissance d'écriture FR/EN hors ligne, recherche dans le texte, export texte.
 - [ ] Redressement des formes ; fond image/PDF ; revenir à l'original ; glisser une note vers l'Explorateur.
 
-**Critères de fin** : `CHECK OK` ; tests de chaque fonction réussis (injection de stylet vérifiée par un test qui lit les évènements reçus par une fenêtre de test ; reconnaissance vérifiée sur des notes de référence avec le taux de mots reconnus affiché).
+**Critères de fin** : `CHECK OK` ; tests de chaque fonction réussis (reconnaissance vérifiée sur des notes de référence avec le taux de mots reconnus affiché).
 
 ## M8 — Finition et publication
 

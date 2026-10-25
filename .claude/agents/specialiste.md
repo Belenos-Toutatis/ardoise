@@ -1,6 +1,6 @@
 ---
 name: specialiste
-description: Modules difficiles - protocole Bluetooth LE de la tablette et simulateur, rendu des encres et textures, pipeline vidéo/audio, format de fichier des notes, import des notes Inkspace, injection de stylet Windows, problèmes de performance ou de concurrence.
+description: Modules difficiles - protocole Bluetooth LE de la tablette et simulateur, rendu des encres et textures, pipeline vidéo/audio, format de fichier des notes, import des notes Inkspace, reconnaissance d'écriture, problèmes de performance ou de concurrence.
 model: opus
 effort: xhigh
 color: purple

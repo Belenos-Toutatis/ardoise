@@ -53,7 +53,7 @@ Une session Claude Code dans le cloud tourne sous Ubuntu, pas sous Windows.
 
 - `scripts/cloud-setup.sh` (lancé au démarrage par `.claude/settings.json`) installe Rust 1.98.1 avec la cible WebAssembly, Node 24 et les bibliothèques WebKitGTK dont Tauri a besoin sous Linux. Sa dernière ligne dit `ready` ou ce qui a échoué.
 - Possible : `cargo xtask check` (l'app se compile pour Linux ; le code propre à Windows a ses variantes `cfg(not(windows))`), les tests Rust et ceux de l'interface, `cargo xtask golden`.
-- Impossible : `cargo xtask selftest`, `cargo xtask e2e`, et tout ce qui demande Windows (WebView2, Bluetooth Windows, Media Foundation, injection de stylet, presse-papiers et fenêtres réelles). Les écrire quand même, avec des tests Linux de la logique, et lister dans le compte rendu final ce qui reste à vérifier sous Windows.
+- Impossible : `cargo xtask selftest`, `cargo xtask e2e`, et tout ce qui demande Windows (WebView2, Bluetooth Windows, Media Foundation, reconnaissance d'écriture, presse-papiers et fenêtres réelles). Les écrire quand même, avec des tests Linux de la logique, et lister dans le compte rendu final ce qui reste à vérifier sous Windows.
 - `testdata/private/` n'existe pas : les tests qui en ont besoin se sautent d'eux-mêmes.
 - Une case de `ROADMAP.md` n'est cochée qu'après la vérification Windows, faite par une session sur le PC qui fusionne la branche.
 - Travailler sur la branche de la session, la pousser sur `origin`, ne jamais pousser sur `main`. Les sous-agents en `worktree` restent possibles ; fusionner leurs branches dans celle de la session.

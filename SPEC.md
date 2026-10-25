@@ -142,9 +142,10 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 
 ### 4.7 Fonctions supplémentaires (P2)
 
-- **Tablette comme stylet Windows** : en mode direct, la Slate pilote le pointeur et écrit dans n'importe quel logiciel (OneNote, Paint, tableau blanc), avec pression, sur l'écran choisi — sans pilote.
 - **Reconnaissance d'écriture** hors ligne en français et en anglais : recherche dans les notes manuscrites, export en texte brut.
 - Thème clair / sombre / système, raccourcis clavier.
+
+La tablette comme stylet Windows (écrire dans n'importe quel logiciel en mode direct) a été abandonnée à la demande de l'utilisateur le 2026-10-25.
 
 ### 4.8 Diagnostics et tests à distance (P1)
 
@@ -189,7 +190,6 @@ crates/
   ardoise-render    rendu image (tiny-skia), fonds, modèles, textures ; export PNG/JPG/SVG/PDF
   ardoise-media     relecture image par image, MP4/GIF/WebP/WebM, capture micro, encodage audio
   ardoise-inkspace  import des notes Inkspace
-  ardoise-winpen    stylet Windows simulé (P2)
   ardoise-hwr       reconnaissance d'écriture (P2)
 app/
   src-tauri/        ardoise.exe : commandes, fenêtres, options en ligne de commande
@@ -216,7 +216,6 @@ testdata/private/   copies de notes personnelles pour les tests locaux — ignor
 | Vidéo WebM | AV1 par `rav1e` + `webm` (son Opus). | libvpx impossible à compiler ici. AV1 est lent sans assembleur : `nasm` portable sera nécessaire sur la machine de compilation (pas chez l'utilisateur). |
 | GIF / WebP | `gif` + quantification des couleurs ; `webp-animation`. | `gifski` exclu (licence AGPL). |
 | Micro | `cpal` (WASAPI, liste et choix du micro) + `rubato` (rééchantillonnage) ; Opus par `ropus` (Rust pur). | Pas de droits admin. Si Windows bloque le micro pour les applications de bureau, on reçoit du silence : le détecter et expliquer le réglage à changer. |
-| Stylet Windows (P2) | `CreateSyntheticPointerDevice(PT_PEN)` + `InjectSyntheticPointerInput` ; repli `SendInput` souris. | Windows 10 1809+, sans admin ; ne peut pas écrire dans une fenêtre lancée en administrateur. |
 | Écriture (P2) | `InkRecognizerContainer` de Windows (fonctionne hors application du Store). | Français présent sur ce PC ; anglais seulement si le module d'écriture anglais est installé dans Windows. |
 
 ### 6.3 Import Inkspace
