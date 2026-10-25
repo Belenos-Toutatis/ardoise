@@ -570,7 +570,7 @@
       "disabledHint": "Select strokes with the lasso first, then straighten them.",
       "doneOne": "1 shape straightened (Ctrl+Z to undo).",
       "doneMany": "{count} shapes straightened (Ctrl+Z to undo).",
-      "none": "No shape recognised in the selection. Ardoise straightens lines, circles, ellipses, rectangles and arrows at least 1 cm long, drawn clearly enough; the rest stays as it is."
+      "none": "No shape recognised in the selection. Ardoise straightens lines and arrows at least 1 cm long, and circles, ellipses and rectangles about 1.5 cm across or more, drawn clearly enough. Select the drawings rather than the text: a small upright oval (under 2.5 cm) looks like an O or a 0 and stays as it is, like everything else that is not a clear shape."
     },
     "page": {
       "label": "Page",

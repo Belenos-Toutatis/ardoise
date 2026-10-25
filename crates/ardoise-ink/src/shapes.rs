@@ -12,10 +12,33 @@
 //!   the other barb on its own…).
 //!
 //! Anything else is left exactly as it is. Handwriting must never be straightened, so the
-//! recognition is conservative: a shape must be large ([`MIN_SIZE`]), fit its ideal closely,
-//! and a closed shape must go round exactly once. Arrows need exactly one long shaft and two
-//! barbs pointing back along it on both sides, which letters such as V, Y, K, N, T, A or 4 never
-//! give.
+//! recognition is conservative: a shape must be large ([`MIN_SIZE`], and [`MIN_CLOSED_SIZE`] for a
+//! closed shape), fit its ideal closely, and a closed shape must go round exactly once. Arrows
+//! need exactly one long shaft and two barbs pointing back along it on both sides, which letters
+//! such as V, Y, K, N, T, A or 4 never give.
+//!
+//! # Handwritten loops (o, O, 0, Q, D)
+//!
+//! A closed letter is a closed stroke like a circle, and the editor straightens whatever the user
+//! selects, so the loops need their own rule (measured with the `measure_*` tests, which are
+//! ignored; run them with `cargo test -p ardoise-ink measure -- --ignored --nocapture`):
+//!
+//! - a closed shape needs a long side of at least [`MIN_CLOSED_SIZE`] (13 mm, so that a circle
+//!   drawn 15 mm wide still counts), above the 4-9 mm of handwriting on an A4 Slate and the
+//!   10-12 mm of a big capital;
+//! - an ellipse that stands up (long axis within 40° of the vertical), is clearly not round
+//!   (short ÷ long axis below `SNAP_RATIO`) and whose long axis is shorter than
+//!   [`LETTER_MAX_AXIS`] (25 mm) looks like an O or a 0 and is left alone (`letter_like`). Wide
+//!   ellipses, circles and anything larger are drawings;
+//! - accepted: a round loop of 13 mm or more (a lower-case o written 15 mm high, about half of
+//!   them; a capital O rounder than 0.9) is a circle, because nothing tells it from one; a Q written above 20 mm has
+//!   its straight tail of 1 cm straightened like any straight stroke of 1 cm (I, l, 1 too); a
+//!   tall oval of 13-25 mm that is a diagram's ellipse is not recognised (draw it wider than tall
+//!   or larger). The editor's notice for a selection without shapes says so.
+//!
+//! Measured over 500 random hands: no letter loop of 4-12 mm is changed; a capital O, 0 or Q of
+//! 13-22 mm is changed in at most 16 % of the cases (only the rounder-than-0.9 capital Os) and a
+//! 0 never; circles of 15 mm and more are recognised in 99 % of the cases.
 //!
 //! # The straightened strokes
 //!
@@ -35,7 +58,9 @@
 //!
 //! | What | Value | Meaning |
 //! |---|---|---|
-//! | [`MIN_SIZE`] | 1000 (10 mm) | smallest line, closed shape (largest side) or arrow shaft |
+//! | [`MIN_SIZE`] | 1000 (10 mm) | smallest line or arrow shaft |
+//! | [`MIN_CLOSED_SIZE`] | 1300 (13 mm) | smallest closed shape (largest side of its bounding box) |
+//! | [`LETTER_MAX_AXIS`] | 2500 (25 mm) | an upright oval with a shorter long axis is an O or a 0, not a drawing |
 //! | `CLOSE_GAP` | 0.2 | largest gap between the ends of a closed shape, × its bounding-box diagonal (a circle open by about 30° still counts) |
 //! | `MIN_ASPECT` | 0.1 | thinnest closed shape (short side ÷ long side) |
 //! | `FIT_MEAN` / `FIT_MAX` | 0.06 / 0.2 | mean and largest distance of the stroke (overshoot included) to the ideal ellipse or rectangle, × its mean radius (√(a·b), √(w·h)/2) |
@@ -58,6 +83,18 @@ use crate::model::{Point, Stroke};
 /// Smallest shape that is straightened, in device units (10 mm): the length of a line or of an
 /// arrow's shaft, the long side of a closed shape. Handwriting is smaller.
 pub const MIN_SIZE: f64 = 1000.0;
+/// Smallest closed shape (circle, ellipse, rectangle) that is straightened, in device units
+/// (13 mm): the long side of its bounding box, so that a circle drawn 15 mm wide still counts. A closed loop is also what handwriting draws (o, O,
+/// 0, Q, D, a, e…), so it must be larger than the letters of the biggest writing.
+pub const MIN_CLOSED_SIZE: f64 = 1300.0;
+/// A tall oval (see `letter_like`) this small is a letter O or a 0 and is left alone, in device
+/// units (25 mm): the length of its long axis.
+pub const LETTER_MAX_AXIS: f64 = 2500.0;
+/// Largest short ÷ long axis of a letter-like oval: a rounder one is a circle (it would snap to
+/// one).
+const LETTER_MAX_RATIO: f64 = SNAP_RATIO;
+/// Largest angle between the long axis of a letter-like oval and the vertical (40°).
+const LETTER_MAX_LEAN: f64 = 40.0 * PI / 180.0;
 /// Largest distance between two points of a straightened stroke, in device units (0.5 mm).
 pub const SAMPLE_SPACING: f64 = 50.0;
 /// Most points of one straightened stroke (the spacing grows for huge shapes).
@@ -426,7 +463,7 @@ fn closed_shape(points: &[V]) -> Option<Closed> {
         return None;
     }
     let (w, h) = extent(points);
-    if w.max(h) < MIN_SIZE {
+    if w.max(h) < MIN_CLOSED_SIZE {
         return None;
     }
     let diag = w.hypot(h);
@@ -452,7 +489,7 @@ fn closed_shape(points: &[V]) -> Option<Closed> {
     }
     let trimmed = &points[..=end];
     let (tw, th) = extent(trimmed);
-    if tw.max(th) < MIN_SIZE || tw.min(th) < MIN_ASPECT * tw.max(th) {
+    if tw.max(th) < MIN_CLOSED_SIZE || tw.min(th) < MIN_ASPECT * tw.max(th) {
         return None;
     }
 
@@ -460,7 +497,7 @@ fn closed_shape(points: &[V]) -> Option<Closed> {
     let dir = winding(&fit)?;
     let check = resample(points, CHECK_SAMPLES);
 
-    let ellipse = fit_ellipse(&fit).and_then(|e| {
+    let ellipse = fit_ellipse(&fit).filter(|e| !letter_like(e)).and_then(|e| {
         [snap_ellipse(e), e]
             .into_iter()
             .map(|e| {
@@ -566,6 +603,16 @@ fn fit_ellipse(poly: &[V]) -> Option<Ellipse> {
         b: 2.0 * l2.sqrt(),
         theta: 0.5 * (2.0 * mxy).atan2(mxx - myy),
     })
+}
+
+/// Whether an ellipse is shaped and sized like a handwritten O or 0: a small oval (long axis
+/// below [`LETTER_MAX_AXIS`]) that is clearly not round and stands up (long axis within
+/// [`LETTER_MAX_LEAN`] of the vertical, leaning either way). Round loops (lower-case o), wide
+/// ellipses and anything larger are drawings.
+fn letter_like(e: &Ellipse) -> bool {
+    // `fit_ellipse` gives the long semi-axis first, along `theta`.
+    let from_vertical = e.theta.sin().abs().clamp(0.0, 1.0).acos();
+    2.0 * e.a < LETTER_MAX_AXIS && e.b < LETTER_MAX_RATIO * e.a && from_vertical <= LETTER_MAX_LEAN
 }
 
 /// Nearly round becomes a circle, a nearly horizontal or vertical axis becomes exactly so.

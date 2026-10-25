@@ -570,7 +570,7 @@
       "disabledHint": "Sélectionnez d'abord des traits avec le lasso, puis redressez-les.",
       "doneOne": "1 forme redressée (Ctrl+Z pour annuler).",
       "doneMany": "{count} formes redressées (Ctrl+Z pour annuler).",
-      "none": "Aucune forme reconnue dans la sélection. Ardoise redresse les droites, cercles, ellipses, rectangles et flèches d'au moins 1 cm, tracés assez nettement ; le reste ne change pas."
+      "none": "Aucune forme reconnue dans la sélection. Ardoise redresse les droites et les flèches d'au moins 1 cm, les cercles, ellipses et rectangles d'environ 1,5 cm ou plus, tracés assez nettement. Sélectionnez les dessins plutôt que le texte : un petit ovale debout (moins de 2,5 cm) ressemble à un O ou à un 0 et ne change pas, comme tout ce qui n'est pas une forme nette."
     },
     "page": {
       "label": "Page",
