@@ -67,6 +67,20 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   stroke(s): same tool, colour, width, layer, a pressure that keeps the stroke's look, times spread over the original
   duration (the replay still draws it). A stroke that is no clear shape is left as it is. Pure Rust, deterministic,
   exposed through `ardoise-ink-wasm` so the editor applies it synchronously and it is one undoable step.
+- Handwriting versus drawings (the editor straightens whatever the user selected, as one undoable step, and says how
+  many shapes it straightened). A handwritten o, O, 0, Q or D is a closed stroke like a circle, so closed shapes follow
+  their own rule (`ardoise_ink::shapes`, "Handwritten loops"): a long side of 13 mm at least (`MIN_CLOSED_SIZE`; lines
+  and arrows keep 10 mm); and an ellipse that stands up (long axis within 40° of the vertical), is clearly not round
+  (short ÷ long axis below 0.9) and whose long axis is under 25 mm (`LETTER_MAX_AXIS`) is taken for an O or a 0 and left
+  alone. Measured on random hands (400 to 500 per case, `cargo test -p ardoise-ink measure -- --ignored --nocapture`):
+  no o, O, 0, Q or one-stroke D of 4 to 12 mm is changed; a capital O or Q of 13 to 22 mm in 16 % of the cases (the
+  rounder-than-0.9 ones), a 0 and a D never; circles of 15 mm and more are recognised in 99 % of the cases, wide
+  ellipses in 94 to 99 %. Accepted on purpose: a round loop of 13 mm or more is a circle (about half of the lower-case
+  o written 15 mm high); a tall oval of 13 to 25 mm drawn as a diagram's ellipse is not recognised (the notice for a
+  selection without shapes says that the drawings, not the text, should be selected; such an ellipse works drawn wider
+  than tall or larger); a Q written above 20 mm gets its 1 cm straight tail straightened like any single straight stroke of 1 cm
+  or more (I, l, 1), which is a harmless change. The alternative considered, a flat 15 mm minimum for every closed
+  shape, was not enough: a capital O 15 to 20 mm high is still an ellipse by every measure.
 - Editor: "Redresser les formes" on the selection (Selection tool), with its help text; nothing selected = the
   action is disabled with an explanation.
 

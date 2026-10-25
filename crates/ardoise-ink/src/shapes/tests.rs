@@ -283,7 +283,7 @@ fn hand_drawn_circles_and_ellipses_become_clean_and_closed() {
         (v(10_000.0, 8000.0), 3000.0, 2900.0, 0.0, 2.0, -TAU * 1.12),
         (v(15_000.0, 9000.0), 5000.0, 2200.0, 0.52, -1.0, TAU * 1.05),
         (v(8000.0, 12_000.0), 2500.0, 1100.0, 1.9, 4.0, -TAU * 0.95),
-        (v(6000.0, 6000.0), 700.0, 600.0, 0.0, 0.0, TAU * 1.02),
+        (v(6000.0, 6000.0), 800.0, 700.0, 0.0, 0.0, TAU * 1.02),
     ];
     for (k, &(c, a, b, theta, start, sweep)) in cases.iter().enumerate() {
         let source = hand(
@@ -418,7 +418,7 @@ fn hand_drawn_rectangles_get_sharp_corners() {
             false,
         ),
         (v(9000.0, 9000.0), 4000.0, 2500.0, -1.2, 100.0, 1.15, true),
-        (v(5000.0, 5000.0), 1200.0, 700.0, 0.2, 50.0, 1.0, false),
+        (v(5000.0, 5000.0), 1500.0, 900.0, 0.2, 50.0, 1.0, false),
     ];
     for (k, &(c, w, h, theta, radius, turns, reverse)) in cases.iter().enumerate() {
         let ideal = rectangle(c, w, h, theta, radius, turns, reverse);
@@ -1079,4 +1079,360 @@ fn a_gentle_wave_is_no_line() {
         .collect();
     let mut rng = Lcg::new(15);
     assert!(straighten(&[hand(&ideal, &mut rng, 0.0, 0.0, 0)]).is_empty());
+}
+
+// --- Closed letters -------------------------------------------------------------------------
+
+/// What the pen of a closed letter does.
+#[derive(Clone, Copy, Debug)]
+enum Loop {
+    /// Lower-case o: nearly round, `height` is its x-height.
+    LowerO,
+    /// Capital O: an oval, leaning.
+    CapitalO,
+    /// Digit 0: a narrow oval, leaning.
+    Zero,
+    /// Capital Q: an O and, as a separate stroke, its tail.
+    Q,
+    /// Capital D in one stroke: the stem down, then the bowl back up to the start.
+    OneStrokeD,
+}
+
+impl Loop {
+    const ALL: [Loop; 5] = [
+        Loop::LowerO,
+        Loop::CapitalO,
+        Loop::Zero,
+        Loop::Q,
+        Loop::OneStrokeD,
+    ];
+}
+
+/// A handwritten closed letter `height` units high with its top-left corner at `origin`: a
+/// loop that leans right, starts near the top, goes round either way, ends beside its start (short
+/// of it, past it, or spiralling in or out) and wobbles like the hand-drawn strokes above.
+fn closed_letter(kind: Loop, origin: V, height: f64, rng: &mut Lcg) -> Vec<Stroke> {
+    let (aspect, lean) = match kind {
+        Loop::LowerO => (rng.range(0.8, 1.0), rng.range(-0.1, 0.2)),
+        Loop::CapitalO | Loop::Q => (rng.range(0.65, 0.88), rng.range(-0.1, 0.35)),
+        Loop::Zero => (rng.range(0.5, 0.7), rng.range(-0.1, 0.35)),
+        Loop::OneStrokeD => (0.7, 0.0),
+    };
+    let (a, b) = (height / 2.0, height * aspect / 2.0);
+    let c = origin + V::new(b, a);
+    let wobble = 0.012 * height;
+    let jitter = 0.004 * height;
+    if let Loop::OneStrokeD = kind {
+        // Stem down (straight), the bowl up and back to the stem's top, slightly off.
+        let drift = V::new(rng.range(-0.05, 0.05), rng.range(-0.05, 0.05)) * height;
+        let top = origin;
+        let bottom = origin + V::new(0.0, height);
+        let r = height / 2.0;
+        let w = 0.7 * height;
+        let mut ideal = polyline(&[top, bottom]);
+        // Bottom-right corner rounded, then a half ellipse up to the top.
+        ideal.extend(
+            arc(origin + V::new(0.0, r), w, r, 0.0, PI / 2.0, -PI)
+                .into_iter()
+                .skip(1),
+        );
+        ideal.extend(
+            polyline(&[*ideal.last().unwrap(), top + drift])
+                .into_iter()
+                .skip(1),
+        );
+        return vec![hand(&ideal, rng, wobble, jitter, 0)];
+    }
+    // Start near the top (angle -90° ± 40°), go round either way.
+    let dir = if rng.unit() < 0.7 { -1.0 } else { 1.0 };
+    let start = -PI / 2.0 + rng.range(-0.7, 0.7);
+    let sweep = dir * TAU * rng.range(0.97, 1.12);
+    // Spiral: the radius grows or shrinks along the loop.
+    let spiral = rng.range(-0.1, 0.1);
+    let steps = ((TAU * (a + b) / 2.0 / PEN_STEP).ceil() as usize).max(24);
+    let ideal: Vec<V> = (0..=steps)
+        .map(|i| {
+            let s = i as f64 / steps as f64;
+            let phi = start + sweep * s;
+            let k = 1.0 + spiral * s;
+            c + V::new(b * k * phi.cos(), a * k * phi.sin()).rot(lean) // leaning right: the top moves towards +x
+        })
+        .collect();
+    let mut strokes = vec![hand(&ideal, rng, wobble, jitter, 0)];
+    if let Loop::Q = kind {
+        let from = c + V::new(0.1 * b, 0.35 * a);
+        let to = c + V::new(0.9 * b, 0.95 * a);
+        strokes.push(hand(&polyline(&[from, to]), rng, wobble, jitter, 2000));
+    }
+    strokes
+}
+
+/// Share of `trials` hand-written letters of `kind` at `height` where `straighten` changes
+/// something, by shape.
+fn letter_rate(kind: Loop, height: f64, trials: u64) -> (usize, Vec<(Shape, usize)>) {
+    let mut hits = 0;
+    let mut by_shape: Vec<(Shape, usize)> = Vec::new();
+    for seed in 0..trials {
+        let mut rng = Lcg::new(1000 + seed);
+        let strokes = closed_letter(kind, v(3000.0, 3000.0), height, &mut rng);
+        let result = straighten(&strokes);
+        if !result.is_empty() {
+            hits += 1;
+        }
+        for group in &result {
+            match by_shape.iter_mut().find(|(s, _)| *s == group.shape) {
+                Some((_, n)) => *n += 1,
+                None => by_shape.push((group.shape, 1)),
+            }
+        }
+    }
+    (hits, by_shape)
+}
+
+#[test]
+#[ignore = "measurement, prints a table"]
+fn measure_closed_letters() {
+    let trials = 400;
+    for kind in Loop::ALL {
+        for mm in [4.0, 6.0, 9.0, 12.0, 15.0, 20.0, 30.0] {
+            let (hits, shapes) = letter_rate(kind, mm * 100.0, trials);
+            println!("{kind:?} {mm} mm: {hits}/{trials} straightened {shapes:?}");
+        }
+    }
+}
+
+/// One hand-drawn shape of `kind` whose long side is `size` units, from a random hand.
+fn drawn(kind: Shape, size: f64, rng: &mut Lcg) -> Vec<Stroke> {
+    let c = v(12_000.0, 9000.0);
+    match kind {
+        Shape::Ellipse => {
+            let a = size / 2.0;
+            let round = rng.unit() < 0.5;
+            let b = if round {
+                a * rng.range(0.9, 1.0)
+            } else {
+                a * rng.range(0.4, 0.9)
+            };
+            let theta = rng.range(0.0, PI);
+            let sweep = (if rng.unit() < 0.5 { -1.0 } else { 1.0 }) * TAU * rng.range(0.93, 1.12);
+            let ideal = arc(c, a, b, theta, rng.range(0.0, TAU), sweep);
+            vec![hand(&ideal, rng, 0.025 * b, 0.006 * b, 0)]
+        }
+        Shape::Rectangle => {
+            let (w, h) = (size, size * rng.range(0.4, 1.0));
+            let theta = if rng.unit() < 0.3 {
+                0.0
+            } else {
+                rng.range(-0.5, 0.5)
+            };
+            let ideal = rectangle(
+                c,
+                w,
+                h,
+                theta,
+                0.04 * h,
+                rng.range(0.95, 1.12),
+                rng.unit() < 0.5,
+            );
+            vec![hand(&ideal, rng, 0.02 * h, 0.004 * h, 0)]
+        }
+        Shape::Line => {
+            let angle = rng.range(0.0, TAU);
+            let a = c;
+            let b = a + V::new(size, 0.0).rot(angle);
+            vec![hand(&polyline(&[a, b]), rng, 0.012 * size, 10.0, 0)]
+        }
+        Shape::Arrow => {
+            let angle = rng.range(0.0, TAU);
+            let tail = c;
+            let tip = tail + V::new(size, 0.0).rot(angle);
+            let (t, p, b1, b2) = arrow_points(tail, tip, 0.15 * size, rng.range(0.35, 0.7));
+            vec![hand(
+                &polyline(&[t, p, b1, p, b2]),
+                rng,
+                0.004 * size,
+                0.0008 * size,
+                0,
+            )]
+        }
+    }
+}
+
+/// How many of `trials` hand-written letters of `kind`, `mm` high, `straighten` changes.
+fn letters_changed(kind: Loop, mm: f64, trials: u64) -> usize {
+    letter_rate(kind, mm * 100.0, trials).0
+}
+
+#[test]
+fn closed_letters_are_left_alone_up_to_the_size_of_a_drawing() {
+    // o, O, 0, Q (its tail is a separate stroke) and a one-stroke D, 4 to 20 mm high: the
+    // sizes of handwriting on an A4 Slate, from small notes to big capitals and digits.
+    // (Above 20 mm the Q's tail, a straight stroke of 1 cm, becomes a line, which is accepted.)
+    // (A lower-case o is as round as a circle, so a big one is a circle: see the next test.)
+    for kind in [Loop::CapitalO, Loop::Zero, Loop::Q, Loop::OneStrokeD] {
+        for mm in [4.0, 5.0, 6.5, 8.0, 9.0, 10.0, 12.0, 13.0, 15.0, 18.0, 20.0] {
+            assert_eq!(letters_changed(kind, mm, 150), 0, "{kind:?} at {mm} mm");
+        }
+    }
+    for mm in [4.0, 6.0, 9.0, 12.0] {
+        assert_eq!(letters_changed(Loop::LowerO, mm, 150), 0, "o at {mm} mm");
+    }
+    // A one-stroke D is no ellipse or rectangle at any size.
+    for mm in [25.0, 40.0] {
+        assert_eq!(
+            letters_changed(Loop::OneStrokeD, mm, 150),
+            0,
+            "D at {mm} mm"
+        );
+    }
+}
+
+#[test]
+fn big_ovals_and_round_loops_are_drawings() {
+    // Past the size of writing an O, a 0 and a Q are ellipses, and the Q's tail a line.
+    for kind in [Loop::CapitalO, Loop::Zero, Loop::Q] {
+        let (hits, shapes) = letter_rate(kind, 3000.0, 150);
+        assert!(hits >= 145, "{kind:?} at 30 mm: {hits} {shapes:?}");
+        assert!(shapes.iter().any(|&(s, _)| s == Shape::Ellipse));
+    }
+    // A round loop of 20 mm is a circle, from a lower-case o that big as from a pen.
+    assert!(letters_changed(Loop::LowerO, 20.0, 150) > 50);
+    // The tall-oval rule is about letters only: a round O is not protected.
+    let mut changed = 0;
+    for seed in 0..100 {
+        let mut rng = Lcg::new(seed);
+        let ideal = arc(v(9000.0, 9000.0), 1100.0, 1100.0, 0.0, -1.0, TAU * 1.05);
+        let stroke = hand(&ideal, &mut rng, 25.0, 6.0, 0);
+        changed += usize::from(!straighten(&[stroke]).is_empty());
+    }
+    assert!(changed >= 97, "{changed}");
+}
+
+#[test]
+fn circles_of_15_mm_and_more_and_wide_ellipses_are_straightened() {
+    for (variety, mm, least) in [
+        ("circle", 15.0, 480),
+        ("circle", 20.0, 480),
+        ("circle", 40.0, 480),
+        ("wide", 15.0, 440),
+        ("wide", 20.0, 470),
+        ("wide", 40.0, 480),
+        ("tall", 40.0, 480),
+    ] {
+        let right = (0..500)
+            .filter(|&seed| {
+                let mut rng = Lcg::new(7000 + seed);
+                let result = straighten(&drawn_ellipse(variety, mm * 100.0, &mut rng));
+                result.len() == 1 && result[0].shape == Shape::Ellipse
+            })
+            .count();
+        assert!(right >= least, "{variety} at {mm} mm: {right}/500");
+    }
+}
+
+#[test]
+fn small_tall_ovals_are_taken_for_letters_and_left_as_they_are() {
+    // A drawn ellipse that stands up and is shorter than 25 mm looks like an O or a 0.
+    for mm in [15.0, 20.0] {
+        let kept = (0..300)
+            .filter(|&seed| {
+                let mut rng = Lcg::new(7000 + seed);
+                straighten(&drawn_ellipse("tall", mm * 100.0, &mut rng)).is_empty()
+            })
+            .count();
+        assert!(kept >= 290, "tall ovals at {mm} mm: {kept}/300 left alone");
+    }
+}
+
+#[test]
+#[ignore = "measurement, prints a table"]
+fn measure_recognition_rates() {
+    let trials = 500;
+    for kind in Shape::ALL {
+        for mm in [8.0, 10.0, 12.0, 15.0, 20.0, 25.0, 30.0, 50.0, 100.0] {
+            let mut right = 0;
+            for seed in 0..trials {
+                let mut rng = Lcg::new(5000 + seed);
+                let strokes = drawn(kind, mm * 100.0, &mut rng);
+                let result = straighten(&strokes);
+                if result.len() == 1 && result[0].shape == kind {
+                    right += 1;
+                }
+            }
+            println!("{kind:?} {mm} mm: {right}/{trials} recognised");
+        }
+    }
+}
+
+#[test]
+#[ignore = "measurement, prints false positives"]
+fn measure_false_positives() {
+    let seeds = 300;
+    let (mut writing, mut large, mut total) = (0, 0, 0);
+    for seed in 0..seeds {
+        let mut rng = Lcg::new(9000 + seed);
+        for (name, glyph) in glyphs(&mut rng) {
+            for height in [400.0, 650.0, 900.0] {
+                let strokes: Vec<Stroke> = write(&glyph, v(3000.0, 3000.0), height, &mut rng)
+                    .into_iter()
+                    .map(|(s, _)| s)
+                    .collect();
+                total += 1;
+                if !straighten(&strokes).is_empty() {
+                    writing += 1;
+                    println!("false positive: {name} at {height}");
+                }
+            }
+            for height in [1800.0, 3000.0] {
+                let written = write(&glyph, v(3000.0, 3000.0), height, &mut rng);
+                let strokes: Vec<Stroke> = written.iter().map(|(s, _)| s.clone()).collect();
+                total += 1;
+                if straighten(&strokes).iter().any(|g| g.shape != Shape::Line) {
+                    large += 1;
+                    println!("non-line at 18/30 mm: {name} at {height}");
+                }
+            }
+        }
+    }
+    println!(
+        "glyph runs: {total}; handwriting-size false positives: {writing}; large non-line: {large}"
+    );
+    for kind in Loop::ALL {
+        for mm in [4.0, 6.0, 9.0, 12.0, 15.0, 20.0, 25.0] {
+            let (hits, shapes) = letter_rate(kind, mm * 100.0, 500);
+            println!("{kind:?} {mm} mm: {hits}/500 straightened {shapes:?}");
+        }
+    }
+}
+
+/// A hand-drawn ellipse with a long axis of `size` units: `circle` (aspect 0.92–1), `tall` (0.4–0.9,
+/// long axis within 40° of the vertical) or `wide` (0.4–0.9, long axis within 40° of the horizontal).
+fn drawn_ellipse(variety: &str, size: f64, rng: &mut Lcg) -> Vec<Stroke> {
+    let a = size / 2.0;
+    let (ratio, theta) = match variety {
+        "circle" => (rng.range(0.92, 1.0), rng.range(0.0, PI)),
+        "tall" => (rng.range(0.4, 0.9), PI / 2.0 + rng.range(-0.69, 0.69)),
+        _ => (rng.range(0.4, 0.9), rng.range(-0.69, 0.69)),
+    };
+    let b = a * ratio;
+    let sweep = (if rng.unit() < 0.5 { -1.0 } else { 1.0 }) * TAU * rng.range(0.93, 1.12);
+    let ideal = arc(v(12_000.0, 9000.0), a, b, theta, rng.range(0.0, TAU), sweep);
+    vec![hand(&ideal, rng, 0.025 * b, 0.006 * b, 0)]
+}
+
+#[test]
+#[ignore = "measurement, prints a table"]
+fn measure_ellipse_varieties() {
+    for variety in ["circle", "tall", "wide"] {
+        for mm in [12.0, 15.0, 20.0, 25.0, 30.0, 50.0] {
+            let right = (0..500)
+                .filter(|&seed| {
+                    let mut rng = Lcg::new(7000 + seed);
+                    let result = straighten(&drawn_ellipse(variety, mm * 100.0, &mut rng));
+                    result.len() == 1 && result[0].shape == Shape::Ellipse
+                })
+                .count();
+            println!("{variety} {mm} mm: {right}/500 recognised");
+        }
+    }
 }
