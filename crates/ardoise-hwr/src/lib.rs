@@ -25,7 +25,7 @@ mod system;
 pub mod text;
 
 pub use model::{Bounds, Line, Recognition, Word};
-pub use system::{SystemRecognizer, lower_thread_priority};
+pub use system::SystemRecognizer;
 
 use ardoise_ink::Stroke;
 use serde::{Deserialize, Serialize};

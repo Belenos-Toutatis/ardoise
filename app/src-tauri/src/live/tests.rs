@@ -601,6 +601,70 @@ fn a_page_that_cannot_be_written_is_shown_and_backed_up_when_the_app_closes() {
     assert!(super::backup_dir().ends_with(Path::new("Ardoise").join("live-backup")));
 }
 
+/// Background work reads whether live mode runs without the hub's lock: the flag follows every
+/// way a session starts and ends, failures included.
+#[test]
+fn the_activity_follows_every_start_and_end_of_live_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Notes");
+    std::fs::create_dir(&root).unwrap();
+    ardoise_core::library::init(&root).unwrap();
+    let library = Library::open(&root).unwrap();
+    let hub = LiveHub::new(config());
+    let activity = hub.activity();
+    assert!(!activity.busy(), "not before the first start");
+
+    // Started, streaming, then the tablet's service leaves live mode by itself (tablet gone).
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    assert!(activity.live() && activity.busy());
+    sink.input(LiveInput::State(LiveState::Reconnecting));
+    assert!(activity.live(), "still live while reconnecting");
+    sink.input(LiveInput::State(LiveState::Stopped));
+    assert!(!activity.live());
+    assert!(!hub.page_position().unwrap().running);
+
+    // Started again and stopped by the user.
+    start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    assert!(activity.live());
+    hub.stop().unwrap();
+    assert!(!activity.live());
+
+    // The service could not start the session.
+    let Start::New { sink, .. } = hub
+        .start(options(&library, fixed(LiveButton::NewPage)))
+        .unwrap()
+    else {
+        panic!("already running");
+    };
+    assert!(activity.live());
+    hub.abort_start(sink.session());
+    assert!(!activity.live());
+
+    // Stopped while the pages cannot be written: live mode has ended all the same.
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    break_folder(&root, true);
+    let _ = hub.stop();
+    assert!(!activity.live());
+    break_folder(&root, false);
+
+    // The app closes while live mode runs.
+    start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    let backup = tempfile::tempdir().unwrap();
+    super::close_session(&hub, backup.path());
+    assert!(!activity.live());
+
+    // The presentation window has its own part; the session's view of it does not count.
+    hub.set_presentation(Some(MonitorInfo::new(
+        "HDMI", 1920, 0, 1920, 1080, 1.0, false, None,
+    )));
+    assert!(!activity.busy());
+    let window = activity.presentation_opened();
+    assert!(activity.busy() && !activity.live());
+    activity.presentation_closed(window);
+    assert!(!activity.busy());
+}
+
 #[test]
 fn the_tablet_button_does_what_the_settings_say() {
     let (_dir, library) = library();

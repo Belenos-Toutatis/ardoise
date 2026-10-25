@@ -1,5 +1,5 @@
 //! The background indexer: recognises the notes of the library whose cache entry is missing or
-//! stale, most recently changed first, on a thread of its own at background priority.
+//! stale, most recently changed first, on a thread of its own.
 //!
 //! A pass starts at launch, after every change in the library (the folder watcher), when the
 //! library or the language changes, and when the user resumes it. A newer request interrupts
@@ -7,12 +7,21 @@
 //! (their latency budget is 30 ms) it waits between two notes. Its progress goes to the
 //! interface after every note (at most a few times a second).
 //!
+//! Threads and locks (`docs/design/extras.md`, "Handwriting recognition"): the indexer's thread
+//! runs at normal priority, because it takes locks that the interface's commands also take (its
+//! own, and the app's through [`Services`]); only the engine's worker thread, which shares no
+//! lock, runs at background priority. No lock of the indexer is ever held across a disk access,
+//! a recognition or a call into the app ([`unlocked`] checks it in debug builds), so a search,
+//! the status or a stop never waits for the disk or the engine.
+//!
 //! Everything the indexer needs from the app comes through [`Services`], so that it is tested
 //! with a fake recognizer and plain folders.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -20,13 +29,10 @@ use ardoise_core::library::Library;
 use ardoise_core::note::Note;
 use ardoise_core::settings::HandwritingLanguage;
 use ardoise_hwr::ink::recognizable_strokes;
-use ardoise_hwr::{
-    HwrError, Language, Recognition, Recognizer, RecognizerInfo, lower_thread_priority,
-    recognizer_for,
-};
+use ardoise_hwr::{HwrError, Language, Recognition, Recognizer, RecognizerInfo, recognizer_for};
 use serde::Serialize;
 
-use super::cache::{EntryKey, FileRecord, HandwritingCache, strokes_hash};
+use super::cache::{CacheDir, EntryKey, FileRecord, HandwritingCache, strokes_hash};
 use super::search::{SearchHit, query_words, search_recognition};
 use crate::library::path_text;
 
@@ -118,7 +124,9 @@ pub struct Services {
     /// The engine for a recognition someone waits for (a text export).
     pub on_demand: Arc<dyn Recognizer>,
     pub config: Box<dyn Fn() -> IndexConfig + Send + Sync>,
-    /// True while live mode or the presentation runs.
+    /// True while live mode or the presentation runs. Asked before every note and every
+    /// `pause_poll` while paused: it must be cheap and take no lock that live mode or the
+    /// interface takes (the app reads atomics, `live::Activity`).
     pub busy: Box<dyn Fn() -> bool + Send + Sync>,
     /// Receives the status at every change.
     pub notify: Box<dyn Fn(&IndexStatus) + Send + Sync>,
@@ -142,13 +150,64 @@ struct Shared {
     services: Services,
     inner: Mutex<Inner>,
     wake: Condvar,
+    /// The cache in memory (never locked across a disk access: `disk` does those).
     cache: Mutex<HandwritingCache>,
+    disk: CacheDir,
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+thread_local! {
+    /// Locks of the indexer that this thread holds (see [`unlocked`]).
+    static HELD: Cell<usize> = const { Cell::new(0) };
+}
+
+/// A lock of the indexer, counted in [`HELD`] while it is held.
+struct Held<'a, T>(MutexGuard<'a, T>);
+
+impl<T> Deref for Held<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for Held<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<T> Drop for Held<'_, T> {
+    fn drop(&mut self) {
+        HELD.with(|held| held.set(held.get().saturating_sub(1)));
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> Held<'_, T> {
+    let guard = mutex.lock().unwrap_or_else(PoisonError::into_inner);
+    HELD.with(|held| held.set(held.get() + 1));
+    Held(guard)
+}
+
+/// The lock of `inner` for a wait on [`Shared::wake`] (nothing slow happens while it is held).
+fn lock_for_wait(inner: &Mutex<Inner>) -> MutexGuard<'_, Inner> {
+    inner.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// How many locks of the indexer the calling thread holds.
+fn held_locks() -> usize {
+    HELD.with(Cell::get)
+}
+
+/// Said before every disk access, recognition and call into the app (settings, `busy`, the
+/// interface): the calling thread must hold no lock of the indexer, so that nobody waiting for
+/// one waits for the disk, the engine or the app. Checked in debug builds (the tests).
+fn unlocked(what: &str) {
+    debug_assert_eq!(
+        held_locks(),
+        0,
+        "{what} while holding a lock of the handwriting indexer"
+    );
 }
 
 /// The running indexer (managed by the app).
@@ -162,8 +221,9 @@ pub struct Indexer {
 impl Indexer {
     /// Starts the indexer: its first pass begins at once.
     pub fn start(services: Services) -> Indexer {
-        let cache = HandwritingCache::open(services.cache_dir.clone());
+        let disk = CacheDir::new(services.cache_dir.clone());
         let shared = Arc::new(Shared {
+            disk,
             services,
             inner: Mutex::new(Inner {
                 generation: 1,
@@ -174,7 +234,7 @@ impl Indexer {
                 current: HashMap::new(),
             }),
             wake: Condvar::new(),
-            cache: Mutex::new(cache),
+            cache: Mutex::new(HandwritingCache::default()),
         });
         let worker = shared.clone();
         let thread = std::thread::Builder::new()
@@ -251,7 +311,9 @@ impl Indexer {
         IndexConfig,
         Option<Language>,
     ) {
+        unlocked("reading the settings");
         let config = (self.shared.services.config)();
+        unlocked("listing the recognizers");
         let installed = self.shared.services.on_demand.recognizers();
         let language = installed
             .as_ref()
@@ -277,26 +339,37 @@ impl Indexer {
             strokes: strokes_hash(&strokes),
             language,
         };
-        if let Some(found) = lock(&self.shared.cache).get(&key) {
+        if let Some(found) = self.shared.cached(&key) {
             return Ok(found);
         }
         let recognition = if strokes.is_empty() {
             Recognition::empty(language)
         } else {
+            unlocked("recognising a note");
             self.shared
                 .services
                 .on_demand
                 .recognize(&strokes, language)?
         };
-        Ok(lock(&self.shared.cache).put(key, recognition))
+        Ok(self.shared.keep(key, recognition))
     }
 
-    /// Stops the thread and waits for it (the tests; the app simply ends).
+    /// Whether the thread ended (the tests: it only ends on `shutdown`, or when it panicked).
+    #[cfg(test)]
+    fn thread_ended(&self) -> bool {
+        lock(&self.thread)
+            .as_ref()
+            .is_some_and(JoinHandle::is_finished)
+    }
+
+    /// Stops the thread and waits for it (the tests; the app simply ends). Fails when the
+    /// thread panicked (a debug check such as [`unlocked`] failed there).
     #[cfg(test)]
     pub fn shutdown(&self) {
         self.bump(|inner| inner.quit = true);
-        if let Some(thread) = lock(&self.thread).take() {
-            let _ = thread.join();
+        let thread = lock(&self.thread).take();
+        if let Some(thread) = thread {
+            assert!(thread.join().is_ok(), "the indexer's thread panicked");
         }
     }
 }
@@ -322,6 +395,7 @@ impl Shared {
             inner.last_notified = Some(Instant::now());
             let status = inner.status.clone();
             drop(inner);
+            unlocked("telling the interface");
             (self.services.notify)(&status);
         }
     }
@@ -339,6 +413,7 @@ impl Shared {
             if !self.still(generation) {
                 return false;
             }
+            unlocked("asking whether live mode runs");
             if !(self.services.busy)() {
                 if paused {
                     self.publish(true, |s| s.state = IndexState::Indexing);
@@ -349,7 +424,7 @@ impl Shared {
                 paused = true;
                 self.publish(true, |s| s.state = IndexState::Paused);
             }
-            let inner = lock(&self.inner);
+            let inner = lock_for_wait(&self.inner);
             if inner.generation == generation && !inner.quit {
                 let _ = self.wake.wait_timeout(inner, self.services.pause_poll);
             }
@@ -367,19 +442,52 @@ impl Shared {
             }
         });
     }
+
+    /// The recognition of `key`: in memory, or read from its file (without the lock).
+    fn cached(&self, key: &EntryKey) -> Option<Arc<Recognition>> {
+        let found = lock(&self.cache).loaded(key);
+        if found.is_some() {
+            return found;
+        }
+        unlocked("reading the cache");
+        let recognition = self.disk.read_entry(key)?;
+        Some(lock(&self.cache).insert(key.clone(), Arc::new(recognition)))
+    }
+
+    /// Keeps `recognition` as the entry of `key`: its file is written (without the lock), then
+    /// it is kept in memory.
+    fn keep(&self, key: EntryKey, recognition: Recognition) -> Arc<Recognition> {
+        unlocked("writing the cache");
+        self.disk.write_entry(&key, &recognition);
+        lock(&self.cache).insert(key, Arc::new(recognition))
+    }
+
+    /// Writes `files.json` if it changed (without the lock; tried again later if it failed).
+    fn flush(&self) {
+        let Some(bytes) = lock(&self.cache).files_to_write() else {
+            return;
+        };
+        unlocked("writing files.json");
+        if !self.disk.write_files(&bytes) {
+            lock(&self.cache).files_unwritten();
+        }
+    }
 }
 
 fn run(shared: &Shared) {
-    lower_thread_priority();
+    // Read here rather than on the thread that starts the indexer (the app's main thread).
+    unlocked("reading files.json");
+    let files = shared.disk.read_files();
+    lock(&shared.cache).load_files(files);
     let mut seen = 0;
     loop {
         let generation = {
-            let mut inner = lock(&shared.inner);
+            let mut inner = lock_for_wait(&shared.inner);
             while !inner.quit && inner.generation == seen {
                 inner = shared
                     .wake
                     .wait(inner)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    .unwrap_or_else(PoisonError::into_inner);
             }
             if inner.quit {
                 return;
@@ -391,7 +499,7 @@ fn run(shared: &Shared) {
             seen
         };
         pass(shared, generation);
-        lock(&shared.cache).flush();
+        shared.flush();
     }
 }
 
@@ -401,7 +509,9 @@ fn pass(shared: &Shared, generation: u64) {
     if !shared.wait_while_busy(generation) {
         return;
     }
+    unlocked("reading the settings");
     let config = (shared.services.config)();
+    unlocked("listing the recognizers");
     let language = match shared.services.background.recognizers() {
         Err(HwrError::Unsupported) => return shared.unavailable(UNSUPPORTED, None),
         Err(_) => return shared.unavailable(NO_RECOGNIZER, None),
@@ -410,6 +520,7 @@ fn pass(shared: &Shared, generation: u64) {
     let Some(language) = language else {
         return shared.unavailable(NO_RECOGNIZER, None);
     };
+    unlocked("listing the library");
     let Some(library) = config.library.and_then(|root| Library::open(root).ok()) else {
         return shared.unavailable(NO_LIBRARY, Some(language));
     };
@@ -421,24 +532,33 @@ fn pass(shared: &Shared, generation: u64) {
     });
 
     // The notes whose entry is known without reading them.
+    let keys: Vec<Option<EntryKey>> = {
+        let cache = lock(&shared.cache);
+        notes
+            .iter()
+            .map(|note| {
+                cache
+                    .record(&note.path, &note.stamp)
+                    .map(|record| EntryKey {
+                        id: record.id.clone(),
+                        strokes: record.strokes.clone(),
+                        language,
+                    })
+            })
+            .collect()
+    };
     let mut current = HashMap::new();
     let mut pending = Vec::new();
-    {
-        let mut cache = lock(&shared.cache);
-        for note in &notes {
-            let key = cache
-                .record(&note.path, &note.stamp)
-                .map(|record| EntryKey {
-                    id: record.id.clone(),
-                    strokes: record.strokes.clone(),
-                    language,
-                });
-            match key {
-                Some(key) if cache.get(&key).is_some() => {
-                    current.insert(note.path.clone(), key);
-                }
-                _ => pending.push(note),
+    for (note, key) in notes.iter().zip(keys) {
+        // Reading the entries from the disk (after a restart) waits for live mode too.
+        if !shared.wait_while_busy(generation) {
+            return;
+        }
+        match key {
+            Some(key) if shared.cached(&key).is_some() => {
+                current.insert(note.path.clone(), key);
             }
+            _ => pending.push(note),
         }
     }
     let total = notes.len();
@@ -464,8 +584,9 @@ fn pass(shared: &Shared, generation: u64) {
             return;
         }
         if count % FLUSH_EVERY == FLUSH_EVERY - 1 {
-            lock(&shared.cache).flush();
+            shared.flush();
         }
+        unlocked("reading a note");
         let loaded = match library.read(&entry.path) {
             Ok(loaded) => loaded,
             Err(_) => {
@@ -480,25 +601,23 @@ fn pass(shared: &Shared, generation: u64) {
             strokes: strokes_hash(&strokes),
             language,
         };
-        let known = {
-            let mut cache = lock(&shared.cache);
-            cache.set_record(
-                loaded.path.clone(),
-                FileRecord {
-                    stamp: loaded.stamp,
-                    id: key.id.clone(),
-                    strokes: key.strokes.clone(),
-                },
-            );
-            cache.get(&key).is_some()
-        };
+        lock(&shared.cache).set_record(
+            loaded.path.clone(),
+            FileRecord {
+                stamp: loaded.stamp,
+                id: key.id.clone(),
+                strokes: key.strokes.clone(),
+            },
+        );
+        let known = shared.cached(&key).is_some();
         if !known && strokes.is_empty() {
             // Nothing to read: no need to wake the engine.
-            lock(&shared.cache).put(key.clone(), Recognition::empty(language));
+            shared.keep(key.clone(), Recognition::empty(language));
         } else if !known {
+            unlocked("recognising a note");
             match shared.services.background.recognize(&strokes, language) {
                 Ok(recognition) => {
-                    lock(&shared.cache).put(key.clone(), recognition);
+                    shared.keep(key.clone(), recognition);
                 }
                 Err(HwrError::Unsupported) => return shared.unavailable(UNSUPPORTED, None),
                 Err(HwrError::NoRecognizer { .. }) => {
@@ -533,10 +652,14 @@ fn finish(shared: &Shared, root: &Path, notes: &[ardoise_core::library::NoteEntr
             .or_default()
             .insert(key.strokes.clone());
     }
-    let mut cache = lock(&shared.cache);
-    cache.retain_files(root, &present);
-    cache.prune(&in_use);
-    cache.flush();
+    {
+        let mut cache = lock(&shared.cache);
+        cache.retain_files(root, &present);
+        cache.retain_entries(&in_use);
+    }
+    unlocked("pruning the cache");
+    shared.disk.prune(&in_use);
+    shared.flush();
 }
 
 #[cfg(test)]
@@ -553,12 +676,15 @@ mod tests {
     /// Words the fake engine "reads": each stroke's first point gives one, by its x / 1000.
     const VOCABULARY: [&str; 6] = ["le", "chat", "dort", "lumière", "forêt", "énergie"];
 
-    /// Reads the words of [`VOCABULARY`] out of the strokes; counts its calls.
+    /// Reads the words of [`VOCABULARY`] out of the strokes; counts its calls, notes when they
+    /// start, and how many locks of the indexer the calling thread held.
     struct Fake {
         installed: Vec<RecognizerInfo>,
         calls: AtomicUsize,
         fail: AtomicBool,
         delay: Duration,
+        started: Mutex<Vec<Instant>>,
+        held: AtomicUsize,
     }
 
     impl Fake {
@@ -574,12 +700,27 @@ mod tests {
                 calls: AtomicUsize::new(0),
                 fail: AtomicBool::new(false),
                 delay: Duration::ZERO,
+                started: Mutex::new(Vec::new()),
+                held: AtomicUsize::new(0),
             })
+        }
+
+        fn slow(languages: &[Language], delay: Duration) -> Arc<Fake> {
+            Arc::new(Fake {
+                delay,
+                ..Arc::into_inner(Fake::new(languages)).unwrap()
+            })
+        }
+
+        /// The most locks of the indexer held by a thread that called it.
+        fn held(&self) -> usize {
+            self.held.load(Ordering::SeqCst)
         }
     }
 
     impl Recognizer for Fake {
         fn recognizers(&self) -> Result<Vec<RecognizerInfo>, HwrError> {
+            self.held.fetch_max(held_locks(), Ordering::SeqCst);
             Ok(self.installed.clone())
         }
 
@@ -588,6 +729,8 @@ mod tests {
             strokes: &[Stroke],
             language: Language,
         ) -> Result<Recognition, HwrError> {
+            self.held.fetch_max(held_locks(), Ordering::SeqCst);
+            self.started.lock().unwrap().push(Instant::now());
             self.calls.fetch_add(1, Ordering::SeqCst);
             std::thread::sleep(self.delay);
             if self.fail.load(Ordering::SeqCst) {
@@ -702,6 +845,10 @@ mod tests {
                 if done(&status) {
                     return status;
                 }
+                assert!(
+                    !self.indexer.thread_ended(),
+                    "the indexer's thread panicked while waiting for {what}: {status:?}"
+                );
                 assert!(
                     Instant::now() < deadline,
                     "timed out waiting for {what}: {status:?}"
@@ -886,10 +1033,7 @@ mod tests {
         for i in 0..20 {
             create(&library, &format!("Note {i}"), &[2]);
         }
-        let fake = Arc::new(Fake {
-            delay: Duration::from_millis(20),
-            ..Arc::into_inner(Fake::new(&[Language::Fr])).unwrap()
-        });
+        let fake = Fake::slow(&[Language::Fr], Duration::from_millis(20));
         let h = harness(dir.path(), fake.clone());
         h.wait("some progress", |s| {
             s.state == IndexState::Indexing && s.done >= 2
@@ -971,5 +1115,126 @@ mod tests {
             Err(HwrError::NoRecognizer { .. })
         ));
         h.indexer.shutdown();
+    }
+
+    #[test]
+    fn a_pass_pauses_between_two_notes_while_live_mode_runs() {
+        let (dir, library) = library();
+        for i in 0..10 {
+            create(&library, &format!("Note {i}"), &[i % 6]);
+        }
+        let fake = Fake::slow(&[Language::Fr], Duration::from_millis(40));
+        let h = harness(dir.path(), fake.clone());
+        h.wait("some progress", |s| {
+            s.state == IndexState::Indexing && s.done >= 2
+        });
+        // Live mode starts in the middle of the pass.
+        h.busy.store(true, Ordering::SeqCst);
+        let raised = Instant::now();
+        h.wait("the pause", |s| s.state == IndexState::Paused);
+        let paused = Instant::now();
+        std::thread::sleep(Duration::from_millis(150));
+        let started = lock(&fake.started).clone();
+        assert!(
+            started.iter().filter(|&&at| at > raised).count() <= 1,
+            "at most the note under way when live mode started"
+        );
+        assert!(
+            started.iter().all(|&at| at < paused),
+            "no recognition once paused"
+        );
+        let done = h.indexer.status().done;
+        assert!(done < 10, "{done}");
+
+        // Stopped while paused, then resumed while live mode still runs: paused again.
+        h.indexer.stop();
+        assert_eq!(h.indexer.status().state, IndexState::Stopped);
+        h.indexer.resume();
+        h.wait("the pause again", |s| s.state == IndexState::Paused);
+        assert_eq!(fake.calls.load(Ordering::SeqCst), started.len());
+
+        // Live mode ends: the pass goes on where it was and ends.
+        h.busy.store(false, Ordering::SeqCst);
+        let status = h.idle(10);
+        assert_eq!((status.done, status.failed), (10, 0));
+        assert_eq!(
+            fake.calls.load(Ordering::SeqCst),
+            10,
+            "nothing recognised twice"
+        );
+        let states: Vec<IndexState> = lock(&h.statuses).iter().map(|s| s.state).collect();
+        let resumed = states
+            .windows(2)
+            .any(|w| w == [IndexState::Paused, IndexState::Indexing]);
+        assert!(resumed, "{states:?}");
+        h.indexer.shutdown();
+    }
+
+    /// The indexer's locks are never held while the engine recognises, nor across a disk
+    /// access or a call into the app (`unlocked` checks the latter in debug builds: a failure
+    /// there panics the indexer's thread, which `shutdown` reports).
+    #[test]
+    fn no_lock_is_held_while_recognising_or_reading_files() {
+        let (dir, library) = library();
+        for i in 0..4 {
+            create(&library, &format!("Note {i}"), &[i]);
+        }
+        create(&library, "Vide", &[]);
+        let fake = Fake::slow(&[Language::Fr], Duration::from_millis(300));
+        let h = harness(dir.path(), fake.clone());
+        h.wait("a recognition under way", |_| {
+            fake.calls.load(Ordering::SeqCst) >= 1
+        });
+        // While the engine works, the interface's calls answer at once.
+        let asked = Instant::now();
+        let _ = h.indexer.status();
+        let _ = h.indexer.search("chat");
+        h.indexer.stop();
+        h.indexer.resume();
+        assert!(
+            asked.elapsed() < Duration::from_millis(150),
+            "the interface waited {:?} for the engine",
+            asked.elapsed()
+        );
+        h.idle(5);
+        // On demand, from another thread (a command).
+        let mut note = sample_note("Brouillon");
+        note.strokes = written(&[2]);
+        assert_eq!(h.indexer.recognition_of(&note).unwrap().text(), "dort");
+        assert_eq!(fake.held(), 0);
+        h.indexer.shutdown();
+
+        // Another run reads its cache from the disk, without a lock either.
+        let fake = Fake::new(&[Language::Fr]);
+        let cache = h._cache;
+        let h = harness_in(dir.path(), fake.clone(), cache);
+        h.idle(5);
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(h.indexer.recognition_of(&note).unwrap().text(), "dort");
+        assert_eq!(fake.held(), 0);
+        h.indexer.shutdown();
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "while holding a lock of the handwriting indexer")]
+    fn holding_a_lock_across_slow_work_is_caught() {
+        let mutex = Mutex::new(());
+        let _held = lock(&mutex);
+        unlocked("reading a note");
+    }
+
+    #[test]
+    fn locks_are_counted_while_held() {
+        let mutex = Mutex::new(1);
+        assert_eq!(held_locks(), 0);
+        {
+            let mut held = lock(&mutex);
+            *held += 1;
+            assert_eq!(held_locks(), 1);
+        }
+        assert_eq!(held_locks(), 0);
+        assert_eq!(*lock(&mutex), 2);
+        assert_eq!(held_locks(), 0);
     }
 }

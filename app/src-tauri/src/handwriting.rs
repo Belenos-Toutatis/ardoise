@@ -8,8 +8,8 @@
 //!   format's `text.json` member stays unused, so that two PCs never compete to rewrite the
 //!   same note through Nextcloud.
 //! - [`indexer`]: recognises in the background the notes whose entry is missing or stale,
-//!   pausing while live mode or the presentation runs; its progress goes to the main window
-//!   (event [`HANDWRITING_STATUS`]).
+//!   pausing while live mode or the presentation runs (told by `live::Activity`, without a
+//!   lock); its progress goes to the main window (event [`HANDWRITING_STATUS`]).
 //! - [`search`]: which words of a query the handwriting of each note has, with an excerpt.
 //!
 //! The recognition language is `[handwriting] language` of `ardoise.toml` (auto, fr or en,
@@ -72,12 +72,15 @@ pub struct HandwritingRuntime {
 impl HandwritingRuntime {
     /// Starts the background indexing (once).
     pub fn start(&self, app: &AppHandle) {
-        let (for_config, for_busy, for_notify) = (app.clone(), app.clone(), app.clone());
+        let (for_config, for_notify) = (app.clone(), app.clone());
+        // Taken once: asking for it again would lock Tauri's state manager each time.
+        let activity = app.state::<LiveRuntime>().hub().activity();
         let _ = self.indexer.set(Indexer::start(Services {
             background: Arc::new(SystemRecognizer::background()),
             on_demand: Arc::new(SystemRecognizer::new()),
             config: Box::new(move || index_config(&for_config.state::<AppContext>())),
-            busy: Box::new(move || busy(&for_busy)),
+            // Atomics only: never a lock of live mode or of the windows (see `live::Activity`).
+            busy: Box::new(move || activity.busy()),
             notify: Box::new(move |status| {
                 let _ = for_notify.emit_to("main", HANDWRITING_STATUS, status);
             }),
@@ -101,17 +104,6 @@ pub fn refresh(app: &AppHandle) {
     {
         indexer.refresh();
     }
-}
-
-/// True while live mode runs or the presentation window is open: their latency budget is
-/// 30 ms, the indexing waits.
-fn busy(app: &AppHandle) -> bool {
-    let live = app
-        .try_state::<LiveRuntime>()
-        .is_some_and(|runtime| runtime.hub().page_position().is_some_and(|p| p.running));
-    live || app
-        .get_webview_window(crate::presentation::PRESENTATION)
-        .is_some()
 }
 
 /// The library, the recognition language and the interface language, read fresh.

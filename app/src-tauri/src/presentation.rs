@@ -9,13 +9,13 @@
 
 use serde::Serialize;
 use tauri::{
-    AppHandle, Manager, Monitor, PhysicalPosition, PhysicalSize, State, WebviewUrl,
+    AppHandle, Manager, Monitor, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, Window, WindowEvent,
 };
 
 use crate::AppContext;
 use crate::commands::{CommandError, CommandResult, store, update};
-use crate::live::LiveRuntime;
+use crate::live::{Activity, LiveRuntime};
 
 /// Label of the presentation window.
 pub const PRESENTATION: &str = "presentation";
@@ -139,12 +139,14 @@ fn unexpected(error: tauri::Error) -> CommandError {
     CommandError::new("unexpected", error)
 }
 
-/// Creates the presentation window on `monitor`, or moves it there, full screen.
-fn show_on(app: &AppHandle, monitor: &MonitorInfo) -> tauri::Result<()> {
+/// Creates the presentation window on `monitor`, or moves it there, full screen. A window
+/// created here that cannot be placed is destroyed (it would stay hidden, and the indexing
+/// would wait for it).
+fn show_on(app: &AppHandle, monitor: &MonitorInfo, activity: &Activity) -> tauri::Result<()> {
     let window = match app.get_webview_window(PRESENTATION) {
         Some(window) => {
             window.set_fullscreen(false)?;
-            window
+            return place(&window, monitor);
         }
         None => {
             let mut builder = WebviewWindowBuilder::new(
@@ -165,9 +167,27 @@ fn show_on(app: &AppHandle, monitor: &MonitorInfo) -> tauri::Result<()> {
             if let Some(dir) = crate::webview_data_dir() {
                 builder = builder.data_directory(dir);
             }
-            builder.build()?
+            // Open from now until this very window is destroyed, however that happens.
+            let token = activity.presentation_opened();
+            let window = builder
+                .build()
+                .inspect_err(|_| activity.presentation_closed(token))?;
+            let closed = activity.clone();
+            window.on_window_event(move |event| {
+                if matches!(event, WindowEvent::Destroyed) {
+                    closed.presentation_closed(token);
+                }
+            });
+            window
         }
     };
+    place(&window, monitor).inspect_err(|_| {
+        let _ = window.destroy();
+    })
+}
+
+/// Puts `window` full screen on `monitor` and shows it.
+fn place(window: &WebviewWindow, monitor: &MonitorInfo) -> tauri::Result<()> {
     window.set_position(PhysicalPosition::new(monitor.x, monitor.y))?;
     window.set_size(PhysicalSize::new(monitor.width, monitor.height))?;
     // Full screen on the monitor holding that physical point (not "the current one", which a
@@ -227,7 +247,7 @@ pub async fn open_presentation(
         chosen: true,
         ..chosen.clone()
     };
-    show_on(&app, &chosen).map_err(unexpected)?;
+    show_on(&app, &chosen, &runtime.hub().activity()).map_err(unexpected)?;
     // The window is shown even if the settings cannot be written.
     if let Err(error) = save_projector(&context, &chosen.key) {
         eprintln!("presentation: cannot save the screen chosen: {error:?}");

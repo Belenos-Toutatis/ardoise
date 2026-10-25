@@ -113,7 +113,7 @@ struct FilesJson {
     files: HashMap<PathBuf, FileRecord>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct EntryJson {
     format: u32,
     id: String,
@@ -122,30 +122,31 @@ struct EntryJson {
     recognition: Recognition,
 }
 
-/// The cache of this PC (not shared between threads by itself: its owner locks it).
-#[derive(Debug)]
+/// [`EntryJson`] as it is written (borrowed: the recognition is not copied).
+#[derive(Serialize)]
+struct EntryOut<'a> {
+    format: u32,
+    id: &'a str,
+    strokes: &'a str,
+    language: Language,
+    recognition: &'a Recognition,
+}
+
+/// What the cache of this PC holds in memory. It never touches the disk itself: its owner keeps
+/// it behind a lock that is never held across a disk access ([`CacheDir`] does those).
+#[derive(Debug, Default)]
 pub struct HandwritingCache {
-    dir: PathBuf,
     files: HashMap<PathBuf, FileRecord>,
     files_changed: bool,
     entries: HashMap<EntryKey, Arc<Recognition>>,
 }
 
 impl HandwritingCache {
-    /// The cache in `dir` (created when first written); `files.json` is read if it is there.
-    pub fn open(dir: impl Into<PathBuf>) -> HandwritingCache {
-        let dir = dir.into();
-        let files = fs::read(dir.join(FILES_JSON))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<FilesJson>(&bytes).ok())
-            .filter(|json| json.format == FORMAT)
-            .map(|json| json.files)
-            .unwrap_or_default();
-        HandwritingCache {
-            dir,
-            files,
-            files_changed: false,
-            entries: HashMap::new(),
+    /// Takes the records read from `files.json` ([`CacheDir::read_files`]); those already set
+    /// in this session win.
+    pub fn load_files(&mut self, files: HashMap<PathBuf, FileRecord>) {
+        for (path, record) in files {
+            self.files.entry(path).or_insert(record);
         }
     }
 
@@ -161,65 +162,35 @@ impl HandwritingCache {
         }
     }
 
-    /// The recognition of `key`, from memory or from its file.
-    pub fn get(&mut self, key: &EntryKey) -> Option<Arc<Recognition>> {
-        if let Some(found) = self.entries.get(key) {
-            return Some(found.clone());
-        }
-        let bytes = fs::read(self.dir.join(key.file_name())).ok()?;
-        let json: EntryJson = serde_json::from_slice(&bytes).ok()?;
-        let matches = json.format == FORMAT
-            && json.id == key.id
-            && json.strokes == key.strokes
-            && json.language == key.language
-            && json.recognition.language == key.language;
-        if !matches {
-            return None;
-        }
-        let recognition = Arc::new(json.recognition);
-        self.entries.insert(key.clone(), recognition.clone());
-        Some(recognition)
-    }
-
-    /// The recognition of `key` if it is already in memory (no disk access).
+    /// The recognition of `key` if it is in memory.
     pub fn loaded(&self, key: &EntryKey) -> Option<Arc<Recognition>> {
         self.entries.get(key).cloned()
     }
 
-    /// Keeps `recognition` as the entry of `key` (in memory, and on disk when possible).
-    pub fn put(&mut self, key: EntryKey, recognition: Recognition) -> Arc<Recognition> {
-        let json = EntryJson {
-            format: FORMAT,
-            id: key.id.clone(),
-            strokes: key.strokes.clone(),
-            language: key.language,
-            recognition,
-        };
-        if let Ok(bytes) = serde_json::to_vec(&json)
-            && fs::create_dir_all(&self.dir).is_ok()
-        {
-            let _ = write_atomic(&self.dir.join(key.file_name()), &bytes);
-        }
-        let recognition = Arc::new(json.recognition);
+    /// Keeps `recognition` in memory as the entry of `key`.
+    pub fn insert(&mut self, key: EntryKey, recognition: Arc<Recognition>) -> Arc<Recognition> {
         self.entries.insert(key, recognition.clone());
         recognition
     }
 
-    /// Writes `files.json` if it changed (best effort).
-    pub fn flush(&mut self) {
+    /// `files.json` to write when it changed since it was last taken (it then counts as
+    /// written: see [`files_unwritten`](Self::files_unwritten)).
+    pub fn files_to_write(&mut self) -> Option<Vec<u8>> {
         if !self.files_changed {
-            return;
+            return None;
         }
-        let json = FilesJson {
+        let bytes = serde_json::to_vec(&FilesJson {
             format: FORMAT,
             files: self.files.clone(),
-        };
-        if let Ok(bytes) = serde_json::to_vec(&json)
-            && fs::create_dir_all(&self.dir).is_ok()
-            && write_atomic(&self.dir.join(FILES_JSON), &bytes).is_ok()
-        {
-            self.files_changed = false;
-        }
+        })
+        .ok()?;
+        self.files_changed = false;
+        Some(bytes)
+    }
+
+    /// The `files.json` taken could not be written: it will be written again.
+    pub fn files_unwritten(&mut self) {
+        self.files_changed = true;
     }
 
     /// Forgets the files below `root` that are not in `present` (deleted, moved, renamed).
@@ -232,19 +203,83 @@ impl HandwritingCache {
         }
     }
 
-    /// Removes the entries made useless: for a note id in `in_use` (id → strokes hashes of the
-    /// files that have it), the entries of other strokes (older versions of the note); for any
-    /// other id, the entries older than [`MAX_AGE`] (notes deleted, or of another library).
-    pub fn prune(&mut self, in_use: &HashMap<String, HashSet<String>>) {
-        self.prune_at(in_use, SystemTime::now());
-    }
-
-    fn prune_at(&mut self, in_use: &HashMap<String, HashSet<String>>, now: SystemTime) {
+    /// Forgets the entries of older versions of the notes in `in_use` (id → strokes hashes of
+    /// the files that have it); [`CacheDir::prune`] removes their files.
+    pub fn retain_entries(&mut self, in_use: &HashMap<String, HashSet<String>>) {
         self.entries.retain(|key, _| {
             in_use
                 .get(&key.id)
                 .is_none_or(|hashes| hashes.contains(&key.strokes))
         });
+    }
+}
+
+/// The folder of the cache: every disk access of the cache, made without holding any lock.
+/// Everything is best effort (an entry that cannot be read or written is made again).
+#[derive(Debug, Clone)]
+pub struct CacheDir {
+    dir: PathBuf,
+}
+
+impl CacheDir {
+    /// The cache in `dir` (created when first written).
+    pub fn new(dir: impl Into<PathBuf>) -> CacheDir {
+        CacheDir { dir: dir.into() }
+    }
+
+    /// The records of `files.json`; none when it is missing, damaged or of another format.
+    pub fn read_files(&self) -> HashMap<PathBuf, FileRecord> {
+        fs::read(self.dir.join(FILES_JSON))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<FilesJson>(&bytes).ok())
+            .filter(|json| json.format == FORMAT)
+            .map(|json| json.files)
+            .unwrap_or_default()
+    }
+
+    /// Writes `files.json` ([`HandwritingCache::files_to_write`]); false when it failed.
+    pub fn write_files(&self, bytes: &[u8]) -> bool {
+        fs::create_dir_all(&self.dir).is_ok()
+            && write_atomic(&self.dir.join(FILES_JSON), bytes).is_ok()
+    }
+
+    /// The recognition of `key` read from its file, when it is there and is the right one.
+    pub fn read_entry(&self, key: &EntryKey) -> Option<Recognition> {
+        let bytes = fs::read(self.dir.join(key.file_name())).ok()?;
+        let json: EntryJson = serde_json::from_slice(&bytes).ok()?;
+        let matches = json.format == FORMAT
+            && json.id == key.id
+            && json.strokes == key.strokes
+            && json.language == key.language
+            && json.recognition.language == key.language;
+        matches.then_some(json.recognition)
+    }
+
+    /// Writes the entry of `key`.
+    pub fn write_entry(&self, key: &EntryKey, recognition: &Recognition) {
+        let json = EntryOut {
+            format: FORMAT,
+            id: &key.id,
+            strokes: &key.strokes,
+            language: key.language,
+            recognition,
+        };
+        if let Ok(bytes) = serde_json::to_vec(&json)
+            && fs::create_dir_all(&self.dir).is_ok()
+        {
+            let _ = write_atomic(&self.dir.join(key.file_name()), &bytes);
+        }
+    }
+
+    /// Removes the files of the entries made useless: for a note id in `in_use` (id → strokes
+    /// hashes of the files that have it), the entries of other strokes (older versions of the
+    /// note); for any other id, the entries older than [`MAX_AGE`] (notes deleted, or of
+    /// another library).
+    pub fn prune(&self, in_use: &HashMap<String, HashSet<String>>) {
+        self.prune_at(in_use, SystemTime::now());
+    }
+
+    fn prune_at(&self, in_use: &HashMap<String, HashSet<String>>, now: SystemTime) {
         let Ok(listing) = fs::read_dir(&self.dir) else {
             return;
         };
@@ -391,29 +426,43 @@ mod tests {
     #[test]
     fn entries_survive_a_restart_and_are_checked() {
         let dir = tempfile::tempdir().unwrap();
+        let disk = CacheDir::new(dir.path());
         let k = key("note-1", "0123456789abcdef", Language::Fr);
-        let mut cache = HandwritingCache::open(dir.path());
-        assert!(cache.get(&k).is_none());
-        cache.put(k.clone(), recognition("le chat", Language::Fr));
-        assert_eq!(cache.get(&k).unwrap().text(), "le chat");
-
-        let mut reopened = HandwritingCache::open(dir.path());
-        assert!(reopened.loaded(&k).is_none(), "nothing in memory yet");
-        assert_eq!(reopened.get(&k).unwrap().text(), "le chat");
+        assert!(disk.read_entry(&k).is_none());
+        disk.write_entry(&k, &recognition("le chat", Language::Fr));
+        assert_eq!(disk.read_entry(&k).unwrap().text(), "le chat");
         // Another language or other strokes are other entries.
         assert!(
-            reopened
-                .get(&key("note-1", "0123456789abcdef", Language::En))
+            disk.read_entry(&key("note-1", "0123456789abcdef", Language::En))
                 .is_none()
         );
         assert!(
-            reopened
-                .get(&key("note-1", "fedcba9876543210", Language::Fr))
+            disk.read_entry(&key("note-1", "fedcba9876543210", Language::Fr))
                 .is_none()
         );
         // A damaged entry is a missing one.
         fs::write(dir.path().join(k.file_name()), b"{ not json").unwrap();
-        assert!(HandwritingCache::open(dir.path()).get(&k).is_none());
+        assert!(disk.read_entry(&k).is_none());
+    }
+
+    #[test]
+    fn entries_in_memory_are_kept_and_forgotten() {
+        let mut cache = HandwritingCache::default();
+        let current = key("note-1", "1111111111111111", Language::Fr);
+        let old = key("note-1", "2222222222222222", Language::Fr);
+        let other = key("note-9", "4444444444444444", Language::Fr);
+        assert!(cache.loaded(&current).is_none());
+        for k in [&current, &old, &other] {
+            cache.insert(k.clone(), Arc::new(recognition("x", k.language)));
+        }
+        assert_eq!(cache.loaded(&current).unwrap().text(), "x");
+        cache.retain_entries(&HashMap::from([(
+            "note-1".to_owned(),
+            HashSet::from(["1111111111111111".to_owned()]),
+        )]));
+        assert!(cache.loaded(&current).is_some());
+        assert!(cache.loaded(&old).is_none(), "an older version goes");
+        assert!(cache.loaded(&other).is_some(), "other notes stay");
     }
 
     #[test]
@@ -428,42 +477,67 @@ mod tests {
             id: "n".into(),
             strokes: "0123456789abcdef".into(),
         };
-        let mut cache = HandwritingCache::open(dir.path().join("cache"));
+        let disk = CacheDir::new(dir.path().join("cache"));
+        assert!(disk.read_files().is_empty());
+        let mut cache = HandwritingCache::default();
+        assert!(cache.files_to_write().is_none(), "nothing changed");
         cache.set_record(path.clone(), record.clone());
         cache.set_record(gone.clone(), record.clone());
         cache.set_record(elsewhere.clone(), record.clone());
-        cache.flush();
+        let bytes = cache.files_to_write().unwrap();
+        assert!(cache.files_to_write().is_none(), "taken once");
+        assert!(disk.write_files(&bytes));
 
-        let mut reopened = HandwritingCache::open(dir.path().join("cache"));
+        let mut reopened = HandwritingCache::default();
+        reopened.load_files(disk.read_files());
         assert_eq!(reopened.record(&path, &stamp(10)), Some(&record));
         // The file changed since: unknown.
         assert_eq!(reopened.record(&path, &stamp(11)), None);
         // Files of the library no longer there are forgotten, those of another folder stay.
         reopened.retain_files(&root, &HashSet::from([path.clone()]));
-        reopened.flush();
-        let last = HandwritingCache::open(dir.path().join("cache"));
+        assert!(disk.write_files(&reopened.files_to_write().unwrap()));
+        let mut last = HandwritingCache::default();
+        last.load_files(disk.read_files());
         assert!(last.record(&path, &stamp(10)).is_some());
         assert!(last.record(&gone, &stamp(10)).is_none());
         assert!(last.record(&elsewhere, &stamp(10)).is_some());
+
+        // A record set before `files.json` is read wins over the older one.
+        let newer = FileRecord {
+            stamp: stamp(12),
+            ..record.clone()
+        };
+        let mut early = HandwritingCache::default();
+        early.set_record(path.clone(), newer.clone());
+        early.load_files(disk.read_files());
+        assert_eq!(early.record(&path, &stamp(12)), Some(&newer));
+        // A write that failed is tried again.
+        early.files_to_write().unwrap();
+        early.files_unwritten();
+        assert!(early.files_to_write().is_some());
+        // Not a folder: nothing written.
+        let file = dir.path().join("a-file");
+        fs::write(&file, b"x").unwrap();
+        assert!(!CacheDir::new(&file).write_files(b"{}"));
     }
 
     #[test]
     fn old_versions_of_a_note_are_pruned() {
         let dir = tempfile::tempdir().unwrap();
-        let mut cache = HandwritingCache::open(dir.path());
+        let disk = CacheDir::new(dir.path());
         let current_fr = key("note-1", "1111111111111111", Language::Fr);
         let current_en = key("note-1", "1111111111111111", Language::En);
         let old = key("note-1", "2222222222222222", Language::Fr);
         let conflict = key("note-1", "3333333333333333", Language::Fr);
         let other_library = key("note-9", "4444444444444444", Language::Fr);
         for k in [&current_fr, &current_en, &old, &conflict, &other_library] {
-            cache.put(k.clone(), recognition("x", k.language));
+            disk.write_entry(k, &recognition("x", k.language));
         }
         let in_use = HashMap::from([(
             "note-1".to_owned(),
             HashSet::from(["1111111111111111".to_owned(), "3333333333333333".to_owned()]),
         )]);
-        cache.prune(&in_use);
+        disk.prune(&in_use);
         let exists = |k: &EntryKey| dir.path().join(k.file_name()).exists();
         assert!(
             exists(&current_fr) && exists(&current_en),
@@ -471,10 +545,9 @@ mod tests {
         );
         assert!(exists(&conflict), "a conflict copy keeps its entry");
         assert!(!exists(&old), "the older version goes");
-        assert!(cache.loaded(&old).is_none());
         assert!(exists(&other_library), "recent entries of other notes stay");
         // Months later, entries of notes no longer seen go.
-        cache.prune_at(
+        disk.prune_at(
             &in_use,
             SystemTime::now() + MAX_AGE + Duration::from_secs(60),
         );
