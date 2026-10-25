@@ -179,6 +179,18 @@ export const api = {
   cancelExport: () => call<void>('cancel_export'),
   /** Copies the note's image to the clipboard (Windows); rejects with `clipboardUnavailable` elsewhere. */
   copyNoteImage: (source: ExportSource, dpi: number) => call<void>('copy_note_image', { source, dpi }),
+  /** Whether notes can be dragged out of the app to other programs (Windows). */
+  noteDragSupported: () => call<boolean>('note_drag_supported'),
+  /**
+   * Renders the notes as PNG files named after them, in a temporary folder of the app, for a
+   * drag out (drag-out.ts); returns the files, one per note, in order.
+   */
+  prepareNoteDrag: (paths: string[]) => call<string[]>('prepare_note_drag', { paths }),
+  /**
+   * Starts the system drag over files from `prepareNoteDrag` (the mouse button must be down) and
+   * resolves when it ends.
+   */
+  startNoteDrag: (files: string[]) => call<'dropped' | 'cancelled'>('start_note_drag', { files }),
   /**
    * Splits the editor's current `note`: the new note (titled `title`, same binder) is created
    * first, then the kept part is saved over `path` (`noteConflict` if the file changed since

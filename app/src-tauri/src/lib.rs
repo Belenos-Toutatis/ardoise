@@ -13,6 +13,9 @@ mod commands;
 mod console;
 mod demo;
 mod diagnostic;
+mod drag;
+#[cfg(windows)]
+mod drag_windows;
 mod export;
 mod import;
 mod library;
@@ -129,6 +132,9 @@ pub fn run() {
         open_diagnostic: cli.diagnostic,
     };
 
+    // Leftovers of the drags out of the app (PNG files for other programs), removed once old.
+    drag::start_cleaning();
+
     // A library made before `.ardoise/` became `_ardoise/` is moved over once (best effort:
     // opening the library retries later).
     if let Some(library) = commands::current_state(&context).library() {
@@ -209,6 +215,9 @@ pub fn run() {
             export::export_notes,
             export::cancel_export,
             clipboard::copy_note_image,
+            drag::prepare_note_drag,
+            drag::start_note_drag,
+            drag::note_drag_supported,
             operations::split_note,
             operations::merge_notes,
             video::estimate_video_export,

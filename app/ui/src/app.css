@@ -1037,6 +1037,38 @@ select {
   opacity: 1;
 }
 
+.drag-handle {
+  position: absolute;
+  top: 0.8rem;
+  right: 5rem;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  cursor: grab;
+  opacity: 0;
+  /* The pointer drives the gesture: no scrolling or zooming from the handle. */
+  touch-action: none;
+  user-select: none;
+}
+
+.note-card:hover .drag-handle,
+.note-card:focus-within .drag-handle,
+.note-card.selected .drag-handle,
+.drag-handle.busy {
+  opacity: 1;
+}
+
+.drag-handle.busy {
+  cursor: grabbing;
+}
+
+.drag-status {
+  position: absolute;
+  top: 3rem;
+  right: 0.8rem;
+  align-self: auto;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
 .menu {
   position: relative;
 }

@@ -73,6 +73,13 @@
       "trash": "Mettre à la corbeille",
       "filterTag": "Afficher les notes de l'étiquette {tag}"
     },
+    "drag": {
+      "handle": "Glisser vers l'Explorateur, Word, un e-mail… (image PNG de la note)",
+      "handleMany": "Glisser les {count} notes sélectionnées vers l'Explorateur, Word, un e-mail… (une image PNG par note)",
+      "preparing": "Préparation de l'image… gardez le bouton enfoncé",
+      "preparingMany": "Préparation de {count} images… gardez le bouton enfoncé",
+      "help": "Pour envoyer les notes sélectionnées dans l'Explorateur, Word ou un e-mail (une image PNG par note), faites-les glisser par la poignée qui apparaît sur une carte."
+    },
     "selection": {
       "bar": "Actions sur la sélection",
       "count": "Sélection : {count}",
@@ -422,6 +429,7 @@
     "diagnostic": "le test de la tablette n'a pas pu démarrer ({detail})",
     "unexpected": "erreur inattendue ({detail})",
     "exportFailed": "l'export n'a pas pu être écrit ({detail}) ; choisissez un autre emplacement et vérifiez qu'il reste de la place",
+    "dragUnavailable": "le glisser-déposer vers un autre logiciel n'est pas possible ({detail})",
     "clipboardUnavailable": "le presse-papiers n'est pas disponible ({detail}) ; fermez le logiciel qui l'utilise puis réessayez, ou exportez l'image en PNG",
     "nothingToSplit": "cette découpe ne laisserait rien d'un des deux côtés ; choisissez un instant ou une zone qui sépare la note en deux parties non vides",
     "nothingToMerge": "il faut au moins deux notes pour les assembler",

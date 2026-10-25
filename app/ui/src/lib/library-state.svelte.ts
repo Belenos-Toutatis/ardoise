@@ -4,6 +4,7 @@
  * call its methods; the pure parts are in `library-logic.ts`.
  */
 import { api, errorMessage, onLibraryChanged } from './api';
+import { dragOutSupported } from './drag-out';
 import { currentLocale, t } from './i18n.svelte';
 import {
   buildBinderTree,
@@ -33,6 +34,8 @@ export class LibraryState {
   selected = $state<string[]>([]);
   /** True while cards are being dragged (sidebar drop targets light up). */
   dragging = $state(false);
+  /** Notes can be dragged out of the app to other programs (drag-out.ts); Rust decides. */
+  dragOutSupported = $state(false);
   /** Confirmation of the last operation that created a note, shown in a banner. */
   notice = $state<string | null>(null);
   /** The export or assemble dialog, with the notes it was opened for (displayed order). */
@@ -62,6 +65,7 @@ export class LibraryState {
     let stopped = false;
     let unlisten: (() => void) | null = null;
     void this.refresh();
+    void dragOutSupported().then((supported) => (this.dragOutSupported = supported));
     void onLibraryChanged(() => void this.refresh()).then((stop) => {
       if (stopped) stop();
       else unlisten = stop;
@@ -217,6 +221,11 @@ export class LibraryState {
     this.dragPaths = this.isSelected(path) ? [...this.selected] : [path];
     this.dragging = true;
     return this.dragPaths;
+  }
+
+  /** The notes a drag out to another program carries from the card of `path`: the selection if it is part of it. */
+  dragOutPaths(path: string): string[] {
+    return this.isSelected(path) ? this.selectedDisplayed.map((n) => n.path) : [path];
   }
 
   endDrag(): void {

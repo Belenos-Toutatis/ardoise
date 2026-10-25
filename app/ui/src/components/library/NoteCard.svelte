@@ -1,6 +1,7 @@
 <script lang="ts">
   /** One note of the grid: thumbnail, title, date, favourite star, tags, selection and menu. */
   import { tick, untrack } from 'svelte';
+  import { startDragOut, type DragOutPhase } from '../../lib/drag-out';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { displayTitle, formatDate } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
@@ -33,10 +34,15 @@
   let renaming = $state(false);
   let draft = $state('');
   let input = $state<HTMLInputElement | null>(null);
+  let dragOut = $state<DragOutPhase>('idle');
 
   const locale = $derived(currentLocale());
   const title = $derived(displayTitle(note, locale));
   const selected = $derived(lib.isSelected(note.path));
+  const dragCount = $derived(lib.dragOutPaths(note.path).length);
+  const dragLabel = $derived(
+    dragCount > 1 ? t('library.drag.handleMany', { count: dragCount }) : t('library.drag.handle'),
+  );
   const stampKey = $derived(
     `${note.stamp.modified.secs_since_epoch}.${note.stamp.modified.nanos_since_epoch}.${note.stamp.len}`,
   );
@@ -127,6 +133,15 @@
     }
   }
 
+  /** Pointer down on the drag handle: the note (or the whole selection) goes out as PNG files. */
+  function dragOutStart(event: PointerEvent) {
+    startDragOut(event, {
+      paths: () => lib.dragOutPaths(note.path),
+      onphase: (phase) => (dragOut = phase),
+      onerror: (message) => (lib.error = message),
+    });
+  }
+
   function startRename() {
     draft = note.title;
     renaming = true;
@@ -208,6 +223,27 @@
       <span class="card-title">{title}</span>
       <span class="card-date">{formatDate(note.created, locale)}</span>
     </button>
+  {/if}
+
+  {#if lib.dragOutSupported && !renaming}
+    <button
+      type="button"
+      class="icon-button drag-handle"
+      class:busy={dragOut !== 'idle'}
+      tabindex="-1"
+      aria-label={dragLabel}
+      title={dragLabel}
+      onpointerdown={dragOutStart}
+    >
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+        <path d="M2 9v4.5h12V9M8 2v7.5M5 6.5 8 9.5l3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </button>
+  {/if}
+  {#if dragOut === 'preparing'}
+    <span class="badge drag-status" role="status">
+      {dragCount > 1 ? t('library.drag.preparingMany', { count: dragCount }) : t('library.drag.preparing')}
+    </span>
   {/if}
 
   <button
