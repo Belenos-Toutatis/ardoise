@@ -76,7 +76,8 @@ pub async fn note_outlines(
     context: State<'_, AppContext>,
     path: String,
 ) -> CommandResult<NoteOutlines> {
-    outlines_in(&library_of(&context)?, Path::new(&path)).map_err(library_error)
+    let library = library_of(&context)?;
+    blocking(move || outlines_in(&library, Path::new(&path)).map_err(library_error)).await
 }
 
 /// A note opened for editing, with the stamp to pass back when saving it.
@@ -163,13 +164,25 @@ pub fn background_png(
     encode_png(&image).map_err(render_error)
 }
 
+/// Runs `work` on a blocking thread: reading, decoding and writing a note file take time and
+/// must not hold one of the async runtime's few threads.
+pub(crate) async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> CommandResult<T> + Send + 'static,
+) -> CommandResult<T> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| CommandError::new("unexpected", error))?
+}
+
 #[tauri::command]
 pub async fn open_note(context: State<'_, AppContext>, path: String) -> CommandResult<OpenedNote> {
-    open_in(&library_of(&context)?, Path::new(&path)).map_err(library_error)
+    let library = library_of(&context)?;
+    blocking(move || open_in(&library, Path::new(&path)).map_err(library_error)).await
 }
 
 /// Saves the editor's note. `image_key` names the staged pixels of its background image
-/// (`background::Staging`); without it the file's own image member is kept.
+/// (`background::Staging`); without it the file's own image member is kept, which must show
+/// the image the note describes (`background::check_keyless`).
 #[tauri::command]
 pub async fn save_note(
     context: State<'_, AppContext>,
@@ -179,9 +192,34 @@ pub async fn save_note(
     image_key: Option<String>,
 ) -> CommandResult<FileStamp> {
     let library = library_of(&context)?;
-    let staged = background::chosen_for_save(background::staging(), &note, image_key.as_deref())?;
-    background::with_staged(staged, || save_in(&library, Path::new(&path), note, &stamp))
-        .map_err(library_error)
+    blocking(move || {
+        save_with_key(
+            &library,
+            Path::new(&path),
+            note,
+            &stamp,
+            image_key.as_deref(),
+        )
+    })
+    .await
+}
+
+/// [`save_in`] with the background pixels staged under `key` (`save_note`).
+pub fn save_with_key(
+    library: &Library,
+    path: &Path,
+    note: Note,
+    stamp: &FileStamp,
+    key: Option<&str>,
+) -> CommandResult<FileStamp> {
+    let chosen = background::chosen_for_save(background::staging(), &note, key)?;
+    if key.is_none() && note.background_image.is_some() {
+        let on_disk = library.read(path).map_err(library_error)?;
+        if on_disk.stamp == *stamp {
+            background::check_keyless(&on_disk.file.note, &note)?;
+        }
+    }
+    background::with_staged(chosen, || save_in(library, path, note, stamp)).map_err(library_error)
 }
 
 /// The page background as a PNG data URL; with `image`, the background image staged under its

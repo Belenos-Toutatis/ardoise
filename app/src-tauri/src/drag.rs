@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use ardoise_core::library::Library;
-use ardoise_render::{Image, decode_png};
+use ardoise_render::{Image, NoteView, decode_png};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
@@ -62,9 +62,9 @@ pub enum DragOutcome {
     Cancelled,
 }
 
-/// PNG of `note` for the drag: the export's defaults (150 dpi, with the paper), or a lower
-/// resolution when the note is too large for that.
-fn png_for_drag(note: &ardoise_core::note::Note) -> CommandResult<Vec<u8>> {
+/// PNG of a note (with its background image's pixels) for the drag: the export's defaults
+/// (150 dpi, with the paper), or a lower resolution when the note is too large for that.
+fn png_for_drag(view: NoteView<'_>) -> CommandResult<Vec<u8>> {
     let mut last = None;
     for dpi in DPI_STEPS {
         let options = ExportOptions {
@@ -74,7 +74,7 @@ fn png_for_drag(note: &ardoise_core::note::Note) -> CommandResult<Vec<u8>> {
             pdf_page: PdfPageSize::Actual,
         };
         check_dpi(dpi)?;
-        match image_bytes(note, ExportFormat::Png, &options) {
+        match image_bytes(view, ExportFormat::Png, &options) {
             Ok(bytes) => return Ok(bytes),
             Err(error) if error.is_code(crate::export::IMAGE_TOO_LARGE) => last = Some(error),
             Err(error) => return Err(error),
@@ -102,7 +102,7 @@ pub fn prepare_files(
     let written = loaded
         .iter()
         .map(|source| {
-            let bytes = png_for_drag(&source.note)?;
+            let bytes = png_for_drag(source.view())?;
             write_new_file(&dir, &source.stem, "png", &bytes).map_err(write_error)
         })
         .collect::<CommandResult<Vec<PathBuf>>>();
@@ -354,6 +354,50 @@ mod tests {
         };
         let expected = image_bytes(&note, ExportFormat::Png, &options).unwrap();
         assert_eq!(fs::read(&files[0]).unwrap(), expected);
+    }
+
+    #[test]
+    fn the_background_image_comes_along() {
+        use crate::background::notes_from_file_in;
+        use crate::background::tests::halves;
+        let (_dir, library) = library();
+        // A note made from an image: red on the left half of the page, blue on the right.
+        let source = tempfile::tempdir().unwrap();
+        let image = source.path().join("Tableau.png");
+        fs::write(
+            &image,
+            ardoise_render::encode_png(&halves(400, 300)).unwrap(),
+        )
+        .unwrap();
+        let made = notes_from_file_in(&library, "", &image, None, "Calque 1").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let files =
+            prepare_files(Some(&library), vec![source_of(&made[0].path)], root.path()).unwrap();
+        let png = decode_png(&fs::read(&files[0]).unwrap()).unwrap();
+        let rgb = |x: u32, y: u32| {
+            let [r, g, b, _] = png.pixel(x, y).unwrap();
+            [r, g, b]
+        };
+        let (w, h) = (png.width, png.height);
+        let near = |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 8);
+        assert!(
+            near(rgb(w / 10, h / 2), [220, 30, 30]),
+            "{:?}",
+            rgb(w / 10, h / 2)
+        );
+        assert!(
+            near(rgb(w * 9 / 10, h / 2), [30, 40, 220]),
+            "{:?}",
+            rgb(w * 9 / 10, h / 2)
+        );
+    }
+
+    fn source_of(path: &str) -> ExportSource {
+        ExportSource {
+            path: path.to_owned(),
+            note: None,
+            image_key: None,
+        }
     }
 
     #[test]

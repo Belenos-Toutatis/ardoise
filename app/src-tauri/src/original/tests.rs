@@ -44,6 +44,7 @@ fn ink(original: NoteOriginal) -> (PageSize, Vec<Layer>, Vec<Stroke>) {
             page,
             layers,
             strokes,
+            ..
         } => (page, layers, strokes),
         NoteOriginal::None => panic!("no original"),
     }
@@ -354,8 +355,10 @@ fn the_answer_has_the_shape_of_the_interface() {
         page: note.page,
         layers: note.layers.clone(),
         strokes: note.strokes.clone(),
+        background_image: None,
     })
     .unwrap();
+    assert!(json.get("backgroundImage").is_none());
     assert_eq!(json["source"], "firstVersion");
     assert_eq!(json["page"]["width"], note.page.width);
     assert_eq!(json["layers"][0]["visible"], true);
@@ -368,6 +371,96 @@ fn the_answer_has_the_shape_of_the_interface() {
     })
     .unwrap();
     assert_eq!(tablet["source"], "tablet");
+    assert!(tablet.get("backgroundImage").is_none());
+    let with_image = serde_json::to_value(NoteOriginal::FirstVersion {
+        page: note.page,
+        layers: vec![],
+        strokes: vec![],
+        background_image: Some(fiche()),
+    })
+    .unwrap();
+    assert_eq!(with_image["backgroundImage"]["name"], "fiche.pdf");
+    assert_eq!(with_image["backgroundImage"]["pdfPage"], 2);
+    assert_eq!(with_image["backgroundImage"]["quarterTurns"], 0);
+}
+
+/// The background image of page 2 of `fiche.pdf`, over an A4 landscape page.
+fn fiche() -> BackgroundImage {
+    BackgroundImage {
+        name: "fiche.pdf".into(),
+        pdf_page: Some(2),
+        rect: ardoise_core::note::ImageRect {
+            x: 0.0,
+            y: 1000.0,
+            width: 29_700.0,
+            height: 19_600.0,
+        },
+        quarter_turns: 0,
+        opacity: 0.8,
+    }
+}
+
+#[test]
+fn the_first_version_gives_the_placement_of_its_background_image() {
+    let (_dir, library) = library();
+    let tablet = TabletContext::of(Path::new("unused"), &Settings::default(), None);
+    let mut note = sample_note("Fiche");
+    note.page = ardoise_core::note::A4_LANDSCAPE;
+    note.background_image = Some(fiche());
+    let mut file = NoteFile::new(note);
+    file.background = Some(ardoise_core::format::BackgroundFile {
+        extension: "png".into(),
+        bytes: ardoise_render::encode_png(&crate::background::tests::halves(30, 20)).unwrap(),
+    });
+    let saved = library.create(Path::new(""), &file).unwrap();
+
+    // Turned a quarter turn (page, strokes and image) and saved.
+    let mut turned = open_in(&library, &saved.path).unwrap().note;
+    turned.page = PageSize {
+        width: turned.page.height,
+        height: turned.page.width,
+    };
+    for p in &mut turned.strokes[0].points {
+        p.x += 10.0;
+    }
+    let image = turned.background_image.as_mut().unwrap();
+    image.quarter_turns = 1;
+    image.rect = ardoise_core::note::ImageRect {
+        x: 1000.0,
+        y: 0.0,
+        width: 19_600.0,
+        height: 29_700.0,
+    };
+    save_in(&library, &saved.path, turned, &saved.stamp).unwrap();
+    let after = library.read(&saved.path).unwrap().file;
+    assert_eq!(after.note.background_image.unwrap().quarter_turns, 1);
+    // `original.ardoise` describes the image but does not hold its pixels.
+    let nested = read_from_bytes(after.original_note.as_ref().unwrap()).unwrap();
+    assert_eq!(nested.note.background_image, Some(fiche()));
+    assert!(nested.background.is_none());
+
+    match original_in(&library, &saved.path, &tablet).unwrap() {
+        NoteOriginal::FirstVersion {
+            page,
+            background_image,
+            ..
+        } => {
+            assert_eq!(page, ardoise_core::note::A4_LANDSCAPE);
+            assert_eq!(background_image, Some(fiche()));
+        }
+        other => panic!("{other:?}"),
+    }
+
+    // A note whose first version had no image: none.
+    let (path, stamp) = write_plain(&library, Origin::Live);
+    edit(&library, &path, &stamp);
+    assert!(matches!(
+        original_in(&library, &path, &tablet).unwrap(),
+        NoteOriginal::FirstVersion {
+            background_image: None,
+            ..
+        }
+    ));
 }
 
 #[test]

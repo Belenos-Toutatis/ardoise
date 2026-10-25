@@ -402,38 +402,51 @@ pub fn staged(staging: &Staging, key: &str) -> CommandResult<Arc<Staged>> {
 
 // --- Saving -------------------------------------------------------------------------------
 
-thread_local! {
-    /// The member `settle` writes, chosen by the command that saves ([`with_staged`]).
-    static CHOSEN: RefCell<Option<Arc<Staged>>> = const { RefCell::new(None) };
+/// The background member a save writes, chosen by the command ([`chosen_for_save`]), with its
+/// decoded pixels for the thumbnail (the staging area usually has them decoded already: the
+/// editor's page was drawn with them).
+#[derive(Debug, Clone)]
+pub struct Chosen {
+    pub staged: Arc<Staged>,
+    pub picture: Option<Arc<Picture>>,
 }
 
-/// Runs `save` (a `notes::save_in`, possibly within a split) with `staged` as the background
+thread_local! {
+    /// The member `settle` writes, chosen by the command that saves ([`with_staged`]).
+    static CHOSEN: RefCell<Option<Chosen>> = const { RefCell::new(None) };
+}
+
+/// Runs `save` (a `notes::save_in`, possibly within a split) with `chosen` as the background
 /// member to write when the saved note has an image. `None` keeps the file's own member.
 ///
 /// `save_in` keeps its signature (another part of M7 shares that function), so the choice
 /// reaches [`settle`] through this thread's state, set for the duration of the call.
-pub fn with_staged<T>(staged: Option<Arc<Staged>>, save: impl FnOnce() -> T) -> T {
-    let previous = CHOSEN.with(|chosen| chosen.replace(staged));
+pub fn with_staged<T>(chosen: Option<Chosen>, save: impl FnOnce() -> T) -> T {
+    let previous = CHOSEN.with(|current| current.replace(chosen));
     let result = save();
-    CHOSEN.with(|chosen| *chosen.borrow_mut() = previous);
+    CHOSEN.with(|current| *current.borrow_mut() = previous);
     result
 }
 
 /// Puts the right background member in `file` (as read, still holding the note it was read
 /// with), about to be written with `note`, and returns the note's thumbnail (with its image).
 /// A note whose image was removed loses the member; a note with an image gets the member chosen
-/// by [`with_staged`], else keeps the file's own. A member the note never described (written by
-/// another version) is kept as it is.
+/// by [`with_staged`] (whose decoded pixels draw the thumbnail), else keeps the file's own. A
+/// member the note never described (written by another version) is kept as it is.
 pub fn settle(file: &mut NoteFile, note: &Note) -> Option<Vec<u8>> {
-    if note.background_image.is_none() {
+    let chosen = CHOSEN.with(|current| current.borrow().clone());
+    let picture = if note.background_image.is_none() {
         if file.note.background_image.is_some() {
             file.background = None;
         }
-    } else if let Some(staged) = CHOSEN.with(|chosen| chosen.borrow().clone()) {
-        file.background = Some(staged.file.clone());
-    }
-    let picture = picture_of(note, file.background.as_ref());
-    thumbnail_view(NoteView::new(note, picture.as_ref()))
+        None
+    } else if let Some(chosen) = chosen {
+        file.background = Some(chosen.staged.file.clone());
+        chosen.picture
+    } else {
+        picture_of(note, file.background.as_ref()).map(Arc::new)
+    };
+    thumbnail_view(NoteView::new(note, picture.as_deref()))
 }
 
 /// The decoded pixels of a note's background member; `None` when the note has no image, or
@@ -443,17 +456,44 @@ pub fn picture_of(note: &Note, member: Option<&BackgroundFile>) -> Option<Pictur
     Picture::decode(member?.bytes.clone()).ok()
 }
 
-/// The staged member a save of `note` writes: the one under `key` when the note has an image
-/// and a key (refused with `backgroundMissing` when it is not staged: the note would be
-/// written with the wrong pixels); `None` keeps the file's own member.
+/// The staged member a save of `note` writes, with its pixels: the one under `key` when the
+/// note has an image and a key (refused with `backgroundMissing` when it is not staged: the
+/// note would be written with the wrong pixels); `None` keeps the file's own member (see
+/// [`check_keyless`]).
 pub fn chosen_for_save(
     staging: &Staging,
     note: &Note,
     key: Option<&str>,
-) -> CommandResult<Option<Arc<Staged>>> {
+) -> CommandResult<Option<Chosen>> {
     match (note.background_image.as_ref(), key) {
-        (Some(_), Some(key)) => staged(staging, key).map(Some),
+        (Some(_), Some(key)) => {
+            let staged = staged(staging, key)?;
+            Ok(Some(Chosen {
+                staged,
+                picture: staging.picture(key),
+            }))
+        }
         _ => Ok(None),
+    }
+}
+
+/// A save without staged pixels keeps the file's own member (the editor could not stage the
+/// note's image: its member is missing or unreadable). That member shows the image the file
+/// describes, so the saved note may only describe the same image (the same file name and PDF
+/// page), placed anywhere (rectangle, quarter turns: page operations move it) and at any
+/// opacity; another image, or an image the file does not have, is refused with
+/// `backgroundMissing` (its pixels are not here).
+pub fn check_keyless(on_disk: &Note, note: &Note) -> CommandResult<()> {
+    match (&note.background_image, &on_disk.background_image) {
+        (None, _) => Ok(()),
+        (Some(new), Some(old)) if new.name == old.name && new.pdf_page == old.pdf_page => Ok(()),
+        (Some(new), _) => Err(CommandError::new(
+            "backgroundMissing",
+            format!(
+                "the pixels of the background image {} are not given",
+                new.name
+            ),
+        )),
     }
 }
 
@@ -706,6 +746,7 @@ pub(crate) mod tests {
     use ardoise_render::{Image, RenderOptions, encode_jpeg, encode_png, render_note};
 
     use super::*;
+    use crate::library::list;
     use crate::library::tests::{library, write_sample};
     use crate::notes::{background_png, save_in};
     use crate::operations::{MergeLayout, SplitSpec, merge_in, split_in};
@@ -1036,6 +1077,152 @@ pub(crate) mod tests {
             Some(staging.get(&red.key).unwrap().file.clone())
         );
         assert_eq!(file.note.background_image.map(|i| i.opacity), Some(0.5));
+    }
+
+    /// A note of the library with the red and blue `rouge.png` as its background image.
+    fn with_red_image(library: &Library) -> (PathBuf, FileStamp, Note, Arc<Staged>) {
+        let staging = Staging::default();
+        let saved = write_sample(library, "", "Fiche");
+        let (_d, image) = user_file("rouge.png", &encode_png(&halves(40, 20)).unwrap());
+        let red = stage_file(&staging, &image, None).unwrap();
+        let mut note = library.read(&saved.path).unwrap().file.note;
+        note.background_image = Some(placed("rouge.png", note.page, &red));
+        let chosen = chosen_for_save(&staging, &note, Some(&red.key)).unwrap();
+        let stamp = with_staged(chosen, || {
+            save_in(library, &saved.path, note.clone(), &saved.stamp)
+        })
+        .unwrap();
+        (saved.path, stamp, note, staging.get(&red.key).unwrap())
+    }
+
+    #[test]
+    fn a_save_without_a_key_may_not_describe_another_image() {
+        use crate::notes::save_with_key;
+        let (_dir, library) = library();
+        let (path, stamp, note, red) = with_red_image(&library);
+
+        // The same image, moved by a quarter turn and fainter: its member is the file's.
+        let mut turned = note.clone();
+        if let Some(image) = turned.background_image.as_mut() {
+            image.quarter_turns = 1;
+            image.rect.x += 100.0;
+            image.opacity = 0.5;
+        }
+        let stamp = save_with_key(&library, &path, turned, &stamp, None).unwrap();
+        assert_eq!(
+            library.read(&path).unwrap().file.background,
+            Some(red.file.clone())
+        );
+
+        // Another file, or another page of it: its pixels are not given, nothing is written.
+        for other in [
+            BackgroundImage {
+                name: "bleu.png".into(),
+                ..note.background_image.clone().unwrap()
+            },
+            BackgroundImage {
+                pdf_page: Some(2),
+                ..note.background_image.clone().unwrap()
+            },
+        ] {
+            let mut changed = note.clone();
+            changed.background_image = Some(other);
+            let error = save_with_key(&library, &path, changed.clone(), &stamp, None).unwrap_err();
+            assert_eq!(error.code(), "backgroundMissing");
+            assert_eq!(FileStamp::of(&path).unwrap(), stamp);
+            // A split without a key is refused the same way, before anything is created.
+            let count = list(&library).notes.len();
+            let error = split_in(
+                &library,
+                &path,
+                changed,
+                &stamp,
+                &SplitSpec::Time { at: 120 },
+                "Suite",
+                None,
+            )
+            .unwrap_err();
+            assert_eq!(error.code(), "backgroundMissing");
+            assert_eq!(list(&library).notes.len(), count);
+        }
+
+        // "Save as a copy" without a key: the blank file has no image, so neither its pixels.
+        let blank = library
+            .create(
+                Path::new(""),
+                &NoteFile::new(blank_note("Fiche (copie)", "Calque 1", 1)),
+            )
+            .unwrap();
+        let error =
+            save_with_key(&library, &blank.path, note.clone(), &blank.stamp, None).unwrap_err();
+        assert_eq!(error.code(), "backgroundMissing");
+
+        // Without its image: saved, and the member goes.
+        let mut removed = note;
+        removed.background_image = None;
+        save_with_key(&library, &path, removed, &stamp, None).unwrap();
+        assert_eq!(library.read(&path).unwrap().file.background, None);
+    }
+
+    #[test]
+    fn a_split_after_the_image_was_removed_gives_the_new_note_no_member() {
+        let (_dir, library) = library();
+        let (path, stamp, mut note, _red) = with_red_image(&library);
+        // The editor removed the image (not saved), then splits.
+        note.background_image = None;
+        let result = split_in(
+            &library,
+            &path,
+            note,
+            &stamp,
+            &SplitSpec::Time { at: 120 },
+            "Suite",
+            None,
+        )
+        .unwrap();
+        let created = library.read(Path::new(&result.created.path)).unwrap().file;
+        assert_eq!(
+            (created.note.background_image, created.background),
+            (None, None)
+        );
+        let kept = library.read(&path).unwrap().file;
+        assert_eq!((kept.note.background_image, kept.background), (None, None));
+    }
+
+    #[test]
+    fn the_thumbnail_of_a_save_uses_the_decoded_staged_pixels() {
+        let staging = Staging::default();
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Fiche");
+        let (_d, image) = user_file("rouge.png", &encode_png(&halves(40, 20)).unwrap());
+        let red = stage_file(&staging, &image, None).unwrap();
+        let mut note = library.read(&saved.path).unwrap().file.note;
+        note.background_image = Some(placed("rouge.png", note.page, &red));
+        // The pixels decoded once by the staging area (here, blue ones stand for them): the
+        // save draws the thumbnail with them instead of decoding the member again.
+        let blue = Image {
+            pixels: [10, 10, 200, 255].repeat(16),
+            width: 4,
+            height: 4,
+        };
+        let mut chosen = chosen_for_save(&staging, &note, Some(&red.key))
+            .unwrap()
+            .unwrap();
+        assert!(chosen.picture.is_some());
+        chosen.picture = Some(Arc::new(
+            Picture::decode(encode_png(&blue).unwrap()).unwrap(),
+        ));
+        with_staged(Some(chosen), || {
+            save_in(&library, &saved.path, note, &saved.stamp)
+        })
+        .unwrap();
+        let file = library.read(&saved.path).unwrap().file;
+        assert_eq!(
+            file.background,
+            Some(staging.get(&red.key).unwrap().file.clone())
+        );
+        let thumbnail = ardoise_render::decode_png(file.thumbnail.as_ref().unwrap()).unwrap();
+        assert!(close(rgb(&thumbnail, 5, 100), [10, 10, 200]));
     }
 
     #[test]

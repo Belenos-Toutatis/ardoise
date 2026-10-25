@@ -110,7 +110,7 @@ describe('assembling notes with background images', () => {
     place(AssembleDialog, { lib, notes: listing.notes, onclose: vi.fn() });
     await vi.waitFor(() =>
       expect(document.querySelector('[data-slot="assemble-dropped-images"]')?.textContent).toContain(
-        'Images de fond des autres notes non reprises : 1.',
+        "celle d'une autre note ne sera pas reprise.",
       ),
     );
     cleanup?.();

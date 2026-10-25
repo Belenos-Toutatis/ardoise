@@ -467,7 +467,7 @@
     "handwritingNoRecognizer": "no Windows handwriting recognizer is installed for this language (see the settings)",
     "handwritingFailed": "handwriting recognition failed ({detail})",
     "backgroundUnsupported": "this file is neither a PDF nor a PNG or JPEG image",
-    "backgroundTooLarge": "this file is too large (at most 50 million pixels for an image) ({detail})",
+    "backgroundTooLarge": "this file is too large (an image: at most 50 million pixels and 256 MB; a PDF: at most 512 MB and 10,000 pages) ({detail})",
     "backgroundDamaged": "this file is damaged or unreadable ({detail})",
     "backgroundUnreadable": "this file cannot be opened ({detail})",
     "backgroundMissing": "the background image is no longer in memory; reopen the note and choose the image again",
@@ -588,13 +588,13 @@
     "original": {
       "label": "Original",
       "button": "Back to the original",
-      "helpTablet": "Get the ink back as it came from the tablet, without your edits.",
-      "helpFirst": "Get the ink back as it was before its first edit in Ardoise.",
-      "none": "No original yet: Ardoise keeps the note's ink as it was when you save its first edit.",
+      "helpTablet": "Get the ink back as it came from the tablet, without your edits (with the tablet orientation currently chosen in the settings).",
+      "helpFirst": "Get back the ink of the first saved version that had any, without the edits made since.",
+      "none": "No original yet: the first time you save a change of the ink, Ardoise keeps the version before it, if it had any ink.",
       "loading": "Looking for the original…",
       "confirmTitle": "Go back to the original?",
-      "confirmLost": "Your edits of the ink are lost: strokes added, erased, moved, straightened or recoloured, layers, page rotation and cropping.",
-      "confirmKept": "The title, tags, favourite, page background and narration stay as they are.",
+      "confirmLost": "Your edits of the ink will be lost: strokes added, erased, moved, straightened or recoloured, layers, page rotation and cropping.",
+      "confirmKept": "The title, tags, favourite, paper and narration stay as they are. The background image stays too: it goes back to its original place if the note already had it, otherwise it is placed upright on the restored page.",
       "confirmUndo": "You can still undo (Ctrl+Z); save to keep the result.",
       "confirm": "Back to the original",
       "cancel": "Cancel",
@@ -1294,7 +1294,8 @@
       "done": "Notes created: {count}"
     },
     "assemble": {
-      "dropped": "Only the first note's background image is kept. Background images of the other notes left out: {count}."
+      "droppedOne": "Only the first note's background image is kept: one other note's will not be carried over.",
+      "droppedMany": "Only the first note's background image is kept: those of the {count} other notes will not be carried over."
     }
   }
 }

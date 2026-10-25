@@ -688,6 +688,78 @@ describe('note editor', () => {
     expect(target.querySelector('[data-disk]')?.textContent).toContain('Enregistrer comme copie');
   });
 
+  /** The note disappeared and the creation of the copy waits for `open()`. */
+  async function copyWaiting(title: string) {
+    const rendered = await render(title);
+    mockLibrary().notes.delete(rendered.path);
+    notifyLibraryChanged();
+    await vi.waitFor(() => expect(rendered.target.querySelector('[data-disk="missing"]')).toBeTruthy());
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const createNote = api.createNote;
+    vi.spyOn(api, 'createNote').mockImplementation(async (binder, name) => {
+      await gate;
+      return createNote(binder, name);
+    });
+    return { ...rendered, open };
+  }
+
+  it('goes back to the library only once a copy being saved is written', async () => {
+    const { button, onclose, onsaved, open } = await copyWaiting('Liste de courses');
+    try {
+      button('Enregistrer comme copie').click();
+      button('Bibliothèque').click();
+      button('Bibliothèque').click();
+      await flush();
+      expect(onclose).not.toHaveBeenCalled();
+      open();
+      await vi.waitFor(() => expect(onclose).toHaveBeenCalledTimes(1));
+      // The copy was written first, and announced.
+      expect(onsaved).toHaveBeenCalledTimes(1);
+      expect(mockLibrary().notes.get(onsaved.mock.calls[0][0] as string)?.note.strokes).toHaveLength(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('releases the background images only after the writes still queued when it goes away', async () => {
+    const { button, open } = await copyWaiting('Liste de courses');
+    try {
+      const save = vi.spyOn(api, 'saveNote');
+      const release = vi.spyOn(api, 'releaseBackgroundImages');
+      button('Enregistrer comme copie').click();
+      cleanup?.();
+      cleanup = null;
+      await flush();
+      expect(release).not.toHaveBeenCalled();
+      open();
+      await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(save.mock.invocationCallOrder[0]).toBeLessThan(release.mock.invocationCallOrder[0]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('leaves no blank copy behind when the copy cannot be written', async () => {
+    const { target, button } = await render('Cours de physique');
+    const before = new Set(mockLibrary().notes.keys());
+    const path = [...before].find((p) => p.includes('Cours de physique'))!;
+    mockLibrary().notes.delete(path);
+    notifyLibraryChanged();
+    await vi.waitFor(() => expect(target.querySelector('[data-disk="missing"]')).toBeTruthy());
+    vi.spyOn(api, 'saveNote').mockRejectedValue({ code: 'backgroundMissing', message: 'mock-1' });
+    try {
+      button('Enregistrer comme copie').click();
+      await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toContain("l'image de fond n'est plus en mémoire"));
+      // Nothing new in the library: the blank note made for the copy went to the trash.
+      const added = [...mockLibrary().notes.keys()].filter((p) => !before.has(p));
+      expect(added).toEqual([]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('saves after a pending rename, with the new path and stamp', async () => {
     const { path, target, drag, button, typeTitle, blurTitle, onsaved } = await render('Liste de courses');
     await drag(line(5000, 15000, 15000));
@@ -715,17 +787,19 @@ describe('note editor', () => {
     expect(stored.strokes).toHaveLength(2);
   });
 
-  it('calls no one back once closed: a rename finishing after Back', async () => {
+  it('goes back once a rename under way is done, after announcing the new path', async () => {
     const { button, typeTitle, blurTitle, onclose, onsaved } = await render('Liste de courses');
     typeTitle('Courses du samedi');
     blurTitle();
     button('Bibliothèque').click();
-    expect(onclose).toHaveBeenCalledTimes(1);
-    await flush();
-    await flush();
-    // The rename itself went through.
+    await vi.waitFor(() => expect(onclose).toHaveBeenCalledTimes(1));
+    // The rename itself went through, and the library heard of it first.
     expect([...mockLibrary().notes.keys()].some((p) => p.includes('Courses du samedi'))).toBe(true);
-    expect(onsaved).not.toHaveBeenCalled();
+    expect(onsaved).toHaveBeenCalledTimes(1);
+    expect(onsaved.mock.calls[0][0]).toContain('Courses du samedi');
+    expect(onsaved.mock.invocationCallOrder[0]).toBeLessThan(onclose.mock.invocationCallOrder[0]);
+    await flush();
+    expect(onsaved).toHaveBeenCalledTimes(1);
   });
 
   it('calls no one back once destroyed: a save finishing after unmount', async () => {

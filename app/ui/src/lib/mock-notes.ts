@@ -50,11 +50,14 @@ function keepOriginal(entry: StoredNote, next: Note): void {
   if (entry.original || before.strokes.length === 0) return;
   const ink = (n: Note) => JSON.stringify([n.page, n.layers, n.strokes]);
   if (ink(before) === ink(next)) return;
+  const tablet = before.origin.kind === 'tablet';
   entry.original = copy({
-    source: before.origin.kind === 'tablet' ? 'tablet' : 'firstVersion',
+    source: tablet ? 'tablet' : 'firstVersion',
     page: before.page,
     layers: before.layers,
     strokes: before.strokes,
+    // The first version's `note.json` describes its background image (a tablet page has none).
+    ...(!tablet && before.backgroundImage ? { backgroundImage: before.backgroundImage } : {}),
   });
 }
 

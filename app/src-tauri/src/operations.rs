@@ -6,22 +6,21 @@
 //! its sources alone. Nothing is lost whichever step fails.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use ardoise_core::format::{BackgroundFile, NoteFile};
 use ardoise_core::library::{FileStamp, Library, LibraryError};
 use ardoise_core::note::{ImageRect, Note, PageSize};
 use ardoise_core::ops::{self, NewNote, OpsError};
-use ardoise_render::picture;
+use ardoise_render::{NoteView, picture};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::AppContext;
-use crate::background::{self, Staged};
+use crate::background::{self, Chosen};
 use crate::commands::{CommandError, CommandResult};
 use crate::library::{NoteSummary, library_error, library_of, now_ms, summary_of};
-use crate::notes::save_in;
-use crate::thumbnails::file_thumbnail;
+use crate::notes::{blocking, save_in};
+use crate::thumbnails::{file_thumbnail, thumbnail_view};
 
 /// `SplitSpec` in `note.ts`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -93,7 +92,8 @@ fn binder_of(library: &Library, path: &Path) -> Result<PathBuf, LibraryError> {
 /// of the file it was opened from). The new note goes into the same binder, titled `title`; the
 /// kept part is then saved over `path` with the stamp check. If that save fails, the new note is
 /// moved to the trash and the error is returned. Both notes keep the background image, with
-/// the pixels `image` (staged by the editor), else those of the file.
+/// the pixels `image` (staged by the editor), else those of the file (which must then show the
+/// image the note describes: `background::check_keyless`).
 pub fn split_in(
     library: &Library,
     path: &Path,
@@ -101,13 +101,16 @@ pub fn split_in(
     stamp: &FileStamp,
     split: &SplitSpec,
     title: &str,
-    image: Option<Arc<Staged>>,
+    image: Option<Chosen>,
 ) -> CommandResult<SplitResult> {
     let binder = binder_of(library, path).map_err(library_error)?;
     // Refused early, before anything is created, if the file has changed since it was opened.
     let loaded = library.read(path).map_err(library_error)?;
     if loaded.stamp != *stamp {
         return Err(library_error(LibraryError::Conflict { path: loaded.path }));
+    }
+    if image.is_none() {
+        background::check_keyless(&loaded.file.note, &note)?;
     }
 
     let new = new_note(title);
@@ -118,13 +121,20 @@ pub fn split_in(
     .map_err(ops_error)?;
 
     let mut extracted = NoteFile::new(parts.extracted);
-    // A page background image or PDF belongs to the page, so it goes with the new note too (a
-    // member the note does not describe goes along unchanged, as the kept part keeps it).
+    // A page background image or PDF belongs to the page, so it goes with the new note too;
+    // a new note without an image (the editor removed it) gets no member.
     extracted.background = match (&extracted.note.background_image, &image) {
-        (Some(_), Some(staged)) => Some(staged.file.clone()),
-        _ => loaded.file.background.clone(),
+        (None, _) => None,
+        (Some(_), Some(chosen)) => Some(chosen.staged.file.clone()),
+        (Some(_), None) => loaded.file.background.clone(),
     };
-    extracted.thumbnail = file_thumbnail(&extracted);
+    extracted.thumbnail = match &image {
+        // The staged pixels are decoded already.
+        Some(chosen) if extracted.note.background_image.is_some() => {
+            thumbnail_view(NoteView::new(&extracted.note, chosen.picture.as_deref()))
+        }
+        _ => file_thumbnail(&extracted),
+    };
     let created = library.create(&binder, &extracted).map_err(library_error)?;
 
     let kept = background::with_staged(image, || save_in(library, path, parts.kept, stamp));
@@ -220,16 +230,22 @@ pub async fn split_note(
     title: String,
     image_key: Option<String>,
 ) -> CommandResult<SplitResult> {
-    let image = background::chosen_for_save(background::staging(), &note, image_key.as_deref())?;
-    split_in(
-        &library_of(&context)?,
-        Path::new(&path),
-        note,
-        &stamp,
-        &split,
-        &title,
-        image,
-    )
+    let library = library_of(&context)?;
+    // Reading, rendering the thumbnails and writing two notes: off the async runtime's threads.
+    blocking(move || {
+        let image =
+            background::chosen_for_save(background::staging(), &note, image_key.as_deref())?;
+        split_in(
+            &library,
+            Path::new(&path),
+            note,
+            &stamp,
+            &split,
+            &title,
+            image,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -239,7 +255,8 @@ pub async fn merge_notes(
     layout: MergeLayout,
     title: String,
 ) -> CommandResult<NoteSummary> {
-    merge_in(&library_of(&context)?, &paths, layout, &title)
+    let library = library_of(&context)?;
+    blocking(move || merge_in(&library, &paths, layout, &title)).await
 }
 
 #[cfg(test)]
@@ -523,28 +540,52 @@ mod tests {
 
     #[test]
     fn a_split_carries_the_background_file_to_the_new_note() {
-        let (_dir, library) = library();
-        let mut file = NoteFile::new(sample_note("Fond"));
-        file.background = Some(BackgroundFile {
-            extension: "png".to_owned(),
-            bytes: b"not really a png".to_vec(),
-        });
-        let saved = library.create(Path::new(""), &file).unwrap();
-        let opened = library.read(&saved.path).unwrap();
-        let result = split_in(
-            &library,
-            &saved.path,
-            opened.file.note.clone(),
-            &opened.stamp,
-            &SplitSpec::Time { at: 120 },
-            "Suite",
-            None,
-        )
-        .unwrap();
-        let created = read_note(Path::new(&result.created.path)).unwrap();
-        assert_eq!(created.background, file.background);
-        // The kept note still has its own.
-        assert_eq!(read_note(&saved.path).unwrap().background, file.background);
+        for described in [true, false] {
+            let (_dir, library) = library();
+            let mut note = sample_note("Fond");
+            if described {
+                note.background_image = Some(ardoise_core::note::BackgroundImage {
+                    name: "fond.png".into(),
+                    pdf_page: None,
+                    rect: ImageRect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: note.page.width as f32,
+                        height: note.page.height as f32,
+                    },
+                    quarter_turns: 0,
+                    opacity: 1.0,
+                });
+            }
+            let mut file = NoteFile::new(note);
+            file.background = Some(BackgroundFile {
+                extension: "png".to_owned(),
+                bytes: b"not really a png".to_vec(),
+            });
+            let saved = library.create(Path::new(""), &file).unwrap();
+            let opened = library.read(&saved.path).unwrap();
+            let result = split_in(
+                &library,
+                &saved.path,
+                opened.file.note.clone(),
+                &opened.stamp,
+                &SplitSpec::Time { at: 120 },
+                "Suite",
+                None,
+            )
+            .unwrap();
+            let created = read_note(Path::new(&result.created.path)).unwrap();
+            // The new note gets the member with the image; a member no image describes
+            // (written by another version) is not copied into a note that has no image.
+            let expected = if described {
+                file.background.clone()
+            } else {
+                None
+            };
+            assert_eq!(created.background, expected);
+            // The kept note still has its own.
+            assert_eq!(read_note(&saved.path).unwrap().background, file.background);
+        }
     }
 
     fn three_notes(library: &Library) -> Vec<String> {

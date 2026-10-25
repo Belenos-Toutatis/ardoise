@@ -11,13 +11,20 @@
 //!   changed afterwards.
 //!
 //! Only the page size, the layers and the strokes come back; the title, tags, favourite,
-//! background and narration stay as they are now.
+//! paper and narration stay as they are now. The first version also gives the placement of its
+//! background image (the `backgroundImage` of the `note.json` in `original.ardoise`, whose
+//! pixels are not in it): the editor puts the current image back where it was when it is the
+//! same image (`lib/editor/original.ts`). The tablet's pages have no image.
+//!
+//! The tablet's bytes are decoded with today's settings (the hand, the registered tablet's
+//! area): a note synced with the other hand, or from another tablet model, comes back in the
+//! geometry of today's settings (`docs/design/extras.md`).
 
 use std::path::Path;
 
 use ardoise_core::format::{FormatError, NoteFile, read_from_bytes, to_bytes};
 use ardoise_core::library::Library;
-use ardoise_core::note::{Layer, Note, PageSize};
+use ardoise_core::note::{BackgroundImage, Layer, Note, PageSize};
 use ardoise_core::settings::{Hand, Settings};
 use ardoise_device::identity;
 use ardoise_device::pages::note_from_page;
@@ -43,11 +50,14 @@ pub enum NoteOriginal {
         layers: Vec<Layer>,
         strokes: Vec<Stroke>,
     },
-    /// As it was before its first edit in Ardoise (`original.ardoise`).
+    /// As it was before its first edit in Ardoise (`original.ardoise`), with the placement of
+    /// the background image it had then (its pixels are the note file's, if it still has them).
     FirstVersion {
         page: PageSize,
         layers: Vec<Layer>,
         strokes: Vec<Stroke>,
+        #[serde(rename = "backgroundImage", skip_serializing_if = "Option::is_none")]
+        background_image: Option<BackgroundImage>,
     },
 }
 
@@ -138,6 +148,7 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
             page: note.page,
             layers: note.layers,
             strokes: note.strokes,
+            background_image: note.background_image,
         });
     }
     Ok(NoteOriginal::None)
@@ -159,12 +170,18 @@ pub async fn note_original(
     path: String,
 ) -> CommandResult<NoteOriginal> {
     let library = library_of(&context)?;
-    let settings = match &context.store {
-        Ok(store) => store.load().unwrap_or_default(),
-        Err(_) => Settings::default(),
-    };
-    let tablet = TabletContext::of(library.root(), &settings, context.system_locale.as_deref());
-    original_in(&library, Path::new(&path), &tablet)
+    let store = context.store.clone().ok();
+    let locale = context.system_locale.clone();
+    // Reading the settings and the note, decoding the tablet's bytes: off the async runtime's
+    // threads.
+    crate::notes::blocking(move || {
+        let settings = store
+            .and_then(|store| store.load().ok())
+            .unwrap_or_default();
+        let tablet = TabletContext::of(library.root(), &settings, locale.as_deref());
+        original_in(&library, Path::new(&path), &tablet)
+    })
+    .await
 }
 
 #[cfg(test)]

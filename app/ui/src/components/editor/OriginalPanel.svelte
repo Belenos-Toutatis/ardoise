@@ -2,8 +2,10 @@
   /**
    * "Revenir à l'original" (SPEC §4.4): the ink as it came from the tablet, or as it was before
    * its first edit, after a confirmation that says what is lost and what stays. Disabled, with
-   * the reason, while the note has no original.
+   * the reason, while the note has no original. The confirmation takes the focus (on its Cancel
+   * button, the harmless one) when it opens, and gives it back to the button when it closes.
    */
+  import { tick } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
   import type { NoteOriginal } from '../../lib/original';
 
@@ -23,6 +25,21 @@
   } = $props();
 
   let confirming = $state(false);
+  let openButton = $state<HTMLButtonElement>();
+  let cancelButton = $state<HTMLButtonElement>();
+
+  async function ask() {
+    confirming = true;
+    await tick();
+    cancelButton?.focus();
+  }
+
+  async function settle(revert: boolean) {
+    confirming = false;
+    if (revert) onrevert();
+    await tick();
+    openButton?.focus();
+  }
 
   const available = $derived(original !== null && original.source !== 'none');
   const help = $derived(
@@ -53,14 +70,17 @@
           type="button"
           class="button small-button danger"
           data-action="original-confirm"
-          onclick={() => {
-            confirming = false;
-            onrevert();
-          }}
+          onclick={() => void settle(true)}
         >
           {t('editor.original.confirm')}
         </button>
-        <button type="button" class="button small-button" onclick={() => (confirming = false)}>
+        <button
+          type="button"
+          class="button small-button"
+          data-action="original-cancel"
+          bind:this={cancelButton}
+          onclick={() => void settle(false)}
+        >
           {t('editor.original.cancel')}
         </button>
       </div>
@@ -73,7 +93,8 @@
         data-action="original"
         disabled={disabled || !available}
         title={help}
-        onclick={() => (confirming = true)}
+        bind:this={openButton}
+        onclick={() => void ask()}
       >
         <span aria-hidden="true">↺</span>
         {t('editor.original.button')}
