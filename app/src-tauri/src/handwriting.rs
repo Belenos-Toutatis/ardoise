@@ -457,6 +457,62 @@ mod tests {
         indexer.shutdown();
     }
 
+    /// Windows' engine, the cache and the indexer together: the demo note written by hand is found
+    /// by a word of its handwriting, and the words the end-to-end journeys look for in titles are
+    /// found nowhere in the demo handwriting. Skipped without the French recognizer.
+    #[cfg(windows)]
+    #[test]
+    fn the_demo_note_is_found_by_its_handwriting() {
+        use std::time::Instant;
+        let recognizer = Arc::new(SystemRecognizer::new());
+        let installed = ardoise_hwr::Recognizer::recognizers(&*recognizer).unwrap_or_default();
+        if ardoise_hwr::recognizer_for(&installed, Language::Fr).is_none() {
+            println!("skipped: no French handwriting recognizer on this PC");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Démo");
+        crate::demo::create_demo_library(&root).unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let library = root.clone();
+        let indexer = Indexer::start(Services {
+            background: recognizer.clone(),
+            on_demand: recognizer,
+            config: Box::new(move || IndexConfig {
+                library: Some(library.clone()),
+                setting: HandwritingLanguage::Auto,
+                interface: Language::Fr,
+            }),
+            busy: Box::new(|| false),
+            notify: Box::new(|_| {}),
+            cache_dir: cache.path().to_path_buf(),
+            pause_poll: Duration::from_millis(5),
+        });
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            let status = indexer.status();
+            if status.state == indexer::IndexState::Idle && status.total == 8 {
+                assert_eq!((status.done, status.failed), (8, 0));
+                break;
+            }
+            assert!(Instant::now() < deadline, "indexing too slow: {status:?}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let hits = indexer.search("lumiere");
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert!(hits[0].path.contains("Cours d'optique"), "{hits:?}");
+        assert_eq!(hits[0].excerpt.word, "lumière");
+        assert_eq!(indexer.search("LIGNE droite").len(), 1);
+        for word in ["energie", "bout", "journey", "electron", "lumi\u{e8}res"] {
+            assert!(
+                indexer.search(word).is_empty(),
+                "{word}: {:?}",
+                indexer.search(word)
+            );
+        }
+        indexer.shutdown();
+    }
+
     /// No engine, as outside Windows.
     struct Unsupported;
 
