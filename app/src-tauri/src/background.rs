@@ -19,6 +19,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::Read;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
@@ -123,35 +124,49 @@ pub struct BackgroundSource {
     pub pages: Vec<PageInfo>,
 }
 
-/// The kind of `bytes`: a PDF (`%PDF-` within the first kilobyte, as readers allow), or a PNG
-/// or JPEG image.
-fn kind_of(bytes: &[u8]) -> Result<SourceKind, CommandError> {
-    let head = bytes.get(..bytes.len().min(1024)).unwrap_or_default();
+/// The kind of a file from its first kilobyte: a PDF (`%PDF-` anywhere in it, as readers
+/// allow), or a PNG or JPEG image.
+fn kind_of(head: &[u8]) -> Result<SourceKind, CommandError> {
+    let head = head.get(..head.len().min(1024)).unwrap_or_default();
     if head.windows(5).any(|w| w == b"%PDF-") {
         Ok(SourceKind::Pdf)
-    } else if picture::PictureFormat::sniff(bytes).is_some() {
+    } else if picture::PictureFormat::sniff(head).is_some() {
         Ok(SourceKind::Image)
     } else {
         Err(picture_error(PictureError::Unsupported))
     }
 }
 
-/// The file at `path`, read whole (refused when larger than a PDF or an image may be).
-fn read_source(path: &Path) -> CommandResult<Vec<u8>> {
+/// The file at `path`, read whole, and its kind: its first kilobyte says what it is, and a file
+/// larger than its kind may be is refused before the rest is read.
+fn read_source(path: &Path) -> CommandResult<(Vec<u8>, SourceKind)> {
     let read_error = |error: std::io::Error| {
         CommandError::new(
             "backgroundUnreadable",
             format!("{}: {error}", path.display()),
         )
     };
-    let size = std::fs::metadata(path).map_err(read_error)?.len();
-    if size > (pdf_pages::MAX_PDF_BYTES as u64).max(MAX_IMAGE_BYTES) {
-        return Err(picture_error(PictureError::TooLarge {
-            width: 0,
-            height: 0,
-        }));
+    let mut file = std::fs::File::open(path).map_err(read_error)?;
+    let size = file.metadata().map_err(read_error)?.len();
+    let mut head = Vec::with_capacity(1024);
+    (&mut file)
+        .take(1024)
+        .read_to_end(&mut head)
+        .map_err(read_error)?;
+    let kind = kind_of(&head)?;
+    let limit = match kind {
+        SourceKind::Pdf => pdf_pages::MAX_PDF_BYTES as u64,
+        SourceKind::Image => MAX_IMAGE_BYTES,
+    };
+    if size > limit {
+        return Err(CommandError::new(
+            "backgroundTooLarge",
+            format!("{size} bytes, at most {limit}"),
+        ));
     }
-    std::fs::read(path).map_err(read_error)
+    let mut bytes = head;
+    file.read_to_end(&mut bytes).map_err(read_error)?;
+    Ok((bytes, kind))
 }
 
 fn file_name(path: &Path) -> String {
@@ -162,8 +177,7 @@ fn file_name(path: &Path) -> String {
 
 /// What the file at `path` holds (for the page chooser).
 pub fn inspect(path: &Path) -> CommandResult<BackgroundSource> {
-    let bytes = read_source(path)?;
-    let kind = kind_of(&bytes)?;
+    let (bytes, kind) = read_source(path)?;
     let pages = match kind {
         SourceKind::Pdf => pdf_pages::page_sizes(&bytes)
             .map_err(pdf_error)?
@@ -329,8 +343,7 @@ pub fn stage_file(
     path: &Path,
     pdf_page: Option<u32>,
 ) -> CommandResult<StagedBackground> {
-    let bytes = read_source(path)?;
-    let kind = kind_of(&bytes)?;
+    let (bytes, kind) = read_source(path)?;
     let stored = import(&bytes, kind, pdf_page)?;
     let (width, height) = (stored.width, stored.height);
     let key = staging.put(Staged {
@@ -546,8 +559,7 @@ pub fn notes_from_file_in(
     pages: Option<&[u32]>,
     layer_name: &str,
 ) -> CommandResult<Vec<NoteSummary>> {
-    let bytes = read_source(path)?;
-    let kind = kind_of(&bytes)?;
+    let (bytes, kind) = read_source(path)?;
     let name = file_name(path);
     let binder = binder_path(binder);
     let now = now_ms();
