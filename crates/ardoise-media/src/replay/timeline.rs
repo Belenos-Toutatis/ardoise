@@ -322,7 +322,7 @@ impl<'n> Timeline<'n> {
             modified: note.modified,
             page: note.page,
             background: note.background,
-            background_image: None,
+            background_image: note.background_image.clone(),
             tags: note.tags.clone(),
             favorite: note.favorite,
             layers: note.layers.clone(),

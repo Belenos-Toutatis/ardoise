@@ -850,3 +850,50 @@ fn merge_never_modifies_its_sources_and_is_finite() {
         assert_eq!(notes, before);
     }
 }
+
+// --- background images --------------------------------------------------------------------
+
+fn with_image(mut note: Note, name: &str) -> Note {
+    note.background_image = Some(BackgroundImage {
+        name: name.to_owned(),
+        pdf_page: Some(2),
+        rect: ImageRect {
+            x: -500.0,
+            y: 300.0,
+            width: 21_000.0,
+            height: 9_000.0,
+        },
+        quarter_turns: 1,
+        opacity: 0.6,
+    });
+    note
+}
+
+#[test]
+fn both_halves_of_a_split_keep_the_background_image() {
+    let source = with_image(timed_note(), "fiche.pdf");
+    let split = split_at_time(&source, 1000, new_note("Suite")).unwrap();
+    assert_eq!(split.kept.background_image, source.background_image);
+    assert_eq!(split.extracted.background_image, source.background_image);
+    let source = with_image(zone_note(), "fiche.pdf");
+    let split = split_by_zone(&source, &SQUARE, new_note("Zone")).unwrap();
+    assert_eq!(split.kept.background_image, source.background_image);
+    assert_eq!(split.extracted.background_image, source.background_image);
+}
+
+#[test]
+fn merge_keeps_only_the_first_background_image_where_it_was() {
+    let [a, b] = two_notes();
+    let (a, b) = (with_image(a, "premier.png"), with_image(b, "second.png"));
+    assert_eq!(dropped_images(&[a.clone(), b.clone()]), 1);
+    assert_eq!(dropped_images(&[a.clone(), two_notes()[1].clone()]), 0);
+    assert_eq!(dropped_images(&[two_notes()[0].clone(), b.clone()]), 1);
+    for layout in [MergeLayout::Overlay, MergeLayout::EndToEnd] {
+        let merged = merge(&[a.clone(), b.clone()], layout, new_note("M")).unwrap();
+        // The first note stays at the top left, like its strokes: its image does not move.
+        assert_eq!(merged.background_image, a.background_image, "{layout:?}");
+        assert_eq!(merged.strokes[0].points, a.strokes[0].points);
+        let merged = merge(&[two_notes()[0].clone(), b.clone()], layout, new_note("M")).unwrap();
+        assert_eq!(merged.background_image, None, "{layout:?}");
+    }
+}

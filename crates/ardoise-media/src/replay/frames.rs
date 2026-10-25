@@ -20,7 +20,9 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use ardoise_render::{Backdrop, PageCanvas, PixelRect, PreparedStroke, image_size, paper_color};
+use ardoise_render::{
+    Backdrop, NoteView, PageCanvas, Picture, PixelRect, PreparedStroke, image_size, paper_color,
+};
 
 use super::timeline::{Timeline, frame_time};
 use crate::{MediaError, VideoSettings};
@@ -113,6 +115,16 @@ impl<'n> FrameRenderer<'n> {
     /// [`MediaError::Render`] when the page cannot be drawn at that size (an empty page, or
     /// one so elongated that a side would round to nothing).
     pub fn new(timeline: Timeline<'n>, settings: &FrameSettings) -> Result<Self, MediaError> {
+        Self::with_picture(timeline, settings, None)
+    }
+
+    /// Like [`FrameRenderer::new`], with the pixels of the note's background image (drawn
+    /// under the strokes in every frame on [`Backdrop::Paper`]).
+    pub fn with_picture(
+        timeline: Timeline<'n>,
+        settings: &FrameSettings,
+        picture: Option<&Picture>,
+    ) -> Result<Self, MediaError> {
         let (width, height) = (settings.width, settings.height);
         if width == 0 || height == 0 || width > MAX_FRAME_SIDE || height > MAX_FRAME_SIDE {
             return Err(MediaError::InvalidSettings(format!(
@@ -133,7 +145,7 @@ impl<'n> FrameRenderer<'n> {
             }
             scale = scale.next_down();
         }
-        let paper = PageCanvas::new(note, scale, settings.backdrop)?;
+        let paper = PageCanvas::new(NoteView::new(note, picture), scale, settings.backdrop)?;
         let (Some(free_x), Some(free_y)) = (
             width.checked_sub(paper.width()),
             height.checked_sub(paper.height()),

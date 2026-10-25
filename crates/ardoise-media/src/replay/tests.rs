@@ -1084,3 +1084,50 @@ fn replay_performance() {
         }
     }
 }
+
+#[test]
+fn every_frame_shows_the_background_image_under_the_strokes() {
+    use ardoise_core::note::{BackgroundImage, ImageRect};
+    use ardoise_render::{NoteView, Picture, encode_png};
+
+    let pixels = Image {
+        width: 8,
+        height: 4,
+        pixels: (0..32u32)
+            .flat_map(|i| [200, (i * 7) as u8, 40, 255])
+            .collect(),
+    };
+    let picture = Picture::decode(encode_png(&pixels).unwrap()).unwrap();
+    let mut n = three_strokes();
+    n.background_image = Some(BackgroundImage {
+        name: "fiche.png".into(),
+        pdf_page: None,
+        rect: ImageRect {
+            x: 1000.0,
+            y: -500.0,
+            width: 3000.0,
+            height: 3000.0,
+        },
+        quarter_turns: 3,
+        opacity: 0.75,
+    });
+    let view = NoteView::new(&n, Some(&picture));
+    let t = Timeline::new(&n, &options(4.0, None)).unwrap();
+    let mut frames = FrameRenderer::with_picture(t, &settings(300, 200), Some(&picture)).unwrap();
+    let scale = frames.placement().scale;
+    // The first frame: the page with its image and the first sample; the last: everything.
+    let begun = frames.timeline().note_at(frames.frame_time(0));
+    let first = frames.render_frame(0).unwrap().to_vec();
+    let expected = render_note(NoteView::new(&begun, Some(&picture)), &opts(scale)).unwrap();
+    assert_eq!(first, expected.pixels);
+    let last = frames.frame_count() - 1;
+    let frame = frames.render_frame(last).unwrap();
+    assert_eq!(
+        frame,
+        render_note(view, &opts(scale)).unwrap().pixels.as_slice()
+    );
+    // Without the pixels, the frames are those of the plain page.
+    let t = Timeline::new(&n, &options(4.0, None)).unwrap();
+    let mut plain = FrameRenderer::new(t, &settings(300, 200)).unwrap();
+    assert_ne!(plain.render_frame(0).unwrap(), first.as_slice());
+}

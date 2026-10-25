@@ -7,7 +7,7 @@
 use ardoise_ink::{Point, Stroke};
 
 use crate::library::normalize_tags;
-use crate::note::{Layer, Note, Origin, PageSize, Timing};
+use crate::note::{BackgroundImage, ImageRect, Layer, Note, Origin, PageSize, Timing};
 
 /// Longest side of a page [`merge`] accepts: 100 m, in device units (10 µm).
 pub const MAX_PAGE_SIDE: u32 = 10_000_000;
@@ -214,6 +214,15 @@ pub fn split_by_zone(note: &Note, polygon: &[[f32; 2]], new: NewNote) -> Result<
     })
 }
 
+/// How many background images [`merge`] leaves out: those of every note but the first.
+pub fn dropped_images(notes: &[Note]) -> usize {
+    notes
+        .iter()
+        .skip(1)
+        .filter(|note| note.background_image.is_some())
+        .count()
+}
+
 /// The name of a source note's layer in the merged note (overlay): the layer's own name
 /// prefixed with the note's title when the note has several layers, the title alone when it has
 /// one (the layer's name when the title is empty).
@@ -235,7 +244,12 @@ fn overlay_layer_name(note: &Note, layer: &Layer) -> String {
 ///   has the layer; visible if the layer is visible in any note that has it).
 ///
 /// Background (of the first note), tags (union) and `created` (of the first note) follow;
-/// timing is [`Timing::Synthesized`] if any note's is. Times are made sequential: the first note
+/// the first note's background image comes along, moved like its strokes (the first note stays
+/// at the top-left corner in both layouts, so it does not move), and the other notes' images
+/// are dropped ([`dropped_images`]). An image reaching beyond the first note's page would now
+/// cover part of another note: the caller, which has the pixels, cuts it to that page
+/// (`ardoise_render::picture::crop_to`). Timing is [`Timing::Synthesized`] if any note's is.
+/// Times are made sequential: the first note
 /// keeps its times, each other note starts [`MERGE_GAP_MS`] after the previous one ends, so
 /// that the replay plays the notes in order. A stroke on a layer its note does not have is put
 /// on the note's last layer. The result is a new note of this app, not a favourite.
@@ -336,8 +350,13 @@ pub fn merge(notes: &[Note], layout: MergeLayout, new: NewNote) -> Result<Note, 
         modified: new.now,
         page,
         background: first.background,
-        // TODO(M7 background agent): offset/clip it for side-by-side assembly.
-        background_image: first.background_image.clone(),
+        background_image: first.background_image.clone().map(|image| BackgroundImage {
+            rect: ImageRect {
+                y: image.rect.y + y_offset[0],
+                ..image.rect
+            },
+            ..image
+        }),
         tags: normalize_tags(&tags),
         favorite: false,
         layers,

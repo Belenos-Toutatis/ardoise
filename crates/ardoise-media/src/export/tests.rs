@@ -1104,3 +1104,43 @@ fn temporary_files_are_hidden_next_to_the_destination() {
     assert!(name.encode_utf16().count() <= 255);
     assert!(name.ends_with(".part"));
 }
+
+#[test]
+fn the_pipeline_draws_the_background_image_in_every_frame() {
+    use ardoise_core::note::{BackgroundImage, ImageRect};
+    use ardoise_render::{Image, NoteView, Picture, encode_png};
+
+    let red = Image {
+        width: 2,
+        height: 2,
+        pixels: [220, 30, 30, 255].repeat(4),
+    };
+    let picture = Picture::decode(encode_png(&red).unwrap()).unwrap();
+    let mut note = sample_note();
+    note.background_image = Some(BackgroundImage {
+        name: "rouge.png".into(),
+        pdf_page: None,
+        rect: ImageRect {
+            x: 0.0,
+            y: 0.0,
+            width: note.page.width as f32,
+            height: note.page.height as f32,
+        },
+        quarter_turns: 0,
+        opacity: 1.0,
+    });
+    let options = export(gif());
+    let mut job = Job::new(NoteView::new(&note, Some(&picture)), &options, None).unwrap();
+    let mut recording = Recording::default();
+    job.push_frames(&mut recording, &mut |_| {}, &AtomicBool::new(false))
+        .unwrap();
+    // The page fills the frame's middle row: red paper there in every frame.
+    let (width, height) = (options.width as usize, options.height as usize);
+    let centre = ((height / 2) * width + 2) * 4;
+    for frame in &recording.frames {
+        assert_eq!(frame[centre..centre + 3], [220, 30, 30]);
+    }
+    // Without the pixels, the plain paper.
+    let (_, plain) = record(&note, &options, None);
+    assert_ne!(plain.frames[0][centre..centre + 3], [220, 30, 30]);
+}

@@ -34,7 +34,7 @@ use std::time::Duration;
 
 use ardoise_core::fsutil;
 use ardoise_core::note::{Note, PageSize};
-use ardoise_render::Backdrop;
+use ardoise_render::{Backdrop, NoteView};
 
 use crate::narration::Narration;
 use crate::opus::samples_to_duration;
@@ -283,11 +283,12 @@ fn audio_frames_before(frame: u64, frame_rate: u32) -> u64 {
 /// `cancel` is checked before every frame, after the last one (before the sink's final flush)
 /// and before the rename, and stops the export with [`MediaError::Cancelled`]. On any error
 /// the temporary file is removed and `path` is left untouched. `openh264` is the MP4 fallback
-/// when the user allows it.
-pub fn export_animation(
-    note: &Note,
+/// when the user allows it. The note's background image is in every frame when `note` is a
+/// [`NoteView`] with its pixels.
+pub fn export_animation<'n>(
+    note: impl Into<NoteView<'n>>,
     export: &AnimationExport,
-    narration: Option<&Narration>,
+    narration: Option<&'n Narration>,
     path: &Path,
     openh264: Option<&OpenH264Codec>,
     progress: &mut dyn FnMut(ExportProgress),
@@ -378,13 +379,15 @@ impl<'n> Job<'n> {
     /// Plans the export and prepares its frames (a page that cannot be drawn at that size
     /// fails here).
     fn new(
-        note: &'n Note,
+        note: impl Into<NoteView<'n>>,
         export: &AnimationExport,
         narration: Option<&'n Narration>,
     ) -> Result<Self, MediaError> {
+        let view = note.into();
+        let note = view.note;
         let plan = plan_export(note, export, narration)?;
         let timeline = Timeline::new(note, &plan.replay)?;
-        let renderer = FrameRenderer::new(
+        let renderer = FrameRenderer::with_picture(
             timeline,
             &FrameSettings {
                 width: export.width,
@@ -392,6 +395,7 @@ impl<'n> Job<'n> {
                 frame_rate: export.frame_rate,
                 backdrop: export.backdrop,
             },
+            view.picture,
         )?;
         let sound = match (plan.audio_start, narration) {
             (Some(start), Some(narration)) => Some(SoundTrack {
