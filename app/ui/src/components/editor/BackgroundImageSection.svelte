@@ -2,13 +2,24 @@
   /**
    * « Image ou PDF de fond » (SPEC §4.4, P2), in the page panel: puts an image or a page of a PDF
    * under the writing (to annotate a worksheet, a document, a photo), places it, sets its opacity,
-   * removes it. The file is imported by Rust (`stage_background_image`), which keeps the pixels in
-   * memory until the note is saved; each change is one undoable step of the editor.
+   * removes it, turns it a quarter turn (the page and the writing stay). The file is imported by
+   * Rust (`stage_background_image`), which keeps the pixels in memory until the note is saved; each
+   * change is one undoable step of the editor. When the image's orientation differs from the
+   * note's, the user is offered to switch the note's orientation, in the same step.
    */
   import { api, errorMessage } from '../../lib/api';
-  import { IMAGE_FITS, currentFit, opacityOf, type BackgroundSource, type ImageFit, type PixelsRef } from '../../lib/background';
+  import {
+    IMAGE_FITS,
+    currentFit,
+    opacityOf,
+    type BackgroundSource,
+    type ImageFit,
+    type PixelsRef,
+    type StagedBackground,
+  } from '../../lib/background';
   import { pickBackgroundFile } from '../../lib/dialogs';
   import { importedImage, pixelsOf } from '../../lib/editor/image';
+  import { orientationOf, swappedPage, type Orientation } from '../../lib/editor/page-size';
   import { t } from '../../lib/i18n.svelte';
   import type { BackgroundImage, PageSize } from '../../lib/note';
 
@@ -18,6 +29,7 @@
     pixels,
     disabled = false,
     onset,
+    onturn,
     onfit,
     onopacity,
     onremove,
@@ -27,7 +39,10 @@
     /** The pixels of `image`; absent when they cannot be read (the image is then not drawn). */
     pixels: PixelsRef | undefined;
     disabled?: boolean;
-    onset: (image: BackgroundImage, pixels: PixelsRef) => void;
+    /** The image to put; `orientation` when the note's orientation is to switch in the same step (the image is placed on the switched page). */
+    onset: (image: BackgroundImage, pixels: PixelsRef, orientation?: Orientation) => void;
+    /** The image alone turned a quarter turn. */
+    onturn: (direction: 'cw' | 'ccw') => void;
     onfit: (fit: ImageFit) => void;
     onopacity: (opacity: number) => void;
     onremove: () => void;
@@ -37,6 +52,8 @@
   let pending = $state<{ path: string; source: BackgroundSource; page: number } | null>(null);
   let busy = $state(false);
   let error = $state<string | null>(null);
+  /** An imported image waits for the user to say whether the note takes its orientation. */
+  let offer = $state.raw<{ staged: StagedBackground; orientation: Orientation } | null>(null);
   /** The slider's position while it is dragged (the change is made once, when it is let go). */
   let draft = $state<number | null>(null);
 
@@ -68,12 +85,26 @@
     try {
       const staged = await api.stageBackgroundImage(path, pdfPage);
       pending = null;
+      const orientation = orientationOf(staged);
+      if (staged.width !== staged.height && orientation !== orientationOf(page)) {
+        offer = { staged, orientation };
+        return;
+      }
       onset(importedImage(page, staged), pixelsOf(staged));
     } catch (e) {
       error = errorMessage(e);
     } finally {
       busy = false;
     }
+  }
+
+  /** The user's answer to the offer: the note takes the image's orientation, or keeps its own. */
+  function answer(switchOrientation: boolean) {
+    if (!offer) return;
+    const { staged, orientation } = offer;
+    offer = null;
+    if (switchOrientation) onset(importedImage(swappedPage(page), staged), pixelsOf(staged), orientation);
+    else onset(importedImage(page, staged), pixelsOf(staged));
   }
 
   function commitOpacity(value: number) {
@@ -86,7 +117,24 @@
   <h4 id="editor-background-image-heading">{t('background.editor.title')}</h4>
   <p class="muted small">{t('background.editor.hint')}</p>
 
-  {#if pending}
+  {#if offer}
+    {@const current = orientationOf(page)}
+    <p class="small" role="alert" data-slot="background-orientation-offer">
+      {t('background.editor.orientationOffer', {
+        image: t(`editor.page.${offer.orientation}Lower`),
+        note: t(`editor.page.${current}Lower`),
+      })}
+    </p>
+    <div class="buttons">
+      <button type="button" class="button small-button primary" data-action="background-switch-orientation" onclick={() => answer(true)}>
+        {t('background.editor.switchOrientation', { orientation: t(`editor.page.${offer.orientation}Lower`) })}
+      </button>
+      <button type="button" class="button small-button" data-action="background-keep-orientation" onclick={() => answer(false)}>
+        {t('background.editor.keepOrientation', { orientation: t(`editor.page.${current}Lower`) })}
+      </button>
+      <button type="button" class="button small-button" onclick={() => (offer = null)}>{t('background.editor.cancel')}</button>
+    </div>
+  {:else if pending}
     {@const chosen = pending}
     <p class="small" data-slot="background-pdf">
       {t('background.editor.pdfPages', { name: chosen.source.name, count: chosen.source.pages.length })}
@@ -132,6 +180,33 @@
         {/if}
       </select>
     </label>
+    <div class="turn">
+      <span>{t('background.editor.turn')}</span>
+      <div class="buttons">
+        <button
+          type="button"
+          class="button small-button"
+          data-action="background-turn-ccw"
+          disabled={disabled || busy}
+          title={t('background.editor.turnCcw')}
+          onclick={() => onturn('ccw')}
+        >
+          <span aria-hidden="true">⟲</span>
+          {t('background.editor.turnCcwShort')}
+        </button>
+        <button
+          type="button"
+          class="button small-button"
+          data-action="background-turn-cw"
+          disabled={disabled || busy}
+          title={t('background.editor.turnCw')}
+          onclick={() => onturn('cw')}
+        >
+          <span aria-hidden="true">⟳</span>
+          {t('background.editor.turnCwShort')}
+        </button>
+      </div>
+    </div>
     <label class="row opacity">
       <span>{t('background.editor.opacity')}</span>
       <input
@@ -184,6 +259,13 @@
   h4 {
     margin: 0;
     font-size: 0.9rem;
+  }
+
+  .turn {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.875rem;
   }
 
   .opacity input {

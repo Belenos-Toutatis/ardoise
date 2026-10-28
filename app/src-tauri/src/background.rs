@@ -963,6 +963,15 @@ pub(crate) mod tests {
             a4.width.abs_diff(21_000) <= 1 && a4.height.abs_diff(29_700) <= 1,
             "{a4:?}"
         );
+        // A landscape A4 page (rotation already applied by Windows) gives a landscape note.
+        let landscape = page_for_pdf(PdfPageSize {
+            width: 841.89,
+            height: 595.28,
+        });
+        assert!(
+            landscape.width.abs_diff(29_700) <= 1 && landscape.height.abs_diff(21_000) <= 1,
+            "{landscape:?}"
+        );
         let tiny = page_for_pdf(PdfPageSize {
             width: 1.0,
             height: 1e12,

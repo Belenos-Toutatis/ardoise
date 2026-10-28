@@ -69,11 +69,16 @@ export function fitRect(page: PageSize, pixels: PixelSize, fit: ImageFit): Image
 }
 
 /** The placement that gives the image's rectangle on `page`, or null when it was moved since (a crop). */
-export function currentFit(image: BackgroundImage, page: PageSize, pixels: PixelSize): ImageFit | null {
+export function currentFit(
+  image: BackgroundImage,
+  page: PageSize,
+  pixels: PixelSize,
+  // Stretch first: an image of the page's proportions gives the same rectangle for every fit.
+  order: readonly ImageFit[] = ['stretch', 'contain', 'cover'],
+): ImageFit | null {
   const shown = displayedSize(pixels, image.quarterTurns ?? 0);
   const near = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, Math.abs(b) * 1e-4);
-  // Stretch first: an image of the page's proportions gives the same rectangle for every fit.
-  for (const fit of ['stretch', 'contain', 'cover'] as const) {
+  for (const fit of order) {
     const r = fitRect(page, shown, fit);
     const i = image.rect;
     if (near(i.x, r.x) && near(i.y, r.y) && near(i.width, r.width) && near(i.height, r.height)) return fit;
@@ -104,6 +109,39 @@ export function rotateImage(image: BackgroundImage, page: PageSize, direction: '
 /** The image after a crop whose top-left corner was at (`x`, `y`): moved like the strokes. */
 export function shiftImage(image: BackgroundImage, x: number, y: number): BackgroundImage {
   return { ...image, rect: { ...image.rect, x: image.rect.x - x, y: image.rect.y - y } };
+}
+
+/** The image after the page's ink was scaled by `scale` and then moved by (`dx`, `dy`): moved like the strokes. */
+export function mapImage(image: BackgroundImage, scale: number, dx: number, dy: number): BackgroundImage {
+  const r = image.rect;
+  return {
+    ...image,
+    rect: { x: r.x * scale + dx, y: r.y * scale + dy, width: r.width * scale, height: r.height * scale },
+  };
+}
+
+/**
+ * The image alone turned a quarter turn (the page and the strokes stay): its pixels turn, and it
+ * is placed again with the fit it had (contain, cover or stretch; contain when its proportions
+ * made them all the same), or, when it was moved by hand or cropped, turned in place around the
+ * centre of its rectangle. Needs the size of the stored pixels for the first case.
+ */
+export function turnImageAlone(
+  image: BackgroundImage,
+  page: PageSize,
+  pixels: PixelSize | undefined,
+  direction: 'cw' | 'ccw',
+): BackgroundImage {
+  const turned: BackgroundImage = {
+    ...image,
+    quarterTurns: ((image.quarterTurns ?? 0) + (direction === 'cw' ? 1 : 3)) % 4,
+  };
+  const fit = pixels ? currentFit(image, page, pixels, ['contain', 'cover', 'stretch']) : null;
+  if (fit && pixels) return refit(turned, page, pixels, fit);
+  const r = image.rect;
+  const cx = r.x + r.width / 2;
+  const cy = r.y + r.height / 2;
+  return { ...turned, rect: { x: cx - r.height / 2, y: cy - r.width / 2, width: r.height, height: r.width } };
 }
 
 /** Opacity of an image (absent means 1). */

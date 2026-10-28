@@ -2,9 +2,9 @@
  * Pure operations on a note. Each returns a new note (or the same object when nothing changed)
  * and keeps every untouched stroke object, so that cached outlines and bounds stay valid.
  */
-import { rotateImage, shiftImage } from '../background';
+import { mapImage, rotateImage, shiftImage, turnImageAlone } from '../background';
 import type { InkPoint, Tool } from '../ink';
-import type { Background, Layer, Note, Rgba, Stroke } from '../note';
+import type { Background, Layer, Note, PageSize, Rgba, Stroke } from '../note';
 import {
   affineScale,
   applyAffine,
@@ -23,6 +23,7 @@ import {
   type Vec,
 } from './geometry';
 import { layerVisible, strokesTouched } from './hit';
+import { orientationOf, type Orientation } from './page-size';
 
 export interface StrokeStyle {
   color?: Rgba;
@@ -151,6 +152,74 @@ export function insertCopies(
   return { note: withStrokes(note, [...note.strokes, ...copies]), indices: copies.map((_, i) => start + i) };
 }
 
+/** Pause between the end of the note's ink and the first sample of pasted strokes, milliseconds. */
+export const PASTE_GAP_MS = 500;
+/** Shift between a paste and an identical copy already lying there, device units (4 mm). */
+export const PASTE_STEP = 400;
+
+/** Time of the last sample of the note, milliseconds since it was created (0 without ink). */
+function noteEnd(note: Note): number {
+  let end = 0;
+  for (const stroke of note.strokes) for (const p of stroke.points) if (p.t > end) end = p.t;
+  return end;
+}
+
+/**
+ * Where strokes pasted into `note` go (an offset to add to their points):
+ * - their bounds lie wholly outside the page (copied from a larger or turned page): centred on
+ *   the page, or top-left aligned when larger than it;
+ * - otherwise where they were, but while a stroke with the same first and last sample already
+ *   lies there (the source, or an earlier paste), diagonally further by `PASTE_STEP`.
+ */
+export function pasteOffset(note: Note, strokes: readonly Stroke[]): Vec {
+  let ink: Rect | null = null;
+  for (const stroke of strokes) ink = union(ink, strokeBounds(stroke));
+  const lead = strokes[0]?.points;
+  const first = lead?.[0];
+  const last = lead?.[lead.length - 1];
+  if (!ink || !lead || !first || !last) return { x: 0, y: 0 };
+  const page: Rect = { x: 0, y: 0, width: note.page.width, height: note.page.height };
+  let base: Vec = { x: 0, y: 0 };
+  if (!overlaps(ink, page)) {
+    base = {
+      x: Math.max(0, (page.width - ink.width) / 2) - ink.x,
+      y: Math.max(0, (page.height - ink.height) / 2) - ink.y,
+    };
+  }
+  const near = (a: number, b: number) => Math.abs(a - b) < 1;
+  const occupied = (o: Vec) =>
+    note.strokes.some((s) => {
+      const f = s.points[0];
+      const l = s.points[s.points.length - 1];
+      return (
+        f !== undefined &&
+        l !== undefined &&
+        s.points.length === lead.length &&
+        near(f.x, first.x + o.x) &&
+        near(f.y, first.y + o.y) &&
+        near(l.x, last.x + o.x) &&
+        near(l.y, last.y + o.y)
+      );
+    });
+  let offset = base;
+  for (let step = 0; step < 100 && occupied(offset); step++) {
+    offset = { x: base.x + (step + 1) * PASTE_STEP, y: base.y + (step + 1) * PASTE_STEP };
+  }
+  return offset;
+}
+
+/**
+ * Copies of `strokes` for pasting into `note` (the clipboard may come from another note): the
+ * sample times shifted so that the first one comes `PASTE_GAP_MS` after the last sample of the
+ * note, keeping the rhythm of the copied strokes: the replay draws them last, as written.
+ */
+export function retimedForPaste(note: Note, strokes: readonly Stroke[]): Stroke[] {
+  let first = Infinity;
+  for (const stroke of strokes) for (const p of stroke.points) if (p.t < first) first = p.t;
+  const shift = Number.isFinite(first) ? noteEnd(note) + PASTE_GAP_MS - first : 0;
+  return strokes.map((stroke) => ({ ...stroke, points: stroke.points.map((p) => ({ ...p, t: p.t + shift })) }));
+}
+
 /** Ink bounds of the strokes at `indices` (or of every visible stroke if null). */
 export function strokesBounds(note: Note, indices: Iterable<number> | null): Rect | null {
   let bounds: Rect | null = null;
@@ -272,6 +341,98 @@ export function rotateQuarter(note: Note, direction: 'cw' | 'ccw'): Note {
   };
   if (note.backgroundImage) turned.backgroundImage = rotateImage(note.backgroundImage, note.page, direction);
   return turned;
+}
+
+/** Largest page side, device units (`MAX_PAGE_SIDE` in `ardoise_core::ops`). */
+export const MAX_PAGE_SIDE = 10_000_000;
+
+/** Bounds of the samples of every stroke of the note, hidden layers included (they move with the page). */
+function allInkBounds(note: Note): Rect | null {
+  let bounds: Rect | null = null;
+  for (const stroke of note.strokes) bounds = union(bounds, strokeCentreBounds(stroke));
+  return bounds;
+}
+
+/**
+ * How far `ink` has to move to lie inside a page of `page`'s size, or null when it cannot (it is
+ * larger than the page on an axis). Zero on an axis where it already lies inside.
+ */
+function shiftInside(ink: Rect, page: PageSize): Vec | null {
+  if (ink.width > page.width || ink.height > page.height) return null;
+  const fix = (start: number, size: number, limit: number) =>
+    start < 0 ? -start : start + size > limit ? limit - (start + size) : 0;
+  return { x: fix(ink.x, ink.width, page.width), y: fix(ink.y, ink.height, page.height) };
+}
+
+/** Strokes with a sample outside the page (they are not drawn there, but kept). */
+export function strokesOutsidePage(note: Note): number {
+  const { width, height } = note.page;
+  let count = 0;
+  for (const stroke of note.strokes) {
+    if (stroke.points.some((p) => p.x < 0 || p.y < 0 || p.x > width || p.y > height)) count++;
+  }
+  return count;
+}
+
+/**
+ * Gives the page another size without turning the ink (milestone M8: orientation and paper
+ * size of an existing note). The strokes and the background image move together:
+ *
+ * - `scaleInk` false: the ink keeps its size and its place. When part of it would fall outside
+ *   the new page but all of it fits, it is moved back inside by the smallest shift; when it
+ *   does not fit, it stays where it is (what is outside is not drawn but is kept: the former
+ *   size brings it back, and the crop does not delete it).
+ * - `scaleInk` true: the old page is scaled to fit the new one as a whole and centred in it,
+ *   ink and stroke widths with it (the proportions of the ink never change).
+ *
+ * Returns the same note for a side outside `MIN_CROP`..`MAX_PAGE_SIDE` or for the same size.
+ */
+export function resizePage(note: Note, size: PageSize, scaleInk = false): Note {
+  const width = Math.round(size.width);
+  const height = Math.round(size.height);
+  if (width < MIN_CROP || height < MIN_CROP || width > MAX_PAGE_SIDE || height > MAX_PAGE_SIDE) return note;
+  if (width === note.page.width && height === note.page.height) return note;
+  let scale = 1;
+  let shift: Vec = { x: 0, y: 0 };
+  if (scaleInk) {
+    scale = Math.min(width / note.page.width, height / note.page.height);
+    shift = { x: (width - note.page.width * scale) / 2, y: (height - note.page.height * scale) / 2 };
+  } else {
+    const ink = allInkBounds(note);
+    shift = (ink && shiftInside(ink, { width, height })) || shift;
+  }
+  const moved = scale !== 1 || shift.x !== 0 || shift.y !== 0;
+  const resized: Note = { ...note, page: { width, height } };
+  if (!moved) return resized;
+  resized.strokes = note.strokes.map((stroke) => ({
+    ...stroke,
+    width: stroke.width * scale,
+    points: stroke.points.map((p) => ({ ...p, x: p.x * scale + shift.x, y: p.y * scale + shift.y })),
+  }));
+  if (note.backgroundImage) resized.backgroundImage = mapImage(note.backgroundImage, scale, shift.x, shift.y);
+  return resized;
+}
+
+/**
+ * Makes the page portrait or landscape by swapping its width and height, the ink keeping its
+ * orientation (`resizePage`). The same note when the page already has that orientation.
+ */
+export function setOrientation(note: Note, orientation: Orientation, scaleInk = false): Note {
+  if (orientationOf(note.page) === orientation) return note;
+  return resizePage(note, { width: note.page.height, height: note.page.width }, scaleInk);
+}
+
+/**
+ * Turns the background image alone a quarter turn (`turnImageAlone`): the page and the strokes
+ * stay. `pixels` is the size of the image's stored pixels, when known.
+ */
+export function rotateBackgroundImage(
+  note: Note,
+  pixels: { width: number; height: number } | undefined,
+  direction: 'cw' | 'ccw',
+): Note {
+  if (!note.backgroundImage) return note;
+  return { ...note, backgroundImage: turnImageAlone(note.backgroundImage, note.page, pixels, direction) };
 }
 
 /** Smallest page side accepted by a crop, device units (1 cm). */

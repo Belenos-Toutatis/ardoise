@@ -562,7 +562,14 @@
       "count": "Selected strokes: {count}",
       "duplicate": "Duplicate",
       "delete": "Delete",
-      "clear": "Deselect"
+      "clear": "Deselect",
+      "copy": "Copy",
+      "cut": "Cut",
+      "paste": "Paste"
+    },
+    "clipboard": {
+      "failed": "The clipboard is not available.",
+      "nothing": "The clipboard holds no strokes copied in Ardoise."
     },
     "straighten": {
       "button": "Straighten shapes",
@@ -583,7 +590,26 @@
       "rotateCwShort": "Right",
       "autoCrop": "Crop around the content",
       "manualCrop": "Crop by hand",
-      "cropHint": "Draw on the page the rectangle to keep."
+      "cropHint": "Draw on the page the rectangle to keep.",
+      "formatLabel": "Sheet format",
+      "orientation": "Sheet orientation",
+      "portrait": "Portrait",
+      "landscape": "Landscape",
+      "portraitLower": "portrait",
+      "landscapeLower": "landscape",
+      "orientationHint": "The writing does not turn: only the sheet changes direction, and the writing keeps its place.",
+      "size": "Paper",
+      "width": "Width in millimetres",
+      "height": "Height in millimetres",
+      "apply": "Apply",
+      "sizeInvalid": "Enter sizes between {min} and {max} mm.",
+      "scaleInk": "Scale the writing with the sheet",
+      "scaleInkOn": "The writing and the background image are scaled with the sheet, without distortion.",
+      "scaleInkOff": "The writing keeps its size and place. If it goes beyond the sheet, it is moved back inside when it fits; otherwise the part outside is kept but not shown.",
+      "inkOutsideOne": "One stroke goes beyond the sheet: it is kept but not shown.",
+      "inkOutsideMany": "{count} strokes go beyond the sheet: they are kept but not shown.",
+      "rotateLabel": "Turn the sheet with the writing",
+      "rotateHint": "The sheet, the writing and the background image turn together by a quarter turn."
     },
     "original": {
       "label": "Original",
@@ -593,7 +619,7 @@
       "none": "No original yet: the first time you save a change of the ink, Ardoise keeps the version before it, if it had any ink.",
       "loading": "Looking for the original…",
       "confirmTitle": "Go back to the original?",
-      "confirmLost": "Your edits of the ink will be lost: strokes added, erased, moved, straightened or recoloured, layers, page rotation and cropping.",
+      "confirmLost": "Your edits of the ink will be lost: strokes added, erased, moved, straightened or recoloured, layers, page rotation, format and cropping.",
       "confirmKept": "The title, tags, favourite, paper and narration stay as they are. The background image stays too: it goes back to its original place if the note already had it, otherwise it is placed upright on the restored page.",
       "confirmUndo": "You can still undo (Ctrl+Z); save to keep the result.",
       "confirm": "Back to the original",
@@ -606,6 +632,13 @@
       "cream": "Cream",
       "kraft": "Kraft",
       "slate": "Black slate",
+      "custom": "Custom"
+    },
+    "paperSizes": {
+      "a4": "A4 (210 × 297 mm)",
+      "a5": "A5 (148 × 210 mm)",
+      "letter": "Letter (216 × 279 mm)",
+      "tablet": "Tablet (216 × 297 mm)",
       "custom": "Custom"
     },
     "templates": {
@@ -1263,7 +1296,15 @@
       "replace": "Replace…",
       "remove": "Remove the image",
       "importing": "Importing…",
-      "failed": "This file cannot be put in the background: {message}"
+      "failed": "This file cannot be put in the background: {message}",
+      "orientationOffer": "This image is {image} and the note is {note}. Switch the note to {image}?",
+      "switchOrientation": "Switch the note to {orientation}",
+      "keepOrientation": "Keep {orientation}",
+      "turn": "Turn the image alone",
+      "turnCcw": "Turn the image a quarter turn to the left (the sheet and the writing stay in place)",
+      "turnCcwShort": "Image left",
+      "turnCw": "Turn the image a quarter turn to the right (the sheet and the writing stay in place)",
+      "turnCwShort": "Image right"
     },
     "fits": {
       "contain": "Whole",
@@ -1276,7 +1317,7 @@
       "openHint": "New note from a PDF or an image: one note per PDF page, to write over",
       "title": "New note from a PDF or an image",
       "pickTitle": "PDF or image to annotate",
-      "intro": "Each PDF page becomes a note of its size, with the page in the background; an image becomes a note the size of an A4 sheet.",
+      "intro": "Each PDF page becomes a note of its size and orientation (portrait or landscape), with the page in the background; an image becomes a note the size of an A4 sheet, in the image's orientation.",
       "pdfInfo": "{count} page(s), the first one {width} × {height} mm.",
       "pages": "Pages",
       "allPages": "All pages ({count})",

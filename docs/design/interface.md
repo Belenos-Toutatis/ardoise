@@ -60,6 +60,47 @@ The library is the one configured for this PC. A `LibraryWatcher` runs while the
 
 All visible text goes through `locales/fr.json` and `locales/en.json` (parity test).
 
+## M8: sheet format, image turn, clipboard (agent `page`)
+
+All in the editor's Page panel (`PagePanel.svelte`, `BackgroundImageSection.svelte`) and `lib/editor/` (pure operations,
+unit-tested in `page-format.test.ts`; component tests in `Editor.page.test.ts` and `BackgroundImage.test.ts`). The note
+format does not change; every change is one undoable step.
+
+- **Portrait / landscape** (`ops.setOrientation`) swaps the page's width and height and does *not* turn the ink: the
+  strokes and the background image keep their orientation. "Turn the sheet with the writing" (`rotateQuarter`) stays,
+  under its own heading; the panel's texts spell out the difference. A page is landscape when wider than tall (a square
+  one counts as portrait).
+- **Paper size** (`ops.resizePage`): presets A4 210 × 297, A5 148 × 210, Letter 215.9 × 279.4 and "Tablet" 216 × 297 mm
+  (the Bamboo Slate page, which is not a true A4: 29700 × 21600 units), always in the page's current orientation
+  (`lib/editor/page-size.ts`), plus two millimetre fields (10 to 2000 mm a side) and an Apply button. The select shows
+  "Custom" when the size is none of the presets.
+- **What happens to the ink** (decided here): by default the ink keeps its size and place. When some of it would fall
+  outside the new page but all of it fits (bounds of the samples, hidden layers included), it is moved back inside by
+  the smallest shift; when it does not fit it is left where it is, and a notice says how many strokes now lie beyond the
+  page. Such strokes are kept in the note (they are not drawn; the former size brings them back; the crop does not
+  delete hidden ones). With "Scale the writing with the sheet", the whole old page is scaled uniformly to fit the new
+  one and centred in it: strokes, stroke widths and image alike (no distortion; times and pressures untouched).
+- **Background image** follows the ink in both cases (same shift, or same scale and shift), so that annotations stay
+  aligned with it; the "Placement" select then shows "custom" and the user can re-fit it.
+- **Turn the image alone** (`turnImageAlone`): the stored pixels' `quarterTurns` change and the image is placed again
+  with the fit it had (contain, cover or stretch; contain when its proportions made them all the same, so that it is
+  never distorted); an image moved or cropped by hand turns in place around its centre. Page and strokes stay.
+- **Orientation of notes made from a file**: `create_notes_from_file` already gave a PDF page its own size and an
+  image an A4 sheet of its orientation (`page_for_pdf`, `page_for_image`; the PDF page size has its `/Rotate`
+  applied by Windows), the library dialog now says so. When an image or PDF page is put under an *existing* note
+  and its orientation differs (never for a square image), the section asks whether to switch the note to that
+  orientation: the switch and the placement are one undo step, the image fitted on the switched page.
+- **Clipboard** (`lib/editor/clipboard.ts`): strokes travel as JSON text with a marker
+  (`{"ardoise":"ardoise-strokes","version":1,"strokes":[{tool,color,width,points}]}`) on the system clipboard, so a
+  paste works in another note, window or session; anything else is ignored (the paste event is left alone), and
+  decoding validates every field and bounds the size. Ctrl+C / Ctrl+X / Ctrl+V use the browser's copy / cut / paste
+  events (no permission prompt in WebView2); the selection panel's Copy / Cut / Paste buttons use
+  `navigator.clipboard`. Pasted strokes keep colour, tool, width, pressure and points, land on the active layer, are
+  selected, and are offset by 4 mm diagonally (repeatedly) while an identical copy already lies at the place; strokes
+  that would be wholly outside the page are centred on it. **Timing:** the pasted samples are re-timed to start 0.5 s
+  after the last sample of the destination note, keeping their own rhythm, so the replay draws them last, as written
+  (Duplicate keeps its old behaviour).
+
 ## Tests
 
 - Component tests (vitest + jsdom) for each screen, with the browser stand-in.

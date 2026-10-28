@@ -99,6 +99,10 @@ describe('background image in the editor', () => {
     expect(section()?.textContent).toContain('fiche.pdf : 3 pages');
     choose(section()!.querySelector('select')!, '2');
     button('Mettre en fond').click();
+    // A portrait page on a landscape note: the user is asked, and keeps the note as it is.
+    await vi.waitFor(() => expect(section()?.querySelector('[data-slot="background-orientation-offer"]')).toBeTruthy());
+    expect(section()?.textContent).toContain('Cette image est en portrait et la note en paysage');
+    button('Garder en paysage').click();
     await vi.waitFor(() =>
       expect(section()?.querySelector('[data-slot="background-image-name"]')?.textContent).toContain('fiche.pdf, page 2'),
     );
@@ -147,6 +151,51 @@ describe('background image in the editor', () => {
     expect(source?.imageKey).toMatch(/^mock-/);
     expect(source?.note?.backgroundImage?.quarterTurns).toBe(1);
     expect(source?.note?.page).toEqual({ width: 21600, height: 29700 });
+  });
+
+  it('offers to give the note the image orientation, in one undo step', async () => {
+    const render = vi.spyOn(api, 'renderBackground');
+    const { target, section, button } = await open('Cours de physique');
+    const svg = () => target.querySelector<SVGSVGElement>('svg.canvas')!;
+    expect(svg().getAttribute('data-page-width')).toBe('29700');
+    (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\\Documents\\fiche.pdf';
+    button('Choisir un PDF ou une image…').click();
+    await vi.waitFor(() => expect(section()?.querySelector('[data-slot="background-pdf"]')).toBeTruthy());
+    button('Mettre en fond').click();
+    await vi.waitFor(() => expect(section()?.querySelector('[data-slot="background-orientation-offer"]')).toBeTruthy());
+    // Nothing is placed until the answer.
+    expect(section()?.querySelector('[data-slot="background-image-name"]')).toBeNull();
+    button('Passer la note en portrait').click();
+    await vi.waitFor(() => expect(section()?.querySelector('[data-slot="background-image-name"]')).toBeTruthy());
+    expect(svg().getAttribute('data-page-width')).toBe('21600');
+    expect(svg().getAttribute('data-page-height')).toBe('29700');
+    // The image fills the portrait page: placed on the switched page.
+    await vi.waitFor(() => expect(render.mock.lastCall?.[3]?.image.rect.height).toBeCloseTo(29700, 0));
+    // One step: undo brings back the landscape page without the image.
+    button('Annuler (Ctrl+Z)').click();
+    await tick();
+    expect(svg().getAttribute('data-page-width')).toBe('29700');
+    expect(section()?.querySelector('[data-slot="background-image-name"]')).toBeNull();
+  });
+
+  it('does not ask when the image has the note orientation, and turns only the image', async () => {
+    const render = vi.spyOn(api, 'renderBackground');
+    const { target, section, button } = await open('Cours de physique');
+    (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\\Photos\\tableau.jpg';
+    button('Choisir un PDF ou une image…').click();
+    await vi.waitFor(() =>
+      expect(section()?.querySelector('[data-slot="background-image-name"]')?.textContent).toContain('tableau.jpg'),
+    );
+    expect(section()?.querySelector('[data-slot="background-orientation-offer"]')).toBeNull();
+    const svg = target.querySelector<SVGSVGElement>('svg.canvas')!;
+    button('Image à droite').click();
+    await tick();
+    // The image turned; the page did not.
+    await vi.waitFor(() => expect(render.mock.lastCall?.[3]?.image.quarterTurns).toBe(1));
+    expect(svg.getAttribute('data-page-width')).toBe('29700');
+    button('Image à gauche').click();
+    await tick();
+    await vi.waitFor(() => expect(render.mock.lastCall?.[3]?.image.quarterTurns).toBe(0));
   });
 
   it('opens a note that has an image with its pixels, and says when a file cannot be used', async () => {
