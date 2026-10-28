@@ -28,6 +28,7 @@ import type {
 } from './live';
 import { fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, UNHANDLED } from './mock-data';
 import type { Note, Rgba, Stroke } from './note';
+import { orientPoint, pageSizeFor, turnPoint, turnsFrom, turnStrokes, type Orientation } from './orientation';
 
 /** Pace of the stand-in; tests change it (and `resetMockLive` restores it). */
 export const mockLiveConfig = {
@@ -158,6 +159,10 @@ interface Session {
 
 let session: Session | null = null;
 let pageCounter = 0;
+/** How the (simulated) tablet is held; the real one is `[tablet] orientation`. */
+let heldAs: Orientation = 'landscape';
+/** The orientation each page was written in (by note id): the page on screen follows `heldAs`. */
+const pageOrientation = new Map<string, Orientation>();
 const subscribers = new Set<(batch: LiveBatch) => void>();
 let presentation: MonitorInfo | null = null;
 let savedMonitor: string | null = null;
@@ -170,12 +175,14 @@ function copy<T>(value: T): T {
 function blankPage(board: boolean): Note {
   pageCounter += 1;
   const created = Date.now();
+  const id = `00000000-0000-4000-8000-${pageCounter.toString(16).padStart(12, '0')}`;
+  pageOrientation.set(id, heldAs);
   return {
-    id: `00000000-0000-4000-8000-${pageCounter.toString(16).padStart(12, '0')}`,
+    id,
     title: '',
     created,
     modified: created,
-    page: { ...PAGE },
+    page: pageSizeFor(heldAs, PAGE.width, PAGE.height),
     background: { paper: board ? 'slate' : 'white', template: 'blank', texture: false },
     tags: [],
     layers: [{ name: 'Calque 1', visible: true }],
@@ -195,6 +202,7 @@ function snapshot(): LiveSnapshot {
       page: { ...blankPage(false), id: '' },
       pageIndex: 0,
       pageCount: 1,
+      orientation: heldAs,
       layer: 0,
       style: DEFAULT_STYLE,
       view: IDLE_VIEW,
@@ -208,6 +216,7 @@ function snapshot(): LiveSnapshot {
     page: s.pages[s.pageIndex],
     pageIndex: s.pageIndex,
     pageCount: s.pages.length,
+    orientation: heldAs,
     layer: s.layer,
     style: s.style,
     view: s.view,
@@ -292,7 +301,7 @@ function tick(s: Session): void {
   let hoverAt: { x: number; y: number } | null = null;
   for (let j = 0; j < 3; j++) {
     s.record += 1;
-    const sample = s.pen.next();
+    const sample = orientSample(s.pen.next());
     const page = s.pages[s.pageIndex];
     if (sample.kind === 'down') {
       hoverAt = null;
@@ -332,6 +341,13 @@ function tick(s: Session): void {
   broadcast(events);
 }
 
+/** The pen's samples are in the tablet's frame; the page gets them turned, as the service does. */
+function orientSample(sample: PenSample): PenSample {
+  if (sample.kind === 'away') return sample;
+  const [x, y] = orientPoint(sample.x, sample.y, PAGE.width, PAGE.height, heldAs);
+  return { ...sample, x, y };
+}
+
 function startPen(s: Session): void {
   clearInterval(s.tick);
   if (mockLiveConfig.pen) s.tick = setInterval(() => tick(s), mockLiveConfig.tickMs);
@@ -354,6 +370,7 @@ function goTo(s: Session, index: number): LiveEvent[] {
   const leaving = s.pages[s.pageIndex];
   if (s.saved.has(leaving.id)) events.push(...savePage(s, leaving));
   s.pageIndex = index;
+  followTablet(s.pages[index]);
   s.layer = s.pages[index].layers.length - 1;
   return events;
 }
@@ -526,6 +543,8 @@ export function resetMockLive(): void {
   presentation = null;
   savedMonitor = null;
   pageCounter = 0;
+  heldAs = 'landscape';
+  pageOrientation.clear();
   Object.assign(mockLiveConfig, { waitMs: 1200, tickMs: 15, pen: true, monitors: 2, saveError: null });
 }
 
@@ -551,6 +570,51 @@ export function mockLiveReconnect(ms: number): void {
 export function mockLiveTick(count = 1): void {
   const s = running();
   for (let i = 0; i < count; i++) tick(s);
+}
+
+/** Turns `page` with its ink to the way the tablet is held. */
+function followTablet(page: Note): void {
+  const from = pageOrientation.get(page.id) ?? 'landscape';
+  const turns = turnsFrom(heldAs, from);
+  pageOrientation.set(page.id, heldAs);
+  if (turns === 0) return;
+  const { width, height } = page.page;
+  page.strokes = turnStrokes(page.strokes, width, height, turns);
+  if (turns % 2 === 1) page.page = { width: height, height: width };
+}
+
+/**
+ * The tablet is held another way (`tablet_set_options`, `tablet_set_orientation`). In a running
+ * session, as in Rust: the stroke in progress ends, the page on screen is turned with its ink,
+ * blank pages not written yet take the new size, the other pages follow when they are shown
+ * again, and every window gets a snapshot.
+ */
+export function setMockLiveOrientation(orientation: Orientation): void {
+  if (orientation === heldAs) return;
+  const s = session;
+  const before = s ? { ...s.pages[s.pageIndex].page } : null;
+  const turns = s ? turnsFrom(orientation, pageOrientation.get(s.pages[s.pageIndex].id) ?? 'landscape') : 0;
+  const events = s ? endStroke(s) : [];
+  heldAs = orientation;
+  if (!s || !before) return;
+  s.hover = null;
+  s.pages.forEach((page, index) => {
+    if (page.strokes.length === 0 && !s.saved.has(page.id)) {
+      page.page = pageSizeFor(orientation, PAGE.width, PAGE.height);
+      pageOrientation.set(page.id, orientation);
+    } else if (index === s.pageIndex) {
+      followTablet(page);
+      if (s.saved.has(page.id)) events.push(...savePage(s, page));
+    }
+  });
+  const page = s.pages[s.pageIndex].page;
+  if (s.view.zoom <= 1) {
+    s.view = { ...s.view, x: page.width / 2, y: page.height / 2 };
+  } else {
+    const [x, y] = turnPoint(s.view.x, s.view.y, before.width, before.height, turns);
+    s.view = { ...s.view, x, y };
+  }
+  broadcast([...events, { type: 'snapshot', snapshot: snapshot() }]);
 }
 
 export function mockLiveSubscribers(): number {

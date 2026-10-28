@@ -565,7 +565,7 @@ impl Worker {
         };
         let context = PageContext {
             size: self.page_size(),
-            hand: self.config.options.hand,
+            orientation: self.config.options.orientation,
         };
         self.note(format!(
             "sync: {total} pages on the tablet, {to_read} to read, delete after import: {delete}"
@@ -791,11 +791,27 @@ impl Worker {
             run.sink.input(LiveInput::Started {
                 width,
                 height,
-                hand: self.config.options.hand,
+                orientation: self.config.options.orientation,
             });
             run.started = true;
         }
         run.sink.input(LiveInput::State(LiveState::Live));
+    }
+
+    /// Tells the live sink, once live mode streams, that the tablet is held another way. Done on
+    /// this thread between two notifications: the records before are oriented the old way, the
+    /// ones after the new way.
+    fn reoriented(&mut self) {
+        let (width, height) = self.tablet_size();
+        let orientation = self.config.options.orientation;
+        if let Some(run) = self.live.as_mut().filter(|run| run.started) {
+            run.sink.input(LiveInput::Reoriented {
+                width,
+                height,
+                orientation,
+            });
+        }
+        self.note(format!("live orientation changed: {orientation:?}"));
     }
 
     /// Enters live mode if needed, then forwards one notification.
@@ -843,13 +859,13 @@ impl Worker {
     /// found at H2 (`BUTTON_SYSEVENTS` is a hypothesis).
     fn forward(&mut self, notification: LiveNotification) {
         let (width, height) = self.tablet_size();
-        let hand = self.config.options.hand;
+        let orientation = self.config.options.orientation;
         let input = match notification.channel {
             Channel::Live => match live::decode(&notification.data) {
                 Ok(LivePacket::Samples(records)) => Some(LiveInput::Records {
                     records: records
                         .into_iter()
-                        .map(|record| orient_record(record, width, height, hand))
+                        .map(|record| orient_record(record, width, height, orientation))
                         .collect(),
                     received: notification.received,
                 }),
@@ -1092,6 +1108,9 @@ impl Worker {
     fn set_options(&mut self, options: TabletOptions) {
         let before = self.config.options;
         self.config.options = options;
+        if options.orientation != before.orientation {
+            self.reoriented();
+        }
         if options.auto_sync
             && !before.auto_sync
             && self.session.is_some()

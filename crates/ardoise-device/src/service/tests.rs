@@ -126,7 +126,7 @@ fn options_are_followed_and_shown() {
     let options = TabletOptions {
         auto_sync: false,
         delete_after_import: false,
-        hand: Hand::Left,
+        orientation: Orientation::LandscapeFlipped,
         button: LiveButton::NewLayer,
     };
     service.set_options(options);
@@ -136,7 +136,7 @@ fn options_are_followed_and_shown() {
         serde_json::json!({
             "autoSync": false,
             "deleteAfterImport": false,
-            "hand": "left",
+            "orientation": "left",
             "button": "newLayer",
         })
     );
@@ -433,7 +433,7 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
         library: Some(library.path().to_owned()),
         identity_root: Some(library.path().to_owned()),
         options: TabletOptions {
-            hand: Hand::Left,
+            orientation: Orientation::LandscapeFlipped,
             ..TabletOptions::default()
         },
         simulated: false,
@@ -466,7 +466,7 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
         LiveInput::Started {
             width: 29_700,
             height: 21_600,
-            hand: Hand::Left
+            orientation: Orientation::LandscapeFlipped
         }
     );
     assert_eq!(next(), LiveInput::State(LiveState::Live));
@@ -479,7 +479,7 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
         panic!("records expected");
     };
     assert!(stamp <= SystemTime::now());
-    // Left hand: (2500, 500) on a 29 700 × 21 600 tablet becomes (27 200, 21 100).
+    // Left orientation: (2500, 500) on a 29 700 × 21 600 tablet becomes (27 200, 21 100).
     assert_eq!(
         records,
         [

@@ -39,6 +39,7 @@ function snapshot(extra: Partial<LiveSnapshot> = {}): LiveSnapshot {
     page: page('p1'),
     pageIndex: 0,
     pageCount: 1,
+    orientation: 'landscape',
     layer: 0,
     style: { tool: 'ballpoint', color: BLACK, width: 60 },
     view: { ...DEFAULT_VIEW, x: 14850, y: 10800 },

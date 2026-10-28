@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use ardoise_core::library::Library;
 use ardoise_core::note::{Origin, PageSize, Paper};
-use ardoise_core::settings::{Hand, LiveButton};
+use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
 use ardoise_ink::{Rgba, Tool};
 use ardoise_media::microphone::simulated_narration;
@@ -101,6 +101,7 @@ fn options(library: &Library, button: ButtonSetting) -> StartOptions {
         library: library.clone(),
         french: true,
         size: A5,
+        orientation: Orientation::Landscape,
         button,
     }
 }
@@ -114,7 +115,7 @@ fn start(hub: &LiveHub, options: StartOptions) -> HubSink {
     sink.input(LiveInput::Started {
         width: A5.width,
         height: A5.height,
-        hand: Hand::Right,
+        orientation: Orientation::Landscape,
     });
     sink
 }
@@ -204,6 +205,83 @@ fn every_window_gets_the_same_batches_and_a_closed_one_is_dropped() {
     drop(batches);
     hub.subscribe("main", Arc::new(Window::default()));
     assert_eq!(hub.subscriber_count(), 2);
+    hub.stop().unwrap();
+}
+
+#[test]
+fn a_portrait_session_has_portrait_pages_and_switching_turns_the_page_in_progress() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let portrait = PageSize {
+        width: A5.height,
+        height: A5.width,
+    };
+    let Start::New { mut sink, snapshot } = hub
+        .start(StartOptions {
+            orientation: Orientation::PortraitLeft,
+            ..options(&library, fixed(LiveButton::NewPage))
+        })
+        .unwrap()
+    else {
+        panic!("a session is already running");
+    };
+    assert_eq!(snapshot.orientation, Orientation::PortraitLeft);
+    assert_eq!(snapshot.page.page, portrait);
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::PortraitLeft,
+    });
+    // The service hands over points that are already page coordinates.
+    stroke(&mut sink, 3000, 20);
+    wait_until("the note of page 1", || notes_in(&library).len() == 1);
+    let path = notes_in(&library).remove(0);
+    let note = library.read(&path).unwrap().file.note;
+    assert_eq!(note.page, portrait);
+    let first = note.strokes[0].points[0];
+    assert_eq!((first.x, first.y), (3000.0, 1000.0));
+
+    // The other portrait position: a half turn, page size unchanged, ink turned with it.
+    sink.input(LiveInput::Reoriented {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::PortraitRight,
+    });
+    wait_until("the page rewritten turned", || {
+        library
+            .read(&path)
+            .is_ok_and(|loaded| loaded.file.note.strokes[0].points[0].x != 3000.0)
+    });
+    let turned = library.read(&path).unwrap().file.note;
+    assert_eq!(turned.page, portrait);
+    let first = turned.strokes[0].points[0];
+    assert_eq!((first.x, first.y), (14_800.0 - 3000.0, 21_600.0 - 1000.0));
+    assert_eq!(turned.strokes[0].points.len(), 20);
+    // Every window got a snapshot with the new position and the ink.
+    assert!(window.has(|e| matches!(
+        e,
+        LiveEvent::Snapshot { snapshot } if snapshot.orientation == Orientation::PortraitRight
+            && snapshot.page.strokes.len() == 1
+    )));
+
+    // A quarter turn more: the page becomes landscape, its ink turned a quarter.
+    sink.input(LiveInput::Reoriented {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    wait_until("the page rewritten as landscape", || {
+        library
+            .read(&path)
+            .is_ok_and(|loaded| loaded.file.note.page == A5)
+    });
+    let landscape = library.read(&path).unwrap().file.note;
+    // PortraitRight -> Landscape is one quarter turn clockwise: (x, y) on the 14 800 x 21 600
+    // page becomes (21 600 - y, x).
+    let first = landscape.strokes[0].points[0];
+    assert_eq!((first.x, first.y), (21_600.0 - 20_600.0, 11_800.0));
     hub.stop().unwrap();
 }
 
@@ -764,7 +842,7 @@ fn the_json_has_the_shapes_of_live_ts() {
     );
     let mut out = Vec::new();
     session.set_state(LiveSessionState::Waiting, &mut out);
-    session.started(A5.width, A5.height, &mut out);
+    session.started(A5.width, A5.height, Orientation::Landscape, &mut out);
     session.records(&[pen(10, 20, 0), pen(30, 40, 2047)], 1.5e12, &mut out);
     session.records(
         &[pen(50, 60, 1024), pen(70, 80, 0)],
@@ -811,6 +889,7 @@ fn the_json_has_the_shapes_of_live_ts() {
         [
             "hover",
             "layer",
+            "orientation",
             "page",
             "pageCount",
             "pageIndex",

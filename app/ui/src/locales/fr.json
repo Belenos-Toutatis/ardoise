@@ -246,10 +246,14 @@
       "button": "Bouton de la tablette en mode direct",
       "buttonNewPage": "Nouvelle page",
       "buttonNewLayer": "Nouveau calque",
-      "hand": "Orientation de la tablette",
-      "handRight": "Droitier",
-      "handLeft": "Gaucher",
-      "handHint": "Gaucher : la tablette est utilisée à l'envers ; les tracés sont retournés d'un demi-tour pour apparaître à l'endroit."
+      "orientation": "Position de la tablette",
+      "orientationHint": "Choisissez comment vous tenez la tablette : Ardoise redresse ce que vous dessinez pour qu'il apparaisse à l'endroit. À l'envers convient aux gauchers ; en portrait, les notes sont des pages en portrait. Le bouton est celui qui est à côté du voyant de la tablette."
+    },
+    "orientation": {
+      "landscape": "Paysage, bouton en bas",
+      "landscapeFlipped": "Paysage à l'envers, bouton en haut",
+      "portraitLeft": "Portrait, bouton à gauche",
+      "portraitRight": "Portrait, bouton à droite"
     },
     "manage": {
       "title": "Réglages de la tablette",
@@ -1049,6 +1053,10 @@
       "waiting": "En attente de la tablette",
       "live": "En direct",
       "reconnecting": "Reconnexion…"
+    },
+    "orientation": {
+      "label": "Position de la tablette",
+      "hint": "Change aussitôt : la page en cours tourne avec la tablette, avec ce qui y est déjà dessiné."
     },
     "starting": "Démarrage du mode direct…",
     "waiting": {

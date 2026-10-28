@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Ajouté (jalon M8 — retours des premiers essais)
+
+- Position de la tablette : les quatre positions d'Inkspace (paysage, paysage à l'envers, portrait avec le bouton à gauche, portrait avec le bouton à droite) remplacent « droitier / gaucher », avec un petit dessin de la tablette pour chacune, dans les réglages et dans le panneau de la tablette. Les positions en portrait donnent des notes en portrait ; l'ancien réglage « gaucher » devient « paysage à l'envers ». En mode direct, quatre boutons de la fenêtre de commande changent la position aussitôt : la page en cours tourne avec ce qui y est déjà dessiné.
+
 ### Ajouté (jalon M7 — fonctions en plus)
 
 - Glisser une note vers l'Explorateur, bureau, Word, OneNote ou un e-mail : la poignée qui apparaît sur chaque carte de la bibliothèque dépose une image PNG de la note, nommée comme elle (une image par note quand plusieurs sont sélectionnées), rendue comme l'export PNG dans un dossier temporaire d'Ardoise nettoyé ensuite. Le glisser de cartes vers un classeur est inchangé.

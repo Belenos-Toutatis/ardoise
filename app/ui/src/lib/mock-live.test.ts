@@ -10,7 +10,9 @@ import {
   mockLiveSubscribers,
   mockLiveTick,
   resetMockLive,
+  setMockLiveOrientation,
 } from './mock-live';
+import { orientPoint, quarterTurns, turnPoint } from './orientation';
 
 /** Subscribes and records every batch. */
 async function subscribe() {
@@ -150,6 +152,102 @@ describe('browser stand-in for live mode', () => {
     invoke('live_set_view', { view: { ...view, board: false } });
     expect(sub.last()?.page.background.paper).toBe('white');
     expect(sub.last()?.style).toEqual(red);
+  });
+
+  it('holds the tablet landscape by default and portrait notes follow the position', async () => {
+    mockLiveConfig.pen = false;
+    const sub = await subscribe();
+    expect(sub.first.orientation).toBe('landscape');
+    setMockLiveOrientation('portraitLeft');
+    const started = invoke('live_start') as LiveSnapshot;
+    expect(started.orientation).toBe('portraitLeft');
+    expect(started.page.page).toEqual({ width: 21600, height: 29700 });
+    // The simulated pen writes in the tablet's frame; the points arrive turned onto the page.
+    vi.advanceTimersByTime(mockLiveConfig.waitMs);
+    mockLiveTick(200);
+    const points = sub
+      .events()
+      .flatMap((e) => (e.type === 'points' ? e.points : e.type === 'strokeStart' ? e.stroke.points : []));
+    expect(points.length).toBeGreaterThan(100);
+    for (const p of points) {
+      expect(p.x).toBeGreaterThanOrEqual(0);
+      expect(p.x).toBeLessThanOrEqual(21600);
+      expect(p.y).toBeGreaterThanOrEqual(0);
+      expect(p.y).toBeLessThanOrEqual(29700);
+    }
+  });
+
+  it('turns the page in progress, with its ink, when the position is switched', async () => {
+    mockLiveConfig.pen = false;
+    const sub = await subscribe();
+    invoke('live_start');
+    vi.advanceTimersByTime(mockLiveConfig.waitMs);
+    mockLiveConfig.pen = true;
+    mockLiveTick(300);
+    // Snapshots only carry the strokes finished when they were taken: ask for a fresh one.
+    const before = await mockLiveSubscribe(() => {});
+    expect(before.page.strokes.length).toBeGreaterThan(1);
+    const old = structuredClone(before.page.strokes);
+
+    const count = sub.snapshots().length;
+    setMockLiveOrientation('portraitRight');
+    // One snapshot: the page is portrait and every point turned three quarter turns (the
+    // stroke in progress ended first, so there may be one stroke more).
+    expect(sub.snapshots().length).toBe(count + 1);
+    const after = sub.last()!;
+    expect(after.orientation).toBe('portraitRight');
+    expect(after.page.page).toEqual({ width: 21600, height: 29700 });
+    expect(after.page.strokes.length).toBeGreaterThanOrEqual(old.length);
+    old.forEach((stroke, i) => {
+      stroke.points.forEach((p, j) => {
+        const [x, y] = turnPoint(p.x, p.y, 29700, 21600, quarterTurns('portraitRight'));
+        expect(after.page.strokes[i].points[j]).toMatchObject({ x, y, pressure: p.pressure, t: p.t });
+      });
+    });
+    expect(after.view).toMatchObject({ zoom: 1, x: 10800, y: 14850 });
+    // Same position again: nothing happens.
+    setMockLiveOrientation('portraitRight');
+    expect(sub.snapshots().length).toBe(count + 1);
+  });
+
+  it('turns an earlier page only when it is shown again, and a blank page at once', async () => {
+    mockLiveConfig.pen = false;
+    const sub = await subscribe();
+    invoke('live_start');
+    vi.advanceTimersByTime(mockLiveConfig.waitMs);
+    mockLiveConfig.pen = true;
+    mockLiveTick(120);
+    mockLiveConfig.pen = false;
+    invoke('live_command', { command: { kind: 'newPage' } });
+    expect(sub.last()?.pageIndex).toBe(1);
+    setMockLiveOrientation('landscapeFlipped');
+    // Page 2 is blank: it follows, and stays landscape.
+    expect(sub.last()?.page.page).toEqual({ width: 29700, height: 21600 });
+    setMockLiveOrientation('portraitLeft');
+    expect(sub.last()?.page.page).toEqual({ width: 21600, height: 29700 });
+    // Page 1 has ink and was left in landscape: it turns when shown again.
+    invoke('live_command', { command: { kind: 'previousPage' } });
+    const shown = sub.last()!;
+    expect(shown.pageIndex).toBe(0);
+    expect(shown.page.page).toEqual({ width: 21600, height: 29700 });
+    expect(shown.page.strokes.length).toBeGreaterThan(0);
+    for (const stroke of shown.page.strokes) {
+      for (const p of stroke.points) {
+        expect(p.x).toBeGreaterThanOrEqual(0);
+        expect(p.x).toBeLessThanOrEqual(21600);
+        expect(p.y).toBeGreaterThanOrEqual(0);
+        expect(p.y).toBeLessThanOrEqual(29700);
+      }
+    }
+  });
+
+  it('turns the tablet-frame corners onto the page like the Rust side', () => {
+    expect(orientPoint(0, 0, 29700, 21600, 'landscape')).toEqual([0, 0]);
+    expect(orientPoint(0, 0, 29700, 21600, 'landscapeFlipped')).toEqual([29700, 21600]);
+    expect(orientPoint(0, 0, 29700, 21600, 'portraitLeft')).toEqual([21600, 0]);
+    expect(orientPoint(29700, 0, 29700, 21600, 'portraitLeft')).toEqual([21600, 29700]);
+    expect(orientPoint(0, 0, 29700, 21600, 'portraitRight')).toEqual([0, 29700]);
+    expect(orientPoint(29700, 21600, 29700, 21600, 'portraitRight')).toEqual([21600, 0]);
   });
 
   it('refuses commands when live mode is not running', () => {

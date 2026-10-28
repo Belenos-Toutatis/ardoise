@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from './api';
 import { mockLibrary, mockOnLibraryChanged, resetMockLibrary } from './mock-data';
 import { mockTablet, mockTabletDraw, mockTabletPatch, resetMockTablet } from './mock-tablet';
+import type { Orientation } from './orientation';
 import type { TabletOptions, TabletStatus } from './tablet';
 
-const OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, hand: 'right', button: 'newPage' };
+const OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' };
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -85,8 +86,8 @@ describe('mock tablet: connection', () => {
 
   it('hands out copies of its status', async () => {
     const { first } = await subscribe();
-    first.options.hand = 'left';
-    expect((await api.tabletStatus()).options.hand).toBe('right');
+    first.options.orientation = 'landscapeFlipped';
+    expect((await api.tabletStatus()).options.orientation).toBe('landscape');
   });
 
   it('can be patched by a test (low battery, charging)', async () => {
@@ -210,7 +211,7 @@ describe('mock tablet: sync', () => {
   });
 
   it('turns the strokes half a turn for a left-handed user', async () => {
-    await connectedWithoutSync({ hand: 'left' });
+    await connectedWithoutSync({ orientation: 'landscapeFlipped' });
     await api.tabletSync();
     await beat(3);
     const paths = (await api.tabletStatus()).lastSync!.saved;
@@ -218,6 +219,52 @@ describe('mock tablet: sync', () => {
     // The square of reference page 1 starts at (3000, 3000).
     expect(first.x).toBe(29700 - 3000);
     expect(first.y).toBe(21600 - 3000);
+  });
+});
+
+describe('mock tablet: orientation', () => {
+  const A4_W = 29700;
+  const A4_H = 21600;
+
+  async function firstStroke(orientation: Orientation) {
+    await connectedWithoutSync({ orientation });
+    await api.tabletSync();
+    await beat(3);
+    const paths = (await api.tabletStatus()).lastSync!.saved;
+    const { note } = await api.openNote(paths[0]);
+    return { note, first: note.strokes[0].points[0] };
+  }
+
+  it('keeps a landscape page for the two landscape positions and swaps width and height in portrait', async () => {
+    expect((await firstStroke('landscape')).note.page).toEqual({ width: A4_W, height: A4_H });
+    resetMockLibrary();
+    resetMockTablet();
+    expect((await firstStroke('portraitLeft')).note.page).toEqual({ width: A4_H, height: A4_W });
+  });
+
+  it('turns the corner of reference page 1 a quarter turn the right way in portrait', async () => {
+    // The square of reference page 1 starts at (3000, 3000) of the tablet.
+    const left = await firstStroke('portraitLeft');
+    expect(left.first.x).toBe(A4_H - 3000);
+    expect(left.first.y).toBe(3000);
+    resetMockLibrary();
+    resetMockTablet();
+    const right = await firstStroke('portraitRight');
+    expect(right.first.x).toBe(3000);
+    expect(right.first.y).toBe(A4_W - 3000);
+  });
+
+  it('refuses a position it does not know', async () => {
+    await connectedWithoutSync();
+    expect((await failureOf(api.tabletSetOrientation('upsideDown' as Orientation))).code).toBe('unexpected');
+  });
+
+  it('switches the position without touching the other options', async () => {
+    await connectedWithoutSync({ deleteAfterImport: false });
+    await api.tabletSetOrientation('portraitRight');
+    const options = (await api.tabletStatus()).options;
+    expect(options.orientation).toBe('portraitRight');
+    expect(options.deleteAfterImport).toBe(false);
   });
 });
 
@@ -349,11 +396,11 @@ describe('mock tablet: settings', () => {
   });
 
   it('keeps the options it is given and refuses odd ones', async () => {
-    const options: TabletOptions = { autoSync: false, deleteAfterImport: false, hand: 'left', button: 'newLayer' };
+    const options: TabletOptions = { autoSync: false, deleteAfterImport: false, orientation: 'landscapeFlipped', button: 'newLayer' };
     const status = await api.tabletSetOptions(options);
     expect(status.options).toEqual(options);
     expect((await api.tabletStatus()).options).toEqual(options);
-    const odd = { ...options, hand: 'both' } as unknown as TabletOptions;
+    const odd = { ...options, orientation: 'both' } as unknown as TabletOptions;
     expect((await failureOf(api.tabletSetOptions(odd))).code).toBe('unexpected');
   });
 

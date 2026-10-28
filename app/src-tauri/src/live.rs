@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ardoise_core::note::PageSize;
-use ardoise_core::settings::LiveButton;
+use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{TabletService, TabletStatus};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State, Webview};
@@ -100,6 +100,17 @@ fn button_setting(context: &AppContext) -> ButtonSetting {
             .and_then(|store| store.load().ok())
             .map_or(LiveButton::default(), |settings| settings.tablet.button)
     })
+}
+
+/// How the tablet is held, from `[tablet] orientation` (landscape when the settings cannot be
+/// read).
+fn orientation_setting(context: &AppContext) -> Orientation {
+    store(context)
+        .ok()
+        .and_then(|store| store.load().ok())
+        .map_or(Orientation::default(), |settings| {
+            settings.tablet.orientation
+        })
 }
 
 /// The main window went away (the app ends): live mode stops and every page is written, so that
@@ -212,6 +223,7 @@ pub async fn live_start(
         library,
         french: report_language(&context) == "fr",
         size,
+        orientation: orientation_setting(&context),
         button: button_setting(&context),
     };
     match runtime

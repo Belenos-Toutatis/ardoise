@@ -25,7 +25,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime};
 
 use ardoise_core::note::PageSize;
-use ardoise_core::settings::{Hand, LiveButton, TabletSettings};
+use ardoise_core::settings::{LiveButton, Orientation, TabletSettings};
 use ardoise_proto::live::LiveRecord;
 use serde::{Deserialize, Serialize};
 
@@ -150,7 +150,7 @@ impl StatusError {
 pub struct TabletOptions {
     pub auto_sync: bool,
     pub delete_after_import: bool,
-    pub hand: Hand,
+    pub orientation: Orientation,
     pub button: LiveButton,
 }
 
@@ -165,7 +165,7 @@ impl From<&TabletSettings> for TabletOptions {
         Self {
             auto_sync: settings.auto_sync,
             delete_after_import: settings.delete_after_import,
-            hand: settings.hand,
+            orientation: settings.orientation,
             button: settings.button,
         }
     }
@@ -264,7 +264,7 @@ pub type StatusCallback = Box<dyn Fn(&TabletStatus) + Send + Sync>;
 pub struct PageContext {
     /// Drawing area of the tablet.
     pub size: PageSize,
-    pub hand: Hand,
+    pub orientation: Orientation,
 }
 
 /// Writes a downloaded page as a note of the library (`&Path`, its root) and checks it reads back
@@ -290,7 +290,14 @@ pub enum LiveInput {
     Started {
         width: u32,
         height: u32,
-        hand: Hand,
+        orientation: Orientation,
+    },
+    /// The tablet is held another way while live mode streams (the quick switch of the live
+    /// window): the records that follow are turned for `orientation`; same `width` × `height`.
+    Reoriented {
+        width: u32,
+        height: u32,
+        orientation: Orientation,
     },
     /// Records of one notification, 5 ms apart. `received`: when the transport delivered the
     /// notification (latency stamp, system clock).

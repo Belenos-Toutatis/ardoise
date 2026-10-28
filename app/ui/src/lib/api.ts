@@ -9,6 +9,7 @@ import type { LiveBatch, LiveCommand, LiveSnapshot, LiveStyle, LiveViewState, Mo
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
 import { mockTabletSubscribe } from './mock-tablet';
+import type { Orientation } from './orientation';
 import type { TabletEvent, TabletOptions, TabletStatus } from './tablet';
 import type {
   DownloadProgress,
@@ -252,6 +253,8 @@ export const api = {
   /** Sets the tablet clock; returns the drift left in seconds. */
   tabletSetTime: () => call<number>('tablet_set_time'),
   tabletSetOptions: (options: TabletOptions) => call<TabletStatus>('tablet_set_options', { options }),
+  /** The live window's quick switch: how the tablet is held, applied at once to the live page. */
+  tabletSetOrientation: (orientation: Orientation) => call<void>('tablet_set_orientation', { orientation }),
   /** Presses the simulated tablet's button (`--simulated-tablet` only). */
   simPressButton: () => call<void>('sim_press_button'),
 

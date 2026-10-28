@@ -1,13 +1,16 @@
 <script lang="ts">
   /**
    * The tablet's options (`[tablet]` of `ardoise.toml`): automatic sync, deleting pages after a
-   * verified import (on by default), the button's action in live mode, and the hand. Shared by the
+   * verified import (on by default), the button's action in live mode, and how the tablet is held
+   * (four positions, each with its picture). Shared by the
    * tablet panel and the settings; changes go through the shared tablet state.
    */
   import { onMount } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
-  import type { Hand, LiveButton } from '../../lib/tablet';
+  import { ORIENTATIONS } from '../../lib/orientation';
+  import type { LiveButton } from '../../lib/tablet';
   import { tablet } from '../../lib/tablet-state.svelte';
+  import OrientationIcon from './OrientationIcon.svelte';
 
   onMount(() => tablet.start());
 
@@ -15,7 +18,6 @@
   const options = $derived(tablet.status?.options ?? null);
 
   const BUTTONS: LiveButton[] = ['newPage', 'newLayer'];
-  const HANDS: Hand[] = ['right', 'left'];
 </script>
 
 {#if options}
@@ -63,22 +65,28 @@
       {/each}
     </div>
 
-    <div class="group" role="radiogroup" aria-label={t('tablet.options.hand')} aria-describedby="{uid}-hand">
-      <span class="group-label">{t('tablet.options.hand')}</span>
-      {#each HANDS as hand (hand)}
-        <label class="choice">
+    <div
+      class="group"
+      role="radiogroup"
+      aria-label={t('tablet.options.orientation')}
+      aria-describedby="{uid}-orientation"
+    >
+      <span class="group-label">{t('tablet.options.orientation')}</span>
+      {#each ORIENTATIONS as orientation (orientation)}
+        <label class="choice position">
           <input
             type="radio"
-            name="{uid}-hand"
-            data-option="hand"
-            value={hand}
-            checked={options.hand === hand}
-            onchange={() => tablet.setOptions({ hand })}
+            name="{uid}-orientation"
+            data-option="orientation"
+            value={orientation}
+            checked={options.orientation === orientation}
+            onchange={() => tablet.setOptions({ orientation })}
           />
-          {t(hand === 'right' ? 'tablet.options.handRight' : 'tablet.options.handLeft')}
+          <OrientationIcon {orientation} size={34} />
+          {t(`tablet.orientation.${orientation}`)}
         </label>
       {/each}
-      <p id="{uid}-hand" class="muted small hint">{t('tablet.options.handHint')}</p>
+      <p id="{uid}-orientation" class="muted small hint">{t('tablet.options.orientationHint')}</p>
     </div>
   </div>
 {/if}
@@ -99,6 +107,11 @@
     flex-direction: column;
     gap: 0.1rem;
     margin-top: 0.4rem;
+  }
+
+  .position {
+    align-items: center;
+    gap: 0.5rem;
   }
 
   .group-label {

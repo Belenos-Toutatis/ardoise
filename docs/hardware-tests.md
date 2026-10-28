@@ -149,7 +149,13 @@ Dans le panneau, section **Réglages de la tablette** (la tablette doit être «
 
 1. **Renommer** : écrire `Classe 3B`, cliquer sur **Renommer** : le nom change dans le panneau et dans la barre latérale. Essayer `Éléphant` (accent) et un nom de plus de 15 caractères : le message « Le nom doit faire de 1 à 15 caractères… » apparaît et rien n'est envoyé. Fermer et relancer Ardoise, reconnecter la tablette : le nom est conservé. Remettre `Bamboo Slate` à la fin.
 2. **Mettre à l'heure** : cliquer, puis **noter l'écart restant** affiché (moins d'une seconde est normal).
-3. **Gaucher** : cocher **Gaucher**. **Retourner la tablette d'un demi-tour**, dessiner une page avec le mot `Ardoise` écrit normalement, appuyer brièvement sur le bouton, reconnecter, synchroniser. La note doit apparaître **à l'endroit**. Si le mot est à l'envers ou en miroir, le noter. Repasser ensuite en **Droitier**.
+3. **Position de la tablette** (quatre positions ; remplace « droitier / gaucher »). Pour chacune des quatre, choisir la position dans **Réglages de la tablette**, tenir la tablette comme le dessin de la case l'indique, dessiner une page avec le mot `Ardoise` écrit normalement et une flèche vers le haut, appuyer brièvement sur le bouton, reconnecter, synchroniser. À chaque fois la note doit apparaître **à l'endroit** (mot lisible, flèche vers le haut, pas de miroir) :
+   - **Paysage, bouton en bas** : la tablette posée comme d'habitude, le bouton et le voyant du côté de soi. Note en paysage. **Vérifier que le bouton est bien du côté indiqué** : sinon, noter où il est ;
+   - **Paysage à l'envers, bouton en haut** : la tablette tournée d'un demi-tour (l'ancien « gaucher »). Note en paysage ;
+   - **Portrait, bouton à gauche** : la tablette tournée d'un quart de tour dans le sens des aiguilles d'une montre. Note en **portrait** (plus haute que large) ;
+   - **Portrait, bouton à droite** : la tablette tournée d'un quart de tour en sens inverse. Note en **portrait**.
+   Noter les positions où le mot est couché, à l'envers ou en miroir. Reprendre ensuite **Paysage, bouton en bas**. Un ancien réglage « Gaucher » doit être devenu **Paysage à l'envers** (vérifier après avoir ouvert Ardoise avec un `ardoise.toml` contenant `hand = "left"`).
+   - En **mode direct** (partie D), vérifier la même chose avec la barre des quatre boutons de position de la fenêtre de commande : écrire un mot, changer de position sans lever la main de la tablette puis la reposer : la page en cours **tourne avec son tracé** (le mot reste lisible à l'écran), et ce qu'on écrit ensuite apparaît à l'endroit dans la nouvelle position. Revenir à une page précédente dessinée dans l'autre position : elle tourne à son tour.
 4. **Batterie** : noter le pourcentage affiché. Brancher la tablette en USB : l'indication « en charge » (éclair) apparaît-elle à côté du pourcentage ?
 5. **Oublier la tablette** (en dernier) : un message de confirmation demande « Oublier la tablette… ? » ; **Annuler** ne fait rien, « Oui, l'oublier » oublie la tablette, et le panneau propose alors **Enregistrer la tablette**. Réenregistrer par l'assistant (partie A) avant de continuer.
 
@@ -200,7 +206,7 @@ Le service de la tablette (connexion automatique, synchronisation, mode direct) 
 
 ### Ce qui revient par Nextcloud
 
-- Dans la bibliothèque : les notes synchronisées (parties B et C) et celles du mode direct (D et E), avec leur date. Elles permettent de juger la fidélité des tracés, la pression et l'orientation gaucher.
+- Dans la bibliothèque : les notes synchronisées (parties B et C) et celles du mode direct (D et E), avec leur date. Elles permettent de juger la fidélité des tracés, la pression et les quatre positions de la tablette.
 - Dans `<bibliothèque>\_ardoise\diagnostics\` : les journaux (`AAAA-MM-JJ_HHMMSS.jsonl` et `.txt`) **écrits à chaque erreur** de la tablette, de la synchronisation ou du mode direct, **et à l'arrêt d'une session de mode direct qui a reçu une notification inconnue** (`unclassified during live mode` : le bouton de la tablette par exemple), même sans erreur. Une session sans erreur ni notification inconnue n'en laisse pas : l'absence de fichier n'est pas un problème, mais après l'étape D5 il y en a un si Ardoise n'a pas reconnu le bouton.
 - Dans `<bibliothèque>\_ardoise\device.json` : l'enregistrement de la tablette (nom compris), partagé par tous les PC.
 - Dans `ardoise.toml` (à côté de l'exe) : la section `[tablet]` (options) et le dernier écran de projection de ce PC.
@@ -213,7 +219,7 @@ Ce qui ne revient pas tout seul :
 |---|---|
 | Le texte exact de toute erreur affichée (enregistrement, synchronisation, mode direct, projection) et ce qu'elle proposait de faire | A, B, D, E |
 | Le temps entre l'appui sur le bouton et « Connectée » ; si la synchro automatique a démarré seule | B3, B4, B8 |
-| Une page perdue, en double, tronquée ou à l'envers (droitier comme gaucher) | B, C3 |
+| Une page perdue, en double, tronquée ou à l'envers (dans les quatre positions de la tablette) | B, C3 |
 | Sans effacement : le message « N pages attendent sur la tablette… » apparaît-il, et la seconde page est-elle bien récupérée une fois l'option recochée | B7 |
 | L'écart affiché après « Mettre à l'heure » ; si le nom et la batterie (avec « en charge ») sont corrects | C |
 | **Ce qui se passe à l'appui sur le bouton de la tablette pendant le mode direct** (rien / nouvelle page / nouveau calque / déconnexion / couleur du voyant), appui bref et appui de 2 secondes | D5 |

@@ -8,6 +8,7 @@ import { FakeContext } from '../../lib/live-fake-canvas';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import { mockLiveConfig, mockLiveTick, resetMockLive } from '../../lib/mock-live';
 import { mockNarration, resetMockNarration } from '../../lib/mock-narration';
+import { resetMockTablet } from '../../lib/mock-tablet';
 import LiveView from './LiveView.svelte';
 
 // The real stroke geometry, instantiated from the module's bytes (jsdom cannot fetch it).
@@ -40,6 +41,7 @@ const contexts: FakeContext[] = [];
 
 beforeEach(() => {
   resetMockLive();
+  resetMockTablet();
   resetMockNarration();
   resetMockLibrary();
   setLocale('fr');
@@ -113,6 +115,54 @@ describe('live view (control window)', () => {
     await vi.waitFor(() => expect(contexts.some((c) => c.count('fill') > 0)).toBe(true));
     // A saved page is counted.
     await vi.waitFor(() => expect(view.target.querySelector('[data-saved]')?.textContent).toBe('1 note enregistrée'));
+  });
+
+  it('switches the tablet position at once: the page in progress turns with its ink', async () => {
+    const view = render();
+    await live(view);
+    const positions = () => [...view.target.querySelectorAll<HTMLButtonElement>('[data-slot="orientation"] button')];
+    const pressed = () => positions().map((b) => b.getAttribute('aria-pressed'));
+    expect(positions().map((b) => b.dataset.orientation)).toEqual([
+      'landscape',
+      'landscapeFlipped',
+      'portraitLeft',
+      'portraitRight',
+    ]);
+    expect(positions().map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Paysage, bouton en bas',
+      "Paysage à l'envers, bouton en haut",
+      'Portrait, bouton à gauche',
+      'Portrait, bouton à droite',
+    ]);
+    expect(pressed()).toEqual(['true', 'false', 'false', 'false']);
+
+    mockLiveConfig.pen = true;
+    mockLiveTick(150);
+    await tick();
+    const strokes = Number(view.canvas().dataset.strokes);
+    expect(strokes).toBeGreaterThan(0);
+    // The page of the session, as written in the library.
+    const written = async () => {
+      const saved = (await api.liveSubscribe(() => {})).saved;
+      return mockLibrary().notes.get(saved[0])?.note.page;
+    };
+    await vi.waitFor(async () => expect(await written()).toEqual({ width: 29700, height: 21600 }));
+
+    view.button('Portrait, bouton à gauche').click();
+    await vi.waitFor(() => expect(pressed()).toEqual(['false', 'false', 'true', 'false']));
+    // The same strokes (the one in progress ended) on a portrait page, saved so.
+    expect(Number(view.canvas().dataset.strokes)).toBeGreaterThanOrEqual(strokes);
+    await vi.waitFor(async () => expect(await written()).toEqual({ width: 21600, height: 29700 }));
+    expect((await api.tabletStatus()).options.orientation).toBe('portraitLeft');
+    expect((await api.liveSubscribe(() => {})).orientation).toBe('portraitLeft');
+
+    // Back to landscape; a refused switch is reported and changes nothing.
+    view.button('Paysage, bouton en bas').click();
+    await vi.waitFor(() => expect(pressed()[0]).toBe('true'));
+    vi.spyOn(api, 'tabletSetOrientation').mockRejectedValue({ code: 'tablet', message: 'no tablet' });
+    view.button('Portrait, bouton à droite').click();
+    await vi.waitFor(() => expect(view.target.textContent).toContain('no tablet'));
+    expect(pressed()[0]).toBe('true');
   });
 
   it('changes the tool, the colour and the width', async () => {

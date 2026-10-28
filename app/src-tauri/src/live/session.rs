@@ -9,7 +9,8 @@ use std::time::Instant;
 
 use ardoise_core::library::FileStamp;
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Timing};
-use ardoise_core::settings::LiveButton;
+use ardoise_core::settings::{LiveButton, Orientation};
+use ardoise_device::pages::{oriented_size, turn_point};
 use ardoise_ink::{Point, Stroke};
 use ardoise_proto::SLATE_MAX_PRESSURE;
 use ardoise_proto::live::LiveRecord;
@@ -53,6 +54,9 @@ pub struct Page {
     /// member written with every version of the page. Only the encoded bytes stay in memory: a
     /// later recording on the page decodes them again to merge with them.
     pub audio: Option<Vec<u8>>,
+    /// How the tablet was held for the page's ink: the page on screen follows the tablet
+    /// ([`LiveSession::reorient`]).
+    orientation: Orientation,
     /// No stroke started yet: the note's time origin is still free.
     fresh: bool,
     /// Time of the page's last pen sample, ms since `note.created`.
@@ -60,7 +64,7 @@ pub struct Page {
 }
 
 impl Page {
-    fn new(note: Note) -> Page {
+    fn new(note: Note, orientation: Orientation) -> Page {
         Page {
             note,
             version: 0,
@@ -70,6 +74,7 @@ impl Page {
             last_attempt: None,
             save_error: None,
             audio: None,
+            orientation,
             fresh: true,
             last_t: None,
         }
@@ -95,6 +100,28 @@ impl Page {
 
     fn touch(&mut self) {
         self.version += 1;
+    }
+
+    /// Turns the page `turns` clockwise quarter turns, ink and all, so that it is held as
+    /// `orientation` (the page size is swapped for an odd number of turns). Times, pressures,
+    /// layers and narration are untouched.
+    fn turn(&mut self, turns: u8, orientation: Orientation) {
+        if !turns.is_multiple_of(4) {
+            let (width, height) = (self.note.page.width as f32, self.note.page.height as f32);
+            for stroke in &mut self.note.strokes {
+                for point in &mut stroke.points {
+                    (point.x, point.y) = turn_point(point.x, point.y, width, height, turns);
+                }
+            }
+            if turns % 2 == 1 {
+                self.note.page = PageSize {
+                    width: self.note.page.height,
+                    height: self.note.page.width,
+                };
+            }
+            self.touch();
+        }
+        self.orientation = orientation;
     }
 
     /// Changed since it was written, and worth a file: a note is created only once a stroke
@@ -149,8 +176,10 @@ pub struct LiveSession {
     id: u64,
     pages: Vec<Page>,
     current: usize,
-    /// Drawing area of the tablet: the size of new pages.
+    /// The size of new pages: the tablet's drawing area, as the tablet is held.
     size: PageSize,
+    /// How the tablet is held: the orientation of new pages.
+    orientation: Orientation,
     style: LiveStyle,
     /// Style before the blackboard was turned on, given back when it is turned off.
     style_before_board: Option<LiveStyle>,
@@ -179,6 +208,7 @@ impl LiveSession {
             pages: Vec::new(),
             current: 0,
             size,
+            orientation: Orientation::Landscape,
             style: style.sanitized(),
             style_before_board: None,
             view: view.sanitized(size),
@@ -231,6 +261,21 @@ impl LiveSession {
     #[cfg(test)]
     pub fn size(&self) -> PageSize {
         self.size
+    }
+
+    #[cfg(test)]
+    pub fn orientation(&self) -> Orientation {
+        self.orientation
+    }
+
+    /// The session starts held as `orientation` (before the tablet streams): `size` is the
+    /// page size it implies.
+    pub fn with_orientation(mut self, orientation: Orientation) -> Self {
+        self.orientation = orientation;
+        for page in &mut self.pages {
+            page.orientation = orientation;
+        }
+        self
     }
 
     /// A `saveFailed` event for every page whose last write failed.
@@ -298,7 +343,7 @@ impl LiveSession {
         } else {
             Paper::White
         };
-        Page::new(Note {
+        let note = Note {
             id: uuid::Uuid::new_v4().to_string(),
             title: String::new(),
             created: now_ms,
@@ -318,7 +363,8 @@ impl LiveSession {
             strokes: Vec::new(),
             timing: Timing::Recorded,
             origin: Origin::Live,
-        })
+        };
+        Page::new(note, self.orientation)
     }
 
     /// The whole session, for a window that draws it from scratch.
@@ -328,6 +374,7 @@ impl LiveSession {
             page: self.current_page().note.clone(),
             page_index: self.current,
             page_count: self.pages.len(),
+            orientation: self.orientation,
             layer: self.current_layer(),
             style: self.style,
             view: self.view,
@@ -368,35 +415,110 @@ impl LiveSession {
         self.push_snapshot(out);
     }
 
-    /// The tablet streams; its drawing area is `width` × `height`. Pages not drawn on yet take
-    /// that size.
-    pub fn started(&mut self, width: u32, height: u32, out: &mut Vec<LiveEvent>) {
-        let size = PageSize { width, height };
-        let resized = width > 0 && height > 0 && size != self.size;
-        if resized {
-            self.size = size;
-            for page in &mut self.pages {
-                if page.fresh && page.note.strokes.is_empty() && page.file.is_none() {
-                    page.note.page = size;
-                }
-            }
-            let page = self.current_page().note.page;
-            self.view = if self.view.zoom <= 1.0 {
-                LiveViewState {
-                    board: self.view.board,
-                    laser: self.view.laser,
-                    ..LiveViewState::whole(page)
-                }
-            } else {
-                self.view.sanitized(page)
-            };
-        }
+    /// The tablet streams; its drawing area is `width` × `height` and it is held as
+    /// `orientation`. Pages not drawn on yet take the page size that implies.
+    pub fn started(
+        &mut self,
+        width: u32,
+        height: u32,
+        orientation: Orientation,
+        out: &mut Vec<LiveEvent>,
+    ) {
+        let changed = self.hold(width, height, orientation, out);
         if self.state == LiveSessionState::Live {
-            if resized {
+            if changed {
                 self.push_snapshot(out);
             }
         } else {
             self.set_state(LiveSessionState::Live, out);
+        }
+    }
+
+    /// The tablet is held another way while live mode runs (the quick switch of the live
+    /// window). The stroke in progress ends, then the page on screen is turned with its ink
+    /// (see [`hold`](Self::hold)) and every window gets a snapshot.
+    pub fn reorient(
+        &mut self,
+        width: u32,
+        height: u32,
+        orientation: Orientation,
+        out: &mut Vec<LiveEvent>,
+    ) {
+        if self.hold(width, height, orientation, out) {
+            self.push_snapshot(out);
+        }
+    }
+
+    /// Takes the tablet's drawing area and way of being held. What happens to the pages:
+    /// - the current page is turned with its ink, by the quarter turns from the orientation it
+    ///   was written in (the writing stays upright; the page swaps its width and height for a
+    ///   quarter turn); the shared view follows (zoom kept, centre turned);
+    /// - blank pages never written to disk just take the new size;
+    /// - the other pages keep their ink and orientation, until they are shown again
+    ///   ([`follow`](Self::follow)): the pen's points are always in the current orientation.
+    ///
+    /// Returns whether anything changed.
+    fn hold(
+        &mut self,
+        width: u32,
+        height: u32,
+        orientation: Orientation,
+        out: &mut Vec<LiveEvent>,
+    ) -> bool {
+        let size = oriented_size(PageSize { width, height }, orientation);
+        if width == 0 || height == 0 || (size == self.size && orientation == self.orientation) {
+            return false;
+        }
+        self.end_stroke(out);
+        self.hover_end(out);
+        self.size = size;
+        self.orientation = orientation;
+        let shown = self.current_page();
+        let (before, turns) = (shown.note.page, orientation.turns_from(shown.orientation));
+        for index in 0..self.pages.len() {
+            let page = &mut self.pages[index];
+            if page.note.strokes.is_empty() && page.file.is_none() {
+                page.note.page = size;
+                page.orientation = orientation;
+            } else if index == self.current {
+                page.turn(turns, orientation);
+                self.leave(index);
+            }
+        }
+        let page = self.current_page().note.page;
+        self.view = if self.view.zoom <= 1.0 {
+            LiveViewState {
+                board: self.view.board,
+                laser: self.view.laser,
+                ..LiveViewState::whole(page)
+            }
+        } else {
+            let (x, y) = turn_point(
+                self.view.x as f32,
+                self.view.y as f32,
+                before.width as f32,
+                before.height as f32,
+                turns,
+            );
+            LiveViewState {
+                x: f64::from(x),
+                y: f64::from(y),
+                ..self.view
+            }
+            .sanitized(page)
+        };
+        true
+    }
+
+    /// The current page is shown: it is turned to the way the tablet is held now, if it was
+    /// written another way, so that the pen's points land where they should.
+    fn follow(&mut self) {
+        let orientation = self.orientation;
+        let index = self.current;
+        let page = &mut self.pages[index];
+        if page.orientation != orientation {
+            page.turn(orientation.turns_from(page.orientation), orientation);
+            self.leave(index);
         }
     }
 
@@ -581,6 +703,7 @@ impl LiveSession {
                     self.current = self.pages.len() - 1;
                 }
                 self.leave(left);
+                self.follow();
                 self.push_snapshot(out);
             }
             LiveCommandKind::PreviousPage => {
@@ -591,6 +714,7 @@ impl LiveSession {
                 let left = self.current;
                 self.current -= 1;
                 self.leave(left);
+                self.follow();
                 self.push_snapshot(out);
             }
             LiveCommandKind::NewPage => {
@@ -697,9 +821,16 @@ mod tests {
         );
         let mut out = Vec::new();
         session.set_state(LiveSessionState::Waiting, &mut out);
-        session.started(29_700, 21_600, &mut out);
+        session.started(29_700, 21_600, Orientation::Landscape, &mut out);
         assert_eq!(session.state(), LiveSessionState::Live);
         session
+    }
+
+    impl LiveSession {
+        /// `command` with the button on its default and a fixed clock.
+        fn command_for_test(&mut self, kind: LiveCommandKind, out: &mut Vec<LiveEvent>) {
+            self.command(kind, LiveButton::NewPage, T0 as i64, out);
+        }
     }
 
     fn is_snapshot(event: &LiveEvent) -> bool {
@@ -1013,6 +1144,138 @@ mod tests {
         assert_eq!(stroke.points.len(), 3);
     }
 
+    /// A running session held as `orientation` (the tablet is A4: 29 700 x 21 600).
+    fn running_as(orientation: Orientation) -> LiveSession {
+        let mut session = running();
+        let mut out = Vec::new();
+        session.started(29_700, 21_600, orientation, &mut out);
+        session
+    }
+
+    fn first_point(session: &LiveSession, page: usize) -> (f32, f32) {
+        let p = session.pages()[page].note.strokes[0].points[0];
+        (p.x, p.y)
+    }
+
+    #[test]
+    fn a_portrait_start_makes_portrait_pages() {
+        let mut session = running_as(Orientation::PortraitLeft);
+        assert_eq!(session.orientation(), Orientation::PortraitLeft);
+        assert_eq!(
+            session.size(),
+            PageSize {
+                width: 21_600,
+                height: 29_700
+            }
+        );
+        assert_eq!(session.pages()[0].note.page, session.size());
+        assert_eq!(session.snapshot().orientation, Orientation::PortraitLeft);
+        // The view shows the whole new page.
+        assert_eq!((session.view().x, session.view().y), (10_800.0, 14_850.0));
+        // New pages are portrait too.
+        let mut out = Vec::new();
+        session.command_for_test(LiveCommandKind::NewPage, &mut out);
+        assert_eq!(session.pages()[1].note.page, session.size());
+    }
+
+    #[test]
+    fn switching_turns_the_current_page_with_its_ink_and_ends_the_stroke() {
+        let mut session = running();
+        let mut out = Vec::new();
+        // A finished stroke at (1000, 2000), then a stroke still in progress at (5000, 6000).
+        session.records(
+            &[
+                pen(1000, 2000, 400),
+                pen(1100, 2000, 400),
+                pen(1100, 2000, 0),
+            ],
+            T0,
+            &mut out,
+        );
+        session.records(
+            &[pen(5000, 6000, 400), pen(5100, 6000, 400)],
+            T0 + 100.0,
+            &mut out,
+        );
+        out.clear();
+
+        session.reorient(29_700, 21_600, Orientation::PortraitLeft, &mut out);
+        // The stroke in progress ended (and is kept), one snapshot follows.
+        assert!(out.iter().any(|e| matches!(e, LiveEvent::StrokeEnd { .. })));
+        assert_eq!(snapshots(&out), 1);
+        assert_eq!(session.orientation(), Orientation::PortraitLeft);
+        let page = &session.pages()[0];
+        assert_eq!(
+            page.note.page,
+            PageSize {
+                width: 21_600,
+                height: 29_700
+            }
+        );
+        assert_eq!(page.note.strokes.len(), 2);
+        // A quarter turn clockwise: (x, y) -> (21 600 - y, x).
+        assert_eq!(first_point(&session, 0), (19_600.0, 1000.0));
+        let second = page.note.strokes[1].points[0];
+        assert_eq!((second.x, second.y), (15_600.0, 5000.0));
+        // Times are untouched, and the page is to be written again.
+        let stroke = &page.note.strokes[0];
+        assert_eq!(stroke.points[1].t - stroke.points[0].t, 5);
+        assert!(page.needs_write());
+
+        // Another switch, to flipped landscape: net effect half a turn from the start,
+        // (x, y) -> (29 700 - x, 21 600 - y).
+        out.clear();
+        session.reorient(29_700, 21_600, Orientation::LandscapeFlipped, &mut out);
+        assert_eq!(session.pages()[0].note.page, A4_LANDSCAPE);
+        assert_eq!(first_point(&session, 0), (28_700.0, 19_600.0));
+        // Nothing changes when the position is the same.
+        out.clear();
+        session.reorient(29_700, 21_600, Orientation::LandscapeFlipped, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn switching_keeps_the_zoom_and_turns_its_centre() {
+        let mut session = running();
+        let mut out = Vec::new();
+        let zoomed = LiveViewState {
+            zoom: 2.0,
+            x: 5000.0,
+            y: 4000.0,
+            board: false,
+            laser: false,
+        };
+        session.set_view(zoomed, &mut out);
+        session.records(&[pen(1000, 2000, 400), pen(1100, 2000, 0)], T0, &mut out);
+        session.reorient(29_700, 21_600, Orientation::PortraitLeft, &mut out);
+        let view = session.view();
+        assert_eq!(view.zoom, 2.0);
+        // (5000, 4000) on 29 700 x 21 600 turned a quarter clockwise: (21 600 - 4000, 5000).
+        assert_eq!((view.x, view.y), (17_600.0, 5000.0));
+    }
+
+    #[test]
+    fn other_pages_keep_their_ink_until_shown_again_and_blank_ones_follow() {
+        let mut session = running();
+        let mut out = Vec::new();
+        session.records(&[pen(1000, 2000, 400), pen(1100, 2000, 0)], T0, &mut out);
+        session.command_for_test(LiveCommandKind::NewPage, &mut out);
+        assert_eq!(session.current, 1);
+        session.reorient(29_700, 21_600, Orientation::PortraitRight, &mut out);
+        // Page 2 was blank: it follows at once. Page 1 is untouched, still landscape.
+        assert_eq!(session.pages()[1].note.page, session.size());
+        assert_eq!(session.pages()[0].note.page, A4_LANDSCAPE);
+        assert_eq!(first_point(&session, 0), (1000.0, 2000.0));
+        // Shown again, page 1 turns three quarters: (x, y) -> (y, 29 700 - x).
+        session.command_for_test(LiveCommandKind::PreviousPage, &mut out);
+        assert_eq!(session.pages()[0].note.page, session.size());
+        assert_eq!(first_point(&session, 0), (2000.0, 28_700.0));
+        // New pages from now on are portrait.
+        session.command_for_test(LiveCommandKind::NewPage, &mut out);
+        let newest = session.pages().last().unwrap();
+        assert_eq!(newest.note.page, session.size());
+    }
+
     #[test]
     fn state_changes_end_the_stroke_and_resize_fresh_pages() {
         let mut session = LiveSession::new(
@@ -1028,7 +1291,7 @@ mod tests {
         session.records(&[pen(1, 1, 50)], T0, &mut out);
         assert!(out.is_empty());
         session.set_state(LiveSessionState::Waiting, &mut out);
-        session.started(21_600, 14_800, &mut out);
+        session.started(21_600, 14_800, Orientation::Landscape, &mut out);
         assert_eq!(session.pages()[0].note.page.width, 21_600);
         assert_eq!(session.size().height, 14_800);
         assert_eq!((session.view().x, session.view().y), (10_800.0, 7_400.0));

@@ -4,6 +4,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ardoise_core::note::{Note, PageSize};
+use ardoise_core::settings::Orientation;
 use ardoise_device::pages::TABLET_PEN_WIDTH;
 use ardoise_ink::{Rgba, Tool};
 use serde::{Deserialize, Serialize};
@@ -162,6 +163,8 @@ pub struct LiveSnapshot {
     /// 0-based.
     pub page_index: usize,
     pub page_count: usize,
+    /// How the tablet is held (the live window's quick switch shows it).
+    pub orientation: Orientation,
     /// Layer receiving new strokes (the current page's last one).
     pub layer: u32,
     pub style: LiveStyle,

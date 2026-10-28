@@ -66,7 +66,7 @@ describe('sidebar tablet block', () => {
   });
 
   it('shows the connection and the battery once connected', async () => {
-    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, hand: 'right', button: 'newPage' });
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' });
     const { root } = await render();
     await beat(1.5);
     expect(root().dataset.connection).toBe('connected');

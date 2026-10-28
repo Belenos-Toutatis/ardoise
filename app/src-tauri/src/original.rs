@@ -3,8 +3,8 @@
 //!
 //! - A tablet note keeps the tablet's bytes (`original.bin`, never modified): its original is
 //!   decoded again with [`note_from_page`], exactly as the synchronisation decoded it, with this
-//!   PC's tablet size and hand (the registered tablet's drawing area, else the Bamboo Slate's;
-//!   the hand of the settings).
+//!   PC's tablet size and orientation (the registered tablet's drawing area, else the Bamboo Slate's;
+//!   the orientation of the settings).
 //! - Any other note (live mode, Inkspace import, made in Ardoise) gets `original.ardoise` when
 //!   the editor first saves a change of its ink over it ([`keep_original`], called by
 //!   `notes::save_in`): the version on disk, note and strokes only. It is written once and never
@@ -16,8 +16,8 @@
 //! pixels are not in it): the editor puts the current image back where it was when it is the
 //! same image (`lib/editor/original.ts`). The tablet's pages have no image.
 //!
-//! The tablet's bytes are decoded with today's settings (the hand, the registered tablet's
-//! area): a note synced with the other hand, or from another tablet model, comes back in the
+//! The tablet's bytes are decoded with today's settings (the orientation, the registered tablet's
+//! area): a note synced with the other orientation, or from another tablet model, comes back in the
 //! geometry of today's settings (`docs/design/extras.md`).
 
 use std::path::Path;
@@ -25,7 +25,7 @@ use std::path::Path;
 use ardoise_core::format::{FormatError, NoteFile, read_from_bytes, to_bytes};
 use ardoise_core::library::Library;
 use ardoise_core::note::{BackgroundImage, Layer, Note, PageSize};
-use ardoise_core::settings::{Hand, Settings};
+use ardoise_core::settings::{Orientation, Settings};
 use ardoise_device::identity;
 use ardoise_device::pages::note_from_page;
 use ardoise_device::session::DownloadedPage;
@@ -87,13 +87,13 @@ fn same_ink(a: &Note, b: &Note) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TabletContext {
     pub size: PageSize,
-    pub hand: Hand,
+    pub orientation: Orientation,
     pub layer_name: &'static str,
 }
 
 impl TabletContext {
     /// The tablet registered in the library at `root` (its drawing area; the Bamboo Slate's
-    /// when none is registered), the hand and the language of `settings`.
+    /// when none is registered), the orientation and the language of `settings`.
     pub fn of(root: &Path, settings: &Settings, system_locale: Option<&str>) -> Self {
         let size = match identity::load(root) {
             Ok(Some(record)) if record.width > 0 && record.height > 0 => PageSize {
@@ -107,7 +107,7 @@ impl TabletContext {
         };
         TabletContext {
             size,
-            hand: settings.tablet.hand,
+            orientation: settings.tablet.orientation,
             layer_name: first_layer_name(interface_language(settings, system_locale)),
         }
     }
@@ -125,7 +125,7 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
         let decoded = note_from_page(
             &page,
             tablet.size,
-            tablet.hand,
+            tablet.orientation,
             file.note.id.clone(),
             tablet.layer_name,
             now_ms(),
