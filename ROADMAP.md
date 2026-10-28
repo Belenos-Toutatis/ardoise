@@ -123,7 +123,16 @@ Remarques de l'utilisateur après ses premiers essais sans la tablette (25 octob
 
 **Critères de fin** : `CHECK OK` et `E2E OK` ; tests de chaque fonction ; stylet et écran tactile essayés à la main sur un PC tactile.
 
-## M9 — Finition et publication
+## M9 — Pilotage par un assistant (MCP)
+
+- [ ] Serveur MCP `ardoise.exe --mcp` (SDK Rust officiel de MCP, licence vérifiée) ; outils de lecture : liste, recherche, note, texte reconnu avec positions, rendu en image d'une page ou d'une zone.
+- [ ] Outils d'écriture (créer, renommer, étiqueter, ranger, assembler, découper, redresser, exporter, texte corrigé), sans suppression définitive ; invites prêtes à l'emploi.
+- [ ] Passerelle vers l'application ouverte : ouvrir une note, lancer la présentation, changer de page, version propre à la fin du mode direct.
+- [ ] Guide : déclarer Ardoise dans Claude Code et Claude Desktop ; rappel sur la vie privée.
+
+**Critères de fin** : `CHECK OK` et `E2E OK` ; un test lance `ardoise.exe --mcp`, liste ses outils et appelle chacun sur la bibliothèque de démonstration ; essai réel depuis Claude Code (mettre au propre une note de démonstration).
+
+## M10 — Finition et publication
 
 - [ ] Relecture complète par un agent relecteur ; corrections des problèmes bloquants et importants.
 - [ ] Performances (SPEC §8) mesurées et affichées.

@@ -1,6 +1,6 @@
 //! `cargo xtask privacy`: fails when the git history holds personal data.
 //!
-//! The repository is private today but may be published (milestone M9), and publishing exposes
+//! The repository is private today but may be published (milestone M10), and publishing exposes
 //! the **whole history**, not only the current tree. This command therefore reads every object
 //! reachable from any ref (`git rev-list --all --objects`, each unique blob once, through a single
 //! `git cat-file --batch`), plus every commit message, and looks for:

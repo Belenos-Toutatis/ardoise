@@ -155,7 +155,18 @@ La tablette est au travail alors que le développement se fait à la maison. L'a
 - **outil de test guidé** : une suite d'étapes (rechercher, enregistrer, lire les infos, télécharger les pages, mode direct pendant 30 s, dessins de référence à reproduire) qui produit un rapport ;
 - ces captures servent ensuite de **données de test** rejouées par le simulateur de tablette.
 
-### 4.9 Hors périmètre de la version 1
+### 4.9 Pilotage par un assistant (MCP)
+
+Ajouté à la demande de l'utilisateur le 2026-10-28. Ardoise peut être commandée par un assistant comme Claude Code ou Claude Desktop, grâce au protocole MCP (Model Context Protocol). Ardoise ne contient aucune IA et reste utilisable hors ligne : c'est l'assistant de l'utilisateur qui analyse les notes, par exemple pour reconnaître les schémas et mettre une note au propre.
+
+- `ardoise.exe --mcp` : serveur MCP local (entrée et sortie standard, aucun port réseau), déclaré une fois dans l'assistant. Il lit et écrit la bibliothèque avec le même code que l'application (écritures atomiques, contrôle des modifications concurrentes), même quand l'application est fermée.
+- **Outils de lecture** : lister et chercher les notes (titre, étiquettes, classeur, dates, texte reconnu) ; lire une note (informations, traits) ; son texte reconnu avec la position des lignes ; son rendu en image, page entière ou zone, pour que l'assistant voie les schémas.
+- **Outils d'écriture** : créer une note, renommer, étiqueter, ranger, assembler, découper, redresser les formes, exporter dans tous les formats, enregistrer un texte corrigé qui améliore la recherche d'Ardoise. Aucune suppression définitive : une note supprimée va à la corbeille.
+- **Invites prêtes à l'emploi** : mettre une note au propre (Markdown, Word ou LaTeX), titrer et étiqueter les notes sans titre, résumer une séance pour le cahier de textes.
+- **Passerelle vers l'application ouverte** : ouvrir une note, lancer la présentation, changer de page, proposer une version propre à la fin du mode direct.
+- **Vie privée** : ce que l'assistant lit part chez son fournisseur, selon les réglages du compte de l'utilisateur ; le guide le rappelle (noms d'élèves). Les outils d'écriture sont séparés des outils de lecture, pour qu'on puisse limiter l'assistant à la lecture.
+
+### 4.10 Hors périmètre de la version 1
 
 - Le cloud Wacom et la collaboration en temps réel d'Inkspace.
 - macOS et Linux (l'architecture ne doit pas les empêcher plus tard).
@@ -191,9 +202,10 @@ crates/
   ardoise-media     relecture image par image, MP4/GIF/WebP/WebM, capture micro, encodage audio
   ardoise-inkspace  import des notes Inkspace
   ardoise-hwr       reconnaissance d'écriture (P2)
+  ardoise-mcp       serveur MCP : outils et invites pour un assistant (§4.9)
 app/
   src-tauri/        ardoise.exe : commandes, fenêtres, options en ligne de commande
-                    (--self-test, --diagnostic, --import-inkspace…)
+                    (--self-test, --diagnostic, --import-inkspace, --mcp…)
   ui/               interface Svelte 5 + TypeScript + Vite
 xtask/              cargo xtask check | release | golden
 testdata/           données de test publiables (synthétiques ou anonymisées)
