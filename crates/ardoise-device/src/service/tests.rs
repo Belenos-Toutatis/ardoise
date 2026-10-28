@@ -136,7 +136,7 @@ fn options_are_followed_and_shown() {
         serde_json::json!({
             "autoSync": false,
             "deleteAfterImport": false,
-            "orientation": "left",
+            "orientation": "landscapeFlipped",
             "button": "newLayer",
         })
     );
