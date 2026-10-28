@@ -181,6 +181,12 @@
     "microphone": {
       "title": "Microphone",
       "hint": "The microphone used for the narration of videos and live mode. The choice is remembered on this computer."
+    },
+    "penTouch": {
+      "title": "Pen and touch",
+      "drawWithFinger": "Draw with a finger",
+      "drawWithFingerHint": "By default only the pen draws: a finger pans the page, two fingers zoom, a double tap fits the page. Tick this box for a touch screen without a pen; a finger then draws like the mouse.",
+      "penHint": "The back of the pen erases (with the eraser's settings); the pen's button draws a selection lasso; fingers are ignored while the pen is in use or near the screen."
     }
   },
   "tablet": {
@@ -667,7 +673,13 @@
       "in": "Zoom in",
       "out": "Zoom out",
       "fit": "Fit",
+      "fitWidth": "Width",
+      "fitWidthTitle": "Fit the page to the window's width (Ctrl + 2)",
       "level": "{percent} %"
+    },
+    "touch": {
+      "draw": "Finger",
+      "drawTitle": "Draw with a finger (otherwise a finger pans the page; two fingers zoom; a double tap fits the page)"
     },
     "leave": {
       "title": "Unsaved changes",
@@ -1141,6 +1153,8 @@
       "in": "Zoom in",
       "out": "Zoom out",
       "fit": "Whole page",
+      "fitWidth": "Width",
+      "fitWidthTitle": "Show the page across the projected area's width (W)",
       "level": "× {zoom}"
     },
     "projection": {
@@ -1195,6 +1209,10 @@
           "keys": "0",
           "action": "Whole page"
         },
+        "width": {
+          "keys": "W",
+          "action": "Page width"
+        },
         "pan": {
           "keys": "Shift + arrows",
           "action": "Move the projected area"
@@ -1217,7 +1235,8 @@
   },
   "presentation": {
     "title": "Presentation",
-    "canvas": "Projected page {page}"
+    "canvas": "Projected page {page}",
+    "clearMarks": "Clear the marks"
   },
   "handwriting": {
     "languages": {

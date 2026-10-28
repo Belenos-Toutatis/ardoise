@@ -2,11 +2,14 @@
 
 ## Non publié
 
-### Ajouté (jalon M8 — retours des premiers essais, feuille)
+### Ajouté (jalon M8 — retours des premiers essais)
 
 - Panneau Page : choix **Portrait / Paysage** sans tourner l'écriture (l'écriture garde sa place, replacée dans la feuille quand elle y tient, sinon conservée hors cadre avec un message), **format du papier** A4, A5, Letter, tablette ou dimensions personnalisées en mm, avec l'option d'adapter l'écriture et l'image de fond à la nouvelle taille ; « Tourner la feuille avec l'écriture » reste, clairement distinct.
 - Image ou PDF de fond : bouton pour **tourner l'image seule** d'un quart de tour ; si l'orientation de l'image diffère de celle de la note, Ardoise propose de passer la note dans l'orientation de l'image (une seule étape annulable).
 - **Copier, couper, coller** des traits (Ctrl+C, Ctrl+X, Ctrl+V et boutons de la sélection) d'une note à l'autre, d'une fenêtre à l'autre, par le presse-papiers du système ; le contenu qui ne vient pas d'Ardoise est ignoré.
+- Stylet et écran tactile (Surface) : le dos du stylet efface avec les réglages de la gomme, quel que soit l'outil, et montre le cercle de gomme au survol ; le bouton du stylet trace un lasso de sélection ; la largeur du trait suit la pression ; les doigts sont ignorés tant que le stylet est utilisé ou proche de l'écran. Un doigt fait défiler la page, deux doigts zooment, un double toucher ajuste la page (éditeur, relecture, aperçu du mode direct) ; l'option « Dessiner au doigt » (Réglages et barre de zoom) laisse le doigt dessiner.
+- Zoom « Largeur » à côté de « Ajuster » / « Page entière » (éditeur et relecture : Ctrl + 2 ; mode direct et présentation : touche W).
+- Écrire par-dessus la présentation : au stylet, au doigt ou à la souris sur la fenêtre projetée, annotations temporaires (rouges, jaunes sur le tableau noir) effacées avec le dos du stylet, la touche Suppr ou le bouton « Effacer les annotations », jamais enregistrées dans la note.
 
 ### Ajouté (jalon M7 — fonctions en plus)
 

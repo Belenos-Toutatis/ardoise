@@ -5,6 +5,11 @@
    * drawing order (outlines cached per stroke object). Handles drawing, erasing, lasso, moving
    * and resizing the selection, manual crop, zoom (wheel at the cursor) and pan (middle button,
    * Space + drag, or the pan tool). A drag shows transient state and reports one change at the end.
+   *
+   * Pen and touch (docs/design/interface.md, "M8: pen and touch"): the back of the pen erases
+   * whatever the tool, the pen's barrel button draws a lasso, a finger pans (two fingers pinch,
+   * a double tap fits the page) unless "Draw with a finger" is on, and a finger is ignored while
+   * a pen is in contact or hovering.
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api';
@@ -22,6 +27,16 @@
     type Vec,
   } from '../../lib/editor/geometry';
   import { drawingOrder, hitStroke, selectInLasso } from '../../lib/editor/hit';
+  import {
+    PenPresence,
+    TouchGestures,
+    barrelHeld,
+    inkPressure,
+    pinchView,
+    pointerKind,
+    type TouchAction,
+  } from '../../lib/gestures';
+  import { touchPrefs } from '../../lib/touch-prefs.svelte';
   import { placedImage } from '../../lib/editor/image';
   import { MIN_CROP } from '../../lib/editor/ops';
   import type { SplitPreview } from '../../lib/editor/split';
@@ -39,6 +54,8 @@
   import {
     backgroundWidth,
     fitView,
+    fitWidthView,
+    panBy,
     screenToPage,
     visibleRect,
     zoomAt,
@@ -54,6 +71,7 @@
     tools,
     ink,
     spacePan = false,
+    readonly = false,
     onchange,
     onselect,
     oncropped,
@@ -66,6 +84,8 @@
     ink: Ink;
     /** Space is held: a left drag pans. */
     spacePan?: boolean;
+    /** Replay: the page can only be moved around (no pen, eraser or lasso, whatever the tool). */
+    readonly?: boolean;
     /** An undoable change (one per gesture). */
     onchange: (next: Doc) => void;
     /** A selection change (not an undo step). */
@@ -113,6 +133,10 @@
   let cropRect = $state.raw<Rect | null>(null);
   let livePath = $state('');
   let hover = $state.raw<Vec | null>(null);
+  /** The back of the pen is over the page. */
+  let eraserEnd = $state(false);
+  const presence = new PenPresence();
+  const fingers = new TouchGestures();
   let background = $state<string | null>(null);
 
   const shown = $derived(transient ?? doc);
@@ -199,6 +223,12 @@
     return drag !== null;
   }
 
+  /** The page as wide as the stage (its top shown when it is taller). */
+  export function fitWidth() {
+    measure();
+    view = fitWidthView(doc.note.page, viewport);
+  }
+
   export function zoomBy(factor: number) {
     view = zoomAt(view, { x: viewport.width / 2, y: viewport.height / 2 }, factor);
   }
@@ -278,8 +308,9 @@
     return last;
   }
 
+  /** The pen's pressure is recorded, so the line follows it; a mouse or a finger has a constant one. */
   function sample(e: PointerEvent, p: Vec, d: { t0: number; base: number }): InkPoint {
-    const pressure = typeof e.pressure === 'number' && e.pressure > 0 ? e.pressure : 0.6;
+    const pressure = inkPressure(pointerKind(e), e.pressure);
     return { x: p.x, y: p.y, pressure, t: Math.max(0, Math.round(d.base + (e.timeStamp - d.t0))) };
   }
 
@@ -314,8 +345,82 @@
     dragKind = next.kind;
   }
 
+  /** Drops the gesture under way without reporting it (a second finger took over). */
+  function dropDrag() {
+    if (!drag) return;
+    drag = null;
+    dragKind = null;
+    if (frame && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(frame);
+    frame = 0;
+    livePath = '';
+    transient = null;
+    lasso = null;
+    cropRect = null;
+    dragAffine = null;
+  }
+
+  /** A finger draws (or selects, crops…) only when asked to; otherwise it navigates. */
+  function fingerDraws(): boolean {
+    return touchPrefs.drawWithFinger && !readonly && tools.mode !== 'pan';
+  }
+
+  const touchOptions = () => ({ mode: fingerDraws() ? ('draw' as const) : ('navigate' as const) });
+
+  function applyTouch(action: TouchAction) {
+    if (action.kind === 'pan') view = panBy(view, action.dx, action.dy);
+    else if (action.kind === 'pinch') view = pinchView(view, action.from, action.to, action.factor);
+    else fit();
+  }
+
+  function capture(id: number) {
+    try {
+      svg?.setPointerCapture?.(id);
+    } catch {
+      // Not every pointer can be captured (synthetic events); moves still arrive on the canvas.
+    }
+  }
+
   function onpointerdown(e: PointerEvent) {
+    const kind = pointerKind(e);
+    const id = pointerId(e);
+    if (kind === 'pen' || kind === 'eraser') {
+      presence.seen(id, e.timeStamp, 'down');
+      fingers.reset();
+    } else if (kind === 'touch') {
+      // Palm rejection, then the finger gestures; a finger belongs to the tools only when asked.
+      if (presence.blocksTouch(e.timeStamp)) return;
+      if (drag && !fingers.has(drag.id)) return;
+      if (fingers.down(id, local(e), e.timeStamp)) {
+        e.preventDefault();
+        dropDrag();
+        return;
+      }
+      if (fingers.count > 1 || !fingers.has(id)) return;
+      if (!fingerDraws()) {
+        e.preventDefault();
+        capture(id);
+        return;
+      }
+    }
     if (drag) return;
+    // The back of the pen erases and the barrel button lassoes, whatever the tool.
+    if (!readonly && !split && (kind === 'eraser' || barrelHeld(e))) {
+      e.preventDefault();
+      if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
+      capture(id);
+      const p = pagePoint(e);
+      if (kind === 'eraser') {
+        transient = erase(doc, [p], tools.eraserRadius, tools.eraser);
+        begin({ kind: 'eraser', id, last: p });
+        hover = p;
+      } else {
+        const combine: Combine = e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace';
+        begin({ kind: 'lasso', id, points: [p], combine });
+        lasso = [p];
+        lassoRemoves = combine === 'remove';
+      }
+      return;
+    }
     const panRequested = e.button === 1 || (e.button === 0 && (spacePan || tools.mode === 'pan'));
     if (e.button !== 0 && !panRequested) return;
     e.preventDefault();
@@ -327,12 +432,7 @@
     }
     // A pending title or layer name edit is committed by leaving its field.
     if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
-    const id = pointerId(e);
-    try {
-      svg?.setPointerCapture?.(id);
-    } catch {
-      // Not every pointer can be captured (synthetic events); moves still arrive on the canvas.
-    }
+    capture(id);
     if (panRequested) return begin({ kind: 'pan', id, start: local(e), view });
     const p = pagePoint(e);
     if (split) {
@@ -375,7 +475,17 @@
   }
 
   function onpointermove(e: PointerEvent) {
-    if (tools.mode === 'eraser') hover = pagePoint(e);
+    const kind = pointerKind(e);
+    if (kind === 'pen' || kind === 'eraser') {
+      presence.seen(pointerId(e), e.timeStamp, ((e.buttons ?? 0) & 33) !== 0 ? 'down' : 'hover');
+      eraserEnd = kind === 'eraser' && !readonly && !split;
+    } else if (kind === 'touch' && fingers.has(pointerId(e))) {
+      const action = fingers.move(pointerId(e), local(e), touchOptions());
+      if (action) applyTouch(action);
+      if (fingers.count > 1) return;
+    }
+    if (tools.mode === 'eraser' || eraserEnd) hover = pagePoint(e);
+    else if (hover) hover = null;
     if (!drag || pointerId(e) !== drag.id) return;
     switch (drag.kind) {
       case 'pan': {
@@ -423,6 +533,30 @@
         cropRect = rectFromCorners(drag.start, pagePoint(e));
         break;
     }
+  }
+
+  /** The pointer is up (or was taken away): finger and pen bookkeeping, then the gesture ends. */
+  function release(e: PointerEvent, cancelled: boolean) {
+    const kind = pointerKind(e);
+    if (kind === 'pen' || kind === 'eraser') presence.lifted(pointerId(e), e.timeStamp);
+    else if (kind === 'touch') {
+      let action: TouchAction | null = null;
+      if (cancelled) fingers.cancel(pointerId(e));
+      else action = fingers.up(pointerId(e), e.timeStamp, touchOptions());
+      if (action) applyTouch(action);
+    }
+    finish(e, cancelled);
+  }
+
+  /** The pen's barrel button is a right click for Windows: no menu over the page then. */
+  function noPenMenu(e: MouseEvent) {
+    if ((e as PointerEvent).pointerType === 'pen') e.preventDefault();
+  }
+
+  function leave(e: PointerEvent) {
+    hover = null;
+    eraserEnd = false;
+    if (e.pointerType === 'pen') presence.gone(pointerId(e));
   }
 
   function finish(e: PointerEvent, cancelled: boolean) {
@@ -496,6 +630,7 @@
     bind:this={svg}
     class="canvas mode-{split?.tracing ? 'zone' : tools.mode}"
     class:space={spacePan}
+    class:eraser-end={eraserEnd}
     class:dragging={dragKind === 'pan'}
     role="application"
     aria-label={t('editor.canvas')}
@@ -506,10 +641,11 @@
     data-view="{view.scale} {view.x} {view.y}"
     {onpointerdown}
     {onpointermove}
-    onpointerup={(e) => finish(e, false)}
-    onpointercancel={(e) => finish(e, true)}
-    onlostpointercapture={(e) => finish(e, true)}
-    onpointerleave={() => (hover = null)}
+    onpointerup={(e) => release(e, false)}
+    onpointercancel={(e) => release(e, true)}
+    onlostpointercapture={(e) => release(e, true)}
+    onpointerleave={leave}
+    oncontextmenu={noPenMenu}
   >
     <rect class="sheet" x="0" y="0" width={page.width} height={page.height} />
     {#if background}
@@ -567,7 +703,7 @@
     {#if split?.zone}
       <polygon class="split-zone" points={split.zone.map(([x, y]) => `${x},${y}`).join(' ')} />
     {/if}
-    {#if hover && tools.mode === 'eraser' && !split}
+    {#if hover && (tools.mode === 'eraser' || eraserEnd) && !split && !readonly}
       <circle class="eraser" cx={hover.x} cy={hover.y} r={tools.eraserRadius} />
     {/if}
   </svg>
@@ -576,6 +712,18 @@
     <span class="zoom-level" aria-live="polite">{t('editor.zoom.level', { percent: zoomPercent })}</span>
     <button class="button ghost" type="button" title={t('editor.zoom.in')} aria-label={t('editor.zoom.in')} onclick={() => zoomBy(1.25)}>+</button>
     <button class="button ghost" type="button" onclick={fit}>{t('editor.zoom.fit')}</button>
+    <button class="button ghost" type="button" data-action="fit-width" title={t('editor.zoom.fitWidthTitle')} onclick={fitWidth}>{t('editor.zoom.fitWidth')}</button>
+    {#if !readonly}
+      <button
+        class="button ghost"
+        type="button"
+        data-action="finger-draw"
+        aria-pressed={touchPrefs.drawWithFinger}
+        class:on={touchPrefs.drawWithFinger}
+        title={t('editor.touch.drawTitle')}
+        onclick={() => touchPrefs.set(!touchPrefs.drawWithFinger)}>{t('editor.touch.draw')}</button
+      >
+    {/if}
   </div>
 </div>
 
@@ -603,7 +751,8 @@
     cursor: crosshair;
   }
 
-  .mode-eraser {
+  .mode-eraser,
+  .eraser-end {
     cursor: none;
   }
 
@@ -704,6 +853,11 @@
 
   .zoom .button {
     padding: 0.25rem 0.6rem;
+  }
+
+  .zoom .on {
+    border-color: var(--accent);
+    background: rgb(47 111 223 / 12%);
   }
 
   .zoom-level {

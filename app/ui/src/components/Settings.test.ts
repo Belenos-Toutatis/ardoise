@@ -478,3 +478,28 @@ describe('settings: OpenH264 backup encoder', () => {
     expect(buttons(target)).toEqual(['Remove']);
   });
 });
+
+describe('settings: pen and touch (M8)', () => {
+  it('offers "Draw with a finger", remembered on this computer', async () => {
+    const { touchPrefs } = await import('../lib/touch-prefs.svelte');
+    touchPrefs.set(false);
+    const { target } = await render('fr');
+    const section = target.querySelector<HTMLElement>('[aria-labelledby="settings-pen-touch"]')!;
+    expect(section.querySelector('h3')?.textContent).toBe('Stylet et tactile');
+    const box = section.querySelector<HTMLInputElement>('input[data-setting="draw-with-finger"]')!;
+    expect(box.checked).toBe(false);
+    expect(section.textContent).toContain('Dessiner au doigt');
+    box.click();
+    await tick();
+    expect(touchPrefs.drawWithFinger).toBe(true);
+    expect(localStorage.getItem('ardoise.touch.drawWithFinger')).toBe('1');
+    touchPrefs.set(false);
+  });
+
+  it('speaks English', async () => {
+    const { target } = await render('en');
+    const section = target.querySelector<HTMLElement>('[aria-labelledby="settings-pen-touch"]')!;
+    expect(section.querySelector('h3')?.textContent).toBe('Pen and touch');
+    expect(section.textContent).toContain('Draw with a finger');
+  });
+});

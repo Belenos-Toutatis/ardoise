@@ -181,6 +181,12 @@
     "microphone": {
       "title": "Micro",
       "hint": "Le micro utilisé pour la narration des vidéos et du mode direct. Le choix est mémorisé sur cet ordinateur."
+    },
+    "penTouch": {
+      "title": "Stylet et tactile",
+      "drawWithFinger": "Dessiner au doigt",
+      "drawWithFingerHint": "Par défaut, seul le stylet dessine : un doigt fait défiler la page, deux doigts zooment, un double toucher affiche la page entière. Cochez cette case pour un écran tactile sans stylet ; le doigt dessine alors comme la souris.",
+      "penHint": "Le dos du stylet efface (avec les réglages de la gomme) ; le bouton du stylet trace un lasso de sélection ; les doigts sont ignorés tant que le stylet est utilisé ou proche de l'écran."
     }
   },
   "tablet": {
@@ -667,7 +673,13 @@
       "in": "Agrandir",
       "out": "Réduire",
       "fit": "Ajuster",
+      "fitWidth": "Largeur",
+      "fitWidthTitle": "Ajuster la page à la largeur de la fenêtre (Ctrl + 2)",
       "level": "{percent} %"
+    },
+    "touch": {
+      "draw": "Doigt",
+      "drawTitle": "Dessiner au doigt (sinon un doigt fait défiler la page ; deux doigts : zoom ; double toucher : page entière)"
     },
     "leave": {
       "title": "Modifications non enregistrées",
@@ -1141,6 +1153,8 @@
       "in": "Agrandir",
       "out": "Réduire",
       "fit": "Page entière",
+      "fitWidth": "Largeur",
+      "fitWidthTitle": "Afficher la page sur toute la largeur de la zone projetée (W)",
       "level": "× {zoom}"
     },
     "projection": {
@@ -1195,6 +1209,10 @@
           "keys": "0",
           "action": "Page entière"
         },
+        "width": {
+          "keys": "W",
+          "action": "Largeur de la page"
+        },
         "pan": {
           "keys": "Maj + flèches",
           "action": "Déplacer la zone projetée"
@@ -1217,7 +1235,8 @@
   },
   "presentation": {
     "title": "Présentation",
-    "canvas": "Page projetée {page}"
+    "canvas": "Page projetée {page}",
+    "clearMarks": "Effacer les annotations"
   },
   "handwriting": {
     "languages": {

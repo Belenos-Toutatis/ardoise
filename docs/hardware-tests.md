@@ -224,3 +224,40 @@ Ce qui ne revient pas tout seul :
 | Si le pointeur laser, le tableau noir, le zoom et les pages (clavier et bouton) fonctionnent à la projection | E4 à E8 |
 | Ce qui arrive quand on débranche le projecteur pendant la présentation | E11 |
 | Une photo du message de Windows s'il y en a un (pare-feu, Bluetooth, écran) | partout |
+
+
+## H3 — Stylet et tactile (PC tactile)
+
+**Durée** : 15 à 20 minutes. **Matériel** : un PC avec écran tactile et stylet (la Surface de l'essai précédent) ; un vidéoprojecteur ou un second écran pour le dernier point. Pas de tablette Bamboo Slate ici. Ouvrir une note de la bibliothèque de démonstration (ou en créer une avec quelques traits) dans l'éditeur.
+
+### A. Éditeur : stylet
+
+1. Écrire quelques mots avec la pointe du stylet en appuyant plus ou moins fort : **le trait s'épaissit avec la pression** (pas d'épaisseur constante).
+2. Retourner le stylet et passer le **dos** sur un trait, l'outil étant le **stylo** : le trait s'efface. Même chose avec l'outil Sélection, puis Main. Un petit cercle de gomme doit apparaître **dès que le dos du stylet survole la page**, avant même de toucher. Essayer la gomme « partielle » et « entière » : le dos du stylet suit le réglage de la gomme.
+   - **Si rien ne s'efface** ou si le cercle n'apparaît qu'au contact : noter ce qui se passe (c'est le point le moins sûr : la valeur des boutons rapportée par WebView2 pour un stylet retourné).
+3. Maintenir le **bouton du stylet** et entourer des traits : un **lasso de sélection** apparaît et les traits entourés sont sélectionnés, quel que soit l'outil. Aucun menu contextuel ne doit s'ouvrir sur la page. Avec la souris, le clic droit ne fait rien de plus qu'avant.
+4. Poser la **paume** de la main sur l'écran en écrivant avec le stylet, et la poser aussi **avant** d'approcher le stylet : la paume ne doit ni déplacer la page, ni zoomer, ni dessiner tant que le stylet est sur l'écran ou près de lui (environ une seconde après son départ). Noter si la paume posée **avant** le stylet déclenche quelque chose.
+
+### B. Éditeur : doigts
+
+1. Un doigt posé sur la page et glissé : la page **défile** (aucun trait). Deux doigts qui s'écartent ou se rapprochent : **zoom** autour des doigts, la page suit en même temps le déplacement des deux doigts. Un **double toucher** rapide : la page entière est ajustée.
+2. Les boutons **Ajuster** et **Largeur** (barre de zoom, en bas à droite) : « Largeur » met la page sur toute la largeur et montre son haut. Ctrl + 2 fait pareil.
+3. Cocher **Doigt** dans la barre de zoom (ou Réglages > Stylet et tactile > Dessiner au doigt) : un doigt **dessine** comme la souris ; le stylet dessine toujours ; poser un deuxième doigt pendant qu'un trait est en cours **annule ce trait** et passe au zoom. Décocher : le doigt ne dessine plus.
+4. **Relecture** (touche R) : un doigt fait défiler la page, deux doigts zooment, le double toucher ajuste ; le dos du stylet n'efface rien.
+
+### C. Mode direct et présentation
+
+1. En mode direct, aperçu de la page dans la fenêtre de commande : un doigt déplace le rectangle bleu, deux doigts le zooment, un double toucher montre la page entière ; **Largeur** (et la touche W) affiche la page sur toute la largeur de la zone projetée.
+2. Projeter sur le second écran. Sur la **fenêtre de présentation** (écran tactile ou stylet), écrire avec le stylet, avec un doigt et avec la souris : des annotations **rouges** (jaunes sur le tableau noir) apparaissent par-dessus la page ; le dos du stylet les efface une à une ; le bouton **Effacer les annotations** (il apparaît avec le curseur) ou la touche **Suppr** les efface toutes ; elles disparaissent d'elles-mêmes au changement de page ; **rien n'est enregistré** dans la note (la rouvrir pour vérifier). Deux doigts zooment la zone projetée (la fenêtre de commande suit).
+   - Si la présentation est sur un écran non tactile, vérifier au moins la souris et le stylet de l'ordinateur, et le comportement de la touche W.
+
+### À me signaler
+
+| Ce que je veux savoir | Test |
+|---|---|
+| Si le dos du stylet efface, et si le cercle de gomme apparaît au survol | A2 |
+| Si le bouton du stylet fait bien un lasso (ou ce que fait Windows à la place) | A3 |
+| Si la paume est ignorée, y compris posée avant le stylet | A4 |
+| Si les gestes (défilement, zoom, double toucher) sont fluides et au bon endroit | B1 |
+| Si le doigt dessine quand l'option est cochée | B3 |
+| Si les annotations de la présentation s'effacent et ne s'enregistrent pas | C2 |

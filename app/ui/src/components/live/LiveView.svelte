@@ -19,6 +19,7 @@
     changeView,
     runKeyAction,
     sendCommand,
+    showPageWidth,
     showWholePage,
     toggleBoard,
     toggleLaser,
@@ -65,7 +66,7 @@
   const NOTHING_TO_KEEP = ['emptyRecording', 'microphoneSilent'];
   /** How often the latency shown is refreshed. */
   const LATENCY_REFRESH_MS = 500;
-  const KEYS = ['next', 'previous', 'clear', 'board', 'laser', 'zoom', 'whole', 'pan', 'leave'] as const;
+  const KEYS = ['next', 'previous', 'clear', 'board', 'laser', 'zoom', 'whole', 'width', 'pan', 'leave'] as const;
 
   const live = new LiveState();
   const latency = new LatencyRecorder();
@@ -595,6 +596,9 @@
           >
           <button type="button" class="button small-button" data-action="whole-page" onclick={() => showWholePage(actions)}>
             {t('live.zoom.fit')}
+          </button>
+          <button type="button" class="button small-button" data-action="page-width" title={t('live.zoom.fitWidthTitle')} onclick={() => showPageWidth(actions)}>
+            {t('live.zoom.fitWidth')}
           </button>
         </div>
         <p class="muted small">{t('live.preview.hint')}</p>

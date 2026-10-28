@@ -75,3 +75,18 @@ export function backgroundWidth(page: PageSize, scale: number, pixelRatio = 1): 
   const needed = Math.max(1, page.width * scale * pixelRatio);
   return Math.min(4096, Math.max(512, 2 ** Math.ceil(Math.log2(needed))));
 }
+
+/**
+ * The page as wide as the viewport (with `margin` pixels on each side), centred; a page taller
+ * than the viewport shows its top, a shorter one is centred vertically.
+ */
+export function fitWidthView(page: PageSize, viewport: Viewport, margin = 24): View {
+  const width = Math.max(1, viewport.width - 2 * margin);
+  const scale = clampScale(width / Math.max(1, page.width));
+  const height = page.height * scale;
+  return {
+    scale,
+    x: (viewport.width - page.width * scale) / 2,
+    y: height + 2 * margin <= viewport.height ? (viewport.height - height) / 2 : margin,
+  };
+}

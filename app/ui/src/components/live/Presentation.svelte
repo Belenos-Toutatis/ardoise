@@ -5,6 +5,11 @@
    * page, with the view (zoom, pan), the blackboard and the laser dot. No element of interface;
    * the mouse cursor hides after 2 s without moving. The keyboard works as in the control window,
    * and Esc closes this window.
+   *
+   * The teacher can write over the page with the pen, a finger or the mouse (temporary marks, not
+   * saved; the back of the pen, Delete or the button that shows with the cursor erase them) and
+   * pinch with two fingers to zoom the projected area (docs/design/tablet-live-classroom.md,
+   * "M8: writing over the presentation").
    */
   import { onMount } from 'svelte';
   import { api } from '../../lib/api';
@@ -14,6 +19,7 @@
   import { LatencyRecorder, exposeLatency } from '../../lib/latency';
   import { runKeyAction, type LiveActions } from '../../lib/live-actions';
   import { liveKeyAction } from '../../lib/live-keys';
+  import { changeView } from '../../lib/live-actions';
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
   import { aspectOf } from '../../lib/live-view';
   import LiveCanvas from './LiveCanvas.svelte';
@@ -26,6 +32,9 @@
   let ink = $state.raw<Ink | null>(null);
   let cursorHidden = $state(false);
   let cursorTimer: ReturnType<typeof setTimeout> | undefined;
+  let canvas = $state<ReturnType<typeof LiveCanvas>>();
+  /** Marks written over the page (the clear button shows while there are some). */
+  let markCount = $state(0);
 
   const actions: LiveActions = {
     live,
@@ -34,6 +43,7 @@
     onerror: () => {
       // Nothing can be shown on the projector; the control window reports problems.
     },
+    clearMarks: () => canvas?.clearMarks(),
   };
 
   onMount(() => {
@@ -87,7 +97,7 @@
   }
 </script>
 
-<svelte:window {onkeydown} onmousemove={wake} onpointerdown={wake} />
+<svelte:window {onkeydown} onmousemove={wake} onpointerdown={wake} onpointermove={wake} />
 
 <main
   class="presentation"
@@ -95,7 +105,21 @@
   aria-label={t('presentation.title')}
   data-state={live.ready ? live.state : 'idle'}
 >
-  <LiveCanvas {live} {ink} mode="presentation" {latency} label={t('presentation.canvas', { page: `${live.pageIndex + 1} / ${live.pageCount}` })} />
+  <LiveCanvas
+    bind:this={canvas}
+    {live}
+    {ink}
+    mode="presentation"
+    {latency}
+    label={t('presentation.canvas', { page: `${live.pageIndex + 1} / ${live.pageCount}` })}
+    onview={(view) => changeView(actions, view)}
+    onmarks={(count) => (markCount = count)}
+  />
+  {#if markCount > 0 && !cursorHidden}
+    <button type="button" class="clear-marks" data-action="clear-marks" onclick={() => canvas?.clearMarks()}>
+      {t('presentation.clearMarks')}
+    </button>
+  {/if}
 </main>
 
 <style>
@@ -104,6 +128,19 @@
     inset: 0;
     overflow: hidden;
     background: #000;
+  }
+
+  .clear-marks {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    padding: 0.6rem 1rem;
+    border: 1px solid rgb(255 255 255 / 45%);
+    border-radius: 8px;
+    background: rgb(0 0 0 / 70%);
+    color: #fff;
+    font: inherit;
+    cursor: pointer;
   }
 
   .cursor-hidden,

@@ -22,8 +22,6 @@ describe('live mode keyboard', () => {
     expect(key('Delete', { ctrlKey: true })).toEqual(clear);
     expect(key('Backspace', { ctrlKey: true })).toEqual(clear);
     expect(key('Backspace', { metaKey: true })).toEqual(clear);
-    expect(key('Delete')).toBeNull();
-    expect(key('Backspace')).toBeNull();
     expect(key('Delete', { ctrlKey: true, shiftKey: true })).toBeNull();
     expect(key('Delete', { ctrlKey: true, repeat: true })).toBeNull();
     // Other Ctrl shortcuts are not live mode's.
@@ -90,5 +88,22 @@ describe('live mode keyboard', () => {
 
   it('ignores the keys it does not use', () => {
     for (const k of ['a', 'Enter', 'Tab', 'F5', 'Home', 'x']) expect(key(k), k).toBeNull();
+  });
+});
+
+describe('page width and marks (M8)', () => {
+  it('shows the page width with W', () => {
+    expect(key('w')).toEqual({ kind: 'fitWidth' });
+    expect(key('W', { shiftKey: true })).toEqual({ kind: 'fitWidth' });
+    expect(key('w', { ctrlKey: true })).toBeNull();
+    expect(key('w', { repeat: true })).toBeNull();
+  });
+
+  it('clears the marks written over the presentation with Delete or Backspace', () => {
+    expect(key('Delete')).toEqual({ kind: 'clearMarks' });
+    expect(key('Backspace')).toEqual({ kind: 'clearMarks' });
+    // Clearing the page itself stays Ctrl + Delete.
+    expect(key('Delete', { ctrlKey: true })).toEqual({ kind: 'command', command: 'clearPage' });
+    expect(key('Delete', { target: element('INPUT', { type: 'text' }) })).toBeNull();
   });
 });

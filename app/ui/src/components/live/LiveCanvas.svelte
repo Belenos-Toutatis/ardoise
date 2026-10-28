@@ -12,10 +12,18 @@
    * (`lib/latency.ts`).
    * Attributes for tests: `data-strokes` (strokes of the page, the one in progress included),
    * `data-page` (`n/N`).
+   *
+   * Pen and touch (docs/design/tablet-live-classroom.md, "M8: pen and touch"). `preview`: a
+   * finger drags the projected area as the mouse does, two fingers pinch it (zoom and move), a
+   * double tap shows the whole page. `presentation`: the pen, a finger or the mouse write
+   * temporary marks over the page (the back of the pen erases them; they are not saved and go
+   * with the page), two fingers pinch the projected area. A finger is ignored while a pen is in
+   * contact or hovering (palm rejection).
    */
   import { api } from '../../lib/api';
   import type { Vec } from '../../lib/editor/geometry';
-  import type { Ink } from '../../lib/ink';
+  import { PenPresence, TouchGestures, inkPressure, pointerKind, type PointerKind, type TouchAction } from '../../lib/gestures';
+  import type { Ink, InkPoint } from '../../lib/ink';
   import { wallClock, type LatencyRecorder } from '../../lib/latency';
   import type { LiveViewState } from '../../lib/live';
   import {
@@ -23,12 +31,25 @@
     backgroundPixels,
     buildScene,
     effectiveBackground,
+    isDarkPaper,
     sceneTransform,
     type Ctx2D,
     type Surface,
   } from '../../lib/live-render';
   import type { LiveState } from '../../lib/live-state.svelte';
-  import { DEFAULT_ASPECT, moveViewTo, projectedArea, screenToPage, zoomView, type Size } from '../../lib/live-view';
+  import { MARK_ERASER_PX, eraseMarks, markStyle, newMark } from '../../lib/live-marks';
+  import {
+    DEFAULT_ASPECT,
+    moveViewTo,
+    pinchPresentationView,
+    pinchPreviewView,
+    projectedArea,
+    screenToPage,
+    wholePage,
+    zoomView,
+    type Size,
+  } from '../../lib/live-view';
+  import type { Stroke } from '../../lib/note';
 
   let {
     live,
@@ -38,6 +59,7 @@
     aspect = DEFAULT_ASPECT,
     latency = null,
     onview,
+    onmarks,
   }: {
     live: LiveState;
     ink: Ink | null;
@@ -48,8 +70,10 @@
     aspect?: number;
     /** Records the latency of the points painted. */
     latency?: LatencyRecorder | null;
-    /** Preview: the user moved or zoomed the projected area. */
+    /** The user moved or zoomed the projected area (preview: drag, wheel, pinch; presentation: pinch). */
     onview?: (view: LiveViewState) => void;
+    /** Presentation: the number of marks written over the page changed. */
+    onmarks?: (count: number) => void;
   } = $props();
 
   /** jsdom (tests) has no layout: a nominal size. */
@@ -72,6 +96,12 @@
   let scheduled = false;
   let destroyed = false;
   let drag: { id: number; offset: Vec } | null = null;
+  /** Marks written over the presentation (page units), the one in progress, and the gesture writing or erasing. */
+  let marks: readonly Stroke[] = [];
+  let markCurrent: Stroke | null = null;
+  let markDrag: { id: number; kind: 'write' | 'erase'; t0: number } | null = null;
+  const presence = new PenPresence();
+  const fingers = new TouchGestures();
   /** Bumped when the window is hidden or shown: frames awaited across that say nothing. */
   let visibilityEpoch = 0;
 
@@ -127,7 +157,7 @@
     const height = Math.max(1, Math.round(size.height * pixelRatio));
     if (el.width !== width) el.width = width;
     if (el.height !== height) el.height = height;
-    renderer.paint(context, buildScene(live, { mode, viewport: size, pixelRatio, aspect, backgroundImage }));
+    renderer.paint(context, buildScene(live, { mode, viewport: size, pixelRatio, aspect, backgroundImage, marks, markCurrent }));
     const drawEnd = wallClock();
     const painted = live.takeUnpainted();
     // Points drawn without their outline (geometry still loading) or in a hidden window say
@@ -254,19 +284,117 @@
     return () => el.removeEventListener('wheel', onwheel);
   });
 
-  function pagePoint(e: MouseEvent): Vec {
+  /** The pointer in CSS pixels relative to the canvas. */
+  function localPoint(e: MouseEvent): Vec {
     const r = canvas?.getBoundingClientRect();
-    const local = { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
-    return screenToPage(sceneTransform(live, { mode, viewport: size }), local);
+    return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
+  }
+
+  function pagePoint(e: MouseEvent): Vec {
+    return screenToPage(sceneTransform(live, { mode, viewport: size }), localPoint(e));
   }
 
   function pointerId(e: PointerEvent): number {
     return typeof e.pointerId === 'number' ? e.pointerId : 1;
   }
 
-  /** Grabs the projected area (or, outside it, centres it there first). */
+  function capture(id: number) {
+    try {
+      canvas?.setPointerCapture?.(id);
+    } catch {
+      // Synthetic events cannot be captured; moves still reach the canvas.
+    }
+  }
+
+  function setMarks(next: readonly Stroke[]) {
+    if (next === marks) return;
+    marks = next;
+    onmarks?.(next.length);
+    schedule();
+  }
+
+  /** Removes every mark (and the one being written). */
+  export function clearMarks() {
+    markCurrent = null;
+    markDrag = null;
+    setMarks([]);
+    schedule();
+  }
+
+  // The marks belong to a page: turning it removes them.
+  $effect(() => {
+    void live.pageIndex;
+    if (marks.length > 0 || markCurrent) clearMarks();
+  });
+
+  // The control window's pinch and double tap; the presentation's pinch.
+  function applyTouch(action: TouchAction) {
+    if (!onview) return;
+    if (action.kind === 'pinch') {
+      if (mode === 'presentation') {
+        onview(pinchPresentationView(live.view, live.pageSize, size, action.from, action.to, action.factor));
+      } else {
+        const transform = sceneTransform(live, { mode, viewport: size });
+        onview(
+          pinchPreviewView(live.view, live.pageSize, aspect, screenToPage(transform, action.from), screenToPage(transform, action.to), action.factor),
+        );
+      }
+    } else if (action.kind === 'doubleTap' && mode === 'preview') {
+      onview(wholePage(live.view, live.pageSize));
+    }
+  }
+
+  const touchOptions = () => ({ mode: mode === 'presentation' ? ('draw' as const) : ('navigate' as const) });
+
+  function sample(e: PointerEvent, kind: PointerKind, p: Vec, t0: number): InkPoint {
+    return { x: p.x, y: p.y, pressure: inkPressure(kind, e.pressure), t: Math.max(0, Math.round(e.timeStamp - t0)) };
+  }
+
+  /** Starts a mark with the pen, a finger or the mouse; the back of the pen erases marks. */
+  function startMark(e: PointerEvent, kind: PointerKind, id: number) {
+    if (kind === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    capture(id);
+    const p = pagePoint(e);
+    const { scale } = sceneTransform(live, { mode, viewport: size });
+    if (kind === 'eraser') {
+      markDrag = { id, kind: 'erase', t0: e.timeStamp };
+      setMarks(eraseMarks(marks, [p], MARK_ERASER_PX / scale));
+      return;
+    }
+    const dark = isDarkPaper(effectiveBackground(live.background, live.view.board).paper);
+    markDrag = { id, kind: 'write', t0: e.timeStamp };
+    markCurrent = newMark(markStyle(dark), sample(e, kind, p, e.timeStamp), scale);
+    schedule();
+  }
+
+  /** Preview: grabs the projected area (or, outside it, centres it there first). Presentation: starts a mark. */
   function onpointerdown(e: PointerEvent) {
-    if (mode !== 'preview' || !onview || e.button !== 0) return;
+    const kind = pointerKind(e);
+    const id = pointerId(e);
+    if (kind === 'pen' || kind === 'eraser') {
+      presence.seen(id, e.timeStamp, 'down');
+      fingers.reset();
+    } else if (kind === 'touch') {
+      if (presence.blocksTouch(e.timeStamp)) return;
+      const second = fingers.down(id, localPoint(e), e.timeStamp);
+      if (second) {
+        // Two fingers: whatever the first one began is dropped, the pinch takes over.
+        e.preventDefault();
+        markCurrent = null;
+        markDrag = null;
+        drag = null;
+        dragging = false;
+        schedule();
+        return;
+      }
+      if (fingers.count > 1 || !fingers.has(id)) return;
+    }
+    if (mode === 'presentation') {
+      startMark(e, kind, id);
+      return;
+    }
+    if (!onview || e.button !== 0 || kind === 'eraser') return;
     e.preventDefault();
     const p = pagePoint(e);
     const area = projectedArea(live.pageSize, live.view, aspect);
@@ -277,25 +405,71 @@
       onview(view);
       centre = { x: view.x, y: view.y };
     }
-    drag = { id: pointerId(e), offset: { x: centre.x - p.x, y: centre.y - p.y } };
+    drag = { id, offset: { x: centre.x - p.x, y: centre.y - p.y } };
     dragging = true;
-    try {
-      canvas?.setPointerCapture?.(drag.id);
-    } catch {
-      // Synthetic events cannot be captured; moves still reach the canvas.
-    }
+    capture(id);
   }
 
   function onpointermove(e: PointerEvent) {
-    if (!drag || !onview || pointerId(e) !== drag.id) return;
+    const kind = pointerKind(e);
+    const id = pointerId(e);
+    if (kind === 'pen' || kind === 'eraser') {
+      presence.seen(id, e.timeStamp, ((e.buttons ?? 0) & 33) !== 0 ? 'down' : 'hover');
+    } else if (kind === 'touch') {
+      if (!fingers.has(id)) return;
+      const action = fingers.move(id, localPoint(e), touchOptions());
+      if (action) applyTouch(action);
+      if (fingers.count > 1) return;
+    }
+    if (mode === 'presentation') {
+      if (!markDrag || markDrag.id !== id) return;
+      const { scale } = sceneTransform(live, { mode, viewport: size });
+      if (markDrag.kind === 'erase') {
+        setMarks(eraseMarks(marks, [pagePoint(e)], MARK_ERASER_PX / scale));
+        return;
+      }
+      const current = markCurrent;
+      if (!current) return;
+      const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+      for (const ev of events.length > 0 ? events : [e]) {
+        const q = pagePoint(ev);
+        const last = current.points[current.points.length - 1];
+        if (Math.hypot(q.x - last.x, q.y - last.y) * scale < 0.5) continue;
+        current.points.push(sample(ev, kind, q, markDrag.t0));
+      }
+      schedule();
+      return;
+    }
+    if (!drag || !onview || id !== drag.id) return;
     const p = pagePoint(e);
     onview(moveViewTo(live.view, { x: p.x + drag.offset.x, y: p.y + drag.offset.y }, live.pageSize, aspect));
   }
 
-  function release(e: PointerEvent) {
-    if (!drag || pointerId(e) !== drag.id) return;
+  function release(e: PointerEvent, cancelled = false) {
+    const kind = pointerKind(e);
+    const id = pointerId(e);
+    if (kind === 'pen' || kind === 'eraser') presence.lifted(id, e.timeStamp);
+    else if (kind === 'touch') {
+      let action: TouchAction | null = null;
+      if (cancelled) fingers.cancel(id);
+      else action = fingers.up(id, e.timeStamp, touchOptions());
+      if (action) applyTouch(action);
+    }
+    if (markDrag && markDrag.id === id) {
+      const current = markCurrent;
+      markDrag = null;
+      markCurrent = null;
+      if (current && !cancelled) setMarks([...marks, current]);
+      schedule();
+    }
+    if (!drag || id !== drag.id) return;
     drag = null;
     dragging = false;
+  }
+
+  function onpointerleave(e: PointerEvent) {
+    const kind = pointerKind(e);
+    if (kind === 'pen' || kind === 'eraser') presence.gone(pointerId(e));
   }
 </script>
 
@@ -306,13 +480,15 @@
     class:interactive={mode === 'preview' && !!onview}
     class:dragging
     class:zoomed={live.view.zoom > 1.001}
+    class:writable={mode === 'presentation'}
     data-strokes={live.strokeCount}
     data-page="{live.pageIndex + 1}/{live.pageCount}"
     {onpointerdown}
     {onpointermove}
-    onpointerup={release}
-    onpointercancel={release}
-    onlostpointercapture={release}
+    onpointerup={(e) => release(e)}
+    onpointercancel={(e) => release(e, true)}
+    onlostpointercapture={(e) => release(e, true)}
+    {onpointerleave}
   ></canvas>
 </div>
 
@@ -339,6 +515,10 @@
     height: 100%;
     touch-action: none;
     user-select: none;
+  }
+
+  .live-canvas.writable {
+    cursor: crosshair;
   }
 
   .live-canvas.interactive {

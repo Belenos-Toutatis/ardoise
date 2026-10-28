@@ -6,10 +6,13 @@ import {
   clampView,
   defaultMonitor,
   fitTransform,
+  fitWidthView,
   intersect,
   moveViewTo,
   pageToScreen,
   panView,
+  pinchPresentationView,
+  pinchPreviewView,
   presentationTransform,
   projectedArea,
   roundView,
@@ -172,5 +175,63 @@ describe('helpers', () => {
     expect(defaultMonitor([screen('a', true)])?.key).toBe('a');
     expect(defaultMonitor([screen('a', true), screen('b', false)])?.key).toBe('b');
     expect(defaultMonitor([screen('a', true, true), screen('b', false)])?.key).toBe('a');
+  });
+});
+
+describe('page width and pinch (M8)', () => {
+  const PORTRAIT = { width: 21600, height: 29700 };
+
+  it('fits the width of a portrait page on a 16:9 screen, showing its top', () => {
+    const next = fitWidthView(view({ x: 0, y: 0 }), PORTRAIT, 16 / 9);
+    // The area is as wide as the page: zoom = aspect × height / width.
+    expect(next.zoom).toBeCloseTo(((16 / 9) * PORTRAIT.height) / PORTRAIT.width, 5);
+    const area = projectedArea(PORTRAIT, next, 16 / 9);
+    expect(area.width).toBeCloseTo(PORTRAIT.width, 0);
+    expect(area.x).toBeCloseTo(0, 0);
+    expect(area.y).toBeCloseTo(0, 0);
+  });
+
+  it('is the whole page when the page is already as wide as the screen allows', () => {
+    // A very wide page: the width is the limit at zoom 1.
+    const wide = { width: 40000, height: 10000 };
+    expect(fitWidthView(view(), wide, 16 / 9).zoom).toBe(1);
+  });
+
+  it('stops at the largest zoom', () => {
+    const tall = { width: 2000, height: 80000 };
+    expect(fitWidthView(view(), tall, 16 / 9).zoom).toBe(8);
+  });
+
+  it('pinches the presentation: the page point under the fingers follows them', () => {
+    const viewport = { width: 1280, height: 720 };
+    const start = view({ zoom: 2, x: 14000, y: 9000 });
+    const from = { x: 400, y: 300 };
+    const to = { x: 500, y: 350 };
+    const next = pinchPresentationView(start, A4, viewport, from, to, 1.5);
+    expect(next.zoom).toBeCloseTo(3);
+    const before = presentationTransform(A4, viewport, start);
+    const after = presentationTransform(A4, viewport, next);
+    const page = screenToPage(before, from);
+    const moved = pageToScreen(after, page);
+    expect(moved.x).toBeCloseTo(to.x, 0);
+    expect(moved.y).toBeCloseTo(to.y, 0);
+  });
+
+  it('pinches the presentation out to the whole page and no further', () => {
+    const viewport = { width: 1280, height: 720 };
+    const next = pinchPresentationView(view({ zoom: 1.2, x: 5000, y: 5000 }), A4, viewport, { x: 100, y: 100 }, { x: 100, y: 100 }, 0.1);
+    expect(next.zoom).toBe(1);
+  });
+
+  it('pinches the preview: the area zooms around the fingers and follows them', () => {
+    const start = view({ zoom: 2, x: 14000, y: 9000 });
+    const at = { x: 14000, y: 9000 };
+    const zoomed = pinchPreviewView(start, A4, 16 / 9, at, at, 2);
+    expect(zoomed.zoom).toBeCloseTo(4);
+    expect(zoomed.x).toBeCloseTo(14000, 0);
+    const moved = pinchPreviewView(start, A4, 16 / 9, at, { x: 15000, y: 9500 }, 1);
+    expect(moved.zoom).toBeCloseTo(2);
+    expect(moved.x).toBeCloseTo(15000, 0);
+    expect(moved.y).toBeCloseTo(9500, 0);
   });
 });
