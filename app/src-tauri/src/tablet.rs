@@ -886,9 +886,12 @@ mod tests {
         assert_eq!(saved.orientation, Orientation::PortraitRight);
         assert_eq!(saved.button, LiveButton::NewLayer);
         assert!(!saved.auto_sync);
-        wait_for(&events, |s| {
-            s.options.orientation == Orientation::PortraitRight
-        });
+        // The worker publishes the new options a moment later.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while runtime.status().unwrap().options.orientation != Orientation::PortraitRight {
+            assert!(Instant::now() < deadline, "the service did not follow");
+            std::thread::sleep(Duration::from_millis(20));
+        }
         sim_press_button_in(&runtime).unwrap();
 
         // Another library: the simulated registration stays in its own folder.
