@@ -21,7 +21,8 @@ use ardoise_core::format::NoteFile;
 use ardoise_core::fsutil::write_atomic_new;
 use ardoise_core::library::{Library, LibraryError};
 use ardoise_core::note::{Note, PageSize};
-use ardoise_core::settings::LiveButton;
+use ardoise_core::settings::{LiveButton, Orientation};
+use ardoise_device::pages::oriented_size;
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
 use ardoise_media::{MediaError, Narration, decode_narration, encode_narration};
 use tauri::ipc::Channel;
@@ -92,6 +93,8 @@ pub struct StartOptions {
     pub french: bool,
     /// Drawing area of the tablet, if known (else the Slate A4's).
     pub size: PageSize,
+    /// How the tablet is held (the page size and the points follow).
+    pub orientation: Orientation,
     pub button: ButtonSetting,
 }
 
@@ -364,7 +367,16 @@ impl Shared {
         let mut out = Vec::new();
         let session = &mut state.session;
         match input {
-            LiveInput::Started { width, height, .. } => session.started(width, height, &mut out),
+            LiveInput::Started {
+                width,
+                height,
+                orientation,
+            } => session.started(width, height, orientation, &mut out),
+            LiveInput::Reoriented {
+                width,
+                height,
+                orientation,
+            } => session.reorient(width, height, orientation, &mut out),
             LiveInput::Records { records, received } => {
                 session.records(&records, wall_ms(received), &mut out);
             }
@@ -729,13 +741,15 @@ impl LiveHub {
         } else {
             default_size()
         };
+        let size = oriented_size(size, options.orientation);
         let old = &state.session;
         let view = LiveViewState {
             board: old.view().board,
             laser: old.view().laser,
             ..LiveViewState::whole(size)
         };
-        let mut session = LiveSession::new(id, size, old.style(), view, options.french, now_ms());
+        let mut session = LiveSession::new(id, size, old.style(), view, options.french, now_ms())
+            .with_orientation(options.orientation);
         session.set_presentation(old.presentation().cloned(), &mut Vec::new());
         let mut out = Vec::new();
         session.set_state(LiveSessionState::Waiting, &mut out);

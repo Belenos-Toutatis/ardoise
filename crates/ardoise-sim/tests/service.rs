@@ -1,6 +1,6 @@
 //! The tablet service (`ardoise_device::service`, milestone M4) against the simulated Slate:
 //! registration, sync (deletion only once saved, no duplicate, cancellation), reconnection,
-//! live mode (button, left hand), and the service part of the live-mode latency.
+//! live mode (button, the four positions), and the service part of the live-mode latency.
 //!
 //! Virtual time everywhere, except the latency test (real time, about 3 s).
 //! `cargo test -p ardoise-sim --test service -- --nocapture` prints the measures.
@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use ardoise_core::library::Library;
-use ardoise_core::settings::Hand;
+use ardoise_core::settings::Orientation;
 use ardoise_device::identity::{self, DEVICE_FORMAT, DeviceRecord, HostId};
 use ardoise_device::pages::LibrarySink;
 use ardoise_device::service::{
@@ -83,7 +83,7 @@ fn library_store(refuse: Option<u16>, before: Option<Box<dyn Fn(u16) + Send>>) -
             }
             let library = Library::open(root).map_err(|e| e.to_string())?;
             let mut sink = LibrarySink::new(&library, "", context.size, "Calque 1", || NOW_MS)
-                .with_hand(context.hand);
+                .with_orientation(context.orientation);
             sink.store(page).map(|saved| saved.path)
         },
     )
@@ -506,7 +506,7 @@ fn live_mode_goes_on_after_a_lost_link_and_reports_the_button() {
         LiveInput::Started {
             width: config.width,
             height: config.height,
-            hand: Hand::Right
+            orientation: Orientation::Landscape
         }
     );
     assert_eq!(
@@ -543,13 +543,13 @@ fn live_mode_goes_on_after_a_lost_link_and_reports_the_button() {
 }
 
 #[test]
-fn left_hand_turns_synced_pages_and_live_points() {
+fn flipped_landscape_turns_synced_pages_and_live_points() {
     let library = new_library();
     let tablet = SimTablet::slate_large();
     with_pages(&tablet, 1);
     registered_beforehand(&tablet, library.path());
     let options = TabletOptions {
-        hand: Hand::Left,
+        orientation: Orientation::LandscapeFlipped,
         ..TabletOptions::default()
     };
     let mut run =
@@ -587,6 +587,166 @@ fn left_hand_turns_synced_pages_and_live_points() {
             pressure: expected.pressure,
         })
     );
+    run.service.stop_live();
+    run.service.shutdown();
+}
+
+/// Where the tablet's own point `(x, y)` lands for a position: written out here on purpose, apart
+/// from `pages::orient`, from the geometry of a tablet turned on the desk (`w` x `h` = its area).
+fn expected_point(orientation: Orientation, (x, y): (u32, u32), (w, h): (u32, u32)) -> (u32, u32) {
+    match orientation {
+        Orientation::Landscape => (x, y),
+        Orientation::LandscapeFlipped => (w - x, h - y),
+        // A quarter turn clockwise: the tablet's top edge is on the right.
+        Orientation::PortraitLeft => (h - y, x),
+        // A quarter turn anticlockwise: the tablet's top edge is on the left.
+        Orientation::PortraitRight => (y, w - x),
+    }
+}
+
+#[test]
+fn portrait_positions_make_portrait_notes_and_turn_live_points() {
+    for orientation in [Orientation::PortraitLeft, Orientation::PortraitRight] {
+        let library = new_library();
+        let tablet = SimTablet::slate_large();
+        with_pages(&tablet, 1);
+        registered_beforehand(&tablet, library.path());
+        let options = TabletOptions {
+            orientation,
+            ..TabletOptions::default()
+        };
+        let mut run =
+            Running::virtual_time(&tablet, library.path(), options, library_store(None, None));
+        run.wait(|s| s.last_sync.is_some());
+        let config = tablet.config();
+        let area = (config.width, config.height);
+
+        let path = &notes(library.path())[0];
+        let note = Library::open(library.path())
+            .unwrap()
+            .read(path)
+            .unwrap()
+            .file;
+        // The page is portrait: the tablet's width and height swapped.
+        assert_eq!(
+            (note.note.page.width, note.note.page.height),
+            (config.height, config.width),
+            "{orientation:?}"
+        );
+        let drawn = drawings::square_and_circle(config.width, config.height)[0].points[0];
+        let first = note.note.strokes[0].points[0];
+        let (x, y) = expected_point(orientation, (u32::from(drawn.x), u32::from(drawn.y)), area);
+        assert_eq!((first.x, first.y), (x as f32, y as f32), "{orientation:?}");
+        for stroke in &note.note.strokes {
+            for p in &stroke.points {
+                assert!(p.x >= 0.0 && p.x <= config.height as f32, "{p:?}");
+                assert!(p.y >= 0.0 && p.y <= config.width as f32, "{p:?}");
+            }
+        }
+
+        let (sender, inputs) = mpsc::channel();
+        run.service.start_live(Box::new(ChannelSink(sender)));
+        let (started, _) = until(&inputs, |i| matches!(i, LiveInput::Started { .. }));
+        assert_eq!(
+            started,
+            LiveInput::Started {
+                width: config.width,
+                height: config.height,
+                orientation
+            }
+        );
+        let (records, _) = until(&inputs, |i| matches!(i, LiveInput::Records { .. }));
+        let LiveInput::Records { records, .. } = records else {
+            unreachable!()
+        };
+        let script = drawings::live_script(LIVE_SCRIPT_SECONDS, config.width, config.height);
+        let first_point = script.points().next().unwrap();
+        let (x, y) = expected_point(
+            orientation,
+            (u32::from(first_point.x), u32::from(first_point.y)),
+            area,
+        );
+        assert_eq!(
+            records[0],
+            LiveRecord::Pen(ardoise_proto::stroke::Point {
+                x: x as u16,
+                y: y as u16,
+                pressure: first_point.pressure,
+            }),
+            "{orientation:?}"
+        );
+        run.service.stop_live();
+        run.service.shutdown();
+    }
+}
+
+#[test]
+fn switching_the_position_during_live_mode_turns_the_points_that_follow() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    registered_beforehand(&tablet, library.path());
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, None),
+    );
+    run.connected();
+    let config = tablet.config();
+    let area = (config.width, config.height);
+    let (sender, inputs) = mpsc::channel();
+    run.service.start_live(Box::new(ChannelSink(sender)));
+    let (_, _) = until(&inputs, |i| matches!(i, LiveInput::Records { .. }));
+
+    // The script's own points: every record received, turned back, must be one of them.
+    let script = drawings::live_script(LIVE_SCRIPT_SECONDS, config.width, config.height);
+    let known: std::collections::HashSet<(u32, u32)> = script
+        .points()
+        .map(|p| (u32::from(p.x), u32::from(p.y)))
+        .collect();
+
+    let position = Orientation::PortraitRight;
+    run.service.set_options(TabletOptions {
+        orientation: position,
+        ..TabletOptions::default()
+    });
+    let (switched, _) = until(&inputs, |i| matches!(i, LiveInput::Reoriented { .. }));
+    assert_eq!(
+        switched,
+        LiveInput::Reoriented {
+            width: config.width,
+            height: config.height,
+            orientation: position
+        }
+    );
+    let mut turned = 0;
+    while turned < 50 {
+        let (input, _) = until(&inputs, |i| matches!(i, LiveInput::Records { .. }));
+        let LiveInput::Records { records, .. } = input else {
+            unreachable!()
+        };
+        for record in records {
+            if let LiveRecord::Pen(p) = record {
+                // Page is `height` wide and `width` tall now; undo the anticlockwise turn
+                // (x' = y, y' = w - x).
+                assert!(
+                    u32::from(p.x) <= area.1 && u32::from(p.y) <= area.0,
+                    "{p:?}"
+                );
+                let (x, y) = (area.0 - u32::from(p.y), u32::from(p.x));
+                assert!(
+                    known.contains(&(x, y)),
+                    "{p:?} does not come from the script"
+                );
+                turned += 1;
+            }
+        }
+    }
+    // The same position again changes nothing for the sink.
+    run.service.set_options(TabletOptions {
+        orientation: position,
+        ..TabletOptions::default()
+    });
     run.service.stop_live();
     run.service.shutdown();
 }

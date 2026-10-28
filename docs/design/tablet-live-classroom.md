@@ -23,12 +23,14 @@ ROADMAP M4. Builds on [device-stack.md](device-stack.md) (Session, Manager, simu
 ## Settings (`ardoise.toml`, contract in `ardoise-core::settings`, done)
 
 `[tablet]` section, shared by every PC (like `auto_export`): `auto_sync = true`, `delete_after_import = true`,
-`hand = "right" | "left"`, `button = "newPage" | "newLayer"`, unknown keys kept. Unknown enum values load as the
+`orientation = "landscape" | "landscapeFlipped" | "portraitLeft" | "portraitRight"` (M8, replaces `hand`),
+`button = "newPage" | "newLayer"`, unknown keys kept. Unknown enum values load as the
 default. Per machine: `[machines."PC"] projector = "<monitor key>"` (the last screen chosen for the presentation).
 
-Left hand (`hand = "left"`): the tablet is used upside down, so every point (synced pages and live mode) is turned
-half a turn: `x' = width - x`, `y' = height - y` (`ardoise_device::pages::orient`, applied by the service and by the
-page store). Settings are written through `commands::update` (`pub(crate)`).
+Left hand (`hand = "left"`, before M8): the tablet is used upside down, so every point (synced pages and live mode) is
+turned half a turn: `x' = width - x`, `y' = height - y` (`ardoise_device::pages::orient`, applied by the service and by
+the page store). Settings are written through `commands::update` (`pub(crate)`). See "M8: orientation" below for
+what replaced it.
 
 ## ardoise-device::service (work package A)
 
@@ -60,7 +62,8 @@ Behaviour:
 - **Live mode**: `start_live(sink)` enters live mode when connected (or as soon as the tablet connects: `pending =
   "live"`), calls `hooks.live_started()`, then forwards every notification to `sink` as `LiveInput` (decoded records
   with the receipt stamp, proximity, button, state changes). **Records are delivered already oriented** (left hand:
-  `pages::orient` applied by the service), so the hub uses them as page coordinates; `Started.hand` is informational. Lost links are reopened (`Manager` logic) and reported
+  `pages::orient` applied by the service), so the hub uses them as page coordinates; `Started.orientation` tells the
+  hub the page size (M8). Lost links are reopened (`Manager` logic) and reported
   as `LiveInput::State(Reconnecting)` then `Live`. `stop_live()` leaves live mode (`b1 02`) and stays connected.
 - **Button in live mode**: protocol.md does not say what the Slate sends. Working hypothesis, to be checked at H2:
   a sysevent notification. `ardoise_proto::live::BUTTON_SYSEVENTS` lists the known signatures (for now the
@@ -221,7 +224,7 @@ MonitorInfo = { key: string; name: string; x: number; y: number; width: number; 
 - Tablet panel: information (SPEC §4.1: name, battery and charge, firmware, pages in memory, model and size), "Sync
   now" with progress `current / total` and **Cancel**, "Live mode", automatic sync toggle, "delete from the tablet
   after import" toggle (on by default, with the sentence saying the page is deleted only once its file is written and
-  checked), button action (new page / new layer), settings: rename, set the clock, right / left hand, forget (with
+  checked), button action (new page / new layer), settings: rename, set the clock, the tablet's position (M8: four), forget (with
   confirmation). No tablet registered: the registration wizard.
 - Registration wizard (`components/tablet/RegisterWizard.svelte`): 1. warning first (registering makes the tablet
   unusable with the phone app and with Inkspace until it is registered there again), 2. animation: a tablet drawing
@@ -273,8 +276,8 @@ Tablet service (package A):
   time and bytes; `ImportedPages` recognises a page already imported by that id and identical `original.bin` bytes,
   including a note now in the trash (it is not imported again).
 - New `DeviceError` cases `NotConnected`, `Busy`, `NoTabletRegistered`, `NoLibrary`, `InvalidName`, mapped to the
-  error codes by `service::error_code` / `From<&DeviceError> for StatusError`. `note_from_page` takes the hand;
-  `LibrarySink::with_hand`.
+  error codes by `service::error_code` / `From<&DeviceError> for StatusError`. `note_from_page` takes the orientation (M8; the
+  hand before); `LibrarySink::with_orientation`.
 - Synced notes go to the library root. `sync.total` is the number of pages read (1 without deletion). When the
   tablet connects, a pending live mode goes before the automatic sync. Renaming or setting the clock during a sync or
   live mode answers `tabletBusy`. A foreign tablet that refuses our identity at another address is ignored silently.
@@ -372,3 +375,48 @@ or the mouse write **temporary marks** over the projected page:
 (`pinchPreviewView`: zoom around the fingers and follow them), a double tap shows the whole page. **Page width**:
 button next to "Whole page" and key **W** (`fitWidthView(view, page, aspect)`: the area as wide as the page, showing
 its top; never less than the whole page, zoom at most 8).
+
+## M8: orientation of the tablet (four positions)
+
+Replaces right / left hand with the four positions of Wacom Inkspace (ROADMAP M8). `ardoise_core::settings::Orientation`
+(`[tablet] orientation`, wire value of the same name in the interface):
+
+| Value | Held | Button of the tablet | Quarter turns (clockwise) | Page |
+|---|---|---|---|---|
+| `landscape` | as drawn (long side across) | at the bottom | 0 | width x height |
+| `landscapeFlipped` | half a turn (the old left hand) | at the top | 2 | width x height |
+| `portraitLeft` | a quarter turn clockwise | on the left | 1 | height x width |
+| `portraitRight` | a quarter turn anticlockwise | on the right | 3 | height x width |
+
+"Button at the bottom" is how the tablet is drawn in the registration wizard (`TabletDrawing.svelte`: light at the
+bottom left, button at the bottom right); to be confirmed with the real tablet (`docs/hardware-tests.md`, C3).
+
+- **Transform** (`ardoise_device::pages`): `orient(x, y, width, height, orientation)` turns a point of the tablet's own
+  frame (`width` x `height` = drawing area) by the quarter turns, clockwise: 1 -> `(height - y, x)`, 2 -> `(width - x,
+  height - y)`, 3 -> `(y, width - x)`; the page is `orientation.page_size(width, height)`. Corners map to corners;
+  points beyond the area are clamped. `turn_point` is the same turn on a point of a page (f32), used on ink already
+  written; `oriented_size` gives the page size. Tablet bytes (`original.bin`) are never touched, so "back to the
+  original" decodes again with today's orientation (as it already did with the hand).
+- **Migration**: a settings file with `hand = "right"` reads as `landscape`, `hand = "left"` as `landscapeFlipped`
+  (serde alias on the field plus the legacy values in `From<String>`); the file is written back with `orientation`
+  only. An older Ardoise on another PC sharing the file reads no `hand` and falls back to right-handed.
+- **Sync**: `note_from_page` gives the note the oriented page size and turned points. The note id is derived from the
+  page bytes only, so a page already imported is not imported again after the position changed.
+- **Live**: the service orients the records (`orient_record`) and sends `LiveInput::Started { width, height,
+  orientation }` (the tablet's area; the session computes the page size). `LiveSnapshot.orientation` tells every window.
+- **Quick switch** (live window, four icon buttons, `data-slot="orientation"`): `tablet_set_orientation` saves the
+  setting and calls `TabletService::set_options`; the worker, on the same thread that forwards the notifications (so
+  the records before the switch are oriented the old way, the ones after the new way), sends `LiveInput::Reoriented`.
+  `LiveSession::reorient` then: ends the stroke in progress and the hover; **turns the current page with its ink**
+  (page size swapped for a quarter turn, times and pressures untouched), so what is on screen stays readable; the
+  shared view keeps its zoom, its centre is turned (a whole-page view stays whole); blank pages not written yet just
+  take the new size; **other pages keep their ink and orientation until they are shown again** (`follow`, on page
+  next / previous), when they are turned like the current one. So the pen's points, always in the current orientation,
+  land on a page that has the same one. A page with ink only looked at is thus rewritten turned: accepted (it is
+  rare and the ink is not lost). The turned page is saved at once (`urgent`).
+- **Relation to `device.json`'s `orientation`**: `identity.rs` only has a test keeping an `"orientation": "left-handed"`
+  field "from a newer version" in the record's `extra`; it is not a field of the record and nothing reads it. The
+  setting lives in `ardoise.toml` ([tablet]), shared by the PCs, not with the tablet's registration.
+- **Interface**: `TabletOptions` (Settings and tablet panel) lists the four positions as radio buttons with a picture
+  (`OrientationIcon.svelte`, the tablet turned by quarter turns, button and light drawn) and a name that says where
+  the button ends up. The stand-ins (`mock-tablet.ts`, `mock-live.ts`, `lib/orientation.ts`) follow the same rules.

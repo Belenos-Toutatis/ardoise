@@ -30,8 +30,10 @@
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
   import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
+  import { ORIENTATIONS, type Orientation } from '../../lib/orientation';
   import type { NarrationSaved } from '../../lib/video';
   import RecordPanel from '../narration/RecordPanel.svelte';
+  import OrientationIcon from '../tablet/OrientationIcon.svelte';
   import { NarrationRecorder } from '../narration/recorder.svelte';
   import LiveCanvas from './LiveCanvas.svelte';
 
@@ -249,6 +251,13 @@
   function command(kind: LiveCommandKind) {
     notice = null;
     sendCommand(actions, kind);
+  }
+
+  /** The quick switch of the tablet's position: applies at once, the snapshot that follows shows it. */
+  function setOrientation(orientation: Orientation) {
+    if (orientation === live.orientation) return;
+    notice = null;
+    api.tabletSetOrientation(orientation).catch((error: unknown) => actions.onerror(error));
   }
 
   function setStyle(style: LiveStyle) {
@@ -476,6 +485,23 @@
         <span class="laser-dot" aria-hidden="true"></span>
         {t('live.laser')}
       </button>
+    </div>
+
+    <div class="group" role="group" aria-label={t('live.orientation.label')} title={t('live.orientation.hint')} data-slot="orientation">
+      {#each ORIENTATIONS as orientation (orientation)}
+        <button
+          type="button"
+          class="button small-button toggle orientation"
+          class:active={live.orientation === orientation}
+          data-orientation={orientation}
+          aria-pressed={live.orientation === orientation}
+          aria-label={t(`tablet.orientation.${orientation}`)}
+          title={t(`tablet.orientation.${orientation}`)}
+          onclick={() => setOrientation(orientation)}
+        >
+          <OrientationIcon {orientation} size={26} />
+        </button>
+      {/each}
     </div>
   </div>
 
@@ -726,6 +752,10 @@
   .button:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+
+  .button.orientation {
+    padding: 0.1rem 0.25rem;
   }
 
   .button.toggle.active {

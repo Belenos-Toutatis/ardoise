@@ -4,6 +4,7 @@
  */
 import type { Tool } from './ink';
 import type { Note, Rgba, Stroke } from './note';
+import type { Orientation } from './orientation';
 
 export interface LiveStyle {
   tool: Tool;
@@ -53,6 +54,8 @@ export interface LiveSnapshot {
   page: Note;
   pageIndex: number;
   pageCount: number;
+  /** How the tablet is held: the page is in this orientation (the live window's quick switch). */
+  orientation: Orientation;
   /** Layer receiving new strokes. */
   layer: number;
   style: LiveStyle;

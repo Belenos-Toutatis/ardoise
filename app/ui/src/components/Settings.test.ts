@@ -143,16 +143,36 @@ describe('settings: tablet section', () => {
     expect(section.textContent).toContain("qu'après l'écriture et la vérification de son fichier");
     expect(option('autoSync').checked).toBe(true);
     expect(option('deleteAfterImport').checked).toBe(true);
-    expect(option('hand', 'right').checked).toBe(true);
+    expect(option('orientation', 'landscape').checked).toBe(true);
     expect(option('button', 'newPage').checked).toBe(true);
 
     option('deleteAfterImport').click();
-    option('hand', 'left').click();
+    option('orientation', 'landscapeFlipped').click();
     await settle();
     const saved = (await api.tabletStatus()).options;
-    expect(saved).toEqual({ autoSync: true, deleteAfterImport: false, hand: 'left', button: 'newPage' });
+    expect(saved).toEqual({ autoSync: true, deleteAfterImport: false, orientation: 'landscapeFlipped', button: 'newPage' });
     expect(option('deleteAfterImport').checked).toBe(false);
-    expect(option('hand', 'left').checked).toBe(true);
+    expect(option('orientation', 'landscapeFlipped').checked).toBe(true);
+  });
+
+  it('offers the four positions of the tablet, each named by where its button ends up', async () => {
+    const { target } = await render('fr');
+    const section = target.querySelector('[aria-labelledby="settings-tablet"]')!;
+    const radios = [...section.querySelectorAll<HTMLInputElement>('input[data-option="orientation"]')];
+    expect(radios.map((r) => r.value)).toEqual(['landscape', 'landscapeFlipped', 'portraitLeft', 'portraitRight']);
+    expect(section.textContent).toContain('Paysage, bouton en bas');
+    expect(section.textContent).toContain("Paysage à l'envers, bouton en haut");
+    expect(section.textContent).toContain('Portrait, bouton à gauche');
+    expect(section.textContent).toContain('Portrait, bouton à droite');
+    // One picture per position, turned by quarter turns.
+    expect([...section.querySelectorAll('svg.orientation-icon')].map((svg) => svg.getAttribute('data-orientation'))).toEqual(
+      radios.map((r) => r.value),
+    );
+    radios[2].click();
+    await settle();
+    expect((await api.tabletStatus()).options.orientation).toBe('portraitLeft');
+    expect(radios[2].checked).toBe(true);
+    expect(radios[0].checked).toBe(false);
   });
 
   it('shows no tablet options without a tablet', async () => {
@@ -164,7 +184,7 @@ describe('settings: tablet section', () => {
   it('speaks English in the tablet options', async () => {
     const { target } = await render('en');
     expect(target.textContent).toContain('Delete from the tablet after import');
-    expect(target.textContent).toContain('Left-handed');
+    expect(target.textContent).toContain('Landscape upside down, button at the top');
   });
 
   it('still offers language, theme and library', async () => {

@@ -5,8 +5,8 @@
 //! A synced note's id is derived from the page ([`page_note_id`]), so that a page synced again
 //! (sync without deletion, or a deletion that failed after the save) is recognised
 //! ([`ImportedPages`]) instead of being stored twice. A copy that failed its check never counts
-//! as imported ([`LibrarySink::store`]). Points are turned for a left-handed user ([`orient`]),
-//! in synced pages and in live mode alike.
+//! as imported ([`LibrarySink::store`]). Points are turned to the way the tablet is held ([`orient`]: landscape
+//! or portrait, either way up), in synced pages and in live mode alike.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use ardoise_core::format::{self, NoteFile};
 use ardoise_core::fsutil::remove_file_with_retry;
 use ardoise_core::library::{Library, LoadedNote, SavedNote};
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Timing};
-use ardoise_core::settings::Hand;
+use ardoise_core::settings::Orientation;
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_proto::SLATE_MAX_PRESSURE;
 use ardoise_proto::live::LiveRecord;
@@ -103,24 +103,56 @@ pub fn page_note_id(page: &DownloadedPage) -> String {
     uuid_text(hash.0.to_be_bytes(), 0x80)
 }
 
-/// A point of the tablet in page coordinates. A left-handed user turns the tablet half a turn,
-/// so the point is turned back: `x' = width - x`, `y' = height - y` (SPEC §4.1;
-/// docs/design/tablet-live-classroom.md, "Settings"). Points beyond the area are clamped.
-pub fn orient(x: u16, y: u16, width: u32, height: u32, hand: Hand) -> (u16, u16) {
-    let turn = |value: u16, size: u32| {
-        u16::try_from(size.saturating_sub(u32::from(value))).unwrap_or(u16::MAX)
+/// A point of the tablet in page coordinates: turned by the quarter turns of `orientation`
+/// (clockwise) so that what the user writes is upright on the page. `width` × `height` is the
+/// tablet's drawing area; the page is `orientation.page_size(width, height)`. Landscape keeps
+/// the point, flipped landscape turns it back half a turn (`x' = width - x`,
+/// `y' = height - y`), a portrait position makes `(height - y, x)` or `(y, width - x)`
+/// (SPEC §4.1; docs/design/tablet-live-classroom.md, "Orientation"). Points beyond the area
+/// are clamped.
+pub fn orient(x: u16, y: u16, width: u32, height: u32, orientation: Orientation) -> (u16, u16) {
+    let (x, y) = (u32::from(x), u32::from(y));
+    let (x, y) = match orientation.quarter_turns() {
+        0 => (x, y),
+        1 => (height.saturating_sub(y), x),
+        2 => (width.saturating_sub(x), height.saturating_sub(y)),
+        _ => (y, width.saturating_sub(x)),
     };
-    match hand {
-        Hand::Right => (x, y),
-        Hand::Left => (turn(x, width), turn(y, height)),
+    (
+        u16::try_from(x).unwrap_or(u16::MAX),
+        u16::try_from(y).unwrap_or(u16::MAX),
+    )
+}
+
+/// A point of a page of `width` × `height` after the page is turned `turns` clockwise quarter
+/// turns (the result lives on a page with `width` and `height` swapped when `turns` is odd):
+/// the same turn as [`orient`], for ink already on a page (the live page when the orientation
+/// is switched).
+pub fn turn_point(x: f32, y: f32, width: f32, height: f32, turns: u8) -> (f32, f32) {
+    match turns % 4 {
+        0 => (x, y),
+        1 => (height - y, x),
+        2 => (width - x, height - y),
+        _ => (y, width - x),
     }
 }
 
+/// The page of a tablet whose drawing area is `size`, held as `orientation` says.
+pub fn oriented_size(size: PageSize, orientation: Orientation) -> PageSize {
+    let (width, height) = orientation.page_size(size.width, size.height);
+    PageSize { width, height }
+}
+
 /// [`orient`] applied to a live record ("pen left" records stay as they are).
-pub fn orient_record(record: LiveRecord, width: u32, height: u32, hand: Hand) -> LiveRecord {
+pub fn orient_record(
+    record: LiveRecord,
+    width: u32,
+    height: u32,
+    orientation: Orientation,
+) -> LiveRecord {
     match record {
         LiveRecord::Pen(mut point) => {
-            (point.x, point.y) = orient(point.x, point.y, width, height, hand);
+            (point.x, point.y) = orient(point.x, point.y, width, height, orientation);
             LiveRecord::Pen(point)
         }
         LiveRecord::ProximityOut => LiveRecord::ProximityOut,
@@ -225,13 +257,13 @@ fn stroke_starts(file: &stroke::StrokeFile) -> Vec<u64> {
     starts
 }
 
-/// The note of one downloaded page: black ballpoint strokes on a `page` of the tablet's size,
-/// turned for a left-handed user ([`orient`]), `created` at the page's timestamp (or `now_ms`),
+/// The note of one downloaded page: black ballpoint strokes on a page of the tablet's size
+/// (`size`, swapped in portrait), turned to the way the tablet is held ([`orient`]), `created` at the page's timestamp (or `now_ms`),
 /// `original.bin` = the bytes received (untouched).
 pub fn note_from_page(
     page: &DownloadedPage,
     size: PageSize,
-    hand: Hand,
+    orientation: Orientation,
     id: String,
     layer_name: &str,
     now_ms: i64,
@@ -254,7 +286,7 @@ pub fn note_from_page(
                 .iter()
                 .enumerate()
                 .map(|(i, p)| {
-                    let (x, y) = orient(p.x, p.y, size.width, size.height, hand);
+                    let (x, y) = orient(p.x, p.y, size.width, size.height, orientation);
                     Point {
                         x: f32::from(x),
                         y: f32::from(y),
@@ -274,7 +306,7 @@ pub fn note_from_page(
         title: String::new(),
         created,
         modified: now_ms.max(created),
-        page: size,
+        page: oriented_size(size, orientation),
         background: Background::default(),
         background_image: None,
         tags: Vec::new(),
@@ -307,7 +339,7 @@ pub struct LibrarySink<'a> {
     library: &'a Library,
     binder: PathBuf,
     size: PageSize,
-    hand: Hand,
+    orientation: Orientation,
     layer_name: String,
     now_ms: Box<dyn Fn() -> i64 + 'a>,
     after_save: Option<AfterSave<'a>>,
@@ -337,7 +369,7 @@ impl<'a> LibrarySink<'a> {
             library,
             binder: binder.into(),
             size,
-            hand: Hand::Right,
+            orientation: Orientation::Landscape,
             layer_name: layer_name.into(),
             now_ms: Box::new(now_ms),
             after_save: None,
@@ -350,9 +382,9 @@ impl<'a> LibrarySink<'a> {
         }
     }
 
-    /// Turns the points for a left-handed user ([`orient`]).
-    pub fn with_hand(mut self, hand: Hand) -> Self {
-        self.hand = hand;
+    /// Turns the points to the way the tablet is held ([`orient`]).
+    pub fn with_orientation(mut self, orientation: Orientation) -> Self {
+        self.orientation = orientation;
         self
     }
 
@@ -378,7 +410,7 @@ impl<'a> LibrarySink<'a> {
         let mut file = note_from_page(
             &page,
             self.size,
-            self.hand,
+            self.orientation,
             id,
             &self.layer_name,
             (self.now_ms)(),
@@ -477,7 +509,7 @@ impl<'a> LibrarySink<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ardoise_core::note::A4_LANDSCAPE;
+    use ardoise_core::note::{A4_LANDSCAPE, A4_PORTRAIT};
     use ardoise_proto::stroke::{Point as RawPoint, Stroke as RawStroke};
 
     fn raw_stroke(millis: u32, x: u16, n: u16) -> RawStroke {
@@ -509,8 +541,15 @@ mod tests {
     fn a_page_becomes_a_tablet_note_with_unwrapped_times() {
         // The second stroke starts after the clock wrapped (327 000 ms → 1 000 ms).
         let page = page(&[raw_stroke(327_000, 1000, 4), raw_stroke(1_000, 2000, 3)]);
-        let file =
-            note_from_page(&page, A4_LANDSCAPE, Hand::Right, "id".into(), "Calque 1", 5).unwrap();
+        let file = note_from_page(
+            &page,
+            A4_LANDSCAPE,
+            Orientation::Landscape,
+            "id".into(),
+            "Calque 1",
+            5,
+        )
+        .unwrap();
         let note = &file.note;
         assert_eq!(note.created, 1_792_834_200_000);
         assert_eq!(note.origin, Origin::Tablet);
@@ -589,7 +628,7 @@ mod tests {
             let mut other = note_from_page(
                 &page(&[raw_stroke(0, 100, 5)]),
                 A4_LANDSCAPE,
-                Hand::Right,
+                Orientation::Landscape,
                 "id".into(),
                 "L",
                 1,
@@ -643,8 +682,15 @@ mod tests {
         let mut sink = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7);
         let id = page_note_id(&oldest);
         sink.tamper = Some(Box::new(move |path| {
-            let mut file =
-                note_from_page(&other, A4_LANDSCAPE, Hand::Right, id.clone(), "L", 1).unwrap();
+            let mut file = note_from_page(
+                &other,
+                A4_LANDSCAPE,
+                Orientation::Landscape,
+                id.clone(),
+                "L",
+                1,
+            )
+            .unwrap();
             file.note.title = "Other".into();
             std::fs::write(path, format::to_bytes(&file).unwrap()).unwrap();
         }));
@@ -671,25 +717,37 @@ mod tests {
     }
 
     #[test]
-    fn left_hand_turns_points_half_a_turn() {
+    fn flipped_landscape_turns_points_half_a_turn() {
         assert_eq!(
-            orient(1000, 5000, 29_700, 21_600, Hand::Right),
+            orient(1000, 5000, 29_700, 21_600, Orientation::Landscape),
             (1000, 5000)
         );
         assert_eq!(
-            orient(1000, 5000, 29_700, 21_600, Hand::Left),
+            orient(1000, 5000, 29_700, 21_600, Orientation::LandscapeFlipped),
             (28_700, 16_600)
         );
-        assert_eq!(orient(0, 0, 29_700, 21_600, Hand::Left), (29_700, 21_600));
+        assert_eq!(
+            orient(0, 0, 29_700, 21_600, Orientation::LandscapeFlipped),
+            (29_700, 21_600)
+        );
         // Outside the area: clamped, never wrapped.
-        assert_eq!(orient(30_000, 21_600, 29_700, 21_600, Hand::Left), (0, 0));
+        assert_eq!(
+            orient(
+                30_000,
+                21_600,
+                29_700,
+                21_600,
+                Orientation::LandscapeFlipped
+            ),
+            (0, 0)
+        );
         let pen = LiveRecord::Pen(RawPoint {
             x: 2500,
             y: 500,
             pressure: 700,
         });
         assert_eq!(
-            orient_record(pen, 21_600, 14_800, Hand::Left),
+            orient_record(pen, 21_600, 14_800, Orientation::LandscapeFlipped),
             LiveRecord::Pen(RawPoint {
                 x: 19_100,
                 y: 14_300,
@@ -697,19 +755,151 @@ mod tests {
             })
         );
         assert_eq!(
-            orient_record(LiveRecord::ProximityOut, 21_600, 14_800, Hand::Left),
+            orient_record(
+                LiveRecord::ProximityOut,
+                21_600,
+                14_800,
+                Orientation::LandscapeFlipped
+            ),
             LiveRecord::ProximityOut
         );
 
-        // A synced page of a left-handed user.
+        // A synced page held flipped.
         let page = page(&[raw_stroke(0, 1000, 2)]);
-        let file =
-            note_from_page(&page, A4_LANDSCAPE, Hand::Left, "id".into(), "Calque 1", 5).unwrap();
+        let file = note_from_page(
+            &page,
+            A4_LANDSCAPE,
+            Orientation::LandscapeFlipped,
+            "id".into(),
+            "Calque 1",
+            5,
+        )
+        .unwrap();
+        assert_eq!(file.note.page, A4_LANDSCAPE);
         let first = &file.note.strokes[0].points;
         assert_eq!((first[0].x, first[0].y), (28_700.0, 16_600.0));
         assert_eq!((first[1].x, first[1].y), (28_690.0, 16_600.0));
         // The tablet's bytes are kept untouched.
         assert_eq!(file.original.as_deref(), Some(page.bytes.as_slice()));
+    }
+
+    /// The tablet's four corners, as the user sees them, for each position. The button is at the
+    /// bottom of the tablet's own frame: it ends up on the left (a quarter turn clockwise) or on
+    /// the right (anticlockwise) in portrait.
+    #[test]
+    fn the_four_positions_map_corners_to_corners() {
+        const W: u32 = 29_700;
+        const H: u32 = 21_600;
+        let (w, h) = (W as u16, H as u16);
+        // (position, page size, images of the tablet's top-left, top-right, bottom-left and
+        // bottom-right corners)
+        let cases = [
+            (
+                Orientation::Landscape,
+                (W, H),
+                [(0, 0), (w, 0), (0, h), (w, h)],
+            ),
+            (
+                Orientation::LandscapeFlipped,
+                (W, H),
+                [(w, h), (0, h), (w, 0), (0, 0)],
+            ),
+            (
+                Orientation::PortraitLeft,
+                (H, W),
+                [(h, 0), (h, w), (0, 0), (0, w)],
+            ),
+            (
+                Orientation::PortraitRight,
+                (H, W),
+                [(0, w), (0, 0), (h, w), (h, 0)],
+            ),
+        ];
+        for (orientation, (page_w, page_h), expected) in cases {
+            assert_eq!(
+                orientation.page_size(W, H),
+                (page_w, page_h),
+                "{orientation:?}"
+            );
+            let corners = [(0, 0), (w, 0), (0, h), (w, h)];
+            for (corner, want) in corners.into_iter().zip(expected) {
+                let got = orient(corner.0, corner.1, W, H, orientation);
+                assert_eq!(got, want, "{orientation:?} {corner:?}");
+                // Always inside the page.
+                assert!(u32::from(got.0) <= page_w && u32::from(got.1) <= page_h);
+                // The float version, used on ink already on a page, does the same.
+                let turned = turn_point(
+                    f32::from(corner.0),
+                    f32::from(corner.1),
+                    W as f32,
+                    H as f32,
+                    orientation.quarter_turns(),
+                );
+                assert_eq!(turned, (f32::from(want.0), f32::from(want.1)));
+            }
+        }
+        // A point that is not a corner: 5 000 across and 3 000 down the tablet.
+        assert_eq!(
+            orient(5000, 3000, W, H, Orientation::PortraitLeft),
+            (h - 3000, 5000)
+        );
+        assert_eq!(
+            orient(5000, 3000, W, H, Orientation::PortraitRight),
+            (3000, w - 5000)
+        );
+    }
+
+    #[test]
+    fn turning_a_page_round_trips_and_moves_between_positions() {
+        let (mut width, mut height) = (29_700.0_f32, 21_600.0_f32);
+        let start = (1234.0_f32, 5678.0_f32);
+        let mut point = start;
+        for _ in 0..4 {
+            point = turn_point(point.0, point.1, width, height, 1);
+            (width, height) = (height, width);
+            assert!((0.0..=width).contains(&point.0) && (0.0..=height).contains(&point.1));
+        }
+        assert_eq!(point, start);
+        let once = turn_point(start.0, start.1, 29_700.0, 21_600.0, 1);
+        assert_eq!(turn_point(once.0, once.1, 21_600.0, 29_700.0, 3), start);
+
+        // From one position to another is the difference of their quarter turns.
+        for from in Orientation::ALL {
+            for to in Orientation::ALL {
+                let first = orient(5000, 3000, 29_700, 21_600, from);
+                let (page_w, page_h) = from.page_size(29_700, 21_600);
+                let moved = turn_point(
+                    f32::from(first.0),
+                    f32::from(first.1),
+                    page_w as f32,
+                    page_h as f32,
+                    to.turns_from(from),
+                );
+                let direct = orient(5000, 3000, 29_700, 21_600, to);
+                assert_eq!(
+                    moved,
+                    (f32::from(direct.0), f32::from(direct.1)),
+                    "{from:?} -> {to:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_portrait_position_makes_a_portrait_note() {
+        let page = page(&[raw_stroke(0, 1000, 2)]);
+        for orientation in [Orientation::PortraitLeft, Orientation::PortraitRight] {
+            let file = note_from_page(&page, A4_LANDSCAPE, orientation, "id".into(), "Calque 1", 5)
+                .unwrap();
+            assert_eq!(file.note.page, A4_PORTRAIT, "{orientation:?}");
+            for stroke in &file.note.strokes {
+                for p in &stroke.points {
+                    assert!((0.0..=A4_PORTRAIT.width as f32).contains(&p.x), "{p:?}");
+                    assert!((0.0..=A4_PORTRAIT.height as f32).contains(&p.y), "{p:?}");
+                }
+            }
+            assert_eq!(file.original.as_deref(), Some(page.bytes.as_slice()));
+        }
     }
 
     #[test]

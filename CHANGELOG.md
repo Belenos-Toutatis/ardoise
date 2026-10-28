@@ -10,6 +10,7 @@
 - Stylet et écran tactile (Surface) : le dos du stylet efface avec les réglages de la gomme, quel que soit l'outil, et montre le cercle de gomme au survol ; le bouton du stylet trace un lasso de sélection ; la largeur du trait suit la pression ; les doigts sont ignorés tant que le stylet est utilisé ou proche de l'écran. Un doigt fait défiler la page, deux doigts zooment, un double toucher ajuste la page (éditeur, relecture, aperçu du mode direct) ; l'option « Dessiner au doigt » (Réglages et barre de zoom) laisse le doigt dessiner.
 - Zoom « Largeur » à côté de « Ajuster » / « Page entière » (éditeur et relecture : Ctrl + 2 ; mode direct et présentation : touche W).
 - Écrire par-dessus la présentation : au stylet, au doigt ou à la souris sur la fenêtre projetée, annotations temporaires (rouges, jaunes sur le tableau noir) effacées avec le dos du stylet, la touche Suppr ou le bouton « Effacer les annotations », jamais enregistrées dans la note.
+- Position de la tablette : les quatre positions d'Inkspace (paysage, paysage à l'envers, portrait avec le bouton à gauche, portrait avec le bouton à droite) remplacent « droitier / gaucher », avec un petit dessin de la tablette pour chacune, dans les réglages et dans le panneau de la tablette. Les positions en portrait donnent des notes en portrait ; l'ancien réglage « gaucher » devient « paysage à l'envers ». En mode direct, quatre boutons de la fenêtre de commande changent la position aussitôt : la page en cours tourne avec ce qui y est déjà dessiné.
 
 ### Ajouté (jalon M7 — fonctions en plus)
 

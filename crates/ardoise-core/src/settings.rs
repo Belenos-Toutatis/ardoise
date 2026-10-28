@@ -156,33 +156,99 @@ impl AutoExport {
     }
 }
 
-/// Which hand writes on the tablet. A left-handed user turns the tablet half a turn, so every
-/// point is turned back (`x' = width - x`, `y' = height - y`). Stored as `"right"` or `"left"`;
-/// any other value loads as right.
+/// How the tablet is held: the four positions of Wacom Inkspace. The tablet's button and light
+/// are on one edge of the body; the position is named after where that edge ends up for the
+/// user. Every point the tablet sends is turned by whole quarter turns back to the way up of
+/// the page (clockwise, [`quarter_turns`](Self::quarter_turns) times), and a portrait position
+/// makes portrait pages (width and height swapped).
+///
+/// Stored as `"landscape"`, `"landscapeFlipped"`, `"portraitLeft"` or `"portraitRight"`. Files
+/// written before the four positions have `hand = "right"` (read as landscape) or
+/// `hand = "left"` (the tablet turned half a turn: landscape flipped); any other value loads as
+/// landscape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
-pub enum Hand {
+pub enum Orientation {
+    /// Held as drawn on the tablet, long side across, button at the bottom. Right-handed.
     #[default]
-    Right,
-    Left,
+    Landscape,
+    /// Half a turn from landscape, button at the top. Left-handed.
+    LandscapeFlipped,
+    /// A quarter turn clockwise from landscape: long side up, button on the left.
+    PortraitLeft,
+    /// A quarter turn anticlockwise from landscape: long side up, button on the right.
+    PortraitRight,
 }
 
-impl From<String> for Hand {
-    fn from(text: String) -> Self {
-        if text == "left" {
-            Hand::Left
+impl Orientation {
+    /// Every position, in the order the interface lists them.
+    pub const ALL: [Orientation; 4] = [
+        Orientation::Landscape,
+        Orientation::LandscapeFlipped,
+        Orientation::PortraitLeft,
+        Orientation::PortraitRight,
+    ];
+
+    /// How many clockwise quarter turns bring the tablet's own coordinates to the page's.
+    pub fn quarter_turns(self) -> u8 {
+        match self {
+            Orientation::Landscape => 0,
+            Orientation::PortraitLeft => 1,
+            Orientation::LandscapeFlipped => 2,
+            Orientation::PortraitRight => 3,
+        }
+    }
+
+    /// The position `turns` clockwise quarter turns (modulo 4) from landscape.
+    pub fn from_quarter_turns(turns: u8) -> Self {
+        match turns % 4 {
+            0 => Orientation::Landscape,
+            1 => Orientation::PortraitLeft,
+            2 => Orientation::LandscapeFlipped,
+            _ => Orientation::PortraitRight,
+        }
+    }
+
+    /// Quarter turns (clockwise, 0 to 3) that bring a page held in `from` to this position.
+    pub fn turns_from(self, from: Orientation) -> u8 {
+        (self.quarter_turns() + 4 - from.quarter_turns()) % 4
+    }
+
+    /// The tablet is held long side up.
+    pub fn is_portrait(self) -> bool {
+        self.quarter_turns() % 2 == 1
+    }
+
+    /// Size of the page for a tablet drawing area of `width` × `height` (swapped in portrait).
+    pub fn page_size(self, width: u32, height: u32) -> (u32, u32) {
+        if self.is_portrait() {
+            (height, width)
         } else {
-            Hand::Right
+            (width, height)
         }
     }
 }
 
-impl From<Hand> for String {
-    fn from(hand: Hand) -> Self {
-        match hand {
-            Hand::Right => "right".to_owned(),
-            Hand::Left => "left".to_owned(),
+impl From<String> for Orientation {
+    fn from(text: String) -> Self {
+        match text.as_str() {
+            "landscapeFlipped" | "left" => Orientation::LandscapeFlipped,
+            "portraitLeft" => Orientation::PortraitLeft,
+            "portraitRight" => Orientation::PortraitRight,
+            _ => Orientation::Landscape,
         }
+    }
+}
+
+impl From<Orientation> for String {
+    fn from(orientation: Orientation) -> Self {
+        match orientation {
+            Orientation::Landscape => "landscape",
+            Orientation::LandscapeFlipped => "landscapeFlipped",
+            Orientation::PortraitLeft => "portraitLeft",
+            Orientation::PortraitRight => "portraitRight",
+        }
+        .to_owned()
     }
 }
 
@@ -228,8 +294,9 @@ pub struct TabletSettings {
     /// Delete each page from the tablet once its note is written and checked.
     #[serde(default = "yes")]
     pub delete_after_import: bool,
-    #[serde(default)]
-    pub hand: Hand,
+    /// How the tablet is held. Files from before the four positions call it `hand`.
+    #[serde(default, alias = "hand")]
+    pub orientation: Orientation,
     /// What the tablet's button does in live mode.
     #[serde(default)]
     pub button: LiveButton,
@@ -243,7 +310,7 @@ impl Default for TabletSettings {
         Self {
             auto_sync: true,
             delete_after_import: true,
-            hand: Hand::Right,
+            orientation: Orientation::Landscape,
             button: LiveButton::NewPage,
             extra: toml::Table::new(),
         }
@@ -1040,5 +1107,118 @@ mod tests {
         // Another setting changed later leaves the automatic export alone.
         let later = store.update(|s| s.theme = Theme::Dark).unwrap();
         assert_eq!(later.auto_export, reloaded.auto_export);
+    }
+
+    #[test]
+    fn the_hand_of_older_files_becomes_an_orientation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        let orientation = |toml: &str| {
+            fs::write(store.path(), toml).unwrap();
+            store.load().unwrap().tablet.orientation
+        };
+        assert_eq!(orientation(""), Orientation::Landscape);
+        assert_eq!(
+            orientation(
+                "[tablet]
+hand = \"right\"
+"
+            ),
+            Orientation::Landscape
+        );
+        assert_eq!(
+            orientation(
+                "[tablet]
+hand = \"left\"
+"
+            ),
+            Orientation::LandscapeFlipped
+        );
+        assert_eq!(
+            orientation(
+                "[tablet]
+hand = \"both\"
+"
+            ),
+            Orientation::Landscape
+        );
+        for known in Orientation::ALL {
+            let text = format!(
+                "[tablet]
+orientation = \"{}\"
+",
+                String::from(known)
+            );
+            assert_eq!(orientation(&text), known);
+        }
+
+        // An older file is read, then written with the new key only; the other keys stay.
+        fs::write(
+            store.path(),
+            "[tablet]
+hand = \"left\"
+button = \"newLayer\"
+future = 1
+",
+        )
+        .unwrap();
+        let updated = store.update(|s| s.theme = Theme::Dark).unwrap();
+        assert_eq!(updated.tablet.orientation, Orientation::LandscapeFlipped);
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(
+            text.contains("orientation = \"landscapeFlipped\""),
+            "{text}"
+        );
+        assert!(!text.contains("hand ="), "{text}");
+        assert!(text.contains("future = 1"), "{text}");
+        assert_eq!(
+            store.load().unwrap().tablet.orientation,
+            Orientation::LandscapeFlipped
+        );
+    }
+
+    #[test]
+    fn orientations_turn_pages_by_quarter_turns() {
+        assert_eq!(Orientation::default(), Orientation::Landscape);
+        for (i, orientation) in Orientation::ALL.into_iter().enumerate() {
+            assert_eq!(
+                Orientation::from_quarter_turns(orientation.quarter_turns()),
+                orientation,
+                "{i}"
+            );
+            assert_eq!(orientation.turns_from(orientation), 0);
+            assert_eq!(
+                orientation.is_portrait(),
+                orientation.quarter_turns() % 2 == 1
+            );
+        }
+        assert_eq!(
+            Orientation::Landscape.page_size(29_700, 21_600),
+            (29_700, 21_600)
+        );
+        assert_eq!(
+            Orientation::LandscapeFlipped.page_size(29_700, 21_600),
+            (29_700, 21_600)
+        );
+        assert_eq!(
+            Orientation::PortraitLeft.page_size(29_700, 21_600),
+            (21_600, 29_700)
+        );
+        assert_eq!(
+            Orientation::PortraitRight.page_size(29_700, 21_600),
+            (21_600, 29_700)
+        );
+        assert_eq!(
+            Orientation::PortraitRight.turns_from(Orientation::Landscape),
+            3
+        );
+        assert_eq!(
+            Orientation::Landscape.turns_from(Orientation::PortraitRight),
+            1
+        );
+        assert_eq!(
+            Orientation::LandscapeFlipped.turns_from(Orientation::PortraitLeft),
+            1
+        );
     }
 }

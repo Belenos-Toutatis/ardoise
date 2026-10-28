@@ -195,23 +195,23 @@ describe('tablet state: actions', () => {
     // Shown before the service answered.
     expect(state.status?.options.deleteAfterImport).toBe(false);
     expect(await done).toBe(true);
-    expect(save).toHaveBeenCalledWith({ autoSync: true, deleteAfterImport: false, hand: 'right', button: 'newPage' });
+    expect(save).toHaveBeenCalledWith({ autoSync: true, deleteAfterImport: false, orientation: 'landscape', button: 'newPage' });
     expect((await api.tabletStatus()).options.deleteAfterImport).toBe(false);
   });
 
   it('puts an option back when the service refuses it', async () => {
     await started();
     vi.spyOn(api, 'tabletSetOptions').mockRejectedValue({ code: 'tablet', message: 'disk full' });
-    const done = state.setOptions({ hand: 'left' });
-    expect(state.status?.options.hand).toBe('left');
+    const done = state.setOptions({ orientation: 'landscapeFlipped' });
+    expect(state.status?.options.orientation).toBe('landscapeFlipped');
     expect(await done).toBe(false);
-    expect(state.status?.options.hand).toBe('right');
+    expect(state.status?.options.orientation).toBe('landscape');
     expect(state.actionError).toContain('Problème avec la tablette : disk full');
   });
 
   it('keeps every other option when one changes', async () => {
     await started();
-    const odd: TabletOptions = { autoSync: false, deleteAfterImport: true, hand: 'left', button: 'newLayer' };
+    const odd: TabletOptions = { autoSync: false, deleteAfterImport: true, orientation: 'landscapeFlipped', button: 'newLayer' };
     await state.setOptions(odd);
     await state.setOptions({ autoSync: true });
     expect(state.status?.options).toEqual({ ...odd, autoSync: true });

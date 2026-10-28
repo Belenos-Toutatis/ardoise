@@ -50,7 +50,7 @@ interface Options {
 async function render({ locale = 'fr', manual = true, connect = true, forget = false }: Options = {}) {
   setLocale(locale);
   if (forget) await api.forgetTablet();
-  if (manual) await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, hand: 'right', button: 'newPage' });
+  if (manual) await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' });
   tablet.start();
   await settle();
   const handlers = { onclose: vi.fn(), onlive: vi.fn(), ontest: vi.fn() };
@@ -196,7 +196,7 @@ describe('tablet panel: sync', () => {
 
   it('says that only the oldest page can be read when nothing is deleted', async () => {
     const { q, action, click } = await render();
-    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, hand: 'right', button: 'newPage' });
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', button: 'newPage' });
     await settle();
     // Before any sync, nothing was read: no message yet.
     expect(q('[data-slot="pages-waiting"]')).toBeNull();
@@ -217,7 +217,7 @@ describe('tablet panel: sync', () => {
     expect(q('[data-slot="pages-waiting"]')).not.toBeNull();
 
     // Turning deletion on hides it: the next sync gets the pages.
-    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, hand: 'right', button: 'newPage' });
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' });
     await settle();
     expect(q('[data-slot="pages-waiting"]')).toBeNull();
   });
@@ -228,7 +228,7 @@ describe('tablet panel: sync', () => {
     await beat(4);
     expect(q('[data-slot="pages-waiting"]')).toBeNull();
 
-    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, hand: 'right', button: 'newPage' });
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', button: 'newPage' });
     mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a'], deleted: 0 }, device: { ...tablet.status!.device!, storedPages: 1 } });
     await settle();
     expect(q('[data-slot="pages-waiting"]')).toBeNull();
@@ -239,7 +239,7 @@ describe('tablet panel: sync', () => {
 
   it('says it in English too', async () => {
     const { q, action, click } = await render({ locale: 'en' });
-    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, hand: 'right', button: 'newPage' });
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', button: 'newPage' });
     await settle();
     await click(action('sync'));
     await beat(3);
@@ -307,15 +307,15 @@ describe('tablet panel: options', () => {
     await click(option(target, 'deleteAfterImport'));
     await click(option(target, 'autoSync'));
     await click(option(target, 'button', 'newLayer'));
-    await click(option(target, 'hand', 'left'));
-    expect(save).toHaveBeenLastCalledWith({ autoSync: true, deleteAfterImport: false, hand: 'left', button: 'newLayer' });
+    await click(option(target, 'orientation', 'landscapeFlipped'));
+    expect(save).toHaveBeenLastCalledWith({ autoSync: true, deleteAfterImport: false, orientation: 'landscapeFlipped', button: 'newLayer' });
     expect((await api.tabletStatus()).options).toEqual({
       autoSync: true,
       deleteAfterImport: false,
-      hand: 'left',
+      orientation: 'landscapeFlipped',
       button: 'newLayer',
     });
-    expect(option(target, 'hand', 'left').checked).toBe(true);
+    expect(option(target, 'orientation', 'landscapeFlipped').checked).toBe(true);
     expect(option(target, 'button', 'newLayer').checked).toBe(true);
     expect(option(target, 'deleteAfterImport').checked).toBe(false);
   });
@@ -334,7 +334,7 @@ describe('tablet panel: options', () => {
     expect(target.textContent).toContain('only once its file has been written to the library and checked');
     expect(target.textContent).toContain('hands over only its oldest page');
     expect(target.textContent).toContain('Tablet button in live mode');
-    expect(target.textContent).toContain('Left-handed');
+    expect(target.textContent).toContain('Landscape upside down, button at the top');
   });
 });
 

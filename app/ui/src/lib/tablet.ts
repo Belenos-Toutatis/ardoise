@@ -16,7 +16,9 @@ export type Connection =
 
 export type RegisterStep = 'holdButton' | 'searching' | 'connecting' | 'pressButton' | 'done';
 
-export type Hand = 'right' | 'left';
+import type { Orientation } from './orientation';
+
+export type { Orientation };
 
 /** What the tablet's button does in live mode. */
 export type LiveButton = 'newPage' | 'newLayer';
@@ -26,7 +28,8 @@ export interface TabletOptions {
   autoSync: boolean;
   /** Delete each page from the tablet once its note is written and checked (on by default). */
   deleteAfterImport: boolean;
-  hand: Hand;
+  /** How the tablet is held (four positions; the live window switches it too). */
+  orientation: Orientation;
   button: LiveButton;
 }
 

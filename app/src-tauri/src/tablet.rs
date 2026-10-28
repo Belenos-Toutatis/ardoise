@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use ardoise_ble::{AdapterInfo, AdapterStatus, BleError};
 use ardoise_core::library::Library;
-use ardoise_core::settings::{Language, Settings, SettingsStore};
+use ardoise_core::settings::{Language, Orientation, Settings, SettingsStore};
 use ardoise_device::identity::{self, IdentityError};
 use ardoise_device::pages::LibrarySink;
 use ardoise_device::service::{
@@ -178,7 +178,7 @@ pub(crate) fn interface_language(settings: &Settings, system_locale: Option<&str
 }
 
 /// Writes a synced page as a new note in the library root (`root`): the points turned for
-/// the hand of `context`, a thumbnail, the note read back to check it (`LibrarySink::store`).
+/// the orientation of `context`, a thumbnail, the note read back to check it (`LibrarySink::store`).
 /// Then the automatic export, with the settings read now: a failed export is logged and never
 /// fails the sync (the note is safe). An `Err` keeps the page on the tablet.
 pub fn store_page_in(
@@ -201,7 +201,7 @@ pub fn store_page_in(
     let mut report = AutoExportReport::default();
     let saved = {
         let mut sink = LibrarySink::new(&library, "", context.size, layer, now_ms)
-            .with_hand(context.hand)
+            .with_orientation(context.orientation)
             .with_thumbnail(crate::thumbnails::thumbnail_png)
             .with_after_save(after_save_hook(
                 &settings.auto_export,
@@ -474,7 +474,7 @@ pub fn tablet_set_options_in(
     crate::commands::update(context, |settings| {
         settings.tablet.auto_sync = options.auto_sync;
         settings.tablet.delete_after_import = options.delete_after_import;
-        settings.tablet.hand = options.hand;
+        settings.tablet.orientation = options.orientation;
         settings.tablet.button = options.button;
     })?;
     let mut status = runtime.with_service(|service| {
@@ -484,6 +484,21 @@ pub fn tablet_set_options_in(
     // The worker publishes them a moment later.
     status.options = options;
     Ok(status)
+}
+
+/// The quick switch of the live window: saves how the tablet is held in `[tablet]` and tells the
+/// service, which turns the live page at once (`LiveInput::Reoriented`). Without a running
+/// service only the setting changes.
+pub fn tablet_set_orientation_in(
+    runtime: &TabletRuntime,
+    context: &AppContext,
+    orientation: Orientation,
+) -> CommandResult<()> {
+    let settings =
+        crate::commands::store(context)?.update(|s| s.tablet.orientation = orientation)?;
+    let options = TabletOptions::from(&settings.tablet);
+    let _ = runtime.with_service(|service| service.set_options(options));
+    Ok(())
 }
 
 pub fn sim_press_button_in(runtime: &TabletRuntime) -> CommandResult<()> {
@@ -566,6 +581,15 @@ pub async fn tablet_set_options(
     tablet_set_options_in(&runtime, &context, options)
 }
 
+#[tauri::command]
+pub async fn tablet_set_orientation(
+    runtime: State<'_, TabletRuntime>,
+    context: State<'_, AppContext>,
+    orientation: Orientation,
+) -> CommandResult<()> {
+    tablet_set_orientation_in(&runtime, &context, orientation)
+}
+
 /// Presses the simulated tablet's button (`--simulated-tablet` only, for the e2e journeys).
 #[tauri::command]
 pub async fn sim_press_button(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
@@ -590,7 +614,7 @@ mod tests {
     use super::*;
     use crate::library::tests::library;
     use ardoise_core::note::A4_LANDSCAPE;
-    use ardoise_core::settings::{AutoExport, AutoExportFormat, Hand, LiveButton};
+    use ardoise_core::settings::{AutoExport, AutoExportFormat, LiveButton, Orientation};
     use ardoise_device::identity::{DEVICE_FORMAT, DeviceRecord, HostId};
     use ardoise_device::service::{Connection, RegisterStep};
     use std::sync::mpsc;
@@ -717,7 +741,7 @@ mod tests {
             .unwrap();
         let page_context = PageContext {
             size: A4_LANDSCAPE,
-            hand: Hand::Right,
+            orientation: Orientation::Landscape,
         };
         let path = store_page_in(
             Some(store),
@@ -847,15 +871,27 @@ mod tests {
         let options = TabletOptions {
             auto_sync: false,
             delete_after_import: true,
-            hand: Hand::Left,
+            orientation: Orientation::LandscapeFlipped,
             button: LiveButton::NewLayer,
         };
         let status = tablet_set_options_in(&runtime, &context, options).unwrap();
         assert_eq!(status.options, options);
         let saved = context.store.as_ref().unwrap().load().unwrap().tablet;
-        assert_eq!(saved.hand, Hand::Left);
+        assert_eq!(saved.orientation, Orientation::LandscapeFlipped);
         assert_eq!(saved.button, LiveButton::NewLayer);
         assert!(!saved.auto_sync);
+        // The live window's quick switch changes the position only, and the service follows.
+        tablet_set_orientation_in(&runtime, &context, Orientation::PortraitRight).unwrap();
+        let saved = context.store.as_ref().unwrap().load().unwrap().tablet;
+        assert_eq!(saved.orientation, Orientation::PortraitRight);
+        assert_eq!(saved.button, LiveButton::NewLayer);
+        assert!(!saved.auto_sync);
+        // The worker publishes the new options a moment later.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while runtime.status().unwrap().options.orientation != Orientation::PortraitRight {
+            assert!(Instant::now() < deadline, "the service did not follow");
+            std::thread::sleep(Duration::from_millis(20));
+        }
         sim_press_button_in(&runtime).unwrap();
 
         // Another library: the simulated registration stays in its own folder.

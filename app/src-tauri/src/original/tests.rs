@@ -95,12 +95,17 @@ fn edit(library: &Library, path: &Path, stamp: &FileStamp) -> FileStamp {
 
 #[test]
 fn a_tablet_note_goes_back_to_what_the_tablet_sent() {
-    for hand in [Hand::Right, Hand::Left] {
+    for orientation in Orientation::ALL {
         let settings_dir = tempfile::tempdir().unwrap();
         let store = SettingsStore::locate(settings_dir.path(), settings_dir.path(), "PC-TEST");
-        let settings = store.update(|s| s.tablet.hand = hand).unwrap();
+        let settings = store
+            .update(|s| s.tablet.orientation = orientation)
+            .unwrap();
         let (dir, library) = library();
-        let context = PageContext { size: SLATE, hand };
+        let context = PageContext {
+            size: SLATE,
+            orientation,
+        };
         let path = store_page_in(
             Some(&store),
             Some("fr-FR"),
@@ -115,7 +120,10 @@ fn a_tablet_note_goes_back_to_what_the_tablet_sent() {
             tablet.size, SLATE,
             "no registered tablet: the Bamboo Slate's area"
         );
-        assert_eq!((tablet.hand, tablet.layer_name), (hand, "Calque 1"));
+        assert_eq!(
+            (tablet.orientation, tablet.layer_name),
+            (orientation, "Calque 1")
+        );
 
         // Never edited: the tablet's page is the original already.
         let expected = (
@@ -126,7 +134,7 @@ fn a_tablet_note_goes_back_to_what_the_tablet_sent() {
         assert!(!expected.2.is_empty());
         let original = original_in(&library, &path, &tablet).unwrap();
         assert!(matches!(original, NoteOriginal::Tablet { .. }));
-        assert_eq!(ink(original), expected, "{hand:?}");
+        assert_eq!(ink(original), expected, "{orientation:?}");
 
         // Edited and saved: still the tablet's page, and no second copy is kept.
         let stamp = edit(&library, &path, &synced.stamp);
@@ -143,7 +151,7 @@ fn a_tablet_note_goes_back_to_what_the_tablet_sent() {
         assert_eq!(
             (restored.page, restored.layers, restored.strokes),
             expected,
-            "{hand:?}"
+            "{orientation:?}"
         );
         assert_eq!(restored.title, "Cours");
         assert_eq!(restored.tags, ["physique"]);
@@ -175,7 +183,10 @@ fn the_tablet_size_comes_from_the_registration() {
             height: 14_800
         }
     );
-    assert_eq!((tablet.hand, tablet.layer_name), (Hand::Right, "Layer 1"));
+    assert_eq!(
+        (tablet.orientation, tablet.layer_name),
+        (Orientation::Landscape, "Layer 1")
+    );
 }
 
 /// A note written the way live mode or the Inkspace import writes one (no `original.bin`).

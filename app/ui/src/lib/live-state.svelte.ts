@@ -35,6 +35,7 @@ import type {
   MonitorInfo,
 } from './live';
 import { roundView, sameView } from './live-view';
+import type { Orientation } from './orientation';
 import type { Background, Layer, PageSize, Rgba, Stroke } from './note';
 
 /** A page Rust failed to write into the library. */
@@ -104,6 +105,8 @@ export class LiveState {
   state = $state<LiveSessionState>('idle');
   pageIndex = $state(0);
   pageCount = $state(1);
+  /** How the tablet is held now. */
+  orientation = $state<Orientation>('landscape');
   /** Layer receiving new strokes. */
   layer = $state(0);
   style = $state.raw<LiveStyle>(DEFAULT_STYLE);
@@ -288,6 +291,7 @@ export class LiveState {
     this.state = s.state;
     this.pageIndex = s.pageIndex;
     this.pageCount = Math.max(1, s.pageCount);
+    this.orientation = s.orientation;
     this.layer = s.layer;
     this.noteId = s.page.id;
     if (this.pageSize.width !== s.page.page.width || this.pageSize.height !== s.page.page.height) {

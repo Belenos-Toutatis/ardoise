@@ -252,10 +252,14 @@
       "button": "Tablet button in live mode",
       "buttonNewPage": "New page",
       "buttonNewLayer": "New layer",
-      "hand": "Tablet orientation",
-      "handRight": "Right-handed",
-      "handLeft": "Left-handed",
-      "handHint": "Left-handed: the tablet is used upside down; strokes are turned half a turn so that they appear upright."
+      "orientation": "Position of the tablet",
+      "orientationHint": "Choose how you hold the tablet: Ardoise turns what you draw so that it appears upright. Upside down suits left-handed users; in portrait, the notes are portrait pages. The button is the one next to the tablet's light."
+    },
+    "orientation": {
+      "landscape": "Landscape, button at the bottom",
+      "landscapeFlipped": "Landscape upside down, button at the top",
+      "portraitLeft": "Portrait, button on the left",
+      "portraitRight": "Portrait, button on the right"
     },
     "manage": {
       "title": "Tablet settings",
@@ -1094,6 +1098,10 @@
       "waiting": "Waiting for the tablet",
       "live": "Live",
       "reconnecting": "Reconnecting…"
+    },
+    "orientation": {
+      "label": "Tablet position",
+      "hint": "Changes at once: the page in progress turns with the tablet, with what is already drawn on it."
     },
     "starting": "Starting live mode…",
     "waiting": {

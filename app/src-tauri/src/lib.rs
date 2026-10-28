@@ -207,6 +207,7 @@ pub fn run() {
             tablet::tablet_rename,
             tablet::tablet_set_time,
             tablet::tablet_set_options,
+            tablet::tablet_set_orientation,
             tablet::sim_press_button,
             live::live_subscribe,
             live::live_start,

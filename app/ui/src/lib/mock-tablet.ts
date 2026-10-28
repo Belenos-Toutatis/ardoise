@@ -13,6 +13,8 @@ import type { InkPoint } from './ink';
 import { UNHANDLED, fileName, freshStamp, mockLibrary, notifyLibraryChanged } from './mock-data';
 import { failure, freePath, mockLibraryInvoke } from './mock-library';
 import type { Note, Stroke, TabletInfo } from './note';
+import { setMockLiveOrientation } from './mock-live';
+import { isOrientation, pageSizeFor, quarterTurns, turnStrokes, type Orientation } from './orientation';
 import type { Connection, DeviceDetails, TabletEvent, TabletOptions, TabletStatus } from './tablet';
 
 /** Knobs of the simulated tablet; tests change them. */
@@ -37,7 +39,7 @@ export const mockTablet = {
 const FIRMWARE = 'B160805A-C170704A';
 const A4 = { width: 29700, height: 21600 };
 
-const DEFAULT_OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, hand: 'right', button: 'newPage' };
+const DEFAULT_OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' };
 
 interface Sim {
   status: TabletStatus;
@@ -64,6 +66,7 @@ let sim: Sim | null = null;
 export function resetMockTablet(): void {
   if (sim) for (const timer of sim.timers) clearTimeout(timer);
   sim = null;
+  setMockLiveOrientation('landscape');
   mockTablet.stepMs = 1000;
   mockTablet.autoPress = true;
   mockTablet.failRegistration = null;
@@ -235,9 +238,9 @@ function pageStrokes(page: number): Stroke[] {
   }
 }
 
-/** Turns a stroke half a turn (left-handed use: the tablet is upside down). */
-function orient(strokes: Stroke[], width: number, height: number): Stroke[] {
-  return strokes.map((s) => ({ ...s, points: s.points.map((p) => ({ ...p, x: width - p.x, y: height - p.y })) }));
+/** The strokes of a tablet page turned to the way the tablet is held (as `pages::orient`). */
+function orient(strokes: Stroke[], width: number, height: number, orientation: Orientation): Stroke[] {
+  return turnStrokes(strokes, width, height, quarterTurns(orientation));
 }
 
 function writeNote(s: Sim, page: number): string {
@@ -249,11 +252,11 @@ function writeNote(s: Sim, page: number): string {
     title: '',
     created: now,
     modified: now,
-    page: { width: info.width, height: info.height },
+    page: pageSizeFor(s.status.options.orientation, info.width, info.height),
     background: { paper: 'white', template: 'blank', texture: false },
     tags: [],
     layers: [{ name: 'Calque 1', visible: true }],
-    strokes: s.status.options.hand === 'left' ? orient(strokes, info.width, info.height) : strokes,
+    strokes: orient(strokes, info.width, info.height, s.status.options.orientation),
     timing: 'recorded',
     origin: { kind: 'tablet' },
   };
@@ -474,11 +477,21 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
     case 'tablet_set_options': {
       const s = getSim();
       const options = args.options as TabletOptions;
-      if (!['right', 'left'].includes(options.hand) || !['newPage', 'newLayer'].includes(options.button)) {
+      if (!isOrientation(options.orientation) || !['newPage', 'newLayer'].includes(options.button)) {
         failure('unexpected', 'invalid options');
       }
       update(s, { options: { ...options } });
+      setMockLiveOrientation(options.orientation);
       return structuredClone(s.status);
+    }
+
+    case 'tablet_set_orientation': {
+      const s = getSim();
+      const orientation = args.orientation as Orientation;
+      if (!isOrientation(orientation)) failure('unexpected', 'invalid orientation');
+      update(s, { options: { ...s.status.options, orientation } });
+      setMockLiveOrientation(orientation);
+      return undefined;
     }
 
     case 'sim_press_button': {
