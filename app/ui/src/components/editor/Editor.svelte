@@ -1051,12 +1051,20 @@
     return !spaceActivates(target);
   }
 
+  /** Ctrl + 2 (the page as wide as the editor), whatever the layout. */
+  function isFitWidthKey(e: KeyboardEvent): boolean {
+    return e.key === '2' || e.code === 'Digit2' || e.code === 'Numpad2';
+  }
+
   /** The keys of replay mode: R and Escape leave it, Space plays or pauses; nothing edits the note. */
   function replayKey(e: KeyboardEvent, key: string, mod: boolean) {
     if (mod) {
       if (key === '0') {
         e.preventDefault();
         canvas?.fit();
+      } else if (isFitWidthKey(e)) {
+        e.preventDefault();
+        canvas?.fitWidth();
       }
       return;
     }
@@ -1118,8 +1126,10 @@
         v: pasteClipboard,
         a: () => reselect(selectAll(doc!)),
         '0': () => canvas?.fit(),
+        '2': () => canvas?.fitWidth(),
       };
-      const run = action[key];
+      // Ctrl + 2 is typed with Shift on some layouts (French): the key code says it too.
+      const run = action[isFitWidthKey(e) ? '2' : key];
       if (run) {
         e.preventDefault();
         run();
@@ -1309,6 +1319,7 @@
         tools={replaying ? replayTools : tools}
         {ink}
         spacePan={spaceDown}
+        readonly={replaying}
         onchange={change}
         onselect={reselect}
         oncropped={() => setMode('select')}

@@ -277,3 +277,35 @@ describe('live drawing', () => {
     expect(blind.paint(empty, scene(live)).full).toBe(true);
   });
 });
+
+describe('marks written over the presentation (M8)', () => {
+  const mark = (extra: Partial<Stroke> = {}): Stroke => stroke(2000, { tool: 'feltTip', color: { r: 216, g: 0, b: 0, a: 255 }, ...extra });
+
+  it('draws the marks over the page and the stroke in progress, not into the cache', () => {
+    const { renderer, target, cache } = setup();
+    const live = source({ strokes: [stroke(1000)] });
+    const marks = [mark(), mark({ color: { r: 0, g: 0, b: 255, a: 255 } })];
+    renderer.paint(target, scene(live));
+    target.reset();
+    cache().ctx.reset();
+    const sceneWithMarks = { ...scene(live), marks, markCurrent: mark() };
+    const report = renderer.paint(target, sceneWithMarks);
+    expect(report.full).toBe(false);
+    expect(cache().ctx.calls).toHaveLength(0);
+    // Two finished marks and the one in progress, filled non-zero, in page units.
+    const fills = target.ops('fill');
+    expect(fills).toHaveLength(3);
+    expect(fills.every((c) => c.args[0] === 'nonzero')).toBe(true);
+    expect(fills[0].fillStyle).toBe('rgb(216, 0, 0)');
+    expect(fills[1].fillStyle).toBe('rgb(0, 0, 255)');
+  });
+
+  it('draws nothing more once the marks are gone', () => {
+    const { renderer, target } = setup();
+    const live = source();
+    renderer.paint(target, { ...scene(live), marks: [mark()] });
+    target.reset();
+    renderer.paint(target, scene(live));
+    expect(target.ops('fill')).toHaveLength(0);
+  });
+});

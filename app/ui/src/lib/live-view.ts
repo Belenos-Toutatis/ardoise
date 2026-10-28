@@ -167,3 +167,49 @@ export function screenToPage(transform: Transform, p: Vec): Vec {
 export function defaultMonitor(monitors: readonly MonitorInfo[]): MonitorInfo | null {
   return monitors.find((m) => m.chosen) ?? monitors.find((m) => !m.primary) ?? monitors[0] ?? null;
 }
+
+/**
+ * The page as wide as the projected area, showing its top (zoom clamped to 1..8); never less
+ * than the whole page.
+ */
+export function fitWidthView(view: LiveViewState, page: PageSize, aspect: number): LiveViewState {
+  const a = aspect > 0 && Number.isFinite(aspect) ? aspect : DEFAULT_ASPECT;
+  const zoom = clampZoom(a / Math.max(1, page.width) / fitScale(page, { width: a, height: 1 }));
+  const area = projectedArea(page, { ...view, zoom }, a);
+  // The centre that puts the area's top edge on the page's top edge (clamping keeps x on the page).
+  return clampView(page, { ...view, zoom, x: page.width / 2, y: area.height / 2 }, a);
+}
+
+/**
+ * The view after a two-finger pinch on the presentation window: the page point under `from`
+ * (screen, CSS pixels) goes to `to`, with the zoom multiplied by `factor` (the point follows the
+ * zoom that is really reached).
+ */
+export function pinchPresentationView(
+  view: LiveViewState,
+  page: PageSize,
+  viewport: Size,
+  from: Vec,
+  to: Vec,
+  factor: number,
+): LiveViewState {
+  const aspect = aspectOf(viewport);
+  const start = clampView(page, view, aspect);
+  const transform = presentationTransform(page, viewport, start);
+  const zoom = clampZoom(start.zoom * factor);
+  const scale = (transform.scale * zoom) / start.zoom;
+  const anchor = screenToPage(transform, from);
+  // The area's top-left corner that puts `anchor` at `to`.
+  const left = anchor.x - to.x / scale;
+  const top = anchor.y - to.y / scale;
+  return clampView(page, { ...start, zoom, x: left + viewport.width / scale / 2, y: top + viewport.height / scale / 2 }, aspect);
+}
+
+/**
+ * The view after a pinch on the control window's preview: the projected area zooms around the
+ * page point `from` and follows the fingers to `to` (both page points).
+ */
+export function pinchPreviewView(view: LiveViewState, page: PageSize, aspect: number, from: Vec, to: Vec, factor: number): LiveViewState {
+  const zoomed = zoomView(view, factor, page, aspect, from);
+  return moveViewTo(zoomed, { x: zoomed.x + to.x - from.x, y: zoomed.y + to.y - from.y }, page, aspect);
+}

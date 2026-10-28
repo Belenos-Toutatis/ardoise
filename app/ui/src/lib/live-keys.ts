@@ -11,6 +11,9 @@
  * | L                                      | laser pointer           |
  * | + / −                                  | zoom in / out           |
  * | 0                                      | whole page              |
+ * | W                                      | page width              |
+ * | Delete, Backspace                      | clear the marks written |
+ * |                                        | over the presentation   |
  * | Shift + arrows                         | move the projected area |
  * | Esc                                    | leave                   |
  *
@@ -24,6 +27,8 @@ export type LiveKeyAction =
   | { kind: 'laser' }
   | { kind: 'zoom'; direction: 1 | -1 }
   | { kind: 'wholePage' }
+  | { kind: 'fitWidth' }
+  | { kind: 'clearMarks' }
   | { kind: 'pan'; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
   | { kind: 'leave' };
 
@@ -97,7 +102,7 @@ export function liveKeyAction(e: KeyInput): LiveKeyAction | null {
   if (e.repeat) return null;
   // On French keyboards 0 is Shift + à: the key code says it too.
   if (key === '0' || e.code === 'Digit0' || e.code === 'Numpad0') return { kind: 'wholePage' };
-  if (e.shiftKey && key !== 'B' && key !== 'L' && key !== 'PageDown' && key !== 'PageUp') return null;
+  if (e.shiftKey && key !== 'B' && key !== 'L' && key !== 'W' && key !== 'PageDown' && key !== 'PageUp') return null;
 
   switch (key) {
     case 'ArrowRight':
@@ -115,6 +120,12 @@ export function liveKeyAction(e: KeyInput): LiveKeyAction | null {
     case 'l':
     case 'L':
       return { kind: 'laser' };
+    case 'w':
+    case 'W':
+      return { kind: 'fitWidth' };
+    case 'Delete':
+    case 'Backspace':
+      return { kind: 'clearMarks' };
     case 'Escape':
       return { kind: 'leave' };
     default:

@@ -9,6 +9,7 @@
   import MicrophonePicker from './narration/MicrophonePicker.svelte';
   import HandwritingSection from './HandwritingSection.svelte';
   import OpenH264Section from './OpenH264Section.svelte';
+  import PenTouchSection from './PenTouchSection.svelte';
   import TabletOptions from './tablet/TabletOptions.svelte';
 
   let { app, onchange, onclose, ontest }: {
@@ -190,6 +191,8 @@
   </section>
 
   <OpenH264Section />
+
+  <PenTouchSection />
 
   <HandwritingSection />
 

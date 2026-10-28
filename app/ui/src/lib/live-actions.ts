@@ -7,7 +7,7 @@ import type { api as Api } from './api';
 import type { LiveCommandKind, LiveViewState } from './live';
 import type { LiveKeyAction } from './live-keys';
 import type { LiveState } from './live-state.svelte';
-import { PAN_STEP, ZOOM_STEP, panView, wholePage, zoomView } from './live-view';
+import { PAN_STEP, ZOOM_STEP, fitWidthView, panView, wholePage, zoomView } from './live-view';
 
 /** The commands used (the real `api`, or a stand-in in tests). */
 export type LiveCommands = Pick<typeof Api, 'liveCommand' | 'liveSetView'>;
@@ -19,6 +19,8 @@ export interface LiveActions {
   aspect: () => number;
   /** A command was refused (e.g. the tablet is gone). */
   onerror: (error: unknown) => void;
+  /** Clears the marks written over the presentation (only that window has any). */
+  clearMarks?: () => void;
 }
 
 export function sendCommand(actions: LiveActions, kind: LiveCommandKind): void {
@@ -49,6 +51,11 @@ export function showWholePage(actions: LiveActions): void {
   changeView(actions, wholePage(actions.live.view, actions.live.pageSize));
 }
 
+/** The page as wide as the projected area (its top shown). */
+export function showPageWidth(actions: LiveActions): void {
+  changeView(actions, fitWidthView(actions.live.view, actions.live.pageSize, actions.aspect()));
+}
+
 /** Runs a keyboard action; `leave` is the window's own (stop live mode, close the presentation). */
 export function runKeyAction(actions: LiveActions, action: LiveKeyAction, leave: () => void): void {
   const { live } = actions;
@@ -67,6 +74,12 @@ export function runKeyAction(actions: LiveActions, action: LiveKeyAction, leave:
       break;
     case 'wholePage':
       showWholePage(actions);
+      break;
+    case 'fitWidth':
+      showPageWidth(actions);
+      break;
+    case 'clearMarks':
+      actions.clearMarks?.();
       break;
     case 'pan':
       changeView(actions, panView(live.view, action.dx * PAN_STEP, action.dy * PAN_STEP, live.pageSize, actions.aspect()));

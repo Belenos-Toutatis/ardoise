@@ -131,6 +131,9 @@ export interface Scene {
   strokes: readonly Stroke[];
   generation: number;
   current: Stroke | null;
+  /** Temporary marks written over the presentation (not part of the note), and the one in progress. */
+  marks: readonly Stroke[];
+  markCurrent: Stroke | null;
   hover: Vec | null;
   laser: boolean;
   /** The pen's position as a ring when the laser is off (control window). */
@@ -167,6 +170,9 @@ export interface SceneOptions {
   /** Shape (width / height) of the projected area, for the preview. */
   aspect: number;
   backgroundImage: CanvasImageSource | null;
+  /** Presentation: temporary marks (page units) and the one being written. */
+  marks?: readonly Stroke[];
+  markCurrent?: Stroke | null;
 }
 
 export function sceneTransform(live: Pick<LiveSource, 'pageSize' | 'view'>, options: Pick<SceneOptions, 'mode' | 'viewport'>): Transform {
@@ -187,6 +193,8 @@ export function buildScene(live: LiveSource, options: SceneOptions): Scene {
     strokes: live.strokes,
     generation: live.generation,
     current: live.current,
+    marks: options.marks ?? [],
+    markCurrent: options.markCurrent ?? null,
     hover: live.hover,
     laser: live.view.laser,
     penRing: preview,
@@ -381,6 +389,14 @@ export class LiveRenderer {
       // Recomputed each frame: the stroke grows (the cache keeps only finished strokes).
       this.drawStroke(target, current, this.ink.contours(current), dark);
       report.currentPoints = current.points.length;
+    }
+    if (scene.marks.length > 0 || scene.markCurrent) {
+      this.pageTransform(target, scene);
+      for (const mark of scene.marks) this.drawStroke(target, mark, this.contours(mark), dark);
+      // The mark being written grows: its outline is recomputed each frame.
+      if (scene.markCurrent && scene.markCurrent.points.length > 0 && this.ink) {
+        this.drawStroke(target, scene.markCurrent, this.ink.contours(scene.markCurrent), dark);
+      }
     }
     this.overlay(target, scene);
     return report;
