@@ -2,6 +2,12 @@
 
 ## Non publié
 
+### Ajouté (jalon M8 — retours des premiers essais)
+
+- Stylet et écran tactile (Surface) : le dos du stylet efface avec les réglages de la gomme, quel que soit l'outil, et montre le cercle de gomme au survol ; le bouton du stylet trace un lasso de sélection ; la largeur du trait suit la pression ; les doigts sont ignorés tant que le stylet est utilisé ou proche de l'écran. Un doigt fait défiler la page, deux doigts zooment, un double toucher ajuste la page (éditeur, relecture, aperçu du mode direct) ; l'option « Dessiner au doigt » (Réglages et barre de zoom) laisse le doigt dessiner.
+- Zoom « Largeur » à côté de « Ajuster » / « Page entière » (éditeur et relecture : Ctrl + 2 ; mode direct et présentation : touche W).
+- Écrire par-dessus la présentation : au stylet, au doigt ou à la souris sur la fenêtre projetée, annotations temporaires (rouges, jaunes sur le tableau noir) effacées avec le dos du stylet, la touche Suppr ou le bouton « Effacer les annotations », jamais enregistrées dans la note.
+
 ### Ajouté (jalon M7 — fonctions en plus)
 
 - Glisser une note vers l'Explorateur, bureau, Word, OneNote ou un e-mail : la poignée qui apparaît sur chaque carte de la bibliothèque dépose une image PNG de la note, nommée comme elle (une image par note quand plusieurs sont sélectionnées), rendue comme l'export PNG dans un dossier temporaire d'Ardoise nettoyé ensuite. Le glisser de cartes vers un classeur est inchangé.

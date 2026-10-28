@@ -66,3 +66,45 @@ All visible text goes through `locales/fr.json` and `locales/en.json` (parity te
 - Pure editor logic (`lib/editor/*.ts`: operations, undo/redo, lasso and eraser hit tests, rotation, crop) unit-tested.
 - End-to-end (`cargo xtask e2e`): the real release executable on a demo library, driven through WebView2's DevTools
   protocol: open a note, modify it, undo, save, find it by search — in French and in English.
+
+## M8: pen and touch
+
+Feedback from a Surface with its pen and touch screen. Pure logic in `lib/gestures.ts` (tested without the DOM);
+the components only feed it Pointer Events fields and apply what it returns.
+
+**Classification** (`pointerKind`): `pointerType: 'touch'` is a finger; `'pen'` is a pen tip, or the **eraser end**
+when `buttons & 32` (or `button === 5`); anything else is a mouse (its behaviour does not change).
+
+**Pen** (editor, `Canvas.svelte`):
+
+- The eraser end erases with the current eraser settings (whole stroke or partial, radius) whatever the selected tool,
+  and shows the eraser circle while it hovers (`pointermove` with `buttons & 32`). It does nothing in a replay
+  (`readonly` prop) or while the split panel is open. *Not verified on hardware*: whether WebView2 reports
+  `buttons & 32` for a hovering inverted pen as well as for contact (`docs/hardware-tests.md`, H3).
+- The stroke width follows the pen's pressure (it already did: the editor records `pointer.pressure`, the geometry
+  maps it to the diameter). A mouse keeps its constant 0.5, a finger a constant 0.6 (`inkPressure`), a pen reporting
+  0 counts as 0.6.
+- **Barrel button** (`buttons & 2` on a pen): a **temporary lasso**, whatever the tool; the selection it makes is the
+  one the Select tool would make (Shift adds, Ctrl removes), and the tool does not change. A mouse's right button is
+  not the barrel. The canvas shows no context menu for a pen (Windows turns the barrel button into a right click).
+- **Palm rejection** (`PenPresence`): while a pen is in contact or has been seen hovering less than 1.2 s ago (or until
+  `pointerleave`), touch is ignored on the page; a pen arriving drops the fingers being tracked.
+
+**Touch** (`TouchGestures`): by default a finger never draws.
+
+- One finger pans (after an 8 px slop that is not lost as a jump), two fingers pinch (zoom around their centre and
+  pan together, `pinchView`), a double tap (two quick still taps within 40 px) fits the page.
+- **Draw with a finger** (`touchPrefs.drawWithFinger`, `lib/touch-prefs.svelte.ts`): a finger then acts like the
+  mouse with the current tool (drawing, lasso, crop…); the two-finger pinch still works, and a second finger
+  dropping while the first one draws **drops the stroke without reporting it**. It is an interface preference kept in
+  the browser storage (`ardoise.touch.drawWithFinger`, like the custom colours and the export choices), not a
+  setting of `ardoise.toml`: it describes the screen of one PC. Switch: Settings > Pen and touch, and a "Finger"
+  toggle in the editor's zoom bar. With the Pan tool, or in a replay, a finger always pans.
+- The same gestures apply to the replay viewer (the editor's canvas in `readonly` mode), to the live control window's
+  preview (`LiveCanvas` `preview`: one finger moves the projected area as the mouse does, two fingers pinch it, a
+  double tap shows the whole page) and to the presentation window (see `tablet-live-classroom.md`).
+
+**Fit the width** (`fitWidthView` in `lib/editor/view.ts`, `lib/live-view.ts`): next to every "fit the page":
+editor and replay "Width" button in the zoom bar and **Ctrl+2** (matched by key code, so French keyboards work), live
+mode "Width" button and the **W** key (listed in the keyboard help), presentation window the **W** key. A page taller
+than the window shows its top.

@@ -345,3 +345,30 @@ Review fixes (after the independent review of M4):
 - With `--simulated-tablet`, forgetting the tablet never falls back on the library's `device.json`.
 - Known limit: the receipt stamp is taken when the session takes the notification out of the transport, so a wait
   between the Bluetooth thread and the session is not in the measured latency (with the simulator there is none).
+
+## M8: pen and touch, writing over the presentation
+
+**Writing over the presentation.** Until M8 the presentation window was only a mirror: no pointer handling at all
+(`touch-action: none` and a cursor that hides after 2 s). Now, in the **presentation window only**, the pen, a finger
+or the mouse write **temporary marks** over the projected page:
+
+- Marks are `Stroke`s in page units kept by `LiveCanvas` (`mode="presentation"`), never sent to Rust, never in the
+  note, so the format and the tablet pipeline are untouched. They are drawn after the cache and the stroke in progress
+  (`Scene.marks`, `Scene.markCurrent` in `live-render.ts`, same outline geometry as the page: `ink.contours`), follow
+  the zoom and pan of the projected area (page coordinates), and disappear when the page changes.
+- Look (`lib/live-marks.ts`): felt tip, 6 screen pixels wide at the moment of writing (so the line is as thick at any
+  zoom), red on a light page, yellow on a dark one (blackboard, slate paper). No palette: the window has no controls.
+- Erase: the **eraser end of the pen** removes whole marks within 18 px; **Delete / Backspace** clears all marks
+  (`clearMarks` key action, a no-op in the control window); a **"Clear the marks" button** shows in a corner while
+  there are marks, together with the cursor (it hides after 2 s like the cursor, since the window otherwise has no
+  element of interface). Ctrl+Delete still clears the page itself, in the control window and the presentation.
+- Palm rejection as in the editor (`PenPresence`). A finger writes here (the "Draw with a finger" preference concerns
+  the editor); **two fingers pinch the projected area** (`pinchPresentationView`, sent like any view change through
+  `live_set_view`, so the control window follows). A second finger dropping while one writes drops that mark.
+- The latency measurements do not include marks (they are not tablet points).
+- Not done on purpose: marks in the control window's preview, saving marks, a palette or an undo.
+
+**Control window preview**: one finger moves the projected area (as the mouse), two fingers pinch it
+(`pinchPreviewView`: zoom around the fingers and follow them), a double tap shows the whole page. **Page width**:
+button next to "Whole page" and key **W** (`fitWidthView(view, page, aspect)`: the area as wide as the page, showing
+its top; never less than the whole page, zoom at most 8).

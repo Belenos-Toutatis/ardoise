@@ -183,6 +183,25 @@ describe('live view (control window)', () => {
     expect(view.button('Réduire').disabled).toBe(true);
   });
 
+  it('shows the page width from the button and from the W key (M8)', async () => {
+    const view = render();
+    await live(view);
+    const level = () => view.target.querySelector<HTMLElement>('[data-zoom]')!;
+    expect(Number(level().dataset.zoom)).toBe(1);
+    view.action('page-width').click();
+    await tick();
+    const wide = Number(level().dataset.zoom);
+    // The demo page is taller than the preview's shape allows: the width fit zooms in.
+    expect(wide).toBeGreaterThanOrEqual(1);
+    view.action('whole-page').click();
+    await tick();
+    expect(Number(level().dataset.zoom)).toBe(1);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', bubbles: true, cancelable: true }));
+    await tick();
+    expect(Number(level().dataset.zoom)).toBeCloseTo(wide, 6);
+    expect(view.target.textContent).toContain('Largeur de la page');
+  });
+
   it('moves the projected area by dragging in the preview', async () => {
     const view = render();
     await live(view);
