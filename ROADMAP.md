@@ -112,7 +112,18 @@ Règles permanentes :
 
 Vérifié sous Windows le 2026-10-25 : `CHECK OK`, `E2E OK` (14 parcours, FR et EN), reconnaissance en français 100 % des mots des notes de référence. Restent à essayer à la main, faute de pouvoir les automatiser ici : l'anglais (le module d'écriture anglais de Windows n'est pas installé sur ce PC), un vrai dépôt d'une note glissée dans l'Explorateur, Word ou OneNote, et la pause de la lecture de l'écriture pendant la présentation.
 
-## M8 — Finition et publication
+## M8 — Retours des premiers essais
+
+Remarques de l'utilisateur après ses premiers essais sans la tablette (25 octobre 2026), à faire en une seule série.
+
+- [ ] Feuille : choisir portrait ou paysage sans tourner l'écriture ; changer le format du papier (A4, A5, Letter, personnalisé) en gardant l'écriture ; tourner seulement l'image ou la page de PDF importée ; une note faite à partir d'un PDF prend l'orientation de sa page ; copier-coller des traits d'une note à l'autre.
+- [ ] Orientation du bloc-notes : les quatre positions d'Inkspace (paysage ou portrait, dans un sens ou dans l'autre) à la place de droitier / gaucher, appliquées à la synchronisation et au mode direct, avec un bouton rapide dans la fenêtre du direct.
+- [ ] Stylet et tactile : le dos du stylet Surface gomme ; pression, bouton latéral, main posée sur l'écran ignorée ; pincer pour zoomer, glisser pour déplacer ; zoom « ajuster à la largeur » partout où l'on zoome ; écrire par-dessus la présentation au stylet ou au doigt.
+- [ ] Exports : WebP dans l'export image ; export texte en Markdown et en Word avec la structure tirée de l'écriture (paragraphes, listes, dessins) ; impression directe.
+
+**Critères de fin** : `CHECK OK` et `E2E OK` ; tests de chaque fonction ; stylet et écran tactile essayés à la main sur un PC tactile.
+
+## M9 — Finition et publication
 
 - [ ] Relecture complète par un agent relecteur ; corrections des problèmes bloquants et importants.
 - [ ] Performances (SPEC §8) mesurées et affichées.

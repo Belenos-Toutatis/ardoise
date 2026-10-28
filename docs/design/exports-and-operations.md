@@ -32,7 +32,7 @@ app/ui          export dialog, split panel in the editor, merge in the library s
   elsewhere (user-chosen destination) are atomic too.
 - No `unwrap`/`expect` on user or file data; typed errors in libraries; `{ code, message }` to the interface.
 - New dependencies: licences compatible with GPL v3 only (MIT, Apache-2.0, BSD, zlib, ISC, BSL-1.0,
-  MPL-2.0…), never AGPL (M8 checks it automatically). Prefer small pure-Rust crates.
+  MPL-2.0…), never AGPL (M9 checks it automatically). Prefer small pure-Rust crates.
 
 ## ardoise-render (exports)
 
