@@ -71,6 +71,7 @@ export function resetMockHandwriting(): void {
     status: null,
     copied: null,
     exported: null,
+    exportedStructured: null,
   });
   mockTexts.clear();
   for (const [id, text] of defaultTexts()) mockTexts.set(id, text);

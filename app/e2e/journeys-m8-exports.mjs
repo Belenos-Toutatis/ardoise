@@ -83,7 +83,7 @@ export const journeys = [
         if (!existsSync(markdown)) throw new Error(`${markdown} was not written`);
         const content = readFileSync(markdown, 'utf8');
         if (!content.startsWith(`# ${NOTE}\n`)) throw new Error(`unexpected start ${j(content.slice(0, 60))}`);
-        if (!content.includes(`${l('handwriting.export.labels.date')}: `)) throw new Error(`no date line: ${j(content)}`);
+        if (!content.includes(`${l('handwriting.export.labels.date')} `)) throw new Error(`no date line: ${j(content)}`);
         if (!/lumière se propage/i.test(content)) throw new Error(`the sentence is missing: ${j(content)}`);
       });
 

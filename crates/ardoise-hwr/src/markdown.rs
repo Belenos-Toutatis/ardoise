@@ -72,14 +72,14 @@ pub fn to_markdown(documents: &[Document], labels: &Labels, prefix: &str) -> Mar
             // Two trailing spaces: a line break inside the paragraph.
             let end = if document.tags.is_empty() { "" } else { "  " };
             text.push_str(&format!(
-                "{}: {}{end}\n",
+                "{} {}{end}\n",
                 escape(&labels.date),
                 escape(&document.date)
             ));
         }
         if !document.tags.is_empty() {
             let tags: Vec<String> = document.tags.iter().map(|tag| escape(tag)).collect();
-            text.push_str(&format!("{}: {}\n", escape(&labels.tags), tags.join(", ")));
+            text.push_str(&format!("{} {}\n", escape(&labels.tags), tags.join(", ")));
         }
         if !document.date.is_empty() || !document.tags.is_empty() {
             text.push('\n');

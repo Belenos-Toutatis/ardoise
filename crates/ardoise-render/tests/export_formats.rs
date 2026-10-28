@@ -360,7 +360,7 @@ fn a_reference_note_exports_to_every_format() {
     let webp = encode_webp(&clear).unwrap();
     let file = dir.join("reference-transparent.webp");
     fs::write(&file, &webp).unwrap();
-    let decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(&webp)).unwrap();
+    let mut decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(&webp)).unwrap();
     rows.push(Row {
         format: "WebP (transparent)",
         bytes: webp.len(),

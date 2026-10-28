@@ -286,8 +286,8 @@ mod tests {
 
     fn labels() -> Labels {
         Labels {
-            date: "Created".into(),
-            tags: "Tags".into(),
+            date: "Created:".into(),
+            tags: "Tags:".into(),
             drawing: "Drawing".into(),
         }
     }
@@ -497,7 +497,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let destination = dir.path().join("journal.docx");
         let written = write_docx(&destination, &[document.clone(), document], &labels()).unwrap();
-        assert_eq!(written, [destination.clone()]);
+        assert_eq!(written, std::slice::from_ref(&destination));
         // A ZIP file whose member names are stored in clear (the format is read back in
         // `ardoise-hwr`'s tests).
         let bytes = fs::read(&destination).unwrap();

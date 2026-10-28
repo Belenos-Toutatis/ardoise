@@ -165,13 +165,13 @@ fn document_xml<'a>(documents: &'a [Document], labels: &Labels) -> (String, Vec<
         if !document.date.is_empty() {
             body.push_str(&text_paragraph(
                 &subtitle,
-                &format!("{}: {}", labels.date, document.date),
+                &format!("{} {}", labels.date, document.date),
             ));
         }
         if !document.tags.is_empty() {
             body.push_str(&text_paragraph(
                 &subtitle,
-                &format!("{}: {}", labels.tags, document.tags.join(", ")),
+                &format!("{} {}", labels.tags, document.tags.join(", ")),
             ));
         }
         for block in &document.blocks {

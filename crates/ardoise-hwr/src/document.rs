@@ -37,9 +37,9 @@ pub struct Document {
 /// The words the files themselves contain, in the interface language.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Labels {
-    /// Before the date ("Created").
+    /// Before the date ("Created:", the colon included: French puts a space before it).
     pub date: String,
-    /// Before the tags ("Tags").
+    /// Before the tags ("Tags:").
     pub tags: String,
     /// The alternative text of a drawing, followed by its number ("Drawing").
     pub drawing: String,
@@ -66,8 +66,8 @@ pub(crate) mod tests {
 
     pub(crate) fn labels() -> Labels {
         Labels {
-            date: "Created".into(),
-            tags: "Tags".into(),
+            date: "Created:".into(),
+            tags: "Tags:".into(),
             drawing: "Drawing".into(),
         }
     }

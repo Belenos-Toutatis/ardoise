@@ -78,7 +78,7 @@ describe('export dialog: recognised text', () => {
     expect(mockHandwriting.exportedStructured).toEqual({
       format: 'md',
       destination: 'C:\\Exports\\physique.md',
-      labels: { date: 'Créée le', tags: 'Étiquettes', drawing: 'Dessin' },
+      labels: { date: 'Créée le :', tags: 'Étiquettes :', drawing: 'Dessin' },
     });
     expect(fr.section().querySelector('.export-result code')?.textContent).toBe('C:\\Exports\\physique.md');
     expect(fr.section().textContent).not.toContain("Windows n'a pas pu analyser");
@@ -91,7 +91,7 @@ describe('export dialog: recognised text', () => {
     expect(mockHandwriting.exportedStructured).toEqual({
       format: 'docx',
       destination: 'C:\\Exports\\physique.docx',
-      labels: { date: 'Created', tags: 'Tags', drawing: 'Drawing' },
+      labels: { date: 'Created:', tags: 'Tags:', drawing: 'Drawing' },
     });
   });
 

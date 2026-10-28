@@ -1283,8 +1283,8 @@
       "pickMd": "Save the text as Markdown",
       "pickDocx": "Save the text as Word",
       "labels": {
-        "date": "Created",
-        "tags": "Tags",
+        "date": "Created:",
+        "tags": "Tags:",
         "drawing": "Drawing"
       }
     }
