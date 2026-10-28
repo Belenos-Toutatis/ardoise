@@ -167,18 +167,24 @@ Pure functions on `Note` (no I/O); ids, titles and dates of new notes come from 
 
 ### WebP in the image export
 
-- `ardoise_render::encode_webp(&Image)`: lossless WebP (VP8L) from the pure-Rust `image-webp` crate (MIT / Apache-2.0,
-  already in the workspace through `resvg`'s dev dependency; now a normal dependency of `ardoise-render`). RGB when
-  every pixel is opaque (a note with its paper), RGBA otherwise (no paper: transparent, like the PNG). WebP stores no
-  resolution (no `pHYs` equivalent), and a side is limited to 16 383 px (`WEBP_MAX_SIDE`, one less than the other image
-  formats): a larger page gives `imageTooLarge`, and the dialog hides the resolutions that would produce it
-  (`dpiFits(pages, dpi, 'webp')`).
+- `ardoise_render::encode_webp(&Image)`: lossless WebP (VP8L) by **libwebp** (`libwebp-sys2`, BSD-3-Clause / MIT, built
+  from source with `cc`; `ardoise-media` already builds the same library for animated WebP through `webp-animation`),
+  lossless preset at libwebp's default effort 4, hand-written FFI in `webp.rs` (a picture imported as RGB or RGBA, a
+  writer callback filling a `Vec<u8>`). The pure-Rust encoder of `image-webp` (already in the workspace through
+  `resvg`'s dev dependency) was tried first and **measured**: it gives files 2.1 times the PNG's on the reference note
+  (paper and Seyès texture) and 1.3 times the PNG's for the ink alone, so a WebP would have been the heavier choice;
+  `image-webp` stays a dev dependency, as the independent decoder of the tests. RGB when every pixel is opaque (a note
+  with its paper), RGBA otherwise (no paper: transparent, like the PNG; the colour under a fully transparent pixel is
+  not kept). WebP stores no resolution (no `pHYs` equivalent), and a side is limited to 16 383 px (`WEBP_MAX_SIDE`, one
+  less than the other image formats): a larger page gives `imageTooLarge`, and the dialog hides the resolutions that
+  would produce it (`dpiFits(pages, dpi, 'webp')`).
 - `ExportFormat::Webp` behaves like PNG everywhere: resolution 72 to 600 dpi, `background` false = transparent, one
   file per note in a folder for several notes (` (2)` rather than overwriting). The format help has its card
   (`export.formatPros/formatCons.webp`) and its column in "Quel format choisir ?". The automatic export after sync
   stays PDF or PNG.
 - Measured on the reference note of `export_formats` (`cargo test -p ardoise-render --test export_formats --
-  --nocapture`): see the "WebP (paper)" row, which prints its size as a share of the PNG's.
+  --nocapture`, 150 dpi): with the paper 889 382 bytes against 1 107 957 for the PNG (80 %), without the paper 67 504
+  against 102 571 (66 %). The format help says "about a quarter smaller".
 
 ### Direct printing
 

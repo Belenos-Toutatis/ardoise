@@ -798,7 +798,7 @@
     "formatPros": {
       "png": "Net et sans perte, fond transparent possible. Idéal pour Word, OneNote ou une diapositive.",
       "jpg": "S'ouvre partout et accepté par tous les sites et formulaires (certains n'acceptent que le JPG).",
-      "webp": "Net et sans perte comme le PNG, mais bien plus léger ; fond transparent possible. Idéal pour le web et les messageries.",
+      "webp": "Net et sans perte comme le PNG, mais environ un quart plus léger ; fond transparent possible. Idéal pour le web et les messageries.",
       "svg": "Vectoriel : net à toutes les tailles, garde l'épaisseur du trait selon la pression, se retouche dans Inkscape.",
       "pdf": "Vectoriel et net à l'impression ; plusieurs notes donnent un seul fichier. Idéal pour imprimer ou partager."
     },

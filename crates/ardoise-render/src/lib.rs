@@ -30,6 +30,7 @@ mod pdf;
 pub mod picture;
 mod svg;
 mod vector;
+mod webp;
 
 use ardoise_core::note::{Note, PageSize};
 use ardoise_ink::Stroke;
@@ -266,35 +267,19 @@ pub fn encode_png_at(image: &Image, dpi: Option<u32>) -> Result<Vec<u8>, RenderE
 /// Largest side of a WebP image, in pixels (the format stores sizes on 14 bits).
 pub const WEBP_MAX_SIDE: u32 = 16_383;
 
-/// Lossless WebP bytes of `image` (VP8L): the pixels come back exactly, like PNG, and ink
-/// compresses well. RGB when every pixel is opaque (which rendered notes are), RGBA
-/// otherwise. WebP records no resolution, and sides above [`WEBP_MAX_SIDE`] are refused
-/// with [`RenderError::Size`].
+/// Lossless WebP bytes of `image` (VP8L, libwebp's encoder): the pixels come back exactly, like
+/// PNG, in a file lighter than the PNG's. RGB when every pixel is opaque (which rendered notes
+/// are), RGBA otherwise (the colour under a fully transparent pixel is not kept). WebP records
+/// no resolution, and sides above [`WEBP_MAX_SIDE`] are refused with [`RenderError::Size`].
 pub fn encode_webp(image: &Image) -> Result<Vec<u8>, RenderError> {
     check_pixels(image)?;
-    let (width, height) = (image.width, image.height);
-    if width > WEBP_MAX_SIDE || height > WEBP_MAX_SIDE {
-        return Err(RenderError::Size { width, height });
+    if image.width > WEBP_MAX_SIDE || image.height > WEBP_MAX_SIDE {
+        return Err(RenderError::Size {
+            width: image.width,
+            height: image.height,
+        });
     }
-    let opaque = image.pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255);
-    let rgb: Vec<u8>;
-    let (data, color) = if opaque {
-        rgb = image
-            .pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .flat_map(|p| [p[0], p[1], p[2]])
-            .collect();
-        (&rgb, image_webp::ColorType::Rgb8)
-    } else {
-        (&image.pixels, image_webp::ColorType::Rgba8)
-    };
-    let mut out = Vec::new();
-    image_webp::WebPEncoder::new(&mut out)
-        .encode(data, width, height, color)
-        .map_err(|e| RenderError::Encode(e.to_string()))?;
-    Ok(out)
+    webp::encode_lossless(image, webp::EFFORT)
 }
 
 /// JPEG bytes of `image`: baseline, 8-bit, YCbCr (JFIF), `quality` 1..=100 (clamped), alpha

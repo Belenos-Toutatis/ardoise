@@ -527,6 +527,14 @@ mod tests {
         let note = sample_note("Libre");
         let clear = image_bytes(&note, ExportFormat::Webp, &options(72, false)).unwrap();
         let paper = image_bytes(&note, ExportFormat::Webp, &options(72, true)).unwrap();
+        // Lighter than the PNG of the same page.
+        let png = image_bytes(&note, ExportFormat::Png, &options(72, true)).unwrap();
+        assert!(
+            paper.len() < png.len(),
+            "{} against {}",
+            paper.len(),
+            png.len()
+        );
         let alpha = |bytes: &[u8]| bytes[24] & 0x10 != 0;
         assert!(alpha(&clear) && !alpha(&paper));
         // Same resolution rules as PNG.

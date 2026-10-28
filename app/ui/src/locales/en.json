@@ -798,7 +798,7 @@
     "formatPros": {
       "png": "Sharp and lossless, optional transparent background. Ideal for Word, OneNote or a slide.",
       "jpg": "Opens everywhere and is accepted by every website and form (some accept only JPG).",
-      "webp": "Sharp and lossless like PNG, but much smaller; transparent background possible. Great for the web and messaging.",
+      "webp": "Sharp and lossless like PNG, but about a quarter smaller; transparent background possible. Great for the web and messaging.",
       "svg": "Vector: sharp at any size, keeps the stroke width given by the pen pressure, editable in Inkscape.",
       "pdf": "Vector and sharp when printed; several notes make a single file. Ideal for printing or sharing."
     },

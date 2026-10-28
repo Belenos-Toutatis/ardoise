@@ -296,6 +296,7 @@ dependencies = [
  "ardoise-ink",
  "image-webp",
  "jpeg-decoder",
+ "libwebp-sys2 0.2.0",
  "lopdf",
  "miniz_oxide 0.8.9",
  "pdf-writer",
