@@ -13,6 +13,9 @@ import type {
   IndexStatus,
   NoteText,
   RecognizerInfo,
+  StructuredExport,
+  StructuredFormat,
+  TextLabels,
 } from './handwriting';
 import { normalize, queryWords } from './library-logic';
 import { UNHANDLED, mockLibrary } from './mock-data';
@@ -54,6 +57,8 @@ export const mockHandwriting = {
   copied: null as string | null,
   /** The last text export. */
   exported: null as { destination: string; document: string } | null,
+  /** The last text export with structure. */
+  exportedStructured: null as { format: StructuredFormat; destination: string; labels: TextLabels } | null,
 };
 
 export function resetMockHandwriting(): void {
@@ -214,6 +219,13 @@ export function mockHandwritingInvoke(command: string, args: Record<string, unkn
       const destination = args.destination as string;
       mockHandwriting.exported = { destination, document: textDocument(texts(args.sources as ExportSource[])) };
       return destination;
+    }
+    case 'export_structured_text': {
+      const destination = args.destination as string;
+      const format = args.format as StructuredFormat;
+      texts(args.sources as ExportSource[]);
+      mockHandwriting.exportedStructured = { format, destination, labels: args.labels as TextLabels };
+      return { paths: [destination], analyzed: true } satisfies StructuredExport;
     }
     case 'copy_handwriting_text': {
       const document = textDocument(texts(args.sources as ExportSource[]));

@@ -17,20 +17,29 @@ pub const DIPS_PER_UNIT: f32 = 96.0 / 2540.0;
 /// How much the strokes are enlarged beyond their physical size for the engine.
 pub const RECOGNITION_SCALE: f32 = 2.0;
 
-/// The strokes of `note` that are handwriting candidates: on a visible layer (hidden layers are
-/// not shown, so they are not searched either), not highlighter marks (wide translucent marks
-/// over the text, never letters), with at least one point.
-pub fn recognizable_strokes(note: &Note) -> Vec<Stroke> {
+/// The positions in `note.strokes` of the strokes that are handwriting candidates: on a visible
+/// layer (hidden layers are not shown, so they are not searched either), not highlighter marks
+/// (wide translucent marks over the text, never letters), with at least one point.
+pub fn recognizable_indices(note: &Note) -> Vec<usize> {
     note.strokes
         .iter()
-        .filter(|stroke| {
+        .enumerate()
+        .filter(|(_, stroke)| {
             note.layers
                 .get(stroke.layer as usize)
                 .is_some_and(|layer| layer.visible)
                 && stroke.tool != Tool::Highlighter
                 && !stroke.points.is_empty()
         })
-        .cloned()
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// The strokes of `note` that are handwriting candidates ([`recognizable_indices`]).
+pub fn recognizable_strokes(note: &Note) -> Vec<Stroke> {
+    recognizable_indices(note)
+        .into_iter()
+        .map(|index| note.strokes[index].clone())
         .collect()
 }
 
@@ -129,6 +138,7 @@ mod tests {
             timing: Timing::Recorded,
             origin: Origin::Tablet,
         };
+        assert_eq!(recognizable_indices(&note), [0, 4]);
         let kept = recognizable_strokes(&note);
         assert_eq!(kept.len(), 2);
         assert_eq!(kept[0].tool, Tool::Ballpoint);

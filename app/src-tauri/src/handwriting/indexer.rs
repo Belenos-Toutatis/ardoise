@@ -322,6 +322,11 @@ impl Indexer {
         (installed, config, language)
     }
 
+    /// The engine for a recognition someone waits for (the layout analysis of a text export).
+    pub fn on_demand(&self) -> Arc<dyn Recognizer> {
+        Arc::clone(&self.shared.services.on_demand)
+    }
+
     /// The recognised text of `note` (as it is in memory: an editor's unsaved changes count),
     /// from the cache or recognised now (and kept).
     pub fn recognition_of(&self, note: &Note) -> Result<Arc<Recognition>, HwrError> {

@@ -81,6 +81,7 @@
   import type { NoteOriginal } from '../../lib/original';
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
+  import PrintDialog from '../PrintDialog.svelte';
   import VideoExportDialog from '../VideoExportDialog.svelte';
   import { clock } from '../narration/format';
   import RecordPanel from '../narration/RecordPanel.svelte';
@@ -173,6 +174,7 @@
   let split = $state<SplitState | null>(null);
   /** What the export dialog exports; null while it is closed. */
   let exporting = $state.raw<ExportSource[] | null>(null);
+  let printing = $state.raw<ExportSource[] | null>(null);
   let copying = $state(false);
   let leaving = $state(false);
   /** The leave dialog was opened by a window close (not by the Back button). */
@@ -299,6 +301,7 @@
     disk = null;
     split = null;
     exporting = null;
+    printing = null;
     closeVideo();
     resetReplay();
     original = null;
@@ -730,6 +733,11 @@
     if (source) exporting = [source];
   }
 
+  function openPrint() {
+    const source = currentSource();
+    if (source) printing = [source];
+  }
+
   function closeVideo() {
     video = null;
     // A dialog that goes away takes its export with it (or ends it): the window is free again.
@@ -1091,7 +1099,7 @@
       return;
     }
     // A dialog or the split panel is open: the editing keys wait; Escape closes the panel.
-    if (exporting || video) return;
+    if (exporting || printing || video) return;
     if (split) {
       if (key === 'Escape') {
         e.preventDefault();
@@ -1287,6 +1295,7 @@
       onsplit={toggleSplit}
       oncopy={copyImage}
       onexport={openExport}
+      onprint={openPrint}
       onreplay={toggleReplay}
       onvideo={openVideo}
       onstraighten={straighten}
@@ -1465,6 +1474,14 @@
       sources={exporting}
       subject={t('export.subjectNote', { title: title.trim() || t('editor.untitled') })}
       onclose={() => (exporting = null)}
+    />
+  {/if}
+
+  {#if printing}
+    <PrintDialog
+      sources={printing}
+      subject={t('export.subjectNote', { title: title.trim() || t('editor.untitled') })}
+      onclose={() => (printing = null)}
     />
   {/if}
 

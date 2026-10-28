@@ -28,8 +28,12 @@ mod operations;
 mod original;
 mod pdf_pages;
 mod presentation;
+mod print;
+#[cfg(windows)]
+mod print_windows;
 mod selftest;
 mod tablet;
+mod textdoc;
 mod thumbnails;
 mod video;
 mod watcher;
@@ -221,6 +225,8 @@ pub fn run() {
             export::export_notes,
             export::cancel_export,
             clipboard::copy_note_image,
+            print::print_notes,
+            textdoc::export_structured_text,
             drag::prepare_note_drag,
             drag::start_note_drag,
             drag::note_drag_supported,

@@ -2,13 +2,14 @@
   /**
    * The export dialog's "recognised text" part: the handwriting of the note (or of the selected
    * notes) read by Windows' recognition, saved as a UTF-8 `.txt` file (one note after the other,
-   * each with its title) or copied to the clipboard, with a preview. The dialog serves the editor
-   * (the note as it is in memory) and the library selection alike.
+   * each with its title), as Markdown or as a Word document (with the structure drawn from the
+   * ink: paragraphs, list items, drawings), or copied to the clipboard, with a preview. The dialog
+   * serves the editor (the note as it is in memory) and the library selection alike.
    */
   import { api, errorMessage } from '../lib/api';
   import { pickExportFile } from '../lib/dialogs';
   import { exportStem } from '../lib/export-options';
-  import { textFileName, type NoteText } from '../lib/handwriting';
+  import { textFileName, type NoteText, type StructuredFormat, type TextLabels } from '../lib/handwriting';
   import { t } from '../lib/i18n.svelte';
   import type { ExportSource } from '../lib/note';
 
@@ -22,7 +23,9 @@
   } = $props();
 
   let phase = $state<'idle' | 'saving' | 'copying'>('idle');
-  let done = $state<{ kind: 'saved'; path: string } | { kind: 'copied' } | null>(null);
+  let done = $state<{ kind: 'saved'; path: string; images: number } | { kind: 'copied' } | null>(null);
+  /** The layout of the last structured export was guessed from the text (no Windows analysis). */
+  let guessed = $state(false);
   let error = $state<string | null>(null);
   let preview = $state.raw<NoteText[] | null>(null);
   let previewLoading = $state(false);
@@ -35,16 +38,31 @@
     return sources.map((source) => ({ ...source }));
   }
 
-  function defaultName(): string {
-    return textFileName(sources.length === 1 ? exportStem(sources[0].path) : t('handwriting.export.defaultName'));
+  function stem(): string {
+    return sources.length === 1 ? exportStem(sources[0].path) : t('handwriting.export.defaultName');
   }
 
-  async function save() {
+  function defaultName(format: 'txt' | StructuredFormat): string {
+    return format === 'txt' ? textFileName(stem()) : `${stem()}.${format}`;
+  }
+
+  /** The words the Markdown and Word files contain, in the interface language. */
+  function labels(): TextLabels {
+    return {
+      date: t('handwriting.export.labels.date'),
+      tags: t('handwriting.export.labels.tags'),
+      drawing: t('handwriting.export.labels.drawing'),
+    };
+  }
+
+  async function save(format: 'txt' | StructuredFormat = 'txt') {
     error = null;
     done = null;
+    guessed = false;
+    const title = { txt: 'pickFile', md: 'pickMd', docx: 'pickDocx' }[format];
     let chosen: string | null;
     try {
-      chosen = await pickExportFile(t('handwriting.export.pickFile'), defaultName(), 'txt');
+      chosen = await pickExportFile(t(`handwriting.export.${title}`), defaultName(format), format);
     } catch (e) {
       error = errorMessage(e);
       return;
@@ -52,7 +70,13 @@
     if (!chosen) return;
     phase = 'saving';
     try {
-      done = { kind: 'saved', path: await api.exportHandwritingText(requestSources(), chosen) };
+      if (format === 'txt') {
+        done = { kind: 'saved', path: await api.exportHandwritingText(requestSources(), chosen), images: 0 };
+      } else {
+        const result = await api.exportStructuredText(requestSources(), format, chosen, labels());
+        done = { kind: 'saved', path: result.paths[0] ?? chosen, images: Math.max(0, result.paths.length - 1) };
+        guessed = !result.analyzed;
+      }
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -92,8 +116,14 @@
   <h3 id="text-export-title" class="text-export-title">{t('handwriting.export.title')}</h3>
   <p class="muted small">{t('handwriting.export.hint')}</p>
   <div class="text-export-actions">
-    <button type="button" class="button" data-action="text-save" disabled={busy} onclick={save}>
+    <button type="button" class="button" data-action="text-save" disabled={busy} onclick={() => save('txt')}>
       {phase === 'saving' ? t('handwriting.export.working') : t('handwriting.export.save')}
+    </button>
+    <button type="button" class="button" data-action="text-md" disabled={busy} onclick={() => save('md')}>
+      {t('handwriting.export.saveMd')}
+    </button>
+    <button type="button" class="button" data-action="text-docx" disabled={busy} onclick={() => save('docx')}>
+      {t('handwriting.export.saveDocx')}
     </button>
     <button type="button" class="button" data-action="text-copy" disabled={busy} onclick={copy}>
       {phase === 'copying' ? t('handwriting.export.working') : t('handwriting.export.copy')}
@@ -103,7 +133,13 @@
     <div class="export-result" role="status">
       <p class="export-status">{t('handwriting.export.saved')}</p>
       <code>{done.path}</code>
+      {#if done.images > 0}
+        <p class="muted small">{t('handwriting.export.savedImages', { count: done.images })}</p>
+      {/if}
     </div>
+    {#if guessed}
+      <p class="muted small" role="status">{t('handwriting.export.guessed')}</p>
+    {/if}
   {:else if done?.kind === 'copied'}
     <p class="export-status" role="status">{t('handwriting.export.copied')}</p>
   {/if}

@@ -14,6 +14,7 @@ import type {
   MergeLayout,
   Note,
   PageSize,
+  PrintOptions,
   SplitResult,
   SplitSpec,
   Stroke,
@@ -63,6 +64,12 @@ function copy<T>(value: T): T {
 const MAX_SIDE = 10_000_000;
 /** Gap between two merged notes in the replay, milliseconds. */
 const MERGE_GAP_MS = 1000;
+
+/** The print stand-in's state: what was printed last, and whether the user closes the dialog. */
+export const mockPrint = {
+  last: null as { sources: ExportSource[]; options: PrintOptions } | null,
+  cancel: false,
+};
 
 const EXTENSIONS: Record<ExportFormat, string> = { png: 'png', jpg: 'jpg', webp: 'webp', svg: 'svg', pdf: 'pdf' };
 
@@ -210,6 +217,15 @@ export function mockExportInvoke(command: string, args: Record<string, unknown>)
         );
       }
       return afterDelay(() => exportedPaths(sources, format, args.destination as string));
+    }
+
+    case 'print_notes': {
+      const sources = args.sources as ExportSource[];
+      if (sources.length === 0) failure('printFailed', 'nothing to print');
+      sources.forEach(sourceNote);
+      mockPrint.last = { sources, options: args.options as PrintOptions };
+      if (mockPrint.cancel) return { printed: false, pages: 0 };
+      return afterDelay(() => ({ printed: true, pages: sources.length }));
     }
 
     case 'cancel_export':

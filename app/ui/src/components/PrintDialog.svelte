@@ -1,0 +1,100 @@
+<script lang="ts">
+  /**
+   * Prints notes: the editor's note (as it is in memory) or the library's selection. Windows
+   * opens its own print dialog (printer, copies, pages); each note is printed on a page of its
+   * own, in its orientation. Here the user only chooses whether the paper is printed and how
+   * the note sits on the sheet.
+   */
+  import { api, errorMessage } from '../lib/api';
+  import { t } from '../lib/i18n.svelte';
+  import type { ExportSource, PrintOptions } from '../lib/note';
+  import { loadPrintChoice, savePrintChoice } from '../lib/print-options';
+  import Modal from './Modal.svelte';
+
+  let {
+    sources,
+    subject,
+    onclose,
+  }: {
+    sources: ExportSource[];
+    /** What is printed, as a sentence part: the note's title, or "3 notes". */
+    subject: string;
+    onclose: () => void;
+  } = $props();
+
+  let options = $state<PrintOptions>({ ...loadPrintChoice() });
+  let phase = $state<'idle' | 'running' | 'done' | 'cancelled'>('idle');
+  let pages = $state(0);
+  let error = $state<string | null>(null);
+
+  const running = $derived(phase === 'running');
+
+  async function run() {
+    error = null;
+    phase = 'running';
+    try {
+      const request = { ...options };
+      const result = await api.printNotes(
+        sources.map((source) => ({ ...source })),
+        request,
+      );
+      if (result.printed) {
+        savePrintChoice(request);
+        pages = result.pages;
+        phase = 'done';
+      } else {
+        phase = 'cancelled';
+      }
+    } catch (e) {
+      error = errorMessage(e);
+      phase = 'idle';
+    }
+  }
+</script>
+
+<Modal title={t('print.title')} onclose={() => !running && onclose()} dismissible={!running}>
+  <div aria-busy={running} data-dialog="print">
+    <p class="muted">{subject}</p>
+    <p class="muted small">{t('print.intro')}</p>
+
+    <fieldset class="export-fieldset" disabled={running}>
+      <legend>{t('print.options')}</legend>
+      <label class="check">
+        <input type="checkbox" data-option="background" bind:checked={options.background} />
+        {t('print.background')}
+      </label>
+      <p class="muted small">{t('print.backgroundHint')}</p>
+      <div class="export-row" role="radiogroup" aria-label={t('print.fit')}>
+        <span>{t('print.fit')}</span>
+        <label class="choice">
+          <input type="radio" name="print-fit" value="actual" bind:group={options.fit} />
+          {t('print.fitActual')}
+        </label>
+        <label class="choice">
+          <input type="radio" name="print-fit" value="fit" bind:group={options.fit} />
+          {t('print.fitFit')}
+        </label>
+      </div>
+    </fieldset>
+
+    {#if running}
+      <p class="export-status" role="status">{t('print.running')}</p>
+    {:else if phase === 'done'}
+      <p class="export-status" role="status">{t('print.done', { count: pages })}</p>
+    {:else if phase === 'cancelled'}
+      <p class="export-notice muted" role="status">{t('print.cancelled')}</p>
+    {/if}
+    {#if error}
+      <p class="banner error inline" role="alert">{t('print.failed', { message: error })}</p>
+    {/if}
+
+    <div class="actions">
+      <button type="button" class="button primary" data-autofocus data-action="print-run" disabled={running} onclick={run}>
+        {phase === 'done' ? t('print.again') : running ? t('print.running') : t('print.run')}
+      </button>
+      <button type="button" class="button" disabled={running} onclick={onclose}>
+        {phase === 'done' ? t('common.close') : t('library.cancel')}
+      </button>
+    </div>
+  </div>
+</Modal>

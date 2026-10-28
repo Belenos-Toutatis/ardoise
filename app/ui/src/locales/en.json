@@ -98,6 +98,7 @@
       "clear": "Deselect",
       "help": "Ctrl+click: add or remove a note · Shift+click: select a range · Esc: deselect all",
       "export": "Export…",
+      "print": "Print…",
       "assemble": "Assemble…",
       "assembleNeeds": "Select at least two notes to assemble them."
     },
@@ -432,6 +433,8 @@
     "exportFailed": "the export couldn't be written ({detail}); choose another location and check that there is enough space",
     "dragUnavailable": "dragging to another program isn't possible ({detail})",
     "clipboardUnavailable": "the clipboard isn't available ({detail}); close the program that is using it and try again, or export the image as a PNG",
+    "printFailed": "printing failed ({detail}); check the printer and try again, or export the note as a PDF",
+    "printUnavailable": "printing is only possible on Windows ({detail}); export the note as a PDF",
     "nothingToSplit": "this split would leave nothing on one side; choose an instant or a zone that divides the note into two non-empty parts",
     "nothingToMerge": "at least two notes are needed to assemble them",
     "pageTooLarge": "the resulting page would be too large (over 100 m on a side); assemble fewer notes or overlay them",
@@ -684,6 +687,10 @@
       "button": "Export…",
       "hint": "Export the note as PNG, JPG, SVG or PDF"
     },
+    "print": {
+      "button": "Print…",
+      "hint": "Print the note, each note on its own page, in its orientation"
+    },
     "replay": {
       "button": "Replay",
       "hint": "Replay the strokes as they were written (R)",
@@ -893,6 +900,22 @@
     "pickFile": "Save the export",
     "pickFolder": "Choose the export folder",
     "defaultPdfName": "Notes"
+  },
+  "print": {
+    "title": "Print",
+    "intro": "Windows opens its print window so that you can choose the printer, the number of copies and the pages. Each note is printed on a page of its own, in its orientation (portrait or landscape).",
+    "options": "Settings",
+    "background": "Print the background (paper, lines, texture, background image)",
+    "backgroundHint": "Unchecked: only the writing is printed, on white paper.",
+    "fit": "Size on the sheet",
+    "fitActual": "Real size (reduced only if the note is larger than the sheet)",
+    "fitFit": "Fitted to the sheet",
+    "run": "Print…",
+    "again": "Print again…",
+    "running": "Printing…",
+    "done": "Sent to the printer: {count} page(s).",
+    "cancelled": "Printing cancelled.",
+    "failed": "Printing failed: {message}"
   },
   "videoExport": {
     "title": "Export as video",
@@ -1241,8 +1264,10 @@
     },
     "export": {
       "title": "Recognised text (handwriting)",
-      "hint": "The handwriting of the note (or of the selected notes) read by Windows, as plain text: each note with its title, one after the other. Recognition can make mistakes: read the text over.",
+      "hint": "The handwriting of the note (or of the selected notes) read by Windows: each note with its title, one after the other. As plain text, or as Markdown and Word, which keep the structure: the title, the date and the tags at the top, then the paragraphs, the lists and the drawings (images). Recognition can make mistakes: read the text over.",
       "save": "Save as .txt…",
+      "saveMd": "Save as Markdown…",
+      "saveDocx": "Save as Word…",
       "copy": "Copy the text",
       "working": "Reading the handwriting…",
       "saved": "Text saved:",
@@ -1252,7 +1277,16 @@
       "previewLoading": "Reading the handwriting…",
       "empty": "No text recognised in this note.",
       "pickFile": "Save the recognised text",
-      "defaultName": "Recognised text"
+      "defaultName": "Recognised text",
+      "guessed": "Windows could not analyse the layout: the paragraphs, lists and drawings were guessed from the text and may be less accurate.",
+      "savedImages": "Drawings saved next to it: {count}",
+      "pickMd": "Save the text as Markdown",
+      "pickDocx": "Save the text as Word",
+      "labels": {
+        "date": "Created",
+        "tags": "Tags",
+        "drawing": "Drawing"
+      }
     }
   },
   "background": {

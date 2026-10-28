@@ -9,6 +9,7 @@
   import LiveView from './live/LiveView.svelte';
   import TabletPanel from './tablet/TabletPanel.svelte';
   import ExportDialog from './ExportDialog.svelte';
+  import PrintDialog from './PrintDialog.svelte';
   import Editor from './editor/Editor.svelte';
   import AssembleDialog from './library/AssembleDialog.svelte';
   import NewFromFileDialog from './library/NewFromFileDialog.svelte';
@@ -201,6 +202,14 @@
 
   {#if lib.dialog?.kind === 'export'}
     <ExportDialog
+      sources={lib.dialog.notes.map((n) => ({ path: n.path }))}
+      subject={lib.dialog.notes.length === 1
+        ? t('export.subjectNote', { title: displayTitle(lib.dialog.notes[0], currentLocale()) })
+        : t('export.subjectMany', { count: lib.dialog.notes.length })}
+      onclose={() => lib.closeDialog()}
+    />
+  {:else if lib.dialog?.kind === 'print'}
+    <PrintDialog
       sources={lib.dialog.notes.map((n) => ({ path: n.path }))}
       subject={lib.dialog.notes.length === 1
         ? t('export.subjectNote', { title: displayTitle(lib.dialog.notes[0], currentLocale()) })

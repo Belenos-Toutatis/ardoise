@@ -2,6 +2,12 @@
 
 ## Non publié
 
+### Ajouté (jalon M8 — retours des premiers essais : exports)
+
+- Export image en WebP, sans perte comme le PNG mais plus léger (fond transparent possible, un fichier par note pour plusieurs notes), avec sa carte et sa colonne dans l'aide « Quel format choisir ? ».
+- Export du texte reconnu en Markdown (`.md`, dessins en PNG à côté du fichier) et en Word (`.docx`, dessins intégrés) avec la structure tirée de l'écriture : titre, date et étiquettes en tête, puis paragraphes, listes et dessins. Windows analyse la mise en page (paragraphes, listes à puces, dessins) ; sans cette analyse, la structure est déduite des lignes reconnues et la fenêtre le dit.
+- Impression directe (« Imprimer… » dans l'éditeur et pour une sélection de la bibliothèque) : la fenêtre d'impression de Windows s'ouvre, chaque note est imprimée sur sa page dans son orientation (portrait ou paysage), avec ou sans le fond du papier, en taille réelle ou ajustée à la feuille.
+
 ### Ajouté (jalon M7 — fonctions en plus)
 
 - Glisser une note vers l'Explorateur, bureau, Word, OneNote ou un e-mail : la poignée qui apparaît sur chaque carte de la bibliothèque dépose une image PNG de la note, nommée comme elle (une image par note quand plusieurs sont sélectionnées), rendue comme l'export PNG dans un dossier temporaire d'Ardoise nettoyé ensuite. Le glisser de cartes vers un classeur est inchangé.

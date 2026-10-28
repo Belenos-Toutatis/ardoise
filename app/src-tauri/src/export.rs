@@ -530,7 +530,7 @@ mod tests {
         let alpha = |bytes: &[u8]| bytes[24] & 0x10 != 0;
         assert!(alpha(&clear) && !alpha(&paper));
         // Same resolution rules as PNG.
-        let error = image_bytes(&note, ExportFormat::Webp, &options(10, true)).unwrap_err();
+        let error = check_options(ExportFormat::Webp, &options(10, true)).unwrap_err();
         assert_eq!(error.code(), EXPORT_FAILED);
         let mut huge = sample_note("Immense");
         huge.page.width = 3_000_000;

@@ -56,6 +56,9 @@
   <button type="button" class="button" onclick={() => lib.openDialog('export')}>
     {t('library.selection.export')}
   </button>
+  <button type="button" class="button" data-action="print" onclick={() => lib.openDialog('print')}>
+    {t('library.selection.print')}
+  </button>
   <button
     type="button"
     class="button"

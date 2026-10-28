@@ -1,6 +1,6 @@
 //! The M5 export proof: a synthetic reference note (every tool, several colours, a
 //! translucent stroke, a Seyès template with texture, two layers of which one is hidden) is
-//! exported to PNG (paper and transparent), JPG, SVG, PDF (two pages, actual size and A4) and
+//! exported to PNG (paper and transparent), WebP (both), JPG, SVG, PDF (two pages, actual size and A4) and
 //! the clipboard payload, and each file is checked by an independent reader (the `png`
 //! decoder, `jpeg-decoder`, `roxmltree`, `lopdf`, and the DIB header read by hand).
 //!
@@ -19,7 +19,8 @@ use ardoise_core::note::{
 use ardoise_ink::{Point, Rgba, Stroke, Tool, outline};
 use ardoise_render::{
     PdfOptions, PdfPage, RenderOptions, SvgOptions, clipboard_image_at, encode_jpeg_at,
-    encode_png_at, note_to_svg, notes_to_pdf, render_note, render_note_transparent, scale_for_dpi,
+    encode_png_at, encode_webp, note_to_svg, notes_to_pdf, render_note, render_note_transparent,
+    scale_for_dpi,
 };
 
 const DPI: u32 = 150;
@@ -327,6 +328,44 @@ fn a_reference_note_exports_to_every_format() {
             "{pw} x {ph} px, {:.0} % clear",
             100.0 * transparent as f64 / alphas.len() as f64
         ),
+        pages: "-".into(),
+        file,
+    });
+
+    // WebP: lossless like the PNG (every pixel back, read by `image-webp`'s decoder), and
+    // lighter; the transparent one keeps its alpha.
+    let paper_png_size = encode_png_at(&raster, Some(DPI)).unwrap().len();
+    let webp = encode_webp(&raster).unwrap();
+    let file = dir.join("reference.webp");
+    fs::write(&file, &webp).unwrap();
+    let mut decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(&webp)).unwrap();
+    let (ww, wh) = decoder.dimensions();
+    let mut pixels = vec![0; decoder.output_buffer_size().unwrap()];
+    decoder.read_image(&mut pixels).unwrap();
+    let identical = pixels
+        .chunks(3)
+        .zip(raster.pixels.as_chunks::<4>().0)
+        .all(|(d, r)| d == &r[..3]);
+    rows.push(Row {
+        format: "WebP (paper)",
+        bytes: webp.len(),
+        valid: (ww, wh) == (w, h) && !decoder.has_alpha() && !decoder.is_lossy() && identical,
+        dimensions: format!(
+            "{ww} x {wh} px, {:.0} % of the PNG",
+            100.0 * webp.len() as f64 / paper_png_size as f64
+        ),
+        pages: "-".into(),
+        file,
+    });
+    let webp = encode_webp(&clear).unwrap();
+    let file = dir.join("reference-transparent.webp");
+    fs::write(&file, &webp).unwrap();
+    let decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(&webp)).unwrap();
+    rows.push(Row {
+        format: "WebP (transparent)",
+        bytes: webp.len(),
+        valid: decoder.dimensions() == (w, h) && decoder.has_alpha() && !decoder.is_lossy(),
+        dimensions: format!("{} x {} px", decoder.dimensions().0, decoder.dimensions().1),
         pages: "-".into(),
         file,
     });

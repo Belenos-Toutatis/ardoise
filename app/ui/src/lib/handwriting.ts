@@ -131,6 +131,23 @@ export function statusNotice(status: IndexStatus): Notice {
   }
 }
 
+/** The text export with structure: Markdown, or a Word document. */
+export type StructuredFormat = 'md' | 'docx';
+
+/** The words the exported files themselves contain, in the interface language. */
+export interface TextLabels {
+  date: string;
+  tags: string;
+  drawing: string;
+}
+
+export interface StructuredExport {
+  /** The files written: the document, then the drawings' images next to a Markdown file. */
+  paths: string[];
+  /** False when Windows' layout analysis was not available: the structure was guessed from the text. */
+  analyzed: boolean;
+}
+
 /** A file name for the text export of `stem` (a note's file name without extension). */
 export function textFileName(stem: string): string {
   return `${stem}.txt`;

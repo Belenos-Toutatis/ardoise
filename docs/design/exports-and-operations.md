@@ -162,3 +162,50 @@ Pure functions on `Note` (no I/O); ids, titles and dates of new notes come from 
   that fits (`AutoExportReport::lowered`). `autoexport::after_save_hook` is ready; M4 plugs it into the
   automatic sync (the app has no sync command yet), and its simulator test proves the chain
   (`autoexport::tests::synced_pages_are_exported_automatically`).
+
+## M8: WebP and direct printing
+
+### WebP in the image export
+
+- `ardoise_render::encode_webp(&Image)`: lossless WebP (VP8L) from the pure-Rust `image-webp` crate (MIT / Apache-2.0,
+  already in the workspace through `resvg`'s dev dependency; now a normal dependency of `ardoise-render`). RGB when
+  every pixel is opaque (a note with its paper), RGBA otherwise (no paper: transparent, like the PNG). WebP stores no
+  resolution (no `pHYs` equivalent), and a side is limited to 16 383 px (`WEBP_MAX_SIDE`, one less than the other image
+  formats): a larger page gives `imageTooLarge`, and the dialog hides the resolutions that would produce it
+  (`dpiFits(pages, dpi, 'webp')`).
+- `ExportFormat::Webp` behaves like PNG everywhere: resolution 72 to 600 dpi, `background` false = transparent, one
+  file per note in a folder for several notes (` (2)` rather than overwriting). The format help has its card
+  (`export.formatPros/formatCons.webp`) and its column in "Quel format choisir ?". The automatic export after sync
+  stays PDF or PNG.
+- Measured on the reference note of `export_formats` (`cargo test -p ardoise-render --test export_formats --
+  --nocapture`): see the "WebP (paper)" row, which prints its size as a share of the PNG's.
+
+### Direct printing
+
+- Mechanism: **GDI through the system print dialog**, not the web view's print and not a PDF handed to a PDF reader.
+  `PrintDlgEx` gives the printer, its settings (copies, duplex, paper tray…) and the page range; the job
+  (`print_windows::print_job`) then draws one page per note: the device context's orientation follows the note
+  (`ResetDC` with `dmOrientation` between two pages, so a portrait note and a landscape note of the same job each fill
+  their sheet), the note is rendered as an image (`ardoise_render::render_note`, the same drawing as the PNG and PDF
+  exports) at the resolution of the sheet, 300 dpi at most, and stretched over the printable area
+  (`StretchDIBits`, halftone). Reasons: the print dialog is the real Windows one, the orientation can change page by
+  page (the web view's `window.print()` shows Edge's own preview and takes one orientation per job in practice), no
+  third-party reader is needed, and the job can be aimed at "Microsoft Print to PDF" with an output file in the test.
+  The cost is a raster page (ink and textures at 300 dpi) instead of vectors.
+- Platform-free and tested on Linux (`print.rs`): `Orientation::of(page)` (landscape when wider than tall),
+  `place(page, sheet, fit)` (centred, proportions kept; `Actual` = real size, reduced only when the note is larger than
+  the printable area; `Fit` = as large as fits), `render_scale`, `selected_notes` (the ranges of the dialog),
+  `bitmap_of` (RGBA to opaque BGRA). `print_windows.rs` is Windows only; elsewhere `print_notes` answers
+  `printUnavailable`.
+- Command `print_notes(sources: ExportSource[], options: PrintOptions { background, fit: 'actual'|'fit' }) ->
+  PrintResult { printed, pages }`. `printed` false = the user closed the dialog (not an error). The dialog runs on a
+  blocking thread, owned by the app's window. Errors: `printFailed`, `printUnavailable`.
+- Interface: "Imprimer…" in the editor's toolbar (the note as it is in memory) and in the library selection bar, both
+  opening `PrintDialog` (paper printed or not, real size or fitted to the sheet; the choices are remembered like the
+  export's). It does not offer the A4 / actual choice of the PDF as such: the sheet is the printer's, chosen in
+  Windows' dialog; "real size" and "fitted" are the two ways a note meets a sheet.
+- Verification on this PC (Windows 11): `cargo test -p ardoise print_windows -- --nocapture` prints three notes
+  (portrait, landscape, portrait) to the installed "Microsoft Print to PDF" with an output file, no dialog and nothing
+  sent to a real printer, and reads the PDF back: three pages, A4 in the orientation of each note. The test skips
+  itself with a message when that printer is not installed. The dialog itself needs a person (see the checklist in the
+  M8 report).
