@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_IMAGE_SIDE, dpiFits, imageSide, largestFittingDpi } from './export-options';
+import { FORMATS, MAX_IMAGE_SIDE, MAX_WEBP_SIDE, dpiFits, imageSide, isRaster, largestFittingDpi } from './export-options';
 
 const A4 = { width: 29700, height: 21600 };
 /** 3 m wide: 17 717 px at 150 dpi, 11 339 px at 96 dpi, 8 504 px at 72 dpi. */
@@ -29,6 +29,16 @@ describe('raster size limit', () => {
     // Exactly the limit is fine.
     expect(imageSide(MAX_IMAGE_SIDE * 2540, 1)).toBe(MAX_IMAGE_SIDE);
     expect(dpiFits([{ width: MAX_IMAGE_SIDE * 2540, height: 1000 }], 1)).toBe(true);
+  });
+
+  it('keeps WebP one pixel under the other formats, and knows which formats are pixels', () => {
+    const edge = { width: MAX_IMAGE_SIDE * 2540, height: 1000 };
+    expect(MAX_WEBP_SIDE).toBe(MAX_IMAGE_SIDE - 1);
+    expect(dpiFits([edge], 1, 'png')).toBe(true);
+    expect(dpiFits([edge], 1, 'webp')).toBe(false);
+    expect(dpiFits([A4], 300, 'webp')).toBe(true);
+    expect(largestFittingDpi([WIDE], [150, 96], 'webp')).toBe(96);
+    expect(FORMATS.filter(isRaster)).toEqual(['png', 'jpg', 'webp']);
   });
 
   it('picks the largest of the candidates that fits, null when none does', () => {

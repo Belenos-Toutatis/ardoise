@@ -55,6 +55,7 @@ describe('mock export', () => {
   it('never gives two notes the same file name', () => {
     const sources = [{ path: 'C:\\lib\\a\\Note.ardoise' }, { path: 'C:\\lib\\b\\Note.ardoise' }];
     expect(exportedPaths(sources, 'jpg', 'D:\\x')).toEqual(['D:\\x\\Note.jpg', 'D:\\x\\Note (2).jpg']);
+    expect(exportedPaths(sources, 'webp', 'D:\\x')).toEqual(['D:\\x\\Note.webp', 'D:\\x\\Note (2).webp']);
   });
 
   it('exports the editor note without it being in the library, and refuses unknown notes', async () => {

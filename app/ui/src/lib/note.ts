@@ -156,7 +156,7 @@ export interface TabletInfo {
 
 // --- Milestone M5: exports, split, merge (docs/design/exports-and-operations.md) ----------
 
-export type ExportFormat = 'png' | 'jpg' | 'svg' | 'pdf';
+export type ExportFormat = 'png' | 'jpg' | 'webp' | 'svg' | 'pdf';
 
 export interface ExportOptions {
   /** Resolution of raster formats, 72..=600. */

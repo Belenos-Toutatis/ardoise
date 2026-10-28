@@ -12,6 +12,8 @@ ardoise-core = { path = "../ardoise-core" }
 ardoise-ink = { path = "../ardoise-ink" }
 # Background images: decodes the JPEG photos users import (pure Rust; no thread pool).
 jpeg-decoder = { version = "0.3", default-features = false }
+# Lossless WebP files (pure Rust; the decoder reads them back in tests).
+image-webp = "0.2"
 # zlib streams of the PDF writer (the version the `png` crate already uses).
 miniz_oxide = "0.8"
 pdf-writer = "0.15"

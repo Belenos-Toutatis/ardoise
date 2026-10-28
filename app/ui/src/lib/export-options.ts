@@ -2,10 +2,12 @@
 import type { ExportFormat, ExportOptions, PageSize } from './note';
 
 export const DPI_CHOICES = [96, 150, 300] as const;
-export const FORMATS: readonly ExportFormat[] = ['png', 'jpg', 'svg', 'pdf'];
+export const FORMATS: readonly ExportFormat[] = ['png', 'jpg', 'webp', 'svg', 'pdf'];
 
 /** Largest side of an exported image, in pixels (the renderer refuses more: `imageTooLarge`). */
 export const MAX_IMAGE_SIDE = 16_384;
+/** Largest side of a WebP image: the format stores sizes on 14 bits. */
+export const MAX_WEBP_SIDE = 16_383;
 /** Device units (10 µm) in an inch. */
 const UNITS_PER_INCH = 2540;
 
@@ -14,14 +16,24 @@ export function imageSide(units: number, dpi: number): number {
   return Math.round((units / UNITS_PER_INCH) * dpi);
 }
 
-/** Whether the image of every page at `dpi` stays within `MAX_IMAGE_SIDE` on both sides. */
-export function dpiFits(pages: readonly PageSize[], dpi: number): boolean {
-  return pages.every((page) => imageSide(page.width, dpi) <= MAX_IMAGE_SIDE && imageSide(page.height, dpi) <= MAX_IMAGE_SIDE);
+/** Whether the image of every page at `dpi` stays within the largest side of `format` on both sides. */
+export function dpiFits(pages: readonly PageSize[], dpi: number, format?: ExportFormat): boolean {
+  const max = format === 'webp' ? MAX_WEBP_SIDE : MAX_IMAGE_SIDE;
+  return pages.every((page) => imageSide(page.width, dpi) <= max && imageSide(page.height, dpi) <= max);
+}
+
+/** The formats made of pixels: they have a resolution. */
+export function isRaster(format: ExportFormat): boolean {
+  return format === 'png' || format === 'jpg' || format === 'webp';
 }
 
 /** The first of `candidates` (best first) whose image fits; null when none does. */
-export function largestFittingDpi(pages: readonly PageSize[], candidates: readonly number[]): number | null {
-  return candidates.find((dpi) => dpiFits(pages, dpi)) ?? null;
+export function largestFittingDpi(
+  pages: readonly PageSize[],
+  candidates: readonly number[],
+  format?: ExportFormat,
+): number | null {
+  return candidates.find((dpi) => dpiFits(pages, dpi, format)) ?? null;
 }
 
 export interface ExportChoice {

@@ -782,6 +782,7 @@
     "formats": {
       "png": "PNG (image)",
       "jpg": "JPG (image)",
+      "webp": "WebP (image)",
       "svg": "SVG (vectoriel)",
       "pdf": "PDF"
     },
@@ -790,12 +791,14 @@
     "formatPros": {
       "png": "Net et sans perte, fond transparent possible. Idéal pour Word, OneNote ou une diapositive.",
       "jpg": "S'ouvre partout et accepté par tous les sites et formulaires (certains n'acceptent que le JPG).",
+      "webp": "Net et sans perte comme le PNG, mais bien plus léger ; fond transparent possible. Idéal pour le web et les messageries.",
       "svg": "Vectoriel : net à toutes les tailles, garde l'épaisseur du trait selon la pression, se retouche dans Inkscape.",
       "pdf": "Vectoriel et net à l'impression ; plusieurs notes donnent un seul fichier. Idéal pour imprimer ou partager."
     },
     "formatCons": {
       "png": "Devient flou si on l'agrandit beaucoup ; plus lourd avec un papier texturé.",
       "jpg": "Pas de fond transparent, léger flou autour des traits ; souvent plus lourd que le PNG pour une note sur papier uni.",
+      "webp": "Moins universel : certains logiciels anciens, sites et formulaires ne l'ouvrent pas ; devient flou si on l'agrandit.",
       "svg": "Pas accepté partout (ENT, anciens logiciels) ; lourd pour une note très chargée.",
       "pdf": "Moins pratique à insérer dans un document ou à retoucher."
     },
@@ -807,6 +810,7 @@
           "label": "Net quand on agrandit",
           "png": "Non",
           "jpg": "Non",
+          "webp": "Non",
           "svg": "Oui",
           "pdf": "Oui"
         },
@@ -814,6 +818,7 @@
           "label": "Fond transparent possible",
           "png": "Oui",
           "jpg": "Non (fond blanc)",
+          "webp": "Oui",
           "svg": "Oui",
           "pdf": "Non"
         },
@@ -821,6 +826,7 @@
           "label": "Taille du fichier",
           "png": "Petite (papier uni) à grosse (texture)",
           "jpg": "Moyenne",
+          "webp": "Petite (plus légère que le PNG)",
           "svg": "Selon le nombre de traits",
           "pdf": "Petite"
         },
@@ -828,6 +834,7 @@
           "label": "Plusieurs notes dans un fichier",
           "png": "Non (un fichier par note)",
           "jpg": "Non (un fichier par note)",
+          "webp": "Non (un fichier par note)",
           "svg": "Non (un fichier par note)",
           "pdf": "Oui (une page par note)"
         },
@@ -835,6 +842,7 @@
           "label": "S'ouvre avec",
           "png": "Tous les logiciels",
           "jpg": "Tous les logiciels",
+          "webp": "Navigateurs, Windows 11, logiciels récents",
           "svg": "Navigateur, Inkscape, Word récent",
           "pdf": "Tout lecteur PDF"
         },
@@ -842,11 +850,12 @@
           "label": "Idéal pour",
           "png": "Word, OneNote, diapositive",
           "jpg": "Site ou formulaire qui exige un JPG",
+          "webp": "Page web, messagerie, archivage léger",
           "svg": "Retoucher le dessin",
           "pdf": "Imprimer, envoyer, archiver"
         }
       },
-      "advice": "En cas de doute : le PDF pour imprimer ou envoyer une note, le PNG pour l'insérer dans un document. Le JPG ne sert que si un site l'exige."
+      "advice": "En cas de doute : le PDF pour imprimer ou envoyer une note, le PNG pour l'insérer dans un document. Le WebP donne le même résultat que le PNG dans un fichier plus léger, si le logiciel qui le reçoit le connaît. Le JPG ne sert que si un site l'exige."
     },
     "options": "Réglages",
     "resolution": "Résolution",
@@ -863,6 +872,7 @@
     "backgroundHints": {
       "png": "Décoché : le fond est transparent, seul le tracé est exporté.",
       "jpg": "Décoché : le fond est blanc (le JPG ne gère pas la transparence).",
+      "webp": "Décoché : le fond est transparent, seul le tracé est exporté.",
       "svg": "Décoché : seul le tracé est exporté, sans papier.",
       "pdf": "Décoché : seul le tracé est exporté, sans papier."
     },

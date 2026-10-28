@@ -1,13 +1,13 @@
 <script lang="ts">
   /**
-   * Exports notes to PNG, JPG, SVG or PDF. Used by the editor (the note as it is in memory) and by
+   * Exports notes to PNG, JPG, WebP, SVG or PDF. Used by the editor (the note as it is in memory) and by
    * the library (the selected notes). The destination is asked last, with the native dialog: a
    * file for one note or for a PDF (one page per note), a folder for several images.
    */
   import { onMount } from 'svelte';
   import { api, errorMessage } from '../lib/api';
   import { pickExportFile, pickExportFolder } from '../lib/dialogs';
-  import { DPI_CHOICES, FORMATS, dpiFits, exportStem, loadChoice, saveChoice } from '../lib/export-options';
+  import { DPI_CHOICES, FORMATS, dpiFits, exportStem, isRaster, loadChoice, saveChoice } from '../lib/export-options';
   import { t } from '../lib/i18n.svelte';
   import type { ExportFormat, ExportOptions, ExportSource, PageSize } from '../lib/note';
   import Modal from './Modal.svelte';
@@ -46,8 +46,8 @@
   const many = $derived(sources.length > 1);
   const intoFolder = $derived(many && format !== 'pdf');
   const running = $derived(phase === 'running');
-  const raster = $derived(format === 'png' || format === 'jpg');
-  const fits = $derived(DPI_CHOICES.map((dpi) => !pages || dpiFits(pages, dpi)));
+  const raster = $derived(isRaster(format));
+  const fits = $derived(DPI_CHOICES.map((dpi) => !pages || dpiFits(pages, dpi, format)));
   const someTooLarge = $derived(fits.includes(false));
   /** Even the lowest resolution gives a too large image: only PDF and SVG are possible. */
   const nothingFits = $derived(!fits.includes(true));

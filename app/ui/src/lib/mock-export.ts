@@ -18,7 +18,7 @@ import type {
   SplitSpec,
   Stroke,
 } from './note';
-import { dpiFits } from './export-options';
+import { dpiFits, isRaster } from './export-options';
 import { UNHANDLED, fileName, freshStamp, mockLibrary, normalizeTags, notifyLibraryChanged, sameStamp } from './mock-data';
 import { baseName, failure, freePath, newId, summary } from './mock-library';
 
@@ -64,7 +64,7 @@ const MAX_SIDE = 10_000_000;
 /** Gap between two merged notes in the replay, milliseconds. */
 const MERGE_GAP_MS = 1000;
 
-const EXTENSIONS: Record<ExportFormat, string> = { png: 'png', jpg: 'jpg', svg: 'svg', pdf: 'pdf' };
+const EXTENSIONS: Record<ExportFormat, string> = { png: 'png', jpg: 'jpg', webp: 'webp', svg: 'svg', pdf: 'pdf' };
 
 /** The note an export source stands for: its unsaved `note`, else the one stored at `path`. */
 function sourceNote(source: ExportSource): Note {
@@ -72,8 +72,8 @@ function sourceNote(source: ExportSource): Note {
 }
 
 /** Like the renderer, a raster image over `MAX_IMAGE_SIDE` pixels on a side is refused. */
-function checkImageSize(pages: PageSize[], dpi: number): void {
-  if (!dpiFits(pages, dpi)) failure('imageTooLarge', `dpi ${dpi}`);
+function checkImageSize(pages: PageSize[], dpi: number, format?: ExportFormat): void {
+  if (!dpiFits(pages, dpi, format)) failure('imageTooLarge', `dpi ${dpi}`);
 }
 
 function checkOptions(options: ExportOptions, format: ExportFormat): void {
@@ -202,10 +202,11 @@ export function mockExportInvoke(command: string, args: Record<string, unknown>)
       const notes = sources.map(sourceNote);
       const options = args.options as ExportOptions;
       checkOptions(options, format);
-      if (format === 'png' || format === 'jpg') {
+      if (isRaster(format)) {
         checkImageSize(
           notes.map((n) => n.page),
           options.dpi,
+          format,
         );
       }
       return afterDelay(() => exportedPaths(sources, format, args.destination as string));

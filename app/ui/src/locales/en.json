@@ -782,6 +782,7 @@
     "formats": {
       "png": "PNG (image)",
       "jpg": "JPG (image)",
+      "webp": "WebP (image)",
       "svg": "SVG (vector)",
       "pdf": "PDF"
     },
@@ -790,12 +791,14 @@
     "formatPros": {
       "png": "Sharp and lossless, optional transparent background. Ideal for Word, OneNote or a slide.",
       "jpg": "Opens everywhere and is accepted by every website and form (some accept only JPG).",
+      "webp": "Sharp and lossless like PNG, but much smaller; transparent background possible. Great for the web and messaging.",
       "svg": "Vector: sharp at any size, keeps the stroke width given by the pen pressure, editable in Inkscape.",
       "pdf": "Vector and sharp when printed; several notes make a single file. Ideal for printing or sharing."
     },
     "formatCons": {
       "png": "Gets blurry when enlarged a lot; heavier with a textured paper.",
       "jpg": "No transparent background, slight blur around the strokes; often heavier than PNG for a note on plain paper.",
+      "webp": "Less universal: some older programs, websites and forms cannot open it; gets blurry when enlarged.",
       "svg": "Not accepted everywhere (school platforms, older software); heavy for a very full note.",
       "pdf": "Less handy to insert into a document or to edit."
     },
@@ -807,6 +810,7 @@
           "label": "Sharp when enlarged",
           "png": "No",
           "jpg": "No",
+          "webp": "No",
           "svg": "Yes",
           "pdf": "Yes"
         },
@@ -814,6 +818,7 @@
           "label": "Transparent background possible",
           "png": "Yes",
           "jpg": "No (white background)",
+          "webp": "Yes",
           "svg": "Yes",
           "pdf": "No"
         },
@@ -821,6 +826,7 @@
           "label": "File size",
           "png": "Small (plain paper) to large (texture)",
           "jpg": "Medium",
+          "webp": "Small (lighter than PNG)",
           "svg": "Depends on the number of strokes",
           "pdf": "Small"
         },
@@ -828,6 +834,7 @@
           "label": "Several notes in one file",
           "png": "No (one file per note)",
           "jpg": "No (one file per note)",
+          "webp": "No (one file per note)",
           "svg": "No (one file per note)",
           "pdf": "Yes (one page per note)"
         },
@@ -835,6 +842,7 @@
           "label": "Opens with",
           "png": "Any software",
           "jpg": "Any software",
+          "webp": "Browsers, Windows 11, recent software",
           "svg": "Browser, Inkscape, recent Word",
           "pdf": "Any PDF reader"
         },
@@ -842,11 +850,12 @@
           "label": "Ideal for",
           "png": "Word, OneNote, slide",
           "jpg": "A website or form that requires JPG",
+          "webp": "Web page, messaging, light archive",
           "svg": "Editing the drawing",
           "pdf": "Printing, sending, archiving"
         }
       },
-      "advice": "When in doubt: PDF to print or send a note, PNG to insert it into a document. JPG is only for when a website requires it."
+      "advice": "When in doubt: PDF to print or send a note, PNG to insert it into a document. WebP gives the same result as PNG in a smaller file, if the program receiving it knows the format. JPG is only for when a website requires it."
     },
     "options": "Settings",
     "resolution": "Resolution",
@@ -863,6 +872,7 @@
     "backgroundHints": {
       "png": "Unchecked: the background is transparent, only the ink is exported.",
       "jpg": "Unchecked: the background is white (JPG can't be transparent).",
+      "webp": "Unchecked: the background is transparent, only the ink is exported.",
       "svg": "Unchecked: only the ink is exported, without paper.",
       "pdf": "Unchecked: only the ink is exported, without paper."
     },

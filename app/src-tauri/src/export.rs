@@ -1,8 +1,8 @@
-//! Exports of notes to PNG, JPG, SVG and PDF (SPEC §4.6), for the editor and the library.
+//! Exports of notes to PNG, JPG, WebP, SVG and PDF (SPEC §4.6), for the editor and the library.
 //! Contract: `docs/design/exports-and-operations.md`.
 //!
 //! - PDF: one file holding every source, one page each.
-//! - PNG, JPG, SVG: a file for one source; for several, a folder with one file per note,
+//! - PNG, JPG, WebP, SVG: a file for one source; for several, a folder with one file per note,
 //!   named like the note file, ` (2)` added rather than overwriting anything.
 //!
 //! Every file is written atomically (`ardoise_core::fsutil`). Rendering, encoding and writing
@@ -21,7 +21,7 @@ use ardoise_core::library::{Library, LibraryError, note_file_stem};
 use ardoise_core::note::Note;
 use ardoise_render::{
     MAX_DPI, MIN_DPI, NoteView, PdfOptions, PdfPage, Picture, RenderError, RenderOptions,
-    SvgOptions, encode_jpeg_at, encode_png_at, note_to_svg, notes_to_pdf, render_note,
+    SvgOptions, encode_jpeg_at, encode_png_at, encode_webp, note_to_svg, notes_to_pdf, render_note,
     render_note_transparent, scale_for_dpi,
 };
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,7 @@ const MAX_SUFFIX: u32 = 999;
 pub enum ExportFormat {
     Png,
     Jpg,
+    Webp,
     Svg,
     Pdf,
 }
@@ -57,6 +58,7 @@ impl ExportFormat {
         match self {
             ExportFormat::Png => "png",
             ExportFormat::Jpg => "jpg",
+            ExportFormat::Webp => "webp",
             ExportFormat::Svg => "svg",
             ExportFormat::Pdf => "pdf",
         }
@@ -170,7 +172,10 @@ pub fn check_dpi(dpi: u32) -> CommandResult<()> {
 
 /// Checks the options that `format` uses.
 fn check_options(format: ExportFormat, options: &ExportOptions) -> CommandResult<()> {
-    if matches!(format, ExportFormat::Png | ExportFormat::Jpg) {
+    if matches!(
+        format,
+        ExportFormat::Png | ExportFormat::Jpg | ExportFormat::Webp
+    ) {
         check_dpi(options.dpi)?;
     }
     if format == ExportFormat::Jpg && !(1..=100).contains(&options.quality) {
@@ -268,6 +273,16 @@ pub fn image_bytes<'a>(
             )
             .map_err(render_error)?;
             encode_jpeg_at(&image, options.quality, dpi).map_err(render_error)
+        }
+        ExportFormat::Webp => {
+            // Lossless like PNG; without the paper the pixels keep their transparency.
+            let image = if options.background {
+                render_note(view, &RenderOptions::at_dpi(options.dpi, true))
+            } else {
+                render_note_transparent(view.note, scale_for_dpi(options.dpi))
+            }
+            .map_err(render_error)?;
+            encode_webp(&image).map_err(render_error)
         }
         ExportFormat::Svg => Ok(note_to_svg(
             view,
@@ -475,6 +490,54 @@ mod tests {
             .collect()
     }
 
+    /// Size of a lossless WebP file, from its RIFF container and the VP8L header (the decoding
+    /// itself is tested in `ardoise-render`).
+    fn webp_size(bytes: &[u8]) -> (u32, u32) {
+        assert_eq!(&bytes[..4], b"RIFF");
+        assert_eq!(&bytes[8..16], b"WEBPVP8L");
+        assert_eq!(bytes[20], 0x2f, "VP8L signature");
+        let bits = u32::from_le_bytes([bytes[21], bytes[22], bytes[23], bytes[24]]);
+        ((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1)
+    }
+
+    #[test]
+    fn webp_notes_behave_like_png() {
+        let (_dir, library) = library();
+        let a = write_sample(&library, "", "Un");
+        let b = write_sample(&library, "Classe", "Deux");
+        let out = tempfile::tempdir().unwrap();
+        // Several notes: a folder, one file per note, never over an existing one.
+        let folder = out.path().join("folder");
+        let sources = || vec![from_library(&a.path), from_library(&b.path)];
+        for _ in 0..2 {
+            let written = export_sources(
+                Some(&library),
+                sources(),
+                ExportFormat::Webp,
+                &options(72, true),
+                &folder,
+                &NOT_CANCELLED,
+            )
+            .unwrap();
+            assert_eq!(written.len(), 2);
+            assert!(written.iter().all(|p| p.extension().unwrap() == "webp"));
+        }
+        assert_eq!(fs::read_dir(&folder).unwrap().count(), 4);
+        // Without the paper the file is transparent (alpha channel: VP8L header bit 28).
+        let note = sample_note("Libre");
+        let clear = image_bytes(&note, ExportFormat::Webp, &options(72, false)).unwrap();
+        let paper = image_bytes(&note, ExportFormat::Webp, &options(72, true)).unwrap();
+        let alpha = |bytes: &[u8]| bytes[24] & 0x10 != 0;
+        assert!(alpha(&clear) && !alpha(&paper));
+        // Same resolution rules as PNG.
+        let error = image_bytes(&note, ExportFormat::Webp, &options(10, true)).unwrap_err();
+        assert_eq!(error.code(), EXPORT_FAILED);
+        let mut huge = sample_note("Immense");
+        huge.page.width = 3_000_000;
+        let error = image_bytes(&huge, ExportFormat::Webp, &options(300, true)).unwrap_err();
+        assert_eq!(error.code(), IMAGE_TOO_LARGE);
+    }
+
     #[test]
     fn options_and_formats_have_the_interface_shape() {
         let options: ExportOptions = serde_json::from_value(serde_json::json!({
@@ -496,13 +559,14 @@ mod tests {
     }
 
     #[test]
-    fn one_note_to_png_jpg_svg_and_pdf_files() {
+    fn one_note_to_png_jpg_webp_svg_and_pdf_files() {
         let (_dir, library) = library();
         let saved = write_sample(&library, "Classe", "Essai");
         let out = tempfile::tempdir().unwrap();
         for format in [
             ExportFormat::Png,
             ExportFormat::Jpg,
+            ExportFormat::Webp,
             ExportFormat::Svg,
             ExportFormat::Pdf,
         ] {
@@ -525,6 +589,7 @@ mod tests {
                     assert_eq!((image.width, image.height), (1754, 1276));
                 }
                 ExportFormat::Jpg => assert_eq!(&bytes[..3], [0xff, 0xd8, 0xff]),
+                ExportFormat::Webp => assert_eq!(webp_size(&bytes), (1754, 1276)),
                 ExportFormat::Svg => {
                     let text = String::from_utf8(bytes).unwrap();
                     assert!(text.contains("viewBox=\"0 0 29700 21600\""));
@@ -538,7 +603,7 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(names.len(), 4, "{names:?}");
+        assert_eq!(names.len(), 5, "{names:?}");
     }
 
     #[test]
