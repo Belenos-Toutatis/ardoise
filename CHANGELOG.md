@@ -2,6 +2,12 @@
 
 ## Non publié
 
+### Ajouté (jalon M8 — retours des premiers essais, feuille)
+
+- Panneau Page : choix **Portrait / Paysage** sans tourner l'écriture (l'écriture garde sa place, replacée dans la feuille quand elle y tient, sinon conservée hors cadre avec un message), **format du papier** A4, A5, Letter, tablette ou dimensions personnalisées en mm, avec l'option d'adapter l'écriture et l'image de fond à la nouvelle taille ; « Tourner la feuille avec l'écriture » reste, clairement distinct.
+- Image ou PDF de fond : bouton pour **tourner l'image seule** d'un quart de tour ; si l'orientation de l'image diffère de celle de la note, Ardoise propose de passer la note dans l'orientation de l'image (une seule étape annulable).
+- **Copier, couper, coller** des traits (Ctrl+C, Ctrl+X, Ctrl+V et boutons de la sélection) d'une note à l'autre, d'une fenêtre à l'autre, par le presse-papiers du système ; le contenu qui ne vient pas d'Ardoise est ignoré.
+
 ### Ajouté (jalon M7 — fonctions en plus)
 
 - Glisser une note vers l'Explorateur, bureau, Word, OneNote ou un e-mail : la poignée qui apparaît sur chaque carte de la bibliothèque dépose une image PNG de la note, nommée comme elle (une image par note quand plusieurs sont sélectionnées), rendue comme l'export PNG dans un dossier temporaire d'Ardoise nettoyé ensuite. Le glisser de cartes vers un classeur est inchangé.

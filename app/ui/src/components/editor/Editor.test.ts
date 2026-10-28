@@ -378,8 +378,19 @@ describe('note editor', () => {
     await key('z', { ctrlKey: true });
     expect(paths()).toHaveLength(1);
     await key('a', { ctrlKey: true });
-    await key('c', { ctrlKey: true });
-    await key('v', { ctrlKey: true });
+    // The browser turns Ctrl+C / Ctrl+V into clipboard events; the system clipboard is faked.
+    let text = '';
+    const clipboardData = { setData: (_type: string, value: string) => (text = value), getData: () => text };
+    const fire = async (type: 'copy' | 'paste') => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: clipboardData });
+      document.body.dispatchEvent(event);
+      await tick();
+      return event.defaultPrevented;
+    };
+    expect(await fire('copy')).toBe(true);
+    expect(text).toContain('ardoise-strokes');
+    expect(await fire('paste')).toBe(true);
     expect(paths()).toHaveLength(2);
     await key('Escape');
     expect(target.querySelector('rect.selection')).toBeNull();
@@ -1210,8 +1221,9 @@ describe('note editor: split, copy image and export', () => {
     expect(toolbarControls().length).toBeGreaterThan(10);
     expect(locked(toolbarControls())).toBe(true);
     expect(locked(controls(section('editor-page-heading')))).toBe(true);
-    // Paper, template, texture, two turns, two crops, and the background image's button.
-    expect(controls(section('editor-page-heading')).length).toBe(8);
+    // Paper, template, texture, two orientations, paper size, two sides and Apply, the scale option,
+    // two turns, two crops, and the background image's button.
+    expect(controls(section('editor-page-heading')).length).toBe(15);
     expect(locked(controls(section('editor-layers-heading')))).toBe(true);
     // The split's own buttons, copy and export stay available.
     expect(button('Découper').disabled).toBe(false);

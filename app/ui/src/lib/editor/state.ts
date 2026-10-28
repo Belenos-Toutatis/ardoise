@@ -5,9 +5,10 @@
  */
 import type { PixelsRef } from '../background';
 import type { Tool } from '../ink';
-import { INKSPACE_COLORS, type Background, type Note, type Rgba, type Stroke } from '../note';
+import { INKSPACE_COLORS, type Background, type Note, type PageSize, type Rgba, type Stroke } from '../note';
 import { type Affine, type Rect, type Vec } from './geometry';
 import * as ops from './ops';
+import type { Orientation } from './page-size';
 
 export type Mode = 'select' | 'pen' | 'eraser' | 'pan' | 'crop';
 export type EraserMode = 'whole' | 'partial';
@@ -149,6 +150,18 @@ export function paste(doc: Doc, strokes: readonly Stroke[], offset: Vec = { x: P
   return withNote(doc, note, indices);
 }
 
+/**
+ * Pastes strokes from the clipboard (copied in this note or another one) on the active layer:
+ * placed by `ops.pasteOffset`, retimed to follow the note's ink (`ops.retimedForPaste`), and
+ * selected afterwards. One undoable step. Nothing happens while the active layer is hidden.
+ */
+export function pasteStrokes(doc: Doc, strokes: readonly Stroke[]): Doc {
+  if (!canDraw(doc) || strokes.length === 0) return doc;
+  const offset = ops.pasteOffset(doc.note, strokes);
+  const { note, indices } = ops.insertCopies(doc.note, ops.retimedForPaste(doc.note, strokes), offset, doc.activeLayer);
+  return withNote(doc, note, indices);
+}
+
 export function duplicateSelection(doc: Doc): Doc {
   return paste(doc, selectedStrokes(doc));
 }
@@ -200,6 +213,21 @@ export function setBackground(doc: Doc, background: Background): Doc {
 
 export function rotate(doc: Doc, direction: 'cw' | 'ccw'): Doc {
   return withNote(doc, ops.rotateQuarter(doc.note, direction));
+}
+
+/** The page of the other orientation (`ops.setOrientation`); the selection stays. */
+export function setOrientation(doc: Doc, orientation: Orientation, scaleInk = false): Doc {
+  return withNote(doc, ops.setOrientation(doc.note, orientation, scaleInk));
+}
+
+/** The page at another paper size, the ink staying in place or scaled with it (`ops.resizePage`). */
+export function resizePage(doc: Doc, size: PageSize, scaleInk = false): Doc {
+  return withNote(doc, ops.resizePage(doc.note, size, scaleInk));
+}
+
+/** The background image alone turned a quarter turn. */
+export function rotateBackgroundImage(doc: Doc, direction: 'cw' | 'ccw'): Doc {
+  return withNote(doc, ops.rotateBackgroundImage(doc.note, doc.backgroundPixels, direction));
 }
 
 export function crop(doc: Doc, rect: Rect): Doc {

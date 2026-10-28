@@ -37,7 +37,11 @@
   import { api, errorMessage, onLibraryChanged, type AppState } from '../../lib/api';
   import { loadCustomColors, rememberCustomColor } from '../../lib/editor/colors';
   import { binderOf, diskChange, type DiskChange } from '../../lib/editor/disk';
+  import { decodeStrokes, encodeStrokes } from '../../lib/editor/clipboard';
+  import type { PixelsRef } from '../../lib/background';
   import { pixelsOf, removeBackgroundImage, setBackgroundImage, setImageFit, setImageOpacity } from '../../lib/editor/image';
+  import { strokesOutsidePage } from '../../lib/editor/ops';
+  import type { Orientation } from '../../lib/editor/page-size';
   import { revertToOriginal } from '../../lib/editor/original';
   import { straightenSelection } from '../../lib/editor/shapes';
   import { canRedo, canUndo, commit, createHistory, redo, replacePresent, undo, type History } from '../../lib/editor/history';
@@ -53,14 +57,17 @@
     duplicateSelection,
     mergeDown,
     moveLayer,
-    paste,
+    pasteStrokes,
     renameLayer,
+    resizePage,
     rotate,
+    rotateBackgroundImage,
     selectAll,
     selectedStrokes,
     setActiveLayer,
     setBackground,
     setLayerVisible,
+    setOrientation,
     type Doc,
     type EraserMode,
     type Mode,
@@ -77,7 +84,7 @@
   import { largestFittingDpi } from '../../lib/export-options';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
-  import type { ExportSource, FileStamp, Note, Rgba, SplitSpec, Stroke } from '../../lib/note';
+  import type { BackgroundImage, ExportSource, FileStamp, Note, Rgba, SplitSpec, Stroke } from '../../lib/note';
   import type { NoteOriginal } from '../../lib/original';
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
@@ -162,7 +169,6 @@
   let tools = $state.raw<ToolSettings>(DEFAULT_TOOLS);
   let widths = { ...DEFAULT_WIDTHS };
   let customColors = $state.raw<Rgba[]>(loadCustomColors());
-  let clipboard: Stroke[] = [];
   let saving = $state(false);
   let saveError = $state<string | null>(null);
   let conflict = $state<string | null>(null);
@@ -681,22 +687,114 @@
     if (history && !split?.busy) history = redo(history);
   }
 
-  function copySelection() {
-    if (doc && hasSelection) clipboard = selectedStrokes(doc);
+  /** How long a clipboard key waits for the browser's event before using the clipboard API, milliseconds. */
+  const CLIPBOARD_EVENT_WAIT_MS = 60;
+
+  // --- Clipboard (M8): strokes travel as marked JSON text on the system clipboard, so that a
+  // paste works in another note, window or session (`lib/editor/clipboard.ts`). The keys go
+  // through the browser's copy / cut / paste events (no permission to ask); the buttons of the
+  // selection panel use the asynchronous clipboard API.
+
+  /** Whether the editing keys are free to act now (no dialog, split panel or replay). */
+  function canEditNow(target: EventTarget | null): boolean {
+    return !!doc && !leaving && !exporting && !video && !split && !replaying && !isTyping(target);
   }
 
-  function pasteClipboard() {
-    if (!doc || clipboard.length === 0) return;
+  /** Pastes strokes from the clipboard as one undoable step (the copies are then selected). */
+  function pasteDecoded(strokes: Stroke[]) {
+    if (!doc) return;
     if (!canDraw(doc)) return hiddenLayerNotice();
-    change(paste(doc, clipboard));
-    // The copies are now selected: pasting again shifts again.
-    if (history) clipboard = selectedStrokes(history.present);
+    change(pasteStrokes(doc, strokes));
+  }
+
+  /**
+   * Whether a copy, cut or paste event came since the last clipboard key. Chromium raises them
+   * for the key by itself; if one does not (nothing for it to copy on the page), the key falls
+   * back on the asynchronous clipboard API a moment later.
+   */
+  let clipboardEventSeen = false;
+
+  function expectClipboardEvent(kind: 'copy' | 'cut' | 'paste') {
+    clipboardEventSeen = false;
+    setTimeout(() => {
+      if (clipboardEventSeen || !doc) return;
+      if (kind === 'paste') void pasteFromClipboard(true);
+      else if (hasSelection) void copyToClipboard(kind === 'cut');
+    }, CLIPBOARD_EVENT_WAIT_MS);
+  }
+
+  function clipboardEvent(e: ClipboardEvent, cut: boolean) {
+    clipboardEventSeen = true;
+    if (!canEditNow(e.target) || !doc || !hasSelection) return;
+    e.preventDefault();
+    if (canvas?.dragging()) return;
+    e.clipboardData?.setData('text/plain', encodeStrokes(selectedStrokes(doc)));
+    if (cut) change(deleteSelection(doc));
+  }
+
+  function onpaste(e: ClipboardEvent) {
+    clipboardEventSeen = true;
+    if (!canEditNow(e.target)) return;
+    const strokes = decodeStrokes(e.clipboardData?.getData('text/plain') ?? '');
+    // Foreign content (text, an image…) is left alone.
+    if (!strokes) return;
+    e.preventDefault();
+    if (!canvas?.dragging()) pasteDecoded(strokes);
+  }
+
+  /** The selection panel's Copy and Cut buttons. */
+  async function copyToClipboard(cut: boolean) {
+    const source = doc;
+    if (!source || !hasSelection) return;
+    try {
+      await navigator.clipboard.writeText(encodeStrokes(selectedStrokes(source)));
+    } catch {
+      return showNotice(t('editor.clipboard.failed'), true);
+    }
+    // Cut deletes what was copied, unless the document changed while the clipboard was written.
+    if (cut && doc === source) change(deleteSelection(source));
+  }
+
+  /** The selection panel's Paste button (or the Ctrl+V key, `quiet`: without a word when the clipboard is not ours). */
+  async function pasteFromClipboard(quiet = false) {
+    let text = '';
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      return showNotice(t('editor.clipboard.failed'), true);
+    }
+    const strokes = decodeStrokes(text);
+    if (strokes) pasteDecoded(strokes);
+    else if (!quiet) showNotice(t('editor.clipboard.nothing'));
+  }
+
+  // --- Page format (M8) ------------------------------------------------------------------
+
+  /** Tells the user when ink fell out of the page by a change of format (it is kept, not drawn). */
+  function inkOutsideNotice(before: Doc, after: Doc) {
+    const outside = strokesOutsidePage(after.note) - strokesOutsidePage(before.note);
+    if (outside > 0) showNotice(outside === 1 ? t('editor.page.inkOutsideOne') : t('editor.page.inkOutsideMany', { count: outside }));
+  }
+
+  function changeFormat(next: Doc) {
+    if (!doc || next === doc) return;
+    const before = doc;
+    change(next);
+    inkOutsideNotice(before, next);
   }
 
   function duplicate() {
     if (!doc) return;
     if (!canDraw(doc)) return hiddenLayerNotice();
     change(duplicateSelection(doc));
+  }
+
+  /** Puts a background image, switching the note's orientation first when the user asked to (one undoable step). */
+  function setImage(image: BackgroundImage, pixels: PixelsRef, orientation?: Orientation) {
+    if (!doc) return;
+    const base = orientation ? setOrientation(doc, orientation) : doc;
+    const next = setBackgroundImage(base, image, pixels);
+    changeFormat(next);
   }
 
   /** "Redresser les formes": one undoable step, or a notice saying why nothing changed. */
@@ -1110,12 +1208,15 @@
       replayKey(e, key, mod);
       return;
     }
+    // Copy, cut and paste: the browser's clipboard events do the work (see `onpaste`).
+    if (mod && !e.shiftKey && !e.altKey && (key === 'c' || key === 'x' || key === 'v')) {
+      expectClipboardEvent(key === 'c' ? 'copy' : key === 'x' ? 'cut' : 'paste');
+      return;
+    }
     if (mod) {
       const action: Record<string, (() => void) | undefined> = {
         z: e.shiftKey ? doRedo : doUndo,
         y: doRedo,
-        c: copySelection,
-        v: pasteClipboard,
         a: () => reselect(selectAll(doc!)),
         '0': () => canvas?.fit(),
       };
@@ -1172,7 +1273,13 @@
   }
 </script>
 
-<svelte:window {onkeydown} {onkeyup} onblur={() => (spaceDown = false)} />
+<svelte:window
+  {onkeydown}
+  {onkeyup}
+  {onpaste}
+  oncopy={(e) => clipboardEvent(e, false)}
+  oncut={(e) => clipboardEvent(e, true)}
+  onblur={() => (spaceDown = false)} />
 
 <section class="editor" data-path={currentPath} data-library={app.library} data-dirty={dirty ? 'yes' : 'no'}>
   <header class="editor-top">
@@ -1400,6 +1507,15 @@
               <h3 id="editor-selection-heading">{t('editor.selection.label')}</h3>
               <p class="small muted">{t('editor.selection.count', { count: doc.selection.length })}</p>
               <div class="buttons">
+                <button type="button" class="button small-button" data-action="copy-selection" onclick={() => void copyToClipboard(false)}>
+                  {t('editor.selection.copy')}
+                </button>
+                <button type="button" class="button small-button" data-action="cut-selection" onclick={() => void copyToClipboard(true)}>
+                  {t('editor.selection.cut')}
+                </button>
+                <button type="button" class="button small-button" data-action="paste-selection" onclick={() => void pasteFromClipboard()}>
+                  {t('editor.selection.paste')}
+                </button>
                 <button type="button" class="button small-button" onclick={duplicate}>
                   {t('editor.selection.duplicate')}
                 </button>
@@ -1423,9 +1539,12 @@
           {/if}
           <PagePanel
             background={doc.note.background}
+            page={doc.note.page}
             cropping={tools.mode === 'crop'}
             disabled={split !== null}
             onbackground={(b) => change(setBackground(doc!, b))}
+            onorientation={(orientation, scaleInk) => changeFormat(setOrientation(doc!, orientation, scaleInk))}
+            onresize={(size, scaleInk) => changeFormat(resizePage(doc!, size, scaleInk))}
             onrotate={(direction) => change(rotate(doc!, direction))}
             onautocrop={() => change(autoCrop(doc!))}
             onmanualcrop={() => setMode(tools.mode === 'crop' ? 'select' : 'crop')}
@@ -1435,7 +1554,8 @@
               image={doc.note.backgroundImage}
               pixels={doc.backgroundPixels}
               disabled={split !== null}
-              onset={(image, pixels) => change(setBackgroundImage(doc!, image, pixels))}
+              onset={(image, pixels, orientation) => setImage(image, pixels, orientation)}
+              onturn={(direction) => change(rotateBackgroundImage(doc!, direction))}
               onfit={(fit) => change(setImageFit(doc!, fit))}
               onopacity={(opacity) => change(setImageOpacity(doc!, opacity))}
               onremove={() => change(removeBackgroundImage(doc!))}

@@ -562,7 +562,14 @@
       "count": "Traits sélectionnés : {count}",
       "duplicate": "Dupliquer",
       "delete": "Supprimer",
-      "clear": "Désélectionner"
+      "clear": "Désélectionner",
+      "copy": "Copier",
+      "cut": "Couper",
+      "paste": "Coller"
+    },
+    "clipboard": {
+      "failed": "Le presse-papiers n'est pas accessible.",
+      "nothing": "Le presse-papiers ne contient pas de traits copiés dans Ardoise."
     },
     "straighten": {
       "button": "Redresser les formes",
@@ -583,7 +590,26 @@
       "rotateCwShort": "Droite",
       "autoCrop": "Recadrer autour du contenu",
       "manualCrop": "Recadrer à la main",
-      "cropHint": "Tracez sur la page le rectangle à garder."
+      "cropHint": "Tracez sur la page le rectangle à garder.",
+      "formatLabel": "Format de la feuille",
+      "orientation": "Orientation de la feuille",
+      "portrait": "Portrait",
+      "landscape": "Paysage",
+      "portraitLower": "portrait",
+      "landscapeLower": "paysage",
+      "orientationHint": "L'écriture ne tourne pas : seule la feuille change de sens, et l'écriture garde sa place.",
+      "size": "Papier",
+      "width": "Largeur en millimètres",
+      "height": "Hauteur en millimètres",
+      "apply": "Appliquer",
+      "sizeInvalid": "Entrez des dimensions entre {min} et {max} mm.",
+      "scaleInk": "Adapter l'écriture à la feuille",
+      "scaleInkOn": "L'écriture et l'image de fond sont réduites ou agrandies avec la feuille, sans déformation.",
+      "scaleInkOff": "L'écriture garde sa taille et sa place. Si elle dépasse, elle est replacée dans la feuille quand elle y tient ; sinon la partie hors cadre est conservée mais pas affichée.",
+      "inkOutsideOne": "Un trait dépasse de la feuille : il est conservé mais n'est pas affiché.",
+      "inkOutsideMany": "{count} traits dépassent de la feuille : ils sont conservés mais ne sont pas affichés.",
+      "rotateLabel": "Tourner la feuille avec l'écriture",
+      "rotateHint": "La feuille, l'écriture et l'image de fond tournent ensemble d'un quart de tour."
     },
     "original": {
       "label": "Original",
@@ -593,7 +619,7 @@
       "none": "Pas encore d'original : la première fois que vous enregistrez une modification de l'encre, Ardoise garde la version précédente, si elle contenait de l'encre.",
       "loading": "Recherche de l'original…",
       "confirmTitle": "Revenir à l'original ?",
-      "confirmLost": "Vos modifications de l'encre seront perdues : traits ajoutés, effacés, déplacés, redressés ou recolorés, calques, rotation et recadrage de la page.",
+      "confirmLost": "Vos modifications de l'encre seront perdues : traits ajoutés, effacés, déplacés, redressés ou recolorés, calques, rotation, format et recadrage de la page.",
       "confirmKept": "Le titre, les étiquettes, le favori, le papier et la narration restent tels quels. L'image de fond reste aussi : elle reprend sa place d'origine si la note l'avait déjà, sinon elle est replacée à l'endroit sur la page rétablie.",
       "confirmUndo": "Vous pourrez encore annuler (Ctrl+Z) ; enregistrez pour garder le résultat.",
       "confirm": "Revenir à l'original",
@@ -606,6 +632,13 @@
       "cream": "Crème",
       "kraft": "Kraft",
       "slate": "Ardoise noire",
+      "custom": "Personnalisé"
+    },
+    "paperSizes": {
+      "a4": "A4 (210 × 297 mm)",
+      "a5": "A5 (148 × 210 mm)",
+      "letter": "Letter (216 × 279 mm)",
+      "tablet": "Tablette (216 × 297 mm)",
       "custom": "Personnalisé"
     },
     "templates": {
@@ -1263,7 +1296,15 @@
       "replace": "Remplacer…",
       "remove": "Retirer l'image",
       "importing": "Import en cours…",
-      "failed": "Impossible de mettre ce fichier en fond : {message}"
+      "failed": "Impossible de mettre ce fichier en fond : {message}",
+      "orientationOffer": "Cette image est en {image} et la note en {note}. Passer la note en {image} ?",
+      "switchOrientation": "Passer la note en {orientation}",
+      "keepOrientation": "Garder en {orientation}",
+      "turn": "Tourner l'image seule",
+      "turnCcw": "Tourner l'image d'un quart de tour vers la gauche (la feuille et l'écriture restent en place)",
+      "turnCcwShort": "Image à gauche",
+      "turnCw": "Tourner l'image d'un quart de tour vers la droite (la feuille et l'écriture restent en place)",
+      "turnCwShort": "Image à droite"
     },
     "fits": {
       "contain": "Entière",
@@ -1276,7 +1317,7 @@
       "openHint": "Nouvelle note depuis un PDF ou une image : une note par page du PDF, à écrire par-dessus",
       "title": "Nouvelle note depuis un PDF ou une image",
       "pickTitle": "PDF ou image à annoter",
-      "intro": "Chaque page du PDF devient une note à sa taille, avec la page en fond ; une image devient une note de la taille d'une feuille A4.",
+      "intro": "Chaque page du PDF devient une note à sa taille et dans son orientation (portrait ou paysage), avec la page en fond ; une image devient une note de la taille d'une feuille A4, dans l'orientation de l'image.",
       "pdfInfo": "{count} page(s), la première de {width} × {height} mm.",
       "pages": "Pages",
       "allPages": "Toutes les pages ({count})",
