@@ -47,7 +47,7 @@ describe('Settings > Assistant (MCP)', () => {
       mcpServers: { ardoise: { command: EXE, args: ['--mcp'] } },
     });
     expect(root.querySelector('[data-slot="assistant-privacy"]')?.textContent).toBe(t('assistant.privacy'));
-    expect(root.textContent).toContain('docs/guide/assistant.fr.md');
+    expect(root.textContent).toContain('guide\\assistant.fr.html');
   });
 
   it('read only adds --read-only to both', async () => {
@@ -56,7 +56,7 @@ describe('Settings > Assistant (MCP)', () => {
     await settle();
     expect(snippet(root, 'claude-code')).toMatch(/--mcp --read-only$/);
     expect(JSON.parse(snippet(root, 'claude-desktop')).mcpServers.ardoise.args).toEqual(['--mcp', '--read-only']);
-    expect(root.textContent).toContain('docs/guide/assistant.en.md');
+    expect(root.textContent).toContain('guide\\assistant.en.html');
   });
 
   it('says whether the open app can be driven, in both languages', async () => {
