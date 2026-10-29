@@ -3,8 +3,8 @@
 // library, as an assistant would start it (a child process with pipes for its standard handles),
 // and spoken to in JSON-RPC, one message per line.
 //
-// Not wired into run.mjs / xtask: the integrator calls `mcpJourney({ exe, log })` after the other
-// journeys. By hand: `node app/e2e/mcp.mjs target/release/ardoise.exe`.
+// `run.mjs` (`cargo xtask e2e`) calls `mcpJourney` in each language after the window journeys
+// (`ARDOISE_E2E_ONLY="serveur MCP"` runs only this one). By hand: `node app/e2e/mcp.mjs target/release/ardoise.exe`.
 //
 // It checks: initialize; tools/list (every read tool; with --read-only no write tool); a call of
 // each read tool: the render is a real PNG, the text of « Cours d'optique » has its words (needs
