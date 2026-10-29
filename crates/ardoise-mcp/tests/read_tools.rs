@@ -933,7 +933,10 @@ async fn get_note_text_passes_the_language_and_reports_missing_recognition() {
             json!({ "note": "Physique/2026-10-26 Chimie des métaux" }),
         )
         .await;
-    assert_eq!(named["lines"], json!(["Les métaux conduisent le courant"]));
+    assert_eq!(
+        named["lines"][0]["text"],
+        "Les métaux conduisent le courant"
+    );
 
     // A note without ink has an empty text.
     let empty = session.ok("get_note_text", json!({ "note": VIDE })).await;
