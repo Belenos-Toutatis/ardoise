@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use ardoise_mcp::ToolError;
-use ardoise_mcp::bridge::pipe::{PipeClient, PipeError, PipeServer, current_user_sid};
+use ardoise_mcp::bridge::pipe::{
+    MAX_CONNECTIONS, PipeClient, PipeError, PipeServer, current_user_sid,
+};
 use ardoise_mcp::bridge::protocol::{MAX_LINE, Response};
 use ardoise_mcp::bridge::{
     AppBridge, AppView, LastLive, LiveNote, LiveSession, OpenedNote, PipeBridge,
@@ -233,4 +235,72 @@ fn malformed_and_oversized_lines_are_refused() {
     let response: Response = serde_json::from_slice(&answer).unwrap();
     assert_eq!(response.error.unwrap().code, "invalidRequest");
     assert_eq!(client.read_line(Duration::from_secs(5)).unwrap(), None);
+}
+
+fn app_state_line(id: u64) -> Vec<u8> {
+    format!("{{\"v\":1,\"id\":{id},\"request\":{{\"kind\":\"app_state\"}}}}\n").into_bytes()
+}
+
+#[test]
+fn a_request_far_over_the_limit_still_gets_its_answer() {
+    let (_server, name) = serve(App::default());
+    let mut client = PipeClient::connect(&name, Duration::from_secs(2)).unwrap();
+    // Far more than the pipe holds: the app answers and closes while the client still writes.
+    let mut long = vec![b'a'; 4 * MAX_LINE * 4];
+    long.push(b'\n');
+    let answer = client.exchange(&long, Duration::from_secs(5)).unwrap();
+    let response: Response = serde_json::from_slice(&answer).unwrap();
+    assert_eq!(response.error.unwrap().code, "invalidRequest");
+    assert_eq!(client.read_line(Duration::from_secs(5)).unwrap(), None);
+}
+
+#[test]
+fn connections_over_the_limit_are_told_the_app_is_busy() {
+    let (_server, name) = serve(App::default());
+    // Every place taken: each client is counted once it has had an answer.
+    let mut held = Vec::new();
+    for id in 1..=MAX_CONNECTIONS as u64 {
+        let mut client = PipeClient::connect(&name, Duration::from_secs(2)).unwrap();
+        let answer = client
+            .exchange(&app_state_line(id), Duration::from_secs(5))
+            .unwrap();
+        let response: Response = serde_json::from_slice(&answer).unwrap();
+        assert_eq!(response.id, id);
+        assert!(response.ok.is_some());
+        held.push(client);
+    }
+    // One more: told so, under its own id, then the connection is closed.
+    let mut extra = PipeClient::connect(&name, Duration::from_secs(2)).unwrap();
+    let answer = extra
+        .exchange(&app_state_line(77), Duration::from_secs(5))
+        .unwrap();
+    let response: Response = serde_json::from_slice(&answer).unwrap();
+    assert_eq!(response.id, 77);
+    assert_eq!(response.error.unwrap().code, "appBusy");
+    assert_eq!(extra.read_line(Duration::from_secs(5)).unwrap(), None);
+    // Through the tools' client: `appBusy`, not a lost connection.
+    let error = PipeBridge::new(&name).app_state().unwrap_err();
+    assert_eq!(error.code, "appBusy", "{error:?}");
+    assert!(error.message.contains("try again"), "{error:?}");
+    // A place freed: requests go through again (the server sees the close at its next read).
+    drop(held.pop());
+    let bridge = PipeBridge::new(&name);
+    let started = Instant::now();
+    loop {
+        match bridge.app_state() {
+            Ok(view) => {
+                assert_eq!(view.version, "9.9.9");
+                break;
+            }
+            Err(error) if error.code == "appBusy" && started.elapsed() < Duration::from_secs(3) => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => panic!("{error:?}"),
+        }
+    }
+    // The clients held all along still work.
+    let answer = held[0]
+        .exchange(&app_state_line(9), Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(serde_json::from_slice::<Response>(&answer).unwrap().id, 9);
 }
