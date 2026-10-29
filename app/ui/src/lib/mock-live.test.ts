@@ -291,6 +291,12 @@ describe('browser stand-in for live mode', () => {
     expect((invoke('list_monitors') as MonitorInfo[]).find((m) => m.chosen)?.key).toBe(shown.key);
     invoke('close_presentation');
     expect(sub.last()?.presentation).toBeNull();
+    // The assistant's bridge projects without changing the saved choice.
+    invoke('close_presentation');
+    const bridged = invoke('open_presentation', { monitor: screens[0].key, remember: false }) as MonitorInfo;
+    expect(bridged.primary).toBe(true);
+    expect((invoke('list_monitors') as MonitorInfo[]).find((m) => m.chosen)?.key).toBe(shown.key);
+    invoke('close_presentation');
     const primary = invoke('open_presentation', { monitor: screens[0].key }) as MonitorInfo;
     expect(primary.primary).toBe(true);
     mockLiveConfig.monitors = 0;

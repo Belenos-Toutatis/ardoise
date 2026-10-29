@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type { AppState } from '../lib/api';
+  import { bridgeScreens } from '../lib/app-bridge.svelte';
   import { currentLocale, t } from '../lib/i18n.svelte';
   import { SORT_ORDERS, displayTitle, type SortOrder } from '../lib/library-logic';
   import { LibraryState } from '../lib/library-state.svelte';
@@ -36,7 +37,28 @@
   onMount(() => {
     // Started with `--diagnostic`: the tablet test is shown right away.
     if (app.openDiagnostic) panel = 'diagnostic';
-    return lib.start();
+    const stopLibrary = lib.start();
+    // The assistant's bridge opens notes as a click on a card does (`lib/app-bridge.svelte.ts`).
+    const unregister = bridgeScreens.register('home', {
+      busy: () =>
+        lib.dialog || fromFile
+          ? 'a dialog is open in Ardoise'
+          : panel === 'diagnostic'
+            ? 'the tablet test is open in Ardoise'
+            : null,
+      openNote: async (path) => {
+        panel = null;
+        // Through the library first, so that the editor loads the new note afresh.
+        openPath = null;
+        await tick();
+        openPath = path;
+        await tick();
+      },
+    });
+    return () => {
+      unregister();
+      stopLibrary();
+    };
   });
 
   function toggle(name: 'settings' | 'diagnostic' | 'tablet') {

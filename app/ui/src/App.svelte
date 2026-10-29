@@ -2,7 +2,8 @@
   import { onMount, tick } from 'svelte';
   import Home from './components/Home.svelte';
   import Wizard from './components/Wizard.svelte';
-  import { api, errorMessage, type AppState } from './lib/api';
+  import { api, errorMessage, onBridgeRequest, type AppState } from './lib/api';
+  import { bridgeScreens, startAppBridge } from './lib/app-bridge.svelte';
   import { resolveLocale } from './lib/i18n-core';
   import { catalogs, currentLocale, setLocale, t } from './lib/i18n.svelte';
   import { uiSelfTest } from './lib/selftest';
@@ -16,6 +17,13 @@
     setLocale(resolveLocale(next.language, next.systemLocale));
     applyTheme(next.theme);
   }
+
+  // The assistant's bridge (MCP): requests of `ardoise.exe --mcp`, answered by the screens on display.
+  onMount(() => startAppBridge({ listen: onBridgeRequest, reply: api.bridgeReply }));
+  $effect(() => {
+    bridgeScreens.app =
+      loadError || appState?.settingsError ? 'error' : !appState ? 'loading' : appState.library ? 'home' : 'setup';
+  });
 
   onMount(async () => {
     try {

@@ -141,6 +141,24 @@ pub struct PagePosition {
     pub running: bool,
 }
 
+/// Where the session shown stands and the notes it wrote, for the assistant's bridge
+/// (`app_bridge.rs`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveOverview {
+    pub state: LiveSessionState,
+    /// Started and not stopped.
+    pub running: bool,
+    /// The current page, 0-based, and the number of pages.
+    pub page: usize,
+    pub pages: usize,
+    /// Name of the screen of the presentation window, when it is open.
+    pub presentation: Option<String>,
+    /// The library the session writes to.
+    pub library: Option<PathBuf>,
+    /// The pages written to the library: index (0-based), note id, path.
+    pub notes: Vec<(usize, String, PathBuf)>,
+}
+
 /// What a write produced.
 struct Written {
     file: SavedFile,
@@ -900,6 +918,32 @@ impl LiveHub {
             session: state.session.id(),
             page: state.session.current(),
             running: state.session.is_running(),
+        })
+    }
+
+    /// The session shown and the notes it wrote; `None` before the first start.
+    pub fn overview(&self) -> Option<LiveOverview> {
+        let state = self.shared.lock();
+        let session = &state.session;
+        state.started.then(|| LiveOverview {
+            state: session.state(),
+            running: session.is_running(),
+            page: session.current(),
+            pages: session.pages().len(),
+            presentation: session.presentation().map(|monitor| monitor.name.clone()),
+            library: state
+                .library
+                .as_ref()
+                .map(|library| library.root().to_path_buf()),
+            notes: session
+                .pages()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, page)| {
+                    let file = page.file.as_ref()?;
+                    Some((index, page.note.id.clone(), file.path.clone()))
+                })
+                .collect(),
         })
     }
 

@@ -77,6 +77,10 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
         } satisfies NoteOutlines;
       case 'self_test_report':
         return undefined;
+      case 'mcp_launch_info':
+        return { exe: 'C:\\Outils\\Ardoise\\ardoise.exe', bridge: { state: 'serving', detail: null } };
+      case 'bridge_reply':
+        return undefined;
       case 'diagnostic_answer':
         answerMockPrompt(args.decision as Decision);
         return undefined;

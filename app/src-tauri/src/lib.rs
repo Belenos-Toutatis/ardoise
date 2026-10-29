@@ -6,6 +6,7 @@
 #[cfg(all(dev, not(debug_assertions)))]
 compile_error!("release builds need `--features custom-protocol` (use `cargo xtask check`)");
 
+mod app_bridge;
 mod autoexport;
 mod background;
 mod clipboard;
@@ -22,6 +23,7 @@ mod handwriting;
 mod import;
 mod library;
 mod live;
+mod mcp;
 mod narration;
 mod notes;
 mod operations;
@@ -63,6 +65,9 @@ pub struct Cli {
     /// `--simulated-tablet`: the simulated tablet replaces Bluetooth (real time, 3 stored pages);
     /// its registration is kept in a throwaway folder, never in the library.
     pub simulated_tablet: bool,
+    /// `--mcp [--read-only]`: serve the MCP protocol on standard input/output, without a
+    /// window, until stdin closes.
+    pub mcp: Option<mcp::McpArgs>,
 }
 
 impl Cli {
@@ -70,6 +75,8 @@ impl Cli {
         let mut cli = Cli::default();
         let mut import_inkspace = false;
         let mut import_args = import::ImportArgs::default();
+        let mut mcp = false;
+        let mut read_only = false;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -78,6 +85,8 @@ impl Cli {
                 "--simulated" => cli.simulated = true,
                 "--simulated-tablet" => cli.simulated_tablet = true,
                 "--import-inkspace" => import_inkspace = true,
+                "--mcp" => mcp = true,
+                "--read-only" => read_only = true,
                 "--compare" => import_args.compare = true,
                 "--library" => import_args.library = args.next().map(PathBuf::from),
                 "--create-demo-library" => {
@@ -92,6 +101,9 @@ impl Cli {
         }
         if import_inkspace {
             cli.import_inkspace = Some(import_args);
+        }
+        if mcp {
+            cli.mcp = Some(mcp::McpArgs { read_only });
         }
         cli
     }
@@ -118,6 +130,13 @@ fn webview_data_dir() -> Option<PathBuf> {
 pub fn run() {
     let cli = Cli::parse(std::env::args().skip(1));
     let headless_diagnostic = cli.diagnostic && cli.simulated;
+    // The MCP server first: its stdout carries the protocol and nothing else, so no other mode
+    // runs next to it. Started by an assistant, the program has pipes for standard handles
+    // (left alone); started by hand from a terminal, it borrows the terminal's console.
+    if let Some(args) = cli.mcp {
+        console::attach_parent_console();
+        std::process::exit(mcp::run_cli(args));
+    }
     if cli.self_test
         || headless_diagnostic
         || cli.import_inkspace.is_some()
@@ -171,6 +190,7 @@ pub fn run() {
         .manage(narration::NarrationRuntime::default())
         .manage(codec::CodecDownload::default())
         .manage(handwriting::HandwritingRuntime::default())
+        .manage(app_bridge::BridgeRuntime::default())
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -268,6 +288,8 @@ pub fn run() {
             handwriting::handwriting_text,
             handwriting::export_handwriting_text,
             handwriting::copy_handwriting_text,
+            app_bridge::bridge_reply,
+            app_bridge::mcp_launch_info,
         ])
         .setup(move |app| {
             if cli.self_test {
@@ -295,6 +317,10 @@ pub fn run() {
                 .follow(app.handle(), library.as_deref());
             // The tablet: auto-connect, sync, live mode (a failure shows in its status).
             tablet::start_service(app.handle(), cli.simulated_tablet);
+            // The assistant's bridge (MCP), for the windowed app only; logged when unavailable.
+            if !cli.self_test {
+                app_bridge::start(app.handle());
+            }
             Ok(())
         })
         .run(tauri::generate_context!());

@@ -511,7 +511,8 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
       return monitors();
     case 'open_presentation': {
       const monitor = chooseMonitor((args.monitor as string | null) ?? null);
-      savedMonitor = monitor.key;
+      // The assistant's bridge (`remember: false`) changes no setting.
+      if (args.remember !== false) savedMonitor = monitor.key;
       presentation = { ...monitor, chosen: true };
       broadcastSnapshot();
       return copy(presentation);

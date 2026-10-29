@@ -35,14 +35,15 @@ use crate::commands::{CommandError, CommandResult, current_state, store, update}
 use crate::export::{ExportSource, export_error, library_for, load_sources};
 use crate::live::LiveRuntime;
 
-pub use indexer::{IndexConfig, IndexStatus, Indexer, Services};
+pub use cache::CacheDir;
+pub use indexer::{IndexConfig, IndexState, IndexStatus, Indexer, Listed, Services};
 pub use search::SearchHit;
 
 /// Event sent to the main window at every change of the indexing (payload: [`IndexStatus`]).
 pub const HANDWRITING_STATUS: &str = "handwriting-status";
 
 /// How often a paused indexing checks whether live mode or the presentation ended.
-const PAUSE_POLL: Duration = Duration::from_millis(500);
+pub(crate) const PAUSE_POLL: Duration = Duration::from_millis(500);
 
 /// Where the cache lives: `%LOCALAPPDATA%\Ardoise\handwriting`, local to this PC (never in the
 /// library nor next to the portable exe); under the temporary folder when `LOCALAPPDATA` is
@@ -107,7 +108,7 @@ pub fn refresh(app: &AppHandle) {
 }
 
 /// The library, the recognition language and the interface language, read fresh.
-fn index_config(context: &AppContext) -> IndexConfig {
+pub(crate) fn index_config(context: &AppContext) -> IndexConfig {
     let setting = store(context)
         .ok()
         .and_then(|store| store.load().ok())

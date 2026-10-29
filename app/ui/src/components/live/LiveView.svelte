@@ -10,6 +10,7 @@
    */
   import { onMount } from 'svelte';
   import { api, errorMessage, type AppState } from '../../lib/api';
+  import { bridgeScreens, drivePresentation, until } from '../../lib/app-bridge.svelte';
   import { INKSPACE_COLOR_NAMES, sameColor } from '../../lib/editor/colors';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { TOOLS, loadInk, type Ink, type Tool } from '../../lib/ink';
@@ -154,7 +155,33 @@
     })();
     void refreshMonitors();
     const timer = setInterval(refreshLatency, LATENCY_REFRESH_MS);
+    // The assistant's bridge drives the projection and the pages as these buttons and keys do.
+    const unregister = bridgeScreens.register('live', {
+      presentation: (action, page, abandoned) =>
+        drivePresentation(
+          {
+            get pageIndex() {
+              return live.pageIndex;
+            },
+            get pageCount() {
+              return live.pageCount;
+            },
+            get presentation() {
+              return live.presentation;
+            },
+            // The assistant's choice of screen is not saved: no bridge request changes a setting.
+            project: () => openProjection(false),
+            stopProjecting: closeProjection,
+            command: (kind) => api.liveCommand({ kind }),
+            until,
+          },
+          action,
+          page,
+          abandoned,
+        ),
+    });
     return () => {
+      unregister();
       alive = false;
       clearInterval(timer);
       live.close();
@@ -285,26 +312,42 @@
     }
   }
 
-  async function project() {
+  /**
+   * "Project": the presentation window on the chosen screen, saved as this PC's choice unless
+   * `remember` is false; a failure is shown, and thrown.
+   */
+  async function openProjection(remember = true): Promise<MonitorInfo> {
     projecting = true;
     projectionError = null;
     try {
-      const shown = await api.openPresentation(monitorKey || null);
+      const shown = await api.openPresentation(monitorKey || null, remember);
       monitorKey = shown.key;
+      return shown;
     } catch (error) {
       projectionError = errorMessage(error);
+      throw error;
     } finally {
       projecting = false;
     }
   }
 
-  async function stopProjecting() {
+  async function project() {
+    await openProjection().catch(() => {});
+  }
+
+  /** "Stop projecting"; a failure is shown, and thrown. */
+  async function closeProjection(): Promise<void> {
     projectionError = null;
     try {
       await api.closePresentation();
     } catch (error) {
       projectionError = errorMessage(error);
+      throw error;
     }
+  }
+
+  async function stopProjecting() {
+    await closeProjection().catch(() => {});
   }
 
   /** `\\.\DISPLAY2` → "Screen 2"; other names as they are. */

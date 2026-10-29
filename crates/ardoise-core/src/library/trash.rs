@@ -16,9 +16,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::names::{MAX_SUFFIX, exists, is_note_file_name, note_stem, with_suffix};
-use super::{Library, LibraryError, META_DIR, io_error, now_ms};
-use crate::format;
+use super::{Library, LibraryError, META_DIR, format_error, io_error, now_ms};
+use crate::format::{self, NoteFile};
 use crate::fsutil::{remove_file_with_retry, rename_no_replace, write_atomic_new};
+use crate::note::Note;
 
 /// Folder of the trash inside `_ardoise/`.
 pub const TRASH_DIR: &str = "trash";
@@ -26,6 +27,13 @@ pub const TRASH_DIR: &str = "trash";
 pub const TRASH_RETENTION: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
 const RECORD_SUFFIX: &str = ".json";
+
+/// Why a note could not be put at a name of the trash.
+enum Placed {
+    /// The name was taken meanwhile: the next one is tried.
+    Taken,
+    Failed(LibraryError),
+}
 
 /// The `.json` record next to a trashed note.
 #[derive(Debug, Serialize, Deserialize)]
@@ -106,23 +114,67 @@ impl Library {
         if !path.is_file() {
             return Err(LibraryError::NotFound { path });
         }
-        let relative = path.strip_prefix(&self.root).unwrap_or(&path);
+        // Best effort: a damaged note can be trashed too.
+        let header = format::read_header(&path).ok();
+        self.put_in_trash(
+            &path,
+            header.as_ref().map(|h| &h.note),
+            |target| match rename_no_replace(&path, target) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound && !exists(&path) => {
+                    Err(Placed::Failed(LibraryError::NotFound {
+                        path: path.clone(),
+                    }))
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(Placed::Taken),
+                Err(e) => Err(Placed::Failed(io_error(&path)(e))),
+                Ok(()) => Ok(()),
+            },
+        )
+    }
+
+    /// Puts `file`, a note that is not in the library, into the trash as if it had been trashed
+    /// from `original` (a note path of this library, absolute or relative, that need not exist):
+    /// the trash view shows it with its title, and restoring it creates that note (" (n)" added
+    /// when the name is taken). For a version of a note kept before a change the app cannot undo
+    /// (`straighten_shapes` of the MCP server): give it its own id, so that it never stands for
+    /// the note itself once restored.
+    pub fn trash_copy(&self, file: &NoteFile, original: &Path) -> Result<TrashItem, LibraryError> {
+        let original = self.note_path(original)?;
+        let bytes = format::to_bytes(file).map_err(format_error(&original))?;
+        self.put_in_trash(
+            &original,
+            Some(&file.note),
+            |target| match write_atomic_new(target, &bytes) {
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(Placed::Taken),
+                Err(e) => Err(Placed::Failed(io_error(target)(e))),
+                Ok(_) => Ok(()),
+            },
+        )
+    }
+
+    /// Writes the record of a note trashed from `path` (absolute, in the library) under the
+    /// first free name of the trash, then has `place` put the note at that name.
+    fn put_in_trash(
+        &self,
+        path: &Path,
+        note: Option<&Note>,
+        mut place: impl FnMut(&Path) -> Result<(), Placed>,
+    ) -> Result<TrashItem, LibraryError> {
+        let relative = path.strip_prefix(&self.root).unwrap_or(path);
         let original = relative
             .components()
             .filter_map(|c| c.as_os_str().to_str())
             .collect::<Vec<_>>()
             .join("/");
-        // Best effort: a damaged note can be trashed too.
-        let header = format::read_header(&path).ok();
         let deleted = now_ms();
         let record = Record {
             original: original.clone(),
             deleted,
-            title: header.as_ref().map(|h| h.note.title.clone()),
-            id: header.as_ref().map(|h| h.note.id.clone()),
+            title: note.map(|n| n.title.clone()),
+            id: note.map(|n| n.id.clone()),
         };
         let record_bytes = serde_json::to_vec_pretty(&record).map_err(|e| LibraryError::Io {
-            path: path.clone(),
+            path: path.to_path_buf(),
             source: io::Error::other(e),
         })?;
         let dir = self.trash_dir();
@@ -144,7 +196,7 @@ impl Library {
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(io_error(&record_file)(e)),
             }
-            match rename_no_replace(&path, &target) {
+            match place(&target) {
                 Ok(()) => {
                     return Ok(TrashItem {
                         id,
@@ -155,14 +207,11 @@ impl Library {
                         note_id: record.id,
                     });
                 }
-                Err(e) => {
+                Err(failure) => {
                     let _ = remove_file_with_retry(&record_file);
-                    match e.kind() {
-                        io::ErrorKind::AlreadyExists => continue,
-                        io::ErrorKind::NotFound if !exists(&path) => {
-                            return Err(LibraryError::NotFound { path });
-                        }
-                        _ => return Err(io_error(&path)(e)),
+                    match failure {
+                        Placed::Taken => continue,
+                        Placed::Failed(error) => return Err(error),
                     }
                 }
             }

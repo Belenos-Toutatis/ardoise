@@ -25,14 +25,15 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use ardoise_core::library::Library;
+use ardoise_core::format::read_note;
+use ardoise_core::library::{FileStamp, Library, NoteEntry};
 use ardoise_core::note::Note;
 use ardoise_core::settings::HandwritingLanguage;
 use ardoise_hwr::ink::recognizable_strokes;
 use ardoise_hwr::{HwrError, Language, Recognition, Recognizer, RecognizerInfo, recognizer_for};
 use serde::Serialize;
 
-use super::cache::{CacheDir, EntryKey, FileRecord, HandwritingCache, strokes_hash};
+use super::cache::{CacheDir, Correction, EntryKey, FileRecord, HandwritingCache, strokes_hash};
 use super::search::{SearchHit, query_words, search_recognition};
 use crate::library::path_text;
 
@@ -135,15 +136,47 @@ pub struct Services {
     pub pause_poll: Duration,
 }
 
+/// A note of the library as a listing gives it: enough to find its records and entries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    pub path: PathBuf,
+    pub stamp: FileStamp,
+    pub id: String,
+}
+
+impl From<&NoteEntry> for Listed {
+    fn from(entry: &NoteEntry) -> Listed {
+        Listed {
+            path: entry.path.clone(),
+            stamp: entry.stamp,
+            id: entry.id.clone(),
+        }
+    }
+}
+
+/// What a search in a listing found.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ListedSearch {
+    pub hits: Vec<SearchHit>,
+    /// Notes of the listing whose recognised text is not known yet (always 0 when there is no
+    /// recognition here).
+    pub unread: usize,
+}
+
 struct Inner {
     /// Bumped by every request; a pass goes on only while it is the one it started with.
     generation: u64,
+    /// The latest generation whose pass has listed the library and taken everything it knew
+    /// without recognising (or found that there is no recognition here).
+    ready: u64,
     stopped: bool,
     quit: bool,
     status: IndexStatus,
     last_notified: Option<Instant>,
     /// The notes of the library whose entry is known, by path.
     current: HashMap<PathBuf, EntryKey>,
+    /// The library as the latest pass listed it (the search of the interface looks in it).
+    listed: Arc<Vec<Listed>>,
 }
 
 struct Shared {
@@ -227,11 +260,13 @@ impl Indexer {
             services,
             inner: Mutex::new(Inner {
                 generation: 1,
+                ready: 0,
                 stopped: false,
                 quit: false,
                 status: IndexStatus::default(),
                 last_notified: None,
                 current: HashMap::new(),
+                listed: Arc::new(Vec::new()),
             }),
             wake: Condvar::new(),
             cache: Mutex::new(HandwritingCache::default()),
@@ -247,17 +282,32 @@ impl Indexer {
         }
     }
 
-    fn bump(&self, change: impl FnOnce(&mut Inner)) {
+    fn bump(&self, change: impl FnOnce(&mut Inner)) -> u64 {
         let mut inner = lock(&self.shared.inner);
         inner.generation += 1;
+        let generation = inner.generation;
         change(&mut inner);
         drop(inner);
         self.shared.wake.notify_all();
+        generation
     }
 
-    /// Indexes again (the library or the settings changed). Does not undo a stop.
-    pub fn refresh(&self) {
-        self.bump(|_| {});
+    /// Indexes again (the library or the settings changed). Does not undo a stop. Returns the
+    /// generation of the pass it asks for (see [`ready`](Self::ready)).
+    pub fn refresh(&self) -> u64 {
+        self.bump(|_| {})
+    }
+
+    /// The generation of the latest pass asked for (1 for the pass the start begins).
+    pub fn generation(&self) -> u64 {
+        lock(&self.shared.inner).generation
+    }
+
+    /// Whether the pass of `generation` (or a later one) has listed the library and taken what
+    /// the cache knows of it, so that a search sees every note whose text is known; the notes
+    /// it still has to recognise come after.
+    pub fn ready(&self, generation: u64) -> bool {
+        lock(&self.shared.inner).ready >= generation
     }
 
     /// Stops indexing until [`resume`](Self::resume).
@@ -275,32 +325,83 @@ impl Indexer {
         lock(&self.shared.inner).status.clone()
     }
 
-    /// The notes of the library whose handwriting has some of the words of `query`.
+    /// The notes of the library whose handwriting has some of the words of `query`: the
+    /// library as the latest pass listed it (the interface's search, which the folder watcher
+    /// keeps up to date by refreshing the indexer).
     pub fn search(&self, query: &str) -> Vec<SearchHit> {
+        let listed = Arc::clone(&lock(&self.shared.inner).listed);
+        self.search_in(query, &listed).hits
+    }
+
+    /// The notes of `notes` (a listing of the library made now) whose handwriting has some of
+    /// the words of `query`, and how many of them have not been read yet. A note counts with
+    /// the text of the version listed, never an older one: its record (path and stamp) must give
+    /// the strokes of an entry in memory in the language recognised. A corrected transcription
+    /// stands in for the recogniser's text, also for a note that was never recognised (no
+    /// recognizer on this PC, or not read yet): its strokes are then read once to check that
+    /// the correction is for the ink the note has now.
+    pub fn search_in(&self, query: &str, notes: &[Listed]) -> ListedSearch {
         let words = query_words(query);
-        if words.is_empty() {
-            return Vec::new();
+        let language = lock(&self.shared.inner).status.language;
+        // Read without a lock: the MCP server may be another process than the app, and there
+        // are few of them.
+        unlocked("reading the corrections");
+        let corrections = self.shared.disk.corrections();
+        let corrected: HashSet<&str> = corrections.keys().map(|(id, _)| id.as_str()).collect();
+
+        // Corrected notes whose strokes are not known for the version listed: read once (the
+        // record then remembers them).
+        let unknown: Vec<&Listed> = {
+            let cache = lock(&self.shared.cache);
+            notes
+                .iter()
+                .filter(|note| {
+                    corrected.contains(note.id.as_str())
+                        && cache.record(&note.path, &note.stamp).is_none()
+                })
+                .collect()
+        };
+        for note in unknown {
+            self.shared.record_strokes(note);
         }
-        let current: Vec<(PathBuf, EntryKey)> = lock(&self.shared.inner)
-            .current
-            .iter()
-            .map(|(path, key)| (path.clone(), key.clone()))
-            .collect();
+
         let cache = lock(&self.shared.cache);
-        let mut hits: Vec<SearchHit> = current
-            .iter()
-            .filter_map(|(path, key)| {
-                let recognition = cache.loaded(key)?;
-                let (words, excerpt) = search_recognition(&recognition, &words)?;
-                Some(SearchHit {
-                    path: path_text(path),
+        let mut unread = 0;
+        let mut hits = Vec::new();
+        for note in notes {
+            let record = cache.record(&note.path, &note.stamp);
+            let correction = record
+                .and_then(|r| corrections.get(&(r.id.clone(), r.strokes.clone())))
+                .filter(|c| c.id == note.id);
+            let recognition = match correction {
+                Some(correction) => Some(Arc::new(correction.recognition())),
+                None => {
+                    let known = record.zip(language).and_then(|(record, language)| {
+                        cache.loaded(&EntryKey {
+                            id: record.id.clone(),
+                            strokes: record.strokes.clone(),
+                            language,
+                        })
+                    });
+                    if known.is_none() && language.is_some() {
+                        unread += 1;
+                    }
+                    known
+                }
+            };
+            let Some(recognition) = recognition.filter(|_| !words.is_empty()) else {
+                continue;
+            };
+            if let Some((words, excerpt)) = search_recognition(&recognition, &words) {
+                hits.push(SearchHit {
+                    path: path_text(&note.path),
                     words,
                     excerpt,
-                })
-            })
-            .collect();
+                });
+            }
+        }
         hits.sort_by(|a, b| a.path.cmp(&b.path));
-        hits
+        ListedSearch { hits, unread }
     }
 
     /// The installed recognizers, the settings and the language they give.
@@ -330,14 +431,60 @@ impl Indexer {
     /// The recognised text of `note` (as it is in memory: an editor's unsaved changes count),
     /// from the cache or recognised now (and kept).
     pub fn recognition_of(&self, note: &Note) -> Result<Arc<Recognition>, HwrError> {
+        self.recognition_in(note, None)
+    }
+
+    /// Like [`recognition_of`](Self::recognition_of), in `forced` language when given (the MCP
+    /// server's `language` argument; `NoRecognizer` when none is installed for it).
+    pub fn recognition_in(
+        &self,
+        note: &Note,
+        forced: Option<Language>,
+    ) -> Result<Arc<Recognition>, HwrError> {
+        self.recognize(note, forced)
+            .map(|(_, recognition)| recognition)
+    }
+
+    /// [`recognition_in`](Self::recognition_in) for the note of the library at `path`, read in
+    /// the version `stamp`: its record is kept too, so that the search finds its text at once
+    /// (the MCP server's `get_note_text`) instead of waiting for a pass to read the note again.
+    pub fn recognition_at(
+        &self,
+        path: &Path,
+        stamp: &FileStamp,
+        note: &Note,
+        forced: Option<Language>,
+    ) -> Result<Arc<Recognition>, HwrError> {
+        let (key, recognition) = self.recognize(note, forced)?;
+        lock(&self.shared.cache).set_record(
+            path.to_path_buf(),
+            FileRecord {
+                stamp: *stamp,
+                id: key.id,
+                strokes: key.strokes,
+            },
+        );
+        Ok(recognition)
+    }
+
+    /// The entry of `note` in `forced` language or the one recognised here, and its text.
+    fn recognize(
+        &self,
+        note: &Note,
+        forced: Option<Language>,
+    ) -> Result<(EntryKey, Arc<Recognition>), HwrError> {
         let (installed, _, language) = self.languages();
         let installed = installed?;
-        let language = language.ok_or(HwrError::NoRecognizer {
-            language: installed
-                .iter()
-                .find_map(|r| r.language)
-                .unwrap_or(Language::Fr),
-        })?;
+        let language = match forced {
+            Some(forced) if recognizer_for(&installed, forced).is_some() => forced,
+            Some(forced) => return Err(HwrError::NoRecognizer { language: forced }),
+            None => language.ok_or(HwrError::NoRecognizer {
+                language: installed
+                    .iter()
+                    .find_map(|r| r.language)
+                    .unwrap_or(Language::Fr),
+            })?,
+        };
         let strokes = recognizable_strokes(note);
         let key = EntryKey {
             id: note.id.clone(),
@@ -345,7 +492,7 @@ impl Indexer {
             language,
         };
         if let Some(found) = self.shared.cached(&key) {
-            return Ok(found);
+            return Ok((key, found));
         }
         let recognition = if strokes.is_empty() {
             Recognition::empty(language)
@@ -356,7 +503,7 @@ impl Indexer {
                 .on_demand
                 .recognize(&strokes, language)?
         };
-        Ok(self.shared.keep(key, recognition))
+        Ok((key.clone(), self.shared.keep(key, recognition)))
     }
 
     /// Whether the thread ended (the tests: it only ends on `shutdown`, or when it panicked).
@@ -436,8 +583,38 @@ impl Shared {
         }
     }
 
-    fn unavailable(&self, reason: &'static str, language: Option<Language>) {
+    /// The pass of `generation` has listed the library and taken what the cache knows.
+    fn set_ready(&self, generation: u64) {
+        let mut inner = lock(&self.inner);
+        inner.ready = inner.ready.max(generation);
+    }
+
+    /// Reads the strokes of the listed `note` and keeps its record (a search needs them to
+    /// check a correction). Nothing is kept when the file changed meanwhile or cannot be read.
+    fn record_strokes(&self, note: &Listed) {
+        unlocked("reading a note");
+        let before = FileStamp::of(&note.path).ok();
+        let Ok(file) = read_note(&note.path) else {
+            return;
+        };
+        let after = FileStamp::of(&note.path).ok();
+        if before != Some(note.stamp) || after != before || file.note.id != note.id {
+            return;
+        }
+        let strokes = strokes_hash(&recognizable_strokes(&file.note));
+        lock(&self.cache).set_record(
+            note.path.clone(),
+            FileRecord {
+                stamp: note.stamp,
+                id: note.id.clone(),
+                strokes,
+            },
+        );
+    }
+
+    fn unavailable(&self, reason: &'static str, language: Option<Language>, generation: u64) {
         lock(&self.inner).current.clear();
+        self.set_ready(generation);
         self.publish(true, |s| {
             *s = IndexStatus {
                 state: IndexState::Unavailable,
@@ -516,25 +693,35 @@ fn pass(shared: &Shared, generation: u64) {
     }
     unlocked("reading the settings");
     let config = (shared.services.config)();
-    unlocked("listing the recognizers");
-    let language = match shared.services.background.recognizers() {
-        Err(HwrError::Unsupported) => return shared.unavailable(UNSUPPORTED, None),
-        Err(_) => return shared.unavailable(NO_RECOGNIZER, None),
-        Ok(installed) => resolve_language(&config.setting, config.interface, &installed),
-    };
-    let Some(language) = language else {
-        return shared.unavailable(NO_RECOGNIZER, None);
-    };
+    // Listed even when nothing can be recognised here: the search still finds the corrected
+    // transcriptions (`set_note_text`) of the notes listed.
     unlocked("listing the library");
-    let Some(library) = config.library.and_then(|root| Library::open(root).ok()) else {
-        return shared.unavailable(NO_LIBRARY, Some(language));
-    };
-    let mut notes = library.list().notes;
+    let library = config.library.and_then(|root| Library::open(root).ok());
+    let mut notes = library
+        .as_ref()
+        .map(|library| library.list().notes)
+        .unwrap_or_default();
     notes.sort_by(|a, b| {
         b.modified
             .cmp(&a.modified)
             .then_with(|| a.path.cmp(&b.path))
     });
+    if !shared.still(generation) {
+        return;
+    }
+    lock(&shared.inner).listed = Arc::new(notes.iter().map(Listed::from).collect());
+    unlocked("listing the recognizers");
+    let language = match shared.services.background.recognizers() {
+        Err(HwrError::Unsupported) => return shared.unavailable(UNSUPPORTED, None, generation),
+        Err(_) => return shared.unavailable(NO_RECOGNIZER, None, generation),
+        Ok(installed) => resolve_language(&config.setting, config.interface, &installed),
+    };
+    let Some(language) = language else {
+        return shared.unavailable(NO_RECOGNIZER, None, generation);
+    };
+    let Some(library) = library else {
+        return shared.unavailable(NO_LIBRARY, Some(language), generation);
+    };
 
     // The notes whose entry is known without reading them.
     let keys: Vec<Option<EntryKey>> = {
@@ -583,6 +770,7 @@ fn pass(shared: &Shared, generation: u64) {
             failed,
         }
     });
+    shared.set_ready(generation);
 
     for (count, entry) in pending.into_iter().enumerate() {
         if !shared.wait_while_busy(generation) {
@@ -624,9 +812,11 @@ fn pass(shared: &Shared, generation: u64) {
                 Ok(recognition) => {
                     shared.keep(key.clone(), recognition);
                 }
-                Err(HwrError::Unsupported) => return shared.unavailable(UNSUPPORTED, None),
+                Err(HwrError::Unsupported) => {
+                    return shared.unavailable(UNSUPPORTED, None, generation);
+                }
                 Err(HwrError::NoRecognizer { .. }) => {
-                    return shared.unavailable(NO_RECOGNIZER, None);
+                    return shared.unavailable(NO_RECOGNIZER, None, generation);
                 }
                 Err(_) => {
                     failed += 1;
@@ -662,8 +852,26 @@ fn finish(shared: &Shared, root: &Path, notes: &[ardoise_core::library::NoteEntr
         cache.retain_files(root, &present);
         cache.retain_entries(&in_use);
     }
+    // A correction of another version of a note is removed only once the note, read again
+    // now, has other strokes: it may be for an edit made after this pass listed the library
+    // (another process, the MCP server, writes them at any time).
+    let paths: HashMap<&str, &Path> = notes
+        .iter()
+        .map(|note| (note.id.as_str(), note.path.as_path()))
+        .collect();
+    let is_current = |correction: &Correction| {
+        let Some(path) = paths.get(correction.id.as_str()) else {
+            return false;
+        };
+        unlocked("reading a note");
+        // A note that cannot be read now is not judged: its correction stays.
+        read_note(path).map_or(true, |file| {
+            file.note.id != correction.id
+                || strokes_hash(&recognizable_strokes(&file.note)) == correction.strokes
+        })
+    };
     unlocked("pruning the cache");
-    shared.disk.prune(&in_use);
+    shared.disk.prune(&in_use, &is_current);
     shared.flush();
 }
 
@@ -994,6 +1202,187 @@ mod tests {
         h.indexer.refresh();
         h.idle(0);
         assert!(h.indexer.search("foret").is_empty());
+        h.indexer.shutdown();
+    }
+
+    #[test]
+    fn a_corrected_transcription_stands_in_for_the_recognisers_text() {
+        let (dir, library) = library();
+        let cat = create(&library, "Chat", &[0, 1, 2]);
+        let fake = Fake::new(&[Language::Fr]);
+        let h = harness(dir.path(), fake.clone());
+        h.idle(1);
+        assert_eq!(h.indexer.search("chat").len(), 1);
+        assert!(h.indexer.search("renard").is_empty());
+
+        // The assistant's text replaces the recogniser's words in the search, whichever process
+        // wrote it (the file is read at each search).
+        let note = library.read(&cat).unwrap().file.note;
+        let disk = CacheDir::new(h._cache.path());
+        disk.set_correction_for(&note, Language::Fr, "Le renard\r\ndort dans la forêt")
+            .unwrap();
+        let hits = h.indexer.search("renard foret");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, path_text(&cat));
+        assert_eq!(hits[0].words, ["renard", "foret"]);
+        assert_eq!(hits[0].excerpt.word, "renard");
+        assert!(h.indexer.search("chat").is_empty());
+        assert_eq!(disk.correction_for(&note).unwrap().language, Language::Fr);
+        // The recognition itself is untouched.
+        assert_eq!(
+            h.indexer.recognition_of(&note).unwrap().text(),
+            "le chat dort"
+        );
+
+        // An empty text removes it.
+        disk.set_correction_for(&note, Language::Fr, "  ").unwrap();
+        assert!(disk.correction_for(&note).is_none());
+        assert!(h.indexer.search("renard").is_empty());
+        assert_eq!(h.indexer.search("chat").len(), 1);
+
+        // The correction is bound to the ink: written again, then the note is edited, it is
+        // not found any more (and the pruning at the end of the next pass removes the file).
+        disk.set_correction_for(&note, Language::Fr, "Le renard")
+            .unwrap();
+        assert_eq!(h.indexer.search("renard").len(), 1);
+        let mut loaded = library.read(&cat).unwrap();
+        loaded.file.note.strokes = written(&[4]);
+        library.save(&cat, &loaded.file, &loaded.stamp).unwrap();
+        h.indexer.refresh();
+        h.wait("the edited note", |_| !h.indexer.search("foret").is_empty());
+        assert!(h.indexer.search("renard").is_empty());
+        assert!(disk.correction_for(&loaded.file.note).is_none());
+        h.idle(1);
+        let leftover = std::fs::read_dir(h._cache.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with("-fix.json"))
+            .count();
+        assert_eq!(leftover, 0, "the older version's correction is pruned");
+        h.indexer.shutdown();
+    }
+
+    fn listed(library: &Library) -> Vec<Listed> {
+        library.list().notes.iter().map(Listed::from).collect()
+    }
+
+    #[test]
+    fn a_listing_of_now_is_searched_with_the_text_of_each_version() {
+        let (dir, library) = library();
+        let cat = create(&library, "Chat", &[1]);
+        let fake = Fake::new(&[Language::Fr]);
+        let h = harness(dir.path(), fake.clone());
+        h.idle(1);
+        let found = h.indexer.search_in("chat", &listed(&library));
+        assert_eq!((found.hits.len(), found.unread), (1, 0));
+
+        // Edited since the pass (nobody refreshed it): the old text is not searched any more,
+        // the note counts as not read yet.
+        let mut loaded = library.read(&cat).unwrap();
+        loaded.file.note.strokes = written(&[4]);
+        library.save(&cat, &loaded.file, &loaded.stamp).unwrap();
+        let found = h.indexer.search_in("chat", &listed(&library));
+        assert_eq!((found.hits.len(), found.unread), (0, 1));
+        // A new note too.
+        let fox = create(&library, "Renard", &[5]);
+        assert_eq!(h.indexer.search_in("x", &listed(&library)).unread, 2);
+
+        // Read on demand with its place in the library (`get_note_text`): found at once.
+        let new = library.read(&fox).unwrap();
+        h.indexer
+            .recognition_at(&fox, &new.stamp, &new.file.note, None)
+            .unwrap();
+        let found = h.indexer.search_in("energie", &listed(&library));
+        assert_eq!(found.hits.len(), 1);
+        assert_eq!(found.hits[0].path, path_text(&fox));
+        assert_eq!(found.unread, 1);
+
+        // Once a pass has looked again, everything is read.
+        let generation = h.indexer.refresh();
+        h.wait("the new pass", |_| h.indexer.ready(generation));
+        h.idle(2);
+        let found = h.indexer.search_in("foret", &listed(&library));
+        assert_eq!((found.hits.len(), found.unread), (1, 0));
+        assert!(
+            h.indexer
+                .search_in("chat", &listed(&library))
+                .hits
+                .is_empty()
+        );
+        h.indexer.shutdown();
+    }
+
+    #[test]
+    fn a_correction_is_found_without_any_recognition() {
+        let (dir, library) = library();
+        let cat = create(&library, "Chat", &[1]);
+        // No recognizer on this PC: nothing is read, nothing is counted as unread.
+        let h = harness(dir.path(), Fake::new(&[]));
+        let status = h.wait("unavailable", |s| s.state == IndexState::Unavailable);
+        assert_eq!(status.reason, Some(NO_RECOGNIZER));
+        assert!(h.indexer.ready(h.indexer.generation()));
+        let found = h.indexer.search_in("renard", &listed(&library));
+        assert_eq!(found, ListedSearch::default());
+
+        // The assistant's transcription is found all the same, by the listing given and by the
+        // interface's search (the library as the pass listed it).
+        let loaded = library.read(&cat).unwrap();
+        let disk = CacheDir::new(h._cache.path());
+        disk.set_correction_for(&loaded.file.note, Language::Fr, "Le renard")
+            .unwrap();
+        let found = h.indexer.search_in("renard", &listed(&library));
+        assert_eq!(found.hits.len(), 1);
+        assert_eq!(found.hits[0].path, path_text(&cat));
+        assert_eq!(h.indexer.search("renard").len(), 1);
+
+        // Not once the ink has changed.
+        let mut edited = loaded;
+        edited.file.note.strokes = written(&[4]);
+        library.save(&cat, &edited.file, &edited.stamp).unwrap();
+        assert!(
+            h.indexer
+                .search_in("renard", &listed(&library))
+                .hits
+                .is_empty()
+        );
+        h.indexer.shutdown();
+    }
+
+    #[test]
+    fn a_correction_written_during_a_pass_is_not_pruned_at_its_end() {
+        let (dir, library) = library();
+        for i in 0..6 {
+            create(&library, &format!("Note {i}"), &[2]);
+        }
+        // The most recently changed note is read first.
+        std::thread::sleep(Duration::from_millis(20));
+        let cat = create(&library, "Chat", &[1]);
+        let fake = Fake::slow(&[Language::Fr], Duration::from_millis(60));
+        let h = harness(dir.path(), fake.clone());
+        h.wait("the first note", |s| s.done >= 1);
+        assert_eq!(h.indexer.search("chat").len(), 1);
+
+        // While the pass reads the others, the note is edited and the new ink corrected
+        // (the MCP server, another process).
+        let mut loaded = library.read(&cat).unwrap();
+        loaded.file.note.strokes = written(&[4]);
+        library.save(&cat, &loaded.file, &loaded.stamp).unwrap();
+        // As `set_note_text` does: the note as it is in its file.
+        let edited = library.read(&cat).unwrap().file.note;
+        let disk = CacheDir::new(h._cache.path());
+        disk.set_correction_for(&edited, Language::Fr, "Le renard")
+            .unwrap();
+        assert!(
+            h.indexer.status().state == IndexState::Indexing,
+            "the pass is still under way"
+        );
+        h.idle(7);
+        // The pass ended with the old ink in use: the correction of the new one stays.
+        assert_eq!(disk.correction_for(&edited).unwrap().text, "Le renard");
+        assert_eq!(
+            h.indexer.search_in("renard", &listed(&library)).hits.len(),
+            1
+        );
         h.indexer.shutdown();
     }
 

@@ -41,6 +41,11 @@ impl CommandError {
     pub(crate) fn is_code(&self, code: &str) -> bool {
         self.code == code
     }
+
+    /// The identifier and the detail, for the errors of the MCP server's tools.
+    pub(crate) fn parts(&self) -> (&'static str, &str) {
+        (self.code, &self.message)
+    }
 }
 
 impl From<SettingsError> for CommandError {

@@ -190,6 +190,33 @@
       "penHint": "Le dos du stylet efface (avec les réglages de la gomme) ; le bouton du stylet trace un lasso de sélection ; les doigts sont ignorés tant que le stylet est utilisé ou proche de l'écran."
     }
   },
+  "assistant": {
+    "title": "Assistant (MCP)",
+    "intro": "Un assistant comme Claude Code ou Claude Desktop peut lire vos notes, les voir comme des images, les mettre au propre (Markdown, Word, LaTeX), les titrer et les ranger. Copiez le texte ci-dessous dans l'assistant : Ardoise ne modifie jamais sa configuration elle-même.",
+    "appTools": "Ouvrir une note ou piloter la présentation du mode direct demande qu'Ardoise soit ouverte.",
+    "bridge": {
+      "serving": "Liaison avec Ardoise ouverte : active.",
+      "retrying": "Liaison avec Ardoise ouverte : interrompue, nouvelle tentative en cours ({detail}).",
+      "anotherCopy": "Liaison avec Ardoise ouverte : assurée par une autre fenêtre d'Ardoise lancée depuis ce dossier.",
+      "unavailable": "Liaison avec Ardoise ouverte : indisponible ({detail}). Les autres outils de l'assistant fonctionnent quand même.",
+      "off": "Liaison avec Ardoise ouverte : indisponible sur ce système."
+    },
+    "readOnly": "Lecture seule",
+    "readOnlyHint": "L'assistant pourra lire et voir vos notes, mais ni les modifier ni piloter Ardoise. Conseillé quand il n'a besoin que de lire.",
+    "code": {
+      "title": "Claude Code",
+      "hint": "Une seule fois, dans PowerShell ou l'invite de commandes (Ardoise sera disponible dans tous vos projets). Copiez la commande telle quelle, guillemets autour de -- compris :"
+    },
+    "desktop": {
+      "title": "Claude Desktop",
+      "hint": "Dans Claude Desktop : Paramètres > Développeur > Modifier la configuration. Ajoutez l'entrée « ardoise » à côté des serveurs déjà présents dans « mcpServers », enregistrez, puis quittez et relancez Claude Desktop."
+    },
+    "copy": "Copier",
+    "copied": "Copié",
+    "copyFailed": "Impossible de copier : sélectionnez le texte et copiez-le avec Ctrl+C.",
+    "privacy": "Vie privée : ce que l'assistant lit (le texte et l'image de vos notes, parfois des noms d'élèves) part chez son fournisseur, selon les réglages de votre compte. En général, l'assistant demande votre accord avant de modifier quoi que ce soit, mais cela dépend de ses réglages d'autorisation ; Ardoise lui signale les outils qui modifient ou retirent des notes. Rien n'est jamais supprimé définitivement. Pour qu'il ne puisse que lire, déclarez-le avec « Lecture seule » cochée.",
+    "guide": "Pas à pas : guide « Assistant » (docs/guide/assistant.fr.md)."
+  },
   "tablet": {
     "title": "Tablette",
     "loading": "Lecture de l'état de la tablette…",

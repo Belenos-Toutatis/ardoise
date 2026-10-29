@@ -10,6 +10,7 @@ import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
 import { mockTabletSubscribe } from './mock-tablet';
 import type { Orientation } from './orientation';
+import type { BridgeAnswer, BridgeEvent } from './app-bridge.svelte';
 import type { TabletEvent, TabletOptions, TabletStatus } from './tablet';
 import type {
   DownloadProgress,
@@ -286,7 +287,9 @@ export const api = {
   liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
   listMonitors: () => call<MonitorInfo[]>('list_monitors'),
   /** Opens the presentation window full screen on `monitor` (null: the saved or default screen). */
-  openPresentation: (monitor: string | null) => call<MonitorInfo>('open_presentation', { monitor }),
+  /** `remember: false` (the assistant's bridge): the screen is not saved as this PC's choice. */
+  openPresentation: (monitor: string | null, remember = true) =>
+    call<MonitorInfo>('open_presentation', { monitor, remember }),
   closePresentation: () => call<void>('close_presentation'),
 
   // --- Replay, video, narration (milestone M6; Rust side: video.rs, narration.rs, codec.rs) ---
@@ -423,7 +426,37 @@ export const api = {
    */
   printNotes: (sources: ExportSource[], options: PrintOptions) =>
     call<PrintResult>('print_notes', { sources, options }),
+
+  // --- Assistant bridge (milestone M9; Rust side: app_bridge.rs, docs/design/mcp.md) ---
+  /** The main window's answer to request `id` of the assistant's bridge. */
+  bridgeReply: (id: number, answer: BridgeAnswer) => call<void>('bridge_reply', { id, answer }),
+  /** How to start this copy's MCP server (Settings > Assistant). */
+  mcpLaunchInfo: () => call<McpLaunch>('mcp_launch_info'),
 };
+
+/** `McpLaunch` in `app_bridge.rs`. */
+export interface McpLaunch {
+  /** Absolute path of the running executable. */
+  exe: string;
+  /** Whether assistants can drive this window now. */
+  bridge: BridgeStatus;
+}
+
+/** `BridgeStatus` in `app_bridge.rs`. */
+export interface BridgeStatus {
+  state: 'serving' | 'retrying' | 'anotherCopy' | 'unavailable' | 'off';
+  /** The technical reason, for `retrying` and `unavailable`. */
+  detail: string | null;
+}
+
+/**
+ * Calls `handler` with each request of the assistant's bridge (`bridge-request`, main window only).
+ * Returns a function that stops listening. Nothing comes in a plain browser.
+ */
+export async function onBridgeRequest(handler: (event: BridgeEvent) => void): Promise<() => void> {
+  if (!inDesktopApp()) return () => {};
+  return listen<BridgeEvent>('bridge-request', (event) => handler(event.payload));
+}
 
 /**
  * Calls `handler` at every change of the handwriting indexing (progress, pause, end). Returns a

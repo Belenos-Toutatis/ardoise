@@ -35,7 +35,9 @@ use crate::library::{library_error, library_of};
 use crate::tablet::TabletRuntime;
 
 pub use activity::Activity;
-pub use hub::{ButtonSetting, HubConfig, LiveError, LiveHub, PagePosition, Start, StartOptions};
+pub use hub::{
+    ButtonSetting, HubConfig, LiveError, LiveHub, LiveOverview, PagePosition, Start, StartOptions,
+};
 pub use model::{LiveBatch, LiveCommand, LiveSnapshot, LiveStyle, LiveViewState};
 
 use crate::narration::{self, NarrationRuntime};
@@ -128,6 +130,9 @@ pub fn main_window_closed(app: &AppHandle) {
     }
     if let Some(runtime) = app.try_state::<LiveRuntime>() {
         close_session(&runtime.hub, &backup_dir());
+        if let Some(context) = app.try_state::<AppContext>() {
+            crate::app_bridge::remember_live_session(&context, &runtime.hub);
+        }
     }
 }
 
@@ -250,6 +255,7 @@ pub async fn live_start(
 /// narration recording in live mode is stopped first and goes with its pages.
 #[tauri::command]
 pub async fn live_stop(
+    context: State<'_, AppContext>,
     tablet: State<'_, TabletRuntime>,
     runtime: State<'_, LiveRuntime>,
     narration: State<'_, NarrationRuntime>,
@@ -257,7 +263,10 @@ pub async fn live_stop(
     finish_live_narration(&narration, &runtime.hub);
     // Without a running service there is nothing to stop on the tablet's side.
     let _ = tablet.with_service(TabletService::stop_live);
-    runtime.hub.stop().map_err(LiveError::command_error)
+    let saved = runtime.hub.stop().map_err(LiveError::command_error)?;
+    // The assistant's `last_live_note` finds the session after a restart too.
+    crate::app_bridge::remember_live_session(&context, &runtime.hub);
+    Ok(saved)
 }
 
 #[tauri::command]

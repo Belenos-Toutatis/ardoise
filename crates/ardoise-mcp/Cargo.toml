@@ -1,0 +1,49 @@
+[package]
+name = "ardoise-mcp"
+description = "MCP server of Ardoise: the library, the handwriting and the windows exposed to the user's own assistant."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ardoise-core = { path = "../ardoise-core" }
+ardoise-hwr = { path = "../ardoise-hwr" }
+ardoise-ink = { path = "../ardoise-ink" }
+ardoise-render = { path = "../ardoise-render" }
+# Images in tool results are base64 text (the version rmcp itself uses).
+base64 = "0.23"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# The official Rust SDK of the Model Context Protocol (Apache-2.0): the server side over standard
+# input/output, with the `#[tool]` macros that derive each tool's JSON schema from its arguments.
+rmcp = { version = "3.8", default-features = false, features = ["server", "macros", "transport-io"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# The runtime is created by the caller, only in `--mcp` mode (current-thread).
+tokio = { version = "1", default-features = false, features = ["rt", "sync"] }
+# Ids of the notes created (the same crate and feature as the app).
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+# The bridge's named pipe (bridge/pipe.rs): the pipe, overlapped I/O with timeouts, its DACL and
+# the user of the processes at both ends. Same version as the app's: one copy compiled.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+rmcp = { version = "3.8", default-features = false, features = ["server", "client", "macros", "transport-io"] }
+tempfile = "3"
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "macros", "io-util", "time"] }
+
+[lints]
+workspace = true

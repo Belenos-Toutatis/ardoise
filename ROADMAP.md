@@ -127,12 +127,14 @@ Vérifié sous Windows le 2026-10-29 : `CHECK OK`, `E2E OK` (26 parcours, FR et 
 
 ## M9 — Pilotage par un assistant (MCP)
 
-- [ ] Serveur MCP `ardoise.exe --mcp` (SDK Rust officiel de MCP, licence vérifiée) ; outils de lecture : liste, recherche, note, texte reconnu avec positions, rendu en image d'une page ou d'une zone.
-- [ ] Outils d'écriture (créer, renommer, étiqueter, ranger, assembler, découper, redresser, exporter, texte corrigé), sans suppression définitive ; invites prêtes à l'emploi.
-- [ ] Passerelle vers l'application ouverte : ouvrir une note, lancer la présentation, changer de page, version propre à la fin du mode direct.
-- [ ] Guide : déclarer Ardoise dans Claude Code et Claude Desktop ; rappel sur la vie privée.
+- [x] Serveur MCP `ardoise.exe --mcp` (SDK Rust officiel de MCP, licence vérifiée) ; outils de lecture : liste, recherche, note, texte reconnu avec positions, rendu en image d'une page ou d'une zone.
+- [x] Outils d'écriture (créer, renommer, étiqueter, ranger, assembler, découper, redresser, exporter, texte corrigé), sans suppression définitive ; invites prêtes à l'emploi.
+- [x] Passerelle vers l'application ouverte : ouvrir une note, lancer la présentation, changer de page, version propre à la fin du mode direct.
+- [x] Guide : déclarer Ardoise dans Claude Code et Claude Desktop ; rappel sur la vie privée.
 
 **Critères de fin** : `CHECK OK` et `E2E OK` ; un test lance `ardoise.exe --mcp`, liste ses outils et appelle chacun sur la bibliothèque de démonstration ; essai réel depuis Claude Code (mettre au propre une note de démonstration).
+
+Vérifié sous Windows le 2026-10-29 : `CHECK OK`, `E2E OK` (30 parcours, FR et EN ; le serveur MCP y est lancé, liste ses outils et appelle chacun des 20 sur la bibliothèque de démonstration, et récupère les 3 invites dans chaque langue), `SELFTEST OK`, après une relecture indépendante dont les remarques sont corrigées. Reste l'essai réel depuis Claude Code, qui attend l'accord de l'utilisateur pour déclarer Ardoise dans sa configuration, puis à essayer à la main : la commande sous PowerShell 7 (`pwsh`, absent de ce PC), la présentation sur un second écran pilotée par l'assistant et la note du dernier mode direct retrouvée après un vrai redémarrage.
 
 ## M10 — Finition et publication
 

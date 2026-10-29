@@ -190,6 +190,33 @@
       "penHint": "The back of the pen erases (with the eraser's settings); the pen's button draws a selection lasso; fingers are ignored while the pen is in use or near the screen."
     }
   },
+  "assistant": {
+    "title": "Assistant (MCP)",
+    "intro": "An assistant such as Claude Code or Claude Desktop can read your notes, see them as images, clean them up (Markdown, Word, LaTeX), title them and file them. Paste the text below into the assistant: Ardoise never edits its configuration itself.",
+    "appTools": "Opening a note or driving the live presentation needs Ardoise to be open.",
+    "bridge": {
+      "serving": "Link with the open Ardoise: active.",
+      "retrying": "Link with the open Ardoise: interrupted, trying again ({detail}).",
+      "anotherCopy": "Link with the open Ardoise: handled by another Ardoise window started from this folder.",
+      "unavailable": "Link with the open Ardoise: unavailable ({detail}). The assistant's other tools still work.",
+      "off": "Link with the open Ardoise: not available on this system."
+    },
+    "readOnly": "Read only",
+    "readOnlyHint": "The assistant can read and see your notes, but neither change them nor drive Ardoise. Recommended when it only needs to read.",
+    "code": {
+      "title": "Claude Code",
+      "hint": "Once, in PowerShell or the command prompt (Ardoise is then available in all your projects). Copy the command as it is, quotes around -- included:"
+    },
+    "desktop": {
+      "title": "Claude Desktop",
+      "hint": "In Claude Desktop: Settings > Developer > Edit Config. Add the \"ardoise\" entry next to the servers already in \"mcpServers\", save, then quit and restart Claude Desktop."
+    },
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Cannot copy: select the text and copy it with Ctrl+C.",
+    "privacy": "Privacy: what the assistant reads (the text and image of your notes, sometimes students' names) goes to its provider, under your account's settings. Assistants usually ask for your consent before changing anything, but that depends on their permission settings; Ardoise flags the tools that change or remove notes. Nothing is ever deleted for good. To let it only read, declare it with \"Read only\" ticked.",
+    "guide": "Step by step: the \"Assistant\" guide (docs/guide/assistant.en.md)."
+  },
   "tablet": {
     "title": "Tablet",
     "loading": "Reading the tablet status…",

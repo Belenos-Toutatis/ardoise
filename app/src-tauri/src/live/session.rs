@@ -227,7 +227,6 @@ impl LiveSession {
         self.id
     }
 
-    #[cfg(test)]
     pub fn state(&self) -> LiveSessionState {
         self.state
     }

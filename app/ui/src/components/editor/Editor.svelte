@@ -35,6 +35,7 @@
    */
   import { untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, type AppState } from '../../lib/api';
+  import { NoteLoads, bridgeScreens } from '../../lib/app-bridge.svelte';
   import { loadCustomColors, rememberCustomColor } from '../../lib/editor/colors';
   import { binderOf, diskChange, type DiskChange } from '../../lib/editor/disk';
   import { decodeStrokes, encodeStrokes } from '../../lib/editor/clipboard';
@@ -161,6 +162,8 @@
 
   let currentPath = $state('');
   let loadError = $state<string | null>(null);
+  /** The loads of this editor, for the assistant's `open_note` (answered once the note is shown). */
+  const loads = new NoteLoads();
   let ink = $state.raw<Ink | null>(null);
   let history = $state.raw<History<Doc> | null>(null);
   let savedNote = $state.raw<Note | null>(null);
@@ -262,6 +265,28 @@
     });
   });
 
+  // The assistant's bridge sees the note open and whether the editor may be left now
+  // (`lib/app-bridge.svelte.ts`); the reasons are for the assistant, in English.
+  $effect(() =>
+    untrack(() =>
+      bridgeScreens.register('editor', {
+        path: () => currentPath || path,
+        dirty: () => dirty,
+        blocker: () =>
+          recorder.busy
+            ? 'a narration is being recorded in the editor'
+            : videoRunning
+              ? 'a video is being exported from the editor'
+              : dirty
+                ? 'the note open in the editor has unsaved changes: the teacher must save or close it first'
+                : pendingWrites > 0
+                  ? 'the note open in the editor is being saved'
+                  : null,
+        loaded: () => loads.loaded(),
+      }),
+    ),
+  );
+
   // Mounted: hold back window closes with unsaved changes, and watch the note on disk. The
   // teardown runs once, when the editor goes away.
   $effect(() => {
@@ -302,6 +327,8 @@
     salvageRecording();
     generation += 1;
     currentPath = target;
+    // Replaced by the load of another note if one starts before this one ends.
+    const load = loads.begin();
     loadError = null;
     history = null;
     disk = null;
@@ -334,8 +361,10 @@
       conflict = null;
       saveError = null;
       void refreshOriginal(true);
+      load.ok();
     } catch (error) {
       if (currentPath === target) loadError = errorMessage(error);
+      load.fail(error);
     }
   }
 

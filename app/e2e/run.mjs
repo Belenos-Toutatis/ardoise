@@ -21,11 +21,13 @@ import { journeys as exportJourneys } from './journeys-m8-exports.mjs';
 import { inputJourneys } from './journeys-m8-input.mjs';
 import { orientationJourneys } from './journeys-m8-orientation.mjs';
 import { pageJourneys } from './journeys-m8-page.mjs';
+import { bridgeJourneys } from './journeys-m9-bridge.mjs';
+import { mcpJourney } from './mcp.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -255,6 +257,16 @@ for (const language of ['fr', 'en']) {
         }
       }
     }
+  }
+}
+// The MCP server (M9) is spoken to over stdio, without a window: a journey of its own, in each language.
+if (!only || only.some((part) => 'serveur MCP'.includes(part))) {
+  for (const language of ['fr', 'en']) {
+    const label = `[${language.toUpperCase()}] serveur MCP`;
+    console.log(`\n${label}`);
+    const failed = await mcpJourney({ exe, language });
+    console.log(`  → ${label} : ${failed === 0 ? 'OK' : `ÉCHEC (${failed})`}`);
+    if (failed) failures++;
   }
 }
 console.log(failures === 0 ? '\nTous les parcours ont réussi.' : `\n${failures} parcours en échec.`);
