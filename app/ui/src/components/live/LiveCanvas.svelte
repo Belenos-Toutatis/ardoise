@@ -321,9 +321,14 @@
     schedule();
   }
 
-  // The marks belong to a page: turning it removes them.
+  // The marks belong to a page in the way it is held: another page, or the same page turned
+  // (the quick switch of the orientation, which keeps the index but swaps or flips the page),
+  // removes them.
   $effect(() => {
     void live.pageIndex;
+    void live.orientation;
+    void live.pageSize.width;
+    void live.pageSize.height;
     if (marks.length > 0 || markCurrent) clearMarks();
   });
 

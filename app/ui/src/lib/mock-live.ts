@@ -587,7 +587,8 @@ function followTablet(page: Note): void {
  * The tablet is held another way (`tablet_set_options`, `tablet_set_orientation`). In a running
  * session, as in Rust: the stroke in progress ends, the page on screen is turned with its ink,
  * blank pages not written yet take the new size, the other pages follow when they are shown
- * again, and every window gets a snapshot.
+ * again, and every window gets a snapshot. As in Rust, the switch also counts while the session
+ * still waits for the tablet (or reconnects): the snapshot follows at once.
  */
 export function setMockLiveOrientation(orientation: Orientation): void {
   if (orientation === heldAs) return;

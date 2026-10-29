@@ -210,6 +210,24 @@ describe('browser stand-in for live mode', () => {
     expect(sub.snapshots().length).toBe(count + 1);
   });
 
+  it('shows a switch made while the session still waits for the tablet', async () => {
+    mockLiveConfig.pen = false;
+    const sub = await subscribe();
+    const started = invoke('live_start') as LiveSnapshot;
+    expect(started.state).toBe('waiting');
+    setMockLiveOrientation('portraitLeft');
+    const waiting = sub.last()!;
+    expect(waiting.state).toBe('waiting');
+    expect(waiting.orientation).toBe('portraitLeft');
+    expect(waiting.page.page).toEqual({ width: 21600, height: 29700 });
+    // The tablet then streams: same position, the page is not turned again.
+    vi.advanceTimersByTime(mockLiveConfig.waitMs);
+    const live = sub.last()!;
+    expect(live.state).toBe('live');
+    expect(live.orientation).toBe('portraitLeft');
+    expect(live.page.page).toEqual({ width: 21600, height: 29700 });
+  });
+
   it('turns an earlier page only when it is shown again, and a blank page at once', async () => {
     mockLiveConfig.pen = false;
     const sub = await subscribe();

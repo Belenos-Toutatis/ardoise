@@ -120,6 +120,41 @@ fn a_switched_off_adapter_is_reported() {
 }
 
 #[test]
+fn a_quick_switch_while_live_mode_waits_for_the_tablet_reaches_the_sink() {
+    // The registered tablet cannot be reached: live mode waits. The sink still hears the new way
+    // of holding the tablet (the interface must show the switch), with the Slate Large's area as
+    // none is known.
+    let library = tempfile::tempdir().unwrap();
+    crate::identity::save(library.path(), &scripted_record()).unwrap();
+    let (service, statuses) = start(Some(library.path().to_owned()), Box::new(Handed(None)));
+    let (inputs, received) = mpsc::channel();
+    service.start_live(Box::new(ChannelSink(inputs)));
+    let next = || received.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(next(), LiveInput::State(LiveState::Waiting));
+    let options = TabletOptions {
+        orientation: Orientation::PortraitLeft,
+        ..TabletOptions::default()
+    };
+    service.set_options(options);
+    assert_eq!(
+        next(),
+        LiveInput::Reoriented {
+            width: ardoise_proto::SLATE_LARGE_WIDTH,
+            height: ardoise_proto::SLATE_LARGE_HEIGHT,
+            orientation: Orientation::PortraitLeft
+        }
+    );
+    // Another option alone says nothing.
+    service.set_options(TabletOptions {
+        auto_sync: false,
+        ..options
+    });
+    wait_for(&statuses, |s| !s.options.auto_sync);
+    assert!(received.try_recv().is_err());
+    service.shutdown();
+}
+
+#[test]
 fn options_are_followed_and_shown() {
     let library = tempfile::tempdir().unwrap();
     let (service, statuses) = start(Some(library.path().to_owned()), Box::new(Scripted));

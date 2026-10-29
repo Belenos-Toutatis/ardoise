@@ -292,8 +292,10 @@ pub enum LiveInput {
         height: u32,
         orientation: Orientation,
     },
-    /// The tablet is held another way while live mode streams (the quick switch of the live
-    /// window): the records that follow are turned for `orientation`; same `width` × `height`.
+    /// The tablet is held another way (the quick switch of the live window), while live mode
+    /// streams or while it still waits for the tablet (then before `Started`, which repeats the
+    /// same way): the records that follow are turned for `orientation`; `width` × `height` is
+    /// the tablet's drawing area (the Slate Large's when none is known yet).
     Reoriented {
         width: u32,
         height: u32,
