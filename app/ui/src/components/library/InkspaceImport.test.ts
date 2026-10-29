@@ -109,11 +109,11 @@ describe('importing from Inkspace', () => {
     expect(slot('inkspace-path')?.textContent).toBe(FOUND);
     expect(slot('inkspace-count')?.textContent).toContain('dont 1 illisible');
     expect(slot('inkspace-count')?.textContent).not.toContain('déjà');
-    expect(button('Importer 5 notes').disabled).toBe(false);
+    expect(button('Importer 4 notes').disabled).toBe(false);
     expect(binderField().value).toBe('Inkspace');
     expect(text()).toContain('Laissez vide pour ranger les notes à la racine');
 
-    button('Importer 5 notes').click();
+    button('Importer 4 notes').click();
     await vi.waitFor(() => expect(status()).toContain('Import des notes : 2 sur 5…'));
     expect(document.querySelector('progress')?.getAttribute('value')).toBe('2');
     expect(document.querySelector('progress')?.getAttribute('max')).toBe('5');
@@ -139,15 +139,16 @@ describe('importing from Inkspace', () => {
   it('knows the notes are already there when the dialog opens again', async () => {
     dialog();
     await found();
-    button('Importer 5 notes').click();
+    button('Importer 4 notes').click();
     await vi.waitFor(() => expect(slot('inkspace-report')).toBeTruthy());
     cleanup?.();
 
-    // The damaged note is still to do, the four others are in the library.
+    // The four readable notes are in the library; the damaged one cannot be imported.
     dialog();
     await vi.waitFor(() => expect(slot('inkspace-count')?.textContent).toContain('5 notes trouvées'));
     expect(slot('inkspace-count')?.textContent).toContain('dont 4 déjà dans la bibliothèque (elles seront ignorées)');
-    expect(button('Importer 1 note').disabled).toBe(false);
+    expect(text()).toContain("Les notes lisibles d'Inkspace sont toutes déjà dans la bibliothèque");
+    expect(button('Importer 0 notes').disabled).toBe(true);
     cleanup?.();
 
     // Everything in the library: nothing to do.
@@ -168,7 +169,7 @@ describe('importing from Inkspace', () => {
       'Classe/Sciences',
     ]);
     await type(binderField(), ' Classe/Sciences ');
-    button('Importer 5 notes').click();
+    button('Importer 4 notes').click();
     await vi.waitFor(() => expect(slot('inkspace-report')).toBeTruthy());
     expect(spy).toHaveBeenCalledWith(FOUND, 'Classe/Sciences', expect.any(Function));
     expect(slot('inkspace-report')!.textContent).toContain('4 notes importées dans le classeur « Classe/Sciences »');
@@ -179,7 +180,7 @@ describe('importing from Inkspace', () => {
     dialog();
     await found();
     await type(binderField(), '');
-    button('Importer 5 notes').click();
+    button('Importer 4 notes').click();
     await vi.waitFor(() => expect(slot('inkspace-report')).toBeTruthy());
     expect(spy).toHaveBeenLastCalledWith(FOUND, '', expect.any(Function));
     // The second import skips the notes the first one made: the report says so, at the root.
@@ -192,7 +193,7 @@ describe('importing from Inkspace', () => {
     await vi.waitFor(() => expect(slot('inkspace-not-found')?.textContent).toContain("n'a pas trouvé Wacom Inkspace"));
     expect(slot('inkspace-path')).toBeNull();
     expect(slot('inkspace-count')).toBeNull();
-    expect(buttons()).not.toContain('Importer 5 notes');
+    expect(buttons()).not.toContain('Importer 4 notes');
 
     (window as E2eWindow).__ardoiseE2eFolderPath = 'D:\\Copie\\LocalState\\WacomCloudDb';
     button('Choisir un dossier…').click();
@@ -200,7 +201,7 @@ describe('importing from Inkspace', () => {
     // The folder is shown as the LocalState folder the Rust side normalised it to.
     expect(slot('inkspace-path')?.textContent).toBe('D:\\Copie\\LocalState');
     expect(slot('inkspace-not-found')).toBeNull();
-    expect(button('Importer 5 notes').disabled).toBe(false);
+    expect(button('Importer 4 notes').disabled).toBe(false);
     expect(buttons()).toContain('Choisir un autre dossier…');
   });
 
@@ -225,7 +226,7 @@ describe('importing from Inkspace', () => {
     await vi.waitFor(() => expect(alertText()).toContain("ce dossier ne contient pas de notes d'Inkspace"));
     expect(alertText()).toContain('(C:\\Users\\demo\\Documents)');
     expect(slot('inkspace-path')?.textContent).toBe('C:\\Users\\demo\\Documents');
-    expect(buttons()).not.toContain('Importer 5 notes');
+    expect(buttons()).not.toContain('Importer 4 notes');
 
     button('Réessayer').click();
     await vi.waitFor(() => expect(inspect).toHaveBeenCalledTimes(2));
@@ -252,8 +253,8 @@ describe('importing from Inkspace', () => {
     const cancel = vi.spyOn(api, 'inkspaceCancel');
     const { onshow } = dialog();
     await found();
-    button('Importer 5 notes').click();
-    await vi.waitFor(() => expect(status()).toContain('Import des notes : 2 sur 5…'));
+    button('Importer 4 notes').click();
+    await vi.waitFor(() => expect(status()).toContain('Import des notes : 2 sur 4…'));
 
     button("Arrêter l'import").click();
     await vi.waitFor(() => expect(status()).toContain('Arrêt après la note en cours…'));
@@ -266,7 +267,8 @@ describe('importing from Inkspace', () => {
     expect(report).toContain('Import arrêté');
     expect(report).toContain('2 notes importées dans le classeur « Inkspace »');
     expect(report).toContain("Relancez l'import pour ajouter les autres");
-    expect(document.querySelector('li')).toBeNull();
+    // The note that cannot be read is reported whatever happens to the others.
+    expect(document.querySelectorAll('li')).toHaveLength(1);
 
     button('Voir les notes importées').click();
     expect(onshow).toHaveBeenCalledWith('Inkspace');
@@ -276,12 +278,12 @@ describe('importing from Inkspace', () => {
     vi.spyOn(api, 'inkspaceImport').mockRejectedValueOnce({ code: 'inkspaceBusy', message: '' });
     const { onclose, onshow } = dialog();
     await found();
-    button('Importer 5 notes').click();
+    button('Importer 4 notes').click();
     await vi.waitFor(() => expect(alertText()).toContain('un import depuis Inkspace est déjà en cours'));
-    expect(button('Importer 5 notes').disabled).toBe(false);
+    expect(button('Importer 4 notes').disabled).toBe(false);
     expect(slot('inkspace-report')).toBeNull();
 
-    button('Importer 5 notes').click();
+    button('Importer 4 notes').click();
     await vi.waitFor(() => expect(slot('inkspace-report')).toBeTruthy());
     expect(document.querySelector('[role="alert"]')).toBeNull();
     button('Fermer').click();
@@ -300,7 +302,7 @@ describe('importing from Inkspace', () => {
     });
     dialog();
     await found();
-    button('Importer 5 notes').click();
+    button('Importer 4 notes').click();
     await vi.waitFor(() => expect(slot('inkspace-report')).toBeTruthy());
     const report = slot('inkspace-report')!.textContent!;
     expect(report).toContain("Aucune note n'a été importée.");
@@ -317,7 +319,7 @@ describe('importing from Inkspace', () => {
     setLocale('en');
     dialog();
     await vi.waitFor(() => expect(slot('inkspace-count')?.textContent).toContain('5 notes found'));
-    button('Import 5 notes').click();
+    button('Import 4 notes').click();
     await vi.waitFor(() => expect(slot('inkspace-report')).toBeTruthy());
     const report = slot('inkspace-report')!.textContent!;
     expect(report).toContain('4 notes imported into the binder “Inkspace”');
@@ -342,7 +344,7 @@ describe('the library and the first-run offer', () => {
 
     entry.click();
     await found();
-    button('Importer 5 notes').click();
+    button('Importer 4 notes').click();
     await vi.waitFor(() => expect(slot('inkspace-report')).toBeTruthy());
     button('Voir les notes importées').click();
     await vi.waitFor(() => expect(slot('inkspace-path')).toBeNull());

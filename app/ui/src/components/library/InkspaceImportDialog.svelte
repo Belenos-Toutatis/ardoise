@@ -46,8 +46,8 @@
   let report = $state.raw<InkspaceReport | null>(null);
 
   const busy = $derived(detecting || reading);
-  /** Notes an import will look at: those not yet in the library. */
-  const toImport = $derived(source ? Math.max(0, source.notes - source.alreadyImported) : 0);
+  /** Notes an import will add: the readable ones not yet in the library. */
+  const toImport = $derived(source ? Math.max(0, source.notes - source.alreadyImported - source.unreadable) : 0);
 
   async function inspectFolder(path: string) {
     folder = path;
@@ -208,7 +208,7 @@
         </div>
 
         {#if toImport === 0}
-          <p class="muted">{t('inkspace.allImported')}</p>
+          <p class="muted">{t(source.unreadable > 0 ? 'inkspace.allReadableImported' : 'inkspace.allImported')}</p>
         {:else}
           <label class="field">
             <span>{t('inkspace.binder')}</span>

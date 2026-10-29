@@ -80,6 +80,41 @@ app/src-tauri     ardoise.exe --import-inkspace [LocalState] [--library DIR] [--
   (binder `Inkspace`, original dates, Inkspace id kept to avoid duplicates on a second import) and prints a table and
   `N/N notes importées`.
 
+### Import from the interface (M10 review)
+
+- **Detection** (`locate.rs`): the rules are platform-free (`packages_dirs(env)` / `locate_with_env(reader, env)`, the
+  environment passed in, tested on fake trees): `%LOCALAPPDATA%\Packages`, then `%USERPROFILE%\AppData\Local\Packages`
+  when that is another folder, first `D91E29CF.InkspaceApp_*` package (case-insensitive) whose `LocalState` has
+  `WacomCloudDb\_`. Research §1 knows no other location of Inkspace 3's notes. `locate_local_state` uses the process
+  environment on Windows and finds nothing elsewhere. A folder chosen by hand goes through `local_state_in`: a
+  LocalState (or a copy under any name), the package folder, `WacomCloudDb`, `WacomCloudDb\_`, or a `Packages` folder;
+  existence checks only (only a folder named `Packages` is listed), so picking `db\` by mistake reads nothing.
+- **One implementation** (`app/src-tauri/src/import.rs`): `read_notes` (the crate's in-memory import, errors mapped to
+  `inkspaceUnreadable` / `inkspaceDamaged` / `inkspaceTooLarge`), `survey` (counts for the dialog: notes, already
+  imported, unreadable), `save_into_library` / `import_into_library` (binder validated by `Library::binder_dir` before
+  anything is read; `inkspaceTarget` when the binder would resolve inside the LocalState; each note written
+  atomically by `Library::create` with its thumbnail; per-note failures with their code: `inkspaceNoteDamaged` for a
+  note that cannot be decoded, the library's code for a note that cannot be written). `import/cli.rs` is the console
+  front end (French table, `--compare`).
+- **Dedup**: on the note id, which is UUID v5 of Inkspace's id (and page index), looked up in the library listing
+  and in the trash's records. It survives edits, renames, moves and the kept part of a split; a trashed note is not
+  brought back. A note file that cannot be listed (damaged, newer version) is not known, so its Inkspace note would be
+  imported again (a ` (2)` file); accepted, since such a file needs the user's attention anyway.
+- **Cancel**: a flag checked before each note (`inkspace_cancel`); the notes written stay complete and the report
+  says `cancelled`; the next import skips them. A cancel while the database is read stops before the first write.
+- **Commands**: `inkspace_detect` → LocalState or null; `inkspace_inspect(path)` → `InkspaceSource`;
+  `inkspace_import(path, binder, onProgress: Channel<{done,total}>)` → `LibraryImport` (`{ binder, total, imported,
+  skipped, failed: [{ inkspaceId, created, code, message }], cancelled }`), one import at a time (`inkspaceBusy`);
+  `inkspace_cancel`. All run on blocking threads.
+- **Interface**: sidebar entry « Importer depuis Inkspace… » (`InkspaceImportDialog.svelte`), and an offer in the
+  first-run wizard when Inkspace is detected (`inkspaceOffer.pending` opens the dialog on the library screen; the user
+  still confirms there). Folder picker hook for the journeys: `window.__ardoiseE2eFolderPath`.
+- **Test data**: the synthetic Inkspace builder is the crate's `synthetic` module (feature `synthetic`, enabled by the
+  app and by the crate's own tests through a self dev-dependency); `ardoise.exe --create-demo-inkspace DIR` writes four
+  made-up notes into a new or empty DIR (refuses anything else, so real Inkspace data cannot be touched). The journey
+  `app/e2e/journeys-m10-inkspace.mjs` puts such a folder where detection looks (the runner already points
+  `LOCALAPPDATA` to the run's folder).
+
 ## Decisions made while building M2
 
 - **Width semantics.** `Stroke::width` is the full-pressure diameter for every tool (the major axis for the fountain

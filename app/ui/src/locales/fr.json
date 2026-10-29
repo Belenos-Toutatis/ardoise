@@ -1470,6 +1470,7 @@
     "importOne": "Importer 1 note",
     "import": "Importer {count} notes",
     "allImported": "Toutes les notes d'Inkspace sont déjà dans la bibliothèque : il n'y a rien à importer.",
+    "allReadableImported": "Les notes lisibles d'Inkspace sont toutes déjà dans la bibliothèque : il n'y a rien à importer.",
     "progress": "Import des notes : {done} sur {total}…",
     "progressLabel": "Avancement de l'import",
     "stop": "Arrêter l'import",

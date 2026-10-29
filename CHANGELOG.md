@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Ajouté (import Inkspace depuis l'application)
+
+- « Importer depuis Inkspace… » dans la bibliothèque, et proposé par l'assistant du premier lancement quand Inkspace est trouvé : Ardoise trouve tout seul les notes de Wacom Inkspace sur ce PC (ou dans une copie de son dossier « LocalState » choisie à la main), dit combien il y en a et combien sont déjà dans la bibliothèque, les importe dans le classeur choisi (« Inkspace » par défaut) avec une barre d'avancement et un bouton pour arrêter, puis fait le bilan : notes importées, notes déjà présentes (ignorées, même déplacées ou mises à la corbeille) et notes qui n'ont pas pu l'être, avec la raison. Rien n'est modifié chez Inkspace. `ardoise.exe --import-inkspace` fait exactement le même import ; `ardoise.exe --create-demo-inkspace DOSSIER` écrit des données Inkspace de démonstration (pour les tests).
+
 ### Ajouté (jalon M9 — pilotage par un assistant)
 
 - Serveur MCP local `ardoise.exe --mcp [--read-only]` (entrée et sortie standard, aucun port réseau, sans fenêtre, application ouverte ou non) : l'assistant de l'utilisateur (Claude Code, Claude Desktop…) liste et cherche les notes, lit leurs données, leur texte reconnu avec la position des lignes et leur structure, et les voit en image (PNG, 2000 pixels au plus) pour reconnaître schémas et formules. `--read-only` limite l'assistant à la lecture.

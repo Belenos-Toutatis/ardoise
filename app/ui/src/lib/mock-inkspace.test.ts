@@ -35,8 +35,8 @@ describe('Inkspace import in the browser stand-in', () => {
     const before = mockLibrary().notes.size;
     const steps: InkspaceProgress[] = [];
     const first = await importNotes('Inkspace', (p) => steps.push(p));
-    expect(steps.map((s) => s.done)).toEqual([0, 1, 2, 3, 4, 5]);
-    expect(steps.every((s) => s.total === 5)).toBe(true);
+    expect(steps.map((s) => s.done)).toEqual([0, 1, 2, 3, 4]);
+    expect(steps.every((s) => s.total === 4)).toBe(true);
     expect(first).toMatchObject({ binder: 'Inkspace', total: 5, imported: 4, skipped: 0, cancelled: false });
     expect(first.failed).toHaveLength(1);
     expect(first.failed[0]).toMatchObject({ code: 'inkspaceNoteDamaged' });

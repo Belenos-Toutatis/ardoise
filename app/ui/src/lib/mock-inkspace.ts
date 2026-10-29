@@ -31,7 +31,7 @@ export const mockInkspace = {
   detected: LOCAL_STATE as string | null,
   /** Pause before each note, in milliseconds (a calm pace in the dev browser); tests set it to 0. */
   stepMs: 300,
-  /** Holds the import before note `before` (from 0) until `until` settles; tests use it as a gate. */
+  /** Holds the import before readable note `before` (from 0) until `until` settles; tests use it as a gate. */
   hold: null as { before: number; until: Promise<void> } | null,
 };
 
@@ -84,17 +84,27 @@ async function importNotes(
   running = true;
   cancelRequested = false;
   const ids = importedIds();
+  // As on the Rust side: the notes that cannot be read are reported first, the progress counts
+  // the readable ones.
+  const readable = NOTES.filter((n) => n.readable);
   const report: InkspaceReport = {
     binder: target,
     total: NOTES.length,
     imported: 0,
     skipped: 0,
-    failed: [],
+    failed: NOTES.filter((n) => !n.readable).map(
+      (note): InkspaceFailure => ({
+        inkspaceId: note.id,
+        created: note.created,
+        code: 'inkspaceNoteDamaged',
+        message: 'unknown stroke format',
+      }),
+    ),
     cancelled: false,
   };
   try {
-    onProgress?.({ done: 0, total: NOTES.length });
-    for (const [index, note] of NOTES.entries()) {
+    onProgress?.({ done: 0, total: readable.length });
+    for (const [index, note] of readable.entries()) {
       if (mockInkspace.hold?.before === index) await mockInkspace.hold.until;
       await sleep(mockInkspace.stepMs);
       if (cancelRequested) {
@@ -103,21 +113,13 @@ async function importNotes(
       }
       if (ids.has(note.id)) {
         report.skipped += 1;
-      } else if (!note.readable) {
-        const damaged: InkspaceFailure = {
-          inkspaceId: note.id,
-          created: note.created,
-          code: 'inkspaceNoteDamaged',
-          message: 'unknown stroke format',
-        };
-        report.failed.push(damaged);
       } else {
         // Empty title, like Inkspace's notes.
         mockLibraryInvoke('create_note', { binder: target, title: '' });
         ids.add(note.id);
         report.imported += 1;
       }
-      onProgress?.({ done: index + 1, total: NOTES.length });
+      onProgress?.({ done: index + 1, total: readable.length });
     }
     return report;
   } finally {
