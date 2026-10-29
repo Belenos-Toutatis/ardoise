@@ -245,6 +245,8 @@ pub enum LiveEvent {
     /// subscribes meanwhile. Its changes stay in memory and are tried again.
     SaveFailed {
         page_index: usize,
+        /// The library error's code: the interface says it in words (`errorCodes.*`).
+        code: String,
         message: String,
     },
 }
