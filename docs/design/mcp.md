@@ -65,7 +65,7 @@ deleted permanently), `false` on the others, `idempotentHint` where true. Errors
 | `split_note` | `note`, `at_ms` or `polygon` (mm) | the M5 split |
 | `straighten_shapes` | `note`, `strokes?` (indices; default the drawings found by Windows' ink analysis on visible layers, required without it) | the M7 straightening, one save; the version before goes to the library's trash as a note of its own |
 | `export_note` | `notes`, `format` (`png`/`jpg`/`webp`/`svg`/`pdf`/`txt`/`md`/`docx`/`gif`/`webm`/`mp4`), `path` (absolute file or folder), options of each format (dpi, background, quality, …) | the app's exports; never overwrites (" (2)" added), returns the written paths |
-| `set_note_text` | `note`, `text`, `language?` | stores a corrected transcription in the per-PC handwriting cache, used by the search instead of the recogniser's text until the ink changes; never written into the note file |
+| `set_note_text` | `note`, `text`, `language?` | stores a corrected transcription in the per-PC handwriting cache, used by the search and the text exports instead of the recogniser's text until the ink changes; never written into the note file |
 
 ### Bridge (need the app open)
 
@@ -250,7 +250,9 @@ setting, each naming the tools to use:
     to 16, `frame_rate` 10/15/24/30/60, `hold_end_seconds` 0 to 60 (`options_of`); then the app plans the replay
     (`video::estimate_in`, no file written) and refuses one over 11 minutes (narration included), 39 600 frames or
     20 minutes of estimated encoding (`check_replay_plan`), before encoding anything.
-    The text exports use the recogniser's text, as the app's: a correction made with `set_note_text` is not in them.
+    The text exports use the corrected transcription when there is one, as the app's (changed on 2026-10-29 with the
+    Markdown and Word fidelity fix, `docs/design/extras.md`, M8): the `.txt` gives it as it is, Markdown and Word lay it
+    over the recognised lines.
   - `set_note_text` / `get_note_text`: see below.
 - **Corrected transcription** (`set_note_text`): kept in the per-PC handwriting cache
   (`%LOCALAPPDATA%\Ardoise\handwriting\`) as `<note id>-<strokes hash>-fix.json`

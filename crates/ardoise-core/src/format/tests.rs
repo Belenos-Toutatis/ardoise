@@ -981,9 +981,17 @@ fn generate_v1_fixtures() {
 #[test]
 fn v1_fixtures_are_read() {
     let dir = fixtures_dir();
-    for (name, expected, version) in fixtures() {
+    for (name, mut expected, version) in fixtures() {
         let path = dir.join(name);
-        let file = read_note(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut file = read_note(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+        // The nested original is compared by its content: the ZIP writer records the system that
+        // made it (the fixture was written on Windows, the expected archive is made here).
+        let original = |bytes: Option<Vec<u8>>| bytes.map(|b| read_from_bytes(&b).unwrap());
+        assert_eq!(
+            original(file.original_note.take()),
+            original(expected.original_note.take()),
+            "{name}"
+        );
         assert_eq!(file, expected, "{name}");
         let header = read_header(&path).unwrap();
         assert_eq!(header.format, version, "{name}");

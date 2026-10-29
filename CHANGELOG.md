@@ -73,6 +73,7 @@
 ### Corrigé
 
 - Deux tests de `ardoise-core` passent aussi sous Linux (sessions cloud) : noms de fichiers longs, chemins de corbeille avec lettre de lecteur (un nom contenant `:` est refusé sur tous les systèmes).
+- Export du texte reconnu en Markdown et en Word aussi fidèle que le texte copié : les mots sont ceux de la reconnaissance de la note entière (ou le texte corrigé par l'utilisateur, désormais repris aussi par le `.txt` et la copie), l'analyse de Windows ne donnant plus que la structure ; un trait tracé sous des mots (ou à travers) n'est plus exporté comme une image mais les souligne (gras en Markdown) ou les barre ; un dessin à côté d'un paragraphe vient après lui ; option « Inclure les dessins » dans la fenêtre d'export, cochée seulement quand les notes ont des dessins.
 
 ### Ajouté (jalon M3 — interface : bibliothèque et éditeur)
 

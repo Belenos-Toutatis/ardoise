@@ -35,6 +35,9 @@ export const ENGLISH_RECOGNIZER: RecognizerInfo = {
 /** What the stand-in "reads" in the notes, by note id (the three demo notes by default). */
 export const mockTexts = new Map<string, string>();
 
+/** How many drawings the stand-in finds in a note, by note id (none when absent). */
+export const mockDrawings = new Map<string, number>();
+
 function defaultTexts(): [string, string][] {
   return [
     ['b1f0c6c2-0000-4000-8000-000000000001', 'la lumière se propage\nen ligne droite dans un milieu homogène'],
@@ -58,7 +61,14 @@ export const mockHandwriting = {
   /** The last text export. */
   exported: null as { destination: string; document: string } | null,
   /** The last text export with structure. */
-  exportedStructured: null as { format: StructuredFormat; destination: string; labels: TextLabels } | null,
+  exportedStructured: null as {
+    format: StructuredFormat;
+    destination: string;
+    labels: TextLabels;
+    includeDrawings: boolean;
+  } | null,
+  /** How many times the drawings of the notes were looked for. */
+  drawingChecks: 0,
 };
 
 export function resetMockHandwriting(): void {
@@ -72,9 +82,13 @@ export function resetMockHandwriting(): void {
     copied: null,
     exported: null,
     exportedStructured: null,
+    drawingChecks: 0,
   });
   mockTexts.clear();
   for (const [id, text] of defaultTexts()) mockTexts.set(id, text);
+  mockDrawings.clear();
+  // The physics lesson has a ray of light drawn under its text.
+  mockDrawings.set('b1f0c6c2-0000-4000-8000-000000000001', 1);
 }
 
 resetMockHandwriting();
@@ -225,8 +239,19 @@ export function mockHandwritingInvoke(command: string, args: Record<string, unkn
       const destination = args.destination as string;
       const format = args.format as StructuredFormat;
       texts(args.sources as ExportSource[]);
-      mockHandwriting.exportedStructured = { format, destination, labels: args.labels as TextLabels };
+      mockHandwriting.exportedStructured = {
+        format,
+        destination,
+        labels: args.labels as TextLabels,
+        includeDrawings: args.includeDrawings !== false,
+      };
       return { paths: [destination], analyzed: true } satisfies StructuredExport;
+    }
+    case 'structured_text_drawings': {
+      const sources = args.sources as ExportSource[];
+      texts(sources);
+      mockHandwriting.drawingChecks += 1;
+      return sources.reduce((sum, source) => sum + (mockDrawings.get(sourceNote(source).id) ?? 0), 0);
     }
     case 'copy_handwriting_text': {
       const document = textDocument(texts(args.sources as ExportSource[]));

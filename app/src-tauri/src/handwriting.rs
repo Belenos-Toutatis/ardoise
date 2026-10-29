@@ -25,8 +25,9 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use ardoise_core::fsutil::write_atomic;
+use ardoise_core::note::Note;
 use ardoise_core::settings::HandwritingLanguage;
-use ardoise_hwr::{HwrError, Language, RecognizerInfo, SystemRecognizer};
+use ardoise_hwr::{HwrError, Language, Recognition, RecognizerInfo, SystemRecognizer};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -227,8 +228,63 @@ pub struct NoteText {
     pub text: String,
 }
 
-/// The recognised text of `sources` (the editor's note as it is in memory, or notes of the
-/// library), recognised now when the cache does not have it.
+/// What the text exports read of a note: the recognition of the whole note (the words where the
+/// ink is) and the transcription the user corrected for its ink, which wins. The `.txt` export,
+/// the clipboard and the preview, Markdown and Word all give the same words.
+pub(crate) struct NoteReading {
+    pub recognition: Arc<Recognition>,
+    pub correction: Option<String>,
+}
+
+impl NoteReading {
+    /// The note's text, line after line: the correction (its blank lines kept), else the
+    /// recognised lines.
+    pub fn text(&self) -> String {
+        match &self.correction {
+            Some(text) => corrected_text(text),
+            None => self.recognition.text(),
+        }
+    }
+}
+
+/// A corrected transcription as text: lines without trailing spaces or `\r`, no blank line at
+/// either end.
+fn corrected_text(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    lines.join("\n").trim_matches('\n').to_owned()
+}
+
+/// Reads `note` for the text exports: its correction, and its recognition from the cache or
+/// recognised now. A note with a correction is still exported when it cannot be recognised
+/// here (no recognizer on this PC): the correction is its text, without positions.
+pub(crate) fn reading_of(indexer: &Indexer, note: &Note) -> Result<NoteReading, HwrError> {
+    let correction = indexer.correction_of(note);
+    match indexer.recognition_of(note) {
+        Ok(recognition) => Ok(NoteReading {
+            recognition,
+            correction: correction.map(|c| c.text),
+        }),
+        Err(error) => match correction {
+            Some(correction) => Ok(NoteReading {
+                recognition: Arc::new(Recognition::empty(correction.language)),
+                correction: Some(correction.text),
+            }),
+            None => Err(error),
+        },
+    }
+}
+
+/// The text of `note` as the `.txt` export and the clipboard give it: its correction, else its
+/// recognised lines (recognised now when the cache does not have them).
+pub(crate) fn plain_text_of(indexer: &Indexer, note: &Note) -> Result<String, HwrError> {
+    match indexer.correction_of(note) {
+        Some(correction) => Ok(corrected_text(&correction.text)),
+        None => Ok(indexer.recognition_of(note)?.text()),
+    }
+}
+
+/// The text of `sources` (the editor's note as it is in memory, or notes of the library): the
+/// corrected transcription, else the recognition, made now when the cache does not have it.
 fn texts_of(
     indexer: &Indexer,
     context: &AppContext,
@@ -241,7 +297,7 @@ fn texts_of(
         .into_iter()
         .zip(paths)
         .map(|(source, path)| {
-            let recognition = indexer.recognition_of(&source.note).map_err(hwr_error)?;
+            let text = plain_text_of(indexer, &source.note).map_err(hwr_error)?;
             let title = source.note.title.trim();
             Ok(NoteText {
                 path,
@@ -250,7 +306,7 @@ fn texts_of(
                 } else {
                     title.to_owned()
                 },
-                text: recognition.text(),
+                text,
             })
         })
         .collect()
@@ -445,11 +501,23 @@ mod tests {
             image_key: None,
         };
         assert_eq!(
-            texts_of(&indexer, &context, vec![in_memory])
+            texts_of(&indexer, &context, vec![in_memory.clone()])
                 .unwrap_err()
                 .code(),
             "handwritingUnsupported"
         );
+        // A transcription the user corrected is the text, even where nothing can be recognised;
+        // the structured exports read it too, without positions.
+        let note = in_memory.note.clone().unwrap();
+        CacheDir::new(cache.path())
+            .set_correction_for(&note, Language::Fr, "  Le renard \r\n\r\ndort\r\n\r\n")
+            .unwrap();
+        let texts = texts_of(&indexer, &context, vec![in_memory]).unwrap();
+        assert_eq!(texts[0].text, "  Le renard\n\ndort");
+        let reading = reading_of(&indexer, &note).unwrap();
+        assert!(reading.recognition.is_empty());
+        assert_eq!(reading.recognition.language, Language::Fr);
+        assert_eq!(reading.text(), "  Le renard\n\ndort");
         indexer.shutdown();
     }
 

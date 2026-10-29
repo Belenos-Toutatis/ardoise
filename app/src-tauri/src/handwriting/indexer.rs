@@ -428,6 +428,13 @@ impl Indexer {
         Arc::clone(&self.shared.services.on_demand)
     }
 
+    /// The transcription corrected for `note` (`set_note_text`), if its ink is still the one it
+    /// was written for: the text exports give it instead of the recogniser's text.
+    pub fn correction_of(&self, note: &Note) -> Option<Correction> {
+        unlocked("reading a correction");
+        self.shared.disk.correction_for(note)
+    }
+
     /// The recognised text of `note` (as it is in memory: an editor's unsaved changes count),
     /// from the cache or recognised now (and kept).
     pub fn recognition_of(&self, note: &Note) -> Result<Arc<Recognition>, HwrError> {

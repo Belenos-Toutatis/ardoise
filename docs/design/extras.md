@@ -318,18 +318,72 @@ notes go one after the other (a rule between two notes in Markdown, a new page i
   strokes. `ardoise-hwr` drives it on the same worker thread as the recognizer (`Recognizer::analyze`, answering
   `Unsupported` elsewhere); the tree is flattened to `Region`s (paragraph, list item, drawing; stroke positions mapped
   back through the ids). One analysis of a one-page note takes about 2 s (the first one on a PC a little more).
-- **The text is not the analyzer's.** `InkAnalyzer` has no language setting (it reads with the language of the system)
-  and the app's chosen language must win, so `structure::read_regions` reads again each paragraph and list item **on
-  its own** with the recognizer of the chosen language. This is also more accurate than the page-wide recognition the
-  search uses: on the synthetic test page the page-wide pass split "nous irons" into "nousirons" and "poires rouges"
-  into "poiresronges", while the region by region reading gave every phrase right
-  (`cargo test -p ardoise-hwr --test structure -- --nocapture` prints both). A region that cannot be read again keeps
-  the analyzer's text, or the words of the cached page recognition found inside it.
+- **The words are those of the plain text.** The Markdown and Word exports give the words of the `.txt` export and the
+  clipboard: the recognition of the whole note (the cache the search uses), or the user's corrected transcription. The
+  analysis gives the structure only. M8 first read each paragraph and list item again on its own (`read_regions`), on
+  the grounds that the synthetic test page came out better that way ("nousirons" read as "nous irons"); on a real note
+  of the user (2026-10-29) the opposite happened: the copied text had the right words and the Markdown misread several
+  of them, and the per-region reading also ignored the user's corrections. So (`structure::from_regions`):
+  - each recognised line goes, in the engine's order, to the paragraph or list item whose rectangle holds the largest
+    share of it (at least 20 %, or its middle; the region taken a quarter of a line larger on each side, as the two
+    engines draw their rectangles differently; the smaller region on a tie); a line spread over two regions is not split
+    (it stays as the plain text has it). Lines no region holds are laid out by the fallback's rules below;
+  - a region in which the recognition has no word at all is read on its own (`read_regions`), with the recognizer of
+    the chosen language (`InkAnalyzer` has no language setting and reads with the system's); if that fails too, the
+    analyzer's own text stands in. A region with a word of a line that went to another region (a title and a date on
+    one row: one recognised line, two regions) is neither read again nor given the analyzer's text: its words would come
+    twice. A list item loses its dash or number, and a first word made of signs only (the bullet
+    the analyzer found, read as "→" or "°");
+  - what the recognition read in a drawing's ink, outside every paragraph and list item ("o" for a circle), is
+    dropped: the drawing's image shows it.
+- **Corrections** (`set_note_text`, MCP; `handwriting/cache.rs`, `Indexer::correction_of`). The corrected text always
+  wins, in the `.txt`, the clipboard and the preview (blank lines kept) as in Markdown and Word (`NoteReading`,
+  `handwriting.rs`; the MCP server's `export_note` too). `structure::lay_correction` lays it over the recognised lines:
+  when both have as many lines (blank ones aside) each corrected line takes the place of its recognised line, its words
+  the rectangles of the recognised words when there are as many, else the line's width shared by their letters; then the
+  structure is built as above, nothing is read again, a region the user's lines do not reach is left out, and no
+  corrected word is dropped. When the lines do not match, the corrected text is exported as it is, in plain paragraphs
+  (blank lines separate them, a line starting with a dash or a number is a list item), placed where the text was, the
+  drawings around it. A note with a correction is exported even on a PC without a recognizer (the correction, without
+  positions; without the analysis either, nothing tells its handwriting from drawings, so it has none). Limit: lines are
+  matched by their number only; a correction that merges two lines and splits another keeps the right text, but some
+  of its words may land in the neighbouring block or take a neighbour's underline.
+- **Underlines** (`structure::decoration_of`). A thin, wide group of strokes (the analyzer's drawing or unclassified ink,
+  or a group of the fallback's uncovered ink) right under a line or through it is no drawing: at most half the line's
+  height tall (a line tall when six times wider than tall: a sloping underline), three times wider than tall and wider
+  than 0.4 line; its middle below 64 % of the line's height (from the top) and its top at most half a line under the line
+  is an **underline**, between 20 % and 64 % a **strikethrough**. It marks the words it covers (each by half its width at
+  least, together under at least half of the mark: one much longer than the words is a rule or an arrow), on the nearest
+  line; a "word" whose rectangle is the mark's (the recognizer's reading of it, "_") goes. The boundary is set for lines
+  with ascenders and descenders (small letters' middle at about half the line, baseline at two thirds); on a line
+  without descenders a strikethrough is taken for an underline, the safer mistake. Marks go in the text model (`document::Text`: spans with a `Mark`): Word underlines the
+  words (`<w:u w:val="single"/>`) or strikes them (`<w:strike/>`); Markdown has no underline (`<u>` is raw HTML that
+  many viewers strip), so underlined words get **strong emphasis** (`**…**`: a hand underline marks what matters) and
+  struck ones `~~…~~` (GitHub, Obsidian, Typora). A mark over no word, or far from any line, stays a drawing. Without
+  the analysis, a strikethrough is hardly ever found: its middle lies in a word's rectangle, so the fallback counts it
+  as read text, not as a mark; underlines (below the words) are found.
+- **Where the drawings go** (`structure::reading_order`). The blocks of text top to bottom (then left to right); each
+  drawing after the last block it comes after: a drawing **beside** a block (they overlap vertically by 30 % of the
+  smaller height and horizontally by at most 20 % of the narrower width) comes after it when it is on its right, before
+  it on its left; otherwise after the blocks above its middle. So a figure drawn right of a paragraph follows that
+  paragraph (even when its top is higher), one as tall as two paragraphs follows the second, and a list beside a figure
+  is not cut by it. Markdown (and the Word export, one column) cannot place a picture beside a paragraph: CommonMark has
+  no floats or columns, an HTML table or `<img align>` is raw HTML many viewers strip or render differently, and the
+  file must stay plain text the user can edit. After the paragraph is the closest a single column gets.
+- **"Inclure les dessins"** (export window, `TextExportSection.svelte`). Markdown and Word include the drawings unless
+  the option is off. It is on by default only when the notes have drawings: when the window opens, for five notes at
+  most, `structured_text_drawings(sources) -> number` builds their structures and counts the drawings (the option shows
+  "Recherche des dessins…" meanwhile, and the Markdown and Word buttons wait, as an export started then would analyse
+  the same pages again; none: off and greyed, "Aucun dessin trouvé"). The structures are kept in memory
+  (`textdoc::Structures`, the last 8, keyed by note id, strokes, visible layers, recognition and correction), so the
+  export that follows does not analyse the page again (about 2 s a page). For more notes, or when the search fails, the
+  option stays on (a note without drawings exports the same either way). `export_structured_text` takes
+  `includeDrawings` (absent: on); the drawings' words are dropped either way (they are the drawing's ink).
 - **Fallback without the analysis** (`structure::from_recognition`, platform-free, tested on Linux): lines whose gap to
   the previous one exceeds one line height start a paragraph; a line starting with a dash, bullet, star or number
   (`strip_bullet`; "-5" is a number, not a bullet), or with a small unread mark drawn to its left, is a list item that
   takes the following indented lines; ink not under any recognised word, grouped by proximity (4 mm, or half a
-  line), is a drawing (marks under 2 mm are dropped). It is weaker: the recognizer reads drawings as stray words
+  line), is a drawing (marks under 2 mm are dropped) or an underline (above). It is weaker: the recognizer reads drawings as stray words
   ("J", "o") that hide them, so a circle drawn among text is often missed. The dialog says so when a note's layout was
   guessed (`handwriting.export.guessed`).
 - **Drawings** are cropped from one rendering of the note that holds only the drawings' strokes (the text next to a
@@ -355,6 +409,14 @@ notes go one after the other (a rule between two notes in Markdown, a new page i
   is created only when there is a drawing. Tests (`textdoc.rs`): existing `<name>-1.png` and a foreign
   `<name>_images` untouched, links matching the files written, fewer drawings leaving no stale image. The
   interface's "Drawings saved…" sentence says "in the folder next to it". Word is unaffected (drawings embedded).
-- Command `export_structured_text(sources, format: 'md'|'docx', destination, labels) -> { paths, analyzed }`
-  (`textdoc.rs`), through the indexer's on-demand engine; same sources as the `.txt` export (the note as it is in the
-  editor, or notes of the library).
+- Command `export_structured_text(sources, format: 'md'|'docx', destination, labels, includeDrawings?) -> { paths,
+  analyzed }` (`textdoc.rs`), through the indexer's on-demand engine; same sources as the `.txt` export (the note as it
+  is in the editor, or notes of the library). `structured_text_drawings(sources) -> number` (above).
+- Tests on Linux (synthetic recognitions and analyses, a fake engine): `ardoise-hwr` `structure::tests` (lines to
+  regions in order, a region without a line read on its own and only then, corrections laid line by line or not,
+  underlines and strikethroughs in both paths and the mark's own reading, drawings beside and between blocks, the
+  structure without drawings), `markdown`/`docx` (marked runs), `textdoc::tests` (the export and its check through the
+  indexer, a correction read from the cache, the structures kept once), `handwriting::tests` (the `.txt` text from a
+  correction, without an engine), `TextExportSection.test.ts` (the option). On Windows, `cargo test -p ardoise-hwr
+  --test structure -- --nocapture` analyses a synthetic page with an underlined title and prints the recognition, the
+  regions, the structure and the underlined words.
