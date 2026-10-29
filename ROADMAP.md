@@ -116,12 +116,14 @@ Vérifié sous Windows le 2026-10-25 : `CHECK OK`, `E2E OK` (14 parcours, FR et 
 
 Remarques de l'utilisateur après ses premiers essais sans la tablette (25 octobre 2026), à faire en une seule série.
 
-- [ ] Feuille : choisir portrait ou paysage sans tourner l'écriture ; changer le format du papier (A4, A5, Letter, personnalisé) en gardant l'écriture ; tourner seulement l'image ou la page de PDF importée ; une note faite à partir d'un PDF prend l'orientation de sa page ; copier-coller des traits d'une note à l'autre.
-- [ ] Orientation du bloc-notes : les quatre positions d'Inkspace (paysage ou portrait, dans un sens ou dans l'autre) à la place de droitier / gaucher, appliquées à la synchronisation et au mode direct, avec un bouton rapide dans la fenêtre du direct.
-- [ ] Stylet et tactile : le dos du stylet Surface gomme ; pression, bouton latéral, main posée sur l'écran ignorée ; pincer pour zoomer, glisser pour déplacer ; zoom « ajuster à la largeur » partout où l'on zoome ; écrire par-dessus la présentation au stylet ou au doigt.
-- [ ] Exports : WebP dans l'export image ; export texte en Markdown et en Word avec la structure tirée de l'écriture (paragraphes, listes, dessins) ; impression directe.
+- [x] Feuille : choisir portrait ou paysage sans tourner l'écriture ; changer le format du papier (A4, A5, Letter, personnalisé) en gardant l'écriture ; tourner seulement l'image ou la page de PDF importée ; une note faite à partir d'un PDF prend l'orientation de sa page ; copier-coller des traits d'une note à l'autre.
+- [x] Orientation du bloc-notes : les quatre positions d'Inkspace (paysage ou portrait, dans un sens ou dans l'autre) à la place de droitier / gaucher, appliquées à la synchronisation et au mode direct, avec un bouton rapide dans la fenêtre du direct.
+- [x] Stylet et tactile : le dos du stylet Surface gomme ; pression, bouton latéral, main posée sur l'écran ignorée ; pincer pour zoomer, glisser pour déplacer ; zoom « ajuster à la largeur » partout où l'on zoome ; écrire par-dessus la présentation au stylet ou au doigt.
+- [x] Exports : WebP dans l'export image ; export texte en Markdown et en Word avec la structure tirée de l'écriture (paragraphes, listes, dessins) ; impression directe.
 
 **Critères de fin** : `CHECK OK` et `E2E OK` ; tests de chaque fonction ; stylet et écran tactile essayés à la main sur un PC tactile.
+
+Vérifié sous Windows le 2026-10-29 : `CHECK OK`, `E2E OK` (26 parcours, FR et EN), `SELFTEST OK`, après une relecture indépendante dont les remarques sont corrigées. Restent à essayer à la main : le stylet et l'écran tactile sur un PC tactile (`docs/hardware-tests.md`, H3 ; le dos du stylet ne peut pas être simulé par les tests), les quatre positions avec la vraie tablette (C3), l'impression sur une vraie imprimante, l'export Word ouvert dans Word et la mise en forme Markdown/Word sur une vraie écriture.
 
 ## M9 — Pilotage par un assistant (MCP)
 
