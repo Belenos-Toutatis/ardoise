@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::fs;
 use std::sync::atomic::AtomicUsize;
 
+use ardoise_media::decode_narration;
 use ardoise_media::microphone::simulated_narration;
 use serde_json::json;
 
@@ -631,12 +632,13 @@ fn a_replay_narration_is_saved_into_its_note_and_read_back() {
         (2.0, Some(500), 300)
     );
     assert!((1990..=2010).contains(&info.duration_ms), "{info:?}");
-    let wav = narration_wav(&library, &saved.path).unwrap();
-    assert_eq!(&wav[..4], b"RIFF");
+    // The interface gets the stream as stored (the WebView plays Ogg Opus), never a WAV file.
+    let opus = narration_opus(&library, &saved.path).unwrap();
+    assert_eq!(&opus[..4], b"OggS");
+    assert_eq!(Some(&opus), after.file.audio.as_ref());
     // The header says what decoding gives.
     let decoded = read_narration(&library, &saved.path).unwrap().unwrap();
     assert_eq!(info.duration_ms, duration_ms(decoded.duration()));
-    assert_eq!(wav.len(), 44 + decoded.clip.samples.len() * 2);
 
     // Recording again replaces it; deleting it removes it.
     let shorter = Narration {
@@ -650,7 +652,7 @@ fn a_replay_narration_is_saved_into_its_note_and_read_back() {
     assert_eq!(read_narration(&library, &saved.path).unwrap(), None);
     assert_eq!(narration_info_in(&library, &saved.path).unwrap(), None);
     assert_eq!(
-        narration_wav(&library, &saved.path).unwrap_err().code(),
+        narration_opus(&library, &saved.path).unwrap_err().code(),
         NO_NARRATION
     );
 
@@ -660,6 +662,10 @@ fn a_replay_narration_is_saved_into_its_note_and_read_back() {
     library.save(&saved.path, &file, &stamp).unwrap();
     assert_eq!(
         narration_info_in(&library, &saved.path).unwrap_err().code(),
+        "noteDamaged"
+    );
+    assert_eq!(
+        narration_opus(&library, &saved.path).unwrap_err().code(),
         "noteDamaged"
     );
 }
@@ -1037,4 +1043,39 @@ fn a_recording_on_one_page_keeps_its_buffer() {
     assert_eq!(pieces[0].1.clip.samples.len(), 48_000);
     let merged = merge_by_page(pieces);
     assert_eq!(merged[0].1.clip.samples.as_ptr(), buffer);
+}
+
+/// Not a test: puts a long synthetic narration into an existing note, for the manual check of
+/// the replay's sound (M10, `docs/design/media.md`). Run it in release, the encoder is slow
+/// otherwise:
+/// `ARDOISE_LONG_NARRATION_NOTE=<note.ardoise> [ARDOISE_LONG_NARRATION_SECS=3600]
+/// cargo test -p ardoise --release --lib -- --ignored writes_a_long_narration`.
+#[test]
+#[ignore = "manual check helper"]
+fn writes_a_long_narration_into_a_note() {
+    let Some(path) = std::env::var_os("ARDOISE_LONG_NARRATION_NOTE") else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    let secs: u64 = std::env::var("ARDOISE_LONG_NARRATION_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3600);
+    let started = std::time::Instant::now();
+    let narration = Narration {
+        clip: simulated_narration(Duration::from_secs(secs), 1),
+        base: NarrationBase::Replay,
+        options: ReplayOptions::default(),
+        start_ms: 0,
+    };
+    let bytes = encode_narration(&narration).unwrap();
+    let mut file = ardoise_core::format::read_note(&path).unwrap();
+    file.audio = Some(bytes);
+    ardoise_core::format::write_note(&path, &file).unwrap();
+    println!(
+        "{secs} s of narration ({} bytes) written into {} in {:?}",
+        file.audio.as_ref().map_or(0, Vec::len),
+        path.display(),
+        started.elapsed()
+    );
 }

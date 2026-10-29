@@ -15,6 +15,7 @@
   import Editor from './editor/Editor.svelte';
   import ActivityBanner from './library/ActivityBanner.svelte';
   import AssembleDialog from './library/AssembleDialog.svelte';
+  import DraftsBanner from './library/DraftsBanner.svelte';
   import InkspaceImportDialog from './library/InkspaceImportDialog.svelte';
   import NewFromFileDialog from './library/NewFromFileDialog.svelte';
   import NoteGrid from './library/NoteGrid.svelte';
@@ -110,6 +111,12 @@
   function open(note: NoteSummary) {
     leaveLibrary(note.path);
     openPath = note.path;
+  }
+
+  /** A draft's note is opened from the banner. */
+  function openDraft(path: string) {
+    leaveLibrary(path);
+    openPath = path;
   }
 
   async function newNote() {
@@ -282,6 +289,7 @@
             </button>
           </div>
         {/if}
+        <DraftsBanner {lib} onopen={openDraft} />
         {#if inTrash}
           <TrashView {lib} />
         {:else}

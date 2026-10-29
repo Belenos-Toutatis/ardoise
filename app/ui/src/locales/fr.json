@@ -681,6 +681,8 @@
     "pdfUnsupported": "les PDF ne peuvent être lus que sous Windows",
     "pdfEncrypted": "ce PDF est protégé par un mot de passe ; enregistrez-en une copie sans mot de passe",
     "pdfNoSuchPage": "ce PDF n'a pas cette page ({detail})",
+    "draftFailed": "la copie de secours des modifications n'a pas pu être écrite ou lue ({detail})",
+    "draftNotFound": "ces modifications récupérées n'existent plus",
     "invalidTagColor": "cette couleur ne fait pas partie de la palette ({detail})",
     "tagColorsNewer": "les couleurs des étiquettes ont été enregistrées par une version plus récente d'Ardoise : mettez Ardoise à jour sur ce PC pour les modifier ({detail})",
     "tagColorsConflict": "les couleurs des étiquettes changeaient au même moment, sans doute sur un autre ordinateur ; réessayez dans un instant ({detail})",
@@ -1643,6 +1645,37 @@
     "assemble": {
       "droppedOne": "Seule l'image de fond de la première note est gardée : celle d'une autre note ne sera pas reprise.",
       "droppedMany": "Seule l'image de fond de la première note est gardée : celles de {count} autres notes ne seront pas reprises."
+    }
+  },
+  "drafts": {
+    "shutdownReason": "Une note a des modifications non enregistrées. Revenez dans Ardoise pour l'enregistrer.",
+    "writeFailed": "La copie de secours de vos modifications n'a pas pu être écrite ({message}). Pensez à enregistrer la note.",
+    "copyTitle": "{title} (récupérée)",
+    "restoredCopy": "Les modifications récupérées sont dans la nouvelle note « {title} ».",
+    "recovery": {
+      "title": "Modifications récupérées",
+      "restoreText": "Ardoise s'est fermé avant que cette note soit enregistrée. Ses modifications ont été gardées (dernière copie le {date}).",
+      "copyText": "Ardoise s'est fermé avant que cette note soit enregistrée, et la note a changé depuis (sur un autre ordinateur, par exemple). Ses modifications (dernière copie le {date}) peuvent être récupérées dans une nouvelle note, sans toucher à celle-ci.",
+      "restore": "Récupérer les modifications",
+      "copy": "Récupérer dans une nouvelle note",
+      "discard": "Les abandonner",
+      "discardConfirm": "Abandonner définitivement ces modifications ?",
+      "discardYes": "Abandonner",
+      "discardNo": "Garder",
+      "later": "Plus tard",
+      "failed": "La récupération a échoué : {message}"
+    },
+    "library": {
+      "title": "Ardoise s'est fermé sans enregistrer des modifications. Notes concernées : {count}",
+      "saved": "dernière copie le {date}",
+      "missing": "la note n'existe plus",
+      "open": "Ouvrir",
+      "restoreCopy": "Récupérer dans une nouvelle note",
+      "discard": "Abandonner",
+      "discardConfirm": "Abandonner définitivement les modifications de « {title} » ?",
+      "discardYes": "Abandonner",
+      "discardNo": "Garder",
+      "failed": "La récupération a échoué : {message}"
     }
   },
   "libraryChoice": {
