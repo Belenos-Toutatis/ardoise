@@ -481,7 +481,7 @@ impl Library {
 
     /// [`list`](Self::list), reusing the header of every note whose file did not change since
     /// `cache` saw it (same path and stamp): opening a note's archive is what costs on a
-    /// synced folder with a thousand notes. The cache then holds exactly the notes listed.
+    /// synced folder with a thousand notes. The cache then holds the notes listed of this library.
     pub fn list_with(&self, cache: &mut HeaderCache) -> Listing {
         let mut found = Vec::new();
         let mut binders = Vec::new();
@@ -521,7 +521,11 @@ impl Library {
                 Err(error) => listing.problems.push(ListProblem { path, error }),
             }
         }
-        cache.entries = kept;
+        // Only this library's entries are replaced: the cache may serve several libraries.
+        cache
+            .entries
+            .retain(|path, _| !path.starts_with(&self.root));
+        cache.entries.extend(kept);
         binders.sort();
         listing.binders = binders;
         listing.notes.sort_by(|a, b| a.path.cmp(&b.path));
