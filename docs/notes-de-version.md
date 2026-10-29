@@ -1,0 +1,185 @@
+# Notes de version — Ardoise 0.1.0
+
+Première version d'Ardoise, en préparation (rien n'est encore publié). Ces notes disent, pour l'utilisateur, ce que la
+version fait et surtout **ce qui n'a pas encore été essayé**. Le détail technique est dans le
+[journal des modifications](../CHANGELOG.md) ; l'usage est expliqué dans le [guide](guide/guide.fr.md).
+
+*English version below.*
+
+## Ce que fait cette version
+
+**Récupérer et écrire**
+
+- Enregistrement de la tablette Bamboo Slate en Bluetooth LE (une seule fois, valable pour tous vos PC), connexion
+  automatique, synchronisation des pages (chaque page devient une note), effacement de la tablette seulement après
+  écriture vérifiée, quatre positions de la tablette.
+- Mode direct : tracé en temps réel, pages et calques, tableau noir, pointeur laser, zoom ; présentation en plein écran
+  sur le vidéoprojecteur (bureau étendu) avec annotations par-dessus qui ne sont pas enregistrées.
+
+**Ranger et retrouver**
+
+- Bibliothèque dans un dossier ordinaire (compatible Nextcloud : écritures atomiques, détection des copies en conflit,
+  mise à jour quand une note change sur un autre PC) ; classeurs, étiquettes, favoris, corbeille (30 jours), sélection
+  multiple, assemblage de notes ; recherche par titre, étiquette et écriture manuscrite (reconnaissance d'écriture de
+  Windows, hors connexion).
+- Notes créées à partir d'un PDF ou d'une image, à annoter.
+- Import des notes de Wacom Inkspace. <!-- M10: à confirmer -->
+
+**Modifier**
+
+- Sept outils d'encre sensibles à la pression, gomme, lasso, couleurs, calques, papiers, modèles de page (ligné, Seyès,
+  quadrillé, millimétré, pointillé, portées), format et orientation de la feuille, redressement des formes, découpe
+  par instant ou par zone, retour à l'original, copier-coller entre notes, annuler et rétablir sans limite.
+- Stylet et écran tactile (dos du stylet qui gomme, bouton du stylet qui fait un lasso, doigts, rejet de la paume).
+
+**Relire et exporter**
+
+- Relecture animée du tracé (0,25× à 16×, temps morts supprimables), narration au micro.
+- Exports : PNG, JPG, WebP, SVG, PDF, texte, Markdown et Word (avec la structure tirée de l'écriture), vidéos MP4, GIF, WebP
+  et WebM ; copie dans le presse-papiers, impression, glisser une note vers l'Explorateur ou Word.
+- Assistant (MCP) : Claude Code, Claude Desktop ou un autre assistant peut lire les notes, les mettre au propre, les titrer
+  et les ranger, et piloter Ardoise ouverte ; mode lecture seule possible.
+
+**Autour**
+
+- Interface en français et en anglais, thèmes clair et sombre, application portable (un exécutable, réglages à côté), aucun
+  droit d'administrateur, aucun compte, aucune connexion sauf le téléchargement facultatif d'OpenH264.
+- Test guidé de la tablette et journaux de diagnostic rangés dans la bibliothèque.
+- Format de fichier des notes : version 1.2 (les versions précédentes sont lues).
+
+## À essayer avant de compter dessus
+
+La tablette n'est pas sur le poste de développement : **tout ce qui parle à la vraie Bamboo Slate a été vérifié avec une
+tablette simulée uniquement**. Les essais suivants sont encore à faire par l'utilisateur, avec les procédures de
+`docs/hardware-tests.md` ; les journaux reviennent par Nextcloud.
+
+| Essai | Ce qu'il doit établir |
+|---|---|
+| **H0** — `ardoise.exe` sur le PC du travail | Windows (SmartScreen, Smart App Control, AppLocker) accepte l'exécutable non signé, depuis le dossier Nextcloud ; la clé Bluetooth est vue. |
+| **H1** — la tablette parle à Ardoise | L'enregistrement, la lecture des informations, le téléchargement des pages et le mode direct fonctionnent avec une vraie Slate. **Le décodage des pages n'a jamais été vérifié sur une capture réelle de Slate** (seulement sur des données d'une autre tablette et des données synthétiques). |
+| **H2** — synchronisation, mode direct, projecteur | Synchro réelle, latence ressentie, ce que la tablette envoie à l'appui sur son bouton en mode direct (inconnu aujourd'hui), reprise après coupure, projection sur un vrai vidéoprojecteur (et son débranchement), les quatre positions de la tablette. |
+| **H3** — stylet et tactile ; essai complet en classe | Dos du stylet, bouton, paume, gestes des doigts sur un PC tactile ; puis un cours entier avec la tablette. |
+
+D'autres essais à la main restent à faire, car les tests automatiques ne peuvent pas les remplacer :
+
+- la reconnaissance d'écriture **en anglais** (le module d'écriture anglais de Windows n'est pas installé sur le PC de
+  développement) et la pause de la lecture de l'écriture pendant la présentation ;
+- un vrai dépôt d'une note glissée dans l'Explorateur, Word ou OneNote ;
+- l'impression sur une vraie imprimante, l'export Word ouvert dans Word, la mise en forme Markdown et Word sur une vraie
+  écriture ;
+- l'assistant : l'essai réel depuis Claude Code (mettre au propre une note), la commande sous PowerShell 7, la
+  présentation sur un second écran pilotée par l'assistant, la note du dernier mode direct retrouvée après un vrai
+  redémarrage.
+
+## Limites connues
+
+- **Windows seulement** : Windows 11 est la seule version essayée. Pas de macOS, pas de Linux, pas d'application pour
+  téléphone.
+- **Exécutable non signé** : un avertissement SmartScreen au premier lancement est normal ; un PC géré peut refuser de le
+  lancer.
+- **Tablettes** : Bamboo Slate (A4, modèle visé) ; Slate A5, Spark, Folio et Intuos Pro Paper non testés.
+- La Bamboo Slate ne livre que sa **page la plus ancienne** : sans l'option « Effacer de la tablette après import »
+  (activée par défaut), une seule page est lisible à la fois.
+- Une tablette n'est enregistrée qu'auprès d'une application : une fois enregistrée dans Ardoise, elle ne fonctionne plus
+  avec l'application du téléphone ni avec Inkspace avant d'y être réenregistrée.
+- **Import d'Inkspace** : la pression est estimée à partir de l'épaisseur du trait, et le minutage de l'écriture est
+  parfois inventé ; le cloud Wacom et la collaboration d'Inkspace n'existent pas dans Ardoise. <!-- M10: à confirmer -->
+- **Reconnaissance d'écriture** : elle dépend du module d'écriture manuscrite installé dans Windows pour la langue, et
+  peut se tromper ; les textes exportés doivent être relus.
+- **MP4** : il utilise l'encodeur de Windows ; sur une édition « N » sans le Media Feature Pack, il faut télécharger
+  OpenH264 chez Cisco (à la demande) ou choisir le WebM, qui est nettement plus lent.
+- Pas de zone de texte tapée au clavier dans une note, pas d'export PSD ni de formats d'encre WILL / Universal Ink Model.
+- Les notes d'une même bibliothèque ne doivent pas être modifiées sur deux PC en même temps (Ardoise refuse d'écraser
+  l'autre version et propose une copie). Pour mettre à jour `ardoise.exe` dans un dossier synchronisé, fermer Ardoise
+  sur tous les PC.
+- Le nom « Ardoise » est un nom de travail ; il peut changer avant la publication.
+
+---
+
+# Release notes — Ardoise 0.1.0
+
+First version of Ardoise, in preparation (nothing is published yet). These notes tell the user what the version does and,
+above all, **what has not been tried yet**. Technical detail is in the [changelog](../CHANGELOG.md) (in French); usage is
+explained in the [guide](guide/guide.en.md).
+
+## What this version does
+
+**Receiving and writing**
+
+- Registering the Bamboo Slate over Bluetooth LE (once, valid for all your PCs), automatic connection, syncing the pages
+  (each page becomes a note), deleting from the tablet only after the file has been written and checked, four tablet
+  positions.
+- Live mode: real-time stroke, pages and layers, blackboard, laser pointer, zoom; full-screen presentation on a
+  projector (extended desktop) with annotations over it that are not saved.
+
+**Filing and finding**
+
+- A library in an ordinary folder (Nextcloud-friendly: atomic writes, conflict-copy detection, refresh when a note
+  changes on another PC); binders, tags, favourites, trash (30 days), multiple selection, assembling notes; search by
+  title, tag and handwriting (Windows handwriting recognition, offline).
+- Notes created from a PDF or an image, to annotate.
+- Import of Wacom Inkspace notes. <!-- M10: à confirmer -->
+
+**Editing**
+
+- Seven pressure-sensitive ink tools, eraser, lasso, colours, layers, papers, page templates (lined, Seyès, squared,
+  graph paper, dotted, music staves), sheet format and orientation, straightening shapes, splitting by instant or by
+  zone, back to the original, copy and paste between notes, unlimited undo and redo.
+- Pen and touch screen (pen eraser end, pen button as a lasso, fingers, palm rejection).
+
+**Replaying and exporting**
+
+- Animated replay (0.25× to 16×, dead time removable), narration with a microphone.
+- Exports: PNG, JPG, WebP, SVG, PDF, text, Markdown and Word (with the structure drawn from the handwriting), MP4, GIF,
+  WebP and WebM videos; clipboard copy, printing, dragging a note out to Explorer or Word.
+- Assistant (MCP): Claude Code, Claude Desktop or another assistant can read notes, tidy them up, title and file them,
+  and drive the open Ardoise; read-only mode available.
+
+**Around it**
+
+- French and English interface, light and dark themes, portable application (one executable, settings next to it), no
+  administrator rights, no account, no connection except the optional OpenH264 download.
+- Guided tablet test and diagnostic logs kept in the library.
+- Note file format: version 1.2 (earlier versions are read).
+
+## To try before relying on it
+
+The tablet is not on the development PC: **everything that talks to the real Bamboo Slate has been checked with a
+simulated tablet only**. The following trials are still to be made by the user, following the procedures in
+`docs/hardware-tests.md` (in French); the logs come back through Nextcloud.
+
+| Trial | What it must establish |
+|---|---|
+| **H0**: `ardoise.exe` on the work PC | Windows (SmartScreen, Smart App Control, AppLocker) accepts the unsigned executable, from the Nextcloud folder; the Bluetooth dongle is seen. |
+| **H1**: the tablet talks to Ardoise | Registration, reading the information, downloading the pages and live mode work with a real Slate. **Page decoding has never been checked against a real Slate capture** (only against another tablet's data and synthetic data). |
+| **H2**: sync, live mode, projector | Real sync, perceived latency, what the tablet sends when its button is pressed in live mode (unknown today), recovery after a drop, projecting on a real projector (and unplugging it), the four tablet positions. |
+| **H3**: pen and touch; full trial in class | Pen eraser end, button, palm, finger gestures on a touch PC; then a whole lesson with the tablet. |
+
+Other hands-on checks remain, because automated tests cannot replace them:
+
+- handwriting recognition **in English** (the English handwriting module of Windows is not installed on the development
+  PC) and the pause of handwriting reading during the presentation;
+- a real drop of a note dragged into Explorer, Word or OneNote;
+- printing on a real printer, a Word export opened in Word, Markdown and Word formatting on real handwriting;
+- the assistant: the real trial from Claude Code (tidy up a note), the command under PowerShell 7, the presentation on
+  a second screen driven by the assistant, the last live-mode note found again after a real restart.
+
+## Known limits
+
+- **Windows only**: Windows 11 is the only version tried. No macOS, no Linux, no phone app.
+- **Unsigned executable**: a SmartScreen warning at the first start is normal; a managed PC may refuse to run it.
+- **Tablets**: Bamboo Slate (A4, the target model); Slate A5, Spark, Folio and Intuos Pro Paper are untested.
+- The Bamboo Slate hands over only its **oldest page**: without the "Delete from the tablet after import" option (on by
+  default), only one page is readable at a time.
+- A tablet is registered with one application only: once registered in Ardoise, it no longer works with the phone app or
+  with Inkspace until it is registered there again.
+- **Inkspace import**: the pressure is estimated from the stroke width, and the timing of the writing is sometimes made
+  up; Wacom's cloud and Inkspace's collaboration do not exist in Ardoise. <!-- M10: à confirmer -->
+- **Handwriting recognition**: it depends on the handwriting module installed in Windows for the language, and can make
+  mistakes; exported texts must be read over.
+- **MP4**: it uses Windows' encoder; on a Windows "N" edition without the Media Feature Pack, you must download OpenH264
+  from Cisco (on request) or choose WebM, which is much slower.
+- No text box typed on the keyboard in a note, no PSD export, no WILL / Universal Ink Model ink formats.
+- Notes of a library must not be edited on two PCs at the same time (Ardoise refuses to overwrite the other version and
+  offers a copy). To update `ardoise.exe` in a synced folder, close Ardoise on all PCs.
+- The name "Ardoise" is a working name; it may change before publication.

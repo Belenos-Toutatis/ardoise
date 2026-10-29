@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Ajouté (jalon M10 — documentation)
+
+- Guide d'utilisateur complet en français et en anglais (`docs/guide/guide.fr.md`, `guide.en.md`), `README.md` à la racine et notes de la version 0.1.0 (`docs/notes-de-version.md`) ; dans le guide de l'assistant, « Réglages » remplace « Paramètres » (nom réel du bouton).
+
 ### Ajouté (jalon M9 — pilotage par un assistant)
 
 - Serveur MCP local `ardoise.exe --mcp [--read-only]` (entrée et sortie standard, aucun port réseau, sans fenêtre, application ouverte ou non) : l'assistant de l'utilisateur (Claude Code, Claude Desktop…) liste et cherche les notes, lit leurs données, leur texte reconnu avec la position des lignes et leur structure, et les voit en image (PNG, 2000 pixels au plus) pour reconnaître schémas et formules. `--read-only` limite l'assistant à la lecture.
