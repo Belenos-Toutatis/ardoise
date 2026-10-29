@@ -9,7 +9,8 @@ appear on screen. Version française : [guide.fr.md](guide.fr.md).
 
 > *Where does this first version stand?* Everything that does not need the tablet (library, editing, replay, exports,
 > import of Inkspace notes) has been checked on Windows by automated tests; a few hands-on checks are still to be done
-> (printing, pen and touch screen, a Word export opened in Word…). Everything that talks to the real tablet
+> (printing, pen and touch screen, a Word export opened in Word, an import with Inkspace open, a Windows logoff with an
+> unsaved note, tag colours on two PCs through Nextcloud…). Everything that talks to the real tablet
 > (registration, sync, live mode, projecting the live mode) has been checked with a simulated tablet, but *not yet with
 > a real Bamboo Slate*: those trials are planned at work. The passages concerned carry the mention
 > "*Needs the tablet*". See also the release notes.
@@ -65,11 +66,25 @@ cannot contain a text box typed on the keyboard.
   prior setup in the Windows Bluetooth settings is planned: the tablet is registered inside Ardoise (*to be confirmed
   with the real tablet*).
 
-### Installing = copying
+### Installing = unzipping
 
-1. Create a folder for the program, for example `C:\Users\Name\Nextcloud\Ardoise\Program`.
-2. Copy `ardoise.exe` into it (and, if you like, the guides and the licence that come with it).
-3. Double-click `ardoise.exe`. Create a desktop shortcut if you want. <!-- M10: à confirmer -->
+Ardoise comes as an archive `ardoise-<version>-windows-x64.zip` (for example `ardoise-0.1.0-windows-x64.zip`).
+
+1. If the archive came from a download or an email, first right-click it, choose *Properties*, and tick *Unblock* if it
+   is offered.
+2. Right-click the archive, choose *Extract all…*, and pick the folder where the program will live, for example
+   `C:\Users\Name\Nextcloud\Ardoise\Program` (Windows suggests a folder named after the archive: you can shorten it).
+   The content arrives in a folder `ardoise-<version>`.
+3. In that folder, double-click `ardoise.exe`. Create a desktop shortcut if you want.
+
+The folder contains:
+
+- `ardoise.exe`: the program. It is the only essential file; there is nothing to install;
+- `LISEZMOI.txt`: the essentials in French and English;
+- `LICENSE` and `THIRD-PARTY-NOTICES`: Ardoise's licence (GNU GPL version 3) and those of the free components it uses;
+- `guide\`: this guide and the assistant guide, as HTML pages to open in a web browser (double-click them):
+  `guide.fr.html`, `guide.en.html`, `assistant.fr.html` and `assistant.en.html`. The links from one page to the other
+  work.
 
 To uninstall, delete that folder (and, if you like, `%LOCALAPPDATA%\Ardoise`, see below). Your notes are not touched:
 they are in your library.
@@ -88,6 +103,14 @@ Ardoise cannot do anything about it: ask your IT department for permission.
 Your settings are in `ardoise.toml`, *next to `ardoise.exe`*: the file travels with the program. If that folder is
 not writable, Ardoise uses `%APPDATA%\Ardoise\ardoise.toml`. The exact path is shown at the bottom of **Settings**.
 The file is plain text, but you never need to edit it by hand.
+
+### Starting Ardoise twice
+
+Only one Ardoise window is open per copy of the program: if you double-click the same `ardoise.exe` again (one
+double-click too many during a slow start, for example), Ardoise brings the window that is already open to the front
+instead of opening a second one, which would fight over the tablet. Two copies placed in *two different folders* (so
+with two `ardoise.toml` files) can, on the other hand, run side by side. The commands written in this guide
+(`--self-test`, `--import-inkspace`, `--create-demo-library`…) work even while the Ardoise window is open.
 
 ### Several computers
 
@@ -116,10 +139,10 @@ The file is plain text, but you never need to edit it by hand.
 
 These folders belong to each computer and are never in your library or in Nextcloud, under `%LOCALAPPDATA%\Ardoise`:
 WebView2's folder (`webview`), the thumbnails (`thumbnails`), the recognised text used by search (`handwriting`), the
-OpenH264 encoder if you downloaded it (`codecs`), and two folders of *backup copies* (`live-backup` for live pages that
-could not be written, `narration-backup` for a narration that could not be added to its note). WebView2's folder, the
-thumbnails and the recognised text rebuild themselves; delete the backup copies only after making sure you no longer
-need them.
+OpenH264 encoder if you downloaded it (`codecs`), and three folders of *backup copies* (`drafts` for the changes of a
+note not saved yet, see chapter 8, `live-backup` for live pages that could not be written, `narration-backup` for a
+narration that could not be added to its note). WebView2's folder, the thumbnails and the recognised text rebuild
+themselves; delete the backup copies only after making sure you no longer need them.
 
 ## 3. First start
 
@@ -129,12 +152,21 @@ At the first start on a PC, the **Welcome to Ardoise** window asks for the folde
    `C:\Users\Name\Nextcloud\Ardoise\Notes`.
 2. Ardoise tells you whether it already contains a library ("it will be used as is") or whether it will create a new
    one. This choice only applies to this computer.
-3. Click **Continue**.
+3. If Ardoise finds Wacom Inkspace notes on this PC, the window says so ("Ardoise found Wacom Inkspace notes on this
+   computer (24 notes).") and offers a box, ticked by default: **Import them into the library (binder “Inkspace”)**.
+   Untick it if you do not want to import them now; you can do it later (chapter 11).
+4. Click **Continue**. If the Inkspace box is ticked, the import window opens straight away in the library: you confirm
+   the import before it starts (chapter 11).
 
 You arrive in the *library*. While it is empty, it says that the pages from your tablet will appear after the first
-sync; you can already create a note with **New note**. To change library later: **Settings**, then **Change** next to
-**Library folder**. Ardoise creates a `_ardoise` folder in the library (tablet registration, diagnostic logs, trash). It
-is not hidden, so that Nextcloud syncs it: leave it alone.
+sync; you can already create a note with **New note**. Ardoise creates a `_ardoise` folder in the library (tablet
+registration, diagnostic logs, trash, tag colours). It is not hidden, so that Nextcloud syncs it: leave it alone.
+
+To change library later: **Settings**, then **Change** next to **Library folder**, and pick the folder. Ardoise does
+not switch straight away: it first shows what that folder holds ("This folder already contains an Ardoise library: it
+will be used as is" or "A new library will be created in this folder", and the number of notes), reminds you that the
+change only applies to this PC, and waits for your agreement: **Use this folder** (or **Cancel**). The notes of the old
+library stay in their folder.
 
 The general settings are also in **Settings**: **Language** (**Automatic (Windows language)**, **Français** or
 **English**) and **Theme** (**Same as Windows**, **Light**, **Dark**).
@@ -237,16 +269,24 @@ Open the **Tablet** panel (click the **Tablet** block of the sidebar) and click 
 **Waiting for the tablet** to **Live** as soon as the tablet sends points: if need be, press its button briefly to
 connect it. If the link drops, the state becomes **Reconnecting…** and the stroke resumes by itself.
 
-To end, click **Finish**: each page is saved as a note (the window's counter says "N notes saved"). If a page cannot be
-written to the library (disk full, folder unavailable…), a message explains it, the page stays in memory and a backup
-copy is written on this PC when Ardoise closes.
+To end, click **Finish**: each page is saved as a note (the window's counter says "N notes saved"). The `Esc` key makes
+the same request, but Ardoise asks first (**End live mode?**, with **Continue** or **End live mode**), because ending
+cannot be undone (see below for `Esc` and the projection). If a page cannot be written to the library (disk full,
+folder unavailable…), a message explains it, the page stays in memory and a backup copy is written on this PC when
+Ardoise closes. If live mode does not stop properly, **Close anyway** also stops the projection and the session, and
+closes the window.
+
+If a note of the session is renamed or tagged during the lesson (by the assistant, for instance), the following pages
+keep being written to it instead of being duplicated.
 
 ### The control window
 
 - **Tool** (ballpoint, fountain pen, felt-tip, pencil, brush, highlighter, chalk), **Colour** (including **Chalk white**
   and **Yellow**) and **Width**: the next stroke follows them, the previous ones do not change.
 - **Pages**: **Previous page**, **Next page** (the position is shown: "Page 2 / 5"), **New page**. **New layer** adds a
-  layer to the current page. **Clear the page** clears the current page only. <!-- M10: à confirmer -->
+  layer to the current page. **Clear the page** (or `Ctrl + Delete`) clears the current page only; a "Page cleared." message offers **Undo
+  clearing** for 8 seconds, which gives the ink back. If the page has changed meanwhile, Ardoise says the clearing can
+  no longer be undone.
 - **Blackboard**: slate background and white chalk. **Laser pointer**: the pen hovering, without touching the tablet,
   shows a red dot on screen *without writing anything*; touching the tablet writes again.
 - **Tablet position**: four buttons that change the position at once; the current page turns with what is already
@@ -273,8 +313,12 @@ for next and previous page work in any case.
    write appears on both.
 4. **Stop projecting** closes the presentation. Ardoise remembers the chosen screen on this PC.
 
-<!-- M10: à confirmer -->
 With a single screen, the presentation covers the control window: press `Esc` in the presentation to close it.
+
+*What `Esc` does.* In the control window as in the presentation, while the projection is shown, `Esc` closes it (as in
+a slideshow); when nothing is projected, `Esc` asks whether to end live mode. *`Space` always means "next page"*, even
+when a button of the window has the focus: it never presses that button (which is what prevents wiping the next page by
+mistake).
 
 ### Writing over the presentation
 
@@ -295,7 +339,8 @@ Up): see chapter 17.
 The library is the home page. At the top: the **Search notes** field, the sort (**Sort notes**: **Date: newest first**,
 **Date: oldest first**, **Title: A → Z**, **Title: Z → A**), and the **New note**, **From a PDF or an image…** and
 **Settings** buttons. On the left: the sidebar with **All notes**, **Favourites**, the **Binders**, the **Tags**, the
-**Trash**, and at the bottom the **Tablet** block and the **Test the tablet** button.
+**Trash**, the **Import from Inkspace…** entry (chapter 11), and at the bottom the **Tablet** block and the **Test the
+tablet** button.
 
 A card shows the thumbnail, the title (or the date if the note has no title), the date and the tags. A click opens the
 note in the editor. On the card: the box to *select* it, the favourites star, the **Actions for…** menu (**Rename**,
@@ -305,26 +350,50 @@ Renaming a note also renames its file.
 Thumbnails are kept in a cache of each PC. When a note changes on another computer (Nextcloud sync), the library
 updates by itself.
 
+Messages may appear above the notes: **Unreadable files: N** (see below) and, after Ardoise stopped abruptly, the list
+of unsaved changes that can be recovered (chapter 8).
+
 ### Binders
 
-<!-- M10: à confirmer -->
 A binder is simply a *subfolder* of the library. Click the **New binder** icon (or **New sub-binder in…** next to a
 binder), type the **Binder name** and click **Create**. To file notes, drag them onto a binder in the sidebar, or
-select them and use **Move to…** (**Library (root)** takes them back to the root). Ardoise does not offer to rename or
-delete a binder: do it in Explorer, it is an ordinary folder.
+select them and use **Move to…** (**Library (root)** takes them back to the root).
+
+To rename or delete a binder, open the **⋯** menu ("Actions on the binder…") next to its name in the sidebar:
+
+- **Rename…**: type the new name, then **Rename** (**Cancel** or `Esc` gives up). The folder is renamed and its notes
+  follow. Ardoise never replaces a binder or a file with the same name: it warns you and lets you pick another.
+- **Delete…**: Ardoise asks for confirmation, saying how many notes (and sub-binders) the binder holds. **Delete the
+  binder** sends its notes to the **Trash**, then removes the folder. Nothing is destroyed: each note restored from the
+  trash goes back to its binder. A folder that still holds files that are not notes is kept, and the message says so.
+  An **Undo** message stays on screen for a few seconds (see "The trash" below): it brings the binder back with its
+  notes.
 
 ### Tags and favourites
 
-<!-- M10: à confirmer -->
 Select one or several notes, click **Tags…**, type a tag (several, separated by a comma) and click **Add**; an existing
 tag is removed with its cross. A click on a tag in the sidebar, or on a card's tag, shows only the notes that carry it.
 The star of a card (or **Add to favourites**) adds it to the **Favourites**.
 
+*Tag colours.* The small dot next to a tag, in the sidebar and in the **Tags…** panel (under **Existing tags**), opens a
+palette of eight colours, readable in the light theme as in the dark one: **Red**, **Orange**, **Yellow**, **Green**,
+**Teal**, **Blue**, **Purple**, **Pink**; **No colour** removes it. On the keyboard, the arrows move between the
+colours, `Enter` chooses and `Esc` closes. The colour changes on every note that carries the tag: you see it on the
+cards, in the sidebar and in the panel. It belongs to the *library* (the file `_ardoise\tags.json`), not to the notes:
+all your PCs see it, through Nextcloud. If two PCs change the colours at the same time, Ardoise merges tag by tag, the
+most recent change winning.
+
 ### Selecting several notes
 
 Tick the cards, or: `Ctrl + click` adds or removes a note, `Shift + click` selects a range, `Ctrl + A` selects all,
-`Esc` deselects. An action bar appears: **Move to…**, **Tags…**, **Export…**, **Print…**, **Assemble…**,
+`Esc` deselects. An action bar appears: **Move to…**, **Tags…**, **Export…**, **Print…**, **Assemble…**, **Turn**,
 **Add to favourites** (or **Remove from favourites**), **Move to trash**, **Deselect**.
+
+**Turn** rotates *all* the selected notes at once: choose **A quarter turn to the left** or **A quarter turn to the
+right**. The sheet, the writing and the background image turn together, exactly like **Turn the sheet with the writing**
+in the editor (chapter 8). A bar shows progress ("Turning the notes: 2 of 5"), **Stop** interrupts the operation between
+two notes, and the notes that could not be turned are listed with the reason. The **Undo** message puts the notes back
+the way they were (see "The trash").
 
 **Assemble** (at least two notes) creates a new note without changing the originals: **Overlay on one page** (all the
 notes on a single page, each on its own layers) or **Place end to end (long page)** (the notes one under the other).
@@ -332,12 +401,12 @@ Give the **Title of the new note** and click **Assemble**. Only the first note's
 
 ### Creating a note
 
-<!-- M10: à confirmer -->
 - **New note**: a blank A4 page in landscape, in the binder on display.
 - **From a PDF or an image…**: one note per chosen page of the PDF (**All pages** or **Some pages**, for example
   `1-3, 5`), at the size and in the orientation of the page, with the page in the background so you can write over it.
   An image gives a note the size of an A4 sheet, in the image's orientation. PDFs protected by a password are not read:
-  save a copy without a password.
+  save a copy without a password. For a long PDF, a bar shows progress ("Creating the notes: 3 of 12…") and **Cancel**
+  stops the creation: no note is then kept ("Cancelled: no note was kept").
 
 ### Searching for a note
 
@@ -360,11 +429,22 @@ mistakes on difficult handwriting.
 back where it was) or **Delete for good**. **Empty the trash** deletes everything, after confirmation. Notes in the
 trash are deleted for good after 30 days.
 
+*Taking it back straight away.* After **Move to trash** (the button or the `Delete` key), a message appears at the bottom
+of the library ("3 notes moved to the trash.") with an **Undo** button that restores the notes. It stays for a few
+seconds (8), and as long as the mouse or the keyboard is on it. `Ctrl + Z` does the same from the library (outside a text
+field, and not in the editor, which has its own **Undo**). The **Undo** messages of **Turn** and of deleting a binder work
+the same way, and `Ctrl + Z` undoes the most recent of these actions. If a note cannot go to the trash (it was deleted
+meanwhile on another computer, for example), the others go anyway; that one is reported and stays selected.
+
 ### Conflict copies and unreadable files
 
 When Nextcloud creates a "conflict" copy of a note edited on two PCs, the card carries the **Conflict copy** label:
-open both versions, keep the one you want and move the other to the trash. A message **Unreadable files: N** lists
-files the application cannot display; they are not modified.
+open both versions, keep the one you want and move the other to the trash.
+
+If the library contains files the application cannot read, a **Unreadable files: N** banner appears above the notes.
+It lists each file with the reason, in the application's language: for example, a note made by a newer version of
+Ardoise says to *update Ardoise* (chapter 2). These files are not modified. Temporary `.part` files left by an abrupt
+stop are ignored, then cleaned up.
 
 ## 8. Editing a note
 
@@ -376,7 +456,27 @@ and redo have no limit while the note is open.
 If the note was changed meanwhile on another PC, Ardoise *refuses to overwrite the other version*: your changes stay on
 screen and **Save as a copy** saves them in a new note.
 
-<!-- M10: à confirmer -->
+### The automatic backup copy
+
+As long as a note has unsaved changes, Ardoise keeps a *backup copy* of it: about 2 seconds after your last change (at
+most 10 seconds after the first one, if you write without a pause). This copy is kept on this PC only, in
+`%LOCALAPPDATA%\Ardoise\drafts`, never in the library or in Nextcloud. It does not replace **Save**: the note on disk is
+not touched, and the copy disappears as soon as you save (or choose **Go back without saving**).
+
+- *After a crash, a forced restart, an empty battery or a Windows update*, Ardoise offers to recover the changes. When
+  you open the note again, the **Recovered changes** window says when the last copy was made. If the note has not
+  changed since, **Recover the changes** puts them back in the note (you then save). If the note changed meanwhile, for
+  example on another PC, the window only offers **Recover into a new note**: the changes go into a new note titled
+  "… (recovered)", without touching the note that changed; Ardoise never overwrites a newer version. **Discard them**
+  deletes them, after confirmation (**Discard** or **Keep**); **Later** leaves them waiting.
+- On the library screen, a banner "Ardoise closed without saving some changes. Notes concerned: N" lists them too, with
+  the date of the last copy. Each line offers **Open** (the note, where the window above appears), or **Recover into a
+  new note** when the note no longer exists, and **Discard**.
+- *At a Windows logoff or shutdown*, if a note has unsaved changes, Ardoise writes its backup copy at once, and Windows
+  shows that Ardoise is preventing the shutdown, with the reason: "A note has unsaved changes. Go back to Ardoise to save
+  it." You can go back to Ardoise and save, or shut down anyway: the backup copy is then already on disk and Ardoise
+  will offer it at the next start. (When Windows forces the shutdown without waiting, the backup copy is written all the
+  same.)
 
 ### The tools
 
@@ -389,11 +489,18 @@ The toolbar offers four tools (**Tool**):
 - **Eraser**: **Whole strokes** or **Partial**, with its **Size**.
 - **Select** (the lasso): draw around strokes to select them; `Shift` + lasso adds, `Ctrl` + lasso removes. The
   **Selection** panel offers **Copy**, **Cut**, **Paste**, **Duplicate**, **Straighten shapes**, **Delete**. Changes of
-  colour, ink and width then apply to the selection; you move and resize it with the mouse.
+  colour, ink and width then apply to the selection; you move it (by grabbing it inside its frame) and resize it (by the
+  frame's handles) with the mouse, or with the pen (see below and chapter 12).
 - **Move the page**: drag the page (holding the space bar, or the middle mouse button, does the same with any tool).
 
-**Zoom**: the wheel zooms around the cursor; at the bottom right, **Zoom in**, **Zoom out**, **Fit** (whole page) and
-**Width** (`Ctrl + 2`, the page across the whole width of the window).
+**Zoom**: the wheel zooms around the cursor; at the bottom right, **Zoom in**, **Zoom out**, **Fit** (whole page, `Ctrl + 0`) and
+**Width** (`Ctrl + 2`, the page across the whole width of the window). Both shortcuts also work on an AZERTY keyboard,
+where digits need `Shift`: `Ctrl + à` and `Ctrl + é` are enough, without `Shift`, as is `Ctrl + Shift + à`.
+
+*With the pen.* When you made the selection with the pen's *button* (the lasso, whatever the tool), the pen's tip, like a
+finger, then grabs the selection instead of drawing: put down inside the frame, it moves it; put down on a handle of the
+frame, it resizes it. This works with the **Pen** and **Eraser** tools: no need to go back to the **Select** tool.
+Outside the frame, the pen draws as usual, and `Esc` deselects.
 
 ### Straightening shapes
 
@@ -551,6 +658,18 @@ title, date and tags at the top, then paragraphs, lists and drawings (images). A
 could not analyse the layout, Ardoise says so: the structure is then guessed from the text and may be less accurate.
 *Always read the text over*: recognition can make mistakes.
 
+- *The words are the same* in the .txt, the Markdown, the Word file and the copied text: they are those of the
+  recognition of the whole note. Windows' layout analysis only supplies the structure (paragraphs, lists, drawings).
+- *Corrections win.* If a corrected text has been saved for the note (by the assistant, chapter 14), that is what is
+  exported, everywhere, instead of the recognised text.
+- *A line under words* underlines them: it becomes **bold** in Markdown (which has no underline) and a real underline in
+  Word. A line struck through words strikes them (`~~word~~` in Markdown, struck text in Word). These lines are not
+  exported as images.
+- **Include the drawings (Markdown, Word)**: diagrams and figures are placed as images between the paragraphs (in Word,
+  inside the document; in Markdown, as PNG files in a folder next to the `.md` file, never replacing an existing file).
+  A drawing next to a paragraph comes after it. The box is ticked only if the notes have drawings; otherwise Ardoise
+  says "No drawing found: the text alone is exported". Untick it to get the text only.
+
 ### Copying, printing, dragging
 
 - **Copy image**: puts the note on Windows' clipboard; paste it into Word or OneNote.
@@ -563,33 +682,52 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
 
 ## 11. Importing your Inkspace notes
 
-<!-- M10: à confirmer -->
-If you have notes in Wacom Inkspace on this PC, Ardoise can import them. *For now the import is done on the command
-line*; there is no button in the application.
+If you have used Wacom Inkspace on this PC, Ardoise can take over its notes. Ardoise changes and deletes nothing in
+Inkspace: it only reads its data.
 
-1. Close Inkspace (as a precaution). Ardoise changes nothing in Inkspace: it reads its data into memory.
-2. Open PowerShell in the folder of `ardoise.exe` (in Explorer, type `powershell` in the address bar then Enter) and
-   run, giving *the folder of your library*:
+### From the application
 
-   ```
-   .\ardoise.exe --import-inkspace --library "C:\Users\Name\Nextcloud\Ardoise\Notes" | Out-String
-   ```
+1. Close Inkspace if it is open (if Ardoise cannot read its files, it tells you: "close Inkspace then try again").
+2. In the library sidebar, click **Import from Inkspace…**. (At the first start, the window opens by itself if you left
+   the Inkspace box ticked, chapter 3.)
+3. The **Import from Wacom Inkspace** window looks for Inkspace on this PC ("Looking for Inkspace on this computer…").
+   When it finds it, it shows **Inkspace's folder** and the number of notes ("24 notes found"), saying how many were
+   *already imported* (in the library or its trash: they will be skipped) and how many cannot be read.
+4. If Inkspace is not found ("Ardoise did not find Wacom Inkspace on this computer…"), or if you want to import from a
+   copy (on a USB stick, for example), click **Choose a folder…** (or **Choose another folder…**) and give Inkspace's
+   `LocalState` folder, or a copy of that folder.
+5. **Destination binder**: "Inkspace" by default. Type another name, or pick an existing binder from the list offered;
+   left empty, the field puts the notes at the root of the library.
+6. Click **Import N notes**. A progress bar says "Importing notes: 3 of 24…". **Stop the import** stops after the note in
+   progress: the notes already imported are complete, and running the import again adds the others.
+7. A report appears (**Import finished**, or **Import stopped**): how many notes were imported and into which binder,
+   how many had been imported before (skipped), and the notes that could not be imported, with their date, the start of
+   their identifier and the reason. **Show the imported notes** opens the binder.
 
-   (`| Out-String` makes PowerShell wait and shows the report at the end.) Ardoise finds Inkspace's installation by
-   itself; if it cannot, add the `LocalState` folder of a copy as the first argument. Without `--library`, Ardoise
-   shows the table of the notes it found but saves nothing.
-3. The report lists each note (date, orientation, number of layers, strokes and points, timing) and ends with
-   "N/N notes importées" (the report is in French).
+Importing several times creates no duplicate: a note already imported is skipped, even if you renamed it, moved it or
+put it in the trash.
 
-The notes arrive in a binder called *Inkspace*. Importing twice creates no duplicate, and a note you have moved to the
-trash is not brought back. Good to know:
+### On the command line
+
+The same import exists without a window: in PowerShell, in the folder of `ardoise.exe`,
+
+```
+.\ardoise.exe --import-inkspace --library "C:\Users\Name\Nextcloud\Ardoise\Notes" | Out-String
+```
+
+(`| Out-String` makes PowerShell wait and shows the report at the end; add the `LocalState` folder of a copy as the first
+argument if Ardoise cannot find Inkspace.) Without `--library`, it only shows the table of the notes found. The report,
+in French, ends with "N/N notes importées".
+
+### Good to know
 
 - Inkspace does not keep the *pressure* but the stroke's width: Ardoise estimates the pressure from the width. The look
   is very close, but not identical.
 - Inkspace does not always keep the *timing* of the writing: when it is missing, Ardoise makes it up (the "synthétisé"
-  column of the report), and the replay of those notes is only indicative.
+  column of the command-line report), and the replay of those notes is only indicative.
 - Imported notes use the *ballpoint pen*, on a white background, with no title or paper; you can edit them like any
   others.
+- Wacom's cloud and Inkspace's collaboration do not exist in Ardoise: only the notes present on the PC are taken over.
 
 ## 12. Pen and touch screen
 
@@ -601,7 +739,9 @@ presentation can be used with the pen or a finger.
 - The stroke *gets thicker with pressure*.
 - The *back of the pen* (the eraser) *erases*, with the eraser settings (**Whole strokes** or **Partial**), whatever the
   tool chosen. An eraser circle appears when it hovers over the page.
-- The pen's *button* draws a *selection lasso*, whatever the tool.
+- The pen's *button* draws a *selection lasso*, whatever the tool. Afterwards, the pen's *tip* (like a finger) grabs the
+  selection instead of drawing: put down inside the frame, it moves it; put down on a handle, it resizes it (with the
+  **Pen** and **Eraser** tools). Outside the frame, it draws as usual.
 - A *palm* resting on the screen is ignored while the pen is in use or near the screen.
 
 *The finger*
@@ -629,11 +769,14 @@ continue** after each action, **Skip this step** if a step is stuck, **Stop the 
 pages, draw: a square and a circle as large as possible; "Ardoise 2026" in normal handwriting; three horizontal
 lines, very light, normal, very heavy.
 
-Two boxes to know about: **Delete pages from the tablet once saved** (ticked by default) and **Simulation (no
-tablet)**. The test may register the tablet if it is not yet registered, with the same consequences as in chapter 4.
+Two boxes to know about: **Delete pages from the tablet once added to the library as notes** (ticked by default) and
+**Simulation (no tablet)**. The test may register the tablet if it is not yet registered, with the same consequences as in chapter 4.
 
 > *Beware of the pages already on the tablet.* During the test, the pages in memory are downloaded, then deleted
-> from the tablet if the box is ticked. They are saved and checked before being deleted: they are kept in the diagnostics folder (see below) and, with the box ticked, also saved as notes of the library. If the tablet holds important pages, you can also get them first through the normal sync (chapter 5). <!-- M10: à confirmer -->
+> from the tablet if the box is ticked. Each page is first saved and checked: a raw copy is kept in the diagnostics
+> folder (see below) and the page is added to the library as a note, as in the normal sync (a page already there is not
+> added twice). Only then does the tablet delete it; if a page cannot be saved, it stays on the tablet. If the tablet
+> holds important pages, you can also get them first through the normal sync (chapter 5).
 
 At the end, the summary says "N passed, N failed, N skipped" and gives the location of the log.
 
@@ -665,7 +808,9 @@ AI and stays usable offline; it is the assistant's software that does the work.
 
 **Settings**, **Assistant (MCP)** section, gives the exact text to copy into the assistant, with a **Read only** box so
 that it can only read. Everything is explained step by step, with example requests, in the
-[assistant guide](assistant.en.md) (en français : [L'assistant](assistant.fr.md)).
+[assistant guide](assistant.en.md) (en français : [L'assistant](assistant.fr.md)). In Ardoise's archive, it is the file
+`guide\assistant.en.html` (and `guide\assistant.fr.html` in French), to open in a web browser; **Settings** reminds you of
+it under the text to copy.
 
 ## 15. Privacy
 
@@ -710,6 +855,11 @@ of every component used, with its licence.
 | "This PDF is protected by a password" | Save a copy without a password. |
 | "Printing failed" | Check the printer, or export the note as a PDF. |
 | Live pages could not be saved | They stay in memory. Check the library folder (space, permissions, sync); a backup copy is written to `%LOCALAPPDATA%\Ardoise\live-backup`. |
+| "Ardoise closed without saving some changes" (library banner), or a "Recovered changes" window | Ardoise stopped before you saved. Open the note again and recover the changes (chapter 8). |
+| "Unreadable files: N" | Ardoise cannot read these files and has not changed them; the reason is written next to each one (chapters 2 and 7). |
+| Windows says "Ardoise is preventing shutdown" | A note has unsaved changes: go back to Ardoise and save, or shut down anyway (the backup copy is already written, chapter 8). |
+| "Ardoise did not find Wacom Inkspace on this computer" | Click **Choose a folder…** and give Inkspace's `LocalState` folder or a copy (chapter 11). If Ardoise says to close Inkspace, close it and try again. |
+| A second double-click on `ardoise.exe` seems to do nothing new | That is intended: the window that is already open comes back to the front (chapter 2). |
 
 If the problem comes from the tablet, run **Test the tablet** (chapter 13): the log, brought back by Nextcloud, makes it
 possible to understand what happened.
@@ -732,6 +882,7 @@ These shortcuts do nothing while you are typing in a text field.
 | `Esc` | Deselect |
 | `F2` | Rename the note |
 | `Delete` | Move the note (or the selection) to the trash |
+| `Ctrl + Z` | Undo the last action whose **Undo** message is displayed (move to trash, **Turn**, deleting a binder) |
 
 ### Editor
 
@@ -745,11 +896,11 @@ These shortcuts do nothing while you are typing in a text field.
 | `Delete` or `Backspace` | Delete the selection |
 | `Esc` | Deselect |
 | `V`, `P`, `E`, `H` | Tools **Select**, **Pen**, **Eraser**, **Move the page** |
-| `Space` (held) | Move the page |
+| `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button) |
 | `F` | **Straighten shapes** |
 | `R` | **Replay** |
-| `Ctrl + 0` | **Fit** (whole page) |
-| `Ctrl + 2` | **Width** |
+| `Ctrl + 0` | **Fit** (whole page). On an AZERTY keyboard: `Ctrl + à` or `Ctrl + Shift + à` |
+| `Ctrl + 2` | **Width**. On an AZERTY keyboard: `Ctrl + é` or `Ctrl + Shift + é` |
 | Wheel | Zoom around the cursor |
 | Middle button (drag) | Move the page |
 
@@ -759,22 +910,28 @@ These shortcuts do nothing while you are typing in a text field.
 |---|---|
 | `Space` | Play / pause |
 | `R` or `Esc` | Leave the replay |
-| Arrows (on the timeline) | Back or forward by one second |
-| `Page Up`, `Page Down` (on the timeline) | Forward or back by 10 seconds |
+| Arrows (on the timeline) | Back or forward by one second (`←` and `↓` go back, `→` and `↑` go forward) |
+| `Page Up`, `Page Down` (on the timeline) | Forward (`Page Up`) or back (`Page Down`) by 10 seconds, as on a slider |
 | `Ctrl + 0`, `Ctrl + 2` | **Fit**, **Width** |
 
 ### Live mode (control window and presentation)
 
 | Keys | Action |
 |---|---|
-| `→`, `Page Down`, `Space` | Next page |
+| `→`, `Page Down`, `Space` | Next page (`Space` also when a button has the focus) |
 | `←`, `Page Up` | Previous page |
-| `Ctrl + Delete` (or `Ctrl + Backspace`) | Clear the page |
+| `Ctrl + Delete` (or `Ctrl + Backspace`) | Clear the page (**Undo clearing** for 8 seconds) |
 | `B` | **Blackboard** |
 | `L` | **Laser pointer** |
 | `+` / `−` | Zoom the projected area in / out |
-| `0` | **Whole page** |
+| `0` (on an AZERTY keyboard, the `à` key) | **Whole page** |
 | `W` | **Width** |
 | `Shift + arrows` | Move the projected area |
 | `Delete` or `Backspace` | Clear the marks written over the presentation |
-| `Esc` | **Finish** (in the presentation: close it) |
+| `Esc` | Close the projection if it is shown; otherwise ask whether to end live mode |
+
+### In windows
+
+| Keys | Action |
+|---|---|
+| `Esc` | Close the open window (export, print, assemble, Inkspace import…), wherever the focus is; not during an operation in progress, which you must stop or let finish first |

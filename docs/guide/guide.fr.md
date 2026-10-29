@@ -10,7 +10,9 @@ tels qu'ils apparaissent à l'écran. English version: [guide.en.md](guide.en.md
 
 > *Où en est cette première version ?* Tout ce qui ne demande pas la tablette (bibliothèque, édition, relecture,
 > exports, import des notes d'Inkspace) a été vérifié sous Windows par des tests automatiques ; quelques essais à la
-> main restent à faire (impression, stylet et écran tactile, export Word ouvert dans Word…). Tout ce qui parle à la
+> main restent à faire (impression, stylet et écran tactile, export Word ouvert dans Word, import avec Inkspace
+> ouvert, fermeture de session de Windows avec une note non enregistrée, couleurs des étiquettes sur deux PC avec
+> Nextcloud…). Tout ce qui parle à la
 > vraie tablette (enregistrement, synchronisation, mode direct, projection du direct) a été vérifié avec une tablette
 > simulée, mais *pas encore avec une Bamboo Slate réelle* : ces essais sont prévus au travail. Les passages concernés
 > le signalent par la mention « *Demande la tablette* ». Voir aussi les notes de version.
@@ -66,11 +68,26 @@ applications pour téléphone. Les notes ne peuvent pas contenir de zone de text
   USB. Aucun réglage préalable dans les paramètres Bluetooth de Windows n'est prévu : l'enregistrement de la tablette se
   fait dans Ardoise (*à confirmer avec la vraie tablette*).
 
-### Installer = copier
+### Installer = décompresser
 
-1. Créez un dossier pour le programme, par exemple `C:\Users\Prénom\Nextcloud\Ardoise\Programme`.
-2. Copiez-y `ardoise.exe` (et, si vous le souhaitez, les guides et la licence qui l'accompagnent).
-3. Double-cliquez sur `ardoise.exe`. Créez un raccourci sur le bureau si vous voulez. <!-- M10: à confirmer -->
+Ardoise est livrée dans une archive `ardoise-<version>-windows-x64.zip` (par exemple `ardoise-0.1.0-windows-x64.zip`).
+
+1. Si l'archive vient d'un téléchargement ou d'un courriel, faites d'abord un clic droit dessus, *Propriétés*, et
+   cochez *Débloquer* s'il est proposé.
+2. Faites un clic droit sur l'archive, *Extraire tout…*, et choisissez le dossier où ranger le programme, par exemple
+   `C:\Users\Prénom\Nextcloud\Ardoise\Programme` (Windows propose un dossier portant le nom de l'archive : vous
+   pouvez le raccourcir). Le contenu arrive dans un dossier `ardoise-<version>`.
+3. Dans ce dossier, double-cliquez sur `ardoise.exe`. Créez un raccourci sur le bureau si vous voulez.
+
+Le dossier contient :
+
+- `ardoise.exe` : le programme. C'est le seul fichier indispensable ; il n'y a rien à installer ;
+- `LISEZMOI.txt` : l'essentiel en français et en anglais ;
+- `LICENSE` et `THIRD-PARTY-NOTICES` : la licence d'Ardoise (GNU GPL version 3) et celles des composants libres
+  qu'elle utilise ;
+- `guide\` : ce guide et le guide de l'assistant, en pages HTML à ouvrir dans un navigateur (par un double-clic) :
+  `guide.fr.html`, `guide.en.html`, `assistant.fr.html` et `assistant.en.html`. Les liens d'une page à l'autre
+  fonctionnent.
 
 Pour la désinstallation, supprimez ce dossier (et, si vous le souhaitez, `%LOCALAPPDATA%\Ardoise`, voir plus bas).
 Vos notes, elles, ne sont pas touchées : elles sont dans votre bibliothèque.
@@ -91,6 +108,15 @@ Vos réglages sont dans `ardoise.toml`, *à côté de `ardoise.exe`* : le fichie
 dossier n'est pas accessible en écriture, Ardoise utilise `%APPDATA%\Ardoise\ardoise.toml`. Le chemin exact est
 rappelé en bas de **Réglages**. Le fichier est du texte simple, mais il n'est pas nécessaire de le modifier à la
 main.
+
+### Lancer Ardoise deux fois
+
+Une seule fenêtre d'Ardoise est ouverte par exemplaire du programme : si vous double-cliquez de nouveau sur le même
+`ardoise.exe` (un double-clic de trop pendant un démarrage lent, par exemple), Ardoise ramène la fenêtre déjà ouverte
+au premier plan au lieu d'en ouvrir une seconde, qui se disputerait la tablette. Deux exemplaires placés dans *deux
+dossiers différents* (donc avec deux fichiers `ardoise.toml`) peuvent en revanche tourner côte à côte. Les commandes
+écrites dans ce guide (`--self-test`, `--import-inkspace`, `--create-demo-library`…) fonctionnent même quand la
+fenêtre d'Ardoise est ouverte.
 
 ### Plusieurs ordinateurs
 
@@ -122,10 +148,11 @@ main.
 
 Ces dossiers sont propres à chaque ordinateur et ne sont jamais dans votre bibliothèque ni dans Nextcloud, sous
 `%LOCALAPPDATA%\Ardoise` : le dossier de WebView2 (`webview`), les miniatures (`thumbnails`), le texte reconnu pour la
-recherche (`handwriting`), l'encodeur OpenH264 si vous l'avez téléchargé (`codecs`), et deux dossiers de *copies de
-secours* (`live-backup` pour des pages du direct qui n'ont pas pu être écrites, `narration-backup` pour une narration
-qui n'a pas pu être ajoutée à sa note). Le dossier de WebView2, les miniatures et le texte reconnu se reconstruisent
-tout seuls ; ne supprimez les copies de secours qu'après avoir vérifié que vous n'en avez plus besoin.
+recherche (`handwriting`), l'encodeur OpenH264 si vous l'avez téléchargé (`codecs`), et trois dossiers de *copies de
+secours* (`drafts` pour les modifications d'une note pas encore enregistrées, voir le chapitre 8, `live-backup` pour
+des pages du direct qui n'ont pas pu être écrites, `narration-backup` pour une narration qui n'a pas pu être ajoutée à
+sa note). Le dossier de WebView2, les miniatures et le texte reconnu se reconstruisent tout seuls ; ne supprimez les
+copies de secours qu'après avoir vérifié que vous n'en avez plus besoin.
 
 ## 3. Premier démarrage
 
@@ -135,13 +162,23 @@ Au premier lancement sur un PC, la fenêtre **Bienvenue dans Ardoise** demande l
    `C:\Users\Prénom\Nextcloud\Ardoise\Notes`.
 2. Ardoise indique s'il contient déjà une bibliothèque (« elle sera utilisée telle quelle ») ou si elle en crée une
    nouvelle. Ce choix ne concerne que cet ordinateur.
-3. Cliquez sur **Continuer**.
+3. Si Ardoise trouve des notes de Wacom Inkspace sur ce PC, la fenêtre le dit (« Ardoise a trouvé des notes de Wacom
+   Inkspace sur cet ordinateur (24 notes). ») et propose une case, cochée d'office : **Les importer dans la
+   bibliothèque (classeur « Inkspace »)**. Décochez-la si vous ne voulez pas les importer maintenant ; vous pourrez le
+   faire plus tard (chapitre 11).
+4. Cliquez sur **Continuer**. Si la case d'Inkspace est cochée, la fenêtre d'import s'ouvre aussitôt dans la
+   bibliothèque : vous confirmez l'import avant qu'il ne commence (chapitre 11).
 
 Vous arrivez dans la *bibliothèque*. Tant qu'elle est vide, elle dit que les pages de la tablette apparaîtront après
-la première synchronisation ; vous pouvez déjà créer une note avec **Nouvelle note**. Pour changer de bibliothèque
-plus tard : **Réglages**, puis **Changer** à côté de **Dossier de la bibliothèque**. Ardoise crée dans la
-bibliothèque un dossier `_ardoise` (enregistrement de la tablette, journaux de diagnostic, corbeille). Il n'est pas
-caché, pour que Nextcloud le synchronise : n'y touchez pas.
+la première synchronisation ; vous pouvez déjà créer une note avec **Nouvelle note**. Ardoise crée dans la
+bibliothèque un dossier `_ardoise` (enregistrement de la tablette, journaux de diagnostic, corbeille, couleurs des
+étiquettes). Il n'est pas caché, pour que Nextcloud le synchronise : n'y touchez pas.
+
+Pour changer de bibliothèque plus tard : **Réglages**, puis **Changer** à côté de **Dossier de la bibliothèque**, et
+choisissez le dossier. Ardoise ne change pas aussitôt : elle montre d'abord ce que contient ce dossier (« Ce dossier
+contient déjà une bibliothèque Ardoise : elle sera utilisée telle quelle » ou « Une nouvelle bibliothèque sera créée
+dans ce dossier », et le nombre de notes), rappelle que le changement ne vaut que pour ce PC, et attend votre accord :
+**Utiliser ce dossier** (ou **Annuler**). Les notes de l'ancienne bibliothèque restent dans leur dossier.
 
 Les réglages généraux sont aussi dans **Réglages** : **Langue** (**Automatique (langue de Windows)**, **Français** ou
 **English**) et **Thème** (**Comme Windows**, **Clair**, **Sombre**).
@@ -249,16 +286,24 @@ appuyez brièvement sur son bouton pour la connecter. En cas de coupure, l'état
 reprend tout seul.
 
 Pour terminer, cliquez sur **Terminer** : chaque page est enregistrée comme une note (le compteur de la fenêtre dit
-« N notes enregistrées »). Si une page ne peut pas être écrite dans la bibliothèque (disque plein, dossier
+« N notes enregistrées »). La touche `Échap` fait la même demande, mais Ardoise vous interroge d'abord (**Terminer le
+mode direct ?**, avec **Continuer** ou **Terminer**), car terminer ne s'annule pas (voir plus bas pour `Échap` et la
+projection). Si une page ne peut pas être écrite dans la bibliothèque (disque plein, dossier
 inaccessible…), un message l'explique, la page reste en mémoire et une copie de secours est écrite sur ce PC à la
-fermeture d'Ardoise.
+fermeture d'Ardoise. Si le mode direct ne s'arrête pas correctement, **Fermer quand même** arrête aussi la
+projection et la séance, et ferme la fenêtre.
+
+Si une note de la séance est renommée ou étiquetée pendant le cours (par l'assistant, par exemple), les pages suivantes
+continuent d'y être écrites au lieu d'être dupliquées.
 
 ### La fenêtre de commande
 
 - **Outil** (stylo à bille, plume, feutre, crayon, pinceau, surligneur, craie), **Couleur** (dont **Blanc craie** et
   **Jaune**) et **Épaisseur** : le trait suivant en tient compte, pas les précédents.
 - **Pages** : **Page précédente**, **Page suivante** (la position s'affiche : « Page 2 / 5 »), **Nouvelle page**.
-  **Nouveau calque** ajoute un calque à la page en cours. **Effacer la page** efface la page en cours seulement. <!-- M10: à confirmer -->
+  **Nouveau calque** ajoute un calque à la page en cours. **Effacer la page** (ou `Ctrl + Suppr`) efface la page en cours
+  seulement ; un message « Page effacée. » propose pendant 8 secondes **Annuler l'effacement**, qui rend l'encre. Si la
+  page a changé entre-temps, Ardoise dit que l'effacement ne peut plus être annulé.
 - **Tableau noir** : fond ardoise et craie blanche. **Pointeur laser** : le stylet en survol, sans toucher la tablette,
   montre un point rouge à l'écran *sans rien écrire* ; en touchant la tablette on écrit de nouveau.
 - **Position de la tablette** : quatre boutons qui changent aussitôt la position ; la page en cours tourne avec ce
@@ -285,9 +330,13 @@ tablette.* Les touches de la page suivante et précédente marchent dans tous le
    l'ordinateur. Ce que vous écrivez s'affiche sur les deux.
 4. **Arrêter la projection** ferme la présentation. Ardoise retient l'écran choisi sur ce PC.
 
-<!-- M10: à confirmer -->
 Avec un seul écran, la présentation recouvre la fenêtre de commande : appuyez sur `Échap` dans la présentation pour la
 fermer.
+
+*À quoi sert `Échap`.* Dans la fenêtre de commande comme dans la présentation, quand la projection est affichée,
+`Échap` la ferme (comme dans un diaporama) ; quand rien n'est projeté, `Échap` demande s'il faut terminer le mode
+direct. *`Espace` veut toujours dire « page suivante »*, même si un bouton de la fenêtre a le focus : il n'appuie
+jamais sur ce bouton (c'est ce qui évite d'effacer la page suivante par mégarde).
 
 ### Écrire par-dessus la présentation
 
@@ -308,8 +357,8 @@ envoie Page suivante et Page précédente) : voir le chapitre 17.
 La bibliothèque est la page d'accueil. En haut : le champ **Rechercher une note**, le tri (**Trier les notes** :
 **Date : la plus récente d'abord**, **Date : la plus ancienne d'abord**, **Titre : A → Z**, **Titre : Z → A**), les
 boutons **Nouvelle note**, **Depuis un PDF ou une image…** et **Réglages**. À gauche : la barre latérale avec
-**Toutes les notes**, **Favoris**, les **Classeurs**, les **Étiquettes**, la **Corbeille**, et en bas le bloc
-**Tablette** et le bouton **Tester la tablette**.
+**Toutes les notes**, **Favoris**, les **Classeurs**, les **Étiquettes**, la **Corbeille**, l'entrée
+**Importer depuis Inkspace…** (chapitre 11), et en bas le bloc **Tablette** et le bouton **Tester la tablette**.
 
 Une carte montre la miniature, le titre (ou la date si la note n'a pas de titre), la date et les étiquettes. Un clic
 ouvre la note dans l'éditeur. Sur la carte : la case pour *sélectionner*, l'étoile des favoris, le menu
@@ -319,29 +368,56 @@ glisser la note hors d'Ardoise (chapitre 10). Renommer une note renomme aussi so
 Les miniatures sont gardées dans un cache propre à chaque PC. Quand une note change sur un autre ordinateur
 (synchronisation Nextcloud), la bibliothèque se met à jour toute seule.
 
+Des messages peuvent s'afficher au-dessus des notes : **Fichiers illisibles : N** (voir plus bas) et, après un arrêt
+brutal d'Ardoise, la liste des modifications non enregistrées que l'on peut récupérer (chapitre 8).
+
 ### Classeurs
 
-<!-- M10: à confirmer -->
 Un classeur est un simple *sous-dossier* de la bibliothèque. Cliquez sur l'icône **Nouveau classeur** (ou sur
 **Nouveau sous-classeur dans…** à côté d'un classeur), tapez le **Nom du classeur** et cliquez sur **Créer**. Pour
 ranger des notes, glissez-les sur un classeur de la barre latérale, ou sélectionnez-les puis **Déplacer vers…**
-(**Bibliothèque (racine)** ramène à la racine). Ardoise ne propose pas de renommer ou de supprimer un classeur : faites-le
-dans l'Explorateur, c'est un dossier ordinaire.
+(**Bibliothèque (racine)** ramène à la racine).
+
+Pour renommer ou supprimer un classeur, ouvrez le menu **⋯** (« Actions sur le classeur… ») à côté de son nom dans la
+barre latérale :
+
+- **Renommer…** : tapez le nouveau nom puis **Renommer** (**Annuler** ou `Échap` abandonne). Le dossier est renommé et
+  ses notes le suivent. Ardoise ne remplace jamais un classeur ou un fichier du même nom : elle prévient et vous
+  laisse en choisir un autre.
+- **Supprimer…** : Ardoise demande confirmation en disant combien de notes (et de sous-classeurs) le classeur contient.
+  **Supprimer le classeur** envoie ses notes à la **Corbeille**, puis supprime le dossier. Rien n'est détruit : chaque
+  note restaurée depuis la corbeille retrouve son classeur. Un dossier qui contient encore des fichiers qui ne sont pas
+  des notes est gardé, et le message le dit. Un message **Annuler** reste affiché quelques secondes (voir « La
+  corbeille » plus bas) : il rétablit le classeur avec ses notes.
 
 ### Étiquettes et favoris
 
-<!-- M10: à confirmer -->
 Sélectionnez une ou plusieurs notes, cliquez sur **Étiquettes…**, tapez une étiquette (plusieurs, séparées par une
 virgule) et cliquez sur **Ajouter** ; une étiquette existante se retire avec sa croix. Un clic sur une étiquette de la
 barre latérale, ou sur celle d'une carte, n'affiche que les notes qui la portent. L'étoile d'une carte (ou
 **Mettre en favoris**) ajoute aux **Favoris**.
 
+*Couleurs des étiquettes.* Le petit rond à côté d'une étiquette, dans la barre latérale et dans le panneau
+**Étiquettes…** (sous **Étiquettes existantes**), ouvre une palette de huit couleurs, lisibles en thème clair comme en
+thème sombre : **Rouge**, **Orange**, **Jaune**, **Vert**, **Turquoise**, **Bleu**, **Violet**, **Rose** ; **Aucune
+couleur** l'enlève. Au clavier, les flèches passent d'une couleur à l'autre, `Entrée` choisit et `Échap` ferme. La
+couleur change sur toutes les notes qui portent l'étiquette : on la retrouve sur les cartes, dans la barre latérale et
+dans le panneau. Elle appartient à la *bibliothèque* (fichier `_ardoise\tags.json`), pas aux notes : tous vos PC la
+voient, par Nextcloud. Si deux PC changent les couleurs en même temps, Ardoise fusionne étiquette par étiquette, le
+changement le plus récent l'emportant.
+
 ### Sélection multiple
 
 Cochez les cartes, ou : `Ctrl + clic` ajoute ou retire une note, `Maj + clic` sélectionne une plage, `Ctrl + A` tout,
 `Échap` désélectionne. Une barre d'actions apparaît : **Déplacer vers…**, **Étiquettes…**, **Exporter…**,
-**Imprimer…**, **Assembler…**, **Mettre en favoris** (ou **Retirer des favoris**), **Mettre à la corbeille**,
-**Désélectionner**.
+**Imprimer…**, **Assembler…**, **Tourner**, **Mettre en favoris** (ou **Retirer des favoris**),
+**Mettre à la corbeille**, **Désélectionner**.
+
+**Tourner** fait pivoter *toutes* les notes sélectionnées d'un coup : choisissez **Un quart de tour à gauche** ou
+**Un quart de tour à droite**. La feuille, l'écriture et l'image de fond tournent ensemble, exactement comme
+**Tourner la feuille avec l'écriture** dans l'éditeur (chapitre 8). Une barre indique l'avancement (« Rotation des notes :
+2 sur 5 »), **Arrêter** interrompt l'opération entre deux notes, et les notes qui n'ont pas pu être tournées sont
+listées avec la raison. Le message **Annuler** remet les notes dans leur sens (voir « La corbeille »).
 
 **Assembler** (au moins deux notes) crée une nouvelle note, sans modifier les originales : **Superposer sur une page**
 (toutes les notes sur une seule page, chacune sur ses propres calques) ou **Mettre bout à bout (page longue)** (les
@@ -350,12 +426,13 @@ de la première note est gardée.
 
 ### Créer une note
 
-<!-- M10: à confirmer -->
 - **Nouvelle note** : une page blanche A4 en paysage, dans le classeur affiché.
 - **Depuis un PDF ou une image…** : une note par page du PDF choisie (**Toutes les pages** ou **Certaines pages**,
   par exemple `1-3, 5`), à la taille et dans l'orientation de la page, avec la page en fond pour écrire par-dessus. Une
   image donne une note de la taille d'une feuille A4, dans l'orientation de l'image. Les PDF protégés par un mot de
-  passe ne sont pas lus : enregistrez-en une copie sans mot de passe.
+  passe ne sont pas lus : enregistrez-en une copie sans mot de passe. Pour un long PDF, une barre indique
+  l'avancement (« Création des notes : 3 sur 12… ») et **Annuler** arrête la création : aucune note n'est alors gardée
+  (« Création annulée : aucune note n'a été gardée »).
 
 ### Chercher une note
 
@@ -379,11 +456,23 @@ difficile.
 (elle revient où elle était) ou **Supprimer définitivement**. **Vider la corbeille** supprime tout, après confirmation.
 Les notes de la corbeille sont supprimées définitivement après 30 jours.
 
+*Se reprendre tout de suite.* Après **Mettre à la corbeille** (le bouton ou la touche `Suppr`), un message s'affiche en
+bas de la bibliothèque (« 3 notes mises à la corbeille. ») avec un bouton **Annuler** qui restaure les notes. Il reste
+quelques secondes (8), et tant que la souris ou le clavier est dessus. `Ctrl + Z` fait la même chose depuis la
+bibliothèque (hors d'un champ de texte, et pas dans l'éditeur, qui a son propre **Annuler**). Les messages **Annuler**
+de **Tourner** et de la suppression d'un classeur marchent de la même façon, et `Ctrl + Z` annule la plus récente de
+ces actions. Si une note ne peut pas aller à la corbeille (elle a été supprimée entre-temps sur un autre ordinateur,
+par exemple), les autres y vont quand même ; celle-là est signalée et reste sélectionnée.
+
 ### Notes en conflit et fichiers illisibles
 
 Quand Nextcloud crée une copie « en conflit » d'une note modifiée sur deux PC, la carte porte l'étiquette
-**Copie en conflit** : ouvrez les deux versions, gardez celle que vous voulez et mettez l'autre à la corbeille. Un
-message **Fichiers illisibles : N** liste des fichiers que l'application ne sait pas afficher ; ils ne sont pas modifiés.
+**Copie en conflit** : ouvrez les deux versions, gardez celle que vous voulez et mettez l'autre à la corbeille.
+
+Si la bibliothèque contient des fichiers que l'application ne sait pas lire, un bandeau **Fichiers illisibles : N**
+s'affiche au-dessus des notes. Il liste chaque fichier avec la raison, dans la langue de l'application : par exemple
+une note créée par une version plus récente d'Ardoise demande de *mettre Ardoise à jour* (chapitre 2). Ces fichiers ne
+sont pas modifiés. Les fichiers temporaires `.part` laissés par un arrêt brutal sont ignorés, puis nettoyés.
 
 ## 8. Modifier une note
 
@@ -396,7 +485,29 @@ rétablir n'ont pas de limite pendant que la note est ouverte.
 Si la note a été modifiée entre-temps sur un autre PC, Ardoise *refuse d'écraser l'autre version* : vos modifications
 restent à l'écran et **Enregistrer comme copie** les sauve dans une nouvelle note.
 
-<!-- M10: à confirmer -->
+### La copie de secours automatique
+
+Tant qu'une note a des modifications non enregistrées, Ardoise en garde une *copie de secours* : environ 2 secondes
+après votre dernière modification (au plus 10 secondes après la première, si vous écrivez sans pause). Cette copie est
+rangée sur ce PC seulement, dans `%LOCALAPPDATA%\Ardoise\drafts`, jamais dans la bibliothèque ni dans Nextcloud. Elle ne
+remplace pas **Enregistrer** : la note du disque n'est pas touchée, et la copie disparaît dès que vous enregistrez (ou
+que vous choisissez **Revenir sans enregistrer**).
+
+- *Après un plantage, un redémarrage forcé, une batterie vide ou une mise à jour de Windows*, Ardoise propose de
+  récupérer les modifications. Quand vous rouvrez la note, la fenêtre **Modifications récupérées** dit quand la
+  dernière copie a été faite. Si la note n'a pas changé depuis, **Récupérer les modifications** les remet dans la note
+  (à vous d'enregistrer ensuite). Si la note a changé entre-temps, par exemple sur un autre PC, la fenêtre ne propose
+  que **Récupérer dans une nouvelle note** : les modifications vont dans une nouvelle note intitulée « … (récupérée) »,
+  sans toucher à la note qui a changé ; Ardoise n'écrase jamais une version plus récente. **Les abandonner** les
+  supprime, après confirmation (**Abandonner** ou **Garder**) ; **Plus tard** les laisse en attente.
+- Sur l'écran de la bibliothèque, un bandeau « Ardoise s'est fermé sans enregistrer des modifications. Notes
+  concernées : N » les liste aussi, avec la date de la dernière copie. Chaque ligne propose **Ouvrir** (la note, où la
+  fenêtre ci-dessus s'affiche), ou **Récupérer dans une nouvelle note** quand la note n'existe plus, et **Abandonner**.
+- *À la fermeture de session ou à l'arrêt de Windows*, si une note a des modifications non enregistrées, Ardoise écrit
+  aussitôt sa copie de secours, et Windows affiche qu'Ardoise empêche l'arrêt, avec la raison : « Une note a des
+  modifications non enregistrées. Revenez dans Ardoise pour l'enregistrer. » Vous pouvez revenir dans Ardoise pour
+  enregistrer, ou arrêter quand même : la copie de secours est alors déjà sur le disque et Ardoise la proposera au
+  prochain lancement. (Quand Windows impose l'arrêt sans attendre, la copie de secours est écrite quand même.)
 
 ### Les outils
 
@@ -410,13 +521,22 @@ La barre d'outils propose quatre outils (**Outil**) :
 - **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**.
 - **Sélection** (le lasso) : entourez des traits pour les sélectionner ; `Maj` + lasso ajoute, `Ctrl` + lasso retire. Le
   panneau **Sélection** propose **Copier**, **Couper**, **Coller**, **Dupliquer**, **Redresser les formes**, **Supprimer**.
-  Les changements de couleur, d'encre et d'épaisseur s'appliquent alors à la sélection ; on la déplace et on la
-  redimensionne à la souris.
+  Les changements de couleur, d'encre et d'épaisseur s'appliquent alors à la sélection ; on la déplace (en la saisissant
+  à l'intérieur de son cadre) et on la redimensionne (par les poignées du cadre) à la souris, ou au stylet (voir ci-dessous
+  et le chapitre 12).
 - **Déplacer la page** : faire glisser la page (la barre d'espace maintenue, ou le bouton du milieu de la souris,
   font la même chose avec n'importe quel outil).
 
 **Zoom** : la molette zoome autour du curseur ; en bas à droite, **Agrandir**, **Réduire**, **Ajuster** (page
-entière) et **Largeur** (`Ctrl + 2`, la page sur toute la largeur de la fenêtre).
+entière, `Ctrl + 0`) et **Largeur** (`Ctrl + 2`, la page sur toute la largeur de la fenêtre). Ces deux raccourcis
+marchent aussi sur un clavier AZERTY, où les chiffres s'obtiennent avec `Maj` : `Ctrl + à` et `Ctrl + é` suffisent,
+sans `Maj`, de même que `Ctrl + Maj + à`.
+
+*Avec le stylet.* Quand vous avez fait la sélection avec le *bouton du stylet* (le lasso, quel que soit l'outil), la
+pointe du stylet, comme un doigt, saisit ensuite la sélection au lieu de dessiner : posée dans le cadre de la
+sélection, elle la déplace ; posée sur une poignée du cadre, elle la redimensionne. Cela vaut avec les outils **Stylo**
+et **Gomme** : pas besoin de repasser par l'outil **Sélection**. Hors du cadre, le stylet dessine comme d'habitude, et
+`Échap` désélectionne.
 
 ### Redresser les formes
 
@@ -578,6 +698,19 @@ structure : titre, date et étiquettes en tête, puis paragraphes, listes et des
 Si Windows n'a pas pu analyser la mise en page, Ardoise le dit : la structure est alors déduite du texte et peut être
 moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
 
+- *Les mots sont les mêmes* dans le .txt, le Markdown, le Word et le texte copié : ce sont ceux de la reconnaissance de
+  la note entière. L'analyse de mise en page de Windows ne fournit que la structure (paragraphes, listes, dessins).
+- *Les corrections l'emportent.* Si un texte corrigé a été enregistré pour la note (par l'assistant, chapitre 14), c'est
+  lui qui est exporté, partout, au lieu du texte reconnu.
+- *Un trait sous des mots* les souligne : il devient du **gras** en Markdown (qui n'a pas de souligné) et un vrai
+  soulignement dans Word. Un trait qui barre des mots les barre (`~~mot~~` en Markdown, texte barré dans Word). Ces
+  traits ne sont pas exportés comme des images.
+- **Inclure les dessins (Markdown, Word)** : les schémas et figures sont placés comme des images entre les paragraphes
+  (dans Word, dans le document ; en Markdown, en fichiers PNG dans un dossier à côté du fichier `.md`, sans jamais
+  remplacer un fichier existant). Un dessin posé à côté d'un paragraphe vient après lui. La case n'est cochée que si
+  les notes ont des dessins ; sinon Ardoise écrit « Aucun dessin trouvé : le texte seul est exporté ». Décochez-la pour
+  n'avoir que le texte.
+
 ### Copier, imprimer, glisser
 
 - **Copier l'image** : met la note dans le presse-papiers de Windows ; collez-la dans Word ou OneNote.
@@ -590,33 +723,56 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
 
 ## 11. Importer les notes d'Inkspace
 
-<!-- M10: à confirmer -->
-Si vous avez des notes dans Wacom Inkspace sur ce PC, Ardoise peut les importer. *L'import se fait pour l'instant en
-ligne de commande*, il n'y a pas de bouton dans l'application.
+Si vous avez utilisé Wacom Inkspace sur ce PC, Ardoise peut reprendre ses notes. Ardoise ne modifie ni ne supprime rien
+chez Inkspace : elle ne fait que lire ses données.
 
-1. Fermez Inkspace (par précaution). Ardoise ne modifie rien chez Inkspace : elle lit ses données en mémoire.
-2. Ouvrez PowerShell dans le dossier d'`ardoise.exe` (dans l'Explorateur, tapez `powershell` dans la barre d'adresse
-   puis Entrée) et lancez, en indiquant *le dossier de votre bibliothèque* :
+### Depuis l'application
 
-   ```
-   .\ardoise.exe --import-inkspace --library "C:\Users\Prénom\Nextcloud\Ardoise\Notes" | Out-String
-   ```
+1. Fermez Inkspace s'il est ouvert (si Ardoise ne peut pas lire ses fichiers, elle vous le dit : « fermez Inkspace puis
+   réessayez »).
+2. Dans la barre latérale de la bibliothèque, cliquez sur **Importer depuis Inkspace…**. (Au premier lancement, la fenêtre
+   s'ouvre toute seule si vous avez laissé cochée la case d'Inkspace, chapitre 3.)
+3. La fenêtre **Importer depuis Wacom Inkspace** cherche Inkspace sur ce PC (« Recherche d'Inkspace sur cet
+   ordinateur… »). Quand elle le trouve, elle affiche le **Dossier d'Inkspace** et le nombre de notes (« 24 notes
+   trouvées »), en précisant combien sont *déjà importées* (dans la bibliothèque ou sa corbeille : elles seront
+   ignorées) et combien sont illisibles.
+4. Si Inkspace n'est pas trouvé (« Ardoise n'a pas trouvé Wacom Inkspace sur cet ordinateur… »), ou si vous voulez
+   importer depuis une copie (sur une clé USB, par exemple), cliquez sur **Choisir un dossier…** (ou **Choisir un autre
+   dossier…**) et indiquez le dossier `LocalState` d'Inkspace, ou une copie de ce dossier.
+5. **Classeur de destination** : « Inkspace » par défaut. Tapez un autre nom, ou choisissez un classeur existant dans la
+   liste proposée ; laissé vide, le champ range les notes à la racine de la bibliothèque.
+6. Cliquez sur **Importer N notes**. Une barre d'avancement indique « Import des notes : 3 sur 24… ». **Arrêter
+   l'import** s'arrête après la note en cours : les notes déjà importées sont complètes, et relancer l'import ajoute les
+   autres.
+7. Un compte rendu s'affiche (**Import terminé**, ou **Import arrêté**) : combien de notes sont importées et dans quel
+   classeur, combien étaient déjà importées auparavant (ignorées), et les notes qui n'ont pas pu l'être, avec leur date, le
+   début de leur identifiant et la raison. **Voir les notes importées** ouvre le classeur.
 
-   (`| Out-String` fait attendre PowerShell et affiche le compte rendu à la fin.) Ardoise trouve seule l'installation
-   d'Inkspace ; si elle n'y arrive pas, ajoutez en premier argument le dossier `LocalState` d'une copie. Sans
-   `--library`, Ardoise affiche le tableau des notes trouvées mais n'enregistre rien.
-3. Le compte rendu liste chaque note (date, orientation, nombre de calques, de traits, de points, minutage) et se termine
-   par « N/N notes importées ».
+Importer plusieurs fois ne crée pas de doublon : une note déjà importée est ignorée, même si vous l'avez renommée,
+déplacée ou mise à la corbeille.
 
-Les notes arrivent dans un classeur *Inkspace*. Importer deux fois ne crée pas de doublon, et une note que vous avez
-mise à la corbeille n'est pas rapportée. À savoir :
+### En ligne de commande
 
-- Inkspace ne garde pas la *pression* mais l'épaisseur du trait : Ardoise l'estime à partir de l'épaisseur. L'aspect
-  est très proche, mais pas identique.
+La même importation existe sans fenêtre : dans PowerShell, dans le dossier d'`ardoise.exe`,
+
+```
+.\ardoise.exe --import-inkspace --library "C:\Users\Prénom\Nextcloud\Ardoise\Notes" | Out-String
+```
+
+(`| Out-String` fait attendre PowerShell et affiche le compte rendu à la fin ; ajoutez en premier argument le dossier
+`LocalState` d'une copie si Ardoise ne trouve pas Inkspace.) Sans `--library`, elle affiche seulement le tableau des
+notes trouvées. Le compte rendu, en français, se termine par « N/N notes importées ».
+
+### À savoir
+
+- Inkspace ne garde pas la *pression* mais l'épaisseur du trait : Ardoise estime la pression à partir de l'épaisseur.
+  L'aspect est très proche, mais pas identique.
 - Inkspace ne garde pas toujours le *minutage* de l'écriture : quand il manque, Ardoise l'invente (colonne
-  « synthétisé » du compte rendu), et la relecture de ces notes n'est qu'indicative.
+  « synthétisé » du compte rendu de la ligne de commande), et la relecture de ces notes n'est qu'indicative.
 - Les notes importées sont écrites à l'*outil stylo à bille*, sur fond blanc, sans titre ni papier ; vous pouvez les
   retoucher comme les autres.
+- Le nuage de Wacom et la collaboration d'Inkspace n'existent pas dans Ardoise : seules les notes présentes sur le PC
+  sont reprises.
 
 ## 12. Stylet et écran tactile
 
@@ -628,7 +784,9 @@ présentation s'utilisent au stylet ou au doigt.
 - Le trait *s'épaissit avec la pression*.
 - Le *dos du stylet* (la gomme) *efface*, avec les réglages de la gomme (**Traits entiers** ou **Partielle**), quel que
   soit l'outil choisi. Un cercle de gomme apparaît quand il survole la page.
-- Le *bouton du stylet* trace un *lasso de sélection*, quel que soit l'outil.
+- Le *bouton du stylet* trace un *lasso de sélection*, quel que soit l'outil. Ensuite, la *pointe* du stylet (comme un
+  doigt) saisit la sélection au lieu de dessiner : posée dans le cadre, elle la déplace ; posée sur une poignée, elle la
+  redimensionne (avec les outils **Stylo** et **Gomme**). Hors du cadre, elle dessine comme d'habitude.
 - La *paume* posée sur l'écran est ignorée tant que le stylet est utilisé ou proche de l'écran.
 
 *Le doigt*
@@ -656,12 +814,16 @@ consignes à l'écran, cliquez sur **C'est fait, continuer** après chaque actio
 **Arrêter le test** pour terminer. Pour les pages de référence, dessinez : un carré et un cercle aussi grands que possible ;
 « Ardoise 2026 » en écriture normale ; trois traits horizontaux, très léger, normal, très appuyé.
 
-Deux cases à connaître : **Effacer les pages de la tablette une fois enregistrées** (cochée par défaut) et
-**Simulation (sans tablette)**. Le test peut enregistrer la tablette si elle ne l'est pas encore, avec les mêmes
+Deux cases à connaître : **Effacer les pages de la tablette une fois ajoutées à la bibliothèque comme notes** (cochée
+par défaut) et **Simulation (sans tablette)**. Le test peut enregistrer la tablette si elle ne l'est pas encore, avec les mêmes
 conséquences qu'au chapitre 4.
 
 > *Attention aux pages qui sont déjà sur la tablette.* Pendant le test, les pages en mémoire sont téléchargées, puis
-> effacées de la tablette si la case est cochée. Elles sont enregistrées et vérifiées avant d'être effacées : elles sont conservées dans le dossier des diagnostics (voir plus bas) et, avec la case cochée, aussi enregistrées comme notes de la bibliothèque. Si la tablette contient des pages importantes, vous pouvez aussi les récupérer d'abord par la synchronisation normale (chapitre 5). <!-- M10: à confirmer -->
+> effacées de la tablette si la case est cochée. Chaque page est d'abord enregistrée et vérifiée : une copie brute est
+> gardée dans le dossier des diagnostics (voir plus bas) et la page est ajoutée à la bibliothèque comme une note, comme
+> dans la synchronisation normale (une page déjà présente n'est pas ajoutée deux fois). Ce n'est qu'ensuite que la
+> tablette l'efface ; si une page ne peut pas être enregistrée, elle reste sur la tablette. Si la tablette contient des
+> pages importantes, vous pouvez aussi les récupérer d'abord par la synchronisation normale (chapitre 5).
 
 À la fin, le résumé indique « N réussie(s), N échec(s), N ignorée(s) » et l'emplacement du journal.
 
@@ -694,7 +856,9 @@ ne contient aucune IA et reste utilisable hors ligne ; c'est le logiciel de l'as
 
 **Réglages**, section **Assistant (MCP)**, donne le texte exact à copier dans l'assistant, avec une case **Lecture seule** pour
 qu'il ne puisse que lire. Tout est expliqué pas à pas, avec des exemples de demandes, dans le guide
-[L'assistant](assistant.fr.md) (English: [the assistant guide](assistant.en.md)).
+[L'assistant](assistant.fr.md) (English: [the assistant guide](assistant.en.md)). Dans l'archive d'Ardoise, c'est le
+fichier `guide\assistant.fr.html` (et `guide\assistant.en.html` en anglais), à ouvrir dans un navigateur ; **Réglages**
+le rappelle sous le texte à copier.
 
 ## 15. Vie privée
 
@@ -740,6 +904,11 @@ de tous les composants utilisés avec leur licence.
 | « Ce PDF est protégé par un mot de passe » | Enregistrez-en une copie sans mot de passe. |
 | « L'impression a échoué » | Vérifiez l'imprimante, ou exportez la note en PDF. |
 | Des pages du direct n'ont pas pu être enregistrées | Elles restent en mémoire. Vérifiez le dossier de la bibliothèque (place, droits, synchronisation) ; une copie de secours est écrite dans `%LOCALAPPDATA%\Ardoise\live-backup`. |
+| « Ardoise s'est fermé sans enregistrer des modifications » (bandeau de la bibliothèque), ou fenêtre « Modifications récupérées » | Ardoise s'est arrêté avant que vous enregistriez. Rouvrez la note et récupérez les modifications (chapitre 8). |
+| « Fichiers illisibles : N » | Ardoise ne sait pas lire ces fichiers et ne les a pas modifiés ; la raison est écrite à côté de chacun (chapitres 2 et 7). |
+| Windows dit qu'« Ardoise empêche l'arrêt » | Une note a des modifications non enregistrées : revenez dans Ardoise et enregistrez, ou arrêtez quand même (la copie de secours est déjà écrite, chapitre 8). |
+| « Ardoise n'a pas trouvé Wacom Inkspace sur cet ordinateur » | Cliquez sur **Choisir un dossier…** et indiquez le dossier `LocalState` d'Inkspace ou une copie (chapitre 11). Si Ardoise dit de fermer Inkspace, fermez-le et réessayez. |
+| Un second double-clic sur `ardoise.exe` ne fait rien de nouveau | C'est voulu : la fenêtre déjà ouverte revient au premier plan (chapitre 2). |
 
 Si le problème tient à la tablette, lancez **Tester la tablette** (chapitre 13) : le journal, ramené par Nextcloud,
 permet de comprendre ce qui s'est passé.
@@ -762,6 +931,7 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte.
 | `Échap` | Désélectionner |
 | `F2` | Renommer la note |
 | `Suppr` | Mettre la note (ou la sélection) à la corbeille |
+| `Ctrl + Z` | Annuler la dernière action dont le message **Annuler** est affiché (mise à la corbeille, **Tourner**, suppression d'un classeur) |
 
 ### Éditeur
 
@@ -775,11 +945,11 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte.
 | `Suppr` ou `Retour arrière` | Supprimer la sélection |
 | `Échap` | Désélectionner |
 | `V`, `P`, `E`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Déplacer la page** |
-| `Espace` (maintenu) | Déplacer la page |
+| `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton) |
 | `F` | **Redresser les formes** |
 | `R` | **Relecture** |
-| `Ctrl + 0` | **Ajuster** (page entière) |
-| `Ctrl + 2` | **Largeur** |
+| `Ctrl + 0` | **Ajuster** (page entière). Au clavier AZERTY : `Ctrl + à` ou `Ctrl + Maj + à` |
+| `Ctrl + 2` | **Largeur**. Au clavier AZERTY : `Ctrl + é` ou `Ctrl + Maj + é` |
 | Molette | Zoom autour du curseur |
 | Bouton du milieu (glisser) | Déplacer la page |
 
@@ -789,22 +959,28 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte.
 |---|---|
 | `Espace` | Lecture / pause |
 | `R` ou `Échap` | Quitter la relecture |
-| Flèches (sur la ligne du temps) | Reculer ou avancer d'une seconde |
-| `Pg préc`, `Pg suiv` (sur la ligne du temps) | Reculer ou avancer de 10 secondes |
+| Flèches (sur la ligne du temps) | Reculer ou avancer d'une seconde (`←` et `↓` reculent, `→` et `↑` avancent) |
+| `Pg préc`, `Pg suiv` (sur la ligne du temps) | Avancer (`Pg préc`) ou reculer (`Pg suiv`) de 10 secondes, comme sur un curseur |
 | `Ctrl + 0`, `Ctrl + 2` | **Ajuster**, **Largeur** |
 
 ### Mode direct (fenêtre de commande et présentation)
 
 | Touches | Action |
 |---|---|
-| `→`, `Pg suiv`, `Espace` | Page suivante |
+| `→`, `Pg suiv`, `Espace` | Page suivante (`Espace` aussi quand un bouton a le focus) |
 | `←`, `Pg préc` | Page précédente |
-| `Ctrl + Suppr` (ou `Ctrl + Retour arrière`) | Effacer la page |
+| `Ctrl + Suppr` (ou `Ctrl + Retour arrière`) | Effacer la page (**Annuler l'effacement** pendant 8 secondes) |
 | `B` | **Tableau noir** |
 | `L` | **Pointeur laser** |
 | `+` / `−` | Agrandir / réduire la zone projetée |
-| `0` | **Page entière** |
+| `0` (au clavier AZERTY, la touche `à`) | **Page entière** |
 | `W` | **Largeur** |
 | `Maj + flèches` | Déplacer la zone projetée |
 | `Suppr` ou `Retour arrière` | Effacer les annotations écrites sur la présentation |
-| `Échap` | **Terminer** (dans la présentation : la fermer) |
+| `Échap` | Fermer la projection si elle est affichée ; sinon, demander s'il faut **Terminer** le mode direct |
+
+### Dans les fenêtres
+
+| Touches | Action |
+|---|---|
+| `Échap` | Fermer la fenêtre ouverte (export, impression, assemblage, import d'Inkspace…), où que soit le focus ; pas pendant une opération en cours, qu'il faut d'abord arrêter ou laisser finir |
