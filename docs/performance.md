@@ -33,16 +33,16 @@ Dernière mesure : 2026-10-29, sur 12th Gen Intel(R) Core(TM) i5-1235U, 10 cœur
 
 | Objectif | Mesuré | Résultat |
 |---|---|---|
-| Démarrage à chaud (< 2 s) | 12,14 s (médiane de 3; à froid : 3,52 s) | NON ATTEINT |
-| 1000 notes affichées (< 2 s) | en cache : 6,74 s; hors cache : 11,20 s | NON ATTEINT |
-| 1000 notes, miniatures visibles dessinées (< 3 s) | en cache : 7,60 s; hors cache : 11,37 s (12 cartes) | NON ATTEINT |
-| 1000 notes, défilement, miniatures en cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 56,8 fps, p95 33,3 ms, 19 en retard (> 25 ms), 0 au-delà de 50 ms (342 images) | OK |
-| 1000 notes, défilement, miniatures hors cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 59,0 fps, p95 16,9 ms, 7 en retard (> 25 ms), 0 au-delà de 50 ms (355 images) | à titre indicatif |
+| Démarrage à chaud (< 2 s) | 11,61 s (médiane de 3 ; à froid : 8,56 s) | NON ATTEINT |
+| 1000 notes affichées (< 2 s) | en cache : 38,28 s ; hors cache : 36,62 s | NON ATTEINT |
+| 1000 notes, miniatures visibles dessinées (< 3 s) | en cache : 51,57 s ; hors cache : 37,31 s (12 cartes) | NON ATTEINT |
+| 1000 notes, défilement, miniatures en cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 43,8 fps, p95 33,5 ms, 85 en retard (> 25 ms), 5 au-delà de 50 ms (264 images) | NON ATTEINT |
+| 1000 notes, défilement, miniatures hors cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 24,4 fps, p95 143,4 ms, 62 en retard (> 25 ms), 28 au-delà de 50 ms (149 images) | à titre indicatif |
 | Mode direct (>= 60 images/s, <= 1 % d'images en retard) | 60,0 fps, p95 16,8 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (481 images) | OK |
-| MP4 1080p d'une relecture de 2 min (< 2 min) | 87,8 s (3599 images, 120 s de relecture; Media Foundation: Intel® Quick Sync Video H.264 Encoder MFT (hardware)) | OK |
+| MP4 1080p d'une relecture de 2 min (< 2 min) | 62,4 s (3599 images, 120 s de relecture ; Media Foundation: Intel® Quick Sync Video H.264 Encoder MFT (hardware)) | OK |
 | Taille de l'exécutable (< 30 Mo) | 19,7 Mo | OK |
 <!-- perf:end -->
 
 ## Mesure de référence avant les corrections de la bibliothèque (M10)
 
-Première mesure, prise sur le code d'avant les corrections de l'affichage de la bibliothèque (premier balayage sur le fil principal, relecture complète de la bibliothèque à chaque changement, écriture du cache des miniatures en O(N²), un `IntersectionObserver` par carte, sélection en O(n²), cache de 400 miniatures), **pendant que d'autres compilations occupaient le PC** : les temps de démarrage et d'affichage (12 s à chaud, 7 s pour 1 000 notes) ne sont donc pas ceux d'un PC au repos. À refaire sur un PC au repos après la fusion ; ce qui reste fiable malgré la charge : le défilement (56 à 59 images/s, aucune image au-delà de 50 ms), le mode direct (60,0 images/s, aucune image en retard), l'export MP4 (88 s pour 2 min, encodeur matériel Intel Quick Sync) et la taille (19,7 Mo).
+Première mesure, prise sur le code d'avant les corrections de l'affichage de la bibliothèque (premier balayage sur le fil principal, relecture complète de la bibliothèque à chaque changement, écriture du cache des miniatures en O(N²), un `IntersectionObserver` par carte, sélection en O(n²), cache de 400 miniatures), **pendant que d'autres compilations occupaient le PC** : les temps de démarrage et d’affichage (12 s à chaud ; 7 s puis 38 s pour 1 000 notes selon la charge du moment) et le défilement hors cache ne sont donc pas ceux d’un PC au repos. À refaire sur un PC au repos après la fusion ; ce qui reste fiable malgré la charge : le mode direct (60,0 images/s, aucune image en retard), l’export MP4 (62 à 88 s pour 2 min, encodeur matériel Intel Quick Sync) et la taille (19,7 Mo).
