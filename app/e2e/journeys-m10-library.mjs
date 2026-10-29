@@ -180,7 +180,8 @@ export const libraryJourneys = [
         await app.waitFor(`document.activeElement?.closest('.binder-editor') !== null`, 'the name field');
         await app.key('a', { ctrl: true });
         await app.type(newName);
-        await app.key('Enter');
+        // The driver's Enter carries no character, so the form is not submitted implicitly: click the button.
+        await app.click('.binder-editor button[type="submit"]');
         await app.waitFor(`document.querySelector('.sidebar [data-binder="${newName}"]') !== null`, 'the renamed binder');
         if (existsSync(join(app.library, 'Perso')) || notesIn(newName).length !== 2) throw new Error('the folder did not follow');
       });
@@ -191,7 +192,8 @@ export const libraryJourneys = [
         await app.waitFor(`document.activeElement?.closest('.binder-editor') !== null`, 'the name field');
         await app.key('a', { ctrl: true });
         await app.type('Classe');
-        await app.key('Enter');
+        // The driver's Enter carries no character, so the form is not submitted implicitly: click the button.
+        await app.click('.binder-editor button[type="submit"]');
         await app.waitFor(`document.querySelector('.binder-error') !== null`, 'the refusal');
         await app.key('Escape');
         if (notesIn(newName).length !== 2 || notesIn('Classe/3e B').length !== 4) throw new Error('notes moved');
