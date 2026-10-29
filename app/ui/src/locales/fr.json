@@ -125,7 +125,10 @@
       "purge": "Supprimer définitivement",
       "confirmPurge": "Supprimer définitivement « {title} » ?",
       "emptyAll": "Vider la corbeille",
-      "confirmEmpty": "Supprimer définitivement les {count} notes de la corbeille ? Cette action est irréversible.",
+      "confirmEmpty": {
+        "one": "Supprimer définitivement la note de la corbeille ? Cette action est irréversible.",
+        "other": "Supprimer définitivement les {count} notes de la corbeille ? Cette action est irréversible."
+      },
       "confirm": "Confirmer"
     },
     "assemble": {
@@ -989,7 +992,10 @@
     "run": "Imprimer…",
     "again": "Imprimer de nouveau…",
     "running": "Impression en cours…",
-    "done": "Envoyé à l'imprimante : {count} page(s).",
+    "done": {
+      "one": "Envoyé à l'imprimante : {count} page.",
+      "other": "Envoyé à l'imprimante : {count} pages."
+    },
     "cancelled": "Impression annulée.",
     "failed": "L'impression a échoué : {message}"
   },
@@ -1416,7 +1422,10 @@
       "title": "Nouvelle note depuis un PDF ou une image",
       "pickTitle": "PDF ou image à annoter",
       "intro": "Chaque page du PDF devient une note à sa taille et dans son orientation (portrait ou paysage), avec la page en fond ; une image devient une note de la taille d'une feuille A4, dans l'orientation de l'image.",
-      "pdfInfo": "{count} page(s), la première de {width} × {height} mm.",
+      "pdfInfo": {
+        "one": "Une page de {width} × {height} mm.",
+        "other": "{count} pages, la première de {width} × {height} mm."
+      },
       "pages": "Pages",
       "allPages": "Toutes les pages ({count})",
       "somePages": "Certaines pages",

@@ -10,7 +10,7 @@
   import { api, errorMessage } from '../../lib/api';
   import { pageMillimetres, parsePageList, type BackgroundSource, type NotesProgress } from '../../lib/background';
   import { pickBackgroundFile } from '../../lib/dialogs';
-  import { t } from '../../lib/i18n.svelte';
+  import { t, tn } from '../../lib/i18n.svelte';
   import type { NoteSummary } from '../../lib/note';
   import Modal from '../Modal.svelte';
 
@@ -97,7 +97,7 @@
       <p data-slot="new-from-file-name"><strong>{source.name}</strong></p>
       {#if source.kind === 'pdf'}
         <p class="muted small">
-          {t('background.library.pdfInfo', { count, width: firstPage?.width ?? 0, height: firstPage?.height ?? 0 })}
+          {tn('background.library.pdfInfo', count, { width: firstPage?.width ?? 0, height: firstPage?.height ?? 0 })}
         </p>
         {#if count > 1}
           <fieldset class="export-fieldset" disabled={running}>

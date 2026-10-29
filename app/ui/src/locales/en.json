@@ -125,7 +125,10 @@
       "purge": "Delete for good",
       "confirmPurge": "Delete “{title}” for good?",
       "emptyAll": "Empty the trash",
-      "confirmEmpty": "Delete the {count} notes in the trash for good? This cannot be undone.",
+      "confirmEmpty": {
+        "one": "Delete the note in the trash for good? This cannot be undone.",
+        "other": "Delete the {count} notes in the trash for good? This cannot be undone."
+      },
       "confirm": "Confirm"
     },
     "assemble": {
@@ -989,7 +992,10 @@
     "run": "Print…",
     "again": "Print again…",
     "running": "Printing…",
-    "done": "Sent to the printer: {count} page(s).",
+    "done": {
+      "one": "Sent to the printer: {count} page.",
+      "other": "Sent to the printer: {count} pages."
+    },
     "cancelled": "Printing cancelled.",
     "failed": "Printing failed: {message}"
   },
@@ -1416,7 +1422,10 @@
       "title": "New note from a PDF or an image",
       "pickTitle": "PDF or image to annotate",
       "intro": "Each PDF page becomes a note of its size and orientation (portrait or landscape), with the page in the background; an image becomes a note the size of an A4 sheet, in the image's orientation.",
-      "pdfInfo": "{count} page(s), the first one {width} × {height} mm.",
+      "pdfInfo": {
+        "one": "One page, {width} × {height} mm.",
+        "other": "{count} pages, the first one {width} × {height} mm."
+      },
       "pages": "Pages",
       "allPages": "All pages ({count})",
       "somePages": "Some pages",
