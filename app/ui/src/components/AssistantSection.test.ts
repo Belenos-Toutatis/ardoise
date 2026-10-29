@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api } from '../lib/api';
+import { api, type BridgeStatus } from '../lib/api';
 import { setLocale, t } from '../lib/i18n.svelte';
 import AssistantSection from './AssistantSection.svelte';
 
@@ -75,7 +75,7 @@ describe('Settings > Assistant (MCP)', () => {
   });
 
   it('reads the bridge status again when the window gets the focus', async () => {
-    const states = ['retrying', 'serving'];
+    const states: BridgeStatus['state'][] = ['retrying', 'serving'];
     vi.spyOn(api, 'mcpLaunchInfo').mockImplementation(async () => ({
       exe: EXE,
       bridge: { state: states.shift() ?? 'serving', detail: 'pipe busy' },
