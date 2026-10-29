@@ -3,6 +3,7 @@
   import { t } from '../../lib/i18n.svelte';
   import { flattenTree, tagsOfNotes } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
+  import TagColorPicker from './TagColorPicker.svelte';
 
   let { lib }: { lib: LibraryState } = $props();
 
@@ -143,14 +144,16 @@
         <h3 class="mini-heading">{t('library.selection.tagsOfSelection')}</h3>
         <ul class="chips">
           {#each selectionTags as entry (entry.tag)}
+            {@const color = lib.tagColors.of(entry.tag)}
             <li>
               <button
                 type="button"
                 class="chip removable"
+                data-tag-color={color}
                 aria-label={t('library.selection.removeTag', { tag: entry.tag })}
                 onclick={() => lib.removeTag(notes, entry.tag)}
               >
-                {entry.tag}<span aria-hidden="true"> ×</span>
+                {#if color}<span class="tag-dot" aria-hidden="true"></span>{/if}{entry.tag}<span aria-hidden="true"> ×</span>
               </button>
             </li>
           {/each}
@@ -161,9 +164,16 @@
         <h3 class="mini-heading">{t('library.selection.existingTags')}</h3>
         <ul class="chips">
           {#each knownTags as tag (tag)}
-            <li><button type="button" class="chip" data-add-tag={tag} onclick={() => addTags(tag)}>{tag}</button></li>
+            {@const color = lib.tagColors.of(tag)}
+            <li class="tag-entry">
+              <button type="button" class="chip" data-add-tag={tag} data-tag-color={color} onclick={() => addTags(tag)}
+                >{#if color}<span class="tag-dot" aria-hidden="true"></span>{/if}{tag}</button
+              >
+              <TagColorPicker {tag} colors={lib.tagColors} />
+            </li>
           {/each}
         </ul>
+        <p class="muted small">{t('library.tagColor.hint')}</p>
       {/if}
     </div>
   {/if}

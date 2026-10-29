@@ -9,6 +9,7 @@ import type { HandwritingHit, IndexStatus } from './handwriting';
 import { currentLocale, t } from './i18n.svelte';
 import { LibraryActivity } from './library-activity.svelte';
 import type { TurnDirection } from './library-batch';
+import { TagColorState } from './tag-colors.svelte';
 import {
   buildBinderTree,
   displayTitle,
@@ -56,6 +57,8 @@ export class LibraryState {
   dialog = $state<{ kind: 'export' | 'print' | 'assemble'; notes: NoteSummary[] } | null>(null);
   /** Operations on several notes: progress, failures, « Annuler » (`library-activity.svelte.ts`). */
   readonly activity = new LibraryActivity(() => this.refresh());
+  /** Colours of the tags (`_ardoise/tags.json`), loaded by the sidebar (`tag-colors.svelte.ts`). */
+  readonly tagColors = new TagColorState((message) => (this.error = message));
 
   /** Paths being dragged; kept here because a drag event's data is not readable until the drop. */
   private dragPaths: string[] = [];

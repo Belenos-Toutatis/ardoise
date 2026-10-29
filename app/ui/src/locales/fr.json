@@ -199,6 +199,22 @@
         "one": "Une note n'a pas pu être restaurée :",
         "other": "{count} notes n'ont pas pu être restaurées :"
       }
+    },
+    "tagColor": {
+      "button": "Couleur de l'étiquette « {tag} » : {color}",
+      "palette": "Couleur de l'étiquette « {tag} »",
+      "none": "Aucune couleur",
+      "hint": "Le rond à côté d'une étiquette change sa couleur, sur toutes les notes qui la portent.",
+      "names": {
+        "red": "Rouge",
+        "orange": "Orange",
+        "yellow": "Jaune",
+        "green": "Vert",
+        "teal": "Turquoise",
+        "blue": "Bleu",
+        "purple": "Violet",
+        "pink": "Rose"
+      }
     }
   },
   "settings": {
@@ -570,7 +586,10 @@
     "backgroundMissing": "l'image de fond n'est plus en mémoire ; rouvrez la note et choisissez l'image de nouveau",
     "pdfUnsupported": "les PDF ne peuvent être lus que sous Windows",
     "pdfEncrypted": "ce PDF est protégé par un mot de passe ; enregistrez-en une copie sans mot de passe",
-    "pdfNoSuchPage": "ce PDF n'a pas cette page ({detail})"
+    "pdfNoSuchPage": "ce PDF n'a pas cette page ({detail})",
+    "invalidTagColor": "cette couleur ne fait pas partie de la palette ({detail})",
+    "tagColorsNewer": "les couleurs des étiquettes ont été enregistrées par une version plus récente d'Ardoise : mettez Ardoise à jour sur ce PC pour les modifier ({detail})",
+    "tagColorsConflict": "les couleurs des étiquettes changeaient au même moment, sans doute sur un autre ordinateur ; réessayez dans un instant ({detail})"
   },
   "editor": {
     "back": "Bibliothèque",

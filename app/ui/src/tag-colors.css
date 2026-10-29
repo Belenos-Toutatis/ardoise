@@ -1,0 +1,184 @@
+/*
+ * Tag colours (milestone M10, `lib/tag-colors.ts`): a dot, a chip background and a chip text
+ * colour per palette id, for the light and the dark theme (text on its background has a contrast
+ * of at least 4.5:1 in both). An element with `data-tag-color="<id>"` gets `--tag-dot`, `--tag-bg`
+ * and `--tag-fg`.
+ */
+
+:root {
+  --tag-red-dot: #dc2626;
+  --tag-red-bg: #fee2e2;
+  --tag-red-fg: #991b1b;
+  --tag-orange-dot: #ea580c;
+  --tag-orange-bg: #ffedd5;
+  --tag-orange-fg: #9a3412;
+  --tag-yellow-dot: #a16207;
+  --tag-yellow-bg: #fef3c7;
+  --tag-yellow-fg: #854d0e;
+  --tag-green-dot: #16a34a;
+  --tag-green-bg: #dcfce7;
+  --tag-green-fg: #166534;
+  --tag-teal-dot: #0d9488;
+  --tag-teal-bg: #ccfbf1;
+  --tag-teal-fg: #115e59;
+  --tag-blue-dot: #2563eb;
+  --tag-blue-bg: #dbeafe;
+  --tag-blue-fg: #1e40af;
+  --tag-purple-dot: #9333ea;
+  --tag-purple-bg: #f3e8ff;
+  --tag-purple-fg: #6b21a8;
+  --tag-pink-dot: #db2777;
+  --tag-pink-bg: #fce7f3;
+  --tag-pink-fg: #9d174d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --tag-red-dot: #f87171;
+    --tag-red-bg: #4c1414;
+    --tag-red-fg: #fecaca;
+    --tag-orange-dot: #fb923c;
+    --tag-orange-bg: #4a2008;
+    --tag-orange-fg: #fed7aa;
+    --tag-yellow-dot: #facc15;
+    --tag-yellow-bg: #45330a;
+    --tag-yellow-fg: #fef08a;
+    --tag-green-dot: #4ade80;
+    --tag-green-bg: #0f3a21;
+    --tag-green-fg: #bbf7d0;
+    --tag-teal-dot: #2dd4bf;
+    --tag-teal-bg: #0b3836;
+    --tag-teal-fg: #99f6e4;
+    --tag-blue-dot: #60a5fa;
+    --tag-blue-bg: #172a55;
+    --tag-blue-fg: #bfdbfe;
+    --tag-purple-dot: #c084fc;
+    --tag-purple-bg: #33134f;
+    --tag-purple-fg: #e9d5ff;
+    --tag-pink-dot: #f472b6;
+    --tag-pink-bg: #4a1230;
+    --tag-pink-fg: #fbcfe8;
+  }
+}
+
+:root[data-theme='dark'] {
+  --tag-red-dot: #f87171;
+  --tag-red-bg: #4c1414;
+  --tag-red-fg: #fecaca;
+  --tag-orange-dot: #fb923c;
+  --tag-orange-bg: #4a2008;
+  --tag-orange-fg: #fed7aa;
+  --tag-yellow-dot: #facc15;
+  --tag-yellow-bg: #45330a;
+  --tag-yellow-fg: #fef08a;
+  --tag-green-dot: #4ade80;
+  --tag-green-bg: #0f3a21;
+  --tag-green-fg: #bbf7d0;
+  --tag-teal-dot: #2dd4bf;
+  --tag-teal-bg: #0b3836;
+  --tag-teal-fg: #99f6e4;
+  --tag-blue-dot: #60a5fa;
+  --tag-blue-bg: #172a55;
+  --tag-blue-fg: #bfdbfe;
+  --tag-purple-dot: #c084fc;
+  --tag-purple-bg: #33134f;
+  --tag-purple-fg: #e9d5ff;
+  --tag-pink-dot: #f472b6;
+  --tag-pink-bg: #4a1230;
+  --tag-pink-fg: #fbcfe8;
+}
+
+[data-tag-color='red'] {
+  --tag-dot: var(--tag-red-dot);
+  --tag-bg: var(--tag-red-bg);
+  --tag-fg: var(--tag-red-fg);
+}
+
+[data-tag-color='orange'] {
+  --tag-dot: var(--tag-orange-dot);
+  --tag-bg: var(--tag-orange-bg);
+  --tag-fg: var(--tag-orange-fg);
+}
+
+[data-tag-color='yellow'] {
+  --tag-dot: var(--tag-yellow-dot);
+  --tag-bg: var(--tag-yellow-bg);
+  --tag-fg: var(--tag-yellow-fg);
+}
+
+[data-tag-color='green'] {
+  --tag-dot: var(--tag-green-dot);
+  --tag-bg: var(--tag-green-bg);
+  --tag-fg: var(--tag-green-fg);
+}
+
+[data-tag-color='teal'] {
+  --tag-dot: var(--tag-teal-dot);
+  --tag-bg: var(--tag-teal-bg);
+  --tag-fg: var(--tag-teal-fg);
+}
+
+[data-tag-color='blue'] {
+  --tag-dot: var(--tag-blue-dot);
+  --tag-bg: var(--tag-blue-bg);
+  --tag-fg: var(--tag-blue-fg);
+}
+
+[data-tag-color='purple'] {
+  --tag-dot: var(--tag-purple-dot);
+  --tag-bg: var(--tag-purple-bg);
+  --tag-fg: var(--tag-purple-fg);
+}
+
+[data-tag-color='pink'] {
+  --tag-dot: var(--tag-pink-dot);
+  --tag-bg: var(--tag-pink-bg);
+  --tag-fg: var(--tag-pink-fg);
+}
+
+.chip[data-tag-color] {
+  background: var(--tag-bg);
+  color: var(--tag-fg);
+}
+
+.chip[data-tag-color]:hover {
+  background: color-mix(in srgb, var(--tag-dot) 30%, var(--tag-bg));
+}
+
+/* A small disc of the tag's colour, before its name. */
+.tag-dot {
+  display: inline-block;
+  flex: none;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: var(--tag-dot, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 25%, transparent);
+  vertical-align: baseline;
+}
+
+.chip .tag-dot {
+  margin-right: 0.3rem;
+}
+
+/* The colour button of a sidebar row shows on hover or focus, like the binder's "+". */
+.nav-row .row-tool {
+  display: inline-flex;
+  opacity: 0;
+}
+
+.nav-row:hover .row-tool,
+.nav-row:focus-within .row-tool {
+  opacity: 1;
+}
+
+.nav-label .tag-dot {
+  margin-right: 0.15rem;
+}
+
+/* A tag of the tags panel with its colour button. */
+.tag-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+}

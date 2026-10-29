@@ -1,6 +1,7 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
 import './app.css';
+import './tag-colors.css';
 import Presentation from './components/live/Presentation.svelte';
 
 const target = document.getElementById('app');

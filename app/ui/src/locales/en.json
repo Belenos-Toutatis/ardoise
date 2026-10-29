@@ -199,6 +199,22 @@
         "one": "One note could not be restored:",
         "other": "{count} notes could not be restored:"
       }
+    },
+    "tagColor": {
+      "button": "Colour of the tag \"{tag}\": {color}",
+      "palette": "Colour of the tag \"{tag}\"",
+      "none": "No colour",
+      "hint": "The dot next to a tag changes its colour, on every note that has it.",
+      "names": {
+        "red": "Red",
+        "orange": "Orange",
+        "yellow": "Yellow",
+        "green": "Green",
+        "teal": "Teal",
+        "blue": "Blue",
+        "purple": "Purple",
+        "pink": "Pink"
+      }
     }
   },
   "settings": {
@@ -570,7 +586,10 @@
     "backgroundMissing": "the background image is no longer in memory; reopen the note and choose the image again",
     "pdfUnsupported": "PDF files can only be read on Windows",
     "pdfEncrypted": "this PDF is protected by a password; save a copy without a password",
-    "pdfNoSuchPage": "this PDF has no such page ({detail})"
+    "pdfNoSuchPage": "this PDF has no such page ({detail})",
+    "invalidTagColor": "this colour is not in the palette ({detail})",
+    "tagColorsNewer": "the tag colours were saved by a newer version of Ardoise: update Ardoise on this PC to change them ({detail})",
+    "tagColorsConflict": "the tag colours were changing at the same moment, probably on another computer; try again in a moment ({detail})"
   },
   "editor": {
     "back": "Library",

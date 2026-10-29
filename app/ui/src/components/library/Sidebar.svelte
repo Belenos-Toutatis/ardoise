@@ -3,12 +3,13 @@
    * Left column: views (all notes, favourites), the tree of binders (drop targets for dragged
    * notes), tags, trash, then the tablet block with the entry that opens the tablet test.
    */
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { t } from '../../lib/i18n.svelte';
   import { ancestorsOf, sameView, type BinderNode, type LibraryView } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import TabletStatus from './TabletStatus.svelte';
+  import TagColorPicker from './TagColorPicker.svelte';
 
   let {
     lib,
@@ -39,6 +40,9 @@
     const view = lib.view;
     if (view.kind === 'binder') for (const path of ancestorsOf(view.binder)) expanded.add(path);
   });
+
+  // The tag colours follow the library while the sidebar shows them.
+  onMount(() => lib.tagColors.start());
 
   const notes = $derived(lib.notes);
   const favoriteCount = $derived(notes.filter((n) => n.favorite).length);
@@ -227,17 +231,25 @@
     {#if (lib.listing?.tags.length ?? 0) > 0}
       <ul class="nav-list">
         {#each lib.listing?.tags ?? [] as entry (entry.tag)}
+          {@const color = lib.tagColors.of(entry.tag)}
           <li>
-            <button
-              type="button"
-              class="nav-item"
-              data-tag={entry.tag}
-              aria-current={current({ kind: 'tag', tag: entry.tag })}
-              onclick={() => lib.setView({ kind: 'tag', tag: entry.tag })}
-            >
-              <span class="nav-label"># {entry.tag}</span>
-              <span class="count">{entry.count}</span>
-            </button>
+            <div class="nav-row">
+              <button
+                type="button"
+                class="nav-item"
+                data-tag={entry.tag}
+                data-tag-color={color}
+                aria-current={current({ kind: 'tag', tag: entry.tag })}
+                onclick={() => lib.setView({ kind: 'tag', tag: entry.tag })}
+              >
+                <span class="nav-label">
+                  {#if color}<span class="tag-dot" aria-hidden="true"></span>{:else}#{/if}
+                  {entry.tag}
+                </span>
+                <span class="count">{entry.count}</span>
+              </button>
+              <span class="row-tool"><TagColorPicker tag={entry.tag} colors={lib.tagColors} /></span>
+            </div>
           </li>
         {/each}
       </ul>
