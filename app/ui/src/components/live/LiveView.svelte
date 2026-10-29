@@ -27,12 +27,13 @@
     zoomStep,
     type LiveActions,
   } from '../../lib/live-actions';
-  import { liveKeyAction } from '../../lib/live-keys';
+  import { isSpaceKey, isTypingTarget, liveKeyAction } from '../../lib/live-keys';
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
   import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
   import { ORIENTATIONS, type Orientation } from '../../lib/orientation';
   import type { NarrationSaved } from '../../lib/video';
+  import Modal from '../Modal.svelte';
   import RecordPanel from '../narration/RecordPanel.svelte';
   import OrientationIcon from '../tablet/OrientationIcon.svelte';
   import { NarrationRecorder } from '../narration/recorder.svelte';
@@ -67,9 +68,11 @@
   ];
   /** Why stopping the narration may fail without anything being lost: there was no sound to keep. */
   const NOTHING_TO_KEEP = ['emptyRecording', 'microphoneSilent'];
+  /** How long « Undo the clearing » stays offered after « Clear the page ». */
+  const UNDO_CLEAR_MS = 8000;
   /** How often the latency shown is refreshed. */
   const LATENCY_REFRESH_MS = 500;
-  const KEYS = ['next', 'previous', 'clear', 'board', 'laser', 'zoom', 'whole', 'width', 'pan', 'leave'] as const;
+  const KEYS = ['next', 'previous', 'clear', 'board', 'laser', 'zoom', 'whole', 'width', 'pan', 'marks', 'leave'] as const;
 
   const live = new LiveState();
   const latency = new LatencyRecorder();
@@ -91,6 +94,13 @@
   let latencyUi = $state<number | null>(null);
   let latencyCount = $state(0);
   let narrationOpen = $state(false);
+  /** Esc asked to end live mode: waiting for the answer. */
+  let confirmLeave = $state(false);
+  /** « Undo the clearing » is offered. */
+  let undoClear = $state(false);
+  let undoTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The view was closed: a `live_start` still pending then stops the session it starts. */
+  let destroyed = false;
   /** What the last narration recording saved; null before one, or after a cancelled one. */
   let narrated = $state.raw<NarrationSaved | null>(null);
   /** The microphone chosen here, until the app state says so. */
@@ -133,7 +143,14 @@
     commands: api,
     aspect: () => aspect,
     onerror: (error) => (notice = t('live.commandFailed', { message: errorMessage(error) })),
+    onCleared: offerUndo,
   };
+
+  // The offer concerns the page that was cleared: it goes when the page changes.
+  $effect(() => {
+    void live.pageIndex;
+    dropUndo();
+  });
 
   onMount(() => {
     let alive = true;
@@ -183,7 +200,9 @@
     return () => {
       unregister();
       alive = false;
+      destroyed = true;
       clearInterval(timer);
+      clearTimeout(undoTimer);
       live.close();
       recorder.dispose();
       // A recording is never thrown away silently: the pages get the sound recorded so far.
@@ -195,9 +214,15 @@
     starting = true;
     startError = null;
     try {
-      live.adoptStart(await api.liveStart());
+      const snapshot = await api.liveStart();
+      if (destroyed) {
+        // The view was closed while the session started: nobody would stop it.
+        void api.liveStop().catch(() => {});
+        return;
+      }
+      live.adoptStart(snapshot);
     } catch (error) {
-      startError = errorMessage(error);
+      if (!destroyed) startError = errorMessage(error);
     } finally {
       starting = false;
     }
@@ -270,9 +295,47 @@
     onclose();
   }
 
-  function closeAnyway() {
+  /**
+   * "Close anyway" after a failure: the projection and the Rust session are stopped as well as
+   * can be (a failed narration or a failed start must not leave the projector full screen and
+   * the session running with nobody to see it), then the view closes whatever happens.
+   */
+  async function closeAnyway() {
+    if (stopping) return;
+    stopping = true;
+    await api.closePresentation().catch(() => {});
+    await api.liveStop().catch(() => {});
     live.close();
     onclose();
+  }
+
+  function offerUndo() {
+    clearTimeout(undoTimer);
+    undoClear = true;
+    undoTimer = setTimeout(() => (undoClear = false), UNDO_CLEAR_MS);
+  }
+
+  function dropUndo() {
+    clearTimeout(undoTimer);
+    undoClear = false;
+  }
+
+  async function undoClearing() {
+    dropUndo();
+    try {
+      if (!(await api.liveRestoreCleared())) notice = t('live.clearUndoFailed');
+    } catch (error) {
+      notice = errorMessage(error);
+    }
+  }
+
+  /**
+   * Esc: closes the projection when it is open (as in a slideshow), otherwise asks before
+   * ending live mode, which is not undone by a second press.
+   */
+  function escape() {
+    if (live.presentation) void stopProjecting();
+    else if (!stopping) confirmLeave = true;
   }
 
   function command(kind: LiveCommandKind) {
@@ -358,18 +421,24 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if (e.defaultPrevented) return;
+    // The question about ending live mode has its own keys.
+    if (e.defaultPrevented || confirmLeave) return;
     const action = liveKeyAction(e);
     if (!action) return;
     e.preventDefault();
-    runKeyAction(actions, action, () => void finish());
+    runKeyAction(actions, action, escape);
+  }
+
+  /** Space is "next page" already on key down: a focused button must not also be pressed on key up. */
+  function onkeyup(e: KeyboardEvent) {
+    if (isSpaceKey(e.key) && !confirmLeave && !isTypingTarget(e.target)) e.preventDefault();
   }
 
   const mm = (units: number) => (units / 100).toFixed(units < 100 ? 2 : 1);
   const ms = (value: number | null) => (value === null ? t('live.latency.none') : t('live.latency.value', { ms: decimal.format(value) }));
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} {onkeyup} />
 
 <section class="live-view" data-state={sessionState} aria-label={t('live.title')}>
   <header class="live-top">
@@ -390,7 +459,7 @@
       type="button"
       class="button primary"
       data-action="stop-live"
-      disabled={stopping}
+      disabled={stopping || starting}
       title={t('live.stopHint')}
       onclick={finish}
     >
@@ -403,14 +472,14 @@
       <strong>{t('live.startFailed')}</strong>
       <p>{startError}</p>
       <button type="button" class="button small-button primary" onclick={start}>{t('live.retry')}</button>
-      <button type="button" class="button small-button" onclick={closeAnyway}>{t('common.close')}</button>
+      <button type="button" class="button small-button" disabled={stopping} onclick={closeAnyway}>{t('common.close')}</button>
     </div>
   {/if}
   {#if stopError}
     <div class="banner error live-banner" role="alert">
       <strong>{t('live.stopFailed')}</strong>
       <p>{stopError}</p>
-      <button type="button" class="button small-button" onclick={closeAnyway}>{t('live.closeAnyway')}</button>
+      <button type="button" class="button small-button" disabled={stopping} onclick={closeAnyway}>{t('live.closeAnyway')}</button>
     </div>
   {/if}
   {#if live.saveErrors.length > 0}
@@ -420,10 +489,18 @@
       </strong>
       <ul>
         {#each live.saveErrors as error (error.pageIndex)}
-          <li>{t('live.saveFailed.item', { page: error.pageIndex + 1, message: error.message })}</li>
+          <li>{t('live.saveFailed.item', { page: error.pageIndex + 1, message: errorMessage(error) })}</li>
         {/each}
       </ul>
       <p>{t('live.saveFailed.advice')}</p>
+    </div>
+  {/if}
+  {#if undoClear}
+    <div class="banner notice live-banner" role="status" data-slot="undo-clear">
+      <p>{t('live.clearDone')}</p>
+      <button type="button" class="button small-button primary" data-action="undo-clear" onclick={undoClearing}>
+        {t('live.clearUndo')}
+      </button>
     </div>
   {/if}
   {#if notice}
@@ -684,6 +761,28 @@
       </section>
     </aside>
   </div>
+
+  {#if confirmLeave}
+    <Modal title={t('live.leave.title')} onclose={() => (confirmLeave = false)}>
+      <p>{t('live.leave.message')}</p>
+      <div class="actions">
+        <button type="button" class="button primary" data-autofocus data-action="leave-cancel" onclick={() => (confirmLeave = false)}>
+          {t('live.leave.continue')}
+        </button>
+        <button
+          type="button"
+          class="button danger"
+          data-action="leave-confirm"
+          onclick={() => {
+            confirmLeave = false;
+            void finish();
+          }}
+        >
+          {t('live.leave.confirm')}
+        </button>
+      </div>
+    </Modal>
+  {/if}
 </section>
 
 <style>

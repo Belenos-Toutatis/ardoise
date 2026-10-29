@@ -21,9 +21,22 @@ export interface LiveActions {
   onerror: (error: unknown) => void;
   /** Clears the marks written over the presentation (only that window has any). */
   clearMarks?: () => void;
+  /** « Clear the page » went through and there was ink on it: the window offers to undo it. */
+  onCleared?: () => void;
 }
 
 export function sendCommand(actions: LiveActions, kind: LiveCommandKind): void {
+  if (kind === 'clearPage') {
+    const { live } = actions;
+    const hadInk = live.strokeCount > 0 || live.current !== null;
+    actions.commands
+      .liveCommand({ kind })
+      .then(() => {
+        if (hadInk) actions.onCleared?.();
+      })
+      .catch(actions.onerror);
+    return;
+  }
   actions.commands.liveCommand({ kind }).catch(actions.onerror);
 }
 

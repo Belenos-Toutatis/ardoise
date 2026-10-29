@@ -6,7 +6,7 @@
    * both reproduced as the app sends them.
    */
   import { onMount } from 'svelte';
-  import { api, errorMessage } from '../lib/api';
+  import { api, errorMessage, genericError } from '../lib/api';
   import { currentLocale, t } from '../lib/i18n.svelte';
   import { megabytes, type DownloadProgress, type OpenH264State } from '../lib/video';
 
@@ -177,6 +177,6 @@
     {/if}
   {/if}
   {#if error}
-    <p class="error" role="alert">{t('errors.generic', { message: error })}</p>
+    <p class="error" role="alert">{genericError(error)}</p>
   {/if}
 </section>

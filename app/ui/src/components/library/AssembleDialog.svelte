@@ -85,6 +85,9 @@
       <input class="text-input" type="text" bind:value={title} disabled={running} />
     </label>
 
+    {#if running}
+      <p class="muted small" role="status">{t('library.assemble.progress', { count: notes.length })}</p>
+    {/if}
     {#if error}
       <p class="banner error inline" role="alert">{t('library.assemble.error', { message: error })}</p>
     {/if}

@@ -141,7 +141,8 @@
       "run": "Assembler",
       "running": "Assemblage…",
       "error": "Impossible d'assembler les notes : {message}",
-      "done": "Nouvelle note créée : {title}"
+      "done": "Nouvelle note créée : {title}",
+      "progress": "Assemblage de {count} notes…"
     }
   },
   "settings": {
@@ -442,7 +443,7 @@
   "errors": {
     "settings": "Impossible de lire le fichier de réglages {path} : {message}. Il n'a pas été modifié ; corrigez-le ou supprimez-le, puis relancez Ardoise.",
     "library": "Impossible d'utiliser ce dossier : {message}",
-    "generic": "Une erreur est survenue : {message}"
+    "generic": "Une erreur est survenue. {message}"
   },
   "errorCodes": {
     "settings": "le fichier de réglages ne peut pas être lu ou modifié ({detail})",
@@ -621,7 +622,7 @@
     },
     "page": {
       "label": "Page",
-      "paper": "Papier",
+      "paper": "Couleur du papier",
       "template": "Modèle",
       "texture": "Texture du papier",
       "rotateCcw": "Tourner la page d'un quart de tour vers la gauche",
@@ -638,7 +639,7 @@
       "portraitLower": "portrait",
       "landscapeLower": "paysage",
       "orientationHint": "L'écriture ne tourne pas : seule la feuille change de sens, et l'écriture garde sa place.",
-      "size": "Papier",
+      "size": "Format",
       "width": "Largeur en millimètres",
       "height": "Hauteur en millimètres",
       "apply": "Appliquer",
@@ -722,7 +723,9 @@
       "discard": "Revenir sans enregistrer",
       "cancel": "Rester",
       "saveClose": "Enregistrer et fermer",
-      "discardClose": "Fermer sans enregistrer"
+      "discardClose": "Fermer sans enregistrer",
+      "saveSwitch": "Enregistrer et ouvrir l'autre note",
+      "discardSwitch": "Ouvrir sans enregistrer"
     },
     "share": {
       "label": "Découper, copier, exporter"
@@ -775,7 +778,8 @@
     "video": {
       "button": "Vidéo",
       "hint": "Exporter la relecture en vidéo (MP4, WebM) ou en image animée (GIF, WebP)…"
-    }
+    },
+    "backgroundLoadFailed": "L'image de fond de cette note n'a pas pu être chargée ({message}). La note s'ouvre sans elle ; l'image reste dans le fichier tant que vous ne la retirez pas."
   },
   "replay": {
     "bar": "Contrôles de la relecture",
@@ -1287,7 +1291,11 @@
         },
         "leave": {
           "keys": "Échap",
-          "action": "Terminer (sur l'écran projeté : fermer la présentation)"
+          "action": "Fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
+        },
+        "marks": {
+          "keys": "Suppr, Retour arrière",
+          "action": "Effacer les annotations tracées sur la présentation (fenêtre projetée)"
         }
       }
     },
@@ -1299,6 +1307,15 @@
       "savedOne": "Narration enregistrée sur 1 page.",
       "savedMany": "Narration enregistrée sur {count} pages.",
       "savedNone": "Aucune page de la séance ne contient de tracé : la narration n'a pas été conservée."
+    },
+    "clearDone": "Page effacée.",
+    "clearUndo": "Annuler l'effacement",
+    "clearUndoFailed": "L'effacement ne peut plus être annulé : la page a changé entre-temps.",
+    "leave": {
+      "title": "Terminer le mode direct ?",
+      "message": "Chaque page écrite est enregistrée comme une note de la bibliothèque. Pour arrêter seulement la projection, utilisez « Arrêter la projection » : Échap la ferme aussi quand elle est affichée.",
+      "continue": "Continuer",
+      "confirm": "Terminer"
     }
   },
   "presentation": {
@@ -1431,7 +1448,9 @@
       "running": "Création des notes…",
       "progress": "Création des notes : {done} sur {total}…",
       "error": "Impossible de créer les notes : {message}",
-      "done": "Notes créées : {count}"
+      "done": "Notes créées : {count}",
+      "cancelling": "Annulation…",
+      "cancelled": "Création annulée : aucune note n'a été gardée."
     },
     "assemble": {
       "droppedOne": "Seule l'image de fond de la première note est gardée : celle d'une autre note ne sera pas reprise.",

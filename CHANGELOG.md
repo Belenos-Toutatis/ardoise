@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Corrigé (jalon M10 — pendant un cours)
+
+- Mode direct : Espace passe toujours à la page suivante (un bouton resté au focus n'est plus pressé, « Effacer la page » n'efface plus la page suivante), Échap ferme la projection quand elle est affichée et demande confirmation avant de terminer, « Annuler l'effacement » rend l'encre pendant 8 secondes, « Fermer quand même » arrête aussi la projection et la séance, et une note renommée ou étiquetée depuis la bibliothèque ou par l'assistant pendant le cours continue de recevoir les pages au lieu de les dupliquer. Ouvrir une note ou le mode direct ne détruit plus la bibliothèque (test de la tablette en cours, assistant d'enregistrement, réglages, défilement, classeurs ouverts, focus sur la carte) ; l'éditeur refuse de quitter pendant un export ou une découpe, demande avant d'abandonner des modifications (y compris un titre tapé), garde le focus dans sa fenêtre de sortie ; Échap ferme toute fenêtre, où que soit le focus ; les erreurs s'écrivent en deux phrases ; la création de notes depuis un long PDF peut être annulée ; avec le stylet (bouton du lasso) ou un doigt, la sélection se déplace et se redimensionne.
+
 ### Ajouté (jalon M9 — pilotage par un assistant)
 
 - Serveur MCP local `ardoise.exe --mcp [--read-only]` (entrée et sortie standard, aucun port réseau, sans fenêtre, application ouverte ou non) : l'assistant de l'utilisateur (Claude Code, Claude Desktop…) liste et cherche les notes, lit leurs données, leur texte reconnu avec la position des lignes et leur structure, et les voit en image (PNG, 2000 pixels au plus) pour reconnaître schémas et formules. `--read-only` limite l'assistant à la lecture.

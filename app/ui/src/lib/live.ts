@@ -95,7 +95,7 @@ export type LiveEvent =
    * A page could not be written into the library (sent once per page while the error repeats).
    * The pages stay in memory; a later `saved` means that everything is written.
    */
-  | { type: 'saveFailed'; pageIndex: number; message: string };
+  | { type: 'saveFailed'; pageIndex: number; code: string; message: string };
 
 export interface LiveBatch {
   events: LiveEvent[];

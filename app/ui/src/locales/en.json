@@ -141,7 +141,8 @@
       "run": "Assemble",
       "running": "Assembling…",
       "error": "Couldn't assemble the notes: {message}",
-      "done": "New note created: {title}"
+      "done": "New note created: {title}",
+      "progress": "Assembling {count} notes…"
     }
   },
   "settings": {
@@ -442,7 +443,7 @@
   "errors": {
     "settings": "Cannot read the settings file {path}: {message}. It was left unchanged; fix or delete it, then restart Ardoise.",
     "library": "Cannot use this folder: {message}",
-    "generic": "Something went wrong: {message}"
+    "generic": "Something went wrong. {message}"
   },
   "errorCodes": {
     "settings": "the settings file cannot be read or written ({detail})",
@@ -621,7 +622,7 @@
     },
     "page": {
       "label": "Page",
-      "paper": "Paper",
+      "paper": "Paper colour",
       "template": "Template",
       "texture": "Paper texture",
       "rotateCcw": "Rotate the page a quarter turn to the left",
@@ -638,7 +639,7 @@
       "portraitLower": "portrait",
       "landscapeLower": "landscape",
       "orientationHint": "The writing does not turn: only the sheet changes direction, and the writing keeps its place.",
-      "size": "Paper",
+      "size": "Size",
       "width": "Width in millimetres",
       "height": "Height in millimetres",
       "apply": "Apply",
@@ -722,7 +723,9 @@
       "discard": "Go back without saving",
       "cancel": "Stay",
       "saveClose": "Save and close",
-      "discardClose": "Close without saving"
+      "discardClose": "Close without saving",
+      "saveSwitch": "Save and open the other note",
+      "discardSwitch": "Open without saving"
     },
     "share": {
       "label": "Split, copy, export"
@@ -775,7 +778,8 @@
     "video": {
       "button": "Video",
       "hint": "Export the replay as a video (MP4, WebM) or an animated image (GIF, WebP)…"
-    }
+    },
+    "backgroundLoadFailed": "This note's background image could not be loaded ({message}). The note opens without it; the image stays in the file unless you remove it."
   },
   "replay": {
     "bar": "Replay controls",
@@ -1287,7 +1291,11 @@
         },
         "leave": {
           "keys": "Esc",
-          "action": "Finish (on the projected screen: close the presentation)"
+          "action": "Close the projection if it is shown, otherwise end live mode (after confirmation)"
+        },
+        "marks": {
+          "keys": "Delete, Backspace",
+          "action": "Clear the annotations drawn over the presentation (projected window)"
         }
       }
     },
@@ -1299,6 +1307,15 @@
       "savedOne": "Narration saved on 1 page.",
       "savedMany": "Narration saved on {count} pages.",
       "savedNone": "No page of the session has any strokes: the narration was not kept."
+    },
+    "clearDone": "Page cleared.",
+    "clearUndo": "Undo clearing",
+    "clearUndoFailed": "The clearing can no longer be undone: the page has changed since.",
+    "leave": {
+      "title": "End live mode?",
+      "message": "Every page you wrote is saved as a note in the library. To stop only the projection, use \"Stop projecting\": Esc also closes it while it is shown.",
+      "continue": "Continue",
+      "confirm": "End live mode"
     }
   },
   "presentation": {
@@ -1431,7 +1448,9 @@
       "running": "Creating the notes…",
       "progress": "Creating the notes: {done} of {total}…",
       "error": "The notes cannot be created: {message}",
-      "done": "Notes created: {count}"
+      "done": "Notes created: {count}",
+      "cancelling": "Cancelling…",
+      "cancelled": "Cancelled: no note was kept."
     },
     "assemble": {
       "droppedOne": "Only the first note's background image is kept: one other note's will not be carried over.",
