@@ -45,7 +45,8 @@ use crate::server::ArdoiseServer;
 
 pub use create::{CreateNoteArgs, Orientation, PaperArg, PaperName, TemplateName};
 pub use export::{
-    ExportFormat, ExportKind, PdfPage, VideoOptions, VideoResolution, VideoTiming, free_file,
+    ExportFormat, ExportKind, MARKDOWN_IMAGES_SUFFIX, PdfPage, VideoOptions, VideoResolution,
+    VideoTiming, check_replay_plan, free_file,
 };
 pub use export::{ExportNoteArgs, ExportOptions, ExportRequest, ExportTarget};
 pub use text::SetNoteTextArgs;

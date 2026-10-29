@@ -1,7 +1,9 @@
 //! `export_note`: the app's exports, to files that never replace another.
 //!
 //! This module checks the arguments, picks where the files go and gives each its first free
-//! name (" (2)" added); the app writes them ([`WriteServices::export`](super::WriteServices::export)).
+//! name (" (2)" added; for a Markdown file, a name whose `<name>_images` folder is free too);
+//! the app writes them ([`WriteServices::export`](super::WriteServices::export)) without ever
+//! replacing a file. The folders made for an export that fails are removed again.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,6 +25,25 @@ const DEFAULT_DPI: u32 = 150;
 const DEFAULT_QUALITY: u8 = 90;
 /// Highest " (n)" tried for a free name.
 const MAX_SUFFIX: u32 = 999;
+/// What the app adds to a Markdown file's name for the folder of its drawings
+/// (`textdoc::write_markdown`): `<name>_images`.
+pub const MARKDOWN_IMAGES_SUFFIX: &str = "_images";
+
+/// Limits of a replay, which the assistant cannot cancel once asked for (the app's own limits
+/// for the rate, the speed and the last frame: `video::check_options`).
+pub const REPLAY_FRAME_RATES: [u32; 5] = [10, 15, 24, 30, 60];
+pub const MIN_REPLAY_SPEED: f64 = 0.25;
+pub const MAX_REPLAY_SPEED: f64 = 16.0;
+pub const MAX_HOLD_END_SECONDS: f64 = 60.0;
+/// `duration_seconds` at most (10 minutes).
+pub const MAX_REPLAY_SECONDS: f64 = 600.0;
+/// The longest replay, last frame and narration included (what `duration_seconds` and the
+/// longest pause give).
+pub const MAX_REPLAY_TOTAL_SECONDS: f64 = MAX_REPLAY_SECONDS + MAX_HOLD_END_SECONDS;
+/// The most frames: the longest replay at the highest rate.
+pub const MAX_REPLAY_FRAMES: u64 = 39_600;
+/// The longest the app's estimate of the encoding may be (a 4K replay encodes slowly).
+pub const MAX_REPLAY_ENCODING_SECONDS: u64 = 20 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -193,23 +214,27 @@ pub struct ExportNoteArgs {
     pub resolution: Option<VideoResolution>,
     /// Replay frames per second: 10, 15, 24, 30 or 60 (default 15 for gif, 30 for webm and mp4).
     pub frame_rate: Option<u32>,
-    /// Replay speed, times the writing speed (default 1). Not with `duration_seconds`.
+    /// Replay speed, times the writing speed, 0.25 to 16 (default 1). Not with `duration_seconds`. The whole replay may last 11 minutes at most: a long note needs a higher speed or `duration_seconds`.
     pub speed: Option<f64>,
-    /// Replay length in seconds, the writing squeezed or stretched to fit. Not with `speed`.
+    /// Replay length in seconds, the writing squeezed or stretched to fit, at most 600 (10 minutes). Not with `speed`.
     pub duration_seconds: Option<f64>,
     /// Replay: cut the long pauses (default `false`).
     pub trim_pauses: Option<bool>,
-    /// Replay: seconds the last frame stays (default 3, at most 60).
+    /// Replay: seconds the last frame stays, 0 to 60 (default 3).
     pub hold_end_seconds: Option<f64>,
     /// Replay: play the note's recorded narration, webm and mp4 only (default `true`).
     pub narration: Option<bool>,
 }
 
 /// `path`, or `stem (2).ext`, `stem (3).ext`… next to it: the first name that is free.
-pub fn free_file(path: &Path) -> PathBuf {
-    if !path.exists() {
-        return path.to_path_buf();
-    }
+/// `exportFailed` when the 999 first ones are all taken.
+pub fn free_file(path: &Path) -> Result<PathBuf, ToolError> {
+    free_file_with(path, None)
+}
+
+/// [`free_file`], where `companion` (a suffix of the stem, e.g. `_images`) names a file or folder
+/// that goes with the file and must be free too.
+fn free_file_with(path: &Path, companion: Option<&str>) -> Result<PathBuf, ToolError> {
     let stem = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -219,10 +244,32 @@ pub fn free_file(path: &Path) -> PathBuf {
         .map(|e| format!(".{}", e.to_string_lossy()))
         .unwrap_or_default();
     let dir = path.parent().unwrap_or(Path::new(""));
-    (2..=MAX_SUFFIX)
-        .map(|n| dir.join(format!("{stem} ({n}){extension}")))
-        .find(|candidate| !candidate.exists())
-        .unwrap_or_else(|| path.to_path_buf())
+    (1..=MAX_SUFFIX)
+        .map(|n| match n {
+            1 => stem.clone(),
+            n => format!("{stem} ({n})"),
+        })
+        .find(|stem| {
+            !dir.join(format!("{stem}{extension}")).exists()
+                && companion.is_none_or(|suffix| !dir.join(format!("{stem}{suffix}")).exists())
+        })
+        .map(|stem| dir.join(format!("{stem}{extension}")))
+        .ok_or_else(|| {
+            ToolError::new(
+                "exportFailed",
+                format!(
+                    "no free name for {}: {MAX_SUFFIX} names are taken",
+                    path.display()
+                ),
+            )
+        })
+}
+
+/// The first free name for a file of `format` at `path`: for Markdown, its drawings' folder
+/// must be free too (the app would otherwise put them among another export's).
+fn free_name(path: &Path, format: ExportFormat) -> Result<PathBuf, ToolError> {
+    let companion = (format == ExportFormat::Md).then_some(MARKDOWN_IMAGES_SUFFIX);
+    free_file_with(path, companion)
 }
 
 /// Whether `path` names a folder rather than a file: it is one, or ends with a separator, or
@@ -231,13 +278,51 @@ fn names_a_folder(text: &str, path: &Path) -> bool {
     text.ends_with(['/', '\\']) || path.is_dir() || path.extension().is_none()
 }
 
+/// The folders made for an export, shallowest first: removed again if it fails.
+#[derive(Debug, Default)]
+pub(super) struct MadeFolders(Vec<PathBuf>);
+
+impl MadeFolders {
+    /// Creates `dir` and its missing parents, remembering which were missing.
+    fn make(dir: &Path) -> Result<MadeFolders, ToolError> {
+        let mut missing = Vec::new();
+        let mut at = Some(dir);
+        while let Some(folder) = at.filter(|folder| !folder.as_os_str().is_empty()) {
+            if folder.exists() {
+                break;
+            }
+            missing.push(folder.to_path_buf());
+            at = folder.parent();
+        }
+        missing.reverse();
+        let made = MadeFolders(missing);
+        fs::create_dir_all(dir).map_err(|error| {
+            made.undo();
+            ToolError::new(
+                "exportFailed",
+                format!("cannot create {}: {error}", dir.display()),
+            )
+        })?;
+        Ok(made)
+    }
+
+    /// Removes the folders made, deepest first, if they are still empty (best effort).
+    pub(super) fn undo(&self) {
+        for folder in self.0.iter().rev() {
+            let _ = fs::remove_dir(folder);
+        }
+    }
+}
+
 /// Where the files of an export of `stems` (the notes' file names without extension) in
-/// `format` to `text` go. Creates the folder they go in, never touches an existing file.
+/// `format` to `text` go. Every check comes first; then the folder they go in is created (the
+/// folders made are returned, to be removed again if the export fails). Never touches an
+/// existing file.
 pub(super) fn resolve_target(
     text: &str,
     format: ExportFormat,
     stems: &[String],
-) -> Result<ExportTarget, ToolError> {
+) -> Result<(ExportTarget, MadeFolders), ToolError> {
     let path = Path::new(text.trim());
     if !path.is_absolute() {
         return Err(ToolError::invalid(format!(
@@ -245,26 +330,18 @@ pub(super) fn resolve_target(
         )));
     }
     let several_images = stems.len() > 1 && format.kind() == ExportKind::Image;
-    let create = |dir: &Path| {
-        fs::create_dir_all(dir).map_err(|error| {
-            ToolError::new(
-                "exportFailed",
-                format!("cannot create {}: {error}", dir.display()),
-            )
-        })
-    };
     if names_a_folder(text.trim(), path) {
-        create(path)?;
         if several_images {
-            return Ok(ExportTarget::Folder(path.to_path_buf()));
+            let made = MadeFolders::make(path)?;
+            return Ok((ExportTarget::Folder(path.to_path_buf()), made));
         }
         let stem = match stems {
             [only] => only.clone(),
             _ => "Ardoise export".to_owned(),
         };
-        return Ok(ExportTarget::File(free_file(
-            &path.join(format!("{stem}.{}", format.extension())),
-        )));
+        let file = free_name(&path.join(format!("{stem}.{}", format.extension())), format)?;
+        let made = MadeFolders::make(path)?;
+        return Ok((ExportTarget::File(file), made));
     }
     let extension = path
         .extension()
@@ -284,10 +361,38 @@ pub(super) fn resolve_target(
             format.extension(),
         )));
     }
-    if let Some(parent) = path.parent() {
-        create(parent)?;
+    let file = free_name(path, format)?;
+    let made = match path.parent() {
+        Some(parent) => MadeFolders::make(parent)?,
+        None => MadeFolders::default(),
+    };
+    Ok((ExportTarget::File(file), made))
+}
+
+/// Checks the plan of a replay (the app's estimate: its frames, its length and how long its
+/// encoding takes) against the limits of an export the assistant cannot cancel.
+pub fn check_replay_plan(frames: u64, duration_ms: u64, encoding_ms: u64) -> Result<(), ToolError> {
+    let minutes = |ms: u64| format!("{} min {:02} s", ms / 60_000, ms / 1000 % 60);
+    if duration_ms as f64 > MAX_REPLAY_TOTAL_SECONDS * 1000.0 {
+        return Err(ToolError::invalid(format!(
+            "this replay would last {}: a replay asked by the assistant lasts at most {} min (10 min of writing and up to 60 s on the last frame). Give `duration_seconds` (at most {MAX_REPLAY_SECONDS}) or a higher `speed` (at most {MAX_REPLAY_SPEED}); a long narration makes it longer too (`narration: false`)",
+            minutes(duration_ms),
+            MAX_REPLAY_TOTAL_SECONDS / 60.0,
+        )));
     }
-    Ok(ExportTarget::File(free_file(path)))
+    if frames > MAX_REPLAY_FRAMES {
+        return Err(ToolError::invalid(format!(
+            "this replay would have {frames} frames, at most {MAX_REPLAY_FRAMES}: lower `frame_rate` or make it shorter"
+        )));
+    }
+    if encoding_ms > MAX_REPLAY_ENCODING_SECONDS * 1000 {
+        return Err(ToolError::invalid(format!(
+            "encoding this replay would take about {}, at most {} min for an export the assistant cannot stop: lower `resolution` or `frame_rate`, or make it shorter",
+            minutes(encoding_ms),
+            MAX_REPLAY_ENCODING_SECONDS / 60,
+        )));
+    }
+    Ok(())
 }
 
 fn check_range(name: &str, value: f64, low: f64, high: f64) -> Result<(), ToolError> {
@@ -317,10 +422,33 @@ fn options_of(args: &ExportNoteArgs, language: Language) -> Result<ExportOptions
                 "give `speed` or `duration_seconds`, not both",
             ));
         }
-        (Some(speed), None) => VideoTiming::Speed(speed),
-        (None, Some(seconds)) => VideoTiming::Duration(seconds),
+        (Some(speed), None) => {
+            check_range("speed", speed, MIN_REPLAY_SPEED, MAX_REPLAY_SPEED)?;
+            VideoTiming::Speed(speed)
+        }
+        (None, Some(seconds)) => {
+            if !(seconds.is_finite() && seconds > 0.0 && seconds <= MAX_REPLAY_SECONDS) {
+                return Err(ToolError::invalid(format!(
+                    "`duration_seconds` is {seconds}: it must be more than 0 and at most {MAX_REPLAY_SECONDS} (10 minutes)"
+                )));
+            }
+            VideoTiming::Duration(seconds)
+        }
         (None, None) => VideoTiming::Speed(1.0),
     };
+    let frame_rate = args.frame_rate.unwrap_or(if gif { 15 } else { 30 });
+    if !REPLAY_FRAME_RATES.contains(&frame_rate) {
+        return Err(ToolError::invalid(format!(
+            "`frame_rate` is {frame_rate}: it must be one of {REPLAY_FRAME_RATES:?}"
+        )));
+    }
+    let hold_end_seconds = args.hold_end_seconds.unwrap_or(3.0);
+    check_range(
+        "hold_end_seconds",
+        hold_end_seconds,
+        0.0,
+        MAX_HOLD_END_SECONDS,
+    )?;
     Ok(ExportOptions {
         dpi,
         background: args.background.unwrap_or(true),
@@ -333,10 +461,10 @@ fn options_of(args: &ExportNoteArgs, language: Language) -> Result<ExportOptions
             } else {
                 VideoResolution::FullHd
             }),
-            frame_rate: args.frame_rate.unwrap_or(if gif { 15 } else { 30 }),
+            frame_rate,
             timing,
             trim_pauses: args.trim_pauses.unwrap_or(false),
-            hold_end_seconds: args.hold_end_seconds.unwrap_or(3.0),
+            hold_end_seconds,
             narration: args.narration.unwrap_or(true),
         },
     })
@@ -375,14 +503,17 @@ pub fn export_note(host: &Host, args: ExportNoteArgs) -> ToolResult {
                 .unwrap_or_default()
         })
         .collect();
-    let target = resolve_target(&args.path, args.format, &stems)?;
+    let (target, made) = resolve_target(&args.path, args.format, &stems)?;
     let request = ExportRequest {
         notes: entries.iter().map(|entry| entry.path.clone()).collect(),
         format: args.format,
         target,
         options,
     };
-    let outcome = host.write.export(&library, &request)?;
+    let outcome = host.write.export(&library, &request).inspect_err(|_| {
+        // A failed export leaves no empty folder behind.
+        made.undo();
+    })?;
     json_result(json!({
         "format": args.format.extension(),
         "files": outcome.files.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
@@ -407,12 +538,165 @@ mod tests {
     fn a_taken_name_gets_a_number_and_nothing_is_replaced() {
         let dir = tempfile::tempdir().unwrap();
         let first = dir.path().join("a.png");
-        assert_eq!(free_file(&first), first);
+        assert_eq!(free_file(&first).unwrap(), first);
         fs::write(&first, b"1").unwrap();
-        let second = free_file(&first);
+        let second = free_file(&first).unwrap();
         assert_eq!(second, dir.path().join("a (2).png"));
         fs::write(&second, b"2").unwrap();
-        assert_eq!(free_file(&first), dir.path().join("a (3).png"));
+        assert_eq!(free_file(&first).unwrap(), dir.path().join("a (3).png"));
+        // Every name taken: an error, never a taken name.
+        fs::write(dir.path().join("b.png"), b"").unwrap();
+        for n in 2..=MAX_SUFFIX {
+            fs::write(dir.path().join(format!("b ({n}).png")), b"").unwrap();
+        }
+        let error = free_file(&dir.path().join("b.png")).unwrap_err();
+        assert_eq!(error.code, "exportFailed");
+    }
+
+    #[test]
+    fn a_markdown_file_needs_its_drawings_folder_free_too() {
+        let dir = tempfile::tempdir().unwrap();
+        // A folder of drawings left by an export whose `.md` was moved or deleted.
+        fs::create_dir(dir.path().join("cours_images")).unwrap();
+        fs::write(dir.path().join("cours_images").join("cours-1.png"), b"x").unwrap();
+        let (target, _) = resolve_target(
+            &text(dir.path(), "cours.md"),
+            ExportFormat::Md,
+            &stems(&["a"]),
+        )
+        .unwrap();
+        assert_eq!(target, ExportTarget::File(dir.path().join("cours (2).md")));
+        // Into a folder, the same: the note's name, then the next one.
+        fs::write(dir.path().join("Optique_images"), b"a file of the user").unwrap();
+        let (target, _) = resolve_target(
+            &text(dir.path(), ""),
+            ExportFormat::Md,
+            &stems(&["Optique"]),
+        )
+        .unwrap();
+        assert_eq!(
+            target,
+            ExportTarget::File(dir.path().join("Optique (2).md"))
+        );
+        // Other formats have no companion.
+        let (target, _) = resolve_target(
+            &text(dir.path(), "cours.docx"),
+            ExportFormat::Docx,
+            &stems(&["a"]),
+        )
+        .unwrap();
+        assert_eq!(target, ExportTarget::File(dir.path().join("cours.docx")));
+    }
+
+    #[test]
+    fn folders_are_made_after_every_check_and_removed_again_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        // A refused request makes no folder.
+        let wrong = text(dir.path(), "new/deeper/x.png");
+        assert!(resolve_target(&wrong, ExportFormat::Jpg, &stems(&["a"])).is_err());
+        let crowd = text(dir.path(), "new/deeper/x.png");
+        assert!(resolve_target(&crowd, ExportFormat::Png, &stems(&["a", "b"])).is_err());
+        assert!(!dir.path().join("new").exists());
+        // An accepted one makes them, and gives them back to undo.
+        let (target, made) = resolve_target(
+            &text(dir.path(), "new/deeper/x.png"),
+            ExportFormat::Png,
+            &stems(&["a"]),
+        )
+        .unwrap();
+        assert_eq!(
+            target,
+            ExportTarget::File(dir.path().join("new").join("deeper").join("x.png"))
+        );
+        assert!(dir.path().join("new").join("deeper").is_dir());
+        made.undo();
+        assert!(!dir.path().join("new").exists());
+        assert!(dir.path().exists(), "a folder that was there stays");
+        // A folder that holds something by then is left alone.
+        let (_, made) = resolve_target(
+            &text(dir.path(), "kept/"),
+            ExportFormat::Png,
+            &stems(&["a", "b"]),
+        )
+        .unwrap();
+        fs::write(dir.path().join("kept").join("a.png"), b"x").unwrap();
+        made.undo();
+        assert!(dir.path().join("kept").join("a.png").exists());
+    }
+
+    fn args(format: ExportFormat) -> ExportNoteArgs {
+        ExportNoteArgs {
+            notes: vec!["a".into()],
+            format,
+            path: String::new(),
+            dpi: None,
+            background: None,
+            quality: None,
+            pdf_page: None,
+            language: None,
+            resolution: None,
+            frame_rate: None,
+            speed: None,
+            duration_seconds: None,
+            trim_pauses: None,
+            hold_end_seconds: None,
+            narration: None,
+        }
+    }
+
+    #[test]
+    fn replay_options_are_bounded() {
+        let ok = |args: &ExportNoteArgs| options_of(args, Language::Fr).is_ok();
+        let refused = |args: &ExportNoteArgs| {
+            let error = options_of(args, Language::Fr).unwrap_err();
+            assert_eq!(error.code, "invalidArguments");
+            error.message
+        };
+        let mut a = args(ExportFormat::Webm);
+        assert!(ok(&a));
+        a.duration_seconds = Some(600.0);
+        assert!(ok(&a));
+        a.duration_seconds = Some(600.5);
+        assert!(refused(&a).contains("600"));
+        a.duration_seconds = Some(f64::INFINITY);
+        refused(&a);
+        a.duration_seconds = Some(0.0);
+        refused(&a);
+        a.duration_seconds = None;
+        a.speed = Some(16.0);
+        assert!(ok(&a));
+        a.speed = Some(1e9);
+        assert!(refused(&a).contains("16"));
+        a.speed = Some(0.1);
+        refused(&a);
+        a.speed = None;
+        a.frame_rate = Some(25);
+        assert!(refused(&a).contains("[10, 15, 24, 30, 60]"));
+        a.frame_rate = Some(60);
+        a.hold_end_seconds = Some(61.0);
+        assert!(refused(&a).contains("60"));
+        a.hold_end_seconds = Some(-1.0);
+        refused(&a);
+        a.hold_end_seconds = Some(60.0);
+        assert!(ok(&a));
+    }
+
+    #[test]
+    fn a_replay_plan_beyond_the_limits_is_refused_with_them() {
+        assert!(check_replay_plan(36_000, 600_000, 60_000).is_ok());
+        let long = check_replay_plan(30_000, 3_600_000, 60_000).unwrap_err();
+        assert_eq!(long.code, "invalidArguments");
+        assert!(long.message.contains("60 min 00 s"), "{}", long.message);
+        assert!(long.message.contains("`duration_seconds`"));
+        let frames = check_replay_plan(MAX_REPLAY_FRAMES + 1, 600_000, 60_000).unwrap_err();
+        assert!(frames.message.contains("39600"), "{}", frames.message);
+        let slow = check_replay_plan(36_000, 600_000, 2 * 3_600_000).unwrap_err();
+        assert!(slow.message.contains("20 min"), "{}", slow.message);
+        assert_eq!(
+            MAX_REPLAY_FRAMES,
+            (MAX_REPLAY_TOTAL_SECONDS * 60.0) as u64,
+            "the longest replay at 60 fps"
+        );
     }
 
     #[test]
@@ -421,14 +705,16 @@ mod tests {
         let folder = text(dir.path(), "out");
         let one = resolve_target(&folder, ExportFormat::Png, &stems(&["2026-10-24 Optique"]));
         assert_eq!(
-            one.unwrap(),
+            one.unwrap().0,
             ExportTarget::File(dir.path().join("out").join("2026-10-24 Optique.png"))
         );
         // Several images: a folder, one file each.
         let many = resolve_target(&folder, ExportFormat::Jpg, &stems(&["a", "b"])).unwrap();
-        assert_eq!(many, ExportTarget::Folder(dir.path().join("out")));
+        assert_eq!(many.0, ExportTarget::Folder(dir.path().join("out")));
         // One file for the notes together.
-        let pdf = resolve_target(&folder, ExportFormat::Pdf, &stems(&["a", "b"])).unwrap();
+        let pdf = resolve_target(&folder, ExportFormat::Pdf, &stems(&["a", "b"]))
+            .unwrap()
+            .0;
         assert_eq!(
             pdf,
             ExportTarget::File(dir.path().join("out").join("Ardoise export.pdf"))
@@ -459,7 +745,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let taken = dir.path().join("x.pdf");
         fs::write(&taken, b"keep").unwrap();
-        let target =
+        let (target, _) =
             resolve_target(&taken.to_string_lossy(), ExportFormat::Pdf, &stems(&["a"])).unwrap();
         assert_eq!(target, ExportTarget::File(dir.path().join("x (2).pdf")));
         assert_eq!(fs::read(&taken).unwrap(), b"keep");

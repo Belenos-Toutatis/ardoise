@@ -12,10 +12,10 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ardoise_core::format::NoteFile;
-use ardoise_core::fsutil::write_atomic_new;
+use ardoise_core::fsutil::{remove_file_with_retry, rename_no_replace, write_atomic_new};
 use ardoise_core::library::{FileStamp, Library, SavedNote};
 use ardoise_core::note::Note;
 use ardoise_hwr::Language;
@@ -24,7 +24,7 @@ use ardoise_hwr::docx::to_docx;
 use ardoise_mcp::ToolError;
 use ardoise_mcp::write::{
     ExportFormat, ExportKind, ExportOutcome, ExportRequest, ExportTarget, MergeLayout, PdfPage,
-    SplitRequest, VideoResolution, VideoTiming, WriteServices,
+    SplitRequest, VideoResolution, VideoTiming, WriteServices, check_replay_plan,
 };
 use ardoise_media::OpenH264Codec;
 use ardoise_render::{NoteView, PdfOptions, notes_to_pdf};
@@ -40,12 +40,18 @@ use crate::handwriting::{CacheDir, NoteText, hwr_error, text_document};
 use crate::library::path_text;
 use crate::notes::save_with_key;
 use crate::operations::{self, SplitSpec, merge_in, split_in};
-use crate::textdoc::{document_of, write_markdown};
+use crate::textdoc::{document_of, write_markdown_new};
 use crate::thumbnails::thumbnail_png;
 use crate::video::{self, VideoExportOptions, export_video_in};
 
 /// An export is not cancellable from the assistant's side: the flag is never set.
 static NOT_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// Highest " (n)" tried for a replay's name.
+const MAX_SUFFIX: u32 = 999;
+
+/// Makes the names of the replays being written unique within this process.
+static REPLAYS: AtomicU64 = AtomicU64::new(0);
 
 /// The services of a server that has the app's code at hand.
 pub(super) struct AppWrite {
@@ -192,6 +198,49 @@ fn video_options(request: &ExportRequest) -> VideoExportOptions {
     }
 }
 
+/// A name next to `target` that nobody else uses, for a file being written:
+/// `.<name>.<process>-<n>.mcp-part`.
+fn partial_name(target: &Path) -> PathBuf {
+    let name = target
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let unique = REPLAYS.fetch_add(1, Ordering::Relaxed);
+    target.with_file_name(format!(".{name}.{}-{unique}.mcp-part", std::process::id()))
+}
+
+/// Moves the finished file `partial` to `target`, or to `stem (2).ext`… when that name is taken
+/// (a file that appeared meanwhile is never replaced). `partial` is removed if it cannot be
+/// moved.
+fn move_to_free_name(partial: &Path, target: &Path) -> Result<PathBuf, ToolError> {
+    let (dir, stem) = split_target(target);
+    let extension = target
+        .extension()
+        .map(|e| e.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    for n in 1..=MAX_SUFFIX {
+        let name = if n == 1 {
+            format!("{stem}.{extension}")
+        } else {
+            format!("{stem} ({n}).{extension}")
+        };
+        let candidate = dir.join(name);
+        match rename_no_replace(partial, &candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                let _ = remove_file_with_retry(partial);
+                return Err(export_failed(format!("{}: {error}", candidate.display())));
+            }
+        }
+    }
+    let _ = remove_file_with_retry(partial);
+    Err(export_failed(format!(
+        "no free name for {}",
+        target.display()
+    )))
+}
+
 impl AppWrite {
     /// One image per note (a file for one, a folder for several), or one PDF of all the notes.
     fn export_images(
@@ -278,7 +327,10 @@ impl AppWrite {
         }
         let labels = labels(request.options.language);
         let files = if request.format == ExportFormat::Md {
-            write_markdown(target, &documents, &labels).map_err(tool_error)?
+            // The name and its drawings' folder were free when the tool chose them: nothing
+            // that exists is reused, replaced or removed (the app's dialog confirms a
+            // replacement; nobody did here).
+            write_markdown_new(target, &documents, &labels).map_err(tool_error)?
         } else {
             let bytes = to_docx(&documents, &labels).map_err(export_failed)?;
             vec![write_target(target, &bytes)?]
@@ -304,22 +356,31 @@ impl AppWrite {
             note: None,
             image_key: None,
         };
+        // The assistant cannot cancel it: its plan is checked against the limits first.
+        let plan =
+            video::estimate_in(Some(library), source.clone(), &options).map_err(tool_error)?;
+        check_replay_plan(plan.frames, plan.duration_ms, plan.export_ms)?;
         let openh264 = (options.format == video::VideoFormat::Mp4
             && openh264_allowed(&self.context))
         .then(|| OpenH264Codec::new(codec_dir()));
+        // Written under a name of its own, then moved to the first free name: the target was
+        // free when the tool chose it, but the encoding takes minutes, and the app's writer
+        // replaces its destination (its dialog confirmed that; nobody did here).
+        let partial = partial_name(target);
         let result = export_video_in(
             Some(library),
             source,
             &options,
-            target,
+            &partial,
             openh264.as_ref(),
             // No progress notification: the call answers when the file is complete.
             &mut |_| {},
             &NOT_CANCELLED,
         )
         .map_err(tool_error)?;
+        let path = move_to_free_name(&partial, target)?;
         Ok(ExportOutcome {
-            files: vec![PathBuf::from(result.path)],
+            files: vec![path],
             details: json!({
                 "frames": result.frames,
                 "duration_ms": result.duration_ms,
@@ -719,6 +780,84 @@ mod tests {
         }
         let image = image_options(&request(vec![note], ExportFormat::Jpg, target));
         assert_eq!((image.dpi, image.quality, image.background), (72, 80, true));
+    }
+
+    #[test]
+    fn a_replay_never_replaces_a_file_that_appeared_during_its_encoding() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("replay.gif");
+        let partial = partial_name(&target);
+        assert_ne!(
+            partial_name(&target),
+            partial,
+            "a name of its own each time"
+        );
+        fs::write(&partial, b"ours").unwrap();
+        // Another program made the file meanwhile: kept, the replay takes the next name.
+        fs::write(&target, b"theirs").unwrap();
+        let moved = move_to_free_name(&partial, &target).unwrap();
+        assert_eq!(moved, dir.path().join("replay (2).gif"));
+        assert_eq!(fs::read(&target).unwrap(), b"theirs");
+        assert_eq!(fs::read(&moved).unwrap(), b"ours");
+        assert!(!partial.exists());
+
+        // A whole replay through the app's pipeline, to a free name.
+        let (services, _settings) = services();
+        let (_library_dir, library) = library();
+        let note = write_sample(&library, "Classe", "Cours").path;
+        let mut asked = request(
+            vec![note],
+            ExportFormat::Gif,
+            ExportTarget::File(dir.path().join("cours.gif")),
+        );
+        asked.options.video = VideoOptions {
+            resolution: VideoResolution::Hd,
+            frame_rate: 10,
+            timing: VideoTiming::Speed(1.0),
+            trim_pauses: false,
+            hold_end_seconds: 0.0,
+            narration: false,
+        };
+        let outcome = services.export(&library, &asked).unwrap();
+        assert_eq!(outcome.files, [dir.path().join("cours.gif")]);
+        assert!(fs::read(&outcome.files[0]).unwrap().starts_with(b"GIF89a"));
+        let leftovers = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains("part"))
+            .count();
+        assert_eq!(leftovers, 0);
+    }
+
+    #[test]
+    fn a_replay_too_long_for_the_assistant_is_refused_before_encoding() {
+        let (services, _settings) = services();
+        let (_library_dir, library) = library();
+        // An hour of writing (a whole lesson in live mode) at its own speed.
+        let saved = write_sample(&library, "Classe", "Séance");
+        let mut loaded = library.read(&saved.path).unwrap();
+        for (i, point) in loaded.file.note.strokes[0].points.iter_mut().enumerate() {
+            point.t = i as u32 * 120_000;
+        }
+        library
+            .save(&saved.path, &loaded.file, &loaded.stamp)
+            .unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let mut asked = request(
+            vec![saved.path],
+            ExportFormat::Webm,
+            ExportTarget::File(out.path().join("seance.webm")),
+        );
+        asked.options.video.timing = VideoTiming::Speed(1.0);
+        asked.options.video.trim_pauses = false;
+        let error = services.export(&library, &asked).unwrap_err();
+        assert_eq!(error.code, "invalidArguments", "{error:?}");
+        assert!(
+            error.message.contains("`duration_seconds`"),
+            "{}",
+            error.message
+        );
+        assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     }
 
     #[test]

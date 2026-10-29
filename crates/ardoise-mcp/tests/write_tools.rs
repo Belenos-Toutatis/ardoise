@@ -211,6 +211,17 @@ async fn a_host_without_write_services_fails_with_a_code() {
         let error = session.failure(tool, arguments).await;
         assert_eq!(error["code"], "writeUnavailable", "{tool}");
     }
+    // An export that fails leaves no folder made for it.
+    let out = export_dir();
+    let nested = out.path().join("new").join("deeper");
+    let error = session
+        .failure(
+            "export_note",
+            json!({ "notes": [OPTIQUE], "format": "md", "path": nested.to_string_lossy() }),
+        )
+        .await;
+    assert_eq!(error["code"], "writeUnavailable");
+    assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     // The tools that are the library's own need no service.
     session
         .ok("update_note", json!({ "note": OPTIQUE, "favorite": false }))
@@ -928,6 +939,17 @@ async fn an_export_to_a_file_takes_the_name_asked_and_its_options() {
     let request = session.harness.write.exports.lock().unwrap()[1].clone();
     assert_eq!(request.options.language, Language::Fr);
     assert_eq!(request.notes.len(), 2);
+
+    // A Markdown name whose drawings' folder is taken (a previous export's, its `.md` gone)
+    // moves on: the app would put the drawings among the other export's.
+    fs::create_dir(md.join("cours_images")).unwrap();
+    let result = session
+        .ok(
+            "export_note",
+            json!({ "notes": [OPTIQUE], "format": "md", "path": md.join("cours.md").to_string_lossy() }),
+        )
+        .await;
+    assert_eq!(files(&result), [md.join("cours (2).md")]);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -977,6 +999,11 @@ async fn bad_export_requests_are_refused_before_anything_is_written() {
         json!({ "notes": [OPTIQUE], "format": "jpg", "path": dir, "quality": 0 }),
         json!({ "notes": [OPTIQUE, CHIMIE], "format": "mp4", "path": dir }),
         json!({ "notes": [OPTIQUE], "format": "gif", "path": dir, "speed": 2, "duration_seconds": 10 }),
+        // Replays beyond their limits (the assistant cannot cancel one).
+        json!({ "notes": [OPTIQUE], "format": "webm", "path": dir, "duration_seconds": 3600 }),
+        json!({ "notes": [OPTIQUE], "format": "webm", "path": dir, "speed": 1000 }),
+        json!({ "notes": [OPTIQUE], "format": "webm", "path": dir, "frame_rate": 1000 }),
+        json!({ "notes": [OPTIQUE], "format": "gif", "path": dir, "hold_end_seconds": 3600 }),
         json!({ "notes": [], "format": "png", "path": dir }),
         // An unknown format.
         json!({ "notes": [OPTIQUE], "format": "bmp", "path": dir }),

@@ -11,7 +11,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ardoise_core::fsutil::write_atomic;
+use ardoise_core::fsutil::{write_atomic, write_atomic_new};
 use ardoise_core::note::Note;
 use ardoise_hwr::document::{Block, Document, Drawing, Labels};
 use ardoise_hwr::docx::to_docx;
@@ -307,6 +307,86 @@ pub fn write_markdown(
     }
     written.insert(0, destination.to_path_buf());
     Ok(written)
+}
+
+/// [`write_markdown`] for a destination nobody confirmed (the MCP server's `export_note`, which
+/// chose a free name): nothing that exists is reused, replaced or removed. The drawings go in a
+/// folder made for them (`<name>_images`, or `<name>_images (2)`… when that name is taken, even
+/// by a previous export's drawings); the `.md` must still be free when it is written, else the
+/// export fails and the drawings written for it are taken back.
+pub fn write_markdown_new(
+    destination: &Path,
+    documents: &[Document],
+    labels: &Labels,
+) -> CommandResult<Vec<PathBuf>> {
+    let stem = destination
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let parent = destination.parent().unwrap_or(Path::new("."));
+    let fail =
+        |path: &Path, error: std::io::Error| export_error(format!("{}: {error}", path.display()));
+    let drawings = documents
+        .iter()
+        .flat_map(|document| &document.blocks)
+        .any(|block| matches!(block, Block::Drawing(_)));
+    let folder = if drawings {
+        Some(new_images_folder(parent, &stem)?)
+    } else {
+        None
+    };
+    let folder_name = folder.as_ref().map_or("", |(name, _)| name.as_str());
+    let markdown = to_markdown(documents, labels, &stem, folder_name);
+    let mut written = Vec::new();
+    let mut write = || -> CommandResult<()> {
+        if let Some((_, folder)) = &folder {
+            // The images first: a text file never points at an image that is not there.
+            for image in &markdown.images {
+                let path = folder.join(&image.name);
+                write_atomic_new(&path, &image.png).map_err(|e| fail(&path, e))?;
+                written.push(path);
+            }
+        }
+        write_atomic_new(destination, markdown.text.as_bytes())
+            .map_err(|e| fail(destination, e))?;
+        Ok(())
+    };
+    let outcome = write();
+    if outcome.is_err() || markdown.images.is_empty() {
+        // Only what this export made: its drawings, then its folder if it is empty.
+        if outcome.is_err() {
+            for path in &written {
+                let _ = fs::remove_file(path);
+            }
+        }
+        if let Some((_, folder)) = &folder {
+            let _ = fs::remove_dir(folder);
+        }
+    }
+    outcome?;
+    written.insert(0, destination.to_path_buf());
+    Ok(written)
+}
+
+/// A folder for the drawings of `stem` that did not exist: made now (`create_dir` fails on a
+/// name taken, even at the same moment by another program). Returns its name and path.
+fn new_images_folder(parent: &Path, stem: &str) -> CommandResult<(String, PathBuf)> {
+    for n in 1..=MAX_FOLDER_SUFFIX {
+        let name = if n == 1 {
+            format!("{stem}{IMAGES_SUFFIX}")
+        } else {
+            format!("{stem}{IMAGES_SUFFIX} ({n})")
+        };
+        let folder = parent.join(&name);
+        match fs::create_dir(&folder) {
+            Ok(()) => return Ok((name, folder)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(export_error(format!("{}: {error}", folder.display()))),
+        }
+    }
+    Err(export_error(format!(
+        "no free folder name for {stem}{IMAGES_SUFFIX}"
+    )))
 }
 
 /// Writes the Word document of `documents` to `destination`, atomically.
@@ -629,6 +709,53 @@ lu
         assert_eq!(again, written);
         assert_eq!(fs::read(&theirs).unwrap(), b"theirs");
         assert!(!dir.path().join("notes_images (3)").exists());
+    }
+
+    #[test]
+    fn a_new_markdown_export_reuses_replaces_and_removes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("notes.md");
+        // A previous export's drawings, whose `.md` is gone: the GUI's export would take them
+        // back; this one leaves them alone.
+        let folder = dir.path().join("notes_images");
+        fs::create_dir(&folder).unwrap();
+        for n in 1..=2 {
+            fs::write(folder.join(format!("notes-{n}.png")), b"old").unwrap();
+        }
+        let written = write_markdown_new(&destination, &[sample_document()], &labels()).unwrap();
+        let image = dir.path().join("notes_images (2)").join("notes-1.png");
+        assert_eq!(written, [destination.clone(), image.clone()]);
+        assert!(ardoise_render::decode_png(&fs::read(&image).unwrap()).is_ok());
+        assert!(
+            fs::read_to_string(&destination)
+                .unwrap()
+                .contains("![Drawing 1](notes_images%20%282%29/notes-1.png)")
+        );
+        for n in 1..=2 {
+            assert_eq!(
+                fs::read(folder.join(format!("notes-{n}.png"))).unwrap(),
+                b"old"
+            );
+        }
+
+        // The `.md` taken meanwhile: refused, the file kept, the drawings made for it taken
+        // back with their folder.
+        let error = write_markdown_new(&destination, &[sample_document()], &labels()).unwrap_err();
+        assert_eq!(error.parts().0, "exportFailed");
+        assert!(
+            fs::read_to_string(&destination)
+                .unwrap()
+                .starts_with("# Journal")
+        );
+        assert!(!dir.path().join("notes_images (3)").exists());
+
+        // Without drawings, no folder.
+        let plain_md = dir.path().join("plain.md");
+        let mut plain = sample_document();
+        plain.blocks.retain(|b| !matches!(b, Block::Drawing(_)));
+        let written = write_markdown_new(&plain_md, &[plain], &labels()).unwrap();
+        assert_eq!(written, std::slice::from_ref(&plain_md));
+        assert!(!dir.path().join("plain_images").exists());
     }
 
     #[test]

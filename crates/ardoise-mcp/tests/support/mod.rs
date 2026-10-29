@@ -352,7 +352,8 @@ impl WriteServices for FakeWrite {
                 .map(|note| {
                     let stem = note.file_stem().unwrap().to_string_lossy().into_owned();
                     let path =
-                        ardoise_mcp::write::free_file(&folder.join(format!("{stem}.{extension}")));
+                        ardoise_mcp::write::free_file(&folder.join(format!("{stem}.{extension}")))
+                            .unwrap();
                     std::fs::write(&path, format!("fake {extension}")).unwrap();
                     path
                 })
