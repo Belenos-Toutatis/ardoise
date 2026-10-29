@@ -981,9 +981,18 @@ fn generate_v1_fixtures() {
 #[test]
 fn v1_fixtures_are_read() {
     let dir = fixtures_dir();
-    for (name, expected, version) in fixtures() {
+    for (name, mut expected, version) in fixtures() {
         let path = dir.join(name);
-        let file = read_note(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut file = read_note(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+        // The original note is a zip made at run time for `expected`: its "version made by"
+        // names the system that wrote it (Unix here, DOS for the committed fixture written on
+        // Windows). What it holds is what must match.
+        let original = |file: &mut NoteFile| {
+            file.original_note
+                .take()
+                .map(|bytes| read_from_bytes(&bytes).unwrap())
+        };
+        assert_eq!(original(&mut file), original(&mut expected), "{name}");
         assert_eq!(file, expected, "{name}");
         let header = read_header(&path).unwrap();
         assert_eq!(header.format, version, "{name}");
