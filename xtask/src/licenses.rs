@@ -284,6 +284,9 @@ struct Pkg {
     /// `license_file` of a Rust manifest, shown when the `license` field is missing.
     license_file: Option<String>,
     repository: Option<String>,
+    /// Authors as the manifest lists them (`Name <e-mail>` or plain names): the copyright holders
+    /// of a licence text the package does not ship.
+    authors: Vec<String>,
     /// Folder holding the package source (and its licence files).
     dir: PathBuf,
 }
@@ -330,6 +333,15 @@ fn rust_pkg(p: &Value) -> Pkg {
         repository: str_of(p, "repository")
             .or_else(|| str_of(p, "homepage"))
             .map(clean_url),
+        authors: p["authors"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
         dir,
     }
 }
@@ -461,6 +473,7 @@ fn npm_pkg(app: &Path, key: &str, entry: &Value) -> Pkg {
         license,
         license_file: None,
         repository: None,
+        authors: Vec::new(),
         dir: app.join(key),
     }
 }
@@ -470,6 +483,18 @@ fn npm_repository(package_json: &Value) -> Option<String> {
     let repo = package_json.get("repository")?;
     let url = repo.as_str().or_else(|| str_of(repo, "url"))?;
     Some(clean_url(url)).filter(|u| !u.is_empty())
+}
+
+/// Author of a `package.json` (`author`, a string or `{ name }`).
+fn npm_authors(package_json: &Value) -> Vec<String> {
+    match package_json.get("author") {
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(other) => str_of(other, "name")
+            .map(str::to_string)
+            .into_iter()
+            .collect(),
+        None => Vec::new(),
+    }
 }
 
 /// Normalizes a repository URL: no `git+` prefix, no `.git` suffix, https for git URLs and
@@ -548,10 +573,11 @@ fn npm_packages(root: &Path) -> Result<(Vec<Pkg>, Vec<Pkg>), String> {
             return Err(format!("app/{key} is missing: run `npm ci` in app/ first"));
         }
         let manifest_path = pkg.dir.join("package.json");
-        pkg.repository = fs::read_to_string(&manifest_path)
+        let json = fs::read_to_string(&manifest_path)
             .ok()
-            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-            .and_then(|j| npm_repository(&j));
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+        pkg.repository = json.as_ref().and_then(npm_repository);
+        pkg.authors = json.as_ref().map(npm_authors).unwrap_or_default();
         shipped.push(pkg);
     }
     Ok((checked, shipped))
@@ -653,6 +679,104 @@ fn normalize_text(bytes: &[u8]) -> String {
     lines.join("\n").trim_matches('\n').to_string()
 }
 
+/// Standard texts of the licences whose package may ship no text of its own. `{holders}` marks
+/// the copyright line of the permissive licences (MIT, BSD), filled from the package metadata.
+const STANDARD_TEXTS: &[(&str, &str)] = &[
+    ("Apache-2.0", include_str!("../licenses/Apache-2.0.txt")),
+    ("BSD-2-Clause", include_str!("../licenses/BSD-2-Clause.txt")),
+    ("BSD-3-Clause", include_str!("../licenses/BSD-3-Clause.txt")),
+    ("MIT", include_str!("../licenses/MIT.txt")),
+    ("MPL-2.0", include_str!("../licenses/MPL-2.0.txt")),
+];
+
+/// The licence identifiers an expression names, in order, without repeats.
+fn expr_ids(expr: &Expr, out: &mut Vec<String>) {
+    match expr {
+        Expr::License { id, .. } => {
+            if !out.contains(id) {
+                out.push(id.clone());
+            }
+        }
+        Expr::And(items) | Expr::Or(items) => items.iter().for_each(|e| expr_ids(e, out)),
+    }
+}
+
+/// A name without its `<e-mail>` and `(url)` parts.
+fn author_name(author: &str) -> String {
+    let mut name = String::new();
+    let mut depth = 0usize;
+    for c in author.chars() {
+        match c {
+            '<' | '(' => depth += 1,
+            '>' | ')' => depth = depth.saturating_sub(1),
+            c if depth == 0 => name.push(c),
+            _ => {}
+        }
+    }
+    name.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The copyright holders of a package: its authors (no e-mail addresses), otherwise "the
+/// <repository name> contributors" with the repository address. `None` when the metadata says
+/// nothing, which fails the generation: a notice without a holder would be incomplete.
+fn copyright_holders(pkg: &Pkg) -> Option<String> {
+    let names: Vec<String> = pkg
+        .authors
+        .iter()
+        .map(|a| author_name(a))
+        .filter(|n| !n.is_empty())
+        .collect();
+    if !names.is_empty() {
+        return Some(names.join(", "));
+    }
+    let url = pkg.repository.as_deref()?;
+    let repo = url.trim_end_matches('/').rsplit('/').next()?;
+    Some(format!("the {repo} contributors ({url})"))
+}
+
+/// The licence texts standing in for the ones a package does not ship: for each licence of its
+/// expression, the standard text, with "Copyright (c) <holders>" for MIT and BSD.
+fn supplied_texts(pkg: &Pkg) -> Result<Vec<String>, String> {
+    let expr = pkg
+        .license
+        .as_deref()
+        .ok_or_else(|| {
+            format!(
+                "{} ships no licence text and has no licence field",
+                pkg.label()
+            )
+        })
+        .and_then(|l| parse_expr(l).map_err(|e| format!("{}: {e}", pkg.label())))?;
+    let mut ids = Vec::new();
+    expr_ids(&expr, &mut ids);
+    ids.iter()
+        .map(|id| {
+            let (_, text) = STANDARD_TEXTS
+                .iter()
+                .find(|(known, _)| known == id)
+                .ok_or_else(|| {
+                    format!(
+                        "{} ships no text of {id}: add its standard text to xtask/licenses",
+                        pkg.label()
+                    )
+                })?;
+            if text.contains("{holders}") {
+                let holders = copyright_holders(pkg).ok_or_else(|| {
+                    format!(
+                        "{} ships no {id} text and its metadata names no copyright holder",
+                        pkg.label()
+                    )
+                })?;
+                Ok(normalize_text(
+                    text.replace("{holders}", &holders).as_bytes(),
+                ))
+            } else {
+                Ok(normalize_text(text.as_bytes()))
+            }
+        })
+        .collect()
+}
+
 fn sorted(mut pkgs: Vec<&Pkg>) -> Vec<&Pkg> {
     pkgs.sort_by(|a, b| (&a.name, &a.version).cmp(&(&b.name, &b.version)));
     pkgs
@@ -712,13 +836,38 @@ fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
         "reimplementation written from our own protocol notes and captures.",
     );
     w(&mut out, "");
+    w(&mut out, "2. Cisco OpenH264 (not distributed with Ardoise)");
+    w(&mut out, &thin);
+    w(&mut out, "");
+    w(
+        &mut out,
+        "OpenH264 Video Codec provided by Cisco Systems, Inc.",
+    );
+    w(&mut out, "");
+    w(
+        &mut out,
+        "Ardoise never ships the OpenH264 library: when Windows cannot write MP4 files",
+    );
+    w(
+        &mut out,
+        "itself, the user may have Ardoise download it from Cisco, whose binary is",
+    );
+    w(
+        &mut out,
+        "covered by Cisco's AVC/H.264 patent licence (its terms are shown in Settings). The",
+    );
+    w(
+        &mut out,
+        "openh264 Rust packages listed below are only the bindings, under BSD-2-Clause.",
+    );
+    w(&mut out, "");
 
     // Packages sorted for the lists; texts grouped across both ecosystems.
     let rust_sorted = sorted(rust.iter().collect());
     let npm_sorted = sorted(npm.iter().collect());
     for (n, title, pkgs) in [
-        (2, "Rust packages", &rust_sorted),
-        (3, "JavaScript packages (interface bundle)", &npm_sorted),
+        (3, "Rust packages", &rust_sorted),
+        (4, "JavaScript packages (interface bundle)", &npm_sorted),
     ] {
         w(&mut out, &format!("{n}. {title}: {}", pkgs.len()));
         w(&mut out, &thin);
@@ -739,7 +888,7 @@ fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
 
     // Licence texts, deduplicated by identical text.
     let mut texts: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut missing: BTreeSet<String> = BTreeSet::new();
+    let mut supplied: BTreeSet<String> = BTreeSet::new();
     for p in rust_sorted.iter().chain(npm_sorted.iter()) {
         let tag = if p.eco == Ecosystem::Npm {
             " (npm)"
@@ -747,9 +896,33 @@ fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
             ""
         };
         let files = license_files(p);
-        if files.is_empty() {
-            missing.insert(format!(
-                "{}{tag} | {}",
+        // A NOTICE file alone is not a licence text.
+        let has_text = files.iter().any(|f| {
+            f.file_name().is_some_and(|n| {
+                !n.to_string_lossy()
+                    .to_ascii_uppercase()
+                    .starts_with("NOTICE")
+            })
+        });
+        if !has_text {
+            let supplied_text = supplied_texts(p)?;
+            // MIT and BSD texts carry a copyright line built from the package metadata.
+            let holders = if supplied_text.iter().any(|t| t.contains("Copyright (c)")) {
+                format!(
+                    " | Copyright (c) {}",
+                    copyright_holders(p).unwrap_or_default()
+                )
+            } else {
+                String::new()
+            };
+            for text in supplied_text {
+                texts
+                    .entry(text)
+                    .or_default()
+                    .insert(format!("{}{tag}", p.label()));
+            }
+            supplied.insert(format!(
+                "{}{tag} | {}{holders}",
                 p.label(),
                 p.license.as_deref().unwrap_or("-")
             ));
@@ -774,7 +947,7 @@ fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
             .then(a.0.cmp(&b.0))
     });
 
-    w(&mut out, &format!("4. Licence texts: {}", groups.len()));
+    w(&mut out, &format!("5. Licence texts: {}", groups.len()));
     w(&mut out, &thin);
     w(&mut out, "");
     w(
@@ -811,21 +984,35 @@ fn notices(rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
     w(
         &mut out,
         &format!(
-            "5. Packages whose licence text is not shipped by the package: {}",
-            missing.len()
+            "6. Packages that ship no licence text of their own: {}",
+            supplied.len()
         ),
     );
     w(&mut out, &rule);
     w(&mut out, "");
-    if missing.is_empty() {
+    w(
+        &mut out,
+        "For these packages the standard text of each of their licences is reproduced in",
+    );
+    w(
+        &mut out,
+        "section 5 (they are listed in the \"Covers\" lines); for MIT and BSD, its copyright",
+    );
+    w(
+        &mut out,
+        "line names the holders given by the package's metadata (its authors, otherwise",
+    );
+    w(&mut out, "its repository).");
+    w(&mut out, "");
+    if supplied.is_empty() {
         w(&mut out, "None.");
     } else {
         w(
             &mut out,
-            "name version | licence expression (the standard text of the licence applies)",
+            "name version | licence expression | copyright line, where the licence has one",
         );
         w(&mut out, "");
-        for m in &missing {
+        for m in &supplied {
             w(&mut out, m);
         }
     }
@@ -1063,5 +1250,115 @@ tauri v2.12.5
             npm_repository(&serde_json::json!({ "repository": { "type": "git", "url": "git+https://x.org/a.git" } })).unwrap(),
             "https://x.org/a"
         );
+    }
+
+    fn pkg(name: &str, license: &str, authors: &[&str], repository: Option<&str>) -> Pkg {
+        Pkg {
+            eco: Ecosystem::Rust,
+            name: name.into(),
+            version: "1.0.0".into(),
+            license: Some(license.into()),
+            license_file: None,
+            repository: repository.map(str::to_string),
+            authors: authors.iter().map(|a| a.to_string()).collect(),
+            dir: PathBuf::new(),
+        }
+    }
+
+    #[test]
+    fn holders_come_from_the_authors_without_addresses() {
+        let p = pkg(
+            "a",
+            "MIT",
+            &[
+                "Jane Doe <jane at example dot org>",
+                "Zack Owens",
+                "R. Roe (https://r.example)",
+            ],
+            Some("https://github.com/x/a"),
+        );
+        assert_eq!(
+            copyright_holders(&p).unwrap(),
+            "Jane Doe, Zack Owens, R. Roe"
+        );
+    }
+
+    #[test]
+    fn holders_fall_back_to_the_repository_then_to_nothing() {
+        let p = pkg(
+            "a",
+            "MIT",
+            &[],
+            Some("https://github.com/wravery/webview2-rs"),
+        );
+        assert_eq!(
+            copyright_holders(&p).unwrap(),
+            "the webview2-rs contributors (https://github.com/wravery/webview2-rs)"
+        );
+        assert_eq!(copyright_holders(&pkg("a", "MIT", &[], None)), None);
+        // An empty author (only an address) does not count.
+        assert_eq!(
+            copyright_holders(&pkg("a", "MIT", &["<address only>"], None)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_missing_text_is_supplied_for_each_licence_of_the_expression() {
+        let p = pkg("dasp", "MIT OR Apache-2.0", &["Jane <j at x dot org>"], None);
+        let texts = supplied_texts(&p).unwrap();
+        assert_eq!(texts.len(), 2);
+        assert!(texts[0].contains(
+            "Copyright (c) Jane
+"
+        ));
+        assert!(texts[0].contains("Permission is hereby granted"));
+        assert!(texts[1].contains(
+            "Apache License
+"
+        ));
+        assert!(!texts.iter().any(|t| t.contains("{holders}")));
+        // The legacy `/` separator counts as OR.
+        assert_eq!(
+            supplied_texts(&pkg("c", "Apache-2.0/MIT", &["Z"], None))
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_supplied_text_needs_a_holder_and_a_known_licence() {
+        let no_holder = pkg("a", "BSD-3-Clause", &[], None);
+        assert!(
+            supplied_texts(&no_holder)
+                .unwrap_err()
+                .contains("no copyright holder")
+        );
+        let unknown = pkg("b", "ISC", &["X"], None);
+        assert!(
+            supplied_texts(&unknown)
+                .unwrap_err()
+                .contains("xtask/licenses")
+        );
+        // MPL and Apache need no holder.
+        assert_eq!(
+            supplied_texts(&pkg("w", "MPL-2.0", &[], None))
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn standard_texts_are_complete() {
+        for (id, text) in STANDARD_TEXTS {
+            assert!(text.len() > 500, "{id} is too short");
+            assert_eq!(
+                text.contains("{holders}"),
+                ["MIT", "BSD-2-Clause", "BSD-3-Clause"].contains(id),
+                "{id}"
+            );
+        }
     }
 }
