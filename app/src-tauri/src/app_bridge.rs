@@ -11,8 +11,9 @@
 //! session's notes) is read here. Nothing deletes, changes a setting or touches the tablet.
 //!
 //! `last_live_note` survives a restart of the app: the notes of the last live session are
-//! remembered in per-PC state (`%LOCALAPPDATA%\Ardoise\last-live-session.json`), never in the
-//! library, when live mode stops and when the app closes.
+//! remembered in per-PC state (`%LOCALAPPDATA%\Ardoise\last-live-session-<hash>.json`, the hash
+//! of the copy's settings location, as in the pipe's name), never in the library, when live mode
+//! stops and when the app closes.
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -23,7 +24,9 @@ use std::time::Duration;
 
 use ardoise_core::library::{LEGACY_META_DIR, META_DIR, NOTE_EXTENSION};
 use ardoise_mcp::ToolError;
-use ardoise_mcp::bridge::pipe::{PipeError, PipeServer, pipe_name_for};
+use ardoise_mcp::bridge::pipe::{
+    PipeError, PipeServer, pipe_name_for, settings_hash, settings_key,
+};
 use ardoise_mcp::bridge::protocol::wire_code;
 use ardoise_mcp::bridge::{
     AppBridge, AppView, LastLive, LiveNote, LiveSession, LiveStatus, NoApp, OpenedNote, PipeBridge,
@@ -47,8 +50,11 @@ const BRIDGE_REQUEST: &str = "bridge-request";
 const VIEW_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long it has to carry out an action (the client waits 20 s: this error arrives first).
 const ACTION_TIMEOUT: Duration = Duration::from_secs(15);
-/// The last live session of this PC, in [`state_dir`].
-const LAST_LIVE_FILE: &str = "last-live-session.json";
+/// The last live session, in [`state_dir`]: `last-live-session-<hash of the copy>.json`.
+const LAST_LIVE_STEM: &str = "last-live-session";
+/// Its name before it was kept per copy (shared by every copy of the PC): read when the copy has
+/// no file of its own yet.
+const LEGACY_LAST_LIVE_FILE: &str = "last-live-session.json";
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -190,8 +196,8 @@ struct AppSide {
     library: Box<dyn Fn() -> Option<PathBuf> + Send + Sync>,
     /// The live session shown.
     live: Box<dyn Fn() -> Option<LiveOverview> + Send + Sync>,
-    /// Where the last live session is remembered.
-    state_dir: PathBuf,
+    /// The file remembering the last live session ([`record_file`]).
+    record: PathBuf,
 }
 
 fn path_text(path: &Path) -> String {
@@ -283,17 +289,40 @@ struct LastLiveRecord {
     notes: Vec<LiveNote>,
 }
 
-fn record_path(dir: &Path) -> PathBuf {
-    dir.join(LAST_LIVE_FILE)
+/// The file remembering the last live session of the copy of Ardoise named `copy` (the hash of
+/// its settings location, [`settings_hash`]), in `dir`: copies with their own settings (and so,
+/// often, their own library) keep their own; without a settings location, the shared name.
+fn record_file(dir: &Path, copy: Option<&str>) -> PathBuf {
+    match copy {
+        Some(hash) => dir.join(format!("{LAST_LIVE_STEM}-{hash}.json")),
+        None => dir.join(LEGACY_LAST_LIVE_FILE),
+    }
 }
 
-fn read_record(dir: &Path) -> Option<LastLiveRecord> {
-    let text = std::fs::read(record_path(dir)).ok()?;
-    serde_json::from_slice(&text).ok()
+/// The record file of the running copy.
+fn record_of(context: &AppContext) -> PathBuf {
+    let copy = context
+        .store
+        .as_ref()
+        .ok()
+        .map(|store| settings_hash(&settings_key(store.path())));
+    record_file(&state_dir(), copy.as_deref())
+}
+
+/// The remembered session: the copy's own file, else the file shared by every copy before
+/// records were kept per copy (still given only while its library is open).
+fn read_record(file: &Path) -> Option<LastLiveRecord> {
+    let read = |path: &Path| -> Option<LastLiveRecord> {
+        serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+    };
+    read(file).or_else(|| {
+        let legacy = file.with_file_name(LEGACY_LAST_LIVE_FILE);
+        (legacy != file).then(|| read(&legacy)).flatten()
+    })
 }
 
 /// Remembers the session of `overview` (when it wrote notes). Atomic; outside the library.
-fn write_record(dir: &Path, overview: &LiveOverview, ended: i64) -> std::io::Result<()> {
+fn write_record(file: &Path, overview: &LiveOverview, ended: i64) -> std::io::Result<()> {
     let (Some(library), false) = (&overview.library, overview.notes.is_empty()) else {
         return Ok(());
     };
@@ -302,9 +331,11 @@ fn write_record(dir: &Path, overview: &LiveOverview, ended: i64) -> std::io::Res
         ended,
         notes: live_notes(overview),
     };
-    std::fs::create_dir_all(dir)?;
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
     let bytes = serde_json::to_vec_pretty(&record).map_err(std::io::Error::other)?;
-    ardoise_core::fsutil::write_atomic(&record_path(dir), &bytes)
+    ardoise_core::fsutil::write_atomic(file, &bytes)
 }
 
 /// Per-PC state of the app: `%LOCALAPPDATA%\Ardoise` (the temporary folder without it).
@@ -317,9 +348,9 @@ fn state_dir() -> PathBuf {
 
 /// Remembers the notes of the session of `hub` for `last_live_note` after a restart (live mode
 /// stopped, or the app closing). Best effort: a failure is logged.
-pub fn remember_live_session(hub: &LiveHub) {
+pub fn remember_live_session(context: &AppContext, hub: &LiveHub) {
     if let Some(overview) = hub.overview()
-        && let Err(error) = write_record(&state_dir(), &overview, now_ms())
+        && let Err(error) = write_record(&record_of(context), &overview, now_ms())
     {
         eprintln!("assistant bridge: cannot remember the last live session: {error}");
     }
@@ -386,7 +417,7 @@ impl AppBridge for AppSide {
     }
 
     fn last_live_note(&self) -> Result<LastLive, ToolError> {
-        let record = read_record(&self.state_dir);
+        let record = read_record(&self.record);
         // This run's session, once it wrote a note (a session left blank is not the lesson).
         if let Some(overview) = (self.live)().filter(|overview| !overview.notes.is_empty()) {
             let notes = live_notes(&overview);
@@ -424,6 +455,41 @@ impl AppBridge for AppSide {
 pub struct BridgeRuntime {
     pending: Arc<Pending>,
     server: Mutex<Option<PipeServer>>,
+    /// Why the bridge is not served, once [`start`] has run (`None`: served, or not started).
+    refused: Mutex<Option<BridgeStatus>>,
+}
+
+/// Whether assistants can drive this window (Settings > Assistant shows it).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStatus {
+    /// `serving`; `retrying` (a failure, tried again); `anotherCopy` (another Ardoise started
+    /// from this copy serves it); `unavailable` (the pipe could not be created); `off` (not on
+    /// this system, or not started).
+    pub state: &'static str,
+    /// The technical reason, for `retrying` and `unavailable`.
+    pub detail: Option<String>,
+}
+
+impl BridgeStatus {
+    fn new(state: &'static str, detail: Option<String>) -> BridgeStatus {
+        BridgeStatus { state, detail }
+    }
+}
+
+impl BridgeRuntime {
+    /// The bridge's state now.
+    pub fn status(&self) -> BridgeStatus {
+        if let Some(server) = lock(&self.server).as_ref() {
+            return match server.trouble() {
+                Some(trouble) => BridgeStatus::new("retrying", Some(trouble)),
+                None => BridgeStatus::new("serving", None),
+            };
+        }
+        lock(&self.refused)
+            .clone()
+            .unwrap_or_else(|| BridgeStatus::new("off", None))
+    }
 }
 
 /// The pipe of this copy of Ardoise for the current user; `None` without a settings location
@@ -459,16 +525,26 @@ pub fn start(app: &AppHandle) {
                 .map(PathBuf::from)
         }),
         live: Box::new(move || live_app.state::<LiveRuntime>().hub().overview()),
-        state_dir: state_dir(),
+        record: record_of(&app.state::<AppContext>()),
     };
-    match PipeServer::start(&name, Arc::new(side)) {
-        Ok(server) => *lock(&runtime.server) = Some(server),
-        Err(PipeError::AlreadyServed(_)) => eprintln!(
-            "assistant bridge: another Ardoise started from this copy serves the assistants; this one runs without the bridge"
-        ),
-        Err(PipeError::Unsupported) => {}
-        Err(error) => eprintln!("assistant bridge: not available: {error}"),
-    }
+    let refused = match PipeServer::start(&name, Arc::new(side)) {
+        Ok(server) => {
+            *lock(&runtime.server) = Some(server);
+            return;
+        }
+        Err(PipeError::AlreadyServed(_)) => {
+            eprintln!(
+                "assistant bridge: another Ardoise started from this copy serves the assistants; this one runs without the bridge"
+            );
+            BridgeStatus::new("anotherCopy", None)
+        }
+        Err(PipeError::Unsupported) => BridgeStatus::new("off", None),
+        Err(error) => {
+            eprintln!("assistant bridge: not available: {error}");
+            BridgeStatus::new("unavailable", Some(error.to_string()))
+        }
+    };
+    *lock(&runtime.refused) = Some(refused);
 }
 
 /// The bridge of `ardoise.exe --mcp`: the app started from the same copy, through its pipe.
@@ -503,14 +579,17 @@ pub fn bridge_reply(
 pub struct McpLaunch {
     /// Absolute path of the running executable.
     pub exe: String,
+    /// Whether assistants can drive this window now.
+    pub bridge: BridgeStatus,
 }
 
 #[tauri::command]
-pub fn mcp_launch_info() -> CommandResult<McpLaunch> {
+pub fn mcp_launch_info(runtime: State<'_, BridgeRuntime>) -> CommandResult<McpLaunch> {
     let exe = std::env::current_exe().map_err(|error| CommandError::new("unexpected", error))?;
     let exe = path_text(&exe);
     Ok(McpLaunch {
         exe: exe.strip_prefix(r"\\?\").map(str::to_owned).unwrap_or(exe),
+        bridge: runtime.status(),
     })
 }
 
@@ -580,8 +659,13 @@ mod tests {
                 window: Box::new(Arc::clone(&self.window)),
                 library: Box::new(move || Some(root.clone())),
                 live: Box::new(move || lock(&live).clone()),
-                state_dir: self.state.clone(),
+                record: self.record(),
             }
+        }
+
+        /// The record file of the copy under test.
+        fn record(&self) -> PathBuf {
+            record_file(&self.state, Some("0123abcd"))
         }
 
         fn overview(&self, running: bool, notes: &[(usize, &str)]) -> LiveOverview {
@@ -695,11 +779,30 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(answer.into_result().unwrap_err().code, code::APP_BUSY);
+        // A code of the interface the bridge does not list (a live command's error) is kept;
+        // anything that is not a plain identifier is not.
+        let new: UiAnswer = serde_json::from_value(json!({
+            "error": { "code": "liveTabletLost", "message": "?" }
+        }))
+        .unwrap();
+        assert_eq!(new.into_result().unwrap_err().code, "liveTabletLost");
         let odd: UiAnswer = serde_json::from_value(json!({
-            "error": { "code": "brandNew", "message": "?" }
+            "error": { "code": "not a code!", "message": "?" }
         }))
         .unwrap();
         assert_eq!(odd.into_result().unwrap_err().code, "unexpected");
+    }
+
+    #[test]
+    fn the_bridge_says_whether_it_serves() {
+        let runtime = BridgeRuntime::default();
+        assert_eq!(runtime.status(), BridgeStatus::new("off", None));
+        *lock(&runtime.refused) = Some(BridgeStatus::new("anotherCopy", None));
+        assert_eq!(runtime.status().state, "anotherCopy");
+        assert_eq!(
+            serde_json::to_value(BridgeStatus::new("retrying", Some("x".into()))).unwrap(),
+            json!({ "state": "retrying", "detail": "x" })
+        );
     }
 
     #[test]
@@ -781,7 +884,7 @@ mod tests {
 
         // It stops and is remembered.
         let stopped = fixture.overview(false, &[(0, "a"), (1, "b")]);
-        write_record(&fixture.state, &stopped, 1_792_843_200_000).unwrap();
+        write_record(&fixture.record(), &stopped, 1_792_843_200_000).unwrap();
         *lock(&fixture.live) = Some(stopped);
         let ended = side.last_live_note().unwrap().session.unwrap();
         assert!(!ended.running && ended.this_run);
@@ -805,8 +908,53 @@ mod tests {
         assert_eq!(other.last_live_note().unwrap().session, None);
         // A session without notes is not written.
         let blank = fixture.overview(false, &[]);
-        let state = fixture.state.join("blank");
-        write_record(&state, &blank, 1).unwrap();
-        assert!(!record_path(&state).exists());
+        let file = record_file(&fixture.state.join("blank"), Some("0123abcd"));
+        write_record(&file, &blank, 1).unwrap();
+        assert!(!file.exists());
+    }
+
+    #[test]
+    fn each_copy_remembers_its_own_live_session() {
+        let fixture = Fixture::new(|_| Ok(Value::Null));
+        let ours = fixture.overview(false, &[(0, "ours")]);
+        let mut theirs = fixture.overview(false, &[(0, "theirs")]);
+        theirs.library = Some(PathBuf::from("D:\\Autre"));
+        // Another copy (other settings) stops live mode after this one: nothing is lost.
+        write_record(&fixture.record(), &ours, 1).unwrap();
+        write_record(&record_file(&fixture.state, Some("ffff0000")), &theirs, 2).unwrap();
+        let remembered = fixture.side().last_live_note().unwrap().session.unwrap();
+        assert_eq!(remembered.notes[0].id, "ours");
+        assert_eq!(
+            record_file(&fixture.state, Some("0123abcd")).file_name(),
+            Some(std::ffi::OsStr::new("last-live-session-0123abcd.json"))
+        );
+    }
+
+    #[test]
+    fn the_shared_record_of_earlier_versions_is_still_read() {
+        let fixture = Fixture::new(|_| Ok(Value::Null));
+        let legacy = record_file(&fixture.state, None);
+        assert_eq!(
+            legacy.file_name(),
+            Some(std::ffi::OsStr::new(LEGACY_LAST_LIVE_FILE))
+        );
+        write_record(&legacy, &fixture.overview(false, &[(0, "old")]), 1).unwrap();
+        // The copy has no file of its own yet: the shared one is given (its library is open).
+        let side = fixture.side();
+        assert_eq!(
+            side.last_live_note().unwrap().session.unwrap().notes[0].id,
+            "old"
+        );
+        // Once the copy has its own, the shared one is not read any more.
+        write_record(
+            &fixture.record(),
+            &fixture.overview(false, &[(0, "new")]),
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            side.last_live_note().unwrap().session.unwrap().notes[0].id,
+            "new"
+        );
     }
 }

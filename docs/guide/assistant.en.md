@@ -39,13 +39,16 @@ A few requests, as you would write them:
 Once, in **PowerShell** or the **command prompt** (the path is an example: take the one Settings > Assistant gives):
 
 ```
-claude mcp add --scope user ardoise -- "C:\Tools\Ardoise\ardoise.exe" --mcp
+claude mcp add --scope user ardoise "--" "C:\Tools\Ardoise\ardoise.exe" --mcp
 ```
 
 - `--scope user`: Ardoise is available in **all your Claude Code projects** (the declaration is kept in your
   profile, not in a project).
 - Keep the **double quotes** around the path (it may contain spaces).
-- `--` separates Claude Code's own options from Ardoise's command: everything after it is given to Ardoise as is.
+- `"--"` separates Claude Code's own options from Ardoise's command: everything after it is given to Ardoise as is.
+  **Keep its double quotes too**: when Claude Code was installed with npm, `claude` is a script that PowerShell
+  starts after dropping an unquoted `--`, and `--mcp` would then be taken for an option of Claude Code. With the
+  quotes, the same command works in PowerShell and in the command prompt, however Claude Code was installed.
 - Check: `claude mcp list` (Ardoise should be "Connected"), or `/mcp` inside Claude Code.
 - Remove: `claude mcp remove ardoise`.
 
@@ -121,7 +124,7 @@ The assistant must use **the same copy** of Ardoise as the one you open (same fo
 |---|---|
 | `noLibrary`: no library | Open Ardoise on this PC and choose the library. |
 | `handwritingNoRecognizer` / `handwritingUnsupported` | Install Windows' handwriting for the language (see above). Images stay readable. |
-| `appNotRunning`: "Ardoise is not open" | Open Ardoise — the copy whose path is declared. |
+| `appNotRunning`: "Ardoise is not open" | Open Ardoise — the copy whose path is declared. If it is open already, look at the "Link with the open Ardoise" line in Settings > Assistant: it says whether this window can be driven. |
 | `appNotResponding` | Ardoise is busy (an export, a dialog) or still starting: try again. |
 | `appBusy` | First finish in Ardoise what is under way (save the note, close the dialog, finish live mode). |
 | `liveNotRunning` | Start live mode in Ardoise before asking for the presentation. |
@@ -136,7 +139,10 @@ The assistant must use **the same copy** of Ardoise as the one you open (same fo
   information about students.
 - Ardoise itself sends nothing over the Internet: the assistant reads, when you ask it to.
 - **Read only is recommended** when the assistant only needs to read (`--read-only`).
-- **The assistant asks for your consent before each change**: Claude Code and Claude Desktop ask for permission
-  before using a tool that writes; you can refuse.
+- **The assistant usually asks for your consent before changing anything**: Claude Code and Claude Desktop ask for
+  permission before using a tool that writes, and you can refuse. But that depends on their settings: a tool you
+  "always allowed", or a mode that accepts everything, asks nothing any more. Ardoise flags the tools that change or
+  remove notes (move to the trash, change the title or tags, split, straighten shapes, move) as **destructive**,
+  which prompts the assistant to ask. To be sure nothing changes, declare Ardoise **read only** (`--read-only`).
 - **Nothing is ever deleted for good**: a note the assistant deletes goes to Ardoise's trash (kept 30 days), where you
   can restore it. Exports never overwrite an existing file.

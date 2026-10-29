@@ -8,7 +8,7 @@
 // the presentation window) and pages (`canvas.live-canvas[data-page]`), and the live session's notes
 // are in the library. The "app not open" answers are checked by app/e2e/mcp.mjs.
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpSession } from './mcp.mjs';
@@ -99,13 +99,16 @@ export const bridgeJourneys = [
           await app.waitFor(`document.querySelector('[data-snippet="claude-code"]') !== null`, 'the assistant panel');
           const exe = join(app.dir, 'ardoise.exe');
           const command = await app.evaluate(`document.querySelector('[data-snippet="claude-code"]').textContent`);
-          const expected = `claude mcp add --scope user ardoise -- "${exe}" --mcp`;
+          const expected = `claude mcp add --scope user ardoise "--" "${exe}" --mcp`;
           if (command.toLowerCase() !== expected.toLowerCase()) throw new Error(`command: ${command}, expected ${expected}`);
           await app.click('[data-setting="assistant-read-only"]');
           await app.waitFor(`document.querySelector('[data-snippet="claude-code"]').textContent.endsWith('--mcp --read-only')`, 'the read-only option');
           const config = JSON.parse(await app.evaluate(`document.querySelector('[data-snippet="claude-desktop"]').textContent`));
           const entry = config.mcpServers?.ardoise;
           if (!samePath(entry?.command, exe) || entry.args.join(' ') !== '--mcp --read-only') throw new Error(JSON.stringify(config));
+          // This window serves the bridge (the `--mcp` above just went through it).
+          const bridge = await app.evaluate(`document.querySelector('[data-slot="assistant-bridge"]')?.dataset.state ?? null`);
+          if (bridge !== 'serving') throw new Error(`bridge status ${bridge}`);
           await app.click('.topbar button', l('settings.title'));
           await app.waitFor(`document.querySelector('[data-slot="assistant"]') === null`, 'the settings closed');
         });
@@ -162,6 +165,9 @@ export const bridgeJourneys = [
           // Rust records the presentation window once it is built and placed full screen.
           const state = await ok(session, 'app_state');
           if (state.presentation_open !== true || state.presentation_screen !== started.screen) throw new Error(JSON.stringify(state));
+          // Unlike the "Project" button, the bridge saves no choice of screen in the settings.
+          const settings = readFileSync(join(app.dir, 'ardoise.toml'), 'utf8');
+          if (/projector/.test(settings)) throw new Error(`the settings changed:\n${settings}`);
         });
 
         await check('presentation next, page, previous : la page projetée suit', async () => {
@@ -207,6 +213,12 @@ export const bridgeJourneys = [
             if (!page.found || !listed.some((n) => n.id === page.id)) throw new Error(`page ${page.page} not in the library: ${JSON.stringify(page)}`);
           }
           if (after.note.id !== after.notes.at(-1).id) throw new Error(JSON.stringify(after));
+          // Remembered for this copy only (`last-live-session-<hash>.json`), not in the file all copies shared.
+          const state = join(app.dir, 'LocalAppData', 'Ardoise');
+          const records = readdirSync(state).filter((name) => name.startsWith('last-live-session'));
+          if (records.length !== 1 || !/^last-live-session-[0-9a-f]{8}\.json$/.test(records[0])) {
+            throw new Error(`records: ${records.join(', ')}`);
+          }
         });
       } finally {
         await session.close(3000);

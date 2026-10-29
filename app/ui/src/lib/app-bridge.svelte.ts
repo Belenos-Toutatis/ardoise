@@ -59,12 +59,23 @@ export interface EditorSlot {
   dirty(): boolean;
   /** Why the editor cannot be left now (unsaved changes, a recording…), or null. */
   blocker(): string | null;
+  /** Settles once the editor has loaded the note at `path`; rejects with why it could not (`NoteLoads`). */
+  loaded(path: string): Promise<void>;
 }
+
+/** Why an action under way must stop (its request was replaced, or nobody waits for it any more), or null. */
+export type Abandoned = () => BridgeError | null;
 
 /** The live window (`LiveView.svelte`). */
 export interface LiveSlot {
-  presentation(action: PresentationAction, page: number | null): Promise<PresentationState>;
+  presentation(action: PresentationAction, page: number | null, abandoned: Abandoned): Promise<PresentationState>;
 }
+
+/**
+ * How long the interface keeps at an action: less than the 15 s Rust gives the window
+ * (`ACTION_TIMEOUT` in `app_bridge.rs`), after which nobody waits for the answer any more.
+ */
+export const ACTION_BUDGET_MS = 12_000;
 
 /** What the main window shows, as the screens register themselves. */
 export class BridgeScreens {
@@ -72,6 +83,8 @@ export class BridgeScreens {
   home = $state.raw<HomeSlot | null>(null);
   editor = $state.raw<EditorSlot | null>(null);
   live = $state.raw<LiveSlot | null>(null);
+  /** Presentation requests received: a newer one replaces the one under way. */
+  presentationRuns = 0;
 
   /** Registers `slot` while a screen is mounted; returns what unregisters it (if still the same). */
   register<K extends 'home' | 'editor' | 'live'>(kind: K, slot: BridgeScreens[K]): () => void {
@@ -118,15 +131,64 @@ export function bridgeView(screens: BridgeScreens): BridgeView {
 /** Paths as Windows compares them. */
 const samePath = (a: string, b: string) => a.replaceAll('/', '\\').toLowerCase() === b.replaceAll('/', '\\').toLowerCase();
 
+/**
+ * The loads of one editor, as `open_note` waits for them (`EditorSlot.loaded`): the editor calls
+ * `begin` when it starts loading a note and ends it with `ok` or `fail`; a load begun meanwhile
+ * replaces the one under way (which then fails with `appBusy`).
+ */
+export class NoteLoads {
+  #current: { path: string; done: Promise<void>; settle: (error?: unknown) => void } | null = null;
+
+  begin(path: string): { ok(): void; fail(error: unknown): void } {
+    this.#current?.settle(busy('another note was opened in Ardoise meanwhile'));
+    let settled = false;
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const done = new Promise<void>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    // Nobody may be waiting for it.
+    done.catch(() => {});
+    const settle = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (error === undefined) resolve();
+      else reject(error);
+    };
+    this.#current = { path, done, settle };
+    return { ok: () => settle(), fail: (error) => settle(error ?? new Error('the note could not be loaded')) };
+  }
+
+  /** Settles once the note at `path` is loaded (at once if it is); rejects with the load's error. */
+  loaded(path: string): Promise<void> {
+    const current = this.#current;
+    if (!current || !samePath(current.path, path)) {
+      return Promise.reject(new Refusal('appNotResponding', `the editor is not loading ${path}`));
+    }
+    return current.done;
+  }
+}
+
 async function openNote(screens: BridgeScreens, path: string): Promise<{ path: string }> {
   const home = screens.home;
   if (!home) throw busy(`no library is open in Ardoise (${screens.app})`);
   if (screens.live) throw busy('live mode is on screen in Ardoise: the teacher must finish it first');
   const editor = screens.editor;
-  if (editor && samePath(editor.path(), path)) return { path: editor.path() };
+  if (editor && samePath(editor.path(), path)) {
+    // Already there: still says whether it could be read.
+    await editor.loaded(editor.path());
+    return { path: editor.path() };
+  }
   const blocked = editor?.blocker() ?? home.busy();
   if (blocked) throw busy(blocked);
   await home.openNote(path);
+  // Opened once the editor, mounted for it, has read the note (a damaged one fails with its code).
+  const shows = () => screens.editor !== null && samePath(screens.editor.path(), path);
+  await until(shows, 3000);
+  const opened = screens.editor;
+  if (!opened || !shows()) throw new Refusal('appNotResponding', 'the editor did not open the note');
+  await opened.loaded(path);
   return { path };
 }
 
@@ -135,6 +197,14 @@ async function presentation(
   action: PresentationAction,
   page: number | null,
 ): Promise<PresentationState> {
+  const run = ++screens.presentationRuns;
+  const deadline = Date.now() + ACTION_BUDGET_MS;
+  const abandoned: Abandoned = () =>
+    screens.presentationRuns !== run
+      ? { code: 'appBusy', message: 'replaced by a newer presentation request' }
+      : Date.now() > deadline
+        ? { code: 'appNotResponding', message: 'the live window took too long: the request was given up' }
+        : null;
   if (action === 'page' && !(Number.isInteger(page) && (page ?? 0) >= 1)) {
     throw new Refusal('invalidArguments', '`page` must be a page number from 1');
   }
@@ -147,7 +217,7 @@ async function presentation(
       'live mode is not open in Ardoise: the teacher starts it from the tablet panel (Live mode)',
     );
   }
-  return live.presentation(action, page);
+  return live.presentation(action, page, abandoned);
 }
 
 /** Carries `request` out with the screens on display; never throws. */
@@ -216,11 +286,16 @@ function presentationState(live: LiveDriver, screen?: string | null): Presentati
   };
 }
 
-/** One action of the `presentation` tool, as the live window's buttons and keys do it. */
+/**
+ * One action of the `presentation` tool, as the live window's buttons and keys do it. Going to a
+ * page steps one page at a time and stops as soon as the request is `abandoned` (replaced, or past
+ * its time): the window never goes on changing pages once Rust has answered.
+ */
 export async function drivePresentation(
   live: LiveDriver,
   action: PresentationAction,
   page: number | null,
+  abandoned: Abandoned = () => null,
 ): Promise<PresentationState> {
   switch (action) {
     case 'start': {
@@ -249,10 +324,14 @@ export async function drivePresentation(
       }
       // One step at a time, as the arrow keys: never past the last page (which would add one).
       for (let steps = 0; live.pageIndex !== target && steps < 1000; steps++) {
+        const gone = abandoned();
+        if (gone) throw new Refusal(gone.code, gone.message);
         const from = live.pageIndex;
         await live.command(from < target ? 'nextPage' : 'previousPage');
-        if (!(await live.until(() => live.pageIndex !== from))) break;
+        if (!(await live.until(() => live.pageIndex !== from || abandoned() !== null))) break;
       }
+      const gone = abandoned();
+      if (gone && live.pageIndex !== target) throw new Refusal(gone.code, gone.message);
       if (live.pageIndex !== target) {
         throw new Refusal('appNotResponding', `the live window did not reach page ${target + 1}`);
       }

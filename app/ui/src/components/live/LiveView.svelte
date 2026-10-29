@@ -157,7 +157,7 @@
     const timer = setInterval(refreshLatency, LATENCY_REFRESH_MS);
     // The assistant's bridge drives the projection and the pages as these buttons and keys do.
     const unregister = bridgeScreens.register('live', {
-      presentation: (action, page) =>
+      presentation: (action, page, abandoned) =>
         drivePresentation(
           {
             get pageIndex() {
@@ -169,13 +169,15 @@
             get presentation() {
               return live.presentation;
             },
-            project: openProjection,
+            // The assistant's choice of screen is not saved: no bridge request changes a setting.
+            project: () => openProjection(false),
             stopProjecting: closeProjection,
             command: (kind) => api.liveCommand({ kind }),
             until,
           },
           action,
           page,
+          abandoned,
         ),
     });
     return () => {
@@ -310,12 +312,15 @@
     }
   }
 
-  /** "Project": the presentation window on the chosen screen; a failure is shown, and thrown. */
-  async function openProjection(): Promise<MonitorInfo> {
+  /**
+   * "Project": the presentation window on the chosen screen, saved as this PC's choice unless
+   * `remember` is false; a failure is shown, and thrown.
+   */
+  async function openProjection(remember = true): Promise<MonitorInfo> {
     projecting = true;
     projectionError = null;
     try {
-      const shown = await api.openPresentation(monitorKey || null);
+      const shown = await api.openPresentation(monitorKey || null, remember);
       monitorKey = shown.key;
       return shown;
     } catch (error) {

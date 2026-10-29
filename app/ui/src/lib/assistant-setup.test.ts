@@ -4,9 +4,9 @@ import { claudeCodeCommand, claudeDesktopConfig, mcpArgs } from './assistant-set
 const EXE = 'C:\\Users\\Prof Physique\\Outils\\Ardoise\\ardoise.exe';
 
 describe('declaring Ardoise in an assistant', () => {
-  it('Claude Code: user scope, the quoted path after --', () => {
+  it('Claude Code: user scope, the quoted path after a quoted --', () => {
     expect(claudeCodeCommand(EXE, false)).toBe(
-      'claude mcp add --scope user ardoise -- "C:\\Users\\Prof Physique\\Outils\\Ardoise\\ardoise.exe" --mcp',
+      'claude mcp add --scope user ardoise "--" "C:\\Users\\Prof Physique\\Outils\\Ardoise\\ardoise.exe" --mcp',
     );
     expect(claudeCodeCommand(EXE, true)).toMatch(/ardoise\.exe" --mcp --read-only$/);
   });
