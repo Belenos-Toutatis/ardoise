@@ -4,6 +4,8 @@ use std::fs::{self, DirEntry};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+
 use super::names::is_note_file_name;
 
 /// Deepest binder nesting explored (protection against pathological trees).
@@ -44,8 +46,27 @@ fn is_hidden_folder(_entry: &DirEntry) -> bool {
 
 /// Walks the tree under `root`, calling `visit` for every binder and note, in no particular
 /// order. Links and junctions are not followed. Unreadable folders are returned, not fatal.
-pub(crate) fn walk(root: &Path, mut visit: impl FnMut(Found)) -> Vec<(PathBuf, io::Error)> {
+pub(crate) fn walk(root: &Path, visit: impl FnMut(Found)) -> Vec<(PathBuf, io::Error)> {
+    walk_bounded(root, usize::MAX, visit).problems
+}
+
+/// What [`walk_bounded`] did.
+pub(crate) struct Walked {
+    /// Folders that could not be read.
+    pub problems: Vec<(PathBuf, io::Error)>,
+    /// False when the walk stopped because more than `max_entries` directory entries exist.
+    pub complete: bool,
+}
+
+/// [`walk`], giving up before visiting more than `max_entries` directory entries (every entry
+/// read from a folder counts, skipped ones included).
+pub(crate) fn walk_bounded(
+    root: &Path,
+    max_entries: usize,
+    mut visit: impl FnMut(Found),
+) -> Walked {
     let mut problems = Vec::new();
+    let mut visited = 0usize;
     let mut pending = vec![(PathBuf::new(), 0usize)];
     while let Some((relative, depth)) = pending.pop() {
         let dir = root.join(&relative);
@@ -57,6 +78,13 @@ pub(crate) fn walk(root: &Path, mut visit: impl FnMut(Found)) -> Vec<(PathBuf, i
             }
         };
         for entry in entries {
+            if visited >= max_entries {
+                return Walked {
+                    problems,
+                    complete: false,
+                };
+            }
+            visited += 1;
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(error) => {
@@ -91,7 +119,36 @@ pub(crate) fn walk(root: &Path, mut visit: impl FnMut(Found)) -> Vec<(PathBuf, i
             }
         }
     }
-    problems
+    Walked {
+        problems,
+        complete: true,
+    }
+}
+
+/// How many note files a folder holds, see [`count_notes`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteCount {
+    pub notes: usize,
+    /// False when the walk stopped at `max_entries` (the folder may hold more).
+    pub complete: bool,
+}
+
+/// How many note files `folder` holds, as the listing would find them (same skipped names,
+/// hidden/system folders and links as the library walk), stopping after `max_entries`
+/// directory entries visited. The folder need not be a library; one that cannot be read
+/// counts as empty. Used to show what a folder holds before it is chosen as the library.
+pub fn count_notes(folder: &Path, max_entries: usize) -> NoteCount {
+    let mut notes = 0;
+    let walked = walk_bounded(folder, max_entries, |found| {
+        if matches!(found, Found::Note { .. }) {
+            notes += 1;
+        }
+    });
+    NoteCount {
+        notes,
+        complete: walked.complete,
+    }
 }
 
 #[cfg(test)]
@@ -164,6 +221,83 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let problems = walk(&dir.path().join("missing"), |_| panic!("nothing to find"));
         assert_eq!(problems.len(), 1);
+    }
+
+    fn tree_for_counting(root: &Path) {
+        for folder in ["Classe/3e B", "_ardoise/trash", ".hidden", "Vide"] {
+            fs::create_dir_all(root.join(folder)).unwrap();
+        }
+        for file in [
+            "a.ardoise",
+            "Classe/b.ARDOISE",
+            "Classe/3e B/c.ardoise",
+            "Classe/3e B/c.ardoise.part",
+            "_ardoise/trash/x.ardoise",
+            ".hidden/y.ardoise",
+            ".z.ardoise",
+            "cours.pdf",
+            "Classe/notes.txt",
+        ] {
+            fs::write(root.join(file), b"x").unwrap();
+        }
+    }
+
+    #[test]
+    fn counts_notes_like_the_listing() {
+        let dir = tempfile::tempdir().unwrap();
+        tree_for_counting(dir.path());
+        let count = count_notes(dir.path(), 1000);
+        assert_eq!(
+            count,
+            NoteCount {
+                notes: 3,
+                complete: true
+            }
+        );
+        // Same result as the walk the listing uses.
+        let mut walked = 0;
+        walk(dir.path(), |f| {
+            walked += usize::from(matches!(f, Found::Note { .. }))
+        });
+        assert_eq!(walked, count.notes);
+    }
+
+    #[test]
+    fn counting_stops_at_the_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        for n in 0..20 {
+            fs::write(dir.path().join(format!("{n}.ardoise")), b"x").unwrap();
+        }
+        let few = count_notes(dir.path(), 5);
+        assert!(!few.complete);
+        assert!(few.notes <= 5);
+        // Exactly as many entries as the budget: nothing is left out.
+        assert_eq!(
+            count_notes(dir.path(), 20),
+            NoteCount {
+                notes: 20,
+                complete: true
+            }
+        );
+        assert!(!count_notes(dir.path(), 19).complete);
+        assert_eq!(
+            count_notes(dir.path(), 0),
+            NoteCount {
+                notes: 0,
+                complete: false
+            }
+        );
+    }
+
+    #[test]
+    fn counting_a_missing_or_empty_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let empty = NoteCount {
+            notes: 0,
+            complete: true,
+        };
+        assert_eq!(count_notes(dir.path(), 10), empty);
+        assert_eq!(count_notes(&dir.path().join("missing"), 10), empty);
     }
 
     #[test]
