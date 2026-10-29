@@ -95,6 +95,13 @@ export interface FailedNote {
   error: { code: string; message: string };
 }
 
+/** What moving notes to the trash did (`TrashedNotes` in `organize.rs`). */
+export interface TrashedNotes {
+  /** Each note moved, with the id of its trash entry (to restore it). */
+  trashed: { path: string; id: string }[];
+  failed: FailedNote[];
+}
+
 /** What deleting a binder did (`BinderDeleted` in `organize.rs`). */
 export interface BinderDeleted {
   /** Its notes, now in the trash, each restorable to its own binder. */
@@ -172,8 +179,8 @@ export const api = {
   createBinder: (binder: string) => call<void>('create_binder', { binder }),
   /** Moves notes into `binder`; returns their new paths, in order. */
   moveNotes: (paths: string[], binder: string) => call<string[]>('move_notes', { paths, binder }),
-  /** Moves notes to the trash; returns the ids of their trash entries, in order (to restore them). */
-  trashNotes: (paths: string[]) => call<string[]>('trash_notes', { paths }),
+  /** Moves each note it can to the trash; says which went (with their trash ids) and which failed. */
+  trashNotes: (paths: string[]) => call<TrashedNotes>('trash_notes', { paths }),
   trashList: () => call<TrashEntry[]>('trash_list'),
   /** Restores a trashed note; returns its path. */
   trashRestore: (id: string) => call<string>('trash_restore', { id }),

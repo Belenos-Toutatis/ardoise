@@ -4,7 +4,7 @@
  * for a few seconds afterwards a notice with « Annuler » that undoes it (turning the notes
  * back, restoring the trashed ones). `ActivityBanner.svelte` draws it; `LibraryState` owns one.
  */
-import { api, errorMessage, type BinderDeleted } from './api';
+import { api, errorMessage, type BinderDeleted, type FailedNote, type TrashedNotes } from './api';
 import { t, tn } from './i18n.svelte';
 import { opposite, runBatch, turnNote, type BatchFailure, type BatchOutcome, type BatchTarget, type TurnDirection } from './library-batch';
 import type { FileStamp } from './note';
@@ -105,6 +105,12 @@ export class LibraryActivity {
     if (outcome && outcome.done.length > 0) this.show(tn('library.turn.undone', outcome.done.length), null);
   }
 
+  /** After `trash_notes`: lists the notes that stayed, and offers to restore the others. */
+  trashed(done: TrashedNotes, titleOf: (path: string) => string): void {
+    this.failures = failuresOf(tn('library.trashUndo.trashFailed', done.failed.length), done.failed, titleOf);
+    this.offerRestore(done.trashed.map(({ path, id }) => ({ path: id, title: titleOf(path) })));
+  }
+
   /**
    * After notes went to the trash: offers to restore them. Each target's `path` is the id of its
    * trash entry, `title` the note's title.
@@ -127,13 +133,7 @@ export class LibraryActivity {
    * the binder back with its notes.
    */
   binderDeleted(binder: string, name: string, done: BinderDeleted): void {
-    this.failures =
-      done.failed.length > 0
-        ? {
-            heading: tn('library.binder.deleteFailed', done.failed.length),
-            items: done.failed.map((f) => ({ path: f.path, title: baseName(f.path), message: errorMessage(f.error) })),
-          }
-        : null;
+    this.failures = failuresOf(tn('library.binder.deleteFailed', done.failed.length), done.failed, baseName);
     const entries = done.trashed.map((entry) => ({ path: entry.id, title: entry.title?.trim() || baseName(entry.original) }));
     let message =
       entries.length === 0 ? t('library.binder.deletedEmpty', { name }) : tn('library.binder.deleted', entries.length, { name });
@@ -208,4 +208,10 @@ function baseName(path: string): string {
 /** The kept folders that hold no other kept folder (those above them are kept because of them). */
 export function deepestFolders(folders: readonly string[]): string[] {
   return folders.filter((folder) => !folders.some((other) => other.startsWith(`${folder}/`)));
+}
+
+/** The failures to list under `heading`, or null when there are none. */
+function failuresOf(heading: string, failed: FailedNote[], titleOf: (path: string) => string) {
+  if (failed.length === 0) return null;
+  return { heading, items: failed.map((f) => ({ path: f.path, title: titleOf(f.path), message: errorMessage(f.error) })) };
 }

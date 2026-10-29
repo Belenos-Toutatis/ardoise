@@ -227,6 +227,21 @@ describe('undo after « Mettre à la corbeille »', () => {
     expect(ui.q('.activity-offer')?.textContent).toContain('2 notes restaurées.');
   });
 
+  it('trashes every note it can, lists the one that failed and offers to restore the others', async () => {
+    ui = await renderHome();
+    await ui.select('Cours de physique', 'Liste de courses', 'Réunion parents');
+    // Deleted meanwhile on another computer (the listing has not caught up yet).
+    mockLibrary().notes.delete(pathOf('Liste de courses'));
+    await ui.click(ui.button('Mettre à la corbeille', ui.q('.selection-bar')!));
+    await vi.waitFor(() => expect(ui!.q('.activity-failures')).not.toBeNull());
+    expect(mockLibrary().trash.size).toBe(2);
+    expect(ui.q('.activity-failures')?.textContent).toContain("Une note n'a pas pu être mise à la corbeille :");
+    expect(ui.q('.activity-failures')?.textContent).toContain("« Liste de courses » : la note n'existe plus");
+    expect(ui.q('.activity-offer')?.textContent).toContain('2 notes mises à la corbeille.');
+    await ui.click(ui.button('Annuler', ui.q('.activity-offer')!));
+    await vi.waitFor(() => expect(ui!.titles()).toEqual(['Réunion parents', 'Cours de physique']));
+  });
+
   it('restores a note trashed with the Delete key', async () => {
     ui = await renderHome('en');
     await ui.key(ui.card('Liste de courses').querySelector('.card-open'), 'Delete');

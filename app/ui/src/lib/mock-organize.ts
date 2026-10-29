@@ -3,7 +3,7 @@
  * `delete_binder`, `tag_colors`, `set_tag_color`; Rust: `organize.rs`), over the demo library of
  * `mock-data.ts`.
  */
-import type { BinderDeleted } from './api';
+import type { BinderDeleted, TrashedNotes } from './api';
 import { UNHANDLED, mockLibrary, notePath, notifyLibraryChanged, type MockLibrary } from './mock-data';
 import { baseName, failure, mockLibraryInvoke } from './mock-library';
 import type { TrashEntry } from './note';
@@ -69,7 +69,7 @@ export function mockOrganizeInvoke(command: string, args: Record<string, unknown
       const binder = args.binder as string;
       knownBinder(library, binder);
       const paths = [...library.notes].filter(([, s]) => within(s.binder, binder)).map(([path]) => path).sort();
-      const ids = paths.length > 0 ? (mockLibraryInvoke('trash_notes', { paths }) as string[]) : [];
+      const ids = paths.length > 0 ? (mockLibraryInvoke('trash_notes', { paths }) as TrashedNotes).trashed.map((t) => t.id) : [];
       const trashed = ids.map((id): TrashEntry => {
         const entry = library.trash.get(id) ?? failure('notInTrash', id);
         const { stored, ...rest } = entry;

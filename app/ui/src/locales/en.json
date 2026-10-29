@@ -198,6 +198,10 @@
       "failed": {
         "one": "One note could not be restored:",
         "other": "{count} notes could not be restored:"
+      },
+      "trashFailed": {
+        "one": "One note could not be moved to the trash:",
+        "other": "{count} notes could not be moved to the trash:"
       }
     },
     "tagColor": {

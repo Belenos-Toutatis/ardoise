@@ -4,6 +4,7 @@
 //! "Library: organising").
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use ardoise_core::library::{Library, LibraryError};
 use serde::Serialize;
@@ -20,6 +21,42 @@ use crate::notes::blocking;
 pub struct FailedNote {
     pub path: String,
     pub error: CommandError,
+}
+
+/// A note moved to the trash: where it was, and the id of its trash entry.
+#[derive(Debug, Serialize)]
+pub struct TrashedNote {
+    pub path: String,
+    pub id: String,
+}
+
+/// What `trash_notes` did (`TrashedNotes` in `api.ts`).
+#[derive(Debug, Serialize)]
+pub struct TrashedNotes {
+    pub trashed: Vec<TrashedNote>,
+    pub failed: Vec<FailedNote>,
+}
+
+/// Moves each note to the trash; one that fails (gone meanwhile, held open…) does not stop the
+/// others.
+pub fn trash_notes_in(library: &Library, paths: &[String]) -> TrashedNotes {
+    let mut done = TrashedNotes {
+        trashed: Vec::new(),
+        failed: Vec::new(),
+    };
+    for path in paths {
+        match library.trash(Path::new(path)) {
+            Ok(item) => done.trashed.push(TrashedNote {
+                path: path.clone(),
+                id: item.id,
+            }),
+            Err(error) => done.failed.push(FailedNote {
+                path: path.clone(),
+                error: library_error(error),
+            }),
+        }
+    }
+    done
 }
 
 /// What deleting a binder did (`BinderDeleted` in `api.ts`).
@@ -121,7 +158,6 @@ pub async fn set_tag_color(
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::Path;
 
     use super::*;
     use crate::library::tests::{library, write_sample};
@@ -199,6 +235,36 @@ mod tests {
             delete_binder_in(&library, "Absent").unwrap_err().code(),
             "binderNotFound"
         );
+    }
+
+    #[test]
+    fn trashing_notes_goes_on_after_a_failure() {
+        let (_dir, library) = library();
+        let a = path_text(&write_sample(&library, "", "Un").path);
+        let b = path_text(&write_sample(&library, "Classe", "Deux").path);
+        let gone = path_text(&library.root().join("2026-10-24 Absente.ardoise"));
+        let done = trash_notes_in(&library, &[a.clone(), gone.clone(), b.clone()]);
+        assert_eq!(
+            done.trashed
+                .iter()
+                .map(|t| t.path.as_str())
+                .collect::<Vec<_>>(),
+            [a.as_str(), b.as_str()]
+        );
+        assert_eq!(done.failed.len(), 1);
+        assert_eq!(done.failed[0].path, gone);
+        assert_eq!(done.failed[0].error.code(), "noteNotFound");
+        assert!(library.list().notes.is_empty());
+        // The ids restore the notes where they were.
+        for trashed in &done.trashed {
+            assert_eq!(
+                path_text(&library.restore(&trashed.id).unwrap()),
+                trashed.path
+            );
+        }
+        let json = serde_json::to_value(&done).unwrap();
+        assert!(json["trashed"][0]["id"].is_string() && json["trashed"][0]["path"].is_string());
+        assert_eq!(json["failed"][0]["error"]["code"], "noteNotFound");
     }
 
     #[test]

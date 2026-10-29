@@ -163,7 +163,7 @@ format stays 1.2.
 | `rename_binder` | `binder`, `name` | the new binder path; `binderExists` rather than replacing a folder or file, `binderNotFound` |
 | `delete_binder` | `binder` | `BinderDeleted { trashed: TrashEntry[], failed: { path, error: {code, message} }[], kept: string[] }` |
 | `tag_colors` / `set_tag_color` | – / `tag`, `color \| null` | `{ [tag in lower case]: colour id }`; `invalidTagColor`, `tagColorsNewer`, `tagColorsConflict` |
-| `trash_notes` (`library.rs`) | `paths` | now the ids of the trash entries, in order (for « Annuler ») |
+| `trash_notes` (`library.rs`, body in `organize.rs`) | `paths` | now `{ trashed: { path, id }[], failed: { path, error }[] }`: every note that can go is trashed, the trash ids serve « Annuler » |
 | `inspect_library` (`commands.rs`) | `path` | `{ existing, notes, complete }`: notes counted by a bounded walk (`count_notes`, 20 000 entries) |
 
 - **Turning several notes** (« Tourner » in the selection bar, `lib/library-batch.ts`, `lib/library-activity.svelte.ts`):

@@ -198,6 +198,10 @@
       "failed": {
         "one": "Une note n'a pas pu être restaurée :",
         "other": "{count} notes n'ont pas pu être restaurées :"
+      },
+      "trashFailed": {
+        "one": "Une note n'a pas pu être mise à la corbeille :",
+        "other": "{count} notes n'ont pas pu être mises à la corbeille :"
       }
     },
     "tagColor": {
