@@ -8,7 +8,7 @@ use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-use crate::document::{Block, Document, Drawing, Labels};
+use crate::document::{Block, Document, Drawing, Labels, Mark, Text};
 
 /// EMU (English Metric Units) in a millimetre.
 const EMU_PER_MM: f64 = 36_000.0;
@@ -102,6 +102,34 @@ fn text_paragraph(properties: &str, text: &str) -> String {
     )
 }
 
+/// A paragraph of marked text: one run per span (a space between two), the underlined ones
+/// underlined, the struck ones struck.
+fn marked_paragraph(properties: &str, text: &Text) -> String {
+    let mut runs = String::new();
+    let spans = text
+        .spans
+        .iter()
+        .filter(|span| !span.text.trim().is_empty());
+    for (index, span) in spans.enumerate() {
+        let format = match span.mark {
+            Mark::None => "",
+            Mark::Underline => "<w:rPr><w:u w:val=\"single\"/></w:rPr>",
+            Mark::Strike => "<w:rPr><w:strike/></w:rPr>",
+        };
+        // The space between two spans is never underlined or struck.
+        let space = if index > 0 { " " } else { "" };
+        if !space.is_empty() && span.mark != Mark::None {
+            runs.push_str("<w:r><w:t xml:space=\"preserve\"> </w:t></w:r>");
+        }
+        let lead = if span.mark == Mark::None { space } else { "" };
+        runs.push_str(&format!(
+            "<w:r>{format}<w:t xml:space=\"preserve\">{lead}{}</w:t></w:r>",
+            xml_escape(span.text.trim())
+        ));
+    }
+    format!("<w:p>{properties}{runs}</w:p>")
+}
+
 fn properties(parts: &[&str]) -> String {
     if parts.is_empty() {
         String::new()
@@ -176,8 +204,8 @@ fn document_xml<'a>(documents: &'a [Document], labels: &Labels) -> (String, Vec<
         }
         for block in &document.blocks {
             match block {
-                Block::Paragraph(text) => body.push_str(&text_paragraph("", text)),
-                Block::ListItem(text) => body.push_str(&text_paragraph(
+                Block::Paragraph(text) => body.push_str(&marked_paragraph("", text)),
+                Block::ListItem(text) => body.push_str(&marked_paragraph(
                     &properties(&[
                         "<w:pStyle w:val=\"ListParagraph\"/>",
                         "<w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"1\"/></w:numPr>",
@@ -446,6 +474,55 @@ mod tests {
             text_of(&parts, "docProps/core.xml")
                 .contains("<dc:title>Réunion &amp; *plan* #1</dc:title>")
         );
+    }
+
+    #[test]
+    fn marked_words_are_underlined_or_struck_in_their_own_runs() {
+        let text = Text::from_words([
+            ("la", Mark::None),
+            ("lumière", Mark::Underline),
+            ("se", Mark::Underline),
+            ("propage", Mark::None),
+            ("<vite>", Mark::Strike),
+        ]);
+        let xml = marked_paragraph("", &text);
+        let w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        let wrapped = format!("<w:root xmlns:w=\"{w}\">{xml}</w:root>");
+        let doc = roxmltree::Document::parse(&wrapped).unwrap();
+        let runs: Vec<(String, &str)> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name((w, "r")))
+            .map(|run| {
+                let text: String = run
+                    .descendants()
+                    .filter(|n| n.has_tag_name((w, "t")))
+                    .filter_map(|n| n.text())
+                    .collect();
+                let mark = if run.descendants().any(|n| n.has_tag_name((w, "u"))) {
+                    "u"
+                } else if run.descendants().any(|n| n.has_tag_name((w, "strike"))) {
+                    "s"
+                } else {
+                    ""
+                };
+                (text, mark)
+            })
+            .collect();
+        assert_eq!(
+            runs,
+            [
+                ("la".to_owned(), ""),
+                (" ".to_owned(), ""),
+                ("lumière se".to_owned(), "u"),
+                (" propage".to_owned(), ""),
+                (" ".to_owned(), ""),
+                ("<vite>".to_owned(), "s"),
+            ]
+        );
+        // The paragraph reads as the plain text.
+        let all: String = runs.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(all, text.to_string());
+        assert_eq!(marked_paragraph("", &Text::default()), "<w:p></w:p>");
     }
 
     #[test]

@@ -413,10 +413,21 @@ export const api = {
   /**
    * Saves the recognised text with its structure (title, date and tags, then paragraphs, list
    * items and drawings) as Markdown (drawings as PNG files next to it) or as a Word document.
-   * `labels` are the words the file contains, in the interface language.
+   * `labels` are the words the file contains, in the interface language; `includeDrawings`
+   * false leaves the drawings out.
    */
-  exportStructuredText: (sources: ExportSource[], format: StructuredFormat, destination: string, labels: TextLabels) =>
-    call<StructuredExport>('export_structured_text', { sources, format, destination, labels }),
+  exportStructuredText: (
+    sources: ExportSource[],
+    format: StructuredFormat,
+    destination: string,
+    labels: TextLabels,
+    includeDrawings: boolean,
+  ) => call<StructuredExport>('export_structured_text', { sources, format, destination, labels, includeDrawings }),
+  /**
+   * How many drawings the Markdown and Word exports of `sources` hold (the layout analysis takes a
+   * few seconds a note; the desktop app keeps it for the export that follows).
+   */
+  structuredTextDrawings: (sources: ExportSource[]) => call<number>('structured_text_drawings', { sources }),
 
   // --- Printing (milestone M8; Rust side: print.rs, print_windows.rs) ---
 

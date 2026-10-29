@@ -335,7 +335,7 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Store your corrected transcription of a note's handwriting. The app's search (and `search_notes`) then uses it instead of the recogniser's text, and `get_note_text` returns it flagged `is_correction`, until the note's ink changes. It is kept in this PC's handwriting cache and never written into the note. An empty `text` removes the correction.
+    /// Store your corrected transcription of a note's handwriting. The app's search (and `search_notes`) and its text exports (`.txt`, clipboard, Markdown, Word, and `export_note`) then use it instead of the recogniser's text, and `get_note_text` returns it flagged `is_correction`, until the note's ink changes. It is kept in this PC's handwriting cache and never written into the note. An empty `text` removes the correction.
     #[tool(
         name = "set_note_text",
         annotations(

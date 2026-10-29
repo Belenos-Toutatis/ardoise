@@ -190,6 +190,7 @@ pub fn run() {
         .manage(narration::NarrationRuntime::default())
         .manage(codec::CodecDownload::default())
         .manage(handwriting::HandwritingRuntime::default())
+        .manage(textdoc::Structures::default())
         .manage(app_bridge::BridgeRuntime::default())
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
@@ -248,6 +249,7 @@ pub fn run() {
             clipboard::copy_note_image,
             print::print_notes,
             textdoc::export_structured_text,
+            textdoc::structured_text_drawings,
             drag::prepare_note_drag,
             drag::start_note_drag,
             drag::note_drag_supported,

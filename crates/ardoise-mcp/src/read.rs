@@ -660,8 +660,8 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
         .items
         .iter()
         .map(|item| match item {
-            Item::Paragraph(text) => json!({ "kind": "paragraph", "text": text }),
-            Item::ListItem(text) => json!({ "kind": "list_item", "text": text }),
+            Item::Paragraph(text) => json!({ "kind": "paragraph", "text": text.to_string() }),
+            Item::ListItem(text) => json!({ "kind": "list_item", "text": text.to_string() }),
             Item::Drawing(area) => json!({
                 "kind": "drawing",
                 "bounds_mm": RectMm::from(area.bounds),
