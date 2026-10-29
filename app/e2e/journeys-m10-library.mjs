@@ -26,7 +26,8 @@ const plural = (language, key, count, params = {}) => {
 
 const cards = `document.querySelectorAll('.note-card').length`;
 const page = `(() => { const s = document.querySelector('.editor svg.canvas'); return s ? s.dataset.pageWidth + 'x' + s.dataset.pageHeight : null; })()`;
-const offerText = `document.querySelector('.activity-offer')?.textContent ?? ''`;
+// Every notice on display (they pile up), in parentheses: the expression is followed by `.includes(…)`.
+const offerText = `[...document.querySelectorAll('.activity-offer')].map((offer) => offer.textContent).join(' ')`;
 
 /** Marks the card titled `title` so that a selector can reach it: `[data-e2e="<mark>"]`. */
 async function markCard(app, title, mark) {
@@ -50,6 +51,8 @@ async function select(app, title) {
 async function pageOf(app, l, title) {
   const card = await markCard(app, title, `open-${Date.now()}`);
   await app.click(`${card} .card-open`);
+  // The page size is meaningful once the note is loaded (its strokes drawn), not when the empty editor appears.
+  await app.waitFor(`document.querySelectorAll('.editor g.ink path[data-stroke]').length > 0`, `the strokes of "${title}"`);
   const size = await app.waitFor(page, `the page of "${title}"`);
   await app.click('.editor button', l('editor.back'));
   await app.waitFor(`document.querySelectorAll('.note-card').length > 0`, 'the library again');
