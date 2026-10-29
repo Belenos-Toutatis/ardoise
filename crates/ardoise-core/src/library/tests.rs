@@ -402,6 +402,9 @@ fn save_rechecks_after_waiting_for_a_locked_file() {
         lock.write_all(&writer_bytes).unwrap();
         lock.set_modified(SystemTime::now() + Duration::from_secs(3))
             .unwrap();
+        // Keeps the file a while after changing it: a check that falls between the change and
+        // the release (or a thread paused there) must not let the save slip through.
+        std::thread::sleep(Duration::from_millis(250));
         drop(lock);
     });
     let mut ours = loaded.file.clone();
