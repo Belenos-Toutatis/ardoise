@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Ajouté (jalon M9 — pilotage par un assistant)
+
+- Serveur MCP local `ardoise.exe --mcp [--read-only]` (entrée et sortie standard, aucun port réseau, sans fenêtre, application ouverte ou non) : l'assistant de l'utilisateur (Claude Code, Claude Desktop…) liste et cherche les notes, lit leurs données, leur texte reconnu avec la position des lignes et leur structure, et les voit en image (PNG, 2000 pixels au plus) pour reconnaître schémas et formules. `--read-only` limite l'assistant à la lecture.
+
 ### Ajouté (jalon M8 — retours des premiers essais)
 
 - Panneau Page : choix **Portrait / Paysage** sans tourner l'écriture (l'écriture garde sa place, replacée dans la feuille quand elle y tient, sinon conservée hors cadre avec un message), **format du papier** A4, A5, Letter, tablette ou dimensions personnalisées en mm, avec l'option d'adapter l'écriture et l'image de fond à la nouvelle taille ; « Tourner la feuille avec l'écriture » reste, clairement distinct.

@@ -330,14 +330,28 @@ impl Indexer {
     /// The recognised text of `note` (as it is in memory: an editor's unsaved changes count),
     /// from the cache or recognised now (and kept).
     pub fn recognition_of(&self, note: &Note) -> Result<Arc<Recognition>, HwrError> {
+        self.recognition_in(note, None)
+    }
+
+    /// Like [`recognition_of`](Self::recognition_of), in `forced` language when given (the MCP
+    /// server's `language` argument; `NoRecognizer` when none is installed for it).
+    pub fn recognition_in(
+        &self,
+        note: &Note,
+        forced: Option<Language>,
+    ) -> Result<Arc<Recognition>, HwrError> {
         let (installed, _, language) = self.languages();
         let installed = installed?;
-        let language = language.ok_or(HwrError::NoRecognizer {
-            language: installed
-                .iter()
-                .find_map(|r| r.language)
-                .unwrap_or(Language::Fr),
-        })?;
+        let language = match forced {
+            Some(forced) if recognizer_for(&installed, forced).is_some() => forced,
+            Some(forced) => return Err(HwrError::NoRecognizer { language: forced }),
+            None => language.ok_or(HwrError::NoRecognizer {
+                language: installed
+                    .iter()
+                    .find_map(|r| r.language)
+                    .unwrap_or(Language::Fr),
+            })?,
+        };
         let strokes = recognizable_strokes(note);
         let key = EntryKey {
             id: note.id.clone(),

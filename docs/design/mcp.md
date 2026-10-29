@@ -105,3 +105,54 @@ setting, each naming the tools to use:
   text of "Cours d'optique" contains its words, a write tool changes the file, the bridge tools answer "app not open"
   then work once the app is started by the journey).
 - Real trial from Claude Code (with the user's consent to add the server to its configuration).
+
+## As built — server and read tools (M9, part 1)
+
+- **SDK**: `rmcp` 3.8 (`server`, `macros`, `transport-io`; `client` only in the tests). Tools are written with
+  `#[tool_router]` / `#[tool]`, so each tool's JSON schema comes from the doc-commented argument struct
+  (`schemars`); an argument that does not fit the schema is refused by rmcp as a failed tool result
+  (`isError: true`, text "failed to deserialize parameters: …"), the others by our code with
+  `{ code: "invalidArguments", message }`. Results are JSON objects sent both as text and as
+  `structuredContent`; keys are `snake_case` like the arguments; `render_note` answers an `image` content
+  (PNG, base64) followed by a text content with the sizes. The server name is `ardoise`.
+- **Codes**: the interface's `errorCodes.*` (`noteNotFound`, `noLibrary`, `handwritingUnsupported`,
+  `handwritingNoRecognizer`, `render`, …) plus `invalidArguments`, `appNotRunning` and `readOnly` (reserved
+  for the next parts).
+- **Crate layout** (`crates/ardoise-mcp/src`): `server.rs` (handler, `build_tool_router(options)` = the one place
+  where groups are chosen and `--read-only` is enforced), `host.rs` (the services the app gives the server),
+  `read.rs`, `write.rs`, `bridge.rs`, `prompts.rs` (one file per group; the last three are stubs),
+  `notes.rs` (id-or-path lookup, mm, ISO dates), `strokes.rs` (stroke summaries, Douglas–Peucker),
+  `error.rs`. The crate cannot depend on the app, which owns the handwriting cache and the exports: the app
+  implements the traits of `host.rs` in `app/src-tauri/src/mcp.rs`.
+- **Adding to it**: a tool is a method in an `#[tool_router(router = <name>, vis = "pub(crate)")] impl ArdoiseServer`
+  block, returning `Result<CallToolResult, ErrorData>` through `self.blocking(|host| …)` (blocking pool, errors
+  turned into failed results); the new router is added in `ArdoiseServer::write_router()` / `bridge_router()`.
+  Prompts: `prompt_router()` in `prompts.rs`. App-side needs go in `WriteServices` / `AppBridge`
+  (`host.rs` carries them, `Host::with_write` / `with_app` set them in `mcp.rs`).
+- **Finding the library**: `--mcp` builds an `AppContext` like the app's (`SettingsStore::open_default()`:
+  `ardoise.toml` next to the executable, section of this machine's name) and calls `commands::current_state`
+  at every tool call, so a library changed in the app is followed; `noLibrary` when none is chosen. The
+  automatic export folder is left out of `list_binders` while the automatic export is on. The language of
+  the app comes from `diagnostic::report_language`.
+- **Handwriting**: the app's `Indexer` (M7) is started at the first search or text request (a session that only
+  lists notes never wakes the engine) with `busy = false`: the process cannot see live mode, which runs in the
+  app's process, so the background pass keeps the low priority of the background engine. The search waits at
+  most 10 s for the pass to load the texts the cache already holds, then answers with what is read and the
+  number of unread notes; the pass goes on reading the library while the server lives. `get_note_text`
+  recognises on demand through `Indexer::recognition_in` (new: forces a language) and fills the same cache.
+  Structure: `ardoise_hwr::structure::structure_of` (Windows' ink analysis, else layout heuristics;
+  `structure.source` says which). Outside Windows `SystemRecognizer` answers `Unsupported`, so the text tools
+  answer `handwritingUnsupported`, and the search works on titles, tags and binders.
+- **Choices the design left open**: `list_notes` filters and sorts on the *creation* date (`from` / `to` are
+  local dates; `to` includes its whole day); `limit` is clamped to 1..500 (50 by default); the stroke count and
+  page size need the note read, which is done for the returned page only. `search_notes` follows the
+  interface's rule (every word in title, tags, binder or recognised text; a word begins a recognised word),
+  gives `matched_in`, a `snippet` and `text_search.unread_notes`. `get_note` `points`: tolerance doubles
+  from 0.05 mm until the points fit `max_points`; if even the coarsest simplification is over budget the
+  last strokes come without points (`strokes_without_points`). `render_note` renders the whole page at the
+  dpi (25..300, default 100; lowered so that the region's longest side is at most 2000 px) and crops the
+  region; `layers` (indices or names) draws the chosen layers even if hidden. `--read-only` serves the read
+  group only (bridge tools too, `app_state` included).
+- **Tests**: `crates/ardoise-mcp/tests/read_tools.rs` (in-memory duplex transport, temporary library, fake
+  handwriting service), unit tests in the modules, `app/src-tauri/src/mcp.rs` (argument parsing), and the
+  journey `app/e2e/mcp.mjs` (real executable over pipes; not wired into `run.mjs`).

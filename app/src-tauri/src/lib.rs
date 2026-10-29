@@ -22,6 +22,7 @@ mod handwriting;
 mod import;
 mod library;
 mod live;
+mod mcp;
 mod narration;
 mod notes;
 mod operations;
@@ -63,6 +64,9 @@ pub struct Cli {
     /// `--simulated-tablet`: the simulated tablet replaces Bluetooth (real time, 3 stored pages);
     /// its registration is kept in a throwaway folder, never in the library.
     pub simulated_tablet: bool,
+    /// `--mcp [--read-only]`: serve the MCP protocol on standard input/output, without a
+    /// window, until stdin closes.
+    pub mcp: Option<mcp::McpArgs>,
 }
 
 impl Cli {
@@ -70,6 +74,8 @@ impl Cli {
         let mut cli = Cli::default();
         let mut import_inkspace = false;
         let mut import_args = import::ImportArgs::default();
+        let mut mcp = false;
+        let mut read_only = false;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -78,6 +84,8 @@ impl Cli {
                 "--simulated" => cli.simulated = true,
                 "--simulated-tablet" => cli.simulated_tablet = true,
                 "--import-inkspace" => import_inkspace = true,
+                "--mcp" => mcp = true,
+                "--read-only" => read_only = true,
                 "--compare" => import_args.compare = true,
                 "--library" => import_args.library = args.next().map(PathBuf::from),
                 "--create-demo-library" => {
@@ -92,6 +100,9 @@ impl Cli {
         }
         if import_inkspace {
             cli.import_inkspace = Some(import_args);
+        }
+        if mcp {
+            cli.mcp = Some(mcp::McpArgs { read_only });
         }
         cli
     }
@@ -118,6 +129,13 @@ fn webview_data_dir() -> Option<PathBuf> {
 pub fn run() {
     let cli = Cli::parse(std::env::args().skip(1));
     let headless_diagnostic = cli.diagnostic && cli.simulated;
+    // The MCP server first: its stdout carries the protocol and nothing else, so no other mode
+    // runs next to it. Started by an assistant, the program has pipes for standard handles
+    // (left alone); started by hand from a terminal, it borrows the terminal's console.
+    if let Some(args) = cli.mcp {
+        console::attach_parent_console();
+        std::process::exit(mcp::run_cli(args));
+    }
     if cli.self_test
         || headless_diagnostic
         || cli.import_inkspace.is_some()

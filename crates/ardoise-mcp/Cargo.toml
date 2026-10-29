@@ -1,0 +1,34 @@
+[package]
+name = "ardoise-mcp"
+description = "MCP server of Ardoise: the library, the handwriting and the windows exposed to the user's own assistant."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ardoise-core = { path = "../ardoise-core" }
+ardoise-hwr = { path = "../ardoise-hwr" }
+ardoise-ink = { path = "../ardoise-ink" }
+ardoise-render = { path = "../ardoise-render" }
+# Images in tool results are base64 text (the version rmcp itself uses).
+base64 = "0.23"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# The official Rust SDK of the Model Context Protocol (Apache-2.0): the server side over standard
+# input/output, with the `#[tool]` macros that derive each tool's JSON schema from its arguments.
+rmcp = { version = "3.8", default-features = false, features = ["server", "macros", "transport-io"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# The runtime is created by the caller, only in `--mcp` mode (current-thread).
+tokio = { version = "1", default-features = false, features = ["rt", "sync"] }
+
+[dev-dependencies]
+rmcp = { version = "3.8", default-features = false, features = ["server", "client", "macros", "transport-io"] }
+tempfile = "3"
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "macros", "io-util", "time"] }
+
+[lints]
+workspace = true
