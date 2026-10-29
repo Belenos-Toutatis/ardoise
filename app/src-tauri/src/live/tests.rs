@@ -458,18 +458,71 @@ fn a_note_moved_meanwhile_is_followed_and_one_changed_elsewhere_is_kept() {
     });
     assert_eq!(notes_in(&library), std::slice::from_ref(&moved));
 
-    // Changed elsewhere (renamed on another PC): left alone, the page goes on in a new note.
-    let renamed = library.retitle(&moved, "Cours", None).unwrap().path;
+    // Its ink changed elsewhere (edited on another PC): left alone, the page goes on in a new note.
+    let mut loaded = library.read(&moved).unwrap();
+    let extra = loaded.file.note.strokes[0].clone();
+    loaded.file.note.strokes.push(extra);
+    library
+        .save(&loaded.path, &loaded.file, &loaded.stamp)
+        .unwrap();
     stroke(&mut sink, 5000, 5);
     wait_until("a new note", || notes_in(&library).len() == 2);
-    let kept = library.read(&renamed).unwrap().file.note;
-    assert_eq!((kept.title.as_str(), kept.strokes.len()), ("Cours", 2));
+    let kept = library.read(&moved).unwrap().file.note;
+    assert_eq!(kept.strokes.len(), 3);
     let saved = hub.stop().unwrap();
     assert_eq!(saved.len(), 1);
     let new = library.read(Path::new(&saved[0])).unwrap().file.note;
     assert_eq!(Path::new(&saved[0]).parent(), Some(dir.path()));
     assert_eq!(new.strokes.len(), 3);
     assert_ne!(new.id, kept.id);
+}
+
+#[test]
+fn a_note_retitled_or_tagged_meanwhile_keeps_receiving_the_pages() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    let created = notes_in(&library).remove(0);
+    let id = library.read(&created).unwrap().file.note.id;
+
+    // Retitled and tagged from the library (the file is renamed and rewritten) during the lesson.
+    let renamed = library.retitle(&created, "Cours", None).unwrap().path;
+    library
+        .set_tags(&renamed, &["4e".to_string()], None)
+        .unwrap();
+    stroke(&mut sink, 4000, 5);
+    wait_until("the renamed note rewritten", || {
+        stroke_count(&library, &renamed) == Some(2)
+    });
+    // The same note: no duplicate, the outside title and tags kept, the page's id unchanged.
+    assert_eq!(notes_in(&library), std::slice::from_ref(&renamed));
+    let note = library.read(&renamed).unwrap().file.note;
+    assert_eq!(
+        (note.title.as_str(), note.tags.clone()),
+        ("Cours", vec!["4e".to_string()])
+    );
+    assert_eq!(note.id, id);
+
+    // Tagged again without a rename: the conflict is merged too, and the first changes survive
+    // the writes that follow.
+    library
+        .set_tags(&renamed, &["4e".to_string(), "optique".to_string()], None)
+        .unwrap();
+    stroke(&mut sink, 5000, 5);
+    wait_until("the third stroke", || {
+        stroke_count(&library, &renamed) == Some(3)
+    });
+    stroke(&mut sink, 6000, 5);
+    wait_until("the fourth stroke", || {
+        stroke_count(&library, &renamed) == Some(4)
+    });
+    assert_eq!(notes_in(&library), std::slice::from_ref(&renamed));
+    let note = library.read(&renamed).unwrap().file.note;
+    assert_eq!(note.title, "Cours");
+    assert_eq!(note.tags, ["4e", "optique"]);
+    assert_eq!(hub.stop().unwrap(), [path_text(&renamed)]);
 }
 
 #[test]
@@ -858,6 +911,7 @@ fn the_json_has_the_shapes_of_live_ts() {
     });
     out.push(LiveEvent::SaveFailed {
         page_index: 1,
+        code: "libraryAccess".into(),
         message: "disk full".into(),
     });
     let json: Vec<Value> = out
@@ -964,7 +1018,7 @@ fn the_json_has_the_shapes_of_live_ts() {
     );
     assert_eq!(
         json[11],
-        json!({ "type": "saveFailed", "pageIndex": 1, "message": "disk full" })
+        json!({ "type": "saveFailed", "pageIndex": 1, "code": "libraryAccess", "message": "disk full" })
     );
     let batch = serde_json::to_value(LiveBatch {
         events: vec![LiveEvent::HoverEnd],

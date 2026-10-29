@@ -6,6 +6,9 @@
 
 - Écran « À propos » (Réglages) : version, licence GPL-3.0 ou ultérieure (en clair et en entier), crédit à Tuhi, mention de Cisco et état d'OpenH264, composants avec filtre et textes complets des licences ; `THIRD-PARTY-NOTICES` donne désormais un texte de licence complet pour chaque composant. `cargo xtask dist` construit l'archive de distribution (`ardoise.exe`, licences, `LISEZMOI.txt`, guides en HTML).
 - Guide d'utilisateur complet en français et en anglais (`docs/guide/guide.fr.md`, `guide.en.md`), `README.md` à la racine et notes de la version 0.1.0 (`docs/notes-de-version.md`) ; dans le guide de l'assistant, « Réglages » remplace « Paramètres » (nom réel du bouton).
+### Corrigé (jalon M10 — pendant un cours)
+
+- Mode direct : Espace passe toujours à la page suivante (un bouton resté au focus n'est plus pressé, « Effacer la page » n'efface plus la page suivante), Échap ferme la projection quand elle est affichée et demande confirmation avant de terminer, « Annuler l'effacement » rend l'encre pendant 8 secondes, « Fermer quand même » arrête aussi la projection et la séance, et une note renommée ou étiquetée depuis la bibliothèque ou par l'assistant pendant le cours continue de recevoir les pages au lieu de les dupliquer. Ouvrir une note ou le mode direct ne détruit plus la bibliothèque (test de la tablette en cours, assistant d'enregistrement, réglages, défilement, classeurs ouverts, focus sur la carte) ; l'éditeur refuse de quitter pendant un export ou une découpe, demande avant d'abandonner des modifications (y compris un titre tapé), garde le focus dans sa fenêtre de sortie ; Échap ferme toute fenêtre, où que soit le focus ; les erreurs s'écrivent en deux phrases ; la création de notes depuis un long PDF peut être annulée ; avec le stylet (bouton du lasso) ou un doigt, la sélection se déplace et se redimensionne.
 
 ### Ajouté (jalon M9 — pilotage par un assistant)
 

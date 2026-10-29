@@ -291,6 +291,15 @@ pub async fn live_command(
         .map_err(LiveError::command_error)
 }
 
+/// « Undo the clearing » after « Clear the page »: true when the ink came back.
+#[tauri::command]
+pub async fn live_restore_cleared(runtime: State<'_, LiveRuntime>) -> CommandResult<bool> {
+    runtime
+        .hub
+        .restore_cleared()
+        .map_err(LiveError::command_error)
+}
+
 #[tauri::command]
 pub async fn live_set_view(
     runtime: State<'_, LiveRuntime>,

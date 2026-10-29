@@ -257,6 +257,11 @@ select {
   height: 100%;
 }
 
+/* The library under the editor or live mode: kept mounted, not shown. */
+.shell.shell-hidden {
+  display: none;
+}
+
 .topbar {
   display: flex;
   align-items: center;

@@ -427,3 +427,9 @@ bottom left, button at the bottom right); to be confirmed with the real tablet (
 - **Interface**: `TabletOptions` (Settings and tablet panel) lists the four positions as radio buttons with a picture
   (`OrientationIcon.svelte`, the tablet turned by quarter turns, button and light drawn) and a name that says where
   the button ends up. The stand-ins (`mock-tablet.ts`, `mock-live.ts`, `lib/orientation.ts`) follow the same rules.
+
+## M10: review fixes (live mode)
+
+- **Clear the page can be undone.** `LiveSession` keeps the strokes of the last cleared page (`Cleared`: page, orientation, strokes); `restore_cleared` puts them back under what was written since, only while that page is still on screen and held as it was (a quarter turn drops the offer). Hub: `restore_cleared`, command `live_restore_cleared` (returns whether the ink came back). The control window offers it for 8 s and withdraws it on a page change.
+- **A note changed from outside no longer duplicates the pages.** Each written page remembers a fingerprint of its ink and layout (`SavedFile::content`: hash of the `strokes.bin` encoding and of the layout JSON, not of title, tags, favourite or modification time). When the write meets a `Conflict`, or a `NotFound` whose note exists elsewhere under the same id (the file was renamed), `merge_outside` reads the file: if its fingerprint is the one last written, only metadata changed; the page is written into it with the outside title, tags and favourite mark kept, and the page adopts them (`Written::outside`) so that its next writes keep them. Any other change (ink edited elsewhere, another note under that id) still gives a new note next to it, as before.
+- `saveFailed` events carry the library error's `code` next to the system's `message`.

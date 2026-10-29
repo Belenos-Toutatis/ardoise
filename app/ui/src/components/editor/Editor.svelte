@@ -89,6 +89,7 @@
   import type { NoteOriginal } from '../../lib/original';
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
+  import Modal from '../Modal.svelte';
   import PrintDialog from '../PrintDialog.svelte';
   import VideoExportDialog from '../VideoExportDialog.svelte';
   import { clock } from '../narration/format';
@@ -186,6 +187,10 @@
   let printing = $state.raw<ExportSource[] | null>(null);
   let copying = $state(false);
   let leaving = $state(false);
+  /** Another note was asked for while this one has changes: the path to open once answered. */
+  let switching = $state<string | null>(null);
+  /** Renames that failed so far: leaving waits for the answer of the queued ones. */
+  let renameFailures = 0;
   /** The leave dialog was opened by a window close (not by the Back button). */
   let closing = $state(false);
   let spaceDown = $state(false);
@@ -261,7 +266,18 @@
   $effect(() => {
     const next = path;
     untrack(() => {
-      if (next !== currentPath) void open(next);
+      if (next === currentPath) return;
+      // Unsaved edits are never dropped silently, nor writes still queued (opening drops them).
+      if (doc && (dirty || titleEdited())) {
+        switching = next;
+        leaving = true;
+      } else if (pendingWrites > 0) {
+        void settled().then(() => {
+          if (alive && next !== currentPath) void open(next);
+        });
+      } else {
+        void open(next);
+      }
     });
   });
 
@@ -277,11 +293,17 @@
             ? 'a narration is being recorded in the editor'
             : videoRunning
               ? 'a video is being exported from the editor'
-              : dirty
-                ? 'the note open in the editor has unsaved changes: the teacher must save or close it first'
-                : pendingWrites > 0
-                  ? 'the note open in the editor is being saved'
-                  : null,
+              : exporting || printing || video
+                ? 'a dialog (export, print or video) is open in the editor: the teacher must close it first'
+                : split
+                  ? 'the split panel is open in the editor: the teacher must finish or cancel it first'
+                  : leaving
+                    ? 'the editor is asking whether to save its changes: the teacher must answer first'
+                    : dirty || titleEdited()
+                      ? 'the note open in the editor has unsaved changes: the teacher must save or close it first'
+                      : pendingWrites > 0
+                        ? 'the note open in the editor is being saved'
+                        : null,
         loaded: () => loads.loaded(),
       }),
     ),
@@ -347,7 +369,13 @@
       await api.releaseBackgroundImages().catch(() => {});
       const [opened, module] = await Promise.all([api.openNote(target), ink ?? loadInk()]);
       if (currentPath !== target) return;
-      const staged = opened.note.backgroundImage ? await api.stageNoteBackground(target).catch(() => null) : null;
+      let imageFailure: string | null = null;
+      const staged = opened.note.backgroundImage
+        ? await api.stageNoteBackground(target).catch((error: unknown) => {
+            imageFailure = errorMessage(error);
+            return null;
+          })
+        : null;
       if (currentPath !== target) return;
       const fresh = docFromNote(opened.note, t('editor.layers.defaultName', { n: 1 }));
       const start = staged ? { ...fresh, backgroundPixels: pixelsOf(staged) } : fresh;
@@ -362,6 +390,8 @@
       saveError = null;
       void refreshOriginal(true);
       load.ok();
+      // The note opens without its image: say so instead of showing a bare page.
+      if (imageFailure !== null) showNotice(t('editor.backgroundLoadFailed', { message: imageFailure }), true);
     } catch (error) {
       if (currentPath === target) loadError = errorMessage(error);
       load.fail(error);
@@ -416,6 +446,11 @@
     // The file changed or went away: the edits are kept, and can be saved as a copy.
     if (code === 'noteConflict' || code === 'noteNotFound') conflict = errorMessage(error);
     else saveError = errorMessage(error);
+  }
+
+  /** A title typed in the field and not renamed yet. */
+  function titleEdited(): boolean {
+    return !!doc && titleDraft.trim() !== targetTitle;
   }
 
   function save(): Promise<boolean> {
@@ -473,6 +508,7 @@
       } catch (error) {
         if (gen !== generation) return;
         titleError = errorMessage(error);
+        renameFailures += 1;
         targetTitle = title;
         titleDraft = title;
       }
@@ -581,9 +617,11 @@
     if (pendingWrites > 0) {
       if (closeAfterWrites) return;
       closeAfterWrites = true;
+      const failures = renameFailures;
       void settled().then(() => {
         closeAfterWrites = false;
-        if (alive) close();
+        // A rename that failed meanwhile (the title field's blur): its error is shown, not lost.
+        if (alive && renameFailures === failures) close();
       });
       return;
     }
@@ -594,7 +632,7 @@
   function back() {
     if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
     if (videoRunning) return showNotice(t('videoExport.closeBusy'), true);
-    if (dirty) leaving = true;
+    if (dirty || titleEdited()) leaving = true;
     else close();
   }
 
@@ -610,9 +648,9 @@
       showNotice(t('videoExport.closeBusy'), true);
       return true;
     }
-    if (!alive || (!dirty && pendingWrites === 0)) return false;
+    if (!alive || (!dirty && !titleEdited() && pendingWrites === 0)) return false;
     if (windowClose.destroy) {
-      if (dirty) {
+      if (dirty || titleEdited()) {
         closing = true;
         leaving = true;
       } else {
@@ -632,16 +670,27 @@
 
   async function saveAndLeave() {
     const fromWindow = closing;
+    const target = switching;
+    const failures = renameFailures;
     const ok = await save();
+    await settled();
     leaving = false;
     closing = false;
-    if (!ok) return;
-    if (fromWindow) await closeWindow();
+    switching = null;
+    // Nothing leaves while the save or the rename failed: their error stays in view.
+    if (!ok || renameFailures !== failures) return;
+    if (target !== null) void open(target);
+    else if (fromWindow) await closeWindow();
     else close();
   }
 
   function discardAndLeave() {
-    if (closing) void closeWindow();
+    const target = switching;
+    switching = null;
+    if (target !== null) {
+      leaving = false;
+      void open(target);
+    } else if (closing) void closeWindow();
     else {
       leaving = false;
       close();
@@ -649,8 +698,12 @@
   }
 
   function stay() {
+    const wanted = switching;
     leaving = false;
     closing = false;
+    switching = null;
+    // The library screen asked for another note: it goes back to following this one.
+    if (wanted !== null) notifySaved(currentPath);
   }
 
   // --- Tools and style -------------------------------------------------------------------
@@ -1191,10 +1244,15 @@
     return e.key === '2' || e.code === 'Digit2' || e.code === 'Numpad2';
   }
 
+  /** Ctrl + 0 (the whole page), whatever the layout: 0 is typed with Shift on a French keyboard. */
+  function isFitKey(e: KeyboardEvent): boolean {
+    return e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0';
+  }
+
   /** The keys of replay mode: R and Escape leave it, Space plays or pauses; nothing edits the note. */
   function replayKey(e: KeyboardEvent, key: string, mod: boolean) {
     if (mod) {
-      if (key === '0') {
+      if (isFitKey(e)) {
         e.preventDefault();
         canvas?.fit();
       } else if (isFitWidthKey(e)) {
@@ -1266,8 +1324,8 @@
         '0': () => canvas?.fit(),
         '2': () => canvas?.fitWidth(),
       };
-      // Ctrl + 2 is typed with Shift on some layouts (French): the key code says it too.
-      const run = action[isFitWidthKey(e) ? '2' : key];
+      // Ctrl + 0 and Ctrl + 2 are typed with Shift on some layouts (French): the key code says it too.
+      const run = action[isFitKey(e) ? '0' : isFitWidthKey(e) ? '2' : key];
       if (run) {
         e.preventDefault();
         run();
@@ -1655,21 +1713,17 @@
   {/if}
 
   {#if leaving}
-    <div class="editor-dialog-backdrop">
-      <div class="card editor-dialog" role="alertdialog" aria-modal="true" aria-labelledby="editor-leave-title" aria-describedby="editor-leave-text">
-        <h2 id="editor-leave-title">{t('editor.leave.title')}</h2>
-        <p id="editor-leave-text">{t('editor.leave.message')}</p>
-        <div class="actions">
-          <!-- svelte-ignore a11y_autofocus -->
-          <button type="button" class="button primary" autofocus onclick={saveAndLeave} disabled={saving}>
-            {closing ? t('editor.leave.saveClose') : t('editor.leave.save')}
-          </button>
-          <button type="button" class="button danger" onclick={discardAndLeave}>
-            {closing ? t('editor.leave.discardClose') : t('editor.leave.discard')}
-          </button>
-          <button type="button" class="button" onclick={stay}>{t('editor.leave.cancel')}</button>
-        </div>
+    <Modal title={t('editor.leave.title')} onclose={stay} role="alertdialog">
+      <p>{t('editor.leave.message')}</p>
+      <div class="actions">
+        <button type="button" class="button primary" data-autofocus onclick={saveAndLeave} disabled={saving}>
+          {switching !== null ? t('editor.leave.saveSwitch') : closing ? t('editor.leave.saveClose') : t('editor.leave.save')}
+        </button>
+        <button type="button" class="button danger" onclick={discardAndLeave}>
+          {switching !== null ? t('editor.leave.discardSwitch') : closing ? t('editor.leave.discardClose') : t('editor.leave.discard')}
+        </button>
+        <button type="button" class="button" onclick={stay}>{t('editor.leave.cancel')}</button>
       </div>
-    </div>
+    </Modal>
   {/if}
 </section>

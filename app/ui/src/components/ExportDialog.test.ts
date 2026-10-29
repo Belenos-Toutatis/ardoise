@@ -445,6 +445,24 @@ describe('export dialog: exporting', () => {
     expect(ui.onclose).toHaveBeenCalledTimes(2);
   });
 
+  it('closes with Escape wherever the focus is, and takes the focus back when its control is disabled', async () => {
+    const ui = await render(['Liste de courses']);
+    // The focus is on the page (the native file picker just closed, or a control was disabled).
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(ui.onclose).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives the focus back to the dialog when the focused control becomes disabled', async () => {
+    const ui = await render(['Liste de courses']);
+    const focused = document.activeElement as HTMLButtonElement;
+    expect(ui.dialog().contains(focused)).toBe(true);
+    focused.disabled = true;
+    await settle();
+    expect(document.activeElement).toBe(ui.dialog());
+  });
+
   it('moves the focus into the dialog and keeps Tab inside', async () => {
     const outside = document.createElement('button');
     document.body.append(outside);

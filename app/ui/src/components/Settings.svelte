@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { api, errorMessage, type AppState, type ThemePreference } from '../lib/api';
+  import { api, errorMessage, genericError, type AppState, type ThemePreference } from '../lib/api';
   import { currentLocale, t } from '../lib/i18n.svelte';
   import { pickFolder } from '../lib/library';
   import { formatDate } from '../lib/library-logic';
@@ -182,7 +182,7 @@
       <p class="muted small" role="status">{t('settings.autoExport.saved')}</p>
     {/if}
     {#if autoError}
-      <p class="error" role="alert">{t('errors.generic', { message: autoError })}</p>
+      <p class="error" role="alert">{genericError(autoError)}</p>
     {/if}
   </section>
 
@@ -210,7 +210,7 @@
   </dl>
 
   {#if error}
-    <p class="error" role="alert">{t('errors.generic', { message: error })}</p>
+    <p class="error" role="alert">{genericError(error)}</p>
   {/if}
 </aside>
 

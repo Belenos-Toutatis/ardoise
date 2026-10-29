@@ -103,6 +103,22 @@ describe('browser stand-in for live mode', () => {
     expect(b).toEqual(a);
   });
 
+  it('gives the ink back after « Clear the page », only on the page that was cleared', async () => {
+    mockLiveConfig.pen = true;
+    const sub = await subscribe();
+    invoke('live_start');
+    vi.advanceTimersByTime(mockLiveConfig.waitMs + 1500);
+    invoke('live_command', { command: { kind: 'clearPage' } });
+    expect(sub.last()!.page.strokes).toHaveLength(0);
+    expect(invoke('live_restore_cleared')).toBe(true);
+    expect(sub.last()!.page.strokes.length).toBeGreaterThan(0);
+    // Only once, and not from another page.
+    expect(invoke('live_restore_cleared')).toBe(false);
+    invoke('live_command', { command: { kind: 'clearPage' } });
+    invoke('live_command', { command: { kind: 'newPage' } });
+    expect(invoke('live_restore_cleared')).toBe(false);
+  });
+
   it('turns pages, adds pages and layers, clears the page', async () => {
     mockLiveConfig.pen = false;
     const sub = await subscribe();
@@ -337,7 +353,7 @@ describe('browser stand-in for live mode', () => {
     invoke('live_start');
     vi.advanceTimersByTime(15 * 150);
     const failures = () => sub.events().flatMap((e) => (e.type === 'saveFailed' ? [e] : []));
-    expect(failures()).toEqual([{ type: 'saveFailed', pageIndex: 0, message: 'The library is read-only' }]);
+    expect(failures()).toEqual([{ type: 'saveFailed', pageIndex: 0, code: 'libraryAccess', message: 'The library is read-only' }]);
     expect(sub.events().some((e) => e.type === 'saved')).toBe(false);
     expect(mockLibrary().notes.size).toBe(before);
 

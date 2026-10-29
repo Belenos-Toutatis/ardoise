@@ -6,7 +6,7 @@
    * guide docs/guide/assistant.*.md).
    */
   import { onMount } from 'svelte';
-  import { api, errorMessage, type BridgeStatus } from '../lib/api';
+  import { api, errorMessage, genericError, type BridgeStatus } from '../lib/api';
   import { claudeCodeCommand, claudeDesktopConfig } from '../lib/assistant-setup';
   import { t } from '../lib/i18n.svelte';
 
@@ -49,7 +49,7 @@
   <h3 id="settings-assistant">{t('assistant.title')}</h3>
   <p class="muted small">{t('assistant.intro')}</p>
   {#if error}
-    <p class="error" role="alert">{t('errors.generic', { message: error })}</p>
+    <p class="error" role="alert">{genericError(error)}</p>
   {:else if exe !== null}
     <label class="choice">
       <input

@@ -348,6 +348,7 @@
 
   /** Drops the gesture under way without reporting it (a second finger took over). */
   function dropDrag() {
+    grabbingFinger = false;
     if (!drag) return;
     drag = null;
     dragKind = null;
@@ -365,7 +366,34 @@
     return touchPrefs.drawWithFinger && !readonly && tools.mode !== 'pan';
   }
 
-  const touchOptions = () => ({ mode: fingerDraws() ? ('draw' as const) : ('navigate' as const) });
+  /** A finger that navigates took hold of the selection (to move or resize it): it is not a pan. */
+  let grabbingFinger = false;
+
+  const touchOptions = () => ({ mode: fingerDraws() || grabbingFinger ? ('draw' as const) : ('navigate' as const) });
+
+  /**
+   * The selection was made with the pen's barrel button, whatever the tool in use: the pen's tip
+   * and a finger then move and resize it, as with the selection tool, instead of drawing.
+   */
+  let barrelPicked = $state(false);
+  $effect(() => {
+    if (doc.selection.length === 0) barrelPicked = false;
+  });
+  const barrelActive = $derived(barrelPicked && doc.selection.length > 0 && tools.mode !== 'select');
+  /** The selection can be grabbed: with the selection tool, or after a barrel-button lasso. */
+  const grabbable = $derived(
+    !readonly && !split && doc.selection.length > 0 && (tools.mode === 'select' || (barrelActive && (tools.mode === 'pen' || tools.mode === 'eraser'))),
+  );
+
+  /** A press on a handle of the selection (resize) or inside its frame (move), or null. */
+  function grabAt(e: PointerEvent): Drag | null {
+    if (!grabbable || e.ctrlKey || e.metaKey || e.shiftKey) return null;
+    const id = pointerId(e);
+    const p = pagePoint(e);
+    const anchor = handleAt(local(e));
+    if (anchor) return { kind: 'scale', id, anchor, start: p };
+    return selectionBox && containsPoint(selectionBox, p) ? { kind: 'move', id, start: p } : null;
+  }
 
   function applyTouch(action: TouchAction) {
     if (action.kind === 'pan') view = panBy(view, action.dx, action.dy);
@@ -408,6 +436,12 @@
       if (!fingerDraws()) {
         e.preventDefault();
         capture(id);
+        // A finger on the selection moves or resizes it instead of panning the page.
+        const grab = e.button === 0 ? grabAt(e) : null;
+        if (grab) {
+          grabbingFinger = true;
+          begin(grab);
+        }
         return;
       }
     }
@@ -446,6 +480,11 @@
       lasso = [p];
       lassoRemoves = false;
       return;
+    }
+    // After a barrel-button lasso the pen's tip and a finger take hold of the selection, not the page.
+    if (barrelActive && (kind === 'pen' || kind === 'touch')) {
+      const grab = grabAt(e);
+      if (grab) return begin(grab);
     }
     switch (tools.mode) {
       case 'pen': {
@@ -584,6 +623,7 @@
     const d = drag;
     drag = null;
     dragKind = null;
+    grabbingFinger = false;
     if (frame && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(frame);
     frame = 0;
     switch (d.kind) {
@@ -615,6 +655,7 @@
               ? doc.selection.filter((i) => !picked.includes(i))
               : picked;
         onselect(select(doc, next));
+        barrelPicked = !!d.barrel && next.length > 0;
         break;
       }
       case 'zone': {
@@ -663,7 +704,10 @@
     {onpointermove}
     onpointerup={(e) => release(e, false)}
     onpointercancel={(e) => release(e, true)}
-    onlostpointercapture={(e) => release(e, true)}
+    onlostpointercapture={(e) => {
+      // The capture of a child that had it implicitly (a finger on a stroke) is not the gesture's end.
+      if (e.target === e.currentTarget) release(e, true);
+    }}
     onpointerleave={leave}
     oncontextmenu={noPenMenu}
   >
@@ -702,7 +746,7 @@
         width={selectionBox.width}
         height={selectionBox.height}
       />
-      {#if tools.mode === 'select'}
+      {#if tools.mode === 'select' || barrelActive}
         {#each corners(selectionBox) as c}
           <rect
             class="handle"

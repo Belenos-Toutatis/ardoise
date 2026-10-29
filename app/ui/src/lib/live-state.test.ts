@@ -203,16 +203,16 @@ describe('live state: pages, layers, clearing', () => {
   it('keeps the pages that could not be written until a save succeeds', () => {
     const live = ready();
     expect(live.saveErrors).toEqual([]);
-    live.receive(batch({ type: 'saveFailed', pageIndex: 1, message: 'disk full' }));
-    live.receive(batch({ type: 'saveFailed', pageIndex: 0, message: 'access denied' }));
+    live.receive(batch({ type: 'saveFailed', pageIndex: 1, code: 'libraryAccess', message: 'disk full' }));
+    live.receive(batch({ type: 'saveFailed', pageIndex: 0, code: 'libraryAccess', message: 'access denied' }));
     expect(live.saveErrors).toEqual([
-      { pageIndex: 0, message: 'access denied' },
-      { pageIndex: 1, message: 'disk full' },
+      { pageIndex: 0, code: 'libraryAccess', message: 'access denied' },
+      { pageIndex: 1, code: 'libraryAccess', message: 'disk full' },
     ]);
     // The same page failing again shows its latest message, once.
-    live.receive(batch({ type: 'saveFailed', pageIndex: 1, message: 'disk still full' }));
+    live.receive(batch({ type: 'saveFailed', pageIndex: 1, code: 'libraryAccess', message: 'disk still full' }));
     expect(live.saveErrors).toHaveLength(2);
-    expect(live.saveErrors[1]).toEqual({ pageIndex: 1, message: 'disk still full' });
+    expect(live.saveErrors[1]).toEqual({ pageIndex: 1, code: 'libraryAccess', message: 'disk still full' });
     // Other events, even a snapshot, do not clear it.
     live.receive(batch({ type: 'hover', x: 1, y: 1 }, { type: 'snapshot', snapshot: snapshot() }));
     expect(live.saveErrors).toHaveLength(2);

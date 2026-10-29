@@ -165,6 +165,17 @@ struct Written {
     /// The note's id as written: a new one when the note had to be written again next to a
     /// version changed elsewhere.
     id: String,
+    /// Title, tags and favourite mark found on disk when the note was changed from outside
+    /// (retitled, tagged) and the page was written into it all the same: the page takes them,
+    /// so that its next writes keep them.
+    outside: Option<Outside>,
+}
+
+/// What the library may change in a note live mode is writing.
+struct Outside {
+    title: String,
+    tags: Vec<String>,
+    favorite: bool,
 }
 
 struct HubState {
@@ -277,22 +288,50 @@ fn may_need_save(events: &[LiveEvent]) -> bool {
         .any(|e| matches!(e, LiveEvent::StrokeEnd { .. } | LiveEvent::Snapshot { .. }))
 }
 
+/// Fingerprint of what live mode writes into a note: the ink, the layers, the paper, the page
+/// (everything but the title, tags, favourite mark and modification time, which the library or
+/// an assistant change while the lesson goes on).
+fn content_fingerprint(note: &Note) -> Option<u64> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    // The ink as `strokes.bin` stores it, so that a note read back hashes as the page did.
+    let strokes = ardoise_core::format::strokes::encode(&note.strokes).ok()?;
+    let layout = serde_json::to_vec(&(
+        note.created,
+        &note.page,
+        &note.background,
+        &note.background_image,
+        &note.layers,
+        &note.timing,
+        &note.origin,
+    ))
+    .ok()?;
+    let mut hasher = DefaultHasher::new();
+    strokes.hash(&mut hasher);
+    layout.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
 /// Writes a page: a new note in the library root the first time, then over its file. A file
-/// moved meanwhile (same note, untouched) is followed; one deleted or changed elsewhere is left
-/// alone and the page becomes a new note next to it, so that nothing is ever overwritten.
+/// moved meanwhile (same note, untouched) is followed; one whose title or tags were changed
+/// elsewhere keeps them and receives the page ([`merge_outside`]); one whose content was
+/// changed elsewhere, or that was deleted, is left alone and the page becomes a new note next
+/// to it, so that nothing is ever overwritten.
 fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError> {
     let mut file = NoteFile::new(job.note.clone());
     file.note.modified = now_ms().max(file.note.created);
     file.thumbnail = thumbnail_png(&file.note);
     file.audio = job.audio.clone();
+    let content = content_fingerprint(&file.note);
     let Some(previous) = &job.file else {
         let saved = library.create(Path::new(""), &file)?;
         return Ok(Written {
             file: SavedFile {
                 path: saved.path,
                 stamp: saved.stamp,
+                content,
             },
             id: file.note.id,
+            outside: None,
         });
     };
     match library.save(&previous.path, &file, &previous.stamp) {
@@ -300,43 +339,113 @@ fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError>
             file: SavedFile {
                 path: previous.path.clone(),
                 stamp,
+                content,
             },
             id: file.note.id,
+            outside: None,
         }),
         Err(LibraryError::NotFound { .. }) => {
             let moved = library
                 .list()
                 .notes
                 .into_iter()
-                .find(|entry| entry.id == file.note.id && entry.stamp == previous.stamp);
+                .find(|entry| entry.id == file.note.id);
             match moved {
-                Some(entry) => {
+                Some(entry) if entry.stamp == previous.stamp => {
                     let stamp = library.save(&entry.path, &file, &entry.stamp)?;
                     Ok(Written {
                         file: SavedFile {
                             path: entry.path,
                             stamp,
+                            content,
                         },
                         id: file.note.id,
+                        outside: None,
                     })
                 }
-                None => write_as_new(library, file),
+                // Retitled elsewhere (the file was renamed and rewritten).
+                Some(entry) => {
+                    match merge_outside(library, &file, previous, content, &entry.path) {
+                        Some(written) => Ok(written),
+                        None => write_as_new(library, file, content),
+                    }
+                }
+                None => write_as_new(library, file, content),
             }
         }
-        Err(LibraryError::Conflict { .. }) => write_as_new(library, file),
+        Err(LibraryError::Conflict { .. }) => {
+            match merge_outside(library, &file, previous, content, &previous.path) {
+                Some(written) => Ok(written),
+                None => write_as_new(library, file, content),
+            }
+        }
         Err(error) => Err(error),
     }
 }
 
-fn write_as_new(library: &Library, mut file: NoteFile) -> Result<Written, LibraryError> {
+/// The note at `path` was rewritten since this page last wrote it. When only what the library
+/// changes differs (title, tags, favourite mark: the retitle or tags of the library grid, the
+/// assistant's `update_note`), the page is written into it with those kept; the page then goes
+/// on in the same note instead of leaving a duplicate per page. `None` when the note holds
+/// other ink or layout than the page last wrote, is another note, or cannot be written: the
+/// caller then writes a new note.
+fn merge_outside(
+    library: &Library,
+    file: &NoteFile,
+    previous: &SavedFile,
+    content: Option<u64>,
+    path: &Path,
+) -> Option<Written> {
+    let known = previous.content?;
+    let loaded = library.read(path).ok()?;
+    let mut merged = loaded.file;
+    if merged.note.id != file.note.id || content_fingerprint(&merged.note)? != known {
+        return None;
+    }
+    let outside = Outside {
+        title: merged.note.title.clone(),
+        tags: merged.note.tags.clone(),
+        favorite: merged.note.favorite,
+    };
+    let note = &mut merged.note;
+    note.created = file.note.created;
+    note.modified = file.note.modified.max(note.modified);
+    note.page = file.note.page;
+    note.background = file.note.background;
+    note.background_image = file.note.background_image.clone();
+    note.layers = file.note.layers.clone();
+    note.strokes = file.note.strokes.clone();
+    note.timing = file.note.timing;
+    note.origin = file.note.origin.clone();
+    merged.thumbnail = file.thumbnail.clone();
+    merged.audio = file.audio.clone();
+    let stamp = library.save(&loaded.path, &merged, &loaded.stamp).ok()?;
+    Some(Written {
+        file: SavedFile {
+            path: loaded.path,
+            stamp,
+            content,
+        },
+        id: file.note.id.clone(),
+        outside: Some(outside),
+    })
+}
+
+fn write_as_new(
+    library: &Library,
+    mut file: NoteFile,
+    content: Option<u64>,
+) -> Result<Written, LibraryError> {
     file.note.id = uuid::Uuid::new_v4().to_string();
     let saved = library.create(Path::new(""), &file)?;
     Ok(Written {
         file: SavedFile {
             path: saved.path,
             stamp: saved.stamp,
+            content,
         },
         id: file.note.id,
+        outside: None,
     })
 }
 
@@ -581,6 +690,11 @@ impl Shared {
         };
         page.file = Some(written.file);
         page.note.id = written.id;
+        if let Some(outside) = written.outside {
+            page.note.title = outside.title;
+            page.note.tags = outside.tags;
+            page.note.favorite = outside.favorite;
+        }
         page.saved_version = job.version;
         let recovered = page.save_error.take().is_some();
         let after = state.session.saved();
@@ -603,11 +717,13 @@ impl Shared {
             return;
         }
         let message = error.to_string();
-        page.save_error = Some(message.clone());
+        let code = error.code();
+        page.save_error = Some((code, message.clone()));
         self.publish(
             state,
             vec![LiveEvent::SaveFailed {
                 page_index: job.page,
+                code: code.to_string(),
                 message,
             }],
         );
@@ -859,6 +975,17 @@ impl LiveHub {
                 session.command(kind, button.unwrap_or_default(), now_ms(), out);
             },
         )
+    }
+
+    /// « Undo the clearing »: gives the current page the ink of the last « Clear the page »
+    /// back. Returns whether anything was restored (the page was changed or left meanwhile).
+    pub fn restore_cleared(&self) -> Result<bool, LiveError> {
+        let mut restored = false;
+        self.change(
+            |_| true,
+            |session, out| restored = session.restore_cleared(out),
+        )?;
+        Ok(restored)
     }
 
     pub fn set_style(&self, style: LiveStyle) -> Result<(), LiveError> {

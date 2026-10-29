@@ -337,7 +337,8 @@ describe('live view (control window)', () => {
     expect(banner()!.getAttribute('role')).toBe('alert');
     const text = banner()!.textContent!;
     expect(text).toContain("Une page n'a pas pu être enregistrée dans la bibliothèque.");
-    expect(text).toContain('Page 1 : Accès refusé (os error 5)');
+    // The code says it in words; the system's detail stays in brackets.
+    expect(text).toContain('Page 1 : la bibliothèque ne peut pas être lue ou modifiée (Accès refusé (os error 5))');
     expect(text).toContain('Les pages restent en mémoire');
     expect(text).toContain('vérifiez le dossier de la bibliothèque');
     expect(text).toContain("une copie de secours est écrite dans le dossier local d'Ardoise");
@@ -351,7 +352,7 @@ describe('live view (control window)', () => {
     mockLiveTick(120);
     await tick();
     await vi.waitFor(() => expect(banner()!.textContent).toContain('2 pages n'));
-    expect(banner()!.textContent).toContain('Page 2 : Accès refusé (os error 5)');
+    expect(banner()!.textContent).toContain('Page 2 : la bibliothèque ne peut pas être lue ou modifiée');
 
     // The folder is fixed: the next save writes both pages and the banner goes away.
     mockLiveConfig.saveError = null;
@@ -370,7 +371,7 @@ describe('live view (control window)', () => {
     await vi.waitFor(() => expect(view.target.querySelector('[data-slot="save-failed"]')).not.toBeNull());
     const text = view.target.querySelector('[data-slot="save-failed"]')!.textContent!;
     expect(text).toContain('A page could not be saved to the library.');
-    expect(text).toContain('Page 1: disk full');
+    expect(text).toContain('Page 1: the library cannot be read or changed (disk full)');
     expect(text).toContain('The pages stay in memory');
     expect(text).toContain("a backup copy is written to Ardoise's local folder");
   });
@@ -405,8 +406,128 @@ describe('live view (control window)', () => {
     await tick();
     press('Delete', { ctrlKey: true });
     await vi.waitFor(() => expect(view.canvas().dataset.strokes).toBe('0'));
+    // Esc asks before ending live mode (nothing is projected here).
     press('Escape');
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeTruthy());
+    expect(view.onclose).not.toHaveBeenCalled();
+  });
+
+  const press = (key: string, init: KeyboardEventInit = {}, target: EventTarget = window) =>
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
+  const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]');
+  const dialogButton = (label: string) =>
+    [...(dialog()?.querySelectorAll('button') ?? [])].find((b) => b.textContent?.trim() === label)!;
+
+  it('Esc closes the projection when it is open, and otherwise asks before ending live mode', async () => {
+    const view = render();
+    await live(view);
+    view.action('project').click();
+    await vi.waitFor(() => expect(view.action('stop-projecting')).toBeTruthy());
+    press('Escape');
+    await vi.waitFor(() => expect(view.action('project')).toBeTruthy());
+    // Live mode itself goes on.
+    expect(dialog()).toBeNull();
+    expect(view.onclose).not.toHaveBeenCalled();
+
+    // Nothing projected: a question, answered « Continuer » first (the focused answer).
+    press('Escape');
+    await vi.waitFor(() => expect(dialog()).not.toBeNull());
+    expect(dialog()!.textContent).toContain('Terminer le mode direct ?');
+    expect(document.activeElement).toBe(dialogButton('Continuer'));
+    // Keys do not reach the live view behind the question.
+    press(' ');
+    await tick();
+    expect(view.canvas().dataset.page).toBe('1/1');
+    dialogButton('Continuer').click();
+    await tick();
+    expect(dialog()).toBeNull();
+    expect(view.onclose).not.toHaveBeenCalled();
+
+    press('Escape');
+    await vi.waitFor(() => expect(dialog()).not.toBeNull());
+    dialogButton('Terminer').click();
     await vi.waitFor(() => expect(view.onclose).toHaveBeenCalledTimes(1));
+  });
+
+  it('Space is the next page even when a button has the focus, and does not press it', async () => {
+    const view = render();
+    await live(view);
+    mockLiveTick(150);
+    await tick();
+    const strokes = view.canvas().dataset.strokes;
+    expect(Number(strokes)).toBeGreaterThan(0);
+    // « Clear the page » was just used: it keeps the focus.
+    view.action('clear-page').focus();
+    const down = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    view.action('clear-page').dispatchEvent(down);
+    const up = new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true });
+    view.action('clear-page').dispatchEvent(up);
+    expect(down.defaultPrevented).toBe(true);
+    // The browser would click the button on key up: it is prevented there too.
+    expect(up.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(view.canvas().dataset.page).toBe('2/2'));
+    // The first page kept its ink.
+    view.button('Page précédente').click();
+    await vi.waitFor(() => expect(view.canvas().dataset.page).toBe('1/2'));
+    expect(view.canvas().dataset.strokes).toBe(strokes);
+    // A key typed in a text field stays the field's.
+    const field = document.createElement('input');
+    field.type = 'text';
+    view.target.append(field);
+    const typed = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    field.dispatchEvent(typed);
+    expect(typed.defaultPrevented).toBe(false);
+  });
+
+  it('offers to undo « Clear the page » for a few seconds, and gives the ink back', async () => {
+    const view = render();
+    await live(view);
+    mockLiveTick(150);
+    await tick();
+    const strokes = view.canvas().dataset.strokes;
+    expect(Number(strokes)).toBeGreaterThan(0);
+    const undo = () => view.target.querySelector<HTMLButtonElement>('button[data-action="undo-clear"]');
+    expect(undo()).toBeNull();
+
+    view.action('clear-page').click();
+    await vi.waitFor(() => expect(view.canvas().dataset.strokes).toBe('0'));
+    await vi.waitFor(() => expect(undo()).not.toBeNull());
+    expect(undo()!.textContent?.trim()).toBe("Annuler l'effacement");
+    undo()!.click();
+    await vi.waitFor(() => expect(view.canvas().dataset.strokes).toBe(strokes));
+    expect(undo()).toBeNull();
+
+    // Clearing again offers it again; changing page withdraws the offer, and an empty page offers nothing.
+    view.action('clear-page').click();
+    await vi.waitFor(() => expect(undo()).not.toBeNull());
+    view.button('Page suivante').click();
+    await vi.waitFor(() => expect(view.canvas().dataset.page).toBe('2/2'));
+    await vi.waitFor(() => expect(undo()).toBeNull());
+    view.action('clear-page').click();
+    await tick();
+    await tick();
+    expect(undo()).toBeNull();
+  });
+
+  it('withdraws the offer to undo after eight seconds', async () => {
+    const view = render();
+    await live(view);
+    mockLiveTick(150);
+    await tick();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      view.action('clear-page').click();
+      for (let i = 0; i < 10; i++) await tick();
+      expect(view.target.querySelector('[data-slot="undo-clear"]')).not.toBeNull();
+      vi.advanceTimersByTime(7_900);
+      await tick();
+      expect(view.target.querySelector('[data-slot="undo-clear"]')).not.toBeNull();
+      vi.advanceTimersByTime(200);
+      await tick();
+      expect(view.target.querySelector('[data-slot="undo-clear"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('finishes: stops live mode, closes the presentation, and the pages are notes', async () => {
@@ -443,8 +564,44 @@ describe('live view (control window)', () => {
     view.action('stop-live').click();
     await vi.waitFor(() => expect(view.target.textContent).toContain("Le mode direct ne s'est pas arrêté correctement."));
     expect(view.onclose).not.toHaveBeenCalled();
+    // Closing anyway also stops the projection and the session in Rust, best effort.
+    view.action('project').click();
+    await vi.waitFor(() => expect(view.action('stop-projecting')).toBeTruthy());
+    const stopping = vi.spyOn(api, 'liveStop');
+    const closing = vi.spyOn(api, 'closePresentation');
     view.button('Fermer quand même').click();
-    expect(view.onclose).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(view.onclose).toHaveBeenCalledTimes(1));
+    expect(closing).toHaveBeenCalled();
+    expect(stopping).toHaveBeenCalled();
+    expect((await api.liveSubscribe(() => {})).state).toBe('idle');
+  });
+
+  it('closes anyway even when the stop and the projection fail', async () => {
+    const view = render();
+    await live(view);
+    vi.spyOn(api, 'liveStop').mockRejectedValue({ code: 'tablet', message: 'link lost' });
+    view.action('stop-live').click();
+    await vi.waitFor(() => expect(view.target.textContent).toContain("Le mode direct ne s'est pas arrêté correctement."));
+    vi.spyOn(api, 'closePresentation').mockRejectedValue({ code: 'tablet', message: 'gone' });
+    view.button('Fermer quand même').click();
+    await vi.waitFor(() => expect(view.onclose).toHaveBeenCalledTimes(1));
+  });
+
+  it('cannot be ended while live mode is still starting, and stops a session that starts too late', async () => {
+    let release!: (snapshot: Awaited<ReturnType<typeof api.liveStart>>) => void;
+    const start = api.liveStart;
+    vi.spyOn(api, 'liveStart').mockImplementation(
+      () => new Promise((resolve) => (release = resolve as typeof release)),
+    );
+    const view = render();
+    await vi.waitFor(() => expect(release).toBeDefined());
+    expect(view.action('stop-live').disabled).toBe(true);
+    const stopping = vi.spyOn(api, 'liveStop');
+    // The view goes away while `live_start` is pending, then Rust answers.
+    cleanup?.();
+    cleanup = null;
+    release(await start());
+    await vi.waitFor(() => expect(stopping).toHaveBeenCalledTimes(1));
   });
 });
 

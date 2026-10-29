@@ -191,7 +191,7 @@ describe('library: listing and sidebar', () => {
     await ui.click(ui.byLabel('Nouveau classeur'));
     await ui.type(ui.q<HTMLInputElement>('.binder-form input')!, 'a:b');
     await ui.click(ui.button('Créer'));
-    expect(ui.q('[role="alert"]')?.textContent).toContain("ce nom n'est pas utilisable");
+    expect(ui.q('[role="alert"]')?.textContent).toContain("Ce nom n'est pas utilisable");
     expect(mockLibrary().binders.has('a:b')).toBe(false);
   });
 });
@@ -548,9 +548,11 @@ describe('library: opening notes and live refresh', () => {
     await ui.click(ui.open('Cours de physique'));
     const editor = ui.q('.editor')!;
     expect(editor.getAttribute('data-path')).toBe(notePath(ROOT, 'Classe/3e B', '2026-10-20 Cours de physique.ardoise'));
-    expect(ui.q('.topbar')).toBeNull();
+    // The library stays mounted, hidden, under the editor.
+    expect(ui.q('.shell')?.classList.contains('shell-hidden')).toBe(true);
     await ui.click(ui.q('.editor-top button')!);
     expect(ui.q('.editor')).toBeNull();
+    expect(ui.q('.shell')?.classList.contains('shell-hidden')).toBe(false);
     expect(ui.all('.note-card').length).toBe(3);
   });
 
@@ -663,6 +665,15 @@ describe('library: export and assemble the selection', () => {
     await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
     await ui.click(ui.button('Exporter…'));
     await ui.key(ui.q('[role="dialog"]')!, 'Escape');
+    expect(ui.q('[role="dialog"]')).toBeNull();
+  });
+
+  it('closes the export dialog with Escape when the focus is on the page', async () => {
+    const ui = await render();
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    await ui.click(ui.button('Exporter…'));
+    (document.activeElement as HTMLElement | null)?.blur();
+    await ui.key(document.body, 'Escape');
     expect(ui.q('[role="dialog"]')).toBeNull();
   });
 

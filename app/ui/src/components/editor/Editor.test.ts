@@ -11,6 +11,8 @@ import { BLACK, bigNote } from '../../lib/editor/test-fixtures';
 import type { WindowClose } from '../../lib/editor/window-close';
 import type { Stroke } from '../../lib/note';
 import Editor from './Editor.svelte';
+import EditorHarness from './EditorHarness.svelte';
+import { bridgeScreens } from '../../lib/app-bridge.svelte';
 
 // The video export dialog is another work package: the editor is tested against a stand-in that
 // shows what the editor gave it.
@@ -489,6 +491,117 @@ describe('note editor', () => {
     await tick();
     button('Revenir sans enregistrer').click();
     expect(onclose).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the focus inside the confirmation, and gives it back to the button when answered « Rester »', async () => {
+    const { target, button, drag } = await render('Liste de courses');
+    await drag(line(5000, 15000, 15000));
+    const back = button('Bibliothèque');
+    back.focus();
+    back.click();
+    await tick();
+    const dialog = target.ownerDocument.querySelector<HTMLElement>('[role="alertdialog"]')!;
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    // Tab from the last answer wraps to the first one: it never leaves the dialog.
+    const buttons = [...dialog.querySelectorAll('button')];
+    buttons[buttons.length - 1].focus();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(buttons[0]);
+    // Escape answers « Rester » from anywhere.
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await tick();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(document.activeElement).toBe(back);
+  });
+
+  it('counts a title typed but not committed as an unsaved change', async () => {
+    const { target, button, typeTitle, onclose } = await render('Liste de courses');
+    typeTitle('Courses du samedi');
+    // The assistant is told too.
+    expect(bridgeScreens.editor?.blocker()).toContain('unsaved changes');
+    button('Bibliothèque').click();
+    await tick();
+    expect(target.ownerDocument.querySelector('[role="alertdialog"]')).toBeTruthy();
+    expect(onclose).not.toHaveBeenCalled();
+  });
+
+  it('does not leave when the rename that the title field started fails, and says why', async () => {
+    vi.spyOn(api, 'retitleNote').mockRejectedValue({ code: 'invalidName', message: 'a:b' });
+    const { target, button, typeTitle, blurTitle, onclose } = await render('Liste de courses');
+    typeTitle('a:b');
+    blurTitle();
+    button('Bibliothèque').click();
+    await flush();
+    await flush();
+    expect(onclose).not.toHaveBeenCalled();
+    expect(target.textContent).toContain("Ce nom n'est pas utilisable".toLowerCase());
+  });
+
+  it('tells the assistant why the editor cannot be left while a dialog or the split panel is open', async () => {
+    const { button, target } = await render('Liste de courses');
+    expect(bridgeScreens.editor?.blocker()).toBeNull();
+    button('Exporter…').click();
+    await tick();
+    expect(bridgeScreens.editor?.blocker()).toContain('dialog');
+    // Closed (Escape from anywhere), the editor can be left again.
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await tick();
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(bridgeScreens.editor?.blocker()).toBeNull();
+  });
+
+  it('says so when the background image of the note cannot be loaded', async () => {
+    const path = demoPath('Liste de courses');
+    const stored = mockLibrary().notes.get(path)!;
+    stored.note.backgroundImage = { name: 'fiche.png', rect: { x: 0, y: 0, width: 100, height: 100 }, quarterTurns: 0, opacity: 1 } as never;
+    vi.spyOn(api, 'stageNoteBackground').mockRejectedValue({ code: 'backgroundMissing', message: '' });
+    const { target } = await render('Liste de courses');
+    await vi.waitFor(() => expect(target.textContent).toContain("L'image de fond de cette note n'a pas pu être chargée"));
+  });
+
+  it('asks before another note replaces one with unsaved changes', async () => {
+    const first = demoPath('Liste de courses');
+    const second = demoPath('Réunion parents');
+    const target = document.createElement('div');
+    document.body.append(target);
+    const onclose = vi.fn();
+    const onsaved = vi.fn();
+    const component = mount(EditorHarness, { target, props: { initial: first, app, onclose, onsaved } });
+    cleanup = () => {
+      unmount(component);
+      target.remove();
+    };
+    await vi.waitFor(() => expect(target.querySelector('svg.canvas')).toBeTruthy());
+    const svg = target.querySelector<SVGSVGElement>('svg.canvas')!;
+    // An edit: a stroke on the page.
+    const [scale, vx, vy] = svg.getAttribute('data-view')!.split(' ').map(Number);
+    const fire = (type: string, x: number, y: number) => {
+      const e = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x * scale + vx, clientY: y * scale + vy, button: 0, buttons: 1 });
+      Object.defineProperty(e, 'pointerId', { value: 1 });
+      Object.defineProperty(e, 'pressure', { value: 0.5 });
+      svg.dispatchEvent(e);
+    };
+    fire('pointerdown', 5000, 15000);
+    fire('pointermove', 9000, 15000);
+    fire('pointerup', 12000, 15000);
+    await tick();
+    expect(target.querySelector('.editor')?.getAttribute('data-dirty')).toBe('yes');
+
+    component.go(second);
+    await tick();
+    // Not replaced: the edits are asked about first.
+    expect(document.querySelector('[role="alertdialog"]')).toBeTruthy();
+    expect(target.querySelector('.editor')?.getAttribute('data-path')).toBe(first);
+    document.querySelector<HTMLButtonElement>('[role="alertdialog"] button:last-child')!.click();
+    await tick();
+    expect(target.querySelector('.editor')?.getAttribute('data-path')).toBe(first);
+    expect(onsaved).toHaveBeenCalledWith(first);
+
+    component.go(second);
+    await tick();
+    const discard = [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')].find((b) => b.textContent?.trim() === 'Ouvrir sans enregistrer')!;
+    discard.click();
+    await vi.waitFor(() => expect(target.querySelector('.editor')?.getAttribute('data-path')).toBe(second));
   });
 
   it('saves and leaves from the confirmation', async () => {

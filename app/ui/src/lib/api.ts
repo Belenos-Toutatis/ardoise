@@ -285,6 +285,8 @@ export const api = {
   liveStop: () => call<string[]>('live_stop'),
   liveSetStyle: (style: LiveStyle) => call<void>('live_set_style', { style }),
   liveCommand: (command: LiveCommand) => call<void>('live_command', { command }),
+  /** « Undo the clearing »: gives the current page the ink of the last « Clear the page » back. */
+  liveRestoreCleared: () => call<boolean>('live_restore_cleared'),
   liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
   listMonitors: () => call<MonitorInfo[]>('list_monitors'),
   /** Opens the presentation window full screen on `monitor` (null: the saved or default screen). */
@@ -388,6 +390,8 @@ export const api = {
     channel.onmessage = onProgress;
     return invoke<NoteSummary[]>('create_notes_from_file', { binder, path, pages, onProgress: channel });
   },
+  /** Stops `createNotesFromFile` after the page being rendered: the notes made are removed again and the call fails with the code `cancelled`. */
+  cancelCreateNotes: () => call<void>('cancel_create_notes'),
   /** The background image's name of each note (null without one). */
   backgroundImageNames: (paths: string[]) => call<(string | null)[]>('background_image_names', { paths }),
 
@@ -510,6 +514,18 @@ export function followHandwritingStatus(handler: (status: IndexStatus) => void):
 export async function onLibraryChanged(handler: () => void): Promise<() => void> {
   if (!inDesktopApp()) return mockOnLibraryChanged(handler);
   return listen('library-changed', () => handler());
+}
+
+/**
+ * « Something went wrong. » followed by the error's text as a sentence of its own: the
+ * `errorCodes.*` phrases start in lower case and have no full stop (they also fill other
+ * sentences), so this gives the first letter a capital and the end a full stop.
+ */
+export function genericError(message: string): string {
+  const text = message.trim();
+  if (text === '') return t('errors.generic', { message: '' }).trim();
+  const sentence = text.charAt(0).toLocaleUpperCase() + text.slice(1);
+  return t('errors.generic', { message: /[.!?…]$/.test(sentence) ? sentence : `${sentence}.` });
 }
 
 /**

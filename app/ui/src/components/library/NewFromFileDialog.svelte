@@ -31,6 +31,12 @@
   let which = $state<'all' | 'some'>('all');
   let pageList = $state('');
   let running = $state(false);
+  /** The notes are being made (as opposed to the file being read): this can be cancelled. */
+  let creating = $state(false);
+  /** « Cancel » was pressed: waiting for the page being rendered to finish. */
+  let cancelling = $state(false);
+  /** The last creation was cancelled: nothing was kept. */
+  let cancelled = $state(false);
   let error = $state<string | null>(null);
   /** How far the creation is, while notes are made. */
   let progress = $state.raw<NotesProgress | null>(null);
@@ -65,6 +71,9 @@
   async function create() {
     if (!ready || !path || !source) return;
     running = true;
+    creating = true;
+    cancelling = false;
+    cancelled = false;
     error = null;
     progress = null;
     try {
@@ -72,10 +81,21 @@
       const made = await api.createNotesFromFile(binder, path, pages, (next) => (progress = next));
       oncreated(made);
     } catch (e) {
-      error = errorMessage(e);
+      if ((e as { code?: unknown } | null)?.code === 'cancelled') cancelled = true;
+      else error = errorMessage(e);
       running = false;
       progress = null;
+    } finally {
+      creating = false;
+      cancelling = false;
     }
+  }
+
+  /** Stops after the page being rendered; the notes already made are removed again. */
+  async function cancel() {
+    if (!creating || cancelling) return;
+    cancelling = true;
+    await api.cancelCreateNotes().catch(() => {});
   }
 
   onMount(() => {
@@ -83,7 +103,7 @@
   });
 </script>
 
-<Modal title={t('background.library.title')} {onclose} dismissible={!running}>
+<Modal title={t('background.library.title')} onclose={() => (creating ? void cancel() : onclose())} dismissible={!running || creating}>
   <form
     aria-busy={running}
     onsubmit={(event) => {
@@ -139,6 +159,12 @@
             ? t('background.library.progress', { done: progress.done, total: progress.total })
             : t('background.library.running')}
       </p>
+      {#if progress && progress.total > 1}
+        <progress max={progress.total} value={progress.done} aria-label={t('background.library.running')}></progress>
+      {/if}
+    {/if}
+    {#if cancelled}
+      <p class="muted small" role="status" data-slot="new-from-file-cancelled">{t('background.library.cancelled')}</p>
     {/if}
     {#if error}
       <p class="banner error inline" role="alert">{t('background.library.error', { message: error })}</p>
@@ -153,7 +179,15 @@
       <button type="button" class="button" disabled={running} onclick={() => void choose()}>
         {t('background.library.otherFile')}
       </button>
-      <button type="button" class="button" disabled={running} onclick={onclose}>{t('library.cancel')}</button>
+      <button
+        type="button"
+        class="button"
+        data-action="cancel-create"
+        disabled={cancelling || (running && !creating)}
+        onclick={() => (creating ? void cancel() : onclose())}
+      >
+        {cancelling ? t('background.library.cancelling') : t('library.cancel')}
+      </button>
     </div>
   </form>
 </Modal>

@@ -31,6 +31,10 @@ pub const SAMPLE_MS: f64 = 5.0;
 pub struct SavedFile {
     pub path: PathBuf,
     pub stamp: FileStamp,
+    /// Fingerprint of the ink and layout written (not the title, tags or favourite mark, which
+    /// the library changes): tells a note only retitled elsewhere from one whose content was
+    /// changed. `None` when it could not be computed.
+    pub content: Option<u64>,
 }
 
 /// One page of the session: a note, and where it stands on disk.
@@ -48,8 +52,8 @@ pub struct Page {
     /// Last write attempt (set by the hub).
     pub last_attempt: Option<Instant>,
     /// Why the last write failed, once the windows were told (set by the hub): cleared by the
-    /// next write that succeeds.
-    pub save_error: Option<String>,
+    /// next write that succeeds: the library error's code (`errorCodes.*`) and its detail.
+    pub save_error: Option<(&'static str, String)>,
     /// The narration recorded on this page in live mode (note time), as the note's `audio.opus`
     /// member written with every version of the page. Only the encoded bytes stay in memory: a
     /// later recording on the page decodes them again to merge with them.
@@ -191,6 +195,17 @@ pub struct LiveSession {
     french: bool,
     /// The screen the presentation window is on (kept here so that every snapshot carries it).
     presentation: Option<MonitorInfo>,
+    /// The ink of the page last cleared, kept so that "Undo the clearing" can give it back.
+    cleared: Option<Cleared>,
+}
+
+/// The strokes a page had before « Clear the page », for [`LiveSession::restore_cleared`].
+#[derive(Debug, Clone)]
+struct Cleared {
+    page: usize,
+    /// How the page was held then: strokes written in another orientation do not fit any more.
+    orientation: Orientation,
+    strokes: Vec<Stroke>,
 }
 
 impl LiveSession {
@@ -217,6 +232,7 @@ impl LiveSession {
             drawing: None,
             french,
             presentation: None,
+            cleared: None,
         };
         let page = session.new_page(now_ms);
         session.pages.push(page);
@@ -283,9 +299,10 @@ impl LiveSession {
             .iter()
             .enumerate()
             .filter_map(|(page_index, page)| {
-                let message = page.save_error.clone()?;
+                let (code, message) = page.save_error.clone()?;
                 Some(LiveEvent::SaveFailed {
                     page_index,
+                    code: code.to_string(),
                     message,
                 })
             })
@@ -741,8 +758,17 @@ impl LiveSession {
                 // The stroke in progress goes too: the snapshot replaces everything.
                 self.drawing = None;
                 let page = &mut self.pages[self.current];
-                page.note.strokes.clear();
+                let strokes = std::mem::take(&mut page.note.strokes);
+                let orientation = page.orientation;
                 page.touch();
+                // An empty page keeps what an earlier clearing saved (a second press is harmless).
+                if !strokes.is_empty() {
+                    self.cleared = Some(Cleared {
+                        page: self.current,
+                        orientation,
+                        strokes,
+                    });
+                }
                 self.push_snapshot(out);
             }
             LiveCommandKind::Button => {
@@ -753,6 +779,27 @@ impl LiveSession {
                 self.command(kind, button, now_ms, out);
             }
         }
+    }
+
+    /// Gives back the ink of the last « Clear the page », under what was written since. Only
+    /// while that page is still the one on screen and held as it was; returns whether anything
+    /// was restored.
+    pub fn restore_cleared(&mut self, out: &mut Vec<LiveEvent>) -> bool {
+        let Some(cleared) = self.cleared.take() else {
+            return false;
+        };
+        let Some(page) = self.pages.get_mut(cleared.page) else {
+            return false;
+        };
+        if cleared.page != self.current || page.orientation != cleared.orientation {
+            return false;
+        }
+        let mut strokes = cleared.strokes;
+        strokes.append(&mut page.note.strokes);
+        page.note.strokes = strokes;
+        page.touch();
+        self.push_snapshot(out);
+        true
     }
 
     /// Ink of the strokes to come (the stroke in progress keeps its own).
@@ -1038,6 +1085,49 @@ mod tests {
         out.clear();
         session.records(&[pen(4, 4, 50)], T0 + 105.0, &mut out);
         assert!(matches!(events(&out)[0], LiveEvent::StrokeStart { .. }));
+    }
+
+    #[test]
+    fn undoing_the_clearing_gives_the_ink_back_under_what_was_written_since() {
+        let mut session = running();
+        let mut out = Vec::new();
+        session.records(&[pen(1, 1, 50), pen(2, 2, 0)], T0, &mut out);
+        let kept = session.pages()[0].note.strokes.clone();
+        assert_eq!(kept.len(), 1);
+        session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
+        assert!(session.pages()[0].note.strokes.is_empty());
+        // A second clearing of the empty page keeps the ink of the first one.
+        session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
+        // Something is written, then the clearing is undone: the old ink goes first.
+        session.records(&[pen(5, 5, 50), pen(6, 6, 0)], T0 + 200.0, &mut out);
+        let version = session.pages()[0].version;
+        out.clear();
+        assert!(session.restore_cleared(&mut out));
+        assert_eq!(snapshots(&out), 1);
+        let strokes = &session.pages()[0].note.strokes;
+        assert_eq!(strokes.len(), 2);
+        assert_eq!(strokes[0], kept[0]);
+        assert!(session.pages()[0].version > version);
+        // Only once.
+        assert!(!session.restore_cleared(&mut out));
+    }
+
+    #[test]
+    fn the_clearing_cannot_be_undone_from_another_page() {
+        let mut session = running();
+        let mut out = Vec::new();
+        session.records(&[pen(1, 1, 50), pen(2, 2, 0)], T0, &mut out);
+        session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
+        session.command(
+            LiveCommandKind::NextPage,
+            LiveButton::NewPage,
+            T0 as i64,
+            &mut out,
+        );
+        out.clear();
+        assert!(!session.restore_cleared(&mut out));
+        assert!(out.is_empty());
+        assert!(session.pages().iter().all(|p| p.note.strokes.is_empty()));
     }
 
     #[test]
