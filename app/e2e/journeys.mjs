@@ -96,7 +96,7 @@ export const journeys = [
 
       await check('revenir à la bibliothèque', async () => {
         await app.click('.editor-top button');
-        await app.waitFor(`document.querySelector('input.search') !== null`, 'the library');
+        await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library');
       });
 
       const word = app.language === 'fr' ? 'bout' : 'journey';
@@ -214,7 +214,7 @@ export const journeys = [
 
       await check('arrêter le mode direct enregistre la session : au moins 12 notes dans la grille', async () => {
         await app.click('button[data-action="stop-live"]');
-        await app.waitFor(`document.querySelector('input.search') !== null`, 'the library');
+        await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library');
         await app.waitFor(cards('>= 12'), 'the live note in the grid', 15_000);
       });
     },

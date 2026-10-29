@@ -88,7 +88,7 @@ export const orientationJourneys = [
         await app.click('[data-slot="orientation"] button[data-orientation="portraitRight"]');
         await app.waitFor(`${pressed} === 'portraitRight'`, 'portrait, button on the right');
         await app.click('button[data-action="stop-live"]');
-        await app.waitFor(`document.querySelector('input.search') !== null`, 'the library');
+        await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library');
         await app.click(STATUS);
         await app.waitFor(`${radios}.length === 4`, 'the panel');
         await app.waitFor(`[...${radios}].find((r) => r.checked)?.value === 'portraitRight'`, 'the saved position');

@@ -76,7 +76,7 @@ export const uiJourneys = [
         await app.key('Escape');
         await app.waitFor(`document.querySelector('[data-action="leave-confirm"]') !== null`, 'the question');
         await app.click('[data-action="leave-confirm"]');
-        await app.waitFor(`document.querySelector('input.search') !== null`, 'the library', 15_000);
+        await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library', 15_000);
       });
     },
   },
@@ -190,7 +190,7 @@ export const uiJourneys = [
 
       await check('revenir : le même panneau, le même défilement, le focus sur la carte', async () => {
         await app.click('.editor-top button', l('editor.back'));
-        await app.waitFor(`document.querySelector('input.search') !== null`, 'the library');
+        await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library');
         if (!(await app.evaluate(`document.querySelector('aside.panel') === window.__panel`))) {
           throw new Error('the panel was built again');
         }
