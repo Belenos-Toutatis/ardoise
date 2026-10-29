@@ -181,8 +181,8 @@ format stays 1.2.
   (`lib/tag-colors.svelte.ts`) and on every `library-changed`. Eight palette ids (`lib/tag-colors.ts`); `tag-colors.css`
   gives each a dot, a chip background and a chip text colour for the light and the dark theme (text contrast 6.2:1 at
   least). Shown on the cards' chips, the sidebar's tags and the tags panel; chosen with `TagColorPicker` (sidebar row,
-  tags panel). The watcher only reports notes: a colour changed on another PC shows at the next change of the library or
-  the next start.
+  tags panel). The watcher only reports notes: a colour changed on another PC shows when the window comes back to the
+  front (`focus`), at the next change of the library, or at the next start.
 - **Binders**: menu « ⋯ » on each binder row (`BinderEditor.svelte`). Rename: the folder is renamed in place
   (`rename_no_replace`; a change of case only works on Windows), the view and the open branches follow. Delete:
   confirmation with the count of notes (the sidebar's count, sub-binders included) and of sub-binders; the notes go to

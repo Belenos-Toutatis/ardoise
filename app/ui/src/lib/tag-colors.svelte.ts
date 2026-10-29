@@ -13,18 +13,25 @@ export class TagColorState {
     return colorOf(this.colors, tag);
   }
 
-  /** Loads the colours and reloads them whenever the library changes. Returns the function that stops it. */
+  /**
+   * Loads the colours and reloads them whenever the library changes, and when the window comes
+   * back to the front: the library's watcher only reports notes, and a colour chosen on another
+   * PC arrives through Nextcloud in `_ardoise/tags.json`. Returns the function that stops it.
+   */
   start(): () => void {
     let stopped = false;
     let unlisten: (() => void) | null = null;
+    const reload = () => void this.load();
     void this.load();
-    void onLibraryChanged(() => void this.load()).then((stop) => {
+    void onLibraryChanged(reload).then((stop) => {
       if (stopped) stop();
       else unlisten = stop;
     });
+    window.addEventListener('focus', reload);
     return () => {
       stopped = true;
       unlisten?.();
+      window.removeEventListener('focus', reload);
     };
   }
 

@@ -78,6 +78,15 @@ describe('tag colours', () => {
     expect(sidebarTag('physique').dataset.tagColor).toBeUndefined();
   });
 
+  it('are read again when the window comes back to the front (chosen on another PC)', async () => {
+    ui = await renderHome();
+    expect(sidebarTag('physique').dataset.tagColor).toBeUndefined();
+    // Another PC wrote _ardoise/tags.json, which Nextcloud brought here.
+    await api.setTagColor('physique', 'teal');
+    window.dispatchEvent(new Event('focus'));
+    await vi.waitFor(() => expect(sidebarTag('physique').dataset.tagColor).toBe('teal'));
+  });
+
   it('closes the palette with Escape', async () => {
     ui = await renderHome();
     const row = sidebarTag('réunion').closest('.nav-row')!;

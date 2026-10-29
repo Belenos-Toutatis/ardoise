@@ -116,7 +116,7 @@
 
 <style>
   .binder-editor {
-    margin: 0.25rem 0 0.4rem 1.4rem;
+    margin: 0.25rem 0 0.4rem 0.4rem;
   }
 
   .binder-editor .binder-form {
