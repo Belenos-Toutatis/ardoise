@@ -2,33 +2,38 @@
 //! Markdown (`.md`, the drawings as PNG files in a folder next to it) or as a Word document (`.docx`, the
 //! drawings embedded). Contract: `docs/design/extras.md`, "M8: text export with structure".
 //!
-//! The structure (paragraphs, list items, drawings) comes from Windows' ink analysis, or from
-//! layout heuristics on the recognised lines when it is not available
-//! (`ardoise_hwr::structure`, platform-free). The files are built by `ardoise_hwr::markdown` and
-//! `ardoise_hwr::docx`; this module reads the notes, crops the drawings out of them and writes
-//! the files atomically.
+//! The words are those of the `.txt` export and the clipboard: the recognition of the whole note,
+//! or the transcription the user corrected ([`NoteReading`]). The structure (paragraphs, list
+//! items, drawings, underlined words) comes from Windows' ink analysis, or from layout
+//! heuristics on the recognised lines when it is not available (`ardoise_hwr::structure`,
+//! platform-free). The files are built by `ardoise_hwr::markdown` and `ardoise_hwr::docx`; this
+//! module reads the notes, crops the drawings out of them and writes the files atomically.
 
+use std::collections::VecDeque;
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use ardoise_core::fsutil::{write_atomic, write_atomic_new};
 use ardoise_core::note::Note;
+use ardoise_hwr::Recognizer;
 use ardoise_hwr::document::{Block, Document, Drawing, Labels};
 use ardoise_hwr::docx::to_docx;
 use ardoise_hwr::markdown::to_markdown;
-use ardoise_hwr::structure::{DrawingArea, Item, structure_of};
-use ardoise_hwr::{Recognition, Recognizer};
+use ardoise_hwr::structure::{DrawingArea, Item, Structure, structure_of};
 use ardoise_render::{
     Image, NoteView, RenderOptions, encode_png_at, paper_color, render_note, scale_for_dpi,
 };
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
+use crate::AppContext;
 use crate::commands::CommandResult;
 use crate::export::{
     ExportSource, LoadedSource, export_error, library_for, load_sources, render_error,
 };
-use crate::handwriting::{blocking, hwr_error};
+use crate::handwriting::{Indexer, NoteReading, blocking, hwr_error, reading_of};
 
 /// Resolution of the drawings' images, in dots per inch.
 const DRAWING_DPI: u32 = 200;
@@ -155,19 +160,106 @@ fn render_drawings(source: &LoadedSource, areas: &[&DrawingArea]) -> CommandResu
         .collect()
 }
 
-/// The document of one note: its title (or file name), date and tags, then its structure.
-/// The flag tells whether Windows' ink analysis gave the structure.
+/// How many structures [`Structures`] keeps.
+const KEPT_STRUCTURES: usize = 8;
+
+/// The structures found lately: the export window first asks whether the notes have drawings
+/// (its "Inclure les dessins" is on only when they do), then the export uses them. Windows' ink
+/// analysis of a page takes about two seconds; it is done once.
+#[derive(Default)]
+pub struct Structures(Mutex<VecDeque<(u64, Arc<Structure>)>>);
+
+impl Structures {
+    fn get(&self, key: u64) -> Option<Arc<Structure>> {
+        let kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        kept.iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, structure)| Arc::clone(structure))
+    }
+
+    fn keep(&self, key: u64, structure: Arc<Structure>) {
+        let mut kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        kept.retain(|(k, _)| *k != key);
+        kept.push_back((key, structure));
+        while kept.len() > KEPT_STRUCTURES {
+            kept.pop_front();
+        }
+    }
+}
+
+/// What the structure of `note` read as `reading` depends on: its strokes (points, tools,
+/// layers and their visibility), the recognition (language, engine, words and their places) and
+/// the correction.
+fn structure_key(note: &Note, reading: &NoteReading) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    note.id.hash(&mut hasher);
+    note.strokes.len().hash(&mut hasher);
+    for stroke in &note.strokes {
+        stroke.tool.hash(&mut hasher);
+        stroke.layer.hash(&mut hasher);
+        stroke.points.len().hash(&mut hasher);
+        for point in &stroke.points {
+            point.x.to_bits().hash(&mut hasher);
+            point.y.to_bits().hash(&mut hasher);
+            point.pressure.to_bits().hash(&mut hasher);
+        }
+    }
+    for layer in &note.layers {
+        layer.visible.hash(&mut hasher);
+    }
+    reading.recognition.language.hash(&mut hasher);
+    reading.recognition.recognizer.hash(&mut hasher);
+    for word in reading.recognition.words() {
+        word.text.hash(&mut hasher);
+        for side in [
+            word.bounds.x,
+            word.bounds.y,
+            word.bounds.width,
+            word.bounds.height,
+        ] {
+            side.to_bits().hash(&mut hasher);
+        }
+    }
+    reading.correction.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// The structure of `note`, read as `reading`, by `recognizer`'s ink analysis (or the layout
+/// heuristics); found again in `known` when it holds it, and kept there.
+pub fn structure_for(
+    note: &Note,
+    reading: &NoteReading,
+    recognizer: &dyn Recognizer,
+    known: Option<&Structures>,
+) -> Arc<Structure> {
+    let key = structure_key(note, reading);
+    if let Some(found) = known.and_then(|known| known.get(key)) {
+        return found;
+    }
+    let structure = Arc::new(structure_of(
+        recognizer,
+        &reading.recognition,
+        reading.correction.as_deref(),
+        note,
+    ));
+    if let Some(known) = known {
+        known.keep(key, Arc::clone(&structure));
+    }
+    structure
+}
+
+/// The document of one note: its title (or file name), date and tags, then `structure`, without
+/// its drawings unless `drawings`.
 pub fn document_of(
     source: &LoadedSource,
-    recognition: &Recognition,
-    recognizer: &dyn Recognizer,
-) -> CommandResult<(Document, bool)> {
-    let structure = structure_of(recognizer, recognition, &source.note);
+    structure: &Structure,
+    drawings: bool,
+) -> CommandResult<Document> {
     let areas: Vec<&DrawingArea> = structure
         .items
         .iter()
         .filter_map(|item| match item {
-            Item::Drawing(area) => Some(area),
+            Item::Drawing(area) if drawings => Some(area),
             _ => None,
         })
         .collect();
@@ -178,7 +270,8 @@ pub fn document_of(
         .filter_map(|item| match item {
             Item::Paragraph(text) => Some(Block::Paragraph(text.clone())),
             Item::ListItem(text) => Some(Block::ListItem(text.clone())),
-            Item::Drawing(_) => images.next().map(Block::Drawing),
+            Item::Drawing(_) if drawings => images.next().map(Block::Drawing),
+            Item::Drawing(_) => None,
         })
         .collect();
     let title = source.note.title.trim();
@@ -192,7 +285,7 @@ pub fn document_of(
         tags: source.note.tags.clone(),
         blocks,
     };
-    Ok((document, structure.analyzed))
+    Ok(document)
 }
 
 /// Suffix of the folder that holds a Markdown file's drawings: `<name>_images`.
@@ -401,8 +494,67 @@ pub fn write_docx(
     Ok(vec![destination.to_path_buf()])
 }
 
+/// The notes of `sources` read and their structures (kept in `known`).
+fn structures_of(
+    indexer: &Indexer,
+    context: &AppContext,
+    sources: Vec<ExportSource>,
+    known: &Structures,
+) -> CommandResult<Vec<(LoadedSource, Arc<Structure>)>> {
+    let library = library_for(context, &sources)?;
+    let loaded = load_sources(library.as_ref(), sources)?;
+    let engine = indexer.on_demand();
+    loaded
+        .into_iter()
+        .map(|source| {
+            let reading = reading_of(indexer, &source.note).map_err(hwr_error)?;
+            let structure = structure_for(&source.note, &reading, &*engine, Some(known));
+            Ok((source, structure))
+        })
+        .collect()
+}
+
+/// The documents of `sources` (their drawings left out unless `drawings`), and whether Windows'
+/// ink analysis gave every structure.
+fn documents_of(
+    indexer: &Indexer,
+    context: &AppContext,
+    sources: Vec<ExportSource>,
+    drawings: bool,
+    known: &Structures,
+) -> CommandResult<(Vec<Document>, bool)> {
+    let mut documents = Vec::new();
+    let mut analyzed = true;
+    for (source, structure) in structures_of(indexer, context, sources, known)? {
+        analyzed &= structure.analyzed;
+        documents.push(document_of(&source, &structure, drawings)?);
+    }
+    Ok((documents, analyzed))
+}
+
+/// How many drawings the Markdown and Word exports of `sources` hold when they are included: the
+/// export window's "Inclure les dessins" is on only when there are some. The structures found
+/// are kept for the export that follows.
+#[tauri::command]
+pub async fn structured_text_drawings(
+    app: AppHandle,
+    sources: Vec<ExportSource>,
+) -> CommandResult<usize> {
+    let handle = app.clone();
+    blocking(app, move |indexer, context| {
+        let known = handle.state::<Structures>();
+        let found = structures_of(indexer, context, sources, &known)?;
+        Ok(found
+            .iter()
+            .map(|(_, structure)| structure.drawings())
+            .sum())
+    })
+    .await
+}
+
 /// Exports the recognised text of `sources` with its structure, as Markdown or Word, to
-/// `destination` (one note after the other); returns the files written.
+/// `destination` (one note after the other); returns the files written. `include_drawings`
+/// false leaves the drawings out (absent: they are in).
 #[tauri::command]
 pub async fn export_structured_text(
     app: AppHandle,
@@ -410,19 +562,13 @@ pub async fn export_structured_text(
     format: StructuredFormat,
     destination: String,
     labels: TextLabels,
+    include_drawings: Option<bool>,
 ) -> CommandResult<StructuredExport> {
+    let handle = app.clone();
     blocking(app, move |indexer, context| {
-        let library = library_for(context, &sources)?;
-        let loaded = load_sources(library.as_ref(), sources)?;
-        let engine = indexer.on_demand();
-        let mut documents = Vec::new();
-        let mut analyzed = true;
-        for source in &loaded {
-            let recognition = indexer.recognition_of(&source.note).map_err(hwr_error)?;
-            let (document, by_analysis) = document_of(source, &recognition, &*engine)?;
-            analyzed &= by_analysis;
-            documents.push(document);
-        }
+        let known = handle.state::<Structures>();
+        let drawings = include_drawings.unwrap_or(true);
+        let (documents, analyzed) = documents_of(indexer, context, sources, drawings, &known)?;
         let labels = Labels::from(labels);
         let destination = Path::new(&destination);
         let written = match format {
@@ -444,13 +590,19 @@ pub async fn export_structured_text(
 mod tests {
     use std::fs;
 
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use ardoise_core::settings::HandwritingLanguage;
+    use ardoise_hwr::document::{Mark, Text};
     use ardoise_hwr::model::{Bounds, Line, Word};
     use ardoise_hwr::structure::{Region, RegionKind};
-    use ardoise_hwr::{HwrError, Language, RecognizerInfo};
+    use ardoise_hwr::{HwrError, Language, Recognition, RecognizerInfo};
     use ardoise_ink::{Point, Rgba, Stroke, Tool};
 
     use super::*;
-    use crate::library::tests::sample_note;
+    use crate::handwriting::{CacheDir, IndexConfig, Services};
+    use crate::library::tests::{context, sample_note};
 
     fn labels() -> Labels {
         Labels {
@@ -478,25 +630,40 @@ mod tests {
         }
     }
 
-    /// Reads "lu" for any group of strokes; analyses a page into a paragraph (stroke 0), a list item
-    /// (stroke 1) and a drawing (stroke 2), unless `analysis` is false.
+    /// Has a French recognizer that reads any note as [`page_text`]; analyses a page into a
+    /// paragraph (stroke 0), a list item (stroke 1) and a drawing (stroke 2), unless `analysis`
+    /// is false, and with `underline` a thin mark under the paragraph's word (stroke 3). Counts
+    /// its analyses.
+    #[derive(Default)]
     struct Fake {
         analysis: bool,
+        underline: bool,
+        analyses: AtomicUsize,
+    }
+
+    impl Fake {
+        fn new(analysis: bool) -> Fake {
+            Fake {
+                analysis,
+                ..Fake::default()
+            }
+        }
     }
 
     impl Recognizer for Fake {
         fn recognizers(&self) -> Result<Vec<RecognizerInfo>, HwrError> {
-            Ok(Vec::new())
+            Ok(vec![RecognizerInfo {
+                name: "Français".into(),
+                language: Some(Language::Fr),
+            }])
         }
 
-        /// Reading a paragraph or a list item on its own: "lu".
         fn recognize(&self, _: &[Stroke], language: Language) -> Result<Recognition, HwrError> {
-            let mut read = page_text(language);
-            read.lines.truncate(1);
-            Ok(read)
+            Ok(page_text(language))
         }
 
         fn analyze(&self, _: &[Stroke]) -> Result<Vec<Region>, HwrError> {
+            self.analyses.fetch_add(1, Ordering::SeqCst);
             if !self.analysis {
                 return Err(HwrError::Unsupported);
             }
@@ -511,11 +678,25 @@ mod tests {
                 text: String::new(),
                 strokes: vec![stroke],
             };
-            Ok(vec![
+            let mut regions = vec![
                 region(RegionKind::Paragraph, 1000.0, 1000.0, 0),
                 region(RegionKind::ListItem, 1000.0, 3000.0, 1),
                 region(RegionKind::Drawing, 6000.0, 4000.0, 2),
-            ])
+            ];
+            if self.underline {
+                regions.push(Region {
+                    kind: RegionKind::Drawing,
+                    bounds: Bounds {
+                        x: 1180.0,
+                        y: 1520.0,
+                        width: 540.0,
+                        height: 40.0,
+                    },
+                    text: String::new(),
+                    strokes: vec![3],
+                });
+            }
+            Ok(regions)
         }
     }
 
@@ -555,22 +736,34 @@ mod tests {
         }
     }
 
+    /// How the exports read a note: its recognition, and the user's correction if any.
+    fn reading(correction: Option<&str>) -> NoteReading {
+        NoteReading {
+            recognition: Arc::new(page_text(Language::Fr)),
+            correction: correction.map(str::to_owned),
+        }
+    }
+
+    /// The document of the sample note through `fake`, its drawings included.
+    fn document_with(fake: &Fake, correction: Option<&str>) -> (Document, bool) {
+        let source = source();
+        let structure = structure_for(&source.note, &reading(correction), fake, None);
+        let document = document_of(&source, &structure, true).unwrap();
+        (document, structure.analyzed)
+    }
+
     #[test]
     fn a_note_becomes_a_document_with_its_drawings_cropped() {
-        let (document, analyzed) = document_of(
-            &source(),
-            &page_text(Language::Fr),
-            &Fake { analysis: true },
-        )
-        .unwrap();
+        let (document, analyzed) = document_with(&Fake::new(true), None);
         assert!(analyzed);
         assert_eq!(document.title, "Journal");
         assert_eq!(document.tags, ["classe"]);
         assert_eq!(document.date.len(), 16, "{}", document.date);
         assert_eq!(document.blocks.len(), 3);
-        // The paragraph and the list item are read again on their own ("lu").
+        // The words are those of the recognition of the whole note (the plain text), each line
+        // in the region that holds it; the list item without its dash.
         assert_eq!(document.blocks[0], Block::Paragraph("lu".into()));
-        assert_eq!(document.blocks[1], Block::ListItem("lu".into()));
+        assert_eq!(document.blocks[1], Block::ListItem("pommes".into()));
         let Block::Drawing(drawing) = &document.blocks[2] else {
             panic!("a drawing")
         };
@@ -614,27 +807,151 @@ mod tests {
 
     #[test]
     fn without_the_analysis_the_structure_is_guessed_from_the_text() {
-        let (document, analyzed) = document_of(
-            &source(),
-            &page_text(Language::Fr),
-            &Fake { analysis: false },
-        )
-        .unwrap();
+        let (document, analyzed) = document_with(&Fake::new(false), None);
         assert!(!analyzed);
         assert_eq!(document.blocks[0], Block::Paragraph("lu".into()));
         assert_eq!(document.blocks[1], Block::ListItem("pommes".into()));
         assert!(matches!(document.blocks[2], Block::Drawing(_)));
     }
 
+    #[test]
+    fn the_corrected_text_is_exported_and_drawings_can_be_left_out() {
+        let (document, _) = document_with(&Fake::new(true), Some("relu\r\n- poires"));
+        assert_eq!(document.blocks[0], Block::Paragraph("relu".into()));
+        assert_eq!(document.blocks[1], Block::ListItem("poires".into()));
+        assert!(matches!(document.blocks[2], Block::Drawing(_)));
+        // Without the drawings: the text alone.
+        let source = source();
+        let structure = structure_for(&source.note, &reading(None), &Fake::new(true), None);
+        assert_eq!(structure.drawings(), 1);
+        let plain = document_of(&source, &structure, false).unwrap();
+        assert_eq!(
+            plain.blocks,
+            [
+                Block::Paragraph("lu".into()),
+                Block::ListItem("pommes".into())
+            ]
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("plain.md");
+        let written = write_markdown(&destination, &[plain], &labels()).unwrap();
+        assert_eq!(written, std::slice::from_ref(&destination));
+    }
+
+    #[test]
+    fn an_underline_is_no_picture_but_underlined_words() {
+        let fake = Fake {
+            underline: true,
+            ..Fake::new(true)
+        };
+        let (document, _) = document_with(&fake, None);
+        let underlined = Text::from_words([("lu", Mark::Underline)]);
+        assert_eq!(document.blocks[0], Block::Paragraph(underlined));
+        assert_eq!(document.drawings().count(), 1, "only the real drawing");
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("souligné.md");
+        write_markdown(&destination, std::slice::from_ref(&document), &labels()).unwrap();
+        let text = fs::read_to_string(&destination).unwrap();
+        assert!(text.contains("\n**lu**\n\n- pommes\n"), "{text}");
+        // Word underlines the run (the run itself: `ardoise-hwr`'s `docx` tests).
+        let docx = dir.path().join("souligné.docx");
+        assert_eq!(write_docx(&docx, &[document], &labels()).unwrap(), [docx]);
+    }
+
+    #[test]
+    fn structures_are_found_once_for_the_check_and_the_export() {
+        let fake = Fake::new(true);
+        let known = Structures::default();
+        let note = source().note;
+        let first = structure_for(&note, &reading(None), &fake, Some(&known));
+        let again = structure_for(&note, &reading(None), &fake, Some(&known));
+        assert!(Arc::ptr_eq(&first, &again));
+        assert_eq!(fake.analyses.load(Ordering::SeqCst), 1);
+        // Another text, other recognised words, other ink or a hidden layer: found again.
+        structure_for(&note, &reading(Some("relu")), &fake, Some(&known));
+        let mut misread = page_text(Language::Fr);
+        misread.lines[0].words[0].text = "la".into();
+        let other = NoteReading {
+            recognition: Arc::new(misread),
+            correction: None,
+        };
+        structure_for(&note, &other, &fake, Some(&known));
+        let mut moved = note.clone();
+        moved.strokes[0].points[0].x += 1.0;
+        structure_for(&moved, &reading(None), &fake, Some(&known));
+        let mut hidden = note.clone();
+        hidden.layers[0].visible = false;
+        structure_for(&hidden, &reading(None), &fake, Some(&known));
+        assert_eq!(fake.analyses.load(Ordering::SeqCst), 5);
+        // A title is not the ink.
+        let mut renamed = note.clone();
+        renamed.title = "Autre".into();
+        structure_for(&renamed, &reading(None), &fake, Some(&known));
+        assert_eq!(fake.analyses.load(Ordering::SeqCst), 5);
+        // A few are kept, the oldest go first.
+        for n in 0..KEPT_STRUCTURES {
+            let mut other = note.clone();
+            other.id = format!("autre-{n}");
+            structure_for(&other, &reading(None), &fake, Some(&known));
+        }
+        assert_eq!(known.0.lock().unwrap().len(), KEPT_STRUCTURES);
+        let before = fake.analyses.load(Ordering::SeqCst);
+        structure_for(&note, &reading(None), &fake, Some(&known));
+        assert_eq!(fake.analyses.load(Ordering::SeqCst), before + 1);
+        // Without a store, nothing is kept.
+        structure_for(&note, &reading(None), &fake, None);
+        assert_eq!(fake.analyses.load(Ordering::SeqCst), before + 2);
+    }
+
+    #[test]
+    fn the_export_and_its_check_read_the_correction_through_the_indexer() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path());
+        let cache = tempfile::tempdir().unwrap();
+        let fake = Arc::new(Fake::new(true));
+        let indexer = Indexer::start(Services {
+            background: fake.clone(),
+            on_demand: fake.clone(),
+            config: Box::new(|| IndexConfig {
+                library: None,
+                setting: HandwritingLanguage::Auto,
+                interface: Language::Fr,
+            }),
+            busy: Box::new(|| false),
+            notify: Box::new(|_| {}),
+            cache_dir: cache.path().to_path_buf(),
+            pause_poll: Duration::from_millis(5),
+        });
+        let note = source().note;
+        let sources = || {
+            vec![ExportSource {
+                path: "Journal.ardoise".into(),
+                note: Some(note.clone()),
+                image_key: None,
+            }]
+        };
+        let known = Structures::default();
+        let found = structures_of(&indexer, &context, sources(), &known).unwrap();
+        assert_eq!(found[0].1.drawings(), 1);
+        let (documents, analyzed) =
+            documents_of(&indexer, &context, sources(), false, &known).unwrap();
+        assert!(analyzed);
+        assert_eq!(documents[0].blocks.len(), 2);
+        assert_eq!(fake.analyses.load(Ordering::SeqCst), 1, "analysed once");
+        // The user's correction of the note's ink wins.
+        CacheDir::new(cache.path())
+            .set_correction_for(&note, Language::Fr, "relu\n- poires")
+            .unwrap();
+        let (documents, _) = documents_of(&indexer, &context, sources(), true, &known).unwrap();
+        assert_eq!(documents[0].blocks[0], Block::Paragraph("relu".into()));
+        assert_eq!(documents[0].blocks[1], Block::ListItem("poires".into()));
+        assert_eq!(documents[0].drawings().count(), 1);
+        indexer.shutdown();
+    }
+
     /// The document of the sample note, with one drawing.
     fn sample_document() -> Document {
-        document_of(
-            &source(),
-            &page_text(Language::Fr),
-            &Fake { analysis: true },
-        )
-        .unwrap()
-        .0
+        document_with(&Fake::new(true), None).0
     }
 
     #[test]
@@ -664,7 +981,7 @@ Created: "
                 "
 lu
 
-- lu
+- pommes
 
 ![Drawing 1](Mon%20journal%20%281%29_images/Mon%20journal%20%281%29-1.png)
 "
@@ -800,12 +1117,7 @@ lu
 
     #[test]
     fn a_word_document_embeds_the_drawings() {
-        let (document, _) = document_of(
-            &source(),
-            &page_text(Language::En),
-            &Fake { analysis: true },
-        )
-        .unwrap();
+        let (document, _) = document_with(&Fake::new(true), None);
         let dir = tempfile::tempdir().unwrap();
         let destination = dir.path().join("journal.docx");
         let written = write_docx(&destination, &[document.clone(), document], &labels()).unwrap();

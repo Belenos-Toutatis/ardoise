@@ -125,7 +125,10 @@
       "purge": "Supprimer définitivement",
       "confirmPurge": "Supprimer définitivement « {title} » ?",
       "emptyAll": "Vider la corbeille",
-      "confirmEmpty": "Supprimer définitivement les {count} notes de la corbeille ? Cette action est irréversible.",
+      "confirmEmpty": {
+        "one": "Supprimer définitivement la note de la corbeille ? Cette action est irréversible.",
+        "other": "Supprimer définitivement les {count} notes de la corbeille ? Cette action est irréversible."
+      },
       "confirm": "Confirmer"
     },
     "assemble": {
@@ -141,7 +144,121 @@
       "run": "Assembler",
       "running": "Assemblage…",
       "error": "Impossible d'assembler les notes : {message}",
-      "done": "Nouvelle note créée : {title}"
+      "done": "Nouvelle note créée : {title}",
+      "progress": "Assemblage de {count} notes…"
+    },
+    "turn": {
+      "button": "Tourner",
+      "panel": "Tourner les notes sélectionnées",
+      "left": "Un quart de tour à gauche",
+      "right": "Un quart de tour à droite",
+      "hint": "La feuille, l'écriture et l'image de fond tournent ensemble, comme avec « Tourner la feuille avec l'écriture » dans l'éditeur.",
+      "progress": "Rotation des notes : {done} sur {total}",
+      "undoProgress": "Retour des notes dans leur sens d'origine : {done} sur {total}",
+      "doneLeft": {
+        "one": "{count} note tournée d'un quart de tour à gauche.",
+        "other": "{count} notes tournées d'un quart de tour à gauche."
+      },
+      "doneRight": {
+        "one": "{count} note tournée d'un quart de tour à droite.",
+        "other": "{count} notes tournées d'un quart de tour à droite."
+      },
+      "failed": {
+        "one": "Une note n'a pas pu être tournée :",
+        "other": "{count} notes n'ont pas pu être tournées :"
+      },
+      "undone": {
+        "one": "La note a retrouvé son sens d'origine.",
+        "other": "Les {count} notes ont retrouvé leur sens d'origine."
+      },
+      "undoFailed": {
+        "one": "Une note n'a pas pu retrouver son sens d'origine :",
+        "other": "{count} notes n'ont pas pu retrouver leur sens d'origine :"
+      }
+    },
+    "activity": {
+      "stop": "Arrêter",
+      "stopping": "Arrêt après cette note…",
+      "stopped": {
+        "one": "Arrêté avant la fin : la dernière note n'a pas changé.",
+        "other": "Arrêté avant la fin : les {count} dernières notes n'ont pas changé."
+      },
+      "undo": "Annuler",
+      "failure": "« {title} » : {message}",
+      "undoShortcut": "Annuler (Ctrl+Z)"
+    },
+    "trashUndo": {
+      "done": {
+        "one": "Note mise à la corbeille.",
+        "other": "{count} notes mises à la corbeille."
+      },
+      "restored": {
+        "one": "Note restaurée.",
+        "other": "{count} notes restaurées."
+      },
+      "progress": "Restauration des notes : {done} sur {total}",
+      "failed": {
+        "one": "Une note n'a pas pu être restaurée :",
+        "other": "{count} notes n'ont pas pu être restaurées :"
+      },
+      "trashFailed": {
+        "one": "Une note n'a pas pu être mise à la corbeille :",
+        "other": "{count} notes n'ont pas pu être mises à la corbeille :"
+      }
+    },
+    "tagColor": {
+      "button": "Couleur de l'étiquette « {tag} » : {color}",
+      "palette": "Couleur de l'étiquette « {tag} »",
+      "none": "Aucune couleur",
+      "hint": "Le rond à côté d'une étiquette change sa couleur, sur toutes les notes qui la portent.",
+      "names": {
+        "red": "Rouge",
+        "orange": "Orange",
+        "yellow": "Jaune",
+        "green": "Vert",
+        "teal": "Turquoise",
+        "blue": "Bleu",
+        "purple": "Violet",
+        "pink": "Rose"
+      }
+    },
+    "binder": {
+      "menu": "Actions sur le classeur « {name} »",
+      "rename": "Renommer…",
+      "delete": "Supprimer…",
+      "newName": "Nouveau nom du classeur « {name} »",
+      "renameDo": "Renommer",
+      "deleteTitle": "Supprimer le classeur « {name} »",
+      "confirmEmpty": "Supprimer le classeur « {name} » ? Il ne contient aucune note : son dossier sera supprimé.",
+      "confirm": {
+        "one": "Supprimer le classeur « {name} » ? Sa note va à la corbeille, puis son dossier est supprimé.",
+        "other": "Supprimer le classeur « {name} » ? Ses {count} notes vont à la corbeille, puis son dossier est supprimé."
+      },
+      "confirmSubBinders": {
+        "one": "Son sous-classeur est inclus.",
+        "other": "Ses {count} sous-classeurs sont inclus."
+      },
+      "confirmHint": "Une note restaurée depuis la corbeille retrouve son classeur. Les fichiers qui ne sont pas des notes restent à leur place.",
+      "deleteDo": "Supprimer le classeur",
+      "deleted": {
+        "one": "Classeur « {name} » supprimé : {count} note mise à la corbeille.",
+        "other": "Classeur « {name} » supprimé : {count} notes mises à la corbeille."
+      },
+      "deletedEmpty": "Classeur « {name} » supprimé.",
+      "folder": "« {name} »",
+      "kept": {
+        "one": "Le dossier {folders} n'a pas pu être supprimé : il contient encore des fichiers, ou il est en cours d'utilisation.",
+        "other": "Les dossiers {folders} n'ont pas pu être supprimés : ils contiennent encore des fichiers, ou ils sont en cours d'utilisation."
+      },
+      "deleteFailed": {
+        "one": "Une note n'a pas pu être mise à la corbeille (elle reste dans son classeur) :",
+        "other": "{count} notes n'ont pas pu être mises à la corbeille (elles restent dans leur classeur) :"
+      },
+      "restored": {
+        "one": "Classeur « {name} » rétabli avec sa note.",
+        "other": "Classeur « {name} » rétabli avec ses {count} notes."
+      },
+      "restoredEmpty": "Classeur « {name} » rétabli."
     }
   },
   "settings": {
@@ -155,7 +272,6 @@
     "library": "Dossier de la bibliothèque",
     "machine": "Cet ordinateur",
     "settingsFile": "Fichier de réglages",
-    "version": "Version {version}",
     "cancel": "Annuler",
     "tablet": "Tablette",
     "tabletNone": "Aucune tablette n'est enregistrée.",
@@ -188,6 +304,12 @@
       "drawWithFinger": "Dessiner au doigt",
       "drawWithFingerHint": "Par défaut, seul le stylet dessine : un doigt fait défiler la page, deux doigts zooment, un double toucher affiche la page entière. Cochez cette case pour un écran tactile sans stylet ; le doigt dessine alors comme la souris.",
       "penHint": "Le dos du stylet efface (avec les réglages de la gomme) ; le bouton du stylet trace un lasso de sélection ; les doigts sont ignorés tant que le stylet est utilisé ou proche de l'écran."
+    },
+    "librarySwitch": {
+      "title": "Changer de bibliothèque",
+      "hint": "Ardoise affichera aussitôt les notes de ce dossier, sur ce PC seulement ({machine}). Les notes de la bibliothèque actuelle restent dans leur dossier.",
+      "confirm": "Utiliser ce dossier",
+      "current": "C'est déjà la bibliothèque de ce PC : rien ne change."
     }
   },
   "assistant": {
@@ -215,7 +337,52 @@
     "copied": "Copié",
     "copyFailed": "Impossible de copier : sélectionnez le texte et copiez-le avec Ctrl+C.",
     "privacy": "Vie privée : ce que l'assistant lit (le texte et l'image de vos notes, parfois des noms d'élèves) part chez son fournisseur, selon les réglages de votre compte. En général, l'assistant demande votre accord avant de modifier quoi que ce soit, mais cela dépend de ses réglages d'autorisation ; Ardoise lui signale les outils qui modifient ou retirent des notes. Rien n'est jamais supprimé définitivement. Pour qu'il ne puisse que lire, déclarez-le avec « Lecture seule » cochée.",
-    "guide": "Pas à pas : guide « Assistant » (docs/guide/assistant.fr.md)."
+    "guide": "Pas à pas : le guide « Assistant », fichier guide\\assistant.fr.html dans le dossier d'Ardoise."
+  },
+  "about": {
+    "section": "À propos",
+    "title": "À propos d'Ardoise",
+    "open": "À propos d'Ardoise…",
+    "nameVersion": "Ardoise, version {version}",
+    "version": "version {version}",
+    "licenseShort": "Logiciel libre, sous licence GPL-3.0 ou ultérieure.",
+    "license": {
+      "title": "Licence",
+      "line": "Ardoise est distribuée sous la licence {license} (GNU General Public License, version 3 ou, à votre choix, toute version ultérieure).",
+      "meaning": "En clair : vous pouvez utiliser, copier, étudier, modifier et partager Ardoise librement ; si vous distribuez une version modifiée, elle doit rester libre, sous la même licence. Ardoise est fournie sans aucune garantie.",
+      "show": "Afficher le texte complet de la licence",
+      "hide": "Masquer le texte complet de la licence",
+      "textLabel": "Texte complet de la licence GNU GPL version 3"
+    },
+    "credits": {
+      "title": "Crédits",
+      "tuhi": "Le protocole Bluetooth de la Bamboo Slate a été compris grâce à Tuhi, le pilote libre pour Linux des tablettes Wacom SmartPad, de Peter Hutterer, Benjamin Tissoires et leurs contributeurs (https://github.com/tuhiproject/tuhi, GPL-2.0 ou ultérieure). La documentation que Tuhi donne du protocole de la tablette a guidé Ardoise, qui le réimplémente à partir de ses propres notes et captures : Ardoise ne contient aucun code de Tuhi."
+    },
+    "cisco": {
+      "title": "Encodeur vidéo OpenH264",
+      "notice": "OpenH264 Video Codec provided by Cisco Systems, Inc.",
+      "download": "Ardoise ne contient pas OpenH264 : si Windows ne sait pas écrire les fichiers MP4, c'est vous qui le téléchargez chez Cisco, depuis les Réglages. Il est alors conservé sur cet ordinateur seulement.",
+      "installed": "Installé sur cet ordinateur (version {version}).",
+      "notInstalled": "Pas installé sur cet ordinateur.",
+      "damaged": "Présent sur cet ordinateur, mais endommagé : il faut le télécharger de nouveau.",
+      "license": "La licence du binaire fourni par Cisco est affichée dans les Réglages, sous « Encodeur vidéo de secours (OpenH264) »."
+    },
+    "components": {
+      "title": "Composants",
+      "intro": "Ardoise est construite avec les composants libres ci-dessous, chacun sous sa propre licence.",
+      "search": "Filtrer les composants",
+      "placeholder": "Nom, version ou licence",
+      "count": "Composants affichés : {shown} sur {total}",
+      "none": "Aucun composant ne correspond.",
+      "name": "Composant",
+      "versionColumn": "Version",
+      "licenseColumn": "Licence"
+    },
+    "notices": {
+      "show": "Afficher les textes complets des licences des composants",
+      "hide": "Masquer les textes des licences des composants",
+      "textLabel": "Textes des licences des composants (fichier THIRD-PARTY-NOTICES)"
+    }
   },
   "tablet": {
     "title": "Tablette",
@@ -344,7 +511,7 @@
     "open": "Tester la tablette",
     "title": "Test de la tablette",
     "intro": "Ce test vérifie pas à pas la liaison avec la Bamboo Slate et enregistre tous les échanges dans la bibliothèque (dossier _ardoise/diagnostics) pour analyse. Durée : environ 5 minutes.",
-    "deleteAfterSync": "Effacer les pages de la tablette une fois enregistrées",
+    "deleteAfterSync": "Effacer les pages de la tablette une fois ajoutées à la bibliothèque comme notes",
     "simulated": "Simulation (sans tablette)",
     "start": "Démarrer le test",
     "again": "Recommencer le test",
@@ -405,6 +572,7 @@
       "clockDrift": "Écart d'horloge",
       "strokes": "Traits",
       "points": "Points",
+      "notes": "Notes ajoutées à la bibliothèque",
       "deleted": "Pages effacées",
       "folder": "Dossier",
       "samples": "Points reçus",
@@ -442,7 +610,7 @@
   "errors": {
     "settings": "Impossible de lire le fichier de réglages {path} : {message}. Il n'a pas été modifié ; corrigez-le ou supprimez-le, puis relancez Ardoise.",
     "library": "Impossible d'utiliser ce dossier : {message}",
-    "generic": "Une erreur est survenue : {message}"
+    "generic": "Une erreur est survenue. {message}"
   },
   "errorCodes": {
     "settings": "le fichier de réglages ne peut pas être lu ou modifié ({detail})",
@@ -513,7 +681,21 @@
     "backgroundMissing": "l'image de fond n'est plus en mémoire ; rouvrez la note et choisissez l'image de nouveau",
     "pdfUnsupported": "les PDF ne peuvent être lus que sous Windows",
     "pdfEncrypted": "ce PDF est protégé par un mot de passe ; enregistrez-en une copie sans mot de passe",
-    "pdfNoSuchPage": "ce PDF n'a pas cette page ({detail})"
+    "pdfNoSuchPage": "ce PDF n'a pas cette page ({detail})",
+    "draftFailed": "la copie de secours des modifications n'a pas pu être écrite ou lue ({detail})",
+    "draftNotFound": "ces modifications récupérées n'existent plus",
+    "invalidTagColor": "cette couleur ne fait pas partie de la palette ({detail})",
+    "tagColorsNewer": "les couleurs des étiquettes ont été enregistrées par une version plus récente d'Ardoise : mettez Ardoise à jour sur ce PC pour les modifier ({detail})",
+    "tagColorsConflict": "les couleurs des étiquettes changeaient au même moment, sans doute sur un autre ordinateur ; réessayez dans un instant ({detail})",
+    "binderExists": "un classeur ou un fichier porte déjà ce nom à cet endroit ; choisissez-en un autre ({detail})",
+    "binderNotFound": "ce classeur n'existe plus, il a peut-être été renommé ou supprimé sur un autre ordinateur ({detail})",
+    "inkspaceNotFound": "ce dossier ne contient pas de notes d'Inkspace ({detail}) ; choisissez le dossier « LocalState » d'Inkspace ou une copie de ce dossier",
+    "inkspaceUnreadable": "les notes d'Inkspace ne peuvent pas être lues ({detail}) ; fermez Inkspace puis réessayez",
+    "inkspaceDamaged": "la base de notes d'Inkspace est endommagée ou dans un format inconnu ({detail}) ; si Inkspace est ouvert, fermez-le puis réessayez",
+    "inkspaceTooLarge": "la base de notes d'Inkspace est trop volumineuse pour être importée ({detail})",
+    "inkspaceNoteDamaged": "cette note d'Inkspace ne peut pas être lue ({detail})",
+    "inkspaceBusy": "un import depuis Inkspace est déjà en cours",
+    "inkspaceTarget": "ce classeur se trouve dans le dossier d'Inkspace ({detail}) ; choisissez un classeur de la bibliothèque"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -621,7 +803,7 @@
     },
     "page": {
       "label": "Page",
-      "paper": "Papier",
+      "paper": "Couleur du papier",
       "template": "Modèle",
       "texture": "Texture du papier",
       "rotateCcw": "Tourner la page d'un quart de tour vers la gauche",
@@ -638,7 +820,7 @@
       "portraitLower": "portrait",
       "landscapeLower": "paysage",
       "orientationHint": "L'écriture ne tourne pas : seule la feuille change de sens, et l'écriture garde sa place.",
-      "size": "Papier",
+      "size": "Format",
       "width": "Largeur en millimètres",
       "height": "Hauteur en millimètres",
       "apply": "Appliquer",
@@ -722,7 +904,9 @@
       "discard": "Revenir sans enregistrer",
       "cancel": "Rester",
       "saveClose": "Enregistrer et fermer",
-      "discardClose": "Fermer sans enregistrer"
+      "discardClose": "Fermer sans enregistrer",
+      "saveSwitch": "Enregistrer et ouvrir l'autre note",
+      "discardSwitch": "Ouvrir sans enregistrer"
     },
     "share": {
       "label": "Découper, copier, exporter"
@@ -775,7 +959,8 @@
     "video": {
       "button": "Vidéo",
       "hint": "Exporter la relecture en vidéo (MP4, WebM) ou en image animée (GIF, WebP)…"
-    }
+    },
+    "backgroundLoadFailed": "L'image de fond de cette note n'a pas pu être chargée ({message}). La note s'ouvre sans elle ; l'image reste dans le fichier tant que vous ne la retirez pas."
   },
   "replay": {
     "bar": "Contrôles de la relecture",
@@ -989,7 +1174,10 @@
     "run": "Imprimer…",
     "again": "Imprimer de nouveau…",
     "running": "Impression en cours…",
-    "done": "Envoyé à l'imprimante : {count} page(s).",
+    "done": {
+      "one": "Envoyé à l'imprimante : {count} page.",
+      "other": "Envoyé à l'imprimante : {count} pages."
+    },
     "cancelled": "Impression annulée.",
     "failed": "L'impression a échoué : {message}"
   },
@@ -1287,7 +1475,11 @@
         },
         "leave": {
           "keys": "Échap",
-          "action": "Terminer (sur l'écran projeté : fermer la présentation)"
+          "action": "Fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
+        },
+        "marks": {
+          "keys": "Suppr, Retour arrière",
+          "action": "Effacer les annotations tracées sur la présentation (fenêtre projetée)"
         }
       }
     },
@@ -1299,6 +1491,15 @@
       "savedOne": "Narration enregistrée sur 1 page.",
       "savedMany": "Narration enregistrée sur {count} pages.",
       "savedNone": "Aucune page de la séance ne contient de tracé : la narration n'a pas été conservée."
+    },
+    "clearDone": "Page effacée.",
+    "clearUndo": "Annuler l'effacement",
+    "clearUndoFailed": "L'effacement ne peut plus être annulé : la page a changé entre-temps.",
+    "leave": {
+      "title": "Terminer le mode direct ?",
+      "message": "Chaque page écrite est enregistrée comme une note de la bibliothèque. Pour arrêter seulement la projection, utilisez « Arrêter la projection » : Échap la ferme aussi quand elle est affichée.",
+      "continue": "Continuer",
+      "confirm": "Terminer"
     }
   },
   "presentation": {
@@ -1355,6 +1556,10 @@
       "save": "Enregistrer en .txt…",
       "saveMd": "Enregistrer en Markdown…",
       "saveDocx": "Enregistrer en Word…",
+      "includeDrawings": "Inclure les dessins (Markdown, Word)",
+      "drawingsHelp": "Schémas et figures, en images entre les paragraphes. Un trait tracé sous des mots ne devient pas une image : ces mots sont soulignés (en gras en Markdown).",
+      "drawingsChecking": "Recherche des dessins…",
+      "noDrawings": "Aucun dessin trouvé : le texte seul est exporté.",
       "copy": "Copier le texte",
       "working": "Lecture de l'écriture…",
       "saved": "Texte enregistré :",
@@ -1416,7 +1621,10 @@
       "title": "Nouvelle note depuis un PDF ou une image",
       "pickTitle": "PDF ou image à annoter",
       "intro": "Chaque page du PDF devient une note à sa taille et dans son orientation (portrait ou paysage), avec la page en fond ; une image devient une note de la taille d'une feuille A4, dans l'orientation de l'image.",
-      "pdfInfo": "{count} page(s), la première de {width} × {height} mm.",
+      "pdfInfo": {
+        "one": "Une page de {width} × {height} mm.",
+        "other": "{count} pages, la première de {width} × {height} mm."
+      },
       "pages": "Pages",
       "allPages": "Toutes les pages ({count})",
       "somePages": "Certaines pages",
@@ -1431,11 +1639,107 @@
       "running": "Création des notes…",
       "progress": "Création des notes : {done} sur {total}…",
       "error": "Impossible de créer les notes : {message}",
-      "done": "Notes créées : {count}"
+      "done": "Notes créées : {count}",
+      "cancelling": "Annulation…",
+      "cancelled": "Création annulée : aucune note n'a été gardée."
     },
     "assemble": {
       "droppedOne": "Seule l'image de fond de la première note est gardée : celle d'une autre note ne sera pas reprise.",
       "droppedMany": "Seule l'image de fond de la première note est gardée : celles de {count} autres notes ne seront pas reprises."
+    }
+  },
+  "drafts": {
+    "shutdownReason": "Une note a des modifications non enregistrées. Revenez dans Ardoise pour l'enregistrer.",
+    "writeFailed": "La copie de secours de vos modifications n'a pas pu être écrite ({message}). Pensez à enregistrer la note.",
+    "copyTitle": "{title} (récupérée)",
+    "restoredCopy": "Les modifications récupérées sont dans la nouvelle note « {title} ».",
+    "recovery": {
+      "title": "Modifications récupérées",
+      "restoreText": "Ardoise s'est fermé avant que cette note soit enregistrée. Ses modifications ont été gardées (dernière copie le {date}).",
+      "copyText": "Ardoise s'est fermé avant que cette note soit enregistrée, et la note a changé depuis (sur un autre ordinateur, par exemple). Ses modifications (dernière copie le {date}) peuvent être récupérées dans une nouvelle note, sans toucher à celle-ci.",
+      "restore": "Récupérer les modifications",
+      "copy": "Récupérer dans une nouvelle note",
+      "discard": "Les abandonner",
+      "discardConfirm": "Abandonner définitivement ces modifications ?",
+      "discardYes": "Abandonner",
+      "discardNo": "Garder",
+      "later": "Plus tard",
+      "failed": "La récupération a échoué : {message}"
+    },
+    "library": {
+      "title": "Ardoise s'est fermé sans enregistrer des modifications. Notes concernées : {count}",
+      "saved": "dernière copie le {date}",
+      "missing": "la note n'existe plus",
+      "open": "Ouvrir",
+      "restoreCopy": "Récupérer dans une nouvelle note",
+      "discard": "Abandonner",
+      "discardConfirm": "Abandonner définitivement les modifications de « {title} » ?",
+      "discardYes": "Abandonner",
+      "discardNo": "Garder",
+      "failed": "La récupération a échoué : {message}"
+    }
+  },
+  "libraryChoice": {
+    "noNotes": "Il ne contient aucune note.",
+    "notes": {
+      "one": "Il contient {count} note.",
+      "other": "Il contient {count} notes."
+    },
+    "notesAtLeast": {
+      "one": "Il contient au moins {count} note (le dossier est très grand : le compte s'est arrêté là).",
+      "other": "Il contient au moins {count} notes (le dossier est très grand : le compte s'est arrêté là)."
+    }
+  },
+  "inkspace": {
+    "entry": "Importer depuis Inkspace…",
+    "title": "Importer depuis Wacom Inkspace",
+    "intro": "Ardoise peut reprendre les notes écrites avec Wacom Inkspace. Les données d'Inkspace ne sont ni modifiées ni supprimées.",
+    "detecting": "Recherche d'Inkspace sur cet ordinateur…",
+    "reading": "Lecture des notes d'Inkspace…",
+    "location": "Dossier d'Inkspace",
+    "foundOne": "1 note trouvée",
+    "found": "{count} notes trouvées",
+    "alreadyOne": "dont 1 déjà importée (dans la bibliothèque ou sa corbeille), qui sera ignorée",
+    "already": "dont {count} déjà importées (dans la bibliothèque ou sa corbeille), qui seront ignorées",
+    "unreadableOne": "dont 1 illisible",
+    "unreadable": "dont {count} illisibles",
+    "pick": "Choisir un dossier…",
+    "pickOther": "Choisir un autre dossier…",
+    "pickTitle": "Dossier « LocalState » de Wacom Inkspace",
+    "retry": "Réessayer",
+    "notFound": "Ardoise n'a pas trouvé Wacom Inkspace sur cet ordinateur. Si vous avez une copie du dossier « LocalState » d'Inkspace (sur une clé USB, par exemple), choisissez-la.",
+    "readError": "Impossible d'utiliser ce dossier : {message}",
+    "importError": "L'import a échoué : {message}",
+    "binder": "Classeur de destination",
+    "binderHint": "Laissez vide pour ranger les notes à la racine de la bibliothèque.",
+    "importOne": "Importer 1 note",
+    "import": "Importer {count} notes",
+    "allImported": "Toutes les notes d'Inkspace ont déjà été importées (elles sont dans la bibliothèque ou sa corbeille) : il n'y a rien à importer.",
+    "allReadableImported": "Les notes lisibles d'Inkspace ont toutes déjà été importées (elles sont dans la bibliothèque ou sa corbeille) : il n'y a rien à importer.",
+    "progress": "Import des notes : {done} sur {total}…",
+    "progressLabel": "Avancement de l'import",
+    "stop": "Arrêter l'import",
+    "stopping": "Arrêt après la note en cours…",
+    "doneTitle": "Import terminé",
+    "cancelledTitle": "Import arrêté",
+    "importedOne": "1 note importée dans le classeur « {binder} »",
+    "imported": "{count} notes importées dans le classeur « {binder} »",
+    "importedRootOne": "1 note importée à la racine de la bibliothèque",
+    "importedRoot": "{count} notes importées à la racine de la bibliothèque",
+    "nothingImported": "Aucune note n'a été importée.",
+    "skippedOne": "1 déjà importée auparavant (dans la bibliothèque ou sa corbeille), ignorée",
+    "skipped": "{count} déjà importées auparavant (dans la bibliothèque ou sa corbeille), ignorées",
+    "failedOne": "1 note n'a pas pu être importée :",
+    "failed": "{count} notes n'ont pas pu être importées :",
+    "unknownDate": "Date inconnue",
+    "cancelledHint": "Les notes déjà importées sont complètes. Relancez l'import pour ajouter les autres : celles qui sont déjà dans la bibliothèque seront ignorées.",
+    "show": "Voir les notes importées",
+    "wizard": {
+      "found": "Ardoise a trouvé des notes de Wacom Inkspace sur cet ordinateur.",
+      "foundCountOne": "Ardoise a trouvé des notes de Wacom Inkspace sur cet ordinateur (1 note).",
+      "foundCount": "Ardoise a trouvé des notes de Wacom Inkspace sur cet ordinateur ({count} notes).",
+      "check": "Les importer dans la bibliothèque (classeur « {binder} »)",
+      "hint": "Vous confirmerez l'import avant qu'il ne commence."
     }
   }
 }

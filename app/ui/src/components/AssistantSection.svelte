@@ -6,7 +6,7 @@
    * guide docs/guide/assistant.*.md).
    */
   import { onMount } from 'svelte';
-  import { api, errorMessage, type BridgeStatus } from '../lib/api';
+  import { api, errorMessage, genericError, type BridgeStatus } from '../lib/api';
   import { claudeCodeCommand, claudeDesktopConfig } from '../lib/assistant-setup';
   import { t } from '../lib/i18n.svelte';
 
@@ -23,6 +23,20 @@
   const command = $derived(exe === null ? '' : claudeCodeCommand(exe, readOnly));
   const config = $derived(exe === null ? '' : claudeDesktopConfig(exe, readOnly));
 
+  /** How often the bridge status is read again while this section is on screen. */
+  const BRIDGE_REFRESH_MS = 5000;
+
+  /** Reads the bridge status again (the guide sends the user to look at it after a change). */
+  function refreshBridge() {
+    if (document.visibilityState === 'hidden') return;
+    api
+      .mcpLaunchInfo()
+      .then((info) => (bridge = info.bridge ?? null))
+      .catch(() => {
+        // Keep what is shown: the first read reports its own failure.
+      });
+  }
+
   onMount(() => {
     api
       .mcpLaunchInfo()
@@ -31,6 +45,12 @@
         bridge = info.bridge ?? null;
       })
       .catch((e: unknown) => (error = errorMessage(e)));
+    const timer = setInterval(refreshBridge, BRIDGE_REFRESH_MS);
+    window.addEventListener('focus', refreshBridge);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', refreshBridge);
+    };
   });
 
   async function copy(target: Target) {
@@ -49,7 +69,7 @@
   <h3 id="settings-assistant">{t('assistant.title')}</h3>
   <p class="muted small">{t('assistant.intro')}</p>
   {#if error}
-    <p class="error" role="alert">{t('errors.generic', { message: error })}</p>
+    <p class="error" role="alert">{genericError(error)}</p>
   {:else if exe !== null}
     <label class="choice">
       <input

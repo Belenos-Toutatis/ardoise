@@ -7,9 +7,13 @@ import { api, errorMessage, followHandwritingStatus, onLibraryChanged } from './
 import { dragOutSupported } from './drag-out';
 import type { HandwritingHit, IndexStatus } from './handwriting';
 import { currentLocale, t } from './i18n.svelte';
+import { LibraryActivity } from './library-activity.svelte';
+import type { TurnDirection } from './library-batch';
+import { TagColorState } from './tag-colors.svelte';
 import {
   buildBinderTree,
   displayTitle,
+  isInBinder,
   mergeTags,
   oldestFirst,
   parseTags,
@@ -22,7 +26,11 @@ import {
 } from './library-logic';
 import type { FileStamp, LibraryListing, MergeLayout, NoteSummary, TrashEntry } from './note';
 
-const THUMBNAIL_CACHE_SIZE = 400;
+/** Thumbnails kept: at least this many, and enough for the whole library (up to the maximum). */
+const THUMBNAIL_CACHE_MIN = 400;
+const THUMBNAIL_CACHE_MAX = 2000;
+/** The cached pictures are data URLs: past this many characters (about as many bytes) the oldest go. */
+const THUMBNAIL_CACHE_CHARS = 64_000_000;
 
 /** Pause after a keystroke before the handwriting is searched; tests set it to 0. */
 export const handwritingSearch = { delayMs: 120 };
@@ -52,12 +60,19 @@ export class LibraryState {
   notice = $state<string | null>(null);
   /** The export or assemble dialog, with the notes it was opened for (displayed order). */
   dialog = $state<{ kind: 'export' | 'print' | 'assemble'; notes: NoteSummary[] } | null>(null);
+  /** Operations on several notes: progress, failures, « Annuler » (`library-activity.svelte.ts`). */
+  readonly activity = new LibraryActivity(() => this.refresh());
+  /** Colours of the tags (`_ardoise/tags.json`), loaded by the sidebar (`tag-colors.svelte.ts`). */
+  readonly tagColors = new TagColorState((message) => (this.error = message));
 
   /** Paths being dragged; kept here because a drag event's data is not readable until the drop. */
   private dragPaths: string[] = [];
   private anchor: string | null = null;
   private sequence = 0;
   private thumbnails = new Map<string, Promise<string | null>>();
+  /** Length of each cached picture once known, and their total. */
+  private thumbnailChars = new Map<string, number>();
+  private thumbnailTotal = 0;
 
   // Handwriting search (milestone M7): the desktop app says which query words the handwriting
   // of each note has; the search of titles, tags and binders combines them (`matchesSearch`).
@@ -73,13 +88,17 @@ export class LibraryState {
   readonly notes = $derived(this.listing?.notes ?? []);
   readonly tree = $derived(buildBinderTree(this.listing?.binders ?? [], this.notes));
   readonly visible = $derived(visibleNotes(this.notes, this.view, this.#query, this.order, currentLocale(), this.hits));
-  readonly selectedNotes = $derived(this.notes.filter((n) => this.selected.includes(n.path)));
+  /** `selected` as a set: every card asks whether it is selected. */
+  readonly #selectedSet = $derived(new Set(this.selected));
+  readonly selectedNotes = $derived(this.notes.filter((n) => this.#selectedSet.has(n.path)));
   /** The selected notes as the grid shows them; those the search hides come last. */
   readonly selectedDisplayed = $derived.by(() => {
-    const shown = this.visible.filter((n) => this.selected.includes(n.path));
-    const rest = this.selectedNotes.filter((n) => !shown.includes(n));
+    const shown = this.visible.filter((n) => this.#selectedSet.has(n.path));
+    const shownPaths = new Set(shown.map((n) => n.path));
+    const rest = this.selectedNotes.filter((n) => !shownPaths.has(n.path));
     return [...shown, ...rest];
   });
+  readonly #selectedPaths = $derived(this.selectedDisplayed.map((n) => n.path));
 
   // --- Loading -------------------------------------------------------------------------------
 
@@ -254,7 +273,7 @@ export class LibraryState {
   // --- Selection -----------------------------------------------------------------------------
 
   isSelected(path: string): boolean {
-    return this.selected.includes(path);
+    return this.#selectedSet.has(path);
   }
 
   /** True when a range selection can start from the last toggled note. */
@@ -301,7 +320,12 @@ export class LibraryState {
 
   /** The notes a drag out to another program carries from the card of `path`: the selection if it is part of it. */
   dragOutPaths(path: string): string[] {
-    return this.isSelected(path) ? this.selectedDisplayed.map((n) => n.path) : [path];
+    return this.isSelected(path) ? [...this.#selectedPaths] : [path];
+  }
+
+  /** How many notes a drag out from the card of `path` carries. */
+  dragOutCount(path: string): number {
+    return this.isSelected(path) ? this.#selectedPaths.length : 1;
   }
 
   endDrag(): void {
@@ -322,14 +346,37 @@ export class LibraryState {
     const key = `${path}|${stamp.modified.secs_since_epoch}.${stamp.modified.nanos_since_epoch}|${stamp.len}`;
     let found = this.thumbnails.get(key);
     if (!found) {
-      found = api.noteThumbnail(path, stamp).catch(() => null);
+      found = api
+        .noteThumbnail(path, stamp)
+        .catch(() => null)
+        .then((url) => {
+          // Only what is still cached counts (the entry may have been evicted meanwhile).
+          if (url !== null && this.thumbnails.has(key) && !this.thumbnailChars.has(key)) {
+            this.thumbnailChars.set(key, url.length);
+            this.thumbnailTotal += url.length;
+            this.trimThumbnails();
+          }
+          return url;
+        });
       this.thumbnails.set(key, found);
-      if (this.thumbnails.size > THUMBNAIL_CACHE_SIZE) {
-        const oldest = this.thumbnails.keys().next().value;
-        if (oldest !== undefined) this.thumbnails.delete(oldest);
-      }
+      this.trimThumbnails();
     }
     return found;
+  }
+
+  /** Drops the oldest pictures beyond what the library needs and the memory budget allows. */
+  private trimThumbnails(): void {
+    const limit = Math.min(Math.max(THUMBNAIL_CACHE_MIN, this.notes.length + 100), THUMBNAIL_CACHE_MAX);
+    while (
+      this.thumbnails.size > 1 &&
+      (this.thumbnails.size > limit || this.thumbnailTotal > THUMBNAIL_CACHE_CHARS)
+    ) {
+      const oldest = this.thumbnails.keys().next().value;
+      if (oldest === undefined) break;
+      this.thumbnails.delete(oldest);
+      this.thumbnailTotal -= this.thumbnailChars.get(oldest) ?? 0;
+      this.thumbnailChars.delete(oldest);
+    }
   }
 
   // --- Operations on notes -------------------------------------------------------------------
@@ -359,8 +406,61 @@ export class LibraryState {
   }
 
   async trashNotes(paths: string[]): Promise<void> {
-    await this.run(() => api.trashNotes(paths));
-    this.selected = this.selected.filter((p) => !paths.includes(p));
+    const titles = new Map(paths.map((path) => [path, this.titleOf(path)]));
+    const done = await this.run(() => api.trashNotes(paths));
+    if (!done) return;
+    // The notes that could not go stay selected, ready for another try.
+    const gone = new Set(done.trashed.map((t) => t.path));
+    this.selected = this.selected.filter((p) => !gone.has(p));
+    this.activity.trashed(done, (path) => titles.get(path) ?? path);
+  }
+
+  /** Turns each note a quarter turn, as the editor does; offers to turn them back. */
+  async turnNotes(notes: NoteSummary[], direction: TurnDirection): Promise<void> {
+    this.error = null;
+    await this.activity.turn(
+      notes.map((note) => ({ path: note.path, title: displayTitle(note, currentLocale()) })),
+      direction,
+    );
+  }
+
+  // --- Binders (milestone M10) ----------------------------------------------------------------
+
+  /**
+   * Renames a binder; the view follows it. Returns its new path; the error (a name taken, say)
+   * goes back to the caller, which shows it by the name field.
+   */
+  async renameBinder(binder: string, name: string): Promise<string> {
+    this.error = null;
+    try {
+      const renamed = await api.renameBinder(binder, name.trim());
+      const view = this.view;
+      if (view.kind === 'binder' && isInBinder(view.binder, binder)) {
+        this.view = { kind: 'binder', binder: renamed + view.binder.slice(binder.length) };
+      }
+      return renamed;
+    } finally {
+      await this.refresh();
+    }
+  }
+
+  /** Deletes a binder: its notes go to the trash (restorable to it), then its empty folders go. */
+  async deleteBinder(binder: string, name: string): Promise<void> {
+    this.error = null;
+    try {
+      const done = await api.deleteBinder(binder);
+      if (this.view.kind === 'binder' && isInBinder(this.view.binder, binder)) this.view = { kind: 'all' };
+      await this.refresh();
+      this.activity.binderDeleted(binder, name, done);
+    } catch (error) {
+      this.error = errorMessage(error);
+      await this.refresh();
+    }
+  }
+
+  private titleOf(path: string): string {
+    const note = this.notes.find((n) => n.path === path);
+    return note ? displayTitle(note, currentLocale()) : path;
   }
 
   async toggleFavorite(note: NoteSummary): Promise<void> {

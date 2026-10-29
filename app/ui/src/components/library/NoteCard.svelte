@@ -5,7 +5,9 @@
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { displayTitle, formatDate } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
+  import { whenNearViewport } from '../../lib/near-viewport';
   import type { NoteSummary } from '../../lib/note';
+  import { noteDrawn } from '../../lib/perf';
   import Menu from './Menu.svelte';
 
   let {
@@ -39,7 +41,7 @@
   const locale = $derived(currentLocale());
   const title = $derived(displayTitle(note, locale));
   const selected = $derived(lib.isSelected(note.path));
-  const dragCount = $derived(lib.dragOutPaths(note.path).length);
+  const dragCount = $derived(lib.dragOutCount(note.path));
   const dragLabel = $derived(
     dragCount > 1 ? t('library.drag.handleMany', { count: dragCount }) : t('library.drag.handle'),
   );
@@ -53,30 +55,14 @@
     void stampKey;
     if (!host) return;
     let cancelled = false;
-    const load = () => {
+    const stop = whenNearViewport(host, () => {
       void lib.thumbnail(path, untrack(() => note.stamp)).then((url) => {
         if (!cancelled) src = url;
       });
-    };
-    if (typeof IntersectionObserver === 'undefined') {
-      load();
-      return () => {
-        cancelled = true;
-      };
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          load();
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '300px' },
-    );
-    observer.observe(host);
+    });
     return () => {
       cancelled = true;
-      observer.disconnect();
+      stop();
     };
   });
 
@@ -173,7 +159,7 @@
 {#snippet thumb()}
   <span class="thumb" bind:this={host}>
     {#if src}
-      <img {src} alt="" draggable="false" />
+      <img {src} alt="" draggable="false" onload={noteDrawn} />
     {:else}
       <span class="thumb-placeholder" aria-hidden="true"></span>
     {/if}
@@ -280,12 +266,15 @@
   {#if note.tags.length > 0}
     <ul class="chips" aria-label={t('library.tags')}>
       {#each note.tags as tag (tag)}
+        {@const color = lib.tagColors.of(tag)}
         <li>
           <button
             type="button"
             class="chip"
+            data-tag-color={color}
             aria-label={t('library.card.filterTag', { tag })}
-            onclick={() => lib.setView({ kind: 'tag', tag })}>{tag}</button
+            onclick={() => lib.setView({ kind: 'tag', tag })}
+            >{#if color}<span class="tag-dot" aria-hidden="true"></span>{/if}{tag}</button
           >
         </li>
       {/each}

@@ -3,12 +3,13 @@
 // Milestone M8: the pen's eraser end and barrel button, pressure, palm rejection, finger gestures.
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_TOOLS, docFromNote, type Doc, type ToolSettings } from '../../lib/editor/state';
+import { DEFAULT_TOOLS, docFromNote, select, type Doc, type ToolSettings } from '../../lib/editor/state';
 import { hline, note } from '../../lib/editor/test-fixtures';
 import { PenPresence } from '../../lib/gestures';
 import { instantiateInk, type Ink } from '../../lib/ink';
 import { touchPrefs } from '../../lib/touch-prefs.svelte';
 import Canvas from './Canvas.svelte';
+import CanvasHarness from './CanvasHarness.svelte';
 
 let ink: Ink;
 beforeAll(async () => {
@@ -367,5 +368,159 @@ describe('fit the width', () => {
     // The A4 landscape page in a landscape stage: the width fit is the page fit, never smaller.
     expect(wide.scale).toBeGreaterThanOrEqual(fitted.scale - 1e-9);
     expect(wide.x).toBeCloseTo(24, 3);
+  });
+});
+
+describe('moving and resizing the selection with the pen and a finger', () => {
+  const twoLines = () => select(docFromNote(note([hline(1000, 5000, 3000), hline(1000, 5000, 6000)])), [0, 1]);
+  const finger = (id: number, t = 0): Init => ({ pointerType: 'touch', pointerId: id, buttons: 1, pressure: 1, t });
+  const movedBy = (changed: Doc) => changed.note.strokes[0].points[0].x - 1000;
+
+  it('moves it with the pen tip in the selection tool', async () => {
+    const c = await render({ doc: twoLines(), tools: { mode: 'select' } });
+    await c.stroke(
+      [
+        [3000, 4500],
+        [3300, 4500],
+        [3800, 4800],
+      ],
+      { pointerType: 'pen', pointerId: 3 },
+    );
+    expect(c.onchange).toHaveBeenCalledTimes(1);
+    expect(movedBy(c.onchange.mock.calls[0][0])).toBeCloseTo(800, 0);
+  });
+
+  it('moves it with a finger even though fingers only navigate, and a finger outside still pans', async () => {
+    const c = await render({ doc: twoLines(), tools: { mode: 'select' } });
+    const before = c.view();
+    await c.stroke(
+      [
+        [3000, 4500],
+        [3300, 4500],
+        [3800, 4800],
+      ],
+      finger(1),
+    );
+    expect(c.onchange).toHaveBeenCalledTimes(1);
+    expect(movedBy(c.onchange.mock.calls[0][0])).toBeCloseTo(800, 0);
+    // The page did not move under the finger.
+    expect(c.view()).toEqual(before);
+    // Off the selection the same finger pans the page, as before.
+    await c.stroke(
+      [
+        [9000, 12000],
+        [10000, 12000],
+        [11000, 12000],
+      ],
+      finger(2, 100),
+    );
+    expect(c.onchange).toHaveBeenCalledTimes(1);
+    expect(c.view().x).toBeGreaterThan(before.x + 20);
+  });
+
+  it('resizes it from a handle with the pen and with a finger', async () => {
+    for (const init of [{ pointerType: 'pen', pointerId: 3 }, finger(1)]) {
+      const c = await render({ doc: twoLines(), tools: { mode: 'select' } });
+      // The handle at the bottom right of the frame; the anchor is the opposite corner.
+      await c.stroke(
+        [
+          [5030, 6030],
+          [7000, 8000],
+        ],
+        init,
+      );
+      expect(c.onchange).toHaveBeenCalledTimes(1);
+      const strokes = c.onchange.mock.calls[0][0].note.strokes;
+      expect(strokes[0].points.at(-1).x).toBeGreaterThan(5500);
+      cleanup?.();
+    }
+  });
+
+  it('moves a selection made with the barrel button while the tool is still the pen, and draws elsewhere', async () => {
+    const onchange = vi.fn();
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(CanvasHarness, {
+      target,
+      props: {
+        initial: docFromNote(note([hline(1000, 5000, 3000), hline(1000, 5000, 6000)])),
+        tools: { ...DEFAULT_TOOLS, mode: 'pen' },
+        ink,
+        onchange,
+      },
+    });
+    cleanup = () => {
+      unmount(component);
+      target.remove();
+    };
+    await tick();
+    const svg = target.querySelector<SVGSVGElement>('svg.canvas')!;
+    const [scale, vx, vy] = svg.getAttribute('data-view')!.split(' ').map(Number);
+    const at = (x: number, y: number) => ({ x: x * scale + vx, y: y * scale + vy });
+    const fire = (type: string, p: { x: number; y: number }, init: Init) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, button: 0, buttons: init.buttons ?? 1 });
+      for (const [key, value] of Object.entries({ pointerType: init.pointerType ?? 'pen', pointerId: init.pointerId ?? 3, pressure: 0.5, timeStamp: init.t ?? 0 })) {
+        Object.defineProperty(event, key, { value, configurable: true });
+      }
+      svg.dispatchEvent(event);
+    };
+    const drag = async (points: [number, number][], init: Init) => {
+      fire('pointerdown', at(...points[0]), init);
+      for (const p of points.slice(1)) fire('pointermove', at(...p), init);
+      fire('pointerup', at(...points[points.length - 1]), { ...init, buttons: 0 });
+      await tick();
+    };
+    // The barrel-button lasso around both lines.
+    await drag(
+      [
+        [500, 2000],
+        [5500, 2000],
+        [5500, 7000],
+        [500, 7000],
+        [500, 2100],
+      ],
+      { buttons: 3 },
+    );
+    expect(onchange).not.toHaveBeenCalled();
+    expect(target.querySelectorAll('rect.handle').length).toBe(4);
+    // The tip inside the frame moves the ink instead of drawing.
+    await drag(
+      [
+        [3000, 4500],
+        [3300, 4500],
+        [3800, 4800],
+      ],
+      { t: 100 },
+    );
+    expect(onchange).toHaveBeenCalledTimes(1);
+    const moved = onchange.mock.calls[0][0] as Doc;
+    expect(moved.note.strokes).toHaveLength(2);
+    expect(moved.note.strokes[0].points[0].x - 1000).toBeCloseTo(800, 0);
+    // Away from the frame the tip draws again (and the selection goes).
+    await drag(
+      [
+        [12000, 12000],
+        [13000, 12500],
+        [14000, 12000],
+      ],
+      { t: 200 },
+    );
+    expect(onchange).toHaveBeenCalledTimes(2);
+    expect((onchange.mock.calls[1][0] as Doc).note.strokes).toHaveLength(3);
+    expect(target.querySelectorAll('rect.handle').length).toBe(0);
+  });
+
+  it('keeps the gesture when a child of the canvas loses an implicit pointer capture', async () => {
+    const c = await render({ doc: twoLines(), tools: { mode: 'select' } });
+    const finger1 = finger(1);
+    c.fire('pointerdown', c.client(3000, 4500), finger1);
+    c.fire('pointermove', c.client(3800, 4800), { ...finger1, t: 10 });
+    // A finger pressed on ink captures the pointer implicitly on that stroke; Chrome releases it
+    // when the canvas captures it explicitly: that is not the end of the gesture.
+    const path = c.svg.querySelector('path')!;
+    path.dispatchEvent(new Event('lostpointercapture', { bubbles: true }));
+    c.fire('pointerup', c.client(3800, 4800), { ...finger1, buttons: 0, t: 20 });
+    await tick();
+    expect(c.onchange).toHaveBeenCalledTimes(1);
   });
 });

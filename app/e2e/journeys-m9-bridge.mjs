@@ -136,7 +136,7 @@ export const bridgeJourneys = [
           const none = await ok(session, 'last_live_note');
           if (none.session !== null) throw new Error(JSON.stringify(none));
           await app.click('.editor button', l('editor.back'));
-          await app.waitFor(`document.querySelector('input.search') !== null`, 'the library');
+          await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library');
         });
 
         await check('le professeur lance le mode direct (tablette simulée)', async () => {
@@ -205,7 +205,7 @@ export const bridgeJourneys = [
           );
           if (during.session.running !== true || during.session.this_run !== true) throw new Error(JSON.stringify(during));
           await app.click('button[data-action="stop-live"]');
-          await app.waitFor(`document.querySelector('input.search') !== null`, 'the library');
+          await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library');
           const after = await ok(session, 'last_live_note');
           if (after.session.running !== false || !after.note?.found) throw new Error(JSON.stringify(after));
           const listed = (await ok(session, 'list_notes', { limit: 100 })).notes;

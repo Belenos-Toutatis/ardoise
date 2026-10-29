@@ -96,6 +96,7 @@ export function mockBackgroundInvoke(command: string, args: Record<string, unkno
     case 'stage_note_background':
       return stagedOfNote(args.path as string);
     case 'release_background_images':
+    case 'cancel_create_notes':
       return undefined;
     case 'create_notes_from_file':
       return createFromFile(

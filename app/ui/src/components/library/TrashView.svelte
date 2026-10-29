@@ -1,6 +1,6 @@
 <script lang="ts">
   /** The trash: restore a note, delete it for good, or empty the trash (both ask to confirm). */
-  import { currentLocale, t } from '../../lib/i18n.svelte';
+  import { currentLocale, t, tn } from '../../lib/i18n.svelte';
   import { formatDate, originalBinder } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import type { TrashEntry } from '../../lib/note';
@@ -54,7 +54,7 @@
 
   {#if confirming === 'all'}
     <div class="confirm" role="alertdialog" aria-label={t('library.trashView.emptyAll')}>
-      <p>{t('library.trashView.confirmEmpty', { count: confirmed.length })}</p>
+      <p>{tn('library.trashView.confirmEmpty', confirmed.length)}</p>
       <div class="actions">
         <button type="button" class="button primary danger-fill" onclick={emptyAll}>
           {t('library.trashView.confirm')}

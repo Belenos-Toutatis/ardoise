@@ -5,7 +5,7 @@
    * language (Ardoise never downloads it), and the background indexing with its stop button.
    */
   import { onMount } from 'svelte';
-  import { api, errorMessage, followHandwritingStatus } from '../lib/api';
+  import { api, errorMessage, followHandwritingStatus, genericError } from '../lib/api';
   import {
     HANDWRITING_SETTINGS,
     missingRecognizer,
@@ -144,7 +144,7 @@
     {/if}
   {/if}
   {#if error}
-    <p class="error" role="alert">{t('errors.generic', { message: error })}</p>
+    <p class="error" role="alert">{genericError(error)}</p>
   {/if}
 </section>
 

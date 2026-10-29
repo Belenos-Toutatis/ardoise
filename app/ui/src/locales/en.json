@@ -125,7 +125,10 @@
       "purge": "Delete for good",
       "confirmPurge": "Delete “{title}” for good?",
       "emptyAll": "Empty the trash",
-      "confirmEmpty": "Delete the {count} notes in the trash for good? This cannot be undone.",
+      "confirmEmpty": {
+        "one": "Delete the note in the trash for good? This cannot be undone.",
+        "other": "Delete the {count} notes in the trash for good? This cannot be undone."
+      },
       "confirm": "Confirm"
     },
     "assemble": {
@@ -141,7 +144,121 @@
       "run": "Assemble",
       "running": "Assembling…",
       "error": "Couldn't assemble the notes: {message}",
-      "done": "New note created: {title}"
+      "done": "New note created: {title}",
+      "progress": "Assembling {count} notes…"
+    },
+    "turn": {
+      "button": "Turn",
+      "panel": "Turn the selected notes",
+      "left": "A quarter turn to the left",
+      "right": "A quarter turn to the right",
+      "hint": "The sheet, the writing and the background image turn together, as with \"Turn the sheet with the writing\" in the editor.",
+      "progress": "Turning the notes: {done} of {total}",
+      "undoProgress": "Turning the notes back: {done} of {total}",
+      "doneLeft": {
+        "one": "{count} note turned a quarter turn to the left.",
+        "other": "{count} notes turned a quarter turn to the left."
+      },
+      "doneRight": {
+        "one": "{count} note turned a quarter turn to the right.",
+        "other": "{count} notes turned a quarter turn to the right."
+      },
+      "failed": {
+        "one": "One note could not be turned:",
+        "other": "{count} notes could not be turned:"
+      },
+      "undone": {
+        "one": "The note is back the way it was.",
+        "other": "The {count} notes are back the way they were."
+      },
+      "undoFailed": {
+        "one": "One note could not be turned back:",
+        "other": "{count} notes could not be turned back:"
+      }
+    },
+    "activity": {
+      "stop": "Stop",
+      "stopping": "Stopping after this note…",
+      "stopped": {
+        "one": "Stopped before the end: the last note did not change.",
+        "other": "Stopped before the end: the last {count} notes did not change."
+      },
+      "undo": "Undo",
+      "failure": "\"{title}\": {message}",
+      "undoShortcut": "Undo (Ctrl+Z)"
+    },
+    "trashUndo": {
+      "done": {
+        "one": "Note moved to the trash.",
+        "other": "{count} notes moved to the trash."
+      },
+      "restored": {
+        "one": "Note restored.",
+        "other": "{count} notes restored."
+      },
+      "progress": "Restoring the notes: {done} of {total}",
+      "failed": {
+        "one": "One note could not be restored:",
+        "other": "{count} notes could not be restored:"
+      },
+      "trashFailed": {
+        "one": "One note could not be moved to the trash:",
+        "other": "{count} notes could not be moved to the trash:"
+      }
+    },
+    "tagColor": {
+      "button": "Colour of the tag \"{tag}\": {color}",
+      "palette": "Colour of the tag \"{tag}\"",
+      "none": "No colour",
+      "hint": "The dot next to a tag changes its colour, on every note that has it.",
+      "names": {
+        "red": "Red",
+        "orange": "Orange",
+        "yellow": "Yellow",
+        "green": "Green",
+        "teal": "Teal",
+        "blue": "Blue",
+        "purple": "Purple",
+        "pink": "Pink"
+      }
+    },
+    "binder": {
+      "menu": "Actions on the binder \"{name}\"",
+      "rename": "Rename…",
+      "delete": "Delete…",
+      "newName": "New name of the binder \"{name}\"",
+      "renameDo": "Rename",
+      "deleteTitle": "Delete the binder \"{name}\"",
+      "confirmEmpty": "Delete the binder \"{name}\"? It holds no note: its folder will be removed.",
+      "confirm": {
+        "one": "Delete the binder \"{name}\"? Its note goes to the trash, then its folder is removed.",
+        "other": "Delete the binder \"{name}\"? Its {count} notes go to the trash, then its folder is removed."
+      },
+      "confirmSubBinders": {
+        "one": "Its sub-binder is included.",
+        "other": "Its {count} sub-binders are included."
+      },
+      "confirmHint": "A note restored from the trash goes back to its binder. Files that are not notes stay where they are.",
+      "deleteDo": "Delete the binder",
+      "deleted": {
+        "one": "Binder \"{name}\" deleted: {count} note moved to the trash.",
+        "other": "Binder \"{name}\" deleted: {count} notes moved to the trash."
+      },
+      "deletedEmpty": "Binder \"{name}\" deleted.",
+      "folder": "\"{name}\"",
+      "kept": {
+        "one": "The folder {folders} could not be removed: it still holds files, or it is in use.",
+        "other": "The folders {folders} could not be removed: they still hold files, or they are in use."
+      },
+      "deleteFailed": {
+        "one": "One note could not be moved to the trash (it stays in its binder):",
+        "other": "{count} notes could not be moved to the trash (they stay in their binder):"
+      },
+      "restored": {
+        "one": "Binder \"{name}\" restored with its note.",
+        "other": "Binder \"{name}\" restored with its {count} notes."
+      },
+      "restoredEmpty": "Binder \"{name}\" restored."
     }
   },
   "settings": {
@@ -155,7 +272,6 @@
     "library": "Library folder",
     "machine": "This computer",
     "settingsFile": "Settings file",
-    "version": "Version {version}",
     "cancel": "Cancel",
     "tablet": "Tablet",
     "tabletNone": "No tablet is registered.",
@@ -188,6 +304,12 @@
       "drawWithFinger": "Draw with a finger",
       "drawWithFingerHint": "By default only the pen draws: a finger pans the page, two fingers zoom, a double tap fits the page. Tick this box for a touch screen without a pen; a finger then draws like the mouse.",
       "penHint": "The back of the pen erases (with the eraser's settings); the pen's button draws a selection lasso; fingers are ignored while the pen is in use or near the screen."
+    },
+    "librarySwitch": {
+      "title": "Change the library",
+      "hint": "Ardoise will show the notes of this folder at once, on this PC only ({machine}). The notes of the current library stay in their folder.",
+      "confirm": "Use this folder",
+      "current": "This is already the library of this PC: nothing changes."
     }
   },
   "assistant": {
@@ -215,7 +337,52 @@
     "copied": "Copied",
     "copyFailed": "Cannot copy: select the text and copy it with Ctrl+C.",
     "privacy": "Privacy: what the assistant reads (the text and image of your notes, sometimes students' names) goes to its provider, under your account's settings. Assistants usually ask for your consent before changing anything, but that depends on their permission settings; Ardoise flags the tools that change or remove notes. Nothing is ever deleted for good. To let it only read, declare it with \"Read only\" ticked.",
-    "guide": "Step by step: the \"Assistant\" guide (docs/guide/assistant.en.md)."
+    "guide": "Step by step: the \"Assistant\" guide, file guide\\assistant.en.html in Ardoise's folder."
+  },
+  "about": {
+    "section": "About",
+    "title": "About Ardoise",
+    "open": "About Ardoise…",
+    "nameVersion": "Ardoise, version {version}",
+    "version": "version {version}",
+    "licenseShort": "Free software, under the GPL-3.0 licence or later.",
+    "license": {
+      "title": "Licence",
+      "line": "Ardoise is distributed under the {license} licence (GNU General Public License, version 3 or, at your option, any later version).",
+      "meaning": "In plain words: you may use, copy, study, change and share Ardoise freely; if you distribute a modified version, it must stay free under the same licence. Ardoise comes with no warranty at all.",
+      "show": "Show the full text of the licence",
+      "hide": "Hide the full text of the licence",
+      "textLabel": "Full text of the GNU GPL version 3"
+    },
+    "credits": {
+      "title": "Credits",
+      "tuhi": "The Bamboo Slate's Bluetooth protocol was understood thanks to Tuhi, the free Linux driver for Wacom SmartPad tablets by Peter Hutterer, Benjamin Tissoires and contributors (https://github.com/tuhiproject/tuhi, GPL-2.0 or later). Tuhi's documentation of the tablet's protocol guided Ardoise, which reimplements it from its own notes and captures: Ardoise contains no Tuhi code."
+    },
+    "cisco": {
+      "title": "OpenH264 video encoder",
+      "notice": "OpenH264 Video Codec provided by Cisco Systems, Inc.",
+      "download": "Ardoise does not contain OpenH264: if Windows cannot write MP4 files, you download it yourself from Cisco, from the Settings. It is then kept on this computer only.",
+      "installed": "Installed on this computer (version {version}).",
+      "notInstalled": "Not installed on this computer.",
+      "damaged": "Present on this computer, but damaged: it has to be downloaded again.",
+      "license": "The licence of the binary provided by Cisco is shown in the Settings, under \"Backup video encoder (OpenH264)\"."
+    },
+    "components": {
+      "title": "Components",
+      "intro": "Ardoise is built with the free components below, each under its own licence.",
+      "search": "Filter the components",
+      "placeholder": "Name, version or licence",
+      "count": "Components shown: {shown} of {total}",
+      "none": "No component matches.",
+      "name": "Component",
+      "versionColumn": "Version",
+      "licenseColumn": "Licence"
+    },
+    "notices": {
+      "show": "Show the full licence texts of the components",
+      "hide": "Hide the licence texts of the components",
+      "textLabel": "Licence texts of the components (THIRD-PARTY-NOTICES file)"
+    }
   },
   "tablet": {
     "title": "Tablet",
@@ -344,7 +511,7 @@
     "open": "Test the tablet",
     "title": "Tablet test",
     "intro": "This test checks the link with the Bamboo Slate step by step and records every exchange in the library (_ardoise/diagnostics folder) for analysis. It takes about 5 minutes.",
-    "deleteAfterSync": "Delete pages from the tablet once saved",
+    "deleteAfterSync": "Delete pages from the tablet once added to the library as notes",
     "simulated": "Simulation (no tablet)",
     "start": "Start the test",
     "again": "Run the test again",
@@ -405,6 +572,7 @@
       "clockDrift": "Clock drift",
       "strokes": "Strokes",
       "points": "Points",
+      "notes": "Notes added to the library",
       "deleted": "Pages deleted",
       "folder": "Folder",
       "samples": "Points received",
@@ -442,7 +610,7 @@
   "errors": {
     "settings": "Cannot read the settings file {path}: {message}. It was left unchanged; fix or delete it, then restart Ardoise.",
     "library": "Cannot use this folder: {message}",
-    "generic": "Something went wrong: {message}"
+    "generic": "Something went wrong. {message}"
   },
   "errorCodes": {
     "settings": "the settings file cannot be read or written ({detail})",
@@ -513,7 +681,21 @@
     "backgroundMissing": "the background image is no longer in memory; reopen the note and choose the image again",
     "pdfUnsupported": "PDF files can only be read on Windows",
     "pdfEncrypted": "this PDF is protected by a password; save a copy without a password",
-    "pdfNoSuchPage": "this PDF has no such page ({detail})"
+    "pdfNoSuchPage": "this PDF has no such page ({detail})",
+    "draftFailed": "the backup copy of the changes could not be written or read ({detail})",
+    "draftNotFound": "these recovered changes no longer exist",
+    "invalidTagColor": "this colour is not in the palette ({detail})",
+    "tagColorsNewer": "the tag colours were saved by a newer version of Ardoise: update Ardoise on this PC to change them ({detail})",
+    "tagColorsConflict": "the tag colours were changing at the same moment, probably on another computer; try again in a moment ({detail})",
+    "binderExists": "a binder or a file already has this name here; choose another one ({detail})",
+    "binderNotFound": "this binder no longer exists; it may have been renamed or deleted on another computer ({detail})",
+    "inkspaceNotFound": "this folder holds no Inkspace notes ({detail}); choose Inkspace's “LocalState” folder or a copy of it",
+    "inkspaceUnreadable": "Inkspace's notes cannot be read ({detail}); close Inkspace and try again",
+    "inkspaceDamaged": "Inkspace's note database is damaged or in an unknown format ({detail}); if Inkspace is open, close it and try again",
+    "inkspaceTooLarge": "Inkspace's note database is too large to import ({detail})",
+    "inkspaceNoteDamaged": "this Inkspace note cannot be read ({detail})",
+    "inkspaceBusy": "an Inkspace import is already running",
+    "inkspaceTarget": "this binder is inside Inkspace's folder ({detail}); choose a binder of the library"
   },
   "editor": {
     "back": "Library",
@@ -621,7 +803,7 @@
     },
     "page": {
       "label": "Page",
-      "paper": "Paper",
+      "paper": "Paper colour",
       "template": "Template",
       "texture": "Paper texture",
       "rotateCcw": "Rotate the page a quarter turn to the left",
@@ -638,7 +820,7 @@
       "portraitLower": "portrait",
       "landscapeLower": "landscape",
       "orientationHint": "The writing does not turn: only the sheet changes direction, and the writing keeps its place.",
-      "size": "Paper",
+      "size": "Size",
       "width": "Width in millimetres",
       "height": "Height in millimetres",
       "apply": "Apply",
@@ -722,7 +904,9 @@
       "discard": "Go back without saving",
       "cancel": "Stay",
       "saveClose": "Save and close",
-      "discardClose": "Close without saving"
+      "discardClose": "Close without saving",
+      "saveSwitch": "Save and open the other note",
+      "discardSwitch": "Open without saving"
     },
     "share": {
       "label": "Split, copy, export"
@@ -775,7 +959,8 @@
     "video": {
       "button": "Video",
       "hint": "Export the replay as a video (MP4, WebM) or an animated image (GIF, WebP)…"
-    }
+    },
+    "backgroundLoadFailed": "This note's background image could not be loaded ({message}). The note opens without it; the image stays in the file unless you remove it."
   },
   "replay": {
     "bar": "Replay controls",
@@ -989,7 +1174,10 @@
     "run": "Print…",
     "again": "Print again…",
     "running": "Printing…",
-    "done": "Sent to the printer: {count} page(s).",
+    "done": {
+      "one": "Sent to the printer: {count} page.",
+      "other": "Sent to the printer: {count} pages."
+    },
     "cancelled": "Printing cancelled.",
     "failed": "Printing failed: {message}"
   },
@@ -1287,7 +1475,11 @@
         },
         "leave": {
           "keys": "Esc",
-          "action": "Finish (on the projected screen: close the presentation)"
+          "action": "Close the projection if it is shown, otherwise end live mode (after confirmation)"
+        },
+        "marks": {
+          "keys": "Delete, Backspace",
+          "action": "Clear the annotations drawn over the presentation (projected window)"
         }
       }
     },
@@ -1299,6 +1491,15 @@
       "savedOne": "Narration saved on 1 page.",
       "savedMany": "Narration saved on {count} pages.",
       "savedNone": "No page of the session has any strokes: the narration was not kept."
+    },
+    "clearDone": "Page cleared.",
+    "clearUndo": "Undo clearing",
+    "clearUndoFailed": "The clearing can no longer be undone: the page has changed since.",
+    "leave": {
+      "title": "End live mode?",
+      "message": "Every page you wrote is saved as a note in the library. To stop only the projection, use \"Stop projecting\": Esc also closes it while it is shown.",
+      "continue": "Continue",
+      "confirm": "End live mode"
     }
   },
   "presentation": {
@@ -1355,6 +1556,10 @@
       "save": "Save as .txt…",
       "saveMd": "Save as Markdown…",
       "saveDocx": "Save as Word…",
+      "includeDrawings": "Include the drawings (Markdown, Word)",
+      "drawingsHelp": "Diagrams and figures, as pictures between the paragraphs. A line drawn under words does not become a picture: those words are underlined (bold in Markdown).",
+      "drawingsChecking": "Looking for drawings…",
+      "noDrawings": "No drawing found: the text alone is exported.",
       "copy": "Copy the text",
       "working": "Reading the handwriting…",
       "saved": "Text saved:",
@@ -1416,7 +1621,10 @@
       "title": "New note from a PDF or an image",
       "pickTitle": "PDF or image to annotate",
       "intro": "Each PDF page becomes a note of its size and orientation (portrait or landscape), with the page in the background; an image becomes a note the size of an A4 sheet, in the image's orientation.",
-      "pdfInfo": "{count} page(s), the first one {width} × {height} mm.",
+      "pdfInfo": {
+        "one": "One page, {width} × {height} mm.",
+        "other": "{count} pages, the first one {width} × {height} mm."
+      },
       "pages": "Pages",
       "allPages": "All pages ({count})",
       "somePages": "Some pages",
@@ -1431,11 +1639,107 @@
       "running": "Creating the notes…",
       "progress": "Creating the notes: {done} of {total}…",
       "error": "The notes cannot be created: {message}",
-      "done": "Notes created: {count}"
+      "done": "Notes created: {count}",
+      "cancelling": "Cancelling…",
+      "cancelled": "Cancelled: no note was kept."
     },
     "assemble": {
       "droppedOne": "Only the first note's background image is kept: one other note's will not be carried over.",
       "droppedMany": "Only the first note's background image is kept: those of the {count} other notes will not be carried over."
+    }
+  },
+  "drafts": {
+    "shutdownReason": "A note has unsaved changes. Go back to Ardoise to save it.",
+    "writeFailed": "The backup copy of your changes could not be written ({message}). Remember to save the note.",
+    "copyTitle": "{title} (recovered)",
+    "restoredCopy": "The recovered changes are in the new note “{title}”.",
+    "recovery": {
+      "title": "Recovered changes",
+      "restoreText": "Ardoise closed before this note was saved. Its changes were kept (last copy on {date}).",
+      "copyText": "Ardoise closed before this note was saved, and the note has changed since (on another computer, for instance). Its changes (last copy on {date}) can be recovered into a new note, leaving this one as it is.",
+      "restore": "Recover the changes",
+      "copy": "Recover into a new note",
+      "discard": "Discard them",
+      "discardConfirm": "Discard these changes for good?",
+      "discardYes": "Discard",
+      "discardNo": "Keep",
+      "later": "Later",
+      "failed": "Recovery failed: {message}"
+    },
+    "library": {
+      "title": "Ardoise closed without saving some changes. Notes concerned: {count}",
+      "saved": "last copy on {date}",
+      "missing": "the note no longer exists",
+      "open": "Open",
+      "restoreCopy": "Recover into a new note",
+      "discard": "Discard",
+      "discardConfirm": "Discard the changes of “{title}” for good?",
+      "discardYes": "Discard",
+      "discardNo": "Keep",
+      "failed": "Recovery failed: {message}"
+    }
+  },
+  "libraryChoice": {
+    "noNotes": "It holds no note.",
+    "notes": {
+      "one": "It holds {count} note.",
+      "other": "It holds {count} notes."
+    },
+    "notesAtLeast": {
+      "one": "It holds at least {count} note (the folder is very large: the count stopped there).",
+      "other": "It holds at least {count} notes (the folder is very large: the count stopped there)."
+    }
+  },
+  "inkspace": {
+    "entry": "Import from Inkspace…",
+    "title": "Import from Wacom Inkspace",
+    "intro": "Ardoise can take over the notes written with Wacom Inkspace. Inkspace's data is neither changed nor deleted.",
+    "detecting": "Looking for Inkspace on this computer…",
+    "reading": "Reading Inkspace's notes…",
+    "location": "Inkspace's folder",
+    "foundOne": "1 note found",
+    "found": "{count} notes found",
+    "alreadyOne": "including 1 imported before (in the library or its trash), which will be skipped",
+    "already": "including {count} imported before (in the library or its trash), which will be skipped",
+    "unreadableOne": "including 1 that cannot be read",
+    "unreadable": "including {count} that cannot be read",
+    "pick": "Choose a folder…",
+    "pickOther": "Choose another folder…",
+    "pickTitle": "Wacom Inkspace's “LocalState” folder",
+    "retry": "Try again",
+    "notFound": "Ardoise did not find Wacom Inkspace on this computer. If you have a copy of Inkspace's “LocalState” folder (on a USB stick, for example), choose it.",
+    "readError": "This folder cannot be used: {message}",
+    "importError": "The import failed: {message}",
+    "binder": "Destination binder",
+    "binderHint": "Leave empty to put the notes at the root of the library.",
+    "importOne": "Import 1 note",
+    "import": "Import {count} notes",
+    "allImported": "All of Inkspace's notes were imported before (they are in the library or its trash): there is nothing to import.",
+    "allReadableImported": "All of Inkspace's readable notes were imported before (they are in the library or its trash): there is nothing to import.",
+    "progress": "Importing notes: {done} of {total}…",
+    "progressLabel": "Import progress",
+    "stop": "Stop the import",
+    "stopping": "Stopping after the current note…",
+    "doneTitle": "Import finished",
+    "cancelledTitle": "Import stopped",
+    "importedOne": "1 note imported into the binder “{binder}”",
+    "imported": "{count} notes imported into the binder “{binder}”",
+    "importedRootOne": "1 note imported at the root of the library",
+    "importedRoot": "{count} notes imported at the root of the library",
+    "nothingImported": "No note was imported.",
+    "skippedOne": "1 imported before (in the library or its trash), skipped",
+    "skipped": "{count} imported before (in the library or its trash), skipped",
+    "failedOne": "1 note could not be imported:",
+    "failed": "{count} notes could not be imported:",
+    "unknownDate": "Unknown date",
+    "cancelledHint": "The notes already imported are complete. Run the import again to add the others: those already in the library will be skipped.",
+    "show": "Show the imported notes",
+    "wizard": {
+      "found": "Ardoise found Wacom Inkspace notes on this computer.",
+      "foundCountOne": "Ardoise found Wacom Inkspace notes on this computer (1 note).",
+      "foundCount": "Ardoise found Wacom Inkspace notes on this computer ({count} notes).",
+      "check": "Import them into the library (binder “{binder}”)",
+      "hint": "You will confirm the import before it starts."
     }
   }
 }

@@ -157,11 +157,12 @@ fn write_and_rename<E>(
     replace: Replace,
     check: &mut dyn FnMut() -> Result<(), E>,
 ) -> Result<fs::Metadata, CheckedWriteError<E>> {
-    let mut file = OpenOptions::new().write(true).create_new(true).open(temp)?;
+    let mut file = create_temp_file(temp)?;
     file.write_all(bytes)?;
     file.flush()?;
     file.sync_all()?;
     drop(file);
+    show_temp_file(temp);
     // Read once the handle is closed, so that no pending timestamp update is missed.
     let metadata = fs::metadata(temp)?;
     let mut attempt = 1;
@@ -182,6 +183,103 @@ fn write_and_rename<E>(
             Ok(()) => return Ok(metadata),
         }
     }
+}
+
+/// Creates the temporary file. On Windows it is hidden while it is being written (a leading
+/// dot hides nothing there): a crash leaves a file Explorer does not show, and
+/// [`sweep_stale_temp_files`] removes it later.
+fn create_temp_file(temp: &Path) -> io::Result<fs::File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.attributes(windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN);
+    }
+    options.open(temp)
+}
+
+/// Makes the completed temporary file an ordinary one again: the rename keeps its attributes,
+/// and the note must not end up hidden. Best effort (a file left hidden is only less visible).
+fn show_temp_file(temp: &Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_ARCHIVE, SetFileAttributesW};
+        let wide: Vec<u16> = temp.as_os_str().encode_wide().chain([0]).collect();
+        let mut attempt = 1;
+        // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the call.
+        while unsafe { SetFileAttributesW(wide.as_ptr(), FILE_ATTRIBUTE_ARCHIVE) } == 0
+            && attempt < RENAME_ATTEMPTS
+        {
+            attempt += 1;
+            std::thread::sleep(RENAME_RETRY_DELAY);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = temp;
+}
+
+/// Whether `name` is a temporary file of [`temp_path_for`]: `.{name}.{pid}.{n}.part`.
+fn is_temp_name(name: &str) -> bool {
+    let Some(inner) = name
+        .strip_prefix('.')
+        .and_then(|rest| rest.strip_suffix(".part"))
+    else {
+        return false;
+    };
+    let mut parts = inner.rsplitn(3, '.');
+    let number = |part: Option<&str>| {
+        part.is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    };
+    number(parts.next()) && number(parts.next()) && parts.next().is_some_and(|n| !n.is_empty())
+}
+
+/// Deepest folder [`sweep_stale_temp_files`] explores.
+const SWEEP_DEPTH: usize = 64;
+
+/// Deletes the temporary files of [`write_atomic`] that a crash (or a killed process) left under
+/// `root`, when they were last written more than `older_than` ago, so that a write in progress
+/// is never touched. Only files named exactly as ours are removed; links are not followed and
+/// hidden folders (`.git`, a sync client's) are skipped. Returns how many were deleted.
+pub fn sweep_stale_temp_files(root: &Path, older_than: Duration) -> usize {
+    let Some(limit) = std::time::SystemTime::now().checked_sub(older_than) else {
+        return 0;
+    };
+    let mut removed = 0;
+    let mut pending = vec![(root.to_path_buf(), 0usize)];
+    while let Some((dir, depth)) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
+                if depth < SWEEP_DEPTH && !name.starts_with('.') {
+                    pending.push((entry.path(), depth + 1));
+                }
+            } else if kind.is_file()
+                && is_temp_name(name)
+                && entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .is_ok_and(|modified| modified < limit)
+                && fs::remove_file(entry.path()).is_ok()
+            {
+                removed += 1;
+            }
+        }
+    }
+    removed
 }
 
 fn with_retry(mut operation: impl FnMut() -> io::Result<()>) -> io::Result<()> {
@@ -335,6 +433,72 @@ mod tests {
         releaser.join().unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"new");
         assert_eq!(entries(dir.path()), ["a.txt"]);
+    }
+
+    #[test]
+    fn stale_temp_files_are_swept_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("Classe/3e B")).unwrap();
+        fs::create_dir_all(root.join("_ardoise")).unwrap();
+        fs::create_dir_all(root.join(".sync")).unwrap();
+        let old = std::time::SystemTime::now() - Duration::from_secs(3 * 24 * 3600);
+        let make = |path: &str, stamp: std::time::SystemTime| {
+            let path = root.join(path);
+            fs::write(&path, b"x").unwrap();
+            OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(stamp)
+                .unwrap();
+        };
+        let now = std::time::SystemTime::now();
+        // Ours and stale: gone, at the root, in a binder and in the library folder.
+        make(".2026-10-24 Cours.ardoise.4242.0.part", old);
+        make("Classe/3e B/.a.ardoise.7.12.part", old);
+        make("_ardoise/.device.json.9.3.part", old);
+        // Ours but recent (a write in progress), someone else's, or not ours.
+        make(".b.ardoise.4242.1.part", now);
+        make(".download.part", old);
+        make("c.ardoise.part", old);
+        make(".sync/.x.1.2.part", old);
+        make("note.ardoise", old);
+        assert_eq!(
+            sweep_stale_temp_files(root, Duration::from_secs(24 * 3600)),
+            3
+        );
+        assert_eq!(
+            entries(root),
+            [
+                ".b.ardoise.4242.1.part",
+                ".download.part",
+                ".sync",
+                "Classe",
+                "_ardoise",
+                "c.ardoise.part",
+                "note.ardoise"
+            ]
+        );
+        assert!(is_temp_name(".a.b.12.0.part"));
+        assert!(!is_temp_name(".a.12.part"));
+        assert!(!is_temp_name("a.1.2.part"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_temp_file_is_hidden_while_written_and_the_result_is_not() {
+        use std::os::windows::fs::MetadataExt;
+        const HIDDEN: u32 = 0x2;
+        let dir = tempfile::tempdir().unwrap();
+        let temp = dir.path().join(".t.1.0.part");
+        drop(create_temp_file(&temp).unwrap());
+        assert_ne!(fs::metadata(&temp).unwrap().file_attributes() & HIDDEN, 0);
+        show_temp_file(&temp);
+        assert_eq!(fs::metadata(&temp).unwrap().file_attributes() & HIDDEN, 0);
+        let target = dir.path().join("a.txt");
+        write_atomic(&target, b"x").unwrap();
+        assert_eq!(fs::metadata(&target).unwrap().file_attributes() & HIDDEN, 0);
     }
 
     #[test]

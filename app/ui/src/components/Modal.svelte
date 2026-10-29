@@ -1,11 +1,16 @@
 <script lang="ts" module>
   let counter = 0;
+  /** The modals open, the last one on top: only that one answers Escape. */
+  const stack: number[] = [];
 </script>
 
 <script lang="ts">
   /**
    * A modal dialog: title, content, Escape to close, Tab kept inside, focus moved in on opening
    * and given back on closing. `dismissible` false (an operation is running) ignores Escape.
+   * Escape works wherever the focus is (a button that became disabled, the native file picker
+   * that just closed: the focus is then on the page), for the topmost modal only; the focus
+   * comes back to the card when the control that had it is disabled.
    */
   import { onMount, type Snippet } from 'svelte';
 
@@ -13,15 +18,19 @@
     title,
     onclose,
     dismissible = true,
+    role = 'dialog',
     children,
   }: {
     title: string;
     onclose: () => void;
     dismissible?: boolean;
+    /** `alertdialog` for a question that must be answered (unsaved changes, leaving). */
+    role?: 'dialog' | 'alertdialog';
     children: Snippet;
   } = $props();
 
-  const titleId = `modal-title-${++counter}`;
+  const id = ++counter;
+  const titleId = `modal-title-${id}`;
   let dialog = $state<HTMLElement | null>(null);
 
   const FOCUSABLE = 'button, input, select, textarea, [href], [tabindex]:not([tabindex="-1"])';
@@ -32,19 +41,36 @@
     );
   }
 
+  /** The focus went nowhere (the control that had it was disabled): back to the dialog. */
+  function recoverFocus() {
+    const active = document.activeElement;
+    const lost = !active || active === document.body || (active instanceof HTMLElement && dialog?.contains(active) && 'disabled' in active && active.disabled);
+    if (lost && document.hasFocus()) dialog?.focus();
+  }
+
   onMount(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     (dialog?.querySelector<HTMLElement>('[data-autofocus]') ?? focusable()[0] ?? dialog)?.focus();
-    return () => previous?.focus();
+    stack.push(id);
+    const watcher = new MutationObserver(recoverFocus);
+    if (dialog) watcher.observe(dialog, { attributes: true, subtree: true, attributeFilter: ['disabled'] });
+    return () => {
+      watcher.disconnect();
+      const at = stack.lastIndexOf(id);
+      if (at >= 0) stack.splice(at, 1);
+      previous?.focus();
+    };
   });
 
+  /** Escape, wherever the focus is. */
+  function windowKey(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || event.defaultPrevented || stack[stack.length - 1] !== id) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (dismissible) onclose();
+  }
+
   function onkeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      if (dismissible) onclose();
-      return;
-    }
     if (event.key !== 'Tab') return;
     const items = focusable();
     if (items.length === 0) {
@@ -64,12 +90,14 @@
   }
 </script>
 
+<svelte:window onkeydown={windowKey} />
+
 <div class="modal-backdrop">
   <!-- The dialog handles the keys that bubble up from its own controls. -->
   <div
     bind:this={dialog}
     class="card modal"
-    role="dialog"
+    {role}
     aria-modal="true"
     aria-labelledby={titleId}
     tabindex="-1"

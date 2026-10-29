@@ -34,10 +34,11 @@
    * `lib/editor/original.ts`). Both are one undoable step, saved like any edit.
    */
   import { untrack } from 'svelte';
-  import { api, errorMessage, onLibraryChanged, type AppState } from '../../lib/api';
+  import { api, errorMessage, onLibraryChanged, onSessionEnding, type AppState } from '../../lib/api';
   import { NoteLoads, bridgeScreens } from '../../lib/app-bridge.svelte';
   import { loadCustomColors, rememberCustomColor } from '../../lib/editor/colors';
   import { binderOf, diskChange, type DiskChange } from '../../lib/editor/disk';
+  import { DraftKeeper, findOffer, type Offer } from '../../lib/editor/drafts';
   import { decodeStrokes, encodeStrokes } from '../../lib/editor/clipboard';
   import type { PixelsRef } from '../../lib/background';
   import { pixelsOf, removeBackgroundImage, setBackgroundImage, setImageFit, setImageOpacity } from '../../lib/editor/image';
@@ -89,6 +90,7 @@
   import type { NoteOriginal } from '../../lib/original';
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
+  import Modal from '../Modal.svelte';
   import PrintDialog from '../PrintDialog.svelte';
   import VideoExportDialog from '../VideoExportDialog.svelte';
   import { clock } from '../narration/format';
@@ -99,6 +101,8 @@
   import LayersPanel from './LayersPanel.svelte';
   import OriginalPanel from './OriginalPanel.svelte';
   import PagePanel from './PagePanel.svelte';
+  import RecoveryDialog from './RecoveryDialog.svelte';
+  import { narrationType } from './narration-playback';
   import ReplayBar from './ReplayBar.svelte';
   import { ReplayPlayer } from './replay-player.svelte';
   import SplitPanel from './SplitPanel.svelte';
@@ -186,6 +190,10 @@
   let printing = $state.raw<ExportSource[] | null>(null);
   let copying = $state(false);
   let leaving = $state(false);
+  /** Another note was asked for while this one has changes: the path to open once answered. */
+  let switching = $state<string | null>(null);
+  /** Renames that failed so far: leaving waits for the answer of the queued ones. */
+  let renameFailures = 0;
   /** The leave dialog was opened by a window close (not by the Back button). */
   let closing = $state(false);
   let spaceDown = $state(false);
@@ -244,6 +252,44 @@
     }),
   );
 
+  // Drafts (M10, `lib/editor/drafts.ts`): the unsaved note is kept outside the library a few
+  // seconds after each change, and at once when Windows ends the session; a draft left by an
+  // earlier run is offered when its note is opened.
+  /** The id of the note in its file (the key of its draft; the edited note may carry another). */
+  let noteId = '';
+  let offer = $state.raw<Offer | null>(null);
+  let recovering = $state(false);
+  let recoveryError = $state<string | null>(null);
+  let draftErrorShown = false;
+  const drafts = new DraftKeeper(
+    {
+      write: (snapshot) => api.draftWrite(snapshot),
+      discard: (id) => api.draftDiscard(id),
+      unsaved: (unsaved) => api.setUnsavedWork(unsaved ? t('drafts.shutdownReason') : null),
+    },
+    {
+      onerror: (error) => {
+        if (!alive || draftErrorShown) return;
+        draftErrorShown = true;
+        showNotice(t('drafts.writeFailed', { message: errorMessage(error) }), true);
+      },
+    },
+  );
+  $effect(() => {
+    const present = history?.present;
+    const snapshot =
+      present && dirty && stamp
+        ? {
+            path: currentPath,
+            noteId,
+            note: { ...present.note, title },
+            baseStamp: stamp,
+            imageKey: present.backgroundPixels?.key ?? null,
+          }
+        : null;
+    untrack(() => drafts.update(snapshot));
+  });
+
   /** False once the editor was closed or destroyed: late results call back no one. */
   let alive = true;
   /** Tail of the write queue. */
@@ -261,7 +307,18 @@
   $effect(() => {
     const next = path;
     untrack(() => {
-      if (next !== currentPath) void open(next);
+      if (next === currentPath) return;
+      // Unsaved edits are never dropped silently, nor writes still queued (opening drops them).
+      if (doc && (dirty || titleEdited())) {
+        switching = next;
+        leaving = true;
+      } else if (pendingWrites > 0) {
+        void settled().then(() => {
+          if (alive && next !== currentPath) void open(next);
+        });
+      } else {
+        void open(next);
+      }
     });
   });
 
@@ -277,11 +334,17 @@
             ? 'a narration is being recorded in the editor'
             : videoRunning
               ? 'a video is being exported from the editor'
-              : dirty
-                ? 'the note open in the editor has unsaved changes: the teacher must save or close it first'
-                : pendingWrites > 0
-                  ? 'the note open in the editor is being saved'
-                  : null,
+              : exporting || printing || video
+                ? 'a dialog (export, print or video) is open in the editor: the teacher must close it first'
+                : split
+                  ? 'the split panel is open in the editor: the teacher must finish or cancel it first'
+                  : leaving
+                    ? 'the editor is asking whether to save its changes: the teacher must answer first'
+                    : dirty || titleEdited()
+                      ? 'the note open in the editor has unsaved changes: the teacher must save or close it first'
+                      : pendingWrites > 0
+                        ? 'the note open in the editor is being saved'
+                        : null,
         loaded: () => loads.loaded(),
       }),
     ),
@@ -303,6 +366,9 @@
     onLibraryChanged(() => void checkDisk()).then(keep, () => {
       // Not watched: saving still detects conflicts.
     });
+    onSessionEnding(() => void drafts.flush()).then(keep, () => {
+      // Not told: the drafts written after each change are there.
+    });
     return () => {
       stopped = true;
       alive = false;
@@ -312,19 +378,26 @@
       recorder.dispose();
       // A recording is never thrown away silently: it goes into its note (or stays pending).
       salvageRecording();
+      // Unsaved edits leave with the editor only as a draft (written now, with its image's pixels).
+      const kept = drafts.dispose();
       dropNarrationSound();
       // The background images imported or opened here are no longer needed once the writes
-      // still queued (a "save as a copy" started just before leaving) have used their pixels;
-      // the next editor waits for this before it stages its own.
-      lastRelease = settled()
+      // still queued (a "save as a copy" started just before leaving) and the draft have used
+      // their pixels; the next editor waits for this before it stages its own.
+      lastRelease = Promise.all([settled(), kept])
         .then(() => api.releaseBackgroundImages())
         .catch(() => {});
     };
   });
 
   async function open(target: string) {
-    // Another note is opened: the recording of this one is saved before the editor moves on.
+    // Another note is opened: the recording of this one is saved before the editor moves on, and
+    // its unsaved edits (never expected here) are kept as a draft.
     salvageRecording();
+    const detached = drafts.detach();
+    offer = null;
+    recoveryError = null;
+    drafts.hold(false);
     generation += 1;
     currentPath = target;
     // Replaced by the load of another note if one starts before this one ends.
@@ -343,15 +416,23 @@
       // The previous note's background images go; this note's image is kept in memory by Rust
       // (its key goes into the history with the note, `lib/editor/image.ts`).
       await settled();
+      await detached;
       await lastRelease;
       await api.releaseBackgroundImages().catch(() => {});
       const [opened, module] = await Promise.all([api.openNote(target), ink ?? loadInk()]);
       if (currentPath !== target) return;
-      const staged = opened.note.backgroundImage ? await api.stageNoteBackground(target).catch(() => null) : null;
+      let imageFailure: string | null = null;
+      const staged = opened.note.backgroundImage
+        ? await api.stageNoteBackground(target).catch((error: unknown) => {
+            imageFailure = errorMessage(error);
+            return null;
+          })
+        : null;
       if (currentPath !== target) return;
       const fresh = docFromNote(opened.note, t('editor.layers.defaultName', { n: 1 }));
       const start = staged ? { ...fresh, backgroundPixels: pixelsOf(staged) } : fresh;
       ink = module;
+      noteId = opened.note.id;
       history = createHistory(start);
       savedNote = start.note;
       stamp = opened.stamp;
@@ -361,7 +442,10 @@
       conflict = null;
       saveError = null;
       void refreshOriginal(true);
+      void lookForDraft(target, opened);
       load.ok();
+      // The note opens without its image: say so instead of showing a bare page.
+      if (imageFailure !== null) showNotice(t('editor.backgroundLoadFailed', { message: imageFailure }), true);
     } catch (error) {
       if (currentPath === target) loadError = errorMessage(error);
       load.fail(error);
@@ -416,6 +500,11 @@
     // The file changed or went away: the edits are kept, and can be saved as a copy.
     if (code === 'noteConflict' || code === 'noteNotFound') conflict = errorMessage(error);
     else saveError = errorMessage(error);
+  }
+
+  /** A title typed in the field and not renamed yet. */
+  function titleEdited(): boolean {
+    return !!doc && titleDraft.trim() !== targetTitle;
   }
 
   function save(): Promise<boolean> {
@@ -473,6 +562,7 @@
       } catch (error) {
         if (gen !== generation) return;
         titleError = errorMessage(error);
+        renameFailures += 1;
         targetTitle = title;
         titleDraft = title;
       }
@@ -503,6 +593,7 @@
         }
         if (gen !== generation) return false;
         currentPath = created.path;
+        noteId = created.id;
         stamp = next;
         savedNote = present.note;
         title = copyTitle;
@@ -568,6 +659,83 @@
     void open(currentPath);
   }
 
+  // --- Drafts (M10) -----------------------------------------------------------------------
+
+  /** Offers the draft of the note just opened, if one was left (`RecoveryDialog`). */
+  async function lookForDraft(target: string, opened: { note: Note; stamp: FileStamp }) {
+    const gen = generation;
+    const found = await findOffer(api.draftFind, api.draftDiscard, opened.note.id, opened);
+    if (!alive || gen !== generation || currentPath !== target) return;
+    offer = found;
+    // Until the user chooses, nothing written here may replace that draft.
+    drafts.hold(found !== null);
+  }
+
+  function closeOffer() {
+    offer = null;
+    recoveryError = null;
+    drafts.hold(false);
+  }
+
+  /** The draft's note over the opened one, as one undoable step (Ctrl+Z gives the saved version back). */
+  async function restoreDraft() {
+    const current = offer;
+    if (!current || !history || recovering) return;
+    recovering = true;
+    recoveryError = null;
+    const gen = generation;
+    try {
+      const restored = current.draft.note;
+      let pixels = history.present.backgroundPixels;
+      const kept = current.draft.hasImage ? await api.draftStageImage(noteId) : null;
+      if (gen !== generation || !history) return;
+      if (kept) pixels = pixelsOf(kept);
+      else if (!sameImage(restored.backgroundImage, history.present.note.backgroundImage)) pixels = undefined;
+      const fresh = docFromNote(restored, t('editor.layers.defaultName', { n: 1 }));
+      change(restored.backgroundImage && pixels ? { ...fresh, backgroundPixels: pixels } : fresh);
+      // That draft now follows the note: replaced by the next one, removed once it is saved.
+      drafts.adopt(noteId);
+      closeOffer();
+    } catch (error) {
+      if (gen === generation) recoveryError = errorMessage(error);
+    } finally {
+      recovering = false;
+    }
+  }
+
+  function sameImage(a: BackgroundImage | undefined, b: BackgroundImage | undefined): boolean {
+    return !!a && !!b && a.name === b.name && a.pdfPage === b.pdfPage;
+  }
+
+  /** The draft as a new note beside this one (left untouched), which the editor then opens. */
+  async function restoreDraftAsCopy() {
+    const current = offer;
+    if (!current || recovering) return;
+    recovering = true;
+    recoveryError = null;
+    const gen = generation;
+    try {
+      const name = current.draft.title.trim() || title.trim() || t('editor.untitled');
+      const created = await api.draftRestoreCopy(noteId, t('drafts.copyTitle', { title: name }));
+      if (gen !== generation || !alive) return;
+      closeOffer();
+      const opening = open(created.path);
+      notifySaved(created.path);
+      await opening;
+      showNotice(t('drafts.restoredCopy', { title: created.title }));
+    } catch (error) {
+      if (gen === generation) recoveryError = errorMessage(error);
+    } finally {
+      recovering = false;
+    }
+  }
+
+  async function discardDraft() {
+    if (!offer || recovering) return;
+    closeOffer();
+    await drafts.discard(noteId);
+  }
+
   // --- Leaving ----------------------------------------------------------------------------
 
   /** Set while leaving waits for the queued writes. */
@@ -581,9 +749,11 @@
     if (pendingWrites > 0) {
       if (closeAfterWrites) return;
       closeAfterWrites = true;
+      const failures = renameFailures;
       void settled().then(() => {
         closeAfterWrites = false;
-        if (alive) close();
+        // A rename that failed meanwhile (the title field's blur): its error is shown, not lost.
+        if (alive && renameFailures === failures) close();
       });
       return;
     }
@@ -594,7 +764,7 @@
   function back() {
     if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
     if (videoRunning) return showNotice(t('videoExport.closeBusy'), true);
-    if (dirty) leaving = true;
+    if (dirty || titleEdited()) leaving = true;
     else close();
   }
 
@@ -610,9 +780,9 @@
       showNotice(t('videoExport.closeBusy'), true);
       return true;
     }
-    if (!alive || (!dirty && pendingWrites === 0)) return false;
+    if (!alive || (!dirty && !titleEdited() && pendingWrites === 0)) return false;
     if (windowClose.destroy) {
-      if (dirty) {
+      if (dirty || titleEdited()) {
         closing = true;
         leaving = true;
       } else {
@@ -632,16 +802,28 @@
 
   async function saveAndLeave() {
     const fromWindow = closing;
+    const target = switching;
+    const failures = renameFailures;
     const ok = await save();
+    await settled();
     leaving = false;
     closing = false;
-    if (!ok) return;
-    if (fromWindow) await closeWindow();
+    switching = null;
+    // Nothing leaves while the save or the rename failed: their error stays in view.
+    if (!ok || renameFailures !== failures) return;
+    if (target !== null) void open(target);
+    else if (fromWindow) await closeWindow();
     else close();
   }
 
   function discardAndLeave() {
-    if (closing) void closeWindow();
+    void drafts.discard(noteId);
+    const target = switching;
+    switching = null;
+    if (target !== null) {
+      leaving = false;
+      void open(target);
+    } else if (closing) void closeWindow();
     else {
       leaving = false;
       close();
@@ -649,8 +831,12 @@
   }
 
   function stay() {
+    const wanted = switching;
     leaving = false;
     closing = false;
+    switching = null;
+    // The library screen asked for another note: it goes back to following this one.
+    if (wanted !== null) notifySaved(currentPath);
   }
 
   // --- Tools and style -------------------------------------------------------------------
@@ -729,7 +915,7 @@
 
   /** Whether the editing keys are free to act now (no dialog, split panel or replay). */
   function canEditNow(target: EventTarget | null): boolean {
-    return !!doc && !leaving && !exporting && !video && !split && !replaying && !isTyping(target);
+    return !!doc && !leaving && !offer && !exporting && !video && !split && !replaying && !isTyping(target);
   }
 
   /** Pastes strokes from the clipboard as one undoable step (the copies are then selected). */
@@ -1045,9 +1231,9 @@
     narrationLoading = true;
     narrationError = null;
     try {
-      const wav = await api.narrationAudio(currentPath);
+      const sound = await api.narrationAudio(currentPath);
       if (gen !== generation || !replaying || narration !== info) return;
-      const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
+      const url = URL.createObjectURL(new Blob([sound], { type: narrationType(sound) }));
       dropNarrationSound();
       narrationUrl = url;
       player.setOptions({ speed: info.speed, maxPauseMs: info.maxPauseMs });
@@ -1191,10 +1377,15 @@
     return e.key === '2' || e.code === 'Digit2' || e.code === 'Numpad2';
   }
 
+  /** Ctrl + 0 (the whole page), whatever the layout: 0 is typed with Shift on a French keyboard. */
+  function isFitKey(e: KeyboardEvent): boolean {
+    return e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0';
+  }
+
   /** The keys of replay mode: R and Escape leave it, Space plays or pauses; nothing edits the note. */
   function replayKey(e: KeyboardEvent, key: string, mod: boolean) {
     if (mod) {
-      if (key === '0') {
+      if (isFitKey(e)) {
         e.preventDefault();
         canvas?.fit();
       } else if (isFitWidthKey(e)) {
@@ -1266,8 +1457,8 @@
         '0': () => canvas?.fit(),
         '2': () => canvas?.fitWidth(),
       };
-      // Ctrl + 2 is typed with Shift on some layouts (French): the key code says it too.
-      const run = action[isFitWidthKey(e) ? '2' : key];
+      // Ctrl + 0 and Ctrl + 2 are typed with Shift on some layouts (French): the key code says it too.
+      const run = action[isFitKey(e) ? '0' : isFitWidthKey(e) ? '2' : key];
       if (run) {
         e.preventDefault();
         run();
@@ -1655,21 +1846,29 @@
   {/if}
 
   {#if leaving}
-    <div class="editor-dialog-backdrop">
-      <div class="card editor-dialog" role="alertdialog" aria-modal="true" aria-labelledby="editor-leave-title" aria-describedby="editor-leave-text">
-        <h2 id="editor-leave-title">{t('editor.leave.title')}</h2>
-        <p id="editor-leave-text">{t('editor.leave.message')}</p>
-        <div class="actions">
-          <!-- svelte-ignore a11y_autofocus -->
-          <button type="button" class="button primary" autofocus onclick={saveAndLeave} disabled={saving}>
-            {closing ? t('editor.leave.saveClose') : t('editor.leave.save')}
-          </button>
-          <button type="button" class="button danger" onclick={discardAndLeave}>
-            {closing ? t('editor.leave.discardClose') : t('editor.leave.discard')}
-          </button>
-          <button type="button" class="button" onclick={stay}>{t('editor.leave.cancel')}</button>
-        </div>
+    <Modal title={t('editor.leave.title')} onclose={stay} role="alertdialog">
+      <p>{t('editor.leave.message')}</p>
+      <div class="actions">
+        <button type="button" class="button primary" data-autofocus onclick={saveAndLeave} disabled={saving}>
+          {switching !== null ? t('editor.leave.saveSwitch') : closing ? t('editor.leave.saveClose') : t('editor.leave.save')}
+        </button>
+        <button type="button" class="button danger" onclick={discardAndLeave}>
+          {switching !== null ? t('editor.leave.discardSwitch') : closing ? t('editor.leave.discardClose') : t('editor.leave.discard')}
+        </button>
+        <button type="button" class="button" onclick={stay}>{t('editor.leave.cancel')}</button>
       </div>
-    </div>
+    </Modal>
+  {/if}
+
+  {#if offer}
+    <RecoveryDialog
+      {offer}
+      busy={recovering}
+      error={recoveryError}
+      onrestore={restoreDraft}
+      oncopy={restoreDraftAsCopy}
+      ondiscard={discardDraft}
+      onlater={back}
+    />
   {/if}
 </section>

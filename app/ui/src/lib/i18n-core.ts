@@ -25,6 +25,36 @@ export function lookup(messages: Messages, key: string): string | undefined {
   return typeof node === 'string' ? node : undefined;
 }
 
+/**
+ * Plural messages: a catalog entry `{ "one": "…", "other": "…" }` whose wording follows a count,
+ * chosen by the language's plural rules (in French, 0 and 1 take `one`; in English only 1 does).
+ * Categories other than these two (French `many` for millions) fall back to `other`.
+ */
+export type PluralCategory = 'one' | 'other';
+
+export function pluralCategory(locale: Locale, count: number): PluralCategory {
+  return new Intl.PluralRules(locale).select(count) === 'one' ? 'one' : 'other';
+}
+
+/** The form of the plural message `key` for `count`, or undefined when the catalog has none. */
+export function lookupPlural(messages: Messages, key: string, locale: Locale, count: number): string | undefined {
+  return lookup(messages, `${key}.${pluralCategory(locale, count)}`) ?? lookup(messages, `${key}.other`);
+}
+
+/** Whether a catalog node is a plural message (it has an `other` form). */
+export function isPluralMessage(node: string | Messages): node is Messages {
+  return typeof node !== 'string' && 'other' in node;
+}
+
+/** Dotted paths of every plural message of a catalog. */
+export function pluralKeys(messages: Messages, prefix = ''): string[] {
+  return Object.entries(messages).flatMap(([key, value]) => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (typeof value === 'string') return [];
+    return isPluralMessage(value) ? [path] : pluralKeys(value, path);
+  });
+}
+
 /** Replaces `{name}` placeholders; unknown placeholders are left visible. */
 export function interpolate(template: string, params?: Record<string, string | number>): string {
   if (!params) return template;

@@ -82,6 +82,19 @@ pub struct LibraryWatcher {
     watcher: Option<RecommendedWatcher>,
     messages: Sender<Message>,
     thread: Option<JoinHandle<()>>,
+    /// Closed (or sent to) once the first scan is done.
+    scanned: Receiver<()>,
+}
+
+impl LibraryWatcher {
+    /// Waits until the first scan of the library is done. It runs on the watcher's thread (on
+    /// a synced folder of a thousand notes it takes seconds, and callers such as the window's
+    /// start must not wait for it); a note written between [`Library::watch`] and the end of
+    /// that scan is part of the starting state, not a change. Tests that write right after
+    /// starting the watch wait for it.
+    pub fn wait_until_scanned(&self) {
+        let _ = self.scanned.recv();
+    }
 }
 
 impl std::fmt::Debug for LibraryWatcher {
@@ -107,8 +120,8 @@ type Snapshot = BTreeMap<PathBuf, FileStamp>;
 fn scan(root: &Path) -> Snapshot {
     let mut snapshot = Snapshot::new();
     walk::walk(root, |found| {
-        if let Found::Note { path, .. } = found
-            && let Ok(stamp) = FileStamp::of(&path)
+        if let Found::Note { path, stamp, .. } = found
+            && let Some(stamp) = stamp.or_else(|| FileStamp::of(&path).ok())
         {
             snapshot.insert(path, stamp);
         }
@@ -249,9 +262,14 @@ fn run(
     root: PathBuf,
     debounce: Duration,
     messages: Receiver<Message>,
-    mut snapshot: Snapshot,
+    scanned: Sender<()>,
     mut on_change: impl FnMut(Vec<LibraryChange>),
 ) {
+    // Scanned once the system watch is active: nothing can fall in between (events that came
+    // meanwhile wait in `messages` and make a rescan, which finds nothing new).
+    let mut snapshot = scan(&root);
+    let _ = scanned.send(());
+    drop(scanned);
     // Under continuous activity, still report at least this often.
     let max_delay = (debounce * 4).max(Duration::from_secs(1));
     let mut first_event: Option<Instant> = None;
@@ -321,17 +339,17 @@ impl Library {
         watcher
             .watch(&self.root, RecursiveMode::Recursive)
             .map_err(|e| watch_error(e.to_string()))?;
-        // Scanned once the system watch is active: nothing can fall in between.
-        let snapshot = scan(&self.root);
         let root = self.root.clone();
+        let (done, scanned) = mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("ardoise-library-watch".to_owned())
-            .spawn(move || run(root, debounce, receiver, snapshot, on_change))
+            .spawn(move || run(root, debounce, receiver, done, on_change))
             .map_err(|e| watch_error(e.to_string()))?;
         Ok(LibraryWatcher {
             watcher: Some(watcher),
             messages: sender,
             thread: Some(thread),
+            scanned,
         })
     }
 }

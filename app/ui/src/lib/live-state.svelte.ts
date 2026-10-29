@@ -42,6 +42,8 @@ import type { Background, Layer, PageSize, Rgba, Stroke } from './note';
 export interface SaveError {
   /** 0-based. */
   pageIndex: number;
+  /** The library error's code: `errorMessage({ code, message })` says it in words. */
+  code: string;
   message: string;
 }
 
@@ -245,7 +247,7 @@ export class LiveState {
       case 'saveFailed':
         this.saveErrors = [
           ...this.saveErrors.filter((e) => e.pageIndex !== event.pageIndex),
-          { pageIndex: event.pageIndex, message: event.message },
+          { pageIndex: event.pageIndex, code: event.code, message: event.message },
         ].sort((a, b) => a.pageIndex - b.pageIndex);
         break;
     }

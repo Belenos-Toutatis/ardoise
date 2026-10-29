@@ -2,13 +2,93 @@
 //! list items and drawings (cropped images). Platform-free; [`crate::markdown`] and
 //! [`crate::docx`] write it. The structure itself comes from [`crate::structure`].
 
+use std::fmt;
+
+/// A line drawn by hand on words: never a drawing of its own, it decorates the words it covers
+/// (see `structure`, "Underlines").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mark {
+    #[default]
+    None,
+    /// Under the words: Word underlines them, Markdown gives them strong emphasis (`**…**`).
+    Underline,
+    /// Through the words: Word strikes them, Markdown `~~…~~`.
+    Strike,
+}
+
+/// Consecutive words with the same mark, separated by single spaces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    pub text: String,
+    pub mark: Mark,
+}
+
+/// The text of a paragraph or a list item: its spans, separated by single spaces. Displayed, it
+/// is the plain text (the marks left out).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Text {
+    pub spans: Vec<Span>,
+}
+
+impl Text {
+    /// Text without marks (nothing when `text` is blank).
+    pub fn plain(text: &str) -> Text {
+        Text::from_words(text.split_whitespace().map(|word| (word, Mark::None)))
+    }
+
+    /// The words with their marks, in order: consecutive words with the same mark share a span,
+    /// empty words are left out.
+    pub fn from_words<'a>(words: impl IntoIterator<Item = (&'a str, Mark)>) -> Text {
+        let mut spans: Vec<Span> = Vec::new();
+        for (word, mark) in words {
+            let word = word.trim();
+            if word.is_empty() {
+                continue;
+            }
+            match spans.last_mut() {
+                Some(span) if span.mark == mark => {
+                    span.text.push(' ');
+                    span.text.push_str(word);
+                }
+                _ => spans.push(Span {
+                    text: word.to_owned(),
+                    mark,
+                }),
+            }
+        }
+        Text { spans }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.spans.iter().all(|span| span.text.trim().is_empty())
+    }
+}
+
+impl fmt::Display for Text {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, span) in self.spans.iter().enumerate() {
+            if index > 0 {
+                f.write_str(" ")?;
+            }
+            f.write_str(&span.text)?;
+        }
+        Ok(())
+    }
+}
+
+impl From<&str> for Text {
+    fn from(text: &str) -> Text {
+        Text::plain(text)
+    }
+}
+
 /// One block of a note's body, in reading order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     /// A paragraph: its lines joined by single spaces.
-    Paragraph(String),
+    Paragraph(Text),
     /// A list item (its bullet or number mark removed). Consecutive items make one list.
-    ListItem(String),
+    ListItem(Text),
     /// Ink that is not text, as an image.
     Drawing(Drawing),
 }
@@ -102,6 +182,39 @@ pub(crate) mod tests {
                 Block::Paragraph("1. fin".into()),
             ],
         }
+    }
+
+    #[test]
+    fn text_keeps_its_marks_in_spans() {
+        let text = Text::from_words([
+            ("la", Mark::None),
+            ("lumière", Mark::None),
+            ("en", Mark::Underline),
+            (" ", Mark::Strike),
+            ("ligne", Mark::Underline),
+            ("droite", Mark::Strike),
+        ]);
+        assert_eq!(
+            text.spans,
+            [
+                Span {
+                    text: "la lumière".into(),
+                    mark: Mark::None
+                },
+                Span {
+                    text: "en ligne".into(),
+                    mark: Mark::Underline
+                },
+                Span {
+                    text: "droite".into(),
+                    mark: Mark::Strike
+                },
+            ]
+        );
+        assert_eq!(text.to_string(), "la lumière en ligne droite");
+        assert_eq!(Text::plain("  deux   mots "), Text::from("deux mots"));
+        assert!(Text::plain(" ").is_empty());
+        assert!(Text::default().is_empty());
     }
 
     #[test]

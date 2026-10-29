@@ -47,7 +47,7 @@ describe('new notes from a PDF or an image', () => {
     const create = vi.spyOn(api, 'createNotesFromFile');
     const { button } = place(NewFromFileDialog, { binder: 'Classe', onclose: vi.fn(), oncreated });
     await vi.waitFor(() => expect(document.querySelector('[data-slot="new-from-file-name"]')?.textContent).toBe('fiche.pdf'));
-    expect(document.body.textContent).toContain('3 page(s), la première de 210 × 297 mm.');
+    expect(document.body.textContent).toContain('3 pages, la première de 210 × 297 mm.');
     expect(button('Créer les 3 notes').disabled).toBe(false);
 
     // Some pages only: an invalid list blocks the button.
@@ -93,6 +93,37 @@ describe('new notes from a PDF or an image', () => {
     );
     finish();
     await vi.waitFor(() => expect(oncreated).toHaveBeenCalledTimes(1));
+  });
+
+  it('can be cancelled while the notes are made: nothing is kept, no error', async () => {
+    (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\Documents\fiche.pdf';
+    const cancelling = vi.spyOn(api, 'cancelCreateNotes');
+    let refuse!: (error: unknown) => void;
+    vi.spyOn(api, 'createNotesFromFile').mockImplementation(
+      (_binder, _path, _pages, onProgress) =>
+        new Promise((_resolve, reject) => {
+          onProgress?.({ done: 1, total: 3 });
+          refuse = reject;
+        }),
+    );
+    const oncreated = vi.fn();
+    const { button } = place(NewFromFileDialog, { binder: '', onclose: vi.fn(), oncreated });
+    await vi.waitFor(() => expect(button('Créer les 3 notes').disabled).toBe(false));
+    button('Créer les 3 notes').click();
+    await vi.waitFor(() => expect(document.querySelector('progress')?.getAttribute('value')).toBe('1'));
+    // « Annuler » is available while the notes are made.
+    const cancel = document.querySelector<HTMLButtonElement>('button[data-action="cancel-create"]')!;
+    expect(cancel.disabled).toBe(false);
+    cancel.click();
+    await tick();
+    expect(cancelling).toHaveBeenCalledTimes(1);
+    expect(cancel.textContent?.trim()).toBe('Annulation…');
+    // Rust answers with the code « cancelled » once the page being rendered is done.
+    refuse({ code: 'cancelled', message: 'the import was cancelled' });
+    await vi.waitFor(() => expect(document.querySelector('[data-slot="new-from-file-cancelled"]')).toBeTruthy());
+    expect(oncreated).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(button('Créer les 3 notes').disabled).toBe(false);
   });
 
   it('makes one note from an image, and closes when no file is chosen', async () => {

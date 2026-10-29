@@ -35,7 +35,7 @@ use ardoise_media::microphone::{CaptureStatus, Level, Recorder, list_input_devic
 use ardoise_media::replay::{MAX_SPEED, MIN_SPEED, ReplayOptions};
 use ardoise_media::{
     AudioClip, MediaError, NARRATION_SAMPLE_RATE, Narration, NarrationBase, NarrationHeader,
-    decode_narration, encode_narration, narration_header, wav_bytes,
+    encode_narration, narration_header,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -986,13 +986,15 @@ pub fn delete_narration_in(
         .map_err(library_error)
 }
 
-/// The narration stored in the note at `path`, if any.
+/// The narration stored in the note at `path`, if any, decoded (the tests compare it with what
+/// the interface gets).
+#[cfg(test)]
 pub fn read_narration(library: &Library, path: &Path) -> CommandResult<Option<Narration>> {
     let loaded = library.read(path).map_err(library_error)?;
     loaded
         .file
         .audio
-        .map(|bytes| decode_narration(&bytes).map_err(damaged))
+        .map(|bytes| ardoise_media::decode_narration(&bytes).map_err(damaged))
         .transpose()
 }
 
@@ -1011,11 +1013,18 @@ pub fn narration_info_in(library: &Library, path: &Path) -> CommandResult<Option
         .transpose()
 }
 
-/// The narration of the note at `path` as a WAV file (`noNarration` when it has none).
-pub fn narration_wav(library: &Library, path: &Path) -> CommandResult<Vec<u8>> {
-    let narration = read_narration(library, path)?
+/// The narration of the note at `path` as stored (`noNarration` when it has none): its Ogg Opus
+/// stream, which the WebView plays itself (M10: no longer decoded to a WAV file, which took
+/// 345 MB of memory per hour of sound). Its headers are checked (`noteDamaged`), its sound is
+/// not decoded.
+pub fn narration_opus(library: &Library, path: &Path) -> CommandResult<Vec<u8>> {
+    let loaded = library.read(path).map_err(library_error)?;
+    let bytes = loaded
+        .file
+        .audio
         .ok_or_else(|| CommandError::new(NO_NARRATION, "this note has no narration"))?;
-    Ok(wav_bytes(&narration.clip))
+    narration_header(&bytes).map_err(damaged)?;
+    Ok(bytes)
 }
 
 /// Hands the pieces of a live recording to the hub; returns how many pages got narration.
@@ -1423,14 +1432,16 @@ pub async fn narration_info(
     narration_info_in(&library_of(&context)?, Path::new(&path))
 }
 
-/// The narration of a note as a WAV file (raw bytes: an `ArrayBuffer` in the interface).
+/// The narration of a note as stored, an Ogg Opus stream (raw bytes: an `ArrayBuffer` in the
+/// interface), read on a blocking thread.
 #[tauri::command]
 pub async fn narration_audio(
     context: State<'_, AppContext>,
     path: String,
 ) -> CommandResult<tauri::ipc::Response> {
-    let wav = narration_wav(&library_of(&context)?, Path::new(&path))?;
-    Ok(tauri::ipc::Response::new(wav))
+    let library = library_of(&context)?;
+    let opus = crate::notes::blocking(move || narration_opus(&library, Path::new(&path))).await?;
+    Ok(tauri::ipc::Response::new(opus))
 }
 
 #[tauri::command]
@@ -1439,7 +1450,8 @@ pub async fn delete_narration(
     path: String,
     stamp: FileStamp,
 ) -> CommandResult<FileStamp> {
-    delete_narration_in(&library_of(&context)?, Path::new(&path), &stamp)
+    let library = library_of(&context)?;
+    crate::notes::blocking(move || delete_narration_in(&library, Path::new(&path), &stamp)).await
 }
 
 #[cfg(test)]

@@ -4,11 +4,14 @@
    * notes) read by Windows' recognition, saved as a UTF-8 `.txt` file (one note after the other,
    * each with its title), as Markdown or as a Word document (with the structure drawn from the
    * ink: paragraphs, list items, drawings), or copied to the clipboard, with a preview. The dialog
-   * serves the editor (the note as it is in memory) and the library selection alike.
+   * serves the editor (the note as it is in memory) and the library selection alike. The drawings
+   * of Markdown and Word can be left out: the option is on only when the notes have some (looked
+   * for when the dialog opens, for a few notes; the desktop app keeps what it found for the export).
    */
+  import { onMount } from 'svelte';
   import { api, errorMessage } from '../lib/api';
   import { pickExportFile } from '../lib/dialogs';
-  import { exportStem } from '../lib/export-options';
+  import { drawingCheck, exportStem } from '../lib/export-options';
   import { textFileName, type NoteText, type StructuredFormat, type TextLabels } from '../lib/handwriting';
   import { t } from '../lib/i18n.svelte';
   import type { ExportSource } from '../lib/note';
@@ -30,8 +33,45 @@
   let preview = $state.raw<NoteText[] | null>(null);
   let previewLoading = $state(false);
   let previewError = $state<string | null>(null);
+  /** Markdown and Word include the drawings. */
+  let includeDrawings = $state(true);
+  /** How many drawings the notes have; null while unknown (not looked for, or the search failed). */
+  let drawings = $state<number | null>(null);
+  let drawingsChecking = $state(false);
 
   const busy = $derived(disabled || phase !== 'idle');
+
+  /** Beyond this many notes, the drawings are not looked for (seconds of analysis per note). */
+  const MAX_DRAWING_CHECK = 5;
+
+  // Whether the notes have drawings: the option is on only when they do. Unknown, it stays on (a
+  // note without drawings exports the same either way). The search never holds the buttons for
+  // more than a few seconds: past that, the drawings are left in and the export goes ahead.
+  onMount(() => {
+    if (sources.length === 0 || sources.length > MAX_DRAWING_CHECK) return;
+    let alive = true;
+    drawingsChecking = true;
+    const giveUp = setTimeout(() => {
+      alive = false;
+      drawingsChecking = false;
+    }, drawingCheck.limitMs);
+    api
+      .structuredTextDrawings(requestSources())
+      .then((count) => {
+        if (!alive) return;
+        drawings = count;
+        includeDrawings = count > 0;
+      })
+      .catch(() => {})
+      .finally(() => {
+        clearTimeout(giveUp);
+        if (alive) drawingsChecking = false;
+      });
+    return () => {
+      alive = false;
+      clearTimeout(giveUp);
+    };
+  });
 
   /** Fresh copies: the editor's note is reactive state. */
   function requestSources(): ExportSource[] {
@@ -73,7 +113,7 @@
       if (format === 'txt') {
         done = { kind: 'saved', path: await api.exportHandwritingText(requestSources(), chosen), images: 0 };
       } else {
-        const result = await api.exportStructuredText(requestSources(), format, chosen, labels());
+        const result = await api.exportStructuredText(requestSources(), format, chosen, labels(), includeDrawings);
         done = { kind: 'saved', path: result.paths[0] ?? chosen, images: Math.max(0, result.paths.length - 1) };
         guessed = !result.analyzed;
       }
@@ -119,16 +159,47 @@
     <button type="button" class="button" data-action="text-save" disabled={busy} onclick={() => save('txt')}>
       {phase === 'saving' ? t('handwriting.export.working') : t('handwriting.export.save')}
     </button>
-    <button type="button" class="button" data-action="text-md" disabled={busy} onclick={() => save('md')}>
+    <!-- Not while the drawings are looked for: the export would analyse the same pages again. -->
+    <button
+      type="button"
+      class="button"
+      data-action="text-md"
+      disabled={busy || drawingsChecking}
+      onclick={() => save('md')}
+    >
       {t('handwriting.export.saveMd')}
     </button>
-    <button type="button" class="button" data-action="text-docx" disabled={busy} onclick={() => save('docx')}>
+    <button
+      type="button"
+      class="button"
+      data-action="text-docx"
+      disabled={busy || drawingsChecking}
+      onclick={() => save('docx')}
+    >
       {t('handwriting.export.saveDocx')}
     </button>
     <button type="button" class="button" data-action="text-copy" disabled={busy} onclick={copy}>
       {phase === 'copying' ? t('handwriting.export.working') : t('handwriting.export.copy')}
     </button>
   </div>
+  <label class="check">
+    <input
+      type="checkbox"
+      data-option="text-drawings"
+      bind:checked={includeDrawings}
+      disabled={busy || drawingsChecking || drawings === 0}
+    />
+    {t('handwriting.export.includeDrawings')}
+  </label>
+  <p class="muted small" data-hint="text-drawings">
+    {#if drawingsChecking}
+      {t('handwriting.export.drawingsChecking')}
+    {:else if drawings === 0}
+      {t('handwriting.export.noDrawings')}
+    {:else}
+      {t('handwriting.export.drawingsHelp')}
+    {/if}
+  </p>
   {#if done?.kind === 'saved'}
     <div class="export-result" role="status">
       <p class="export-status">{t('handwriting.export.saved')}</p>

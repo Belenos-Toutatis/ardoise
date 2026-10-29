@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import Home from './components/Home.svelte';
   import Wizard from './components/Wizard.svelte';
-  import { api, errorMessage, onBridgeRequest, type AppState } from './lib/api';
+  import { api, errorMessage, genericError, onBridgeRequest, type AppState } from './lib/api';
   import { bridgeScreens, startAppBridge } from './lib/app-bridge.svelte';
   import { resolveLocale } from './lib/i18n-core';
   import { catalogs, currentLocale, setLocale, t } from './lib/i18n.svelte';
@@ -39,7 +39,7 @@
 </script>
 
 {#if loadError}
-  <p class="banner error" role="alert">{t('errors.generic', { message: loadError })}</p>
+  <p class="banner error" role="alert">{genericError(loadError)}</p>
 {:else if !appState}
   <p class="loading">{t('common.loading')}</p>
 {:else if appState.settingsError}

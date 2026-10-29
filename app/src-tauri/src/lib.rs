@@ -6,6 +6,7 @@
 #[cfg(all(dev, not(debug_assertions)))]
 compile_error!("release builds need `--features custom-protocol` (use `cargo xtask check`)");
 
+mod about;
 mod app_bridge;
 mod autoexport;
 mod background;
@@ -15,18 +16,21 @@ mod commands;
 mod console;
 mod demo;
 mod diagnostic;
+mod drafts;
 mod drag;
 #[cfg(windows)]
 mod drag_windows;
 mod export;
 mod handwriting;
 mod import;
+mod instance;
 mod library;
 mod live;
 mod mcp;
 mod narration;
 mod notes;
 mod operations;
+mod organize;
 mod original;
 mod pdf_pages;
 mod presentation;
@@ -34,6 +38,7 @@ mod print;
 #[cfg(windows)]
 mod print_windows;
 mod selftest;
+mod session_end;
 mod tablet;
 mod textdoc;
 mod thumbnails;
@@ -62,6 +67,12 @@ pub struct Cli {
     /// `--create-demo-library DIR`: make DIR a library of synthetic notes without a window,
     /// print what was created and exit (an empty path when DIR is missing).
     pub create_demo_library: Option<PathBuf>,
+    /// `--create-demo-inkspace DIR`: write made-up Inkspace data into the new or empty folder
+    /// DIR (a stand-in for Inkspace's `LocalState`) and exit (an empty path when DIR is missing).
+    pub create_demo_inkspace: Option<PathBuf>,
+    /// `--demo-notes N` with `--create-demo-library`: a library of N notes (the 8 demo notes, then
+    /// copies of them), for the performance measure; 0 for the 8 demo notes alone.
+    pub demo_notes: usize,
     /// `--simulated-tablet`: the simulated tablet replaces Bluetooth (real time, 3 stored pages);
     /// its registration is kept in a throwaway folder, never in the library.
     pub simulated_tablet: bool,
@@ -92,6 +103,13 @@ impl Cli {
                 "--create-demo-library" => {
                     cli.create_demo_library =
                         Some(args.next().map(PathBuf::from).unwrap_or_default());
+                }
+                "--create-demo-inkspace" => {
+                    cli.create_demo_inkspace =
+                        Some(args.next().map(PathBuf::from).unwrap_or_default());
+                }
+                "--demo-notes" => {
+                    cli.demo_notes = args.next().and_then(|n| n.parse().ok()).unwrap_or(0);
                 }
                 other if !other.starts_with("--") && import_args.local_state.is_none() => {
                     import_args.local_state = Some(PathBuf::from(other));
@@ -141,6 +159,7 @@ pub fn run() {
         || headless_diagnostic
         || cli.import_inkspace.is_some()
         || cli.create_demo_library.is_some()
+        || cli.create_demo_inkspace.is_some()
     {
         console::attach_parent_console();
     }
@@ -149,7 +168,10 @@ pub fn run() {
         std::process::exit(import::run_cli(import_args));
     }
     if let Some(dir) = &cli.create_demo_library {
-        std::process::exit(demo::run_cli(dir));
+        std::process::exit(demo::run_cli(dir, cli.demo_notes));
+    }
+    if let Some(dir) = &cli.create_demo_inkspace {
+        std::process::exit(import::cli::run_demo_cli(dir));
     }
 
     let context = AppContext {
@@ -159,6 +181,19 @@ pub fn run() {
         open_diagnostic: cli.diagnostic,
     };
 
+    // One windowed app per copy (M10, `instance.rs`): a second launch of this copy brings the
+    // first one's window to the front and ends here.
+    let instance = instance::guarded(&cli)
+        .then(|| instance::names_for(&context))
+        .flatten();
+    let _instance_guard = match instance.as_ref().map(instance::claim) {
+        Some(instance::Launch::AlreadyRunning) => std::process::exit(0),
+        Some(instance::Launch::First(guard)) => guard,
+        None => None,
+    };
+    let window_class = instance.map(|names| names.class);
+    let drafts = drafts::DraftRuntime::new(&context);
+
     // Leftovers of the drags out of the app (PNG files for other programs), removed once old.
     drag::start_cleaning();
 
@@ -167,10 +202,21 @@ pub fn run() {
     if let Some(library) = commands::current_state(&context).library() {
         let library = std::path::Path::new(library);
         let _ = ardoise_core::library::migrate_legacy_meta_dir(library);
-        // SPEC §3.2: the trash keeps notes 30 days (best effort, never blocks the start).
-        if let Ok(opened) = ardoise_core::library::Library::open(library) {
-            let _ = opened.purge_expired();
-        }
+        // Upkeep, off the start (a synced folder can be slow): SPEC §3.2, the trash keeps notes
+        // 30 days; and the temporary files of a write that a crash (or a killed `--mcp`) cut
+        // short, a day old at least, are removed. Best effort.
+        let library = library.to_path_buf();
+        let _ = std::thread::Builder::new()
+            .name("ardoise-library-upkeep".into())
+            .spawn(move || {
+                if let Ok(opened) = ardoise_core::library::Library::open(&library) {
+                    let _ = opened.purge_expired();
+                }
+                ardoise_core::fsutil::sweep_stale_temp_files(
+                    &library,
+                    std::time::Duration::from_secs(24 * 60 * 60),
+                );
+            });
     }
 
     if headless_diagnostic {
@@ -190,7 +236,10 @@ pub fn run() {
         .manage(narration::NarrationRuntime::default())
         .manage(codec::CodecDownload::default())
         .manage(handwriting::HandwritingRuntime::default())
+        .manage(textdoc::Structures::default())
         .manage(app_bridge::BridgeRuntime::default())
+        .manage(import::InkspaceImport::default())
+        .manage(drafts)
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -217,6 +266,10 @@ pub fn run() {
             library::set_note_tags,
             library::set_note_favorite,
             library::retitle_note,
+            organize::rename_binder,
+            organize::delete_binder,
+            organize::tag_colors,
+            organize::set_tag_color,
             notes::open_note,
             notes::save_note,
             notes::render_background,
@@ -238,6 +291,7 @@ pub fn run() {
             live::live_stop,
             live::live_set_style,
             live::live_command,
+            live::live_restore_cleared,
             live::live_set_view,
             presentation::list_monitors,
             presentation::open_presentation,
@@ -248,6 +302,7 @@ pub fn run() {
             clipboard::copy_note_image,
             print::print_notes,
             textdoc::export_structured_text,
+            textdoc::structured_text_drawings,
             drag::prepare_note_drag,
             drag::start_note_drag,
             drag::note_drag_supported,
@@ -278,6 +333,7 @@ pub fn run() {
             background::stage_note_background,
             background::release_background_images,
             background::create_notes_from_file,
+            background::cancel_create_notes,
             background::background_image_names,
             handwriting::handwriting_info,
             handwriting::set_handwriting_language,
@@ -288,8 +344,21 @@ pub fn run() {
             handwriting::handwriting_text,
             handwriting::export_handwriting_text,
             handwriting::copy_handwriting_text,
+            about::about_info,
+            about::about_text,
             app_bridge::bridge_reply,
             app_bridge::mcp_launch_info,
+            import::inkspace_detect,
+            import::inkspace_inspect,
+            import::inkspace_import,
+            import::inkspace_cancel,
+            drafts::draft_write,
+            drafts::draft_find,
+            drafts::draft_list,
+            drafts::draft_discard,
+            drafts::draft_stage_image,
+            drafts::draft_restore_copy,
+            session_end::set_unsaved_work,
         ])
         .setup(move |app| {
             if cli.self_test {
@@ -305,7 +374,13 @@ pub fn run() {
             if let Some(dir) = webview_data_dir() {
                 window = window.data_directory(dir);
             }
+            // The class a second launch of this copy looks for (`instance.rs`).
+            if let Some(class) = &window_class {
+                window = window.window_classname(class);
+            }
             window.build()?;
+            // The end of the Windows session with unsaved notes (M10, `session_end.rs`).
+            session_end::install(app.handle());
             // Handwriting recognition of the library, in the background.
             app.state::<handwriting::HandwritingRuntime>()
                 .start(app.handle());
@@ -365,6 +440,17 @@ mod tests {
             parse(&["--create-demo-library"]).create_demo_library,
             Some(PathBuf::new())
         );
+        let inkspace = parse(&["--create-demo-inkspace", "D:\\Faux\\LocalState"]);
+        assert_eq!(
+            inkspace.create_demo_inkspace,
+            Some(PathBuf::from("D:\\Faux\\LocalState"))
+        );
+        assert_eq!(inkspace.import_inkspace, None);
+        assert_eq!(inkspace.create_demo_library, None);
+        assert_eq!(demo.demo_notes, 0);
+        let large = parse(&["--create-demo-library", "D:\\Démo", "--demo-notes", "1000"]);
+        assert_eq!(large.demo_notes, 1000);
+        assert_eq!(parse(&["--demo-notes", "x"]).demo_notes, 0);
     }
 
     #[test]

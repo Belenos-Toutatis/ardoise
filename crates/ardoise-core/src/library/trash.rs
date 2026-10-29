@@ -315,10 +315,23 @@ impl Library {
 
     /// Deletes for good the notes trashed more than [`TRASH_RETENTION`] before `now_ms`, and
     /// records left without a note. Returns how many notes were deleted.
+    ///
+    /// The date in the record is the clock of the computer that trashed the note, and this
+    /// computer's clock may be far ahead of it: a note is also kept until its file has been
+    /// here for the whole retention, by this computer's own clock (`created` time of the file
+    /// in the trash: the moment Nextcloud brought it, or the note's own creation for a note
+    /// trashed here, which the record dates the same way). A wrong clock then deletes nothing
+    /// that other computers trashed recently.
     pub fn purge_expired_at(&self, now_ms: i64) -> Result<usize, LibraryError> {
         let retention = i64::try_from(TRASH_RETENTION.as_millis()).unwrap_or(i64::MAX);
         let limit = now_ms.saturating_sub(retention);
-        self.purge_where(|deleted| deleted <= limit)
+        self.purge_where(
+            |item| {
+                item.deleted <= limit
+                    && local_file_time(&item.path).is_some_and(|here| here <= limit)
+            },
+            |deleted| deleted <= limit,
+        )
     }
 
     /// [`purge_expired_at`](Self::purge_expired_at) now.
@@ -328,19 +341,23 @@ impl Library {
 
     /// Empties the trash. Returns how many notes were deleted.
     pub fn empty_trash(&self) -> Result<usize, LibraryError> {
-        self.purge_where(|_| true)
+        self.purge_where(|_| true, |_| true)
     }
 
-    fn purge_where(&self, expired: impl Fn(i64) -> bool) -> Result<usize, LibraryError> {
+    fn purge_where(
+        &self,
+        expired: impl Fn(&TrashItem) -> bool,
+        expired_record: impl Fn(i64) -> bool,
+    ) -> Result<usize, LibraryError> {
         let mut purged = 0;
         for item in self.trash_items()? {
-            if expired(item.deleted) {
+            if expired(&item) {
                 remove_file_with_retry(&item.path).map_err(io_error(&item.path))?;
                 let _ = remove_file_with_retry(&record_path(&item.path));
                 purged += 1;
             }
         }
-        self.purge_orphan_records(&expired)?;
+        self.purge_orphan_records(&expired_record)?;
         Ok(purged)
     }
 
@@ -371,6 +388,15 @@ impl Library {
         }
         Ok(())
     }
+}
+
+/// When this computer got the file, by its clock: the creation time of the file (a download
+/// creates it), else its modification time; Unix milliseconds. `None` if neither is known.
+fn local_file_time(path: &Path) -> Option<i64> {
+    let metadata = fs::metadata(path).ok()?;
+    let time = metadata.created().or_else(|_| metadata.modified()).ok()?;
+    let since = time.duration_since(std::time::UNIX_EPOCH).ok()?;
+    i64::try_from(since.as_millis()).ok()
 }
 
 #[cfg(test)]

@@ -1,12 +1,13 @@
 <script lang="ts">
-  /** Actions on the selected notes: move to a binder, tags, export, assemble, favourite, trash. */
+  /** Actions on the selected notes: move to a binder, tags, export, assemble, turn, favourite, trash. */
   import { t } from '../../lib/i18n.svelte';
   import { flattenTree, tagsOfNotes } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
+  import TagColorPicker from './TagColorPicker.svelte';
 
   let { lib }: { lib: LibraryState } = $props();
 
-  let panel = $state<'move' | 'tags' | null>(null);
+  let panel = $state<'move' | 'tags' | 'turn' | null>(null);
   let tagText = $state('');
 
   const notes = $derived(lib.selectedNotes);
@@ -20,13 +21,18 @@
     if (notes.length === 0) panel = null;
   });
 
-  function toggle(name: 'move' | 'tags') {
+  function toggle(name: 'move' | 'tags' | 'turn') {
     panel = panel === name ? null : name;
   }
 
   async function move(binder: string) {
     panel = null;
     await lib.moveSelected(binder);
+  }
+
+  async function turn(direction: 'cw' | 'ccw') {
+    panel = null;
+    await lib.turnNotes(lib.selectedDisplayed, direction);
   }
 
   async function addTags(text: string) {
@@ -68,6 +74,16 @@
   >
     {t('library.selection.assemble')}
   </button>
+  <button
+    type="button"
+    class="button"
+    data-action="turn"
+    aria-expanded={panel === 'turn'}
+    disabled={lib.activity.busy}
+    onclick={() => toggle('turn')}
+  >
+    {t('library.turn.button')}
+  </button>
   <button type="button" class="button" onclick={() => lib.setFavorite(notes, !allFavorite)}>
     {allFavorite ? t('library.selection.unfavorite') : t('library.selection.favorite')}
   </button>
@@ -93,6 +109,18 @@
         {/each}
       </ul>
     </div>
+  {:else if panel === 'turn'}
+    <div class="selection-panel" role="group" aria-label={t('library.turn.panel')}>
+      <div class="actions">
+        <button type="button" class="button" data-action="turn-ccw" onclick={() => turn('ccw')}>
+          <span aria-hidden="true">↺</span> {t('library.turn.left')}
+        </button>
+        <button type="button" class="button" data-action="turn-cw" onclick={() => turn('cw')}>
+          <span aria-hidden="true">↻</span> {t('library.turn.right')}
+        </button>
+      </div>
+      <p class="muted small">{t('library.turn.hint')}</p>
+    </div>
   {:else if panel === 'tags'}
     <div class="selection-panel" role="group" aria-label={t('library.selection.tags')}>
       <form
@@ -116,14 +144,16 @@
         <h3 class="mini-heading">{t('library.selection.tagsOfSelection')}</h3>
         <ul class="chips">
           {#each selectionTags as entry (entry.tag)}
+            {@const color = lib.tagColors.of(entry.tag)}
             <li>
               <button
                 type="button"
                 class="chip removable"
+                data-tag-color={color}
                 aria-label={t('library.selection.removeTag', { tag: entry.tag })}
                 onclick={() => lib.removeTag(notes, entry.tag)}
               >
-                {entry.tag}<span aria-hidden="true"> ×</span>
+                {#if color}<span class="tag-dot" aria-hidden="true"></span>{/if}{entry.tag}<span aria-hidden="true"> ×</span>
               </button>
             </li>
           {/each}
@@ -134,9 +164,16 @@
         <h3 class="mini-heading">{t('library.selection.existingTags')}</h3>
         <ul class="chips">
           {#each knownTags as tag (tag)}
-            <li><button type="button" class="chip" data-add-tag={tag} onclick={() => addTags(tag)}>{tag}</button></li>
+            {@const color = lib.tagColors.of(tag)}
+            <li class="tag-entry">
+              <button type="button" class="chip" data-add-tag={tag} data-tag-color={color} onclick={() => addTags(tag)}
+                >{#if color}<span class="tag-dot" aria-hidden="true"></span>{/if}{tag}</button
+              >
+              <TagColorPicker {tag} colors={lib.tagColors} />
+            </li>
           {/each}
         </ul>
+        <p class="muted small">{t('library.tagColor.hint')}</p>
       {/if}
     </div>
   {/if}

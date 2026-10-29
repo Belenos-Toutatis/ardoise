@@ -152,6 +152,8 @@ interface Session {
   /** Record at which each page was created (its `created` instant). */
   pageStart: Map<string, number>;
   pen: PenScript;
+  /** The ink of the page last cleared, for « Undo the clearing ». */
+  cleared: { pageIndex: number; strokes: Stroke[] } | null;
   wait?: ReturnType<typeof setTimeout>;
   tick?: ReturnType<typeof setInterval>;
   reconnect?: ReturnType<typeof setTimeout>;
@@ -269,7 +271,7 @@ function savePage(s: Session, page: Note): LiveEvent[] {
   if (failure !== null) {
     if (s.failed.has(page.id)) return [];
     s.failed.add(page.id);
-    return [{ type: 'saveFailed', pageIndex: s.pages.indexOf(page), message: failure }];
+    return [{ type: 'saveFailed', pageIndex: s.pages.indexOf(page), code: 'libraryAccess', message: failure }];
   }
   for (const other of s.pages) if (s.failed.has(other.id)) writePage(s, other);
   s.failed.clear();
@@ -398,10 +400,13 @@ function runCommand(s: Session, command: LiveCommand): void {
       s.layer = page.layers.length - 1;
       break;
     }
-    case 'clearPage':
+    case 'clearPage': {
       s.current = null;
-      s.pages[s.pageIndex].strokes = [];
+      const page = s.pages[s.pageIndex];
+      if (page.strokes.length > 0) s.cleared = { pageIndex: s.pageIndex, strokes: page.strokes };
+      page.strokes = [];
       break;
+    }
     default:
       throw { code: 'invalidCommand', message: String((command as { kind: unknown }).kind) };
   }
@@ -447,6 +452,7 @@ function startSession(): LiveSnapshot {
     record: 0,
     pageStart: new Map(),
     pen: new PenScript(),
+    cleared: null,
   };
   addPage(s);
   session = s;
@@ -504,6 +510,16 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
     case 'live_command':
       runCommand(running(), args.command as LiveCommand);
       return undefined;
+    case 'live_restore_cleared': {
+      const s = running();
+      const cleared = s.cleared;
+      s.cleared = null;
+      if (!cleared || cleared.pageIndex !== s.pageIndex) return false;
+      const page = s.pages[s.pageIndex];
+      page.strokes = [...cleared.strokes, ...page.strokes];
+      broadcastSnapshot();
+      return true;
+    }
     case 'live_set_view':
       setView(running(), args.view as LiveViewState);
       return undefined;

@@ -22,12 +22,17 @@ import { inputJourneys } from './journeys-m8-input.mjs';
 import { orientationJourneys } from './journeys-m8-orientation.mjs';
 import { pageJourneys } from './journeys-m8-page.mjs';
 import { bridgeJourneys } from './journeys-m9-bridge.mjs';
+import { aboutJourneys } from './journeys-m10-about.mjs';
+import { hardFixJourneys } from './journeys-m10-fix-hard.mjs';
+import { inkspaceJourneys } from './journeys-m10-inkspace.mjs';
+import { libraryJourneys } from './journeys-m10-library.mjs';
+import { uiJourneys } from './journeys-m10-ui.mjs';
 import { mcpJourney } from './mcp.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -218,7 +223,8 @@ async function startApp(language, port, args = []) {
       await sleep(300);
     },
   };
-  await app.waitFor('document.readyState === "complete"', 'the interface');
+  // `complete` is not enough: the interface shows "Loading…" until the settings are read, and a journey that clicks at once would find nothing.
+  await app.waitFor('document.readyState === "complete" && document.querySelector("#app .shell") !== null', 'the interface');
   return app;
 }
 

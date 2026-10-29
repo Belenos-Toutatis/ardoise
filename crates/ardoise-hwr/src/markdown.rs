@@ -1,7 +1,7 @@
 //! A note (or several) as Markdown: the title as a heading, the date and the tags, then the
 //! paragraphs, the list items and the drawings as images saved in a folder next to the `.md` file.
 
-use crate::document::{Block, Document, Labels};
+use crate::document::{Block, Document, Labels, Mark, Text};
 
 /// A drawing's PNG file, to be written next to the Markdown file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +21,11 @@ pub struct Markdown {
 
 /// Escapes what Markdown would take for formatting in running text.
 pub fn escape(text: &str) -> String {
+    guard_block_start(escape_inline(text))
+}
+
+/// `text` with a backslash before each character Markdown would take for inline formatting.
+fn escape_inline(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 4);
     for c in text.chars() {
         if matches!(
@@ -31,7 +36,11 @@ pub fn escape(text: &str) -> String {
         }
         out.push(c);
     }
-    // At the start of a block, a mark that would make a heading, a list or a quote.
+    out
+}
+
+/// At the start of a block, a mark that would make a heading, a list or a quote is escaped.
+fn guard_block_start(mut out: String) -> String {
     let digits = out.chars().take_while(char::is_ascii_digit).count();
     let numbered = digits > 0 && matches!(out[digits..].chars().next(), Some('.' | ')'));
     if numbered {
@@ -40,6 +49,26 @@ pub fn escape(text: &str) -> String {
         out.insert(0, '\\');
     }
     out
+}
+
+/// A paragraph's or a list item's text, its marked words wrapped: strong emphasis for the
+/// underlined ones (Markdown has no underline, and a hand underline marks what matters), `~~`
+/// for the struck ones. Spans are separated by spaces, so each delimiter run opens or closes.
+pub fn inline(text: &Text) -> String {
+    let parts: Vec<String> = text
+        .spans
+        .iter()
+        .filter(|span| !span.text.trim().is_empty())
+        .map(|span| {
+            let escaped = escape_inline(span.text.trim());
+            match span.mark {
+                Mark::None => escaped,
+                Mark::Underline => format!("**{escaped}**"),
+                Mark::Strike => format!("~~{escaped}~~"),
+            }
+        })
+        .collect();
+    guard_block_start(parts.join(" "))
 }
 
 /// A file name as the target of a link: spaces, parentheses and the other characters that would
@@ -109,9 +138,9 @@ pub fn to_markdown(
             }
             match block {
                 Block::Paragraph(paragraph) => {
-                    text.push_str(&format!("{}\n\n", escape(paragraph)));
+                    text.push_str(&format!("{}\n\n", inline(paragraph)));
                 }
-                Block::ListItem(line) => text.push_str(&format!("- {}\n", escape(line))),
+                Block::ListItem(line) => text.push_str(&format!("- {}\n", inline(line))),
                 Block::Drawing(drawing) => {
                     let number = images.len() + 1;
                     let name = format!("{prefix}-{number}.png");
@@ -152,6 +181,25 @@ mod tests {
         assert_eq!(escape("12. douze"), r"12\. douze");
         assert_eq!(escape("3 pommes"), "3 pommes");
         assert_eq!(escape("é à ç 2 + 2"), "é à ç 2 + 2");
+    }
+
+    #[test]
+    fn marked_words_are_emphasised_or_struck() {
+        let text = Text::from_words([
+            ("la", Mark::None),
+            ("lumière", Mark::Underline),
+            ("se", Mark::Underline),
+            ("*propage*", Mark::None),
+            ("en", Mark::Strike),
+        ]);
+        assert_eq!(inline(&text), r"la **lumière se** \*propage\* ~~en~~");
+        // A block that starts with a list or heading mark is still escaped, a marked one needs
+        // nothing more.
+        assert_eq!(inline(&Text::plain("- tiret")), r"\- tiret");
+        assert_eq!(inline(&Text::plain("12. douze")), r"12\. douze");
+        let marked = Text::from_words([("1.", Mark::Underline), ("un", Mark::None)]);
+        assert_eq!(inline(&marked), "**1.** un");
+        assert_eq!(inline(&Text::default()), "");
     }
 
     #[test]

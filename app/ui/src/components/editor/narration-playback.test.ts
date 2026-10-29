@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NarrationPlayback, type AudioLike } from './narration-playback';
+import { NarrationPlayback, narrationType, type AudioLike } from './narration-playback';
 
 /** An audio element that only remembers what it was told. */
 function fakeAudio(duration = 10) {
@@ -94,5 +94,16 @@ describe('narration playback', () => {
     expect(audio.paused).toBe(true);
     sync.stop();
     expect(audio.pauses).toBe(1);
+  });
+});
+
+describe('narrationType', () => {
+  const bytes = (text: string) => new TextEncoder().encode(text).buffer as ArrayBuffer;
+
+  it('plays the stored Ogg Opus stream, and the WAV of the browser stand-in', () => {
+    expect(narrationType(bytes('OggS rest of the page'))).toBe('audio/ogg; codecs=opus');
+    expect(narrationType(bytes('RIFF....WAVEfmt '))).toBe('audio/wav');
+    expect(narrationType(new ArrayBuffer(0))).toBe('audio/wav');
+    expect(narrationType(bytes('Ogg'))).toBe('audio/wav');
   });
 });

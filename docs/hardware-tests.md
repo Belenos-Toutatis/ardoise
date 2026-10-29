@@ -57,9 +57,9 @@ Remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version (Ardoi
 ### Au travail
 
 1. Couper le Bluetooth du téléphone. Brancher le dongle. Vérifier que la synchronisation Nextcloud est active.
-2. Lancer `ardoise.exe` (double-clic). Cliquer sur **Tester la tablette** (en haut à droite).
-3. Laisser cochée la case **Effacer les pages de la tablette une fois enregistrées** (les pages sont d'abord enregistrées et vérifiées, ensuite seulement effacées). Ne pas cocher **Simulation**. Cliquer sur **Démarrer le test**.
-   > Les pages **déjà présentes** sur la tablette sont aussi téléchargées puis effacées. Elles ne sont pas perdues (fichiers `page-N.bin` dans le dossier des diagnostics, qu'Ardoise saura importer plus tard), mais elles n'apparaîtront pas encore comme des notes. Si la tablette contient des pages importantes, les récupérer d'abord avec l'application du téléphone.
+2. Lancer `ardoise.exe` (double-clic). Cliquer sur **Tester la tablette** (en bas de la barre latérale).
+3. Laisser cochée la case **Effacer les pages de la tablette une fois ajoutées à la bibliothèque comme notes** (les pages sont d'abord enregistrées, vérifiées et ajoutées à la bibliothèque comme notes, ensuite seulement effacées). Ne pas cocher **Simulation**. Cliquer sur **Démarrer le test**.
+   > Les pages **déjà présentes** sur la tablette sont aussi téléchargées puis effacées. Elles ne sont pas perdues : chacune devient une **note** de la bibliothèque (comme à la synchronisation normale, sans doublon si elle y est déjà), et une copie brute (`page-N.bin`) et un aperçu (`page-N.svg`) restent dans le dossier des diagnostics. Si une page ne peut pas devenir une note, elle n'est pas effacée de la tablette.
 4. Suivre les consignes à l'écran. Après chaque action, cliquer sur **C'est fait, continuer**. En cas de blocage sur une étape, **Passer cette étape** permet d'aller à la suivante ; **Arrêter le test** termine tout de suite (le journal est quand même enregistré).
 
 | Étape à l'écran | Ce qu'il faut faire |
@@ -69,7 +69,7 @@ Remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version (Ardoi
 | Recherche de la tablette | La première fois : **maintenir le bouton enfoncé environ 6 secondes**, jusqu'à ce que le voyant **clignote en bleu**. Les fois suivantes : un appui bref suffit. |
 | Connexion | Quand Ardoise le demande, **appuyer brièvement sur le bouton** pour confirmer l'enregistrement (quelques secondes pour le faire). |
 | Informations | Rien : nom, version, batterie, taille et nombre de pages sont lus. |
-| Téléchargement des pages | Rien : les pages sont téléchargées, vérifiées, enregistrées, puis effacées de la tablette. |
+| Téléchargement des pages | Rien : les pages sont téléchargées, vérifiées, ajoutées à la bibliothèque comme notes, puis effacées de la tablette. |
 | Mode direct (30 s) | **Dessiner sans s'arrêter pendant 30 secondes** : traits, cercles, quelques mots, en appuyant plus ou moins fort. |
 | Reconnexion | Si Ardoise le demande, appuyer brièvement sur le bouton. |
 
@@ -175,8 +175,8 @@ Dans le panneau, section **Réglages de la tablette** (la tablette doit être «
 
    Refaire l'essai en **maintenant** le bouton 2 secondes (sans aller jusqu'à 6 secondes), puis en changeant l'option **Bouton de la tablette en mode direct** (Nouvelle page / Nouveau calque).
 
-   Si Ardoise reconnaît le bouton, il fait ce que l'option indique. Sinon, les notifications reçues de la tablette sont notées dans le journal de diagnostic avec la mention `unclassified during live mode`, ce qui donnera la vraie signature du bouton ; mais ce journal n'est pas réservé aux erreurs : une session de mode direct qui a reçu une notification inconnue est écrite dans `_ardoise\diagnostics\` **à l'arrêt du mode direct** (étape 6, bouton **Arrêter**), ou à la perte de la liaison. Il faut donc terminer proprement le mode direct après cet essai. Noter quand même **à la main** ce qui a été observé.
-6. Fermer le mode direct (bouton **Arrêter**). Vérifier que la session est devenue une **note** de la bibliothèque (une par page dessinée), dont le contenu est celui qu'on a vu à l'écran.
+   Si Ardoise reconnaît le bouton, il fait ce que l'option indique. Sinon, les notifications reçues de la tablette sont notées dans le journal de diagnostic avec la mention `unclassified during live mode`, ce qui donnera la vraie signature du bouton ; mais ce journal n'est pas réservé aux erreurs : une session de mode direct qui a reçu une notification inconnue est écrite dans `_ardoise\diagnostics\` **à l'arrêt du mode direct** (étape 6, bouton **Terminer**), ou à la perte de la liaison. Il faut donc terminer proprement le mode direct après cet essai. Noter quand même **à la main** ce qui a été observé.
+6. Fermer le mode direct (bouton **Terminer**). Vérifier que la session est devenue une **note** de la bibliothèque (une par page dessinée), dont le contenu est celui qu'on a vu à l'écran.
 7. **Reprise après coupure** : relancer le mode direct et dessiner, puis éloigner la tablette de l'ordinateur (autre pièce) pendant 10 secondes, puis la rapprocher. L'état « reconnexion » apparaît-il, puis le tracé reprend-il sans qu'il faille tout relancer ? Noter ce qui se passe.
 
 #### E. Projecteur (bureau étendu)
@@ -187,7 +187,7 @@ Dans le panneau, section **Réglages de la tablette** (la tablette doit être «
    - la fenêtre de présentation s'ouvre **en plein écran sur l'écran choisi**, **sans aucun élément d'interface** (ni barre de titre, ni boutons, ni curseur de souris après 2 secondes d'immobilité) ;
    - la fenêtre de commande reste **sur le portable** avec les outils, les couleurs, les pages et l'aperçu de ce qui est projeté ;
    - le tracé fait sur la tablette apparaît sur les deux écrans ; l'image projetée est nette et bien cadrée (noter la résolution du projecteur et les bandes noires éventuelles).
-4. **Zoom et déplacement** : zoomer (boutons **+** / **−**, ou touches `+` et `-`), déplacer la zone projetée (glisser dans l'aperçu, ou `Maj` + flèches), revenir à la page entière (touche `0` ou bouton **1:1**). Le projecteur suit-il ? L'aperçu montre-t-il le rectangle projeté ?
+4. **Zoom et déplacement** : zoomer (boutons **+** / **−**, ou touches `+` et `-`), déplacer la zone projetée (glisser dans l'aperçu, ou `Maj` + flèches), revenir à la page entière (touche `0` ou bouton **Page entière**). Le projecteur suit-il ? L'aperçu montre-t-il le rectangle projeté ?
 5. **Tableau noir** : activer (touche `B` ou bouton) : fond ardoise, craie blanche par défaut. Désactiver : retour au fond blanc.
 6. **Pointeur laser** : activer (touche `L` ou bouton). **Approcher le stylet de la tablette sans la toucher** : un point rouge suit le stylet sur le projecteur, **sans rien écrire**. Éloigner le stylet : le point disparaît. Toucher la tablette : on écrit de nouveau.
 7. **Pages au clavier et au bouton** : `→`, `Espace` ou `Page suivante` passent à la page suivante ; `←` ou `Page précédente` reviennent. Faire de même **avec le bouton de la tablette** (selon l'option du panneau et ce qui a été constaté en D5). Le changement de page apparaît-il tout de suite sur le projecteur ?

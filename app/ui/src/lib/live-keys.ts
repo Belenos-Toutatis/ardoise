@@ -17,8 +17,10 @@
  * | Shift + arrows                         | move the projected area |
  * | Esc                                    | leave                   |
  *
- * Presentation remotes send Page Up / Page Down. Keys typed in a field are left alone, and so
- * are Space and Enter on a focused button (they press it).
+ * Presentation remotes send Page Up / Page Down. Keys typed in a field are left alone. Space
+ * always means "next page", even with a button focused (the button of a tool just used would
+ * otherwise be pressed again: « Clear the page » by Space wiped the new page). Esc closes the
+ * projection when it is open and otherwise asks before ending live mode: the window decides.
  */
 
 export type LiveKeyAction =
@@ -53,6 +55,11 @@ interface ElementLike {
 
 const BUTTON_INPUTS = new Set(['button', 'submit', 'reset']);
 
+/** Space, whatever the browser calls it. */
+export function isSpaceKey(key: string): boolean {
+  return key === ' ' || key === 'Spacebar';
+}
+
 /** A field the user types in (text, number, range, select…): its keys are its own. */
 export function isTypingTarget(target: EventTarget | null | undefined): boolean {
   const el = target as ElementLike | null | undefined;
@@ -61,13 +68,6 @@ export function isTypingTarget(target: EventTarget | null | undefined): boolean 
   const tag = el.tagName.toUpperCase();
   if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
   return tag === 'INPUT' && !BUTTON_INPUTS.has(String(el.type ?? 'text').toLowerCase());
-}
-
-function isButton(target: EventTarget | null | undefined): boolean {
-  const el = target as ElementLike | null | undefined;
-  if (!el || typeof el.tagName !== 'string') return false;
-  const tag = el.tagName.toUpperCase();
-  return tag === 'BUTTON' || (tag === 'INPUT' && BUTTON_INPUTS.has(String(el.type ?? '').toLowerCase()));
 }
 
 /** The action of a key press in live mode, or null when live mode does not use it. */
@@ -110,7 +110,7 @@ export function liveKeyAction(e: KeyInput): LiveKeyAction | null {
       return { kind: 'command', command: 'nextPage' };
     case ' ':
     case 'Spacebar':
-      return isButton(e.target) ? null : { kind: 'command', command: 'nextPage' };
+      return { kind: 'command', command: 'nextPage' };
     case 'ArrowLeft':
     case 'PageUp':
       return { kind: 'command', command: 'previousPage' };

@@ -6,6 +6,16 @@
  * drawing), and stops by itself at its end.
  */
 
+/**
+ * The media type of a narration's bytes (`narration_audio`): the note's own Ogg Opus stream,
+ * which the WebView plays and seeks itself (M10: no longer decoded to a WAV file), or a WAV file
+ * (the browser stand-in).
+ */
+export function narrationType(bytes: ArrayBuffer): string {
+  const head = new Uint8Array(bytes, 0, Math.min(4, bytes.byteLength));
+  return String.fromCharCode(...head) === 'OggS' ? 'audio/ogg; codecs=opus' : 'audio/wav';
+}
+
 /** How far the sound may drift from the replay before it is put back in place, seconds. */
 const DRIFT_S = 0.25;
 

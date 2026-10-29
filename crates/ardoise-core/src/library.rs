@@ -9,13 +9,15 @@
 //!   ([`LibraryError::Conflict`]).
 //! - No lock file, no database: the folder can be synced by any tool.
 
+mod binders;
 mod conflicts;
 mod names;
+mod tag_colors;
 mod trash;
 mod walk;
 mod watch;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -26,11 +28,14 @@ use serde::{Deserialize, Serialize};
 use crate::format::{self, FormatError, NoteFile};
 use crate::fsutil::{CheckedWriteError, rename_no_replace, write_atomic_checked, write_atomic_new};
 
+pub use binders::BinderTrashed;
 pub use conflicts::{ConflictKind, ConflictName, parse_conflict_name};
 pub use names::{
     MAX_NAME_CHARS, NOTE_EXTENSION, invalid_name_reason, local_date, note_file_stem, sanitize_name,
 };
+pub use tag_colors::{TAG_COLORS_FILE, tag_key};
 pub use trash::{TRASH_DIR, TRASH_RETENTION, TrashItem};
+pub use walk::{NoteCount, count_notes};
 pub use watch::{LibraryChange, LibraryWatcher};
 
 use names::{MAX_SUFFIX, exists, note_path, note_stem, stem_matches, with_suffix};
@@ -47,6 +52,19 @@ pub const LEGACY_META_DIR: &str = ".ardoise";
 /// Whether `folder` already holds an Ardoise library (under the current or the old name).
 pub fn is_library(folder: &Path) -> bool {
     folder.join(META_DIR).is_dir() || folder.join(LEGACY_META_DIR).is_dir()
+}
+
+/// Whether `dir` or a folder below it holds a note file. Walks like the library does (links
+/// and junctions are not followed, so a loop cannot run away; hidden and temporary names are
+/// skipped).
+pub fn holds_notes(dir: &Path) -> bool {
+    let mut found = false;
+    walk::walk(dir, |item| {
+        if matches!(item, walk::Found::Note { .. }) {
+            found = true;
+        }
+    });
+    found
 }
 
 /// Makes `folder` a library, keeping anything already there. The folder itself must exist,
@@ -193,6 +211,33 @@ pub enum LibraryError {
         /// Identifier given.
         id: String,
     },
+    /// The binder does not exist (or is a file, a link or a junction, which are never
+    /// followed).
+    #[error("the binder {} does not exist", path.display())]
+    BinderNotFound {
+        /// Binder asked for, relative to the library root.
+        path: PathBuf,
+    },
+    /// A file or folder already has the name a binder would take; nothing was moved.
+    #[error("{} already exists", path.display())]
+    BinderExists {
+        /// The binder path that is taken, relative to the library root.
+        path: PathBuf,
+    },
+    /// A tag colour is not a palette identifier (`a-z`, `0-9` and `-`, starting with a letter,
+    /// 32 characters at most).
+    #[error("invalid tag colour {color:?}")]
+    InvalidTagColor {
+        /// Colour given.
+        color: String,
+    },
+    /// `_ardoise/tags.json` (or a copy of it) was written by a newer version of Ardoise; it
+    /// is left untouched.
+    #[error("{} was written by a newer version of Ardoise; it was not changed", path.display())]
+    TagColorsNewer {
+        /// The file involved.
+        path: PathBuf,
+    },
     /// The folder cannot be watched.
     #[error("cannot watch {}: {message}", path.display())]
     Watch {
@@ -216,6 +261,10 @@ impl LibraryError {
             LibraryError::InvalidName { .. } => "invalidName",
             LibraryError::NoFreeName { .. } => "noFreeName",
             LibraryError::NotInTrash { .. } => "notInTrash",
+            LibraryError::BinderNotFound { .. } => "binderNotFound",
+            LibraryError::BinderExists { .. } => "binderExists",
+            LibraryError::InvalidTagColor { .. } => "invalidTagColor",
+            LibraryError::TagColorsNewer { .. } => "tagColorsNewer",
             LibraryError::Watch { .. } => "libraryWatch",
         }
     }
@@ -277,6 +326,22 @@ pub struct Listing {
     /// Sorted by path.
     pub notes: Vec<NoteEntry>,
     pub problems: Vec<ListProblem>,
+    /// Every binder (sub-folder), relative to the root, sorted; empty ones included.
+    pub binders: Vec<PathBuf>,
+}
+
+/// The notes of a past [`Listing`], to list again without reopening the files that did not
+/// change ([`Library::list_with`]).
+#[derive(Debug, Default)]
+pub struct HeaderCache {
+    entries: HashMap<PathBuf, NoteEntry>,
+}
+
+impl HeaderCache {
+    /// The listed note at `path`, if its file still has `stamp`.
+    pub fn get(&self, path: &Path, stamp: &FileStamp) -> Option<&NoteEntry> {
+        self.entries.get(path).filter(|entry| entry.stamp == *stamp)
+    }
 }
 
 /// A tag and how many listed notes carry it.
@@ -447,11 +512,22 @@ impl Library {
     /// Lists every note, reading only each file's `note.json`. Files that cannot be read are
     /// reported in [`Listing::problems`] and do not stop the listing.
     pub fn list(&self) -> Listing {
+        self.list_with(&mut HeaderCache::default())
+    }
+
+    /// [`list`](Self::list), reusing the header of every note whose file did not change since
+    /// `cache` saw it (same path and stamp): opening a note's archive is what costs on a
+    /// synced folder with a thousand notes. The cache then holds the notes listed of this library.
+    pub fn list_with(&self, cache: &mut HeaderCache) -> Listing {
         let mut found = Vec::new();
-        let walk_problems = walk::walk(&self.root, |f| {
-            if let walk::Found::Note { path, binder } = f {
-                found.push((path, binder));
-            }
+        let mut binders = Vec::new();
+        let walk_problems = walk::walk(&self.root, |f| match f {
+            walk::Found::Note {
+                path,
+                binder,
+                stamp,
+            } => found.push((path, binder, stamp)),
+            walk::Found::Binder(binder) => binders.push(binder),
         });
         let mut listing = Listing::default();
         for (path, error) in walk_problems {
@@ -463,12 +539,31 @@ impl Library {
                 path,
             });
         }
-        for (path, binder) in found {
-            match read_entry(&path, binder) {
-                Ok(entry) => listing.notes.push(entry),
+        let mut kept = HashMap::with_capacity(found.len());
+        for (path, binder, stamp) in found {
+            let cached = stamp.and_then(|stamp| {
+                let entry = cache.entries.remove(&path)?;
+                (entry.stamp == stamp && entry.binder == binder).then_some(entry)
+            });
+            let entry = match cached {
+                Some(entry) => Ok(entry),
+                None => read_entry(&path, binder),
+            };
+            match entry {
+                Ok(entry) => {
+                    kept.insert(path, entry.clone());
+                    listing.notes.push(entry);
+                }
                 Err(error) => listing.problems.push(ListProblem { path, error }),
             }
         }
+        // Only this library's entries are replaced: the cache may serve several libraries.
+        cache
+            .entries
+            .retain(|path, _| !path.starts_with(&self.root));
+        cache.entries.extend(kept);
+        binders.sort();
+        listing.binders = binders;
         listing.notes.sort_by(|a, b| a.path.cmp(&b.path));
         listing.problems.sort_by(|a, b| a.path.cmp(&b.path));
         listing
@@ -670,14 +765,14 @@ impl Library {
         let dir = path.parent().unwrap_or(&self.root).to_path_buf();
         let case_only = current.to_lowercase() == desired.to_lowercase();
         let target = note_path(&dir, &desired);
-        let new_path = if case_only && rename_no_replace(&path, &target).is_ok() {
+        let renamed = if case_only && rename_no_replace(&path, &target).is_ok() {
             // Only the case changed: for Windows it is the same name, renamed in place.
-            target
+            Ok(target)
         } else {
-            self.move_unique(&path, &dir, &desired)?
+            self.move_unique(&path, &dir, &desired)
         };
         Ok(SavedNote {
-            path: new_path,
+            path: renamed_or_kept(&path, renamed)?,
             stamp,
         })
     }
@@ -774,6 +869,23 @@ fn read_entry(path: &Path, binder: PathBuf) -> Result<NoteEntry, LibraryError> {
         favorite: note.favorite,
         stamp,
     })
+}
+
+/// The path of a note whose new title is saved, once its file was (or was not) renamed to match.
+/// A rename that failed (a sync client holds the file, a permission) leaves the file under its
+/// old name: the title inside the file is right, the name catches up at the next retitle, and
+/// the caller still gets the stamp of the save it must give back at its next one (an error would
+/// lose it, and the editor's next save would be refused against its own write). A note that
+/// vanished meanwhile is an error.
+fn renamed_or_kept(
+    path: &Path,
+    renamed: Result<PathBuf, LibraryError>,
+) -> Result<PathBuf, LibraryError> {
+    match renamed {
+        Ok(new_path) => Ok(new_path),
+        Err(error @ LibraryError::NotFound { .. }) => Err(error),
+        Err(_) => Ok(path.to_path_buf()),
+    }
 }
 
 #[cfg(test)]

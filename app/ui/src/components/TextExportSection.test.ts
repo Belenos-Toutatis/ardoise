@@ -2,10 +2,11 @@
 // The export dialog also exports the recognised handwriting as text (milestone M7).
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { drawingCheck } from '../lib/export-options';
 import { setLocale } from '../lib/i18n.svelte';
 import { mockLibrary, resetMockLibrary } from '../lib/mock-data';
 import { mockClipboard } from '../lib/mock-export';
-import { mockHandwriting, resetMockHandwriting } from '../lib/mock-handwriting';
+import { mockDrawings, mockHandwriting, resetMockHandwriting } from '../lib/mock-handwriting';
 import type { ExportSource } from '../lib/note';
 import ExportDialog from './ExportDialog.svelte';
 
@@ -79,6 +80,7 @@ describe('export dialog: recognised text', () => {
       format: 'md',
       destination: 'C:\\Exports\\physique.md',
       labels: { date: 'Créée le :', tags: 'Étiquettes :', drawing: 'Dessin' },
+      includeDrawings: true,
     });
     expect(fr.section().querySelector('.export-result code')?.textContent).toBe('C:\\Exports\\physique.md');
     expect(fr.section().textContent).not.toContain("Windows n'a pas pu analyser");
@@ -92,7 +94,107 @@ describe('export dialog: recognised text', () => {
       format: 'docx',
       destination: 'C:\\Exports\\physique.docx',
       labels: { date: 'Created:', tags: 'Tags:', drawing: 'Drawing' },
+      includeDrawings: true,
     });
+  });
+
+  it('includes the drawings only when the notes have some, and lets the user leave them out', async () => {
+    const drawingsOption = (ui: Awaited<ReturnType<typeof render>>) =>
+      ui.target.querySelector<HTMLInputElement>('input[data-option="text-drawings"]')!;
+    const hint = (ui: Awaited<ReturnType<typeof render>>) =>
+      ui.target.querySelector('[data-hint="text-drawings"]')?.textContent?.trim();
+
+    // The physics lesson has a drawing: on, and it can be turned off.
+    const lesson = await render([{ path: pathOf('Cours de physique') }]);
+    expect(lesson.section().textContent).toContain('Inclure les dessins (Markdown, Word)');
+    expect(drawingsOption(lesson).checked).toBe(true);
+    expect(drawingsOption(lesson).disabled).toBe(false);
+    expect(hint(lesson)).toContain('ces mots sont soulignés');
+    drawingsOption(lesson).click();
+    await settle();
+    (window as { __ardoiseE2eSavePath?: unknown }).__ardoiseE2eSavePath = 'C:\\Exports\\sans-dessins.md';
+    lesson.action('text-md').click();
+    await settle();
+    expect(mockHandwriting.exportedStructured?.includeDrawings).toBe(false);
+    cleanup?.();
+
+    // The shopping list has none: off, and nothing to choose.
+    const list = await render([{ path: pathOf('Liste de courses') }], 'en');
+    expect(list.section().textContent).toContain('Include the drawings (Markdown, Word)');
+    expect(drawingsOption(list).checked).toBe(false);
+    expect(drawingsOption(list).disabled).toBe(true);
+    expect(hint(list)).toBe('No drawing found: the text alone is exported.');
+    (window as { __ardoiseE2eSavePath?: unknown }).__ardoiseE2eSavePath = 'C:\\Exports\\list.docx';
+    list.action('text-docx').click();
+    await settle();
+    expect(mockHandwriting.exportedStructured?.includeDrawings).toBe(false);
+    expect(mockHandwriting.drawingChecks).toBe(2);
+    cleanup?.();
+
+    // Several notes, one with a drawing: on.
+    mockDrawings.set(mockLibrary().notes.get(pathOf('Liste de courses'))!.note.id, 2);
+    const both = await render([{ path: pathOf('Liste de courses') }, { path: pathOf('Réunion parents') }]);
+    expect(drawingsOption(both).checked).toBe(true);
+  });
+
+  it('waits for the drawings to be looked for before a Markdown or Word export', async () => {
+    let answer: (count: number) => void = () => {};
+    const { api } = await import('../lib/api');
+    const check = vi.spyOn(api, 'structuredTextDrawings').mockReturnValue(
+      new Promise<number>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const ui = await render([{ path: pathOf('Cours de physique') }]);
+    const option = ui.target.querySelector<HTMLInputElement>('input[data-option="text-drawings"]')!;
+    expect(ui.target.querySelector('[data-hint="text-drawings"]')?.textContent?.trim()).toBe('Recherche des dessins…');
+    expect(option.disabled).toBe(true);
+    expect(ui.action('text-md').disabled).toBe(true);
+    expect(ui.action('text-docx').disabled).toBe(true);
+    // The plain text needs no drawing.
+    expect(ui.action('text-save').disabled).toBe(false);
+    expect(ui.action('text-copy').disabled).toBe(false);
+    answer(1);
+    await settle();
+    expect(ui.action('text-md').disabled).toBe(false);
+    expect(option.disabled).toBe(false);
+    expect(option.checked).toBe(true);
+    check.mockRestore();
+  });
+
+  it('stops waiting for the drawings after a few seconds: the buttons work, the drawings stay in', async () => {
+    const { api } = await import('../lib/api');
+    const check = vi.spyOn(api, 'structuredTextDrawings').mockReturnValue(new Promise<number>(() => {}));
+    drawingCheck.limitMs = 400;
+    try {
+      const ui = await render([{ path: pathOf('Cours de physique') }]);
+      expect(ui.action('text-md').disabled).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      await settle();
+      expect(ui.action('text-md').disabled).toBe(false);
+      expect(ui.action('text-docx').disabled).toBe(false);
+      expect(ui.target.querySelector<HTMLInputElement>('input[data-option="text-drawings"]')!.checked).toBe(true);
+    } finally {
+      drawingCheck.limitMs = 5000;
+      check.mockRestore();
+    }
+  });
+
+  it('keeps the drawings when they cannot be looked for', async () => {
+    // Too many notes to analyse them all when the dialog opens: not looked for, on.
+    const many = Array.from({ length: 6 }, () => ({ path: pathOf('Liste de courses') }));
+    const ui = await render(many);
+    const option = ui.target.querySelector<HTMLInputElement>('input[data-option="text-drawings"]')!;
+    expect(mockHandwriting.drawingChecks).toBe(0);
+    expect(option.checked).toBe(true);
+    expect(option.disabled).toBe(false);
+    cleanup?.();
+    // The search fails (no recognizer): on, the export says why it fails.
+    mockHandwriting.recognizers = [];
+    const failed = await render([{ path: pathOf('Liste de courses') }]);
+    const kept = failed.target.querySelector<HTMLInputElement>('input[data-option="text-drawings"]')!;
+    expect(kept.checked).toBe(true);
+    expect(kept.disabled).toBe(false);
   });
 
   it('says why a structured export fails', async () => {

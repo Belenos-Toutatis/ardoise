@@ -7,13 +7,17 @@
 //! after the note's id, its place in the library and the file's stamp (size and modification
 //! time), so a note changed anywhere gets a new entry and two files with the same id (a
 //! Nextcloud conflict copy) do not share one; older entries of the same file are removed when a
-//! new one is written, and entries not written for [`MAX_AGE`] (notes deleted, moved or renamed
-//! since) at the same time. The cache is a convenience: when it cannot be read or written,
+//! new one is written (the name last written for each note file is remembered, so that nothing
+//! lists the folder), and entries not written for [`MAX_AGE`] (notes deleted, moved or renamed
+//! since) are removed the first time something is written, together with the older entries of
+//! the same file that an earlier run left. The cache is a convenience: when it cannot be read or written,
 //! thumbnails are simply made again.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ardoise_core::format::{self, NoteFile};
@@ -90,23 +94,31 @@ pub fn png_data_url(png: &[u8]) -> String {
 pub struct ThumbnailCache {
     /// `None` when there is no place for it: thumbnails are then made at every request.
     dir: Option<PathBuf>,
+    /// The entry last written for each note file ([`entry_prefix`] to its file name); `None`
+    /// until the folder has been read once ([`scan_cache`]).
+    latest: Arc<Mutex<Option<HashMap<String, String>>>>,
 }
 
 impl ThumbnailCache {
+    fn new(dir: Option<PathBuf>) -> Self {
+        ThumbnailCache {
+            dir,
+            latest: Arc::default(),
+        }
+    }
+
     /// `%LOCALAPPDATA%\Ardoise\thumbnails` (local to the PC, never synced).
     pub fn default_location() -> Self {
         let dir = std::env::var_os("LOCALAPPDATA")
             .filter(|v| !v.is_empty())
             .map(|dir| PathBuf::from(dir).join("Ardoise").join("thumbnails"));
-        ThumbnailCache { dir }
+        ThumbnailCache::new(dir)
     }
 
     /// A cache in `dir` (created when first needed).
     #[cfg(test)]
     pub fn at(dir: impl Into<PathBuf>) -> Self {
-        ThumbnailCache {
-            dir: Some(dir.into()),
-        }
+        ThumbnailCache::new(Some(dir.into()))
     }
 
     fn read(&self, name: &str) -> Option<Vec<u8>> {
@@ -114,37 +126,68 @@ impl ThumbnailCache {
         is_png(&bytes).then_some(bytes)
     }
 
-    /// Stores `png` as `name`, removes the other entries of the same file and the entries older
-    /// than [`MAX_AGE`]. Failures are ignored: the cache only saves time.
+    /// Stores `png` as `name`, removes the entry written before for the same file, and, the
+    /// first time, the entries older than [`MAX_AGE`] and the older ones of each file
+    /// ([`scan_cache`]). Failures are ignored: the cache only saves time.
     fn store(&self, prefix: &str, name: &str, png: &[u8]) {
         let Some(dir) = &self.dir else { return };
         if fs::create_dir_all(dir).is_err() || write_atomic(&dir.join(name), png).is_err() {
             return;
         }
-        let Ok(entries) = fs::read_dir(dir) else {
-            return;
+        let mut latest = self.latest.lock().unwrap_or_else(PoisonError::into_inner);
+        let latest = latest.get_or_insert_with(|| scan_cache(dir));
+        if let Some(previous) = latest.insert(prefix.to_owned(), name.to_owned())
+            && previous != name
+        {
+            let _ = fs::remove_file(dir.join(previous));
+        }
+    }
+}
+
+/// Reads the cache folder once: removes the entries not written for [`MAX_AGE`] and, of the
+/// entries of one note file, all but the newest; returns the newest of each by [`entry_prefix`].
+fn scan_cache(dir: &Path) -> HashMap<String, String> {
+    let mut newest: HashMap<String, (SystemTime, String)> = HashMap::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return HashMap::new();
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
         };
-        for entry in entries.flatten() {
-            let file_name = entry.file_name();
-            let Some(other) = file_name.to_str() else {
-                continue;
-            };
-            if other == name || !other.ends_with(".png") {
-                continue;
-            }
-            let expired = || {
-                entry
-                    .metadata()
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|modified| SystemTime::now().duration_since(modified).ok())
-                    .is_some_and(|age| age > MAX_AGE)
-            };
-            if other.starts_with(prefix) || expired() {
+        // `<prefix>_` ends at the first underscore: ids are reduced to letters, digits and dashes.
+        let Some(end) = name.find('_') else { continue };
+        if !name.ends_with(".png") {
+            continue;
+        }
+        let modified = entry.metadata().and_then(|m| m.modified()).ok();
+        let expired = modified
+            .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+            .is_some_and(|age| age > MAX_AGE);
+        if expired {
+            let _ = fs::remove_file(entry.path());
+            continue;
+        }
+        let modified = modified.unwrap_or(UNIX_EPOCH);
+        let prefix = &name[..=end];
+        match newest.get(prefix) {
+            Some((best, _)) if *best >= modified => {
                 let _ = fs::remove_file(entry.path());
+            }
+            Some((_, older)) => {
+                let _ = fs::remove_file(dir.join(older));
+                newest.insert(prefix.to_owned(), (modified, name.to_owned()));
+            }
+            None => {
+                newest.insert(prefix.to_owned(), (modified, name.to_owned()));
             }
         }
     }
+    newest
+        .into_iter()
+        .map(|(prefix, (_, name))| (prefix, name))
+        .collect()
 }
 
 /// The part of a cache file name that identifies a note file: its id, reduced to characters
@@ -213,9 +256,13 @@ pub fn thumbnail_of(
         path: path.clone(),
         source,
     };
-    let header = format::read_header(&path).map_err(format_error)?;
+    // The listing read the id already; a card must not open the archive again to get it.
+    let id = match crate::library::listed_note_id(&path, &stamp) {
+        Some(id) => id,
+        None => format::read_header(&path).map_err(format_error)?.note.id,
+    };
     let relative = path.strip_prefix(library.root()).unwrap_or(&path);
-    let prefix = entry_prefix(&header.note.id, relative);
+    let prefix = entry_prefix(&id, relative);
     let name = cache_name(&prefix, &stamp);
     if let Some(png) = cache.read(&name) {
         return Ok(Some(png));
@@ -408,6 +455,55 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_store_reads_the_folder_only_once() {
+        let (_dir, library) = library();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let thumbnails = cache_dir.path().join("thumbnails");
+        let cache = ThumbnailCache::at(&thumbnails);
+        let first = write_sample(&library, "", "Première");
+        let second = write_sample(&library, "", "Seconde");
+        // An older entry of the first note's file, left by an earlier run.
+        thumbnail_of(&library, &cache, &first.path).unwrap();
+        let name = cache_files(&thumbnails).remove(0);
+        let prefix = &name[..=name.find('_').unwrap()];
+        let older = thumbnails.join(format!("{prefix}1_1_1.png"));
+        fs::write(&older, PNG_SIGNATURE).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&older)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(3600))
+            .unwrap();
+        // The folder was read at the first store: another note's store does not read it again
+        // (it would remove the stray file).
+        thumbnail_of(&library, &cache, &second.path).unwrap();
+        assert!(older.exists());
+    }
+
+    #[test]
+    fn leftover_entries_of_an_earlier_run_go_at_the_first_store() {
+        let (_dir, library) = library();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let thumbnails = cache_dir.path().join("thumbnails");
+        let cache = ThumbnailCache::at(&thumbnails);
+        let saved = write_sample(&library, "", "Essai");
+        thumbnail_of(&library, &cache, &saved.path).unwrap();
+        let current = cache_files(&thumbnails).remove(0);
+        let prefix = current[..=current.find('_').unwrap()].to_owned();
+        let older = thumbnails.join(format!("{prefix}1_1_1.png"));
+        fs::write(&older, PNG_SIGNATURE).unwrap();
+        // A new run: a new cache over the same folder reads it at its first store.
+        let later = ThumbnailCache::at(&thumbnails);
+        library
+            .set_tags(&saved.path, &["a".to_owned()], None)
+            .unwrap();
+        thumbnail_of(&library, &later, &saved.path).unwrap();
+        let files = cache_files(&thumbnails);
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert_ne!(files[0], current);
+    }
+
+    #[test]
     fn a_note_without_thumbnail_is_rendered() {
         let (_dir, library) = library();
         let file = NoteFile::new(sample_note("Sans vignette"));
@@ -432,7 +528,7 @@ pub(crate) mod tests {
                 .unwrap()
                 .is_some()
         );
-        let none = ThumbnailCache { dir: None };
+        let none = ThumbnailCache::new(None);
         assert!(
             thumbnail_of(&library, &none, &saved.path)
                 .unwrap()
@@ -443,7 +539,7 @@ pub(crate) mod tests {
     #[test]
     fn thumbnails_only_for_notes_of_the_library() {
         let (_dir, library) = library();
-        let cache = ThumbnailCache { dir: None };
+        let cache = ThumbnailCache::new(None);
         let outside = tempfile::tempdir().unwrap();
         let path = outside.path().join("2026-10-24 Ailleurs.ardoise");
         format::write_note(&path, &NoteFile::new(sample_note("Ailleurs"))).unwrap();

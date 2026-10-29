@@ -178,7 +178,7 @@ describe('tablet test panel', () => {
 
     expect(target.textContent).toContain('Tablet test');
     expect(target.textContent).toContain('Bluetooth adapter');
-    expect(target.textContent).toContain('Delete pages from the tablet once saved');
+    expect(target.textContent).toContain('Delete pages from the tablet once added to the library as notes');
     button('Start the test').click();
     await vi.waitFor(() => expect(target.querySelector('.card-prompt')).toBeTruthy());
     expect(target.textContent).toContain('draw 3 reference pages');

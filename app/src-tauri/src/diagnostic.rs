@@ -14,11 +14,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ardoise_core::library;
-use ardoise_core::settings::Language;
+use ardoise_core::settings::{Language, Orientation};
 use ardoise_device::diagnostic::{
-    self, Decision, DiagnosticConfig, DiagnosticReport, Instruction, Operator, Progress, StepId,
-    StepOutcome,
+    self, Decision, DiagnosticConfig, DiagnosticReport, Instruction, Operator, PageImport,
+    Progress, StepId, StepOutcome,
 };
+use ardoise_device::service::TabletOptions;
 use ardoise_device::transport::{
     Advertisement, Clock, Connector, SystemClock, Transport, TransportError,
 };
@@ -28,7 +29,7 @@ use tauri::{AppHandle, State};
 
 use crate::AppContext;
 use crate::commands::{CommandError, current_state};
-use crate::tablet::TabletPause;
+use crate::tablet::{TabletPause, store_page_in};
 
 /// What the interface receives during a run (see `app/ui/src/lib/diagnostic.ts`).
 #[derive(Debug, Clone, Serialize)]
@@ -243,6 +244,36 @@ fn adapter_check() -> Result<String, String> {
     }
 }
 
+/// How the pages of the test become notes: the normal synchronisation's page store (thumbnail,
+/// automatic export), with the tablet settings and language read when the test starts.
+#[derive(Clone)]
+struct NoteImport {
+    import: PageImport,
+    orientation: Orientation,
+}
+
+impl NoteImport {
+    fn new(context: &AppContext) -> Self {
+        let store = context.store.as_ref().ok().cloned();
+        let settings = store
+            .as_ref()
+            .and_then(|store| store.load().ok())
+            .unwrap_or_default();
+        let locale = context.system_locale.clone();
+        Self {
+            orientation: TabletOptions::from(&settings.tablet).orientation,
+            import: PageImport::new(move |root, page, context| {
+                store_page_in(store.as_ref(), locale.as_deref(), root, page, context)
+            }),
+        }
+    }
+
+    fn apply(self, config: &mut DiagnosticConfig) {
+        config.orientation = self.orientation;
+        config.page_import = Some(self.import);
+    }
+}
+
 /// Runs the test against the simulated tablet; `inner` is the person answering prompts, or
 /// `None` to let the simulated user answer everything.
 fn run_simulated(
@@ -250,6 +281,7 @@ fn run_simulated(
     options: DiagnosticOptions,
     language: String,
     cancel: Arc<AtomicBool>,
+    notes: NoteImport,
     inner: Option<Box<dyn Operator + Send>>,
 ) -> DiagnosticReport {
     let tablet = ardoise_sim::SimTablet::slate_large();
@@ -262,6 +294,7 @@ fn run_simulated(
     config.delete_after_sync = options.delete_after_sync;
     config.language = language;
     config.cancel = cancel;
+    notes.apply(&mut config);
     diagnostic::run(connector, &mut operator, &config, None)
 }
 
@@ -284,6 +317,7 @@ pub fn run_simulated_cli(context: &AppContext) -> i32 {
         options,
         report_language(context),
         Arc::new(AtomicBool::new(false)),
+        NoteImport::new(context),
         None,
     );
     print!(
@@ -331,6 +365,7 @@ pub fn diagnostic_start(
         )
     };
     let language = report_language(&context);
+    let notes = NoteImport::new(&context);
     let (answers_tx, answers_rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     *current = Some(RunHandle {
@@ -354,13 +389,14 @@ pub fn diagnostic_start(
                     options,
                     language,
                     cancel,
+                    notes,
                     Some(Box::new(operator)),
                 )
             } else {
                 // The tablet service lets go of the tablet during the test, and takes it back
                 // at the end, whatever the end (the guard also runs on a panic).
                 let pause = TabletPause::new(&app);
-                let report = run_ble(&library, options, language, cancel, operator);
+                let report = run_ble(&library, options, language, cancel, notes, operator);
                 drop(pause);
                 report
             };
@@ -382,12 +418,14 @@ fn run_ble(
     options: DiagnosticOptions,
     language: String,
     cancel: Arc<AtomicBool>,
+    notes: NoteImport,
     mut operator: UiOperator,
 ) -> DiagnosticReport {
     let mut config = DiagnosticConfig::new(library.to_path_buf(), "ble");
     config.delete_after_sync = options.delete_after_sync;
     config.language = language;
     config.cancel = cancel;
+    notes.apply(&mut config);
     let connector: Box<dyn Connector> = match ardoise_ble::BleConnector::new() {
         Ok(connector) => Box::new(connector),
         Err(error) => Box::new(Unavailable { error }),

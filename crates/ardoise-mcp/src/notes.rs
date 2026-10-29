@@ -145,8 +145,9 @@ pub fn binder_text(binder: &Path) -> String {
 
 /// The note named `reference`: its `id` (case does not matter), or its path relative to the
 /// library (`/` or `\`, case does not matter, `.ardoise` optional), or its absolute path. When
-/// several files share an id (a sync client's conflict copies), the original wins, then the
-/// most recent.
+/// several files share an id, a sync client's conflict copies give way to the original; but two
+/// files that both look like originals (a copy made in the Explorer) are refused: the error
+/// lists their paths, and the path of one of them names it.
 pub fn find_note(library: &Library, reference: &str) -> Result<NoteEntry, ToolError> {
     let reference = reference.trim();
     if reference.is_empty() {
@@ -160,9 +161,24 @@ pub fn find_note(library: &Library, reference: &str) -> Result<NoteEntry, ToolEr
         .iter()
         .filter(|note| note.id.eq_ignore_ascii_case(reference))
         .collect();
-    same_id.sort_by_key(|note| (note.conflict.is_some(), std::cmp::Reverse(note.modified)));
-    if let Some(note) = same_id.first() {
-        return Ok((*note).clone());
+    // Conflict copies only count when there is no original.
+    if same_id.iter().any(|note| note.conflict.is_none()) {
+        same_id.retain(|note| note.conflict.is_none());
+    }
+    match same_id.as_slice() {
+        [] => {}
+        [note] => return Ok((*note).clone()),
+        several => {
+            let mut paths: Vec<String> = several
+                .iter()
+                .map(|note| relative_path(library, &note.path))
+                .collect();
+            paths.sort();
+            return Err(ToolError::invalid(format!(
+                "several notes have the id `{reference}` ({}): give the path of the one you mean",
+                paths.join(", ")
+            )));
+        }
     }
 
     // An absolute path inside the library is turned into a relative one; comparisons ignore case

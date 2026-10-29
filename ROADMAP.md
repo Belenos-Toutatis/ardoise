@@ -138,12 +138,14 @@ Vérifié sous Windows le 2026-10-29 : `CHECK OK`, `E2E OK` (30 parcours, FR et 
 
 ## M10 — Finition et publication
 
-- [ ] Relecture complète par un agent relecteur ; corrections des problèmes bloquants et importants.
-- [ ] Performances (SPEC §8) mesurées et affichées.
-- [ ] Vérification automatique des licences de toutes les dépendances (aucune AGPL ni incompatible GPL v3) ; `THIRD-PARTY-NOTICES` et écran « À propos » (crédits Tuhi, mention Cisco).
+- [x] Relecture complète par un agent relecteur ; corrections des problèmes bloquants et importants.
+- [x] Performances (SPEC §8) mesurées et affichées.
+- [x] Vérification automatique des licences de toutes les dépendances (aucune AGPL ni incompatible GPL v3) ; `THIRD-PARTY-NOTICES` et écran « À propos » (crédits Tuhi, mention Cisco).
 - [x] Vérification qu'aucune donnée personnelle (notes, captures non anonymisées, jeton Inkspace) n'est dans l'historique git.
-- [ ] Guide utilisateur FR/EN, README, notes de version.
-- [ ] Archive de distribution (`ardoise.exe` + licence + guide).
+- [x] Guide utilisateur FR/EN, README, notes de version.
+- [x] Archive de distribution (`ardoise.exe` + licence + guide).
+
+Vérifié sous Windows le 2026-10-29 : `CHECK OK`, `E2E OK` (58 parcours, FR et EN, dont le serveur MCP), `SELFTEST OK`, `PERF OK` (PC au repos : démarrage 0,95 s, 1 000 notes listées en 1,8 s, défilement et mode direct à 60 images/s, MP4 d'une relecture de 2 min en 15 s, exécutable de 21 Mo), `DIST OK` (archive de 8,2 Mo). Deux relectures complètes (Rust, interface et documentation) dont les remarques importantes sont corrigées, ainsi que les retours d'essai du 29 octobre (rotation de plusieurs notes, sélection au stylet, export Markdown fidèle, Échap dans la fenêtre d'export). Ajouts demandés par le cahier des charges et trouvés à la relecture : import d'Inkspace depuis l'interface, étiquettes de couleur, classeurs renommés et supprimés, brouillons automatiques. Restent à essayer à la main : une vraie déconnexion de Windows avec une note modifiée, l'import d'Inkspace pendant qu'Inkspace est ouvert, les couleurs d'étiquettes avec Nextcloud sur deux PC, le déplacement d'une sélection au stylet sur la Surface, et l'essai réel de M9 depuis Claude Code (connexion du Claude Code en ligne de commande à refaire).
 
 ### Point de contrôle H3 [matériel]
 

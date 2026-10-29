@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Read;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use ardoise_core::format::{BackgroundFile, NoteFile};
@@ -435,10 +436,17 @@ thread_local! {
 /// `save_in` keeps its signature (another part of M7 shares that function), so the choice
 /// reaches [`settle`] through this thread's state, set for the duration of the call.
 pub fn with_staged<T>(chosen: Option<Chosen>, save: impl FnOnce() -> T) -> T {
-    let previous = CHOSEN.with(|current| current.replace(chosen));
-    let result = save();
-    CHOSEN.with(|current| *current.borrow_mut() = previous);
-    result
+    /// Restores the previous choice when dropped, so that a panic in `save` does not leave this
+    /// (pooled) thread holding the choice for the next note saved on it.
+    struct Restore(Option<Chosen>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            CHOSEN.with(|current| *current.borrow_mut() = previous);
+        }
+    }
+    let _restore = Restore(CHOSEN.with(|current| current.replace(chosen)));
+    save()
 }
 
 /// Puts the right background member in `file` (as read, still holding the note it was read
@@ -635,53 +643,101 @@ pub fn notes_from_file_with_progress(
     layer_name: &str,
     progress: &mut dyn FnMut(NotesProgress),
 ) -> CommandResult<Vec<NoteSummary>> {
+    notes_from_file_cancellable(
+        library,
+        binder,
+        path,
+        pages,
+        layer_name,
+        progress,
+        &AtomicBool::new(false),
+    )
+}
+
+/// [`notes_from_file_with_progress`] that stops when `cancel` is set (checked before each
+/// page and again once it is rendered): the notes already made are then removed again, so that
+/// a cancelled import leaves nothing in the library, and the error has the code `cancelled`.
+pub fn notes_from_file_cancellable(
+    library: &Library,
+    binder: &str,
+    path: &Path,
+    pages: Option<&[u32]>,
+    layer_name: &str,
+    progress: &mut dyn FnMut(NotesProgress),
+    cancel: &AtomicBool,
+) -> CommandResult<Vec<NoteSummary>> {
     let (bytes, kind) = read_source(path)?;
     let name = file_name(path);
     let binder = binder_path(binder);
     let now = now_ms();
     let mut made = Vec::new();
+    let mut cancelled = false;
     let mut create = |file: &NoteFile| -> CommandResult<()> {
         let saved = library.create(&binder, file).map_err(library_error)?;
         made.push(summary_of(library, &saved.path, &file.note, saved.stamp));
         Ok(())
     };
-    match kind {
-        SourceKind::Image => {
-            progress(NotesProgress { done: 0, total: 1 });
-            let stored = picture::import_image(&bytes).map_err(picture_error)?;
-            let page = page_for_image(stored.width, stored.height);
-            let title = note_title(&name, None, 1);
-            create(&note_with_image(
-                &title, layer_name, now, page, &name, None, stored,
-            ))?;
-            progress(NotesProgress { done: 1, total: 1 });
-        }
-        SourceKind::Pdf => {
-            let pdf = PdfFile::load(&bytes).map_err(pdf_error)?;
-            let sizes = pdf.page_sizes().map_err(pdf_error)?;
-            let all: Vec<u32> = (1..=sizes.len() as u32).collect();
-            let chosen = pages.unwrap_or(&all);
-            let total = chosen.len();
-            progress(NotesProgress { done: 0, total });
-            for (i, &number) in chosen.iter().enumerate() {
-                let size = page_size(&sizes, number)?;
-                let stored = import_pdf_page(&pdf, size, number)?;
-                let title = note_title(&name, Some(number), sizes.len());
-                // One millisecond apart: sorted by date, the pages keep their order.
-                let created = now.saturating_add(i as i64);
+    let outcome = (|| -> CommandResult<()> {
+        match kind {
+            SourceKind::Image => {
+                if cancel.load(Ordering::SeqCst) {
+                    cancelled = true;
+                    return Ok(());
+                }
+                progress(NotesProgress { done: 0, total: 1 });
+                let stored = picture::import_image(&bytes).map_err(picture_error)?;
+                let page = page_for_image(stored.width, stored.height);
+                let title = note_title(&name, None, 1);
                 create(&note_with_image(
-                    &title,
-                    layer_name,
-                    created,
-                    page_for_pdf(size),
-                    &name,
-                    Some(number),
-                    stored,
+                    &title, layer_name, now, page, &name, None, stored,
                 ))?;
-                progress(NotesProgress { done: i + 1, total });
+                progress(NotesProgress { done: 1, total: 1 });
+            }
+            SourceKind::Pdf => {
+                let pdf = PdfFile::load(&bytes).map_err(pdf_error)?;
+                let sizes = pdf.page_sizes().map_err(pdf_error)?;
+                let all: Vec<u32> = (1..=sizes.len() as u32).collect();
+                let chosen = pages.unwrap_or(&all);
+                let total = chosen.len();
+                progress(NotesProgress { done: 0, total });
+                for (i, &number) in chosen.iter().enumerate() {
+                    if cancel.load(Ordering::SeqCst) {
+                        cancelled = true;
+                        return Ok(());
+                    }
+                    let size = page_size(&sizes, number)?;
+                    let stored = import_pdf_page(&pdf, size, number)?;
+                    // The rendering is the long part: a click on "Cancel" during it counts at once.
+                    if cancel.load(Ordering::SeqCst) {
+                        cancelled = true;
+                        return Ok(());
+                    }
+                    let title = note_title(&name, Some(number), sizes.len());
+                    // One millisecond apart: sorted by date, the pages keep their order.
+                    let created = now.saturating_add(i as i64);
+                    create(&note_with_image(
+                        &title,
+                        layer_name,
+                        created,
+                        page_for_pdf(size),
+                        &name,
+                        Some(number),
+                        stored,
+                    ))?;
+                    progress(NotesProgress { done: i + 1, total });
+                }
             }
         }
+        Ok(())
+    })();
+    if cancelled {
+        for note in &made {
+            // Best effort: the notes were made a moment ago by this very import.
+            let _ = std::fs::remove_file(&note.path);
+        }
+        return Err(CommandError::new("cancelled", "the import was cancelled"));
     }
+    outcome?;
     Ok(made)
 }
 
@@ -749,8 +805,9 @@ pub async fn create_notes_from_file(
 ) -> CommandResult<Vec<NoteSummary>> {
     let library = library_of(&context)?;
     let layer = first_layer_name(&crate::diagnostic::report_language(&context));
+    NOTES_CANCEL.store(false, Ordering::SeqCst);
     blocking(move || {
-        notes_from_file_with_progress(
+        notes_from_file_cancellable(
             &library,
             &binder,
             Path::new(&path),
@@ -760,9 +817,21 @@ pub async fn create_notes_from_file(
                 // The interface may have gone: the notes are made anyway.
                 let _ = on_progress.send(progress);
             },
+            &NOTES_CANCEL,
         )
     })
     .await
+}
+
+/// Set by « Cancel » while `create_notes_from_file` runs (one import at a time: the dialog is
+/// modal).
+static NOTES_CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Stops `create_notes_from_file` after the page being rendered; the notes made so far are
+/// removed again and the command fails with the code `cancelled`.
+#[tauri::command]
+pub fn cancel_create_notes() {
+    NOTES_CANCEL.store(true, Ordering::SeqCst);
 }
 
 /// The background image's name of each note (the assembly keeps only the first one's).
@@ -1282,6 +1351,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_panic_in_a_save_does_not_leave_its_choice_on_the_thread() {
+        let staging = Staging::default();
+        let (_d, image) = user_file("rouge.png", &encode_png(&halves(40, 20)).unwrap());
+        let red = stage_file(&staging, &image, None).unwrap();
+        let chosen = Chosen {
+            staged: staging.get(&red.key).unwrap(),
+            picture: None,
+        };
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_staged(Some(chosen), || panic!("the save failed"));
+        }));
+        assert!(outcome.is_err());
+        assert!(CHOSEN.with(|current| current.borrow().is_none()));
+    }
+
+    #[test]
     fn the_editor_page_and_the_exports_draw_the_staged_image() {
         let staging = staging();
         let (_d, image) = user_file("demi.png", &encode_png(&halves(40, 20)).unwrap());
@@ -1661,6 +1746,65 @@ pub(crate) mod tests {
             .filter_map(|y| picture.image().pixel(x, y))
             .any(|[r, g, b, _]| r < 60 && g < 60 && b < 60);
         assert!(dark, "the page's content is drawn");
+    }
+
+    /// « Cancel » during the import of a PDF: the notes already made are removed again.
+    #[cfg(windows)]
+    #[test]
+    fn cancelling_the_import_of_a_pdf_leaves_nothing_in_the_library() {
+        let (_d, pdf) = user_file("fiche.pdf", &two_page_pdf());
+        let (_dir, library) = library();
+        let cancel = AtomicBool::new(false);
+        let error = notes_from_file_cancellable(
+            &library,
+            "Fiches",
+            &pdf,
+            None,
+            "Calque 1",
+            // The user presses « Cancel » once the first note exists.
+            &mut |p| {
+                if p.done == 1 {
+                    cancel.store(true, Ordering::SeqCst);
+                }
+            },
+            &cancel,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "cancelled");
+        assert!(list(&library).notes.is_empty(), "no half-made import");
+    }
+
+    /// A cancel already pressed stops an image import before anything is made.
+    #[test]
+    fn a_cancelled_import_makes_no_note() {
+        let (_dir, library) = library();
+        let (_d, image) = user_file("Tableau.png", &encode_png(&halves(40, 30)).unwrap());
+        let cancel = AtomicBool::new(true);
+        let error = notes_from_file_cancellable(
+            &library,
+            "",
+            &image,
+            None,
+            "Layer 1",
+            &mut |_| {},
+            &cancel,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "cancelled");
+        assert!(list(&library).notes.is_empty());
+        // Without the flag the same file is imported.
+        cancel.store(false, Ordering::SeqCst);
+        let made = notes_from_file_cancellable(
+            &library,
+            "",
+            &image,
+            None,
+            "Layer 1",
+            &mut |_| {},
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(made.len(), 1);
     }
 
     /// Elsewhere than on Windows, PDF files are refused with their own code.

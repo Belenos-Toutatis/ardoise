@@ -453,7 +453,12 @@ mod tests {
         let files = prepare_files(
             None,
             vec![ExportSource {
-                path: "C:\\Ardoise\\2026-10-24 Brouillon.ardoise".into(),
+                // A path of the platform (Linux does not split a Windows path).
+                path: if cfg!(windows) {
+                    "C:\\Ardoise\\2026-10-24 Brouillon.ardoise".into()
+                } else {
+                    "/Ardoise/2026-10-24 Brouillon.ardoise".into()
+                },
                 note: Some(sample_note("Brouillon")),
                 image_key: None,
             }],

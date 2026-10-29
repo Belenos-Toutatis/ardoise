@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ardoise_core::library::{self, NOTE_EXTENSION};
+use ardoise_core::library;
 use ardoise_core::settings::{
     AutoExport, AutoExportFormat, Language, Settings, SettingsError, SettingsStore, Theme,
 };
@@ -213,22 +213,6 @@ pub fn set_theme(context: State<'_, AppContext>, theme: Theme) -> CommandResult<
     update(&context, |settings| settings.theme = theme)
 }
 
-/// Whether `dir` or a folder below it holds a note file.
-fn holds_notes(dir: &Path) -> bool {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
-        let path = entry.path();
-        if path.is_dir() {
-            holds_notes(&path)
-        } else {
-            path.extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case(NOTE_EXTENSION))
-        }
-    })
-}
-
 /// Sets the automatic export after a sync (`[auto_export]`, shared by every PC). The folder
 /// must be a sub-folder of the library (`invalidFolder` otherwise); it is stored as `a/b`.
 /// With the export on, it must not be a binder that holds notes (`invalidFolder`), so that the
@@ -246,7 +230,7 @@ pub(crate) fn set_auto_export_in(
     let format = auto_export.format.known();
     if format.is_active()
         && let Ok(library) = library_of(context)
-        && holds_notes(&library.root().join(&folder))
+        && library::holds_notes(&library.root().join(&folder))
     {
         return Err(CommandError::new(
             "invalidFolder",
@@ -270,10 +254,20 @@ pub fn set_auto_export(
     set_auto_export_in(&context, auto_export)
 }
 
+/// What a folder chosen as the library holds (`LibraryInspection` in `api.ts`).
 #[derive(Debug, Serialize)]
 pub struct LibraryInspection {
+    /// `_ardoise/` (or the old `.ardoise/`) is there: an Ardoise library.
     existing: bool,
+    /// Note files found, sub-folders included.
+    notes: usize,
+    /// False when the count stopped early (a very large folder): there may be more.
+    complete: bool,
 }
+
+/// Folder entries looked at before the count of notes stops: picking a whole disk or a home
+/// folder must not keep the dialog waiting.
+const INSPECTION_ENTRIES: usize = 20_000;
 
 fn existing_folder(path: &str) -> CommandResult<&Path> {
     let folder = Path::new(path);
@@ -284,18 +278,26 @@ fn existing_folder(path: &str) -> CommandResult<&Path> {
     }
 }
 
-#[tauri::command]
-pub fn inspect_library(path: String) -> CommandResult<LibraryInspection> {
-    let folder = existing_folder(&path)?;
+pub(crate) fn inspect_folder(path: &str, max_entries: usize) -> CommandResult<LibraryInspection> {
+    let folder = existing_folder(path)?;
+    let count = library::count_notes(folder, max_entries);
     Ok(LibraryInspection {
         existing: library::is_library(folder),
+        notes: count.notes,
+        complete: count.complete,
     })
+}
+
+/// Counting the notes walks the folder (perhaps a slow synced one): on a blocking thread.
+#[tauri::command]
+pub async fn inspect_library(path: String) -> CommandResult<LibraryInspection> {
+    crate::notes::blocking(move || inspect_folder(&path, INSPECTION_ENTRIES)).await
 }
 
 /// Makes `path` this computer's library, creating `_ardoise/` there if needed, and watches
 /// it from then on.
 #[tauri::command]
-pub fn set_library(
+pub async fn set_library(
     app: AppHandle,
     context: State<'_, AppContext>,
     watch: State<'_, LibraryWatch>,
@@ -368,6 +370,41 @@ mod tests {
         assert_eq!(
             current_state(&context(settings.path(), "PC-A")).library(),
             Some(path.as_str())
+        );
+    }
+
+    #[test]
+    fn inspecting_a_folder_tells_what_it_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = |path: &Path| path.to_string_lossy().into_owned();
+        let empty = inspect_folder(&text(dir.path()), 1000).unwrap();
+        assert!(!empty.existing && empty.notes == 0 && empty.complete);
+
+        fs::create_dir_all(dir.path().join("Classe")).unwrap();
+        fs::write(dir.path().join("2026-10-24 Un.ardoise"), b"x").unwrap();
+        fs::write(
+            dir.path().join("Classe").join("2026-10-24 Deux.ardoise"),
+            b"x",
+        )
+        .unwrap();
+        fs::write(dir.path().join("Classe").join("sujet.pdf"), b"x").unwrap();
+        let found = inspect_folder(&text(dir.path()), 1000).unwrap();
+        assert!(!found.existing);
+        assert_eq!((found.notes, found.complete), (2, true));
+
+        library::init(dir.path()).unwrap();
+        let json = serde_json::to_value(inspect_folder(&text(dir.path()), 1000).unwrap()).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "existing": true, "notes": 2, "complete": true })
+        );
+        // A very large folder: the count stops early and says so.
+        assert!(!inspect_folder(&text(dir.path()), 1).unwrap().complete);
+        assert_eq!(
+            inspect_folder(&text(&dir.path().join("absent")), 1000)
+                .unwrap_err()
+                .code(),
+            "notAFolder"
         );
     }
 

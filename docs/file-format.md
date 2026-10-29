@@ -342,3 +342,13 @@ Sample files of version 1 (regenerate only when adding one:
   `Title (conflicted copy [user ]YYYY-MM-DD HHMMSS).ardoise`, `Title_conflict-YYYYMMDD-HHMMSS.ardoise`,
   `Title (case clash from YYYY-MM-DD HHMMSS).ardoise`, and other wordings such as
   `Title (copie en conflit de Nom YYYY-MM-DD).ardoise`.
+- Tag colours (milestone M10): `_ardoise/tags.json`, owned by the library (a note only carries tag names, so the
+  note format does not change):
+  `{"version": 1, "tags": {"physique": {"color": "blue", "changed": 1792843200000}, "3e b": {"color": null, "changed": …}}}`.
+  Keys are tags with spaces collapsed, in lower case; `color` is a palette id of the interface (`[a-z][a-z0-9-]{0,31}`;
+  an id the interface does not know is not shown), `null` a removal kept as a tombstone; `changed` is the Unix time of
+  the change. Written atomically with the check that the file did not change meanwhile. Nextcloud conflict copies of it
+  in `_ardoise/` are merged per tag, the latest `changed` winning (on a tie a colour beats a removal, then the greater
+  id), when reading; the next write folds them into `tags.json` and deletes them. Unknown fields are kept; a file that
+  cannot be understood is moved aside as `tags.damaged-<ms>.json` before the next write; a file of a newer version is
+  read but never rewritten (`crates/ardoise-core/src/library/tag_colors.rs`).

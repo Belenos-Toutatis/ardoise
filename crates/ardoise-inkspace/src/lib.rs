@@ -1,11 +1,13 @@
 //! Import of Wacom Inkspace notes (SPEC §6.3, research `docs/research/inkspace-format.md`).
 //!
 //! Pipeline: [`locate_local_state`] finds `%LOCALAPPDATA%\Packages\D91E29CF.InkspaceApp_*\
-//! LocalState`; [`import_local_state`] reads `WacomCloudDb\_` into memory (rusty-leveldb on
-//! its in-memory environment, so nothing is written next to Inkspace's data), walks the note
-//! tree, decodes the strokes and converts every page into an [`ardoise_core::note::Note`];
-//! [`compare::compare_with_preview`] renders an imported note and scores it against
-//! Inkspace's own `preview_*.png`.
+//! LocalState` (on Windows; the rules are platform-free in [`locate_with_env`]), and
+//! [`local_state_in`] turns a folder chosen by hand into its `LocalState`;
+//! [`import_local_state`] reads `WacomCloudDb\_` into memory (rusty-leveldb on its in-memory
+//! environment, so nothing is written next to Inkspace's data), walks the note tree, decodes
+//! the strokes and converts every page into an [`ardoise_core::note::Note`];
+//! [`compare::compare_with_preview`] renders an imported note and scores it against Inkspace's
+//! own `preview_*.png`.
 //!
 //! # Privacy
 //!
@@ -47,6 +49,8 @@ mod locate;
 mod protobuf;
 pub mod reader;
 mod store;
+#[cfg(feature = "synthetic")]
+pub mod synthetic;
 pub mod width;
 
 use std::path::{Path, PathBuf};
@@ -54,7 +58,10 @@ use std::path::{Path, PathBuf};
 use ardoise_core::note::{Note, Timing};
 
 pub use compare::{CompareError, Scores, THRESHOLDS, Thresholds, compare_with_preview};
-pub use locate::{PACKAGE_PREFIX, locate_in_packages, locate_local_state};
+pub use locate::{
+    PACKAGE_PREFIX, is_inkspace_package, local_state_in, locate_in_packages, locate_local_state,
+    locate_with_env, packages_dirs,
+};
 pub use reader::{Access, AccessKind, TrackedReader};
 
 /// Errors that stop the whole import.
@@ -150,11 +157,31 @@ impl ImportReport {
     }
 }
 
-/// Imports every note of the Inkspace `LocalState` folder into memory. Reads go through
-/// `reader`; nothing is written anywhere.
+/// Whether an import looks for Inkspace's render of each note ([`ImportedNote::preview`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Previews {
+    /// Looks in `db\notes\<uuid>\` (existence checks and a listing, nothing read): for
+    /// [`compare::compare_with_preview`].
+    Find,
+    /// Never looks under `db\` at all: the import into a library needs no preview.
+    Skip,
+}
+
+/// Imports every note of the Inkspace `LocalState` folder into memory, with their previews
+/// ([`import_local_state_with`] and [`Previews::Find`]).
 pub fn import_local_state(
     local_state: &Path,
     reader: &TrackedReader,
+) -> Result<ImportReport, ImportError> {
+    import_local_state_with(local_state, reader, Previews::Find)
+}
+
+/// Imports every note of the Inkspace `LocalState` folder into memory. Reads go through
+/// `reader`; nothing is written anywhere.
+pub fn import_local_state_with(
+    local_state: &Path,
+    reader: &TrackedReader,
+    previews: Previews,
 ) -> Result<ImportReport, ImportError> {
     let db = store::load(reader, local_state)?;
     let (documents, doc_failures) = decode::documents(&db)?;
@@ -171,7 +198,7 @@ pub fn import_local_state(
         for (page_index, page) in doc.pages.iter().enumerate() {
             match convert::convert_page(doc, page_index, page) {
                 Ok((note, stats)) => {
-                    let preview = if page_index == 0 {
+                    let preview = if page_index == 0 && previews == Previews::Find {
                         find_preview(reader, local_state, doc)
                     } else {
                         None

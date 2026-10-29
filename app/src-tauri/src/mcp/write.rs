@@ -36,11 +36,11 @@ use crate::background;
 use crate::codec::{codec_dir, openh264_allowed};
 use crate::commands::CommandError;
 use crate::export::{self, ExportSource, LoadedSource, load_sources, write_new_file};
-use crate::handwriting::{CacheDir, NoteText, hwr_error, text_document};
+use crate::handwriting::{CacheDir, NoteText, hwr_error, reading_of, text_document};
 use crate::library::path_text;
 use crate::notes::save_with_key;
 use crate::operations::{self, SplitSpec, merge_in, split_in};
-use crate::textdoc::{document_of, write_markdown_new};
+use crate::textdoc::{document_of, structure_for, write_markdown_new};
 use crate::thumbnails::thumbnail_png;
 use crate::video::{self, VideoExportOptions, export_video_in};
 
@@ -290,9 +290,10 @@ impl AppWrite {
         };
         let sources = sources_of(library, &request.notes)?;
         let indexer = self.handwriting.indexer();
-        let mut recognitions = Vec::new();
+        // The words of every text export: the corrected transcription, else the recognition.
+        let mut readings = Vec::new();
         for source in &sources {
-            recognitions.push(indexer.recognition_of(&source.note).map_err(|error| {
+            readings.push(reading_of(indexer, &source.note).map_err(|error| {
                 let error = hwr_error(error);
                 tool_error(error)
             })?);
@@ -300,14 +301,14 @@ impl AppWrite {
         if request.format == ExportFormat::Txt {
             let notes: Vec<NoteText> = sources
                 .iter()
-                .zip(&recognitions)
-                .map(|(source, recognition)| NoteText {
+                .zip(&readings)
+                .map(|(source, reading)| NoteText {
                     path: String::new(),
                     title: match source.note.title.trim() {
                         "" => source.stem.clone(),
                         title => title.to_owned(),
                     },
-                    text: recognition.text(),
+                    text: reading.text(),
                 })
                 .collect();
             let file = write_target(target, text_document(&notes).as_bytes())?;
@@ -319,11 +320,10 @@ impl AppWrite {
         let engine = indexer.on_demand();
         let mut documents: Vec<Document> = Vec::new();
         let mut analyzed = true;
-        for (source, recognition) in sources.iter().zip(&recognitions) {
-            let (document, by_analysis) =
-                document_of(source, recognition, &*engine).map_err(tool_error)?;
-            analyzed &= by_analysis;
-            documents.push(document);
+        for (source, reading) in sources.iter().zip(&readings) {
+            let structure = structure_for(&source.note, reading, &*engine, None);
+            analyzed &= structure.analyzed;
+            documents.push(document_of(source, &structure, true).map_err(tool_error)?);
         }
         let labels = labels(request.options.language);
         let files = if request.format == ExportFormat::Md {

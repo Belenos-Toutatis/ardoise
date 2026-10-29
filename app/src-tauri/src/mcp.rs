@@ -226,7 +226,7 @@ impl Handwriting for AppHandwriting {
     }
 
     fn structure_of(&self, note: &Note, recognition: &Recognition) -> Structure {
-        structure_of(&*self.indexer().on_demand(), recognition, note)
+        structure_of(&*self.indexer().on_demand(), recognition, None, note)
     }
 
     fn correction_of(&self, note: &Note) -> Option<ardoise_mcp::Correction> {

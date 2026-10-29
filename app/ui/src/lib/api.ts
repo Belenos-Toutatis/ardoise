@@ -1,10 +1,12 @@
 /** Typed wrappers around the Rust commands of `app/src-tauri/src/commands.rs`. */
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { AboutInfo, AboutText } from './about';
 import type { BackgroundSource, NotesProgress, StagedBackground } from './background';
 import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic';
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
+import type { InkspaceProgress, InkspaceReport, InkspaceSource } from './inkspace';
 import type { LiveBatch, LiveCommand, LiveSnapshot, LiveStyle, LiveViewState, MonitorInfo } from './live';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
@@ -27,6 +29,7 @@ import type {
 } from './video';
 import { mockOpenH264Download, mockVideoExport } from './mock-video';
 import type { NoteOriginal } from './original';
+import type { Draft, DraftSnapshot, DraftSummary } from './editor/drafts';
 import type {
   HandwritingHit,
   HandwritingInfo,
@@ -83,6 +86,32 @@ export interface AppState {
 export interface LibraryInspection {
   /** The folder already holds an Ardoise library (`_ardoise/` present). */
   existing: boolean;
+  /** Note files found in it, sub-folders included. */
+  notes: number;
+  /** False when the count stopped early (a very large folder): there may be more notes. */
+  complete: boolean;
+}
+
+/** A note an operation on several notes could not handle, with the reason (`organize.rs`). */
+export interface FailedNote {
+  path: string;
+  error: { code: string; message: string };
+}
+
+/** What moving notes to the trash did (`TrashedNotes` in `organize.rs`). */
+export interface TrashedNotes {
+  /** Each note moved, with the id of its trash entry (to restore it). */
+  trashed: { path: string; id: string }[];
+  failed: FailedNote[];
+}
+
+/** What deleting a binder did (`BinderDeleted` in `organize.rs`). */
+export interface BinderDeleted {
+  /** Its notes, now in the trash, each restorable to its own binder. */
+  trashed: TrashEntry[];
+  failed: FailedNote[];
+  /** Folders kept because they still hold other files (relative, `/`-separated, deepest first). */
+  kept: string[];
 }
 
 /** A stroke ready to draw: SVG path data to fill with the non-zero rule (`notes.rs`). */
@@ -153,8 +182,8 @@ export const api = {
   createBinder: (binder: string) => call<void>('create_binder', { binder }),
   /** Moves notes into `binder`; returns their new paths, in order. */
   moveNotes: (paths: string[], binder: string) => call<string[]>('move_notes', { paths, binder }),
-  /** Moves notes to the trash. */
-  trashNotes: (paths: string[]) => call<void>('trash_notes', { paths }),
+  /** Moves each note it can to the trash; says which went (with their trash ids) and which failed. */
+  trashNotes: (paths: string[]) => call<TrashedNotes>('trash_notes', { paths }),
   trashList: () => call<TrashEntry[]>('trash_list'),
   /** Restores a trashed note; returns its path. */
   trashRestore: (id: string) => call<string>('trash_restore', { id }),
@@ -168,6 +197,17 @@ export const api = {
   /** Changes a note's title, which renames its file. */
   retitleNote: (path: string, title: string, stamp: FileStamp) =>
     call<{ path: string; stamp: FileStamp }>('retitle_note', { path, title, stamp }),
+
+  // --- Library: organising (milestone M10; Rust side: app/src-tauri/src/organize.rs) -------
+
+  /** Renames a binder (`a/b`) in place; returns its new path. Refused (`binderExists`) rather than replacing a folder. */
+  renameBinder: (binder: string, name: string) => call<string>('rename_binder', { binder, name }),
+  /** Puts every note of a binder (and its sub-binders) in the trash, then removes the folders left empty. */
+  deleteBinder: (binder: string) => call<BinderDeleted>('delete_binder', { binder }),
+  /** Colour id of every tag that has one, keyed by the tag in lower case (`tagKey`). */
+  tagColors: () => call<Record<string, string>>('tag_colors'),
+  /** Gives a tag a colour of the palette, or none (`null`); returns every colour afterwards. */
+  setTagColor: (tag: string, color: string | null) => call<Record<string, string>>('set_tag_color', { tag, color }),
 
   // --- Editor -------------------------------------------------------------------------------
 
@@ -284,6 +324,8 @@ export const api = {
   liveStop: () => call<string[]>('live_stop'),
   liveSetStyle: (style: LiveStyle) => call<void>('live_set_style', { style }),
   liveCommand: (command: LiveCommand) => call<void>('live_command', { command }),
+  /** « Undo the clearing »: gives the current page the ink of the last « Clear the page » back. */
+  liveRestoreCleared: () => call<boolean>('live_restore_cleared'),
   liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
   listMonitors: () => call<MonitorInfo[]>('list_monitors'),
   /** Opens the presentation window full screen on `monitor` (null: the saved or default screen). */
@@ -343,7 +385,7 @@ export const api = {
   narrationDiscard: () => call<void>('narration_discard'),
   /** The narration stored in a note, or null. */
   narrationInfo: (path: string) => call<NarrationInfo | null>('narration_info', { path }),
-  /** The narration as a WAV file, to play during the replay. */
+  /** The narration as stored, an Ogg Opus stream (a WAV file in the browser stand-in), to play during the replay. */
   narrationAudio: (path: string) => call<ArrayBuffer>('narration_audio', { path }),
   /** Removes a note's narration; returns the new stamp. */
   deleteNarration: (path: string, stamp: FileStamp) => call<FileStamp>('delete_narration', { path, stamp }),
@@ -387,8 +429,34 @@ export const api = {
     channel.onmessage = onProgress;
     return invoke<NoteSummary[]>('create_notes_from_file', { binder, path, pages, onProgress: channel });
   },
+  /** Stops `createNotesFromFile` after the page being rendered: the notes made are removed again and the call fails with the code `cancelled`. */
+  cancelCreateNotes: () => call<void>('cancel_create_notes'),
   /** The background image's name of each note (null without one). */
   backgroundImageNames: (paths: string[]) => call<(string | null)[]>('background_image_names', { paths }),
+
+  // --- Inkspace import (M10; Rust side: import.rs) -------------------------------------------
+
+  /** Inkspace's `LocalState` folder found on this PC, or null (always null outside Windows). */
+  inkspaceDetect: () => call<string | null>('inkspace_detect'),
+  /**
+   * Reads a folder of Inkspace data (can take a second) and counts its notes. Rejects with
+   * `inkspaceNotFound`, `inkspaceUnreadable` (Inkspace is running, say), `inkspaceDamaged` or
+   * `inkspaceTooLarge`.
+   */
+  inkspaceInspect: (path: string) => call<InkspaceSource>('inkspace_inspect', { path }),
+  /**
+   * Imports the notes of `path` into `binder` (empty: the library root), skipping those already
+   * there; `onProgress` hears how many are handled, before the first one and after each. A
+   * stopped import resolves with `cancelled: true`; `inkspaceBusy` when another one is running.
+   */
+  inkspaceImport: (path: string, binder: string, onProgress: (progress: InkspaceProgress) => void = () => {}) => {
+    if (!inDesktopApp()) return call<InkspaceReport>('inkspace_import', { path, binder, onProgress });
+    const channel = new Channel<InkspaceProgress>();
+    channel.onmessage = onProgress;
+    return invoke<InkspaceReport>('inkspace_import', { path, binder, onProgress: channel });
+  },
+  /** Asks the running import to stop after the note under way. */
+  inkspaceCancel: () => call<void>('inkspace_cancel'),
 
   // --- Handwriting recognition (milestone M7; Rust side: handwriting.rs) ----------------------
 
@@ -413,10 +481,21 @@ export const api = {
   /**
    * Saves the recognised text with its structure (title, date and tags, then paragraphs, list
    * items and drawings) as Markdown (drawings as PNG files next to it) or as a Word document.
-   * `labels` are the words the file contains, in the interface language.
+   * `labels` are the words the file contains, in the interface language; `includeDrawings`
+   * false leaves the drawings out.
    */
-  exportStructuredText: (sources: ExportSource[], format: StructuredFormat, destination: string, labels: TextLabels) =>
-    call<StructuredExport>('export_structured_text', { sources, format, destination, labels }),
+  exportStructuredText: (
+    sources: ExportSource[],
+    format: StructuredFormat,
+    destination: string,
+    labels: TextLabels,
+    includeDrawings: boolean,
+  ) => call<StructuredExport>('export_structured_text', { sources, format, destination, labels, includeDrawings }),
+  /**
+   * How many drawings the Markdown and Word exports of `sources` hold (the layout analysis takes a
+   * few seconds a note; the desktop app keeps it for the export that follows).
+   */
+  structuredTextDrawings: (sources: ExportSource[]) => call<number>('structured_text_drawings', { sources }),
 
   // --- Printing (milestone M8; Rust side: print.rs, print_windows.rs) ---
 
@@ -432,7 +511,44 @@ export const api = {
   bridgeReply: (id: number, answer: BridgeAnswer) => call<void>('bridge_reply', { id, answer }),
   /** How to start this copy's MCP server (Settings > Assistant). */
   mcpLaunchInfo: () => call<McpLaunch>('mcp_launch_info'),
+
+  // --- About (milestone M10; Rust side: about.rs) -----------------------------------------------
+  /** Version, licence and the third-party components built into this copy. */
+  aboutInfo: () => call<AboutInfo>('about_info'),
+  /** The licence of Ardoise (`license`) or the licences of its components (`notices`), in full. */
+  aboutText: (which: AboutText) => call<string>('about_text', { which }),
+
+  // --- Drafts and the end of the Windows session (M10; drafts.rs, session_end.rs) ---
+  /** Keeps the editor's unsaved note outside the library (replacing its previous draft). */
+  draftWrite: (snapshot: DraftSnapshot) =>
+    call<void>('draft_write', {
+      path: snapshot.path,
+      noteId: snapshot.noteId,
+      note: snapshot.note,
+      baseStamp: snapshot.baseStamp,
+      imageKey: snapshot.imageKey,
+    }),
+  /** The draft kept for a note of the library, if any. */
+  draftFind: (noteId: string) => call<Draft | null>('draft_find', { noteId }),
+  /** The drafts left by an earlier run of Ardoise, closed without saving them. */
+  draftList: () => call<DraftSummary[]>('draft_list'),
+  draftDiscard: (noteId: string) => call<void>('draft_discard', { noteId }),
+  /** Stages the background image kept with a draft; null when it kept none. */
+  draftStageImage: (noteId: string) => call<StagedBackground | null>('draft_stage_image', { noteId }),
+  /** Makes a new note titled `title` of a draft (the note it came from is not touched), then forgets the draft. */
+  draftRestoreCopy: (noteId: string, title: string) => call<NoteSummary>('draft_restore_copy', { noteId, title }),
+  /** What Windows shows while unsaved work holds the end of the session back; null when nothing is unsaved. */
+  setUnsavedWork: (reason: string | null) => call<void>('set_unsaved_work', { reason }),
 };
+
+/**
+ * Calls `handler` when Windows ends the session (shutdown, restart, logoff): the drafts are
+ * written at once. Returns a function that stops listening. Nothing comes in a plain browser.
+ */
+export async function onSessionEnding(handler: () => void): Promise<() => void> {
+  if (!inDesktopApp()) return () => {};
+  return listen('session-ending', () => handler());
+}
 
 /** `McpLaunch` in `app_bridge.rs`. */
 export interface McpLaunch {
@@ -503,6 +619,18 @@ export function followHandwritingStatus(handler: (status: IndexStatus) => void):
 export async function onLibraryChanged(handler: () => void): Promise<() => void> {
   if (!inDesktopApp()) return mockOnLibraryChanged(handler);
   return listen('library-changed', () => handler());
+}
+
+/**
+ * « Something went wrong. » followed by the error's text as a sentence of its own: the
+ * `errorCodes.*` phrases start in lower case and have no full stop (they also fill other
+ * sentences), so this gives the first letter a capital and the end a full stop.
+ */
+export function genericError(message: string): string {
+  const text = message.trim();
+  if (text === '') return t('errors.generic', { message: '' }).trim();
+  const sentence = text.charAt(0).toLocaleUpperCase() + text.slice(1);
+  return t('errors.generic', { message: /[.!?…]$/.test(sentence) ? sentence : `${sentence}.` });
 }
 
 /**

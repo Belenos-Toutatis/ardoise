@@ -12,6 +12,7 @@ import Home from './Home.svelte';
 // app state (the microphone chosen on their side) through the `onchange` they are given.
 interface DoubleProps {
   onchange?: (next: AppState) => void;
+  onclose?: () => void;
 }
 
 function double(name: string) {
@@ -21,6 +22,11 @@ function double(name: string) {
     button.textContent = name;
     button.addEventListener('click', () => props.onchange?.({ ...app, microphone: 'mock-mic-2' }));
     anchor.before(button);
+    const back = document.createElement('button');
+    back.dataset.doubleClose = name;
+    back.textContent = `close ${name}`;
+    back.addEventListener('click', () => props.onclose?.());
+    anchor.before(back);
   };
 }
 
@@ -96,5 +102,78 @@ describe('the main window gives the app state to the editor and the live view', 
     await settle();
     target.querySelector<HTMLButtonElement>('button[data-double="live"]')!.click();
     expect(onchange).toHaveBeenCalledWith(expect.objectContaining({ microphone: 'mock-mic-2' }));
+  });
+});
+
+describe('the library stays mounted under the editor and live mode', () => {
+  const shellOf = (target: HTMLElement) => target.querySelector<HTMLElement>('.shell')!;
+  const cardOf = (target: HTMLElement) => target.querySelector<HTMLButtonElement>('.note-card .card-open')!;
+
+  it('hides the library while a note is edited and shows the same one afterwards', async () => {
+    const { target } = await render();
+    const shell = shellOf(target);
+    const card = cardOf(target);
+    expect(shell.classList.contains('shell-hidden')).toBe(false);
+    card.click();
+    await settle();
+    // The same elements, hidden: nothing was built again.
+    expect(shellOf(target)).toBe(shell);
+    expect(shell.classList.contains('shell-hidden')).toBe(true);
+    expect(target.querySelector('button[data-double="editor"]')).not.toBeNull();
+    target.querySelector<HTMLButtonElement>('button[data-double-close="editor"]')!.click();
+    await settle();
+    expect(shell.classList.contains('shell-hidden')).toBe(false);
+    expect(cardOf(target)).toBe(card);
+  });
+
+  it('gives back the scroll position and the focus on the card that was opened', async () => {
+    const { target } = await render();
+    const scroller = target.querySelector<HTMLElement>('.library-scroll')!;
+    scroller.scrollTop = 240;
+    const card = cardOf(target);
+    card.focus();
+    card.click();
+    await settle();
+    // What the browser does to a hidden element.
+    scroller.scrollTop = 0;
+    (document.activeElement as HTMLElement | null)?.blur();
+    target.querySelector<HTMLButtonElement>('button[data-double-close="editor"]')!.click();
+    await settle();
+    expect(scroller.scrollTop).toBe(240);
+    expect(document.activeElement).toBe(card);
+  });
+
+  it('keeps the open panel (a tablet test, the settings being edited) while a note is opened', async () => {
+    const { target } = await render();
+    target.querySelector<HTMLButtonElement>('.topbar button[aria-expanded]')!.click();
+    await settle();
+    const settings = target.querySelector('aside.panel');
+    expect(settings).not.toBeNull();
+    cardOf(target).click();
+    await settle();
+    expect(settings!.isConnected).toBe(true);
+    target.querySelector<HTMLButtonElement>('button[data-double-close="editor"]')!.click();
+    await settle();
+    expect(settings!.isConnected).toBe(true);
+  });
+
+  it('ignores Ctrl+N and Ctrl+F while a dialog of the library is open', async () => {
+    (window as { __ardoiseE2eOpenPath?: string }).__ardoiseE2eOpenPath = 'C:\\Documents\\fiche.pdf';
+    try {
+      const { target } = await render();
+      target.querySelector<HTMLButtonElement>('button[data-action="new-from-file"]')!.click();
+      await settle();
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+      const search = target.querySelector<HTMLInputElement>('input.search')!;
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, bubbles: true, cancelable: true }));
+      await settle();
+      // Neither a note was made and opened (which would have unmounted the dialog), nor the search focused.
+      expect(target.querySelector('button[data-double="editor"]')).toBeNull();
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(document.activeElement).not.toBe(search);
+    } finally {
+      delete (window as { __ardoiseE2eOpenPath?: string }).__ardoiseE2eOpenPath;
+    }
   });
 });

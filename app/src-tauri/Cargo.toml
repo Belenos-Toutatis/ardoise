@@ -29,7 +29,8 @@ ardoise-ble = { path = "../../crates/ardoise-ble" }
 ardoise-device = { path = "../../crates/ardoise-device" }
 ardoise-hwr = { path = "../../crates/ardoise-hwr" }
 ardoise-ink = { path = "../../crates/ardoise-ink" }
-ardoise-inkspace = { path = "../../crates/ardoise-inkspace" }
+# `synthetic`: made-up Inkspace data for `--create-demo-inkspace` (never used by the import).
+ardoise-inkspace = { path = "../../crates/ardoise-inkspace", features = ["synthetic"] }
 ardoise-mcp = { path = "../../crates/ardoise-mcp" }
 ardoise-media = { path = "../../crates/ardoise-media" }
 ardoise-proto = { path = "../../crates/ardoise-proto" }
@@ -48,12 +49,19 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 # Console: attach to the parent console. DataExchange, Memory, Ole: the clipboard (clipboard.rs).
+# Security, Threading, WindowsAndMessaging: one app per copy (instance.rs). Shutdown, Shell
+# (window subclass): the end of the Windows session (session_end.rs).
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Security",
     "Win32_System_Console",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
     "Win32_System_Ole",
+    "Win32_System_Shutdown",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # Same version as `ardoise-ble` and `ardoise-media`: one copy compiled.
 # - Data_Pdf, Foundation, Storage_Streams: PDF pages rendered by Windows for background images

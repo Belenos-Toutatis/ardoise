@@ -71,14 +71,16 @@ describe('live mode keyboard', () => {
     expect(key('ArrowRight', { repeat: true })).toBeNull();
   });
 
-  it('leaves keys typed in a field alone, and Space on a button presses it', () => {
+  it('leaves keys typed in a field alone, but Space is the next page even on a button', () => {
     expect(key('b', { target: element('INPUT', { type: 'text' }) })).toBeNull();
     expect(key('ArrowRight', { target: element('INPUT', { type: 'range' }) })).toBeNull();
     expect(key('ArrowRight', { target: element('SELECT') })).toBeNull();
     expect(key('Escape', { target: element('TEXTAREA') })).toBeNull();
     expect(key('l', { target: element('DIV', { isContentEditable: true }) })).toBeNull();
-    expect(key(' ', { target: element('BUTTON') })).toBeNull();
-    expect(key(' ', { target: element('INPUT', { type: 'button' }) })).toBeNull();
+    // A button just used (« Clear the page ») must not be pressed again by the Space for "next page".
+    expect(key(' ', { target: element('BUTTON') })).toEqual({ kind: 'command', command: 'nextPage' });
+    expect(key(' ', { target: element('INPUT', { type: 'button' }) })).toEqual({ kind: 'command', command: 'nextPage' });
+    expect(key(' ', { target: element('INPUT', { type: 'text' }) })).toBeNull();
     expect(key('ArrowRight', { target: element('BUTTON') })).toEqual({ kind: 'command', command: 'nextPage' });
     expect(key(' ', { target: element('CANVAS') })).toEqual({ kind: 'command', command: 'nextPage' });
     expect(isTypingTarget(element('INPUT', { type: 'submit' }))).toBe(false);
