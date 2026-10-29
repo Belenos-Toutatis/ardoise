@@ -59,8 +59,8 @@ export interface EditorSlot {
   dirty(): boolean;
   /** Why the editor cannot be left now (unsaved changes, a recording…), or null. */
   blocker(): string | null;
-  /** Settles once the editor has loaded the note at `path`; rejects with why it could not (`NoteLoads`). */
-  loaded(path: string): Promise<void>;
+  /** Settles once the editor has loaded its note (`path()`); rejects with why it could not (`NoteLoads`). */
+  loaded(): Promise<void>;
 }
 
 /** Why an action under way must stop (its request was replaced, or nobody waits for it any more), or null. */
@@ -134,12 +134,13 @@ const samePath = (a: string, b: string) => a.replaceAll('/', '\\').toLowerCase()
 /**
  * The loads of one editor, as `open_note` waits for them (`EditorSlot.loaded`): the editor calls
  * `begin` when it starts loading a note and ends it with `ok` or `fail`; a load begun meanwhile
- * replaces the one under way (which then fails with `appBusy`).
+ * replaces the one under way (which then fails with `appBusy`). Not tied to a path: a rename or a
+ * "save as a copy" moves the note without loading it again (the caller checks `path()`).
  */
 export class NoteLoads {
-  #current: { path: string; done: Promise<void>; settle: (error?: unknown) => void } | null = null;
+  #current: { done: Promise<void>; settle: (error?: unknown) => void } | null = null;
 
-  begin(path: string): { ok(): void; fail(error: unknown): void } {
+  begin(): { ok(): void; fail(error: unknown): void } {
     this.#current?.settle(busy('another note was opened in Ardoise meanwhile'));
     let settled = false;
     let resolve!: () => void;
@@ -156,17 +157,13 @@ export class NoteLoads {
       if (error === undefined) resolve();
       else reject(error);
     };
-    this.#current = { path, done, settle };
+    this.#current = { done, settle };
     return { ok: () => settle(), fail: (error) => settle(error ?? new Error('the note could not be loaded')) };
   }
 
-  /** Settles once the note at `path` is loaded (at once if it is); rejects with the load's error. */
-  loaded(path: string): Promise<void> {
-    const current = this.#current;
-    if (!current || !samePath(current.path, path)) {
-      return Promise.reject(new Refusal('appNotResponding', `the editor is not loading ${path}`));
-    }
-    return current.done;
+  /** The latest load: settles once its note is shown (at once if it is), rejects with its error. */
+  loaded(): Promise<void> {
+    return this.#current?.done ?? Promise.reject(new Refusal('appNotResponding', 'the editor has loaded no note'));
   }
 }
 
@@ -177,7 +174,7 @@ async function openNote(screens: BridgeScreens, path: string): Promise<{ path: s
   const editor = screens.editor;
   if (editor && samePath(editor.path(), path)) {
     // Already there: still says whether it could be read.
-    await editor.loaded(editor.path());
+    await editor.loaded();
     return { path: editor.path() };
   }
   const blocked = editor?.blocker() ?? home.busy();
@@ -188,7 +185,7 @@ async function openNote(screens: BridgeScreens, path: string): Promise<{ path: s
   await until(shows, 3000);
   const opened = screens.editor;
   if (!opened || !shows()) throw new Refusal('appNotResponding', 'the editor did not open the note');
-  await opened.loaded(path);
+  await opened.loaded();
   return { path };
 }
 
@@ -197,14 +194,6 @@ async function presentation(
   action: PresentationAction,
   page: number | null,
 ): Promise<PresentationState> {
-  const run = ++screens.presentationRuns;
-  const deadline = Date.now() + ACTION_BUDGET_MS;
-  const abandoned: Abandoned = () =>
-    screens.presentationRuns !== run
-      ? { code: 'appBusy', message: 'replaced by a newer presentation request' }
-      : Date.now() > deadline
-        ? { code: 'appNotResponding', message: 'the live window took too long: the request was given up' }
-        : null;
   if (action === 'page' && !(Number.isInteger(page) && (page ?? 0) >= 1)) {
     throw new Refusal('invalidArguments', '`page` must be a page number from 1');
   }
@@ -217,6 +206,15 @@ async function presentation(
       'live mode is not open in Ardoise: the teacher starts it from the tablet panel (Live mode)',
     );
   }
+  // The live window acts: this request replaces the one under way, and is given up in time.
+  const run = ++screens.presentationRuns;
+  const deadline = Date.now() + ACTION_BUDGET_MS;
+  const abandoned: Abandoned = () =>
+    screens.presentationRuns !== run
+      ? { code: 'appBusy', message: 'replaced by a newer presentation request' }
+      : Date.now() > deadline
+        ? { code: 'appNotResponding', message: 'the live window took too long: the request was given up' }
+        : null;
   return live.presentation(action, page, abandoned);
 }
 

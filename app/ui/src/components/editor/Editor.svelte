@@ -282,7 +282,7 @@
                 : pendingWrites > 0
                   ? 'the note open in the editor is being saved'
                   : null,
-        loaded: (target) => loads.loaded(target),
+        loaded: () => loads.loaded(),
       }),
     ),
   );
@@ -328,7 +328,7 @@
     generation += 1;
     currentPath = target;
     // Replaced by the load of another note if one starts before this one ends.
-    const load = loads.begin(target);
+    const load = loads.begin();
     loadError = null;
     history = null;
     disk = null;

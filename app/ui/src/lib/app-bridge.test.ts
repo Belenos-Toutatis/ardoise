@@ -35,8 +35,8 @@ function home(
       opened.push(path);
       if (!into) return;
       const loads = new NoteLoads();
-      const loading = loads.begin(path);
-      into.register('editor', { ...editor(path), loaded: (p) => loads.loaded(p) });
+      const loading = loads.begin();
+      into.register('editor', { ...editor(path), loaded: () => loads.loaded() });
       load(path).then(loading.ok, loading.fail);
     },
   };
@@ -148,14 +148,15 @@ describe('opening a note', () => {
 
   it('a load replaced by another note fails with appBusy', async () => {
     const loads = new NoteLoads();
-    const first = loads.begin('a.ardoise');
-    const waiting = loads.loaded('A.ardoise');
-    const second = loads.begin('b.ardoise');
+    await expect(loads.loaded()).rejects.toMatchObject({ code: 'appNotResponding' });
+    const first = loads.begin();
+    const waiting = loads.loaded();
+    const second = loads.begin();
     await expect(waiting).rejects.toMatchObject({ code: 'appBusy' });
+    // Ending a replaced load changes nothing; the latest one tells.
     first.ok();
-    second.ok();
-    await expect(loads.loaded('b.ardoise')).resolves.toBeUndefined();
-    await expect(loads.loaded('a.ardoise')).rejects.toMatchObject({ code: 'appNotResponding' });
+    second.fail({ code: 'noteDamaged', message: 'bad zip' });
+    await expect(loads.loaded()).rejects.toMatchObject({ code: 'noteDamaged' });
   });
 
   it('the note already in the editor stays as it is', async () => {
