@@ -78,6 +78,8 @@ export const journeys = [
 
       await check(`texte en Markdown (« ${l('handwriting.export.saveMd')} ») : titre, date, étiquettes, texte`, async () => {
         await app.evaluate(`window.__ardoiseE2eSavePath = ${j(markdown)}`);
+        // Disabled while the notes are searched for drawings (a few seconds at most): a click then does nothing.
+        await app.waitFor(`document.querySelector('button[data-action="text-md"]:not([disabled])') !== null`, 'the text export buttons', 30_000);
         await app.click('button[data-action="text-md"]');
         await app.waitFor(`document.querySelector('.text-export .export-result code')?.textContent === ${j(markdown)}`, 'the Markdown export result', 60_000);
         if (!existsSync(markdown)) throw new Error(`${markdown} was not written`);
@@ -89,6 +91,8 @@ export const journeys = [
 
       await check(`texte en Word (« ${l('handwriting.export.saveDocx')} ») : un fichier .docx valide`, async () => {
         await app.evaluate(`window.__ardoiseE2eSavePath = ${j(docx)}`);
+        // Disabled while the notes are searched for drawings (a few seconds at most): a click then does nothing.
+        await app.waitFor(`document.querySelector('button[data-action="text-docx"]:not([disabled])') !== null`, 'the text export buttons', 30_000);
         await app.click('button[data-action="text-docx"]');
         await app.waitFor(`document.querySelector('.text-export .export-result code')?.textContent === ${j(docx)}`, 'the Word export result', 60_000);
         const bytes = readFileSync(docx);
