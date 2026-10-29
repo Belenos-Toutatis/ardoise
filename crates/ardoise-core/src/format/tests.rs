@@ -981,9 +981,18 @@ fn generate_v1_fixtures() {
 #[test]
 fn v1_fixtures_are_read() {
     let dir = fixtures_dir();
-    for (name, expected, version) in fixtures() {
+    for (name, mut expected, version) in fixtures() {
         let path = dir.join(name);
-        let file = read_note(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut file = read_note(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+        // The original note is a whole .ardoise inside the file: compare what it holds, not its
+        // bytes, whose ZIP headers name the system that wrote them (the fixtures come from
+        // Windows, `expected` is encoded on the system running the test).
+        let original = |file: &mut NoteFile| {
+            file.original_note
+                .take()
+                .map(|bytes| read_from_bytes(&bytes).unwrap())
+        };
+        assert_eq!(original(&mut file), original(&mut expected), "{name}");
         assert_eq!(file, expected, "{name}");
         let header = read_header(&path).unwrap();
         assert_eq!(header.format, version, "{name}");
