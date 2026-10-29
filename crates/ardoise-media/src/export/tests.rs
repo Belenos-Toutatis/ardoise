@@ -985,7 +985,7 @@ fn mp4_export_reads_back() {
 fn handwriting(duration_ms: u32) -> Note {
     let strokes = (0..duration_ms / 200)
         .map(|i| {
-            let (row, column) = (i / 10, i % 10);
+            let (row, column) = (i / 10 % 10, i % 10);
             let (x0, y0) = (
                 1500.0 + column as f32 * 2600.0,
                 2000.0 + row as f32 * 1800.0,
@@ -1044,6 +1044,38 @@ fn export_speed_1080p() {
             estimate.as_secs_f64()
         );
     }
+}
+
+/// MP4 at 1080p and 30 frames per second of a 2-minute replay through Media Foundation (SPEC §8: under
+/// 2 minutes on a recent laptop). `cargo xtask perf` runs it in release and reads its `PERF-EXPORT` line:
+/// `cargo test --release -p ardoise-media export_speed_mp4_2min -- --ignored --nocapture`.
+#[test]
+#[ignore = "benchmark: run in release (cargo xtask perf)"]
+fn export_speed_mp4_2min() {
+    let dir = tempfile::tempdir().unwrap();
+    let note = handwriting(120_000);
+    let options = AnimationExport {
+        width: 1920,
+        height: 1080,
+        frame_rate: 30,
+        ..export(FormatOptions::Mp4(Mp4Options {
+            backend: crate::Mp4Backend::MediaFoundation,
+            ..Mp4Options::default()
+        }))
+    };
+    let plan = plan_export(&note, &options, None).unwrap();
+    let path = dir.path().join("speed.mp4");
+    let started = std::time::Instant::now();
+    let summary = run_export(&note, &options, None, &path).unwrap();
+    let elapsed = started.elapsed();
+    println!(
+        "PERF-EXPORT mp4 1920x1080 30fps replay_s={:.1} frames={} seconds={:.2} bytes={} encoder={}",
+        plan.duration.as_secs_f64(),
+        summary.frames,
+        elapsed.as_secs_f64(),
+        std::fs::metadata(&path).unwrap().len(),
+        summary.encoder
+    );
 }
 
 // --- Helpers ---

@@ -6,6 +6,7 @@
   import { displayTitle, formatDate } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import type { NoteSummary } from '../../lib/note';
+  import { noteDrawn } from '../../lib/perf';
   import Menu from './Menu.svelte';
 
   let {
@@ -173,7 +174,7 @@
 {#snippet thumb()}
   <span class="thumb" bind:this={host}>
     {#if src}
-      <img {src} alt="" draggable="false" />
+      <img {src} alt="" draggable="false" onload={noteDrawn} />
     {:else}
       <span class="thumb-placeholder" aria-hidden="true"></span>
     {/if}

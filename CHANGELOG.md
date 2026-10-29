@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Ajouté (jalon M10 — finition et publication)
+
+- Performances mesurées : `cargo xtask perf` mesure sur l'exécutable de production les objectifs de SPEC §8 (démarrage, bibliothèque de 1 000 notes, mode direct, export MP4 1080p d'une relecture de 2 min, taille) et affiche un tableau ; les résultats et leur méthode sont dans `docs/performance.md`. `ardoise.exe --create-demo-library DOSSIER --demo-notes N` fabrique une bibliothèque de N notes pour ces mesures.
+
 ### Ajouté (jalon M9 — pilotage par un assistant)
 
 - Serveur MCP local `ardoise.exe --mcp [--read-only]` (entrée et sortie standard, aucun port réseau, sans fenêtre, application ouverte ou non) : l'assistant de l'utilisateur (Claude Code, Claude Desktop…) liste et cherche les notes, lit leurs données, leur texte reconnu avec la position des lignes et leur structure, et les voit en image (PNG, 2000 pixels au plus) pour reconnaître schémas et formules. `--read-only` limite l'assistant à la lecture.

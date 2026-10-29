@@ -4,6 +4,7 @@
   import { t } from '../../lib/i18n.svelte';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import type { NoteSummary } from '../../lib/note';
+  import { LIBRARY_LISTED_MARK, markWhenDrawn } from '../../lib/perf';
   import HandwritingResults from './HandwritingResults.svelte';
   import NoteCard from './NoteCard.svelte';
   import SelectionBar from './SelectionBar.svelte';
@@ -35,6 +36,11 @@
   const problems = $derived(lib.listing?.problems ?? []);
   // Keeps the Tab stop inside the grid when notes disappear.
   const tabStop = $derived(Math.min(activeIndex, Math.max(notes.length - 1, 0)));
+
+  // The end of the start-up measure of `cargo xtask perf`: the cards are on screen.
+  $effect(() => {
+    if (grid && notes.length > 0) markWhenDrawn(LIBRARY_LISTED_MARK);
+  });
 
   function cards(): HTMLElement[] {
     return [...(grid?.querySelectorAll<HTMLElement>('.card-open[data-index]') ?? [])];

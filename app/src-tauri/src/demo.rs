@@ -20,6 +20,8 @@ use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use crate::library::{binder_path, slash_path};
 use crate::thumbnails::thumbnail_png;
 
+mod bulk;
+
 /// 2026-09-07 07:30 UTC: the first demo note; the others follow over about four weeks.
 const FIRST_DAY_MS: i64 = 1_788_766_200_000;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
@@ -653,13 +655,21 @@ pub struct DemoReport {
 
 /// Makes `dir` (created if needed) a library holding the demo notes. Notes already there
 /// (same id) are kept as they are, so running it twice adds nothing.
+#[cfg(test)]
 pub fn create_demo_library(dir: &Path) -> Result<DemoReport, String> {
+    create_demo_library_of(dir, 0)
+}
+
+/// [`create_demo_library`] with `total` notes when that is more than the 8 demo notes: the
+/// others are copies of them with their own ids, titles, dates and binders ([`bulk`]), for the
+/// performance measure of a library of 1 000 notes.
+pub fn create_demo_library_of(dir: &Path, total: usize) -> Result<DemoReport, String> {
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     library::init(dir).map_err(|e| e.to_string())?;
     let library = Library::open(dir).map_err(|e| e.to_string())?;
     let existing: HashSet<String> = library.list().notes.into_iter().map(|n| n.id).collect();
     let mut report = DemoReport::default();
-    for demo in demo_notes() {
+    for demo in demo_notes().into_iter().chain(bulk::extra_notes(total)) {
         if existing.contains(&demo.note.id) {
             report.skipped += 1;
             continue;
@@ -688,15 +698,18 @@ pub fn create_demo_library(dir: &Path) -> Result<DemoReport, String> {
 }
 
 /// Runs the mode and returns the exit code.
-pub fn run_cli(dir: &Path) -> i32 {
+pub fn run_cli(dir: &Path, total: usize) -> i32 {
     if dir.as_os_str().is_empty() {
-        println!("Usage : ardoise.exe --create-demo-library DOSSIER");
+        println!("Usage : ardoise.exe --create-demo-library DOSSIER [--demo-notes NOMBRE]");
         return 2;
     }
-    match create_demo_library(dir) {
+    match create_demo_library_of(dir, total) {
         Ok(report) => {
-            for line in &report.created {
-                println!("Créée : {line}");
+            // A large library is not listed note by note.
+            if report.created.len() <= 20 {
+                for line in &report.created {
+                    println!("Créée : {line}");
+                }
             }
             println!(
                 "Bibliothèque de démonstration {} : {} note(s) créée(s), {} déjà présente(s)",
@@ -813,7 +826,30 @@ mod tests {
     }
 
     #[test]
+    fn a_larger_library_is_made_of_valid_notes_with_their_own_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Grande");
+        let report = create_demo_library_of(&root, 40).unwrap();
+        assert_eq!(report.created.len(), 40);
+        let listing = crate::library::list(&Library::open(&root).unwrap());
+        assert_eq!(listing.notes.len(), 40);
+        assert!(listing.problems.is_empty());
+        let ids: HashSet<&str> = listing.notes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids.len(), 40);
+        assert!(listing.binders.len() > 10);
+        // The first eight are the demo notes: asking for fewer than eight adds nothing to them.
+        let small = tempfile::tempdir().unwrap();
+        assert_eq!(
+            create_demo_library_of(small.path(), 3)
+                .unwrap()
+                .created
+                .len(),
+            8
+        );
+    }
+
+    #[test]
     fn missing_folder_argument_is_a_usage_error() {
-        assert_eq!(run_cli(Path::new("")), 2);
+        assert_eq!(run_cli(Path::new(""), 0), 2);
     }
 }

@@ -62,6 +62,9 @@ pub struct Cli {
     /// `--create-demo-library DIR`: make DIR a library of synthetic notes without a window,
     /// print what was created and exit (an empty path when DIR is missing).
     pub create_demo_library: Option<PathBuf>,
+    /// `--demo-notes N` with `--create-demo-library`: a library of N notes (the 8 demo notes, then
+    /// copies of them), for the performance measure; 0 for the 8 demo notes alone.
+    pub demo_notes: usize,
     /// `--simulated-tablet`: the simulated tablet replaces Bluetooth (real time, 3 stored pages);
     /// its registration is kept in a throwaway folder, never in the library.
     pub simulated_tablet: bool,
@@ -92,6 +95,9 @@ impl Cli {
                 "--create-demo-library" => {
                     cli.create_demo_library =
                         Some(args.next().map(PathBuf::from).unwrap_or_default());
+                }
+                "--demo-notes" => {
+                    cli.demo_notes = args.next().and_then(|n| n.parse().ok()).unwrap_or(0);
                 }
                 other if !other.starts_with("--") && import_args.local_state.is_none() => {
                     import_args.local_state = Some(PathBuf::from(other));
@@ -149,7 +155,7 @@ pub fn run() {
         std::process::exit(import::run_cli(import_args));
     }
     if let Some(dir) = &cli.create_demo_library {
-        std::process::exit(demo::run_cli(dir));
+        std::process::exit(demo::run_cli(dir, cli.demo_notes));
     }
 
     let context = AppContext {
@@ -365,6 +371,10 @@ mod tests {
             parse(&["--create-demo-library"]).create_demo_library,
             Some(PathBuf::new())
         );
+        assert_eq!(demo.demo_notes, 0);
+        let large = parse(&["--create-demo-library", "D:\\Démo", "--demo-notes", "1000"]);
+        assert_eq!(large.demo_notes, 1000);
+        assert_eq!(parse(&["--demo-notes", "x"]).demo_notes, 0);
     }
 
     #[test]
