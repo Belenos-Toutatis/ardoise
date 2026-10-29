@@ -17,11 +17,14 @@ import { backgroundJourneys } from './journeys-m7-background.mjs';
 import { dragJourneys } from './journeys-m7-drag.mjs';
 import { editJourneys } from './journeys-m7-edit.mjs';
 import { journeys as handwritingJourneys } from './journeys-m7-hwr.mjs';
+import { inputJourneys } from './journeys-m8-input.mjs';
+import { orientationJourneys } from './journeys-m8-orientation.mjs';
+import { pageJourneys } from './journeys-m8-page.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -217,7 +220,8 @@ async function startApp(language, port, args = []) {
 }
 
 let failures = 0;
-let port = 9400;
+// A random base port: two runs at the same time (another worktree, another session) must not drive each other's window.
+let port = Number(process.env.ARDOISE_E2E_PORT) || 9400 + 100 * Math.floor(Math.random() * 40);
 for (const language of ['fr', 'en']) {
   for (const journey of journeys) {
     const app = await startApp(language, port++, journey.args);

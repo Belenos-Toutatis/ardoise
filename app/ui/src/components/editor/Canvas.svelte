@@ -113,7 +113,8 @@
     | { kind: 'pan'; id: number; start: Vec; view: View }
     | { kind: 'pen'; id: number; points: InkPoint[]; t0: number; base: number }
     | { kind: 'eraser'; id: number; last: Vec }
-    | { kind: 'lasso'; id: number; points: Vec[]; combine: Combine }
+    /** `barrel`: started by the pen's barrel button, which ends when the button is released. */
+    | { kind: 'lasso'; id: number; points: Vec[]; combine: Combine; barrel?: boolean }
     | { kind: 'zone'; id: number; points: Vec[] }
     | { kind: 'move'; id: number; start: Vec }
     | { kind: 'scale'; id: number; anchor: Vec; start: Vec }
@@ -380,6 +381,14 @@
     }
   }
 
+  /** The pen's barrel button is down: a lasso that ends with the button (or with the contact). */
+  function startBarrelLasso(e: PointerEvent, id: number, p: Vec) {
+    const combine: Combine = e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace';
+    begin({ kind: 'lasso', id, points: [p], combine, barrel: true });
+    lasso = [p];
+    lassoRemoves = combine === 'remove';
+  }
+
   function onpointerdown(e: PointerEvent) {
     const kind = pointerKind(e);
     const id = pointerId(e);
@@ -414,10 +423,7 @@
         begin({ kind: 'eraser', id, last: p });
         hover = p;
       } else {
-        const combine: Combine = e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace';
-        begin({ kind: 'lasso', id, points: [p], combine });
-        lasso = [p];
-        lassoRemoves = combine === 'remove';
+        startBarrelLasso(e, id, p);
       }
       return;
     }
@@ -486,6 +492,20 @@
     }
     if (tools.mode === 'eraser' || eraserEnd) hover = pagePoint(e);
     else if (hover) hover = null;
+    // Pressing the barrel button of a pen that is not drawing arrives as a move whose buttons
+    // changed (no `pointerdown`, e.g. through the DevTools protocol): it starts the lasso too, and
+    // releasing the button ends it.
+    if (!drag && kind === 'pen' && barrelHeld(e) && !readonly && !split) {
+      e.preventDefault();
+      if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
+      capture(pointerId(e));
+      startBarrelLasso(e, pointerId(e), pagePoint(e));
+      return;
+    }
+    if (drag?.kind === 'lasso' && drag.barrel && pointerId(e) === drag.id && kind === 'pen' && !barrelHeld(e)) {
+      finish(e, false);
+      return;
+    }
     if (!drag || pointerId(e) !== drag.id) return;
     switch (drag.kind) {
       case 'pan': {

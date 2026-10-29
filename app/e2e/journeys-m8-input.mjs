@@ -114,16 +114,25 @@ export const inputJourneys = [
         await app.key('Escape');
       });
 
-      await check('le dos du stylet efface le trait qu’il traverse (bouton 32), sans changer d’outil', async () => {
+      // `Input.dispatchMouseEvent` has no eraser button: WebView2 drops the bit 32 and delivers a plain
+      // tip contact (buttons 1). The eraser end is then covered by the unit tests only (Canvas.pen-touch.test.ts)
+      // and by docs/hardware-tests.md (H3 A2); this check says so instead of failing.
+      await check('le dos du stylet efface le trait qu’il traverse (bouton 32), sans changer d’outil ; sauté si le protocole DevTools ne sait pas envoyer ce bouton', async () => {
+        await app.evaluate(
+          `(() => { window.__eraserSeen = false; document.querySelector('.editor svg.canvas').addEventListener('pointerdown', (e) => { if (e.buttons & 32) window.__eraserSeen = true; }, true); })()`,
+        );
         const before = await app.evaluate(count);
         const y = box.y + box.h * 0.85;
         await penStroke(app, line(box.x + box.w * 0.5, y, box.x + box.w * 0.9, y), { buttons: 32, force: () => 0.5 });
+        if (!(await app.evaluate('window.__eraserSeen'))) {
+          console.log('    (sauté : le protocole DevTools ne transmet pas le bouton gomme (32) ; à vérifier à la main, docs/hardware-tests.md H3 A2)');
+          // The pen came down as a plain tip: whatever it drew is not what this check is about.
+          return;
+        }
         try {
           await app.waitFor(`${count} < ${before}`, 'the erased stroke', 4000);
         } catch {
-          throw new Error(
-            'the stroke was not erased: either the protocol does not send the eraser button (32) in this WebView2, or the eraser end is not recognised; check by hand (docs/hardware-tests.md, H3 A2)',
-          );
+          throw new Error('the eraser end reached the page (buttons 32) but the stroke was not erased');
         }
       });
     },

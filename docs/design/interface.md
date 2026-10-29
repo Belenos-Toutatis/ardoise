@@ -127,7 +127,10 @@ when `buttons & 32` (or `button === 5`); anything else is a mouse (its behaviour
   0 counts as 0.6.
 - **Barrel button** (`buttons & 2` on a pen): a **temporary lasso**, whatever the tool; the selection it makes is the
   one the Select tool would make (Shift adds, Ctrl removes), and the tool does not change. A mouse's right button is
-  not the barrel. The canvas shows no context menu for a pen (Windows turns the barrel button into a right click).
+  not the barrel. Pressing the barrel button of a pen that is not drawing may arrive as a `pointermove` whose `buttons`
+  changed, with no `pointerdown` (this is what WebView2 does with the DevTools protocol): it starts the lasso too, and
+  releasing the button ends it. The DevTools protocol cannot send the eraser button (it drops bit 32), so the eraser
+  end is checked by unit tests and by hand only. The canvas shows no context menu for a pen (Windows turns the barrel button into a right click).
 - **Palm rejection** (`PenPresence`): while a pen is in contact or has been seen hovering less than 1.2 s ago (or until
   `pointerleave`), touch is ignored on the page; a pen arriving drops the fingers being tracked.
 

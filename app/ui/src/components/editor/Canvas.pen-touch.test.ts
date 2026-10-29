@@ -181,6 +181,29 @@ describe('the pen barrel button', () => {
     expect(c.onselect.mock.calls[0][0].selection).toEqual([0]);
   });
 
+  it('also works when the button press arrives as a move, with no pointerdown', async () => {
+    const c = await render({ tools: { mode: 'pen' } });
+    const loop: [number, number][] = [
+      [500, 2000],
+      [5500, 2000],
+      [5500, 4000],
+      [500, 4000],
+      [500, 2100],
+    ];
+    const pen = (t: number) => ({ pointerType: 'pen', buttons: 3, pointerId: 4, t });
+    for (const [i, p] of loop.entries()) c.fire('pointermove', c.client(...p), pen(i * 10));
+    await tick();
+    // The button is released while the pen still hovers: the lasso ends there.
+    c.fire('pointermove', c.client(500, 2100), { pointerType: 'pen', buttons: 0, pointerId: 4, t: 100 });
+    await tick();
+    expect(c.onchange).not.toHaveBeenCalled();
+    expect(c.onselect).toHaveBeenCalledTimes(1);
+    expect(c.onselect.mock.calls[0][0].selection).toEqual([0]);
+    // The next move does not start another one.
+    c.fire('pointermove', c.client(900, 2100), { pointerType: 'pen', buttons: 0, pointerId: 4, t: 110 });
+    expect(c.onselect).toHaveBeenCalledTimes(1);
+  });
+
   it('is not the mouse right button', async () => {
     const c = await render({ tools: { mode: 'pen' } });
     await c.stroke(along(8000, 12000, 8000), { pointerType: 'mouse', buttons: 2, button: 2 });
