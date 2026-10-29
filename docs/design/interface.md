@@ -264,3 +264,26 @@ format stays 1.2.
 - **Plurals**: `tn(key, count, params)` picks the `one` or `other` form of a catalog entry `{ "one": …, "other": … }`
   with `Intl.PluralRules` (French: 0 and 1 are `one`); `{count}` is optional in a form. The tests check that every
   plural message has exactly these two forms in both languages.
+
+## M10: performance
+
+`cargo xtask perf` (`xtask/src/perf.rs`, `app/e2e/perf.mjs`, method and last table in `docs/performance.md`) measures the SPEC §8
+targets on `target/release/ardoise.exe`. Decisions:
+
+- **Split.** The Node script drives the app (a portable copy per run, fresh `LOCALAPPDATA`, DevTools port, same pattern
+  as `run.mjs`) and returns raw numbers (times, one frame interval per frame); Rust computes the statistics (mean fps,
+  p95, frames over 25 / 50 ms), judges them and prints the table, so that the pure parts are unit-tested.
+- **Ready mark.** The interface sets the User Timing mark `ardoise:library-listed` (`lib/perf.ts`, from `NoteGrid`) two
+  animation frames after the grid has cards, and each thumbnail `img` gets `data-drawn-at` (`performance.now()`) on
+  `load`. Start = spawn (wall clock) to `timeOrigin + mark.startTime`; no behaviour changes.
+- **Large library.** `--create-demo-library DIR --demo-notes N` (`app/src-tauri/src/demo/bulk.rs`): the 8 demo notes, then
+  copies of them with unique ids (from `…-000000001000`), titles, dates over 18 months, tags and 24 binders. The default
+  demo (8 notes) is unchanged.
+- **Live mode** runs the simulated tablet (`--simulated-tablet`: 5 ms samples, a 600 s handwriting script) through the
+  registration wizard and the sync, then opens live mode, as the end-to-end journey does. Frame intervals come from a
+  `requestAnimationFrame` loop in the live window, with WebView2 started with `--disable-features=CalculateNativeWinOcclusion`,
+  `--disable-backgrounding-occluded-windows` and `--disable-renderer-backgrounding` so that a window hidden behind another
+  is not throttled.
+- **Export** is the release benchmark `export_speed_mp4_2min` of `ardoise-media` (Media Foundation back end forced), run by
+  `cargo test --release`; it prints a `PERF-EXPORT` line the task parses.
+- The numbers depend on the PC and its load: the table records the CPU, cores, RAM, GPU and Windows version.

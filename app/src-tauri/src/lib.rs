@@ -67,6 +67,9 @@ pub struct Cli {
     /// `--create-demo-inkspace DIR`: write made-up Inkspace data into the new or empty folder
     /// DIR (a stand-in for Inkspace's `LocalState`) and exit (an empty path when DIR is missing).
     pub create_demo_inkspace: Option<PathBuf>,
+    /// `--demo-notes N` with `--create-demo-library`: a library of N notes (the 8 demo notes, then
+    /// copies of them), for the performance measure; 0 for the 8 demo notes alone.
+    pub demo_notes: usize,
     /// `--simulated-tablet`: the simulated tablet replaces Bluetooth (real time, 3 stored pages);
     /// its registration is kept in a throwaway folder, never in the library.
     pub simulated_tablet: bool,
@@ -101,6 +104,9 @@ impl Cli {
                 "--create-demo-inkspace" => {
                     cli.create_demo_inkspace =
                         Some(args.next().map(PathBuf::from).unwrap_or_default());
+                }
+                "--demo-notes" => {
+                    cli.demo_notes = args.next().and_then(|n| n.parse().ok()).unwrap_or(0);
                 }
                 other if !other.starts_with("--") && import_args.local_state.is_none() => {
                     import_args.local_state = Some(PathBuf::from(other));
@@ -159,7 +165,7 @@ pub fn run() {
         std::process::exit(import::run_cli(import_args));
     }
     if let Some(dir) = &cli.create_demo_library {
-        std::process::exit(demo::run_cli(dir));
+        std::process::exit(demo::run_cli(dir, cli.demo_notes));
     }
     if let Some(dir) = &cli.create_demo_inkspace {
         std::process::exit(import::cli::run_demo_cli(dir));
@@ -400,6 +406,10 @@ mod tests {
         );
         assert_eq!(inkspace.import_inkspace, None);
         assert_eq!(inkspace.create_demo_library, None);
+        assert_eq!(demo.demo_notes, 0);
+        let large = parse(&["--create-demo-library", "D:\\Démo", "--demo-notes", "1000"]);
+        assert_eq!(large.demo_notes, 1000);
+        assert_eq!(parse(&["--demo-notes", "x"]).demo_notes, 0);
     }
 
     #[test]

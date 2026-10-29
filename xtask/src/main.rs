@@ -1,8 +1,10 @@
 //! Project automation: `cargo xtask check [--quick]`, `cargo xtask selftest`, `cargo xtask e2e` and
-//! `cargo xtask golden`, `cargo xtask licenses`, `cargo xtask privacy` and `cargo xtask dist`.
+//! `cargo xtask golden`, `cargo xtask licenses`, `cargo xtask privacy`, `cargo xtask dist` and
+//! `cargo xtask perf`.
 
 mod dist;
 mod licenses;
+mod perf;
 mod privacy;
 
 use std::fs;
@@ -26,7 +28,10 @@ Commands:
                    exe, LICENSE, THIRD-PARTY-NOTICES, LISEZMOI.txt and the guides as HTML; prints size and SHA-256
   golden           regenerate the reference images in testdata/golden, then check them
   e2e              end-to-end tests of the main journeys, in French and English, on the
-                   release executable (run `cargo xtask check` first)";
+                   release executable (run `cargo xtask check` first)
+  perf [--write] [--only start,library,live,export,size]
+                   measure the SPEC section 8 targets on the release executable and print a
+                   table (--write puts it in docs/performance.md; run `cargo xtask check` first)";
 
 /// Maximum accepted size of the release executable, in bytes.
 const MAX_EXE_BYTES: u64 = 30 * 1024 * 1024;
@@ -53,6 +58,7 @@ fn main() -> ExitCode {
         ["dist", "--reuse"] => dist_command(true),
         ["golden"] => golden(),
         ["e2e"] => e2e(),
+        ["perf", rest @ ..] => perf::command(rest, &root()),
         _ => {
             println!("{USAGE}");
             ExitCode::from(2)
