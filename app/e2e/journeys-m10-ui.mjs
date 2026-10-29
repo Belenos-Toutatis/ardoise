@@ -23,11 +23,23 @@ const strokeCount = `document.querySelectorAll(${j(STROKES)}).length`;
 /** The simulated tablet draws in live mode as soon as asked to. */
 export const liveArgs = ['--simulated-tablet'];
 
-/** Opens live mode from the tablet panel and waits for the first strokes. */
+/** Registers the simulated tablet (it starts unregistered), opens live mode from the tablet panel and waits for the first strokes. */
 async function startLive(app, check) {
+  const STATUS = '.tablet-status';
+  const WIZARD = '.register-wizard';
+  await check('enregistrer la tablette simulée', async () => {
+    await app.waitFor(`document.querySelector(${j(`${STATUS}[data-connection="notRegistered"]`)}) !== null`, 'the sidebar block');
+    await app.click(STATUS);
+    await app.waitFor(`document.querySelector('.tablet-panel button[data-action="register"]') !== null`, 'the register button');
+    await app.click('.tablet-panel button[data-action="register"]');
+    await app.waitFor(`document.querySelector(${j(`${WIZARD} [data-step="warning"]`)}) !== null`, 'the warning step');
+    await app.click(`${WIZARD} button[data-action="continue"]`);
+    await app.waitFor(`document.querySelector(${j(`${WIZARD} [data-step="done"]`)}) !== null`, 'the end of the registration', 60_000);
+    await app.click(`${WIZARD} button[data-action="finish"]`);
+    await app.waitFor(`document.querySelector(${j(`${STATUS}[data-connection="connected"]`)}) !== null`, 'the end of the sync', 60_000);
+  });
   await check('ouvrir le mode direct (tablette simulée)', async () => {
-    await app.click('.tablet-status');
-    await app.waitFor(`document.querySelector('.tablet-panel button[data-action="live"]') !== null`, 'the tablet panel');
+    await app.waitFor(`document.querySelector('.tablet-panel button[data-action="live"]:not([disabled])') !== null`, 'the live button');
     await app.click('.tablet-panel button[data-action="live"]');
     await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
     await app.waitFor(`Number(${canvasData('strokes')}) > 0`, 'strokes on the live canvas', 10_000);
@@ -76,8 +88,22 @@ export const uiJourneys = [
       await startLive(app, check);
 
       await check('« Effacer la page » vide la page et propose d’annuler', async () => {
+        // The simulated pen goes on drawing right after the clearing, so the count never rests at 0: let a few
+        // strokes build up, then an observer catches the drop (a poll could miss it).
+        await app.waitFor(`Number(${canvasData('strokes')}) >= 3`, 'a few strokes', 30_000);
+        await app.evaluate(`(() => {
+          const canvas = document.querySelector(${j(LIVE_CANVAS)});
+          let last = Number(canvas.dataset.strokes);
+          window.__dropped = false;
+          window.__before = last;
+          new MutationObserver(() => {
+            const now = Number(canvas.dataset.strokes);
+            if (now < last) window.__dropped = true;
+            last = now;
+          }).observe(canvas, { attributes: true, attributeFilter: ['data-strokes'] });
+        })()`);
         await app.click('button[data-action="clear-page"]');
-        await app.waitFor(`${canvasData('strokes')} === '0'`, 'the page cleared');
+        await app.waitFor('window.__dropped === true', 'the page cleared');
         await app.waitFor(`document.querySelector('button[data-action="undo-clear"]') !== null`, 'the undo button');
         const label = await app.evaluate(`document.querySelector('button[data-action="undo-clear"]').textContent.trim()`);
         if (label !== l('live.clearUndo')) throw new Error(`unexpected label "${label}"`);
@@ -85,7 +111,7 @@ export const uiJourneys = [
 
       await check('« Annuler l’effacement » rend le tracé', async () => {
         await app.click('button[data-action="undo-clear"]');
-        await app.waitFor(`Number(${canvasData('strokes')}) > 0`, 'the strokes back');
+        await app.waitFor(`Number(${canvasData('strokes')}) >= window.__before`, 'the strokes back');
       });
 
       await check('Espace avec « Effacer la page » au focus : page suivante, rien d’effacé', async () => {
