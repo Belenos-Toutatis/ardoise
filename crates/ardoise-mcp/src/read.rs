@@ -43,6 +43,11 @@ const MIN_DPI: u32 = 25;
 const MAX_DPI: u32 = 300;
 const MAX_RENDER_SIDE: u32 = 2_000;
 const MM_PER_INCH: f64 = 25.4;
+/// `render_note` draws the whole page, then cuts the region out (`ardoise-render` draws pages,
+/// not parts of them): the page drawn is at most this many pixels (96 MB)...
+const MAX_PAGE_PIXELS: f64 = 24_000_000.0;
+/// ... and this many a side (`ardoise-render` refuses more than 16 384), whatever the region.
+const MAX_PAGE_SIDE: f64 = 16_000.0;
 
 // ---------------------------------------------------------------------------------------------
 // Arguments
@@ -272,7 +277,7 @@ impl ArdoiseServer {
         self.blocking(move |host| get_note_text(host, args)).await
     }
 
-    /// Render a note (or a region of its page) as a PNG image so that you can see it: handwriting, drawings, diagrams, layout, paper and background image. The image's longest side is at most 2000 pixels; the dpi actually used is returned in the text next to it.
+    /// Render a note (or a region of its page) as a PNG image so that you can see it: handwriting, drawings, diagrams, layout, paper and background image. The image's longest side is at most 2000 pixels, and a very large page (an A0 PDF) cannot be seen closer than about 120 dpi; the dpi actually used, and what lowered it, are returned in the text next to it.
     #[tool(
         name = "render_note",
         annotations(
@@ -755,6 +760,26 @@ fn crop(image: &Image, page: (f64, f64), region: Region) -> Image {
     }
 }
 
+/// The resolution a region of `page` (millimetres) is drawn at: `requested`, lowered so that
+/// the image of the region is at most [`MAX_RENDER_SIDE`] pixels a side (`"image_size"`) and so
+/// that the whole page, which is drawn before the region is cut out, stays within
+/// [`MAX_PAGE_PIXELS`] and [`MAX_PAGE_SIDE`] (`"page_size"`: a very large page, such as an A0
+/// PDF, cannot be seen closer). Returns what lowered it, if anything.
+fn render_dpi(requested: f64, page: (f64, f64), region: &Region) -> (f64, Option<&'static str>) {
+    let inches = |mm: f64| mm / MM_PER_INCH;
+    let for_image = f64::from(MAX_RENDER_SIDE) / inches(region.width.max(region.height));
+    let for_page = (MAX_PAGE_PIXELS / (inches(page.0) * inches(page.1)))
+        .sqrt()
+        .min(MAX_PAGE_SIDE / inches(page.0.max(page.1)));
+    if requested <= for_image && requested <= for_page {
+        (requested, None)
+    } else if for_page < for_image {
+        (for_page, Some("page_size"))
+    } else {
+        (for_image, Some("image_size"))
+    }
+}
+
 pub fn render_note_tool(host: &Host, args: RenderNoteArgs) -> ToolResult {
     let library = host.library()?;
     let entry = find_note(&library, &args.note)?;
@@ -803,13 +828,7 @@ pub fn render_note_tool(host: &Host, args: RenderNoteArgs) -> ToolResult {
     };
 
     let requested = args.dpi.unwrap_or(DEFAULT_DPI).clamp(MIN_DPI, MAX_DPI);
-    let longest_mm = region.width.max(region.height);
-    let wanted_side = longest_mm / MM_PER_INCH * f64::from(requested);
-    let dpi = if wanted_side > f64::from(MAX_RENDER_SIDE) {
-        f64::from(MAX_RENDER_SIDE) * MM_PER_INCH / longest_mm
-    } else {
-        f64::from(requested)
-    };
+    let (dpi, limited_by) = render_dpi(f64::from(requested), page, &region);
 
     let picture = if background && note.background_image.is_some() {
         loaded
@@ -844,7 +863,8 @@ pub fn render_note_tool(host: &Host, args: RenderNoteArgs) -> ToolResult {
         "height_px": image.height,
         "dpi": (dpi * 10.0).round() / 10.0,
         "requested_dpi": requested,
-        "dpi_lowered": dpi < f64::from(requested),
+        "dpi_lowered": limited_by.is_some(),
+        "dpi_limited_by": limited_by,
         "region_mm": {
             "x": (region.x * 10.0).round() / 10.0,
             "y": (region.y * 10.0).round() / 10.0,

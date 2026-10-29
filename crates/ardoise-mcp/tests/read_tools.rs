@@ -995,6 +995,7 @@ async fn render_never_exceeds_two_thousand_pixels() {
     assert_eq!(image.width.max(image.height), 2000);
     assert_eq!(info["requested_dpi"], 300);
     assert_eq!(info["dpi_lowered"], true);
+    assert_eq!(info["dpi_limited_by"], "image_size");
     let dpi = info["dpi"].as_f64().unwrap();
     assert!((dpi - 2000.0 * 25.4 / 297.0).abs() < 0.1, "{dpi}");
 
@@ -1018,6 +1019,50 @@ async fn render_never_exceeds_two_thousand_pixels() {
         info["region_mm"],
         json!({ "x": 10.0, "y": 40.0, "width": 50.0, "height": 30.0 })
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_region_of_a_very_large_page_is_drawn_at_a_resolution_the_page_allows() {
+    let session = session().await;
+    // A 2 m square page (custom paper, or a poster PDF), its ink near the top-left corner.
+    let library = Library::open(&session.harness.root).unwrap();
+    let mut poster = make_note("55555555-5555-4555-8555-555555555555", "Affiche", 7);
+    poster.page = PageSize {
+        width: 200_000,
+        height: 200_000,
+    };
+    library
+        .create(Path::new(""), &NoteFile::new(poster))
+        .unwrap();
+    // 50 x 50 mm at 300 dpi would need the whole page at 23 622 px a side (2.2 GB).
+    let result = session
+        .call(
+            "render_note",
+            json!({ "note": "55555555-5555-4555-8555-555555555555", "dpi": 300, "region": { "x": 0, "y": 40, "width": 50, "height": 50 } }),
+        )
+        .await;
+    assert_ne!(result.is_error, Some(true), "{result:?}");
+    let (image, info) = image_and_info(&result);
+    assert_eq!(info["dpi_lowered"], true);
+    assert_eq!(info["dpi_limited_by"], "page_size");
+    let dpi = info["dpi"].as_f64().unwrap();
+    // The page drawn holds at most 24 million pixels.
+    let page_side = 2000.0 / 25.4 * dpi;
+    assert!(page_side * page_side <= 24_000_000.0 * 1.01, "{dpi}");
+    assert!(dpi > 50.0, "{dpi}");
+    let side = (50.0 / 25.4 * dpi).round() as u32;
+    assert!(image.width.abs_diff(side) <= 1 && image.height.abs_diff(side) <= 1);
+    assert!(dark_pixels(&image) > 0, "the ink is in the region");
+    // The whole page, at the dpi asked: the image size lowers it, as for any page.
+    let result = session
+        .call(
+            "render_note",
+            json!({ "note": "55555555-5555-4555-8555-555555555555", "dpi": 300 }),
+        )
+        .await;
+    let (image, info) = image_and_info(&result);
+    assert_eq!(image.width, 2000);
+    assert_eq!(info["dpi_limited_by"], "image_size");
 }
 
 #[tokio::test(flavor = "current_thread")]
