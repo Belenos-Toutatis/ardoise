@@ -68,6 +68,15 @@ pub struct TextSearch {
     pub status: TextStatus,
 }
 
+/// A transcription corrected by the assistant (`set_note_text`): it stands in for the
+/// recogniser's text in the search until the ink of the note changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Correction {
+    pub text: String,
+    /// The language it was given in, when known.
+    pub language: Option<Language>,
+}
+
 /// Handwriting recognition, with the per-PC cache of the app.
 pub trait Handwriting: Send + Sync {
     /// The recognised text of `note` as it is now: from the cache, or recognised now (and
@@ -82,8 +91,15 @@ pub trait Handwriting: Send + Sync {
     /// guessed from the recognised lines when it is not available.
     fn structure_of(&self, note: &Note, recognition: &Recognition) -> Structure;
 
-    /// The notes whose recognised text has the words of `query`.
+    /// The notes whose recognised text has the words of `query` (a corrected transcription
+    /// counts instead of the recogniser's text).
     fn search(&self, query: &str) -> TextSearch;
+
+    /// The transcription stored for `note` by `set_note_text`, if its ink is still the one it
+    /// was written for.
+    fn correction_of(&self, _note: &Note) -> Option<Correction> {
+        None
+    }
 }
 
 /// Everything the server uses. Build it with [`Host::new`]; the other groups are added with

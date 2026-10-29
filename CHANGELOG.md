@@ -5,6 +5,7 @@
 ### Ajouté (jalon M9 — pilotage par un assistant)
 
 - Serveur MCP local `ardoise.exe --mcp [--read-only]` (entrée et sortie standard, aucun port réseau, sans fenêtre, application ouverte ou non) : l'assistant de l'utilisateur (Claude Code, Claude Desktop…) liste et cherche les notes, lit leurs données, leur texte reconnu avec la position des lignes et leur structure, et les voit en image (PNG, 2000 pixels au plus) pour reconnaître schémas et formules. `--read-only` limite l'assistant à la lecture.
+- Outils d'écriture du serveur MCP (absents avec `--read-only`) : créer une note (vierge, au format voulu, ou sur une image ou une page de PDF), renommer et étiqueter, ranger dans un classeur, mettre à la corbeille (restaurable depuis l'application), assembler, découper, redresser les formes, exporter (PNG, JPG, WebP, SVG, PDF, texte, Markdown, Word, GIF, WebM, MP4, sans jamais écraser un fichier : « (2) » est ajouté) et enregistrer un texte corrigé pour la recherche (le cache d'écriture de ce PC, jamais la note). Trois invites prêtes à l'emploi dans la langue de l'application : `mettre_au_propre`, `titrer_et_etiqueter` et `resume_seance` (`clean_up`, `title_and_tag`, `lesson_summary` en anglais).
 
 ### Ajouté (jalon M8 — retours des premiers essais)
 

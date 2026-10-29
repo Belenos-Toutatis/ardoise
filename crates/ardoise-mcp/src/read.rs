@@ -296,13 +296,13 @@ impl ArdoiseServer {
 // list_notes, list_binders, list_tags
 
 /// Whether `binder` is `ancestor` or lies inside it (names compared without regard to case).
-fn in_binder(binder: &str, ancestor: &str) -> bool {
+pub(crate) fn in_binder(binder: &str, ancestor: &str) -> bool {
     let (binder, ancestor) = (binder.to_lowercase(), ancestor.to_lowercase());
     ancestor.is_empty() || binder == ancestor || binder.starts_with(&format!("{ancestor}/"))
 }
 
 /// A binder given by the assistant: `/`-separated, without the slashes around it.
-fn clean_binder(binder: &str) -> String {
+pub(crate) fn clean_binder(binder: &str) -> String {
     binder
         .split(['/', '\\'])
         .filter(|part| !part.is_empty())
@@ -660,17 +660,26 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
             }),
         })
         .collect();
-    json_result(json!({
+    // A transcription corrected with `set_note_text` replaces the recogniser's text (the lines
+    // and the structure, with their positions, stay the recogniser's).
+    let correction = host.handwriting.correction_of(note);
+    let recognised = recognition.text();
+    let mut result = json!({
         "note": NoteSummary::of_entry(&library, &entry),
         "language": recognition.language.code(),
         "recognizer": recognition.recognizer,
-        "text": recognition.text(),
+        "text": correction.as_ref().map_or(&recognised, |c| &c.text),
+        "is_correction": correction.is_some(),
         "lines": lines,
         "structure": {
             "source": if structure.analyzed { "ink_analysis" } else { "layout_heuristics" },
             "items": items,
         },
-    }))
+    });
+    if correction.is_some() {
+        result["recognised_text"] = recognised.into();
+    }
+    json_result(result)
 }
 
 // ---------------------------------------------------------------------------------------------

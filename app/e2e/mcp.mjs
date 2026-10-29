@@ -16,6 +16,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mcpWriteTools } from './mcp-write.mjs';
 
 export const READ_TOOLS = ['get_note', 'get_note_text', 'list_binders', 'list_notes', 'list_tags', 'render_note', 'search_notes'];
 /** Tools that change the library or the app: absent from a `--read-only` server. */
@@ -23,6 +24,10 @@ export const WRITE_TOOLS = [
   'create_note', 'update_note', 'move_note', 'trash_note', 'merge_notes', 'split_note',
   'straighten_shapes', 'export_note', 'set_note_text', 'app_state', 'open_note', 'presentation', 'last_live_note',
 ];
+/** The checks of the later parts of the server (write tools and prompts, bridge), each given the
+ *  helpers of the journey and run after the read tools. */
+const parts = [mcpWriteTools];
+
 const NOTE = "Cours d'optique";
 /** The words of the demo note's handwriting (`demo.rs`: HANDWRITTEN_SENTENCE). */
 const NOTE_WORDS = ['lumiere', 'propage', 'ligne', 'droite'];
@@ -296,6 +301,9 @@ export async function mcpJourney({ exe, language = 'fr', log = console.log } = {
       });
     } finally {
       await readOnly.close(3000);
+    }
+    for (const part of parts) {
+      await part({ makeApp: () => prepareApp(exe, language), startServer, check, textOf, fold, language, log });
     }
   } finally {
     try {

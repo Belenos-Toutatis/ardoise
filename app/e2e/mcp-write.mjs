@@ -1,0 +1,301 @@
+// End-to-end checks of the MCP write tools and the prompts (milestone M9, part 2), run by
+// `mcpJourney` (app/e2e/mcp.mjs) on a demo library of their own, with a real `ardoise.exe --mcp`
+// on pipes: create, update, move, trash, merge, split, straighten, export (png, md, pdf, a
+// replay is too long for a journey), set_note_text then search, and the prompts in the
+// language of the app. No window is driven.
+//
+// By hand: `node app/e2e/mcp.mjs target/debug/ardoise.exe fr` (then `en`).
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { deflateSync } from 'node:zlib';
+
+export const WRITE_ONLY_TOOLS = [
+  'create_note', 'update_note', 'move_note', 'trash_note', 'merge_notes', 'split_note',
+  'straighten_shapes', 'export_note', 'set_note_text',
+];
+const PROMPTS = {
+  fr: ['mettre_au_propre', 'resume_seance', 'titrer_et_etiqueter'],
+  en: ['clean_up', 'lesson_summary', 'title_and_tag'],
+};
+
+const PNG_SIGNATURE = '89504e470d0a1a0a';
+
+function crc32(bytes) {
+  let crc = ~0;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return ~crc >>> 0;
+}
+
+/** A small valid PNG (a grey rectangle with a dark frame). */
+function smallPng(width = 60, height = 40) {
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const out = Buffer.alloc(8 + data.length + 4);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(crc32(body), 8 + data.length);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 6, 0, 0, 0], 8); // 8 bits, RGBA
+  const rows = [];
+  for (let y = 0; y < height; y++) {
+    const row = Buffer.alloc(1 + width * 4);
+    for (let x = 0; x < width; x++) {
+      const edge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
+      row.set(edge ? [30, 30, 30, 255] : [225, 235, 245, 255], 1 + x * 4);
+    }
+    rows.push(row);
+  }
+  return Buffer.concat([
+    Buffer.from(PNG_SIGNATURE, 'hex'),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.concat(rows))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/** Every note of the library, by title. */
+async function notesByTitle(session) {
+  const { notes } = (await session.call('list_notes', { limit: 500 })).structuredContent;
+  return new Map(notes.map((n) => [n.title, n]));
+}
+
+/**
+ * The checks of the write tools and of the prompts, on a server started on `makeApp()`'s own
+ * demo library (the other parts of the journey keep theirs untouched). `check(name, body)` runs
+ * one check.
+ */
+export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold, language }) {
+  const app = makeApp();
+  const out = mkdtempSync(join(tmpdir(), 'ardoise-mcp-out-'));
+  const session = startServer(app);
+  const expectError = async (name, args, code) => {
+    const result = await session.call(name, args);
+    if (!result.isError) throw new Error(`${name} aurait dû échouer : ${JSON.stringify(args).slice(0, 200)}`);
+    const got = result.structuredContent?.code ?? 'invalidArguments';
+    if (got !== code) throw new Error(`${name} : code ${got} au lieu de ${code} (${textOf(result).slice(0, 200)})`);
+  };
+  try {
+    await session.initialize();
+
+    await check('tools/list : les neuf outils d’écriture, sans effet destructeur', async () => {
+      const tools = await session.tools();
+      for (const name of WRITE_ONLY_TOOLS) {
+        const tool = tools.find((t) => t.name === name);
+        if (!tool) throw new Error(`${name} absent`);
+        if (tool.annotations?.readOnlyHint !== false) throw new Error(`${name} : readOnlyHint doit être false`);
+        if (tool.annotations?.destructiveHint !== false) throw new Error(`${name} : destructiveHint doit être false`);
+        if (tool.inputSchema?.type !== 'object' || !tool.description) throw new Error(`${name} : schéma ou description absents`);
+      }
+    });
+
+    // --- create_note, update_note, move_note, trash_note ------------------------------------
+    let created;
+    await check('create_note : une note vierge dans un classeur créé, avec titre, étiquettes et papier', async () => {
+      const result = await session.call('create_note', {
+        title: 'Note de test',
+        binder: 'E2E/Création',
+        tags: ['essai', 'MCP'],
+        paper: 'a5',
+        template: 'seyes',
+      });
+      if (result.isError) throw new Error(textOf(result));
+      created = result.structuredContent.note;
+      if (created.title !== 'Note de test' || created.binder !== 'E2E/Création') throw new Error(JSON.stringify(created));
+      if (created.page.width_mm !== 148 || created.page.height_mm !== 210) throw new Error(`page : ${JSON.stringify(created.page)}`);
+      const read = (await session.call('get_note', { note: created.id })).structuredContent;
+      if (read.background.template !== 'seyes') throw new Error(`gabarit : ${read.background.template}`);
+      if (read.layers[0].name !== (language === 'fr' ? 'Calque 1' : 'Layer 1')) throw new Error(`calque : ${read.layers[0].name}`);
+    });
+    await check('create_note : sur une image donnée par un chemin absolu ; le chemin relatif est refusé', async () => {
+      const image = join(out, 'schéma.png');
+      writeFileSync(image, smallPng());
+      const result = await session.call('create_note', { from_file: image, title: 'Sur image', binder: 'E2E/Création' });
+      if (result.isError) throw new Error(textOf(result));
+      const note = (await session.call('get_note', { note: result.structuredContent.note.id })).structuredContent;
+      const background = note.background.image;
+      if (!background || background.name !== 'schéma.png') throw new Error(`image de fond : ${JSON.stringify(background)}`);
+      await expectError('create_note', { from_file: 'schéma.png' }, 'invalidArguments');
+    });
+    await check('update_note : titre (le fichier est renommé), étiquettes, favori', async () => {
+      const result = await session.call('update_note', {
+        note: created.id, title: 'Note renommée', add_tags: ['plus'], remove_tags: ['mcp'], favorite: true,
+      });
+      if (result.isError) throw new Error(textOf(result));
+      const { note, changed } = result.structuredContent;
+      if (note.title !== 'Note renommée' || !note.favorite) throw new Error(JSON.stringify(note));
+      if (note.tags.join() !== 'essai,plus') throw new Error(`étiquettes : ${note.tags}`);
+      if (!note.path.includes('Note renommée') || !changed.includes('title')) throw new Error(`renommage : ${note.path}`);
+      created = note;
+    });
+    await check('move_note : vers un autre classeur ; un nom pris reçoit « (2) », rien n’est remplacé', async () => {
+      const moved = await session.call('move_note', { note: created.id, binder: 'E2E/Archive' });
+      if (moved.isError || moved.structuredContent.note.binder !== 'E2E/Archive') throw new Error(textOf(moved));
+      const twin = (await session.call('create_note', { title: 'Note renommée', binder: 'E2E/Création' })).structuredContent.note;
+      const twinMoved = await session.call('move_note', { note: twin.id, binder: 'E2E/Archive' });
+      if (twinMoved.isError) throw new Error(textOf(twinMoved));
+      const archive = readdirSync(join(app.library, 'E2E', 'Archive')).filter((f) => f.endsWith('.ardoise'));
+      if (archive.length !== 2) throw new Error(`fichiers : ${archive.join(', ')}`);
+      await expectError('move_note', { note: created.id, binder: '../dehors' }, 'invalidName');
+      created = twinMoved.structuredContent.note;
+    });
+    await check('trash_note : la note va à la corbeille de la bibliothèque, rien n’est supprimé', async () => {
+      const result = await session.call('trash_note', { note: created.id });
+      if (result.isError) throw new Error(textOf(result));
+      if (!result.structuredContent.trash_id) throw new Error('pas d’identifiant de corbeille');
+      if ((await notesByTitle(session)).has('Note renommée') && (await notesByTitle(session)).get('Note renommée').id === created.id) {
+        throw new Error('la note est encore dans la liste');
+      }
+      const trash = readdirSync(join(app.library, '_ardoise', 'trash')).filter((f) => f.endsWith('.ardoise'));
+      if (trash.length !== 1) throw new Error(`corbeille : ${trash.join(', ')}`);
+      await expectError('trash_note', { note: created.id }, 'noteNotFound');
+    });
+
+    // --- merge_notes, split_note, straighten_shapes -----------------------------------------
+    const notes = await notesByTitle(session);
+    const optique = notes.get("Cours d'optique");
+    const ohm = [...notes.values()].find((n) => n.title.startsWith('Électricité'));
+    const chimie = [...notes.values()].find((n) => /chimique/i.test(n.title) && n.stroke_count > 0);
+    await check('merge_notes : une note nouvelle, les sources intactes', async () => {
+      const result = await session.call('merge_notes', { notes: [optique.id, ohm.id], layout: 'endToEnd', title: 'Fusion' });
+      if (result.isError) throw new Error(textOf(result));
+      const { note } = result.structuredContent;
+      if (note.title !== 'Fusion' || note.stroke_count !== optique.stroke_count + ohm.stroke_count) throw new Error(JSON.stringify(note));
+      if (!(note.page.height_mm > optique.page.height_mm * 1.9)) throw new Error(`page : ${JSON.stringify(note.page)}`);
+      const after = await notesByTitle(session);
+      if (after.get("Cours d'optique").stroke_count !== optique.stroke_count) throw new Error('une source a changé');
+      await expectError('merge_notes', { notes: [optique.id], layout: 'overlay' }, 'nothingToMerge');
+    });
+    await check('split_note : à un instant, deux notes qui se partagent les traits', async () => {
+      const read = (await session.call('get_note', { note: optique.id, strokes: 'summary' })).structuredContent;
+      const starts = read.strokes.map((s) => s.start_ms).sort((a, b) => a - b);
+      const at = starts[Math.floor(starts.length / 2)];
+      const result = await session.call('split_note', { note: optique.id, at_ms: at });
+      if (result.isError) throw new Error(textOf(result));
+      const { kept, created: part } = result.structuredContent;
+      if (kept.id !== optique.id || kept.stroke_count + part.stroke_count !== optique.stroke_count) throw new Error(JSON.stringify(result.structuredContent));
+      if (!kept.stroke_count || !part.stroke_count) throw new Error('une moitié est vide');
+      await expectError('split_note', { note: optique.id }, 'invalidArguments');
+    });
+    await check('straighten_shapes : les formes dessinées à la main sont redressées en une sauvegarde', async () => {
+      const before = (await session.call('get_note', { note: chimie.id })).structuredContent;
+      const result = await session.call('straighten_shapes', { note: chimie.id });
+      if (result.isError) throw new Error(textOf(result));
+      const { straightened, saved, shapes } = result.structuredContent;
+      if (!(straightened >= 1) || !saved || !shapes.length) throw new Error(JSON.stringify(result.structuredContent).slice(0, 300));
+      const after = (await session.call('get_note', { note: chimie.id })).structuredContent;
+      if (after.note.modified === before.note.modified && after.note.stroke_count === before.note.stroke_count) throw new Error('la note n’a pas changé');
+      await expectError('straighten_shapes', { note: chimie.id, strokes: [100000] }, 'invalidArguments');
+    });
+
+    // --- export_note -------------------------------------------------------------------------
+    await check('export_note : png et pdf dans un dossier, « (2) » à la seconde fois, rien d’écrasé', async () => {
+      const folder = join(out, 'exports');
+      const args = { notes: [ohm.id], format: 'png', path: folder, dpi: 72 };
+      const first = await session.call('export_note', args);
+      if (first.isError) throw new Error(textOf(first));
+      const [file] = first.structuredContent.files;
+      const bytes = readFileSync(file);
+      if (bytes.subarray(0, 8).toString('hex') !== PNG_SIGNATURE) throw new Error('ce n’est pas un PNG');
+      const before = readFileSync(file).length;
+      const second = await session.call('export_note', args);
+      const [other] = second.structuredContent.files;
+      if (!other.endsWith(' (2).png') || other === file) throw new Error(`second export : ${other}`);
+      if (readFileSync(file).length !== before) throw new Error('le premier fichier a été modifié');
+      const pdf = await session.call('export_note', { notes: [ohm.id, chimie.id], format: 'pdf', path: join(folder, 'classe.pdf') });
+      if (pdf.isError || readFileSync(pdf.structuredContent.files[0]).subarray(0, 4).toString() !== '%PDF') throw new Error(textOf(pdf));
+    });
+    await check('export_note : les chemins relatifs, les noms de fichier faux et les options hors limites sont refusés', async () => {
+      await expectError('export_note', { notes: [ohm.id], format: 'png', path: 'exports/a.png' }, 'invalidArguments');
+      await expectError('export_note', { notes: [ohm.id], format: 'png', path: join(out, 'a.jpg') }, 'invalidArguments');
+      await expectError('export_note', { notes: [ohm.id], format: 'png', path: out, dpi: 5000 }, 'invalidArguments');
+      await expectError('export_note', { notes: [ohm.id, chimie.id], format: 'mp4', path: out }, 'invalidArguments');
+    });
+    await check('export_note : le texte en Markdown, avec ses dessins (reconnaissance de Windows)', async () => {
+      const result = await session.call('export_note', { notes: [optique.id], format: 'md', path: join(out, 'texte'), language });
+      if (result.isError) throw new Error(`${textOf(result)} (il faut la reconnaissance d’écriture de Windows)`);
+      const [md] = result.structuredContent.files;
+      if (!md.endsWith('.md')) throw new Error(`fichiers : ${result.structuredContent.files}`);
+      const text = fold(readFileSync(md, 'utf8'));
+      if (!text.includes('lumiere')) throw new Error(`le texte n’a pas les mots de la note : ${text.slice(0, 200)}`);
+    });
+
+    // --- set_note_text -----------------------------------------------------------------------
+    await check('set_note_text : le mot corrigé est trouvé par search_notes, get_note_text le signale', async () => {
+      const probe = fold('réfraction');
+      const before = await session.call('search_notes', { query: probe });
+      if (before.isError || before.structuredContent.notes.some((n) => n.id === chimie.id)) throw new Error(textOf(before));
+      const file = join(app.library, ...chimie.path.split('/'));
+      const bytes = readFileSync(file);
+      const stored = await session.call('set_note_text', { note: chimie.id, text: 'Cours de chimie\nLa réfraction dévie le rayon', language });
+      if (stored.isError) throw new Error(textOf(stored));
+      const found = await session.call('search_notes', { query: probe });
+      if (found.isError || !found.structuredContent.notes.some((n) => n.id === chimie.id && n.matched_in.includes('text'))) {
+        throw new Error(`non trouvé : ${JSON.stringify(found.structuredContent).slice(0, 400)}`);
+      }
+      const text = (await session.call('get_note_text', { note: chimie.id })).structuredContent;
+      if (!text.is_correction || !fold(text.text).includes('refraction') || !text.recognised_text) throw new Error(JSON.stringify(text).slice(0, 300));
+      if (!readFileSync(file).equals(bytes)) throw new Error('le fichier de la note a été modifié');
+      const removed = await session.call('set_note_text', { note: chimie.id, text: '' });
+      const gone = await session.call('search_notes', { query: probe });
+      if (removed.isError || gone.structuredContent.notes.some((n) => n.id === chimie.id)) throw new Error('la correction n’a pas été retirée');
+    });
+
+    // --- prompts -----------------------------------------------------------------------------
+    await check('prompts/list : les trois prompts dans la langue de l’application', async () => {
+      const answer = await session.request('prompts/list', {});
+      if (answer.error) throw new Error(JSON.stringify(answer.error));
+      const names = answer.result.prompts.map((p) => p.name).sort();
+      if (names.join() !== PROMPTS[language].join()) throw new Error(`prompts : ${names}`);
+      for (const prompt of answer.result.prompts) if (!prompt.description) throw new Error(`${prompt.name} sans description`);
+    });
+    await check('prompts/get : chaque message nomme ses outils, dans l’ordre', async () => {
+      const [clean, lesson, title] = [PROMPTS[language][0], PROMPTS[language][1], PROMPTS[language][2]];
+      const get = async (name, args) => {
+        const answer = await session.request('prompts/get', { name, arguments: args });
+        if (answer.error) throw new Error(`${name} : ${JSON.stringify(answer.error)}`);
+        return answer.result.messages.map((m) => m.content.text).join('\n');
+      };
+      const inOrder = (text, names, label) => {
+        let from = 0;
+        for (const n of names) {
+          const at = text.indexOf(n, from);
+          if (at < 0) throw new Error(`${label} : « ${n} » absent ou dans le désordre`);
+          from = at + n.length;
+        }
+      };
+      const cleaning = await get(clean, { note: ohm.id, format: 'latex' });
+      inOrder(cleaning, ['get_note', 'render_note', 'region', 'get_note_text', 'export_note'], clean);
+      for (const p of ['LuaLaTeX', 'circuitikz', 'mhchem', 'siunitx', 'pgfplots', 'chemfig']) {
+        if (!cleaning.includes(p)) throw new Error(`${clean} : ${p} absent`);
+      }
+      if (!(await get(clean, {})).includes('last_live_note')) throw new Error(`${clean} sans note : last_live_note absent`);
+      const titles = await get(title, {});
+      inOrder(titles, ['render_note', 'get_note_text', 'update_note'], title);
+      const untitled = [...(await notesByTitle(session)).values()].find((n) => n.title === '');
+      if (!untitled || !titles.includes(untitled.id)) throw new Error(`${title} : la note sans titre n’est pas listée`);
+      const day = (await session.call('get_note', { note: ohm.id })).structuredContent.note.created.slice(0, 10);
+      const summary = await get(lesson, { date: day });
+      inOrder(summary, ['get_note_text', 'render_note'], lesson);
+      if (!summary.includes(ohm.id)) throw new Error(`${lesson} : la note du jour n’est pas listée`);
+      const bad = await session.request('prompts/get', { name: lesson, arguments: { date: 'demain' } });
+      if (!bad.error) throw new Error(`${lesson} : une date fausse doit être refusée`);
+    });
+  } finally {
+    session.child.kill();
+    for (const dir of [app.dir, out]) {
+      try {
+        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // Left to the system when Windows still holds a file in it.
+      }
+    }
+  }
+}

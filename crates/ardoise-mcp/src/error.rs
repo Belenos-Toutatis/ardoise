@@ -18,6 +18,8 @@ pub mod code {
     pub const APP_NOT_RUNNING: &str = "appNotRunning";
     /// The server was started with `--read-only`.
     pub const READ_ONLY: &str = "readOnly";
+    /// The host has no service for this write (the tool needs the app's own code).
+    pub const WRITE_UNAVAILABLE: &str = "writeUnavailable";
 }
 
 /// A tool failure.

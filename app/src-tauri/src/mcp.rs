@@ -22,8 +22,10 @@ use ardoise_mcp::{
 use crate::AppContext;
 use crate::commands::current_state;
 use crate::handwriting::{
-    IndexState, IndexStatus, Indexer, PAUSE_POLL, Services, handwriting_dir, index_config,
+    CacheDir, IndexState, IndexStatus, Indexer, PAUSE_POLL, Services, handwriting_dir, index_config,
 };
+
+mod write;
 
 /// How long a search waits for the indexer to read the notes whose text is not in the cache yet
 /// (the cached ones load in a fraction of a second; recognising a note takes about a second).
@@ -138,6 +140,15 @@ impl Handwriting for AppHandwriting {
         structure_of(&*self.indexer().on_demand(), recognition, note)
     }
 
+    fn correction_of(&self, note: &Note) -> Option<ardoise_mcp::Correction> {
+        // Read from the cache folder: no need to wake the engine.
+        let correction = CacheDir::new(handwriting_dir()).correction_for(note)?;
+        Some(ardoise_mcp::Correction {
+            text: correction.text,
+            language: Some(correction.language),
+        })
+    }
+
     fn search(&self, query: &str) -> TextSearch {
         let status = self.settled_status();
         let available = status.state != IndexState::Unavailable;
@@ -175,15 +186,17 @@ fn host() -> Host {
         self_test: None,
         open_diagnostic: false,
     });
+    let handwriting = Arc::new(AppHandwriting {
+        context: Arc::clone(&context),
+        indexer: OnceLock::new(),
+    });
     Host::new(
         Arc::new(AppEnvironment {
             context: Arc::clone(&context),
         }),
-        Arc::new(AppHandwriting {
-            context,
-            indexer: OnceLock::new(),
-        }),
+        handwriting.clone(),
     )
+    .with_write(Arc::new(write::AppWrite::new(context, handwriting)))
 }
 
 /// Best-effort message on stderr (a GUI program may have none).

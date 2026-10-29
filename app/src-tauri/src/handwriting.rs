@@ -35,6 +35,7 @@ use crate::commands::{CommandError, CommandResult, current_state, store, update}
 use crate::export::{ExportSource, export_error, library_for, load_sources};
 use crate::live::LiveRuntime;
 
+pub use cache::CacheDir;
 pub use indexer::{IndexConfig, IndexState, IndexStatus, Indexer, Services};
 pub use search::SearchHit;
 

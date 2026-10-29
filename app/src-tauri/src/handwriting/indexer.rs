@@ -286,11 +286,17 @@ impl Indexer {
             .iter()
             .map(|(path, key)| (path.clone(), key.clone()))
             .collect();
+        // A corrected transcription stands in for the recogniser's text (read without a lock).
+        unlocked("reading the corrections");
+        let corrections = self.shared.disk.corrections();
         let cache = lock(&self.shared.cache);
         let mut hits: Vec<SearchHit> = current
             .iter()
             .filter_map(|(path, key)| {
-                let recognition = cache.loaded(key)?;
+                let recognition = match corrections.get(&(key.id.clone(), key.strokes.clone())) {
+                    Some(correction) => Arc::new(correction.recognition()),
+                    None => cache.loaded(key)?,
+                };
                 let (words, excerpt) = search_recognition(&recognition, &words)?;
                 Some(SearchHit {
                     path: path_text(path),
@@ -1008,6 +1014,63 @@ mod tests {
         h.indexer.refresh();
         h.idle(0);
         assert!(h.indexer.search("foret").is_empty());
+        h.indexer.shutdown();
+    }
+
+    #[test]
+    fn a_corrected_transcription_stands_in_for_the_recognisers_text() {
+        let (dir, library) = library();
+        let cat = create(&library, "Chat", &[0, 1, 2]);
+        let fake = Fake::new(&[Language::Fr]);
+        let h = harness(dir.path(), fake.clone());
+        h.idle(1);
+        assert_eq!(h.indexer.search("chat").len(), 1);
+        assert!(h.indexer.search("renard").is_empty());
+
+        // The assistant's text replaces the recogniser's words in the search, whichever process
+        // wrote it (the file is read at each search).
+        let note = library.read(&cat).unwrap().file.note;
+        let disk = CacheDir::new(h._cache.path());
+        disk.set_correction_for(&note, Language::Fr, "Le renard\r\ndort dans la forêt")
+            .unwrap();
+        let hits = h.indexer.search("renard foret");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, path_text(&cat));
+        assert_eq!(hits[0].words, ["renard", "foret"]);
+        assert_eq!(hits[0].excerpt.word, "renard");
+        assert!(h.indexer.search("chat").is_empty());
+        assert_eq!(disk.correction_for(&note).unwrap().language, Language::Fr);
+        // The recognition itself is untouched.
+        assert_eq!(
+            h.indexer.recognition_of(&note).unwrap().text(),
+            "le chat dort"
+        );
+
+        // An empty text removes it.
+        disk.set_correction_for(&note, Language::Fr, "  ").unwrap();
+        assert!(disk.correction_for(&note).is_none());
+        assert!(h.indexer.search("renard").is_empty());
+        assert_eq!(h.indexer.search("chat").len(), 1);
+
+        // The correction is bound to the ink: written again, then the note is edited, it is
+        // not found any more (and the pruning at the end of the next pass removes the file).
+        disk.set_correction_for(&note, Language::Fr, "Le renard")
+            .unwrap();
+        assert_eq!(h.indexer.search("renard").len(), 1);
+        let mut loaded = library.read(&cat).unwrap();
+        loaded.file.note.strokes = written(&[4]);
+        library.save(&cat, &loaded.file, &loaded.stamp).unwrap();
+        h.indexer.refresh();
+        h.wait("the edited note", |_| !h.indexer.search("foret").is_empty());
+        assert!(h.indexer.search("renard").is_empty());
+        assert!(disk.correction_for(&loaded.file.note).is_none());
+        h.idle(1);
+        let leftover = std::fs::read_dir(h._cache.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with("-fix.json"))
+            .count();
+        assert_eq!(leftover, 0, "the older version's correction is pruned");
         h.indexer.shutdown();
     }
 

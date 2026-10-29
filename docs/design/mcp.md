@@ -165,3 +165,103 @@ setting, each naming the tools to use:
   stdout is null, as the other command-line modes do). The banner goes to stderr, best effort.
   Journey: `node app/e2e/mcp.mjs target/release/ardoise.exe [fr|en]` (13 checks, "MCP OK"); the French
   handwriting recognizer of Windows is needed for the text and search checks.
+
+## As built — write tools and prompts (M9, part 2)
+
+- **Where the code is**: `crates/ardoise-mcp/src/write.rs` (the `WriteServices` trait, the nine tools, their
+  annotations) with one module per kind in `src/write/` (`create`, `update` = update/move/trash, `transform` =
+  merge/split/straighten, `export`, `text`); `src/prompts.rs`; the app's side in `app/src-tauri/src/mcp/write.rs`
+  (`AppWrite`, passed with `Host::with_write`). The crate does the choosing and the checking (arguments, names of
+  files, defaults), the app does what only its own code does.
+- **What each tool reuses** (nothing is re-implemented):
+  - `update_note`, `move_note`, `trash_note`: `ardoise-core` alone (`Library::save` with the stamp check for tags and
+    favourite in one save, `retitle` for the title, `move_to` with the " (2)" rule, `trash`). Nothing is deleted: the
+    note is in `_ardoise/trash`, restorable from the app's trash view (30 days).
+  - `create_note`: a blank note is the app's new note (A4-sized tablet page, one layer named `Calque 1` / `Layer 1`
+    after the app's language) through `WriteServices::create_blank` (thumbnail made like the app does); `from_file`
+    is `background::notes_from_file_with_progress` (image or one PDF page; page 1 when `pdf_page` is omitted, never
+    all the pages), then the title and tags asked for are applied. `paper`, `orientation` and `template` are refused
+    with `from_file` (the page takes the shape of the file). Papers: `a4` 210x297, `a5` 148x210, `letter`
+    215.9x279.4, `tablet` 297x216 (the default), or `{ width, height }` in mm (10 to 2000); `orientation` turns the
+    page, without it the paper's own is kept. Templates: `blank lined seyes grid5mm millimetric dotted music`.
+  - `merge_notes`: `operations::merge_in` (a new note in the binder of the first one; its background image or PDF
+    page is kept, the others' are not). The notes are merged **in the order given** (the library dialog sorts
+    oldest first). Default title: the first note's title, or its date, with " (assemblage)" / " (assembled)".
+  - `split_note`: `operations::split_in` with the file's own content and stamp (narration and background go with
+    the new note). `at_ms` is on the clock of the strokes' `start_ms`/`end_ms`; `polygon` is `[[x, y], ...]` in mm.
+    Default title for the new note: "<title> (suite)" / "(extrait)", "(continued)" / "(excerpt)", as the editor
+    proposes.
+  - `straighten_shapes`: `ardoise_ink::shapes::straighten` on all the strokes (or the indices given), the new
+    strokes taking the place of the first stroke they replace exactly as `straightenSelection` does in the editor;
+    one `notes::save_with_key` (the editor's own save: the version on disk is kept as `original.ardoise` the first
+    time the ink changes, the thumbnail is made again) with the stamp read at the start, so a note changed meanwhile
+    gives `noteConflict` and is left alone. Nothing recognised: no save (`saved: false`). Handwriting that looks
+    like a shape (a large loop, a bar) is changed too when all the strokes are tried: the description tells the
+    assistant to pass the drawings' strokes (`get_note_text` structure gives them).
+  - `export_note`: the crate resolves `path`: absolute only (`invalidArguments` otherwise); a folder (existing, or
+    ending with a separator, or without extension: created if missing) gets `<note file name>.<ext>`; a file name
+    must end with the format's extension (`.jpeg` is accepted for jpg); several notes in an image format need a
+    folder (one file per note), pdf/txt/md/docx put all the notes in one file (`Ardoise export.<ext>` in a folder),
+    a replay takes one note. The first free name is chosen (" (2)", " (3)"…), and the app writes images, PDF, txt and
+    docx with `write_atomic_new` (a name taken in the meantime moves on to the next free one); the Markdown file and
+    the replays go through the app's writers, which replace their target, but the name was free when it was chosen:
+    **no existing file is replaced** (but for a race of milliseconds on those two).
+    Defaults are the app's dialog's: 150 dpi, JPG quality 90, background on, PDF page `actual`; replays 1080p
+    (720p for gif), 30 fps (15 for gif), speed 1, no pause cut, 3 s on the last frame, narration on. Image and PDF
+    exports are `export::image_bytes` / `notes_to_pdf`; txt is `handwriting::text_document`; md and docx are
+    `textdoc::document_of` + `write_markdown` / `to_docx` with the labels of the interface in the language asked;
+    replays are `video::export_video_in` (MP4 may use the OpenH264 fallback only if the user allowed it on this PC).
+    **Video**: the call runs on the blocking pool and answers when the file is complete (seconds to minutes); no
+    progress notification and no cancellation from the assistant's side (decision: not needed for a first
+    version; the connection stays quiet meanwhile, so a client with a short timeout may give up).
+    The text exports use the recogniser's text, as the app's: a correction made with `set_note_text` is not in them.
+  - `set_note_text` / `get_note_text`: see below.
+- **Corrected transcription** (`set_note_text`): kept in the per-PC handwriting cache
+  (`%LOCALAPPDATA%\Ardoise\handwriting\`) as `<note id>-<strokes hash>-fix.json`
+  (`{ format, id, strokes, language, text }`), next to the entries of M7 and keyed by the same hash of the
+  recognised strokes. Hence it is **dropped when the ink changes** (another hash is no longer found, and the cache's
+  pruning removes the file with the older versions of the note), nothing is written into the note file, and old
+  caches stay readable (entries are not touched). The search (`Indexer::search`, so the app's search as well as
+  `search_notes`) reads the corrections folder at each search and, for a note that has one, searches the corrected
+  text (read as lines of words without positions) *instead of* the recogniser's. Written with a plain file write
+  (no engine woken); read by the other process at its next search. `get_note_text` returns the corrected text as
+  `text`, `is_correction: true` and `recognised_text`; the lines and the structure stay the recogniser's (they carry
+  the positions). An empty `text` removes the correction. Limit: 200 000 characters.
+- **When the app has the note open**: nothing special is done, as for a change made by Nextcloud. The editor sees
+  the file's stamp change and shows the "changed elsewhere" banner (reload offered when there are no unsaved
+  changes); if it has unsaved changes its save is refused with `noteConflict` instead of overwriting the tool's
+  write (`Library::save` checks the stamp), and a moved or trashed note gives the "missing" banner. The tools
+  themselves refuse to overwrite a version they did not read (`straighten_shapes`, `update_note`: stamp check).
+- **Codes**: the interface's `errorCodes.*` (`noteNotFound`, `noteConflict`, `invalidName`, `nothingToMerge`,
+  `nothingToSplit`, `exportFailed`, `invalidVideoSettings`, `codecUnavailable`, `backgroundUnsupported`,
+  `pdfEncrypted`…) and `invalidArguments`; the new `writeUnavailable` (a host without the app's service: only for
+  tests and embedding, never reaches the interface, so no `errorCodes` entry). Annotations: all nine
+  `readOnlyHint: false`, `destructiveHint: false`; `idempotentHint: true` for `update_note`, `move_note` and
+  `set_note_text` only.
+- **Prompts**: the router is built once at server start from `Environment::language()`: a French app serves
+  `mettre_au_propre`, `titrer_et_etiqueter`, `resume_seance`; an English one `clean_up`, `title_and_tag`,
+  `lesson_summary` (the six are `#[prompt]` functions and the other language's three routes are removed: no
+  contortion). They are served with `--read-only` too (they only read). Their messages:
+  - `clean_up` (`note?`, `format?` = `markdown` (default) / `word` / `latex`): names the note (id and path) when it
+    exists; without `note`, tells to call `last_live_note` and to ask the user when there is none; five steps
+    (`get_note` summary + `render_note` page, zoom with `region` on dense parts; `get_note_text` with its structure;
+    a faithful document, nothing invented, mistakes of substance flagged; save with the assistant's own file tools or
+    give it, `export_note` md/docx as a starting point; the list of what is uncertain, with positions in mm). For
+    LaTeX: LuaLaTeX with `circuitikz`, `mhchem`, `siunitx`, `pgfplots`, `chemfig`, diagrams redrawn in code.
+  - `title_and_tag` (`binder?`): an *untitled* note is one whose title is empty after trimming (the library then shows
+    its creation date: `displayTitle` in the interface; the demo library has one untitled note). The message carries the list of those notes (40 newest, with count),
+    tells to look at the image and the text, to reuse the existing tags (`list_tags`), to show the whole list and to
+    call `update_note` (`title`, `add_tags`) **only after the user agrees**.
+  - `lesson_summary` (`date?`, `binder?`): the notes of the day (default today; a date alone, or with a binder),
+    or of the most recent day of the binder, are listed in the message in the order they were taken; the summary asked
+    is a title line, 3 to 6 bullets of content, "homework" / "to remember" only if written, about 80 words, no student
+    names, nothing saved; a date that is not ISO is a request error (`invalid_params`).
+  Argument names are the same in both languages.
+- **Tests**: `crates/ardoise-mcp/tests/write_tools.rs` (20 tests: every tool, atomic files, the stamp check, " (2)",
+  trash and restore, relative paths refused, coded errors, a read-only server lists none of them and refuses each
+  call, a host without services), `tests/prompts.rs` (5), `tests/support/mod.rs` (the library, fakes made of
+  `ardoise-core`'s operations and the recorded export requests); the app's side: `mcp/write.rs` tests
+  (thumbnails, `save_in`'s stamp check and original, split and merge, a note on an image, images/folders/PDF without
+  replacing a file, the option mapping), `handwriting/cache.rs` (corrections bound to the ink, pruning, old caches
+  readable) and `handwriting/indexer.rs` (the search uses the correction); the journey `app/e2e/mcp-write.mjs`
+  (`node app/e2e/mcp.mjs target/debug/ardoise.exe fr`, then `en`).

@@ -28,7 +28,7 @@ use rmcp::service::ServiceExt;
 use rmcp::transport::IntoTransport;
 
 pub use error::{ToolError, ToolResult};
-pub use host::{Environment, Handwriting, Host, TextHit, TextSearch, TextStatus};
+pub use host::{Correction, Environment, Handwriting, Host, TextHit, TextSearch, TextStatus};
 pub use server::{ArdoiseServer, ServerOptions, build_tool_router};
 
 /// The server could not start, or stopped on a failure.

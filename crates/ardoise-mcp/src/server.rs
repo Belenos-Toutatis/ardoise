@@ -49,11 +49,13 @@ pub struct ArdoiseServer {
 
 impl ArdoiseServer {
     pub fn new(host: Host, options: ServerOptions) -> ArdoiseServer {
+        // The prompts follow the language of the app as it is now.
+        let language = host.environment.language();
         ArdoiseServer {
             host: Arc::new(host),
             options,
             tool_router: build_tool_router(options),
-            prompt_router: Self::prompt_router(),
+            prompt_router: Self::prompt_router(language),
         }
     }
 
