@@ -1300,3 +1300,27 @@ fn a_cached_listing_reopens_only_the_notes_that_changed() {
     assert_eq!(cache.entries.len(), 2);
     drop(dir);
 }
+
+#[test]
+fn a_note_that_just_arrived_in_the_trash_is_kept_whatever_its_record_says() {
+    let (_dir, library) = new_library();
+    let saved = library
+        .create(Path::new("Classe"), &note_file("id-a", "Cours"))
+        .unwrap();
+    let item = library.trash(&saved.path).unwrap();
+    // The record was written by a computer whose clock is far behind this one's: by it, the
+    // note was trashed a year ago, but the file only just reached this computer.
+    let record = format!(
+        r#"{{"original": "Classe/2026-10-24 Cours.ardoise", "deleted": {}}}"#,
+        item.deleted - 365 * DAY_MS
+    );
+    let record_file = library.trash_dir().join(format!("{}.json", item.id));
+    fs::write(&record_file, record).unwrap();
+    assert_eq!(library.purge_expired_at(item.deleted).unwrap(), 0);
+    assert_eq!(library.trash_items().unwrap().len(), 1);
+    // Thirty days after it arrived, it goes.
+    assert_eq!(
+        library.purge_expired_at(item.deleted + 31 * DAY_MS).unwrap(),
+        1
+    );
+}

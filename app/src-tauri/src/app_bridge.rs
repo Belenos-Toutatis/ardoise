@@ -239,9 +239,11 @@ fn path_key(path: &Path) -> String {
     path.to_string_lossy().replace('/', "\\").to_lowercase()
 }
 
-/// `path` if it names a note file of the library at `root` (absolute, inside it, not in its
-/// `_ardoise` folder, `.ardoise`, existing); the assistant cannot make the app open anything
-/// else.
+/// The path of the note file `path` of the library at `root` (absolute, inside it, existing,
+/// under no `_ardoise`, `.ardoise` or other hidden folder, whatever its depth); the assistant
+/// cannot make the app open anything else. The path returned is the real one (through links and
+/// with the case the disk has) under `root` as the app knows it, not the one given: the window
+/// compares paths with its own.
 fn note_in_library(root: &Path, path: &Path) -> Result<PathBuf, ToolError> {
     let invalid = |message: &str| {
         ToolError::new(
@@ -269,14 +271,18 @@ fn note_in_library(root: &Path, path: &Path) -> Result<PathBuf, ToolError> {
     let inside = real
         .strip_prefix(&real_root)
         .map_err(|_| invalid("outside the library"))?;
-    let hidden = inside.components().next().is_some_and(|first| {
-        matches!(first, Component::Normal(name)
-            if name.eq_ignore_ascii_case(META_DIR) || name.eq_ignore_ascii_case(LEGACY_META_DIR))
+    let hidden = inside.components().any(|part| {
+        matches!(part, Component::Normal(name)
+            if name.to_str().is_none_or(|name| {
+                name.starts_with('.')
+                    || name.eq_ignore_ascii_case(META_DIR)
+                    || name.eq_ignore_ascii_case(LEGACY_META_DIR)
+            }))
     });
     if hidden || !real.is_file() {
         return Err(not_found());
     }
-    Ok(path.to_path_buf())
+    Ok(root.join(inside))
 }
 
 /// The last live session, as remembered on this PC.
@@ -637,6 +643,18 @@ mod tests {
                 b"x",
             )
             .unwrap();
+            std::fs::create_dir_all(root.join("Physique").join(META_DIR)).unwrap();
+            std::fs::write(
+                root.join("Physique").join(META_DIR).join("Profond.ardoise"),
+                b"x",
+            )
+            .unwrap();
+            std::fs::create_dir_all(root.join("Physique").join(".cache")).unwrap();
+            std::fs::write(
+                root.join("Physique").join(".cache").join("Cache.ardoise"),
+                b"x",
+            )
+            .unwrap();
             std::fs::write(root.join("notes.txt"), b"x").unwrap();
             std::fs::write(dir.path().join("Ailleurs.ardoise"), b"x").unwrap();
             let state = dir.path().join("state");
@@ -747,6 +765,18 @@ mod tests {
             ),
             (fixture.root.join("Absente.ardoise"), "noteNotFound"),
             (
+                fixture
+                    .root
+                    .join("Physique")
+                    .join(META_DIR)
+                    .join("Profond.ardoise"),
+                "noteNotFound",
+            ),
+            (
+                fixture.root.join("Physique").join(".cache").join("Cache.ardoise"),
+                "noteNotFound",
+            ),
+            (
                 PathBuf::from("Physique/Cours.ardoise"),
                 code::INVALID_ARGUMENTS,
             ),
@@ -757,6 +787,21 @@ mod tests {
         }
         // Only the note of the library reached the window.
         assert_eq!(lock(&fixture.window.asked).len(), 1);
+    }
+
+    #[test]
+    fn the_note_is_opened_by_its_real_path_under_the_library_root() {
+        let fixture = Fixture::new(|request| match request {
+            UiRequest::OpenNote { path } => Ok(json!({ "path": path })),
+            _ => Ok(Value::Null),
+        });
+        // Case is not significant on Windows: the window gets the path as the disk spells it.
+        let given = fixture.root.join("PHYSIQUE").join("cours.ARDOISE");
+        if given.exists() {
+            let opened = fixture.side().open_note(&path_text(&given)).unwrap();
+            let real = fixture.root.join("Physique").join("Cours.ardoise");
+            assert_eq!(opened.path, path_text(&real));
+        }
     }
 
     #[test]
