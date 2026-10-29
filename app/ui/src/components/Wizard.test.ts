@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../lib/api';
 import { setLocale } from '../lib/i18n.svelte';
+import { inkspaceOffer } from '../lib/inkspace-offer.svelte';
+import { mockInkspace, resetMockInkspace } from '../lib/mock-inkspace';
 import Wizard from './Wizard.svelte';
 
 const FOLDER = 'C:\\Users\\demo\\Nextcloud\\Ardoise';
@@ -26,7 +28,14 @@ const firstRun: AppState = {
 };
 
 let cleanup: (() => void) | null = null;
-afterEach(() => cleanup?.());
+beforeEach(() => {
+  resetMockInkspace();
+  inkspaceOffer.pending = false;
+});
+afterEach(() => {
+  cleanup?.();
+  vi.restoreAllMocks();
+});
 
 function render(onchange: (next: AppState) => void) {
   const target = document.createElement('div');
@@ -71,5 +80,68 @@ describe('first-run wizard', () => {
     expect(target.textContent).toContain('Welcome to Ardoise');
     button('Choose a folder').click();
     await vi.waitFor(() => expect(target.textContent).toContain('already contains an Ardoise library'));
+  });
+});
+
+describe('first-run offer to import Wacom Inkspace', () => {
+  const offer = (target: HTMLElement) => target.querySelector('[data-slot="wizard-inkspace"]');
+  const checkbox = (target: HTMLElement) => target.querySelector<HTMLInputElement>('[data-slot="wizard-inkspace"] input')!;
+
+  async function continueWith(checked: boolean) {
+    setLocale('fr');
+    const onchange = vi.fn();
+    const { target, button } = render(onchange);
+    await vi.waitFor(() => expect(offer(target)).toBeTruthy());
+    if (checkbox(target).checked !== checked) checkbox(target).click();
+    button('Choisir un dossier').click();
+    await vi.waitFor(() => expect(target.textContent).toContain(FOLDER));
+    button('Continuer').click();
+    await vi.waitFor(() => expect(onchange).toHaveBeenCalledOnce());
+  }
+
+  it('offers the notes found, with their count, checked by default', async () => {
+    setLocale('fr');
+    const { target } = render(vi.fn());
+    await vi.waitFor(() => expect(offer(target)).toBeTruthy());
+    expect(offer(target)!.textContent).toContain('Ardoise a trouvé des notes de Wacom Inkspace sur cet ordinateur (5 notes).');
+    expect(offer(target)!.textContent).toContain('Les importer dans la bibliothèque (classeur « Inkspace »)');
+    expect(checkbox(target).checked).toBe(true);
+  });
+
+  it('still offers without a count when the folder cannot be read', async () => {
+    setLocale('fr');
+    vi.spyOn(api, 'inkspaceInspect').mockRejectedValue({ code: 'inkspaceUnreadable', message: 'locked' });
+    const { target } = render(vi.fn());
+    await vi.waitFor(() => expect(offer(target)).toBeTruthy());
+    expect(offer(target)!.textContent).toContain('Ardoise a trouvé des notes de Wacom Inkspace sur cet ordinateur.');
+    expect(offer(target)!.textContent).not.toMatch(/\(\d+ notes?\)/);
+  });
+
+  it('shows nothing when Inkspace is not there', async () => {
+    mockInkspace.detected = null;
+    const detect = vi.spyOn(api, 'inkspaceDetect');
+    const { target } = render(vi.fn());
+    await vi.waitFor(() => expect(detect).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(offer(target)).toBeNull();
+    expect(target.textContent).not.toContain('Inkspace');
+  });
+
+  it('asks the library screen to open the import only when the box is checked', async () => {
+    await continueWith(true);
+    expect(inkspaceOffer.pending).toBe(true);
+    cleanup?.();
+    inkspaceOffer.pending = false;
+
+    await continueWith(false);
+    expect(inkspaceOffer.pending).toBe(false);
+  });
+
+  it('speaks English', async () => {
+    setLocale('en');
+    const { target } = render(vi.fn());
+    await vi.waitFor(() => expect(offer(target)).toBeTruthy());
+    expect(offer(target)!.textContent).toContain('found Wacom Inkspace notes on this computer (5 notes).');
+    expect(offer(target)!.textContent).toContain('Import them into the library (binder “Inkspace”)');
   });
 });
