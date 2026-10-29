@@ -680,6 +680,12 @@ that it can only read. Everything is explained step by step, with example reques
   only** when it only needs to read. The assistant never deletes anything for good (a deleted note goes to the
   trash).
 
+### Licence and credits
+
+**Settings** > **About Ardoise…** shows the version, the licence (free software, GPL-3.0 or later, with its full
+text), the credit to the Tuhi project, Cisco's OpenH264 notice (and whether it is installed on this PC) and the list
+of every component used, with its licence.
+
 ## 16. When something goes wrong
 
 | What you see | What to do |

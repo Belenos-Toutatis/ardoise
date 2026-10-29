@@ -710,6 +710,12 @@ qu'il ne puisse que lire. Tout est expliqué pas à pas, avec des exemples de de
   notes d'élèves, et préférez la **Lecture seule** quand il n'a besoin que de lire. Rien n'est jamais supprimé
   définitivement par l'assistant (une note supprimée va à la corbeille).
 
+### Licence et crédits
+
+**Réglages** > **À propos d'Ardoise…** donne la version, la licence (logiciel libre, GPL-3.0 ou ultérieure, avec son
+texte complet), le crédit au projet Tuhi, la mention d'OpenH264 de Cisco (et s'il est installé sur ce PC) et la liste
+de tous les composants utilisés avec leur licence.
+
 ## 16. En cas de problème
 
 | Ce que vous voyez | Ce qu'il faut faire |
