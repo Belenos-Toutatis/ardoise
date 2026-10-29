@@ -35,8 +35,10 @@ the assistant are **millimetres** from the top-left of the page (device units / 
 ## Tools
 
 Every tool has a short description (English, the protocol's lingua franca; the assistant answers in the user's
-language anyway), a JSON schema, and MCP annotations: `readOnlyHint` for the read tools, `destructiveHint: false`
-everywhere (nothing is ever deleted permanently), `idempotentHint` where true. Errors are tool results with
+language anyway), a JSON schema, and MCP annotations: `readOnlyHint` for the read tools, `destructiveHint: true` on
+the tools that change or remove what is there (`update_note`, `move_note`, `trash_note`, `split_note`,
+`straighten_shapes`: the MCP specification keeps `false` for tools that only add, even though nothing is ever
+deleted permanently), `false` on the others, `idempotentHint` where true. Errors are tool results with
 `isError: true` and the same `{ code, message }` codes as the interface (`errorCodes.*`), message in English.
 
 ### Read
@@ -49,7 +51,7 @@ everywhere (nothing is ever deleted permanently), `idempotentHint` where true. E
 | `search_notes` | `query`, `limit?` | like the app's search (title, tags, recognised text, accent-insensitive), with the snippet that matched; says how many notes are not read yet |
 | `get_note` | `note`, `strokes?` (`none` default / `summary` / `points`), `max_points?` | metadata, layers, background (paper, template, image name/page), duration; `summary`: per stroke tool, colour, width, bounding box (mm), start/end time; `points`: decimated polylines in mm (Douglas–Peucker, bounded by `max_points`, default 5000 in total) |
 | `get_note_text` | `note`, `language?` (`fr`/`en`, default the app's) | recognised text: lines with their bounding boxes (mm), and the structure when Windows' ink analysis is available (paragraphs, list items, drawings with bounds and stroke indices — `ardoise_hwr::structure`, M8); recognises on demand (and fills the per-PC cache) when the note is not read yet |
-| `render_note` | `note`, `region?` ({x, y, width, height} in mm), `dpi?` (default 100, max 300), `background?` (default true), `layers?` | a PNG image content (MCP `image`), longest side at most 2000 px (dpi lowered to fit, the effective dpi returned in a text content next to it) so the assistant can *see* the note |
+| `render_note` | `note`, `region?` ({x, y, width, height} in mm), `dpi?` (default 100, max 300), `background?` (default true), `layers?` | a PNG image content (MCP `image`), longest side at most 2000 px, the whole page drawn at most 24 Mpx (dpi lowered to fit, the effective dpi and what lowered it returned in a text content next to it) so the assistant can *see* the note |
 
 ### Write (absent with `--read-only`)
 
@@ -61,7 +63,7 @@ everywhere (nothing is ever deleted permanently), `idempotentHint` where true. E
 | `trash_note` | `note` | to the library trash, restorable from the app |
 | `merge_notes` | `notes` (≥ 2), `layout` (`overlay`/`endToEnd`), `title?` | the M5 merge, a new note |
 | `split_note` | `note`, `at_ms` or `polygon` (mm) | the M5 split |
-| `straighten_shapes` | `note`, `strokes?` (indices; default all closed or straight shapes) | the M7 straightening, one save |
+| `straighten_shapes` | `note`, `strokes?` (indices; default the drawings found by Windows' ink analysis on visible layers, required without it) | the M7 straightening, one save; the version before goes to the library's trash as a note of its own |
 | `export_note` | `notes`, `format` (`png`/`jpg`/`webp`/`svg`/`pdf`/`txt`/`md`/`docx`/`gif`/`webm`/`mp4`), `path` (absolute file or folder), options of each format (dpi, background, quality, …) | the app's exports; never overwrites (" (2)" added), returns the written paths |
 | `set_note_text` | `note`, `text`, `language?` | stores a corrected transcription in the per-PC handwriting cache, used by the search instead of the recogniser's text until the ink changes; never written into the note file |
 
@@ -136,10 +138,19 @@ setting, each naming the tools to use:
   the app comes from `diagnostic::report_language`.
 - **Handwriting**: the app's `Indexer` (M7) is started at the first search or text request (a session that only
   lists notes never wakes the engine) with `busy = false`: the process cannot see live mode, which runs in the
-  app's process, so the background pass keeps the low priority of the background engine. The search waits at
-  most 20 s for the first pass to end (a small library is searched whole), then answers with what is read
-  and the number of unread notes; the pass goes on reading the library while the server lives. `get_note_text`
-  recognises on demand through `Indexer::recognition_in` (new: forces a language) and fills the same cache.
+  app's process, so the background pass keeps the low priority of the background engine. **The search follows
+  the library as it is now** (after review): `search_notes` gives the listing it made to
+  `Handwriting::search_in`; `--mcp` has no folder watcher, so it compares a fingerprint of that listing (paths,
+  stamps, ids) with the one the indexer last looked at and calls `Indexer::refresh` when it differs (a note
+  written by the app, a tool, Nextcloud...). `Indexer::search_in` counts a note only with the text of the
+  version listed: its record (path + stamp, `files.json`) must give the strokes of an entry in memory in the
+  language recognised; otherwise it is unread, never searched with an older text. The wait is bounded: until
+  the pass of that refresh has listed the library and taken what the cache knows (`Indexer::ready`, 10 s at
+  most, a fraction of a second in practice), then for the notes left to recognise only when they are at most
+  10 (15 s at most: a note just written or edited), else 1 s; then it answers with what is read and
+  `unread_notes` (the hint says that `get_note_text` reads one now). `get_note_text` recognises on demand
+  through `Indexer::recognition_at` (forces a language, and keeps the note's record), so the next search finds
+  that note at once. The write tools need no call of their own: the files they change change the listing.
   Structure: `ardoise_hwr::structure::structure_of` (Windows' ink analysis, else layout heuristics;
   `structure.source` says which). Outside Windows `SystemRecognizer` answers `Unsupported`, so the text tools
   answer `handwritingUnsupported`, and the search works on titles, tags and binders.
@@ -151,7 +162,10 @@ setting, each naming the tools to use:
   from 0.05 mm until the points fit `max_points`; if even the coarsest simplification is over budget the
   last strokes come without points (`strokes_without_points`). `render_note` renders the whole page at the
   dpi (25..300, default 100; lowered so that the region's longest side is at most 2000 px) and crops the
-  region; `layers` (indices or names) draws the chosen layers even if hidden. `--read-only` serves the read
+  region (`ardoise-render` draws pages, not parts of them); the dpi is also lowered so that the page drawn
+  holds at most 24 Mpx and 16 000 px a side, which matters only for very large pages (2 m custom paper, an A0
+  PDF: about 60 to 120 dpi at most); `dpi_limited_by` says `image_size` or `page_size`. `layers` (indices or
+  names) draws the chosen layers even if hidden. `--read-only` serves the read
   group only (bridge tools too, `app_state` included).
 - **Tests**: `crates/ardoise-mcp/tests/read_tools.rs` (in-memory duplex transport, temporary library, fake
   handwriting service), unit tests in the modules, `app/src-tauri/src/mcp.rs` (argument parsing), and the
@@ -191,21 +205,39 @@ setting, each naming the tools to use:
     the new note). `at_ms` is on the clock of the strokes' `start_ms`/`end_ms`; `polygon` is `[[x, y], ...]` in mm.
     Default title for the new note: "<title> (suite)" / "(extrait)", "(continued)" / "(excerpt)", as the editor
     proposes.
-  - `straighten_shapes`: `ardoise_ink::shapes::straighten` on all the strokes (or the indices given), the new
-    strokes taking the place of the first stroke they replace exactly as `straightenSelection` does in the editor;
-    one `notes::save_with_key` (the editor's own save: the version on disk is kept as `original.ardoise` the first
-    time the ink changes, the thumbnail is made again) with the stamp read at the start, so a note changed meanwhile
-    gives `noteConflict` and is left alone. Nothing recognised: no save (`saved: false`). Handwriting that looks
-    like a shape (a large loop, a bar) is changed too when all the strokes are tried: the description tells the
-    assistant to pass the drawings' strokes (`get_note_text` structure gives them).
+  - `straighten_shapes`: `ardoise_ink::shapes::straighten` on the strokes the editor would let the user select as
+    drawings, the new strokes taking the place of the first stroke they replace exactly as `straightenSelection`
+    does in the editor. Default strokes (after review): those of the drawings Windows' ink analysis finds on the
+    visible layers (`structure_of` with `analyzed: true`; the recognised text is not needed to find them, so an
+    empty recognition is used when there is none); the layout heuristics are not trusted (they guess drawings from
+    what the recogniser did not read, which may be letters), so without the analysis `strokes` is required
+    (`invalidArguments` says so). Checked for real on the demo library: pure handwriting notes give no stroke,
+    the drawing notes a few. **The version before is kept**: before the save, the file as read is put into the
+    library's trash as a note of its own (`Library::trash_copy`, new in `ardoise-core`: the record is written
+    first, the note never passes through a binder) with a new id (it must never stand for the note once restored)
+    and the title "<title> (before straightening)" / "(avant redressement)"; the app's trash view restores it next
+    to the note (30 days). Then one `notes::save_with_key` (the editor's own save: `original.ardoise` the first
+    time the ink changes, the thumbnail again) with the stamp read at the start: a note changed meanwhile gives
+    `noteConflict`, is left alone, and the copy is taken back (`Library::purge`). The result gives
+    `previous_version` (`in_trash`, `title`, `id`, a sentence for the user), `strokes_tried` and `chosen_by`
+    (`ink_analysis` / `given`). Nothing recognised: no save, no copy (`saved: false`).
+  - `split_note` changes the source too, but the app's own split keeps no previous version either (the kept part
+    is saved over the note with `save_in`; the other part is in the new note, so no ink is lost): mirrored,
+    `destructiveHint: true` only.
   - `export_note`: the crate resolves `path`: absolute only (`invalidArguments` otherwise); a folder (existing, or
     ending with a separator, or without extension: created if missing) gets `<note file name>.<ext>`; a file name
     must end with the format's extension (`.jpeg` is accepted for jpg); several notes in an image format need a
     folder (one file per note), pdf/txt/md/docx put all the notes in one file (`Ardoise export.<ext>` in a folder),
-    a replay takes one note. The first free name is chosen (" (2)", " (3)"…), and the app writes images, PDF, txt and
-    docx with `write_atomic_new` (a name taken in the meantime moves on to the next free one); the Markdown file and
-    the replays go through the app's writers, which replace their target, but the name was free when it was chosen:
-    **no existing file is replaced** (but for a race of milliseconds on those two).
+    a replay takes one note. The first free name is chosen (" (2)", " (3)"…; `exportFailed` after 999), and the app
+    writes images, PDF, txt and docx with `write_atomic_new` (a name taken in the meantime moves on to the next free
+    one). **No existing file is replaced, reused or removed** (after review): a Markdown name is chosen with its
+    `<name>_images` folder free too, and written by `textdoc::write_markdown_new` (the folder made with
+    `create_dir`, `<name>_images (2)` when taken meanwhile; the `.md` with `write_atomic_new`; nothing reused or
+    removed, its own drawings taken back if the `.md` was taken meanwhile; the GUI's `write_markdown`, whose dialog
+    confirmed a replacement, still reuses a folder holding only its document's previous drawings); a replay is
+    encoded under a name of its own next to the target (`.<name>.<pid>-<n>.mcp-part`), then moved with
+    `rename_no_replace` to the first free name, so a file made during the minutes of encoding stays. Every check
+    comes before any folder is made, and the folders made for an export that fails are removed again (when empty).
     Defaults are the app's dialog's: 150 dpi, JPG quality 90, background on, PDF page `actual`; replays 1080p
     (720p for gif), 30 fps (15 for gif), speed 1, no pause cut, 3 s on the last frame, narration on. Image and PDF
     exports are `export::image_bytes` / `notes_to_pdf`; txt is `handwriting::text_document`; md and docx are
@@ -213,7 +245,11 @@ setting, each naming the tools to use:
     replays are `video::export_video_in` (MP4 may use the OpenH264 fallback only if the user allowed it on this PC).
     **Video**: the call runs on the blocking pool and answers when the file is complete (seconds to minutes); no
     progress notification and no cancellation from the assistant's side (decision: not needed for a first
-    version; the connection stays quiet meanwhile, so a client with a short timeout may give up).
+    version; the connection stays quiet meanwhile, so a client with a short timeout may give up). Hence bounds
+    (after review), `invalidArguments` with the limits: `duration_seconds` more than 0 and at most 600, `speed` 0.25
+    to 16, `frame_rate` 10/15/24/30/60, `hold_end_seconds` 0 to 60 (`options_of`); then the app plans the replay
+    (`video::estimate_in`, no file written) and refuses one over 11 minutes (narration included), 39 600 frames or
+    20 minutes of estimated encoding (`check_replay_plan`), before encoding anything.
     The text exports use the recogniser's text, as the app's: a correction made with `set_note_text` is not in them.
   - `set_note_text` / `get_note_text`: see below.
 - **Corrected transcription** (`set_note_text`): kept in the per-PC handwriting cache
@@ -221,9 +257,14 @@ setting, each naming the tools to use:
   (`{ format, id, strokes, language, text }`), next to the entries of M7 and keyed by the same hash of the
   recognised strokes. Hence it is **dropped when the ink changes** (another hash is no longer found, and the cache's
   pruning removes the file with the older versions of the note), nothing is written into the note file, and old
-  caches stay readable (entries are not touched). The search (`Indexer::search`, so the app's search as well as
-  `search_notes`) reads the corrections folder at each search and, for a note that has one, searches the corrected
-  text (read as lines of words without positions) *instead of* the recogniser's. Written with a plain file write
+  caches stay readable (entries are not touched). The search (`Indexer::search` / `search_in`, so the app's search
+  as well as `search_notes`) reads the corrections folder at each search and, for a listed note that has one,
+  searches the corrected text (read as lines of words without positions) *instead of* the recogniser's. After
+  review: a correction counts for **any listed note** whose current strokes it fits, also one never recognised (no
+  handwriting pack, or not read yet): the note is read once and its record kept; the background pass lists the
+  library even when recognition is unavailable, for the interface's search. The pruning at the end of a pass
+  re-reads a note before removing a correction of other strokes than the pass saw (it may be for an edit made
+  during the pass, by the other process): only a correction that no longer fits the note goes. Written with a plain file write
   (no engine woken); read by the other process at its next search. `get_note_text` returns the corrected text as
   `text`, `is_correction: true` and `recognised_text`; the lines and the structure stay the recogniser's (they carry
   the positions). An empty `text` removes the correction. Limit: 200 000 characters.
@@ -236,8 +277,9 @@ setting, each naming the tools to use:
   `nothingToSplit`, `exportFailed`, `invalidVideoSettings`, `codecUnavailable`, `backgroundUnsupported`,
   `pdfEncrypted`…) and `invalidArguments`; the new `writeUnavailable` (a host without the app's service: only for
   tests and embedding, never reaches the interface, so no `errorCodes` entry). Annotations: all nine
-  `readOnlyHint: false`, `destructiveHint: false`; `idempotentHint: true` for `update_note`, `move_note` and
-  `set_note_text` only.
+  `readOnlyHint: false`; `destructiveHint: true` for `update_note` (it replaces tags and renames), `move_note`,
+  `trash_note`, `split_note` and `straighten_shapes`, `false` for `create_note`, `merge_notes`, `export_note` and
+  `set_note_text`; `idempotentHint: true` for `update_note`, `move_note` and `set_note_text` only.
 - **Prompts**: the router is built once at server start from `Environment::language()`: a French app serves
   `mettre_au_propre`, `titrer_et_etiqueter`, `resume_seance`; an English one `clean_up`, `title_and_tag`,
   `lesson_summary` (the six are `#[prompt]` functions and the other language's three routes are removed: no
@@ -256,14 +298,26 @@ setting, each naming the tools to use:
     or of the most recent day of the binder, are listed in the message in the order they were taken; the summary asked
     is a title line, 3 to 6 bullets of content, "homework" / "to remember" only if written, about 80 words, no student
     names, nothing saved; a date that is not ISO is a request error (`invalid_params`).
-  Argument names are the same in both languages.
-- **Tests**: `crates/ardoise-mcp/tests/write_tools.rs` (20 tests: every tool, atomic files, the stamp check, " (2)",
-  trash and restore, relative paths refused, coded errors, a read-only server lists none of them and refuses each
-  call, a host without services), `tests/prompts.rs` (5), `tests/support/mod.rs` (the library, fakes made of
-  `ardoise-core`'s operations and the recorded export requests); the app's side: `mcp/write.rs` tests
+  Argument names are the same in both languages. **A read-only server** (after review: the texts take the
+  server's options) names none of the tools it lacks: `clean_up` without a note asks the user which one (no
+  `last_live_note`), and its format rules and step 4 point to the app's own text exports instead of `export_note`;
+  `title_and_tag` shows the list for the user to apply in Ardoise (each note's title and tags) instead of calling
+  `update_note`.
+- **Tests**: `crates/ardoise-mcp/tests/write_tools.rs` (22 tests: every tool, atomic files, the stamp check, " (2)",
+  trash and restore, the version before straightening in the trash (and taken back on a conflict), the default
+  strokes from the ink analysis and the refusal without it, the destructive hints, a Markdown name whose drawings'
+  folder is taken, replay limits, no folder left by a failed export, relative paths refused, coded errors, a
+  read-only server lists none of them and refuses each call, a host without services), `tests/prompts.rs` (6, with
+  the read-only prompts in French and English), `tests/support/mod.rs` (the library, fakes made of `ardoise-core`'s
+  operations, an optional "ink analysis", the recorded export requests), `write/export.rs` unit tests (free names,
+  limits, folders undone); `ardoise-core` `library/tests.rs` (`trash_copy`); the app's side: `mcp/write.rs` tests
   (thumbnails, `save_in`'s stamp check and original, split and merge, a note on an image, images/folders/PDF without
-  replacing a file, the option mapping), `handwriting/cache.rs` (corrections bound to the ink, pruning, old caches
-  readable) and `handwriting/indexer.rs` (the search uses the correction); the journey `app/e2e/mcp-write.mjs`
+  replacing a file, a real GIF replay moved to a free name, a replay too long refused before encoding, the option
+  mapping), `textdoc.rs` (`write_markdown_new` reuses, replaces and removes nothing), `mcp.rs` (the search follows
+  the library after a write tool, a long first pass costs a search 1 s), `handwriting/cache.rs` (corrections bound
+  to the ink, the re-check before pruning, old caches readable) and `handwriting/indexer.rs` (the search uses the
+  correction, a listing of now is searched with the text of each version, a correction without any recognizer, a
+  correction written during a pass survives its pruning); the journey `app/e2e/mcp-write.mjs`
   (`node app/e2e/mcp.mjs target/debug/ardoise.exe fr`, then `en`).
 ## As built — bridge to the open app and guide (M9, parts 3 and 4)
 

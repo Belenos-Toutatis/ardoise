@@ -35,6 +35,16 @@ const WRITE_TOOLS: [&str; 9] = [
 /// Tools that give the same result when called twice.
 const IDEMPOTENT: [&str; 3] = ["move_note", "set_note_text", "update_note"];
 
+/// Tools that change or remove what is there (`destructiveHint`: the MCP specification keeps
+/// `false` for the tools that only add), even when the app can restore it.
+const DESTRUCTIVE: [&str; 5] = [
+    "move_note",
+    "split_note",
+    "straighten_shapes",
+    "trash_note",
+    "update_note",
+];
+
 /// Every file under `root` outside `_ardoise` that is not a note: leftovers of an interrupted
 /// atomic write would show here.
 fn strays(root: &Path) -> Vec<PathBuf> {
@@ -81,7 +91,11 @@ async fn every_write_tool_is_listed_with_a_schema_and_annotations() {
         assert_eq!(tool.input_schema.get("type").unwrap(), "object", "{name}");
         let annotations = tool.annotations.as_ref().expect("annotations");
         assert_eq!(annotations.read_only_hint, Some(false), "{name}");
-        assert_eq!(annotations.destructive_hint, Some(false), "{name}");
+        assert_eq!(
+            annotations.destructive_hint,
+            Some(DESTRUCTIVE.contains(&name)),
+            "{name}"
+        );
         assert_eq!(
             annotations.idempotent_hint,
             Some(IDEMPOTENT.contains(&name)),
@@ -197,6 +211,17 @@ async fn a_host_without_write_services_fails_with_a_code() {
         let error = session.failure(tool, arguments).await;
         assert_eq!(error["code"], "writeUnavailable", "{tool}");
     }
+    // An export that fails leaves no folder made for it.
+    let out = export_dir();
+    let nested = out.path().join("new").join("deeper");
+    let error = session
+        .failure(
+            "export_note",
+            json!({ "notes": [OPTIQUE], "format": "md", "path": nested.to_string_lossy() }),
+        )
+        .await;
+    assert_eq!(error["code"], "writeUnavailable");
+    assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     // The tools that are the library's own need no service.
     session
         .ok("update_note", json!({ "note": OPTIQUE, "favorite": false }))
@@ -612,18 +637,36 @@ async fn a_note_is_split_at_an_instant_or_by_a_zone() {
 // ---------------------------------------------------------------------------------------------
 // straighten_shapes
 
+/// The note `id` as it is in its file.
+fn note_of(session: &Session, id: &str) -> ardoise_core::note::Note {
+    let path = session.harness.path_of(id);
+    session.harness.library().read(&path).unwrap().file.note
+}
+
 #[tokio::test(flavor = "current_thread")]
-async fn drawn_shapes_are_straightened_in_one_save() {
+async fn drawn_shapes_are_straightened_in_one_save_and_the_version_before_is_kept() {
     let session = session().await;
     let path = session.harness.path_of(CHIMIE);
     let library = session.harness.library();
-    let before = library.read(&path).unwrap().file.note.strokes;
+    let loaded = library.read(&path).unwrap();
+    let before = loaded.file.note.strokes.clone();
     assert_eq!(before.len(), 4);
+    // The ink analysis finds the circle (3) as a drawing; the waves are handwriting, and one of
+    // them (2) is on a hidden layer: neither is tried by default.
+    session
+        .harness
+        .fake
+        .drawings
+        .lock()
+        .unwrap()
+        .insert(CHIMIE.into(), vec![2, 3]);
 
     let result = session
         .ok("straighten_shapes", json!({ "note": CHIMIE }))
         .await;
-    assert!(result["straightened"].as_u64().unwrap() >= 1, "{result}");
+    assert_eq!(result["chosen_by"], "ink_analysis");
+    assert_eq!(result["strokes_tried"], json!([3]), "{result}");
+    assert_eq!(result["straightened"], 1, "{result}");
     assert_eq!(result["saved"], true);
     assert_eq!(*session.harness.write.saves.lock().unwrap(), 1);
     let shapes = result["shapes"].as_array().unwrap();
@@ -639,6 +682,82 @@ async fn drawn_shapes_are_straightened_in_one_save() {
     assert_eq!(after[3].layer, before[3].layer);
     assert_eq!(after[3].tool, before[3].tool);
     assert!(strays(&session.harness.root).is_empty());
+
+    // The version before is in the trash, as a note of its own that the app restores next to
+    // the note.
+    let kept = &result["previous_version"];
+    let items = library.trash_items().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, kept["in_trash"].as_str().unwrap());
+    assert_eq!(
+        items[0].title.as_deref(),
+        Some("Chimie des métaux (before straightening)")
+    );
+    assert_eq!(kept["title"], "Chimie des métaux (before straightening)");
+    assert!(kept["restore"].as_str().unwrap().contains("30 days"));
+    let copy_id = kept["id"].as_str().unwrap();
+    assert_ne!(copy_id, CHIMIE, "a new id: it never stands for the note");
+    assert_eq!(items[0].note_id.as_deref(), Some(copy_id));
+    let restored = library.restore(&items[0].id).unwrap();
+    assert_eq!(restored.parent(), path.parent());
+    let file = library.read(&restored).unwrap().file;
+    assert_eq!(file.note.strokes, before);
+    assert_eq!(file.note.id, copy_id);
+    assert_eq!(file.note.tags, loaded.file.note.tags);
+    assert_eq!(
+        session.harness.path_of(CHIMIE),
+        path,
+        "the note itself stays"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_version_before_straightening_is_named_in_the_apps_language() {
+    let session = session_with(Language::Fr, ServerOptions::default()).await;
+    session
+        .harness
+        .fake
+        .drawings
+        .lock()
+        .unwrap()
+        .insert(CHIMIE.into(), vec![3]);
+    let result = session
+        .ok("straighten_shapes", json!({ "note": CHIMIE }))
+        .await;
+    assert_eq!(
+        result["previous_version"]["title"],
+        "Chimie des métaux (avant redressement)"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn without_the_ink_analysis_the_strokes_must_be_given() {
+    let session = session().await;
+    let path = session.harness.path_of(CHIMIE);
+    let before = fs::read(&path).unwrap();
+    // No analysis (the fake's heuristics): the default is refused, nothing is written.
+    let error = session
+        .failure("straighten_shapes", json!({ "note": CHIMIE }))
+        .await;
+    assert_eq!(error["code"], "invalidArguments");
+    let message = error["message"].as_str().unwrap();
+    assert!(
+        message.contains("ink analysis") && message.contains("`strokes`"),
+        "{message}"
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert!(session.harness.library().trash_items().unwrap().is_empty());
+
+    // Given, they are tried whatever the analysis.
+    let result = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [3] }),
+        )
+        .await;
+    assert_eq!(result["chosen_by"], "given");
+    assert_eq!(result["straightened"], 1);
+    assert_eq!(session.harness.library().trash_items().unwrap().len(), 1);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -647,7 +766,7 @@ async fn straightening_only_the_chosen_strokes_and_leaving_the_rest_alone() {
     let path = session.harness.path_of(CHIMIE);
     let before = fs::read(&path).unwrap();
 
-    // The waves are no shape: nothing changes, nothing is saved.
+    // The waves are no shape: nothing changes, nothing is saved, nothing is kept.
     let none = session
         .ok(
             "straighten_shapes",
@@ -658,6 +777,20 @@ async fn straightening_only_the_chosen_strokes_and_leaving_the_rest_alone() {
     assert_eq!(none["saved"], false);
     assert_eq!(fs::read(&path).unwrap(), before);
     assert_eq!(*session.harness.write.saves.lock().unwrap(), 0);
+    assert!(session.harness.library().trash_items().unwrap().is_empty());
+    // A note whose analysis finds no drawing: the same.
+    session
+        .harness
+        .fake
+        .drawings
+        .lock()
+        .unwrap()
+        .insert(OPTIQUE.into(), Vec::new());
+    let none = session
+        .ok("straighten_shapes", json!({ "note": OPTIQUE }))
+        .await;
+    assert_eq!(none["strokes_tried"], json!([]));
+    assert_eq!(none["saved"], false);
 
     let error = session
         .failure(
@@ -667,6 +800,7 @@ async fn straightening_only_the_chosen_strokes_and_leaving_the_rest_alone() {
         .await;
     assert_eq!(error["code"], "invalidArguments");
     assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(note_of(&session, CHIMIE).strokes.len(), 4);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -690,7 +824,10 @@ async fn a_note_changed_meanwhile_is_not_overwritten() {
             .unwrap();
     }));
     let error = session
-        .failure("straighten_shapes", json!({ "note": CHIMIE }))
+        .failure(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [3] }),
+        )
         .await;
     assert_eq!(error["code"], "noteConflict", "{error}");
     // The other version is still there, untouched by the tool.
@@ -698,6 +835,8 @@ async fn a_note_changed_meanwhile_is_not_overwritten() {
     assert!(kept.favorite);
     assert_eq!(kept.strokes, before, "the circle was not replaced");
     assert!(strays(&session.harness.root).is_empty());
+    // The copy made before the save is taken back: nothing was replaced.
+    assert!(session.harness.library().trash_items().unwrap().is_empty());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -800,6 +939,17 @@ async fn an_export_to_a_file_takes_the_name_asked_and_its_options() {
     let request = session.harness.write.exports.lock().unwrap()[1].clone();
     assert_eq!(request.options.language, Language::Fr);
     assert_eq!(request.notes.len(), 2);
+
+    // A Markdown name whose drawings' folder is taken (a previous export's, its `.md` gone)
+    // moves on: the app would put the drawings among the other export's.
+    fs::create_dir(md.join("cours_images")).unwrap();
+    let result = session
+        .ok(
+            "export_note",
+            json!({ "notes": [OPTIQUE], "format": "md", "path": md.join("cours.md").to_string_lossy() }),
+        )
+        .await;
+    assert_eq!(files(&result), [md.join("cours (2).md")]);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -849,6 +999,11 @@ async fn bad_export_requests_are_refused_before_anything_is_written() {
         json!({ "notes": [OPTIQUE], "format": "jpg", "path": dir, "quality": 0 }),
         json!({ "notes": [OPTIQUE, CHIMIE], "format": "mp4", "path": dir }),
         json!({ "notes": [OPTIQUE], "format": "gif", "path": dir, "speed": 2, "duration_seconds": 10 }),
+        // Replays beyond their limits (the assistant cannot cancel one).
+        json!({ "notes": [OPTIQUE], "format": "webm", "path": dir, "duration_seconds": 3600 }),
+        json!({ "notes": [OPTIQUE], "format": "webm", "path": dir, "speed": 1000 }),
+        json!({ "notes": [OPTIQUE], "format": "webm", "path": dir, "frame_rate": 1000 }),
+        json!({ "notes": [OPTIQUE], "format": "gif", "path": dir, "hold_end_seconds": 3600 }),
         json!({ "notes": [], "format": "png", "path": dir }),
         // An unknown format.
         json!({ "notes": [OPTIQUE], "format": "bmp", "path": dir }),

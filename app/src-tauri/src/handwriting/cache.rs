@@ -409,12 +409,23 @@ impl CacheDir {
     /// Removes the files of the entries made useless: for a note id in `in_use` (id → strokes
     /// hashes of the files that have it), the entries of other strokes (older versions of the
     /// note); for any other id, the entries older than [`MAX_AGE`] (notes deleted, or of
-    /// another library).
-    pub fn prune(&self, in_use: &HashMap<String, HashSet<String>>) {
-        self.prune_at(in_use, SystemTime::now());
+    /// another library). A correction of other strokes than `in_use` gives is asked about
+    /// first, right before it would go: it stays when `is_current` says it is for the ink the
+    /// note has now (an edit made since `in_use` was known, corrected meanwhile).
+    pub fn prune(
+        &self,
+        in_use: &HashMap<String, HashSet<String>>,
+        is_current: &dyn Fn(&Correction) -> bool,
+    ) {
+        self.prune_at(in_use, is_current, SystemTime::now());
     }
 
-    fn prune_at(&self, in_use: &HashMap<String, HashSet<String>>, now: SystemTime) {
+    fn prune_at(
+        &self,
+        in_use: &HashMap<String, HashSet<String>>,
+        is_current: &dyn Fn(&Correction) -> bool,
+        now: SystemTime,
+    ) {
         let Ok(listing) = fs::read_dir(&self.dir) else {
             return;
         };
@@ -441,6 +452,11 @@ impl CacheDir {
                 !keep_prefixes
                     .iter()
                     .any(|keep| name.starts_with(keep.as_str()))
+                    && !(name.ends_with(CORRECTION_SUFFIX)
+                        && fs::read(entry.path())
+                            .ok()
+                            .and_then(|bytes| serde_json::from_slice::<Correction>(&bytes).ok())
+                            .is_some_and(|correction| is_current(&correction)))
             } else {
                 entry
                     .metadata()
@@ -672,7 +688,7 @@ mod tests {
             "note-1".to_owned(),
             HashSet::from(["1111111111111111".to_owned(), "3333333333333333".to_owned()]),
         )]);
-        disk.prune(&in_use);
+        disk.prune(&in_use, &|_| false);
         let exists = |k: &EntryKey| dir.path().join(k.file_name()).exists();
         assert!(
             exists(&current_fr) && exists(&current_en),
@@ -684,6 +700,7 @@ mod tests {
         // Months later, entries of notes no longer seen go.
         disk.prune_at(
             &in_use,
+            &|_| false,
             SystemTime::now() + MAX_AGE + Duration::from_secs(60),
         );
         assert!(!exists(&other_library));
@@ -729,11 +746,21 @@ mod tests {
         let current = strokes_hash(&written.strokes);
         let in_use =
             |hash: &str| HashMap::from([(written.id.clone(), HashSet::from([hash.to_owned()]))]);
-        disk.prune(&in_use(&current));
+        disk.prune(&in_use(&current), &|_| false);
         assert!(disk.correction_for(&written).is_some());
-        disk.prune(&in_use(&strokes_hash(&edited.strokes)));
-        assert!(disk.correction_for(&written).is_none());
+        // A correction of other strokes than those in use is for an edit made since they were
+        // known when the note, read again, has them: it stays (the entry of the old ink goes).
+        let asked = std::sync::Mutex::new(Vec::new());
+        disk.prune(&in_use(&strokes_hash(&edited.strokes)), &|correction| {
+            asked.lock().unwrap().push(correction.strokes.clone());
+            true
+        });
+        assert_eq!(*asked.lock().unwrap(), std::slice::from_ref(&current));
+        assert!(disk.correction_for(&written).is_some());
         assert!(!dir.path().join(entry.file_name()).exists());
+        // Otherwise it goes with the older versions.
+        disk.prune(&in_use(&strokes_hash(&edited.strokes)), &|_| false);
+        assert!(disk.correction_for(&written).is_none());
 
         // A damaged file is no correction, and an empty text removes one.
         disk.set_correction_for(&written, Language::Fr, "x")

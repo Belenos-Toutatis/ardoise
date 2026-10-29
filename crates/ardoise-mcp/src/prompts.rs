@@ -7,7 +7,9 @@
 //! as it is when the server starts: a French app serves the French names, an English one the
 //! English names (the router is built once, [`ArdoiseServer::prompt_router`]). The prompts that
 //! are about a set of notes put the list of those notes in the message, so that the assistant
-//! does not have to look for them.
+//! does not have to look for them. A read-only server (`--read-only`) has neither the write
+//! tools nor the bridge tools: its prompts name none of them, and leave to the user what would
+//! change the library (the list of titles to apply by hand).
 
 use ardoise_core::library::NoteEntry;
 use ardoise_hwr::Language;
@@ -109,26 +111,47 @@ fn format_name(language: Language, format: CleanFormat) -> &'static str {
     }
 }
 
-/// What the format asks for in step 3.
-fn format_rules(language: Language, format: CleanFormat) -> &'static str {
+/// What the format asks for in step 3; `read_only`: without `export_note`, the drawings are
+/// exported by the user from the app.
+fn format_rules(language: Language, format: CleanFormat, read_only: bool) -> String {
     match (language, format) {
-        (Language::Fr, CleanFormat::Markdown) => {
-            "Format Markdown : titres `#`, listes, tableaux Markdown, formules en LaTeX entre `$...$` (et `$$...$$` pour une formule seule sur sa ligne), unités écrites correctement. Les schémas simples se redessinent en `mermaid` ou en tableau ; pour les autres, laisse un emplacement `![description](schema-N.png)` et dis à la fin quels schémas sont à insérer (`export_note` au format `md` écrit les dessins tels qu'Ardoise les voit, dans un dossier à côté)."
-        }
-        (Language::En, CleanFormat::Markdown) => {
-            "Markdown format: `#` headings, lists, Markdown tables, formulas in LaTeX between `$...$` (and `$$...$$` for a formula on its own line), units written properly. Simple diagrams can be redrawn as `mermaid` or as a table; for the others leave a placeholder `![description](diagram-N.png)` and say at the end which diagrams have to be inserted (`export_note` with format `md` writes the drawings as Ardoise sees them, in a folder next to the file)."
-        }
-        (Language::Fr, CleanFormat::Word) => {
-            "Format Word : produis un fichier .docx si tes outils le permettent (styles Titre 1, Titre 2, listes, tableaux, équations), sinon donne le contenu en Markdown propre, prêt à être converti (par exemple avec pandoc), et dis-le. Pour un schéma que tu ne peux pas redessiner, mets un emplacement et signale-le ; `export_note` au format `docx` garde les dessins tels qu'Ardoise les voit."
-        }
-        (Language::En, CleanFormat::Word) => {
-            "Word format: produce a .docx file if your tools allow it (Heading 1, Heading 2 styles, lists, tables, equations), otherwise give the content as clean Markdown ready to convert (for example with pandoc), and say so. For a diagram you cannot redraw, leave a placeholder and flag it; `export_note` with format `docx` keeps the drawings as Ardoise sees them."
-        }
+        (Language::Fr, CleanFormat::Markdown) => format!(
+            "Format Markdown : titres `#`, listes, tableaux Markdown, formules en LaTeX entre `$...$` (et `$$...$$` pour une formule seule sur sa ligne), unités écrites correctement. Les schémas simples se redessinent en `mermaid` ou en tableau ; pour les autres, laisse un emplacement `![description](schema-N.png)` et dis à la fin quels schémas sont à insérer ({}).",
+            if read_only {
+                "l'utilisateur peut exporter les dessins tels qu'Ardoise les voit avec l'export du texte en Markdown de l'application"
+            } else {
+                "`export_note` au format `md` écrit les dessins tels qu'Ardoise les voit, dans un dossier à côté"
+            }
+        ),
+        (Language::En, CleanFormat::Markdown) => format!(
+            "Markdown format: `#` headings, lists, Markdown tables, formulas in LaTeX between `$...$` (and `$$...$$` for a formula on its own line), units written properly. Simple diagrams can be redrawn as `mermaid` or as a table; for the others leave a placeholder `![description](diagram-N.png)` and say at the end which diagrams have to be inserted ({}).",
+            if read_only {
+                "the user can export the drawings as Ardoise sees them with the app's Markdown text export"
+            } else {
+                "`export_note` with format `md` writes the drawings as Ardoise sees them, in a folder next to the file"
+            }
+        ),
+        (Language::Fr, CleanFormat::Word) => format!(
+            "Format Word : produis un fichier .docx si tes outils le permettent (styles Titre 1, Titre 2, listes, tableaux, équations), sinon donne le contenu en Markdown propre, prêt à être converti (par exemple avec pandoc), et dis-le. Pour un schéma que tu ne peux pas redessiner, mets un emplacement et signale-le ; {}",
+            if read_only {
+                "l'export du texte en Word de l'application garde les dessins tels qu'Ardoise les voit."
+            } else {
+                "`export_note` au format `docx` garde les dessins tels qu'Ardoise les voit."
+            }
+        ),
+        (Language::En, CleanFormat::Word) => format!(
+            "Word format: produce a .docx file if your tools allow it (Heading 1, Heading 2 styles, lists, tables, equations), otherwise give the content as clean Markdown ready to convert (for example with pandoc), and say so. For a diagram you cannot redraw, leave a placeholder and flag it; {}",
+            if read_only {
+                "the app's Word text export keeps the drawings as Ardoise sees them."
+            } else {
+                "`export_note` with format `docx` keeps the drawings as Ardoise sees them."
+            }
+        ),
         (Language::Fr, CleanFormat::Latex) => {
-            "Format LaTeX : un document complet qui se compile avec LuaLaTeX (classe `article` ou `scrartcl`, `fontspec`, `babel` en français). Paquets : `siunitx` pour les nombres et les unités (`\\num`, `\\unit`, `\\qty`), `mhchem` pour les formules et équations chimiques (`\\ce{H2O}`), `circuitikz` pour les schémas électriques, `pgfplots` pour les courbes et graphiques, `chemfig` pour les formules développées, `tikz` pour les autres schémas. Les schémas sont redessinés en code (TikZ, circuitikz...), pas laissés en image. Si tu peux compiler, compile et corrige les erreurs avant de répondre."
+            "Format LaTeX : un document complet qui se compile avec LuaLaTeX (classe `article` ou `scrartcl`, `fontspec`, `babel` en français). Paquets : `siunitx` pour les nombres et les unités (`\\num`, `\\unit`, `\\qty`), `mhchem` pour les formules et équations chimiques (`\\ce{H2O}`), `circuitikz` pour les schémas électriques, `pgfplots` pour les courbes et graphiques, `chemfig` pour les formules développées, `tikz` pour les autres schémas. Les schémas sont redessinés en code (TikZ, circuitikz...), pas laissés en image. Si tu peux compiler, compile et corrige les erreurs avant de répondre.".to_owned()
         }
         (Language::En, CleanFormat::Latex) => {
-            "LaTeX format: a complete document that compiles with LuaLaTeX (`article` or `scrartcl` class, `fontspec`, `babel`). Packages: `siunitx` for numbers and units (`\\num`, `\\unit`, `\\qty`), `mhchem` for chemical formulas and equations (`\\ce{H2O}`), `circuitikz` for circuit diagrams, `pgfplots` for curves and graphs, `chemfig` for structural formulas, `tikz` for the other diagrams. Diagrams are redrawn as code (TikZ, circuitikz...), not left as images. If you can compile, compile and fix the errors before answering."
+            "LaTeX format: a complete document that compiles with LuaLaTeX (`article` or `scrartcl` class, `fontspec`, `babel`). Packages: `siunitx` for numbers and units (`\\num`, `\\unit`, `\\qty`), `mhchem` for chemical formulas and equations (`\\ce{H2O}`), `circuitikz` for circuit diagrams, `pgfplots` for curves and graphs, `chemfig` for structural formulas, `tikz` for the other diagrams. Diagrams are redrawn as code (TikZ, circuitikz...), not left as images. If you can compile, compile and fix the errors before answering.".to_owned()
         }
     }
 }
@@ -138,9 +161,10 @@ fn clean_up_text(
     note: Option<&NoteRef>,
     asked: bool,
     format: CleanFormat,
+    read_only: bool,
 ) -> String {
     let format_name = format_name(language, format);
-    let rules = format_rules(language, format);
+    let rules = format_rules(language, format, read_only);
     match language {
         Language::Fr => {
             let which = match (note, asked) {
@@ -151,7 +175,13 @@ fn clean_up_text(
                     note.path
                 ),
                 (None, true) => "La note demandée n'existe pas dans la bibliothèque : retrouve-la avec `search_notes` ou `list_notes`, ou demande à l'utilisateur laquelle il veut, avant de continuer.".to_owned(),
+                (None, false) if read_only => "Aucune note n'est désignée : demande à l'utilisateur laquelle mettre au propre (`search_notes` et `list_notes` aident à la retrouver ; `list_notes` donne les plus récentes d'abord) avant de continuer.".to_owned(),
                 (None, false) => "Aucune note n'est désignée : appelle l'outil `last_live_note` pour trouver la note de la dernière séance en direct. S'il n'y en a pas (ou si Ardoise n'est pas ouverte), demande à l'utilisateur laquelle mettre au propre (`search_notes` et `list_notes` aident à la retrouver) avant de continuer.".to_owned(),
+            };
+            let export = if read_only {
+                "Ce serveur est en lecture seule : il n'écrit aucun fichier."
+            } else {
+                "`export_note` peut aussi fournir un point de départ (formats `md` ou `docx`) ; il n'écrase jamais un fichier et rend les chemins écrits."
             };
             format!(
                 "Tu aides un enseignant de physique-chimie (collège) à mettre au propre une note manuscrite d'Ardoise. {which}\n\
@@ -160,7 +190,7 @@ fn clean_up_text(
                  1. Regarde la note. Appelle `get_note` (avec `strokes: \"summary\"`) pour la taille de la page, les calques et les traits, puis `render_note` pour la page entière à une définition lisible (dpi 100 à 150). Zoome ensuite avec `render_note` et `region` (en millimètres depuis le coin haut gauche de la page) sur les zones denses, les formules, les schémas et les graphiques, avec un dpi plus élevé (200 à 300). La reconnaissance d'écriture se trompe sur les formules, les symboles et les schémas : l'image fait foi.\n\
                  2. Lis le texte reconnu avec `get_note_text` : chaque ligne a sa position en millimètres, ce qui permet de la retrouver sur l'image, et la structure (paragraphes, listes, dessins avec leur zone et leurs traits) aide à retrouver la mise en page. Corrige-le d'après l'image.\n\
                  3. Écris un document propre et fidèle. N'invente rien : ne complète pas le cours, ne corrige pas silencieusement une erreur de fond (signale-la à la fin), ne change ni les valeurs ni les unités. Garde l'ordre et la hiérarchie de la page : titres, listes, tableaux, formules, unités ; les schémas (circuits, montages, rayons lumineux, molécules, courbes) sont redessinés avec les moyens du format. {rules}\n\
-                 4. Enregistre le document avec tes propres outils de fichiers si tu en as, à l'endroit que l'utilisateur indique (par défaut son dossier de travail), sans écraser un fichier existant. Sinon donne-le dans ta réponse. `export_note` peut aussi fournir un point de départ (formats `md` ou `docx`) ; il n'écrase jamais un fichier et rend les chemins écrits.\n\
+                 4. Enregistre le document avec tes propres outils de fichiers si tu en as, à l'endroit que l'utilisateur indique (par défaut son dossier de travail), sans écraser un fichier existant. Sinon donne-le dans ta réponse. {export}\n\
                  5. Termine par la liste de ce qui reste incertain : mots illisibles, symboles ou valeurs devinés, schémas simplifiés, erreurs de fond rencontrées, avec leur position sur la page (en millimètres) pour que l'utilisateur vérifie.\n\n\
                  Les notes peuvent contenir des noms d'élèves : ne les recopie que s'ils font partie du document demandé."
             )
@@ -174,7 +204,13 @@ fn clean_up_text(
                     note.path
                 ),
                 (None, true) => "The note asked for is not in the library: find it with `search_notes` or `list_notes`, or ask the user which one they mean, before going on.".to_owned(),
+                (None, false) if read_only => "No note is named: ask the user which note to clean up (`search_notes` and `list_notes` help to find it; `list_notes` gives the newest first) before going on.".to_owned(),
                 (None, false) => "No note is named: call the tool `last_live_note` to find the note of the last live session. If there is none (or Ardoise is not open), ask the user which note to clean up (`search_notes` and `list_notes` help to find it) before going on.".to_owned(),
+            };
+            let export = if read_only {
+                "This server is read-only: it writes no file."
+            } else {
+                "`export_note` can also give a starting point (formats `md` or `docx`); it never overwrites a file and returns the paths written."
             };
             format!(
                 "You are helping a physics and chemistry teacher (lower secondary school) turn a handwritten Ardoise note into a clean document. {which}\n\
@@ -183,7 +219,7 @@ fn clean_up_text(
                  1. Look at the note. Call `get_note` (with `strokes: \"summary\"`) for the page size, the layers and the strokes, then `render_note` for the whole page at a readable resolution (100 to 150 dpi). Then zoom with `render_note` and `region` (in millimetres from the top-left corner of the page) on dense areas, formulas, diagrams and graphs, at a higher dpi (200 to 300). Handwriting recognition gets formulas, symbols and diagrams wrong: the image is the reference.\n\
                  2. Read the recognised text with `get_note_text`: each line has its position in millimetres, which lets you find it on the image, and the structure (paragraphs, list items, drawings with their area and strokes) helps to recover the layout. Correct it from the image.\n\
                  3. Write a faithful, clean document. Invent nothing: do not complete the lesson, do not silently fix a mistake of substance (flag it at the end), change neither values nor units. Keep the order and hierarchy of the page: titles, lists, tables, formulas, units; diagrams (circuits, set-ups, light rays, molecules, curves) are redrawn with the means of the format. {rules}\n\
-                 4. Save the document with your own file tools if you have them, where the user says (by default their working folder), without overwriting an existing file. Otherwise give it in your reply. `export_note` can also give a starting point (formats `md` or `docx`); it never overwrites a file and returns the paths written.\n\
+                 4. Save the document with your own file tools if you have them, where the user says (by default their working folder), without overwriting an existing file. Otherwise give it in your reply. {export}\n\
                  5. End with the list of what remains uncertain: unreadable words, guessed symbols or values, simplified diagrams, mistakes of substance, with their position on the page (in millimetres) so that the user can check.\n\n\
                  Notes may contain students' names: copy them only if they belong in the requested document."
             )
@@ -214,7 +250,13 @@ fn list_text(language: Language, lines: &[String], total: usize) -> String {
     text
 }
 
-fn title_and_tag_text(language: Language, binder: &str, lines: &[String], total: usize) -> String {
+fn title_and_tag_text(
+    language: Language,
+    binder: &str,
+    lines: &[String],
+    total: usize,
+    read_only: bool,
+) -> String {
     let list = list_text(language, lines, total);
     match language {
         Language::Fr => {
@@ -223,14 +265,20 @@ fn title_and_tag_text(language: Language, binder: &str, lines: &[String], total:
             } else {
                 format!("du classeur « {binder} »")
             };
+            let apply = if read_only {
+                "3. Montre la liste complète à l'utilisateur (note, titre proposé, étiquettes proposées), prête à appliquer : ce serveur est en lecture seule, c'est l'utilisateur qui donne les titres et les étiquettes dans Ardoise (le titre et les étiquettes de chaque note, dans la bibliothèque ou l'éditeur). Il peut corriger ou retirer des lignes. Ne propose rien pour les notes qui ont déjà un titre.\n\
+                 4. Termine en rappelant que rien n'a été modifié."
+            } else {
+                "3. Montre la liste complète à l'utilisateur (note, titre proposé, étiquettes proposées) et demande-lui son accord : il peut corriger ou retirer des lignes. N'appelle `update_note` (avec `title` et `add_tags`) qu'après son accord, une fois par note. Ne touche pas aux notes qui ont déjà un titre.\n\
+                 4. Résume ce qui a été appliqué."
+            };
             format!(
                 "Tu aides à donner un titre et des étiquettes aux notes d'Ardoise qui n'en ont pas. Une note « sans titre » a un titre vide (l'application affiche alors sa date de création).\n\n\
                  Notes sans titre {scope} : {total}, les plus récentes d'abord.\n{list}\n\n\
                  Procède dans cet ordre.\n\
                  1. Pour chaque note de la liste (si elle est incomplète, `list_notes` avec `binder` donne les autres : ne garde que celles dont `title` est vide), appelle `render_note` (page entière, dpi 80 à 100) pour la voir et `get_note_text` pour son texte reconnu. L'image fait foi : la reconnaissance se trompe sur les formules et les schémas. Une note vide ou illisible n'a rien à recevoir : dis-le.\n\
                  2. Propose un titre court et précis (3 à 8 mots, sans la date, qui dit de quoi parle la note : « Loi d'Ohm - exercices ») et 1 à 4 étiquettes courtes en minuscules. Regarde d'abord les étiquettes qui existent (`list_tags`) et réutilise-les plutôt que d'en créer de proches. N'utilise aucun nom d'élève.\n\
-                 3. Montre la liste complète à l'utilisateur (note, titre proposé, étiquettes proposées) et demande-lui son accord : il peut corriger ou retirer des lignes. N'appelle `update_note` (avec `title` et `add_tags`) qu'après son accord, une fois par note. Ne touche pas aux notes qui ont déjà un titre.\n\
-                 4. Résume ce qui a été appliqué."
+                 {apply}"
             )
         }
         Language::En => {
@@ -239,14 +287,20 @@ fn title_and_tag_text(language: Language, binder: &str, lines: &[String], total:
             } else {
                 format!("in the binder \"{binder}\"")
             };
+            let apply = if read_only {
+                "3. Show the user the complete list (note, proposed title, proposed tags), ready to apply: this server is read-only, so the user gives the titles and tags in Ardoise (each note's title and tags, in the library or the editor). They can correct or remove lines. Propose nothing for notes that already have a title.\n\
+                 4. End by recalling that nothing was changed."
+            } else {
+                "3. Show the user the complete list (note, proposed title, proposed tags) and ask for their agreement: they can correct or remove lines. Call `update_note` (with `title` and `add_tags`) only after they agree, once per note. Do not touch notes that already have a title.\n\
+                 4. Summarise what was applied."
+            };
             format!(
                 "You are helping to give a title and tags to the Ardoise notes that have none. An \"untitled\" note has an empty title (the app then shows its creation date).\n\n\
                  Untitled notes {scope}: {total}, newest first.\n{list}\n\n\
                  Proceed in this order.\n\
                  1. For each note of the list (if it is incomplete, `list_notes` with `binder` gives the others: keep only those whose `title` is empty), call `render_note` (whole page, 80 to 100 dpi) to see it and `get_note_text` for its recognised text. The image is the reference: recognition gets formulas and diagrams wrong. An empty or unreadable note has nothing to receive: say so.\n\
                  2. Propose a short, precise title (3 to 8 words, without the date, saying what the note is about: \"Ohm's law - exercises\") and 1 to 4 short lowercase tags. Look at the existing tags first (`list_tags`) and reuse them instead of creating close ones. Use no student's name.\n\
-                 3. Show the user the complete list (note, proposed title, proposed tags) and ask for their agreement: they can correct or remove lines. Call `update_note` (with `title` and `add_tags`) only after they agree, once per note. Do not touch notes that already have a title.\n\
-                 4. Summarise what was applied."
+                 {apply}"
             )
         }
     }
@@ -320,7 +374,7 @@ fn result(description: &str, text: String) -> GetPromptResult {
         .with_description(description)
 }
 
-fn clean_up(host: &Host, language: Language, args: &CleanUpArgs) -> String {
+fn clean_up(host: &Host, language: Language, read_only: bool, args: &CleanUpArgs) -> String {
     let asked = args.note.as_deref().is_some_and(|n| !n.trim().is_empty());
     let note = args
         .note
@@ -340,6 +394,7 @@ fn clean_up(host: &Host, language: Language, args: &CleanUpArgs) -> String {
         note.as_ref(),
         asked,
         args.format.unwrap_or_default(),
+        read_only,
     )
 }
 
@@ -359,7 +414,12 @@ fn untitled(host: &Host, binder: &str) -> Vec<NoteEntry> {
     notes
 }
 
-fn title_and_tag(host: &Host, language: Language, args: &TitleAndTagArgs) -> String {
+fn title_and_tag(
+    host: &Host,
+    language: Language,
+    read_only: bool,
+    args: &TitleAndTagArgs,
+) -> String {
     let binder = clean_binder(args.binder.as_deref().unwrap_or_default());
     let notes = untitled(host, &binder);
     let lines: Vec<String> = notes
@@ -367,7 +427,7 @@ fn title_and_tag(host: &Host, language: Language, args: &TitleAndTagArgs) -> Str
         .take(LISTED)
         .map(|entry| line_of(host, entry))
         .collect();
-    title_and_tag_text(language, &binder, &lines, notes.len())
+    title_and_tag_text(language, &binder, &lines, notes.len(), read_only)
 }
 
 /// The notes of a lesson: those created on `date`, in `binder` if given; with a binder alone,
@@ -464,8 +524,9 @@ impl ArdoiseServer {
         &self,
         Parameters(args): Parameters<CleanUpArgs>,
     ) -> Result<GetPromptResult, ErrorData> {
+        let read_only = self.options().read_only;
         let text = self
-            .prompt_on_host(move |host| clean_up(host, Language::Fr, &args))
+            .prompt_on_host(move |host| clean_up(host, Language::Fr, read_only, &args))
             .await?;
         Ok(result("Mettre au propre une note", text))
     }
@@ -478,36 +539,39 @@ impl ArdoiseServer {
         &self,
         Parameters(args): Parameters<CleanUpArgs>,
     ) -> Result<GetPromptResult, ErrorData> {
+        let read_only = self.options().read_only;
         let text = self
-            .prompt_on_host(move |host| clean_up(host, Language::En, &args))
+            .prompt_on_host(move |host| clean_up(host, Language::En, read_only, &args))
             .await?;
         Ok(result("Clean up a note", text))
     }
 
     #[prompt(
         name = "titrer_et_etiqueter",
-        description = "Propose un titre et des étiquettes pour les notes sans titre, d'après leur texte et leur image, puis les applique après accord."
+        description = "Propose un titre et des étiquettes pour les notes sans titre, d'après leur texte et leur image, puis les applique après accord (en lecture seule : la liste à appliquer à la main)."
     )]
     async fn titrer_et_etiqueter(
         &self,
         Parameters(args): Parameters<TitleAndTagArgs>,
     ) -> Result<GetPromptResult, ErrorData> {
+        let read_only = self.options().read_only;
         let text = self
-            .prompt_on_host(move |host| title_and_tag(host, Language::Fr, &args))
+            .prompt_on_host(move |host| title_and_tag(host, Language::Fr, read_only, &args))
             .await?;
         Ok(result("Titrer et étiqueter les notes sans titre", text))
     }
 
     #[prompt(
         name = "title_and_tag",
-        description = "Propose a title and tags for the untitled notes from their text and image, then apply them once the user agrees."
+        description = "Propose a title and tags for the untitled notes from their text and image, then apply them once the user agrees (read-only: the list to apply by hand)."
     )]
     async fn title_and_tag(
         &self,
         Parameters(args): Parameters<TitleAndTagArgs>,
     ) -> Result<GetPromptResult, ErrorData> {
+        let read_only = self.options().read_only;
         let text = self
-            .prompt_on_host(move |host| title_and_tag(host, Language::En, &args))
+            .prompt_on_host(move |host| title_and_tag(host, Language::En, read_only, &args))
             .await?;
         Ok(result("Title and tag untitled notes", text))
     }

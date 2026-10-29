@@ -36,7 +36,7 @@ use crate::export::{ExportSource, export_error, library_for, load_sources};
 use crate::live::LiveRuntime;
 
 pub use cache::CacheDir;
-pub use indexer::{IndexConfig, IndexState, IndexStatus, Indexer, Services};
+pub use indexer::{IndexConfig, IndexState, IndexStatus, Indexer, Listed, Services};
 pub use search::SearchHit;
 
 /// Event sent to the main window at every change of the indexing (payload: [`IndexStatus`]).

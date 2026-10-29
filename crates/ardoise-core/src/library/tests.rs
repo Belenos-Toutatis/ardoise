@@ -758,6 +758,54 @@ fn trash_restore_and_purge() {
 }
 
 #[test]
+fn a_note_that_is_not_in_the_library_can_be_put_in_the_trash() {
+    let (dir, library) = new_library();
+    let note = library
+        .create(Path::new("Classe"), &note_file("note-1", "Cours"))
+        .unwrap();
+    let mut copy = library.read(&note.path).unwrap().file;
+    copy.note.id = "copy-1".into();
+    copy.note.title = "Cours (before straightening)".into();
+    let beside = note
+        .path
+        .with_file_name("Cours (before straightening).ardoise");
+
+    // Twice: both are kept, under two names of the trash, and nothing appears in the binder.
+    let first = library.trash_copy(&copy, &beside).unwrap();
+    let second = library.trash_copy(&copy, &beside).unwrap();
+    assert_ne!(first.id, second.id);
+    assert_eq!(
+        first.original,
+        Path::new("Classe/Cours (before straightening).ardoise")
+    );
+    assert_eq!(first.title.as_deref(), Some("Cours (before straightening)"));
+    assert_eq!(first.note_id.as_deref(), Some("copy-1"));
+    assert_eq!(library.trash_items().unwrap().len(), 2);
+    assert_eq!(library.list().notes.len(), 1);
+    assert_eq!(names_in(&dir.path().join("Classe")).len(), 1);
+
+    // Restored next to the note, with the content given; the note itself is untouched.
+    let restored = library.restore(&first.id).unwrap();
+    assert_eq!(restored, beside);
+    assert_eq!(library.read(&restored).unwrap().file.note, copy.note);
+    let again = library.restore(&second.id).unwrap();
+    assert_eq!(
+        again.file_name().unwrap(),
+        "Cours (before straightening) (2).ardoise"
+    );
+    assert_eq!(library.read(&note.path).unwrap().file.note.id, "note-1");
+
+    // Only a note path of this library.
+    let outside = dir.path().join("..").join("x.ardoise");
+    assert!(library.trash_copy(&copy, &outside).is_err());
+    assert!(
+        library
+            .trash_copy(&copy, Path::new("_ardoise/x.ardoise"))
+            .is_err()
+    );
+}
+
+#[test]
 fn trash_purge_now_and_odd_contents() {
     let (dir, library) = new_library();
     let a = library.create(Path::new(""), &note_file("a", "A")).unwrap();

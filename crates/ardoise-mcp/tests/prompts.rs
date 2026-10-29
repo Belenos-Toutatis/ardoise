@@ -321,3 +321,71 @@ async fn a_lesson_summary_carries_the_notes_of_the_day() {
     );
     assert!(text.contains(DEVOIR));
 }
+
+/// The names of the tools `session`'s server has.
+async fn tools(session: &Session) -> Vec<String> {
+    session
+        .client
+        .list_all_tools()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|t| t.name.to_string())
+        .collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_read_only_server_s_prompts_name_only_the_tools_it_has() {
+    let every = tools(&session().await).await;
+    for (language, clean, title, lesson, by_hand) in [
+        (
+            Language::Fr,
+            "mettre_au_propre",
+            "titrer_et_etiqueter",
+            "resume_seance",
+            "c'est l'utilisateur qui donne les titres et les étiquettes dans Ardoise",
+        ),
+        (
+            Language::En,
+            "clean_up",
+            "title_and_tag",
+            "lesson_summary",
+            "the user gives the titles and tags in Ardoise",
+        ),
+    ] {
+        let session = session_with(language, ServerOptions { read_only: true }).await;
+        let present = tools(&session).await;
+        let absent: Vec<&String> = every.iter().filter(|t| !present.contains(t)).collect();
+        assert!(
+            absent.iter().any(|t| *t == "update_note")
+                && absent.iter().any(|t| *t == "last_live_note")
+        );
+        let mut texts = Vec::new();
+        for format in ["markdown", "word", "latex"] {
+            texts.push(session.prompt(clean, json!({ "format": format })).await);
+            texts.push(
+                session
+                    .prompt(clean, json!({ "note": OPTIQUE, "format": format }))
+                    .await,
+            );
+        }
+        let titles = session.prompt(title, json!({})).await;
+        assert!(titles.contains(by_hand), "{titles}");
+        texts.push(titles);
+        texts.push(
+            session
+                .prompt(lesson, json!({ "date": "2026-10-24" }))
+                .await,
+        );
+        for text in &texts {
+            for tool in &absent {
+                assert!(
+                    !text.contains(&format!("`{tool}`")),
+                    "`{tool}` is not served read-only:\n{text}"
+                );
+            }
+        }
+        // The reading tools are still named.
+        assert!(texts[0].contains("`render_note`") && texts[0].contains("`search_notes`"));
+    }
+}
