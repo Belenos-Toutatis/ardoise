@@ -200,6 +200,7 @@ the guide is left as is and reported as a warning; headings get GitHub-style anc
 light and dark, with a print version). The archive is deterministic (entries sorted, fixed timestamps and
 permissions, same bytes for the same inputs); the size and SHA-256 are printed. Nothing is uploaded or published.
 Tests build an archive from a fake exe and a throwaway guide.
+
 ## M10: review fixes (interface)
 
 - **The library stays mounted.** `Home.svelte` keeps the library shell in the DOM (class `shell-hidden`, `display: none`) while the editor or live mode shows over it. A tablet test in progress, the registration wizard, the OpenH264 download, an unsaved Settings draft, the binders opened in the sidebar and the 1,000 cards all survive. `leaveLibrary` notes the scroll position and the card that was opened; `backToLibrary` gives both back. The assistant's `open_note` no longer closes the open panel.
