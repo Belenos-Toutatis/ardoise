@@ -152,3 +152,47 @@ when `buttons & 32` (or `button === 5`); anything else is a mouse (its behaviour
 editor and replay "Width" button in the zoom bar and **Ctrl+2** (matched by key code, so French keyboards work), live
 mode "Width" button and the **W** key (listed in the keyboard help), presentation window the **W** key. A page taller
 than the window shows its top.
+
+## M10: library features
+
+Requirements: SPEC §3.4, §4.3 (tag colours, multiple selection), §5 (feedback for long operations, undo). The note
+format stays 1.2.
+
+| Command (`organize.rs` unless said) | Arguments | Returns |
+|---|---|---|
+| `rename_binder` | `binder`, `name` | the new binder path; `binderExists` rather than replacing a folder or file, `binderNotFound` |
+| `delete_binder` | `binder` | `BinderDeleted { trashed: TrashEntry[], failed: { path, error: {code, message} }[], kept: string[] }` |
+| `tag_colors` / `set_tag_color` | – / `tag`, `color \| null` | `{ [tag in lower case]: colour id }`; `invalidTagColor`, `tagColorsNewer`, `tagColorsConflict` |
+| `trash_notes` (`library.rs`) | `paths` | now the ids of the trash entries, in order (for « Annuler ») |
+| `inspect_library` (`commands.rs`) | `path` | `{ existing, notes, complete }`: notes counted by a bounded walk (`count_notes`, 20 000 entries) |
+
+- **Turning several notes** (« Tourner » in the selection bar, `lib/library-batch.ts`, `lib/library-activity.svelte.ts`):
+  each note is opened (`open_note`), turned by the editor's own `ops.rotateQuarter` and saved (`save_note`, with the
+  stamp read; no image key, so the note's background member is kept), one after the other. One implementation for the
+  editor and the library: they cannot disagree. Progress with « Arrêter » (stops between two notes), failures listed
+  per note with the translated `errorCodes.*` phrase, then the undo notice; undoing turns each note back the other way
+  only if its stamp is still the one the turn returned (a note changed since is listed, not touched). Turning back is
+  exact up to the rounding of `h − (h − y)` on f32 samples (a fraction of a micrometre).
+- **Undo notice** (`ActivityBanner.svelte`): after a turn, « Mettre à la corbeille » (button or Delete) and a binder
+  deletion; 8 s, paused while the pointer or the focus is on it; a new operation replaces it. It sits at the bottom of
+  the library's scrolling area, after the content (sticky), so it never pushes the cards under the pointer; the
+  progress and the failures appear there too.
+- **Tag colours**: `_ardoise/tags.json` (format in `docs/file-format.md` §6), loaded by the sidebar
+  (`lib/tag-colors.svelte.ts`) and on every `library-changed`. Eight palette ids (`lib/tag-colors.ts`); `tag-colors.css`
+  gives each a dot, a chip background and a chip text colour for the light and the dark theme (text contrast 6.2:1 at
+  least). Shown on the cards' chips, the sidebar's tags and the tags panel; chosen with `TagColorPicker` (sidebar row,
+  tags panel). The watcher only reports notes: a colour changed on another PC shows at the next change of the library or
+  the next start.
+- **Binders**: menu « ⋯ » on each binder row (`BinderEditor.svelte`). Rename: the folder is renamed in place
+  (`rename_no_replace`; a change of case only works on Windows), the view and the open branches follow. Delete:
+  confirmation with the count of notes (the sidebar's count, sub-binders included) and of sub-binders; the notes go to
+  the trash one by one (`Library::trash`, so each is restorable to its own binder), then the folders left empty are
+  removed deepest first (`remove_dir` only: other files, hidden files and links keep their folder, and the notice
+  names the deepest kept folders). « Annuler » recreates the binder and restores its notes (empty sub-binders are not
+  recreated).
+- **Settings › change library** (`LibrarySetting.svelte`): the chosen folder is inspected and shown with
+  `LibraryFolderFacts` (also in the wizard): existing library or new, number of notes (or « at least » when the count
+  stopped); « Utiliser ce dossier » switches, « Annuler » does nothing; the current library picked again changes nothing.
+- **Plurals**: `tn(key, count, params)` picks the `one` or `other` form of a catalog entry `{ "one": …, "other": … }`
+  with `Intl.PluralRules` (French: 0 and 1 are `one`); `{count}` is optional in a form. The tests check that every
+  plural message has exactly these two forms in both languages.

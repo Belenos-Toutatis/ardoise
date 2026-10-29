@@ -4,7 +4,6 @@
 //! "Library: organising").
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use ardoise_core::library::{Library, LibraryError};
 use serde::Serialize;
@@ -122,6 +121,7 @@ pub async fn set_tag_color(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
 
     use super::*;
     use crate::library::tests::{library, write_sample};
