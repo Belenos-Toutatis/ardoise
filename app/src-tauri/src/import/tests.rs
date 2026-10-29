@@ -534,3 +534,57 @@ fn the_demo_inkspace_data_imports() {
     assert_eq!(snapshot(&dir), before);
     assert_eq!(cli::run_demo_cli(Path::new("")), 2);
 }
+
+/// `testdata/private/inkspace/LocalState` (git-ignored, on the development PC only) or
+/// `ARDOISE_INKSPACE_COPY`, like the crate's own tests.
+fn private_copy() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("ARDOISE_INKSPACE_COPY").filter(|v| !v.is_empty()) {
+        let dir = PathBuf::from(dir);
+        return dir.is_dir().then_some(dir);
+    }
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .map(|a| {
+            a.join("testdata")
+                .join("private")
+                .join("inkspace")
+                .join("LocalState")
+        })
+        .find(|candidate| candidate.is_dir())
+}
+
+/// The user's 22 notes (research §9) through the interface's path: all imported once, then all
+/// skipped, the copy unchanged. Skipped when the private copy is absent (cloud sessions).
+#[test]
+fn the_22_notes_of_the_private_copy_import_once() {
+    let Some(copy) = private_copy() else {
+        println!(
+            "the_22_notes_of_the_private_copy_import_once: SKIPPED - no private Inkspace copy"
+        );
+        return;
+    };
+    let reader = TrackedReader::new();
+    let local_state = local_state_of(&reader, &copy).unwrap();
+    let before = snapshot(&local_state.join("WacomCloudDb"));
+    let (_dir, library) = new_library();
+    let source = survey(&local_state, Some(&library), &reader).unwrap();
+    assert_eq!(
+        (source.notes, source.already_imported, source.unreadable),
+        (22, 0, 0)
+    );
+    let first = quiet(&local_state, &library, DEFAULT_BINDER);
+    assert_eq!((first.total, first.imported, first.skipped), (22, 22, 0));
+    assert!(first.failed.is_empty(), "{:?}", first.failed);
+    let second = quiet(&local_state, &library, DEFAULT_BINDER);
+    assert_eq!((second.imported, second.skipped), (0, 22));
+    assert_eq!(note_files(&library).len(), 22);
+    assert_eq!(snapshot(&local_state.join("WacomCloudDb")), before);
+    // Nothing under db\ was read (only the notes' preview folders were looked at).
+    let db = local_state.join("db");
+    assert!(
+        reader
+            .accesses()
+            .iter()
+            .all(|a| !a.path.starts_with(&db) || a.kind != AccessKind::Read)
+    );
+}
