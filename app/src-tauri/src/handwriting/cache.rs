@@ -755,7 +755,7 @@ mod tests {
             asked.lock().unwrap().push(correction.strokes.clone());
             true
         });
-        assert_eq!(*asked.lock().unwrap(), [current.clone()]);
+        assert_eq!(*asked.lock().unwrap(), std::slice::from_ref(&current));
         assert!(disk.correction_for(&written).is_some());
         assert!(!dir.path().join(entry.file_name()).exists());
         // Otherwise it goes with the older versions.
