@@ -363,7 +363,8 @@ const READ_TOOLS: [&str; 7] = [
 
 #[tokio::test(flavor = "current_thread")]
 async fn every_read_tool_is_listed_with_a_schema_and_annotations() {
-    let session = session().await;
+    // The read-only server: exactly the read tools (the full one adds the other groups).
+    let session = session_with(false, 0, ServerOptions { read_only: true }).await;
     let tools = session.client.list_all_tools().await.unwrap();
     let mut names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
     names.sort();
