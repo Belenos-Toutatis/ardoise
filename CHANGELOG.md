@@ -2,6 +2,15 @@
 
 ## Non publié
 
+### Ajouté (jalon M10 — finition)
+
+- Copie de secours des notes en cours de modification : quelques secondes après chaque changement non enregistré (et aussitôt quand Windows ferme la session), l'éditeur garde la note modifiée sur ce PC, hors de la bibliothèque (`%LOCALAPPDATA%\Ardoise\drafts\`, jamais synchronisé). Après un plantage, une mise à jour de Windows, une batterie vide ou un arrêt, Ardoise propose de récupérer les modifications à l'ouverture de la note (et en liste sur l'écran de la bibliothèque) : sur la note si elle n'a pas changé depuis, sinon seulement dans une nouvelle note « (récupérée) », sans jamais écraser une version plus récente. Tant qu'une note n'est pas enregistrée, Windows affiche « Ardoise empêche l'arrêt » avec la raison au lieu de fermer l'application sans prévenir.
+- Une seule fenêtre par copie d'Ardoise : un second lancement du même `ardoise.exe` (double-clic de trop pendant un démarrage lent) ramène la fenêtre déjà ouverte au premier plan au lieu de démarrer une deuxième application qui se disputerait la tablette. Deux copies dans deux dossiers fonctionnent toujours côte à côte, et les modes en ligne de commande (`--mcp`, `--self-test`, `--create-demo-library`, `--import-inkspace`) fonctionnent pendant que l'application est ouverte.
+
+### Corrigé (jalon M10)
+
+- L'écoute d'une narration pendant la relecture ne décode plus tout le son en WAV en mémoire (près de 350 Mo par heure, 1,4 Go pour 4 heures, en bloquant d'autres tâches pendant le décodage) : la fenêtre lit directement le flux Ogg Opus de la note (environ 29 Mo par heure).
+
 ### Ajouté (jalon M9 — pilotage par un assistant)
 
 - Serveur MCP local `ardoise.exe --mcp [--read-only]` (entrée et sortie standard, aucun port réseau, sans fenêtre, application ouverte ou non) : l'assistant de l'utilisateur (Claude Code, Claude Desktop…) liste et cherche les notes, lit leurs données, leur texte reconnu avec la position des lignes et leur structure, et les voit en image (PNG, 2000 pixels au plus) pour reconnaître schémas et formules. `--read-only` limite l'assistant à la lecture.

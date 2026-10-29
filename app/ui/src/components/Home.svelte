@@ -13,6 +13,7 @@
   import PrintDialog from './PrintDialog.svelte';
   import Editor from './editor/Editor.svelte';
   import AssembleDialog from './library/AssembleDialog.svelte';
+  import DraftsBanner from './library/DraftsBanner.svelte';
   import NewFromFileDialog from './library/NewFromFileDialog.svelte';
   import NoteGrid from './library/NoteGrid.svelte';
   import Sidebar from './library/Sidebar.svelte';
@@ -205,6 +206,7 @@
               </button>
             </div>
           {/if}
+          <DraftsBanner {lib} onopen={(path) => (openPath = path)} />
           {#if inTrash}
             <TrashView {lib} />
           {:else}

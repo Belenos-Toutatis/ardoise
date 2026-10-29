@@ -15,12 +15,14 @@ mod commands;
 mod console;
 mod demo;
 mod diagnostic;
+mod drafts;
 mod drag;
 #[cfg(windows)]
 mod drag_windows;
 mod export;
 mod handwriting;
 mod import;
+mod instance;
 mod library;
 mod live;
 mod mcp;
@@ -34,6 +36,7 @@ mod print;
 #[cfg(windows)]
 mod print_windows;
 mod selftest;
+mod session_end;
 mod tablet;
 mod textdoc;
 mod thumbnails;
@@ -159,6 +162,19 @@ pub fn run() {
         open_diagnostic: cli.diagnostic,
     };
 
+    // One windowed app per copy (M10, `instance.rs`): a second launch of this copy brings the
+    // first one's window to the front and ends here.
+    let instance = instance::guarded(&cli)
+        .then(|| instance::names_for(&context))
+        .flatten();
+    let _instance_guard = match instance.as_ref().map(instance::claim) {
+        Some(instance::Launch::AlreadyRunning) => std::process::exit(0),
+        Some(instance::Launch::First(guard)) => guard,
+        None => None,
+    };
+    let window_class = instance.map(|names| names.class);
+    let drafts = drafts::DraftRuntime::new(&context);
+
     // Leftovers of the drags out of the app (PNG files for other programs), removed once old.
     drag::start_cleaning();
 
@@ -191,6 +207,7 @@ pub fn run() {
         .manage(codec::CodecDownload::default())
         .manage(handwriting::HandwritingRuntime::default())
         .manage(app_bridge::BridgeRuntime::default())
+        .manage(drafts)
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -290,6 +307,13 @@ pub fn run() {
             handwriting::copy_handwriting_text,
             app_bridge::bridge_reply,
             app_bridge::mcp_launch_info,
+            drafts::draft_write,
+            drafts::draft_find,
+            drafts::draft_list,
+            drafts::draft_discard,
+            drafts::draft_stage_image,
+            drafts::draft_restore_copy,
+            session_end::set_unsaved_work,
         ])
         .setup(move |app| {
             if cli.self_test {
@@ -305,7 +329,13 @@ pub fn run() {
             if let Some(dir) = webview_data_dir() {
                 window = window.data_directory(dir);
             }
+            // The class a second launch of this copy looks for (`instance.rs`).
+            if let Some(class) = &window_class {
+                window = window.window_classname(class);
+            }
             window.build()?;
+            // The end of the Windows session with unsaved notes (M10, `session_end.rs`).
+            session_end::install(app.handle());
             // Handwriting recognition of the library, in the background.
             app.state::<handwriting::HandwritingRuntime>()
                 .start(app.handle());

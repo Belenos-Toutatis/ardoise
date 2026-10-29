@@ -27,6 +27,7 @@ import type {
 } from './video';
 import { mockOpenH264Download, mockVideoExport } from './mock-video';
 import type { NoteOriginal } from './original';
+import type { Draft, DraftSnapshot, DraftSummary } from './editor/drafts';
 import type {
   HandwritingHit,
   HandwritingInfo,
@@ -343,7 +344,7 @@ export const api = {
   narrationDiscard: () => call<void>('narration_discard'),
   /** The narration stored in a note, or null. */
   narrationInfo: (path: string) => call<NarrationInfo | null>('narration_info', { path }),
-  /** The narration as a WAV file, to play during the replay. */
+  /** The narration as stored, an Ogg Opus stream (a WAV file in the browser stand-in), to play during the replay. */
   narrationAudio: (path: string) => call<ArrayBuffer>('narration_audio', { path }),
   /** Removes a note's narration; returns the new stamp. */
   deleteNarration: (path: string, stamp: FileStamp) => call<FileStamp>('delete_narration', { path, stamp }),
@@ -432,7 +433,38 @@ export const api = {
   bridgeReply: (id: number, answer: BridgeAnswer) => call<void>('bridge_reply', { id, answer }),
   /** How to start this copy's MCP server (Settings > Assistant). */
   mcpLaunchInfo: () => call<McpLaunch>('mcp_launch_info'),
+
+  // --- Drafts and the end of the Windows session (M10; drafts.rs, session_end.rs) ---
+  /** Keeps the editor's unsaved note outside the library (replacing its previous draft). */
+  draftWrite: (snapshot: DraftSnapshot) =>
+    call<void>('draft_write', {
+      path: snapshot.path,
+      noteId: snapshot.noteId,
+      note: snapshot.note,
+      baseStamp: snapshot.baseStamp,
+      imageKey: snapshot.imageKey,
+    }),
+  /** The draft kept for a note of the library, if any. */
+  draftFind: (noteId: string) => call<Draft | null>('draft_find', { noteId }),
+  /** The drafts left by an earlier run of Ardoise, closed without saving them. */
+  draftList: () => call<DraftSummary[]>('draft_list'),
+  draftDiscard: (noteId: string) => call<void>('draft_discard', { noteId }),
+  /** Stages the background image kept with a draft; null when it kept none. */
+  draftStageImage: (noteId: string) => call<StagedBackground | null>('draft_stage_image', { noteId }),
+  /** Makes a new note titled `title` of a draft (the note it came from is not touched), then forgets the draft. */
+  draftRestoreCopy: (noteId: string, title: string) => call<NoteSummary>('draft_restore_copy', { noteId, title }),
+  /** What Windows shows while unsaved work holds the end of the session back; null when nothing is unsaved. */
+  setUnsavedWork: (reason: string | null) => call<void>('set_unsaved_work', { reason }),
 };
+
+/**
+ * Calls `handler` when Windows ends the session (shutdown, restart, logoff): the drafts are
+ * written at once. Returns a function that stops listening. Nothing comes in a plain browser.
+ */
+export async function onSessionEnding(handler: () => void): Promise<() => void> {
+  if (!inDesktopApp()) return () => {};
+  return listen('session-ending', () => handler());
+}
 
 /** `McpLaunch` in `app_bridge.rs`. */
 export interface McpLaunch {

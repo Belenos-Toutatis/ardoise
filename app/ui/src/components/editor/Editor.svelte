@@ -34,10 +34,11 @@
    * `lib/editor/original.ts`). Both are one undoable step, saved like any edit.
    */
   import { untrack } from 'svelte';
-  import { api, errorMessage, onLibraryChanged, type AppState } from '../../lib/api';
+  import { api, errorMessage, onLibraryChanged, onSessionEnding, type AppState } from '../../lib/api';
   import { NoteLoads, bridgeScreens } from '../../lib/app-bridge.svelte';
   import { loadCustomColors, rememberCustomColor } from '../../lib/editor/colors';
   import { binderOf, diskChange, type DiskChange } from '../../lib/editor/disk';
+  import { DraftKeeper, findOffer, type Offer } from '../../lib/editor/drafts';
   import { decodeStrokes, encodeStrokes } from '../../lib/editor/clipboard';
   import type { PixelsRef } from '../../lib/background';
   import { pixelsOf, removeBackgroundImage, setBackgroundImage, setImageFit, setImageOpacity } from '../../lib/editor/image';
@@ -99,6 +100,8 @@
   import LayersPanel from './LayersPanel.svelte';
   import OriginalPanel from './OriginalPanel.svelte';
   import PagePanel from './PagePanel.svelte';
+  import RecoveryDialog from './RecoveryDialog.svelte';
+  import { narrationType } from './narration-playback';
   import ReplayBar from './ReplayBar.svelte';
   import { ReplayPlayer } from './replay-player.svelte';
   import SplitPanel from './SplitPanel.svelte';
@@ -244,6 +247,44 @@
     }),
   );
 
+  // Drafts (M10, `lib/editor/drafts.ts`): the unsaved note is kept outside the library a few
+  // seconds after each change, and at once when Windows ends the session; a draft left by an
+  // earlier run is offered when its note is opened.
+  /** The id of the note in its file (the key of its draft; the edited note may carry another). */
+  let noteId = '';
+  let offer = $state.raw<Offer | null>(null);
+  let recovering = $state(false);
+  let recoveryError = $state<string | null>(null);
+  let draftErrorShown = false;
+  const drafts = new DraftKeeper(
+    {
+      write: (snapshot) => api.draftWrite(snapshot),
+      discard: (id) => api.draftDiscard(id),
+      unsaved: (unsaved) => api.setUnsavedWork(unsaved ? t('drafts.shutdownReason') : null),
+    },
+    {
+      onerror: (error) => {
+        if (!alive || draftErrorShown) return;
+        draftErrorShown = true;
+        showNotice(t('drafts.writeFailed', { message: errorMessage(error) }), true);
+      },
+    },
+  );
+  $effect(() => {
+    const present = history?.present;
+    const snapshot =
+      present && dirty && stamp
+        ? {
+            path: currentPath,
+            noteId,
+            note: { ...present.note, title },
+            baseStamp: stamp,
+            imageKey: present.backgroundPixels?.key ?? null,
+          }
+        : null;
+    untrack(() => drafts.update(snapshot));
+  });
+
   /** False once the editor was closed or destroyed: late results call back no one. */
   let alive = true;
   /** Tail of the write queue. */
@@ -303,6 +344,9 @@
     onLibraryChanged(() => void checkDisk()).then(keep, () => {
       // Not watched: saving still detects conflicts.
     });
+    onSessionEnding(() => void drafts.flush()).then(keep, () => {
+      // Not told: the drafts written after each change are there.
+    });
     return () => {
       stopped = true;
       alive = false;
@@ -312,19 +356,26 @@
       recorder.dispose();
       // A recording is never thrown away silently: it goes into its note (or stays pending).
       salvageRecording();
+      // Unsaved edits leave with the editor only as a draft (written now, with its image's pixels).
+      const kept = drafts.dispose();
       dropNarrationSound();
       // The background images imported or opened here are no longer needed once the writes
-      // still queued (a "save as a copy" started just before leaving) have used their pixels;
-      // the next editor waits for this before it stages its own.
-      lastRelease = settled()
+      // still queued (a "save as a copy" started just before leaving) and the draft have used
+      // their pixels; the next editor waits for this before it stages its own.
+      lastRelease = Promise.all([settled(), kept])
         .then(() => api.releaseBackgroundImages())
         .catch(() => {});
     };
   });
 
   async function open(target: string) {
-    // Another note is opened: the recording of this one is saved before the editor moves on.
+    // Another note is opened: the recording of this one is saved before the editor moves on, and
+    // its unsaved edits (never expected here) are kept as a draft.
     salvageRecording();
+    const detached = drafts.detach();
+    offer = null;
+    recoveryError = null;
+    drafts.hold(false);
     generation += 1;
     currentPath = target;
     // Replaced by the load of another note if one starts before this one ends.
@@ -343,6 +394,7 @@
       // The previous note's background images go; this note's image is kept in memory by Rust
       // (its key goes into the history with the note, `lib/editor/image.ts`).
       await settled();
+      await detached;
       await lastRelease;
       await api.releaseBackgroundImages().catch(() => {});
       const [opened, module] = await Promise.all([api.openNote(target), ink ?? loadInk()]);
@@ -352,6 +404,7 @@
       const fresh = docFromNote(opened.note, t('editor.layers.defaultName', { n: 1 }));
       const start = staged ? { ...fresh, backgroundPixels: pixelsOf(staged) } : fresh;
       ink = module;
+      noteId = opened.note.id;
       history = createHistory(start);
       savedNote = start.note;
       stamp = opened.stamp;
@@ -361,6 +414,7 @@
       conflict = null;
       saveError = null;
       void refreshOriginal(true);
+      void lookForDraft(target, opened);
       load.ok();
     } catch (error) {
       if (currentPath === target) loadError = errorMessage(error);
@@ -503,6 +557,7 @@
         }
         if (gen !== generation) return false;
         currentPath = created.path;
+        noteId = created.id;
         stamp = next;
         savedNote = present.note;
         title = copyTitle;
@@ -566,6 +621,83 @@
 
   function reload() {
     void open(currentPath);
+  }
+
+  // --- Drafts (M10) -----------------------------------------------------------------------
+
+  /** Offers the draft of the note just opened, if one was left (`RecoveryDialog`). */
+  async function lookForDraft(target: string, opened: { note: Note; stamp: FileStamp }) {
+    const gen = generation;
+    const found = await findOffer(api.draftFind, api.draftDiscard, opened.note.id, opened);
+    if (!alive || gen !== generation || currentPath !== target) return;
+    offer = found;
+    // Until the user chooses, nothing written here may replace that draft.
+    drafts.hold(found !== null);
+  }
+
+  function closeOffer() {
+    offer = null;
+    recoveryError = null;
+    drafts.hold(false);
+  }
+
+  /** The draft's note over the opened one, as one undoable step (Ctrl+Z gives the saved version back). */
+  async function restoreDraft() {
+    const current = offer;
+    if (!current || !history || recovering) return;
+    recovering = true;
+    recoveryError = null;
+    const gen = generation;
+    try {
+      const restored = current.draft.note;
+      let pixels = history.present.backgroundPixels;
+      const kept = current.draft.hasImage ? await api.draftStageImage(noteId) : null;
+      if (gen !== generation || !history) return;
+      if (kept) pixels = pixelsOf(kept);
+      else if (!sameImage(restored.backgroundImage, history.present.note.backgroundImage)) pixels = undefined;
+      const fresh = docFromNote(restored, t('editor.layers.defaultName', { n: 1 }));
+      change(restored.backgroundImage && pixels ? { ...fresh, backgroundPixels: pixels } : fresh);
+      // That draft now follows the note: replaced by the next one, removed once it is saved.
+      drafts.adopt(noteId);
+      closeOffer();
+    } catch (error) {
+      if (gen === generation) recoveryError = errorMessage(error);
+    } finally {
+      recovering = false;
+    }
+  }
+
+  function sameImage(a: BackgroundImage | undefined, b: BackgroundImage | undefined): boolean {
+    return !!a && !!b && a.name === b.name && a.pdfPage === b.pdfPage;
+  }
+
+  /** The draft as a new note beside this one (left untouched), which the editor then opens. */
+  async function restoreDraftAsCopy() {
+    const current = offer;
+    if (!current || recovering) return;
+    recovering = true;
+    recoveryError = null;
+    const gen = generation;
+    try {
+      const name = current.draft.title.trim() || title.trim() || t('editor.untitled');
+      const created = await api.draftRestoreCopy(noteId, t('drafts.copyTitle', { title: name }));
+      if (gen !== generation || !alive) return;
+      closeOffer();
+      const opening = open(created.path);
+      notifySaved(created.path);
+      await opening;
+      showNotice(t('drafts.restoredCopy', { title: created.title }));
+    } catch (error) {
+      if (gen === generation) recoveryError = errorMessage(error);
+    } finally {
+      recovering = false;
+    }
+  }
+
+  async function discardDraft() {
+    if (!offer || recovering) return;
+    closeOffer();
+    await drafts.discard(noteId);
   }
 
   // --- Leaving ----------------------------------------------------------------------------
@@ -641,6 +773,7 @@
   }
 
   function discardAndLeave() {
+    void drafts.discard(noteId);
     if (closing) void closeWindow();
     else {
       leaving = false;
@@ -729,7 +862,7 @@
 
   /** Whether the editing keys are free to act now (no dialog, split panel or replay). */
   function canEditNow(target: EventTarget | null): boolean {
-    return !!doc && !leaving && !exporting && !video && !split && !replaying && !isTyping(target);
+    return !!doc && !leaving && !offer && !exporting && !video && !split && !replaying && !isTyping(target);
   }
 
   /** Pastes strokes from the clipboard as one undoable step (the copies are then selected). */
@@ -1045,9 +1178,9 @@
     narrationLoading = true;
     narrationError = null;
     try {
-      const wav = await api.narrationAudio(currentPath);
+      const sound = await api.narrationAudio(currentPath);
       if (gen !== generation || !replaying || narration !== info) return;
-      const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
+      const url = URL.createObjectURL(new Blob([sound], { type: narrationType(sound) }));
       dropNarrationSound();
       narrationUrl = url;
       player.setOptions({ speed: info.speed, maxPauseMs: info.maxPauseMs });
@@ -1671,5 +1804,17 @@
         </div>
       </div>
     </div>
+  {/if}
+
+  {#if offer}
+    <RecoveryDialog
+      {offer}
+      busy={recovering}
+      error={recoveryError}
+      onrestore={restoreDraft}
+      oncopy={restoreDraftAsCopy}
+      ondiscard={discardDraft}
+      onlater={back}
+    />
   {/if}
 </section>

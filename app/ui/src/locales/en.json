@@ -513,7 +513,9 @@
     "backgroundMissing": "the background image is no longer in memory; reopen the note and choose the image again",
     "pdfUnsupported": "PDF files can only be read on Windows",
     "pdfEncrypted": "this PDF is protected by a password; save a copy without a password",
-    "pdfNoSuchPage": "this PDF has no such page ({detail})"
+    "pdfNoSuchPage": "this PDF has no such page ({detail})",
+    "draftFailed": "the backup copy of the changes could not be written or read ({detail})",
+    "draftNotFound": "these recovered changes no longer exist"
   },
   "editor": {
     "back": "Library",
@@ -1436,6 +1438,37 @@
     "assemble": {
       "droppedOne": "Only the first note's background image is kept: one other note's will not be carried over.",
       "droppedMany": "Only the first note's background image is kept: those of the {count} other notes will not be carried over."
+    }
+  },
+  "drafts": {
+    "shutdownReason": "A note has unsaved changes. Go back to Ardoise to save it.",
+    "writeFailed": "The backup copy of your changes could not be written ({message}). Remember to save the note.",
+    "copyTitle": "{title} (recovered)",
+    "restoredCopy": "The recovered changes are in the new note “{title}”.",
+    "recovery": {
+      "title": "Recovered changes",
+      "restoreText": "Ardoise closed before this note was saved. Its changes were kept (last copy on {date}).",
+      "copyText": "Ardoise closed before this note was saved, and the note has changed since (on another computer, for instance). Its changes (last copy on {date}) can be recovered into a new note, leaving this one as it is.",
+      "restore": "Recover the changes",
+      "copy": "Recover into a new note",
+      "discard": "Discard them",
+      "discardConfirm": "Discard these changes for good?",
+      "discardYes": "Discard",
+      "discardNo": "Keep",
+      "later": "Later",
+      "failed": "Recovery failed: {message}"
+    },
+    "library": {
+      "title": "Ardoise closed without saving some changes. Notes concerned: {count}",
+      "saved": "last copy on {date}",
+      "missing": "the note no longer exists",
+      "open": "Open",
+      "restoreCopy": "Recover into a new note",
+      "discard": "Discard",
+      "discardConfirm": "Discard the changes of “{title}” for good?",
+      "discardYes": "Discard",
+      "discardNo": "Keep",
+      "failed": "Recovery failed: {message}"
     }
   }
 }

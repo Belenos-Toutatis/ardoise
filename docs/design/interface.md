@@ -152,3 +152,62 @@ when `buttons & 32` (or `button === 5`); anything else is a mouse (its behaviour
 editor and replay "Width" button in the zoom bar and **Ctrl+2** (matched by key code, so French keyboards work), live
 mode "Width" button and the **W** key (listed in the keyboard help), presentation window the **W** key. A page taller
 than the window shows its top.
+
+## M10: drafts and session end (agent `m10-fix-hard`)
+
+Review finding: the editor kept edits in memory until Ctrl+S, and Windows ending the session lost them silently.
+Checked in tao 0.37.2 (`platform_impl/windows/event_loop.rs`, `thread_event_target_callback`): `WM_QUERYENDSESSION`
+is not handled (Windows is told yes), and `WM_ENDSESSION` ends the process at once (`std::process::exit(0)`); no
+`CloseRequested` reaches the interface, so the leave dialog never shows at shutdown, logoff or a Windows Update restart.
+
+- **Drafts** (`app/src-tauri/src/drafts.rs`, `lib/editor/drafts.ts`): while the note is dirty, the editor hands its
+  present state to `draft_write` 2 s after the last change, and no later than 10 s after the first unwritten one
+  (`DraftKeeper`). One JSON file per note in `%LOCALAPPDATA%\Ardoise\drafts\<copy>\` (temp folder when unset), the copy
+  being `pipe::settings_hash` of the settings location as for the bridge pipe: `draft-<FNV-1a of library + note id>.json`
+  holding the note as edited, the library, the file's path and id, the stamp the edits started from, the time and the
+  process token (`session`). A background image staged in memory only (imported, not saved) is written beside it once
+  per staging key. Every write is atomic (`fsutil::write_atomic`); nothing goes into the library, so drafts never sync.
+  The key is the id **of the file** (`noteId`, from `open_note`, or the copy's after "save as a copy"): the edited note
+  keeps the old id after a copy.
+- **Removed** when the note is no longer dirty (saved, or undone back to the saved version) if this editor wrote it, on
+  "leave without saving", on "Discard" in the recovery dialog (asked twice), or once restored as a copy. Never by age.
+- **Offered** when the note is opened (`draft_find` by the file's id): `recoveryOf` compares the draft's base stamp with
+  the file's: equal → "Recover the changes" puts the draft's note over the opened one as **one undoable step** (Ctrl+Z
+  gives the saved version back; the note is then dirty and saved as usual); different (another PC saved it through
+  Nextcloud) or unknown → only "Recover into a new note" (`draft_restore_copy`: a new note "<title> (récupérée)" in the
+  same binder, else the root, new id, the draft's image; the newer note is not touched), which the editor then opens.
+  A draft holding exactly what the file holds (a save whose draft could not be removed) is removed quietly.
+  `RecoveryDialog.svelte` is modal; "Later" goes back to the library and keeps the draft. While it is open, the
+  keeper holds its writes (`hold`) and the editing keys are off, so nothing written now replaces the earlier draft.
+- **On the library screen** (`DraftsBanner.svelte`, one line in `Home.svelte`): `draft_list` gives the drafts of the
+  current library written by an earlier run (another `session` token), most recent first: "Open" (the note found by
+  path, else by id) or, when the note is gone, "Recover into a new note"; "Discard" asks once more. Reloaded when the
+  library listing changes.
+- **Session end** (`app/src-tauri/src/session_end.rs`): the editor reports dirtiness through `set_unsaved_work(reason)`
+  (the sentence `drafts.shutdownReason`, in the interface language); while set, the main window has a
+  `ShutdownBlockReasonCreate` reason (destroyed when nothing is unsaved). The main window is subclassed
+  (`SetWindowSubclass`, installed in Tauri's setup on the window's thread): on `WM_QUERYENDSESSION` it emits
+  `session-ending` (from another thread, after the procedure returns), on which the editor writes its draft at once,
+  and answers FALSE while work is unsaved unless `ENDSESSION_CRITICAL` (Windows then shows "Ardoise is preventing
+  shutdown" with the reason; "Shut down anyway" sends `WM_ENDSESSION`, which tao turns into `exit(0)`, the draft
+  being on disk by then). A forced end (`EWX_FORCE`, critical) or a crash keeps the last periodic draft.
+
+## M10: one window per copy (agent `m10-fix-hard`)
+
+`app/src-tauri/src/instance.rs`. Rather than `tauri-plugin-single-instance` (MIT/Apache, but keyed by the
+configuration's identifier, so one per PC and not per copy, and a second instance that does not find the first one's
+window carries on as a second app), a named mutex and a window class:
+
+- The windowed launches (`guarded`: no argument, `--diagnostic`, `--simulated-tablet`) claim
+  `Local\ardoise-instance-<user SID>-<copy hash>` (`CreateMutexW`, owned by the main thread for the life of the
+  process); the copy hash is the bridge pipe's `settings_hash(settings_key(settings file))`, so two folders with their
+  own `ardoise.toml` run side by side, and a copy whose settings live in `%APPDATA%` (unwritable folder) is one copy.
+  `--mcp [--read-only]`, `--self-test`, `--create-demo-library`, `--import-inkspace` and `--diagnostic --simulated`
+  never claim it.
+- The main window's class is `Ardoise-<copy hash>` (`window_classname`). A second launch whose mutex already exists
+  looks for that window every 100 ms (`FindWindowW`) and brings it to the front (`ShowWindow` restore,
+  `SetForegroundWindow`: the new process was started by the user and may give the focus away), then exits with 0. If
+  the mutex is released meanwhile (the first app is closing, or crashed: the mutex is abandoned), it becomes the app;
+  after 20 s without a window it exits quietly (the first one is still starting). A second `--diagnostic` launch only
+  shows the open window (the tablet test is one click away there).
+- Without a settings location or a SID (non-Windows builds), no guard.
