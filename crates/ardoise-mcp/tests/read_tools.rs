@@ -911,7 +911,7 @@ async fn get_note_text_passes_the_language_and_reports_missing_recognition() {
 
     // Two files with one id (a copy made in the Explorer): refused, with both paths, instead
     // of silently reading the most recent; a path names the one meant.
-    let library = session.harness.library().unwrap();
+    let library = Library::open(&session.harness.root).unwrap();
     library
         .create(
             Path::new("Copie"),
