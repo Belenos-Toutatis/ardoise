@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ardoise_core::library::{self, NOTE_EXTENSION};
+use ardoise_core::library;
 use ardoise_core::settings::{
     AutoExport, AutoExportFormat, Language, Settings, SettingsError, SettingsStore, Theme,
 };
@@ -213,22 +213,6 @@ pub fn set_theme(context: State<'_, AppContext>, theme: Theme) -> CommandResult<
     update(&context, |settings| settings.theme = theme)
 }
 
-/// Whether `dir` or a folder below it holds a note file.
-fn holds_notes(dir: &Path) -> bool {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return false;
-    };
-    entries.flatten().any(|entry| {
-        let path = entry.path();
-        if path.is_dir() {
-            holds_notes(&path)
-        } else {
-            path.extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case(NOTE_EXTENSION))
-        }
-    })
-}
-
 /// Sets the automatic export after a sync (`[auto_export]`, shared by every PC). The folder
 /// must be a sub-folder of the library (`invalidFolder` otherwise); it is stored as `a/b`.
 /// With the export on, it must not be a binder that holds notes (`invalidFolder`), so that the
@@ -246,7 +230,7 @@ pub(crate) fn set_auto_export_in(
     let format = auto_export.format.known();
     if format.is_active()
         && let Ok(library) = library_of(context)
-        && holds_notes(&library.root().join(&folder))
+        && library::holds_notes(&library.root().join(&folder))
     {
         return Err(CommandError::new(
             "invalidFolder",

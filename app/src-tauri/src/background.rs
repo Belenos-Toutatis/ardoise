@@ -435,10 +435,17 @@ thread_local! {
 /// `save_in` keeps its signature (another part of M7 shares that function), so the choice
 /// reaches [`settle`] through this thread's state, set for the duration of the call.
 pub fn with_staged<T>(chosen: Option<Chosen>, save: impl FnOnce() -> T) -> T {
-    let previous = CHOSEN.with(|current| current.replace(chosen));
-    let result = save();
-    CHOSEN.with(|current| *current.borrow_mut() = previous);
-    result
+    /// Restores the previous choice when dropped, so that a panic in `save` does not leave this
+    /// (pooled) thread holding the choice for the next note saved on it.
+    struct Restore(Option<Chosen>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            CHOSEN.with(|current| *current.borrow_mut() = previous);
+        }
+    }
+    let _restore = Restore(CHOSEN.with(|current| current.replace(chosen)));
+    save()
 }
 
 /// Puts the right background member in `file` (as read, still holding the note it was read
@@ -1279,6 +1286,22 @@ pub(crate) mod tests {
         );
         let thumbnail = ardoise_render::decode_png(file.thumbnail.as_ref().unwrap()).unwrap();
         assert!(close(rgb(&thumbnail, 5, 100), [10, 10, 200]));
+    }
+
+    #[test]
+    fn a_panic_in_a_save_does_not_leave_its_choice_on_the_thread() {
+        let staging = Staging::default();
+        let (_d, image) = user_file("rouge.png", &encode_png(&halves(40, 20)).unwrap());
+        let red = stage_file(&staging, &image, None).unwrap();
+        let chosen = Chosen {
+            staged: staging.get(&red.key).unwrap(),
+            picture: None,
+        };
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_staged(Some(chosen), || panic!("the save failed"));
+        }));
+        assert!(outcome.is_err());
+        assert!(CHOSEN.with(|current| current.borrow().is_none()));
     }
 
     #[test]

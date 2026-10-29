@@ -49,6 +49,19 @@ pub fn is_library(folder: &Path) -> bool {
     folder.join(META_DIR).is_dir() || folder.join(LEGACY_META_DIR).is_dir()
 }
 
+/// Whether `dir` or a folder below it holds a note file. Walks like the library does (links
+/// and junctions are not followed, so a loop cannot run away; hidden and temporary names are
+/// skipped).
+pub fn holds_notes(dir: &Path) -> bool {
+    let mut found = false;
+    walk::walk(dir, |item| {
+        if matches!(item, walk::Found::Note { .. }) {
+            found = true;
+        }
+    });
+    found
+}
+
 /// Makes `folder` a library, keeping anything already there. The folder itself must exist,
 /// so that a typo in a path never silently creates a new tree.
 pub fn init(folder: &Path) -> io::Result<()> {
@@ -670,14 +683,14 @@ impl Library {
         let dir = path.parent().unwrap_or(&self.root).to_path_buf();
         let case_only = current.to_lowercase() == desired.to_lowercase();
         let target = note_path(&dir, &desired);
-        let new_path = if case_only && rename_no_replace(&path, &target).is_ok() {
+        let renamed = if case_only && rename_no_replace(&path, &target).is_ok() {
             // Only the case changed: for Windows it is the same name, renamed in place.
-            target
+            Ok(target)
         } else {
-            self.move_unique(&path, &dir, &desired)?
+            self.move_unique(&path, &dir, &desired)
         };
         Ok(SavedNote {
-            path: new_path,
+            path: renamed_or_kept(&path, renamed)?,
             stamp,
         })
     }
@@ -774,6 +787,23 @@ fn read_entry(path: &Path, binder: PathBuf) -> Result<NoteEntry, LibraryError> {
         favorite: note.favorite,
         stamp,
     })
+}
+
+/// The path of a note whose new title is saved, once its file was (or was not) renamed to match.
+/// A rename that failed (a sync client holds the file, a permission) leaves the file under its
+/// old name: the title inside the file is right, the name catches up at the next retitle, and
+/// the caller still gets the stamp of the save it must give back at its next one (an error would
+/// lose it, and the editor's next save would be refused against its own write). A note that
+/// vanished meanwhile is an error.
+fn renamed_or_kept(
+    path: &Path,
+    renamed: Result<PathBuf, LibraryError>,
+) -> Result<PathBuf, LibraryError> {
+    match renamed {
+        Ok(new_path) => Ok(new_path),
+        Err(error @ LibraryError::NotFound { .. }) => Err(error),
+        Err(_) => Ok(path.to_path_buf()),
+    }
 }
 
 #[cfg(test)]

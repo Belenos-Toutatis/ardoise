@@ -1228,3 +1228,36 @@ fn favourites_are_set_listed_and_cleared() {
         Err(LibraryError::Conflict { .. })
     ));
 }
+
+#[test]
+fn a_failed_rename_after_a_retitle_keeps_the_saved_note_at_its_path() {
+    let path = Path::new("a/2026-10-24 Old.ardoise");
+    let busy = LibraryError::Io {
+        path: path.to_path_buf(),
+        source: io::Error::from(io::ErrorKind::PermissionDenied),
+    };
+    assert_eq!(renamed_or_kept(path, Err(busy)).unwrap(), path);
+    let moved = PathBuf::from("a/2026-10-24 New.ardoise");
+    assert_eq!(renamed_or_kept(path, Ok(moved.clone())).unwrap(), moved);
+    let gone = LibraryError::NotFound {
+        path: path.to_path_buf(),
+    };
+    assert!(matches!(
+        renamed_or_kept(path, Err(gone)),
+        Err(LibraryError::NotFound { .. })
+    ));
+}
+
+#[test]
+fn holds_notes_looks_below_and_ignores_the_library_folder() {
+    let (dir, library) = new_library();
+    assert!(!holds_notes(dir.path()));
+    fs::create_dir_all(dir.path().join("Export/2026")).unwrap();
+    fs::write(dir.path().join("Export/2026/a.pdf"), b"%PDF").unwrap();
+    assert!(!holds_notes(&dir.path().join("Export")));
+    library
+        .create(Path::new("Export/2026"), &note_file("n1", "Dedans"))
+        .unwrap();
+    assert!(holds_notes(&dir.path().join("Export")));
+    assert!(!holds_notes(&dir.path().join("absent")));
+}
