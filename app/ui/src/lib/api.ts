@@ -153,8 +153,8 @@ export const api = {
   createBinder: (binder: string) => call<void>('create_binder', { binder }),
   /** Moves notes into `binder`; returns their new paths, in order. */
   moveNotes: (paths: string[], binder: string) => call<string[]>('move_notes', { paths, binder }),
-  /** Moves notes to the trash. */
-  trashNotes: (paths: string[]) => call<void>('trash_notes', { paths }),
+  /** Moves notes to the trash; returns the ids of their trash entries, in order (to restore them). */
+  trashNotes: (paths: string[]) => call<string[]>('trash_notes', { paths }),
   trashList: () => call<TrashEntry[]>('trash_list'),
   /** Restores a trashed note; returns its path. */
   trashRestore: (id: string) => call<string>('trash_restore', { id }),

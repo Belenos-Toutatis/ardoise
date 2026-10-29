@@ -145,6 +145,60 @@
       "running": "Assembling…",
       "error": "Couldn't assemble the notes: {message}",
       "done": "New note created: {title}"
+    },
+    "turn": {
+      "button": "Turn",
+      "panel": "Turn the selected notes",
+      "left": "A quarter turn to the left",
+      "right": "A quarter turn to the right",
+      "hint": "The sheet, the writing and the background image turn together, as with \"Turn the sheet with the writing\" in the editor.",
+      "progress": "Turning the notes: {done} of {total}",
+      "undoProgress": "Turning the notes back: {done} of {total}",
+      "doneLeft": {
+        "one": "{count} note turned a quarter turn to the left.",
+        "other": "{count} notes turned a quarter turn to the left."
+      },
+      "doneRight": {
+        "one": "{count} note turned a quarter turn to the right.",
+        "other": "{count} notes turned a quarter turn to the right."
+      },
+      "failed": {
+        "one": "One note could not be turned:",
+        "other": "{count} notes could not be turned:"
+      },
+      "undone": {
+        "one": "The note is back the way it was.",
+        "other": "The {count} notes are back the way they were."
+      },
+      "undoFailed": {
+        "one": "One note could not be turned back:",
+        "other": "{count} notes could not be turned back:"
+      }
+    },
+    "activity": {
+      "stop": "Stop",
+      "stopping": "Stopping after this note…",
+      "stopped": {
+        "one": "Stopped before the end: the last note did not change.",
+        "other": "Stopped before the end: the last {count} notes did not change."
+      },
+      "undo": "Undo",
+      "failure": "\"{title}\": {message}"
+    },
+    "trashUndo": {
+      "done": {
+        "one": "Note moved to the trash.",
+        "other": "{count} notes moved to the trash."
+      },
+      "restored": {
+        "one": "Note restored.",
+        "other": "{count} notes restored."
+      },
+      "progress": "Restoring the notes: {done} of {total}",
+      "failed": {
+        "one": "One note could not be restored:",
+        "other": "{count} notes could not be restored:"
+      }
     }
   },
   "settings": {

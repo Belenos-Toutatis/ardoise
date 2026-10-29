@@ -7,6 +7,8 @@ import { api, errorMessage, followHandwritingStatus, onLibraryChanged } from './
 import { dragOutSupported } from './drag-out';
 import type { HandwritingHit, IndexStatus } from './handwriting';
 import { currentLocale, t } from './i18n.svelte';
+import { LibraryActivity } from './library-activity.svelte';
+import type { TurnDirection } from './library-batch';
 import {
   buildBinderTree,
   displayTitle,
@@ -52,6 +54,8 @@ export class LibraryState {
   notice = $state<string | null>(null);
   /** The export or assemble dialog, with the notes it was opened for (displayed order). */
   dialog = $state<{ kind: 'export' | 'print' | 'assemble'; notes: NoteSummary[] } | null>(null);
+  /** Operations on several notes: progress, failures, « Annuler » (`library-activity.svelte.ts`). */
+  readonly activity = new LibraryActivity(() => this.refresh());
 
   /** Paths being dragged; kept here because a drag event's data is not readable until the drop. */
   private dragPaths: string[] = [];
@@ -359,8 +363,24 @@ export class LibraryState {
   }
 
   async trashNotes(paths: string[]): Promise<void> {
-    await this.run(() => api.trashNotes(paths));
+    const titles = paths.map((path) => this.titleOf(path));
+    const ids = await this.run(() => api.trashNotes(paths));
     this.selected = this.selected.filter((p) => !paths.includes(p));
+    if (ids) this.activity.offerRestore(ids.map((id, i) => ({ path: id, title: titles[i] ?? id })));
+  }
+
+  /** Turns each note a quarter turn, as the editor does; offers to turn them back. */
+  async turnNotes(notes: NoteSummary[], direction: TurnDirection): Promise<void> {
+    this.error = null;
+    await this.activity.turn(
+      notes.map((note) => ({ path: note.path, title: displayTitle(note, currentLocale()) })),
+      direction,
+    );
+  }
+
+  private titleOf(path: string): string {
+    const note = this.notes.find((n) => n.path === path);
+    return note ? displayTitle(note, currentLocale()) : path;
   }
 
   async toggleFavorite(note: NoteSummary): Promise<void> {

@@ -227,6 +227,7 @@ export function mockLibraryInvoke(command: string, args: Record<string, unknown>
       const library = mockLibrary();
       const paths = args.paths as string[];
       paths.forEach((path) => find(library, path));
+      const ids: string[] = [];
       for (const path of paths) {
         const stored = find(library, path);
         library.notes.delete(path);
@@ -240,9 +241,10 @@ export function mockLibraryInvoke(command: string, args: Record<string, unknown>
           noteId: stored.note.id,
           stored,
         });
+        ids.push(id);
       }
       notifyLibraryChanged();
-      return undefined;
+      return ids;
     }
 
     case 'trash_list':

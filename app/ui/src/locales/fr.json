@@ -145,6 +145,60 @@
       "running": "Assemblage…",
       "error": "Impossible d'assembler les notes : {message}",
       "done": "Nouvelle note créée : {title}"
+    },
+    "turn": {
+      "button": "Tourner",
+      "panel": "Tourner les notes sélectionnées",
+      "left": "Un quart de tour à gauche",
+      "right": "Un quart de tour à droite",
+      "hint": "La feuille, l'écriture et l'image de fond tournent ensemble, comme avec « Tourner la feuille avec l'écriture » dans l'éditeur.",
+      "progress": "Rotation des notes : {done} sur {total}",
+      "undoProgress": "Retour des notes dans leur sens d'origine : {done} sur {total}",
+      "doneLeft": {
+        "one": "{count} note tournée d'un quart de tour à gauche.",
+        "other": "{count} notes tournées d'un quart de tour à gauche."
+      },
+      "doneRight": {
+        "one": "{count} note tournée d'un quart de tour à droite.",
+        "other": "{count} notes tournées d'un quart de tour à droite."
+      },
+      "failed": {
+        "one": "Une note n'a pas pu être tournée :",
+        "other": "{count} notes n'ont pas pu être tournées :"
+      },
+      "undone": {
+        "one": "La note a retrouvé son sens d'origine.",
+        "other": "Les {count} notes ont retrouvé leur sens d'origine."
+      },
+      "undoFailed": {
+        "one": "Une note n'a pas pu retrouver son sens d'origine :",
+        "other": "{count} notes n'ont pas pu retrouver leur sens d'origine :"
+      }
+    },
+    "activity": {
+      "stop": "Arrêter",
+      "stopping": "Arrêt après cette note…",
+      "stopped": {
+        "one": "Arrêté avant la fin : la dernière note n'a pas changé.",
+        "other": "Arrêté avant la fin : les {count} dernières notes n'ont pas changé."
+      },
+      "undo": "Annuler",
+      "failure": "« {title} » : {message}"
+    },
+    "trashUndo": {
+      "done": {
+        "one": "Note mise à la corbeille.",
+        "other": "{count} notes mises à la corbeille."
+      },
+      "restored": {
+        "one": "Note restaurée.",
+        "other": "{count} notes restaurées."
+      },
+      "progress": "Restauration des notes : {done} sur {total}",
+      "failed": {
+        "one": "Une note n'a pas pu être restaurée :",
+        "other": "{count} notes n'ont pas pu être restaurées :"
+      }
     }
   },
   "settings": {

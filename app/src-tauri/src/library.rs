@@ -377,12 +377,18 @@ pub async fn move_notes(
     with_library(&context, |library| move_notes_in(library, &paths, &binder))
 }
 
+/// Moves notes to the trash; returns the ids of their trash entries, in order, for the
+/// interface's « Annuler ».
 #[tauri::command]
-pub async fn trash_notes(context: State<'_, AppContext>, paths: Vec<String>) -> CommandResult<()> {
+pub async fn trash_notes(
+    context: State<'_, AppContext>,
+    paths: Vec<String>,
+) -> CommandResult<Vec<String>> {
     with_library(&context, |library| {
         paths
             .iter()
-            .try_for_each(|path| library.trash(Path::new(path)).map(|_| ()))
+            .map(|path| library.trash(Path::new(path)).map(|item| item.id))
+            .collect()
     })
 }
 
