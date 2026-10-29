@@ -8,10 +8,10 @@
 //! One [`Host`] holds one object per service group. A tool group (`read.rs`, `write.rs`,
 //! `bridge.rs`) only uses its own service, so groups can grow without touching each other.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ardoise_core::library::Library;
+use ardoise_core::library::{FileStamp, Library, NoteEntry};
 use ardoise_core::note::Note;
 use ardoise_hwr::structure::Structure;
 use ardoise_hwr::{HwrError, Language, Recognition};
@@ -57,7 +57,7 @@ pub struct TextStatus {
     /// Why it is not available: `unsupported`, `noRecognizer` or `noLibrary`.
     pub reason: Option<String>,
     /// Notes whose text is not read yet (the search does not see them until `get_note_text`
-    /// or the indexing reads them).
+    /// or the background indexing reads them).
     pub unread: usize,
 }
 
@@ -87,6 +87,20 @@ pub trait Handwriting: Send + Sync {
         language: Option<Language>,
     ) -> Result<Arc<Recognition>, HwrError>;
 
+    /// [`recognition_of`](Self::recognition_of) for the note of the library at `path`, read in
+    /// the version `stamp`: the search then finds its text at once (`get_note_text` makes a note
+    /// searchable).
+    fn recognition_at(
+        &self,
+        path: &Path,
+        stamp: &FileStamp,
+        note: &Note,
+        language: Option<Language>,
+    ) -> Result<Arc<Recognition>, HwrError> {
+        let _ = (path, stamp);
+        self.recognition_of(note, language)
+    }
+
     /// The layout of `note` (paragraphs, list items, drawings) from Windows' ink analysis, or
     /// guessed from the recognised lines when it is not available.
     fn structure_of(&self, note: &Note, recognition: &Recognition) -> Structure;
@@ -94,6 +108,14 @@ pub trait Handwriting: Send + Sync {
     /// The notes whose recognised text has the words of `query` (a corrected transcription
     /// counts instead of the recogniser's text).
     fn search(&self, query: &str) -> TextSearch;
+
+    /// [`search`](Self::search) in `notes`, the library as it is listed now: a note added,
+    /// edited or moved since the last search counts with its text of now (or as not read yet),
+    /// never with an older one.
+    fn search_in(&self, query: &str, notes: &[NoteEntry]) -> TextSearch {
+        let _ = notes;
+        self.search(query)
+    }
 
     /// The transcription stored for `note` by `set_note_text`, if its ink is still the one it
     /// was written for.

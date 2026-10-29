@@ -467,7 +467,7 @@ pub fn search_notes(host: &Host, args: SearchNotesArgs) -> ToolResult {
         .clamp(1, MAX_SEARCH_LIMIT);
     let library = host.library()?;
     let listing = library.list();
-    let text = host.handwriting.search(&args.query);
+    let text = host.handwriting.search_in(&args.query, &listing.notes);
     let hits: HashMap<_, _> = text
         .hits
         .iter()
@@ -527,7 +527,7 @@ pub fn search_notes(host: &Host, args: SearchNotesArgs) -> ToolResult {
     }
     if status.available && status.unread > 0 {
         text_search["hint"] = format!(
-            "{} note(s) have not been read by the handwriting recognition yet, so their text was not searched. get_note_text reads one now.",
+            "{} note(s) have not been read by the handwriting recognition yet, so their text was not searched. get_note_text reads one now (it is then found by the next search); the others are read in the background while this server runs.",
             status.unread
         )
         .into();
@@ -638,9 +638,13 @@ pub fn get_note_text(host: &Host, args: GetNoteTextArgs) -> ToolResult {
     let entry = find_note(&library, &args.note)?;
     let loaded = read_note(&library, &entry)?;
     let note = &loaded.file.note;
-    let recognition = host
-        .handwriting
-        .recognition_of(note, args.language.map(Language::from))?;
+    // Kept with the note's path and version: the next search finds its text.
+    let recognition = host.handwriting.recognition_at(
+        &loaded.path,
+        &loaded.stamp,
+        note,
+        args.language.map(Language::from),
+    )?;
     let structure = host.handwriting.structure_of(note, &recognition);
     let lines: Vec<_> = recognition
         .lines

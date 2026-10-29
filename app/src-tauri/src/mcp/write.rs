@@ -36,7 +36,7 @@ use crate::background;
 use crate::codec::{codec_dir, openh264_allowed};
 use crate::commands::CommandError;
 use crate::export::{self, ExportSource, LoadedSource, load_sources, write_new_file};
-use crate::handwriting::{CacheDir, NoteText, handwriting_dir, hwr_error, text_document};
+use crate::handwriting::{CacheDir, NoteText, hwr_error, text_document};
 use crate::library::path_text;
 use crate::notes::save_with_key;
 use crate::operations::{self, SplitSpec, merge_in, split_in};
@@ -57,7 +57,8 @@ pub(super) struct AppWrite {
 
 impl AppWrite {
     pub(super) fn new(context: Arc<AppContext>, handwriting: Arc<AppHandwriting>) -> AppWrite {
-        AppWrite::with_cache(context, handwriting, CacheDir::new(handwriting_dir()))
+        let cache = handwriting.cache.clone();
+        AppWrite::with_cache(context, handwriting, cache)
     }
 
     fn with_cache(
@@ -449,7 +450,6 @@ impl WriteServices for AppWrite {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::sync::OnceLock;
 
     use ardoise_core::format::read_note;
     use ardoise_mcp::write::{ExportOptions, VideoOptions};
@@ -462,10 +462,7 @@ mod tests {
     fn services() -> (AppWrite, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let context = Arc::new(context(dir.path()));
-        let handwriting = Arc::new(AppHandwriting {
-            context: Arc::clone(&context),
-            indexer: OnceLock::new(),
-        });
+        let handwriting = Arc::new(AppHandwriting::new(Arc::clone(&context)));
         let cache = CacheDir::new(dir.path().join("handwriting"));
         (AppWrite::with_cache(context, handwriting, cache), dir)
     }
