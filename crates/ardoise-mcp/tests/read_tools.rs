@@ -363,9 +363,17 @@ const READ_TOOLS: [&str; 7] = [
 
 #[tokio::test(flavor = "current_thread")]
 async fn every_read_tool_is_listed_with_a_schema_and_annotations() {
-    // The read-only server: exactly the read tools (the full one adds the other groups).
-    let session = session_with(false, 0, ServerOptions { read_only: true }).await;
-    let tools = session.client.list_all_tools().await.unwrap();
+    let session = session().await;
+    // The other groups of tools (write, bridge) have their own tests: the read tools are all
+    // there, with the hints of a read tool.
+    let tools: Vec<_> = session
+        .client
+        .list_all_tools()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|t| READ_TOOLS.contains(&t.name.as_ref()))
+        .collect();
     let mut names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
     names.sort();
     assert_eq!(names, READ_TOOLS);

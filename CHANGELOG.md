@@ -5,6 +5,7 @@
 ### Ajouté (jalon M9 — pilotage par un assistant)
 
 - Serveur MCP local `ardoise.exe --mcp [--read-only]` (entrée et sortie standard, aucun port réseau, sans fenêtre, application ouverte ou non) : l'assistant de l'utilisateur (Claude Code, Claude Desktop…) liste et cherche les notes, lit leurs données, leur texte reconnu avec la position des lignes et leur structure, et les voit en image (PNG, 2000 pixels au plus) pour reconnaître schémas et formules. `--read-only` limite l'assistant à la lecture.
+- Passerelle vers l'application ouverte : l'assistant voit ce qu'Ardoise affiche, ouvre une note dans l'éditeur, projette la page du mode direct et change de page, et retrouve les notes du dernier mode direct pour en proposer une version propre (canal local réservé à l'utilisateur, jamais de suppression, de réglage ni d'accès à la tablette). Paramètres > Assistant (MCP) donne la commande pour Claude Code et le texte pour Claude Desktop, avec ou sans lecture seule ; guide `docs/guide/assistant.fr.md` (et `.en.md`), avec le rappel sur la vie privée.
 
 ### Ajouté (jalon M8 — retours des premiers essais)
 

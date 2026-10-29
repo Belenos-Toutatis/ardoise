@@ -23,6 +23,9 @@ export const WRITE_TOOLS = [
   'create_note', 'update_note', 'move_note', 'trash_note', 'merge_notes', 'split_note',
   'straighten_shapes', 'export_note', 'set_note_text', 'app_state', 'open_note', 'presentation', 'last_live_note',
 ];
+/** The checks of the later parts of the server (write tools and prompts, bridge), each given the
+ *  helpers of the journey and run after the read tools. */
+const parts = [bridgeWithoutApp];
 const NOTE = "Cours d'optique";
 /** The words of the demo note's handwriting (`demo.rs`: HANDWRITTEN_SENTENCE). */
 const NOTE_WORDS = ['lumiere', 'propage', 'ligne', 'droite'];
@@ -219,6 +222,38 @@ async function readTools(session, check) {
   });
 }
 
+/** The bridge tools without the app open (`journeys-m9-bridge.mjs` drives them with the app). */
+async function bridgeWithoutApp({ makeApp, startServer, check }) {
+  const app = makeApp();
+  const session = startServer(app);
+  try {
+    await session.initialize();
+    const listed = await session.call('list_notes', { limit: 1 });
+    const note = listed.structuredContent.notes[0].id;
+    await check('passerelle sans Ardoise ouverte : chaque outil répond appNotRunning', async () => {
+      for (const [tool, args] of [
+        ['app_state', {}],
+        ['open_note', { note }],
+        ['presentation', { action: 'start' }],
+        ['last_live_note', {}],
+      ]) {
+        const result = await session.call(tool, args, 10_000);
+        const error = result.structuredContent;
+        if (!result.isError || error?.code !== 'appNotRunning' || error.message !== 'Ardoise is not open') {
+          throw new Error(`${tool} : ${JSON.stringify(result).slice(0, 300)}`);
+        }
+      }
+    });
+  } finally {
+    await session.close(3000);
+    try {
+      rmSync(app.dir, { recursive: true, force: true });
+    } catch {
+      // Left to the system when Windows still holds a file in it.
+    }
+  }
+}
+
 /**
  * The whole journey: a full server, then a `--read-only` one. `log(line)` prints a step; returns
  * the number of failed checks.
@@ -296,6 +331,9 @@ export async function mcpJourney({ exe, language = 'fr', log = console.log } = {
       });
     } finally {
       await readOnly.close(3000);
+    }
+    for (const part of parts) {
+      await part({ makeApp: () => prepareApp(exe, language), startServer, check, textOf, fold, language, log });
     }
   } finally {
     try {
