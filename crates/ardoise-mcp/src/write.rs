@@ -6,7 +6,8 @@
 //! `ardoise-core`'s (`Library::save` with its stamp check, the trash, the " (2)" rule of moves
 //! and creations), and what lives in the app's executable (thumbnails, the note's original,
 //! background images, the exports, the handwriting cache) comes through [`WriteServices`].
-//! Nothing is ever overwritten and nothing is deleted for good.
+//! No file is ever overwritten by an export and nothing is deleted for good: a trashed note, and
+//! the version of a note before `straighten_shapes`, are in the library's trash.
 //!
 //! To add a tool:
 //!
@@ -17,7 +18,9 @@
 //! 2. write the arguments and the function `fn(&Host, Args) -> ToolResult` in the module of its
 //!    kind (`create`, `update`, `transform`, `export`, `text`), and the tool below in the
 //!    `impl ArdoiseServer` block marked `#[tool_router(router = write_tools, vis = "pub(crate)")]`,
-//!    with `annotations(read_only_hint = false, destructive_hint = false, ...)`;
+//!    with `annotations(read_only_hint = false, destructive_hint = ..., ...)`: `true` when the
+//!    tool changes or removes what is there (the MCP specification keeps `false` for tools that
+//!    only add), even if the app can restore it;
 //! 3. nothing else: [`crate::server::build_tool_router`] adds `write_router()` unless the server
 //!    runs read-only.
 
@@ -198,13 +201,13 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Change a note's metadata: its title (the file is renamed to match), its tags (replace them, or add or remove some) and its favourite mark. The ink is not touched.
+    /// Change a note's metadata: its title (the file is renamed to match), its tags (replace them, or add or remove some) and its favourite mark. The ink is not touched; the old title and tags are not kept.
     #[tool(
         name = "update_note",
         annotations(
             title = "Update a note's title, tags or favourite mark",
             read_only_hint = false,
-            destructive_hint = false,
+            destructive_hint = true,
             idempotent_hint = true,
             open_world_hint = false
         )
@@ -223,7 +226,7 @@ impl ArdoiseServer {
         annotations(
             title = "Move a note to a binder",
             read_only_hint = false,
-            destructive_hint = false,
+            destructive_hint = true,
             idempotent_hint = true,
             open_world_hint = false
         )
@@ -242,7 +245,7 @@ impl ArdoiseServer {
         annotations(
             title = "Move a note to the trash",
             read_only_hint = false,
-            destructive_hint = false,
+            destructive_hint = true,
             idempotent_hint = false,
             open_world_hint = false
         )
@@ -280,7 +283,7 @@ impl ArdoiseServer {
         annotations(
             title = "Split a note",
             read_only_hint = false,
-            destructive_hint = false,
+            destructive_hint = true,
             idempotent_hint = false,
             open_world_hint = false
         )
@@ -293,13 +296,13 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Straighten hand-drawn shapes (lines, circles and ellipses, rectangles, arrows) in a note, as the editor's "Straighten shapes" does, in one save. By default every stroke is tried; handwriting that looks like a shape (a large loop, a bar) can change too, so pass `strokes` (indices from `get_note`, or the `strokes` of the drawings in `get_note_text`'s structure) to straighten only the drawings.
+    /// Straighten hand-drawn shapes (lines, circles and ellipses, rectangles, arrows) in a note, as the editor's "Straighten shapes" does on a selection, in one save. By default only the strokes of the drawings found by Windows' ink analysis on the visible layers are tried (without the analysis, `strokes` is required); pass `strokes` (indices from `get_note`, or the `strokes` of the drawings in `get_note_text`'s structure) to choose them. The version before is first put in the library's trash as a note of its own, "<title> (before straightening)", that the user can restore from the app; the result says so.
     #[tool(
         name = "straighten_shapes",
         annotations(
             title = "Straighten drawn shapes",
             read_only_hint = false,
-            destructive_hint = false,
+            destructive_hint = true,
             idempotent_hint = false,
             open_world_hint = false
         )

@@ -12,7 +12,7 @@ use ardoise_core::format::NoteFile;
 use ardoise_core::library::{self, FileStamp, Library, SavedNote};
 use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Note, Origin, PageSize, Timing};
 use ardoise_core::ops::{self, NewNote};
-use ardoise_hwr::structure::{Structure, from_recognition, ink_boxes};
+use ardoise_hwr::structure::{DrawingArea, Item, Structure, from_recognition, ink_boxes};
 use ardoise_hwr::{Bounds, HwrError, Language, Line, Recognition, Word};
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_mcp::write::{
@@ -69,6 +69,9 @@ pub struct Fake {
     pub corrections: Corrections,
     /// The library the search looks into (notes are found by id, wherever they were moved).
     pub root: Mutex<PathBuf>,
+    /// The drawings that "Windows' ink analysis" finds, by note id (stroke indices); a note
+    /// without an entry gets no analysis (the layout heuristics, `analyzed: false`).
+    pub drawings: Mutex<HashMap<String, Vec<usize>>>,
 }
 
 pub fn fold(text: &str) -> String {
@@ -117,9 +120,18 @@ impl Handwriting for Fake {
     }
 
     fn structure_of(&self, note: &Note, recognition: &Recognition) -> Structure {
-        Structure {
-            items: from_recognition(recognition, &ink_boxes(note)),
-            analyzed: false,
+        match self.drawings.lock().unwrap().get(&note.id) {
+            Some(strokes) => Structure {
+                items: vec![Item::Drawing(DrawingArea {
+                    bounds: Bounds::default(),
+                    strokes: strokes.clone(),
+                })],
+                analyzed: true,
+            },
+            None => Structure {
+                items: from_recognition(recognition, &ink_boxes(note)),
+                analyzed: false,
+            },
         }
     }
 
