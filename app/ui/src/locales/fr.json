@@ -299,6 +299,12 @@
       "drawWithFinger": "Dessiner au doigt",
       "drawWithFingerHint": "Par défaut, seul le stylet dessine : un doigt fait défiler la page, deux doigts zooment, un double toucher affiche la page entière. Cochez cette case pour un écran tactile sans stylet ; le doigt dessine alors comme la souris.",
       "penHint": "Le dos du stylet efface (avec les réglages de la gomme) ; le bouton du stylet trace un lasso de sélection ; les doigts sont ignorés tant que le stylet est utilisé ou proche de l'écran."
+    },
+    "librarySwitch": {
+      "title": "Changer de bibliothèque",
+      "hint": "Ardoise affichera aussitôt les notes de ce dossier, sur ce PC seulement ({machine}). Les notes de la bibliothèque actuelle restent dans leur dossier.",
+      "confirm": "Utiliser ce dossier",
+      "current": "C'est déjà la bibliothèque de ce PC : rien ne change."
     }
   },
   "assistant": {
@@ -1558,6 +1564,17 @@
     "assemble": {
       "droppedOne": "Seule l'image de fond de la première note est gardée : celle d'une autre note ne sera pas reprise.",
       "droppedMany": "Seule l'image de fond de la première note est gardée : celles de {count} autres notes ne seront pas reprises."
+    }
+  },
+  "libraryChoice": {
+    "noNotes": "Il ne contient aucune note.",
+    "notes": {
+      "one": "Il contient {count} note.",
+      "other": "Il contient {count} notes."
+    },
+    "notesAtLeast": {
+      "one": "Il contient au moins {count} note (le dossier est très grand : le compte s'est arrêté là).",
+      "other": "Il contient au moins {count} notes (le dossier est très grand : le compte s'est arrêté là)."
     }
   }
 }

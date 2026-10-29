@@ -299,6 +299,12 @@
       "drawWithFinger": "Draw with a finger",
       "drawWithFingerHint": "By default only the pen draws: a finger pans the page, two fingers zoom, a double tap fits the page. Tick this box for a touch screen without a pen; a finger then draws like the mouse.",
       "penHint": "The back of the pen erases (with the eraser's settings); the pen's button draws a selection lasso; fingers are ignored while the pen is in use or near the screen."
+    },
+    "librarySwitch": {
+      "title": "Change the library",
+      "hint": "Ardoise will show the notes of this folder at once, on this PC only ({machine}). The notes of the current library stay in their folder.",
+      "confirm": "Use this folder",
+      "current": "This is already the library of this PC: nothing changes."
     }
   },
   "assistant": {
@@ -1558,6 +1564,17 @@
     "assemble": {
       "droppedOne": "Only the first note's background image is kept: one other note's will not be carried over.",
       "droppedMany": "Only the first note's background image is kept: those of the {count} other notes will not be carried over."
+    }
+  },
+  "libraryChoice": {
+    "noNotes": "It holds no note.",
+    "notes": {
+      "one": "It holds {count} note.",
+      "other": "It holds {count} notes."
+    },
+    "notesAtLeast": {
+      "one": "It holds at least {count} note (the folder is very large: the count stopped there).",
+      "other": "It holds at least {count} notes (the folder is very large: the count stopped there)."
     }
   }
 }
