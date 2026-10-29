@@ -189,7 +189,8 @@ Pure functions on `Note` (no I/O); ids, titles and dates of new notes come from 
 ### Direct printing
 
 - Mechanism: **GDI through the system print dialog**, not the web view's print and not a PDF handed to a PDF reader.
-  `PrintDlgEx` gives the printer, its settings (copies, duplex, paper tray…) and the page range; the job
+  `PrintDlgEx` (shown, with the job, on a thread of its own in a single-threaded COM apartment: a pool thread may already be
+  in the multithreaded one) gives the printer, its settings (copies, duplex, paper tray…) and the page range; the job
   (`print_windows::print_job`) then draws one page per note: the device context's orientation follows the note
   (`ResetDC` with `dmOrientation` between two pages, so a portrait note and a landscape note of the same job each fill
   their sheet), the note is rendered as an image (`ardoise_render::render_note`, the same drawing as the PNG and PDF

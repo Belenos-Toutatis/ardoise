@@ -93,7 +93,7 @@ format does not change; every change is one undoable step.
 - **Clipboard** (`lib/editor/clipboard.ts`): strokes travel as JSON text with a marker
   (`{"ardoise":"ardoise-strokes","version":1,"strokes":[{tool,color,width,points}]}`) on the system clipboard, so a
   paste works in another note, window or session; anything else is ignored (the paste event is left alone), and
-  decoding validates every field and bounds the size. Ctrl+C / Ctrl+X / Ctrl+V use the browser's copy / cut / paste
+  decoding validates every field and bounds the size and the ranges (what a saved note could not hold is refused, never pasted: `t` an integer in `0..=u32::MAX` with at most 24 h between samples, `x`/`y` within ± `MAX_PAGE_SIDE`, width in `(0, 100 000]`; a pressure outside 0..1 is clamped). Ctrl+C / Ctrl+X / Ctrl+V use the browser's copy / cut / paste
   events (no permission prompt in WebView2); the selection panel's Copy / Cut / Paste buttons use
   `navigator.clipboard`. Pasted strokes keep colour, tool, width, pressure and points, land on the active layer, are
   selected, and are offset by 4 mm diagonally (repeatedly) while an identical copy already lies at the place; strokes

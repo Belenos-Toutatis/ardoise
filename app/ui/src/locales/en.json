@@ -1339,7 +1339,7 @@
       "pickFile": "Save the recognised text",
       "defaultName": "Recognised text",
       "guessed": "Windows could not analyse the layout: the paragraphs, lists and drawings were guessed from the text and may be less accurate.",
-      "savedImages": "Drawings saved next to it: {count}",
+      "savedImages": "Drawings saved in the folder next to it: {count}",
       "pickMd": "Save the text as Markdown",
       "pickDocx": "Save the text as Word",
       "labels": {
