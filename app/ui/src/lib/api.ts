@@ -10,6 +10,7 @@ import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
 import { mockTabletSubscribe } from './mock-tablet';
 import type { Orientation } from './orientation';
+import type { BridgeAnswer, BridgeEvent } from './app-bridge.svelte';
 import type { TabletEvent, TabletOptions, TabletStatus } from './tablet';
 import type {
   DownloadProgress,
@@ -423,7 +424,28 @@ export const api = {
    */
   printNotes: (sources: ExportSource[], options: PrintOptions) =>
     call<PrintResult>('print_notes', { sources, options }),
+
+  // --- Assistant bridge (milestone M9; Rust side: app_bridge.rs, docs/design/mcp.md) ---
+  /** The main window's answer to request `id` of the assistant's bridge. */
+  bridgeReply: (id: number, answer: BridgeAnswer) => call<void>('bridge_reply', { id, answer }),
+  /** How to start this copy's MCP server (Settings > Assistant). */
+  mcpLaunchInfo: () => call<McpLaunch>('mcp_launch_info'),
 };
+
+/** `McpLaunch` in `app_bridge.rs`. */
+export interface McpLaunch {
+  /** Absolute path of the running executable. */
+  exe: string;
+}
+
+/**
+ * Calls `handler` with each request of the assistant's bridge (`bridge-request`, main window only).
+ * Returns a function that stops listening. Nothing comes in a plain browser.
+ */
+export async function onBridgeRequest(handler: (event: BridgeEvent) => void): Promise<() => void> {
+  if (!inDesktopApp()) return () => {};
+  return listen<BridgeEvent>('bridge-request', (event) => handler(event.payload));
+}
 
 /**
  * Calls `handler` at every change of the handwriting indexing (progress, pause, end). Returns a
