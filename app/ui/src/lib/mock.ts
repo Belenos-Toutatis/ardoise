@@ -13,6 +13,7 @@ import { mockLiveInvoke } from './mock-live';
 import { mockNarrationInvoke } from './mock-narration';
 import { mockNotesInvoke } from './mock-notes';
 import { mockTabletInvoke } from './mock-tablet';
+import { mockAboutInvoke } from './mock-about';
 import { mockVideoInvoke } from './mock-video';
 
 export { mockOnLibraryChanged } from './mock-data';
@@ -100,6 +101,7 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
           mockNarrationInvoke,
           mockBackgroundInvoke,
           mockHandwritingInvoke,
+          mockAboutInvoke,
         ]) {
           const handled = handle(command, args);
           if (handled !== UNHANDLED) return handled;

@@ -2,8 +2,9 @@
 
 ## Non publié
 
-### Ajouté (jalon M10 — documentation)
+### Ajouté (jalon M10 — finition)
 
+- Écran « À propos » (Réglages) : version, licence GPL-3.0 ou ultérieure (en clair et en entier), crédit à Tuhi, mention de Cisco et état d'OpenH264, composants avec filtre et textes complets des licences ; `THIRD-PARTY-NOTICES` donne désormais un texte de licence complet pour chaque composant. `cargo xtask dist` construit l'archive de distribution (`ardoise.exe`, licences, `LISEZMOI.txt`, guides en HTML).
 - Guide d'utilisateur complet en français et en anglais (`docs/guide/guide.fr.md`, `guide.en.md`), `README.md` à la racine et notes de la version 0.1.0 (`docs/notes-de-version.md`) ; dans le guide de l'assistant, « Réglages » remplace « Paramètres » (nom réel du bouton).
 
 ### Ajouté (jalon M9 — pilotage par un assistant)

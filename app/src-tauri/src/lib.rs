@@ -6,6 +6,7 @@
 #[cfg(all(dev, not(debug_assertions)))]
 compile_error!("release builds need `--features custom-protocol` (use `cargo xtask check`)");
 
+mod about;
 mod app_bridge;
 mod autoexport;
 mod background;
@@ -288,6 +289,8 @@ pub fn run() {
             handwriting::handwriting_text,
             handwriting::export_handwriting_text,
             handwriting::copy_handwriting_text,
+            about::about_info,
+            about::about_text,
             app_bridge::bridge_reply,
             app_bridge::mcp_launch_info,
         ])

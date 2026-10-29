@@ -1,6 +1,7 @@
 /** Typed wrappers around the Rust commands of `app/src-tauri/src/commands.rs`. */
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { AboutInfo, AboutText } from './about';
 import type { BackgroundSource, NotesProgress, StagedBackground } from './background';
 import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic';
 import type { LanguagePreference } from './i18n-core';
@@ -432,6 +433,12 @@ export const api = {
   bridgeReply: (id: number, answer: BridgeAnswer) => call<void>('bridge_reply', { id, answer }),
   /** How to start this copy's MCP server (Settings > Assistant). */
   mcpLaunchInfo: () => call<McpLaunch>('mcp_launch_info'),
+
+  // --- About (milestone M10; Rust side: about.rs) -----------------------------------------------
+  /** Version, licence and the third-party components built into this copy. */
+  aboutInfo: () => call<AboutInfo>('about_info'),
+  /** The licence of Ardoise (`license`) or the licences of its components (`notices`), in full. */
+  aboutText: (which: AboutText) => call<string>('about_text', { which }),
 };
 
 /** `McpLaunch` in `app_bridge.rs`. */

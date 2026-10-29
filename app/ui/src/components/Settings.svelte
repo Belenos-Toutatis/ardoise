@@ -7,6 +7,7 @@
   import { sizeInMillimetres, tablet } from '../lib/tablet-state.svelte';
   import LanguagePicker from './LanguagePicker.svelte';
   import MicrophonePicker from './narration/MicrophonePicker.svelte';
+  import AboutSection from './AboutSection.svelte';
   import AssistantSection from './AssistantSection.svelte';
   import HandwritingSection from './HandwritingSection.svelte';
   import OpenH264Section from './OpenH264Section.svelte';
@@ -199,13 +200,14 @@
 
   <AssistantSection />
 
+  <AboutSection version={app.version} />
+
   <dl class="facts">
     <dt>{t('settings.machine')}</dt>
     <dd>{app.machine}</dd>
     <dt>{t('settings.settingsFile')}</dt>
     <dd><code>{app.settingsPath}</code></dd>
   </dl>
-  <p class="muted small">{t('settings.version', { version: app.version })}</p>
 
   {#if error}
     <p class="error" role="alert">{t('errors.generic', { message: error })}</p>
