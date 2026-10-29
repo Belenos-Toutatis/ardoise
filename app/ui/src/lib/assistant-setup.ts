@@ -18,10 +18,14 @@ export function mcpArgs(readOnly: boolean): string[] {
 
 /**
  * The command for Claude Code, for PowerShell or the command prompt: the path in double quotes
- * (it may hold spaces; Windows paths never hold a double quote).
+ * (it may hold spaces; Windows paths never hold a double quote), and `--` in double quotes too.
+ * PowerShell drops a bare `--` before a script sees it: with Claude Code installed by npm,
+ * `claude` is the script `claude.ps1`, which would then pass `--mcp` to `claude mcp add` as one
+ * of its own options. A quoted `"--"` reaches the script, the native `claude.exe` and, through the
+ * command prompt, both (checked with stand-ins in Windows PowerShell 5.1 and cmd.exe).
  */
 export function claudeCodeCommand(exe: string, readOnly: boolean): string {
-  return `claude mcp add --scope user ${SERVER_NAME} -- "${exe}" ${mcpArgs(readOnly).join(' ')}`;
+  return `claude mcp add --scope user ${SERVER_NAME} "--" "${exe}" ${mcpArgs(readOnly).join(' ')}`;
 }
 
 /** The JSON for Claude Desktop (backslashes doubled by JSON itself). */

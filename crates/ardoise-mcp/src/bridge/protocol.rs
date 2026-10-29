@@ -11,6 +11,8 @@
 //! Every line is at most [`MAX_LINE`] bytes; a request of another version, of an unknown kind or
 //! that does not parse is answered with an error, never executed.
 
+use std::sync::{Mutex, PoisonError};
+
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -185,6 +187,26 @@ pub fn answer_line(line: &[u8], bridge: &dyn AppBridge) -> Vec<u8> {
     encode(&response)
 }
 
+/// The id of a request line, as far as it can be read (0 otherwise).
+pub fn request_id(line: &[u8]) -> u64 {
+    match parse_request(line) {
+        Ok(envelope) => envelope.id,
+        Err((id, _)) => id,
+    }
+}
+
+/// The response line to request `id` when the app already serves as many connections as it
+/// takes.
+pub fn busy_line(id: u64) -> Vec<u8> {
+    encode(&respond(
+        id,
+        Err(ToolError::new(
+            code::APP_BUSY,
+            "Ardoise is serving other requests: try again",
+        )),
+    ))
+}
+
 /// The response line when a request is longer than [`MAX_LINE`].
 pub fn too_long_line() -> Vec<u8> {
     encode(&respond(
@@ -334,8 +356,8 @@ pub fn read_response<T: DeserializeOwned>(line: &[u8], id: u64) -> Result<T, Too
     serde_json::from_value(value).map_err(|error| not_understood(error.to_string()))
 }
 
-/// The codes the app may answer (the interface's `errorCodes.*` it uses, and the server's):
-/// [`ToolError`] holds static codes, and an unknown one becomes `unexpected`.
+/// The codes the app usually answers (the interface's `errorCodes.*` it uses, and the server's),
+/// static already ([`ToolError`] holds static codes).
 const WIRE_CODES: [&str; 12] = [
     code::INVALID_ARGUMENTS,
     code::APP_NOT_RUNNING,
@@ -351,13 +373,45 @@ const WIRE_CODES: [&str; 12] = [
     "unexpected",
 ];
 
-/// The static code for `code` received on the wire (`unexpected` for one this server does not know).
+/// Longest code passed through.
+const MAX_CODE: usize = 48;
+/// Codes outside [`WIRE_CODES`] kept at most: each is allocated once and kept for the life of
+/// the process, so their number is bounded.
+const MAX_OTHER_CODES: usize = 64;
+
+/// A code that may go to the assistant as received: `^[a-zA-Z][a-zA-Z0-9]{0,47}$`, the shape of
+/// every `errorCodes.*` key (nothing to escape, nothing to mislead).
+pub fn is_safe_code(code: &str) -> bool {
+    let mut chars = code.chars();
+    code.len() <= MAX_CODE
+        && chars
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric())
+}
+
+/// The static code for `code` received on the wire: the same code when it is safe
+/// ([`is_safe_code`]: a live command's error, a note that cannot be read…), else `unexpected`.
+/// The mapping is there for safety, not as a closed list: a new code of the app reaches the
+/// assistant.
 pub fn wire_code(code: &str) -> &'static str {
-    WIRE_CODES
-        .iter()
-        .find(|known| **known == code)
-        .copied()
-        .unwrap_or("unexpected")
+    if let Some(known) = WIRE_CODES.iter().find(|known| **known == code) {
+        return known;
+    }
+    if !is_safe_code(code) {
+        return "unexpected";
+    }
+    static OTHERS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    let mut others = OTHERS.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(seen) = others.iter().find(|seen| **seen == code) {
+        return seen;
+    }
+    if others.len() >= MAX_OTHER_CODES {
+        return "unexpected";
+    }
+    let kept: &'static str = Box::leak(code.to_owned().into_boxed_str());
+    others.push(kept);
+    kept
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -641,9 +695,49 @@ mod tests {
     }
 
     #[test]
-    fn unknown_codes_become_unexpected() {
+    fn safe_codes_pass_through_and_others_become_unexpected() {
         assert_eq!(wire_code("liveNotRunning"), "liveNotRunning");
         assert_eq!(wire_code("appBusy"), code::APP_BUSY);
-        assert_eq!(wire_code("somethingNew"), "unexpected");
+        // A code this server does not know (a live command's error…) keeps its name, kept once.
+        let new = wire_code("liveCommandFailed2");
+        assert_eq!(new, "liveCommandFailed2");
+        assert!(std::ptr::eq(new, wire_code("liveCommandFailed2")));
+        let longest = format!("a{}c", "B9".repeat(23));
+        assert_eq!(longest.len(), 48);
+        assert_eq!(wire_code(&longest), longest);
+        let too_long = format!("{longest}d");
+        for unsafe_code in [
+            "",
+            "9lives",
+            "two words",
+            "a-b",
+            "a_b",
+            "<script>",
+            "é",
+            "note\nforged",
+            &too_long,
+        ] {
+            assert!(!is_safe_code(unsafe_code), "{unsafe_code}");
+            assert_eq!(wire_code(unsafe_code), "unexpected", "{unsafe_code}");
+        }
+    }
+
+    #[test]
+    fn a_busy_app_answers_the_request_it_turns_away() {
+        let line = br#"{"v":1,"id":12,"request":{"kind":"app_state"}}"#;
+        assert_eq!(request_id(line), 12);
+        assert_eq!(request_id(b"not json"), 0);
+        assert_eq!(
+            request_id(br#"{"v":1,"id":13,"request":{"kind":"forget"}}"#),
+            13
+        );
+        let busy = busy_line(request_id(line));
+        assert_eq!(busy.last(), Some(&b'\n'));
+        let error = read_response::<AppView>(&busy[..busy.len() - 1], 12).unwrap_err();
+        assert_eq!(error.code, code::APP_BUSY);
+        // Under another id too, the client takes the refusal for what it is.
+        let other = busy_line(0);
+        let error = read_response::<AppView>(&other[..other.len() - 1], 12).unwrap_err();
+        assert_eq!(error.code, code::APP_BUSY);
     }
 }

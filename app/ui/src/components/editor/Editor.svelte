@@ -35,7 +35,7 @@
    */
   import { untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, type AppState } from '../../lib/api';
-  import { bridgeScreens } from '../../lib/app-bridge.svelte';
+  import { NoteLoads, bridgeScreens } from '../../lib/app-bridge.svelte';
   import { loadCustomColors, rememberCustomColor } from '../../lib/editor/colors';
   import { binderOf, diskChange, type DiskChange } from '../../lib/editor/disk';
   import { decodeStrokes, encodeStrokes } from '../../lib/editor/clipboard';
@@ -162,6 +162,8 @@
 
   let currentPath = $state('');
   let loadError = $state<string | null>(null);
+  /** The loads of this editor, for the assistant's `open_note` (answered once the note is shown). */
+  const loads = new NoteLoads();
   let ink = $state.raw<Ink | null>(null);
   let history = $state.raw<History<Doc> | null>(null);
   let savedNote = $state.raw<Note | null>(null);
@@ -280,6 +282,7 @@
                 : pendingWrites > 0
                   ? 'the note open in the editor is being saved'
                   : null,
+        loaded: () => loads.loaded(),
       }),
     ),
   );
@@ -324,6 +327,8 @@
     salvageRecording();
     generation += 1;
     currentPath = target;
+    // Replaced by the load of another note if one starts before this one ends.
+    const load = loads.begin();
     loadError = null;
     history = null;
     disk = null;
@@ -356,8 +361,10 @@
       conflict = null;
       saveError = null;
       void refreshOriginal(true);
+      load.ok();
     } catch (error) {
       if (currentPath === target) loadError = errorMessage(error);
+      load.fail(error);
     }
   }
 

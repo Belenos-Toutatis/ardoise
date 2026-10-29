@@ -42,13 +42,17 @@ Une seule fois, dans **PowerShell** ou l'**invite de commandes** (le chemin est 
 Paramètres > Assistant) :
 
 ```
-claude mcp add --scope user ardoise -- "C:\Outils\Ardoise\ardoise.exe" --mcp
+claude mcp add --scope user ardoise "--" "C:\Outils\Ardoise\ardoise.exe" --mcp
 ```
 
 - `--scope user` : Ardoise est disponible dans **tous vos projets** Claude Code (la déclaration est enregistrée
   dans votre profil, pas dans un projet).
 - Gardez les **guillemets** autour du chemin (il peut contenir des espaces).
-- Le `--` sépare les options de Claude Code de la commande d'Ardoise : tout ce qui suit est donné tel quel à Ardoise.
+- Le `"--"` sépare les options de Claude Code de la commande d'Ardoise : tout ce qui suit est donné tel quel à
+  Ardoise. **Gardez aussi ses guillemets** : si Claude Code a été installé avec npm, la commande `claude` est un
+  script que PowerShell lance en supprimant un `--` sans guillemets, et `--mcp` serait alors pris pour une option de
+  Claude Code. Avec les guillemets, la même commande marche dans PowerShell comme dans l'invite de commandes, quelle
+  que soit l'installation de Claude Code.
 - Vérifier : `claude mcp list` (Ardoise doit être « Connected »), ou `/mcp` dans Claude Code.
 - Retirer : `claude mcp remove ardoise`.
 
@@ -84,7 +88,8 @@ En cas de souci, le journal de Claude Desktop pour Ardoise est `%APPDATA%\Claude
 
 Avec `--read-only` (case **Lecture seule** dans Paramètres > Assistant, qui l'ajoute aux deux textes), l'assistant
 peut **seulement lire** : lister et chercher les notes, lire leur texte reconnu, les voir en image. Il ne peut ni
-créer, ni renommer, ni ranger, ni exporter, ni piloter Ardoise.
+créer, ni renommer, ni ranger, ni exporter, ni piloter Ardoise. L'invite `titrer_et_etiqueter` donne alors une liste de
+titres et d'étiquettes à appliquer vous-même dans Ardoise.
 
 **Conseillé chaque fois que l'assistant n'a besoin que de lire** (résumer, retrouver une note, préparer un document
 à partir de vos notes).
@@ -127,7 +132,7 @@ L'assistant doit utiliser **la même copie** d'Ardoise que celle que vous ouvrez
 |---|---|
 | `noLibrary` : aucune bibliothèque | Ouvrez Ardoise sur ce PC et choisissez la bibliothèque. |
 | `handwritingNoRecognizer` / `handwritingUnsupported` | Installez l'écriture manuscrite française de Windows (voir plus haut). Les images restent lisibles. |
-| `appNotRunning` : « Ardoise is not open » | Ouvrez Ardoise — la copie dont le chemin est déclaré. |
+| `appNotRunning` : « Ardoise is not open » | Ouvrez Ardoise — la copie dont le chemin est déclaré. Si elle est déjà ouverte, regardez la ligne « Liaison avec Ardoise ouverte » dans Paramètres > Assistant : elle dit si cette fenêtre peut être pilotée. |
 | `appNotResponding` | Ardoise est occupée (export, fenêtre de dialogue) ou démarre encore : réessayez. |
 | `appBusy` | Terminez d'abord dans Ardoise ce qui est en cours (enregistrer la note, fermer la fenêtre de dialogue, finir le mode direct). |
 | `liveNotRunning` | Lancez le mode direct dans Ardoise avant de demander la présentation. |
@@ -142,7 +147,12 @@ L'assistant doit utiliser **la même copie** d'Ardoise que celle que vous ouvrez
   (RGPD) avant de faire lire des notes qui contiennent des informations sur des élèves.
 - Ardoise elle-même n'envoie rien sur Internet : c'est l'assistant qui lit, quand vous le lui demandez.
 - **Lecture seule conseillée** quand l'assistant n'a besoin que de lire (`--read-only`).
-- **L'assistant vous demande votre accord avant chaque modification** : Claude Code et Claude Desktop affichent une
-  demande d'autorisation avant d'utiliser un outil qui écrit ; vous pouvez refuser.
+- **En général, l'assistant vous demande votre accord avant de modifier quelque chose** : Claude Code et Claude
+  Desktop affichent une demande d'autorisation avant d'utiliser un outil qui écrit, et vous pouvez refuser. Mais cela
+  dépend de leurs réglages : un outil que vous avez « toujours autorisé », ou un mode qui accepte tout, ne demande
+  plus rien. Ardoise signale à l'assistant les outils qui modifient ou retirent des notes (mettre à la corbeille,
+  modifier le titre ou les étiquettes, découper, redresser les formes, déplacer) comme **destructifs**, ce qui
+  l'incite à demander. Pour être sûr que rien ne change, déclarez Ardoise en **lecture seule** (`--read-only`).
 - **Rien n'est jamais supprimé définitivement** : une note que l'assistant supprime va dans la corbeille d'Ardoise
-  (gardée 30 jours), d'où vous pouvez la restaurer. Les exports n'écrasent jamais un fichier existant.
+  (gardée 30 jours), d'où vous pouvez la restaurer. Quand il redresse les formes d'une note, la version d'avant y est
+  aussi, sous le nom « <titre> (avant redressement) ». Les exports n'écrasent jamais un fichier existant.

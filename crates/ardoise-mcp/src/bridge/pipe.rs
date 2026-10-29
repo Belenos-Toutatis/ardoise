@@ -33,6 +33,19 @@ pub const MAX_CONNECTIONS: usize = 4;
 pub const IDLE: Duration = Duration::from_secs(30);
 /// Longest wait to send an answer.
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the request of a connection over the limit is awaited before `appBusy` is
+/// answered (closing first would make the client's write fail: it would never read the answer).
+pub const BUSY_READ: Duration = Duration::from_secs(1);
+/// Pause after a first failure to accept connections; doubled after each next one in a row, up
+/// to [`RETRY_MAX`].
+pub const RETRY_FIRST: Duration = Duration::from_millis(250);
+pub const RETRY_MAX: Duration = Duration::from_secs(5);
+
+/// The pause before trying again after `failures` failures in a row (1 or more).
+pub fn retry_delay(failures: u32) -> Duration {
+    let doublings = failures.saturating_sub(1).min(16);
+    RETRY_FIRST.saturating_mul(1 << doublings).min(RETRY_MAX)
+}
 
 /// A failure of the pipe.
 #[derive(Debug, thiserror::Error)]
@@ -96,10 +109,16 @@ pub fn pipe_name(user: &str, settings_key: &str) -> String {
             }
         })
         .collect();
+    format!(r"\\.\pipe\ardoise-{user}-{}", settings_hash(settings_key))
+}
+
+/// 8 hex digits naming the copy of Ardoise whose settings are at `settings_key`
+/// ([`settings_key`]): in the pipe's name, and in the name of the per-PC files of that copy.
+pub fn settings_hash(settings_key: &str) -> String {
     let hash = fnv1a64(settings_key.as_bytes());
     // The two halves folded: 8 hex digits are plenty for the few copies of one user.
     let short = (hash ^ (hash >> 32)) as u32;
-    format!(r"\\.\pipe\ardoise-{user}-{short:08x}")
+    format!("{short:08x}")
 }
 
 /// The settings file as a stable key: its folder resolved by the file system (true case, long
@@ -123,8 +142,8 @@ pub fn pipe_name_for(settings: &Path) -> Result<String, PipeError> {
 mod imp {
     use std::io;
     use std::ptr::{null, null_mut};
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex, PoisonError};
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
@@ -156,13 +175,14 @@ mod imp {
     };
     use windows_sys::Win32::System::Threading::{
         CreateEventW, GetCurrentProcess, INFINITE, OpenProcess, OpenProcessToken,
-        PROCESS_QUERY_LIMITED_INFORMATION, SetEvent, WaitForMultipleObjects,
+        PROCESS_QUERY_LIMITED_INFORMATION, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
     };
 
-    use super::{AccessRule, IDLE, MAX_CONNECTIONS, PipeError, WRITE_TIMEOUT};
+    use super::{
+        AccessRule, BUSY_READ, IDLE, MAX_CONNECTIONS, PipeError, WRITE_TIMEOUT, retry_delay,
+    };
     use crate::bridge::AppBridge;
-    use crate::bridge::protocol::{LineBuffer, answer_line, too_long_line};
-    use crate::error::code;
+    use crate::bridge::protocol::{LineBuffer, answer_line, busy_line, request_id, too_long_line};
 
     /// Access-allowed and access-denied ACE types (`winnt.h`).
     const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
@@ -497,12 +517,32 @@ mod imp {
         name: String,
         stop: Arc<Owned>,
         thread: Option<JoinHandle<()>>,
+        trouble: Arc<Mutex<Option<String>>>,
     }
 
     impl PipeServer {
         /// Creates the pipe `name` (its first instance: [`PipeError::AlreadyServed`] when
         /// another process holds the name) and serves `bridge` on it until stopped.
         pub fn start(name: &str, bridge: Arc<dyn AppBridge>) -> Result<PipeServer, PipeError> {
+            PipeServer::launch(name, bridge, Faults::default())
+        }
+
+        /// [`PipeServer::start`], with the next `count` instances failing to be created (the
+        /// tests of the accepting thread's recovery).
+        #[cfg(test)]
+        fn start_failing(
+            name: &str,
+            bridge: Arc<dyn AppBridge>,
+            count: usize,
+        ) -> Result<PipeServer, PipeError> {
+            PipeServer::launch(name, bridge, Faults(Arc::new(AtomicUsize::new(count))))
+        }
+
+        fn launch(
+            name: &str,
+            bridge: Arc<dyn AppBridge>,
+            faults: Faults,
+        ) -> Result<PipeServer, PipeError> {
             let descriptor = user_only(&current_user_sid()?)?;
             let wide_name = wide(name);
             let first =
@@ -515,12 +555,15 @@ mod imp {
                     }
                 })?;
             let stop = Arc::new(manual_event()?);
+            let trouble = Arc::new(Mutex::new(None));
             let accept = Accept {
                 name: wide_name,
                 descriptor,
                 stop: Arc::clone(&stop),
                 bridge,
                 active: Arc::new(AtomicUsize::new(0)),
+                trouble: Arc::clone(&trouble),
+                faults,
             };
             let thread = std::thread::Builder::new()
                 .name("ardoise-bridge".into())
@@ -529,11 +572,21 @@ mod imp {
                 name: name.to_owned(),
                 stop,
                 thread: Some(thread),
+                trouble,
             })
         }
 
         pub fn name(&self) -> &str {
             &self.name
+        }
+
+        /// What keeps the server from accepting connections normally while it tries again
+        /// (`None` when all is well).
+        pub fn trouble(&self) -> Option<String> {
+            self.trouble
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
         }
 
         /// Stops accepting connections and ends those under way at their next read.
@@ -556,6 +609,26 @@ mod imp {
         }
     }
 
+    /// Instance creations made to fail (the tests); nothing outside them.
+    #[derive(Default)]
+    struct Faults(#[cfg(test)] Arc<AtomicUsize>);
+
+    #[cfg(test)]
+    impl Faults {
+        fn next_fails(&self) -> bool {
+            self.0
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+        }
+    }
+
+    #[cfg(not(test))]
+    impl Faults {
+        fn next_fails(&self) -> bool {
+            false
+        }
+    }
+
     /// The accepting thread's state.
     struct Accept {
         name: Vec<u16>,
@@ -563,11 +636,19 @@ mod imp {
         stop: Arc<Owned>,
         bridge: Arc<dyn AppBridge>,
         active: Arc<AtomicUsize>,
+        /// What goes wrong while the thread tries again ([`PipeServer::trouble`]).
+        trouble: Arc<Mutex<Option<String>>>,
+        faults: Faults,
     }
 
     impl Accept {
+        /// Accepts connections until the server stops. A failure never ends the thread (the
+        /// bridge would be gone until the app restarts): it is logged, reported by
+        /// [`PipeServer::trouble`], and tried again after a growing pause ([`retry_delay`]).
+        /// Through it all, one instance of the pipe stays open, so the name is never free.
         fn run(self, first: Owned) {
             let mut waiting = first;
+            let mut failures = 0u32;
             loop {
                 let connected = overlapped(waiting.0, None, Some(self.stop.0), |operation| {
                     // SAFETY: `waiting` is a pipe instance opened for overlapped I/O.
@@ -584,24 +665,52 @@ mod imp {
                         continue;
                     }
                     Err(error) => {
-                        eprintln!("assistant bridge: cannot accept a connection: {error}");
-                        return;
+                        failures += 1;
+                        self.report(format!("cannot accept a connection: {error}"), failures);
+                        if self.pause(failures) {
+                            return;
+                        }
+                        // The instance may be spoilt: a fresh one replaces it, created before it
+                        // is closed (the same one is tried again if that fails too).
+                        // SAFETY: a server end of a pipe.
+                        unsafe { DisconnectNamedPipe(waiting.0) };
+                        if let Ok(fresh) = self.instance() {
+                            waiting = fresh;
+                        }
+                        continue;
                     }
                 }
                 // The next instance exists before this one is handed over: the name is never
                 // free for another process.
-                let next = match create_instance(&self.name, &self.descriptor, false) {
+                let next = match self.instance() {
                     Ok(next) => next,
                     Err(error) => {
-                        eprintln!("assistant bridge: cannot create the next instance: {error}");
+                        failures += 1;
+                        self.report(
+                            format!("cannot create the next instance: {error}"),
+                            failures,
+                        );
+                        // Without a spare instance this one cannot be handed over (the name
+                        // would be free once its connection ends): it is served here, then
+                        // made ready for the next client.
+                        self.active.fetch_add(1, Ordering::SeqCst);
                         serve(&waiting, &*self.bridge, &self.stop);
-                        return;
+                        self.active.fetch_sub(1, Ordering::SeqCst);
+                        // SAFETY: a server end of a pipe.
+                        unsafe { DisconnectNamedPipe(waiting.0) };
+                        if self.pause(failures) {
+                            return;
+                        }
+                        continue;
                     }
                 };
+                if failures > 0 {
+                    failures = 0;
+                    self.recovered();
+                }
                 let connection = std::mem::replace(&mut waiting, next);
                 if self.active.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
-                    let busy = crate::bridge::protocol::encode(&busy_response());
-                    let _ = write_all(connection.0, &busy, Instant::now() + WRITE_TIMEOUT);
+                    turn_away(&connection, &self.stop);
                     continue;
                 }
                 self.active.fetch_add(1, Ordering::SeqCst);
@@ -621,18 +730,48 @@ mod imp {
                 }
             }
         }
+
+        /// A new instance of the pipe (never the first: the name is already held).
+        fn instance(&self) -> io::Result<Owned> {
+            if self.faults.next_fails() {
+                return Err(io::Error::other("instance made to fail by a test"));
+            }
+            create_instance(&self.name, &self.descriptor, false)
+        }
+
+        /// Records a failure: logged when a run of failures begins, kept for
+        /// [`PipeServer::trouble`] until the server recovers.
+        fn report(&self, trouble: String, failures: u32) {
+            if failures == 1 {
+                eprintln!("assistant bridge: {trouble}; trying again");
+            }
+            *self.trouble.lock().unwrap_or_else(PoisonError::into_inner) = Some(trouble);
+        }
+
+        fn recovered(&self) {
+            eprintln!("assistant bridge: accepting connections again");
+            *self.trouble.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        }
+
+        /// Waits [`retry_delay`] before trying again; `true` when the server stops meanwhile.
+        fn pause(&self, failures: u32) -> bool {
+            let millis = u32::try_from(retry_delay(failures).as_millis()).unwrap_or(u32::MAX);
+            // SAFETY: a valid event handle.
+            unsafe { WaitForSingleObject(self.stop.0, millis) == WAIT_OBJECT_0 }
+        }
     }
 
-    fn busy_response() -> crate::bridge::protocol::Response {
-        crate::bridge::protocol::Response {
-            v: crate::bridge::protocol::PROTOCOL_VERSION,
-            id: 0,
-            ok: None,
-            error: Some(crate::bridge::protocol::WireError {
-                code: code::APP_BUSY.to_owned(),
-                message: "Ardoise is serving other requests: try again".to_owned(),
-            }),
-        }
+    /// Answers `appBusy` to a connection over the limit, then closes it. Its request is read
+    /// first (at most [`BUSY_READ`]): closing at once would make the client's write fail before
+    /// it reads the answer.
+    fn turn_away(connection: &Owned, stop: &Owned) {
+        let mut buffer = LineBuffer::new();
+        let deadline = Instant::now() + BUSY_READ;
+        let id = match read_line(connection.0, &mut buffer, deadline, Some(stop.0)) {
+            Ok(Some(line)) => request_id(&line),
+            _ => 0,
+        };
+        let _ = write_all(connection.0, &busy_line(id), Instant::now() + WRITE_TIMEOUT);
     }
 
     /// Answers the requests of one connection until it closes, stays idle for [`IDLE`], sends
@@ -719,7 +858,17 @@ mod imp {
         /// within `timeout`.
         pub fn exchange(&mut self, line: &[u8], timeout: Duration) -> Result<Vec<u8>, PipeError> {
             let deadline = Instant::now() + timeout;
-            write_all(self.pipe.0, line, deadline)?;
+            if let Err(error) = write_all(self.pipe.0, line, deadline) {
+                // The app may have answered and closed before reading the whole request (a
+                // request too long, a connection turned away): its answer is still in the pipe.
+                if closed_by_the_app(&error)
+                    && let Ok(Some(answer)) =
+                        read_line(self.pipe.0, &mut self.buffer, deadline, None)
+                {
+                    return Ok(answer);
+                }
+                return Err(error);
+            }
             match read_line(self.pipe.0, &mut self.buffer, deadline, None)? {
                 Some(answer) => Ok(answer),
                 None => Err(PipeError::Io(io::Error::new(
@@ -748,6 +897,14 @@ mod imp {
         pub fn access_rules(&self) -> Result<Vec<AccessRule>, PipeError> {
             Ok(access_rules(self.pipe.0)?)
         }
+    }
+
+    /// The other end closed the pipe (the app answered and went, or went away).
+    fn closed_by_the_app(error: &PipeError) -> bool {
+        matches!(error, PipeError::Io(error) if matches!(
+            error.raw_os_error().map(|c| c as u32),
+            Some(ERROR_NO_DATA | ERROR_BROKEN_PIPE | ERROR_PIPE_NOT_CONNECTED)
+        ))
     }
 
     /// The process serving `pipe` must run as the current user: a pipe squatted by another
@@ -857,6 +1014,63 @@ mod imp {
         }
         Ok(rules)
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::bridge::NoApp;
+        use crate::bridge::protocol::{AppView, Request, read_response, request_line};
+
+        fn name() -> String {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            format!(r"\\.\pipe\ardoise-unit-{}-{nanos}", std::process::id())
+        }
+
+        fn ask(name: &str) -> Result<AppView, crate::ToolError> {
+            let mut client =
+                PipeClient::connect(name, Duration::from_secs(5)).map_err(|error| {
+                    crate::ToolError::new("unexpected", format!("connect: {error}"))
+                })?;
+            let answer = client
+                .exchange(&request_line(5, &Request::AppState), Duration::from_secs(5))
+                .map_err(|error| {
+                    crate::ToolError::new("unexpected", format!("exchange: {error}"))
+                })?;
+            read_response(&answer, 5)
+        }
+
+        #[test]
+        fn the_accepting_thread_outlives_its_failures() {
+            let name = name();
+            let server = PipeServer::start_failing(&name, Arc::new(NoApp), 2).unwrap();
+            assert_eq!(server.trouble(), None);
+            // No spare instance can be made for the first two clients: each is served on the
+            // accepting thread itself, the name stays held, the trouble is reported.
+            for _ in 0..2 {
+                let answer = ask(&name).unwrap_err();
+                assert_eq!(answer.code, "appNotRunning", "{answer:?}");
+                assert!(server.trouble().unwrap().contains("next instance"));
+            }
+            // Then all is well again, after the pauses.
+            let answer = ask(&name).unwrap_err();
+            assert_eq!(answer.code, "appNotRunning", "{answer:?}");
+            assert_eq!(server.trouble(), None);
+            // Several clients at once again.
+            let mut first = PipeClient::connect(&name, Duration::from_secs(5)).unwrap();
+            assert_eq!(ask(&name).unwrap_err().code, "appNotRunning");
+            let line = first
+                .exchange(&request_line(1, &Request::AppState), Duration::from_secs(5))
+                .unwrap();
+            assert_eq!(
+                read_response::<AppView>(&line, 1).unwrap_err().code,
+                "appNotRunning"
+            );
+            server.stop();
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -877,6 +1091,10 @@ mod imp {
 
         pub fn name(&self) -> &str {
             ""
+        }
+
+        pub fn trouble(&self) -> Option<String> {
+            None
         }
 
         pub fn stop(self) {}
@@ -962,6 +1180,30 @@ mod tests {
             settings_key_of(r"\\?\UNC\serveur\partage\ardoise.toml"),
             r"\\serveur\partage\ardoise.toml"
         );
+    }
+
+    #[test]
+    fn the_hash_names_the_copy() {
+        let key = settings_key_of(r"C:\Outils\Ardoise\ardoise.toml");
+        let hash = settings_hash(&key);
+        assert_eq!(hash.len(), 8);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()), "{hash}");
+        assert!(pipe_name("S-1-5-21-1", &key).ends_with(&format!("-{hash}")));
+        assert_ne!(
+            settings_hash(&settings_key_of(r"C:\Temp\e2e\ardoise.toml")),
+            hash
+        );
+    }
+
+    #[test]
+    fn retries_slow_down_without_stopping() {
+        assert_eq!(retry_delay(1), RETRY_FIRST);
+        assert_eq!(retry_delay(2), RETRY_FIRST * 2);
+        assert_eq!(retry_delay(3), RETRY_FIRST * 4);
+        assert_eq!(retry_delay(6), RETRY_MAX);
+        assert_eq!(retry_delay(u32::MAX), RETRY_MAX);
+        // Never a busy loop, even if called with 0.
+        assert_eq!(retry_delay(0), RETRY_FIRST);
     }
 
     #[test]

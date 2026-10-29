@@ -232,12 +232,16 @@ pub async fn list_monitors(
     monitors(&app, saved_projector(&context).as_deref())
 }
 
+/// Opens the presentation window on `monitor` (else the saved screen, else a secondary one) and,
+/// unless `remember` is `false`, saves that choice for this PC. The assistant's bridge passes
+/// `false`: no bridge request changes a setting (docs/design/mcp.md).
 #[tauri::command]
 pub async fn open_presentation(
     app: AppHandle,
     context: State<'_, AppContext>,
     runtime: State<'_, LiveRuntime>,
     monitor: Option<String>,
+    remember: Option<bool>,
 ) -> CommandResult<MonitorInfo> {
     let saved = saved_projector(&context);
     let monitors = monitors(&app, saved.as_deref())?;
@@ -249,7 +253,9 @@ pub async fn open_presentation(
     };
     show_on(&app, &chosen, &runtime.hub().activity()).map_err(unexpected)?;
     // The window is shown even if the settings cannot be written.
-    if let Err(error) = save_projector(&context, &chosen.key) {
+    if remember != Some(false)
+        && let Err(error) = save_projector(&context, &chosen.key)
+    {
         eprintln!("presentation: cannot save the screen chosen: {error:?}");
     }
     runtime.hub().set_presentation(Some(chosen.clone()));

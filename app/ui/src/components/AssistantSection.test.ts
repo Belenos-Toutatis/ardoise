@@ -40,7 +40,7 @@ describe('Settings > Assistant (MCP)', () => {
   it('shows what to paste, built with the running executable', async () => {
     const root = await render('fr');
     expect(root.querySelector('h3')?.textContent).toBe('Assistant (MCP)');
-    expect(snippet(root, 'claude-code')).toBe(`claude mcp add --scope user ardoise -- "${EXE}" --mcp`);
+    expect(snippet(root, 'claude-code')).toBe(`claude mcp add --scope user ardoise "--" "${EXE}" --mcp`);
     expect(JSON.parse(snippet(root, 'claude-desktop'))).toEqual({
       mcpServers: { ardoise: { command: EXE, args: ['--mcp'] } },
     });
@@ -55,6 +55,21 @@ describe('Settings > Assistant (MCP)', () => {
     expect(snippet(root, 'claude-code')).toMatch(/--mcp --read-only$/);
     expect(JSON.parse(snippet(root, 'claude-desktop')).mcpServers.ardoise.args).toEqual(['--mcp', '--read-only']);
     expect(root.textContent).toContain('docs/guide/assistant.en.md');
+  });
+
+  it('says whether the open app can be driven, in both languages', async () => {
+    const root = await render('fr');
+    const line = root.querySelector('[data-slot="assistant-bridge"]');
+    expect(line?.getAttribute('data-state')).toBe('serving');
+    expect(line?.textContent?.trim()).toBe(t('assistant.bridge.serving'));
+    for (const locale of ['fr', 'en'] as const) {
+      setLocale(locale);
+      for (const state of ['serving', 'retrying', 'anotherCopy', 'unavailable', 'off']) {
+        const text = t(`assistant.bridge.${state}`, { detail: 'X' });
+        expect(text).not.toBe(`assistant.bridge.${state}`);
+        expect(text.includes('X')).toBe(state === 'retrying' || state === 'unavailable');
+      }
+    }
   });
 
   it('copies each text, and says when the clipboard refuses', async () => {

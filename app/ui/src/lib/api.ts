@@ -287,7 +287,9 @@ export const api = {
   liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
   listMonitors: () => call<MonitorInfo[]>('list_monitors'),
   /** Opens the presentation window full screen on `monitor` (null: the saved or default screen). */
-  openPresentation: (monitor: string | null) => call<MonitorInfo>('open_presentation', { monitor }),
+  /** `remember: false` (the assistant's bridge): the screen is not saved as this PC's choice. */
+  openPresentation: (monitor: string | null, remember = true) =>
+    call<MonitorInfo>('open_presentation', { monitor, remember }),
   closePresentation: () => call<void>('close_presentation'),
 
   // --- Replay, video, narration (milestone M6; Rust side: video.rs, narration.rs, codec.rs) ---
@@ -436,6 +438,15 @@ export const api = {
 export interface McpLaunch {
   /** Absolute path of the running executable. */
   exe: string;
+  /** Whether assistants can drive this window now. */
+  bridge: BridgeStatus;
+}
+
+/** `BridgeStatus` in `app_bridge.rs`. */
+export interface BridgeStatus {
+  state: 'serving' | 'retrying' | 'anotherCopy' | 'unavailable' | 'off';
+  /** The technical reason, for `retrying` and `unavailable`. */
+  detail: string | null;
 }
 
 /**

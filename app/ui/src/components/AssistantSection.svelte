@@ -6,13 +6,15 @@
    * guide docs/guide/assistant.*.md).
    */
   import { onMount } from 'svelte';
-  import { api, errorMessage } from '../lib/api';
+  import { api, errorMessage, type BridgeStatus } from '../lib/api';
   import { claudeCodeCommand, claudeDesktopConfig } from '../lib/assistant-setup';
   import { t } from '../lib/i18n.svelte';
 
   type Target = 'claudeCode' | 'claudeDesktop';
 
   let exe = $state<string | null>(null);
+  /** Whether assistants can drive this window (`open_note`, `presentation`…). */
+  let bridge = $state.raw<BridgeStatus | null>(null);
   let error = $state<string | null>(null);
   let readOnly = $state(false);
   let copied = $state<Target | null>(null);
@@ -24,7 +26,10 @@
   onMount(() => {
     api
       .mcpLaunchInfo()
-      .then((info) => (exe = info.exe))
+      .then((info) => {
+        exe = info.exe;
+        bridge = info.bridge ?? null;
+      })
       .catch((e: unknown) => (error = errorMessage(e)));
   });
 
@@ -74,6 +79,11 @@
       <p class="error small" role="alert">{t('assistant.copyFailed')}</p>
     {/if}
     <p class="muted small">{t('assistant.appTools')}</p>
+    {#if bridge}
+      <p class="muted small" data-slot="assistant-bridge" data-state={bridge.state}>
+        {t(`assistant.bridge.${bridge.state}`, { detail: bridge.detail ?? '' })}
+      </p>
+    {/if}
   {/if}
   <p class="muted small" data-slot="assistant-privacy">{t('assistant.privacy')}</p>
   <p class="muted small">{t('assistant.guide')}</p>

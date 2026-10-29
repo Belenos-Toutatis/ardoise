@@ -94,7 +94,7 @@ setting, each naming the tools to use:
 - What the assistant reads (text, images) goes to its provider under the user's own account settings. The guide
   says so in plain words (students' names on notes), and recommends `--read-only` when only reading is needed.
 - The server reads the library of this PC only; `from_file` and export `path` must be absolute and are used as given
-  (the assistant's client asks the user before each call that writes).
+  (the assistant's client usually asks the user before a call that writes, depending on its permission settings).
 - No tool deletes permanently, empties the trash, changes settings or touches the tablet.
 
 ## Tests
@@ -335,8 +335,11 @@ setting, each naming the tools to use:
   `{"v":1,"id":7,"request":{"kind":"app_state"|"open_note"|"presentation"|"last_live_note", …}}`, answer
   `{"v":1,"id":7,"ok":…}` or `{"v":1,"id":7,"error":{"code","message"}}`. Another `v` gives `bridgeVersion`; an
   unknown kind, an unknown field, a missing `id`, unreadable JSON or a line over the limit gives `invalidRequest`, and
-  the app is not asked anything (an over-long line also closes the connection). Codes received are mapped to the
-  server's static codes (`wire_code`; an unknown one becomes `unexpected`). New codes, at the end of `error::code`:
+  the app is not asked anything (an over-long line also closes the connection). Codes received pass through when
+  they are plain identifiers (`wire_code`, `^[a-zA-Z][a-zA-Z0-9]{0,47}$`: a live command's error, a note that cannot
+  be read… reach the assistant; the usual ones are static, any other is allocated once, at most 64 per process);
+  anything else becomes `unexpected`. The mapping is for safety, not a closed list. New codes, at the end of
+  `error::code`:
   `appNotResponding`, `appBusy`, `bridgeVersion`, `invalidRequest` (they never reach the interface's screens).
 - **Security**: DACL `D:P(D;;GA;;;NU)(A;;GA;;;<SID>)` (protected; network logons denied; the current user only);
   `PIPE_REJECT_REMOTE_CLIENTS`; the first instance with `FILE_FLAG_FIRST_PIPE_INSTANCE` (`AlreadyServed` when the
@@ -348,8 +351,23 @@ setting, each naming the tools to use:
   connection, 5 s per write); at most 4 connections at once (the next one gets `appBusy`). One connection per request
   on the client side (an app opened or closed meanwhile is followed); the server accepts several requests per
   connection. No request deletes, changes a setting or touches the tablet.
+- **Answers before a close** (review fixes): a connection over the limit is turned away by the accepting thread
+  *after* reading its request (at most 1 s, `BUSY_READ`), with `appBusy` under the request's id: closing at once made
+  the client's write fail (`ERROR_NO_DATA`) before it read anything, so it reported a lost connection. And when the
+  client's write fails because the app closed its end (a request far over the limit, a connection turned away), the
+  client still reads the answer left in the pipe (data written before `CloseHandle` stays readable; checked by
+  `tests/bridge_pipe.rs`, which fails without it).
+- **The accepting thread never gives up**: a failure of `ConnectNamedPipe`, or of the next instance, is logged once
+  per run of failures, kept for `PipeServer::trouble()` and tried again after a pause (`retry_delay`: 250 ms, doubled
+  each time, at most 5 s, waiting on the stop event: no busy loop). An instance that failed to connect is replaced by
+  a fresh one created before it is closed; without a spare instance the connection is served on the accepting thread
+  itself, then its instance reused. One instance stays open throughout, so the name is never free.
 - **Who serves**: only the windowed app, from `setup` (not `--mcp`, `--self-test`, nor the other command-line modes,
-  which exit before Tauri starts). Failures are logged on stderr (`assistant bridge: …`).
+  which exit before Tauri starts). Failures are logged on stderr (`assistant bridge: …`) and shown in Settings >
+  Assistant: `mcp_launch_info` gives `bridge: { state, detail }` (`serving`, `retrying` + detail, `anotherCopy` when
+  another Ardoise of the same copy holds the pipe, `unavailable` + detail, `off` outside Windows or without a settings
+  location), shown as the line "Liaison avec Ardoise ouverte : …". `app_state` cannot report it: when the bridge does
+  not serve, nothing reaches the app.
 - **Requests are carried out like clicks**: what the Svelte interface owns goes to the main window as the event
   `bridge-request` `{ id, request: { kind: "view" | "openNote" | "presentation", … } }`; the interface answers with
   the command `bridge_reply(id, { ok } | { error: { code, message } })` (main window only), correlated by id. The
@@ -357,7 +375,10 @@ setting, each naming the tools to use:
   (`appNotResponding`). In the interface, `lib/app-bridge.svelte.ts`: the screens register what they offer while
   mounted (`bridgeScreens`: `home` = `Home.svelte`, `editor` = `Editor.svelte`, `live` = `LiveView.svelte`;
   `App.svelte` says `loading` / `setup` / `error` and wires the event); `answerBridge` and `drivePresentation` are
-  pure apart from them (vitest). Messages for the assistant are English, like Rust's `message`.
+  pure apart from them (vitest). Messages for the assistant are English, like Rust's `message`. The interface keeps
+  at an action at most 12 s (`ACTION_BUDGET_MS`, under Rust's 15 s), and a newer `presentation` request replaces the
+  one under way: `page` checks before each step whether its request is abandoned (`appNotResponding` past the time,
+  `appBusy` when replaced), so the window never goes on paging after Rust has answered.
 - **`app_state`**: the window's view (screen `library` / `editor` / `live` / `setup` / `loading`, the editor's note
   and unsaved changes) joined with Rust's: version, library, and the live session (`LiveHub::overview`, new: state,
   running, page and pages, presentation screen). The tool resolves the editor's note to id, path and title.
@@ -366,44 +387,65 @@ setting, each naming the tools to use:
   and outside `_ardoise/` (`note_in_library`, canonical paths). The interface refuses with `appBusy` when the editor
   cannot be left (unsaved changes, a narration recording, a video export, a save under way: the user's "Back" would
   hold too), while live mode is on screen (opening a note would take the teacher out of the lesson), while a library
-  dialog or the tablet test is open, and before a library exists. The note already in the editor is a no-op.
-  Otherwise `Home` shows the library for a tick, then the note (the editor loads it afresh).
+  dialog or the tablet test is open, and before a library exists. Otherwise `Home` shows the library for a tick,
+  then the note (the editor loads it afresh), and the answer waits until the editor has **read** the note
+  (`EditorSlot.loaded`, `NoteLoads` in `app-bridge.svelte.ts`): a note that cannot be read answers its error and
+  code (a damaged file is not reported "opened"), a load replaced by another note answers `appBusy`, an editor that
+  does not show up within 3 s `appNotResponding`. The note already in the editor is not reloaded, but the outcome of
+  its load is still answered.
 - **What "presentation" is** (M4, M8): the full-screen window of **live mode** (`presentation.rs`,
   `Presentation.svelte`), opened from the live window ("Project" / "Stop projecting"), whose page is the live
   session's current page. Without a tablet, live mode starts in `waiting` (the simulator streams with
   `--simulated-tablet`). The tool maps: `start` = the "Project" button (the screen chosen in the live window, else
-  the saved or default one; `noMonitor` from Rust); `stop` = "Stop projecting" (live mode goes on; idempotent, and a
+  the saved or default one; `noMonitor` from Rust), except that the screen is **not saved** as this PC's choice
+  (`open_presentation(monitor, remember: false)`: no bridge request changes a setting; the button still saves it);
+  `stop` = "Stop projecting" (live mode goes on; idempotent, and a
   success when live mode is not on screen); `next` / `previous` = `live_command` `nextPage` / `previousPage`, as the
   arrow keys (`next` from the last page adds a blank page, like →; `previous` on page 1 does nothing); `page` = one
   step at a time up to page *n* (1-based, an existing page: `invalidArguments` beyond), each step waiting for the
   session's batch. The assistant **never starts or stops live mode** (that talks to the tablet): every action but
   `stop` answers `liveNotRunning` until the teacher opens live mode.
 - **`last_live_note`**: this run's session once it wrote a note (`running`, pages in order), else the session
-  remembered from an earlier run. **It survives a restart**: `%LOCALAPPDATA%\Ardoise\last-live-session.json`
-  (per-PC state, never in the library; atomic) holds the library, the end time and each page's note id and path,
-  written when live mode stops (`live_stop`) and when the main window closes; it is given only while the same
-  library is open. The tool finds each note by id in the library now (a note moved since is followed; one gone is
+  remembered from an earlier run. **It survives a restart**: `%LOCALAPPDATA%\Ardoise\last-live-session-<hash>.json`
+  (per-PC state, never in the library; atomic; `<hash>` names the copy as in the pipe's name, `settings_hash`, so
+  copies with their own settings no longer overwrite each other's record) holds the library, the end time and each
+  page's note id and path, written when live mode stops (`live_stop`) and when the main window closes; it is given
+  only while the same library is open. While the copy has no file of its own, the former shared
+  `last-live-session.json` is read (same library rule). The tool finds each note by id in the library now (a note moved since is followed; one gone is
   `found: false`) and gives the last page still there as `note`.
 - **Annotations**: `app_state` and `last_live_note` (idempotent) read-only; `open_note` (idempotent), `presentation`
   `read_only_hint: false`; all `destructive_hint: false`. `--read-only` keeps all four out (part 1's choice). With no
   app, each answers `appNotRunning` / "Ardoise is not open" (argument errors, e.g. an unknown note, come first).
 - **Settings > Assistant (MCP)** (`AssistantSection.svelte`, `lib/assistant-setup.ts`, locales section
   `assistant`): the command `mcp_launch_info` gives `current_exe()`; the panel shows
-  `claude mcp add --scope user ardoise -- "<exe>" --mcp` (syntax checked in the Claude Code documentation: options
+  `claude mcp add --scope user ardoise "--" "<exe>" --mcp` (syntax checked in the Claude Code documentation: options
   before the name, the server's command after `--`) and the Claude Desktop `mcpServers` entry, both with
-  `--read-only` when the box is ticked, with copy buttons (`navigator.clipboard`), the privacy reminder and a pointer
-  to the guide. The app never edits a Claude configuration.
+  `--read-only` when the box is ticked, with copy buttons (`navigator.clipboard`), the bridge's status line, the
+  privacy reminder and a pointer to the guide. The app never edits a Claude configuration. **Why `"--"` is quoted**:
+  PowerShell drops a bare `--` when it starts a *script*, and an npm install of Claude Code makes `claude` the
+  script `claude.ps1` (which passes `$args` to node): `--mcp` would then reach `claude mcp add` as one of its options.
+  Checked on this PC with stand-ins (a `claude.ps1` shaped like npm's, a `claude.cmd`, and `node` as a native
+  program printing its arguments), Windows PowerShell 5.1 and cmd.exe: a bare `--` is lost through the `.ps1` and
+  kept for native programs and `.cmd`; `"--"` arrives as `--` in every case. `pwsh` 7 is not installed here (its
+  parameter binder treats `--` the same way, documented, not checked); the native `claude.exe` itself was not run.
+  The privacy reminder says assistants *usually* ask before a change, depending on their permission settings, that
+  the tools that change or remove notes are flagged destructive, and points to `--read-only`.
 - **Guide**: `docs/guide/assistant.fr.md` / `.en.md` (folder `docs/guide/` for M10's user guide): what an assistant
   can do, Claude Code (user scope) and Claude Desktop (`%APPDATA%\Claude\claude_desktop_config.json`; Microsoft
   Store / MSIX under `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\`; *Edit Config* opens
   the right one), `--read-only`, prompts (`/ardoise:name (MCP)` or `/mcp__ardoise__name`), the bridge tools,
   troubleshooting, privacy in plain words.
 - **Tests**: `bridge/protocol.rs` (round trip, wire spelling, size limit, unknown requests and fields, versions,
-  lines), `bridge/pipe.rs` (name and hash), `tests/bridge_tools.rs` (the tools through rmcp with a fake app:
-  annotations, `--read-only`, `appNotRunning`, note resolution, argument checks, `last_live_note` by id),
-  `tests/bridge_pipe.rs` (Windows, a real pipe per test: round trip, several requests per connection, the DACL read
-  back with `GetSecurityInfo` (the user's SID allowed, network denied, nothing else), one server per name, "not open"
-  at once, the client's timeout, malformed and over-long lines), `app_bridge.rs` (window answers, path checks,
-  correlation by id, the remembered session), vitest `lib/app-bridge.test.ts`, `lib/assistant-setup.test.ts`,
-  `components/AssistantSection.test.ts`; e2e `app/e2e/journeys-m9-bridge.mjs` (wired in `run.mjs`: `--mcp` of the
-  runner's copy drives the open app) and the part `bridgeWithoutApp` of `app/e2e/mcp.mjs`.
+  lines, safe codes passed through, the busy line), `bridge/pipe.rs` (name and hash, retry delays; on Windows the
+  accepting thread surviving injected instance failures: served inline, trouble reported then cleared),
+  `tests/bridge_tools.rs` (the tools through rmcp with a fake app: annotations, `--read-only`, `appNotRunning`, note
+  resolution, argument checks, `last_live_note` by id), `tests/bridge_pipe.rs` (Windows, a real pipe per test: round
+  trip, several requests per connection, the DACL read back with `GetSecurityInfo` (the user's SID allowed, network
+  denied, nothing else), one server per name, "not open" at once, the client's timeout, malformed and over-long
+  lines, a 1 MiB request still answered, more connections than the limit answered `appBusy` then served again),
+  `app_bridge.rs` (window answers, path checks, correlation by id, the remembered session, one record per copy, the
+  former shared record, the bridge status), vitest `lib/app-bridge.test.ts` (also: `open_note` answered once the
+  note is read or with its load error, `page` stopping when abandoned, newer requests replacing older ones),
+  `lib/assistant-setup.test.ts`, `lib/mock-live.test.ts` (`remember: false`), `components/AssistantSection.test.ts`;
+  e2e `app/e2e/journeys-m9-bridge.mjs` (wired in `run.mjs`: `--mcp` of the runner's copy drives the open app) and
+  the part `bridgeWithoutApp` of `app/e2e/mcp.mjs`.

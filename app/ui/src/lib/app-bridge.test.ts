@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  ACTION_BUDGET_MS,
   BridgeScreens,
+  NoteLoads,
   answerBridge,
   asBridgeError,
   drivePresentation,
@@ -16,19 +18,37 @@ import type { LiveCommandKind, MonitorInfo } from './live';
 
 const NOTE = 'C:\\Bibliothèque\\Physique\\Cours.ardoise';
 
-function home(busy: string | null = null): HomeSlot & { opened: string[] } {
+/**
+ * The library screen; `into` set, opening a note mounts an editor there that loads it as `load`
+ * says (at once by default), as `Home.svelte` and `Editor.svelte` do.
+ */
+function home(
+  busy: string | null = null,
+  into?: BridgeScreens,
+  load: (path: string) => Promise<void> = async () => {},
+): HomeSlot & { opened: string[] } {
   const opened: string[] = [];
   return {
     opened,
     busy: () => busy,
     openNote: async (path) => {
       opened.push(path);
+      if (!into) return;
+      const loads = new NoteLoads();
+      const loading = loads.begin();
+      into.register('editor', { ...editor(path), loaded: () => loads.loaded() });
+      load(path).then(loading.ok, loading.fail);
     },
   };
 }
 
 function editor(path: string, dirty = false, blocker: string | null = null): EditorSlot {
-  return { path: () => path, dirty: () => dirty, blocker: () => blocker ?? (dirty ? 'unsaved changes' : null) };
+  return {
+    path: () => path,
+    dirty: () => dirty,
+    blocker: () => blocker ?? (dirty ? 'unsaved changes' : null),
+    loaded: async () => {},
+  };
 }
 
 interface Parts {
@@ -84,10 +104,59 @@ describe('what the window shows', () => {
 
 describe('opening a note', () => {
   it('opens it as a click on its card does', async () => {
-    const library = home();
-    const answer = await answerBridge({ kind: 'openNote', path: NOTE }, screens({ home: library }));
+    const s = screens();
+    const library = home(null, s);
+    s.register('home', library);
+    const answer = await answerBridge({ kind: 'openNote', path: NOTE }, s);
     expect(okOf(answer)).toEqual({ path: NOTE });
     expect(library.opened).toEqual([NOTE]);
+    expect(s.editor?.path()).toBe(NOTE);
+  });
+
+  it('answers once the editor has read the note, or with why it could not', async () => {
+    let finish!: () => void;
+    const s = screens();
+    s.register(
+      'home',
+      home(null, s, () => new Promise<void>((resolve) => (finish = resolve))),
+    );
+    let answered: BridgeAnswer | null = null;
+    const answer = answerBridge({ kind: 'openNote', path: NOTE }, s).then((a) => (answered = a));
+    await vi.waitFor(() => expect(s.editor).not.toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(answered).toBeNull();
+    finish();
+    expect(okOf(await answer)).toEqual({ path: NOTE });
+
+    // A damaged note: its error, code included, not "opened".
+    const damaged = screens();
+    damaged.register('home', home(null, damaged, () => Promise.reject({ code: 'noteDamaged', message: 'bad zip' })));
+    expect(errorOf(await answerBridge({ kind: 'openNote', path: NOTE }, damaged))).toEqual({
+      code: 'noteDamaged',
+      message: 'bad zip',
+    });
+    // Asked again while it is on screen: still the same error.
+    const again = damaged.editor!;
+    expect(again.path()).toBe(NOTE);
+    expect(errorOf(await answerBridge({ kind: 'openNote', path: NOTE }, damaged))?.code).toBe('noteDamaged');
+  });
+
+  it('an editor that never shows up is not taken for success', async () => {
+    const answer = await answerBridge({ kind: 'openNote', path: NOTE }, screens({ home: home() }));
+    expect(errorOf(answer)?.code).toBe('appNotResponding');
+  });
+
+  it('a load replaced by another note fails with appBusy', async () => {
+    const loads = new NoteLoads();
+    await expect(loads.loaded()).rejects.toMatchObject({ code: 'appNotResponding' });
+    const first = loads.begin();
+    const waiting = loads.loaded();
+    const second = loads.begin();
+    await expect(waiting).rejects.toMatchObject({ code: 'appBusy' });
+    // Ending a replaced load changes nothing; the latest one tells.
+    first.ok();
+    second.fail({ code: 'noteDamaged', message: 'bad zip' });
+    await expect(loads.loaded()).rejects.toMatchObject({ code: 'noteDamaged' });
   });
 
   it('the note already in the editor stays as it is', async () => {
@@ -149,7 +218,28 @@ describe('the presentation', () => {
       expect(error?.code).toBe('invalidArguments');
     }
     expect(okOf(await answerBridge({ kind: 'presentation', action: 'page', page: 2 }, s))).toMatchObject({ page: 2 });
-    expect(presentation).toHaveBeenCalledWith('page', 2);
+    expect(presentation).toHaveBeenCalledWith('page', 2, expect.any(Function));
+  });
+
+  it('a newer request replaces the one under way; an old one is given up', async () => {
+    const seen: (() => unknown)[] = [];
+    const presentation = vi.fn(async (_action: string, _page: number | null, abandoned: () => unknown) => {
+      seen.push(abandoned);
+      return { open: true, screen: null, page: 1, pages: 3 };
+    });
+    const s = screens({ home: home(), live: { presentation } });
+    await answerBridge({ kind: 'presentation', action: 'page', page: 2 }, s);
+    expect(seen[0]()).toBeNull();
+    await answerBridge({ kind: 'presentation', action: 'next' }, s);
+    expect(seen[0]()).toMatchObject({ code: 'appBusy' });
+    expect(seen[1]()).toBeNull();
+    vi.useFakeTimers({ now: Date.now() });
+    try {
+      vi.setSystemTime(Date.now() + ACTION_BUDGET_MS + 1);
+      expect(seen[1]()).toMatchObject({ code: 'appNotResponding' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -227,6 +317,25 @@ describe('driving the live window', () => {
     live.command = async () => {};
     live.until = async () => false;
     await expect(drivePresentation(live, 'page', 3)).rejects.toMatchObject({ code: 'appNotResponding' });
+  });
+
+  it('stops stepping as soon as the request is abandoned', async () => {
+    const live = fakeLive(10, 0);
+    let gone = false;
+    const step = live.command;
+    live.command = async (kind) => {
+      await step(kind);
+      // Rust gives up after the second step (time out, or a newer request).
+      if (live.commands.length === 2) gone = true;
+    };
+    const abandoned = () => (gone ? { code: 'appNotResponding', message: 'given up' } : null);
+    await expect(drivePresentation(live, 'page', 9, abandoned)).rejects.toMatchObject({
+      code: 'appNotResponding',
+      message: 'given up',
+    });
+    // No page changed after that.
+    expect(live.commands).toEqual(['nextPage', 'nextPage']);
+    expect(live.pageIndex).toBe(2);
   });
 });
 
