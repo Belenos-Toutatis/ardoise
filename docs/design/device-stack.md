@@ -126,3 +126,12 @@ Public surface (names may be refined, the shape must stay):
   drops the rest silently if our task falls behind. A page download then fails its CRC (retried once, nothing is
   deleted); live mode would show gaps. If H1 shows it, move the notification handler to direct WinRT
   `ValueChanged` callbacks feeding an unbounded channel (the plan B of SPEC §6.2).
+
+## M10: the guided test keeps the tablet's pages as notes
+
+`DiagnosticConfig::page_import` (a `PageImport`, shareable) turns each downloaded page into a note of the library
+before the session deletes it from the tablet, like the normal synchronisation: the app gives `tablet::store_page_in`
+(thumbnail, automatic export, the tablet settings' orientation); without one the runner uses a plain `LibrarySink`.
+`ImportedPages` recognises a page already in the library (an earlier test, the normal sync): not stored twice. A page
+that cannot be stored stays on the tablet (the sink's `Err`). The raw `page-N.bin` and the `.svg` preview are still
+written in the diagnostics folder. The step's report has a `notes` detail (notes added).

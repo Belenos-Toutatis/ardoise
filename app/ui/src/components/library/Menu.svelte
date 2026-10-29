@@ -54,9 +54,15 @@
   function outside(event: MouseEvent) {
     if (open && root && !root.contains(event.target as Node)) open = false;
   }
-</script>
 
-<svelte:window onclick={outside} />
+  // Listens to the page only while the menu is open (every card has a menu: a listener each
+  // would be a thousand listeners).
+  $effect(() => {
+    if (!open) return;
+    window.addEventListener('click', outside);
+    return () => window.removeEventListener('click', outside);
+  });
+</script>
 
 <!-- The keydown handler only handles keys bubbling up from the buttons inside. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->

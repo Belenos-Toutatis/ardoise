@@ -18,7 +18,7 @@ import {
 } from './mock-data';
 
 /** Files the demo listing reports as unreadable; tests and developers may fill it. */
-export const mockProblems: { path: string; message: string }[] = [];
+export const mockProblems: { path: string; code: string; message: string }[] = [];
 
 const DEMO_TABLET: TabletInfo = {
   name: 'Bamboo Slate',

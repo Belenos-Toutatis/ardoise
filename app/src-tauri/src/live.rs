@@ -254,19 +254,23 @@ pub async fn live_start(
 /// Leaves live mode and writes every page; returns the paths of the session's notes. A
 /// narration recording in live mode is stopped first and goes with its pages.
 #[tauri::command]
-pub async fn live_stop(
-    context: State<'_, AppContext>,
-    tablet: State<'_, TabletRuntime>,
-    runtime: State<'_, LiveRuntime>,
-    narration: State<'_, NarrationRuntime>,
-) -> CommandResult<Vec<String>> {
-    finish_live_narration(&narration, &runtime.hub);
-    // Without a running service there is nothing to stop on the tablet's side.
-    let _ = tablet.with_service(TabletService::stop_live);
-    let saved = runtime.hub.stop().map_err(LiveError::command_error)?;
-    // The assistant's `last_live_note` finds the session after a restart too.
-    crate::app_bridge::remember_live_session(&context, &runtime.hub);
-    Ok(saved)
+pub async fn live_stop(app: AppHandle) -> CommandResult<Vec<String>> {
+    // Writing the session's pages (and closing the narration) takes disk time: off the async
+    // runtime's threads.
+    crate::notes::blocking(move || {
+        let context = app.state::<AppContext>();
+        let tablet = app.state::<TabletRuntime>();
+        let runtime = app.state::<LiveRuntime>();
+        let narration = app.state::<NarrationRuntime>();
+        finish_live_narration(&narration, &runtime.hub);
+        // Without a running service there is nothing to stop on the tablet's side.
+        let _ = tablet.with_service(TabletService::stop_live);
+        let saved = runtime.hub.stop().map_err(LiveError::command_error)?;
+        // The assistant's `last_live_note` finds the session after a restart too.
+        crate::app_bridge::remember_live_session(&context, &runtime.hub);
+        Ok(saved)
+    })
+    .await
 }
 
 #[tauri::command]

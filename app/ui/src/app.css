@@ -1118,19 +1118,23 @@ select {
   font-weight: 600;
 }
 
-.problems {
-  margin-top: 1.5rem;
-  color: var(--muted);
+.library-problems {
+  margin: 0 0 1rem;
   font-size: 0.875rem;
 }
 
-.problems summary {
-  cursor: pointer;
+.library-problems p {
+  margin: 0;
 }
 
-.problems ul {
+.library-problems ul {
   margin: 0.25rem 0 0;
   padding-left: 1.25rem;
+  color: var(--text);
+}
+
+.library-problems li span {
+  color: var(--muted);
 }
 
 /* Trash */

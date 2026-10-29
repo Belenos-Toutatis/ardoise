@@ -526,13 +526,18 @@ describe('library: favourites, tags, rename, conflicts', () => {
     expect(badges[0].getAttribute('title')).toContain('2026-10-22 Liste de courses.ardoise');
   });
 
-  it('lists unreadable files discreetly', async () => {
-    mockProblems.push({ path: 'C:\\demo\\Ardoise\\cassée.ardoise', message: 'fichier endommagé' });
+  it('shows unreadable files in a visible banner, with the sentence of their error code', async () => {
+    mockProblems.push(
+      { path: 'C:\\demo\\Ardoise\\cassée.ardoise', code: 'noteDamaged', message: 'fichier endommagé' },
+      { path: 'C:\\demo\\Ardoise\\future.ardoise', code: 'noteNewerVersion', message: 'format 9.0' },
+    );
     const ui = await render();
-    const details = ui.q<HTMLDetailsElement>('details.problems')!;
-    expect(details.querySelector('summary')?.textContent).toBe('Fichiers illisibles : 1');
-    expect(details.open).toBe(false);
-    expect(details.textContent).toContain('cassée.ardoise');
+    const banner = ui.q('.library-problems')!;
+    expect(banner.getAttribute('role')).toBe('status');
+    expect(banner.textContent).toContain('Fichiers illisibles : 2');
+    expect(banner.textContent).toContain('cassée.ardoise');
+    // A note from a newer Ardoise says to update the app, not a raw English error.
+    expect(banner.textContent).toContain('mettez Ardoise à jour (format 9.0)');
   });
 
   it('shows the tag of a card and filters by it', async () => {

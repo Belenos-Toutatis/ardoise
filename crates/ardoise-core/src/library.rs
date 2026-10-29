@@ -301,6 +301,13 @@ pub struct HeaderCache {
     entries: HashMap<PathBuf, NoteEntry>,
 }
 
+impl HeaderCache {
+    /// The listed note at `path`, if its file still has `stamp`.
+    pub fn get(&self, path: &Path, stamp: &FileStamp) -> Option<&NoteEntry> {
+        self.entries.get(path).filter(|entry| entry.stamp == *stamp)
+    }
+}
+
 /// A tag and how many listed notes carry it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

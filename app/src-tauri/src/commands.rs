@@ -279,7 +279,7 @@ pub fn inspect_library(path: String) -> CommandResult<LibraryInspection> {
 /// Makes `path` this computer's library, creating `_ardoise/` there if needed, and watches
 /// it from then on.
 #[tauri::command]
-pub fn set_library(
+pub async fn set_library(
     app: AppHandle,
     context: State<'_, AppContext>,
     watch: State<'_, LibraryWatch>,

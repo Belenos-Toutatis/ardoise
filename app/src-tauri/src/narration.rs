@@ -1439,7 +1439,8 @@ pub async fn delete_narration(
     path: String,
     stamp: FileStamp,
 ) -> CommandResult<FileStamp> {
-    delete_narration_in(&library_of(&context)?, Path::new(&path), &stamp)
+    let library = library_of(&context)?;
+    crate::notes::blocking(move || delete_narration_in(&library, Path::new(&path), &stamp)).await
 }
 
 #[cfg(test)]

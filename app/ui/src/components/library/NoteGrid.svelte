@@ -1,6 +1,7 @@
 <script lang="ts">
   /** The note grid of the current view, with its heading, selection bar, empty states and problem list. */
   import { tick } from 'svelte';
+  import { errorMessage } from '../../lib/api';
   import { t } from '../../lib/i18n.svelte';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import type { NoteSummary } from '../../lib/note';
@@ -91,6 +92,25 @@
     <span class="muted count">{notes.length}</span>
   </header>
 
+  {#if problems.length > 0}
+    <!-- Unreadable files stay on the disk untouched; the reason is the library error's sentence
+         (a note from a newer Ardoise says to update it). -->
+    <div class="banner error library-problems" role="status" data-slot="problems">
+      <p>
+        <strong>{t('library.problems', { count: problems.length })}</strong>
+        {t('library.problemsHint')}
+      </p>
+      <ul>
+        {#each problems as problem (problem.path)}
+          <li>
+            <code>{problem.path}</code>
+            <span>{errorMessage({ code: problem.code, message: problem.message })}</span>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+
   {#if lib.selected.length > 0}
     <SelectionBar {lib} />
   {/if}
@@ -130,15 +150,4 @@
     </ul>
   {/if}
 
-  {#if problems.length > 0}
-    <details class="problems">
-      <summary>{t('library.problems', { count: problems.length })}</summary>
-      <p class="muted small">{t('library.problemsHint')}</p>
-      <ul>
-        {#each problems as problem (problem.path)}
-          <li><code>{problem.path}</code> <span class="muted">{problem.message}</span></li>
-        {/each}
-      </ul>
-    </details>
-  {/if}
 </section>

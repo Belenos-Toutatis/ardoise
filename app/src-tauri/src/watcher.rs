@@ -69,6 +69,20 @@ impl LibraryWatch {
         Ok(())
     }
 
+    /// Waits for the watcher's first scan (it runs on the watcher's thread): a note written
+    /// before it ends is part of the starting state, not a change.
+    #[cfg(test)]
+    fn wait_until_scanned(&self) {
+        if let Some(running) = self
+            .current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
+            running._watcher.wait_until_scanned();
+        }
+    }
+
     /// The library being watched.
     #[cfg(test)]
     fn watched(&self) -> Option<PathBuf> {
@@ -97,6 +111,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(watch.watched().as_deref(), Some(dir.path()));
+        watch.wait_until_scanned();
 
         let saved = write_sample(&library, "", "Essai");
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
