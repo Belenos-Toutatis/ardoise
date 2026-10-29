@@ -228,7 +228,6 @@ pub fn run() {
         .manage(textdoc::Structures::default())
         .manage(app_bridge::BridgeRuntime::default())
         .manage(import::InkspaceImport::default())
-
         .manage(drafts)
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
@@ -342,7 +341,6 @@ pub fn run() {
             import::inkspace_inspect,
             import::inkspace_import,
             import::inkspace_cancel,
-
             drafts::draft_write,
             drafts::draft_find,
             drafts::draft_list,
