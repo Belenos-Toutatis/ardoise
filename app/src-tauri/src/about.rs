@@ -149,7 +149,7 @@ mod tests {
         assert!(
             info.components
                 .iter()
-                .all(|c| !c.name.is_empty() && !c.version.is_empty() && c.license != "")
+                .all(|c| !c.name.is_empty() && !c.version.is_empty() && !c.license.is_empty())
         );
         assert!(info.components.iter().any(|c| c.name == "tauri"));
         assert!(info.components.iter().any(|c| c.name == "svelte"));
