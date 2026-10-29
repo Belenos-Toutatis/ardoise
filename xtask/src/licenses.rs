@@ -1305,7 +1305,12 @@ tauri v2.12.5
 
     #[test]
     fn a_missing_text_is_supplied_for_each_licence_of_the_expression() {
-        let p = pkg("dasp", "MIT OR Apache-2.0", &["Jane <j at x dot org>"], None);
+        let p = pkg(
+            "dasp",
+            "MIT OR Apache-2.0",
+            &["Jane <j at x dot org>"],
+            None,
+        );
         let texts = supplied_texts(&p).unwrap();
         assert_eq!(texts.len(), 2);
         assert!(texts[0].contains(

@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Ajouté (jalon M10 — finition)
+
+- Écran « À propos » (Réglages) : version, licence GPL-3.0 ou ultérieure (en clair et en entier), crédit à Tuhi, mention de Cisco et état d'OpenH264, composants avec filtre et textes complets des licences ; `THIRD-PARTY-NOTICES` donne désormais un texte de licence complet pour chaque composant. `cargo xtask dist` construit l'archive de distribution (`ardoise.exe`, licences, `LISEZMOI.txt`, guides en HTML).
+
 ### Ajouté (jalon M9 — pilotage par un assistant)
 
 - Serveur MCP local `ardoise.exe --mcp [--read-only]` (entrée et sortie standard, aucun port réseau, sans fenêtre, application ouverte ou non) : l'assistant de l'utilisateur (Claude Code, Claude Desktop…) liste et cherche les notes, lit leurs données, leur texte reconnu avec la position des lignes et leur structure, et les voit en image (PNG, 2000 pixels au plus) pour reconnaître schémas et formules. `--read-only` limite l'assistant à la lecture.

@@ -9,6 +9,10 @@ publish.workspace = true
 
 [dependencies]
 serde_json = "1"
+# `cargo xtask dist`: the guides as HTML, the archive, its checksum.
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+sha2 = "0.10"
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [lints]
 workspace = true

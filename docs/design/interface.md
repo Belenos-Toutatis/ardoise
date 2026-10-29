@@ -152,3 +152,51 @@ when `buttons & 32` (or `button === 5`); anything else is a mouse (its behaviour
 editor and replay "Width" button in the zoom bar and **Ctrl+2** (matched by key code, so French keyboards work), live
 mode "Width" button and the **W** key (listed in the keyboard help), presentation window the **W** key. A page taller
 than the window shows its top.
+
+## M10: About and distribution
+
+**The « À propos » screen** (SPEC §9). Settings > *À propos* (`AboutSection.svelte`) shows "Ardoise, version X" and
+one line on the licence, with a button that opens `AboutDialog.svelte` in the shared `Modal` (Escape closes it, Tab
+stays inside, the focus goes back to the button). It replaces the old version line of Settings. It is not repeated in
+the library header, which only holds the Settings button.
+
+- **Content**: name and version; the licence GPL-3.0-or-later with one plain sentence (use, study, change, share; a
+  distributed modified version stays free; no warranty) and the full `LICENSE` behind a disclosure button; the credit
+  to Tuhi (same wording as `THIRD-PARTY-NOTICES`: its documentation of the protocol guided Ardoise, which
+  reimplements it and contains no Tuhi code); Cisco's notice as `OpenH264State.notice` sends it (fallback: the same
+  sentence from the locale), the sentence saying that the user downloads OpenH264 from Cisco and that it is never
+  shipped, and whether it is installed here; the components (name, version, licence) with a filter field that
+  matches every word against name, version and licence (`lib/about.ts`, accents and case ignored) and a "shown of
+  total" counter; the full notices behind a second disclosure button.
+- **Data**: the exe embeds the repository's own `LICENSE` and `THIRD-PARTY-NOTICES` with `include_str!`
+  (`app/src-tauri/src/about.rs`); the component list is parsed back from the notices' two package lists, so the
+  screen and the file cannot disagree (a test checks the counts announced by the headings). Two commands:
+  `about_info` (version, SPDX licence, components) and `about_text("license" | "notices")` (long texts, fetched only
+  when the user asks and kept; an unknown name is a `{ code: "unexpected", message }` error). The notices add about
+  0.8 MB to the exe, so they are not compressed.
+- **Accessibility and themes**: disclosure buttons with `aria-expanded` and `aria-controls`; the scrollable list and
+  texts are focusable (`tabindex="0"`, labelled) so the keyboard can scroll them; the table has column and row
+  headers; colours come from the theme variables only, so dark mode follows.
+- **Tests**: `AboutDialog.test.ts` (both languages, filter, disclosures, errors), `lib/about.test.ts`, the Rust tests
+  of `about.rs`, and the journey `app/e2e/journeys-m10-about.mjs` (`aboutJourneys`, not wired into `run.mjs`).
+
+**`THIRD-PARTY-NOTICES` is complete** (`xtask/src/licenses.rs`): a package that ships no licence text (or only a
+NOTICE file) gets the standard text of each licence of its expression, from `xtask/licenses/` (Apache-2.0, MPL-2.0,
+and MIT, BSD-2-Clause, BSD-3-Clause templates with a `{holders}` placeholder). The holders on the "Copyright (c)"
+line are the manifest authors (names only, e-mail addresses dropped), otherwise "the <repository> contributors" with
+the repository address; with neither, the generation fails. Texts identical to one already in the file are merged
+into its "Covers" list (Apache-2.0 and MPL-2.0 were), the others are new texts. The file also has a section on the
+Cisco OpenH264 binary, which is not shipped. The automatic check (`cargo xtask licenses`, part of `check`) already
+covered every package of the resolved Cargo graph (all platforms, dev and build dependencies) and of
+`package-lock.json`, a superset of what ends up in the exe, so no gap was found there.
+
+**`cargo xtask dist [--reuse]`** (`xtask/src/dist.rs`): checks the licences, builds the release exe like `check` does
+(`--features custom-protocol`; `--reuse` takes `target/release/ardoise.exe` as it is), refuses an exe of 30 MB or
+more, and writes `target/dist/ardoise-<version>-windows-x64.zip` (version of `[workspace.package]`) with, under
+`ardoise-<version>/`: `ardoise.exe`, `LICENSE`, `THIRD-PARTY-NOTICES`, `LISEZMOI.txt` (French then English, CRLF)
+and `guide/*.html`. Each `docs/guide/*.md` becomes a standalone page with `pulldown-cmark` (tables and
+strikethrough; links to another guide page rewritten from `.md` to `.html`, fragment kept; a link to a file outside
+the guide is left as is and reported as a warning; headings get GitHub-style anchors; one embedded stylesheet,
+light and dark, with a print version). The archive is deterministic (entries sorted, fixed timestamps and
+permissions, same bytes for the same inputs); the size and SHA-256 are printed. Nothing is uploaded or published.
+Tests build an archive from a fake exe and a throwaway guide.
