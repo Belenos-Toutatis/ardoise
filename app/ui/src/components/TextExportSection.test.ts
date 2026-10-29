@@ -2,6 +2,7 @@
 // The export dialog also exports the recognised handwriting as text (milestone M7).
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { drawingCheck } from '../lib/export-options';
 import { setLocale } from '../lib/i18n.svelte';
 import { mockLibrary, resetMockLibrary } from '../lib/mock-data';
 import { mockClipboard } from '../lib/mock-export';
@@ -159,6 +160,24 @@ describe('export dialog: recognised text', () => {
     expect(option.disabled).toBe(false);
     expect(option.checked).toBe(true);
     check.mockRestore();
+  });
+
+  it('stops waiting for the drawings after a few seconds: the buttons work, the drawings stay in', async () => {
+    const { api } = await import('../lib/api');
+    const check = vi.spyOn(api, 'structuredTextDrawings').mockReturnValue(new Promise<number>(() => {}));
+    drawingCheck.limitMs = 400;
+    try {
+      const ui = await render([{ path: pathOf('Cours de physique') }]);
+      expect(ui.action('text-md').disabled).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      await settle();
+      expect(ui.action('text-md').disabled).toBe(false);
+      expect(ui.action('text-docx').disabled).toBe(false);
+      expect(ui.target.querySelector<HTMLInputElement>('input[data-option="text-drawings"]')!.checked).toBe(true);
+    } finally {
+      drawingCheck.limitMs = 5000;
+      check.mockRestore();
+    }
   });
 
   it('keeps the drawings when they cannot be looked for', async () => {

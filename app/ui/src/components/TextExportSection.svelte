@@ -11,7 +11,7 @@
   import { onMount } from 'svelte';
   import { api, errorMessage } from '../lib/api';
   import { pickExportFile } from '../lib/dialogs';
-  import { exportStem } from '../lib/export-options';
+  import { drawingCheck, exportStem } from '../lib/export-options';
   import { textFileName, type NoteText, type StructuredFormat, type TextLabels } from '../lib/handwriting';
   import { t } from '../lib/i18n.svelte';
   import type { ExportSource } from '../lib/note';
@@ -45,11 +45,16 @@
   const MAX_DRAWING_CHECK = 5;
 
   // Whether the notes have drawings: the option is on only when they do. Unknown, it stays on (a
-  // note without drawings exports the same either way).
+  // note without drawings exports the same either way). The search never holds the buttons for
+  // more than a few seconds: past that, the drawings are left in and the export goes ahead.
   onMount(() => {
     if (sources.length === 0 || sources.length > MAX_DRAWING_CHECK) return;
     let alive = true;
     drawingsChecking = true;
+    const giveUp = setTimeout(() => {
+      alive = false;
+      drawingsChecking = false;
+    }, drawingCheck.limitMs);
     api
       .structuredTextDrawings(requestSources())
       .then((count) => {
@@ -59,10 +64,12 @@
       })
       .catch(() => {})
       .finally(() => {
+        clearTimeout(giveUp);
         if (alive) drawingsChecking = false;
       });
     return () => {
       alive = false;
+      clearTimeout(giveUp);
     };
   });
 

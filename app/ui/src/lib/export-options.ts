@@ -86,3 +86,6 @@ export function exportStem(path: string): string {
   const name = path.split(/[\\/]/).pop() ?? path;
   return name.replace(/\.ardoise$/i, '') || name;
 }
+
+/** How long the text export's Markdown and Word buttons wait for the drawings search, in milliseconds (tests change it). */
+export const drawingCheck = { limitMs: 5000 };
