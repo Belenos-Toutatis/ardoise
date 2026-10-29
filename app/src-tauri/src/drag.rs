@@ -453,7 +453,13 @@ mod tests {
         let files = prepare_files(
             None,
             vec![ExportSource {
-                path: "C:\\Ardoise\\2026-10-24 Brouillon.ardoise".into(),
+                // A folder outside any library, written with this system's separator.
+                path: path_text(
+                    &root
+                        .path()
+                        .join("Ailleurs")
+                        .join("2026-10-24 Brouillon.ardoise"),
+                ),
                 note: Some(sample_note("Brouillon")),
                 image_key: None,
             }],
