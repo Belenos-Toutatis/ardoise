@@ -411,11 +411,11 @@ fn merge_outside(
     note.created = file.note.created;
     note.modified = file.note.modified.max(note.modified);
     note.page = file.note.page;
-    note.background = file.note.background.clone();
+    note.background = file.note.background;
     note.background_image = file.note.background_image.clone();
     note.layers = file.note.layers.clone();
     note.strokes = file.note.strokes.clone();
-    note.timing = file.note.timing.clone();
+    note.timing = file.note.timing;
     note.origin = file.note.origin.clone();
     merged.thumbnail = file.thumbnail.clone();
     merged.audio = file.audio.clone();
