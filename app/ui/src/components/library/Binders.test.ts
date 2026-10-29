@@ -152,7 +152,7 @@ describe('deleting a binder', () => {
     ui = await renderHome();
     await act('Perso', 'Supprimer…');
     await ui.click(ui.button('Supprimer le classeur'));
-    await vi.waitFor(() => expect(ui!.q('[role="alert"]')?.textContent).toContain("ce classeur n'existe plus"));
+    await vi.waitFor(() => expect(ui!.q('[role="alert"]')?.textContent).toContain("Ce classeur n'existe plus"));
   });
 
   it('lists the notes that could not go to the trash', async () => {

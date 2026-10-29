@@ -194,13 +194,13 @@ describe('turning several notes', () => {
   });
 
   it('removes the notice after a few seconds, but not while the pointer is on it', async () => {
-    undoNotice.durationMs = 30;
+    undoNotice.durationMs = 300;
     ui = await renderHome();
     await ui.select('Réunion parents');
     await turn('right');
     const offer = ui.q('.activity-offer')!;
     offer.dispatchEvent(new MouseEvent('mouseenter'));
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await new Promise((resolve) => setTimeout(resolve, 700));
     expect(ui.q('.activity-offer')).not.toBeNull();
     offer.dispatchEvent(new MouseEvent('mouseleave'));
     await vi.waitFor(() => expect(ui!.q('.activity-offer')).toBeNull());
