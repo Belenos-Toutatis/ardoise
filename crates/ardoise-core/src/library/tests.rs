@@ -1266,9 +1266,15 @@ fn holds_notes_looks_below_and_ignores_the_library_folder() {
 #[test]
 fn a_cached_listing_reopens_only_the_notes_that_changed() {
     let (dir, library) = new_library();
-    let kept = library.create(Path::new(""), &note_file("a", "Gardée")).unwrap();
-    let edited = library.create(Path::new("B"), &note_file("b", "Avant")).unwrap();
-    let gone = library.create(Path::new("B"), &note_file("c", "Perdue")).unwrap();
+    let kept = library
+        .create(Path::new(""), &note_file("a", "Gardée"))
+        .unwrap();
+    let edited = library
+        .create(Path::new("B"), &note_file("b", "Avant"))
+        .unwrap();
+    let gone = library
+        .create(Path::new("B"), &note_file("c", "Perdue"))
+        .unwrap();
     let mut cache = HeaderCache::default();
     let first = library.list_with(&mut cache);
     assert_eq!(first.notes.len(), 3);
@@ -1320,7 +1326,9 @@ fn a_note_that_just_arrived_in_the_trash_is_kept_whatever_its_record_says() {
     assert_eq!(library.trash_items().unwrap().len(), 1);
     // Thirty days after it arrived, it goes.
     assert_eq!(
-        library.purge_expired_at(item.deleted + 31 * DAY_MS).unwrap(),
+        library
+            .purge_expired_at(item.deleted + 31 * DAY_MS)
+            .unwrap(),
         1
     );
 }

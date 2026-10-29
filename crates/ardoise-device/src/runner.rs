@@ -485,8 +485,8 @@ impl Run<'_> {
                     decode_errors.push(format!("page {index}: {error}"));
                 }
             }
-            let known = imported.find(&library, &page).is_some()
-                || (!delete && imported.in_trash(&page));
+            let known =
+                imported.find(&library, &page).is_some() || (!delete && imported.in_trash(&page));
             if known {
                 lock(&log).note(format!("page {index} already in the library"));
                 return Ok(());

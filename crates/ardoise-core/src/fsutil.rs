@@ -464,7 +464,10 @@ mod tests {
         make("c.ardoise.part", old);
         make(".sync/.x.1.2.part", old);
         make("note.ardoise", old);
-        assert_eq!(sweep_stale_temp_files(root, Duration::from_secs(24 * 3600)), 3);
+        assert_eq!(
+            sweep_stale_temp_files(root, Duration::from_secs(24 * 3600)),
+            3
+        );
         assert_eq!(
             entries(root),
             [

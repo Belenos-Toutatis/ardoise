@@ -273,11 +273,11 @@ fn note_in_library(root: &Path, path: &Path) -> Result<PathBuf, ToolError> {
         .map_err(|_| invalid("outside the library"))?;
     let hidden = inside.components().any(|part| {
         matches!(part, Component::Normal(name)
-            if name.to_str().is_none_or(|name| {
-                name.starts_with('.')
-                    || name.eq_ignore_ascii_case(META_DIR)
-                    || name.eq_ignore_ascii_case(LEGACY_META_DIR)
-            }))
+        if name.to_str().is_none_or(|name| {
+            name.starts_with('.')
+                || name.eq_ignore_ascii_case(META_DIR)
+                || name.eq_ignore_ascii_case(LEGACY_META_DIR)
+        }))
     });
     if hidden || !real.is_file() {
         return Err(not_found());
@@ -773,7 +773,11 @@ mod tests {
                 "noteNotFound",
             ),
             (
-                fixture.root.join("Physique").join(".cache").join("Cache.ardoise"),
+                fixture
+                    .root
+                    .join("Physique")
+                    .join(".cache")
+                    .join("Cache.ardoise"),
                 "noteNotFound",
             ),
             (

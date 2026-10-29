@@ -340,6 +340,7 @@ pub fn retitle_in(
 
 /// The listing the interface shows: the whole library, without the automatic export folder
 /// while the automatic export is on.
+#[cfg(test)]
 fn list_for_interface(context: &AppContext) -> CommandResult<LibraryListing> {
     Ok(list_without_exports(
         &library_of(context)?,
@@ -369,14 +370,7 @@ fn list_without_exports(library: &Library, export_folder: Option<&str>) -> Libra
 // Async: Tauri runs them on a worker thread instead of the main thread, so disk access never
 // freezes the window.
 
-fn with_library<T>(
-    context: &AppContext,
-    action: impl FnOnce(&Library) -> Result<T, LibraryError>,
-) -> CommandResult<T> {
-    action(&library_of(context)?).map_err(library_error)
-}
-
-/// [`with_library`] on a blocking thread: the disk of a synced folder can be slow, and the
+/// Runs `action` on the library, on a blocking thread: the disk of a synced folder can be slow, and the
 /// async runtime has only a few threads.
 async fn with_library_blocking<T: Send + 'static>(
     context: &AppContext,

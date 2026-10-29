@@ -923,9 +923,15 @@ async fn get_note_text_passes_the_language_and_reports_missing_recognition() {
         .await;
     assert_eq!(error["code"], "invalidArguments");
     let message = error["message"].as_str().unwrap();
-    assert!(message.contains("Copie/") && message.contains("Physique/"), "{message}");
+    assert!(
+        message.contains("Copie/") && message.contains("Physique/"),
+        "{message}"
+    );
     let named = session
-        .ok("get_note_text", json!({ "note": "Physique/2026-10-26 Chimie des métaux" }))
+        .ok(
+            "get_note_text",
+            json!({ "note": "Physique/2026-10-26 Chimie des métaux" }),
+        )
         .await;
     assert_eq!(named["lines"], json!(["Les métaux conduisent le courant"]));
 
