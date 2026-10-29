@@ -683,7 +683,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(outcome.files, [pdf.clone()]);
+        assert_eq!(outcome.files, std::slice::from_ref(&pdf));
         assert!(fs::read(&pdf).unwrap().starts_with(b"%PDF"));
 
         // A note that is not in the library: a coded error, nothing written.

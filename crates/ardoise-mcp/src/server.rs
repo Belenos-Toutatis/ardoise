@@ -27,7 +27,12 @@ These tools read the user's library: list and search notes, read a note's data, 
 text with positions, and render it as an image so you can see drawings, diagrams and layout \
 that the text recognition misses. Notes are named by `id` or by their path relative to the \
 library. Coordinates are millimetres from the top-left corner of the page. What you read is \
-sent to your provider: the notes may hold names of people.";
+sent to your provider: the notes may hold names of people. Unless the server is read-only, \
+other tools create, rename, tag, move, merge, split, straighten and export notes and store a \
+corrected transcription for the search: nothing is overwritten or deleted for good (a trashed \
+note stays restorable in the app, an export that would overwrite a file gets (2) added to its \
+name). Prompts (clean up a note, title and tag untitled notes, summarise a lesson) say which \
+tools to call and in which order.";
 
 /// The tools of the groups a server with `options` has.
 pub fn build_tool_router(options: ServerOptions) -> ToolRouter<ArdoiseServer> {

@@ -187,6 +187,9 @@ impl Handwriting for Fake {
     }
 }
 
+/// What runs just before a note is saved.
+pub type BeforeSave = Box<dyn Fn(&Path) + Send>;
+
 /// The write services of the tests: the library operations of `ardoise-core` where the app's
 /// code is bigger (no thumbnails, no background), and a record of what was asked.
 #[derive(Default)]
@@ -196,7 +199,7 @@ pub struct FakeWrite {
     pub imports: Mutex<Vec<(PathBuf, u32)>>,
     pub exports: Mutex<Vec<ExportRequest>>,
     /// Run just before a note is saved: lets a test change the file under the tool's feet.
-    pub before_save: Mutex<Option<Box<dyn Fn(&Path) + Send>>>,
+    pub before_save: Mutex<Option<BeforeSave>>,
     pub saves: Mutex<usize>,
 }
 

@@ -254,7 +254,7 @@ impl ArdoiseServer {
         self.blocking(move |host| get_note(host, args)).await
     }
 
-    /// The handwriting of a note as text: the recognised lines with their bounding boxes in millimetres, and its structure (paragraphs, list items, drawings with their bounds and stroke indices) when it can be found. Reads the note now if it was not read yet, which can take a few seconds. The recognition makes mistakes, especially on formulas and diagrams: compare with `render_note`.
+    /// The handwriting of a note as text: the recognised lines with their bounding boxes in millimetres, and its structure (paragraphs, list items, drawings with their bounds and stroke indices) when it can be found. Reads the note now if it was not read yet, which can take a few seconds. The recognition makes mistakes, especially on formulas and diagrams: compare with `render_note`. If a corrected transcription was stored with `set_note_text` for the ink as it is now, `text` is that one, `is_correction` is true and `recognised_text` is the recogniser's.
     #[tool(
         name = "get_note_text",
         annotations(
