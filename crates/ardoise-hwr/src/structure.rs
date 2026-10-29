@@ -82,6 +82,9 @@ const COVERED_SPAN: f32 = 0.5;
 /// A "word" whose rectangle is this much the mark's (intersection over union) is the
 /// recognition's reading of the mark itself ("_", "—"), not a word.
 const OWN_READING: f32 = 0.5;
+/// A recognised word is dropped when drawings cover at least this share of its area (and no
+/// text block holds its middle).
+const WORD_IN_DRAWINGS: f32 = 0.5;
 /// A drawing is beside a block of text when they overlap vertically by at least this share
 /// of the smaller height...
 const BESIDE_OVERLAP: f32 = 0.3;
@@ -885,6 +888,7 @@ fn regions_layout(
     let texts = text_regions(regions);
     let mut marked = Marked::new(source.lines);
     let mut drawings = Vec::new();
+    let mut covers = Vec::new();
     for region in regions.iter().filter(|r| r.kind == RegionKind::Drawing) {
         if region.bounds.width < MIN_DRAWING && region.bounds.height < MIN_DRAWING {
             continue;
@@ -894,6 +898,7 @@ fn regions_layout(
             continue;
         }
         if !source.corrected {
+            covers.push(region.bounds);
             // What the recognition read in the drawing's ink, outside any text.
             for (line, kept) in source.lines.iter().zip(marked.kept.iter_mut()) {
                 for (word, kept) in line.words.iter().zip(kept.iter_mut()) {
@@ -918,6 +923,22 @@ fn regions_layout(
                 strokes: drawing_strokes(&region.bounds, own, ink),
             }),
         ));
+    }
+    // A "word" that is mostly over drawings, though its middle is in none (the engine read
+    // the ink of two drawings as one letter, and its line then spans the page), is no text.
+    for (line, kept) in source.lines.iter().zip(marked.kept.iter_mut()) {
+        for (word, kept) in line.words.iter().zip(kept.iter_mut()) {
+            let area = word.bounds.width * word.bounds.height;
+            let covered: f32 = covers.iter().map(|c| intersection(&word.bounds, c)).sum();
+            let (x, y) = center(&word.bounds);
+            let margin = word.bounds.height * REGION_MARGIN;
+            if area > 0.0
+                && covered >= area * WORD_IN_DRAWINGS
+                && !texts.iter().any(|t| contains(&t.bounds, x, y, margin))
+            {
+                *kept = false;
+            }
+        }
     }
     let mut held: Vec<Vec<MarkedLine>> = texts.iter().map(|_| Vec::new()).collect();
     let mut loose = Vec::new();
@@ -1685,6 +1706,53 @@ mod tests {
         let found = structure_of(&reader, &r, None, &note_of(strokes));
         assert!(reader.asked().is_empty(), "nothing read again");
         assert_eq!(texts(&found.items), ["P:Optique 12/03", "P:la lumiere"]);
+    }
+
+    #[test]
+    fn a_word_over_two_drawings_is_not_text_and_does_not_stretch_its_line() {
+        // The engine read the ink of two drawings, right of the text, as one letter ending the
+        // last list item: its line must not span the page and fall into another block.
+        let r = recognition(vec![
+            line("le chat", 0.0, 0.0),
+            Line::new(vec![
+                word("du", 0.0, 3000.0, 400.0, 300.0),
+                word("J", 8000.0, 0.0, 1000.0, 3200.0),
+            ]),
+        ]);
+        let regions = [
+            region(
+                RegionKind::Paragraph,
+                bounds(0.0, 0.0, 900.0, 300.0),
+                "",
+                vec![],
+            ),
+            region(
+                RegionKind::ListItem,
+                bounds(0.0, 3000.0, 400.0, 300.0),
+                "",
+                vec![],
+            ),
+            region(
+                RegionKind::Drawing,
+                bounds(8000.0, 0.0, 1000.0, 1500.0),
+                "",
+                vec![],
+            ),
+            region(
+                RegionKind::Drawing,
+                bounds(8000.0, 1700.0, 1000.0, 1500.0),
+                "",
+                vec![],
+            ),
+        ];
+        let items = from_regions(&regions, &[], &r, &[]);
+        assert_eq!(
+            texts(&items)
+                .into_iter()
+                .filter(|t| !t.starts_with("D"))
+                .collect::<Vec<_>>(),
+            ["P:le chat", "L:du"]
+        );
     }
 
     #[test]

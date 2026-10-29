@@ -256,9 +256,10 @@ fn windows_ink_analysis_finds_paragraphs_list_items_and_drawings() {
         })
         .collect();
     assert_eq!(list.len(), 3, "{:?}", describe(&items));
-    // Words may be misread by the engine; the first letters are enough to tell the items.
-    for (found, expected) in list.iter().zip(["pomm", "poire", "du"]) {
-        assert!(found.starts_with(expected), "{list:?}");
+    // Words may be misread by the engine ("du pain" comes back as "aupain"): a piece of the
+    // noun is enough to tell the items.
+    for (found, expected) in list.iter().zip(["pomm", "poire", "pain"]) {
+        assert!(found.contains(expected), "{list:?}");
     }
     let paragraphs = items
         .iter()
