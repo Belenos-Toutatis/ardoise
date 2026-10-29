@@ -337,7 +337,7 @@
     "copied": "Copied",
     "copyFailed": "Cannot copy: select the text and copy it with Ctrl+C.",
     "privacy": "Privacy: what the assistant reads (the text and image of your notes, sometimes students' names) goes to its provider, under your account's settings. Assistants usually ask for your consent before changing anything, but that depends on their permission settings; Ardoise flags the tools that change or remove notes. Nothing is ever deleted for good. To let it only read, declare it with \"Read only\" ticked.",
-    "guide": "Step by step: the \"Assistant\" guide (docs/guide/assistant.en.md)."
+    "guide": "Step by step: the \"Assistant\" guide, file guide\\assistant.en.html in Ardoise's folder."
   },
   "about": {
     "section": "About",
