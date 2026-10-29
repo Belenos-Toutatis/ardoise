@@ -137,8 +137,8 @@ setting, each naming the tools to use:
 - **Handwriting**: the app's `Indexer` (M7) is started at the first search or text request (a session that only
   lists notes never wakes the engine) with `busy = false`: the process cannot see live mode, which runs in the
   app's process, so the background pass keeps the low priority of the background engine. The search waits at
-  most 10 s for the pass to load the texts the cache already holds, then answers with what is read and the
-  number of unread notes; the pass goes on reading the library while the server lives. `get_note_text`
+  most 20 s for the first pass to end (a small library is searched whole), then answers with what is read
+  and the number of unread notes; the pass goes on reading the library while the server lives. `get_note_text`
   recognises on demand through `Indexer::recognition_in` (new: forces a language) and fills the same cache.
   Structure: `ardoise_hwr::structure::structure_of` (Windows' ink analysis, else layout heuristics;
   `structure.source` says which). Outside Windows `SystemRecognizer` answers `Unsupported`, so the text tools
@@ -156,3 +156,12 @@ setting, each naming the tools to use:
 - **Tests**: `crates/ardoise-mcp/tests/read_tools.rs` (in-memory duplex transport, temporary library, fake
   handwriting service), unit tests in the modules, `app/src-tauri/src/mcp.rs` (argument parsing), and the
   journey `app/e2e/mcp.mjs` (real executable over pipes; not wired into `run.mjs`).
+- **GUI subsystem and pipes — checked for real**: the release `ardoise.exe` (PE subsystem 2, "windows") started by
+  Node with `stdio: pipe` (what Claude Code does) answers `initialize`, `tools/list` and every read tool, and
+  exits with code 0 when its stdin is closed; nothing else reaches stdout (the journey fails on any stdout line
+  that is not a JSON-RPC message). No console strategy is needed for that case: the parent's pipes are the
+  process's standard handles. `console::attach_parent_console()` is still called first, for a server started by
+  hand from a terminal without redirection (GUI programs then have no standard handles; it attaches only when
+  stdout is null, as the other command-line modes do). The banner goes to stderr, best effort.
+  Journey: `node app/e2e/mcp.mjs target/release/ardoise.exe [fr|en]` (13 checks, "MCP OK"); the French
+  handwriting recognizer of Windows is needed for the text and search checks.

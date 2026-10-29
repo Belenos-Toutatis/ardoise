@@ -25,9 +25,9 @@ use crate::handwriting::{
     IndexState, IndexStatus, Indexer, PAUSE_POLL, Services, handwriting_dir, index_config,
 };
 
-/// How long a search waits for the indexer to load the recognised texts that the cache already
-/// holds (a fraction of a second for hundreds of notes).
-const INDEX_READY: Duration = Duration::from_secs(10);
+/// How long a search waits for the indexer to read the notes whose text is not in the cache yet
+/// (the cached ones load in a fraction of a second; recognising a note takes about a second).
+const INDEX_WAIT: Duration = Duration::from_secs(20);
 
 /// Command-line options of the mode.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -105,14 +105,19 @@ impl AppHandwriting {
         })
     }
 
-    /// The status once the first pass knows which texts the cache holds.
-    fn ready_status(&self) -> IndexStatus {
+    /// The status once the first pass is over (every note read or failed), or after
+    /// [`INDEX_WAIT`]: a small library is searched whole, a large one answers with what is read
+    /// so far and the number of notes still to read.
+    fn settled_status(&self) -> IndexStatus {
         let indexer = self.indexer();
         let started = Instant::now();
         loop {
             let status = indexer.status();
-            let ready = status.language.is_some() || status.reason.is_some();
-            if ready || started.elapsed() >= INDEX_READY {
+            // The default status (before the pass has listed the library) is `Idle` with no
+            // language and no reason: it is not a finished pass.
+            let started_pass = status.language.is_some() || status.reason.is_some();
+            let over = started_pass && status.state != IndexState::Indexing;
+            if over || started.elapsed() >= INDEX_WAIT {
                 return status;
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -134,7 +139,7 @@ impl Handwriting for AppHandwriting {
     }
 
     fn search(&self, query: &str) -> TextSearch {
-        let status = self.ready_status();
+        let status = self.settled_status();
         let available = status.state != IndexState::Unavailable;
         TextSearch {
             hits: self
