@@ -1,11 +1,12 @@
 // End-to-end checks of the MCP write tools and the prompts (milestone M9, part 2), run by
 // `mcpJourney` (app/e2e/mcp.mjs) on a demo library of their own, with a real `ardoise.exe --mcp`
 // on pipes: create, update, move, trash, merge, split, straighten, export (png, md, pdf, a
-// replay is too long for a journey), set_note_text then search, and the prompts in the
-// language of the app. No window is driven.
+// replay is too long for a journey), the search following the library after a write,
+// set_note_text then search, and the prompts in the language of the app (also those of a
+// --read-only server). No window is driven.
 //
 // By hand: `node app/e2e/mcp.mjs target/debug/ardoise.exe fr` (then `en`).
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
@@ -14,6 +15,8 @@ export const WRITE_ONLY_TOOLS = [
   'create_note', 'update_note', 'move_note', 'trash_note', 'merge_notes', 'split_note',
   'straighten_shapes', 'export_note', 'set_note_text',
 ];
+/** The write tools that change or remove what is there (`destructiveHint: true`). */
+const DESTRUCTIVE = ['update_note', 'move_note', 'trash_note', 'split_note', 'straighten_shapes'];
 const PROMPTS = {
   fr: ['mettre_au_propre', 'resume_seance', 'titrer_et_etiqueter'],
   en: ['clean_up', 'lesson_summary', 'title_and_tag'],
@@ -85,13 +88,14 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
   try {
     await session.initialize();
 
-    await check('tools/list : les neuf outils d’écriture, sans effet destructeur', async () => {
+    await check('tools/list : les neuf outils d’écriture, destructeurs ceux qui changent ou retirent', async () => {
       const tools = await session.tools();
       for (const name of WRITE_ONLY_TOOLS) {
         const tool = tools.find((t) => t.name === name);
         if (!tool) throw new Error(`${name} absent`);
         if (tool.annotations?.readOnlyHint !== false) throw new Error(`${name} : readOnlyHint doit être false`);
-        if (tool.annotations?.destructiveHint !== false) throw new Error(`${name} : destructiveHint doit être false`);
+        const destructive = DESTRUCTIVE.includes(name);
+        if (tool.annotations?.destructiveHint !== destructive) throw new Error(`${name} : destructiveHint doit être ${destructive}`);
         if (tool.inputSchema?.type !== 'object' || !tool.description) throw new Error(`${name} : schéma ou description absents`);
       }
     });
@@ -163,15 +167,31 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
     const optique = notes.get("Cours d'optique");
     const ohm = [...notes.values()].find((n) => n.title.startsWith('Électricité'));
     const chimie = [...notes.values()].find((n) => /chimique/i.test(n.title) && n.stroke_count > 0);
+    const searchIds = async (query) => {
+      const result = await session.call('search_notes', { query });
+      if (result.isError) throw new Error(textOf(result));
+      return { ids: result.structuredContent.notes.map((n) => n.id), text: result.structuredContent.text_search };
+    };
+    await check('search_notes avant les écritures : « lumiere » trouve « Cours d’optique » par son écriture', async () => {
+      const { ids, text } = await searchIds('lumiere');
+      if (!ids.includes(optique.id)) throw new Error(`non trouvé (il faut la reconnaissance d’écriture de Windows) : ${JSON.stringify(text)}`);
+    });
+    let merged;
     await check('merge_notes : une note nouvelle, les sources intactes', async () => {
       const result = await session.call('merge_notes', { notes: [optique.id, ohm.id], layout: 'endToEnd', title: 'Fusion' });
       if (result.isError) throw new Error(textOf(result));
       const { note } = result.structuredContent;
+      merged = note;
       if (note.title !== 'Fusion' || note.stroke_count !== optique.stroke_count + ohm.stroke_count) throw new Error(JSON.stringify(note));
       if (!(note.page.height_mm > optique.page.height_mm * 1.9)) throw new Error(`page : ${JSON.stringify(note.page)}`);
       const after = await notesByTitle(session);
       if (after.get("Cours d'optique").stroke_count !== optique.stroke_count) throw new Error('une source a changé');
       await expectError('merge_notes', { notes: [optique.id], layout: 'overlay' }, 'nothingToMerge');
+    });
+    await check('search_notes suit la bibliothèque : la note fusionnée, faite après la première recherche, est trouvée par son écriture', async () => {
+      const { ids, text } = await searchIds('lumiere');
+      if (!ids.includes(merged.id)) throw new Error(`la nouvelle note n’est pas cherchée : ${JSON.stringify(text)}`);
+      if (text.unread_notes !== 0) throw new Error(`notes non lues : ${JSON.stringify(text)}`);
     });
     await check('split_note : à un instant, deux notes qui se partagent les traits', async () => {
       const read = (await session.call('get_note', { note: optique.id, strokes: 'summary' })).structuredContent;
@@ -184,12 +204,25 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
       if (!kept.stroke_count || !part.stroke_count) throw new Error('une moitié est vide');
       await expectError('split_note', { note: optique.id }, 'invalidArguments');
     });
-    await check('straighten_shapes : les formes dessinées à la main sont redressées en une sauvegarde', async () => {
-      const before = (await session.call('get_note', { note: chimie.id })).structuredContent;
-      const result = await session.call('straighten_shapes', { note: chimie.id });
-      if (result.isError) throw new Error(textOf(result));
-      const { straightened, saved, shapes } = result.structuredContent;
-      if (!(straightened >= 1) || !saved || !shapes.length) throw new Error(JSON.stringify(result.structuredContent).slice(0, 300));
+    await check('straighten_shapes : les dessins que trouve l’analyse de l’encre, une sauvegarde, la version d’avant dans la corbeille', async () => {
+      const before = (await session.call('get_note', { note: chimie.id, strokes: 'summary' })).structuredContent;
+      const auto = await session.call('straighten_shapes', { note: chimie.id });
+      if (auto.isError) throw new Error(`${textOf(auto)} (il faut l’analyse de l’encre de Windows)`);
+      let result = auto.structuredContent;
+      if (result.chosen_by !== 'ink_analysis') throw new Error(JSON.stringify(result).slice(0, 300));
+      if (!result.saved) {
+        // No drawing of the demo note is a clear shape: every stroke, given.
+        const all = before.strokes.map((_, index) => index);
+        const given = await session.call('straighten_shapes', { note: chimie.id, strokes: all });
+        if (given.isError) throw new Error(textOf(given));
+        result = given.structuredContent;
+      }
+      const { straightened, saved, shapes, previous_version: kept } = result;
+      if (!(straightened >= 1) || !saved || !shapes.length) throw new Error(JSON.stringify(result).slice(0, 300));
+      const suffix = language === 'fr' ? '(avant redressement)' : '(before straightening)';
+      if (!kept?.title?.endsWith(suffix) || !kept.in_trash || kept.id === chimie.id) throw new Error(`version d’avant : ${JSON.stringify(kept)}`);
+      const trash = readdirSync(join(app.library, '_ardoise', 'trash'));
+      if (!trash.includes(kept.in_trash)) throw new Error(`pas dans la corbeille : ${trash.join(', ')}`);
       const after = (await session.call('get_note', { note: chimie.id })).structuredContent;
       if (after.note.modified === before.note.modified && after.note.stroke_count === before.note.stroke_count) throw new Error('la note n’a pas changé');
       await expectError('straighten_shapes', { note: chimie.id, strokes: [100000] }, 'invalidArguments');
@@ -217,6 +250,11 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
       await expectError('export_note', { notes: [ohm.id], format: 'png', path: join(out, 'a.jpg') }, 'invalidArguments');
       await expectError('export_note', { notes: [ohm.id], format: 'png', path: out, dpi: 5000 }, 'invalidArguments');
       await expectError('export_note', { notes: [ohm.id, chimie.id], format: 'mp4', path: out }, 'invalidArguments');
+      await expectError('export_note', { notes: [ohm.id], format: 'webm', path: out, duration_seconds: 3600 }, 'invalidArguments');
+      await expectError('export_note', { notes: [ohm.id], format: 'gif', path: out, speed: 1000 }, 'invalidArguments');
+      // A refused export leaves no folder behind.
+      await expectError('export_note', { notes: [ohm.id], format: 'png', path: join(out, 'neuf', 'x.png'), dpi: 5000 }, 'invalidArguments');
+      if (existsSync(join(out, 'neuf'))) throw new Error('un dossier a été créé pour un export refusé');
     });
     await check('export_note : le texte en Markdown, avec ses dessins (reconnaissance de Windows)', async () => {
       const result = await session.call('export_note', { notes: [optique.id], format: 'md', path: join(out, 'texte'), language });
@@ -225,6 +263,19 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
       if (!md.endsWith('.md')) throw new Error(`fichiers : ${result.structuredContent.files}`);
       const text = fold(readFileSync(md, 'utf8'));
       if (!text.includes('lumiere')) throw new Error(`le texte n’a pas les mots de la note : ${text.slice(0, 200)}`);
+      // Its name taken by another export's drawings (its `.md` gone): the next name, those
+      // drawings untouched.
+      const stem = md.slice(0, -'.md'.length);
+      rmSync(md);
+      const images = `${stem}_images`;
+      const theirs = join(images, 'mine.png');
+      if (!existsSync(images)) mkdirSync(images);
+      writeFileSync(theirs, 'theirs');
+      const again = await session.call('export_note', { notes: [optique.id], format: 'md', path: join(out, 'texte'), language });
+      if (again.isError) throw new Error(textOf(again));
+      const [other] = again.structuredContent.files;
+      if (other !== `${stem} (2).md`) throw new Error(`second export : ${other}`);
+      if (readFileSync(theirs, 'utf8') !== 'theirs') throw new Error('un fichier du dossier des dessins a changé');
     });
 
     // --- set_note_text -----------------------------------------------------------------------
@@ -287,6 +338,32 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
       if (!summary.includes(ohm.id)) throw new Error(`${lesson} : la note du jour n’est pas listée`);
       const bad = await session.request('prompts/get', { name: lesson, arguments: { date: 'demain' } });
       if (!bad.error) throw new Error(`${lesson} : une date fausse doit être refusée`);
+    });
+    await check('prompts d’un serveur --read-only : aucun outil absent n’y est nommé', async () => {
+      const readOnly = startServer(app, ['--read-only']);
+      try {
+        await readOnly.initialize();
+        const present = (await readOnly.tools()).map((t) => t.name);
+        const absent = (await session.tools()).map((t) => t.name).filter((n) => !present.includes(n));
+        const [clean, lesson, title] = PROMPTS[language];
+        const texts = [];
+        for (const args of [{}, { note: ohm.id, format: 'markdown' }, { format: 'word' }]) {
+          const answer = await readOnly.request('prompts/get', { name: clean, arguments: args });
+          if (answer.error) throw new Error(`${clean} : ${JSON.stringify(answer.error)}`);
+          texts.push(answer.result.messages.map((m) => m.content.text).join('\n'));
+        }
+        for (const name of [title, lesson]) {
+          const answer = await readOnly.request('prompts/get', { name, arguments: {} });
+          if (answer.error) throw new Error(`${name} : ${JSON.stringify(answer.error)}`);
+          texts.push(answer.result.messages.map((m) => m.content.text).join('\n'));
+        }
+        for (const text of texts) {
+          const named = absent.filter((tool) => text.includes(`\`${tool}\``));
+          if (named.length) throw new Error(`outils absents nommés : ${named.join(', ')}`);
+        }
+      } finally {
+        await readOnly.close(3000);
+      }
     });
   } finally {
     session.child.kill();
