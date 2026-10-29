@@ -981,6 +981,7 @@ impl Watched {
                 let _ = sender.send(batch);
             })
             .unwrap();
+        watcher.wait_until_scanned();
         Watched {
             _watcher: watcher,
             changes,
@@ -1260,4 +1261,42 @@ fn holds_notes_looks_below_and_ignores_the_library_folder() {
         .unwrap();
     assert!(holds_notes(&dir.path().join("Export")));
     assert!(!holds_notes(&dir.path().join("absent")));
+}
+
+#[test]
+fn a_cached_listing_reopens_only_the_notes_that_changed() {
+    let (dir, library) = new_library();
+    let kept = library.create(Path::new(""), &note_file("a", "Gardée")).unwrap();
+    let edited = library.create(Path::new("B"), &note_file("b", "Avant")).unwrap();
+    let gone = library.create(Path::new("B"), &note_file("c", "Perdue")).unwrap();
+    let mut cache = HeaderCache::default();
+    let first = library.list_with(&mut cache);
+    assert_eq!(first.notes.len(), 3);
+    assert_eq!(first.binders, [PathBuf::from("B")]);
+
+    // The kept note's file is damaged, but its stamp (time and size) is the same: a cached
+    // listing does not reopen it, so it still lists; a plain listing reports it.
+    let bytes = fs::read(&kept.path).unwrap();
+    fs::write(&kept.path, vec![b'x'; bytes.len()]).unwrap();
+    File::options()
+        .write(true)
+        .open(&kept.path)
+        .unwrap()
+        .set_modified(kept.stamp.modified)
+        .unwrap();
+    assert_eq!(library.list().problems.len(), 1);
+
+    let loaded = library.read(&edited.path).unwrap();
+    let mut file = loaded.file;
+    file.note.title = "Après".into();
+    library.save(&edited.path, &file, &loaded.stamp).unwrap();
+    library.trash(&gone.path).unwrap();
+
+    let second = library.list_with(&mut cache);
+    assert!(second.problems.is_empty(), "{:?}", second.problems);
+    let titles: Vec<&str> = second.notes.iter().map(|n| n.title.as_str()).collect();
+    assert_eq!(titles.len(), 2);
+    assert!(titles.contains(&"Gardée") && titles.contains(&"Après"));
+    assert_eq!(cache.entries.len(), 2);
+    drop(dir);
 }

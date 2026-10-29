@@ -15,7 +15,7 @@ mod trash;
 mod walk;
 mod watch;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -290,6 +290,15 @@ pub struct Listing {
     /// Sorted by path.
     pub notes: Vec<NoteEntry>,
     pub problems: Vec<ListProblem>,
+    /// Every binder (sub-folder), relative to the root, sorted; empty ones included.
+    pub binders: Vec<PathBuf>,
+}
+
+/// The notes of a past [`Listing`], to list again without reopening the files that did not
+/// change ([`Library::list_with`]).
+#[derive(Debug, Default)]
+pub struct HeaderCache {
+    entries: HashMap<PathBuf, NoteEntry>,
 }
 
 /// A tag and how many listed notes carry it.
@@ -460,11 +469,22 @@ impl Library {
     /// Lists every note, reading only each file's `note.json`. Files that cannot be read are
     /// reported in [`Listing::problems`] and do not stop the listing.
     pub fn list(&self) -> Listing {
+        self.list_with(&mut HeaderCache::default())
+    }
+
+    /// [`list`](Self::list), reusing the header of every note whose file did not change since
+    /// `cache` saw it (same path and stamp): opening a note's archive is what costs on a
+    /// synced folder with a thousand notes. The cache then holds exactly the notes listed.
+    pub fn list_with(&self, cache: &mut HeaderCache) -> Listing {
         let mut found = Vec::new();
-        let walk_problems = walk::walk(&self.root, |f| {
-            if let walk::Found::Note { path, binder } = f {
-                found.push((path, binder));
-            }
+        let mut binders = Vec::new();
+        let walk_problems = walk::walk(&self.root, |f| match f {
+            walk::Found::Note {
+                path,
+                binder,
+                stamp,
+            } => found.push((path, binder, stamp)),
+            walk::Found::Binder(binder) => binders.push(binder),
         });
         let mut listing = Listing::default();
         for (path, error) in walk_problems {
@@ -476,12 +496,27 @@ impl Library {
                 path,
             });
         }
-        for (path, binder) in found {
-            match read_entry(&path, binder) {
-                Ok(entry) => listing.notes.push(entry),
+        let mut kept = HashMap::with_capacity(found.len());
+        for (path, binder, stamp) in found {
+            let cached = stamp.and_then(|stamp| {
+                let entry = cache.entries.remove(&path)?;
+                (entry.stamp == stamp && entry.binder == binder).then_some(entry)
+            });
+            let entry = match cached {
+                Some(entry) => Ok(entry),
+                None => read_entry(&path, binder),
+            };
+            match entry {
+                Ok(entry) => {
+                    kept.insert(path, entry.clone());
+                    listing.notes.push(entry);
+                }
                 Err(error) => listing.problems.push(ListProblem { path, error }),
             }
         }
+        cache.entries = kept;
+        binders.sort();
+        listing.binders = binders;
         listing.notes.sort_by(|a, b| a.path.cmp(&b.path));
         listing.problems.sort_by(|a, b| a.path.cmp(&b.path));
         listing

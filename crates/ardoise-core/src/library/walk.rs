@@ -4,6 +4,7 @@ use std::fs::{self, DirEntry};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::FileStamp;
 use super::names::is_note_file_name;
 
 /// Deepest binder nesting explored (protection against pathological trees).
@@ -13,8 +14,14 @@ const MAX_DEPTH: usize = 64;
 pub(crate) enum Found {
     /// A binder (folder), relative to the root.
     Binder(PathBuf),
-    /// A note file: absolute path and its binder relative to the root.
-    Note { path: PathBuf, binder: PathBuf },
+    /// A note file: absolute path, its binder relative to the root, and its stamp as the
+    /// directory listing gave it (free on Windows, where the listing carries the times and
+    /// sizes; `None` if it could not be read).
+    Note {
+        path: PathBuf,
+        binder: PathBuf,
+        stamp: Option<FileStamp>,
+    },
 }
 
 /// Whether a file or folder name is skipped: the library's own folder `_ardoise/`, hidden
@@ -87,6 +94,10 @@ pub(crate) fn walk(root: &Path, mut visit: impl FnMut(Found)) -> Vec<(PathBuf, i
                 visit(Found::Note {
                     path: entry.path(),
                     binder: relative.clone(),
+                    stamp: entry
+                        .metadata()
+                        .ok()
+                        .and_then(|metadata| FileStamp::from_metadata(&metadata).ok()),
                 });
             }
         }
@@ -130,7 +141,7 @@ mod tests {
         let mut binders = Vec::new();
         let problems = walk(root, |found| match found {
             Found::Binder(b) => binders.push(b),
-            Found::Note { path, binder } => {
+            Found::Note { path, binder, .. } => {
                 notes.push((path.strip_prefix(root).unwrap().to_path_buf(), binder))
             }
         });
