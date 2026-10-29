@@ -334,8 +334,8 @@ notes go one after the other (a rule between two notes in Markdown, a new page i
   guessed (`handwriting.export.guessed`).
 - **Drawings** are cropped from one rendering of the note that holds only the drawings' strokes (the text next to a
   drawing does not creep in): ink on white (the paper stays on a dark paper so that light ink remains visible), 200
-  dpi, 2 mm of margin, PNG. Highlighter marks lying over a drawing belong to it. Markdown: `<name>-1.png`… next to the
-  `.md` (written before the text, atomically; the link target is percent-encoded). Word: embedded, at their real size,
+  dpi, 2 mm of margin, PNG. Highlighter marks lying over a drawing belong to it. Markdown: see "Where the
+  Markdown drawings go" below. Word: embedded, at their real size,
   reduced to the 17 cm text width (and 24 cm height).
 - **Files.** `ardoise_hwr::markdown` (escaped text, `-` lists, `![Dessin 1](…)`), `ardoise_hwr::docx` (minimal Office
   Open XML written with the `zip` crate: content types, relationships, styles Title / Subtitle / ListParagraph, one
@@ -343,6 +343,18 @@ notes go one after the other (a rule between two notes in Markdown, a new page i
   in the files ("Créée le", "Étiquettes", "Dessin") are translated by the interface and sent with the request
   (`TextLabels`); the date is local time, `2026-10-22 14:05`. Platform-free and tested on Linux: the structure, both
   writers (the docx read back with `zip` and `roxmltree`: every part well formed, every relationship resolved).
+- **Where the Markdown drawings go.** The save dialog only confirms replacing the `.md`, so no other file of the
+  user's is ever replaced (the rule of `export.rs`: ` (2)` rather than overwriting). The drawings are written in a
+  **folder next to the `.md`, named `<name>_images`** (language-neutral: no new label), as `<name>-1.png`… (numbered over
+  all the notes), before the text, atomically; the links are relative to that folder and percent-encoded
+  (`![Dessin 1](Mon%20journal_images/Mon%20journal-1.png)`). The folder is **reused only if it does not exist, or holds
+  nothing but `<name>-<number>.png` files** (the drawings of a previous export of the same document: they are
+  replaced, and the ones a longer previous export left are removed once the text is written; an export without any
+  drawing empties and removes that folder). Otherwise (the user's own files or sub-folders in it, or a file of that
+  name) the next free name is taken, `<name>_images (2)`, `(3)`… — the same one again on the next export. The folder
+  is created only when there is a drawing. Tests (`textdoc.rs`): existing `<name>-1.png` and a foreign
+  `<name>_images` untouched, links matching the files written, fewer drawings leaving no stale image. The
+  interface's "Drawings saved…" sentence says "in the folder next to it". Word is unaffected (drawings embedded).
 - Command `export_structured_text(sources, format: 'md'|'docx', destination, labels) -> { paths, analyzed }`
   (`textdoc.rs`), through the indexer's on-demand engine; same sources as the `.txt` export (the note as it is in the
   editor, or notes of the library).

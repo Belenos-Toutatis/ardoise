@@ -1,12 +1,13 @@
 //! A note (or several) as Markdown: the title as a heading, the date and the tags, then the
-//! paragraphs, the list items and the drawings as images saved next to the `.md` file.
+//! paragraphs, the list items and the drawings as images saved in a folder next to the `.md` file.
 
 use crate::document::{Block, Document, Labels};
 
 /// A drawing's PNG file, to be written next to the Markdown file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkdownImage {
-    /// File name, without folder (`prefix-1.png`).
+    /// File name, without folder (`prefix-1.png`); the file goes in the folder given to
+    /// `to_markdown`.
     pub name: String,
     pub png: Vec<u8>,
 }
@@ -58,9 +59,25 @@ fn link_target(name: &str) -> String {
     out
 }
 
+/// The target of a link to `name` inside `folder` (a folder name next to the Markdown file; empty
+/// for the same folder): both parts percent-encoded.
+fn image_link(folder: &str, name: &str) -> String {
+    if folder.is_empty() {
+        link_target(name)
+    } else {
+        format!("{}/{}", link_target(folder), link_target(name))
+    }
+}
+
 /// The Markdown of `documents`, one note after the other (a rule between two notes). The
-/// drawings are `prefix-1.png`, `prefix-2.png`… over all the notes. Lines end with `\n`.
-pub fn to_markdown(documents: &[Document], labels: &Labels, prefix: &str) -> Markdown {
+/// drawings are `prefix-1.png`, `prefix-2.png`… over all the notes, linked as lying in `folder`
+/// (a name next to the Markdown file, empty for the same folder). Lines end with `\n`.
+pub fn to_markdown(
+    documents: &[Document],
+    labels: &Labels,
+    prefix: &str,
+    folder: &str,
+) -> Markdown {
     let mut text = String::new();
     let mut images = Vec::new();
     for (index, document) in documents.iter().enumerate() {
@@ -101,7 +118,7 @@ pub fn to_markdown(documents: &[Document], labels: &Labels, prefix: &str) -> Mar
                     text.push_str(&format!(
                         "![{} {number}]({})\n\n",
                         escape(&labels.drawing),
-                        link_target(&name)
+                        image_link(folder, &name)
                     ));
                     images.push(MarkdownImage {
                         name,
@@ -146,11 +163,16 @@ mod tests {
         );
         assert_eq!(link_target("café.png"), "café.png");
         assert_eq!(link_target("a#b?c.png"), "a%23b%3Fc.png");
+        assert_eq!(image_link("", "a b.png"), "a%20b.png");
+        assert_eq!(
+            image_link("a b_images (2)", "a b-1.png"),
+            "a%20b_images%20%282%29/a%20b-1.png"
+        );
     }
 
     #[test]
     fn a_note_becomes_a_heading_a_header_a_list_and_images() {
-        let markdown = to_markdown(&[sample()], &labels(), "notes");
+        let markdown = to_markdown(&[sample()], &labels(), "notes", "");
         let expected = "\
 # Réunion \\& \\*plan\\* #1
 
@@ -180,9 +202,12 @@ Premier paragraphe avec\\_des \\[signes\\] \\<spéciaux\\>.
         plain.date.clear();
         plain.tags.clear();
         plain.title = "Deux".into();
-        let markdown = to_markdown(&[sample(), plain], &labels(), "x");
+        let markdown = to_markdown(&[sample(), plain], &labels(), "x", "");
         assert_eq!(markdown.images.len(), 2);
         assert_eq!(markdown.images[1].name, "x-2.png");
+        let in_folder = to_markdown(&[sample()], &labels(), "x", "x_images");
+        assert!(in_folder.text.contains("![Drawing 1](x_images/x-1.png)"));
+        assert_eq!(in_folder.images[0].name, "x-1.png");
         assert!(markdown.text.contains("\n---\n\n# Deux\n\nPremier"));
         assert!(markdown.text.contains("![Drawing 2](x-2.png)"));
         assert!(markdown.text.ends_with("fin\n"));
@@ -191,8 +216,8 @@ Premier paragraphe avec\\_des \\[signes\\] \\<spéciaux\\>.
             blocks: Vec::new(),
             ..sample()
         };
-        let text = to_markdown(&[empty], &labels(), "x").text;
+        let text = to_markdown(&[empty], &labels(), "x", "").text;
         assert!(text.ends_with("Tags: école, classe 3e\n"), "{text:?}");
-        assert_eq!(to_markdown(&[], &labels(), "x").text, "\n");
+        assert_eq!(to_markdown(&[], &labels(), "x", "").text, "\n");
     }
 }

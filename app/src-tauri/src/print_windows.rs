@@ -211,6 +211,10 @@ fn print_page(
 
 /// Opens the print dialog over `owner` (the app's window) and prints `sources` as the user
 /// chose; `printed: false` when the dialog is closed without printing.
+///
+/// The dialog and the job run on a thread of their own: the dialog needs COM in a single-threaded
+/// apartment, and a pool thread may already have joined the multithreaded one through another
+/// task (the apartment of a thread cannot be changed).
 pub fn print_with_dialog(
     owner: usize,
     sources: &[LoadedSource],
@@ -219,14 +223,30 @@ pub fn print_with_dialog(
     if sources.is_empty() {
         return Err(print_error("nothing to print"));
     }
-    // The dialog needs COM in a single-threaded apartment on the thread that shows it.
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("print".into())
+            .spawn_scoped(scope, || dialog_and_job(owner, sources, options))
+            .map_err(print_error)?
+            .join()
+            .map_err(|_| print_error("the print thread stopped unexpectedly"))?
+    })
+}
+
+/// [`print_with_dialog`]'s work, on a thread that has no apartment yet: it joins a
+/// single-threaded one for the dialog and leaves it at the end.
+fn dialog_and_job(
+    owner: usize,
+    sources: &[LoadedSource],
+    options: &PrintOptions,
+) -> CommandResult<PrintResult> {
     // SAFETY: balanced by `CoUninitialize` below, on the same thread.
-    let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok();
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+        .ok()
+        .map_err(|e| print_error(format!("COM: {e}")))?;
     let result = show_dialog(owner, sources, options);
-    if com {
-        // SAFETY: the call above succeeded on this thread.
-        unsafe { CoUninitialize() };
-    }
+    // SAFETY: the call above succeeded on this thread.
+    unsafe { CoUninitialize() };
     result
 }
 
@@ -499,8 +519,9 @@ mod tests {
 
         use windows::Win32::Foundation::{LPARAM, TRUE, WPARAM};
         use windows::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, DestroyWindow, EnumWindows, GetWindowTextW, IsWindowVisible,
-            PostMessageW, WINDOW_EX_STYLE, WM_CLOSE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+            CreateWindowExW, DestroyWindow, DispatchMessageW, EnumWindows, GetWindowTextW,
+            IsWindowVisible, MSG, PM_REMOVE, PeekMessageW, PostMessageW, TranslateMessage,
+            WINDOW_EX_STYLE, WM_CLOSE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
         };
         use windows::core::{BOOL, w};
 
@@ -549,7 +570,24 @@ mod tests {
                 )
             }
             .unwrap();
-            let result = print_with_dialog(owner.0 as usize, &sources, &options);
+            // The dialog runs on a thread of its own (as in the app, where the main window's
+            // thread keeps pumping messages): this thread pumps those of the owner meanwhile.
+            let handle = owner.0 as usize;
+            let result = std::thread::scope(|scope| {
+                let printing = scope.spawn(|| print_with_dialog(handle, &sources, &options));
+                while !printing.is_finished() {
+                    let mut message = MSG::default();
+                    // SAFETY: plain message loop for the windows of this thread.
+                    unsafe {
+                        while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                            let _ = TranslateMessage(&message);
+                            DispatchMessageW(&message);
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                printing.join().unwrap()
+            });
             // SAFETY: the window was created above, on this thread.
             let _ = unsafe { DestroyWindow(owner) };
             result

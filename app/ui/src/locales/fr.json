@@ -1339,7 +1339,7 @@
       "pickFile": "Enregistrer le texte reconnu",
       "defaultName": "Texte reconnu",
       "guessed": "Windows n'a pas pu analyser la mise en page : les paragraphes, les listes et les dessins ont été déduits du texte, et peuvent être moins justes.",
-      "savedImages": "Dessins enregistrés à côté : {count}",
+      "savedImages": "Dessins enregistrés dans le dossier à côté : {count}",
       "pickMd": "Enregistrer le texte en Markdown",
       "pickDocx": "Enregistrer le texte en Word",
       "labels": {
