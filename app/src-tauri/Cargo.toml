@@ -29,7 +29,8 @@ ardoise-ble = { path = "../../crates/ardoise-ble" }
 ardoise-device = { path = "../../crates/ardoise-device" }
 ardoise-hwr = { path = "../../crates/ardoise-hwr" }
 ardoise-ink = { path = "../../crates/ardoise-ink" }
-ardoise-inkspace = { path = "../../crates/ardoise-inkspace" }
+# `synthetic`: made-up Inkspace data for `--create-demo-inkspace` (never used by the import).
+ardoise-inkspace = { path = "../../crates/ardoise-inkspace", features = ["synthetic"] }
 ardoise-mcp = { path = "../../crates/ardoise-mcp" }
 ardoise-media = { path = "../../crates/ardoise-media" }
 ardoise-proto = { path = "../../crates/ardoise-proto" }
