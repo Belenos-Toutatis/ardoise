@@ -33,14 +33,14 @@ Dernière mesure : 2026-10-29, sur 12th Gen Intel(R) Core(TM) i5-1235U, 10 cœur
 
 | Objectif | Mesuré | Résultat |
 |---|---|---|
-| Démarrage à chaud (< 2 s) | 11,61 s (médiane de 3 ; à froid : 8,56 s) | NON ATTEINT |
-| 1000 notes affichées (< 2 s) | en cache : 38,28 s ; hors cache : 36,62 s | NON ATTEINT |
-| 1000 notes, miniatures visibles dessinées (< 3 s) | en cache : 51,57 s ; hors cache : 37,31 s (12 cartes) | NON ATTEINT |
-| 1000 notes, défilement, miniatures en cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 43,8 fps, p95 33,5 ms, 85 en retard (> 25 ms), 5 au-delà de 50 ms (264 images) | NON ATTEINT |
-| 1000 notes, défilement, miniatures hors cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 24,4 fps, p95 143,4 ms, 62 en retard (> 25 ms), 28 au-delà de 50 ms (149 images) | à titre indicatif |
-| Mode direct (>= 60 images/s, <= 1 % d'images en retard) | 60,0 fps, p95 16,8 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (481 images) | OK |
-| MP4 1080p d'une relecture de 2 min (< 2 min) | 62,4 s (3599 images, 120 s de relecture ; Media Foundation: Intel® Quick Sync Video H.264 Encoder MFT (hardware)) | OK |
-| Taille de l'exécutable (< 30 Mo) | 19,7 Mo | OK |
+| Démarrage à chaud (< 2 s) | 0,95 s (médiane de 3 ; à froid : 1,03 s) | OK |
+| 1000 notes affichées (< 2 s) | en cache : 1,77 s ; hors cache : 2,46 s | OK |
+| 1000 notes, miniatures visibles dessinées (< 3 s) | en cache : 1,82 s ; hors cache : 2,76 s (12 cartes) | OK |
+| 1000 notes, défilement, miniatures en cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 60,0 fps, p95 16,8 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (360 images) | OK |
+| 1000 notes, défilement, miniatures hors cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 60,0 fps, p95 16,8 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (360 images) | à titre indicatif |
+| Mode direct (>= 60 images/s, <= 1 % d'images en retard) | 60,0 fps, p95 16,9 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (481 images) | OK |
+| MP4 1080p d'une relecture de 2 min (< 2 min) | 14,8 s (3599 images, 120 s de relecture ; Media Foundation: Intel® Quick Sync Video H.264 Encoder MFT (hardware)) | OK |
+| Taille de l'exécutable (< 30 Mo) | 21,4 Mo | OK |
 <!-- perf:end -->
 
 ## Mesure de référence avant les corrections de la bibliothèque (M10)

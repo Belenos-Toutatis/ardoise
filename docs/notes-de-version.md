@@ -99,9 +99,12 @@ D'autres essais à la main restent à faire, car les tests automatiques ne peuve
 - une vraie fermeture de session de Windows avec une note non enregistrée : l'écran « Ardoise empêche l'arrêt », la
   copie de secours écrite, sa proposition au lancement suivant ;
 - les couleurs des étiquettes avec Nextcloud sur deux PC (changement sur l'un, vu sur l'autre ; deux changements
-  simultanés fusionnés) ;
-- la mesure des performances (`cargo xtask perf`, voir [performances](performance.md)) sur un PC au repos : la première
-  mesure a été prise pendant des compilations.
+  simultanés fusionnés).
+
+Performances mesurées le 29 octobre 2026 sur un portable au repos (Intel Core i5-1235U, 16 Go) : tous les objectifs
+sont atteints (démarrage en 0,95 s, bibliothèque de 1 000 notes affichée en 1,8 s et défilée à 60 images/s, mode
+direct à 60 images/s, export MP4 1080p d'une relecture de 2 min en 15 s, exécutable de 21 Mo). Détails :
+[performances](performance.md).
 
 ## Limites connues
 
@@ -225,9 +228,11 @@ Other hands-on checks remain, because automated tests cannot replace them:
 - the Inkspace import from Ardoise's window, with Inkspace open and then closed (it may lock its files);
 - a real Windows logoff with an unsaved note: the "Ardoise is preventing shutdown" screen, the backup copy written, its
   offer at the next start;
-- tag colours with Nextcloud on two PCs (a change on one seen on the other; two simultaneous changes merged);
-- performance measurements (`cargo xtask perf`, see [performance](performance.md), in French) on an idle PC: the first
-  measurement was taken during builds.
+- tag colours with Nextcloud on two PCs (a change on one seen on the other; two simultaneous changes merged).
+
+Performance measured on 29 October 2026 on an idle laptop (Intel Core i5-1235U, 16 GB): every target is met (start in
+0.95 s, a 1,000-note library shown in 1.8 s and scrolled at 60 fps, live mode at 60 fps, MP4 1080p export of a 2-min
+replay in 15 s, a 21 MB executable). Details: [performance](performance.md) (in French).
 
 ## Known limits
 
