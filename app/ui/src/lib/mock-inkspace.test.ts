@@ -44,7 +44,10 @@ describe('Inkspace import in the browser stand-in', () => {
     expect(mockLibrary().binders.has('Inkspace')).toBe(true);
     expect(inspect(FOUND).alreadyImported).toBe(4);
 
-    const second = await importNotes('Inkspace');
+    // The progress of a second import counts only the notes still to write: none.
+    const again: InkspaceProgress[] = [];
+    const second = await importNotes('Inkspace', (p) => again.push(p));
+    expect(again).toEqual([{ done: 0, total: 0 }]);
     expect(second).toMatchObject({ imported: 0, skipped: 4, cancelled: false });
     expect(second.failed).toHaveLength(1);
     expect(mockLibrary().notes.size).toBe(before + 4);

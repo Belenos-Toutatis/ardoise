@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicBool;
 use ardoise_core::library::Library;
 use ardoise_core::note::Timing;
 use ardoise_inkspace::{
-    ImportReport, ImportedNote, Scores, THRESHOLDS, TrackedReader, compare_with_preview,
+    ImportReport, ImportedNote, Previews, Scores, THRESHOLDS, TrackedReader, compare_with_preview,
     local_state_in, locate_local_state,
 };
 
@@ -48,7 +48,13 @@ pub fn run_cli(args: &ImportArgs) -> i32 {
     };
     println!("Source : {}", local_state.display());
 
-    let report = match read_notes(&local_state, &reader) {
+    // Inkspace's previews are looked for only to compare with them.
+    let previews = if args.compare {
+        Previews::Find
+    } else {
+        Previews::Skip
+    };
+    let report = match read_notes(&local_state, &reader, previews) {
         Ok(report) => report,
         Err(error) => {
             println!("Échec de l'import : {}", error.parts().1);
@@ -127,8 +133,12 @@ pub fn run_demo_cli(dir: &Path) -> i32 {
         println!("Usage : ardoise.exe --create-demo-inkspace DOSSIER");
         return 2;
     }
-    let occupied = std::fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_some());
-    if occupied || dir.is_file() {
+    // Only a missing folder, or an empty one that can be listed.
+    let free = match std::fs::read_dir(dir) {
+        Ok(mut entries) => entries.next().is_none(),
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    };
+    if !free {
         println!(
             "{} n'est pas un dossier vide : rien n'a été écrit.",
             dir.display()

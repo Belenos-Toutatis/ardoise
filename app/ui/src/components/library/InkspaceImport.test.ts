@@ -127,7 +127,7 @@ describe('importing from Inkspace', () => {
     const report = slot('inkspace-report')!.textContent!;
     expect(report).toContain('Import terminé');
     expect(report).toContain('4 notes importées dans le classeur « Inkspace »');
-    expect(report).not.toContain('déjà présente');
+    expect(report).not.toContain('déjà importée');
     expect(report).toContain("1 note n'a pas pu être importée :");
     const lines = [...slot('inkspace-report')!.querySelectorAll('li')];
     expect(lines).toHaveLength(1);
@@ -146,17 +146,20 @@ describe('importing from Inkspace', () => {
     // The four readable notes are in the library; the damaged one cannot be imported.
     dialog();
     await vi.waitFor(() => expect(slot('inkspace-count')?.textContent).toContain('5 notes trouvées'));
-    expect(slot('inkspace-count')?.textContent).toContain('dont 4 déjà dans la bibliothèque (elles seront ignorées)');
-    expect(text()).toContain("Les notes lisibles d'Inkspace sont toutes déjà dans la bibliothèque");
-    expect(button('Importer 0 notes').disabled).toBe(true);
+    expect(slot('inkspace-count')?.textContent).toContain(
+      'dont 4 déjà importées (dans la bibliothèque ou sa corbeille), qui seront ignorées',
+    );
+    expect(text()).toContain("Les notes lisibles d'Inkspace ont toutes déjà été importées");
+    // Nothing to import: no import button.
+    expect(document.querySelector('button[type="submit"]')).toBeNull();
     cleanup?.();
 
     // Everything in the library: nothing to do.
     vi.spyOn(api, 'inkspaceInspect').mockResolvedValue({ path: FOUND, notes: 5, alreadyImported: 5, unreadable: 0 });
     dialog();
     await found();
-    expect(text()).toContain("Toutes les notes d'Inkspace sont déjà dans la bibliothèque");
-    expect(button('Importer 0 notes').disabled).toBe(true);
+    expect(text()).toContain("Toutes les notes d'Inkspace ont déjà été importées");
+    expect(document.querySelector('button[type="submit"]')).toBeNull();
     expect(document.querySelector('input[list="inkspace-binders"]')).toBeNull();
   });
 
@@ -274,6 +277,29 @@ describe('importing from Inkspace', () => {
     expect(onshow).toHaveBeenCalledWith('Inkspace');
   });
 
+  it('lets the import be stopped only once it is under way', async () => {
+    const held = gate();
+    let progress!: (p: { done: number; total: number }) => void;
+    vi.spyOn(api, 'inkspaceImport').mockImplementation(async (_path, binder, onProgress) => {
+      progress = onProgress;
+      await held.until;
+      return { binder, total: 5, imported: 0, skipped: 0, failed: [], cancelled: true };
+    });
+    const cancel = vi.spyOn(api, 'inkspaceCancel');
+    dialog();
+    await found();
+    button('Importer 4 notes').click();
+    // Still reading Inkspace's notes: a stop now could reach Rust before the import starts.
+    await vi.waitFor(() => expect(status()).toContain("Lecture des notes d'Inkspace…"));
+    expect(button("Arrêter l'import").disabled).toBe(true);
+    progress({ done: 0, total: 4 });
+    await vi.waitFor(() => expect(button("Arrêter l'import").disabled).toBe(false));
+    button("Arrêter l'import").click();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    held.open();
+    await vi.waitFor(() => expect(slot('inkspace-report')).toBeTruthy());
+  });
+
   it('returns to the folder when the import is refused, and closes from the report', async () => {
     vi.spyOn(api, 'inkspaceImport').mockRejectedValueOnce({ code: 'inkspaceBusy', message: '' });
     const { onclose, onshow } = dialog();
@@ -306,7 +332,7 @@ describe('importing from Inkspace', () => {
     await vi.waitFor(() => expect(slot('inkspace-report')).toBeTruthy());
     const report = slot('inkspace-report')!.textContent!;
     expect(report).toContain("Aucune note n'a été importée.");
-    expect(report).toContain('2 déjà présentes, ignorées');
+    expect(report).toContain('2 déjà importées auparavant (dans la bibliothèque ou sa corbeille), ignorées');
     expect(report).toContain('01234567');
     expect(report).not.toContain('89abcdef');
     expect(report).toContain('la bibliothèque ne peut pas être lue ou modifiée (disque plein)');

@@ -109,7 +109,9 @@ fn has_note_store(reader: &TrackedReader, local_state: &Path) -> bool {
     reader.is_dir(&db_dir(local_state))
 }
 
-fn is_inkspace_package(name: &str) -> bool {
+/// Whether `name` is the name of Inkspace's package folder (`D91E29CF.InkspaceApp_<id>`, any
+/// case).
+pub fn is_inkspace_package(name: &str) -> bool {
     name.get(..PACKAGE_PREFIX.len())
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case(PACKAGE_PREFIX))
         && name.len() > PACKAGE_PREFIX.len()

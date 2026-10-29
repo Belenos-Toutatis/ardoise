@@ -233,6 +233,20 @@ fn notes_are_never_written_into_inkspace_s_folder() {
     let error = quiet_error(&copy, &library, "Sauvegarde/LocalState/Notes");
     assert_eq!(error.code(), "inkspaceTarget");
     fs::remove_dir_all(&inside).unwrap();
+    // …or anywhere in Inkspace's package folder, which holds its LocalState.
+    let package = source
+        .path()
+        .join("Packages")
+        .join("D91E29CF.InkspaceApp_38kynpdw5g1aw");
+    let installed = synthetic::write_local_state(&package, &[synth_note(0, true)]).unwrap();
+    let beside = package.join("Ardoise");
+    fs::create_dir(&beside).unwrap();
+    ardoise_core::library::init(&beside).unwrap();
+    let library_beside = Library::open(&beside).unwrap();
+    let error = quiet_error(&installed, &library_beside, DEFAULT_BINDER);
+    assert_eq!(error.code(), "inkspaceTarget");
+    assert!(!beside.join(DEFAULT_BINDER).exists());
+    fs::remove_dir_all(&package).unwrap();
     assert_eq!(snapshot(source.path()), before);
     // The copy is a fine source for a binder elsewhere.
     assert_eq!(quiet(&copy, &library, DEFAULT_BINDER).imported, 1);
@@ -263,8 +277,18 @@ fn cancelling_keeps_the_notes_written_and_the_next_import_adds_the_rest() {
         assert_eq!(path.extension().unwrap(), "ardoise");
         read_note(path).unwrap();
     }
-    let rest = quiet(&local_state, &library, DEFAULT_BINDER);
+    // The progress counts the notes still to write.
+    let mut events = Vec::new();
+    let rest = import(
+        &local_state,
+        &library,
+        DEFAULT_BINDER,
+        &NOT_CANCELLED,
+        &mut |p| events.push((p.done, p.total)),
+    )
+    .unwrap();
     assert_eq!((rest.imported, rest.skipped, rest.cancelled), (2, 2, false));
+    assert_eq!(events, [(0, 2), (1, 2), (2, 2)]);
 
     // Stopped before the first note: nothing at all.
     let (_dir, library) = new_library();
@@ -353,7 +377,9 @@ fn folders_that_hold_no_inkspace_notes() {
     let local_state = local_state_of(&reader, &store).unwrap();
     assert_eq!(local_state, root.path());
     assert_eq!(
-        read_notes(&local_state, &reader).unwrap_err().code(),
+        read_notes(&local_state, &reader, Previews::Skip)
+            .unwrap_err()
+            .code(),
         "inkspaceDamaged"
     );
     // An unreadable store (its files are folders here).
@@ -458,6 +484,9 @@ fn the_interface_s_import_never_reads_the_profile_key() {
         local_state_of(&reader, &db).unwrap_err().code(),
         "inkspaceNotFound"
     );
+    // Choosing `db\` by mistake only checked what exists there; from here on nothing under
+    // `db\` is even looked at.
+    let before_import = reader.accesses().len();
     let (_dir, library) = new_library();
     let source = survey(&detected, Some(&library), &reader).unwrap();
     assert_eq!(source.notes, 2);
@@ -472,15 +501,16 @@ fn the_interface_s_import_never_reads_the_profile_key() {
     .unwrap();
     assert_eq!(report.imported, 2);
 
-    for access in reader.accesses().iter().filter(|a| a.path.starts_with(&db)) {
-        assert_ne!(access.kind, AccessKind::Read, "read under db: {access:?}");
-        if access.kind == AccessKind::List {
-            assert!(
-                access.path.parent() == Some(db.join("notes").as_path()),
-                "listing under db: {access:?}"
-            );
-        }
+    let accesses = reader.accesses();
+    for access in accesses.iter().filter(|a| a.path.starts_with(&db)) {
+        assert_eq!(access.kind, AccessKind::Stat, "under db: {access:?}");
     }
+    assert!(
+        !accesses[before_import..]
+            .iter()
+            .any(|a| a.path.starts_with(&db)),
+        "the survey or the import looked under db"
+    );
     let utf16 = synthetic::utf16le(CANARY);
     for (path, bytes) in snapshot(library.root()) {
         assert!(
@@ -523,7 +553,7 @@ fn the_demo_inkspace_data_imports() {
     let dir = root.path().join("Packages").join("LocalState");
     assert_eq!(cli::run_demo_cli(&dir), 0);
     let reader = TrackedReader::new();
-    let report = read_notes(&dir, &reader).unwrap();
+    let report = read_notes(&dir, &reader, Previews::Skip).unwrap();
     assert_eq!(report.notes.len(), 4);
     assert!(report.failures.is_empty());
     let (_dir, library) = new_library();
@@ -579,12 +609,7 @@ fn the_22_notes_of_the_private_copy_import_once() {
     assert_eq!((second.imported, second.skipped), (0, 22));
     assert_eq!(note_files(&library).len(), 22);
     assert_eq!(snapshot(&local_state.join("WacomCloudDb")), before);
-    // Nothing under db\ was read (only the notes' preview folders were looked at).
+    // Nothing under db\ was even looked at.
     let db = local_state.join("db");
-    assert!(
-        reader
-            .accesses()
-            .iter()
-            .all(|a| !a.path.starts_with(&db) || a.kind != AccessKind::Read)
-    );
+    assert!(reader.accesses().iter().all(|a| !a.path.starts_with(&db)));
 }

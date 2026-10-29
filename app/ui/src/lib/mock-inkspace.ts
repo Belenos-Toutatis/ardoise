@@ -31,7 +31,7 @@ export const mockInkspace = {
   detected: LOCAL_STATE as string | null,
   /** Pause before each note, in milliseconds (a calm pace in the dev browser); tests set it to 0. */
   stepMs: 300,
-  /** Holds the import before readable note `before` (from 0) until `until` settles; tests use it as a gate. */
+  /** Holds the import before note `before` (from 0) of those to write until `until` settles; tests use it as a gate. */
   hold: null as { before: number; until: Promise<void> } | null,
 };
 
@@ -84,14 +84,14 @@ async function importNotes(
   running = true;
   cancelRequested = false;
   const ids = importedIds();
-  // As on the Rust side: the notes that cannot be read are reported first, the progress counts
-  // the readable ones.
-  const readable = NOTES.filter((n) => n.readable);
+  // As on the Rust side: the notes that cannot be read are reported first, those imported
+  // before are skipped, and the progress counts the notes to write.
+  const readable = NOTES.filter((n) => n.readable && !ids.has(n.id));
   const report: InkspaceReport = {
     binder: target,
     total: NOTES.length,
     imported: 0,
-    skipped: 0,
+    skipped: NOTES.filter((n) => n.readable && ids.has(n.id)).length,
     failed: NOTES.filter((n) => !n.readable).map(
       (note): InkspaceFailure => ({
         inkspaceId: note.id,
@@ -111,14 +111,10 @@ async function importNotes(
         report.cancelled = true;
         break;
       }
-      if (ids.has(note.id)) {
-        report.skipped += 1;
-      } else {
-        // Empty title, like Inkspace's notes.
-        mockLibraryInvoke('create_note', { binder: target, title: '' });
-        ids.add(note.id);
-        report.imported += 1;
-      }
+      // Empty title, like Inkspace's notes.
+      mockLibraryInvoke('create_note', { binder: target, title: '' });
+      ids.add(note.id);
+      report.imported += 1;
       onProgress?.({ done: index + 1, total: readable.length });
     }
     return report;

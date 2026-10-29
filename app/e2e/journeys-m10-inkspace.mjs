@@ -71,6 +71,8 @@ function binderNotes(app, binder) {
 const dialog = `document.querySelector('.modal')`;
 const slot = (name) => `document.querySelector('[data-slot="${name}"]')`;
 const submit = `document.querySelector('.modal button[type="submit"]')`;
+/** The import button is shown only when there is something to import. */
+const nothingToImport = `!${submit}`;
 
 /** Opens the dialog from the sidebar and waits until the folder is read. */
 async function openDialog(app) {
@@ -130,7 +132,7 @@ export const inkspaceJourneys = [
         // Every note found is already imported (the 22 notes of the development PC are all readable).
         const [found, already] = await app.evaluate(counts);
         if (found !== expected || already !== expected) throw new Error(`counts: ${found}, ${already}`);
-        if (!(await app.evaluate(`${submit}?.disabled`))) throw new Error('the import button is enabled');
+        if (!(await app.evaluate(nothingToImport))) throw new Error('the import button is offered');
         await app.click('.modal button', l('library.cancel'));
         await app.waitFor(`!${dialog}`, 'the dialog to close');
       });
@@ -148,7 +150,7 @@ export const inkspaceJourneys = [
           20_000,
         );
         const [found, already] = await app.evaluate(counts);
-        if (found !== expected || already !== expected || !(await app.evaluate(`${submit}?.disabled`))) {
+        if (found !== expected || already !== expected || !(await app.evaluate(nothingToImport))) {
           throw new Error(`notes of the copy are not recognised as imported: ${found}, ${already}`);
         }
         await app.click('.modal button', l('library.cancel'));
@@ -182,8 +184,17 @@ export const inkspaceJourneys = [
           `(() => { const i = document.querySelector('.modal input[list]'); i.value = 'Arrêt'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`,
         );
         await app.click('.modal button[type="submit"]');
-        // The stop button exists only while the import runs; a small folder may finish first.
-        await app.click('.modal button', l('inkspace.stop')).catch(() => {});
+        // « Stop » is enabled once the import is under way; a small folder may finish first. Clicked
+        // in the page, only while it is there: a mouse click could land on the report that replaced it.
+        const stop = JSON.stringify(l('inkspace.stop'));
+        await app.waitFor(
+          `${slot('inkspace-report')} || [...document.querySelectorAll('.modal button')].some((b) => b.textContent.trim() === ${stop} && !b.disabled)`,
+          'the import under way',
+          120_000,
+        );
+        await app.evaluate(
+          `[...document.querySelectorAll('.modal button')].find((b) => b.textContent.trim() === ${stop} && !b.disabled)?.click()`,
+        );
         await app.waitFor(slot('inkspace-report'), 'the report', 120_000);
       });
 
@@ -194,7 +205,7 @@ export const inkspaceJourneys = [
 
       await check('relancer l’import ajoute le reste, sans doublon', async () => {
         await openDialog(app);
-        if (!(await app.evaluate(`${submit}?.disabled`))) {
+        if (!(await app.evaluate(nothingToImport))) {
           await app.evaluate(
             `(() => { const i = document.querySelector('.modal input[list]'); i.value = 'Arrêt'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`,
           );

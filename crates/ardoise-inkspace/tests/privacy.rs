@@ -13,8 +13,8 @@ mod common;
 use std::path::Path;
 
 use ardoise_inkspace::{
-    AccessKind, TrackedReader, compare_with_preview, import_local_state, local_state_in,
-    locate_with_env,
+    AccessKind, Previews, TrackedReader, compare_with_preview, import_local_state,
+    import_local_state_with, local_state_in, locate_with_env,
 };
 use common::{SynthNote, SynthStroke, utf16le};
 use uuid::Uuid;
@@ -172,9 +172,8 @@ fn importer_never_reads_the_profile_key() {
 }
 
 /// The interface's path (M10): automatic detection in a `Packages` folder, every way of choosing
-/// the folder by hand, then the import. Nothing under `db\` is read; only the note folders of
-/// the previews are looked at (existence checks and listings, no content), and choosing `db\`
-/// itself by mistake is refused without listing it.
+/// the folder by hand, then the import without previews. Choosing `db\` by mistake is refused
+/// with existence checks only, and the import never looks under `db\` at all.
 #[test]
 fn detection_and_folders_chosen_by_hand_never_read_the_profile_key() {
     let root = tempfile::tempdir().unwrap();
@@ -210,15 +209,21 @@ fn detection_and_folders_chosen_by_hand_never_read_the_profile_key() {
     for mistaken in [&db, &db.join("notes"), &note_dir] {
         assert_eq!(local_state_in(&reader, mistaken), None, "{mistaken:?}");
     }
-    let report = import_local_state(&local_state, &reader).unwrap();
+    let before_import = reader.accesses().len();
+    let report = import_local_state_with(&local_state, &reader, Previews::Skip).unwrap();
     assert_eq!(report.notes.len(), 1, "{:?}", report.failures);
+    assert_eq!(report.notes[0].preview, None);
 
-    for access in reader.accesses().iter().filter(|a| a.path.starts_with(&db)) {
-        assert_ne!(access.kind, AccessKind::Read, "read under db: {access:?}");
-        if access.kind == AccessKind::List {
-            assert_eq!(access.path, note_dir, "listing under db: {access:?}");
-        }
+    let accesses = reader.accesses();
+    for access in accesses.iter().filter(|a| a.path.starts_with(&db)) {
+        assert_eq!(access.kind, AccessKind::Stat, "under db: {access:?}");
     }
+    assert!(
+        !accesses[before_import..]
+            .iter()
+            .any(|a| a.path.starts_with(&db)),
+        "the import looked under db"
+    );
     let output = format!("{report:#?}");
     assert!(!output.contains("CANARY"));
 }

@@ -90,18 +90,26 @@ app/src-tauri     ardoise.exe --import-inkspace [LocalState] [--library DIR] [--
   LocalState (or a copy under any name), the package folder, `WacomCloudDb`, `WacomCloudDb\_`, or a `Packages` folder;
   existence checks only (only a folder named `Packages` is listed), so picking `db\` by mistake reads nothing.
 - **One implementation** (`app/src-tauri/src/import.rs`): `read_notes` (the crate's in-memory import, errors mapped to
-  `inkspaceUnreadable` / `inkspaceDamaged` / `inkspaceTooLarge`), `survey` (counts for the dialog: notes, already
-  imported, unreadable), `save_into_library` / `import_into_library` (binder validated by `Library::binder_dir` before
-  anything is read; `inkspaceTarget` when the binder would resolve inside the LocalState; each note written
-  atomically by `Library::create` with its thumbnail; per-note failures with their code: `inkspaceNoteDamaged` for a
-  note that cannot be decoded, the library's code for a note that cannot be written). `import/cli.rs` is the console
-  front end (French table, `--compare`).
+  `inkspaceUnreadable` / `inkspaceDamaged` / `inkspaceTooLarge`; `Previews::Skip` except for `--compare`, so the
+  interface's import never even looks under `db\`), `survey` (counts for the dialog: notes, already imported,
+  unreadable), `save_into_library` / `import_into_library` (binder validated by `Library::binder_dir` before anything
+  is read; `inkspaceTarget` when the binder resolves inside the LocalState or inside any `D91E29CF.InkspaceApp_*`
+  folder, or cannot be resolved at all; each note written atomically by `Library::create` with its thumbnail;
+  per-note failures with their code: `inkspaceNoteDamaged` for a note that cannot be decoded, the library's code for a
+  note that cannot be written). `import/cli.rs` is the console front end (French table, `--compare`).
+- **Progress**: `{ done, total }` over the notes to write (readable, not imported before), so it matches the dialog's
+  « Importer N notes »; notes that cannot be decoded and notes imported before are counted in the report only.
 - **Dedup**: on the note id, which is UUID v5 of Inkspace's id (and page index), looked up in the library listing
   and in the trash's records. It survives edits, renames, moves and the kept part of a split; a trashed note is not
   brought back. A note file that cannot be listed (damaged, newer version) is not known, so its Inkspace note would be
   imported again (a ` (2)` file); accepted, since such a file needs the user's attention anyway.
-- **Cancel**: a flag checked before each note (`inkspace_cancel`); the notes written stay complete and the report
-  says `cancelled`; the next import skips them. A cancel while the database is read stops before the first write.
+- **Cancel**: a flag checked before each note (`inkspace_cancel`), reset when an import starts; the notes written stay
+  complete and the report says `cancelled`; the next import skips them. The dialog enables « Arrêter l'import » at the
+  first progress event (sent once the database is read), so a stop can never reach Rust before the import has begun
+  and be lost.
+- **One at a time** inside the app (`inkspaceBusy`). Not across processes: `--import-inkspace --library` run while
+  the app imports into the same library could write a note twice (a ` (2)` file with the same id). The command line
+  is a development tool; documented rather than locked.
 - **Commands**: `inkspace_detect` → LocalState or null; `inkspace_inspect(path)` → `InkspaceSource`;
   `inkspace_import(path, binder, onProgress: Channel<{done,total}>)` → `LibraryImport` (`{ binder, total, imported,
   skipped, failed: [{ inkspaceId, created, code, message }], cancelled }`), one import at a time (`inkspaceBusy`);

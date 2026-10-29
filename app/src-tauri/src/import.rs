@@ -8,7 +8,8 @@
 //! - **Reading** ([`read_notes`]): Inkspace's note store is read into memory through a
 //!   `TrackedReader` and converted there. Nothing is ever written into Inkspace's folder, and
 //!   its `db\` settings store (whose `profile` key holds an access token and an e-mail address)
-//!   is never opened.
+//!   is never opened; the interface's import does not even look under `db\` (only
+//!   `--import-inkspace --compare` looks for Inkspace's previews there).
 //! - **Saving** ([`save_into_library`]): each note is written atomically (`Library::create`)
 //!   into the binder (`Inkspace` by default, [`DEFAULT_BINDER`]) with its thumbnail and its
 //!   original dates. Notes already imported are skipped: an imported note's id is derived from
@@ -27,13 +28,16 @@
 pub mod cli;
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ardoise_core::format::NoteFile;
 use ardoise_core::library::Library;
-use ardoise_inkspace::{ImportError, ImportReport, TrackedReader, import_local_state};
+use ardoise_inkspace::{
+    ImportError, ImportReport, Previews, TrackedReader, import_local_state_with,
+    is_inkspace_package,
+};
 use serde::Serialize;
 use tauri::State;
 use tauri::ipc::Channel;
@@ -56,7 +60,8 @@ pub const NOTE_DAMAGED: &str = "inkspaceNoteDamaged";
 pub struct InkspaceSource {
     /// Inkspace's `LocalState` folder.
     pub path: String,
-    /// Notes found (one per Inkspace page), readable or not.
+    /// Notes found: one per page of a readable Inkspace note, one per note that cannot be
+    /// decoded.
     pub notes: usize,
     /// Notes among `notes` already in the library or its trash.
     pub already_imported: usize,
@@ -64,8 +69,8 @@ pub struct InkspaceSource {
     pub unreadable: usize,
 }
 
-/// How far the saving is (`InkspaceProgress` in `inkspace.ts`): notes handled (written, skipped
-/// or failed) out of the readable notes.
+/// How far the saving is (`InkspaceProgress` in `inkspace.ts`): notes handled (written or
+/// failed) out of the notes to write (readable, not imported before).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ImportProgress {
     pub done: usize,
@@ -118,9 +123,14 @@ pub fn local_state_of(reader: &TrackedReader, folder: &Path) -> CommandResult<Pa
         .ok_or_else(|| CommandError::new("inkspaceNotFound", folder.display()))
 }
 
-/// Every note of Inkspace's `local_state`, converted in memory.
-pub fn read_notes(local_state: &Path, reader: &TrackedReader) -> CommandResult<ImportReport> {
-    import_local_state(local_state, reader).map_err(import_error)
+/// Every note of Inkspace's `local_state`, converted in memory; with `previews`, where
+/// Inkspace's render of each one is (for the comparison of the command line only).
+pub fn read_notes(
+    local_state: &Path,
+    reader: &TrackedReader,
+    previews: Previews,
+) -> CommandResult<ImportReport> {
+    import_local_state_with(local_state, reader, previews).map_err(import_error)
 }
 
 /// Ids of the notes of the library and of its trash. A note that cannot be listed (damaged,
@@ -148,7 +158,7 @@ pub fn survey(
     library: Option<&Library>,
     reader: &TrackedReader,
 ) -> CommandResult<InkspaceSource> {
-    let report = read_notes(local_state, reader)?;
+    let report = read_notes(local_state, reader, Previews::Skip)?;
     // Without a library (the first-run wizard) nothing is imported yet; a trash that cannot be
     // read only makes the count less precise.
     let known = library
@@ -166,28 +176,35 @@ pub fn survey(
     })
 }
 
-/// `path` with its symbolic links and `..` resolved, as far as it exists (the rest appended).
-fn resolved(path: &Path) -> PathBuf {
+/// `path` with its symbolic links and `..` resolved, as far as it exists (the rest appended);
+/// `None` when no part of it exists.
+fn resolved(path: &Path) -> Option<PathBuf> {
     let mut existing = path;
     let mut rest = Vec::new();
     loop {
         if let Ok(real) = existing.canonicalize() {
-            return rest.iter().rev().fold(real, |acc, part| acc.join(part));
+            return Some(rest.iter().rev().fold(real, |acc, part| acc.join(part)));
         }
-        match (existing.parent(), existing.file_name()) {
-            (Some(parent), Some(name)) => {
-                rest.push(name.to_owned());
-                existing = parent;
-            }
-            _ => return path.to_path_buf(),
-        }
+        rest.push(existing.file_name()?.to_owned());
+        existing = existing.parent()?;
     }
 }
 
-/// `inkspaceTarget` when notes written into `target` would land inside Inkspace's
-/// `local_state` (a library chosen inside it, or a binder leading into a copy of it).
+/// `inkspaceTarget` when notes written into `target` would land inside Inkspace's folder: its
+/// `local_state` (a library chosen inside it, a binder leading into a copy of it), or anywhere
+/// in an Inkspace package folder (`D91E29CF.InkspaceApp_*`, which holds the real LocalState).
+/// Refused too when the target cannot be checked.
 fn check_target(local_state: &Path, target: &Path) -> CommandResult<()> {
-    if resolved(target).starts_with(resolved(local_state)) {
+    let local_state = local_state
+        .canonicalize()
+        .map_err(|error| CommandError::new("inkspaceUnreadable", error))?;
+    let inside = resolved(target).is_none_or(|target| {
+        target.starts_with(&local_state)
+            || target.components().any(|part| {
+                matches!(part, Component::Normal(name) if is_inkspace_package(&name.to_string_lossy()))
+            })
+    });
+    if inside {
         Err(CommandError::new("inkspaceTarget", target.display()))
     } else {
         Ok(())
@@ -195,8 +212,9 @@ fn check_target(local_state: &Path, target: &Path) -> CommandResult<()> {
 }
 
 /// Writes every note of `report` into `binder` of `library`, skipping the notes already
-/// imported, and telling `progress` before the first note and after each one. Checks `cancel`
-/// before each note. A note that cannot be written is reported and does not stop the others.
+/// imported, and telling `progress` before the first note to write and after each one. Checks
+/// `cancel` before each note. A note that cannot be written is reported and does not stop the
+/// others.
 pub fn save_into_library(
     library: &Library,
     binder: &Path,
@@ -207,11 +225,15 @@ pub fn save_into_library(
     let target = library.binder_dir(binder).map_err(library_error)?;
     check_target(&report.local_state, &target)?;
     let mut known = known_ids(library)?;
+    let (already, to_write): (Vec<_>, Vec<_>) = report
+        .notes
+        .iter()
+        .partition(|imported| known.contains(&imported.note.id));
     let mut result = LibraryImport {
         binder: slash_path(binder),
         total: report.total(),
         imported: 0,
-        skipped: 0,
+        skipped: already.len(),
         failed: report
             .failures
             .iter()
@@ -224,34 +246,30 @@ pub fn save_into_library(
             .collect(),
         cancelled: false,
     };
-    let total = report.notes.len();
+    let total = to_write.len();
     progress(ImportProgress { done: 0, total });
-    for (i, imported) in report.notes.iter().enumerate() {
+    for (i, imported) in to_write.into_iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             result.cancelled = true;
             break;
         }
         let note = &imported.note;
-        if known.contains(&note.id) {
-            result.skipped += 1;
-        } else {
-            let mut file = NoteFile::new(note.clone());
-            file.thumbnail = crate::thumbnails::thumbnail_png(note);
-            match library.create(binder, &file) {
-                Ok(_) => {
-                    known.insert(note.id.clone());
-                    result.imported += 1;
-                }
-                Err(error) => {
-                    let error = library_error(error);
-                    let (code, message) = error.parts();
-                    result.failed.push(ImportFailure {
-                        inkspace_id: imported.inkspace_id.clone(),
-                        created: Some(note.created),
-                        code,
-                        message: message.to_owned(),
-                    });
-                }
+        let mut file = NoteFile::new(note.clone());
+        file.thumbnail = crate::thumbnails::thumbnail_png(note);
+        match library.create(binder, &file) {
+            Ok(_) => {
+                known.insert(note.id.clone());
+                result.imported += 1;
+            }
+            Err(error) => {
+                let error = library_error(error);
+                let (code, message) = error.parts();
+                result.failed.push(ImportFailure {
+                    inkspace_id: imported.inkspace_id.clone(),
+                    created: Some(note.created),
+                    code,
+                    message: message.to_owned(),
+                });
             }
         }
         progress(ImportProgress { done: i + 1, total });
@@ -272,7 +290,7 @@ pub fn import_into_library(
     // A binder that cannot be used is refused before Inkspace's data is read.
     let target = library.binder_dir(binder).map_err(library_error)?;
     check_target(local_state, &target)?;
-    let report = read_notes(local_state, reader)?;
+    let report = read_notes(local_state, reader, Previews::Skip)?;
     save_into_library(library, binder, &report, cancel, progress)
 }
 

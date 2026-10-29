@@ -249,12 +249,13 @@
 
       <div class="actions">
         {#if running}
-          <button type="button" class="button" data-autofocus disabled={stopping} onclick={() => void stop()}>
+          <!-- Enabled once the import is under way (its first progress): a stop is never lost. -->
+          <button type="button" class="button" data-autofocus disabled={stopping || !progress} onclick={() => void stop()}>
             {t('inkspace.stop')}
           </button>
         {:else}
-          {#if source}
-            <button type="submit" class="button primary" data-autofocus disabled={busy || toImport === 0}>
+          {#if source && toImport > 0}
+            <button type="submit" class="button primary" data-autofocus disabled={busy}>
               {t(toImport === 1 ? 'inkspace.importOne' : 'inkspace.import', { count: toImport })}
             </button>
           {/if}
