@@ -128,6 +128,13 @@ fn the_guided_test_passes_every_step_against_the_simulated_tablet() {
     let sync = step(&report, StepId::Sync);
     assert_eq!(detail(sync, "pages"), "3 / 3");
     assert_eq!(detail(sync, "deleted"), "3");
+    // Every page deleted from the tablet is a note of the library.
+    assert_eq!(detail(sync, "notes"), "3");
+    let library_notes = ardoise_core::library::Library::open(library.path())
+        .unwrap()
+        .list()
+        .notes;
+    assert_eq!(library_notes.len(), 3, "{library_notes:#?}");
     let live = step(&report, StepId::Live);
     let samples: u64 = detail(live, "samples").parse().unwrap();
     assert!((5_600..=6_000).contains(&samples), "{samples}");
@@ -165,6 +172,30 @@ fn the_guided_test_passes_every_step_against_the_simulated_tablet() {
         pages.file_name().unwrap().to_string_lossy()
     );
     say!("DIAGNOSTIC OK");
+}
+
+#[test]
+fn pages_already_in_the_library_are_not_stored_twice() {
+    let tablet = SimTablet::slate_large();
+    let library = tempfile::tempdir().unwrap();
+    let mut user = SimulatedUser::autonomous(tablet.clone());
+    let mut config = config(library.path());
+    // Kept on the tablet: the same three pages are read by both runs.
+    config.delete_after_sync = false;
+    let first = diagnostic::run(Box::new(tablet.connector()), &mut user, &config, None);
+    let notes = |library: &Path| {
+        ardoise_core::library::Library::open(library)
+            .unwrap()
+            .list()
+            .notes
+            .len()
+    };
+    let after_first = notes(library.path());
+    assert!(after_first >= 1, "{first:#?}");
+    assert_eq!(detail(step(&first, StepId::Sync), "deleted"), "0");
+    let mut user = SimulatedUser::autonomous(tablet.clone());
+    diagnostic::run(Box::new(tablet.connector()), &mut user, &config, None);
+    assert_eq!(notes(library.path()), after_first);
 }
 
 #[test]

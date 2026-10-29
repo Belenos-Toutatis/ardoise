@@ -10,6 +10,8 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use ardoise_core::fsutil::write_atomic;
+use ardoise_core::library::Library;
+use ardoise_core::note::PageSize;
 use ardoise_proto::live::{LivePacket, LiveRecord};
 use ardoise_proto::stroke::Point;
 
@@ -20,6 +22,8 @@ use crate::diagnostic::{
 use crate::identity::DeviceRecord;
 use crate::log::{DiagnosticLog, SharedLog, lock};
 use crate::manager::{CLOCK_DRIFT_WARNING, Manager};
+use crate::pages::{ImportedPages, LibrarySink, page_note_id};
+use crate::service::PageContext;
 use crate::session::{DeviceError, DeviceInfo, DownloadedPage, Session};
 use crate::transport::{Advertisement, Connector};
 use crate::{preview, report};
@@ -434,11 +438,26 @@ impl Run<'_> {
             .info
             .as_ref()
             .map_or((29_700, 21_600), |info| (info.width, info.height));
+        // The pages become notes of the library like the normal synchronisation's, before
+        // anything is deleted; a page already there (an earlier test, the normal sync) is
+        // recognised and not stored twice.
+        let library = match Library::open(&self.config.library) {
+            Ok(library) => library,
+            Err(error) => return Flow::Failed(vec![detail("error", error.to_string())]),
+        };
+        let mut imported = ImportedPages::scan(&library);
+        let context = PageContext {
+            size: PageSize { width, height },
+            orientation: self.config.orientation,
+        };
+        let delete = self.config.delete_after_sync;
         let mut strokes = 0usize;
         let mut points = 0usize;
+        let mut notes = 0usize;
         let mut decode_errors = Vec::new();
         let operator = &mut *self.operator;
         let log = self.log.clone();
+        let config = self.config;
         let mut sink = |page: DownloadedPage, index: u16, total: u16| -> Result<(), String> {
             operator.progress(
                 StepId::Sync,
@@ -466,6 +485,22 @@ impl Run<'_> {
                     decode_errors.push(format!("page {index}: {error}"));
                 }
             }
+            let known = imported.find(&library, &page).is_some()
+                || (!delete && imported.in_trash(&page));
+            if known {
+                lock(&log).note(format!("page {index} already in the library"));
+                return Ok(());
+            }
+            // A page that cannot be stored as a note stays on the tablet.
+            let id = page_note_id(&page);
+            let stored = match &config.page_import {
+                Some(import) => import.import(&config.library, page, &context),
+                None => plain_note(&library, page, &context, &config.language),
+            }
+            .map_err(|e| format!("cannot add page {index} to the library: {e}"))?;
+            lock(&log).note(format!("page {index} saved as {}", stored.display()));
+            imported.add(id, &stored);
+            notes += 1;
             Ok(())
         };
         let summary = match session.sync(self.config.delete_after_sync, &mut sink) {
@@ -482,6 +517,7 @@ impl Run<'_> {
             ),
             detail("strokes", strokes.to_string()),
             detail("points", points.to_string()),
+            detail("notes", notes.to_string()),
             detail("deleted", summary.deleted.to_string()),
         ];
         if let Some(dir) = &self.pages_dir {
@@ -623,6 +659,25 @@ fn advertisement_details(found: &Advertisement) -> Vec<Detail> {
 
 /// Writes a page atomically and reads it back: the tablet copy is only deleted once the
 /// file on disk is known to be intact.
+/// A synced page as a plain note (no thumbnail, no automatic export), when the caller gave no
+/// import of its own.
+fn plain_note(
+    library: &Library,
+    page: DownloadedPage,
+    context: &PageContext,
+    language: &str,
+) -> Result<PathBuf, String> {
+    let layer = if language == "fr" {
+        "Calque 1"
+    } else {
+        "Layer 1"
+    };
+    let now = || chrono::Utc::now().timestamp_millis();
+    let mut sink = LibrarySink::new(library, "", context.size, layer, now)
+        .with_orientation(context.orientation);
+    sink.store(page).map(|saved| saved.path)
+}
+
 fn save_verified(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;

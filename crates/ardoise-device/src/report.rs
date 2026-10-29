@@ -56,6 +56,7 @@ const FRENCH: Labels = Labels {
             "clockDrift" => "écart d'horloge",
             "strokes" => "traits",
             "points" => "points",
+            "notes" => "notes ajoutées",
             "deleted" => "effacées",
             "folder" => "dossier",
             "samples" => "points reçus",
@@ -133,6 +134,7 @@ const ENGLISH: Labels = Labels {
             "clockDrift" => "clock drift",
             "strokes" => "strokes",
             "points" => "points",
+            "notes" => "notes added",
             "deleted" => "deleted",
             "folder" => "folder",
             "samples" => "samples",
@@ -226,7 +228,7 @@ mod tests {
     use super::*;
     use crate::diagnostic::{Detail, StepOutcome};
 
-    const KEYS: [&str; 26] = [
+    const KEYS: [&str; 27] = [
         "adapter",
         "name",
         "address",
@@ -241,6 +243,7 @@ mod tests {
         "clockDrift",
         "strokes",
         "points",
+        "notes",
         "deleted",
         "folder",
         "samples",
