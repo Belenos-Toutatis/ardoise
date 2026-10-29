@@ -1,15 +1,18 @@
 <script lang="ts">
   /**
    * Left column: views (all notes, favourites), the tree of binders (drop targets for dragged
-   * notes), tags, trash, the Inkspace import, then the tablet block with the entry that opens the
-   * tablet test.
+   * notes; each one can be renamed or deleted from its menu), tags (each with its colour), trash,
+   * the Inkspace import, then the tablet block with the entry that opens the tablet test.
    */
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { t } from '../../lib/i18n.svelte';
-  import { ancestorsOf, sameView, type BinderNode, type LibraryView } from '../../lib/library-logic';
+  import { ancestorsOf, isInBinder, sameView, type BinderNode, type LibraryView } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
+  import BinderEditor from './BinderEditor.svelte';
+  import Menu from './Menu.svelte';
   import TabletStatus from './TabletStatus.svelte';
+  import TagColorPicker from './TagColorPicker.svelte';
 
   let {
     lib,
@@ -37,12 +40,17 @@
   /** Drop target under the pointer: a binder path, or null. */
   let dropTarget = $state<string | null>(null);
   let nameInput = $state<HTMLInputElement | null>(null);
+  /** The binder being renamed or whose deletion awaits confirmation. */
+  let editing = $state<{ path: string; mode: 'rename' | 'delete' } | null>(null);
 
   // The tree opens down to the binder being viewed.
   $effect(() => {
     const view = lib.view;
     if (view.kind === 'binder') for (const path of ancestorsOf(view.binder)) expanded.add(path);
   });
+
+  // The tag colours follow the library while the sidebar shows them.
+  onMount(() => lib.tagColors.start());
 
   const notes = $derived(lib.notes);
   const favoriteCount = $derived(notes.filter((n) => n.favorite).length);
@@ -79,6 +87,32 @@
       event.stopPropagation();
       creatingIn = null;
     }
+  }
+
+  let nav = $state<HTMLElement | null>(null);
+
+  /** Gives the focus back to the sidebar's entry of `binder`, or to « Toutes les notes ». */
+  async function focusEntry(binder: string | null) {
+    await tick();
+    const items = [...(nav?.querySelectorAll<HTMLElement>('.nav-item') ?? [])];
+    const found = binder === null ? undefined : items.find((item) => item.dataset.binder === binder);
+    (found ?? items.find((item) => item.dataset.view === 'all'))?.focus();
+  }
+
+  /** The binder was renamed: what was open under its old path stays open. */
+  function renamed(from: string, to: string) {
+    editing = null;
+    for (const path of [...expanded]) {
+      if (!isInBinder(path, from)) continue;
+      expanded.delete(path);
+      expanded.add(to + path.slice(from.length));
+    }
+    void focusEntry(to);
+  }
+
+  function closeEditing(path: string) {
+    editing = null;
+    void focusEntry(path);
   }
 
   function dragover(event: DragEvent, binder: string) {
@@ -150,6 +184,15 @@
         <span class="nav-label">{node.name}</span>
         <span class="count">{node.count}</span>
       </button>
+      <span class="row-tool binder-menu">
+        <Menu
+          label={t('library.binder.menu', { name: node.name })}
+          items={[
+            { id: 'rename', label: t('library.binder.rename'), onselect: () => (editing = { path: node.path, mode: 'rename' }) },
+            { id: 'delete', label: t('library.binder.delete'), danger: true, onselect: () => (editing = { path: node.path, mode: 'delete' }) },
+          ]}
+        />
+      </span>
       <button
         type="button"
         class="icon-button add-sub"
@@ -159,6 +202,21 @@
         <span aria-hidden="true">+</span>
       </button>
     </div>
+    {#if editing?.path === node.path}
+      {#key editing.mode}
+        <BinderEditor
+          {lib}
+          {node}
+          mode={editing.mode}
+          onrenamed={renamed}
+          ondeleted={() => {
+            editing = null;
+            void focusEntry(null);
+          }}
+          onclose={() => closeEditing(node.path)}
+        />
+      {/key}
+    {/if}
     {#if creatingIn === node.path}
       {@render creator(node.path)}
     {/if}
@@ -172,7 +230,7 @@
   </li>
 {/snippet}
 
-<nav class="sidebar" aria-label={t('library.sidebarLabel')}>
+<nav class="sidebar" aria-label={t('library.sidebarLabel')} bind:this={nav}>
   <ul class="nav-list">
     <li>
       <button
@@ -231,17 +289,25 @@
     {#if (lib.listing?.tags.length ?? 0) > 0}
       <ul class="nav-list">
         {#each lib.listing?.tags ?? [] as entry (entry.tag)}
+          {@const color = lib.tagColors.of(entry.tag)}
           <li>
-            <button
-              type="button"
-              class="nav-item"
-              data-tag={entry.tag}
-              aria-current={current({ kind: 'tag', tag: entry.tag })}
-              onclick={() => lib.setView({ kind: 'tag', tag: entry.tag })}
-            >
-              <span class="nav-label"># {entry.tag}</span>
-              <span class="count">{entry.count}</span>
-            </button>
+            <div class="nav-row">
+              <button
+                type="button"
+                class="nav-item"
+                data-tag={entry.tag}
+                data-tag-color={color}
+                aria-current={current({ kind: 'tag', tag: entry.tag })}
+                onclick={() => lib.setView({ kind: 'tag', tag: entry.tag })}
+              >
+                <span class="nav-label">
+                  {#if color}<span class="tag-dot" aria-hidden="true"></span>{:else}#{/if}
+                  {entry.tag}
+                </span>
+                <span class="count">{entry.count}</span>
+              </button>
+              <span class="row-tool"><TagColorPicker tag={entry.tag} colors={lib.tagColors} /></span>
+            </div>
           </li>
         {/each}
       </ul>

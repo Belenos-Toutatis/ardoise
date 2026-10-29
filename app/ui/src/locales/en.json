@@ -125,7 +125,10 @@
       "purge": "Delete for good",
       "confirmPurge": "Delete “{title}” for good?",
       "emptyAll": "Empty the trash",
-      "confirmEmpty": "Delete the {count} notes in the trash for good? This cannot be undone.",
+      "confirmEmpty": {
+        "one": "Delete the note in the trash for good? This cannot be undone.",
+        "other": "Delete the {count} notes in the trash for good? This cannot be undone."
+      },
       "confirm": "Confirm"
     },
     "assemble": {
@@ -143,6 +146,119 @@
       "error": "Couldn't assemble the notes: {message}",
       "done": "New note created: {title}",
       "progress": "Assembling {count} notes…"
+    },
+    "turn": {
+      "button": "Turn",
+      "panel": "Turn the selected notes",
+      "left": "A quarter turn to the left",
+      "right": "A quarter turn to the right",
+      "hint": "The sheet, the writing and the background image turn together, as with \"Turn the sheet with the writing\" in the editor.",
+      "progress": "Turning the notes: {done} of {total}",
+      "undoProgress": "Turning the notes back: {done} of {total}",
+      "doneLeft": {
+        "one": "{count} note turned a quarter turn to the left.",
+        "other": "{count} notes turned a quarter turn to the left."
+      },
+      "doneRight": {
+        "one": "{count} note turned a quarter turn to the right.",
+        "other": "{count} notes turned a quarter turn to the right."
+      },
+      "failed": {
+        "one": "One note could not be turned:",
+        "other": "{count} notes could not be turned:"
+      },
+      "undone": {
+        "one": "The note is back the way it was.",
+        "other": "The {count} notes are back the way they were."
+      },
+      "undoFailed": {
+        "one": "One note could not be turned back:",
+        "other": "{count} notes could not be turned back:"
+      }
+    },
+    "activity": {
+      "stop": "Stop",
+      "stopping": "Stopping after this note…",
+      "stopped": {
+        "one": "Stopped before the end: the last note did not change.",
+        "other": "Stopped before the end: the last {count} notes did not change."
+      },
+      "undo": "Undo",
+      "failure": "\"{title}\": {message}",
+      "undoShortcut": "Undo (Ctrl+Z)"
+    },
+    "trashUndo": {
+      "done": {
+        "one": "Note moved to the trash.",
+        "other": "{count} notes moved to the trash."
+      },
+      "restored": {
+        "one": "Note restored.",
+        "other": "{count} notes restored."
+      },
+      "progress": "Restoring the notes: {done} of {total}",
+      "failed": {
+        "one": "One note could not be restored:",
+        "other": "{count} notes could not be restored:"
+      },
+      "trashFailed": {
+        "one": "One note could not be moved to the trash:",
+        "other": "{count} notes could not be moved to the trash:"
+      }
+    },
+    "tagColor": {
+      "button": "Colour of the tag \"{tag}\": {color}",
+      "palette": "Colour of the tag \"{tag}\"",
+      "none": "No colour",
+      "hint": "The dot next to a tag changes its colour, on every note that has it.",
+      "names": {
+        "red": "Red",
+        "orange": "Orange",
+        "yellow": "Yellow",
+        "green": "Green",
+        "teal": "Teal",
+        "blue": "Blue",
+        "purple": "Purple",
+        "pink": "Pink"
+      }
+    },
+    "binder": {
+      "menu": "Actions on the binder \"{name}\"",
+      "rename": "Rename…",
+      "delete": "Delete…",
+      "newName": "New name of the binder \"{name}\"",
+      "renameDo": "Rename",
+      "deleteTitle": "Delete the binder \"{name}\"",
+      "confirmEmpty": "Delete the binder \"{name}\"? It holds no note: its folder will be removed.",
+      "confirm": {
+        "one": "Delete the binder \"{name}\"? Its note goes to the trash, then its folder is removed.",
+        "other": "Delete the binder \"{name}\"? Its {count} notes go to the trash, then its folder is removed."
+      },
+      "confirmSubBinders": {
+        "one": "Its sub-binder is included.",
+        "other": "Its {count} sub-binders are included."
+      },
+      "confirmHint": "A note restored from the trash goes back to its binder. Files that are not notes stay where they are.",
+      "deleteDo": "Delete the binder",
+      "deleted": {
+        "one": "Binder \"{name}\" deleted: {count} note moved to the trash.",
+        "other": "Binder \"{name}\" deleted: {count} notes moved to the trash."
+      },
+      "deletedEmpty": "Binder \"{name}\" deleted.",
+      "folder": "\"{name}\"",
+      "kept": {
+        "one": "The folder {folders} could not be removed: it still holds files, or it is in use.",
+        "other": "The folders {folders} could not be removed: they still hold files, or they are in use."
+      },
+      "deleteFailed": {
+        "one": "One note could not be moved to the trash (it stays in its binder):",
+        "other": "{count} notes could not be moved to the trash (they stay in their binder):"
+      },
+      "restored": {
+        "one": "Binder \"{name}\" restored with its note.",
+        "other": "Binder \"{name}\" restored with its {count} notes."
+      },
+      "restoredEmpty": "Binder \"{name}\" restored."
     }
   },
   "settings": {
@@ -188,6 +304,12 @@
       "drawWithFinger": "Draw with a finger",
       "drawWithFingerHint": "By default only the pen draws: a finger pans the page, two fingers zoom, a double tap fits the page. Tick this box for a touch screen without a pen; a finger then draws like the mouse.",
       "penHint": "The back of the pen erases (with the eraser's settings); the pen's button draws a selection lasso; fingers are ignored while the pen is in use or near the screen."
+    },
+    "librarySwitch": {
+      "title": "Change the library",
+      "hint": "Ardoise will show the notes of this folder at once, on this PC only ({machine}). The notes of the current library stay in their folder.",
+      "confirm": "Use this folder",
+      "current": "This is already the library of this PC: nothing changes."
     }
   },
   "assistant": {
@@ -559,6 +681,11 @@
     "pdfUnsupported": "PDF files can only be read on Windows",
     "pdfEncrypted": "this PDF is protected by a password; save a copy without a password",
     "pdfNoSuchPage": "this PDF has no such page ({detail})",
+    "invalidTagColor": "this colour is not in the palette ({detail})",
+    "tagColorsNewer": "the tag colours were saved by a newer version of Ardoise: update Ardoise on this PC to change them ({detail})",
+    "tagColorsConflict": "the tag colours were changing at the same moment, probably on another computer; try again in a moment ({detail})",
+    "binderExists": "a binder or a file already has this name here; choose another one ({detail})",
+    "binderNotFound": "this binder no longer exists; it may have been renamed or deleted on another computer ({detail})",
     "inkspaceNotFound": "this folder holds no Inkspace notes ({detail}); choose Inkspace's “LocalState” folder or a copy of it",
     "inkspaceUnreadable": "Inkspace's notes cannot be read ({detail}); close Inkspace and try again",
     "inkspaceDamaged": "Inkspace's note database is damaged or in an unknown format ({detail}); if Inkspace is open, close it and try again",
@@ -1044,7 +1171,10 @@
     "run": "Print…",
     "again": "Print again…",
     "running": "Printing…",
-    "done": "Sent to the printer: {count} page(s).",
+    "done": {
+      "one": "Sent to the printer: {count} page.",
+      "other": "Sent to the printer: {count} pages."
+    },
     "cancelled": "Printing cancelled.",
     "failed": "Printing failed: {message}"
   },
@@ -1488,7 +1618,10 @@
       "title": "New note from a PDF or an image",
       "pickTitle": "PDF or image to annotate",
       "intro": "Each PDF page becomes a note of its size and orientation (portrait or landscape), with the page in the background; an image becomes a note the size of an A4 sheet, in the image's orientation.",
-      "pdfInfo": "{count} page(s), the first one {width} × {height} mm.",
+      "pdfInfo": {
+        "one": "One page, {width} × {height} mm.",
+        "other": "{count} pages, the first one {width} × {height} mm."
+      },
       "pages": "Pages",
       "allPages": "All pages ({count})",
       "somePages": "Some pages",
@@ -1510,6 +1643,17 @@
     "assemble": {
       "droppedOne": "Only the first note's background image is kept: one other note's will not be carried over.",
       "droppedMany": "Only the first note's background image is kept: those of the {count} other notes will not be carried over."
+    }
+  },
+  "libraryChoice": {
+    "noNotes": "It holds no note.",
+    "notes": {
+      "one": "It holds {count} note.",
+      "other": "It holds {count} notes."
+    },
+    "notesAtLeast": {
+      "one": "It holds at least {count} note (the folder is very large: the count stopped there).",
+      "other": "It holds at least {count} notes (the folder is very large: the count stopped there)."
     }
   },
   "inkspace": {

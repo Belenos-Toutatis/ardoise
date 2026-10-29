@@ -9,8 +9,10 @@
 //!   ([`LibraryError::Conflict`]).
 //! - No lock file, no database: the folder can be synced by any tool.
 
+mod binders;
 mod conflicts;
 mod names;
+mod tag_colors;
 mod trash;
 mod walk;
 mod watch;
@@ -26,11 +28,14 @@ use serde::{Deserialize, Serialize};
 use crate::format::{self, FormatError, NoteFile};
 use crate::fsutil::{CheckedWriteError, rename_no_replace, write_atomic_checked, write_atomic_new};
 
+pub use binders::BinderTrashed;
 pub use conflicts::{ConflictKind, ConflictName, parse_conflict_name};
 pub use names::{
     MAX_NAME_CHARS, NOTE_EXTENSION, invalid_name_reason, local_date, note_file_stem, sanitize_name,
 };
+pub use tag_colors::{TAG_COLORS_FILE, tag_key};
 pub use trash::{TRASH_DIR, TRASH_RETENTION, TrashItem};
+pub use walk::{NoteCount, count_notes};
 pub use watch::{LibraryChange, LibraryWatcher};
 
 use names::{MAX_SUFFIX, exists, note_path, note_stem, stem_matches, with_suffix};
@@ -193,6 +198,33 @@ pub enum LibraryError {
         /// Identifier given.
         id: String,
     },
+    /// The binder does not exist (or is a file, a link or a junction, which are never
+    /// followed).
+    #[error("the binder {} does not exist", path.display())]
+    BinderNotFound {
+        /// Binder asked for, relative to the library root.
+        path: PathBuf,
+    },
+    /// A file or folder already has the name a binder would take; nothing was moved.
+    #[error("{} already exists", path.display())]
+    BinderExists {
+        /// The binder path that is taken, relative to the library root.
+        path: PathBuf,
+    },
+    /// A tag colour is not a palette identifier (`a-z`, `0-9` and `-`, starting with a letter,
+    /// 32 characters at most).
+    #[error("invalid tag colour {color:?}")]
+    InvalidTagColor {
+        /// Colour given.
+        color: String,
+    },
+    /// `_ardoise/tags.json` (or a copy of it) was written by a newer version of Ardoise; it
+    /// is left untouched.
+    #[error("{} was written by a newer version of Ardoise; it was not changed", path.display())]
+    TagColorsNewer {
+        /// The file involved.
+        path: PathBuf,
+    },
     /// The folder cannot be watched.
     #[error("cannot watch {}: {message}", path.display())]
     Watch {
@@ -216,6 +248,10 @@ impl LibraryError {
             LibraryError::InvalidName { .. } => "invalidName",
             LibraryError::NoFreeName { .. } => "noFreeName",
             LibraryError::NotInTrash { .. } => "notInTrash",
+            LibraryError::BinderNotFound { .. } => "binderNotFound",
+            LibraryError::BinderExists { .. } => "binderExists",
+            LibraryError::InvalidTagColor { .. } => "invalidTagColor",
+            LibraryError::TagColorsNewer { .. } => "tagColorsNewer",
             LibraryError::Watch { .. } => "libraryWatch",
         }
     }

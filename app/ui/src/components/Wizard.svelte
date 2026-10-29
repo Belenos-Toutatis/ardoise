@@ -1,17 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, errorMessage, type AppState } from '../lib/api';
+  import { api, errorMessage, type AppState, type LibraryInspection } from '../lib/api';
   import { t } from '../lib/i18n.svelte';
   import { DEFAULT_BINDER } from '../lib/inkspace';
   import { inkspaceOffer } from '../lib/inkspace-offer.svelte';
   import { pickFolder } from '../lib/library';
   import LanguagePicker from './LanguagePicker.svelte';
+  import LibraryFolderFacts from './LibraryFolderFacts.svelte';
   import Logo from './Logo.svelte';
 
   let { app, onchange }: { app: AppState; onchange: (next: AppState) => void } = $props();
 
   let chosen = $state<string | null>(null);
-  let existing = $state(false);
+  let inspection = $state<LibraryInspection | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
   /** Wacom Inkspace's notes found on this PC (`notes` null when the folder could not be read). */
@@ -40,7 +41,7 @@
     try {
       const folder = await pickFolder(t('wizard.pickerTitle'));
       if (!folder) return;
-      existing = (await api.inspectLibrary(folder)).existing;
+      inspection = await api.inspectLibrary(folder);
       chosen = folder;
     } catch (e) {
       error = errorMessage(e);
@@ -80,12 +81,8 @@
 
     <button class="button" onclick={choose}>{t('wizard.choose')}</button>
 
-    {#if chosen}
-      <div class="chosen">
-        <span class="label">{t('wizard.chosen')}</span>
-        <code>{chosen}</code>
-        <p class="small">{existing ? t('wizard.existing') : t('wizard.new')}</p>
-      </div>
+    {#if chosen && inspection}
+      <LibraryFolderFacts folder={chosen} {inspection} />
     {/if}
 
     {#if inkspace}
@@ -105,7 +102,7 @@
       </div>
     {/if}
 
-    {#if chosen}
+    {#if chosen && inspection}
       <button class="button primary" disabled={busy} onclick={confirm}>{t('common.continue')}</button>
     {/if}
 

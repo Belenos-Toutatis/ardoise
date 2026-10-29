@@ -2,7 +2,6 @@
   import { onMount, untrack } from 'svelte';
   import { api, errorMessage, genericError, type AppState, type ThemePreference } from '../lib/api';
   import { currentLocale, t } from '../lib/i18n.svelte';
-  import { pickFolder } from '../lib/library';
   import { formatDate } from '../lib/library-logic';
   import { sizeInMillimetres, tablet } from '../lib/tablet-state.svelte';
   import LanguagePicker from './LanguagePicker.svelte';
@@ -10,6 +9,7 @@
   import AboutSection from './AboutSection.svelte';
   import AssistantSection from './AssistantSection.svelte';
   import HandwritingSection from './HandwritingSection.svelte';
+  import LibrarySetting from './LibrarySetting.svelte';
   import OpenH264Section from './OpenH264Section.svelte';
   import PenTouchSection from './PenTouchSection.svelte';
   import TabletOptions from './tablet/TabletOptions.svelte';
@@ -71,11 +71,6 @@
     const theme = (event.currentTarget as HTMLSelectElement).value as ThemePreference;
     void run(() => api.setTheme(theme));
   }
-
-  async function changeLibrary() {
-    const folder = await pickFolder(t('wizard.pickerTitle'));
-    if (folder) await run(() => api.setLibrary(folder));
-  }
 </script>
 
 <aside class="panel" aria-label={t('settings.title')}>
@@ -95,11 +90,7 @@
     </select>
   </label>
 
-  <div class="field">
-    <span>{t('settings.library')}</span>
-    <code>{app.library}</code>
-    <button class="button" onclick={changeLibrary}>{t('common.change')}</button>
-  </div>
+  <LibrarySetting {app} {onchange} />
 
   <section class="settings-section" aria-labelledby="settings-tablet">
     <h3 id="settings-tablet">{t('settings.tablet')}</h3>

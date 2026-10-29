@@ -13,6 +13,7 @@
   import ExportDialog from './ExportDialog.svelte';
   import PrintDialog from './PrintDialog.svelte';
   import Editor from './editor/Editor.svelte';
+  import ActivityBanner from './library/ActivityBanner.svelte';
   import AssembleDialog from './library/AssembleDialog.svelte';
   import InkspaceImportDialog from './library/InkspaceImportDialog.svelte';
   import NewFromFileDialog from './library/NewFromFileDialog.svelte';
@@ -286,6 +287,7 @@
         {:else}
           <NoteGrid {lib} onopen={open} onnew={newNote} />
         {/if}
+        <ActivityBanner activity={lib.activity} />
       </div>
       {#if panel === 'settings'}
         <Settings {app} {onchange} onclose={() => (panel = null)} ontest={() => (panel = 'diagnostic')} />

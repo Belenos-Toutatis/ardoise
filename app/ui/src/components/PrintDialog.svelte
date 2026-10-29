@@ -6,7 +6,7 @@
    * the note sits on the sheet.
    */
   import { api, errorMessage } from '../lib/api';
-  import { t } from '../lib/i18n.svelte';
+  import { t, tn } from '../lib/i18n.svelte';
   import type { ExportSource, PrintOptions } from '../lib/note';
   import { loadPrintChoice, savePrintChoice } from '../lib/print-options';
   import Modal from './Modal.svelte';
@@ -80,7 +80,7 @@
     {#if running}
       <p class="export-status" role="status">{t('print.running')}</p>
     {:else if phase === 'done'}
-      <p class="export-status" role="status">{t('print.done', { count: pages })}</p>
+      <p class="export-status" role="status">{tn('print.done', pages)}</p>
     {:else if phase === 'cancelled'}
       <p class="export-notice muted" role="status">{t('print.cancelled')}</p>
     {/if}

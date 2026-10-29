@@ -2,7 +2,7 @@
  * In-memory stand-in for the Rust commands, used when the interface runs in a plain browser
  * (`npm run dev`) so screens can be developed and tested without the desktop app.
  */
-import type { AppState, NoteOutlines } from './api';
+import type { AppState, LibraryInspection, NoteOutlines } from './api';
 import { mockBackgroundInvoke } from './mock-background';
 import { UNHANDLED, setMockAutoExportSettings } from './mock-data';
 import { checkAutoExport, mockExportInvoke } from './mock-export';
@@ -13,6 +13,7 @@ import { mockLibraryInvoke } from './mock-library';
 import { mockLiveInvoke } from './mock-live';
 import { mockNarrationInvoke } from './mock-narration';
 import { mockNotesInvoke } from './mock-notes';
+import { mockOrganizeInvoke } from './mock-organize';
 import { mockTabletInvoke } from './mock-tablet';
 import { mockAboutInvoke } from './mock-about';
 import { mockVideoInvoke } from './mock-video';
@@ -47,6 +48,9 @@ const state: AppState = {
 
 const libraries = new Set<string>();
 
+/** What `inspect_library` says of a folder (tests fill it); other folders are empty. */
+export const mockFolders = new Map<string, LibraryInspection>();
+
 export async function mockInvoke<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
   const result = (() => {
     switch (command) {
@@ -62,8 +66,10 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
         state.autoExport = checkAutoExport(args.autoExport as AppState['autoExport']);
         setMockAutoExportSettings(state.autoExport);
         return { ...state };
-      case 'inspect_library':
-        return { existing: libraries.has(args.path as string) };
+      case 'inspect_library': {
+        const path = args.path as string;
+        return mockFolders.get(path) ?? ({ existing: libraries.has(path), notes: 0, complete: true } satisfies LibraryInspection);
+      }
       case 'set_microphone':
         state.microphone = (args.device as string | null) ?? null;
         return { ...state };
@@ -93,6 +99,7 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
         // Library, editor and export commands live in their own modules, over the demo library.
         for (const handle of [
           mockLibraryInvoke,
+          mockOrganizeInvoke,
           mockNotesInvoke,
           mockExportInvoke,
           mockDragInvoke,

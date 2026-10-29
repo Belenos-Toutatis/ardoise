@@ -75,7 +75,7 @@ describe('print dialog', () => {
     await settle();
     expect(spy).toHaveBeenCalledWith(sources, { background: true, fit: 'actual' });
     expect(mockPrint.last?.sources).toEqual(sources);
-    expect(ui.target.querySelector('[role="status"]')?.textContent).toBe("Envoyé à l'imprimante : 2 page(s).");
+    expect(ui.target.querySelector('[role="status"]')?.textContent).toBe("Envoyé à l'imprimante : 2 pages.");
     expect(ui.button('Imprimer de nouveau…')).toBeTruthy();
     expect(ui.button('Fermer')).toBeTruthy();
   });

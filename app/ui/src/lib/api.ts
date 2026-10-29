@@ -85,6 +85,32 @@ export interface AppState {
 export interface LibraryInspection {
   /** The folder already holds an Ardoise library (`_ardoise/` present). */
   existing: boolean;
+  /** Note files found in it, sub-folders included. */
+  notes: number;
+  /** False when the count stopped early (a very large folder): there may be more notes. */
+  complete: boolean;
+}
+
+/** A note an operation on several notes could not handle, with the reason (`organize.rs`). */
+export interface FailedNote {
+  path: string;
+  error: { code: string; message: string };
+}
+
+/** What moving notes to the trash did (`TrashedNotes` in `organize.rs`). */
+export interface TrashedNotes {
+  /** Each note moved, with the id of its trash entry (to restore it). */
+  trashed: { path: string; id: string }[];
+  failed: FailedNote[];
+}
+
+/** What deleting a binder did (`BinderDeleted` in `organize.rs`). */
+export interface BinderDeleted {
+  /** Its notes, now in the trash, each restorable to its own binder. */
+  trashed: TrashEntry[];
+  failed: FailedNote[];
+  /** Folders kept because they still hold other files (relative, `/`-separated, deepest first). */
+  kept: string[];
 }
 
 /** A stroke ready to draw: SVG path data to fill with the non-zero rule (`notes.rs`). */
@@ -155,8 +181,8 @@ export const api = {
   createBinder: (binder: string) => call<void>('create_binder', { binder }),
   /** Moves notes into `binder`; returns their new paths, in order. */
   moveNotes: (paths: string[], binder: string) => call<string[]>('move_notes', { paths, binder }),
-  /** Moves notes to the trash. */
-  trashNotes: (paths: string[]) => call<void>('trash_notes', { paths }),
+  /** Moves each note it can to the trash; says which went (with their trash ids) and which failed. */
+  trashNotes: (paths: string[]) => call<TrashedNotes>('trash_notes', { paths }),
   trashList: () => call<TrashEntry[]>('trash_list'),
   /** Restores a trashed note; returns its path. */
   trashRestore: (id: string) => call<string>('trash_restore', { id }),
@@ -170,6 +196,17 @@ export const api = {
   /** Changes a note's title, which renames its file. */
   retitleNote: (path: string, title: string, stamp: FileStamp) =>
     call<{ path: string; stamp: FileStamp }>('retitle_note', { path, title, stamp }),
+
+  // --- Library: organising (milestone M10; Rust side: app/src-tauri/src/organize.rs) -------
+
+  /** Renames a binder (`a/b`) in place; returns its new path. Refused (`binderExists`) rather than replacing a folder. */
+  renameBinder: (binder: string, name: string) => call<string>('rename_binder', { binder, name }),
+  /** Puts every note of a binder (and its sub-binders) in the trash, then removes the folders left empty. */
+  deleteBinder: (binder: string) => call<BinderDeleted>('delete_binder', { binder }),
+  /** Colour id of every tag that has one, keyed by the tag in lower case (`tagKey`). */
+  tagColors: () => call<Record<string, string>>('tag_colors'),
+  /** Gives a tag a colour of the palette, or none (`null`); returns every colour afterwards. */
+  setTagColor: (tag: string, color: string | null) => call<Record<string, string>>('set_tag_color', { tag, color }),
 
   // --- Editor -------------------------------------------------------------------------------
 

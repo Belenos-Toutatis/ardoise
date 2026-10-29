@@ -125,7 +125,10 @@
       "purge": "Supprimer définitivement",
       "confirmPurge": "Supprimer définitivement « {title} » ?",
       "emptyAll": "Vider la corbeille",
-      "confirmEmpty": "Supprimer définitivement les {count} notes de la corbeille ? Cette action est irréversible.",
+      "confirmEmpty": {
+        "one": "Supprimer définitivement la note de la corbeille ? Cette action est irréversible.",
+        "other": "Supprimer définitivement les {count} notes de la corbeille ? Cette action est irréversible."
+      },
       "confirm": "Confirmer"
     },
     "assemble": {
@@ -143,6 +146,119 @@
       "error": "Impossible d'assembler les notes : {message}",
       "done": "Nouvelle note créée : {title}",
       "progress": "Assemblage de {count} notes…"
+    },
+    "turn": {
+      "button": "Tourner",
+      "panel": "Tourner les notes sélectionnées",
+      "left": "Un quart de tour à gauche",
+      "right": "Un quart de tour à droite",
+      "hint": "La feuille, l'écriture et l'image de fond tournent ensemble, comme avec « Tourner la feuille avec l'écriture » dans l'éditeur.",
+      "progress": "Rotation des notes : {done} sur {total}",
+      "undoProgress": "Retour des notes dans leur sens d'origine : {done} sur {total}",
+      "doneLeft": {
+        "one": "{count} note tournée d'un quart de tour à gauche.",
+        "other": "{count} notes tournées d'un quart de tour à gauche."
+      },
+      "doneRight": {
+        "one": "{count} note tournée d'un quart de tour à droite.",
+        "other": "{count} notes tournées d'un quart de tour à droite."
+      },
+      "failed": {
+        "one": "Une note n'a pas pu être tournée :",
+        "other": "{count} notes n'ont pas pu être tournées :"
+      },
+      "undone": {
+        "one": "La note a retrouvé son sens d'origine.",
+        "other": "Les {count} notes ont retrouvé leur sens d'origine."
+      },
+      "undoFailed": {
+        "one": "Une note n'a pas pu retrouver son sens d'origine :",
+        "other": "{count} notes n'ont pas pu retrouver leur sens d'origine :"
+      }
+    },
+    "activity": {
+      "stop": "Arrêter",
+      "stopping": "Arrêt après cette note…",
+      "stopped": {
+        "one": "Arrêté avant la fin : la dernière note n'a pas changé.",
+        "other": "Arrêté avant la fin : les {count} dernières notes n'ont pas changé."
+      },
+      "undo": "Annuler",
+      "failure": "« {title} » : {message}",
+      "undoShortcut": "Annuler (Ctrl+Z)"
+    },
+    "trashUndo": {
+      "done": {
+        "one": "Note mise à la corbeille.",
+        "other": "{count} notes mises à la corbeille."
+      },
+      "restored": {
+        "one": "Note restaurée.",
+        "other": "{count} notes restaurées."
+      },
+      "progress": "Restauration des notes : {done} sur {total}",
+      "failed": {
+        "one": "Une note n'a pas pu être restaurée :",
+        "other": "{count} notes n'ont pas pu être restaurées :"
+      },
+      "trashFailed": {
+        "one": "Une note n'a pas pu être mise à la corbeille :",
+        "other": "{count} notes n'ont pas pu être mises à la corbeille :"
+      }
+    },
+    "tagColor": {
+      "button": "Couleur de l'étiquette « {tag} » : {color}",
+      "palette": "Couleur de l'étiquette « {tag} »",
+      "none": "Aucune couleur",
+      "hint": "Le rond à côté d'une étiquette change sa couleur, sur toutes les notes qui la portent.",
+      "names": {
+        "red": "Rouge",
+        "orange": "Orange",
+        "yellow": "Jaune",
+        "green": "Vert",
+        "teal": "Turquoise",
+        "blue": "Bleu",
+        "purple": "Violet",
+        "pink": "Rose"
+      }
+    },
+    "binder": {
+      "menu": "Actions sur le classeur « {name} »",
+      "rename": "Renommer…",
+      "delete": "Supprimer…",
+      "newName": "Nouveau nom du classeur « {name} »",
+      "renameDo": "Renommer",
+      "deleteTitle": "Supprimer le classeur « {name} »",
+      "confirmEmpty": "Supprimer le classeur « {name} » ? Il ne contient aucune note : son dossier sera supprimé.",
+      "confirm": {
+        "one": "Supprimer le classeur « {name} » ? Sa note va à la corbeille, puis son dossier est supprimé.",
+        "other": "Supprimer le classeur « {name} » ? Ses {count} notes vont à la corbeille, puis son dossier est supprimé."
+      },
+      "confirmSubBinders": {
+        "one": "Son sous-classeur est inclus.",
+        "other": "Ses {count} sous-classeurs sont inclus."
+      },
+      "confirmHint": "Une note restaurée depuis la corbeille retrouve son classeur. Les fichiers qui ne sont pas des notes restent à leur place.",
+      "deleteDo": "Supprimer le classeur",
+      "deleted": {
+        "one": "Classeur « {name} » supprimé : {count} note mise à la corbeille.",
+        "other": "Classeur « {name} » supprimé : {count} notes mises à la corbeille."
+      },
+      "deletedEmpty": "Classeur « {name} » supprimé.",
+      "folder": "« {name} »",
+      "kept": {
+        "one": "Le dossier {folders} n'a pas pu être supprimé : il contient encore des fichiers, ou il est en cours d'utilisation.",
+        "other": "Les dossiers {folders} n'ont pas pu être supprimés : ils contiennent encore des fichiers, ou ils sont en cours d'utilisation."
+      },
+      "deleteFailed": {
+        "one": "Une note n'a pas pu être mise à la corbeille (elle reste dans son classeur) :",
+        "other": "{count} notes n'ont pas pu être mises à la corbeille (elles restent dans leur classeur) :"
+      },
+      "restored": {
+        "one": "Classeur « {name} » rétabli avec sa note.",
+        "other": "Classeur « {name} » rétabli avec ses {count} notes."
+      },
+      "restoredEmpty": "Classeur « {name} » rétabli."
     }
   },
   "settings": {
@@ -188,6 +304,12 @@
       "drawWithFinger": "Dessiner au doigt",
       "drawWithFingerHint": "Par défaut, seul le stylet dessine : un doigt fait défiler la page, deux doigts zooment, un double toucher affiche la page entière. Cochez cette case pour un écran tactile sans stylet ; le doigt dessine alors comme la souris.",
       "penHint": "Le dos du stylet efface (avec les réglages de la gomme) ; le bouton du stylet trace un lasso de sélection ; les doigts sont ignorés tant que le stylet est utilisé ou proche de l'écran."
+    },
+    "librarySwitch": {
+      "title": "Changer de bibliothèque",
+      "hint": "Ardoise affichera aussitôt les notes de ce dossier, sur ce PC seulement ({machine}). Les notes de la bibliothèque actuelle restent dans leur dossier.",
+      "confirm": "Utiliser ce dossier",
+      "current": "C'est déjà la bibliothèque de ce PC : rien ne change."
     }
   },
   "assistant": {
@@ -559,6 +681,11 @@
     "pdfUnsupported": "les PDF ne peuvent être lus que sous Windows",
     "pdfEncrypted": "ce PDF est protégé par un mot de passe ; enregistrez-en une copie sans mot de passe",
     "pdfNoSuchPage": "ce PDF n'a pas cette page ({detail})",
+    "invalidTagColor": "cette couleur ne fait pas partie de la palette ({detail})",
+    "tagColorsNewer": "les couleurs des étiquettes ont été enregistrées par une version plus récente d'Ardoise : mettez Ardoise à jour sur ce PC pour les modifier ({detail})",
+    "tagColorsConflict": "les couleurs des étiquettes changeaient au même moment, sans doute sur un autre ordinateur ; réessayez dans un instant ({detail})",
+    "binderExists": "un classeur ou un fichier porte déjà ce nom à cet endroit ; choisissez-en un autre ({detail})",
+    "binderNotFound": "ce classeur n'existe plus, il a peut-être été renommé ou supprimé sur un autre ordinateur ({detail})",
     "inkspaceNotFound": "ce dossier ne contient pas de notes d'Inkspace ({detail}) ; choisissez le dossier « LocalState » d'Inkspace ou une copie de ce dossier",
     "inkspaceUnreadable": "les notes d'Inkspace ne peuvent pas être lues ({detail}) ; fermez Inkspace puis réessayez",
     "inkspaceDamaged": "la base de notes d'Inkspace est endommagée ou dans un format inconnu ({detail}) ; si Inkspace est ouvert, fermez-le puis réessayez",
@@ -1044,7 +1171,10 @@
     "run": "Imprimer…",
     "again": "Imprimer de nouveau…",
     "running": "Impression en cours…",
-    "done": "Envoyé à l'imprimante : {count} page(s).",
+    "done": {
+      "one": "Envoyé à l'imprimante : {count} page.",
+      "other": "Envoyé à l'imprimante : {count} pages."
+    },
     "cancelled": "Impression annulée.",
     "failed": "L'impression a échoué : {message}"
   },
@@ -1488,7 +1618,10 @@
       "title": "Nouvelle note depuis un PDF ou une image",
       "pickTitle": "PDF ou image à annoter",
       "intro": "Chaque page du PDF devient une note à sa taille et dans son orientation (portrait ou paysage), avec la page en fond ; une image devient une note de la taille d'une feuille A4, dans l'orientation de l'image.",
-      "pdfInfo": "{count} page(s), la première de {width} × {height} mm.",
+      "pdfInfo": {
+        "one": "Une page de {width} × {height} mm.",
+        "other": "{count} pages, la première de {width} × {height} mm."
+      },
       "pages": "Pages",
       "allPages": "Toutes les pages ({count})",
       "somePages": "Certaines pages",
@@ -1510,6 +1643,17 @@
     "assemble": {
       "droppedOne": "Seule l'image de fond de la première note est gardée : celle d'une autre note ne sera pas reprise.",
       "droppedMany": "Seule l'image de fond de la première note est gardée : celles de {count} autres notes ne seront pas reprises."
+    }
+  },
+  "libraryChoice": {
+    "noNotes": "Il ne contient aucune note.",
+    "notes": {
+      "one": "Il contient {count} note.",
+      "other": "Il contient {count} notes."
+    },
+    "notesAtLeast": {
+      "one": "Il contient au moins {count} note (le dossier est très grand : le compte s'est arrêté là).",
+      "other": "Il contient au moins {count} notes (le dossier est très grand : le compte s'est arrêté là)."
     }
   },
   "inkspace": {

@@ -1,6 +1,6 @@
 import en from '../locales/en.json';
 import fr from '../locales/fr.json';
-import { interpolate, lookup, type Locale, type Messages } from './i18n-core';
+import { interpolate, lookup, lookupPlural, type Locale, type Messages } from './i18n-core';
 
 export const catalogs: Record<Locale, Messages> = { fr, en };
 
@@ -19,4 +19,13 @@ export function setLocale(locale: Locale): void {
 export function t(key: string, params?: Record<string, string | number>): string {
   const message = lookup(catalogs[current], key) ?? lookup(catalogs.en, key) ?? key;
   return interpolate(message, params);
+}
+
+/**
+ * Translated text of the plural message `key` (`{ one, other }` in the catalogs) for `count`,
+ * which every form can show as `{count}`.
+ */
+export function tn(key: string, count: number, params?: Record<string, string | number>): string {
+  const message = lookupPlural(catalogs[current], key, current, count) ?? lookupPlural(catalogs.en, key, 'en', count) ?? key;
+  return interpolate(message, { count, ...params });
 }

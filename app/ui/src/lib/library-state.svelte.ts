@@ -7,9 +7,13 @@ import { api, errorMessage, followHandwritingStatus, onLibraryChanged } from './
 import { dragOutSupported } from './drag-out';
 import type { HandwritingHit, IndexStatus } from './handwriting';
 import { currentLocale, t } from './i18n.svelte';
+import { LibraryActivity } from './library-activity.svelte';
+import type { TurnDirection } from './library-batch';
+import { TagColorState } from './tag-colors.svelte';
 import {
   buildBinderTree,
   displayTitle,
+  isInBinder,
   mergeTags,
   oldestFirst,
   parseTags,
@@ -52,6 +56,10 @@ export class LibraryState {
   notice = $state<string | null>(null);
   /** The export or assemble dialog, with the notes it was opened for (displayed order). */
   dialog = $state<{ kind: 'export' | 'print' | 'assemble'; notes: NoteSummary[] } | null>(null);
+  /** Operations on several notes: progress, failures, « Annuler » (`library-activity.svelte.ts`). */
+  readonly activity = new LibraryActivity(() => this.refresh());
+  /** Colours of the tags (`_ardoise/tags.json`), loaded by the sidebar (`tag-colors.svelte.ts`). */
+  readonly tagColors = new TagColorState((message) => (this.error = message));
 
   /** Paths being dragged; kept here because a drag event's data is not readable until the drop. */
   private dragPaths: string[] = [];
@@ -359,8 +367,61 @@ export class LibraryState {
   }
 
   async trashNotes(paths: string[]): Promise<void> {
-    await this.run(() => api.trashNotes(paths));
-    this.selected = this.selected.filter((p) => !paths.includes(p));
+    const titles = new Map(paths.map((path) => [path, this.titleOf(path)]));
+    const done = await this.run(() => api.trashNotes(paths));
+    if (!done) return;
+    // The notes that could not go stay selected, ready for another try.
+    const gone = new Set(done.trashed.map((t) => t.path));
+    this.selected = this.selected.filter((p) => !gone.has(p));
+    this.activity.trashed(done, (path) => titles.get(path) ?? path);
+  }
+
+  /** Turns each note a quarter turn, as the editor does; offers to turn them back. */
+  async turnNotes(notes: NoteSummary[], direction: TurnDirection): Promise<void> {
+    this.error = null;
+    await this.activity.turn(
+      notes.map((note) => ({ path: note.path, title: displayTitle(note, currentLocale()) })),
+      direction,
+    );
+  }
+
+  // --- Binders (milestone M10) ----------------------------------------------------------------
+
+  /**
+   * Renames a binder; the view follows it. Returns its new path; the error (a name taken, say)
+   * goes back to the caller, which shows it by the name field.
+   */
+  async renameBinder(binder: string, name: string): Promise<string> {
+    this.error = null;
+    try {
+      const renamed = await api.renameBinder(binder, name.trim());
+      const view = this.view;
+      if (view.kind === 'binder' && isInBinder(view.binder, binder)) {
+        this.view = { kind: 'binder', binder: renamed + view.binder.slice(binder.length) };
+      }
+      return renamed;
+    } finally {
+      await this.refresh();
+    }
+  }
+
+  /** Deletes a binder: its notes go to the trash (restorable to it), then its empty folders go. */
+  async deleteBinder(binder: string, name: string): Promise<void> {
+    this.error = null;
+    try {
+      const done = await api.deleteBinder(binder);
+      if (this.view.kind === 'binder' && isInBinder(this.view.binder, binder)) this.view = { kind: 'all' };
+      await this.refresh();
+      this.activity.binderDeleted(binder, name, done);
+    } catch (error) {
+      this.error = errorMessage(error);
+      await this.refresh();
+    }
+  }
+
+  private titleOf(path: string): string {
+    const note = this.notes.find((n) => n.path === path);
+    return note ? displayTitle(note, currentLocale()) : path;
   }
 
   async toggleFavorite(note: NoteSummary): Promise<void> {

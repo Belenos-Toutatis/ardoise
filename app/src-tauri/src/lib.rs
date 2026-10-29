@@ -28,6 +28,7 @@ mod mcp;
 mod narration;
 mod notes;
 mod operations;
+mod organize;
 mod original;
 mod pdf_pages;
 mod presentation;
@@ -231,6 +232,10 @@ pub fn run() {
             library::set_note_tags,
             library::set_note_favorite,
             library::retitle_note,
+            organize::rename_binder,
+            organize::delete_binder,
+            organize::tag_colors,
+            organize::set_tag_color,
             notes::open_note,
             notes::save_note,
             notes::render_background,

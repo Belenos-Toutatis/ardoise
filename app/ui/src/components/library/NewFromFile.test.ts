@@ -47,7 +47,7 @@ describe('new notes from a PDF or an image', () => {
     const create = vi.spyOn(api, 'createNotesFromFile');
     const { button } = place(NewFromFileDialog, { binder: 'Classe', onclose: vi.fn(), oncreated });
     await vi.waitFor(() => expect(document.querySelector('[data-slot="new-from-file-name"]')?.textContent).toBe('fiche.pdf'));
-    expect(document.body.textContent).toContain('3 page(s), la première de 210 × 297 mm.');
+    expect(document.body.textContent).toContain('3 pages, la première de 210 × 297 mm.');
     expect(button('Créer les 3 notes').disabled).toBe(false);
 
     // Some pages only: an invalid list blocks the button.

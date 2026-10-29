@@ -280,12 +280,15 @@
   {#if note.tags.length > 0}
     <ul class="chips" aria-label={t('library.tags')}>
       {#each note.tags as tag (tag)}
+        {@const color = lib.tagColors.of(tag)}
         <li>
           <button
             type="button"
             class="chip"
+            data-tag-color={color}
             aria-label={t('library.card.filterTag', { tag })}
-            onclick={() => lib.setView({ kind: 'tag', tag })}>{tag}</button
+            onclick={() => lib.setView({ kind: 'tag', tag })}
+            >{#if color}<span class="tag-dot" aria-hidden="true"></span>{/if}{tag}</button
           >
         </li>
       {/each}

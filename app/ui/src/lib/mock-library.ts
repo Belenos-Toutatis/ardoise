@@ -226,9 +226,14 @@ export function mockLibraryInvoke(command: string, args: Record<string, unknown>
     case 'trash_notes': {
       const library = mockLibrary();
       const paths = args.paths as string[];
-      paths.forEach((path) => find(library, path));
+      const trashed: { path: string; id: string }[] = [];
+      const failed: { path: string; error: { code: string; message: string } }[] = [];
       for (const path of paths) {
-        const stored = find(library, path);
+        const stored = library.notes.get(path);
+        if (!stored) {
+          failed.push({ path, error: { code: 'noteNotFound', message: path } });
+          continue;
+        }
         library.notes.delete(path);
         const id = newId();
         const relative = [...stored.binder.split('/').filter(Boolean), baseName(path)].join('/');
@@ -240,9 +245,10 @@ export function mockLibraryInvoke(command: string, args: Record<string, unknown>
           noteId: stored.note.id,
           stored,
         });
+        trashed.push({ path, id });
       }
       notifyLibraryChanged();
-      return undefined;
+      return { trashed, failed };
     }
 
     case 'trash_list':

@@ -377,13 +377,15 @@ pub async fn move_notes(
     with_library(&context, |library| move_notes_in(library, &paths, &binder))
 }
 
+/// Moves notes to the trash, each one that can be: the ids of their trash entries (for the
+/// interface's « Annuler ») and the notes that failed (`organize::trash_notes_in`).
 #[tauri::command]
-pub async fn trash_notes(context: State<'_, AppContext>, paths: Vec<String>) -> CommandResult<()> {
-    with_library(&context, |library| {
-        paths
-            .iter()
-            .try_for_each(|path| library.trash(Path::new(path)).map(|_| ()))
-    })
+pub async fn trash_notes(
+    context: State<'_, AppContext>,
+    paths: Vec<String>,
+) -> CommandResult<crate::organize::TrashedNotes> {
+    let library = library_of(&context)?;
+    crate::notes::blocking(move || Ok(crate::organize::trash_notes_in(&library, &paths))).await
 }
 
 #[tauri::command]
