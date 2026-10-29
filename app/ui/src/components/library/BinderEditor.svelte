@@ -14,6 +14,7 @@
     node,
     mode,
     onrenamed,
+    ondeleted,
     onclose,
   }: {
     lib: LibraryState;
@@ -21,6 +22,9 @@
     mode: 'rename' | 'delete';
     /** The binder was renamed from `from` to `to`. */
     onrenamed: (from: string, to: string) => void;
+    /** The deletion is over (the binder may still be there when it kept other files). */
+    ondeleted: () => void;
+    /** Given up (Annuler, Escape). */
     onclose: () => void;
   } = $props();
 
@@ -28,7 +32,7 @@
   let error = $state<string | null>(null);
   let busy = $state(false);
   let input = $state<HTMLInputElement | null>(null);
-  let confirmButton = $state<HTMLButtonElement | null>(null);
+  let cancelButton = $state<HTMLButtonElement | null>(null);
 
   const subBinders = $derived(flattenTree(node.children).length);
 
@@ -39,7 +43,8 @@
       input?.focus();
       input?.select();
     } else {
-      confirmButton?.focus();
+      // The harmless choice first: Enter does not delete.
+      cancelButton?.focus();
     }
   });
 
@@ -63,9 +68,10 @@
   }
 
   async function remove() {
+    if (busy) return;
     busy = true;
-    onclose();
     await lib.deleteBinder(node.path, node.name);
+    ondeleted();
   }
 
   function keydown(event: KeyboardEvent) {
@@ -105,10 +111,10 @@
       </p>
       <p class="muted small">{t('library.binder.confirmHint')}</p>
       <div class="actions">
-        <button bind:this={confirmButton} type="button" class="button primary danger-fill" disabled={busy} onclick={remove}>
+        <button type="button" class="button primary danger-fill" disabled={busy} onclick={remove}>
           {t('library.binder.deleteDo')}
         </button>
-        <button type="button" class="button" onclick={onclose}>{t('library.cancel')}</button>
+        <button bind:this={cancelButton} type="button" class="button" disabled={busy} onclick={onclose}>{t('library.cancel')}</button>
       </div>
     </div>
   {/if}

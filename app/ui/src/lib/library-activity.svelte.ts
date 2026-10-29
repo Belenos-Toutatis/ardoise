@@ -3,6 +3,10 @@
  * operation on several notes (stoppable between two notes), the notes it could not handle, and
  * for a few seconds afterwards a notice with « Annuler » that undoes it (turning the notes
  * back, restoring the trashed ones). `ActivityBanner.svelte` draws it; `LibraryState` owns one.
+ *
+ * Operations on several notes run one at a time: one asked while another runs (an undo, say)
+ * waits for it. Notices pile up (the last few), each with its own delay, so that a notice never
+ * takes the place of another one still useful.
  */
 import { api, errorMessage, type BinderDeleted, type FailedNote, type TrashedNotes } from './api';
 import { t, tn } from './i18n.svelte';
@@ -20,7 +24,11 @@ export interface Progress {
   stopping: boolean;
 }
 
+/** Notices kept on display at most; older ones go first. */
+const MAX_OFFERS = 3;
+
 export interface Offer {
+  id: number;
   message: string;
   /** False for a plain confirmation (after an undo): no « Annuler » button. */
   undoable: boolean;
@@ -30,18 +38,27 @@ export class LibraryActivity {
   progress = $state<Progress | null>(null);
   /** The notes the last operation could not handle, under a heading that says what failed. */
   failures = $state<{ heading: string; items: BatchFailure[] } | null>(null);
-  offer = $state<Offer | null>(null);
+  /** The notices on display, oldest first. */
+  offers = $state<Offer[]>([]);
 
-  #undo: (() => Promise<void>) | null = null;
-  #stopAsked = false;
-  #timer: ReturnType<typeof setTimeout> | null = null;
+  #undos = new Map<number, () => Promise<void>>();
+  #timers = new Map<number, ReturnType<typeof setTimeout>>();
   #held = false;
+  #ids = 0;
+  #stopAsked = false;
+  /** Settles when the operations asked so far are over. */
+  #queue: Promise<unknown> = Promise.resolve();
 
   /** `refresh` reloads the listing once an operation is over. */
   constructor(private readonly refresh: () => Promise<void>) {}
 
   get busy(): boolean {
     return this.progress !== null;
+  }
+
+  /** The latest notice that can be undone (« Annuler », Ctrl+Z). */
+  get latestUndoable(): Offer | null {
+    return [...this.offers].reverse().find((offer) => offer.undoable) ?? null;
   }
 
   /** Stops the running operation after the note being handled. */
@@ -52,17 +69,27 @@ export class LibraryActivity {
   }
 
   /**
-   * Runs `work` on each target with the progress shown under `label`; failures are listed under
-   * the plural message `failedKey`. Refuses to start while another operation runs.
+   * Runs `work` on each target with the progress shown under `label`, once the operations asked
+   * before are over; failures are listed under the plural message `failedKey`.
    */
-  private async batch<R>(
+  private batch<R>(
     label: string,
     failedKey: string,
     targets: BatchTarget[],
     work: (target: BatchTarget) => Promise<R>,
   ): Promise<BatchOutcome<R> | null> {
-    if (this.busy || targets.length === 0) return null;
-    this.dismissOffer();
+    if (targets.length === 0) return Promise.resolve(null);
+    const run = this.#queue.then(() => this.run(label, failedKey, targets, work));
+    this.#queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async run<R>(
+    label: string,
+    failedKey: string,
+    targets: BatchTarget[],
+    work: (target: BatchTarget) => Promise<R>,
+  ): Promise<BatchOutcome<R>> {
     this.failures = null;
     this.#stopAsked = false;
     this.progress = { label, done: 0, total: targets.length, stopping: false };
@@ -154,49 +181,56 @@ export class LibraryActivity {
     });
   }
 
-  /** Runs the undo of the notice shown, if any. */
-  async undo(): Promise<void> {
-    const undo = this.#undo;
-    this.dismissOffer();
+  /** Runs the undo of the notice `id` (by default the latest that has one). */
+  async undo(id = this.latestUndoable?.id): Promise<void> {
+    if (id === undefined) return;
+    const undo = this.#undos.get(id);
+    this.dismissOffer(id);
     if (undo) await undo();
   }
 
   /** Shows a notice for a few seconds; with `undo`, it has an « Annuler » button. */
   show(message: string, undo: (() => Promise<void>) | null): void {
-    this.dismissOffer();
-    this.offer = { message, undoable: undo !== null };
-    this.#undo = undo;
-    this.#arm();
+    const id = ++this.#ids;
+    if (undo) this.#undos.set(id, undo);
+    for (const old of this.offers.slice(0, Math.max(0, this.offers.length + 1 - MAX_OFFERS))) this.dismissOffer(old.id);
+    this.offers = [...this.offers, { id, message, undoable: undo !== null }];
+    this.#arm(id);
   }
 
-  dismissOffer(): void {
-    if (this.#timer) clearTimeout(this.#timer);
-    this.#timer = null;
-    this.#held = false;
-    this.offer = null;
-    this.#undo = null;
+  /** Removes the notice `id`, or every notice. */
+  dismissOffer(id?: number): void {
+    for (const offer of this.offers) {
+      if (id !== undefined && offer.id !== id) continue;
+      clearTimeout(this.#timers.get(offer.id));
+      this.#timers.delete(offer.id);
+      this.#undos.delete(offer.id);
+    }
+    this.offers = id === undefined ? [] : this.offers.filter((offer) => offer.id !== id);
+    if (this.offers.length === 0) this.#held = false;
   }
 
   dismissFailures(): void {
     this.failures = null;
   }
 
-  /** The pointer or the focus is on the notice: it stays until released. */
+  /** The pointer or the focus is on the notices: they stay until released. */
   hold(): void {
     this.#held = true;
-    if (this.#timer) clearTimeout(this.#timer);
-    this.#timer = null;
+    for (const timer of this.#timers.values()) clearTimeout(timer);
+    this.#timers.clear();
   }
 
   release(): void {
     if (!this.#held) return;
     this.#held = false;
-    this.#arm();
+    for (const offer of this.offers) this.#arm(offer.id);
   }
 
-  #arm(): void {
-    if (this.#timer) clearTimeout(this.#timer);
-    this.#timer = this.offer && !this.#held ? setTimeout(() => this.dismissOffer(), undoNotice.durationMs) : null;
+  #arm(id: number): void {
+    clearTimeout(this.#timers.get(id));
+    if (this.#held) return;
+    this.#timers.set(id, setTimeout(() => this.dismissOffer(id), undoNotice.durationMs));
   }
 }
 

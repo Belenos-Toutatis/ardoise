@@ -2,8 +2,10 @@
   /**
    * The library's longer operations (`lib/library-activity.svelte.ts`): progress with « Arrêter »,
    * the notes that failed with their reasons, and the notice with « Annuler » shown for a few
-   * seconds (it stays while the pointer or the focus is on it). Stuck to the bottom of the library
-   * and placed after its content, so that it never pushes the cards away under the pointer.
+   * seconds (it stays while the pointer or the focus is on it; Ctrl+Z undoes the latest one from
+   * the library, so that the keyboard does not have to reach it in time). Stuck to the bottom of
+   * the library and placed after its content, so that it never pushes the cards away under the
+   * pointer.
    */
   import { onDestroy } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
@@ -14,9 +16,21 @@
   const progress = $derived(activity.progress);
 
   onDestroy(() => activity.dismissOffer());
+
+  /** Ctrl+Z in the library (not in a text field, nor with an editor open: it has its own undo). */
+  function onkeydown(event: KeyboardEvent) {
+    if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'z') return;
+    if (event.defaultPrevented || !activity.latestUndoable || document.querySelector('.editor')) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+    event.preventDefault();
+    void activity.undo();
+  }
 </script>
 
-{#if progress || activity.failures || activity.offer}
+<svelte:window {onkeydown} />
+
+{#if progress || activity.failures || activity.offers.length > 0}
   <div class="activity">
     {#if progress}
       <div class="banner inline-banner notice activity-progress" role="status">
@@ -44,7 +58,8 @@
       </div>
     {/if}
 
-    {#if activity.offer}
+    {#each activity.offers as offer (offer.id)}
+      {@const latest = offer.id === activity.latestUndoable?.id}
       <div
         class="banner inline-banner notice activity-offer"
         role="status"
@@ -53,17 +68,24 @@
         onfocusin={() => activity.hold()}
         onfocusout={() => activity.release()}
       >
-        <span>{activity.offer.message}</span>
+        <span>{offer.message}</span>
         <span class="activity-actions">
-          {#if activity.offer.undoable}
-            <button type="button" class="button primary" data-action="undo" onclick={() => activity.undo()}>
+          {#if offer.undoable}
+            <button
+              type="button"
+              class="button primary"
+              data-action="undo"
+              aria-keyshortcuts={latest ? 'Control+Z' : undefined}
+              title={latest ? t('library.activity.undoShortcut') : undefined}
+              onclick={() => activity.undo(offer.id)}
+            >
               {t('library.activity.undo')}
             </button>
           {/if}
-          <button type="button" class="button ghost" onclick={() => activity.dismissOffer()}>{t('library.dismiss')}</button>
+          <button type="button" class="button ghost" onclick={() => activity.dismissOffer(offer.id)}>{t('library.dismiss')}</button>
         </span>
       </div>
-    {/if}
+    {/each}
   </div>
 {/if}
 

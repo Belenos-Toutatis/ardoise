@@ -28,7 +28,7 @@ const cardChip = (title: string, tag: string) =>
 
 async function pick(within: Element, colorName: string) {
   await ui!.click(within.querySelector('.tag-color-trigger'));
-  const palette = within.querySelector('[role="radiogroup"]')!;
+  const palette = within.querySelector('[role="menu"]')!;
   await ui!.click(ui!.byLabel(colorName, palette));
 }
 
@@ -87,13 +87,38 @@ describe('tag colours', () => {
     await vi.waitFor(() => expect(sidebarTag('physique').dataset.tagColor).toBe('teal'));
   });
 
+  it('is a menu the arrow keys go through, starting on the current colour', async () => {
+    await api.setTagColor('réunion', 'green');
+    ui = await renderHome();
+    await vi.waitFor(() => expect(sidebarTag('réunion').dataset.tagColor).toBe('green'));
+    const row = sidebarTag('réunion').closest('.nav-row')!;
+    const trigger = row.querySelector('.tag-color-trigger')!;
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    await ui.click(trigger);
+    const items = [...row.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+    expect(items).toHaveLength(9);
+    // One Tab stop: the colour chosen now.
+    expect(items.filter((item) => item.tabIndex === 0).map((item) => item.getAttribute('aria-label'))).toEqual(['Vert']);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Vert');
+    await ui.key(document.activeElement, 'ArrowRight');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Turquoise');
+    await ui.key(document.activeElement, 'End');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Aucune couleur');
+    await ui.key(document.activeElement, 'ArrowRight');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Rouge');
+    await ui.click(document.activeElement);
+    await vi.waitFor(() => expect(sidebarTag('réunion').dataset.tagColor).toBe('red'));
+    // Back on the button that opened it.
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it('closes the palette with Escape', async () => {
     ui = await renderHome();
     const row = sidebarTag('réunion').closest('.nav-row')!;
     await ui.click(row.querySelector('.tag-color-trigger'));
-    expect(row.querySelector('[role="radiogroup"]')).not.toBeNull();
-    await ui.key(row.querySelector('[role="radio"]'), 'Escape');
-    expect(row.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(row.querySelector('[role="menu"]')).not.toBeNull();
+    await ui.key(row.querySelector('[role="menuitemradio"]'), 'Escape');
+    expect(row.querySelector('[role="menu"]')).toBeNull();
   });
 
   it('show a translated error when the colour cannot be saved', async () => {

@@ -183,7 +183,8 @@
         "other": "Stopped before the end: the last {count} notes did not change."
       },
       "undo": "Undo",
-      "failure": "\"{title}\": {message}"
+      "failure": "\"{title}\": {message}",
+      "undoShortcut": "Undo (Ctrl+Z)"
     },
     "trashUndo": {
       "done": {
@@ -245,8 +246,8 @@
       "deletedEmpty": "Binder \"{name}\" deleted.",
       "folder": "\"{name}\"",
       "kept": {
-        "one": "The folder {folders} is kept: it holds files that are not notes.",
-        "other": "The folders {folders} are kept: they hold files that are not notes."
+        "one": "The folder {folders} could not be removed: it still holds files, or it is in use.",
+        "other": "The folders {folders} could not be removed: they still hold files, or they are in use."
       },
       "deleteFailed": {
         "one": "One note could not be moved to the trash (it stays in its binder):",

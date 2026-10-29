@@ -304,10 +304,10 @@ pub(crate) fn inspect_folder(path: &str, max_entries: usize) -> CommandResult<Li
     })
 }
 
-/// Async: counting the notes walks the folder, off the main thread.
+/// Counting the notes walks the folder (perhaps a slow synced one): on a blocking thread.
 #[tauri::command]
 pub async fn inspect_library(path: String) -> CommandResult<LibraryInspection> {
-    inspect_folder(&path, INSPECTION_ENTRIES)
+    crate::notes::blocking(move || inspect_folder(&path, INSPECTION_ENTRIES)).await
 }
 
 /// Makes `path` this computer's library, creating `_ardoise/` there if needed, and watches

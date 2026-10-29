@@ -209,6 +209,51 @@ describe('turning several notes', () => {
   });
 });
 
+describe('several operations', () => {
+  it('waits for the running turn before undoing a trashing, and keeps both notices', async () => {
+    let release: () => void = () => {};
+    const save = api.saveNote;
+    vi.spyOn(api, 'saveNote').mockImplementation(async (...args) => {
+      await new Promise<void>((resolve) => (release = resolve));
+      return save(...args);
+    });
+    ui = await renderHome();
+    await ui.select('Cours de physique');
+    await ui.click(ui.q('.selection-bar [data-action="turn"]'));
+    await ui.click(ui.q('.selection-bar [data-action="turn-cw"]'));
+    expect(ui.q('.activity-progress')).not.toBeNull();
+
+    // Meanwhile another note goes to the trash, and its « Annuler » is pressed.
+    await ui.key(ui.card('Liste de courses').querySelector('.card-open'), 'Delete');
+    await vi.waitFor(() => expect(ui!.all('.note-card').length).toBe(2));
+    await ui.click(ui.button('Annuler', ui.q('.activity-offer')!));
+    // The restoring waits for the turn: nothing is lost, nothing is skipped.
+    expect(mockLibrary().trash.size).toBe(1);
+    release();
+    await vi.waitFor(() => expect(mockLibrary().trash.size).toBe(0));
+    await vi.waitFor(() => expect(ui!.all('.note-card').length).toBe(3));
+    expect(stored('Cours de physique').note.page.width).toBe(21600);
+    // Both outcomes are on display; the turn can still be undone.
+    const offers = ui.all('.activity-offer').map((o) => o.textContent ?? '');
+    expect(offers.some((o) => o.includes("1 note tournée d'un quart de tour à droite."))).toBe(true);
+    expect(offers.some((o) => o.includes('Note restaurée.'))).toBe(true);
+  });
+
+  it('undoes the latest notice with Ctrl+Z, but never in a text field', async () => {
+    ui = await renderHome();
+    await ui.select('Réunion parents');
+    await turn('left');
+    const undo = ui.q('.activity-offer [data-action="undo"]')!;
+    expect(undo.getAttribute('aria-keyshortcuts')).toBe('Control+Z');
+    // In the search field, Ctrl+Z belongs to the field.
+    await ui.key(ui.q('input.search'), 'z', { ctrlKey: true });
+    expect(stored('Réunion parents').note.page.width).toBe(21600);
+    await ui.key(document.body, 'z', { ctrlKey: true });
+    await vi.waitFor(() => expect(stored('Réunion parents').note.page.width).toBe(29700));
+    expect(ui.q('.activity-offer')?.textContent).toContain("La note a retrouvé son sens d'origine.");
+  });
+});
+
 describe('undo after « Mettre à la corbeille »', () => {
   it('restores the notes trashed with the button, into their binders', async () => {
     ui = await renderHome();

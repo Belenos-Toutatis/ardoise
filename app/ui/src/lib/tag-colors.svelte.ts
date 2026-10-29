@@ -2,6 +2,9 @@
 import { api, errorMessage, onLibraryChanged } from './api';
 import { colorOf, type TagColor } from './tag-colors';
 
+/** How often the colours are read again while the window stays in front (another PC may change them). */
+export const tagColorsPolling = { intervalMs: 60_000 };
+
 export class TagColorState {
   colors = $state.raw<Readonly<Record<string, string>>>({});
   #sequence = 0;
@@ -14,9 +17,10 @@ export class TagColorState {
   }
 
   /**
-   * Loads the colours and reloads them whenever the library changes, and when the window comes
-   * back to the front: the library's watcher only reports notes, and a colour chosen on another
-   * PC arrives through Nextcloud in `_ardoise/tags.json`. Returns the function that stops it.
+   * Loads the colours and reloads them whenever the library changes, when the window comes back
+   * to the front, and every minute: the library's watcher only reports notes, and a colour chosen
+   * on another PC arrives through Nextcloud in `_ardoise/tags.json` (a few bytes to read). Returns
+   * the function that stops it.
    */
   start(): () => void {
     let stopped = false;
@@ -28,10 +32,12 @@ export class TagColorState {
       else unlisten = stop;
     });
     window.addEventListener('focus', reload);
+    const timer = setInterval(reload, tagColorsPolling.intervalMs);
     return () => {
       stopped = true;
       unlisten?.();
       window.removeEventListener('focus', reload);
+      clearInterval(timer);
     };
   }
 

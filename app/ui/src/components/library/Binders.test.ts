@@ -40,6 +40,7 @@ describe('renaming a binder', () => {
     await ui.click(ui.button('Renommer'));
     await vi.waitFor(() => expect(binderItem('Personnel')).not.toBeNull());
     expect(binderItem('Perso')).toBeNull();
+    expect(document.activeElement).toBe(binderItem('Personnel'));
     expect(binderOf('Réunion parents')).toBe('Personnel');
     expect(ui.q('.binder-editor')).toBeNull();
   });
@@ -79,17 +80,21 @@ describe('deleting a binder', () => {
     const confirm = ui.q('[role="alertdialog"]')!;
     expect(confirm.getAttribute('aria-label')).toBe('Supprimer le classeur « Classe »');
     expect(confirm.textContent).toContain(
-      'Supprimer le classeur « Classe » ? Sa note va à la corbeille, puis son dossier est supprimé. Son sous-classeur est compris.',
+      'Supprimer le classeur « Classe » ? Sa note va à la corbeille, puis son dossier est supprimé. Son sous-classeur est inclus.',
     );
     expect(confirm.textContent).toContain('Une note restaurée depuis la corbeille retrouve son classeur.');
+    // The harmless choice has the focus: Enter does not delete.
+    expect(document.activeElement?.textContent?.trim()).toBe('Annuler');
     // Nothing happens before the confirmation.
     expect(mockLibrary().trash.size).toBe(0);
     await ui.click(ui.button('Annuler', confirm));
     expect(ui.q('[role="alertdialog"]')).toBeNull();
+    expect(document.activeElement).toBe(binderItem('Classe'));
 
     await act('Classe', 'Supprimer…');
     await ui.click(ui.button('Supprimer le classeur'));
     await vi.waitFor(() => expect(binderItem('Classe')).toBeNull());
+    expect(document.activeElement).toBe(ui.q('.sidebar [data-view="all"]'));
     expect(mockLibrary().trash.size).toBe(1);
     expect(ui.titles()).toEqual(['Réunion parents', 'Liste de courses']);
     const offer = ui.q('.activity-offer')!;
@@ -135,7 +140,7 @@ describe('deleting a binder', () => {
     await ui.click(ui.button('Supprimer le classeur'));
     await vi.waitFor(() => expect(ui!.q('.activity-offer')).not.toBeNull());
     expect(ui.q('.activity-offer')?.textContent).toContain(
-      "Le dossier « Perso » est gardé : il contient d'autres fichiers que des notes.",
+      "Le dossier « Perso » n'a pas pu être supprimé : il contient encore des fichiers, ou il est en cours d'utilisation.",
     );
     // The view of the deleted binder gives way to all the notes.
     expect(ui.q('.sidebar [data-view="all"]')?.getAttribute('aria-current')).toBe('true');

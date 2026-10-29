@@ -453,7 +453,8 @@ mod tests {
         let files = prepare_files(
             None,
             vec![ExportSource {
-                path: "C:\\Ardoise\\2026-10-24 Brouillon.ardoise".into(),
+                // A path of this system (a `C:\…` one has no file name on Linux).
+                path: path_text(&Path::new("Ardoise").join("2026-10-24 Brouillon.ardoise")),
                 note: Some(sample_note("Brouillon")),
                 image_key: None,
             }],

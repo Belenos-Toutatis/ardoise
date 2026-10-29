@@ -369,8 +369,11 @@ export class LibraryState {
   async trashNotes(paths: string[]): Promise<void> {
     const titles = new Map(paths.map((path) => [path, this.titleOf(path)]));
     const done = await this.run(() => api.trashNotes(paths));
-    this.selected = this.selected.filter((p) => !paths.includes(p));
-    if (done) this.activity.trashed(done, (path) => titles.get(path) ?? path);
+    if (!done) return;
+    // The notes that could not go stay selected, ready for another try.
+    const gone = new Set(done.trashed.map((t) => t.path));
+    this.selected = this.selected.filter((p) => !gone.has(p));
+    this.activity.trashed(done, (path) => titles.get(path) ?? path);
   }
 
   /** Turns each note a quarter turn, as the editor does; offers to turn them back. */

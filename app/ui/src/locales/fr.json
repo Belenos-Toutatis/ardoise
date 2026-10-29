@@ -183,7 +183,8 @@
         "other": "Arrêté avant la fin : les {count} dernières notes n'ont pas changé."
       },
       "undo": "Annuler",
-      "failure": "« {title} » : {message}"
+      "failure": "« {title} » : {message}",
+      "undoShortcut": "Annuler (Ctrl+Z)"
     },
     "trashUndo": {
       "done": {
@@ -233,8 +234,8 @@
         "other": "Supprimer le classeur « {name} » ? Ses {count} notes vont à la corbeille, puis son dossier est supprimé."
       },
       "confirmSubBinders": {
-        "one": "Son sous-classeur est compris.",
-        "other": "Ses {count} sous-classeurs sont compris."
+        "one": "Son sous-classeur est inclus.",
+        "other": "Ses {count} sous-classeurs sont inclus."
       },
       "confirmHint": "Une note restaurée depuis la corbeille retrouve son classeur. Les fichiers qui ne sont pas des notes restent à leur place.",
       "deleteDo": "Supprimer le classeur",
@@ -245,8 +246,8 @@
       "deletedEmpty": "Classeur « {name} » supprimé.",
       "folder": "« {name} »",
       "kept": {
-        "one": "Le dossier {folders} est gardé : il contient d'autres fichiers que des notes.",
-        "other": "Les dossiers {folders} sont gardés : ils contiennent d'autres fichiers que des notes."
+        "one": "Le dossier {folders} n'a pas pu être supprimé : il contient encore des fichiers, ou il est en cours d'utilisation.",
+        "other": "Les dossiers {folders} n'ont pas pu être supprimés : ils contiennent encore des fichiers, ou ils sont en cours d'utilisation."
       },
       "deleteFailed": {
         "one": "Une note n'a pas pu être mise à la corbeille (elle reste dans son classeur) :",

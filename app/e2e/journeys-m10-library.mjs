@@ -139,7 +139,7 @@ export const libraryJourneys = [
 
       await check(`étiquette « physique » : couleur « ${l('library.tagColor.names.blue')} »`, async () => {
         await app.click('.sidebar .nav-row:has([data-tag="physique"]) .tag-color-trigger');
-        await app.click(`.sidebar [role="radio"][aria-label="${l('library.tagColor.names.blue')}"]`);
+        await app.click(`.sidebar [role="menuitemradio"][aria-label="${l('library.tagColor.names.blue')}"]`);
         await app.waitFor(`document.querySelector('.sidebar [data-tag="physique"]')?.dataset.tagColor === 'blue'`, 'the coloured tag');
       });
 
@@ -158,7 +158,7 @@ export const libraryJourneys = [
 
       await check(`« ${l('library.tagColor.none')} » la retire`, async () => {
         await app.click('.sidebar .nav-row:has([data-tag="physique"]) .tag-color-trigger');
-        await app.click(`.sidebar [role="radio"][aria-label="${l('library.tagColor.none')}"]`);
+        await app.click(`.sidebar [role="menuitemradio"][aria-label="${l('library.tagColor.none')}"]`);
         await app.waitFor(`!document.querySelector('.sidebar [data-tag="physique"]')?.dataset.tagColor`, 'no colour');
       });
     },

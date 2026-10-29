@@ -385,7 +385,7 @@ pub async fn trash_notes(
     paths: Vec<String>,
 ) -> CommandResult<crate::organize::TrashedNotes> {
     let library = library_of(&context)?;
-    Ok(crate::organize::trash_notes_in(&library, &paths))
+    crate::notes::blocking(move || Ok(crate::organize::trash_notes_in(&library, &paths))).await
 }
 
 #[tauri::command]

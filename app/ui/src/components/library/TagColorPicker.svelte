@@ -1,8 +1,9 @@
 <script lang="ts">
   /**
    * The colour of one tag (milestone M10): a small button showing it, which opens the palette
-   * (each colour, or none). The colour belongs to the library (`_ardoise/tags.json`), so it
-   * changes on every note carrying the tag at once. Escape or a click elsewhere closes it.
+   * (each colour, or none) as a menu: the arrow keys move between the colours, Enter or Space
+   * chooses one, Escape or a click elsewhere closes it. The colour belongs to the library
+   * (`_ardoise/tags.json`), so it changes on every note carrying the tag at once.
    */
   import { tick } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
@@ -26,6 +27,17 @@
       await tick();
       root?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
     }
+  }
+
+  /** Arrow keys, Home and End move the focus between the colours (it wraps around). */
+  function move(event: KeyboardEvent) {
+    const steps: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+    if (!(event.key in steps) && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    const items = [...(root?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : at + steps[event.key];
+    items[(next + items.length) % items.length]?.focus();
   }
 
   async function choose(color: TagColor | null) {
@@ -61,18 +73,19 @@
     data-tag-color={current}
     aria-label={label}
     title={label}
-    aria-haspopup="true"
+    aria-haspopup="menu"
     aria-expanded={open}
     onclick={toggle}
   >
     <span class="tag-dot" aria-hidden="true"></span>
   </button>
   {#if open}
-    <span class="tag-color-palette" role="radiogroup" aria-label={t('library.tagColor.palette', { tag })}>
+    <span class="tag-color-palette" role="menu" aria-label={t('library.tagColor.palette', { tag })} tabindex="-1" onkeydown={move}>
       {#each TAG_COLORS as color (color)}
         <button
           type="button"
-          role="radio"
+          role="menuitemradio"
+          tabindex={current === color ? 0 : -1}
           class="swatch"
           data-tag-color={color}
           aria-checked={current === color}
@@ -85,7 +98,8 @@
       {/each}
       <button
         type="button"
-        role="radio"
+        role="menuitemradio"
+        tabindex={current === null ? 0 : -1}
         class="swatch none"
         aria-checked={current === null}
         aria-label={t('library.tagColor.none')}

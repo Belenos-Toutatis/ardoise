@@ -172,24 +172,33 @@ format stays 1.2.
   editor and the library: they cannot disagree. Progress with « Arrêter » (stops between two notes), failures listed
   per note with the translated `errorCodes.*` phrase, then the undo notice; undoing turns each note back the other way
   only if its stamp is still the one the turn returned (a note changed since is listed, not touched). Turning back is
-  exact up to the rounding of `h − (h − y)` on f32 samples (a fraction of a micrometre).
+  exact up to the rounding of `h − (h − y)` on f32 samples (a fraction of a micrometre). As in the editor, the first
+  save that changes the ink keeps the version before it (`original.ardoise`, « Revenir à l'original ») and `modified`
+  changes, also when the turn is undone. Operations on several notes run one at a time: one asked meanwhile (an undo)
+  waits for the running one. A note opened in the editor while a turn runs is not skipped: the stamp check keeps
+  either version from being overwritten silently (the editor reports the conflict).
 - **Undo notice** (`ActivityBanner.svelte`): after a turn, « Mettre à la corbeille » (button or Delete) and a binder
-  deletion; 8 s, paused while the pointer or the focus is on it; a new operation replaces it. It sits at the bottom of
-  the library's scrolling area, after the content (sticky), so it never pushes the cards under the pointer; the
-  progress and the failures appear there too.
+  deletion; 8 s each, paused while the pointer or the focus is on them; up to three stay on display (a notice never
+  silently takes the place of another). **Ctrl+Z** in the library undoes the latest one (not in a text field, not
+  while an editor is open), so that the keyboard need not reach it in time (WCAG 2.2.1). It sits at the bottom of the
+  library's scrolling area, after the content (sticky), so it never pushes the cards under the pointer; the progress
+  and the failures appear there too. `trash_notes` trashes every note it can and returns the failures; the notes that
+  stayed stay selected.
 - **Tag colours**: `_ardoise/tags.json` (format in `docs/file-format.md` §6), loaded by the sidebar
   (`lib/tag-colors.svelte.ts`) and on every `library-changed`. Eight palette ids (`lib/tag-colors.ts`); `tag-colors.css`
   gives each a dot, a chip background and a chip text colour for the light and the dark theme (text contrast 6.2:1 at
   least). Shown on the cards' chips, the sidebar's tags and the tags panel; chosen with `TagColorPicker` (sidebar row,
-  tags panel). The watcher only reports notes: a colour changed on another PC shows when the window comes back to the
-  front (`focus`), at the next change of the library, or at the next start.
+  tags panel), a menu of `menuitemradio` (arrow keys, one Tab stop on the current colour). The watcher only reports
+  notes: the colours are read again at every change of the library, when the window comes back to the front, and every
+  minute (a colour changed on another PC arrives through Nextcloud in `tags.json`).
 - **Binders**: menu « ⋯ » on each binder row (`BinderEditor.svelte`). Rename: the folder is renamed in place
   (`rename_no_replace`; a change of case only works on Windows), the view and the open branches follow. Delete:
-  confirmation with the count of notes (the sidebar's count, sub-binders included) and of sub-binders; the notes go to
-  the trash one by one (`Library::trash`, so each is restorable to its own binder), then the folders left empty are
-  removed deepest first (`remove_dir` only: other files, hidden files and links keep their folder, and the notice
-  names the deepest kept folders). « Annuler » recreates the binder and restores its notes (empty sub-binders are not
-  recreated).
+  confirmation with the count of notes (the sidebar's count, sub-binders included) and of sub-binders, « Annuler »
+  focused first; the notes go to the trash one by one (`Library::trash`, so each is restorable to its own binder),
+  then the folders left empty are removed deepest first (`remove_dir` only: other files, hidden files and links keep
+  their folder, and the notice names the deepest folders that could not be removed: they still hold files, or are in
+  use). « Annuler » recreates the binder and restores its notes (empty sub-binders are not recreated). The focus goes
+  back to the binder (renamed or not) or to « Toutes les notes » after a deletion.
 - **Settings › change library** (`LibrarySetting.svelte`): the chosen folder is inspected and shown with
   `LibraryFolderFacts` (also in the wizard): existing library or new, number of notes (or « at least » when the count
   stopped); « Utiliser ce dossier » switches, « Annuler » does nothing; the current library picked again changes nothing.

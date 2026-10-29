@@ -19,6 +19,8 @@
   const current = $derived(chosen !== null && sameFolder(chosen.folder, app.library));
 
   async function choose() {
+    if (busy) return;
+    busy = true;
     error = null;
     try {
       const folder = await pickFolder(t('wizard.pickerTitle'));
@@ -26,6 +28,8 @@
       chosen = { folder, inspection: await api.inspectLibrary(folder) };
     } catch (e) {
       error = errorMessage(e);
+    } finally {
+      busy = false;
     }
   }
 
@@ -47,7 +51,7 @@
 <div class="field">
   <span>{t('settings.library')}</span>
   <code>{app.library}</code>
-  <button class="button" data-action="change-library" onclick={choose}>{t('common.change')}</button>
+  <button class="button" data-action="change-library" disabled={busy} onclick={choose}>{t('common.change')}</button>
 </div>
 
 {#if chosen}

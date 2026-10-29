@@ -86,6 +86,16 @@
     }
   }
 
+  let nav = $state<HTMLElement | null>(null);
+
+  /** Gives the focus back to the sidebar's entry of `binder`, or to « Toutes les notes ». */
+  async function focusEntry(binder: string | null) {
+    await tick();
+    const items = [...(nav?.querySelectorAll<HTMLElement>('.nav-item') ?? [])];
+    const found = binder === null ? undefined : items.find((item) => item.dataset.binder === binder);
+    (found ?? items.find((item) => item.dataset.view === 'all'))?.focus();
+  }
+
   /** The binder was renamed: what was open under its old path stays open. */
   function renamed(from: string, to: string) {
     editing = null;
@@ -94,6 +104,12 @@
       expanded.delete(path);
       expanded.add(to + path.slice(from.length));
     }
+    void focusEntry(to);
+  }
+
+  function closeEditing(path: string) {
+    editing = null;
+    void focusEntry(path);
   }
 
   function dragover(event: DragEvent, binder: string) {
@@ -185,7 +201,17 @@
     </div>
     {#if editing?.path === node.path}
       {#key editing.mode}
-        <BinderEditor {lib} {node} mode={editing.mode} onrenamed={renamed} onclose={() => (editing = null)} />
+        <BinderEditor
+          {lib}
+          {node}
+          mode={editing.mode}
+          onrenamed={renamed}
+          ondeleted={() => {
+            editing = null;
+            void focusEntry(null);
+          }}
+          onclose={() => closeEditing(node.path)}
+        />
       {/key}
     {/if}
     {#if creatingIn === node.path}
@@ -201,7 +227,7 @@
   </li>
 {/snippet}
 
-<nav class="sidebar" aria-label={t('library.sidebarLabel')}>
+<nav class="sidebar" aria-label={t('library.sidebarLabel')} bind:this={nav}>
   <ul class="nav-list">
     <li>
       <button
