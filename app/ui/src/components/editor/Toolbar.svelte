@@ -25,6 +25,7 @@
     onsplit,
     oncopy,
     onexport,
+    onprint,
     onreplay,
     onvideo,
     onstraighten,
@@ -53,6 +54,7 @@
     onsplit: () => void;
     oncopy: () => void;
     onexport: () => void;
+    onprint: () => void;
     onreplay: () => void;
     onvideo: () => void;
     /** "Redresser les formes" on the selection. */
@@ -229,6 +231,10 @@
     <button type="button" class="button small-button" title={t('editor.export.hint')} onclick={onexport}>
       <span aria-hidden="true">⇪</span>
       {t('editor.export.button')}
+    </button>
+    <button type="button" class="button small-button" data-action="print" title={t('editor.print.hint')} onclick={onprint}>
+      <span aria-hidden="true">⎙</span>
+      {t('editor.print.button')}
     </button>
     <button type="button" class="button small-button" data-action="video-export" title={t('editor.video.hint')} onclick={onvideo}>
       <span aria-hidden="true">▣</span>

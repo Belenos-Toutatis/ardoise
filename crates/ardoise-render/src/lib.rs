@@ -1,5 +1,5 @@
 //! Rendering and export of notes: ink tools, page backgrounds, templates and textures; PNG,
-//! JPG, SVG, PDF and the clipboard image (SPEC §4.6, `docs/design/exports-and-operations.md`).
+//! JPG, WebP, SVG, PDF and the clipboard image (SPEC §4.6, `docs/design/exports-and-operations.md`).
 //!
 //! The public surface below is the contract used by the Inkspace import comparison, the
 //! exports and the thumbnails. Every format draws the same thing (SPEC §6.2):
@@ -30,6 +30,7 @@ mod pdf;
 pub mod picture;
 mod svg;
 mod vector;
+mod webp;
 
 use ardoise_core::note::{Note, PageSize};
 use ardoise_ink::Stroke;
@@ -261,6 +262,24 @@ pub fn encode_png_at(image: &Image, dpi: Option<u32>) -> Result<Vec<u8>, RenderE
     writer.write_image_data(data).map_err(encode_error)?;
     writer.finish().map_err(encode_error)?;
     Ok(out)
+}
+
+/// Largest side of a WebP image, in pixels (the format stores sizes on 14 bits).
+pub const WEBP_MAX_SIDE: u32 = 16_383;
+
+/// Lossless WebP bytes of `image` (VP8L, libwebp's encoder): the pixels come back exactly, like
+/// PNG, in a file lighter than the PNG's. RGB when every pixel is opaque (which rendered notes
+/// are), RGBA otherwise (the colour under a fully transparent pixel is not kept). WebP records
+/// no resolution, and sides above [`WEBP_MAX_SIDE`] are refused with [`RenderError::Size`].
+pub fn encode_webp(image: &Image) -> Result<Vec<u8>, RenderError> {
+    check_pixels(image)?;
+    if image.width > WEBP_MAX_SIDE || image.height > WEBP_MAX_SIDE {
+        return Err(RenderError::Size {
+            width: image.width,
+            height: image.height,
+        });
+    }
+    webp::encode_lossless(image, webp::EFFORT)
 }
 
 /// JPEG bytes of `image`: baseline, 8-bit, YCbCr (JFIF), `quality` 1..=100 (clamped), alpha
@@ -941,5 +960,92 @@ pub(crate) mod tests {
             notes_to_pdf(&[&empty], &PdfOptions::default()),
             Err(RenderError::Size { .. })
         ));
+    }
+
+    /// Decodes a WebP file with the independent reader of `image-webp`: size, whether it has an
+    /// alpha channel, lossless, and RGBA pixels.
+    fn decode_webp(bytes: &[u8]) -> (u32, u32, bool, bool, Vec<u8>) {
+        let mut decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(bytes)).unwrap();
+        let (width, height) = decoder.dimensions();
+        let alpha = decoder.has_alpha();
+        let lossless = !decoder.is_lossy();
+        let mut data = vec![0; decoder.output_buffer_size().unwrap()];
+        decoder.read_image(&mut data).unwrap();
+        let rgba = if alpha {
+            data
+        } else {
+            data.chunks(3)
+                .flat_map(|p| [p[0], p[1], p[2], 255])
+                .collect()
+        };
+        (width, height, alpha, lossless, rgba)
+    }
+
+    #[test]
+    fn webp_is_lossless_and_smaller_than_the_raw_pixels() {
+        let ink = line(
+            Tool::Ballpoint,
+            Rgba::BLACK,
+            60.0,
+            0,
+            (500.0, 500.0),
+            (4500.0, 2500.0),
+        );
+        let n = note(SMALL, Background::default(), vec![ink]);
+        // With the paper: opaque, stored without an alpha channel.
+        let image = render_note(&n, &opts(0.05)).unwrap();
+        let webp = encode_webp(&image).unwrap();
+        assert_eq!(&webp[..4], b"RIFF");
+        assert_eq!(&webp[8..12], b"WEBP");
+        let (w, h, alpha, lossless, pixels) = decode_webp(&webp);
+        assert_eq!((w, h), (image.width, image.height));
+        assert!(!alpha && lossless);
+        assert_eq!(pixels, image.pixels, "every pixel comes back");
+        assert!(webp.len() < image.pixels.len() / 4, "{} bytes", webp.len());
+        // Without the paper: transparent, alpha kept.
+        let clear = render_note_transparent(&n, 0.05).unwrap();
+        assert!(clear.pixels.as_chunks::<4>().0.iter().any(|p| p[3] != 255));
+        let (_, _, alpha, lossless, pixels) = decode_webp(&encode_webp(&clear).unwrap());
+        assert!(alpha && lossless);
+        // The decoder returns straight alpha; fully transparent pixels may lose their colour.
+        for (a, b) in pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(clear.pixels.as_chunks::<4>().0)
+        {
+            assert!(a[3] == b[3] && (b[3] == 0 || a == b), "{a:?} != {b:?}");
+        }
+    }
+
+    #[test]
+    fn webp_refuses_empty_inconsistent_and_oversized_images() {
+        let empty = Image {
+            width: 0,
+            height: 4,
+            pixels: vec![],
+        };
+        assert!(matches!(encode_webp(&empty), Err(RenderError::Size { .. })));
+        let short = Image {
+            width: 2,
+            height: 2,
+            pixels: vec![0; 4],
+        };
+        assert!(matches!(encode_webp(&short), Err(RenderError::Encode(_))));
+        let wide = Image {
+            width: WEBP_MAX_SIDE + 1,
+            height: 1,
+            pixels: vec![255; (WEBP_MAX_SIDE as usize + 1) * 4],
+        };
+        assert!(matches!(
+            encode_webp(&wide),
+            Err(RenderError::Size { width, .. }) if width == WEBP_MAX_SIDE + 1
+        ));
+        let edge = Image {
+            width: WEBP_MAX_SIDE,
+            height: 1,
+            pixels: vec![255; WEBP_MAX_SIDE as usize * 4],
+        };
+        assert!(encode_webp(&edge).is_ok());
     }
 }

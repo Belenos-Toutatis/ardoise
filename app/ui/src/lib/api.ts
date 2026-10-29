@@ -26,7 +26,16 @@ import type {
 } from './video';
 import { mockOpenH264Download, mockVideoExport } from './mock-video';
 import type { NoteOriginal } from './original';
-import type { HandwritingHit, HandwritingInfo, HandwritingSetting, IndexStatus, NoteText } from './handwriting';
+import type {
+  HandwritingHit,
+  HandwritingInfo,
+  HandwritingSetting,
+  IndexStatus,
+  NoteText,
+  StructuredExport,
+  StructuredFormat,
+  TextLabels,
+} from './handwriting';
 import { mockOnHandwritingStatus } from './mock-handwriting';
 import type {
   AutoExportSettings,
@@ -39,6 +48,8 @@ import type {
   LibraryListing,
   Note,
   NoteSummary,
+  PrintOptions,
+  PrintResult,
   OpenedNote,
   MergeLayout,
   PageSize,
@@ -396,6 +407,22 @@ export const api = {
     call<string>('export_handwriting_text', { sources, destination }),
   /** Copies the recognised text to the clipboard (Windows; `clipboardUnavailable` elsewhere). */
   copyHandwritingText: (sources: ExportSource[]) => call<void>('copy_handwriting_text', { sources }),
+  /**
+   * Saves the recognised text with its structure (title, date and tags, then paragraphs, list
+   * items and drawings) as Markdown (drawings as PNG files next to it) or as a Word document.
+   * `labels` are the words the file contains, in the interface language.
+   */
+  exportStructuredText: (sources: ExportSource[], format: StructuredFormat, destination: string, labels: TextLabels) =>
+    call<StructuredExport>('export_structured_text', { sources, format, destination, labels }),
+
+  // --- Printing (milestone M8; Rust side: print.rs, print_windows.rs) ---
+
+  /**
+   * Opens Windows' print dialog and prints each note on a page of its own, in its orientation.
+   * Rejects with `printUnavailable` outside Windows.
+   */
+  printNotes: (sources: ExportSource[], options: PrintOptions) =>
+    call<PrintResult>('print_notes', { sources, options }),
 };
 
 /**

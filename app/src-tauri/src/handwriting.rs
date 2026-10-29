@@ -59,7 +59,7 @@ fn handwriting_dir_in(local_app_data: Option<OsString>) -> PathBuf {
         .join("handwriting")
 }
 
-fn hwr_error(error: HwrError) -> CommandError {
+pub(crate) fn hwr_error(error: HwrError) -> CommandError {
     CommandError::new(error.code(), error)
 }
 
@@ -151,7 +151,7 @@ fn info_of(indexer: &Indexer) -> HandwritingInfo {
 }
 
 /// A blocking call on the indexer, off the async runtime's threads.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     app: AppHandle,
     work: impl FnOnce(&Indexer, &AppContext) -> CommandResult<T> + Send + 'static,
 ) -> CommandResult<T> {

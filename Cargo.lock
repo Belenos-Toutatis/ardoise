@@ -213,6 +213,7 @@ version = "0.1.0"
 dependencies = [
  "ardoise-core",
  "ardoise-ink",
+ "roxmltree",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -220,6 +221,7 @@ dependencies = [
  "windows",
  "windows-collections",
  "windows-numerics",
+ "zip",
 ]
 
 [[package]]
@@ -292,7 +294,9 @@ version = "0.1.0"
 dependencies = [
  "ardoise-core",
  "ardoise-ink",
+ "image-webp",
  "jpeg-decoder",
+ "libwebp-sys2 0.2.0",
  "lopdf",
  "miniz_oxide 0.8.9",
  "pdf-writer",

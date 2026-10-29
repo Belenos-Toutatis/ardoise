@@ -156,7 +156,7 @@ export interface TabletInfo {
 
 // --- Milestone M5: exports, split, merge (docs/design/exports-and-operations.md) ----------
 
-export type ExportFormat = 'png' | 'jpg' | 'svg' | 'pdf';
+export type ExportFormat = 'png' | 'jpg' | 'webp' | 'svg' | 'pdf';
 
 export interface ExportOptions {
   /** Resolution of raster formats, 72..=600. */
@@ -178,6 +178,22 @@ export interface ExportSource {
   path: string;
   note?: Note;
   imageKey?: string;
+}
+
+/** How a printed note sits on the sheet: its real size (reduced if too large), or as large as fits. */
+export type PrintFit = 'actual' | 'fit';
+
+export interface PrintOptions {
+  /** Print the paper (colour, template, texture, background image); otherwise ink on white. */
+  background: boolean;
+  fit: PrintFit;
+}
+
+export interface PrintResult {
+  /** False when the user closed Windows' print dialog without printing. */
+  printed: boolean;
+  /** Pages sent to the printer. */
+  pages: number;
 }
 
 /** How to split a note: at an instant (ms since `created`), or by a traced zone (page units). */

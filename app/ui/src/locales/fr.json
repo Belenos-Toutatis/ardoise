@@ -98,6 +98,7 @@
       "clear": "Désélectionner",
       "help": "Ctrl+clic : ajouter ou retirer une note · Maj+clic : sélectionner une plage · Échap : tout désélectionner",
       "export": "Exporter…",
+      "print": "Imprimer…",
       "assemble": "Assembler…",
       "assembleNeeds": "Sélectionnez au moins deux notes pour les assembler."
     },
@@ -442,6 +443,8 @@
     "exportFailed": "l'export n'a pas pu être écrit ({detail}) ; choisissez un autre emplacement et vérifiez qu'il reste de la place",
     "dragUnavailable": "le glisser-déposer vers un autre logiciel n'est pas possible ({detail})",
     "clipboardUnavailable": "le presse-papiers n'est pas disponible ({detail}) ; fermez le logiciel qui l'utilise puis réessayez, ou exportez l'image en PNG",
+    "printFailed": "l'impression a échoué ({detail}) ; vérifiez l'imprimante puis réessayez, ou exportez la note en PDF",
+    "printUnavailable": "l'impression n'est possible que sous Windows ({detail}) ; exportez la note en PDF",
     "nothingToSplit": "cette découpe ne laisserait rien d'un des deux côtés ; choisissez un instant ou une zone qui sépare la note en deux parties non vides",
     "nothingToMerge": "il faut au moins deux notes pour les assembler",
     "pageTooLarge": "la page obtenue serait trop grande (plus de 100 m de côté) ; assemblez moins de notes ou superposez-les",
@@ -733,6 +736,10 @@
       "button": "Exporter…",
       "hint": "Exporter la note en PNG, JPG, SVG ou PDF"
     },
+    "print": {
+      "button": "Imprimer…",
+      "hint": "Imprimer la note, chaque note sur sa page, dans son orientation"
+    },
     "replay": {
       "button": "Relecture",
       "hint": "Rejouer le tracé comme il a été écrit (R)",
@@ -831,6 +838,7 @@
     "formats": {
       "png": "PNG (image)",
       "jpg": "JPG (image)",
+      "webp": "WebP (image)",
       "svg": "SVG (vectoriel)",
       "pdf": "PDF"
     },
@@ -839,12 +847,14 @@
     "formatPros": {
       "png": "Net et sans perte, fond transparent possible. Idéal pour Word, OneNote ou une diapositive.",
       "jpg": "S'ouvre partout et accepté par tous les sites et formulaires (certains n'acceptent que le JPG).",
+      "webp": "Net et sans perte comme le PNG, mais environ un quart plus léger ; fond transparent possible. Idéal pour le web et les messageries.",
       "svg": "Vectoriel : net à toutes les tailles, garde l'épaisseur du trait selon la pression, se retouche dans Inkscape.",
       "pdf": "Vectoriel et net à l'impression ; plusieurs notes donnent un seul fichier. Idéal pour imprimer ou partager."
     },
     "formatCons": {
       "png": "Devient flou si on l'agrandit beaucoup ; plus lourd avec un papier texturé.",
       "jpg": "Pas de fond transparent, léger flou autour des traits ; souvent plus lourd que le PNG pour une note sur papier uni.",
+      "webp": "Moins universel : certains logiciels anciens, sites et formulaires ne l'ouvrent pas ; devient flou si on l'agrandit.",
       "svg": "Pas accepté partout (ENT, anciens logiciels) ; lourd pour une note très chargée.",
       "pdf": "Moins pratique à insérer dans un document ou à retoucher."
     },
@@ -856,6 +866,7 @@
           "label": "Net quand on agrandit",
           "png": "Non",
           "jpg": "Non",
+          "webp": "Non",
           "svg": "Oui",
           "pdf": "Oui"
         },
@@ -863,6 +874,7 @@
           "label": "Fond transparent possible",
           "png": "Oui",
           "jpg": "Non (fond blanc)",
+          "webp": "Oui",
           "svg": "Oui",
           "pdf": "Non"
         },
@@ -870,6 +882,7 @@
           "label": "Taille du fichier",
           "png": "Petite (papier uni) à grosse (texture)",
           "jpg": "Moyenne",
+          "webp": "Petite (plus légère que le PNG)",
           "svg": "Selon le nombre de traits",
           "pdf": "Petite"
         },
@@ -877,6 +890,7 @@
           "label": "Plusieurs notes dans un fichier",
           "png": "Non (un fichier par note)",
           "jpg": "Non (un fichier par note)",
+          "webp": "Non (un fichier par note)",
           "svg": "Non (un fichier par note)",
           "pdf": "Oui (une page par note)"
         },
@@ -884,6 +898,7 @@
           "label": "S'ouvre avec",
           "png": "Tous les logiciels",
           "jpg": "Tous les logiciels",
+          "webp": "Navigateurs, Windows 11, logiciels récents",
           "svg": "Navigateur, Inkscape, Word récent",
           "pdf": "Tout lecteur PDF"
         },
@@ -891,11 +906,12 @@
           "label": "Idéal pour",
           "png": "Word, OneNote, diapositive",
           "jpg": "Site ou formulaire qui exige un JPG",
+          "webp": "Page web, messagerie, archivage léger",
           "svg": "Retoucher le dessin",
           "pdf": "Imprimer, envoyer, archiver"
         }
       },
-      "advice": "En cas de doute : le PDF pour imprimer ou envoyer une note, le PNG pour l'insérer dans un document. Le JPG ne sert que si un site l'exige."
+      "advice": "En cas de doute : le PDF pour imprimer ou envoyer une note, le PNG pour l'insérer dans un document. Le WebP donne le même résultat que le PNG dans un fichier plus léger, si le logiciel qui le reçoit le connaît. Le JPG ne sert que si un site l'exige."
     },
     "options": "Réglages",
     "resolution": "Résolution",
@@ -912,6 +928,7 @@
     "backgroundHints": {
       "png": "Décoché : le fond est transparent, seul le tracé est exporté.",
       "jpg": "Décoché : le fond est blanc (le JPG ne gère pas la transparence).",
+      "webp": "Décoché : le fond est transparent, seul le tracé est exporté.",
       "svg": "Décoché : seul le tracé est exporté, sans papier.",
       "pdf": "Décoché : seul le tracé est exporté, sans papier."
     },
@@ -932,6 +949,22 @@
     "pickFile": "Enregistrer l'export",
     "pickFolder": "Choisir le dossier de l'export",
     "defaultPdfName": "Notes"
+  },
+  "print": {
+    "title": "Imprimer",
+    "intro": "Windows ouvre sa fenêtre d'impression pour choisir l'imprimante, le nombre de copies et les pages. Chaque note est imprimée sur une page, dans son orientation (portrait ou paysage).",
+    "options": "Réglages",
+    "background": "Imprimer le fond (papier, lignes, texture, image de fond)",
+    "backgroundHint": "Décoché : seule l'écriture est imprimée, sur papier blanc.",
+    "fit": "Taille sur la feuille",
+    "fitActual": "Taille réelle (réduite seulement si la note dépasse la feuille)",
+    "fitFit": "Ajustée à la feuille",
+    "run": "Imprimer…",
+    "again": "Imprimer de nouveau…",
+    "running": "Impression en cours…",
+    "done": "Envoyé à l'imprimante : {count} page(s).",
+    "cancelled": "Impression annulée.",
+    "failed": "L'impression a échoué : {message}"
   },
   "videoExport": {
     "title": "Exporter en vidéo",
@@ -1291,8 +1324,10 @@
     },
     "export": {
       "title": "Texte reconnu (écriture manuscrite)",
-      "hint": "L'écriture de la note (ou des notes choisies) lue par Windows, en texte brut : chaque note avec son titre, l'une après l'autre. La reconnaissance peut se tromper : relisez le texte.",
+      "hint": "L'écriture de la note (ou des notes choisies) lue par Windows : chaque note avec son titre, l'une après l'autre. En texte brut, ou en Markdown et en Word, qui gardent la structure : le titre, la date et les étiquettes en tête, puis les paragraphes, les listes et les dessins (images). La reconnaissance peut se tromper : relisez le texte.",
       "save": "Enregistrer en .txt…",
+      "saveMd": "Enregistrer en Markdown…",
+      "saveDocx": "Enregistrer en Word…",
       "copy": "Copier le texte",
       "working": "Lecture de l'écriture…",
       "saved": "Texte enregistré :",
@@ -1302,7 +1337,16 @@
       "previewLoading": "Lecture de l'écriture…",
       "empty": "Aucun texte reconnu dans cette note.",
       "pickFile": "Enregistrer le texte reconnu",
-      "defaultName": "Texte reconnu"
+      "defaultName": "Texte reconnu",
+      "guessed": "Windows n'a pas pu analyser la mise en page : les paragraphes, les listes et les dessins ont été déduits du texte, et peuvent être moins justes.",
+      "savedImages": "Dessins enregistrés à côté : {count}",
+      "pickMd": "Enregistrer le texte en Markdown",
+      "pickDocx": "Enregistrer le texte en Word",
+      "labels": {
+        "date": "Créée le :",
+        "tags": "Étiquettes :",
+        "drawing": "Dessin"
+      }
     }
   },
   "background": {

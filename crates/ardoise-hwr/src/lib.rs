@@ -17,9 +17,13 @@
 //! handwriting pack is installed (the installed recognizers are listed, nothing is ever
 //! downloaded).
 
+pub mod document;
+pub mod docx;
 pub mod ink;
 pub mod lines;
+pub mod markdown;
 pub mod model;
+pub mod structure;
 pub mod synthetic;
 mod system;
 pub mod text;
@@ -123,6 +127,15 @@ pub trait Recognizer: Send + Sync {
     /// Recognises `strokes` (page coordinates, already chosen with
     /// [`ink::recognizable_strokes`]) with the recognizer of `language`. Blocks until done.
     fn recognize(&self, strokes: &[Stroke], language: Language) -> Result<Recognition, HwrError>;
+
+    /// The layout of `strokes`: which of them make paragraphs, list items and drawings
+    /// ([`structure::Region`]; stroke positions are positions in `strokes`). Windows' ink
+    /// analysis; engines without one answer [`HwrError::Unsupported`], and the export then
+    /// falls back on [`structure::from_recognition`].
+    fn analyze(&self, strokes: &[Stroke]) -> Result<Vec<structure::Region>, HwrError> {
+        let _ = strokes;
+        Err(HwrError::Unsupported)
+    }
 }
 
 #[cfg(test)]

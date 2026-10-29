@@ -56,18 +56,22 @@ windows-sys = { version = "0.61", features = [
 # - Data_Pdf, Foundation, Storage_Streams: PDF pages rendered by Windows for background images
 #   (pdf_pages.rs), read from and rendered into in-memory streams.
 # - Win32_*: the drag of notes out of the app to other programs (drag_windows.rs), OLE drag and
-#   drop and the shell's data object.
+#   drop and the shell's data object; printing (print_windows.rs): the print dialog
+#   (Controls_Dialogs), GDI documents (Storage_Xps) and the printers' default settings (Printing).
 windows = { version = "0.62", features = [
     "Data_Pdf",
     "Foundation",
     "Storage_Streams",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Printing",
+    "Win32_Storage_Xps",
     "Win32_System_Com",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
     "Win32_System_Ole",
     "Win32_System_SystemServices",
+    "Win32_UI_Controls_Dialogs",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",

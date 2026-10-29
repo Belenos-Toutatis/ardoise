@@ -51,7 +51,7 @@ export class LibraryState {
   /** Confirmation of the last operation that created a note, shown in a banner. */
   notice = $state<string | null>(null);
   /** The export or assemble dialog, with the notes it was opened for (displayed order). */
-  dialog = $state<{ kind: 'export' | 'assemble'; notes: NoteSummary[] } | null>(null);
+  dialog = $state<{ kind: 'export' | 'print' | 'assemble'; notes: NoteSummary[] } | null>(null);
 
   /** Paths being dragged; kept here because a drag event's data is not readable until the drop. */
   private dragPaths: string[] = [];
@@ -211,8 +211,8 @@ export class LibraryState {
     this.notice = null;
   }
 
-  /** Opens the export or assemble dialog over the notes selected now. */
-  openDialog(kind: 'export' | 'assemble'): void {
+  /** Opens the export, print or assemble dialog over the notes selected now. */
+  openDialog(kind: 'export' | 'print' | 'assemble'): void {
     this.dialog = { kind, notes: [...this.selectedDisplayed] };
   }
 

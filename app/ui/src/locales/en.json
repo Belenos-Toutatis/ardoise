@@ -98,6 +98,7 @@
       "clear": "Deselect",
       "help": "Ctrl+click: add or remove a note · Shift+click: select a range · Esc: deselect all",
       "export": "Export…",
+      "print": "Print…",
       "assemble": "Assemble…",
       "assembleNeeds": "Select at least two notes to assemble them."
     },
@@ -442,6 +443,8 @@
     "exportFailed": "the export couldn't be written ({detail}); choose another location and check that there is enough space",
     "dragUnavailable": "dragging to another program isn't possible ({detail})",
     "clipboardUnavailable": "the clipboard isn't available ({detail}); close the program that is using it and try again, or export the image as a PNG",
+    "printFailed": "printing failed ({detail}); check the printer and try again, or export the note as a PDF",
+    "printUnavailable": "printing is only possible on Windows ({detail}); export the note as a PDF",
     "nothingToSplit": "this split would leave nothing on one side; choose an instant or a zone that divides the note into two non-empty parts",
     "nothingToMerge": "at least two notes are needed to assemble them",
     "pageTooLarge": "the resulting page would be too large (over 100 m on a side); assemble fewer notes or overlay them",
@@ -733,6 +736,10 @@
       "button": "Export…",
       "hint": "Export the note as PNG, JPG, SVG or PDF"
     },
+    "print": {
+      "button": "Print…",
+      "hint": "Print the note, each note on its own page, in its orientation"
+    },
     "replay": {
       "button": "Replay",
       "hint": "Replay the strokes as they were written (R)",
@@ -831,6 +838,7 @@
     "formats": {
       "png": "PNG (image)",
       "jpg": "JPG (image)",
+      "webp": "WebP (image)",
       "svg": "SVG (vector)",
       "pdf": "PDF"
     },
@@ -839,12 +847,14 @@
     "formatPros": {
       "png": "Sharp and lossless, optional transparent background. Ideal for Word, OneNote or a slide.",
       "jpg": "Opens everywhere and is accepted by every website and form (some accept only JPG).",
+      "webp": "Sharp and lossless like PNG, but about a quarter smaller; transparent background possible. Great for the web and messaging.",
       "svg": "Vector: sharp at any size, keeps the stroke width given by the pen pressure, editable in Inkscape.",
       "pdf": "Vector and sharp when printed; several notes make a single file. Ideal for printing or sharing."
     },
     "formatCons": {
       "png": "Gets blurry when enlarged a lot; heavier with a textured paper.",
       "jpg": "No transparent background, slight blur around the strokes; often heavier than PNG for a note on plain paper.",
+      "webp": "Less universal: some older programs, websites and forms cannot open it; gets blurry when enlarged.",
       "svg": "Not accepted everywhere (school platforms, older software); heavy for a very full note.",
       "pdf": "Less handy to insert into a document or to edit."
     },
@@ -856,6 +866,7 @@
           "label": "Sharp when enlarged",
           "png": "No",
           "jpg": "No",
+          "webp": "No",
           "svg": "Yes",
           "pdf": "Yes"
         },
@@ -863,6 +874,7 @@
           "label": "Transparent background possible",
           "png": "Yes",
           "jpg": "No (white background)",
+          "webp": "Yes",
           "svg": "Yes",
           "pdf": "No"
         },
@@ -870,6 +882,7 @@
           "label": "File size",
           "png": "Small (plain paper) to large (texture)",
           "jpg": "Medium",
+          "webp": "Small (lighter than PNG)",
           "svg": "Depends on the number of strokes",
           "pdf": "Small"
         },
@@ -877,6 +890,7 @@
           "label": "Several notes in one file",
           "png": "No (one file per note)",
           "jpg": "No (one file per note)",
+          "webp": "No (one file per note)",
           "svg": "No (one file per note)",
           "pdf": "Yes (one page per note)"
         },
@@ -884,6 +898,7 @@
           "label": "Opens with",
           "png": "Any software",
           "jpg": "Any software",
+          "webp": "Browsers, Windows 11, recent software",
           "svg": "Browser, Inkscape, recent Word",
           "pdf": "Any PDF reader"
         },
@@ -891,11 +906,12 @@
           "label": "Ideal for",
           "png": "Word, OneNote, slide",
           "jpg": "A website or form that requires JPG",
+          "webp": "Web page, messaging, light archive",
           "svg": "Editing the drawing",
           "pdf": "Printing, sending, archiving"
         }
       },
-      "advice": "When in doubt: PDF to print or send a note, PNG to insert it into a document. JPG is only for when a website requires it."
+      "advice": "When in doubt: PDF to print or send a note, PNG to insert it into a document. WebP gives the same result as PNG in a smaller file, if the program receiving it knows the format. JPG is only for when a website requires it."
     },
     "options": "Settings",
     "resolution": "Resolution",
@@ -912,6 +928,7 @@
     "backgroundHints": {
       "png": "Unchecked: the background is transparent, only the ink is exported.",
       "jpg": "Unchecked: the background is white (JPG can't be transparent).",
+      "webp": "Unchecked: the background is transparent, only the ink is exported.",
       "svg": "Unchecked: only the ink is exported, without paper.",
       "pdf": "Unchecked: only the ink is exported, without paper."
     },
@@ -932,6 +949,22 @@
     "pickFile": "Save the export",
     "pickFolder": "Choose the export folder",
     "defaultPdfName": "Notes"
+  },
+  "print": {
+    "title": "Print",
+    "intro": "Windows opens its print window so that you can choose the printer, the number of copies and the pages. Each note is printed on a page of its own, in its orientation (portrait or landscape).",
+    "options": "Settings",
+    "background": "Print the background (paper, lines, texture, background image)",
+    "backgroundHint": "Unchecked: only the writing is printed, on white paper.",
+    "fit": "Size on the sheet",
+    "fitActual": "Real size (reduced only if the note is larger than the sheet)",
+    "fitFit": "Fitted to the sheet",
+    "run": "Print…",
+    "again": "Print again…",
+    "running": "Printing…",
+    "done": "Sent to the printer: {count} page(s).",
+    "cancelled": "Printing cancelled.",
+    "failed": "Printing failed: {message}"
   },
   "videoExport": {
     "title": "Export as video",
@@ -1291,8 +1324,10 @@
     },
     "export": {
       "title": "Recognised text (handwriting)",
-      "hint": "The handwriting of the note (or of the selected notes) read by Windows, as plain text: each note with its title, one after the other. Recognition can make mistakes: read the text over.",
+      "hint": "The handwriting of the note (or of the selected notes) read by Windows: each note with its title, one after the other. As plain text, or as Markdown and Word, which keep the structure: the title, the date and the tags at the top, then the paragraphs, the lists and the drawings (images). Recognition can make mistakes: read the text over.",
       "save": "Save as .txt…",
+      "saveMd": "Save as Markdown…",
+      "saveDocx": "Save as Word…",
       "copy": "Copy the text",
       "working": "Reading the handwriting…",
       "saved": "Text saved:",
@@ -1302,7 +1337,16 @@
       "previewLoading": "Reading the handwriting…",
       "empty": "No text recognised in this note.",
       "pickFile": "Save the recognised text",
-      "defaultName": "Recognised text"
+      "defaultName": "Recognised text",
+      "guessed": "Windows could not analyse the layout: the paragraphs, lists and drawings were guessed from the text and may be less accurate.",
+      "savedImages": "Drawings saved next to it: {count}",
+      "pickMd": "Save the text as Markdown",
+      "pickDocx": "Save the text as Word",
+      "labels": {
+        "date": "Created:",
+        "tags": "Tags:",
+        "drawing": "Drawing"
+      }
     }
   },
   "background": {

@@ -303,3 +303,46 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
 - Background: a PDF of several pages imported, annotated, rotated, exported (PNG, PDF, video); a photo as background.
 - Original: a tablet note (simulator) and a live note, edited, then back to the original.
 - Drag: a card dropped into an Explorer folder gives the PNG (checked by hand or by a test that reads the data object).
+
+## M8: text export with structure (Markdown and Word)
+
+Next to the plain `.txt` (and the clipboard), the export dialog's "Texte reconnu" section saves a note's handwriting as
+**Markdown** (`.md`) or **Word** (`.docx`) with the structure drawn from the ink: the note's title, its date and its
+tags at the top, then the paragraphs, the list items (bulleted) and the drawings (pictures), in reading order. Several
+notes go one after the other (a rule between two notes in Markdown, a new page in Word).
+
+- **Where the structure comes from.** Windows' ink analysis, `Windows.UI.Input.Inking.Analysis.InkAnalyzer`, **does
+  work in a desktop app outside any UWP package** (tried for real on this PC, Windows 11, no package identity): it
+  gives a tree `Root > WritingRegion > Paragraph > Line > InkWord`, with `ListItem` (holding an `InkBullet` and a line)
+  and `InkDrawing` nodes (a circle and a square were found as such), each with its bounding box and the ids of its
+  strokes. `ardoise-hwr` drives it on the same worker thread as the recognizer (`Recognizer::analyze`, answering
+  `Unsupported` elsewhere); the tree is flattened to `Region`s (paragraph, list item, drawing; stroke positions mapped
+  back through the ids). One analysis of a one-page note takes about 2 s (the first one on a PC a little more).
+- **The text is not the analyzer's.** `InkAnalyzer` has no language setting (it reads with the language of the system)
+  and the app's chosen language must win, so `structure::read_regions` reads again each paragraph and list item **on
+  its own** with the recognizer of the chosen language. This is also more accurate than the page-wide recognition the
+  search uses: on the synthetic test page the page-wide pass split "nous irons" into "nousirons" and "poires rouges"
+  into "poiresronges", while the region by region reading gave every phrase right
+  (`cargo test -p ardoise-hwr --test structure -- --nocapture` prints both). A region that cannot be read again keeps
+  the analyzer's text, or the words of the cached page recognition found inside it.
+- **Fallback without the analysis** (`structure::from_recognition`, platform-free, tested on Linux): lines whose gap to
+  the previous one exceeds one line height start a paragraph; a line starting with a dash, bullet, star or number
+  (`strip_bullet`; "-5" is a number, not a bullet), or with a small unread mark drawn to its left, is a list item that
+  takes the following indented lines; ink not under any recognised word, grouped by proximity (4 mm, or half a
+  line), is a drawing (marks under 2 mm are dropped). It is weaker: the recognizer reads drawings as stray words
+  ("J", "o") that hide them, so a circle drawn among text is often missed. The dialog says so when a note's layout was
+  guessed (`handwriting.export.guessed`).
+- **Drawings** are cropped from one rendering of the note that holds only the drawings' strokes (the text next to a
+  drawing does not creep in): ink on white (the paper stays on a dark paper so that light ink remains visible), 200
+  dpi, 2 mm of margin, PNG. Highlighter marks lying over a drawing belong to it. Markdown: `<name>-1.png`… next to the
+  `.md` (written before the text, atomically; the link target is percent-encoded). Word: embedded, at their real size,
+  reduced to the 17 cm text width (and 24 cm height).
+- **Files.** `ardoise_hwr::markdown` (escaped text, `-` lists, `![Dessin 1](…)`), `ardoise_hwr::docx` (minimal Office
+  Open XML written with the `zip` crate: content types, relationships, styles Title / Subtitle / ListParagraph, one
+  bullet list definition, `docProps/core.xml`, A4 portrait, `pageBreakBefore` on each note after the first). The words
+  in the files ("Créée le", "Étiquettes", "Dessin") are translated by the interface and sent with the request
+  (`TextLabels`); the date is local time, `2026-10-22 14:05`. Platform-free and tested on Linux: the structure, both
+  writers (the docx read back with `zip` and `roxmltree`: every part well formed, every relationship resolved).
+- Command `export_structured_text(sources, format: 'md'|'docx', destination, labels) -> { paths, analyzed }`
+  (`textdoc.rs`), through the indexer's on-demand engine; same sources as the `.txt` export (the note as it is in the
+  editor, or notes of the library).

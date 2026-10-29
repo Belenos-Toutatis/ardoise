@@ -94,12 +94,12 @@ describe('export dialog: options', () => {
     for (const locale of ['fr', 'en'] as const) {
       const ui = await render(['Liste de courses'], locale);
       const cards = [...ui.target.querySelectorAll<HTMLLabelElement>('label.format-card')];
-      expect(cards).toHaveLength(4);
+      expect(cards).toHaveLength(5);
       for (const card of cards) {
         const radio = card.querySelector('input')!;
         // Named by the format alone, described by its strengths and limits.
         const name = document.getElementById(radio.getAttribute('aria-labelledby')!)!.textContent!.trim();
-        expect(['PNG (image)', 'JPG (image)', 'SVG (vectoriel)', 'SVG (vector)', 'PDF']).toContain(name);
+        expect(['PNG (image)', 'JPG (image)', 'WebP (image)', 'SVG (vectoriel)', 'SVG (vector)', 'PDF']).toContain(name);
         const described = radio
           .getAttribute('aria-describedby')!
           .split(' ')
@@ -121,12 +121,13 @@ describe('export dialog: options', () => {
         locale === 'fr' ? 'Critère' : 'Criterion',
         'PNG',
         'JPG',
+        'WEBP',
         'SVG',
         'PDF',
       ]);
       const rows = [...compare.querySelectorAll('tbody tr')];
       expect(rows).toHaveLength(6);
-      for (const row of rows) expect(row.querySelectorAll('td')).toHaveLength(4);
+      for (const row of rows) expect(row.querySelectorAll('td')).toHaveLength(5);
       expect(rows.map((r) => r.querySelector('th')!.textContent)).toContain(locale === 'fr' ? 'Fond transparent possible' : 'Transparent background possible');
       cleanup?.();
       cleanup = null;
@@ -265,6 +266,25 @@ describe('export dialog: exporting', () => {
     expect(ui.resolutionSelect()!.value).toBe('300');
     expect(ui.qualityRange()!.value).toBe('70');
     expect(ui.background().checked).toBe(false);
+  });
+
+  it('exports WebP like PNG: resolution, transparent background, one file per note in a folder', async () => {
+    const spy = vi.spyOn(api, 'exportNotes');
+    const ui = await render(['Réunion parents', 'Liste de courses']);
+    await ui.choose('WebP (image)');
+    expect(ui.resolutionSelect()).not.toBeNull();
+    expect(ui.qualityRange()).toBeNull();
+    expect(ui.target.textContent).toContain('Décoché : le fond est transparent');
+    ui.background().click();
+    ui.button('Exporter…').click();
+    await settle();
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Array),
+      'webp',
+      { dpi: 150, background: false, quality: 90, pdfPage: 'actual' },
+      'C:\\Users\\demo\\Exports',
+    );
+    expect(ui.target.querySelector('.export-result')?.textContent).toContain('Fichiers créés : 2');
   });
 
   it('puts several notes in one PDF, one page each in the order given, in A4', async () => {

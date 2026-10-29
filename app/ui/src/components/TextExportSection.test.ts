@@ -67,6 +67,46 @@ describe('export dialog: recognised text', () => {
     expect(ui.section().querySelector('.export-result code')?.textContent).toBe('C:\\Exports\\texte.txt');
   });
 
+  it('saves the text with its structure as Markdown or Word, with the words of the interface language', async () => {
+    const sources = [{ path: pathOf('Cours de physique') }];
+    const fr = await render(sources);
+    expect(fr.action('text-md').textContent?.trim()).toBe('Enregistrer en Markdown…');
+    expect(fr.action('text-docx').textContent?.trim()).toBe('Enregistrer en Word…');
+    (window as { __ardoiseE2eSavePath?: unknown }).__ardoiseE2eSavePath = 'C:\\Exports\\physique.md';
+    fr.action('text-md').click();
+    await settle();
+    expect(mockHandwriting.exportedStructured).toEqual({
+      format: 'md',
+      destination: 'C:\\Exports\\physique.md',
+      labels: { date: 'Créée le :', tags: 'Étiquettes :', drawing: 'Dessin' },
+    });
+    expect(fr.section().querySelector('.export-result code')?.textContent).toBe('C:\\Exports\\physique.md');
+    expect(fr.section().textContent).not.toContain("Windows n'a pas pu analyser");
+    cleanup?.();
+
+    const en = await render(sources, 'en');
+    (window as { __ardoiseE2eSavePath?: unknown }).__ardoiseE2eSavePath = 'C:\\Exports\\physique.docx';
+    en.action('text-docx').click();
+    await settle();
+    expect(mockHandwriting.exportedStructured).toEqual({
+      format: 'docx',
+      destination: 'C:\\Exports\\physique.docx',
+      labels: { date: 'Created:', tags: 'Tags:', drawing: 'Drawing' },
+    });
+  });
+
+  it('says why a structured export fails', async () => {
+    mockHandwriting.recognizers = [];
+    const ui = await render([{ path: pathOf('Cours de physique') }]);
+    (window as { __ardoiseE2eSavePath?: unknown }).__ardoiseE2eSavePath = 'C:\\Exports\\x.docx';
+    ui.action('text-docx').click();
+    await settle();
+    expect(ui.section().querySelector('[role="alert"]')?.textContent).toContain(
+      "aucun module de reconnaissance d'écriture de Windows n'est installé",
+    );
+    expect(mockHandwriting.exportedStructured).toBeNull();
+  });
+
   it('copies the text of the note in the editor, unsaved changes included', async () => {
     const path = pathOf('Réunion parents');
     const note = { ...mockLibrary().notes.get(path)!.note, title: 'Réunion (brouillon)' };

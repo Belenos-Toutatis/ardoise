@@ -82,17 +82,23 @@ mod windows_impl {
     use std::sync::mpsc::{self, Receiver, Sender};
 
     use windows::Foundation::Point;
+    use windows::UI::Input::Inking::Analysis::{
+        IInkAnalysisNode, InkAnalysisLine, InkAnalysisListItem, InkAnalysisNodeKind,
+        InkAnalysisParagraph, InkAnalyzer,
+    };
     use windows::UI::Input::Inking::{
         InkPoint, InkRecognitionTarget, InkRecognizer, InkRecognizerContainer, InkStrokeBuilder,
         InkStrokeContainer,
     };
     use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
+    use windows::core::Interface;
     use windows_collections::IIterable;
     use windows_numerics::Matrix3x2;
 
     use super::*;
     use crate::lines::group_lines;
     use crate::model::Word;
+    use crate::structure::{Region, RegionKind};
 
     enum Request {
         List(Sender<Result<Vec<RecognizerInfo>, HwrError>>),
@@ -100,6 +106,10 @@ mod windows_impl {
             strokes: Vec<Stroke>,
             language: Language,
             reply: Sender<Result<Recognition, HwrError>>,
+        },
+        Analyze {
+            strokes: Vec<Stroke>,
+            reply: Sender<Result<Vec<Region>, HwrError>>,
         },
     }
 
@@ -180,6 +190,14 @@ mod windows_impl {
                 reply,
             })
         }
+
+        fn analyze(&self, strokes: &[Stroke]) -> Result<Vec<Region>, HwrError> {
+            if strokes.is_empty() {
+                return Ok(Vec::new());
+            }
+            let strokes = strokes.to_vec();
+            self.ask(|reply| Request::Analyze { strokes, reply })
+        }
     }
 
     fn engine_error(step: &'static str) -> impl Fn(windows::core::Error) -> HwrError {
@@ -231,21 +249,14 @@ mod windows_impl {
                 .collect()
         }
 
-        fn recognize(
+        /// The strokes as an ink container (engine coordinates), and the engine's id of each.
+        fn container_of(
             &self,
             strokes: &[Stroke],
-            language: Language,
             scale: Scale,
-        ) -> Result<Recognition, HwrError> {
-            let (info, recognizer) = self
-                .recognizers
-                .iter()
-                .find(|(info, _)| info.language == Some(language))
-                .ok_or(HwrError::NoRecognizer { language })?;
-            self.container
-                .SetDefaultRecognizer(recognizer)
-                .map_err(engine_error("SetDefaultRecognizer"))?;
+        ) -> Result<(InkStrokeContainer, Vec<u32>), HwrError> {
             let ink = InkStrokeContainer::new().map_err(engine_error("InkStrokeContainer"))?;
+            let mut ids = Vec::with_capacity(strokes.len());
             for stroke in strokes {
                 let mut points = Vec::with_capacity(stroke.points.len().max(2));
                 for p in &stroke.points {
@@ -273,7 +284,48 @@ mod windows_impl {
                     .CreateStrokeFromInkPoints(&points, Matrix3x2::identity())
                     .map_err(engine_error("CreateStrokeFromInkPoints"))?;
                 ink.AddStroke(&built).map_err(engine_error("AddStroke"))?;
+                ids.push(built.Id().map_err(engine_error("InkStroke.Id"))?);
             }
+            Ok((ink, ids))
+        }
+
+        /// The paragraphs, list items and drawings `InkAnalyzer` finds in `strokes`, in page
+        /// units.
+        fn analyze(&self, strokes: &[Stroke], scale: Scale) -> Result<Vec<Region>, HwrError> {
+            let (ink, ids) = self.container_of(strokes, scale)?;
+            let analyzer = InkAnalyzer::new().map_err(engine_error("InkAnalyzer"))?;
+            analyzer
+                .AddDataForStrokes(&ink.GetStrokes().map_err(engine_error("GetStrokes"))?)
+                .map_err(engine_error("AddDataForStrokes"))?;
+            analyzer
+                .AnalyzeAsync()
+                .map_err(engine_error("AnalyzeAsync"))?
+                .join()
+                .map_err(engine_error("AnalyzeAsync"))?;
+            let root: IInkAnalysisNode = analyzer
+                .AnalysisRoot()
+                .and_then(|root| root.cast())
+                .map_err(engine_error("AnalysisRoot"))?;
+            let mut regions = Vec::new();
+            collect_regions(&root, &ids, scale, &mut regions)?;
+            Ok(regions)
+        }
+
+        fn recognize(
+            &self,
+            strokes: &[Stroke],
+            language: Language,
+            scale: Scale,
+        ) -> Result<Recognition, HwrError> {
+            let (info, recognizer) = self
+                .recognizers
+                .iter()
+                .find(|(info, _)| info.language == Some(language))
+                .ok_or(HwrError::NoRecognizer { language })?;
+            self.container
+                .SetDefaultRecognizer(recognizer)
+                .map_err(engine_error("SetDefaultRecognizer"))?;
+            let (ink, _) = self.container_of(strokes, scale)?;
             let results = self
                 .container
                 .RecognizeAsync(&ink, InkRecognitionTarget::All)
@@ -313,6 +365,79 @@ mod windows_impl {
         }
     }
 
+    /// The analysis tree flattened to the regions the export needs: a paragraph (or each list
+    /// item of one that holds list items), a drawing, ink the analysis could not classify.
+    fn collect_regions(
+        node: &IInkAnalysisNode,
+        ids: &[u32],
+        scale: Scale,
+        out: &mut Vec<Region>,
+    ) -> Result<(), HwrError> {
+        let step = engine_error("InkAnalysisNode");
+        let kind = node.Kind().map_err(&step)?;
+        let children = |node: &IInkAnalysisNode| -> Result<Vec<IInkAnalysisNode>, HwrError> {
+            Ok(node.Children().map_err(&step)?.into_iter().collect())
+        };
+        let region = |node: &IInkAnalysisNode, kind: RegionKind, text: String| {
+            let rect = node.BoundingRect().map_err(&step)?;
+            let mut strokes = Vec::new();
+            for id in node.GetStrokeIds().map_err(&step)? {
+                if let Some(position) = ids.iter().position(|known| *known == id) {
+                    strokes.push(position);
+                }
+            }
+            Ok::<Region, HwrError>(Region {
+                kind,
+                bounds: scale.to_page(rect.X, rect.Y, rect.Width, rect.Height),
+                text,
+                strokes,
+            })
+        };
+        if kind == InkAnalysisNodeKind::Paragraph {
+            let has_items = children(node)?
+                .iter()
+                .any(|c| c.Kind().is_ok_and(|k| k == InkAnalysisNodeKind::ListItem));
+            if has_items {
+                // A paragraph of list items (and maybe a line before or after them).
+                for child in children(node)? {
+                    collect_regions(&child, ids, scale, out)?;
+                }
+            } else {
+                let text = node
+                    .cast::<InkAnalysisParagraph>()
+                    .and_then(|p| p.RecognizedText())
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+                out.push(region(node, RegionKind::Paragraph, text)?);
+            }
+        } else if kind == InkAnalysisNodeKind::ListItem {
+            let text = node
+                .cast::<InkAnalysisListItem>()
+                .and_then(|p| p.RecognizedText())
+                .map(|t| t.to_string())
+                .unwrap_or_default();
+            out.push(region(node, RegionKind::ListItem, text)?);
+        } else if kind == InkAnalysisNodeKind::InkDrawing
+            || kind == InkAnalysisNodeKind::UnclassifiedInk
+        {
+            // The kind of drawing (circle, rectangle...) is not needed: the ink is cropped.
+            out.push(region(node, RegionKind::Drawing, String::new())?);
+        } else if kind == InkAnalysisNodeKind::Line {
+            // A line outside any paragraph.
+            let text = node
+                .cast::<InkAnalysisLine>()
+                .and_then(|l| l.RecognizedText())
+                .map(|t| t.to_string())
+                .unwrap_or_default();
+            out.push(region(node, RegionKind::Paragraph, text)?);
+        } else if kind == InkAnalysisNodeKind::Root || kind == InkAnalysisNodeKind::WritingRegion {
+            for child in children(node)? {
+                collect_regions(&child, ids, scale, out)?;
+            }
+        }
+        Ok(())
+    }
+
     fn run(requests: Receiver<Request>, scale: Scale, background: bool) {
         // SAFETY: plain FFI call with a valid constant. Already initialised (S_FALSE) or in
         // another apartment: WinRT calls still work, so the result is ignored.
@@ -342,6 +467,13 @@ mod windows_impl {
                 } => {
                     let result = ready(&mut engine).and_then(|()| match engine.as_ref() {
                         Some(engine) => engine.recognize(&strokes, language, scale),
+                        None => Err(HwrError::Stopped),
+                    });
+                    let _ = reply.send(result);
+                }
+                Request::Analyze { strokes, reply } => {
+                    let result = ready(&mut engine).and_then(|()| match engine.as_ref() {
+                        Some(engine) => engine.analyze(&strokes, scale),
                         None => Err(HwrError::Stopped),
                     });
                     let _ = reply.send(result);
