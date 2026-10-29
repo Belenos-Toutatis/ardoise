@@ -6,6 +6,7 @@ import type { BackgroundSource, NotesProgress, StagedBackground } from './backgr
 import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic';
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
+import type { InkspaceProgress, InkspaceReport, InkspaceSource } from './inkspace';
 import type { LiveBatch, LiveCommand, LiveSnapshot, LiveStyle, LiveViewState, MonitorInfo } from './live';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
@@ -394,6 +395,30 @@ export const api = {
   cancelCreateNotes: () => call<void>('cancel_create_notes'),
   /** The background image's name of each note (null without one). */
   backgroundImageNames: (paths: string[]) => call<(string | null)[]>('background_image_names', { paths }),
+
+  // --- Inkspace import (M10; Rust side: import.rs) -------------------------------------------
+
+  /** Inkspace's `LocalState` folder found on this PC, or null (always null outside Windows). */
+  inkspaceDetect: () => call<string | null>('inkspace_detect'),
+  /**
+   * Reads a folder of Inkspace data (can take a second) and counts its notes. Rejects with
+   * `inkspaceNotFound`, `inkspaceUnreadable` (Inkspace is running, say), `inkspaceDamaged` or
+   * `inkspaceTooLarge`.
+   */
+  inkspaceInspect: (path: string) => call<InkspaceSource>('inkspace_inspect', { path }),
+  /**
+   * Imports the notes of `path` into `binder` (empty: the library root), skipping those already
+   * there; `onProgress` hears how many are handled, before the first one and after each. A
+   * stopped import resolves with `cancelled: true`; `inkspaceBusy` when another one is running.
+   */
+  inkspaceImport: (path: string, binder: string, onProgress: (progress: InkspaceProgress) => void = () => {}) => {
+    if (!inDesktopApp()) return call<InkspaceReport>('inkspace_import', { path, binder, onProgress });
+    const channel = new Channel<InkspaceProgress>();
+    channel.onmessage = onProgress;
+    return invoke<InkspaceReport>('inkspace_import', { path, binder, onProgress: channel });
+  },
+  /** Asks the running import to stop after the note under way. */
+  inkspaceCancel: () => call<void>('inkspace_cancel'),
 
   // --- Handwriting recognition (milestone M7; Rust side: handwriting.rs) ----------------------
 

@@ -246,6 +246,7 @@ version = "0.1.0"
 dependencies = [
  "ardoise-core",
  "ardoise-ink",
+ "ardoise-inkspace",
  "ardoise-render",
  "png",
  "rusty-leveldb",

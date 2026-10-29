@@ -63,6 +63,9 @@ pub struct Cli {
     /// `--create-demo-library DIR`: make DIR a library of synthetic notes without a window,
     /// print what was created and exit (an empty path when DIR is missing).
     pub create_demo_library: Option<PathBuf>,
+    /// `--create-demo-inkspace DIR`: write made-up Inkspace data into the new or empty folder
+    /// DIR (a stand-in for Inkspace's `LocalState`) and exit (an empty path when DIR is missing).
+    pub create_demo_inkspace: Option<PathBuf>,
     /// `--simulated-tablet`: the simulated tablet replaces Bluetooth (real time, 3 stored pages);
     /// its registration is kept in a throwaway folder, never in the library.
     pub simulated_tablet: bool,
@@ -92,6 +95,10 @@ impl Cli {
                 "--library" => import_args.library = args.next().map(PathBuf::from),
                 "--create-demo-library" => {
                     cli.create_demo_library =
+                        Some(args.next().map(PathBuf::from).unwrap_or_default());
+                }
+                "--create-demo-inkspace" => {
+                    cli.create_demo_inkspace =
                         Some(args.next().map(PathBuf::from).unwrap_or_default());
                 }
                 other if !other.starts_with("--") && import_args.local_state.is_none() => {
@@ -142,6 +149,7 @@ pub fn run() {
         || headless_diagnostic
         || cli.import_inkspace.is_some()
         || cli.create_demo_library.is_some()
+        || cli.create_demo_inkspace.is_some()
     {
         console::attach_parent_console();
     }
@@ -151,6 +159,9 @@ pub fn run() {
     }
     if let Some(dir) = &cli.create_demo_library {
         std::process::exit(demo::run_cli(dir));
+    }
+    if let Some(dir) = &cli.create_demo_inkspace {
+        std::process::exit(import::cli::run_demo_cli(dir));
     }
 
     let context = AppContext {
@@ -193,6 +204,7 @@ pub fn run() {
         .manage(handwriting::HandwritingRuntime::default())
         .manage(textdoc::Structures::default())
         .manage(app_bridge::BridgeRuntime::default())
+        .manage(import::InkspaceImport::default())
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -297,6 +309,10 @@ pub fn run() {
             about::about_text,
             app_bridge::bridge_reply,
             app_bridge::mcp_launch_info,
+            import::inkspace_detect,
+            import::inkspace_inspect,
+            import::inkspace_import,
+            import::inkspace_cancel,
         ])
         .setup(move |app| {
             if cli.self_test {
@@ -372,6 +388,13 @@ mod tests {
             parse(&["--create-demo-library"]).create_demo_library,
             Some(PathBuf::new())
         );
+        let inkspace = parse(&["--create-demo-inkspace", "D:\\Faux\\LocalState"]);
+        assert_eq!(
+            inkspace.create_demo_inkspace,
+            Some(PathBuf::from("D:\\Faux\\LocalState"))
+        );
+        assert_eq!(inkspace.import_inkspace, None);
+        assert_eq!(inkspace.create_demo_library, None);
     }
 
     #[test]

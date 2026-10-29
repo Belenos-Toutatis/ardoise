@@ -3,6 +3,7 @@
   import { genericError, type AppState } from '../lib/api';
   import { bridgeScreens } from '../lib/app-bridge.svelte';
   import { currentLocale, t } from '../lib/i18n.svelte';
+  import { inkspaceOffer } from '../lib/inkspace-offer.svelte';
   import { SORT_ORDERS, displayTitle, type SortOrder } from '../lib/library-logic';
   import { LibraryState } from '../lib/library-state.svelte';
   import type { NoteSummary } from '../lib/note';
@@ -13,6 +14,7 @@
   import PrintDialog from './PrintDialog.svelte';
   import Editor from './editor/Editor.svelte';
   import AssembleDialog from './library/AssembleDialog.svelte';
+  import InkspaceImportDialog from './library/InkspaceImportDialog.svelte';
   import NewFromFileDialog from './library/NewFromFileDialog.svelte';
   import NoteGrid from './library/NoteGrid.svelte';
   import Sidebar from './library/Sidebar.svelte';
@@ -42,11 +44,16 @@
   onMount(() => {
     // Started with `--diagnostic`: the tablet test is shown right away.
     if (app.openDiagnostic) panel = 'diagnostic';
+    // The wizard offered to import Inkspace's notes and the user accepted: the dialog opens once.
+    if (inkspaceOffer.pending) {
+      inkspaceOffer.pending = false;
+      inkspaceOpen = true;
+    }
     const stopLibrary = lib.start();
     // The assistant's bridge opens notes as a click on a card does (`lib/app-bridge.svelte.ts`).
     const unregister = bridgeScreens.register('home', {
       busy: () =>
-        lib.dialog || fromFile
+        lib.dialog || fromFile || inkspaceOpen
           ? 'a dialog is open in Ardoise'
           : panel === 'diagnostic'
             ? 'the tablet test is open in Ardoise'
@@ -124,6 +131,22 @@
       leaveLibrary(notes[0].path);
       openPath = notes[0].path;
     } else if (notes.length >= 1) lib.notice = t('background.library.done', { count: notes.length });
+  }
+
+  /** « Importer depuis Inkspace » is open. */
+  let inkspaceOpen = $state(false);
+
+  function closeInkspace() {
+    inkspaceOpen = false;
+    void lib.refresh();
+  }
+
+  /** Shows the notes an import has just made. */
+  async function showImported(binder: string) {
+    inkspaceOpen = false;
+    // The binder is new to the listing until it is read again (a refresh drops unknown binders).
+    await lib.refresh();
+    lib.setView(binder ? { kind: 'binder', binder } : { kind: 'all' });
   }
 
   function openLive() {
@@ -237,6 +260,7 @@
       ontest={() => toggle('diagnostic')}
       tabletOpen={panel === 'tablet'}
       ontablet={() => toggle('tablet')}
+      oninkspace={() => (inkspaceOpen = true)}
     />
 
     <main class="content library-main">
@@ -295,4 +319,12 @@
 {/if}
 {#if fromFile}
   <NewFromFileDialog binder={lib.currentBinder} onclose={() => (fromFile = false)} oncreated={createdFromFile} />
+{/if}
+{#if inkspaceOpen}
+  <InkspaceImportDialog
+    binders={lib.listing?.binders ?? []}
+    onclose={closeInkspace}
+    onshow={(binder) => void showImported(binder)}
+    ondone={() => void lib.refresh()}
+  />
 {/if}

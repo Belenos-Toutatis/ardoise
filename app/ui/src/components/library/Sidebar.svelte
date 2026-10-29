@@ -1,7 +1,8 @@
 <script lang="ts">
   /**
    * Left column: views (all notes, favourites), the tree of binders (drop targets for dragged
-   * notes), tags, trash, then the tablet block with the entry that opens the tablet test.
+   * notes), tags, trash, the Inkspace import, then the tablet block with the entry that opens the
+   * tablet test.
    */
   import { tick } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
@@ -16,6 +17,7 @@
     ontest,
     tabletOpen = false,
     ontablet = () => {},
+    oninkspace = () => {},
   }: {
     lib: LibraryState;
     testOpen: boolean;
@@ -24,6 +26,8 @@
     tabletOpen?: boolean;
     /** Opens or closes the tablet panel. */
     ontablet?: () => void;
+    /** Opens « Importer depuis Inkspace ». */
+    oninkspace?: () => void;
   } = $props();
 
   const expanded = new SvelteSet<string>();
@@ -257,6 +261,14 @@
       >
         <span class="nav-label">{t('library.trash')}</span>
         <span class="count">{lib.trash.length}</span>
+      </button>
+    </li>
+  </ul>
+
+  <ul class="nav-list nav-import">
+    <li>
+      <button type="button" class="nav-item" data-action="import-inkspace" onclick={oninkspace}>
+        <span class="nav-label">{t('inkspace.entry')}</span>
       </button>
     </li>
   </ul>

@@ -18,7 +18,14 @@ rusty-leveldb = { version = "4.0.2", default-features = false }
 thiserror = "2"
 uuid = { version = "1", features = ["v5"] }
 
+[features]
+# `synthetic`: made-up Inkspace data written to disk, for tests and `--create-demo-inkspace`.
+# The importer never uses it.
+synthetic = []
+
 [dev-dependencies]
+# The integration tests build their fixtures with the `synthetic` module.
+ardoise-inkspace = { path = ".", features = ["synthetic"] }
 tempfile = "3"
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 

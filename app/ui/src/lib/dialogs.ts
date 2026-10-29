@@ -44,3 +44,19 @@ export async function pickBackgroundFile(title: string, filterName: string): Pro
   });
   return typeof picked === 'string' ? picked : null;
 }
+
+/** A folder the browser stand-in proposes for Inkspace's data. */
+const BROWSER_INKSPACE_FOLDER = 'C:\\Users\\demo\\AppData\\Local\\Packages\\D91E29CF.InkspaceApp_38kynpdw5g1aw\\LocalState';
+
+/**
+ * Native folder picker for Inkspace's data (its `LocalState` folder, or a copy); `null` when the
+ * user cancels. The browser stand-in asks for a path. The end-to-end journeys set
+ * `window.__ardoiseE2eFolderPath` to the folder the dialog would return.
+ */
+export async function pickInkspaceFolder(title: string): Promise<string | null> {
+  const scripted = (window as { __ardoiseE2eFolderPath?: unknown }).__ardoiseE2eFolderPath;
+  if (typeof scripted === 'string') return scripted;
+  if (!inDesktopApp()) return window.prompt(title, BROWSER_INKSPACE_FOLDER);
+  const picked = await open({ directory: true, multiple: false, title });
+  return typeof picked === 'string' ? picked : null;
+}

@@ -8,6 +8,7 @@ import { UNHANDLED, setMockAutoExportSettings } from './mock-data';
 import { checkAutoExport, mockExportInvoke } from './mock-export';
 import { mockDragInvoke } from './mock-drag';
 import { mockHandwritingInvoke } from './mock-handwriting';
+import { mockInkspaceInvoke } from './mock-inkspace';
 import { mockLibraryInvoke } from './mock-library';
 import { mockLiveInvoke } from './mock-live';
 import { mockNarrationInvoke } from './mock-narration';
@@ -102,6 +103,8 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
           mockBackgroundInvoke,
           mockHandwritingInvoke,
           mockAboutInvoke,
+
+          mockInkspaceInvoke,
         ]) {
           const handled = handle(command, args);
           if (handled !== UNHANDLED) return handled;

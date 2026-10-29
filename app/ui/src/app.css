@@ -1819,3 +1819,34 @@ select {
 .about-components tbody th {
   font-weight: 600;
 }
+
+/* Import from Inkspace */
+
+.chosen code {
+  overflow-wrap: anywhere;
+}
+
+.inkspace-progress {
+  margin-top: 1rem;
+}
+
+.inkspace-progress progress {
+  display: block;
+  width: 100%;
+  height: 0.9rem;
+  accent-color: var(--accent);
+}
+
+.inkspace-failures {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.9rem;
+}
+
+.inkspace-when {
+  font-weight: 600;
+}
+
+.sidebar .nav-import {
+  margin-top: 0.25rem;
+}
