@@ -21,7 +21,6 @@ export function markWhenDrawn(name: string): void {
 
 /** `onload` of a thumbnail: when it was drawn (`performance.now()`), in `data-drawn-at`. */
 export function noteDrawn(event: Event): void {
-  if (event.currentTarget instanceof HTMLElement) {
-    event.currentTarget.dataset.drawnAt = String(performance.now());
-  }
+  const element = event.currentTarget as HTMLElement | null;
+  if (element?.dataset) element.dataset.drawnAt = String(performance.now());
 }

@@ -20,9 +20,9 @@ describe('performance marks', () => {
   });
 
   it('records when a thumbnail was drawn', () => {
-    const image = document.createElement('img');
-    image.addEventListener('load', noteDrawn);
-    image.dispatchEvent(new Event('load'));
+    const image = { dataset: {} as Record<string, string> };
+    noteDrawn({ currentTarget: image } as unknown as Event);
     expect(Number(image.dataset.drawnAt)).toBeGreaterThan(0);
+    noteDrawn({ currentTarget: null } as unknown as Event);
   });
 });
