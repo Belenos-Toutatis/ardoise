@@ -371,7 +371,7 @@ describe('live view (control window)', () => {
     await vi.waitFor(() => expect(view.target.querySelector('[data-slot="save-failed"]')).not.toBeNull());
     const text = view.target.querySelector('[data-slot="save-failed"]')!.textContent!;
     expect(text).toContain('A page could not be saved to the library.');
-    expect(text).toContain('Page 1: disk full');
+    expect(text).toContain('Page 1: the library cannot be read or changed (disk full)');
     expect(text).toContain('The pages stay in memory');
     expect(text).toContain("a backup copy is written to Ardoise's local folder");
   });
@@ -594,7 +594,7 @@ describe('live view (control window)', () => {
       () => new Promise((resolve) => (release = resolve as typeof release)),
     );
     const view = render();
-    await tick();
+    await vi.waitFor(() => expect(release).toBeDefined());
     expect(view.action('stop-live').disabled).toBe(true);
     const stopping = vi.spyOn(api, 'liveStop');
     // The view goes away while `live_start` is pending, then Rust answers.

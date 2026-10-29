@@ -13,7 +13,7 @@
     tools,
     ink,
     onchange,
-  }: { initial: Doc; tools: ToolSettings; ink: Ink | null; onchange: (doc: Doc) => void } = $props();
+  }: { initial: Doc; tools: ToolSettings; ink: Ink; onchange: (doc: Doc) => void } = $props();
 
   let doc = $state.raw(untrack(() => initial));
 </script>

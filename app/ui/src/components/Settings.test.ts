@@ -250,7 +250,7 @@ describe('settings: automatic export', () => {
     save(target).click();
     await settle();
     const alert = section(target).querySelector('[role="alert"]')!;
-    expect(alert.textContent).toContain("ce dossier n'est pas utilisable");
+    expect(alert.textContent).toContain("Ce dossier n'est pas utilisable");
     expect(alert.textContent).toContain('par exemple « Exports »');
     expect(onchange).not.toHaveBeenCalled();
     expect(section(target).textContent).not.toContain('Réglage enregistré.');
@@ -269,7 +269,7 @@ describe('settings: automatic export', () => {
     await type(folder(target), '_ardoise/exports');
     save(target).click();
     await settle();
-    expect(section(target).querySelector('[role="alert"]')?.textContent).toContain("ce dossier n'est pas utilisable");
+    expect(section(target).querySelector('[role="alert"]')?.textContent).toContain("Ce dossier n'est pas utilisable");
   });
 
   it('speaks English', async () => {
@@ -280,7 +280,7 @@ describe('settings: automatic export', () => {
     await type(folder(target), '..');
     [...section(target).querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Save')!.click();
     await settle();
-    expect(section(target).querySelector('[role="alert"]')?.textContent).toContain("this folder can't be used");
+    expect(section(target).querySelector('[role="alert"]')?.textContent).toContain("This folder can't be used");
   });
 });
 
@@ -319,7 +319,7 @@ describe('settings: microphone', () => {
     picker.props!.onchange('usb-2');
     await settle();
     expect(onchange).not.toHaveBeenCalled();
-    expect(target.querySelector('[role="alert"]')?.textContent).toContain('le fichier de réglages ne peut pas être lu ou modifié');
+    expect(target.querySelector('[role="alert"]')?.textContent).toContain('Le fichier de réglages ne peut pas être lu ou modifié');
   });
 
   it('speaks English', async () => {
@@ -430,7 +430,7 @@ describe('settings: OpenH264 backup encoder', () => {
     const { target } = await render('fr');
     sectionButton(target, 'Télécharger depuis Cisco').click();
     await settle();
-    expect(section(target).querySelector('[role="alert"]')?.textContent).toContain("le téléchargement d'OpenH264 a échoué");
+    expect(section(target).querySelector('[role="alert"]')?.textContent).toContain("Le téléchargement d'OpenH264 a échoué");
     expect(sectionButton(target, 'Télécharger depuis Cisco').disabled).toBe(false);
   });
 
