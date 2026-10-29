@@ -155,7 +155,6 @@
     "library": "Dossier de la bibliothèque",
     "machine": "Cet ordinateur",
     "settingsFile": "Fichier de réglages",
-    "version": "Version {version}",
     "cancel": "Annuler",
     "tablet": "Tablette",
     "tabletNone": "Aucune tablette n'est enregistrée.",
@@ -216,6 +215,51 @@
     "copyFailed": "Impossible de copier : sélectionnez le texte et copiez-le avec Ctrl+C.",
     "privacy": "Vie privée : ce que l'assistant lit (le texte et l'image de vos notes, parfois des noms d'élèves) part chez son fournisseur, selon les réglages de votre compte. En général, l'assistant demande votre accord avant de modifier quoi que ce soit, mais cela dépend de ses réglages d'autorisation ; Ardoise lui signale les outils qui modifient ou retirent des notes. Rien n'est jamais supprimé définitivement. Pour qu'il ne puisse que lire, déclarez-le avec « Lecture seule » cochée.",
     "guide": "Pas à pas : guide « Assistant » (docs/guide/assistant.fr.md)."
+  },
+  "about": {
+    "section": "À propos",
+    "title": "À propos d'Ardoise",
+    "open": "À propos d'Ardoise…",
+    "nameVersion": "Ardoise, version {version}",
+    "version": "version {version}",
+    "licenseShort": "Logiciel libre, sous licence GPL-3.0 ou ultérieure.",
+    "license": {
+      "title": "Licence",
+      "line": "Ardoise est distribuée sous la licence {license} (GNU General Public License, version 3 ou, à votre choix, toute version ultérieure).",
+      "meaning": "En clair : vous pouvez utiliser, copier, étudier, modifier et partager Ardoise librement ; si vous distribuez une version modifiée, elle doit rester libre, sous la même licence. Ardoise est fournie sans aucune garantie.",
+      "show": "Afficher le texte complet de la licence",
+      "hide": "Masquer le texte complet de la licence",
+      "textLabel": "Texte complet de la licence GNU GPL version 3"
+    },
+    "credits": {
+      "title": "Crédits",
+      "tuhi": "Le protocole Bluetooth de la Bamboo Slate a été compris grâce à Tuhi, le pilote libre pour Linux des tablettes Wacom SmartPad, de Peter Hutterer, Benjamin Tissoires et leurs contributeurs (https://github.com/tuhiproject/tuhi, GPL-2.0 ou ultérieure). La documentation que Tuhi donne du protocole de la tablette a guidé Ardoise, qui le réimplémente à partir de ses propres notes et captures : Ardoise ne contient aucun code de Tuhi."
+    },
+    "cisco": {
+      "title": "Encodeur vidéo OpenH264",
+      "notice": "OpenH264 Video Codec provided by Cisco Systems, Inc.",
+      "download": "Ardoise ne contient pas OpenH264 : si Windows ne sait pas écrire les fichiers MP4, c'est vous qui le téléchargez chez Cisco, depuis les Réglages. Il est alors conservé sur cet ordinateur seulement.",
+      "installed": "Installé sur cet ordinateur (version {version}).",
+      "notInstalled": "Pas installé sur cet ordinateur.",
+      "damaged": "Présent sur cet ordinateur, mais endommagé : il faut le télécharger de nouveau.",
+      "license": "La licence du binaire fourni par Cisco est affichée dans les Réglages, sous « Encodeur vidéo de secours (OpenH264) »."
+    },
+    "components": {
+      "title": "Composants",
+      "intro": "Ardoise est construite avec les composants libres ci-dessous, chacun sous sa propre licence.",
+      "search": "Filtrer les composants",
+      "placeholder": "Nom, version ou licence",
+      "count": "Composants affichés : {shown} sur {total}",
+      "none": "Aucun composant ne correspond.",
+      "name": "Composant",
+      "versionColumn": "Version",
+      "licenseColumn": "Licence"
+    },
+    "notices": {
+      "show": "Afficher les textes complets des licences des composants",
+      "hide": "Masquer les textes des licences des composants",
+      "textLabel": "Textes des licences des composants (fichier THIRD-PARTY-NOTICES)"
+    }
   },
   "tablet": {
     "title": "Tablette",

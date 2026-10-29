@@ -155,7 +155,6 @@
     "library": "Library folder",
     "machine": "This computer",
     "settingsFile": "Settings file",
-    "version": "Version {version}",
     "cancel": "Cancel",
     "tablet": "Tablet",
     "tabletNone": "No tablet is registered.",
@@ -216,6 +215,51 @@
     "copyFailed": "Cannot copy: select the text and copy it with Ctrl+C.",
     "privacy": "Privacy: what the assistant reads (the text and image of your notes, sometimes students' names) goes to its provider, under your account's settings. Assistants usually ask for your consent before changing anything, but that depends on their permission settings; Ardoise flags the tools that change or remove notes. Nothing is ever deleted for good. To let it only read, declare it with \"Read only\" ticked.",
     "guide": "Step by step: the \"Assistant\" guide (docs/guide/assistant.en.md)."
+  },
+  "about": {
+    "section": "About",
+    "title": "About Ardoise",
+    "open": "About Ardoise…",
+    "nameVersion": "Ardoise, version {version}",
+    "version": "version {version}",
+    "licenseShort": "Free software, under the GPL-3.0 licence or later.",
+    "license": {
+      "title": "Licence",
+      "line": "Ardoise is distributed under the {license} licence (GNU General Public License, version 3 or, at your option, any later version).",
+      "meaning": "In plain words: you may use, copy, study, change and share Ardoise freely; if you distribute a modified version, it must stay free under the same licence. Ardoise comes with no warranty at all.",
+      "show": "Show the full text of the licence",
+      "hide": "Hide the full text of the licence",
+      "textLabel": "Full text of the GNU GPL version 3"
+    },
+    "credits": {
+      "title": "Credits",
+      "tuhi": "The Bamboo Slate's Bluetooth protocol was understood thanks to Tuhi, the free Linux driver for Wacom SmartPad tablets by Peter Hutterer, Benjamin Tissoires and contributors (https://github.com/tuhiproject/tuhi, GPL-2.0 or later). Tuhi's documentation of the tablet's protocol guided Ardoise, which reimplements it from its own notes and captures: Ardoise contains no Tuhi code."
+    },
+    "cisco": {
+      "title": "OpenH264 video encoder",
+      "notice": "OpenH264 Video Codec provided by Cisco Systems, Inc.",
+      "download": "Ardoise does not contain OpenH264: if Windows cannot write MP4 files, you download it yourself from Cisco, from the Settings. It is then kept on this computer only.",
+      "installed": "Installed on this computer (version {version}).",
+      "notInstalled": "Not installed on this computer.",
+      "damaged": "Present on this computer, but damaged: it has to be downloaded again.",
+      "license": "The licence of the binary provided by Cisco is shown in the Settings, under \"Backup video encoder (OpenH264)\"."
+    },
+    "components": {
+      "title": "Components",
+      "intro": "Ardoise is built with the free components below, each under its own licence.",
+      "search": "Filter the components",
+      "placeholder": "Name, version or licence",
+      "count": "Components shown: {shown} of {total}",
+      "none": "No component matches.",
+      "name": "Component",
+      "versionColumn": "Version",
+      "licenseColumn": "Licence"
+    },
+    "notices": {
+      "show": "Show the full licence texts of the components",
+      "hide": "Hide the licence texts of the components",
+      "textLabel": "Licence texts of the components (THIRD-PARTY-NOTICES file)"
+    }
   },
   "tablet": {
     "title": "Tablet",
