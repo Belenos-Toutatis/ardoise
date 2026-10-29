@@ -211,3 +211,15 @@ window carries on as a second app), a named mutex and a window class:
   after 20 s without a window it exits quietly (the first one is still starting). A second `--diagnostic` launch only
   shows the open window (the tablet test is one click away there).
 - Without a settings location or a SID (non-Windows builds), no guard.
+
+Checked on the development PC (Windows 11, a debug build with the interface embedded; window messages sent with
+`SendMessageTimeout` as Windows does at logoff): before the fix (the exe of main 26da011), a dirty note let
+`WM_QUERYENDSESSION` through (answer 1, no reason) and `WM_ENDSESSION` ended the process with 0, the change lost after a
+restart. After it: a clean note answers 1; a dirty one answers 0, `ShutdownBlockReasonQuery` returns the French reason,
+the draft holds the latest change 166 ms after the query (the periodic write would come 2 s later), `WM_ENDSESSION`
+ends the process with 0, and the restarted app lists the draft and offers it ("restore"). A process killed 2 s after an
+edit (`taskkill /F /T`) leaves its draft, offered and restored after the restart, and removed once saved. A second
+launch of a copy exits with 0 within 0.3 s and restores and brings forward the minimised first window; `--mcp
+--read-only`, `--create-demo-library` and `--self-test` of that copy work while it is open; a copy in another folder
+runs beside it; two launches at the same moment leave one app. Journeys: `app/e2e/journeys-m10-fix-hard.mjs`. Not
+checked: a real shutdown or logoff (Windows' own "apps preventing shutdown" screen).

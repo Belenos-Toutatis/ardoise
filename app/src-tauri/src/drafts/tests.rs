@@ -296,7 +296,7 @@ fn restoring_as_a_copy_makes_a_new_note_beside_the_old_one() {
     let root = path_text(dir.path());
     let mut draft = record(&root, "n1", 1000, "s1");
     draft.path = path_text(&original.path);
-    draft.note.strokes.truncate(0);
+    draft.note.strokes.clear();
 
     let copy = restore_copy_in(&library, &draft, None, "  Cours (récupéré)  ").unwrap();
     assert_eq!(copy.binder, "Physique/3e");

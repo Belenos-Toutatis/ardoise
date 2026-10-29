@@ -387,3 +387,7 @@ need), then sent it through IPC in one response and the editor wrapped it in a B
   play the same way.
 - Manual check of a long narration: `ARDOISE_LONG_NARRATION_NOTE=<note.ardoise> cargo test -p ardoise --release --lib
   -- --ignored writes_a_long_narration` puts an hour of synthetic voice into a note.
+- Measured on the development PC with a one-hour narration (29 MB note), from "Lire avec la narration" to a sound
+  ready to play, and the peak private memory of the app and its WebView2 processes: before (release exe of main
+  26da011) 25.3 s and 3273 MB (398 MB before, 785 MB after); after (debug build) 2.7 s and 382 MB (266 MB before, 360 MB
+  after). Both seek right: the replay put at 30:00 and 58:20 puts the sound at 1802.5 s and 3502.4 s.
