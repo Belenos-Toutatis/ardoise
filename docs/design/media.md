@@ -369,3 +369,21 @@ After the review of the package (contract changes; the interface codes against t
   one follows it with as many channels), and a live page keeps only its `audio.opus` bytes; a second recording on the
   page decodes them again to merge (re-encoding the earlier narration once more).
 
+
+## M10: narration playback without a WAV in memory (agent `m10-fix-hard`)
+
+Review finding, confirmed: `narration_audio` decoded the whole `audio.opus` to a 16-bit 48 kHz WAV (about 345 MB per
+hour, 1.4 GB at the 4-hour limit) inside an async command (holding a runtime worker that live mode and the tablet
+need), then sent it through IPC in one response and the editor wrapped it in a Blob.
+
+- `narration_audio(path)` now returns the member as stored, the Ogg Opus stream (about 29 MB per hour at 64 kbit/s
+  mono), read on a blocking thread (`notes::blocking`); its headers are checked like `narration_info` (`noteDamaged`),
+  the sound is not decoded. `narration_wav` is gone; `ardoise_media::wav_bytes` stays for its own tests.
+- The editor makes the Blob with the type sniffed from the bytes (`narrationType`: `OggS` → `audio/ogg; codecs=opus`,
+  else `audio/wav`, which the browser stand-in still returns). WebView2 (Chromium) plays and seeks Ogg Opus itself; the
+  pre-skip and the end trimming of RFC 7845 are applied by its demuxer, so `currentTime` 0 is the first sample, as the
+  WAV's was, and `NarrationPlayback` (start offset, drift correction, seeking from the replay's playhead) is
+  unchanged. A narration made of several live pieces is one stream already (`Narration::merge`), so pages and clips
+  play the same way.
+- Manual check of a long narration: `ARDOISE_LONG_NARRATION_NOTE=<note.ardoise> cargo test -p ardoise --release --lib
+  -- --ignored writes_a_long_narration` puts an hour of synthetic voice into a note.
