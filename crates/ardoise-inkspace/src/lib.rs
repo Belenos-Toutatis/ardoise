@@ -1,11 +1,13 @@
 //! Import of Wacom Inkspace notes (SPEC §6.3, research `docs/research/inkspace-format.md`).
 //!
 //! Pipeline: [`locate_local_state`] finds `%LOCALAPPDATA%\Packages\D91E29CF.InkspaceApp_*\
-//! LocalState`; [`import_local_state`] reads `WacomCloudDb\_` into memory (rusty-leveldb on
-//! its in-memory environment, so nothing is written next to Inkspace's data), walks the note
-//! tree, decodes the strokes and converts every page into an [`ardoise_core::note::Note`];
-//! [`compare::compare_with_preview`] renders an imported note and scores it against
-//! Inkspace's own `preview_*.png`.
+//! LocalState` (on Windows; the rules are platform-free in [`locate_with_env`]), and
+//! [`local_state_in`] turns a folder chosen by hand into its `LocalState`;
+//! [`import_local_state`] reads `WacomCloudDb\_` into memory (rusty-leveldb on its in-memory
+//! environment, so nothing is written next to Inkspace's data), walks the note tree, decodes
+//! the strokes and converts every page into an [`ardoise_core::note::Note`];
+//! [`compare::compare_with_preview`] renders an imported note and scores it against Inkspace's
+//! own `preview_*.png`.
 //!
 //! # Privacy
 //!
@@ -47,6 +49,8 @@ mod locate;
 mod protobuf;
 pub mod reader;
 mod store;
+#[cfg(feature = "synthetic")]
+pub mod synthetic;
 pub mod width;
 
 use std::path::{Path, PathBuf};
@@ -54,7 +58,10 @@ use std::path::{Path, PathBuf};
 use ardoise_core::note::{Note, Timing};
 
 pub use compare::{CompareError, Scores, THRESHOLDS, Thresholds, compare_with_preview};
-pub use locate::{PACKAGE_PREFIX, locate_in_packages, locate_local_state};
+pub use locate::{
+    PACKAGE_PREFIX, local_state_in, locate_in_packages, locate_local_state, locate_with_env,
+    packages_dirs,
+};
 pub use reader::{Access, AccessKind, TrackedReader};
 
 /// Errors that stop the whole import.

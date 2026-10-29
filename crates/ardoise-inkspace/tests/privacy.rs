@@ -12,15 +12,14 @@ mod common;
 
 use std::path::Path;
 
-use ardoise_inkspace::{AccessKind, TrackedReader, compare_with_preview, import_local_state};
-use common::{SynthNote, SynthStroke};
+use ardoise_inkspace::{
+    AccessKind, TrackedReader, compare_with_preview, import_local_state, local_state_in,
+    locate_with_env,
+};
+use common::{SynthNote, SynthStroke, utf16le};
 use uuid::Uuid;
 
 const CANARY: &str = "CANARY-5f0c2b7e-profile-access-token-and-e-mail";
-
-fn utf16le(s: &str) -> Vec<u8> {
-    s.encode_utf16().flat_map(u16::to_le_bytes).collect()
-}
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
@@ -28,18 +27,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 
 /// `db\`: an Inkspace-like settings LevelDB (UTF-16LE keys and JSON values), canary inside.
 fn write_settings_db(db: &Path) {
-    let value =
-        |name: &str| format!("{{\"{name}\":\"{CANARY}\",\"email\":\"{CANARY}@example.invalid\"}}");
-    let mut entries = Vec::new();
-    for key in ["device", "profile", "queue", "settings"] {
-        entries.push((utf16le(key), utf16le(&value(key))));
-        // An ASCII copy too, so the canary is findable in either encoding.
-        entries.push((format!("{key}-ascii").into_bytes(), value(key).into_bytes()));
-    }
-    common::write_leveldb(db, &entries, true);
-    // LevelDB's text log, as Inkspace leaves it.
-    std::fs::write(db.join("LOG"), format!("profile {CANARY}\n")).unwrap();
-    std::fs::write(db.join("LOG.old"), format!("profile {CANARY}\n")).unwrap();
+    ardoise_inkspace::synthetic::write_settings_db(db, CANARY).unwrap();
     // Precondition: every file that can hold data carries the canary. CURRENT, LOCK and the
     // MANIFEST have a fixed LevelDB format and cannot.
     let mut checked = Vec::new();
@@ -180,5 +168,57 @@ fn importer_never_reads_the_profile_key() {
     let utf16_debug: String = CANARY.chars().map(|c| format!("{c}\\0")).collect();
     assert!(!output.contains(CANARY));
     assert!(!output.contains(&utf16_debug));
+    assert!(!output.contains("CANARY"));
+}
+
+/// The interface's path (M10): automatic detection in a `Packages` folder, every way of choosing
+/// the folder by hand, then the import. Nothing under `db\` is read; only the note folders of
+/// the previews are looked at (existence checks and listings, no content), and choosing `db\`
+/// itself by mistake is refused without listing it.
+#[test]
+fn detection_and_folders_chosen_by_hand_never_read_the_profile_key() {
+    let root = tempfile::tempdir().unwrap();
+    let packages = root.path().join("Local").join("Packages");
+    let package = packages.join("D91E29CF.InkspaceApp_38kynpdw5g1aw");
+    let note = SynthNote {
+        id: Uuid::from_u128(0x1111_2222_3333_4444_8555_6666_7777_8888),
+        created: 1_700_000_000_000,
+        modified: 1_700_000_100_000,
+        landscape: false,
+        layers: vec![vec![stroke()]],
+    };
+    let local_state = common::write_local_state(&package, std::slice::from_ref(&note));
+    let db = local_state.join("db");
+    write_settings_db(&db);
+    let note_dir = db.join("notes").join(note.id.to_string());
+    std::fs::create_dir_all(&note_dir).unwrap();
+    std::fs::write(
+        note_dir.join(format!("thumb_{}.png", note.modified)),
+        CANARY,
+    )
+    .unwrap();
+    std::fs::write(note_dir.join("preview_1.png"), CANARY).unwrap();
+
+    let reader = TrackedReader::new();
+    let local = root.path().join("Local");
+    let env = |name: &str| (name == "LOCALAPPDATA").then(|| local.clone().into_os_string());
+    assert_eq!(locate_with_env(&reader, env), Some(local_state.clone()));
+    let cloud = local_state.join("WacomCloudDb");
+    for chosen in [&local_state, &package, &cloud, &cloud.join("_"), &packages] {
+        assert_eq!(local_state_in(&reader, chosen), Some(local_state.clone()));
+    }
+    for mistaken in [&db, &db.join("notes"), &note_dir] {
+        assert_eq!(local_state_in(&reader, mistaken), None, "{mistaken:?}");
+    }
+    let report = import_local_state(&local_state, &reader).unwrap();
+    assert_eq!(report.notes.len(), 1, "{:?}", report.failures);
+
+    for access in reader.accesses().iter().filter(|a| a.path.starts_with(&db)) {
+        assert_ne!(access.kind, AccessKind::Read, "read under db: {access:?}");
+        if access.kind == AccessKind::List {
+            assert_eq!(access.path, note_dir, "listing under db: {access:?}");
+        }
+    }
+    let output = format!("{report:#?}");
     assert!(!output.contains("CANARY"));
 }
