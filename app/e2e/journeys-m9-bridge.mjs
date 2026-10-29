@@ -94,6 +94,22 @@ export const bridgeJourneys = [
           if (state.note !== null || state.live_mode !== null) throw new Error(JSON.stringify(state));
         });
 
+        await check('Paramètres > Assistant : la commande et le JSON donnent le chemin de cette copie', async () => {
+          await app.click('.topbar button', l('settings.title'));
+          await app.waitFor(`document.querySelector('[data-snippet="claude-code"]') !== null`, 'the assistant panel');
+          const exe = join(app.dir, 'ardoise.exe');
+          const command = await app.evaluate(`document.querySelector('[data-snippet="claude-code"]').textContent`);
+          const expected = `claude mcp add --scope user ardoise -- "${exe}" --mcp`;
+          if (command.toLowerCase() !== expected.toLowerCase()) throw new Error(`command: ${command}, expected ${expected}`);
+          await app.click('[data-setting="assistant-read-only"]');
+          await app.waitFor(`document.querySelector('[data-snippet="claude-code"]').textContent.endsWith('--mcp --read-only')`, 'the read-only option');
+          const config = JSON.parse(await app.evaluate(`document.querySelector('[data-snippet="claude-desktop"]').textContent`));
+          const entry = config.mcpServers?.ardoise;
+          if (!samePath(entry?.command, exe) || entry.args.join(' ') !== '--mcp --read-only') throw new Error(JSON.stringify(config));
+          await app.click('.topbar button', l('settings.title'));
+          await app.waitFor(`document.querySelector('[data-slot="assistant"]') === null`, 'the settings closed');
+        });
+
         await check('open_note : l’éditeur montre « Cours d’optique », app_state la nomme', async () => {
           const notes = (await ok(session, 'list_notes', { limit: 100 })).notes;
           note = notes.find((n) => n.title === NOTE);
