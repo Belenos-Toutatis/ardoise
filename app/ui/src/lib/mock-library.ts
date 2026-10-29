@@ -77,7 +77,7 @@ export function summary(path: string, stored: StoredNote): NoteSummary {
 }
 
 /** A relative binder path checked segment by segment, as the Rust library does. */
-function cleanBinder(binder: string): string {
+export function cleanBinder(binder: string): string {
   const segments = binder.split('/').map((s) => s.trim());
   if (binder.trim() === '') return '';
   for (const segment of segments) {

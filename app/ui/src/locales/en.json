@@ -513,7 +513,14 @@
     "backgroundMissing": "the background image is no longer in memory; reopen the note and choose the image again",
     "pdfUnsupported": "PDF files can only be read on Windows",
     "pdfEncrypted": "this PDF is protected by a password; save a copy without a password",
-    "pdfNoSuchPage": "this PDF has no such page ({detail})"
+    "pdfNoSuchPage": "this PDF has no such page ({detail})",
+    "inkspaceNotFound": "this folder holds no Inkspace notes ({detail}); choose Inkspace's “LocalState” folder or a copy of it",
+    "inkspaceUnreadable": "Inkspace's notes cannot be read ({detail}); close Inkspace and try again",
+    "inkspaceDamaged": "Inkspace's note database is damaged or in an unknown format ({detail})",
+    "inkspaceTooLarge": "Inkspace's note database is too large to import ({detail})",
+    "inkspaceNoteDamaged": "this Inkspace note cannot be read ({detail})",
+    "inkspaceBusy": "an Inkspace import is already running",
+    "inkspaceTarget": "this binder is inside Inkspace's folder ({detail}); choose a binder of the library"
   },
   "editor": {
     "back": "Library",
@@ -1436,6 +1443,57 @@
     "assemble": {
       "droppedOne": "Only the first note's background image is kept: one other note's will not be carried over.",
       "droppedMany": "Only the first note's background image is kept: those of the {count} other notes will not be carried over."
+    }
+  },
+  "inkspace": {
+    "entry": "Import from Inkspace…",
+    "title": "Import from Wacom Inkspace",
+    "intro": "Ardoise can take over the notes written with Wacom Inkspace. Inkspace's data is neither changed nor deleted.",
+    "detecting": "Looking for Inkspace on this computer…",
+    "reading": "Reading Inkspace's notes…",
+    "location": "Inkspace's folder",
+    "foundOne": "1 note found",
+    "found": "{count} notes found",
+    "alreadyOne": "including 1 already in the library (it will be skipped)",
+    "already": "including {count} already in the library (they will be skipped)",
+    "unreadableOne": "including 1 that cannot be read",
+    "unreadable": "including {count} that cannot be read",
+    "pick": "Choose a folder…",
+    "pickOther": "Choose another folder…",
+    "pickTitle": "Wacom Inkspace's “LocalState” folder",
+    "retry": "Try again",
+    "notFound": "Ardoise did not find Wacom Inkspace on this computer. If you have a copy of Inkspace's “LocalState” folder (on a USB stick, for example), choose it.",
+    "readError": "This folder cannot be read: {message}",
+    "importError": "The import failed: {message}",
+    "binder": "Destination binder",
+    "binderHint": "Leave empty to put the notes at the root of the library.",
+    "importOne": "Import 1 note",
+    "import": "Import {count} notes",
+    "allImported": "All of Inkspace's notes are already in the library: there is nothing to import.",
+    "progress": "Importing notes: {done} of {total}…",
+    "progressLabel": "Import progress",
+    "stop": "Stop the import",
+    "stopping": "Stopping after the current note…",
+    "doneTitle": "Import finished",
+    "cancelledTitle": "Import stopped",
+    "importedOne": "1 note imported into the binder “{binder}”",
+    "imported": "{count} notes imported into the binder “{binder}”",
+    "importedRootOne": "1 note imported at the root of the library",
+    "importedRoot": "{count} notes imported at the root of the library",
+    "nothingImported": "No note was imported.",
+    "skippedOne": "1 already there, skipped",
+    "skipped": "{count} already there, skipped",
+    "failedOne": "1 note could not be imported:",
+    "failed": "{count} notes could not be imported:",
+    "unknownDate": "Unknown date",
+    "cancelledHint": "The notes already imported are complete. Run the import again to add the others: those already in the library will be skipped.",
+    "show": "Show the imported notes",
+    "wizard": {
+      "found": "Ardoise found Wacom Inkspace notes on this computer.",
+      "foundCountOne": "Ardoise found Wacom Inkspace notes on this computer (1 note).",
+      "foundCount": "Ardoise found Wacom Inkspace notes on this computer ({count} notes).",
+      "check": "Import them into the library (binder “{binder}”)",
+      "hint": "You will confirm the import before it starts."
     }
   }
 }
