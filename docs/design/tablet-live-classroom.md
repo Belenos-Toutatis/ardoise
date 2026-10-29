@@ -398,8 +398,11 @@ bottom left, button at the bottom right); to be confirmed with the real tablet (
   written; `oriented_size` gives the page size. Tablet bytes (`original.bin`) are never touched, so "back to the
   original" decodes again with today's orientation (as it already did with the hand).
 - **Migration**: a settings file with `hand = "right"` reads as `landscape`, `hand = "left"` as `landscapeFlipped`
-  (serde alias on the field plus the legacy values in `From<String>`); the file is written back with `orientation`
-  only. An older Ardoise on another PC sharing the file reads no `hand` and falls back to right-handed.
+  (`RawTabletSettings` reads both keys; the legacy values live in `From<String>`). Both keys together are accepted
+  (`orientation` wins; no serde alias, which would make the pair a duplicate-field error and send the whole file
+  back to the defaults). The file is written back with `orientation` **and** `hand` (`landscapeFlipped` ->
+  `"left"`, everything else -> `"right"`), so that an older Ardoise sharing the file through Nextcloud keeps the half
+  turn: it keeps `orientation` in its unknown keys and rewrites `hand` next to it.
 - **Sync**: `note_from_page` gives the note the oriented page size and turned points. The note id is derived from the
   page bytes only, so a page already imported is not imported again after the position changed.
 - **Live**: the service orients the records (`orient_record`) and sends `LiveInput::Started { width, height,
@@ -413,7 +416,11 @@ bottom left, button at the bottom right); to be confirmed with the real tablet (
   take the new size; **other pages keep their ink and orientation until they are shown again** (`follow`, on page
   next / previous), when they are turned like the current one. So the pen's points, always in the current orientation,
   land on a page that has the same one. A page with ink only looked at is thus rewritten turned: accepted (it is
-  rare and the ink is not lost). The turned page is saved at once (`urgent`).
+  rare and the ink is not lost). The turned page is saved at once (`urgent`). The switch also counts while live mode
+  waits for the tablet (not connected, reconnecting): the worker forwards `Reoriented` to any live sink (the
+  tablet's area when none is known yet), the session takes the position and its snapshot shows it; the `Started`
+  that follows repeats the same position and turns nothing again. In the presentation, the marks written over it
+  are removed when the page index, the page size or the orientation changes (a switch keeps the index).
 - **Relation to `device.json`'s `orientation`**: `identity.rs` only has a test keeping an `"orientation": "left-handed"`
   field "from a newer version" in the record's `extra`; it is not a field of the record and nothing reads it. The
   setting lives in `ardoise.toml` ([tablet]), shared by the PCs, not with the tablet's registration.

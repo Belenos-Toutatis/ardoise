@@ -798,13 +798,15 @@ impl Worker {
         run.sink.input(LiveInput::State(LiveState::Live));
     }
 
-    /// Tells the live sink, once live mode streams, that the tablet is held another way. Done on
-    /// this thread between two notifications: the records before are oriented the old way, the
-    /// ones after the new way.
+    /// Tells the live sink that the tablet is held another way, whether live mode streams or
+    /// still waits for the tablet (not connected, reconnecting): the session takes the new way at
+    /// once, so the interface shows the switch, and the `Started` that follows finds nothing to
+    /// turn again. Done on this thread between two notifications: the records before are
+    /// oriented the old way, the ones after the new way.
     fn reoriented(&mut self) {
         let (width, height) = self.tablet_size();
         let orientation = self.config.options.orientation;
-        if let Some(run) = self.live.as_mut().filter(|run| run.started) {
+        if let Some(run) = self.live.as_mut() {
             run.sink.input(LiveInput::Reoriented {
                 width,
                 height,

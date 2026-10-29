@@ -286,23 +286,75 @@ fn yes() -> bool {
 }
 
 /// The tablet's options (SPEC §4.1, §4.2), shared by every computer like the library.
+///
+/// The orientation is stored under `orientation`, and also under the legacy `hand` key so that an
+/// older Ardoise sharing the file keeps the half turn (it writes `hand` next to the `orientation`
+/// it does not know). When both keys are present, `orientation` wins; `hand` alone is read as the
+/// older files meant it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "RawTabletSettings", into = "RawTabletSettings")]
 pub struct TabletSettings {
     /// Sync the stored pages as soon as the tablet connects.
-    #[serde(default = "yes")]
     pub auto_sync: bool,
     /// Delete each page from the tablet once its note is written and checked.
-    #[serde(default = "yes")]
     pub delete_after_import: bool,
-    /// How the tablet is held. Files from before the four positions call it `hand`.
-    #[serde(default, alias = "hand")]
+    /// How the tablet is held.
     pub orientation: Orientation,
     /// What the tablet's button does in live mode.
-    #[serde(default)]
     pub button: LiveButton,
     /// Keys this version does not know about, kept verbatim.
-    #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// The tablet table as stored: the legacy `hand` key next to `orientation`.
+#[derive(Serialize, Deserialize)]
+struct RawTabletSettings {
+    #[serde(default = "yes")]
+    auto_sync: bool,
+    #[serde(default = "yes")]
+    delete_after_import: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    orientation: Option<Orientation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hand: Option<String>,
+    #[serde(default)]
+    button: LiveButton,
+    #[serde(flatten)]
+    extra: toml::Table,
+}
+
+impl From<RawTabletSettings> for TabletSettings {
+    fn from(raw: RawTabletSettings) -> Self {
+        Self {
+            auto_sync: raw.auto_sync,
+            delete_after_import: raw.delete_after_import,
+            orientation: raw
+                .orientation
+                .or_else(|| raw.hand.map(Orientation::from))
+                .unwrap_or_default(),
+            button: raw.button,
+            extra: raw.extra,
+        }
+    }
+}
+
+impl From<TabletSettings> for RawTabletSettings {
+    fn from(settings: TabletSettings) -> Self {
+        // An older Ardoise only knows the half turn.
+        let hand = if settings.orientation == Orientation::LandscapeFlipped {
+            "left"
+        } else {
+            "right"
+        };
+        Self {
+            auto_sync: settings.auto_sync,
+            delete_after_import: settings.delete_after_import,
+            orientation: Some(settings.orientation),
+            hand: Some(hand.to_owned()),
+            button: settings.button,
+            extra: settings.extra,
+        }
+    }
 }
 
 impl Default for TabletSettings {
@@ -1152,7 +1204,7 @@ orientation = \"{}\"
             assert_eq!(orientation(&text), known);
         }
 
-        // An older file is read, then written with the new key only; the other keys stay.
+        // An older file is read, then written with both keys; the other keys stay.
         fs::write(
             store.path(),
             "[tablet]
@@ -1169,12 +1221,96 @@ future = 1
             text.contains("orientation = \"landscapeFlipped\""),
             "{text}"
         );
-        assert!(!text.contains("hand ="), "{text}");
+        assert!(text.contains("hand = \"left\""), "{text}");
         assert!(text.contains("future = 1"), "{text}");
         assert_eq!(
             store.load().unwrap().tablet.orientation,
             Orientation::LandscapeFlipped
         );
+    }
+
+    #[test]
+    fn both_orientation_keys_load_and_an_older_reader_still_accepts_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        let orientation = |toml: &str| {
+            fs::write(store.path(), toml).unwrap();
+            store.load().unwrap().tablet.orientation
+        };
+        // An older exe shared the file: its `hand` sits next to our `orientation`; ours wins.
+        assert_eq!(
+            orientation(
+                "[tablet]
+orientation = \"portraitLeft\"
+hand = \"right\"
+"
+            ),
+            Orientation::PortraitLeft
+        );
+        assert_eq!(
+            orientation(
+                "[tablet]
+hand = \"left\"
+orientation = \"landscape\"
+"
+            ),
+            Orientation::Landscape
+        );
+        assert_eq!(
+            orientation(
+                "[tablet]
+hand = \"left\"
+"
+            ),
+            Orientation::LandscapeFlipped
+        );
+        assert_eq!(
+            orientation(
+                "[tablet]
+orientation = \"portraitRight\"
+"
+            ),
+            Orientation::PortraitRight
+        );
+
+        // A file with both keys keeps the other settings (the library path of `[machines]`).
+        fs::write(
+            store.path(),
+            "[tablet]
+orientation = \"portraitLeft\"
+hand = \"right\"
+button = \"newLayer\"
+",
+        )
+        .unwrap();
+        let updated = store.update(|s| s.theme = Theme::Dark).unwrap();
+        assert_eq!(updated.tablet.orientation, Orientation::PortraitLeft);
+        assert_eq!(updated.tablet.button, LiveButton::NewLayer);
+
+        // What we write is read by a struct that only knows `hand` and keeps the rest.
+        #[derive(Deserialize)]
+        struct OlderTablet {
+            hand: String,
+            #[serde(flatten)]
+            rest: toml::Table,
+        }
+        #[derive(Deserialize)]
+        struct OlderFile {
+            tablet: OlderTablet,
+        }
+        for (held, hand) in [
+            (Orientation::Landscape, "right"),
+            (Orientation::LandscapeFlipped, "left"),
+            (Orientation::PortraitLeft, "right"),
+            (Orientation::PortraitRight, "right"),
+        ] {
+            store.update(|s| s.tablet.orientation = held).unwrap();
+            let text = fs::read_to_string(store.path()).unwrap();
+            let older: OlderFile = toml::from_str(&text).unwrap();
+            assert_eq!(older.tablet.hand, hand, "{text}");
+            assert!(older.tablet.rest.contains_key("orientation"), "{text}");
+            assert_eq!(store.load().unwrap().tablet.orientation, held);
+        }
     }
 
     #[test]

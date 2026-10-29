@@ -163,6 +163,22 @@ describe('writing over the presentation', () => {
     await vi.waitFor(() => expect(view.clearButton()).toBeNull());
   });
 
+  it('goes away with a quick switch of the orientation, which turns the page without changing its index', async () => {
+    const view = await render();
+    await view.write({ pointerType: 'mouse' });
+    await vi.waitFor(() => expect(view.clearButton()).toBeTruthy());
+    // A quarter turn swaps the page's size; the index stays 1/1.
+    await api.tabletSetOrientation('portraitLeft');
+    await vi.waitFor(() => expect(view.clearButton()).toBeNull());
+    expect(view.canvas.dataset.page).toBe('1/1');
+
+    // A half turn keeps the size but flips the page: the marks go too.
+    await view.write({ pointerType: 'mouse', t: 5000 });
+    await vi.waitFor(() => expect(view.clearButton()).toBeTruthy());
+    await api.tabletSetOrientation('portraitRight');
+    await vi.waitFor(() => expect(view.clearButton()).toBeNull());
+  });
+
   it('drops the mark being written when a second finger comes down, and pinches the view instead', async () => {
     const view = await render();
     const base = (await api.liveSubscribe(() => {})).view;

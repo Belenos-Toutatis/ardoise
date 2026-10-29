@@ -1235,6 +1235,47 @@ mod tests {
     }
 
     #[test]
+    fn a_switch_while_waiting_for_the_tablet_shows_at_once_and_is_not_turned_twice() {
+        // Never started: the snapshot takes the new way, pages are blank and just take the size.
+        let mut session = LiveSession::new(
+            1,
+            A4_LANDSCAPE,
+            LiveStyle::default(),
+            LiveViewState::whole(A4_LANDSCAPE),
+            true,
+            T0 as i64 - 60_000,
+        );
+        let mut out = Vec::new();
+        session.set_state(LiveSessionState::Waiting, &mut out);
+        out.clear();
+        session.reorient(29_700, 21_600, Orientation::PortraitLeft, &mut out);
+        assert_eq!(snapshots(&out), 1);
+        assert_eq!(session.state(), LiveSessionState::Waiting);
+        assert_eq!(session.orientation(), Orientation::PortraitLeft);
+        assert_eq!(session.pages()[0].note.page, session.size());
+        // The tablet then streams, held the same way: nothing more to turn.
+        out.clear();
+        session.started(29_700, 21_600, Orientation::PortraitLeft, &mut out);
+        assert_eq!(session.state(), LiveSessionState::Live);
+        assert_eq!(session.orientation(), Orientation::PortraitLeft);
+
+        // The link drops after some ink; the switch during the wait turns the page once.
+        session.records(&[pen(1000, 2000, 400), pen(1100, 2000, 0)], T0, &mut out);
+        session.set_state(LiveSessionState::Reconnecting, &mut out);
+        out.clear();
+        session.reorient(29_700, 21_600, Orientation::LandscapeFlipped, &mut out);
+        assert_eq!(snapshots(&out), 1);
+        assert_eq!(session.state(), LiveSessionState::Reconnecting);
+        assert_eq!(session.pages()[0].note.page, A4_LANDSCAPE);
+        let turned = first_point(&session, 0);
+        out.clear();
+        session.started(29_700, 21_600, Orientation::LandscapeFlipped, &mut out);
+        assert_eq!(session.state(), LiveSessionState::Live);
+        assert_eq!(first_point(&session, 0), turned);
+        assert_eq!(session.pages()[0].note.page, A4_LANDSCAPE);
+    }
+
+    #[test]
     fn switching_keeps_the_zoom_and_turns_its_centre() {
         let mut session = running();
         let mut out = Vec::new();
