@@ -245,6 +245,19 @@ describe('clipboard text', () => {
     expect(decodeStrokes(text)).toEqual([{ ...stroke, layer: 0 }]);
   });
 
+  const point = (over: object) => ({ x: 10, y: 20, pressure: 0.5, t: 0, ...over });
+
+  it('keeps the values at the limits, and clamps a pressure outside 0..1', () => {
+    const edge = [point({ x: -10_000_000, y: 10_000_000, t: 0xffff_ffff - 1000 }), point({ t: 0xffff_ffff })];
+    const decoded = decodeStrokes(wrap([{ ...stroke, width: 100_000, points: edge }]));
+    expect(decoded?.[0].points.map((p) => [p.x, p.y, p.t])).toEqual([
+      [-10_000_000, 10_000_000, 0xffff_ffff - 1000],
+      [10, 20, 0xffff_ffff],
+    ]);
+    const pressures = decodeStrokes(wrap([{ ...stroke, points: [point({ pressure: -3 }), point({ pressure: 7 })] }]));
+    expect(pressures?.[0].points.map((p) => p.pressure)).toEqual([0, 1]);
+  });
+
   it('ignores anything foreign or damaged', () => {
     const bad = [
       '',
@@ -258,6 +271,16 @@ describe('clipboard text', () => {
       wrap([{ ...stroke, color: { r: 999, g: 0, b: 0, a: 255 } }]),
       wrap([{ ...stroke, points: [] }]),
       wrap([{ ...stroke, points: [{ x: 'a', y: 0, pressure: 0, t: 0 }] }]),
+      // Values Rust's types cannot hold, or that no page has: refused, never saved as a broken note.
+      wrap([{ ...stroke, width: 1e9 }]),
+      wrap([{ ...stroke, width: 0 }]),
+      wrap([{ ...stroke, points: [point({ t: -1 })] }]),
+      wrap([{ ...stroke, points: [point({ t: 1.5 })] }]),
+      wrap([{ ...stroke, points: [point({ t: 2 ** 32 })] }]),
+      wrap([{ ...stroke, points: [point({ x: 1e30 })] }]),
+      wrap([{ ...stroke, points: [point({ y: -10_000_001 })] }]),
+      wrap([{ ...stroke, points: [point({ t: 0 }), point({ t: 25 * 3_600_000 })] }]),
+      wrap([{ ...stroke, points: [point({ pressure: null })] }]),
       `{"ardoise":"${CLIPBOARD_MARKER}","version":1,"strokes":[`,
     ];
     for (const text of bad) expect(decodeStrokes(text), text).toBeNull();

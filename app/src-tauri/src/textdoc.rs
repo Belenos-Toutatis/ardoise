@@ -1,5 +1,5 @@
 //! The text export with the structure drawn from the ink (milestone M8): a note's handwriting as
-//! Markdown (`.md`, the drawings as PNG files next to it) or as a Word document (`.docx`, the
+//! Markdown (`.md`, the drawings as PNG files in a folder next to it) or as a Word document (`.docx`, the
 //! drawings embedded). Contract: `docs/design/extras.md`, "M8: text export with structure".
 //!
 //! The structure (paragraphs, list items, drawings) comes from Windows' ink analysis, or from
@@ -8,6 +8,7 @@
 //! `ardoise_hwr::docx`; this module reads the notes, crops the drawings out of them and writes
 //! the files atomically.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use ardoise_core::fsutil::write_atomic;
@@ -194,29 +195,116 @@ pub fn document_of(
     Ok((document, structure.analyzed))
 }
 
-/// Writes the Markdown of `documents` to `destination` and the drawings next to it
-/// (`<name>-1.png`…), atomically; returns the files, the document first.
+/// Suffix of the folder that holds a Markdown file's drawings: `<name>_images`.
+const IMAGES_SUFFIX: &str = "_images";
+/// Highest number tried in a folder name (` (2)`…).
+const MAX_FOLDER_SUFFIX: u32 = 999;
+
+/// Whether `name` is a drawing file of a previous export of `stem` (`<stem>-<number>.png`).
+fn is_export_image(name: &str, stem: &str) -> bool {
+    name.strip_prefix(stem)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .and_then(|rest| rest.strip_suffix(".png"))
+        .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The files of `folder` when it can be used for the drawings of `stem`'s export: it does not
+/// exist (nothing to list) or holds nothing but the drawings of a previous export of the same
+/// document. `None` when it holds anything else (the user's own files, a sub-folder), or is not
+/// a folder.
+fn previous_export_files(folder: &Path, stem: &str) -> Option<Vec<PathBuf>> {
+    let entries = match fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(Vec::new()),
+        Err(_) => return None,
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry.ok()?;
+        let name = entry.file_name();
+        if !entry.file_type().ok()?.is_file() || !is_export_image(&name.to_string_lossy(), stem) {
+            return None;
+        }
+        files.push(entry.path());
+    }
+    Some(files)
+}
+
+/// The name of a folder next to `destination` as `<stem>_images`, or `<stem>_images (2)`… if a
+/// folder of that name holds anything that is not ours: the drawings never land among the
+/// user's files. Returns the name and the files of a previous export it already holds.
+fn images_folder(parent: &Path, stem: &str) -> CommandResult<(String, Vec<PathBuf>)> {
+    for n in 1..=MAX_FOLDER_SUFFIX {
+        let name = if n == 1 {
+            format!("{stem}{IMAGES_SUFFIX}")
+        } else {
+            format!("{stem}{IMAGES_SUFFIX} ({n})")
+        };
+        if let Some(files) = previous_export_files(&parent.join(&name), stem) {
+            return Ok((name, files));
+        }
+    }
+    Err(export_error(format!(
+        "no free folder name for {stem}{IMAGES_SUFFIX}"
+    )))
+}
+
+/// Writes the Markdown of `documents` to `destination` and the drawings in the folder
+/// `<name>_images` next to it (`<name>-1.png`…), atomically; returns the files, the document
+/// first. No file the user did not confirm is replaced: the save dialog confirmed the `.md`, and
+/// the folder is a fresh one, or the one a previous export of the same document made (it holds
+/// only its drawings, which are replaced; those of a longer previous version are removed once
+/// the text is written). A folder holding anything else is left alone: ` (2)` is added to the
+/// name of ours.
 pub fn write_markdown(
     destination: &Path,
     documents: &[Document],
     labels: &Labels,
 ) -> CommandResult<Vec<PathBuf>> {
-    let prefix = destination
+    let stem = destination
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let markdown = to_markdown(documents, labels, &prefix);
-    let folder = destination.parent().unwrap_or(Path::new("."));
+    let parent = destination.parent().unwrap_or(Path::new("."));
     let fail =
         |path: &Path, error: std::io::Error| export_error(format!("{}: {error}", path.display()));
+    let drawings = documents
+        .iter()
+        .flat_map(|document| &document.blocks)
+        .any(|block| matches!(block, Block::Drawing(_)));
+    let (folder_name, stale) = if drawings {
+        images_folder(parent, &stem)?
+    } else {
+        // No drawing now: the folder of a previous export, if any, is emptied below.
+        let name = format!("{stem}{IMAGES_SUFFIX}");
+        let files = previous_export_files(&parent.join(&name), &stem).unwrap_or_default();
+        (name, files)
+    };
+    let folder = parent.join(&folder_name);
+    let markdown = to_markdown(
+        documents,
+        labels,
+        &stem,
+        if drawings { &folder_name } else { "" },
+    );
     let mut written = Vec::new();
     // The images first: a text file never points at an image that is not there.
+    if !markdown.images.is_empty() {
+        fs::create_dir_all(&folder).map_err(|e| fail(&folder, e))?;
+    }
     for image in &markdown.images {
         let path = folder.join(&image.name);
         write_atomic(&path, &image.png).map_err(|e| fail(&path, e))?;
         written.push(path);
     }
     write_atomic(destination, markdown.text.as_bytes()).map_err(|e| fail(destination, e))?;
+    // Drawings of a previous, longer export are not linked any more (best effort).
+    for old in stale.iter().filter(|old| !written.contains(old)) {
+        let _ = fs::remove_file(old);
+    }
+    if markdown.images.is_empty() {
+        let _ = fs::remove_dir(&folder);
+    }
     written.insert(0, destination.to_path_buf());
     Ok(written)
 }
@@ -458,32 +546,129 @@ mod tests {
         assert!(matches!(document.blocks[2], Block::Drawing(_)));
     }
 
-    #[test]
-    fn markdown_is_written_with_its_images_next_to_it() {
-        let (document, _) = document_of(
+    /// The document of the sample note, with one drawing.
+    fn sample_document() -> Document {
+        document_of(
             &source(),
             &page_text(Language::Fr),
             &Fake { analysis: true },
         )
-        .unwrap();
+        .unwrap()
+        .0
+    }
+
+    #[test]
+    fn markdown_is_written_with_its_images_in_a_folder_next_to_it() {
         let dir = tempfile::tempdir().unwrap();
         let destination = dir.path().join("Mon journal (1).md");
-        let written = write_markdown(&destination, &[document], &labels()).unwrap();
+        let written = write_markdown(&destination, &[sample_document()], &labels()).unwrap();
         assert_eq!(written.len(), 2);
         assert_eq!(written[0], destination);
-        let image = dir.path().join("Mon journal (1)-1.png");
+        let image = dir
+            .path()
+            .join("Mon journal (1)_images")
+            .join("Mon journal (1)-1.png");
         assert_eq!(written[1], image);
         let text = fs::read_to_string(&destination).unwrap();
-        assert!(text.starts_with("# Journal\n\nCreated: "), "{text}");
+        assert!(
+            text.starts_with(
+                "# Journal
+
+Created: "
+            ),
+            "{text}"
+        );
         assert!(text.contains("Tags: classe"));
         assert!(
-            text.contains("\nlu\n\n- lu\n\n![Drawing 1](Mon%20journal%20%281%29-1.png)\n"),
+            text.contains(
+                "
+lu
+
+- lu
+
+![Drawing 1](Mon%20journal%20%281%29_images/Mon%20journal%20%281%29-1.png)
+"
+            ),
             "{text}"
         );
         assert!(ardoise_render::decode_png(&fs::read(&image).unwrap()).is_ok());
-        // Written again over the same files: atomic, no leftover.
-        write_markdown(&destination, &[], &labels()).unwrap();
+        // Written again over the same files: atomic, no leftover, the same folder.
+        let again = write_markdown(&destination, &[sample_document()], &labels()).unwrap();
+        assert_eq!(again, written);
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+        assert_eq!(fs::read_dir(image.parent().unwrap()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn the_markdown_export_never_replaces_a_file_of_the_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("notes.md");
+        // The user's own files with the names the old export used, and a folder of that name.
+        let mine = dir.path().join("notes-1.png");
+        fs::write(&mine, b"mine").unwrap();
+        let folder = dir.path().join("notes_images");
+        fs::create_dir(&folder).unwrap();
+        let theirs = folder.join("notes-1.png");
+        fs::write(&theirs, b"theirs").unwrap();
+        fs::write(folder.join("readme.txt"), b"keep").unwrap();
+        let written = write_markdown(&destination, &[sample_document()], &labels()).unwrap();
+        assert_eq!(fs::read(&mine).unwrap(), b"mine");
+        assert_eq!(fs::read(&theirs).unwrap(), b"theirs");
+        assert_eq!(fs::read(folder.join("readme.txt")).unwrap(), b"keep");
+        // The drawings are in a free folder, and the links point at the files written.
+        let image = dir.path().join("notes_images (2)").join("notes-1.png");
+        assert_eq!(written, [destination.clone(), image.clone()]);
+        assert!(ardoise_render::decode_png(&fs::read(&image).unwrap()).is_ok());
+        let text = fs::read_to_string(&destination).unwrap();
+        assert!(
+            text.contains("![Drawing 1](notes_images%20%282%29/notes-1.png)"),
+            "{text}"
+        );
+        // A second export of the document goes to the same free folder again.
+        let again = write_markdown(&destination, &[sample_document()], &labels()).unwrap();
+        assert_eq!(again, written);
+        assert_eq!(fs::read(&theirs).unwrap(), b"theirs");
+        assert!(!dir.path().join("notes_images (3)").exists());
+    }
+
+    #[test]
+    fn exporting_fewer_drawings_leaves_no_stale_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("notes.md");
+        let two = vec![sample_document(), sample_document()];
+        let written = write_markdown(&destination, &two, &labels()).unwrap();
+        assert_eq!(written.len(), 3);
+        let folder = dir.path().join("notes_images");
+        assert_eq!(fs::read_dir(&folder).unwrap().count(), 2);
+        // One drawing now: the second image goes.
+        let written = write_markdown(&destination, &[sample_document()], &labels()).unwrap();
+        assert_eq!(written.len(), 2);
+        assert_eq!(fs::read_dir(&folder).unwrap().count(), 1);
+        assert!(!folder.join("notes-2.png").exists());
+        // No drawing: the folder is gone, and the text has no link.
+        let mut plain = sample_document();
+        plain.blocks.retain(|b| !matches!(b, Block::Drawing(_)));
+        let written = write_markdown(&destination, &[plain], &labels()).unwrap();
+        assert_eq!(written, [destination.clone()]);
+        assert!(!folder.exists());
+        assert!(!fs::read_to_string(&destination).unwrap().contains(".png"));
+        // A folder with a file of the user is never touched by an export without drawings.
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("notes-1.png"), b"x").unwrap();
+        fs::write(folder.join("other.txt"), b"y").unwrap();
+        write_markdown(&destination, &[], &labels()).unwrap();
+        assert_eq!(fs::read_dir(&folder).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn only_the_images_of_an_export_of_the_same_document_are_recognised() {
+        assert!(is_export_image("notes-1.png", "notes"));
+        assert!(is_export_image("notes-12.png", "notes"));
+        assert!(!is_export_image("notes-.png", "notes"));
+        assert!(!is_export_image("notes-1.jpg", "notes"));
+        assert!(!is_export_image("notes-a.png", "notes"));
+        assert!(!is_export_image("other-1.png", "notes"));
+        assert!(!is_export_image("notes-1.png.bak", "notes"));
     }
 
     #[test]
