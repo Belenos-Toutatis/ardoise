@@ -5,10 +5,16 @@
 //! application implements it with its interface; `ardoise-sim` implements it with a
 //! simulated user who presses the simulated tablet's button at the right moments.
 
-use std::path::PathBuf;
+use std::fmt;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
+
+use ardoise_core::settings::Orientation;
+
+use crate::service::PageContext;
+use crate::session::DownloadedPage;
 
 /// The steps, in the order they run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -24,7 +30,8 @@ pub enum StepId {
     Connect,
     /// Name, firmware, battery, size, clock and number of stored pages.
     Info,
-    /// Download of every stored page, CRC and decoding checks, deletion after saving.
+    /// Download of every stored page, CRC and decoding checks, a note in the library for each,
+    /// deletion after saving.
     Sync,
     /// Live mode for a fixed time: sample rate, coordinates and pressure ranges.
     Live,
@@ -153,8 +160,14 @@ pub struct DiagnosticConfig {
     pub reference_pages: u32,
     /// Duration of the live-mode step.
     pub live_duration: Duration,
-    /// Delete each page from the tablet once it is saved and verified.
+    /// Delete each page from the tablet once it is saved and verified (and added to the
+    /// library as a note: [`PageImport`]).
     pub delete_after_sync: bool,
+    /// How the tablet is held, for the notes made from the pages.
+    pub orientation: Orientation,
+    /// Makes the note of a downloaded page as the normal synchronisation does (thumbnail,
+    /// automatic export). `None`: a plain note without them.
+    pub page_import: Option<PageImport>,
     /// How long the tablet is looked for, and how long a button press is awaited.
     pub wait_timeout: Duration,
     /// Language of the text report: `"fr"` or `"en"`.
@@ -173,11 +186,47 @@ impl DiagnosticConfig {
             reference_pages: 3,
             live_duration: Duration::from_secs(30),
             delete_after_sync: true,
+            orientation: Orientation::Landscape,
+            page_import: None,
             wait_timeout: Duration::from_secs(60),
             language: "en".into(),
             cancel: Arc::new(AtomicBool::new(false)),
             host_id: None,
         }
+    }
+}
+
+/// Writes a downloaded page as a note of the library (`&Path`: its root) and returns the note's
+/// path, like [`crate::service::PageStore`] but shareable. `Err` keeps the page on the tablet.
+#[derive(Clone)]
+pub struct PageImport(Arc<PageImportFn>);
+
+type PageImportFn =
+    dyn Fn(&Path, DownloadedPage, &PageContext) -> Result<PathBuf, String> + Send + Sync;
+
+impl PageImport {
+    pub fn new(
+        import: impl Fn(&Path, DownloadedPage, &PageContext) -> Result<PathBuf, String>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self(Arc::new(import))
+    }
+
+    pub(crate) fn import(
+        &self,
+        root: &Path,
+        page: DownloadedPage,
+        context: &PageContext,
+    ) -> Result<PathBuf, String> {
+        (self.0)(root, page, context)
+    }
+}
+
+impl fmt::Debug for PageImport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PageImport")
     }
 }
 

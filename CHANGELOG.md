@@ -38,6 +38,10 @@
 
 - L'écoute d'une narration pendant la relecture ne décode plus tout le son en WAV en mémoire (près de 350 Mo par heure, 1,4 Go pour 4 heures, en bloquant d'autres tâches pendant le décodage) : la fenêtre lit directement le flux Ogg Opus de la note (environ 29 Mo par heure).
 
+### Corrigé (jalon M10 — revue de la bibliothèque, de la tablette et des sauvegardes)
+
+- Le test guidé de la tablette ajoute chaque page à la bibliothèque comme une note avant de l'effacer de la tablette ; la bibliothèque s'affiche plus vite avec beaucoup de notes (premier balayage hors de la fenêtre, en-têtes et vignettes mémorisés, cartes et menus plus légers) ; les notes illisibles sont signalées par un bandeau, avec la raison dans la langue de l'application (« mettez Ardoise à jour » pour une note d'une version plus récente) ; les fichiers temporaires laissés par un arrêt brutal sont masqués puis nettoyés ; la corbeille ne supprime plus, à cause d'une horloge en avance sur un autre PC, des notes mises à la corbeille récemment ; un titre enregistré garde son empreinte si le renommage du fichier échoue ; l'assistant refuse un identifiant porté par deux notes ; l'état de la liaison avec l'assistant se met à jour dans les réglages.
+
 ### Ajouté (jalon M9 — pilotage par un assistant)
 
 - Serveur MCP local `ardoise.exe --mcp [--read-only]` (entrée et sortie standard, aucun port réseau, sans fenêtre, application ouverte ou non) : l'assistant de l'utilisateur (Claude Code, Claude Desktop…) liste et cherche les notes, lit leurs données, leur texte reconnu avec la position des lignes et leur structure, et les voit en image (PNG, 2000 pixels au plus) pour reconnaître schémas et formules. `--read-only` limite l'assistant à la lecture.

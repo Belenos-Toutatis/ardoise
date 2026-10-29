@@ -402,6 +402,9 @@ fn save_rechecks_after_waiting_for_a_locked_file() {
         lock.write_all(&writer_bytes).unwrap();
         lock.set_modified(SystemTime::now() + Duration::from_secs(3))
             .unwrap();
+        // Keeps the file a while after changing it: a check that falls between the change and
+        // the release (or a thread paused there) must not let the save slip through.
+        std::thread::sleep(Duration::from_millis(250));
         drop(lock);
     });
     let mut ours = loaded.file.clone();
@@ -981,6 +984,7 @@ impl Watched {
                 let _ = sender.send(batch);
             })
             .unwrap();
+        watcher.wait_until_scanned();
         Watched {
             _watcher: watcher,
             changes,
@@ -1227,4 +1231,107 @@ fn favourites_are_set_listed_and_cleared() {
         library.set_favorite(&note.path, true, Some(&stamp)),
         Err(LibraryError::Conflict { .. })
     ));
+}
+
+#[test]
+fn a_failed_rename_after_a_retitle_keeps_the_saved_note_at_its_path() {
+    let path = Path::new("a/2026-10-24 Old.ardoise");
+    let busy = LibraryError::Io {
+        path: path.to_path_buf(),
+        source: io::Error::from(io::ErrorKind::PermissionDenied),
+    };
+    assert_eq!(renamed_or_kept(path, Err(busy)).unwrap(), path);
+    let moved = PathBuf::from("a/2026-10-24 New.ardoise");
+    assert_eq!(renamed_or_kept(path, Ok(moved.clone())).unwrap(), moved);
+    let gone = LibraryError::NotFound {
+        path: path.to_path_buf(),
+    };
+    assert!(matches!(
+        renamed_or_kept(path, Err(gone)),
+        Err(LibraryError::NotFound { .. })
+    ));
+}
+
+#[test]
+fn holds_notes_looks_below_and_ignores_the_library_folder() {
+    let (dir, library) = new_library();
+    assert!(!holds_notes(dir.path()));
+    fs::create_dir_all(dir.path().join("Export/2026")).unwrap();
+    fs::write(dir.path().join("Export/2026/a.pdf"), b"%PDF").unwrap();
+    assert!(!holds_notes(&dir.path().join("Export")));
+    library
+        .create(Path::new("Export/2026"), &note_file("n1", "Dedans"))
+        .unwrap();
+    assert!(holds_notes(&dir.path().join("Export")));
+    assert!(!holds_notes(&dir.path().join("absent")));
+}
+
+#[test]
+fn a_cached_listing_reopens_only_the_notes_that_changed() {
+    let (dir, library) = new_library();
+    let kept = library
+        .create(Path::new(""), &note_file("a", "Gardée"))
+        .unwrap();
+    let edited = library
+        .create(Path::new("B"), &note_file("b", "Avant"))
+        .unwrap();
+    let gone = library
+        .create(Path::new("B"), &note_file("c", "Perdue"))
+        .unwrap();
+    let mut cache = HeaderCache::default();
+    let first = library.list_with(&mut cache);
+    assert_eq!(first.notes.len(), 3);
+    assert_eq!(first.binders, [PathBuf::from("B")]);
+
+    // The kept note's file is damaged, but its stamp (time and size) is the same: a cached
+    // listing does not reopen it, so it still lists; a plain listing reports it.
+    let bytes = fs::read(&kept.path).unwrap();
+    fs::write(&kept.path, vec![b'x'; bytes.len()]).unwrap();
+    File::options()
+        .write(true)
+        .open(&kept.path)
+        .unwrap()
+        .set_modified(kept.stamp.modified)
+        .unwrap();
+    assert_eq!(library.list().problems.len(), 1);
+
+    let loaded = library.read(&edited.path).unwrap();
+    let mut file = loaded.file;
+    file.note.title = "Après".into();
+    library.save(&edited.path, &file, &loaded.stamp).unwrap();
+    library.trash(&gone.path).unwrap();
+
+    let second = library.list_with(&mut cache);
+    assert!(second.problems.is_empty(), "{:?}", second.problems);
+    let titles: Vec<&str> = second.notes.iter().map(|n| n.title.as_str()).collect();
+    assert_eq!(titles.len(), 2);
+    assert!(titles.contains(&"Gardée") && titles.contains(&"Après"));
+    assert_eq!(cache.entries.len(), 2);
+    drop(dir);
+}
+
+#[test]
+fn a_note_that_just_arrived_in_the_trash_is_kept_whatever_its_record_says() {
+    let (_dir, library) = new_library();
+    let saved = library
+        .create(Path::new("Classe"), &note_file("id-a", "Cours"))
+        .unwrap();
+    let item = library.trash(&saved.path).unwrap();
+    // The record was written by a computer whose clock is far behind this one's: by it, the
+    // note was trashed a year ago, but the file only just reached this computer.
+    let record = format!(
+        r#"{{"original": "Classe/2026-10-24 Cours.ardoise", "deleted": {}}}"#,
+        item.deleted - 365 * DAY_MS
+    );
+    let record_file = library.trash_dir().join(format!("{}.json", item.id));
+    fs::write(&record_file, record).unwrap();
+    assert_eq!(library.purge_expired_at(item.deleted).unwrap(), 0);
+    assert_eq!(library.trash_items().unwrap().len(), 1);
+    // Thirty days after it arrived, it goes.
+    assert_eq!(
+        library
+            .purge_expired_at(item.deleted + 31 * DAY_MS)
+            .unwrap(),
+        1
+    );
 }

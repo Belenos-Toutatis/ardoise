@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { api, type BridgeStatus } from '../lib/api';
 import { setLocale, t } from '../lib/i18n.svelte';
 import AssistantSection from './AssistantSection.svelte';
 
@@ -10,6 +11,7 @@ afterEach(() => {
   cleanup?.();
   cleanup = null;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function settle() {
@@ -70,6 +72,20 @@ describe('Settings > Assistant (MCP)', () => {
         expect(text.includes('X')).toBe(state === 'retrying' || state === 'unavailable');
       }
     }
+  });
+
+  it('reads the bridge status again when the window gets the focus', async () => {
+    const states: BridgeStatus['state'][] = ['retrying', 'serving'];
+    vi.spyOn(api, 'mcpLaunchInfo').mockImplementation(async () => ({
+      exe: EXE,
+      bridge: { state: states.shift() ?? 'serving', detail: 'pipe busy' },
+    }));
+    const root = await render('en');
+    const line = () => root.querySelector('[data-slot="assistant-bridge"]')?.getAttribute('data-state');
+    expect(line()).toBe('retrying');
+    window.dispatchEvent(new Event('focus'));
+    await settle();
+    expect(line()).toBe('serving');
   });
 
   it('copies each text, and says when the clipboard refuses', async () => {

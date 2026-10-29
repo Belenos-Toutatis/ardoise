@@ -202,10 +202,21 @@ pub fn run() {
     if let Some(library) = commands::current_state(&context).library() {
         let library = std::path::Path::new(library);
         let _ = ardoise_core::library::migrate_legacy_meta_dir(library);
-        // SPEC §3.2: the trash keeps notes 30 days (best effort, never blocks the start).
-        if let Ok(opened) = ardoise_core::library::Library::open(library) {
-            let _ = opened.purge_expired();
-        }
+        // Upkeep, off the start (a synced folder can be slow): SPEC §3.2, the trash keeps notes
+        // 30 days; and the temporary files of a write that a crash (or a killed `--mcp`) cut
+        // short, a day old at least, are removed. Best effort.
+        let library = library.to_path_buf();
+        let _ = std::thread::Builder::new()
+            .name("ardoise-library-upkeep".into())
+            .spawn(move || {
+                if let Ok(opened) = ardoise_core::library::Library::open(&library) {
+                    let _ = opened.purge_expired();
+                }
+                ardoise_core::fsutil::sweep_stale_temp_files(
+                    &library,
+                    std::time::Duration::from_secs(24 * 60 * 60),
+                );
+            });
     }
 
     if headless_diagnostic {

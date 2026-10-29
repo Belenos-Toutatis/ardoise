@@ -909,6 +909,35 @@ async fn get_note_text_passes_the_language_and_reports_missing_recognition() {
         .await;
     assert_eq!(error["code"], "noteNotFound");
 
+    // Two files with one id (a copy made in the Explorer): refused, with both paths, instead
+    // of silently reading the most recent; a path names the one meant.
+    let library = Library::open(&session.harness.root).unwrap();
+    library
+        .create(
+            Path::new("Copie"),
+            &NoteFile::new(make_note(CHIMIE, "Chimie des métaux", 2)),
+        )
+        .unwrap();
+    let error = session
+        .failure("get_note_text", json!({ "note": CHIMIE }))
+        .await;
+    assert_eq!(error["code"], "invalidArguments");
+    let message = error["message"].as_str().unwrap();
+    assert!(
+        message.contains("Copie/") && message.contains("Physique/"),
+        "{message}"
+    );
+    let named = session
+        .ok(
+            "get_note_text",
+            json!({ "note": "Physique/2026-10-26 Chimie des métaux" }),
+        )
+        .await;
+    assert_eq!(
+        named["lines"][0]["text"],
+        "Les métaux conduisent le courant"
+    );
+
     // A note without ink has an empty text.
     let empty = session.ok("get_note_text", json!({ "note": VIDE })).await;
     assert_eq!(empty["text"], "");

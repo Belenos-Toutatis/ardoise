@@ -125,7 +125,7 @@ export interface LibraryListing {
   binders: string[];
   tags: TagCount[];
   /** Files that could not be read (damaged, newer version…). */
-  problems: { path: string; message: string }[];
+  problems: { path: string; code: string; message: string }[];
 }
 
 export interface TrashEntry {

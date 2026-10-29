@@ -26,7 +26,11 @@ import {
 } from './library-logic';
 import type { FileStamp, LibraryListing, MergeLayout, NoteSummary, TrashEntry } from './note';
 
-const THUMBNAIL_CACHE_SIZE = 400;
+/** Thumbnails kept: at least this many, and enough for the whole library (up to the maximum). */
+const THUMBNAIL_CACHE_MIN = 400;
+const THUMBNAIL_CACHE_MAX = 2000;
+/** The cached pictures are data URLs: past this many characters (about as many bytes) the oldest go. */
+const THUMBNAIL_CACHE_CHARS = 64_000_000;
 
 /** Pause after a keystroke before the handwriting is searched; tests set it to 0. */
 export const handwritingSearch = { delayMs: 120 };
@@ -66,6 +70,9 @@ export class LibraryState {
   private anchor: string | null = null;
   private sequence = 0;
   private thumbnails = new Map<string, Promise<string | null>>();
+  /** Length of each cached picture once known, and their total. */
+  private thumbnailChars = new Map<string, number>();
+  private thumbnailTotal = 0;
 
   // Handwriting search (milestone M7): the desktop app says which query words the handwriting
   // of each note has; the search of titles, tags and binders combines them (`matchesSearch`).
@@ -81,13 +88,17 @@ export class LibraryState {
   readonly notes = $derived(this.listing?.notes ?? []);
   readonly tree = $derived(buildBinderTree(this.listing?.binders ?? [], this.notes));
   readonly visible = $derived(visibleNotes(this.notes, this.view, this.#query, this.order, currentLocale(), this.hits));
-  readonly selectedNotes = $derived(this.notes.filter((n) => this.selected.includes(n.path)));
+  /** `selected` as a set: every card asks whether it is selected. */
+  readonly #selectedSet = $derived(new Set(this.selected));
+  readonly selectedNotes = $derived(this.notes.filter((n) => this.#selectedSet.has(n.path)));
   /** The selected notes as the grid shows them; those the search hides come last. */
   readonly selectedDisplayed = $derived.by(() => {
-    const shown = this.visible.filter((n) => this.selected.includes(n.path));
-    const rest = this.selectedNotes.filter((n) => !shown.includes(n));
+    const shown = this.visible.filter((n) => this.#selectedSet.has(n.path));
+    const shownPaths = new Set(shown.map((n) => n.path));
+    const rest = this.selectedNotes.filter((n) => !shownPaths.has(n.path));
     return [...shown, ...rest];
   });
+  readonly #selectedPaths = $derived(this.selectedDisplayed.map((n) => n.path));
 
   // --- Loading -------------------------------------------------------------------------------
 
@@ -262,7 +273,7 @@ export class LibraryState {
   // --- Selection -----------------------------------------------------------------------------
 
   isSelected(path: string): boolean {
-    return this.selected.includes(path);
+    return this.#selectedSet.has(path);
   }
 
   /** True when a range selection can start from the last toggled note. */
@@ -309,7 +320,12 @@ export class LibraryState {
 
   /** The notes a drag out to another program carries from the card of `path`: the selection if it is part of it. */
   dragOutPaths(path: string): string[] {
-    return this.isSelected(path) ? this.selectedDisplayed.map((n) => n.path) : [path];
+    return this.isSelected(path) ? [...this.#selectedPaths] : [path];
+  }
+
+  /** How many notes a drag out from the card of `path` carries. */
+  dragOutCount(path: string): number {
+    return this.isSelected(path) ? this.#selectedPaths.length : 1;
   }
 
   endDrag(): void {
@@ -330,14 +346,37 @@ export class LibraryState {
     const key = `${path}|${stamp.modified.secs_since_epoch}.${stamp.modified.nanos_since_epoch}|${stamp.len}`;
     let found = this.thumbnails.get(key);
     if (!found) {
-      found = api.noteThumbnail(path, stamp).catch(() => null);
+      found = api
+        .noteThumbnail(path, stamp)
+        .catch(() => null)
+        .then((url) => {
+          // Only what is still cached counts (the entry may have been evicted meanwhile).
+          if (url !== null && this.thumbnails.has(key) && !this.thumbnailChars.has(key)) {
+            this.thumbnailChars.set(key, url.length);
+            this.thumbnailTotal += url.length;
+            this.trimThumbnails();
+          }
+          return url;
+        });
       this.thumbnails.set(key, found);
-      if (this.thumbnails.size > THUMBNAIL_CACHE_SIZE) {
-        const oldest = this.thumbnails.keys().next().value;
-        if (oldest !== undefined) this.thumbnails.delete(oldest);
-      }
+      this.trimThumbnails();
     }
     return found;
+  }
+
+  /** Drops the oldest pictures beyond what the library needs and the memory budget allows. */
+  private trimThumbnails(): void {
+    const limit = Math.min(Math.max(THUMBNAIL_CACHE_MIN, this.notes.length + 100), THUMBNAIL_CACHE_MAX);
+    while (
+      this.thumbnails.size > 1 &&
+      (this.thumbnails.size > limit || this.thumbnailTotal > THUMBNAIL_CACHE_CHARS)
+    ) {
+      const oldest = this.thumbnails.keys().next().value;
+      if (oldest === undefined) break;
+      this.thumbnails.delete(oldest);
+      this.thumbnailTotal -= this.thumbnailChars.get(oldest) ?? 0;
+      this.thumbnailChars.delete(oldest);
+    }
   }
 
   // --- Operations on notes -------------------------------------------------------------------

@@ -23,6 +23,20 @@
   const command = $derived(exe === null ? '' : claudeCodeCommand(exe, readOnly));
   const config = $derived(exe === null ? '' : claudeDesktopConfig(exe, readOnly));
 
+  /** How often the bridge status is read again while this section is on screen. */
+  const BRIDGE_REFRESH_MS = 5000;
+
+  /** Reads the bridge status again (the guide sends the user to look at it after a change). */
+  function refreshBridge() {
+    if (document.visibilityState === 'hidden') return;
+    api
+      .mcpLaunchInfo()
+      .then((info) => (bridge = info.bridge ?? null))
+      .catch(() => {
+        // Keep what is shown: the first read reports its own failure.
+      });
+  }
+
   onMount(() => {
     api
       .mcpLaunchInfo()
@@ -31,6 +45,12 @@
         bridge = info.bridge ?? null;
       })
       .catch((e: unknown) => (error = errorMessage(e)));
+    const timer = setInterval(refreshBridge, BRIDGE_REFRESH_MS);
+    window.addEventListener('focus', refreshBridge);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', refreshBridge);
+    };
   });
 
   async function copy(target: Target) {

@@ -256,6 +256,7 @@ async function scriptedDiagnostic(
           detail('pages', '3'),
           detail('strokes', '41'),
           detail('points', '5210'),
+          detail('notes', '3'),
           detail('deleted', options.deleteAfterSync ? '3' : '0'),
           detail('folder', '_ardoise\\diagnostics\\2026-10-24_14-02-11'),
         ]);

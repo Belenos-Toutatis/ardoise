@@ -8,11 +8,13 @@
 //! `/`-separated relative paths.
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::{LazyLock, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ardoise_core::format::NoteFile;
 use ardoise_core::library::{
-    FileStamp, Library, LibraryError, NoteEntry, TagCount, TrashItem, parse_conflict_name,
+    FileStamp, HeaderCache, Library, LibraryError, NoteEntry, TagCount, TrashItem,
+    parse_conflict_name,
 };
 use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Note, Origin, Timing};
 use serde::Serialize;
@@ -20,6 +22,7 @@ use tauri::State;
 
 use crate::AppContext;
 use crate::commands::{CommandError, CommandResult, current_state};
+use crate::notes::blocking;
 use crate::thumbnails::thumbnail_png;
 
 /// Error sent to the interface for a library failure.
@@ -150,6 +153,9 @@ pub(crate) fn summary_of(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ListingProblem {
     pub path: String,
+    /// The `errorCodes.*` key of the library errors (`noteNewerVersion`: "update Ardoise"...).
+    pub code: String,
+    /// The technical detail, English.
     pub message: String,
 }
 
@@ -163,11 +169,22 @@ pub struct LibraryListing {
     pub problems: Vec<ListingProblem>,
 }
 
+/// The headers of the notes listed last, so that a listing reopens only the notes whose file
+/// changed (every `library-changed` event, the app's own saves included, lists the library
+/// again; opening a thousand notes' archives on a synced folder takes seconds).
+static HEADERS: LazyLock<Mutex<HeaderCache>> = LazyLock::new(Mutex::default);
+
+/// The id of the note at `path` as the last listing read it, when its file still has `stamp`:
+/// no need to open the file again (the thumbnails ask for it for every card).
+pub fn listed_note_id(path: &Path, stamp: &FileStamp) -> Option<String> {
+    let headers = HEADERS.lock().unwrap_or_else(PoisonError::into_inner);
+    headers.get(path, stamp).map(|entry| entry.id.clone())
+}
+
 pub fn list(library: &Library) -> LibraryListing {
-    let listing = library.list();
+    let listing = library.list_with(&mut HEADERS.lock().unwrap_or_else(PoisonError::into_inner));
     let tags = listing.tags();
-    let mut binders: Vec<String> = library.binders().iter().map(|b| slash_path(b)).collect();
-    binders.sort();
+    let binders: Vec<String> = listing.binders.iter().map(|b| slash_path(b)).collect();
     LibraryListing {
         tags,
         binders,
@@ -176,6 +193,7 @@ pub fn list(library: &Library) -> LibraryListing {
             .into_iter()
             .map(|p| ListingProblem {
                 path: path_text(&p.path),
+                code: p.error.code().to_owned(),
                 message: p.error.to_string(),
             })
             .collect(),
@@ -322,14 +340,29 @@ pub fn retitle_in(
 
 /// The listing the interface shows: the whole library, without the automatic export folder
 /// while the automatic export is on.
+#[cfg(test)]
 fn list_for_interface(context: &AppContext) -> CommandResult<LibraryListing> {
-    let mut listing = list(&library_of(context)?);
+    Ok(list_without_exports(
+        &library_of(context)?,
+        export_folder(context).as_deref(),
+    ))
+}
+
+/// The automatic export folder to hide, only while the export is on: with it off, the folder
+/// is an ordinary binder.
+fn export_folder(context: &AppContext) -> Option<String> {
     let state = current_state(context);
-    // Only while the export is on: with it off, the folder is an ordinary binder.
     if state.auto_export().is_active() {
-        hide_export_folder(&mut listing, state.auto_export().valid_folder().as_deref());
+        state.auto_export().valid_folder()
+    } else {
+        None
     }
-    Ok(listing)
+}
+
+fn list_without_exports(library: &Library, export_folder: Option<&str>) -> LibraryListing {
+    let mut listing = list(library);
+    hide_export_folder(&mut listing, export_folder);
+    listing
 }
 
 // --- Commands ---------------------------------------------------------------------------
@@ -337,16 +370,21 @@ fn list_for_interface(context: &AppContext) -> CommandResult<LibraryListing> {
 // Async: Tauri runs them on a worker thread instead of the main thread, so disk access never
 // freezes the window.
 
-fn with_library<T>(
+/// Runs `action` on the library, on a blocking thread: the disk of a synced folder can be slow, and the
+/// async runtime has only a few threads.
+async fn with_library_blocking<T: Send + 'static>(
     context: &AppContext,
-    action: impl FnOnce(&Library) -> Result<T, LibraryError>,
+    action: impl FnOnce(&Library) -> Result<T, LibraryError> + Send + 'static,
 ) -> CommandResult<T> {
-    action(&library_of(context)?).map_err(library_error)
+    let library = library_of(context)?;
+    blocking(move || action(&library).map_err(library_error)).await
 }
 
 #[tauri::command]
 pub async fn library_list(context: State<'_, AppContext>) -> CommandResult<LibraryListing> {
-    list_for_interface(&context)
+    let library = library_of(&context)?;
+    let export = export_folder(&context);
+    blocking(move || Ok(list_without_exports(&library, export.as_deref()))).await
 }
 
 #[tauri::command]
@@ -356,16 +394,18 @@ pub async fn create_note(
     title: String,
 ) -> CommandResult<NoteSummary> {
     let layer = first_layer_name(&crate::diagnostic::report_language(&context));
-    with_library(&context, |library| {
+    with_library_blocking(&context, move |library| {
         create_note_in(library, &binder, &title, layer)
     })
+    .await
 }
 
 #[tauri::command]
 pub async fn create_binder(context: State<'_, AppContext>, binder: String) -> CommandResult<()> {
-    with_library(&context, |library| {
+    with_library_blocking(&context, move |library| {
         library.create_binder(&binder_path(&binder)).map(|_| ())
     })
+    .await
 }
 
 #[tauri::command]
@@ -374,7 +414,10 @@ pub async fn move_notes(
     paths: Vec<String>,
     binder: String,
 ) -> CommandResult<Vec<String>> {
-    with_library(&context, |library| move_notes_in(library, &paths, &binder))
+    with_library_blocking(&context, move |library| {
+        move_notes_in(library, &paths, &binder)
+    })
+    .await
 }
 
 /// Moves notes to the trash, each one that can be: the ids of their trash entries (for the
@@ -384,30 +427,33 @@ pub async fn trash_notes(
     context: State<'_, AppContext>,
     paths: Vec<String>,
 ) -> CommandResult<crate::organize::TrashedNotes> {
-    let library = library_of(&context)?;
-    crate::notes::blocking(move || Ok(crate::organize::trash_notes_in(&library, &paths))).await
+    with_library_blocking(&context, move |library| {
+        Ok(crate::organize::trash_notes_in(library, &paths))
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn trash_list(context: State<'_, AppContext>) -> CommandResult<Vec<TrashEntry>> {
-    with_library(&context, trash_list_in)
+    with_library_blocking(&context, trash_list_in).await
 }
 
 #[tauri::command]
 pub async fn trash_restore(context: State<'_, AppContext>, id: String) -> CommandResult<String> {
-    with_library(&context, |library| {
+    with_library_blocking(&context, move |library| {
         library.restore(&id).map(|p| path_text(&p))
     })
+    .await
 }
 
 #[tauri::command]
 pub async fn trash_purge(context: State<'_, AppContext>, id: String) -> CommandResult<()> {
-    with_library(&context, |library| library.purge(&id))
+    with_library_blocking(&context, move |library| library.purge(&id)).await
 }
 
 #[tauri::command]
 pub async fn trash_empty(context: State<'_, AppContext>) -> CommandResult<usize> {
-    with_library(&context, Library::empty_trash)
+    with_library_blocking(&context, Library::empty_trash).await
 }
 
 #[tauri::command]
@@ -417,9 +463,10 @@ pub async fn set_note_tags(
     tags: Vec<String>,
     stamp: FileStamp,
 ) -> CommandResult<FileStamp> {
-    with_library(&context, |library| {
+    with_library_blocking(&context, move |library| {
         library.set_tags(Path::new(&path), &tags, Some(&stamp))
     })
+    .await
 }
 
 #[tauri::command]
@@ -429,9 +476,10 @@ pub async fn set_note_favorite(
     favorite: bool,
     stamp: FileStamp,
 ) -> CommandResult<FileStamp> {
-    with_library(&context, |library| {
+    with_library_blocking(&context, move |library| {
         library.set_favorite(Path::new(&path), favorite, Some(&stamp))
     })
+    .await
 }
 
 #[tauri::command]
@@ -441,9 +489,10 @@ pub async fn retitle_note(
     title: String,
     stamp: FileStamp,
 ) -> CommandResult<RetitledNote> {
-    with_library(&context, |library| {
+    with_library_blocking(&context, move |library| {
         retitle_in(library, &path, &title, &stamp)
     })
+    .await
 }
 
 #[cfg(test)]
@@ -502,6 +551,29 @@ pub(crate) mod tests {
 
     fn text(path: &Path) -> String {
         path_text(path)
+    }
+
+    #[test]
+    fn the_id_of_a_listed_note_is_known_while_its_file_is_unchanged() {
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Essai");
+        list(&library);
+        let id = library.read(&saved.path).unwrap().file.note.id;
+        assert_eq!(listed_note_id(&saved.path, &saved.stamp), Some(id));
+        let other = FileStamp {
+            len: saved.stamp.len + 1,
+            ..saved.stamp
+        };
+        assert_eq!(listed_note_id(&saved.path, &other), None);
+    }
+
+    #[test]
+    fn an_unreadable_note_is_listed_with_its_error_code() {
+        let (dir, library) = library();
+        fs::write(dir.path().join("2026-10-24 Abîmée.ardoise"), b"not a zip").unwrap();
+        let problems = list(&library).problems;
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].code, "noteDamaged");
     }
 
     #[test]

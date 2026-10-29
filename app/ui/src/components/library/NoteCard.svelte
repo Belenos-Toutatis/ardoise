@@ -5,6 +5,7 @@
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { displayTitle, formatDate } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
+  import { whenNearViewport } from '../../lib/near-viewport';
   import type { NoteSummary } from '../../lib/note';
   import { noteDrawn } from '../../lib/perf';
   import Menu from './Menu.svelte';
@@ -40,7 +41,7 @@
   const locale = $derived(currentLocale());
   const title = $derived(displayTitle(note, locale));
   const selected = $derived(lib.isSelected(note.path));
-  const dragCount = $derived(lib.dragOutPaths(note.path).length);
+  const dragCount = $derived(lib.dragOutCount(note.path));
   const dragLabel = $derived(
     dragCount > 1 ? t('library.drag.handleMany', { count: dragCount }) : t('library.drag.handle'),
   );
@@ -54,30 +55,14 @@
     void stampKey;
     if (!host) return;
     let cancelled = false;
-    const load = () => {
+    const stop = whenNearViewport(host, () => {
       void lib.thumbnail(path, untrack(() => note.stamp)).then((url) => {
         if (!cancelled) src = url;
       });
-    };
-    if (typeof IntersectionObserver === 'undefined') {
-      load();
-      return () => {
-        cancelled = true;
-      };
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          load();
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '300px' },
-    );
-    observer.observe(host);
+    });
     return () => {
       cancelled = true;
-      observer.disconnect();
+      stop();
     };
   });
 

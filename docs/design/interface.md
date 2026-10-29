@@ -358,3 +358,18 @@ launch of a copy exits with 0 within 0.3 s and restores and brings forward the m
 --read-only`, `--create-demo-library` and `--self-test` of that copy work while it is open; a copy in another folder
 runs beside it; two launches at the same moment leave one app. Journeys: `app/e2e/journeys-m10-fix-hard.mjs`. Not
 checked: a real shutdown or logoff (Windows' own "apps preventing shutdown" screen).
+
+## M10: the library with a thousand notes
+
+- Listing: `Library::list_with(&mut HeaderCache)` reuses the header of every note whose file kept its stamp (the app
+  keeps one cache, `library::HEADERS`; `listed_note_id` gives the thumbnails the id without opening the note), and the
+  walk takes each note's stamp from the directory entry (no extra open on Windows). `Listing.binders` comes from the
+  same walk. The watcher's first scan runs on its thread (`LibraryWatcher::wait_until_scanned`), so the window and
+  `set_library` never wait for it; the commands that touch the library run through `notes::blocking`.
+- Thumbnails: a store no longer lists the cache folder; the folder is read once per run (`scan_cache`) and the name last
+  written for each note file is remembered.
+- Grid: one shared `IntersectionObserver` (`lib/near-viewport.ts`), a card menu listens to the page only while open,
+  selection lookups use a `Set`, the thumbnail cache is sized for the library (400 to 2000 pictures, 64 million
+  characters at most).
+- Unreadable files: each problem carries its error `code` (`errorCodes.*`, like the library errors) and shows in a
+  banner above the grid.
