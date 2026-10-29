@@ -175,6 +175,7 @@ fn host() -> Host {
         self_test: None,
         open_diagnostic: false,
     });
+    let app = crate::app_bridge::client(&context);
     Host::new(
         Arc::new(AppEnvironment {
             context: Arc::clone(&context),
@@ -184,6 +185,7 @@ fn host() -> Host {
             indexer: OnceLock::new(),
         }),
     )
+    .with_app(app)
 }
 
 /// Best-effort message on stderr (a GUI program may have none).
