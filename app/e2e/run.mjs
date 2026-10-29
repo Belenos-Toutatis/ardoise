@@ -223,8 +223,8 @@ async function startApp(language, port, args = []) {
       await sleep(300);
     },
   };
-  // `complete` is not enough: Svelte mounts the interface a moment later, and a journey that clicks at once would find nothing.
-  await app.waitFor('document.readyState === "complete" && document.querySelector("#app *") !== null', 'the interface');
+  // `complete` is not enough: the interface shows "Loading…" until the settings are read, and a journey that clicks at once would find nothing.
+  await app.waitFor('document.readyState === "complete" && document.querySelector("#app .shell") !== null', 'the interface');
   return app;
 }
 

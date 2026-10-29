@@ -177,6 +177,7 @@ export const uiJourneys = [
       let scroll = 0;
 
       await check('ouvrir le test de la tablette (panneau latéral)', async () => {
+        await app.waitFor(`document.querySelectorAll('.note-card').length > 0`, 'the demo notes');
         await app.click('button', l('diagnostic.open'));
         await app.waitFor(`document.querySelector('aside.panel') !== null`, 'the diagnostic panel');
       });
