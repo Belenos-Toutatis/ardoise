@@ -6,6 +6,7 @@
 #[cfg(all(dev, not(debug_assertions)))]
 compile_error!("release builds need `--features custom-protocol` (use `cargo xtask check`)");
 
+mod app_bridge;
 mod autoexport;
 mod background;
 mod clipboard;
@@ -189,6 +190,7 @@ pub fn run() {
         .manage(narration::NarrationRuntime::default())
         .manage(codec::CodecDownload::default())
         .manage(handwriting::HandwritingRuntime::default())
+        .manage(app_bridge::BridgeRuntime::default())
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -286,6 +288,8 @@ pub fn run() {
             handwriting::handwriting_text,
             handwriting::export_handwriting_text,
             handwriting::copy_handwriting_text,
+            app_bridge::bridge_reply,
+            app_bridge::mcp_launch_info,
         ])
         .setup(move |app| {
             if cli.self_test {
@@ -313,6 +317,10 @@ pub fn run() {
                 .follow(app.handle(), library.as_deref());
             // The tablet: auto-connect, sync, live mode (a failure shows in its status).
             tablet::start_service(app.handle(), cli.simulated_tablet);
+            // The assistant's bridge (MCP), for the windowed app only; logged when unavailable.
+            if !cli.self_test {
+                app_bridge::start(app.handle());
+            }
             Ok(())
         })
         .run(tauri::generate_context!());

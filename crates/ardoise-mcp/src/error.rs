@@ -20,6 +20,16 @@ pub mod code {
     pub const READ_ONLY: &str = "readOnly";
     /// The host has no service for this write (the tool needs the app's own code).
     pub const WRITE_UNAVAILABLE: &str = "writeUnavailable";
+    /// The app is open but did not answer in time (busy, or its window still loading), or the
+    /// connection to it was lost.
+    pub const APP_NOT_RESPONDING: &str = "appNotResponding";
+    /// The app cannot do it now: unsaved changes in the editor, live mode on screen, a dialog
+    /// open… (the message says what).
+    pub const APP_BUSY: &str = "appBusy";
+    /// The open app and this server speak different versions of the bridge.
+    pub const BRIDGE_VERSION: &str = "bridgeVersion";
+    /// A line received on the bridge that is not a request (unreadable, unknown kind, too long).
+    pub const INVALID_REQUEST: &str = "invalidRequest";
 }
 
 /// A tool failure.

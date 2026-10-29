@@ -27,6 +27,19 @@ tokio = { version = "1", default-features = false, features = ["rt", "sync"] }
 # Ids of the notes created (the same crate and feature as the app).
 uuid = { version = "1", features = ["v4"] }
 
+[target.'cfg(windows)'.dependencies]
+# The bridge's named pipe (bridge/pipe.rs): the pipe, overlapped I/O with timeouts, its DACL and
+# the user of the processes at both ends. Same version as the app's: one copy compiled.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 rmcp = { version = "3.8", default-features = false, features = ["server", "client", "macros", "transport-io"] }
 tempfile = "3"

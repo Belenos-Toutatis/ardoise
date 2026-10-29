@@ -26,7 +26,7 @@ export const WRITE_TOOLS = [
 ];
 /** The checks of the later parts of the server (write tools and prompts, bridge), each given the
  *  helpers of the journey and run after the read tools. */
-const parts = [mcpWriteTools];
+const parts = [mcpWriteTools, bridgeWithoutApp];
 
 const NOTE = "Cours d'optique";
 /** The words of the demo note's handwriting (`demo.rs`: HANDWRITTEN_SENTENCE). */
@@ -222,6 +222,38 @@ async function readTools(session, check) {
     const bad = await session.call('list_notes', { sort: 'au hasard' });
     if (!bad.isError) throw new Error('un argument invalide doit être refusé');
   });
+}
+
+/** The bridge tools without the app open (`journeys-m9-bridge.mjs` drives them with the app). */
+async function bridgeWithoutApp({ makeApp, startServer, check }) {
+  const app = makeApp();
+  const session = startServer(app);
+  try {
+    await session.initialize();
+    const listed = await session.call('list_notes', { limit: 1 });
+    const note = listed.structuredContent.notes[0].id;
+    await check('passerelle sans Ardoise ouverte : chaque outil répond appNotRunning', async () => {
+      for (const [tool, args] of [
+        ['app_state', {}],
+        ['open_note', { note }],
+        ['presentation', { action: 'start' }],
+        ['last_live_note', {}],
+      ]) {
+        const result = await session.call(tool, args, 10_000);
+        const error = result.structuredContent;
+        if (!result.isError || error?.code !== 'appNotRunning' || error.message !== 'Ardoise is not open') {
+          throw new Error(`${tool} : ${JSON.stringify(result).slice(0, 300)}`);
+        }
+      }
+    });
+  } finally {
+    await session.close(3000);
+    try {
+      rmSync(app.dir, { recursive: true, force: true });
+    } catch {
+      // Left to the system when Windows still holds a file in it.
+    }
+  }
 }
 
 /**

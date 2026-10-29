@@ -21,11 +21,12 @@ import { journeys as exportJourneys } from './journeys-m8-exports.mjs';
 import { inputJourneys } from './journeys-m8-input.mjs';
 import { orientationJourneys } from './journeys-m8-orientation.mjs';
 import { pageJourneys } from './journeys-m8-page.mjs';
+import { bridgeJourneys } from './journeys-m9-bridge.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 

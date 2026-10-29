@@ -190,6 +190,7 @@ fn host() -> Host {
         context: Arc::clone(&context),
         indexer: OnceLock::new(),
     });
+    let app = crate::app_bridge::client(&context);
     Host::new(
         Arc::new(AppEnvironment {
             context: Arc::clone(&context),
@@ -197,6 +198,7 @@ fn host() -> Host {
         handwriting.clone(),
     )
     .with_write(Arc::new(write::AppWrite::new(context, handwriting)))
+    .with_app(app)
 }
 
 /// Best-effort message on stderr (a GUI program may have none).
