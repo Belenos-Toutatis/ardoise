@@ -16,6 +16,7 @@
 /// Largest PDF read, in bytes (a scanned book of a few hundred pages stays below).
 pub const MAX_PDF_BYTES: usize = 512 << 20;
 /// Most pages listed (a PDF claiming more is refused as damaged).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const MAX_PDF_PAGES: u32 = 10_000;
 
 /// Size of a PDF page as displayed (its rotation applied), in points (1/72 inch).
@@ -34,6 +35,7 @@ pub enum PdfError {
     Unsupported,
     /// The PDF needs a password to be opened.
     #[error("the PDF is protected by a password")]
+    #[cfg_attr(not(windows), allow(dead_code))]
     Encrypted,
     /// Larger than [`MAX_PDF_BYTES`], or with more than [`MAX_PDF_PAGES`] pages.
     #[error("the PDF is too large")]
@@ -43,6 +45,7 @@ pub enum PdfError {
     NoSuchPage(u32),
     /// Windows could not read or render it.
     #[error("the PDF cannot be read: {0}")]
+    #[cfg_attr(not(windows), allow(dead_code))]
     Damaged(String),
 }
 

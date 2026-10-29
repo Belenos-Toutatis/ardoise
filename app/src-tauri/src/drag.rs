@@ -57,8 +57,10 @@ pub fn drag_root() -> PathBuf {
 #[serde(rename_all = "camelCase")]
 pub enum DragOutcome {
     /// Dropped on a program that accepted the files.
+    #[cfg_attr(not(windows), allow(dead_code))]
     Dropped,
     /// Cancelled (Escape, released over nothing that accepts files, or never started).
+    #[cfg_attr(not(windows), allow(dead_code))]
     Cancelled,
 }
 

@@ -9,6 +9,7 @@
 //! as an image at the printer's resolution (300 dpi at most) and stretched over the page.
 //! The Windows part is in [`windows`](crate::print_windows); what decides where and how big
 //! each page is drawn is platform-free and tested here.
+//! Off Windows nothing calls that logic but the tests (hence the `dead_code` allowances).
 
 use ardoise_core::note::PageSize;
 use ardoise_render::{Image, RenderOptions, render_note};
@@ -18,14 +19,17 @@ use crate::commands::{CommandError, CommandResult};
 use crate::export::{LoadedSource, render_error};
 
 /// Error code of a print job that failed (the dialog cancelled is not a failure).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const PRINT_FAILED: &str = "printFailed";
 /// Error code when printing is not possible (not Windows).
 #[cfg_attr(windows, allow(dead_code))]
 pub const PRINT_UNAVAILABLE: &str = "printUnavailable";
 /// Highest resolution of a printed image, in dots per inch: ink and paper textures gain
 /// nothing above, and a page at 600 dpi would take 100 MB.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const MAX_PRINT_DPI: f32 = 300.0;
 /// Device units (10 µm) in an inch.
+#[cfg_attr(not(windows), allow(dead_code))]
 const UNITS_PER_INCH: f32 = 2540.0;
 
 /// How a note is placed on the paper (`PrintFit` in `note.ts`).
@@ -59,6 +63,7 @@ pub struct PrintResult {
 
 /// The orientation a sheet takes for a note.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub enum Orientation {
     Portrait,
     Landscape,
@@ -66,6 +71,7 @@ pub enum Orientation {
 
 impl Orientation {
     /// Landscape when the note is wider than tall, portrait otherwise (a square included).
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub fn of(page: PageSize) -> Orientation {
         if page.width > page.height {
             Orientation::Landscape
@@ -77,6 +83,7 @@ impl Orientation {
 
 /// The printable area of a sheet, in device pixels, and the device's resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct Sheet {
     pub width: i32,
     pub height: i32,
@@ -86,6 +93,7 @@ pub struct Sheet {
 
 /// A rectangle of the printable area, in device pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct Placement {
     pub x: i32,
     pub y: i32,
@@ -94,6 +102,7 @@ pub struct Placement {
 }
 
 /// Where a note of `page` goes on `sheet`: centred, its proportions kept.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn place(page: PageSize, sheet: Sheet, fit: PrintFit) -> Placement {
     let real_width =
         page.width.max(1) as f64 / f64::from(UNITS_PER_INCH) * f64::from(sheet.dpi_x.max(1));
@@ -116,6 +125,7 @@ pub fn place(page: PageSize, sheet: Sheet, fit: PrintFit) -> Placement {
 
 /// Pixels per device unit for rendering a note of `page` that is drawn `placement.width`
 /// device pixels wide: one image pixel per device pixel, at most [`MAX_PRINT_DPI`].
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn render_scale(page: PageSize, placement: &Placement) -> f32 {
     let wanted = placement.width as f32 / page.width.max(1) as f32;
     wanted.min(MAX_PRINT_DPI / UNITS_PER_INCH)
@@ -124,6 +134,7 @@ pub fn render_scale(page: PageSize, placement: &Placement) -> f32 {
 /// The notes (0-based) a print job prints, from the page ranges (1-based, inclusive) the print
 /// dialog returned; no range means every note. Ranges outside `1..=count` are cut, a reversed
 /// one is read the other way round, and the notes come in the order of the ranges.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn selected_notes(count: usize, ranges: &[(u32, u32)]) -> Vec<usize> {
     if ranges.is_empty() {
         return (0..count).collect();
@@ -138,6 +149,7 @@ pub fn selected_notes(count: usize, ranges: &[(u32, u32)]) -> Vec<usize> {
 
 /// A rendered page in the order GDI wants it: top-down 32-bit BGRA rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct PageBitmap {
     pub width: u32,
     pub height: u32,
@@ -146,6 +158,7 @@ pub struct PageBitmap {
 
 /// `image` with red and blue swapped and the alpha dropped (the page is opaque: it has its
 /// paper, or the white page under the ink).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn bitmap_of(image: &Image) -> PageBitmap {
     let mut bgra = Vec::with_capacity(image.pixels.len());
     for pixel in image.pixels.as_chunks::<4>().0 {
@@ -159,6 +172,7 @@ pub fn bitmap_of(image: &Image) -> PageBitmap {
 }
 
 /// The page of `source` to send to the printer when it is drawn in `placement`.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn render_page(
     source: &LoadedSource,
     placement: &Placement,
@@ -172,6 +186,7 @@ pub fn render_page(
     Ok(bitmap_of(&image))
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn print_error(message: impl ToString) -> CommandError {
     CommandError::new(PRINT_FAILED, message)
 }

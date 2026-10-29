@@ -649,7 +649,7 @@ lu
         let mut plain = sample_document();
         plain.blocks.retain(|b| !matches!(b, Block::Drawing(_)));
         let written = write_markdown(&destination, &[plain], &labels()).unwrap();
-        assert_eq!(written, [destination.clone()]);
+        assert_eq!(written, std::slice::from_ref(&destination));
         assert!(!folder.exists());
         assert!(!fs::read_to_string(&destination).unwrap().contains(".png"));
         // A folder with a file of the user is never touched by an export without drawings.
