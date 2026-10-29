@@ -30,8 +30,8 @@ library. Coordinates are millimetres from the top-left corner of the page. What 
 sent to your provider: the notes may hold names of people. Unless the server is read-only, \
 other tools create, rename, tag, move, merge, split, straighten and export notes and store a \
 corrected transcription for the search: nothing is overwritten or deleted for good (a trashed \
-note stays restorable in the app, an export that would overwrite a file gets (2) added to its \
-name). Prompts (clean up a note, title and tag untitled notes, summarise a lesson) say which \
+note, and a note's version before its shapes are straightened, stay restorable from the app's \
+trash; an export that would overwrite a file gets (2) added to its name). Prompts (clean up a note, title and tag untitled notes, summarise a lesson) say which \
 tools to call and in which order.";
 
 /// The tools of the groups a server with `options` has.
