@@ -140,7 +140,7 @@
           {t(done.failed.length === 1 ? 'inkspace.failedOne' : 'inkspace.failed', { count: done.failed.length })}
         </p>
         <ul class="inkspace-failures">
-          {#each done.failed as failure (failure.inkspaceId)}
+          {#each done.failed as failure, index (index)}
             <li>
               <span class="inkspace-when">
                 {failure.created === null ? t('inkspace.unknownDate') : formatDate(failure.created, currentLocale())}
