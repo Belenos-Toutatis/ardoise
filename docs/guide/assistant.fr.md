@@ -30,7 +30,7 @@ Quelques exemples de demandes, en français, telles que vous les écririez :
 - Pour que l'assistant lise **votre écriture**, il faut la reconnaissance d'écriture manuscrite de Windows en
   français : Paramètres Windows > Heure et langue > Langue et région > Français > Options de langue > Écriture
   manuscrite. Sans elle, l'assistant voit quand même vos notes en image.
-- Dans Ardoise, **Paramètres > Assistant (MCP)** affiche le texte exact à copier, avec le chemin de *votre*
+- Dans Ardoise, **Réglages > Assistant (MCP)** affiche le texte exact à copier, avec le chemin de *votre*
   `ardoise.exe`. Copiez-le de là plutôt que de le retaper : c'est le plus sûr.
 
 > Ardoise est portable : si vous déplacez son dossier, refaites la déclaration avec le nouveau chemin. Si vous avez
@@ -39,7 +39,7 @@ Quelques exemples de demandes, en français, telles que vous les écririez :
 ## Déclarer Ardoise dans Claude Code
 
 Une seule fois, dans **PowerShell** ou l'**invite de commandes** (le chemin est un exemple : prenez celui que donne
-Paramètres > Assistant) :
+Réglages > Assistant) :
 
 ```
 claude mcp add --scope user ardoise "--" "C:\Outils\Ardoise\ardoise.exe" --mcp
@@ -64,7 +64,7 @@ claude mcp add --scope user ardoise "--" "C:\Outils\Ardoise\ardoise.exe" --mcp
    - installation par le Microsoft Store (ou le paquet MSIX) : le dossier de l'application est alors sous
      `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\` ; le bouton *Modifier la
      configuration* ouvre toujours le bon fichier.
-2. Ajoutez l'entrée `ardoise` dans `mcpServers` (copiez-la depuis Paramètres > Assistant ; dans ce fichier, chaque
+2. Ajoutez l'entrée `ardoise` dans `mcpServers` (copiez-la depuis Réglages > Assistant ; dans ce fichier, chaque
    `\` du chemin est doublé) :
 
    ```json
@@ -86,7 +86,7 @@ En cas de souci, le journal de Claude Desktop pour Ardoise est `%APPDATA%\Claude
 
 ## L'option « lecture seule » (`--read-only`)
 
-Avec `--read-only` (case **Lecture seule** dans Paramètres > Assistant, qui l'ajoute aux deux textes), l'assistant
+Avec `--read-only` (case **Lecture seule** dans Réglages > Assistant, qui l'ajoute aux deux textes), l'assistant
 peut **seulement lire** : lister et chercher les notes, lire leur texte reconnu, les voir en image. Il ne peut ni
 créer, ni renommer, ni ranger, ni exporter, ni piloter Ardoise. L'invite `titrer_et_etiqueter` donne alors une liste de
 titres et d'étiquettes à appliquer vous-même dans Ardoise.
@@ -132,7 +132,7 @@ L'assistant doit utiliser **la même copie** d'Ardoise que celle que vous ouvrez
 |---|---|
 | `noLibrary` : aucune bibliothèque | Ouvrez Ardoise sur ce PC et choisissez la bibliothèque. |
 | `handwritingNoRecognizer` / `handwritingUnsupported` | Installez l'écriture manuscrite française de Windows (voir plus haut). Les images restent lisibles. |
-| `appNotRunning` : « Ardoise is not open » | Ouvrez Ardoise — la copie dont le chemin est déclaré. Si elle est déjà ouverte, regardez la ligne « Liaison avec Ardoise ouverte » dans Paramètres > Assistant : elle dit si cette fenêtre peut être pilotée. |
+| `appNotRunning` : « Ardoise is not open » | Ouvrez Ardoise — la copie dont le chemin est déclaré. Si elle est déjà ouverte, regardez la ligne « Liaison avec Ardoise ouverte » dans Réglages > Assistant : elle dit si cette fenêtre peut être pilotée. |
 | `appNotResponding` | Ardoise est occupée (export, fenêtre de dialogue) ou démarre encore : réessayez. |
 | `appBusy` | Terminez d'abord dans Ardoise ce qui est en cours (enregistrer la note, fermer la fenêtre de dialogue, finir le mode direct). |
 | `liveNotRunning` | Lancez le mode direct dans Ardoise avant de demander la présentation. |

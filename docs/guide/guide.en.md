@@ -1,0 +1,774 @@
+# Ardoise user guide
+
+Ardoise is a Windows application that replaces Wacom Inkspace for the *Bamboo Slate* tablet. It receives over
+Bluetooth the pages you write on the tablet, lets you write live on screen (and on a projector, in class), keeps your
+notes in a folder of your choice, and lets you edit, replay and export them.
+
+This guide follows the order in which you meet things. The names of buttons and menus are written in bold, as they
+appear on screen. Version française : [guide.fr.md](guide.fr.md).
+
+> *Where does this first version stand?* Everything that does not need the tablet (library, editing, replay, exports,
+> import of Inkspace notes) has been checked on Windows by automated tests; a few hands-on checks are still to be done
+> (printing, pen and touch screen, a Word export opened in Word…). Everything that talks to the real tablet
+> (registration, sync, live mode, projecting the live mode) has been checked with a simulated tablet, but *not yet with
+> a real Bamboo Slate*: those trials are planned at work. The passages concerned carry the mention
+> "*Needs the tablet*". See also the release notes.
+
+## Contents
+
+1. What Ardoise is
+2. Installing Ardoise
+3. First start
+4. Registering the tablet
+5. Getting your pages: sync
+6. Live mode and presenting in class
+7. The library
+8. Editing a note
+9. Replay, narration and video
+10. Exporting, printing, sharing
+11. Importing your Inkspace notes
+12. Pen and touch screen
+13. Diagnostics and trials with the tablet
+14. The assistant (Claude Code, Claude Desktop)
+15. Privacy
+16. When something goes wrong
+17. Keyboard shortcuts
+
+---
+
+## 1. What Ardoise is
+
+- *Portable*: a single file, `ardoise.exe`, that you copy wherever you like, a Nextcloud folder included. No installer,
+  no administrator rights, nothing in `Program Files`.
+- *No account, no cloud*: your notes are files in a folder you choose. Ardoise connects to no server (its only
+  possible connection is the optional download of a backup video encoder, see chapter 9). It contains no artificial
+  intelligence and works offline.
+- *One folder, several computers*: if that folder is synced by Nextcloud, OneDrive or similar, you find your notes, and
+  even the tablet's registration, on all your PCs.
+- *One note = one file* `.ardoise`, kept in subfolders that are your binders.
+- The interface is in *English and French*.
+
+*What needs the tablet*: registering the tablet, syncing it, live mode (and so projecting the live mode), the tablet
+test. *Everything else works without it*, including creating notes with the mouse, the pen or a finger, annotating a
+PDF, replaying, exporting.
+
+*What Ardoise does not do*: Wacom's cloud and Inkspace's real-time collaboration, macOS and Linux, phone apps. Notes
+cannot contain a text box typed on the keyboard.
+
+## 2. Installing Ardoise
+
+### What you need
+
+- Windows 11 (Windows 10 has not been tried). Microsoft's *WebView2* display engine must be present: it is part of
+  Windows 11.
+- For the tablet: Bluetooth Low Energy (Bluetooth 4.0 or later), built into the PC or through a small USB dongle. No
+  prior setup in the Windows Bluetooth settings is planned: the tablet is registered inside Ardoise (*to be confirmed
+  with the real tablet*).
+
+### Installing = copying
+
+1. Create a folder for the program, for example `C:\Users\Name\Nextcloud\Ardoise\Program`.
+2. Copy `ardoise.exe` into it (and, if you like, the guides and the licence that come with it).
+3. Double-click `ardoise.exe`. Create a desktop shortcut if you want. <!-- M10: à confirmer -->
+
+To uninstall, delete that folder (and, if you like, `%LOCALAPPDATA%\Ardoise`, see below). Your notes are not touched:
+they are in your library.
+
+### Windows' warning at the first start
+
+The executable is not digitally signed. Windows may therefore show a blue "*Windows protected your PC*" screen: click
+*More info*, then *Run anyway*. This is normal for an unsigned program. If the file came from a download or an
+email, also right-click `ardoise.exe`, choose *Properties*, and tick *Unblock* if it is offered.
+
+On a PC managed by an IT department, Windows (Smart App Control, AppLocker…) may refuse without offering to carry on.
+Ardoise cannot do anything about it: ask your IT department for permission.
+
+### The settings file
+
+Your settings are in `ardoise.toml`, *next to `ardoise.exe`*: the file travels with the program. If that folder is
+not writable, Ardoise uses `%APPDATA%\Ardoise\ardoise.toml`. The exact path is shown at the bottom of **Settings**.
+The file is plain text, but you never need to edit it by hand.
+
+### Several computers
+
+- Put `ardoise.exe` (and so `ardoise.toml`) in a synced folder, for example Nextcloud. Since the path of the library
+  folder is not the same on every PC, Ardoise keeps that setting *per computer name* in `ardoise.toml`, for example:
+
+  ```toml
+  [machines."HOME-PC"]
+  library = 'C:\Users\Name\Nextcloud\Ardoise\Notes'
+
+  [machines."WORK-PC"]
+  library = 'D:\Nextcloud\Ardoise\Notes'
+  ```
+
+- At the first start on a new PC, Ardoise asks where the library is (chapter 3); you do not have to touch the file.
+- The tablet's registration is in the library (`_ardoise\device.json`): *registering the tablet once is enough* for all
+  your PCs.
+- *Do not edit the same note on two PCs at the same time.* If it happens, Ardoise refuses to overwrite the other version
+  and offers to save yours as a copy (chapter 8). The "conflict copies" created by Nextcloud are flagged in the library
+  (chapter 7).
+- *Updating*: close Ardoise on all PCs, then replace `ardoise.exe`. An executable started from Nextcloud is locked while
+  it runs, so the sync of the new version would fail. A recent version reads all older notes; if a note was made by a
+  version newer than yours, Ardoise asks you to update.
+
+### What Ardoise keeps on each PC
+
+These folders belong to each computer and are never in your library or in Nextcloud, under `%LOCALAPPDATA%\Ardoise`:
+WebView2's folder (`webview`), the thumbnails (`thumbnails`), the recognised text used by search (`handwriting`), the
+OpenH264 encoder if you downloaded it (`codecs`), and two folders of *backup copies* (`live-backup` for live pages that
+could not be written, `narration-backup` for a narration that could not be added to its note). WebView2's folder, the
+thumbnails and the recognised text rebuild themselves; delete the backup copies only after making sure you no longer
+need them.
+
+## 3. First start
+
+At the first start on a PC, the **Welcome to Ardoise** window asks for the folder where your notes will be kept.
+
+1. Click **Choose a folder…** and preferably pick a synced folder (Nextcloud…), for example
+   `C:\Users\Name\Nextcloud\Ardoise\Notes`.
+2. Ardoise tells you whether it already contains a library ("it will be used as is") or whether it will create a new
+   one. This choice only applies to this computer.
+3. Click **Continue**.
+
+You arrive in the *library*. While it is empty, it says that the pages from your tablet will appear after the first
+sync; you can already create a note with **New note**. To change library later: **Settings**, then **Change** next to
+**Library folder**. Ardoise creates a `_ardoise` folder in the library (tablet registration, diagnostic logs, trash). It
+is not hidden, so that Nextcloud syncs it: leave it alone.
+
+The general settings are also in **Settings**: **Language** (**Automatic (Windows language)**, **Français** or
+**English**) and **Theme** (**Same as Windows**, **Light**, **Dark**).
+
+*Trying it without a tablet.* To discover Ardoise without touching your own notes, you can create a demonstration
+library (invented notes). In PowerShell, in the folder of `ardoise.exe`:
+
+```
+.\ardoise.exe --create-demo-library C:\Users\Name\Ardoise-Demo
+```
+
+then choose that folder as your library. And to try sync and live mode without a tablet, start
+`.\ardoise.exe --simulated-tablet`: a *simulated tablet* (three pages in memory) replaces Bluetooth; it is never mixed
+up with the real tablet's registration. One note of the demonstration library, "Cours d'optique", is handwritten
+(synthetic glyphs) and lets you try the handwriting search.
+
+## 4. Registering the tablet
+
+*Needs the tablet.* Registration is done once.
+
+> *Before you start*: a Bamboo Slate is registered with only one application at a time. Once registered in Ardoise, it
+> no longer works with the Wacom phone app or with Inkspace, until you register it there again. Turn off your phone's
+> Bluetooth during the registration.
+
+1. Charge the tablet and keep it near the computer; Bluetooth must be on, on the PC.
+2. In the sidebar, at the bottom, click the **Tablet** block (it shows **No tablet registered**), then
+   **Register the tablet**.
+3. Read the warning (**Before you start**) and click **Continue**.
+4. Follow the assistant, which shows a drawing of the tablet:
+   - **Hold the tablet's button** down for about 6 seconds, until the light blinks blue;
+   - **Looking for the tablet**, then **Connecting to the tablet**: stay still, it can take a few seconds;
+   - **Press the button briefly** to confirm (you have about 30 seconds);
+   - **Tablet registered**: the tablet's name appears. Click **Done**.
+5. If the registration fails, Ardoise writes what went wrong; check Bluetooth, the charge and the distance, then
+   click **Try again**. **Cancel** is available at every step.
+
+The **Tablet** panel then shows the name, the battery (and whether it is **charging**), the firmware version, the number
+of pages in memory, the model and the drawing area. This information is read at the first connection.
+
+The tablet is then recognised on *all* your PCs that use the same library. To undo this: **Settings**, **Tablet**
+section, **Forget the tablet** (it will have to be registered again, on all your computers).
+
+In the **Tablet** panel, the **Tablet settings** section lets you **Rename** the tablet (1 to 15 characters, no
+accents) and **Set the clock** (the tablet's clock is set to the PC's).
+
+## 5. Getting your pages: sync
+
+*Needs the tablet.*
+
+### Writing on the tablet
+
+Put a sheet of paper on the Bamboo Slate and write with its pen. At the end of a page, *a short press* of the button
+saves it in the tablet's memory and moves on to the next one. (Do not hold the button for about 6 seconds: it would put
+the tablet back in registration mode.)
+
+### Receiving the pages
+
+When the registered tablet is in range, Ardoise connects to it by itself; if need be, a short press on its button
+wakes it up. The state appears in the **Tablet** block of the sidebar: **Looking for the tablet…**, **Connecting…**,
+**Connected**, **Syncing…**, with the battery.
+
+The pages are received automatically on connection, or on request with **Sync now** in the **Tablet** panel. A bar
+shows **Page 1 of 3**… and **Cancel** stops the sync (the pages already received stay as notes, the others stay on the
+tablet). The panel then summarises: **3 notes saved.**, **3 pages deleted from the tablet.** or **No new pages.**
+
+Each page becomes a *note* at the root of the library, untitled (the card shows the date), at the tablet's size. You
+can title it, file it, tag it (chapter 7).
+
+### The options
+
+In the **Tablet** panel, **Options** section (and in **Settings**, **Tablet** section):
+
+- **Sync automatically when connecting**: the pages are received as soon as the tablet is in range.
+- **Delete from the tablet after import** (on by default): a page is deleted from the tablet only *after* its file has
+  been written to the library and checked; if anything fails, it stays on the tablet. **Warning**: the Bamboo Slate
+  hands over only its oldest page. Without this option, the other pages stay unreadable until the first one is
+  deleted, and the panel says so ("N pages are waiting on the tablet…"). So leave the option ticked unless you have a
+  particular reason.
+- **Tablet button in live mode**: **New page** or **New layer** (chapter 6).
+- **Position of the tablet**: how you hold the tablet. Ardoise turns what you draw so that it appears upright. Four
+  positions: **Landscape, button at the bottom**, **Landscape upside down, button at the top** (which suits left-handed
+  users), **Portrait, button on the left**, **Portrait, button on the right**. The portrait positions give portrait
+  notes. The button is the one next to the tablet's light.
+
+### Automatic export for your phone
+
+In **Settings**, **Automatic export after sync**: choose a **Format** (**Off**, **PDF** or **PNG (image)**) and a
+**Folder in the library** (for example `Exports`), then **Save**. Each page received is then also written as a PDF or a
+PNG in that folder: you can read your notes on your phone with the Nextcloud app. This folder is not shown in the list of
+binders.
+
+## 6. Live mode and presenting in class
+
+*Needs the tablet.* In live mode, what you write on the tablet appears at once on screen, with the tool, colour and
+width you have chosen. Each page you write becomes a note of the library, saved as you go.
+
+### Starting live mode
+
+Open the **Tablet** panel (click the **Tablet** block of the sidebar) and click **Live mode**. The state goes from
+**Waiting for the tablet** to **Live** as soon as the tablet sends points: if need be, press its button briefly to
+connect it. If the link drops, the state becomes **Reconnecting…** and the stroke resumes by itself.
+
+To end, click **Finish**: each page is saved as a note (the window's counter says "N notes saved"). If a page cannot be
+written to the library (disk full, folder unavailable…), a message explains it, the page stays in memory and a backup
+copy is written on this PC when Ardoise closes.
+
+### The control window
+
+- **Tool** (ballpoint, fountain pen, felt-tip, pencil, brush, highlighter, chalk), **Colour** (including **Chalk white**
+  and **Yellow**) and **Width**: the next stroke follows them, the previous ones do not change.
+- **Pages**: **Previous page**, **Next page** (the position is shown: "Page 2 / 5"), **New page**. **New layer** adds a
+  layer to the current page. **Clear the page** clears the current page only. <!-- M10: à confirmer -->
+- **Blackboard**: slate background and white chalk. **Laser pointer**: the pen hovering, without touching the tablet,
+  shows a red dot on screen *without writing anything*; touching the tablet writes again.
+- **Tablet position**: four buttons that change the position at once; the current page turns with what is already
+  drawn on it.
+- The preview shows the whole page; a *blue rectangle* shows the projected area. Drag it to move the area, the wheel
+  zooms. **Zoom in**, **Zoom out**, **Whole page** and **Width** (the page across the whole width of the projected area)
+  are also offered.
+- **Latency**: the time between the computer receiving a point and drawing it, measured and shown (target: under
+  30 ms).
+- **Record the narration**: talk during the session; the sound is cut page by page and saved with each note, and the
+  note's replay plays it (chapter 9).
+
+The *tablet's button* does, during live mode, what the **Tablet button in live mode** option says (new page or new
+layer). *What the Bamboo Slate sends when the button is pressed has not yet been checked on the real tablet.* The keys
+for next and previous page work in any case.
+
+### Projecting on a video projector
+
+1. Plug in the projector and, in Windows, press `Win + P` and choose *Extend*: each screen has its own desktop.
+2. In the **Projection** section of the control window, choose the **Projection screen** in the list (the **Refresh the
+   list of screens** button updates it) and click **Project**.
+3. A *presentation* window opens *full screen on the chosen screen*, with no interface element at all (the mouse
+   cursor disappears after 2 seconds without moving). The control window stays on the computer's screen. What you
+   write appears on both.
+4. **Stop projecting** closes the presentation. Ardoise remembers the chosen screen on this PC.
+
+<!-- M10: à confirmer -->
+With a single screen, the presentation covers the control window: press `Esc` in the presentation to close it.
+
+### Writing over the presentation
+
+On the projected window you can annotate the page with the pen, a finger or the mouse: the annotations are red (yellow
+on the blackboard). The back of the pen erases them one by one; the **Clear the marks** button (which appears with the
+cursor) or the `Delete` key erases them all; they also disappear when the page changes. *They are never saved in the
+note.* Two fingers zoom the projected area.
+
+### On the keyboard
+
+The same keys work in the control window and in the presentation (a presentation remote sends Page Down and Page
+Up): see chapter 17.
+
+## 7. The library
+
+### Browsing
+
+The library is the home page. At the top: the **Search notes** field, the sort (**Sort notes**: **Date: newest first**,
+**Date: oldest first**, **Title: A → Z**, **Title: Z → A**), and the **New note**, **From a PDF or an image…** and
+**Settings** buttons. On the left: the sidebar with **All notes**, **Favourites**, the **Binders**, the **Tags**, the
+**Trash**, and at the bottom the **Tablet** block and the **Test the tablet** button.
+
+A card shows the thumbnail, the title (or the date if the note has no title), the date and the tags. A click opens the
+note in the editor. On the card: the box to *select* it, the favourites star, the **Actions for…** menu (**Rename**,
+favourites, **Move to trash**) and a handle, which appears on the card, to drag the note out of Ardoise (chapter 10).
+Renaming a note also renames its file.
+
+Thumbnails are kept in a cache of each PC. When a note changes on another computer (Nextcloud sync), the library
+updates by itself.
+
+### Binders
+
+<!-- M10: à confirmer -->
+A binder is simply a *subfolder* of the library. Click the **New binder** icon (or **New sub-binder in…** next to a
+binder), type the **Binder name** and click **Create**. To file notes, drag them onto a binder in the sidebar, or
+select them and use **Move to…** (**Library (root)** takes them back to the root). Ardoise does not offer to rename or
+delete a binder: do it in Explorer, it is an ordinary folder.
+
+### Tags and favourites
+
+<!-- M10: à confirmer -->
+Select one or several notes, click **Tags…**, type a tag (several, separated by a comma) and click **Add**; an existing
+tag is removed with its cross. A click on a tag in the sidebar, or on a card's tag, shows only the notes that carry it.
+The star of a card (or **Add to favourites**) adds it to the **Favourites**.
+
+### Selecting several notes
+
+Tick the cards, or: `Ctrl + click` adds or removes a note, `Shift + click` selects a range, `Ctrl + A` selects all,
+`Esc` deselects. An action bar appears: **Move to…**, **Tags…**, **Export…**, **Print…**, **Assemble…**,
+**Add to favourites** (or **Remove from favourites**), **Move to trash**, **Deselect**.
+
+**Assemble** (at least two notes) creates a new note without changing the originals: **Overlay on one page** (all the
+notes on a single page, each on its own layers) or **Place end to end (long page)** (the notes one under the other).
+Give the **Title of the new note** and click **Assemble**. Only the first note's background image is kept.
+
+### Creating a note
+
+<!-- M10: à confirmer -->
+- **New note**: a blank A4 page in landscape, in the binder on display.
+- **From a PDF or an image…**: one note per chosen page of the PDF (**All pages** or **Some pages**, for example
+  `1-3, 5`), at the size and in the orientation of the page, with the page in the background so you can write over it.
+  An image gives a note the size of an A4 sheet, in the image's orientation. PDFs protected by a password are not read:
+  save a copy without a password.
+
+### Searching for a note
+
+Type in **Search notes**: Ardoise searches the *titles*, the *tags* and the *handwriting*, ignoring accents and
+capital letters. Notes found through the handwriting are grouped under **Found in the handwriting**. `Ctrl + F` puts
+the cursor in the field, `Esc` clears it.
+
+Searching the handwriting uses *Windows' handwriting recognition*, offline, on this PC. The language module must be
+installed in Windows (French usually is; for English: *Windows Settings > Time & language > Language & region*, the
+language, then *Language options > Handwriting > Download*, then restart Ardoise). The settings are in **Settings**,
+**Handwriting recognition**: **Handwriting language** (**Automatic**, **French**, **English**), the state of the
+reading, **Stop reading** and **Resume reading**. Notes are read in the background; reading pauses during live mode and
+the presentation, and a message says how many notes have been read ("Reading the handwriting: 12 of 40 notes."). The
+recognised text stays in a cache on this PC: it is never written into your notes or synced. Recognition sometimes makes
+mistakes on difficult handwriting.
+
+### The trash
+
+**Move to trash** does not destroy anything straight away. In **Trash**, each note has a **Restore** button (it goes
+back where it was) or **Delete for good**. **Empty the trash** deletes everything, after confirmation. Notes in the
+trash are deleted for good after 30 days.
+
+### Conflict copies and unreadable files
+
+When Nextcloud creates a "conflict" copy of a note edited on two PCs, the card carries the **Conflict copy** label:
+open both versions, keep the one you want and move the other to the trash. A message **Unreadable files: N** lists
+files the application cannot display; they are not modified.
+
+## 8. Editing a note
+
+Click a card to open the note. At the top: **Library** (back), the **Title of the note**, the state (**Saved** or
+**Unsaved changes**), **Undo (Ctrl+Z)**, **Redo (Ctrl+Y)** and **Save** (`Ctrl + S`). *Nothing is saved until you click
+Save*; when you leave with changes, Ardoise asks: **Save and go back**, **Go back without saving** or **Stay**. Undo
+and redo have no limit while the note is open.
+
+If the note was changed meanwhile on another PC, Ardoise *refuses to overwrite the other version*: your changes stay on
+screen and **Save as a copy** saves them in a new note.
+
+<!-- M10: à confirmer -->
+
+### The tools
+
+The toolbar offers four tools (**Tool**):
+
+- **Pen**: choose the **Ink** (**Ballpoint pen**, **Fountain pen**, **Felt-tip pen**, **Pencil**, **Brush**,
+  **Highlighter**, **Chalk**), the **Colour** (**Black**, **Blue**, **Green**, **Purple**, **Red**, **Orange**, **Grey**,
+  or **Choose another colour**; custom colours are remembered) and the **Width**. The stroke's width follows the pen's
+  pressure. **Apply to the whole note:** **Colour**, **Ink** or **Width** changes all the strokes at once.
+- **Eraser**: **Whole strokes** or **Partial**, with its **Size**.
+- **Select** (the lasso): draw around strokes to select them; `Shift` + lasso adds, `Ctrl` + lasso removes. The
+  **Selection** panel offers **Copy**, **Cut**, **Paste**, **Duplicate**, **Straighten shapes**, **Delete**. Changes of
+  colour, ink and width then apply to the selection; you move and resize it with the mouse.
+- **Move the page**: drag the page (holding the space bar, or the middle mouse button, does the same with any tool).
+
+**Zoom**: the wheel zooms around the cursor; at the bottom right, **Zoom in**, **Zoom out**, **Fit** (whole page) and
+**Width** (`Ctrl + 2`, the page across the whole width of the window).
+
+### Straightening shapes
+
+Select strokes, then **Straighten shapes** (or the `F` key): lines, circles, ellipses, rectangles (even rotated) and
+arrows drawn freehand become clean shapes, with the same tool, colour and width. The writing and anything that is not
+a clear shape do not change. Ardoise straightens lines and arrows at least 1 cm long, and circles, ellipses and
+rectangles about 1.5 cm across or more; a small upright oval (under 2.5 cm) looks like an "O" or a "0" and stays as it
+is. Select the drawings rather than the text. A single undo cancels it all (`Ctrl + Z`).
+
+### Copy and paste
+
+`Ctrl + C`, `Ctrl + X` and `Ctrl + V` (or the buttons of the **Selection** panel) copy, cut and paste strokes *from one
+note to another*, from one window to another, through Windows' clipboard. Pasted strokes keep their colour, tool and
+width; they are replayed last. Anything that does not come from Ardoise is ignored.
+
+### The sheet: paper, template, format, orientation
+
+The **Page** panel (on the right) sets up the sheet:
+
+- **Paper**: **White**, **Cream**, **Kraft**, **Black slate** (or **Custom**); **Template**: **Blank**, **Lined**,
+  **Seyès**, **5 mm squares**, **Graph paper (mm)**, **Dotted**, **Music staves**; **Paper texture**.
+- **Sheet orientation**: **Portrait** or **Landscape**. **The writing does not turn**: only the sheet changes direction,
+  and the writing keeps its place (if it goes beyond, it is moved back inside the sheet when it fits; otherwise the
+  part outside is kept but not shown, and a message says so).
+- **Sheet format**: **A4**, **A5**, **Letter**, **Tablet** (216 × 297 mm, the Bamboo Slate's page) or **Custom** (width
+  and height in millimetres, then **Apply**). **Scale the writing with the sheet** shrinks or enlarges the writing and
+  the background image with the sheet, without distortion.
+- **Turn the sheet with the writing** (**Left** or **Right**): a quarter turn of everything together, like turning a
+  sheet of paper.
+- **Crop around the content** (automatic) and **Crop by hand** (draw the rectangle to keep).
+
+### Background image or PDF
+
+In the **Page** panel, the **Background image or PDF** section puts an image (PNG or JPEG) or a PDF page *under* the
+writing, to annotate a worksheet, a document or a photo: **Choose a PDF or an image…**, the PDF page if needed, then
+**Put in the background**. Set the **Placement** (**Whole**, **Fill the page**, **Stretched**) and the **Opacity**;
+**Replace…** changes the file, **Remove the image** removes it, **Turn the image alone** turns the image without
+touching the sheet or the writing. If the image does not have the note's orientation, Ardoise offers to switch the note
+to the image's orientation. Everything can be undone. The image follows rotations, splits and assemblies and appears in
+thumbnails, exports and videos. PDFs are rendered by Windows.
+
+### Layers
+
+The **Layers** panel lists the layers. **Add a layer** creates one; you can choose the one to draw on, show or hide
+it, rename it, move it up or down, and merge it with the one below. A hidden layer does not accept writing: show it
+first.
+
+### Splitting a note
+
+**Split** detaches part of the note into a new note, either:
+
+- **At an instant**: drag the **Instant of the split** along the timeline; everything written from there on moves to the
+  new note (suggested title: "… (continued)"). The strokes concerned are coloured.
+- **By zone**: draw on the page, like with the lasso, the zone to detach (suggested title: "… (excerpt)").
+
+Ardoise tells you how many strokes stay and how many go, and lets you change the **Title of the new note**. Each note
+must keep at least one stroke.
+
+### Back to the original
+
+For a note received from the tablet, **Back to the original** (in the **Original** panel) restores the ink as it
+arrived, without your edits. Ardoise spells out what is lost (strokes added, erased, moved, layers, rotation, format)
+and what stays (title, tags, favourite, paper, narration, background image). The action can be undone (`Ctrl + Z`); then
+save to keep it. For a note that has never been modified there is no original yet: Ardoise keeps the previous version
+the first time you save a change of the ink.
+
+## 9. Replay, narration and video
+
+### Replay
+
+The **Replay** button (or the `R` key) replays the stroke *as it was written*. The page is not modified.
+
+- **Play** / **Pause** (`Space`), and the **Position in the replay** timeline (the arrow keys move forward or back by
+  one second when it has focus).
+- **Speed**: from 0.25× to 16× (0.25; 0.5; 1; 2; 4; 8; 16).
+- **Remove dead time**: pauses longer than half a second between two strokes are shortened to half a second.
+- `R`, `Esc` or the button leave the replay.
+
+Touch screens work as in the editor: one finger scrolls, two fingers zoom.
+
+### Narration
+
+During a replay, **Record a narration** (in the **Narration** panel) lets you talk while the stroke is drawn; the sound
+is stored *in the note*. The narration follows the replay's speed and dead-time setting at the moment you start it.
+Choose the **Microphone** (the list remembers your choice on this PC; **Refresh the list of microphones** if you have
+just plugged one in) and look at the **Microphone level** before starting: **Start**, then **Stop and save**. A new
+recording replaces the previous one. **Play with narration** replays stroke and sound together; **Delete the narration**
+removes it. *Save the note (`Ctrl + S`) first*: the sound is added to the note as it is on disk.
+
+If Windows blocks the microphone you get silence and Ardoise detects it: open *Settings > Privacy & security >
+Microphone* and turn on *Let desktop apps access your microphone* (a microphone mute switch, on some PCs, gives the
+same result).
+
+In live mode, **Record the narration** records the sound during the session, cut page by page.
+
+### Exporting as video
+
+The **Video** button opens **Export as video**. Four formats:
+
+| | **MP4 (video)** | **Animated GIF** | **Animated WebP** | **WebM (video)** |
+|---|---|---|---|---|
+| Plays with | Everything: Windows, phone, PowerPoint, school intranet | Browser, email, slide: no player needed | Recent browsers and software | Browsers, Moodle, VLC |
+| Sound (narration) | Yes | No | No | Yes |
+| Transparent background | No | Yes | Yes | No |
+| File size | Small | Large | Medium | Small |
+| Export time | Fast | Very fast | Long | The longest |
+
+When in doubt: MP4, which plays everywhere and carries the sound; GIF for a short animation that must show without a
+player.
+
+Settings: **Image size** (**720p**, **1080p**, **4K** or **Page size**), **Frames per second** (10, 15, 24, 30 or 60),
+**Length of the video** (a **Speed** or a **Target duration** in seconds), **Remove dead time**, **Background**
+(**With the paper** or **Transparent**), **Freeze the last frame** (0 to 60 seconds), **Include the narration**. The size,
+the length and the *estimated export time* are shown before you start; **Export…** then asks for the file to create, a
+bar shows progress and **Cancel the export** stops it. The file only appears once it is complete. WebM (AV1
+compression) is much slower: reduce the size or the number of frames per second if the estimate is long.
+
+*MP4 on a Windows "N" edition.* Ardoise writes MP4 with the encoder built into Windows. It is missing on "N" editions
+installed without the *Media Feature Pack*. In **Settings**, the **Backup video encoder (OpenH264)** section then lets
+you **Download from Cisco** the OpenH264 encoder (the file comes from Cisco's server and its fingerprint is checked; the
+licence is shown; **Cancel the download**, **Remove** and the **Allow Ardoise to use OpenH264 for MP4 files** box keep
+you in control). This download only happens if you ask for it; OpenH264 is never shipped with Ardoise. Without it,
+choose WebM. With this backup, the MP4's sound is Opus: playable in browsers and VLC, but not in the Windows media
+player.
+
+## 10. Exporting, printing, sharing
+
+### Exporting a note or a selection
+
+**Export…** (editor toolbar, or the selection bar in the library for several notes) opens the **Export** window with the
+question **Which format should I choose?**:
+
+| | **PNG (image)** | **JPG (image)** | **WebP (image)** | **SVG (vector)** | **PDF** |
+|---|---|---|---|---|---|
+| Sharp when enlarged | No | No | No | Yes | Yes |
+| Transparent background | Yes | No (white background) | Yes | Yes | No |
+| Several notes in one file | No (one file per note) | No | No | No | Yes (one page per note) |
+| Opens with | All software | All software | Browsers, Windows 11, recent software | Browser, Inkscape, recent Word | Any PDF reader |
+| Best for | Word, OneNote, slide | A site or form that requires a JPG | Web page, messaging | Retouching the drawing | Printing, sending, archiving |
+
+When in doubt: the **PDF** to print or send a note, the **PNG** to insert it in a document.
+
+Settings: **Resolution** (**96 dpi (screen)**, **150 dpi (usual)**, **300 dpi (print)**), **JPG quality**, **PDF page**
+(**The page's actual size** or **A4 (note fitted and centred)**), **Include the background** (unticked, only the stroke
+is exported). Ardoise then asks for the file to create (or the folder, for a one-file-per-note export: no existing
+file is overwritten). Resolutions that would give an image more than 16,384 pixels on a side are not offered; use the
+PDF or the SVG then. The SVG keeps the stroke's width according to pressure; the layers appear as layers in Inkscape.
+All formats draw the strokes exactly as the screen does.
+
+### The text of the handwriting
+
+At the bottom of the same window, **Recognised text (handwriting)** gives the handwriting as read by Windows:
+**Save as .txt…**, **Save as Markdown…**, **Save as Word…** or **Copy the text**. Markdown and Word keep the structure:
+title, date and tags at the top, then paragraphs, lists and drawings (images). A preview is available. If Windows
+could not analyse the layout, Ardoise says so: the structure is then guessed from the text and may be less accurate.
+*Always read the text over*: recognition can make mistakes.
+
+### Copying, printing, dragging
+
+- **Copy image**: puts the note on Windows' clipboard; paste it into Word or OneNote.
+- **Print…** (editor, or the selection bar): Windows' print window opens so that you can choose the printer. Each note is
+  printed on a page, in its orientation. You set **Print the background** and the **Size on the sheet** (**Real size**
+  or **Fitted to the sheet**).
+- *Dragging out of Ardoise*: the handle of a library card drops a *PNG image* of the note into Explorer, onto the
+  desktop, into Word, OneNote or an email (one image per note if several are selected). Keep the button pressed while
+  the image is prepared.
+
+## 11. Importing your Inkspace notes
+
+<!-- M10: à confirmer -->
+If you have notes in Wacom Inkspace on this PC, Ardoise can import them. *For now the import is done on the command
+line*; there is no button in the application.
+
+1. Close Inkspace (as a precaution). Ardoise changes nothing in Inkspace: it reads its data into memory.
+2. Open PowerShell in the folder of `ardoise.exe` (in Explorer, type `powershell` in the address bar then Enter) and
+   run, giving *the folder of your library*:
+
+   ```
+   .\ardoise.exe --import-inkspace --library "C:\Users\Name\Nextcloud\Ardoise\Notes" | Out-String
+   ```
+
+   (`| Out-String` makes PowerShell wait and shows the report at the end.) Ardoise finds Inkspace's installation by
+   itself; if it cannot, add the `LocalState` folder of a copy as the first argument. Without `--library`, Ardoise
+   shows the table of the notes it found but saves nothing.
+3. The report lists each note (date, orientation, number of layers, strokes and points, timing) and ends with
+   "N/N notes importées" (the report is in French).
+
+The notes arrive in a binder called *Inkspace*. Importing twice creates no duplicate, and a note you have moved to the
+trash is not brought back. Good to know:
+
+- Inkspace does not keep the *pressure* but the stroke's width: Ardoise estimates the pressure from the width. The look
+  is very close, but not identical.
+- Inkspace does not always keep the *timing* of the writing: when it is missing, Ardoise makes it up (the "synthétisé"
+  column of the report), and the replay of those notes is only indicative.
+- Imported notes use the *ballpoint pen*, on a white background, with no title or paper; you can edit them like any
+  others.
+
+## 12. Pen and touch screen
+
+On a PC with a touch screen and a pen (a Surface, for example), the editor, the replay, the live mode preview and the
+presentation can be used with the pen or a finger.
+
+*The pen*
+
+- The stroke *gets thicker with pressure*.
+- The *back of the pen* (the eraser) *erases*, with the eraser settings (**Whole strokes** or **Partial**), whatever the
+  tool chosen. An eraser circle appears when it hovers over the page.
+- The pen's *button* draws a *selection lasso*, whatever the tool.
+- A *palm* resting on the screen is ignored while the pen is in use or near the screen.
+
+*The finger*
+
+- By default, *a finger does not draw*: it *scrolls* the page, *two fingers zoom* around themselves, a *double tap*
+  fits the whole page.
+- For a touch screen without a pen, tick **Draw with a finger** (in **Settings**, **Pen and touch** section, or the
+  **Finger** box of the zoom bar): the finger then draws like the mouse, and two-finger zoom still works. This setting
+  is specific to each PC. With the **Move the page** tool, or in a replay, a finger always scrolls.
+
+*The back of the pen and the button cannot be simulated by the automated tests; they have to be tried on the touch
+PC.*
+
+## 13. Diagnostics and trials with the tablet
+
+*Needs the tablet.* If something does not work with the tablet, or to check an installation, Ardoise can test itself and
+keep a trace of what it exchanges with the tablet.
+
+### Testing the tablet
+
+Click **Test the tablet** (at the bottom of the sidebar, or in **Settings**). The **Tablet test** goes through eight
+steps: **Bluetooth adapter**, **Reference pages**, **Finding the tablet**, **Connection**, **Information**, **Page
+download**, **Live mode**, **Reconnection**. It takes about 5 minutes; follow the on-screen instructions, click **Done,
+continue** after each action, **Skip this step** if a step is stuck, **Stop the test** to finish. For the reference
+pages, draw: a square and a circle as large as possible; "Ardoise 2026" in normal handwriting; three horizontal
+lines, very light, normal, very heavy.
+
+Two boxes to know about: **Delete pages from the tablet once saved** (ticked by default) and **Simulation (no
+tablet)**. The test may register the tablet if it is not yet registered, with the same consequences as in chapter 4.
+
+> *Beware of the pages already on the tablet.* During the test, the pages in memory are downloaded, then deleted
+> from the tablet if the box is ticked. They are saved and checked before being deleted: they are kept in the diagnostics folder (see below) and, with the box ticked, also saved as notes of the library. If the tablet holds important pages, you can also get them first through the normal sync (chapter 5). <!-- M10: à confirmer -->
+
+At the end, the summary says "N passed, N failed, N skipped" and gives the location of the log.
+
+### Where the logs are
+
+Each Bluetooth exchange is noted (time, direction, bytes, interpretation) in the library, in `_ardoise\diagnostics\`:
+`YYYY-MM-DD_HHMMSS.jsonl` (the complete log), `.txt` (the readable report) and, for each page received, a raw file and an
+SVG preview. A log is also written automatically when a connection fails. *As this folder is in the library, Nextcloud
+brings it back to the other PC by itself*: you have nothing to send by hand. These logs contain the exchanges with the
+tablet, so the pages it sent during the test; they do not contain the rest of your library.
+
+### Trials on the hardware
+
+The project's repository contains `docs/hardware-tests.md`, the detailed list of the trials to make with the real
+hardware (the executable on the work PC, the tablet, sync, live mode and the projector, pen and touch). The *self-test*
+checks the settings, WebView2, the interface, the translations and the presence of Bluetooth:
+
+```
+.\ardoise.exe --self-test | Out-String
+```
+
+Its last line is `SELF-TEST OK` or `SELF-TEST FAILED`, and the report is also written next to the settings.
+
+## 14. The assistant (Claude Code, Claude Desktop)
+
+Ardoise can be driven by *your own assistant* (Claude Code, Claude Desktop or any software compatible with the MCP
+protocol): it reads your notes, sees them as images, tidies them up, titles them, files them. Ardoise itself contains no
+AI and stays usable offline; it is the assistant's software that does the work.
+
+**Settings**, **Assistant (MCP)** section, gives the exact text to copy into the assistant, with a **Read only** box so
+that it can only read. Everything is explained step by step, with example requests, in the
+[assistant guide](assistant.en.md) (en français : [L'assistant](assistant.fr.md)).
+
+## 15. Privacy
+
+- Your notes stay in *your* folder, on your computers. Ardoise has no account and sends nothing anywhere.
+- The only outgoing connection: the download of OpenH264 from Cisco, *only if you ask for it*. Ardoise does not listen
+  on any network port.
+- Handwriting recognition is Windows', offline, and the recognised text stays in a cache local to each PC.
+- Backup copies and caches are under `%LOCALAPPDATA%\Ardoise`, never in the library.
+- The *diagnostic logs* are in the library (so in Nextcloud): put nothing personal there.
+- If you use *an assistant* (chapter 14), what it reads goes to its provider according to your account settings. The text
+  and image of your notes may contain pupils' names: think before entrusting it with pupils' notes, and prefer **Read
+  only** when it only needs to read. The assistant never deletes anything for good (a deleted note goes to the
+  trash).
+
+## 16. When something goes wrong
+
+| What you see | What to do |
+|---|---|
+| Blue "Windows protected your PC" screen | Unsigned program: *More info*, then *Run anyway* (chapter 2). |
+| Windows blocks `ardoise.exe` with no button to continue | A rule of your PC (Smart App Control, AppLocker…): ask your IT department for permission. |
+| Empty window, or a window that does not open | WebView2 may be missing: install it from Microsoft's site. `.\ardoise.exe --self-test \| Out-String` says whether the engine is present. |
+| "Cannot read the settings file…" | `ardoise.toml` is damaged or was edited by hand with a mistake. Ardoise does not overwrite it: fix or delete it, then restart. |
+| "Bluetooth is switched off" | Switch it on in the Windows settings. |
+| "No Bluetooth adapter found" | Plug in the Bluetooth dongle (4.0 or later), wait for Windows to recognise it, try again. |
+| "The tablet does not answer" / "is not connected" | Bring it closer to the computer and press its button briefly; check the charge. |
+| "The tablet refused the command" | The phone app or Inkspace may have registered it since: register it again in Ardoise (chapter 4). Turn off the phone's Bluetooth. |
+| "The tablet is busy" | A sync or live mode is under way: try again when it is finished. |
+| Only one page is received, the next ones are "waiting" | Tick **Delete from the tablet after import** (chapter 5). |
+| The note shows upside down or on its side | Set the **Position of the tablet** to match how you hold it. |
+| "Your changes were not saved" | The note changed on another PC. **Save as a copy**, or go back to the library and open the note again. |
+| "This note was made by a newer version of Ardoise" | Replace `ardoise.exe` with the recent version (chapter 2). |
+| The library does not show a note that arrived from another PC | Wait for the Nextcloud sync to finish; temporary `.part` files are ignored. |
+| "Windows cannot write MP4 files on this PC" | Install the OpenH264 backup encoder in **Settings** (chapter 9), or choose WebM. |
+| The narration is silent, or the microphone cannot be found | See chapter 9 (microphone privacy); **Refresh the list of microphones**. |
+| The search does not find the handwriting | The Windows handwriting module is missing for the language, or reading is paused (live mode) or stopped: see **Settings**, **Handwriting recognition**. |
+| "This PDF is protected by a password" | Save a copy without a password. |
+| "Printing failed" | Check the printer, or export the note as a PDF. |
+| Live pages could not be saved | They stay in memory. Check the library folder (space, permissions, sync); a backup copy is written to `%LOCALAPPDATA%\Ardoise\live-backup`. |
+
+If the problem comes from the tablet, run **Test the tablet** (chapter 13): the log, brought back by Nextcloud, makes it
+possible to understand what happened.
+
+## 17. Keyboard shortcuts
+
+These shortcuts do nothing while you are typing in a text field.
+
+### Library
+
+| Keys | Action |
+|---|---|
+| `Ctrl + F` | Go to the search field (`Esc` clears it) |
+| `Ctrl + N` | New note |
+| Arrows, `Home`, `End` | Move from card to card (with `Shift`: extend the selection) |
+| `Enter` | Open the note |
+| `Space` | Select the card (with `Shift`: a range) |
+| `Ctrl + click`, `Shift + click` | Add or remove a note, select a range |
+| `Ctrl + A` | Select all the notes |
+| `Esc` | Deselect |
+| `F2` | Rename the note |
+| `Delete` | Move the note (or the selection) to the trash |
+
+### Editor
+
+| Keys | Action |
+|---|---|
+| `Ctrl + S` | Save |
+| `Ctrl + Z` | Undo |
+| `Ctrl + Y`, `Ctrl + Shift + Z` | Redo |
+| `Ctrl + A` | Select everything |
+| `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copy, cut, paste strokes |
+| `Delete` or `Backspace` | Delete the selection |
+| `Esc` | Deselect |
+| `V`, `P`, `E`, `H` | Tools **Select**, **Pen**, **Eraser**, **Move the page** |
+| `Space` (held) | Move the page |
+| `F` | **Straighten shapes** |
+| `R` | **Replay** |
+| `Ctrl + 0` | **Fit** (whole page) |
+| `Ctrl + 2` | **Width** |
+| Wheel | Zoom around the cursor |
+| Middle button (drag) | Move the page |
+
+### Replay
+
+| Keys | Action |
+|---|---|
+| `Space` | Play / pause |
+| `R` or `Esc` | Leave the replay |
+| Arrows (on the timeline) | Back or forward by one second |
+| `Page Up`, `Page Down` (on the timeline) | Forward or back by 10 seconds |
+| `Ctrl + 0`, `Ctrl + 2` | **Fit**, **Width** |
+
+### Live mode (control window and presentation)
+
+| Keys | Action |
+|---|---|
+| `→`, `Page Down`, `Space` | Next page |
+| `←`, `Page Up` | Previous page |
+| `Ctrl + Delete` (or `Ctrl + Backspace`) | Clear the page |
+| `B` | **Blackboard** |
+| `L` | **Laser pointer** |
+| `+` / `−` | Zoom the projected area in / out |
+| `0` | **Whole page** |
+| `W` | **Width** |
+| `Shift + arrows` | Move the projected area |
+| `Delete` or `Backspace` | Clear the marks written over the presentation |
+| `Esc` | **Finish** (in the presentation: close it) |
