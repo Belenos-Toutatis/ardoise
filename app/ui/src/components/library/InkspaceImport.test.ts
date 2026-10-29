@@ -279,7 +279,7 @@ describe('importing from Inkspace', () => {
 
   it('lets the import be stopped only once it is under way', async () => {
     const held = gate();
-    let progress!: (p: { done: number; total: number }) => void;
+    let progress: ((p: { done: number; total: number }) => void) | undefined;
     vi.spyOn(api, 'inkspaceImport').mockImplementation(async (_path, binder, onProgress) => {
       progress = onProgress;
       await held.until;
@@ -292,7 +292,7 @@ describe('importing from Inkspace', () => {
     // Still reading Inkspace's notes: a stop now could reach Rust before the import starts.
     await vi.waitFor(() => expect(status()).toContain("Lecture des notes d'Inkspace…"));
     expect(button("Arrêter l'import").disabled).toBe(true);
-    progress({ done: 0, total: 4 });
+    progress?.({ done: 0, total: 4 });
     await vi.waitFor(() => expect(button("Arrêter l'import").disabled).toBe(false));
     button("Arrêter l'import").click();
     expect(cancel).toHaveBeenCalledTimes(1);
