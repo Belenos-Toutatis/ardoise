@@ -396,7 +396,8 @@ pub fn demo_notes() -> Vec<SynthNote> {
         .collect::<Vec<_>>()
     };
     let note = |n: u128, day: i64, landscape: bool, layers: Vec<Vec<SynthStroke>>| SynthNote {
-        id: Uuid::from_u128(0x5e1f_0000_0000_4000_8000_0000_0000_0000 + n),
+        // The number leads the id, so that the short ids (8 characters) of a table differ.
+        id: Uuid::from_u128(0x5e1f_0000_0000_4000_8000_0000_0000_0000 + (n << 96)),
         created: FIRST_MS + day * DAY_MS,
         modified: FIRST_MS + day * DAY_MS + 600_000,
         landscape,
