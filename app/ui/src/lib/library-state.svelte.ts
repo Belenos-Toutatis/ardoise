@@ -13,6 +13,7 @@ import { TagColorState } from './tag-colors.svelte';
 import {
   buildBinderTree,
   displayTitle,
+  isInBinder,
   mergeTags,
   oldestFirst,
   parseTags,
@@ -379,6 +380,40 @@ export class LibraryState {
       notes.map((note) => ({ path: note.path, title: displayTitle(note, currentLocale()) })),
       direction,
     );
+  }
+
+  // --- Binders (milestone M10) ----------------------------------------------------------------
+
+  /**
+   * Renames a binder; the view follows it. Returns its new path; the error (a name taken, say)
+   * goes back to the caller, which shows it by the name field.
+   */
+  async renameBinder(binder: string, name: string): Promise<string> {
+    this.error = null;
+    try {
+      const renamed = await api.renameBinder(binder, name.trim());
+      const view = this.view;
+      if (view.kind === 'binder' && isInBinder(view.binder, binder)) {
+        this.view = { kind: 'binder', binder: renamed + view.binder.slice(binder.length) };
+      }
+      return renamed;
+    } finally {
+      await this.refresh();
+    }
+  }
+
+  /** Deletes a binder: its notes go to the trash (restorable to it), then its empty folders go. */
+  async deleteBinder(binder: string, name: string): Promise<void> {
+    this.error = null;
+    try {
+      const done = await api.deleteBinder(binder);
+      if (this.view.kind === 'binder' && isInBinder(this.view.binder, binder)) this.view = { kind: 'all' };
+      await this.refresh();
+      this.activity.binderDeleted(binder, name, done);
+    } catch (error) {
+      this.error = errorMessage(error);
+      await this.refresh();
+    }
   }
 
   private titleOf(path: string): string {

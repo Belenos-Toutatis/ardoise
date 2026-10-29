@@ -4,8 +4,8 @@
  * for a few seconds afterwards a notice with « Annuler » that undoes it (turning the notes
  * back, restoring the trashed ones). `ActivityBanner.svelte` draws it; `LibraryState` owns one.
  */
-import { api } from './api';
-import { tn } from './i18n.svelte';
+import { api, errorMessage, type BinderDeleted } from './api';
+import { t, tn } from './i18n.svelte';
 import { opposite, runBatch, turnNote, type BatchFailure, type BatchOutcome, type BatchTarget, type TurnDirection } from './library-batch';
 import type { FileStamp } from './note';
 
@@ -114,11 +114,44 @@ export class LibraryActivity {
     this.show(message, () => this.restore(entries));
   }
 
-  private async restore(entries: BatchTarget[]): Promise<void> {
+  private async restore(entries: BatchTarget[], done = (count: number) => tn('library.trashUndo.restored', count)): Promise<void> {
     const outcome = await this.batch('library.trashUndo.progress', 'library.trashUndo.failed', entries, (entry) =>
       api.trashRestore(entry.path),
     );
-    if (outcome && outcome.done.length > 0) this.show(tn('library.trashUndo.restored', outcome.done.length), null);
+    if (outcome && outcome.done.length > 0) this.show(done(outcome.done.length), null);
+  }
+
+  /**
+   * After a binder was deleted (`done`, from `delete_binder`): lists the notes that could not go
+   * to the trash, says which folders were kept for the other files they hold, and offers to bring
+   * the binder back with its notes.
+   */
+  binderDeleted(binder: string, name: string, done: BinderDeleted): void {
+    this.failures =
+      done.failed.length > 0
+        ? {
+            heading: tn('library.binder.deleteFailed', done.failed.length),
+            items: done.failed.map((f) => ({ path: f.path, title: baseName(f.path), message: errorMessage(f.error) })),
+          }
+        : null;
+    const entries = done.trashed.map((entry) => ({ path: entry.id, title: entry.title?.trim() || baseName(entry.original) }));
+    let message =
+      entries.length === 0 ? t('library.binder.deletedEmpty', { name }) : tn('library.binder.deleted', entries.length, { name });
+    const kept = deepestFolders(done.kept);
+    if (kept.length > 0) {
+      const folders = kept.map((folder) => t('library.binder.folder', { name: folder })).join(', ');
+      message += ` ${tn('library.binder.kept', kept.length, { folders })}`;
+    }
+    this.show(message, async () => {
+      // The binder itself first: an empty one has no note to bring it back.
+      await api.createBinder(binder).catch(() => undefined);
+      if (entries.length === 0) {
+        await this.refresh();
+        this.show(t('library.binder.restoredEmpty', { name }), null);
+      } else {
+        await this.restore(entries, (count) => tn('library.binder.restored', count, { name }));
+      }
+    });
   }
 
   /** Runs the undo of the notice shown, if any. */
@@ -165,4 +198,14 @@ export class LibraryActivity {
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = this.offer && !this.#held ? setTimeout(() => this.dismissOffer(), undoNotice.durationMs) : null;
   }
+}
+
+/** Last part of a path with either separator. */
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+/** The kept folders that hold no other kept folder (those above them are kept because of them). */
+export function deepestFolders(folders: readonly string[]): string[] {
+  return folders.filter((folder) => !folders.some((other) => other.startsWith(`${folder}/`)));
 }

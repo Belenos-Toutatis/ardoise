@@ -1,13 +1,16 @@
 <script lang="ts">
   /**
    * Left column: views (all notes, favourites), the tree of binders (drop targets for dragged
-   * notes), tags, trash, then the tablet block with the entry that opens the tablet test.
+   * notes; each one can be renamed or deleted from its menu), tags (each with its colour), trash,
+   * then the tablet block with the entry that opens the tablet test.
    */
   import { onMount, tick } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { t } from '../../lib/i18n.svelte';
-  import { ancestorsOf, sameView, type BinderNode, type LibraryView } from '../../lib/library-logic';
+  import { ancestorsOf, isInBinder, sameView, type BinderNode, type LibraryView } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
+  import BinderEditor from './BinderEditor.svelte';
+  import Menu from './Menu.svelte';
   import TabletStatus from './TabletStatus.svelte';
   import TagColorPicker from './TagColorPicker.svelte';
 
@@ -34,6 +37,8 @@
   /** Drop target under the pointer: a binder path, or null. */
   let dropTarget = $state<string | null>(null);
   let nameInput = $state<HTMLInputElement | null>(null);
+  /** The binder being renamed or whose deletion awaits confirmation. */
+  let editing = $state<{ path: string; mode: 'rename' | 'delete' } | null>(null);
 
   // The tree opens down to the binder being viewed.
   $effect(() => {
@@ -78,6 +83,16 @@
     if (event.key === 'Escape') {
       event.stopPropagation();
       creatingIn = null;
+    }
+  }
+
+  /** The binder was renamed: what was open under its old path stays open. */
+  function renamed(from: string, to: string) {
+    editing = null;
+    for (const path of [...expanded]) {
+      if (!isInBinder(path, from)) continue;
+      expanded.delete(path);
+      expanded.add(to + path.slice(from.length));
     }
   }
 
@@ -150,6 +165,15 @@
         <span class="nav-label">{node.name}</span>
         <span class="count">{node.count}</span>
       </button>
+      <span class="row-tool binder-menu">
+        <Menu
+          label={t('library.binder.menu', { name: node.name })}
+          items={[
+            { id: 'rename', label: t('library.binder.rename'), onselect: () => (editing = { path: node.path, mode: 'rename' }) },
+            { id: 'delete', label: t('library.binder.delete'), danger: true, onselect: () => (editing = { path: node.path, mode: 'delete' }) },
+          ]}
+        />
+      </span>
       <button
         type="button"
         class="icon-button add-sub"
@@ -159,6 +183,11 @@
         <span aria-hidden="true">+</span>
       </button>
     </div>
+    {#if editing?.path === node.path}
+      {#key editing.mode}
+        <BinderEditor {lib} {node} mode={editing.mode} onrenamed={renamed} onclose={() => (editing = null)} />
+      {/key}
+    {/if}
     {#if creatingIn === node.path}
       {@render creator(node.path)}
     {/if}

@@ -215,6 +215,44 @@
         "purple": "Purple",
         "pink": "Pink"
       }
+    },
+    "binder": {
+      "menu": "Actions on the binder \"{name}\"",
+      "rename": "Rename…",
+      "delete": "Delete…",
+      "newName": "New name of the binder \"{name}\"",
+      "renameDo": "Rename",
+      "deleteTitle": "Delete the binder \"{name}\"",
+      "confirmEmpty": "Delete the binder \"{name}\"? It holds no note: its folder will be removed.",
+      "confirm": {
+        "one": "Delete the binder \"{name}\"? Its note goes to the trash, then its folder is removed.",
+        "other": "Delete the binder \"{name}\"? Its {count} notes go to the trash, then its folder is removed."
+      },
+      "confirmSubBinders": {
+        "one": "Its sub-binder is included.",
+        "other": "Its {count} sub-binders are included."
+      },
+      "confirmHint": "A note restored from the trash goes back to its binder. Files that are not notes stay where they are.",
+      "deleteDo": "Delete the binder",
+      "deleted": {
+        "one": "Binder \"{name}\" deleted: {count} note moved to the trash.",
+        "other": "Binder \"{name}\" deleted: {count} notes moved to the trash."
+      },
+      "deletedEmpty": "Binder \"{name}\" deleted.",
+      "folder": "\"{name}\"",
+      "kept": {
+        "one": "The folder {folders} is kept: it holds files that are not notes.",
+        "other": "The folders {folders} are kept: they hold files that are not notes."
+      },
+      "deleteFailed": {
+        "one": "One note could not be moved to the trash (it stays in its binder):",
+        "other": "{count} notes could not be moved to the trash (they stay in their binder):"
+      },
+      "restored": {
+        "one": "Binder \"{name}\" restored with its note.",
+        "other": "Binder \"{name}\" restored with its {count} notes."
+      },
+      "restoredEmpty": "Binder \"{name}\" restored."
     }
   },
   "settings": {
@@ -589,7 +627,9 @@
     "pdfNoSuchPage": "this PDF has no such page ({detail})",
     "invalidTagColor": "this colour is not in the palette ({detail})",
     "tagColorsNewer": "the tag colours were saved by a newer version of Ardoise: update Ardoise on this PC to change them ({detail})",
-    "tagColorsConflict": "the tag colours were changing at the same moment, probably on another computer; try again in a moment ({detail})"
+    "tagColorsConflict": "the tag colours were changing at the same moment, probably on another computer; try again in a moment ({detail})",
+    "binderExists": "a binder or a file already has this name here; choose another one ({detail})",
+    "binderNotFound": "this binder no longer exists; it may have been renamed or deleted on another computer ({detail})"
   },
   "editor": {
     "back": "Library",

@@ -182,3 +182,8 @@
   align-items: center;
   gap: 0.1rem;
 }
+
+/* A binder's menu stays visible while it is open. */
+.nav-row .row-tool:has([aria-expanded='true']) {
+  opacity: 1;
+}

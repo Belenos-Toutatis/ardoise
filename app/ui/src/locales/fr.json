@@ -215,6 +215,44 @@
         "purple": "Violet",
         "pink": "Rose"
       }
+    },
+    "binder": {
+      "menu": "Actions sur le classeur « {name} »",
+      "rename": "Renommer…",
+      "delete": "Supprimer…",
+      "newName": "Nouveau nom du classeur « {name} »",
+      "renameDo": "Renommer",
+      "deleteTitle": "Supprimer le classeur « {name} »",
+      "confirmEmpty": "Supprimer le classeur « {name} » ? Il ne contient aucune note : son dossier sera supprimé.",
+      "confirm": {
+        "one": "Supprimer le classeur « {name} » ? Sa note va à la corbeille, puis son dossier est supprimé.",
+        "other": "Supprimer le classeur « {name} » ? Ses {count} notes vont à la corbeille, puis son dossier est supprimé."
+      },
+      "confirmSubBinders": {
+        "one": "Son sous-classeur est compris.",
+        "other": "Ses {count} sous-classeurs sont compris."
+      },
+      "confirmHint": "Une note restaurée depuis la corbeille retrouve son classeur. Les fichiers qui ne sont pas des notes restent à leur place.",
+      "deleteDo": "Supprimer le classeur",
+      "deleted": {
+        "one": "Classeur « {name} » supprimé : {count} note mise à la corbeille.",
+        "other": "Classeur « {name} » supprimé : {count} notes mises à la corbeille."
+      },
+      "deletedEmpty": "Classeur « {name} » supprimé.",
+      "folder": "« {name} »",
+      "kept": {
+        "one": "Le dossier {folders} est gardé : il contient d'autres fichiers que des notes.",
+        "other": "Les dossiers {folders} sont gardés : ils contiennent d'autres fichiers que des notes."
+      },
+      "deleteFailed": {
+        "one": "Une note n'a pas pu être mise à la corbeille (elle reste dans son classeur) :",
+        "other": "{count} notes n'ont pas pu être mises à la corbeille (elles restent dans leur classeur) :"
+      },
+      "restored": {
+        "one": "Classeur « {name} » rétabli avec sa note.",
+        "other": "Classeur « {name} » rétabli avec ses {count} notes."
+      },
+      "restoredEmpty": "Classeur « {name} » rétabli."
     }
   },
   "settings": {
@@ -589,7 +627,9 @@
     "pdfNoSuchPage": "ce PDF n'a pas cette page ({detail})",
     "invalidTagColor": "cette couleur ne fait pas partie de la palette ({detail})",
     "tagColorsNewer": "les couleurs des étiquettes ont été enregistrées par une version plus récente d'Ardoise : mettez Ardoise à jour sur ce PC pour les modifier ({detail})",
-    "tagColorsConflict": "les couleurs des étiquettes changeaient au même moment, sans doute sur un autre ordinateur ; réessayez dans un instant ({detail})"
+    "tagColorsConflict": "les couleurs des étiquettes changeaient au même moment, sans doute sur un autre ordinateur ; réessayez dans un instant ({detail})",
+    "binderExists": "un classeur ou un fichier porte déjà ce nom à cet endroit ; choisissez-en un autre ({detail})",
+    "binderNotFound": "ce classeur n'existe plus, il a peut-être été renommé ou supprimé sur un autre ordinateur ({detail})"
   },
   "editor": {
     "back": "Bibliothèque",
