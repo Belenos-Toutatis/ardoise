@@ -285,3 +285,111 @@ La première session avec la vraie tablette a montré que la synchronisation ét
 | Si les gestes (défilement, zoom, double toucher) sont fluides et au bon endroit | B1 |
 | Si le doigt dessine quand l'option est cochée | B3 |
 | Si les annotations de la présentation s'effacent et ne s'enregistrent pas | C2 |
+
+---
+
+## H4 — Montrer la feuille sur un autre ordinateur du réseau
+
+**Durée** : 30 à 40 minutes. **Matériel** : le PC d'Ardoise avec la tablette (chargée, dongle branché, téléphone Bluetooth **coupé**), un **second ordinateur sur le même réseau que lui** (l'idéal : le PC du bureau relié au vidéoprojecteur ; sinon n'importe quel PC) et un **téléphone ou une tablette** sur ce réseau, avec un appareil photo capable de filmer au ralenti (120 ou 240 images par seconde). Le réseau est celui de l'école, Wi-Fi ou prise réseau : noter lequel. Les parties A à E demandent la tablette (mode direct) ; la partie F n'en demande pas.
+
+Ce test vérifie le partage de la feuille (SPEC §4.10) : l'autorisation du pare-feu de Windows, la connexion avec l'adresse, le QR code et le code d'accès, le délai perçu, la pause, la reconnexion après une coupure, le partage d'une note ouverte, l'arrêt, et le fait que le port se referme. Les libellés des boutons du panneau de partage sont ceux de la fenêtre ; ceux donnés ici sont indicatifs.
+
+### À la maison, avant
+
+1. Fermer Ardoise sur tous les PC, puis remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version.
+2. Ne **pas** utiliser `--simulated-tablet`. Ne **pas** ajouter la variable `ARDOISE_SHARE_LOOPBACK` (elle sert aux tests automatiques et enferme le partage sur le PC lui-même).
+3. Vérifier que `ardoise.toml` ne contient pas de section `[share]` : le port par défaut est 8765. Si une section `[share]` existe, noter son port.
+
+### Au travail
+
+#### A. Premier partage et pare-feu
+
+1. Couper le Bluetooth du téléphone, brancher le dongle, lancer `ardoise.exe`. Ouvrir le **Mode direct** (panneau **Tablette**) et dessiner quelques traits.
+2. Dans la fenêtre de commande, cliquer sur **Partager sur le réseau**. Le panneau doit montrer une **adresse** (`http://192.168.x.x:8765`), un **code QR**, un **code à 6 caractères** (par exemple `K7M Q2X`) et « 0 écran ».
+   - Si le PC a plusieurs cartes réseau (Wi-Fi et Ethernet, VPN), **noter toutes les adresses listées** et laquelle est la première.
+3. **Fenêtre du pare-feu Windows** : la première fois, Windows affiche « Alerte de sécurité Windows » (*le Pare-feu Windows Defender a bloqué certaines fonctionnalités de cette application*). **Prendre une photo ou une capture de cette fenêtre telle quelle**, puis noter exactement :
+   - le nom et l'éditeur affichés, le chemin d'`ardoise.exe` ;
+   - les cases proposées (**Réseaux privés**, **Réseaux publics**) et lesquelles sont cochées par défaut ;
+   - si Windows demande un **mot de passe ou une confirmation d'administrateur** après **Autoriser l'accès**.
+   - Cocher **Réseaux privés** seulement, puis cliquer sur **Autoriser l'accès**.
+   - *Si aucune fenêtre n'apparaît* : le noter, c'est que le pare-feu est géré autrement (ou déjà ouvert). Passer à l'étape A4.
+4. Noter le **profil du réseau** du PC d'Ardoise : **Paramètres** > **Réseau et Internet** > Wi-Fi (ou Ethernet) > propriétés du réseau > **Profil réseau** : *Public* ou *Privé*. S'il est *Public* et que la connexion de l'étape B échoue, passer le réseau en *Privé* (ou cocher aussi **Réseaux publics**) et le noter.
+
+#### B. Se connecter depuis l'autre ordinateur
+
+1. Sur le second ordinateur, ouvrir un navigateur (noter lequel et sa version) et taper l'adresse **en entier**, avec `http://` et le port. La page de saisie du code doit s'afficher en quelques secondes. Noter le temps qu'il a fallu.
+   - *Si la page ne s'ouvre pas* : sur le second ordinateur, ouvrir PowerShell et lancer (en remplaçant l'adresse)
+     ```
+     Test-NetConnection 192.168.x.x -Port 8765
+     ```
+     `TcpTestSucceeded : True` veut dire que le réseau et le pare-feu laissent passer (le problème est alors dans le navigateur) ; `False` veut dire que le pare-feu du PC d'Ardoise ou le réseau bloque. Noter le résultat, puis revoir l'étape A3 / A4. Essayer ensuite les autres adresses du panneau.
+2. **Mauvais code d'abord** : taper un code faux (par exemple `ZZZZZZ`). Un message doit dire que le code est incorrect et combien d'essais restent. Le noter.
+3. **Bon code** : taper le code du panneau, en minuscules et sans espace. La feuille en direct s'affiche. Le panneau d'Ardoise passe à **1 écran**.
+4. **Plein écran** : appuyer sur `F11`, puis essayer le bouton plein écran de la page (et le double-clic). Le bouton et le curseur disparaissent-ils après 2 secondes d'immobilité ?
+5. **Téléphone ou tablette** : scanner le **code QR** du panneau. L'adresse s'ouvre dans le navigateur ; taper le code. Le panneau doit afficher **2 écrans**. Le noter (appareil, système, navigateur).
+6. *Facultatif, une seule fois (5 minutes d'attente ensuite)* : sur le second ordinateur, dans une fenêtre de navigation privée, taper **5 codes faux** de suite, puis un sixième (même juste) : la page doit demander d'attendre et dire combien de temps. Pendant ce temps, le téléphone (autre appareil, navigation privée aussi) doit encore pouvoir se connecter avec le bon code.
+
+#### C. La feuille en direct et le délai perçu
+
+1. Écrire sur la tablette : le tracé apparaît à l'écran d'Ardoise **et** sur le second ordinateur.
+2. **Délai perçu** : placer les deux écrans **côte à côte** (ou le second ordinateur à côté du portable) et écrire **une longue ligne, vite, d'un bout à l'autre de la page**. Noter, pour l'autre écran : *instantané* / *léger retard* / *retard gênant*. Objectif : moins de 150 ms de plus que l'écran d'Ardoise.
+3. **Mesure avec le téléphone** : filmer **ensemble** l'écran d'Ardoise et l'autre écran au ralenti (240 images par seconde si possible, sinon 120), pendant qu'on trace un trait rapide. En relisant la vidéo image par image, compter les images entre le moment où le trait apparaît sur l'écran d'Ardoise et celui où il apparaît sur l'autre écran. À 240 images par seconde, 36 images font 150 ms ; à 120, 18 images. Noter l'écart en images et la cadence. Garder la vidéo si possible (sans élèves ni noms à l'écran).
+4. **Tableau noir** : l'activer dans la fenêtre de commande : l'autre écran passe au fond ardoise et à la craie. Le désactiver.
+5. **Pointeur laser** : l'activer, approcher le stylet de la tablette sans la toucher : le point rouge suit sur l'autre écran, sans rien écrire.
+6. **Zoom et déplacement** : zoomer, déplacer la zone, revenir à la page entière : l'autre écran suit-il, au même cadrage que la présentation ?
+7. **Pages** : page suivante, page précédente, nouvelle page, effacer la page : l'autre écran change-t-il tout de suite ?
+8. Écrire sans interruption pendant 2 minutes : le tracé reste-t-il fluide sur l'autre écran, sans saccade ni retard qui grandit ?
+
+#### D. Pause
+
+1. Cliquer sur **Pause**. L'image de l'autre écran se **fige** (un repère discret le dit). Écrire encore sur la tablette : rien ne bouge sur l'autre écran, mais le tracé continue sur l'écran d'Ardoise.
+2. Pendant la pause, **ouvrir la page de l'autre écran dans un nouvel onglet** (ou sur le téléphone) et se connecter : elle doit montrer l'image figée, pas la page en cours.
+3. Cliquer sur **Reprendre** : l'autre écran montre aussitôt l'état actuel (y compris ce qui a été écrit pendant la pause) puis suit de nouveau.
+
+#### E. Coupure du réseau
+
+1. Sur le second ordinateur, **couper le réseau quelques secondes** (désactiver le Wi-Fi ou débrancher la prise, 5 à 10 secondes). La page doit afficher qu'elle se reconnecte (la feuille reste visible ou se grise : le noter).
+2. Rétablir le réseau, sans toucher à la page : elle doit **se reconnecter toute seule**, sans redemander le code, et montrer l'état actuel. Noter le temps de reprise.
+3. Recommencer en coupant le réseau **du PC d'Ardoise** (mettre le portable hors Wi-Fi). Écrire pendant la coupure, rétablir : les deux écrans sont-ils de nouveau d'accord, et le mode direct d'Ardoise n'a-t-il rien perdu ?
+
+#### F. Une note ouverte dans l'éditeur (sans tablette)
+
+1. Terminer le mode direct (**Terminer**), puis revenir à la bibliothèque : l'autre écran montre un **écran d'attente**.
+2. Ouvrir une note de la bibliothèque : l'autre écran montre **la page de cette note**, avec son papier (lignes, quadrillage…) ou son image de fond. Comparer avec l'éditeur : mêmes traits, mêmes couleurs, même fond.
+3. Dans l'éditeur, **tracer un trait** : il apparaît sur l'autre écran en moins d'une seconde. Changer la couleur de tous les traits, effacer un trait, annuler (`Ctrl + Z`) : l'autre écran suit-il, **sans enregistrer** la note ?
+4. Changer de note : l'autre écran change. Revenir à la bibliothèque : écran d'attente. Vérifier que **le titre de la note et le nom du dossier n'apparaissent nulle part** sur l'autre écran.
+5. Rouvrir le **Mode direct** (tablette connectée) : l'autre écran repasse à la feuille en direct.
+
+#### G. Arrêt, fermeture et deuxième partage
+
+1. Cliquer sur **Arrêter le partage** : l'autre écran indique que le partage est **terminé**. Le panneau d'Ardoise n'affiche plus d'adresse ni de code. Sur le second ordinateur, rafraîchir la page : elle doit ne plus répondre, ou demander un code ; la commande `Test-NetConnection` de l'étape B1 doit donner `False`.
+2. Relancer un partage : un **nouveau code** s'affiche (différent du précédent), la même adresse et le même port. Le second ordinateur, resté sur la page, passe tout seul à la saisie du code (l'ancien code ne marche plus) : taper le nouveau.
+3. **Fermer Ardoise pendant le partage** (croix de la fenêtre, après avoir terminé le mode direct). L'autre écran doit indiquer que le partage est terminé ou qu'il se reconnecte, et `Test-NetConnection` doit donner `False` : le port est refermé.
+4. **Deuxième lancement** : relancer `ardoise.exe` (même emplacement) et partager de nouveau. **Windows ne doit pas redemander** l'autorisation du pare-feu : le port est le même et l'autorisation reste valable. Le noter. (Si la fenêtre revient, noter si l'exe a changé de dossier entre-temps.)
+5. *Facultatif* : changer le port dans `ardoise.toml` (section `[share]`, `port = 8766`), relancer, partager : Windows redemande-t-il l'autorisation ? Remettre ensuite 8765 (ou supprimer la section).
+6. *Facultatif* : lancer sur le même PC un programme qui occupe déjà le port 8765 (ou lancer deux copies d'Ardoise placées dans deux dossiers différents et partager dans les deux) : la seconde doit dire que le port est utilisé et comment le changer, sans planter.
+
+### Ce qui revient par Nextcloud
+
+- Les notes écrites en mode direct pendant le test (bibliothèque).
+- Dans `<bibliothèque>\_ardoise\diagnostics\` : un journal seulement en cas d'erreur de la tablette ou d'une session de mode direct anormale. Le partage lui-même n'écrit rien dans la bibliothèque.
+- Dans `ardoise.toml` : la section `[share]` si le port a été changé.
+
+### À me signaler
+
+Ce qui ne revient pas tout seul :
+
+| Quoi | Où |
+|---|---|
+| La **fenêtre du pare-feu** telle que Windows l'a montrée (photo) : cases proposées et cochées, droits d'administrateur demandés ou non ; si aucune fenêtre n'est apparue | A3 |
+| Le **profil du réseau** (Public ou Privé) et le **type de réseau** (Wi-Fi ou prise réseau), le système et le navigateur du second ordinateur, ceux du téléphone ou de la tablette | A4, B1, B5 |
+| Les adresses listées par le panneau, laquelle a marché, et le résultat de `Test-NetConnection` en cas d'échec | A2, B1 |
+| Le texte exact de toute erreur (dans Ardoise ou dans la page), et celui du message de code faux | partout, B2 |
+| Le **délai perçu** (*instantané*, *léger retard*, *retard gênant*) et la mesure à la caméra (nombre d'images et cadence) ; si le tracé reste fluide pendant 2 minutes | C2, C3, C8 |
+| Si le tableau noir, le pointeur laser, le zoom, le déplacement et les pages suivent sur l'autre écran | C4 à C7 |
+| Si la pause fige bien l'image, y compris pour une page ouverte pendant la pause, et si la reprise remet à jour | D |
+| Le comportement après la coupure du réseau (page grisée ou non, reconnexion seule, temps de reprise, code redemandé ou non) | E |
+| Si la note ouverte s'affiche comme dans l'éditeur (fond compris), le délai d'un nouveau trait, et si un titre ou un chemin apparaît quelque part | F |
+| Ce que dit l'autre écran à l'arrêt du partage et à la fermeture d'Ardoise ; si le port est refermé | G1, G3 |
+| Si Windows a redemandé l'autorisation au deuxième lancement ; si le nouveau code est bien différent | G2, G4 |
+| Le port utilisé s'il a été changé dans `ardoise.toml` | A, G5 |

@@ -9,6 +9,7 @@
 // Usage: node app/e2e/run.mjs <path to ardoise.exe>
 import { execFileSync, spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,12 +28,13 @@ import { hardFixJourneys } from './journeys-m10-fix-hard.mjs';
 import { inkspaceJourneys } from './journeys-m10-inkspace.mjs';
 import { libraryJourneys } from './journeys-m10-library.mjs';
 import { uiJourneys } from './journeys-m10-ui.mjs';
+import { shareJourneys } from './journeys-m11-share.mjs';
 import { mcpJourney } from './mcp.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -55,8 +57,24 @@ if (newest(sources) > statSync(exe).mtimeMs) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Starts a portable copy of the app on a fresh demo library, in `language`, with `args` on its command line. */
-async function startApp(language, port, args = []) {
+/** A TCP port nobody listens on (asked of the system, then released): the share of a journey uses it, so two runs never collide. */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+/**
+ * Starts a portable copy of the app on a fresh demo library, in `language`, with `args` on its command line.
+ * `settings`: extra text of ardoise.toml (tables such as `[share]`, put before the machine's table);
+ * `env`: extra environment variables of the process.
+ */
+async function startApp(language, port, args = [], { settings = '', env = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), `ardoise-e2e-${language}-`));
   const appExe = join(dir, 'ardoise.exe');
   copyFileSync(exe, appExe);
@@ -64,9 +82,10 @@ async function startApp(language, port, args = []) {
   mkdirSync(library);
   execFileSync(appExe, ['--create-demo-library', library], { stdio: 'pipe' });
   const machine = process.env.COMPUTERNAME ?? 'PC';
+  const extra = settings ? `${settings.trimEnd()}\n\n` : '';
   writeFileSync(
     join(dir, 'ardoise.toml'),
-    `language = "${language}"\n\n[machines."${machine}"]\nlibrary = '${library}'\n`,
+    `language = "${language}"\n\n${extra}[machines."${machine}"]\nlibrary = '${library}'\n`,
   );
   // LOCALAPPDATA in the run's folder: a fresh WebView2 profile and thumbnail cache, nothing
   // shared with the Ardoise of this PC or with another run.
@@ -77,6 +96,7 @@ async function startApp(language, port, args = []) {
       ...process.env,
       LOCALAPPDATA: local,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+      ...env,
     },
     stdio: 'ignore',
   });
@@ -233,7 +253,11 @@ let failures = 0;
 let port = Number(process.env.ARDOISE_E2E_PORT) || 9400 + 100 * Math.floor(Math.random() * 40);
 for (const language of ['fr', 'en']) {
   for (const journey of journeys) {
-    const app = await startApp(language, port++, journey.args);
+    // A journey may ask for settings and environment variables that depend on a free TCP port (`app.sharePort`).
+    const context = { sharePort: await freePort() };
+    const given = (value) => (typeof value === 'function' ? value(context) : value);
+    const app = await startApp(language, port++, journey.args, { settings: given(journey.settings), env: given(journey.env) });
+    app.sharePort = context.sharePort;
     const label = `[${language.toUpperCase()}] ${journey.name}`;
     console.log(`\n${label}`);
     let step = 0;
