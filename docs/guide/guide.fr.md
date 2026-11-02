@@ -353,8 +353,8 @@ envoie Page suivante et Page précédente) : voir le chapitre 17.
 ### Montrer la feuille sur un autre ordinateur du réseau
 
 *Le partage du mode direct demande la tablette ; celui d'une note ouverte dans l'éditeur n'en demande pas. Ce partage a
-été vérifié avec une tablette simulée et un navigateur sur le même PC, mais pas encore sur deux vrais ordinateurs ni
-avec le pare-feu de l'école : l'essai H4 est prévu au travail.*
+été vérifié par des tests automatiques (serveur, page de l'autre écran, tablette simulée), mais pas encore sur deux
+vrais ordinateurs ni avec le pare-feu de l'école : l'essai H4 est prévu au travail.*
 
 Un autre ordinateur du même réseau (par exemple le PC de la salle, relié au vidéoprojecteur) peut afficher la feuille
 dans un *simple navigateur* : rien à installer dessus. Il montre :
@@ -410,7 +410,7 @@ lui-même.
   programme ailleurs, il peut la redemander.
 - Si un autre programme utilise déjà ce port, Ardoise le dit et ne démarre pas le partage : fermez l'autre programme,
   ou changez le port dans `ardoise.toml` (par exemple `[share]`, puis `port = 8766` sur la ligne suivante), puis
-  relancez Ardoise.
+  relancez le partage.
 
 **Confidentialité.** Le partage ne démarre que si vous cliquez, et s'arrête avec **Arrêter le partage** ou à la
 fermeture d'Ardoise (le port est alors refermé). Le code change à chaque partage. Après 5 codes faux en 5 minutes,

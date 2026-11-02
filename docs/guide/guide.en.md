@@ -334,9 +334,9 @@ Up): see chapter 17.
 
 ### Showing the sheet on another computer of the network
 
-*Sharing live mode needs the tablet; sharing a note open in the editor does not. This sharing has been checked with a
-simulated tablet and a browser on the same PC, but not yet on two real computers nor with the school's firewall: test
-H4 is planned at work.*
+*Sharing live mode needs the tablet; sharing a note open in the editor does not. This sharing has been checked by
+automated tests (server, the other screen's page, simulated tablet), but not yet on two real computers nor with the
+school's firewall: test H4 is planned at work.*
 
 Another computer on the same network (for instance the classroom PC linked to the projector) can show the sheet in a
 *plain web browser*: nothing to install on it. It shows:
@@ -389,7 +389,7 @@ network. Ardoise never changes the firewall itself.
   valid from one share to the next. Windows ties it to the location of `ardoise.exe`: if you move or copy the program
   elsewhere, it may ask again.
 - If another program already uses this port, Ardoise says so and does not start the share: close the other program, or
-  change the port in `ardoise.toml` (for example `[share]`, then `port = 8766` on the next line), then restart Ardoise.
+  change the port in `ardoise.toml` (for example `[share]`, then `port = 8766` on the next line), then start the share again.
 
 **Privacy.** The share starts only when you click, and stops with **Stop sharing** or when Ardoise closes (the port is
 then closed again). The code changes at each share. After 5 wrong codes in 5 minutes, the computer concerned has to
