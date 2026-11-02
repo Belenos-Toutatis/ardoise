@@ -6,8 +6,9 @@
 mod common;
 
 use std::io::{ErrorKind, Read, Write};
-use std::net::{Ipv4Addr, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use ardoise_share::{Limits, LiveFeed, Share, ShareConfig, ShareError};
@@ -235,6 +236,7 @@ fn connections_per_address_are_limited() {
 fn the_oldest_connection_without_a_request_makes_room() {
     let h = Harness::with_limits(Limits {
         connections: 4,
+        reserved: 0,
         connections_per_address: 64,
         ..Limits::default()
     });
@@ -258,6 +260,7 @@ fn the_oldest_connection_without_a_request_makes_room() {
 fn connections_that_sent_their_request_never_make_room() {
     let h = Harness::with_limits(Limits {
         connections: 2,
+        reserved: 0,
         connections_per_address: 64,
         streams_per_address: 32,
         ..Limits::default()
@@ -287,6 +290,305 @@ fn connections_that_sent_their_request_never_make_room() {
     assert_eq!(b.expect(), json(&note("n", 1)));
 }
 
+/// A request that holds its slot: a `/join` whose body never comes (until the request's
+/// deadline).
+const HELD: &[u8] =
+    b"POST /join HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n";
+
+/// Hostile PCs (`sources`) that keep `each` requests open, reconnecting at once whenever one is
+/// closed, until `stop`. Counts the connections the server closed.
+fn hostile_pcs(
+    port: u16,
+    sources: Vec<Ipv4Addr>,
+    each: usize,
+    stop: Arc<AtomicBool>,
+    closed: Arc<AtomicUsize>,
+    ready: std::sync::mpsc::Sender<()>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        // A connection that sent `HELD` (`None` if it could not even connect: tried again at
+        // the next turn). Refused (no room): closed at once, seen at the next turn.
+        let open = |source: Ipv4Addr| {
+            let mut stream = try_connect_from(source, port).ok()?;
+            let _ = stream.write_all(HELD);
+            // Polled without waiting (Windows rounds very short read timeouts up).
+            stream.set_nonblocking(true).ok()?;
+            Some(stream)
+        };
+        // Closed (end of stream or reset), or answered: the server let go of this request.
+        let gone = |stream: &mut Option<TcpStream>| {
+            let Some(stream) = stream else { return true };
+            let mut byte = [0u8; 1];
+            match stream.peek(&mut byte) {
+                Ok(_) => true,
+                Err(error) => !matches!(error.kind(), ErrorKind::WouldBlock),
+            }
+        };
+        let mut held: Vec<(Ipv4Addr, Option<TcpStream>)> = sources
+            .iter()
+            .flat_map(|source| (0..each).map(move |_| *source))
+            .map(|source| (source, open(source)))
+            .collect();
+        let _ = ready.send(());
+        loop {
+            let stopping = stop.load(Ordering::SeqCst);
+            for (source, stream) in &mut held {
+                if gone(stream) {
+                    closed.fetch_add(1, Ordering::SeqCst);
+                    if !stopping {
+                        *stream = open(*source);
+                    }
+                }
+            }
+            if stopping {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    })
+}
+
+/// True once the server refuses a connection from `source` at once, which it does only when
+/// `source` holds as many connections as it may: the server accepts connections in the order
+/// they come, so every connection opened from there before was let in.
+fn holds_all_it_may(source: Ipv4Addr, port: u16) -> bool {
+    closed_soon(&mut connect_from(source, port), Duration::from_millis(200))
+}
+
+#[test]
+fn a_few_pcs_cannot_keep_the_projector_out() {
+    // 12 slots, 4 of them for screens that joined, 4 per address.
+    let h = Harness::with_limits(Limits {
+        connections: 12,
+        reserved: 4,
+        connections_per_address: 4,
+        ..Limits::default()
+    });
+    let port = h.port();
+    // Two hostile PCs fill the 8 other slots with requests they never finish, and take any
+    // slot they lose back at once (as one laptop with several addresses can).
+    let stop = Arc::new(AtomicBool::new(false));
+    let closed = Arc::new(AtomicUsize::new(0));
+    let (ready, started) = std::sync::mpsc::channel();
+    let hostile = hostile_pcs(
+        port,
+        vec![pc(2), pc(3)],
+        4,
+        Arc::clone(&stop),
+        Arc::clone(&closed),
+        ready,
+    );
+    started.recv_timeout(SOON).unwrap();
+    assert!(holds_all_it_may(pc(2), port) && holds_all_it_may(pc(3), port));
+    assert_eq!(closed.load(Ordering::SeqCst), 0, "all 8 were let in");
+
+    // The projector loads the page several times, joins, and opens its stream: each time a
+    // request of the address that holds the most slots makes room (the hostile PCs take the
+    // slot back between two requests).
+    let projector = pc(1);
+    let get = |target: &str| {
+        std::thread::sleep(Duration::from_millis(20));
+        let raw = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+        exchange_from(projector, port, raw.as_bytes()).expect("an answer")
+    };
+    for _ in 0..3 {
+        assert_eq!(get("/").status, 200);
+        assert_eq!(get(SCRIPT_PATH).body, SCRIPT.as_bytes());
+        assert_eq!(get(WASM_PATH).body, WASM);
+    }
+    let cookie = cookie_from(projector, port);
+    let mut stream = open_events_from(projector, port, Some(&cookie)).expect("200");
+    assert_eq!(stream.next_event(SOON), Some(SseEvent::Retry(2000)));
+    assert_eq!(stream.expect(), waiting());
+    // It joined: its address now takes the reserved slots, whatever the others do.
+    for _ in 0..3 {
+        assert_eq!(get("/").status, 200);
+    }
+    h.share.show_note(ardoise_share::NoteUpdate {
+        full: note("n", 2),
+        append: None,
+    });
+    assert_eq!(stream.expect(), json(&note("n", 2)));
+
+    stop.store(true, Ordering::SeqCst);
+    hostile.join().unwrap();
+    let lost = closed.load(Ordering::SeqCst);
+    eprintln!("the hostile PCs lost {lost} connections");
+    assert!(lost >= 3, "the hostile PCs made room: {lost}");
+}
+
+#[test]
+fn pcs_without_the_code_never_take_the_reserved_slots() {
+    let h = Harness::with_limits(Limits {
+        connections: 6,
+        reserved: 2,
+        connections_per_address: 8,
+        ..Limits::default()
+    });
+    let port = h.port();
+    // The projector joins first.
+    let projector = pc(1);
+    let cookie = cookie_from(projector, port);
+    // Then 4 hostile addresses each hold one of the 4 shared slots: none holds two more than
+    // a newcomer, so fair share closes none of them for another PC without the code.
+    let stop = Arc::new(AtomicBool::new(false));
+    let closed = Arc::new(AtomicUsize::new(0));
+    let (ready, started) = std::sync::mpsc::channel();
+    let hostile = hostile_pcs(
+        port,
+        vec![pc(2), pc(3), pc(4), pc(5)],
+        1,
+        Arc::clone(&stop),
+        Arc::clone(&closed),
+        ready,
+    );
+    started.recv_timeout(SOON).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    let mut stranger = connect_from(pc(6), port);
+    assert!(closed_soon(&mut stranger, SOON), "no room without the code");
+    // The projector, which holds a token, still gets in: its stream and the page.
+    let mut stream = open_events_from(projector, port, Some(&cookie)).expect("200");
+    assert_eq!(stream.next_event(SOON), Some(SseEvent::Retry(2000)));
+    assert_eq!(stream.expect(), waiting());
+    let raw = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+    let page = exchange_from(projector, port, raw.as_bytes()).unwrap();
+    assert_eq!(page.status, 200);
+
+    stop.store(true, Ordering::SeqCst);
+    hostile.join().unwrap();
+    assert_eq!(
+        closed.load(Ordering::SeqCst),
+        0,
+        "nothing was closed for it"
+    );
+}
+
+#[test]
+fn a_page_of_another_site_gets_nothing() {
+    let h = Harness::start();
+    let port = h.port();
+    let get = |target: &str, host: &str| {
+        let raw = format!("GET {target} HTTP/1.1\r\nHost: {host}\r\n\r\n");
+        exchange(port, raw.as_bytes()).unwrap()
+    };
+    // The names a DNS rebinding page would send, or another port.
+    for host in [
+        "evil.example".to_owned(),
+        format!("evil.example:{port}"),
+        format!("127.0.0.1.nip.example:{port}"),
+        format!("localhost.evil.example:{port}"),
+        format!("127.0.0.1:{}", port.wrapping_add(1)),
+        format!("[::1]:{port}"),
+    ] {
+        for target in ["/", SCRIPT_PATH, "/events", "/nothing"] {
+            let answer = get(target, &host);
+            assert_eq!(answer.status, 421, "{host} {target}");
+            assert_common_headers(&answer);
+            assert!(!String::from_utf8_lossy(&answer.body).contains("Ardoise"));
+        }
+    }
+    // Even with a valid cookie, the stream is not opened.
+    let cookie = h.cookie();
+    let raw =
+        format!("GET /events HTTP/1.1\r\nHost: evil.example:{port}\r\nCookie: {cookie}\r\n\r\n");
+    assert_eq!(exchange(port, raw.as_bytes()).unwrap().status, 421);
+    assert_eq!(h.share.status().viewers, 0);
+    // Two Host headers.
+    let raw = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nHost: evil.example\r\n\r\n");
+    assert_eq!(exchange(port, raw.as_bytes()).unwrap().status, 421);
+    // The share's own names: an IPv4 address with or without the port, `localhost`, and on
+    // Windows this computer's name.
+    let mut ours = vec![
+        format!("127.0.0.1:{port}"),
+        "127.0.0.1".to_owned(),
+        format!("192.168.1.23:{port}"),
+        format!("localhost:{port}"),
+        "LOCALHOST".to_owned(),
+    ];
+    if cfg!(windows)
+        && let Ok(name) = std::env::var("COMPUTERNAME")
+        && !name.is_empty()
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        ours.push(format!("{}:{port}", name.to_lowercase()));
+    }
+    for host in &ours {
+        let answer = get("/", host);
+        assert_eq!(answer.status, 200, "{host}");
+        assert_eq!(answer.body, PAGE.as_bytes());
+    }
+}
+
+#[test]
+fn another_program_cannot_take_the_port() {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let h = Harness::start();
+    let port = h.port();
+    let reusing = || {
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
+        socket.set_reuse_address(true).unwrap();
+        socket
+    };
+    // A program that asks to share the port (`SO_REUSEADDR`) on the share's address: refused.
+    // (Windows 11 already refuses this one without `SO_EXCLUSIVEADDRUSE`; the option, checked
+    // by a unit test, also covers a single address taken next to the app's wildcard, which a
+    // test cannot open without the firewall's prompt.)
+    let thief = reusing();
+    let bound = thief.bind(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)).into());
+    eprintln!("the share's address with SO_REUSEADDR: {bound:?}");
+    assert!(
+        bound.is_err(),
+        "127.0.0.1:{port} was bound by another socket"
+    );
+    // On all addresses: Linux refuses it too; Windows lets a socket bind the wildcard next to
+    // one bound to a single address (the share in this test; in the app the share binds the
+    // wildcard itself, which leaves no address to take), and connections to the share's
+    // address still reach the share.
+    let wildcard = reusing();
+    let bound = wildcard.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)).into());
+    if bound.is_ok() {
+        wildcard.listen(8).unwrap();
+    }
+    #[cfg(not(windows))]
+    assert!(bound.is_err(), "0.0.0.0:{port} was bound by another socket");
+    for _ in 0..5 {
+        assert_eq!(h.get("/").status, 200);
+    }
+}
+
+#[test]
+fn a_share_started_again_at_once_gets_its_port_back() {
+    let h = Harness::start();
+    let port = h.port();
+    // Answers close their connections first: they leave this side in TIME_WAIT.
+    for _ in 0..5 {
+        assert_eq!(h.get("/").status, 200);
+    }
+    let cookie = h.cookie();
+    let mut viewer = open_events(port, Some(&cookie)).expect("200");
+    assert_eq!(viewer.next_event(SOON), Some(SseEvent::Retry(2000)));
+    drop(h);
+    let mut seen = Vec::new();
+    assert!(viewer.read_until_closed(SOON, &mut seen));
+    // Stop, start again on the same port at once: as when the teacher stops sharing and
+    // shares again.
+    let again = Share::start(
+        ShareConfig {
+            port,
+            ..test_config()
+        },
+        assets(),
+        Arc::new(FakeFeed::default()) as Arc<dyn LiveFeed>,
+        Box::new(|_| {}),
+    );
+    let again = match again {
+        Ok(share) => share,
+        Err(error) => panic!("port {port} not bound again: {error:?}"),
+    };
+    assert_eq!(again.port(), port);
+    assert_eq!(request(port, "GET", "/").status, 200);
+}
+
 #[test]
 fn a_request_must_start_soon_and_end_in_time() {
     let h = Harness::with_limits(Limits {
@@ -308,7 +610,8 @@ fn a_request_must_start_soon_and_end_in_time() {
 
     // A head begun in time and never finished: closed when the request is late.
     let mut slow = connect(h.port());
-    slow.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n").unwrap();
+    slow.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n")
+        .unwrap();
     let started = Instant::now();
     let mut bytes = Vec::new();
     let _ = slow.read_to_end(&mut bytes);
@@ -322,7 +625,7 @@ fn a_request_must_start_soon_and_end_in_time() {
     // A head that keeps coming in time is served.
     let mut steady = connect(h.port());
     steady.set_nodelay(true).unwrap();
-    for byte in b"GET / HTTP/1.1\r\nHost: x\r\n\r\n" {
+    for byte in b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n" {
         steady.write_all(&[*byte]).unwrap();
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -335,12 +638,12 @@ fn a_request_must_start_soon_and_end_in_time() {
 fn a_head_sent_one_byte_at_a_time() {
     let h = Harness::start();
     for head in [
-        "GET /?x HTTP/1.1\r\nHost: share\r\nAccept: */*\r\n\r\n".to_owned(),
+        "GET /?x HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n\r\n".to_owned(),
         // Bare line feeds.
-        "GET / HTTP/1.1\nHost: share\n\n".to_owned(),
+        "GET / HTTP/1.1\nHost: localhost\n\n".to_owned(),
         // A long head (12 KiB), still under the limit.
         format!(
-            "GET / HTTP/1.1\r\nHost: share\r\nX-Long: {}\r\n\r\n",
+            "GET / HTTP/1.1\r\nHost: localhost\r\nX-Long: {}\r\n\r\n",
             "a".repeat(12 * 1024)
         ),
     ] {

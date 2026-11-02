@@ -59,7 +59,9 @@ MIT OR Apache-2.0, both already listed in `THIRD-PARTY-NOTICES`.
 
 New crates: **`qrcodegen` 1.8** (MIT, Project Nayuki, no dependency, a few tens of KB) for the QR code. `getrandom`
 0.4 (MIT OR Apache-2.0) is already in the tree (through `uuid`); the crate depends on it directly for the code and
-the tokens. `serde` / `serde_json` as everywhere.
+the tokens. `serde` / `serde_json` as everywhere. On Windows only, `windows-sys` 0.61 (MIT OR Apache-2.0) for one
+`setsockopt`, with the feature mio already enables: no new code in the exe. In the tests only, `socket2` 0.6 (MIT
+OR Apache-2.0, already in the tree through tokio) for clients bound to other loopback addresses.
 
 ### Threads and lifetime
 
@@ -68,29 +70,71 @@ the tokens. `serde` / `serde_json` as everywhere.
 - `Share::stop` (also on `Drop`): every stream gets the `end` message, every connection is closed, the listener is
   dropped, and the thread is joined (at most 2 s). When `stop` returns, the port is closed: a new connection is
   refused. The app calls it from `share_stop` and from `RunEvent::Exit`.
-- Listening: `0.0.0.0:<port>` (all IPv4 interfaces), `port` from `ardoise.toml` (`[share] port = 8765`), so that the
-  firewall's permission stays valid. Port 0 (tests) takes a free port; `Share::port()` says which.
+- Listening: `0.0.0.0:<port>` (all IPv4 interfaces), `port` from `ardoise.toml` (`[share] port = 8765`): the address
+  stays the same from one share to the next, and an IT department can open that port. Port 0 (tests) takes a free
+  port; `Share::port()` says which. **The rule Windows creates from its firewall prompt is for the program's path**
+  (any port), not for the port: moving or renaming the portable `ardoise.exe` brings the prompt back; changing the
+  port does not.
+- The listening socket is made with tokio's `TcpSocket`. On Windows it gets **`SO_EXCLUSIVEADDRUSE`** before `bind`
+  (through `windows-sys` 0.61, whose `Win32_Networking_WinSock` feature mio already compiles; no administrator
+  rights needed): while the share listens, no other socket can bind its port, on any address. Microsoft documents
+  that without it a socket of the same user that sets `SO_REUSEADDR` may bind the port (for example a single address
+  next to our wildcard, and take the connections to it). On Windows 11 our test sees a takeover of the share's own
+  address refused even without the option (`WSAEACCES`), and a test cannot bind the wildcard without the firewall
+  prompt; a unit test reads the option back from the socket. A share stopped and started again at once still gets
+  its port back (tested on Windows: the connections it closed first stay in `TIME_WAIT` without blocking the new
+  bind). Elsewhere `SO_REUSEADDR`, as std and mio set it on Unix (a listening port is never shared there).
 - Port already used by another program: `ShareError::PortInUse { port }` (code `sharePortInUse`; the message tells to
-  close the other program or change `[share] port` in `ardoise.toml`). Std's listener does not set `SO_REUSEADDR` on
-  Windows, so another program can never share the port with us.
-- Limits (a hostile classmate's PC must not keep the projector's PC out): 64 connections at once and **8 per
-  address** (more are closed at once; when all 64 are taken, the oldest connection that has not sent a whole
-  request head is closed for the newcomer, never a stream or a request being answered), 32 event streams and **4
-  per address** (more get `503`), the first byte of a request within 3 s and its head (16 KiB) within 10 s, body
-  1 KiB, 32 headers; a head is parsed again only when a blank line may have arrived. `TCP_NODELAY` on every socket
-  (no Nagle delay on the stream).
+  close the other program or change `[share] port` in `ardoise.toml`).
+- Limits (a hostile classmate's PC must never keep the projector's PC out; `Limits` in `lib.rs`):
+  - **64 connections** at once, **8 per address** (more are closed at once). **16 of the 64 are reserved for the
+    addresses that hold a session token** (they joined with the code): the PCs without the code share the other
+    48, so a screen that joined always gets back in (reconnection, page reload), whatever they do.
+  - When there is no room, one connection is closed for the newcomer, never an event stream: the oldest one that
+    has not sent its request head yet, if it is of the newcomer's own address or of an address that holds more
+    slots; else the oldest request of the address that holds the most slots, if it holds **at least two more** than
+    the newcomer's (fair share); a newcomer from an address with a token first takes the slot of the oldest
+    connection without one. Otherwise the newcomer is closed at once. So PCs that hold their slots with requests
+    they never finish (an asset they never read, a `/join` body that never comes) and reconnect at once lose a slot
+    to every newcomer that holds fewer, and never take it back (addresses that hold about as many never swap
+    slots): the projector loads the page while it holds fewer than they do, and its connections are never theirs
+    to take. The age of a connection plays no part: a PC that recycles its connections every second gains nothing.
+  - Known limit: PCs without the code that use **48 addresses or more**, one slot each, leave no address holding
+    two more than a newcomer: a browser that has not joined yet is then closed at once (one that has joined uses the
+    reserved slots). A laptop takes that many addresses only with administrator rights and a network that lets it.
+  - **32 event streams** and **4 per address** (more get `503` + `Retry-After: 5`). An address opens at most **8
+    streams in a row, then one every 2 s** (`StreamRate`, a token bucket; more get `503` with `Retry-After`, the
+    seconds until the next): each new stream makes the app copy and serialise the whole page under the live hub's
+    lock. The viewer opens one stream per page load; after a cut it retries after 0.5 s, 1, 2, 4, then every 5 s
+    (its count starting again after each stream that opens) and treats `503` as "retry in 5 s": a viewer whose
+    stream is cut over and over gets 8 quick reconnections, then about one every 2 s, with a 5 s wait after a
+    refusal. A holder of the code looping on reconnections makes the app copy the page at most every 2 s per
+    address.
+  - The first byte of a request within 3 s, its head (16 KiB) within 10 s (and the body of `/join`, 1 KiB), 32
+    headers; **an answer written within 5 s** (the largest, a script of about 200 KB, takes milliseconds on a LAN),
+    then the lingering close (1 s at most). A head is parsed again only when a blank line may have arrived.
+    `TCP_NODELAY` on every socket (no Nagle delay on the stream).
 
 ### Routes
 
 The only `(method, path)` pairs that exist; the query string is ignored, nothing is percent-decoded or normalised.
 **Any other request gets `404`** (also another method on a known path).
 
+**`Host` first.** A request whose `Host` header does not name the share gets **`421 Misdirected Request`** before
+any route, and is not counted as an attempt: the share's names are an IPv4 address (any: the PC may have several),
+`localhost`, and on Windows this computer's name (`COMPUTERNAME`, used only if it is a single label of letters,
+digits and `-`), each with the share's port or without a port. A page of another site whose DNS name was pointed at
+this PC (DNS rebinding), opened in the projector's own browser, names its own host: it can neither spend the
+attempts of that address nor take its slots with requests that count as same-origin. No `Host` header (not a
+browser: browsers always send one) is accepted; two are refused. Other names of the PC (a DNS name with a suffix,
+`<name>.local`) are refused too: the panel shows addresses, the guide says to type one.
+
 | Request | Answer |
 |---|---|
 | `GET /` | `viewer.html` |
 | `GET /assets/<file>` | that viewer asset, if `/assets/<file>` is a key of the asset map; else 404 |
-| `POST /join` | body `{"code":"K7M Q2X"}` (JSON). Right code: `204` + `Set-Cookie: ardoise_share=<token>; Path=/; HttpOnly; SameSite=Strict`. Wrong: `403` `{"error":"wrongCode","remaining":n}`. Too many attempts: `429` + `Retry-After: s`, `{"error":"tooManyAttempts","retryAfter":s}`. Bad request (no JSON, too long, chunked): `400` / `413`. `Content-Type` other than `application/json`: `415`; an `Origin` header other than `http://<Host>`: `403` `{"error":"badOrigin"}` (a page of another site cannot spend the attempts of the projector's browser); neither counts as an attempt |
-| `GET /events` | valid cookie: `200`, `text/event-stream`, the stream (below). Missing or unknown token: `401`. Too many streams: `503` + `Retry-After: 5` |
+| `POST /join` | body `{"code":"K7M Q2X"}` (JSON). Right code: `204` + `Set-Cookie: ardoise_share=<token>; Path=/; HttpOnly; SameSite=Strict`. Wrong: `403` `{"error":"wrongCode","remaining":n}`. Too many attempts: `429` + `Retry-After: s`, `{"error":"tooManyAttempts","retryAfter":s}`. Bad request (no JSON, too long, chunked): `400` / `413`. `Content-Type` other than `application/json`: `415`; an `Origin` header other than `http://<Host>` (the `Host` already checked, see above): `403` `{"error":"badOrigin"}` (a page of another site cannot spend the attempts of the projector's browser); neither counts as an attempt |
+| `GET /events` | valid cookie: `200`, `text/event-stream`, the stream (below). Missing or unknown token: `401`. Too many streams, or this address opened streams too often: `503` + `Retry-After` |
 
 Headers of every answer: `Connection: close`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
 `Cache-Control: no-store` (assets: `public, max-age=31536000, immutable`, their names carry a hash). `viewer.html`
@@ -112,15 +156,25 @@ bytes. The server only ever does `map.get(path)`: `/assets/../x`, `/assets/%2e%2
   `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no `0 O 1 I L`): 31⁶ ≈ 8.9 × 10⁸ codes. New for each share. Shown as two
   groups of three (`K7M Q2X`); the page accepts it in any case, with or without spaces or a dash.
 - **Token**: 32 random bytes in hex, one per successful join, valid until the share stops; at most 8 per address
-  (an address's new join forgets its own oldest, never another address's) and 256 in all. Compared in constant
-  time.
+  (an address's new join forgets its own oldest, never another address's) and 256 in all (then the oldest token of
+  the address that holds the most is forgotten: an address with a single token, the projector, keeps it while
+  others hold several). Compared in constant time. An address that holds a token may use the reserved connection
+  slots (above).
 - **Attempts**, per IP address: at most **5 wrong codes in 5 minutes**; the 6th attempt (right or wrong) within the
   window gets `429` with the seconds until the oldest wrong code is 5 minutes old. A right code clears the
   address's record. At most 4 096 addresses remembered: when all have running records, nothing is evicted and a
-  new address gets `429` until the first record expires (cycling through addresses gains nothing). Per address
-  only: a classmate's PC can lock itself out, never the projector's PC. Brute force: the code changes at each
-  share; during a share of one hour, 100 PCs each trying all the time (1 code a minute) make 6 000 tries out of
-  8.9 × 10⁸ codes, about 1 chance in 150 000.
+  new address gets `429` until the first record expires (cycling through addresses gains nothing). **Nearby
+  addresses have room of their own**: an address on the same /24 network as one of this PC's addresses (found at
+  share start by `addresses::local_ipv4()`), or one of the first 64 addresses that joined, keeps its record in a
+  second table that is never full by construction (at most 254 addresses per address of this PC, plus 64). PCs with
+  thousands of addresses elsewhere on a large network therefore cannot keep the projector of the classroom's
+  network from typing the code; nearby addresses still have their 5 wrong codes in 5 minutes. Per address only: a
+  classmate's PC can lock itself out, never the projector's PC.
+- **Brute force**: the code changes at each share; it is one of 31⁶ = 887 503 681. With N addresses, at most 5·N
+  tries per 5 minutes (60·N an hour): 100 PCs trying all the time make 6 000 tries an hour, about 1 chance in
+  148 000. However many addresses an attacker has, the two tables hold at most 4 096 + 254 per address of this PC
+  + 64 running records: with one address, at most 4 414 × 60 ≈ 265 000 tries an hour, about 1 chance in 3 350 per
+  hour of share (an attacker with thousands of addresses on the network).
 - The page and its assets are public (they are the GPL viewer, no data); only `/events` needs the token.
 
 ### The event stream
@@ -352,7 +406,13 @@ written and flushed per message) → LAN → `fetch` reader → `LiveState` → 
   allowed again after the window, with an injected clock in the unit tests), 404 for every other path including
   traversal and encoded variants and other methods, snapshot then increments for a late joiner, live batches,
   note full then append, pause (frozen, late joiner during pause, resume), waiting, stop (streams get `end`, port
-  refused), slow viewer disconnected without blocking the sender, limits (header size), latency median.
+  refused), slow viewer disconnected without blocking the sender, limits (header size), latency median. Other PCs
+  are clients bound to other loopback addresses (`127.0.0.2`…: Windows and Linux route all of `127.0.0.0/8` to
+  loopback): hostile PCs holding every shared slot and reconnecting at once while the projector loads the page,
+  joins and opens its stream; PCs without the code never taking the reserved slots; the stream rate (`503`, another
+  address unaffected, one more after the interval); `421` for foreign `Host` values (no attempt counted); a socket
+  with `SO_REUSEADDR` that tries to take the port; a share started again at once on the same port. Unit tests for
+  the slot choice, the nearby attempts table, the token limit and the stream rate (injected clock).
 - App (Linux): settings `[share] port`, manifest walk (`viewer_assets` with a fake manifest), stripping of live
   batches, note diff (append / full), a share started with a real `LiveHub` and a TCP client receiving live points
   without any path.
@@ -390,8 +450,21 @@ Server (package A):
   limit: with a VPN that takes the default route, its address may come first (the panel lists every address).
 - After the independent review: the per-address limits, no eviction from the attempts table, tokens per address,
   `Content-Type` and `Origin` on `/join`, heads parsed only when complete, the bytes of messages being written
-  counted against the queue limit, and at stop a message being written gets 400 ms to finish before `end`. No
-  `Host` check (DNS rebinding would still need the code). `on_change` must not call `stop()`.
+  counted against the queue limit, and at stop a message being written gets 400 ms to finish before `end`.
+  `on_change` must not call `stop()`.
+- After the second review (findings A–E): the 16 slots reserved for addresses holding a token and the fair-share
+  rule above (a few PCs holding every slot with requests they never finish kept the projector out); answers within
+  5 s instead of 30 s; the `Host` check (`421`; it replaces "no `Host` check" above); the nearby table of attempts
+  and the corrected brute-force figures; the token limit forgetting from the address that holds the most;
+  `SO_EXCLUSIVEADDRUSE` on Windows; the stream rate per address.
+  - A first version protected requests younger than 2 s from being closed to make room. Dropped: PCs that recycle
+    their connections every second keep them all young, and a newcomer then finds nothing to close. Fair share
+    needs no age.
+  - The real-TCP test with hostile PCs on other loopback addresses found that "the oldest connection that has not
+    sent its head" must also follow fair share: a hostile PC reconnecting at once took the slot of the projector's
+    connection in the instant between its accept and its request head. It now takes only one of its own address or
+    of an address that holds more.
+  - The firewall rule follows the program's path: said in the guide and in H4.
 
 App (package B) and review fixes:
 

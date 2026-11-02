@@ -405,9 +405,12 @@ lui-même.
 - *La fenêtre a été fermée sans choisir.* Ouvrez **Pare-feu Windows Defender** > **Autoriser une application ou une
   fonctionnalité via le Pare-feu Windows Defender** > **Modifier les paramètres** > **Autoriser une autre
   application…** > **Parcourir…** > `ardoise.exe`, puis cochez **Privé** (et **Public** si besoin) pour Ardoise.
-- Le *port est fixe* (8765, réglage `port` de la section `[share]` de `ardoise.toml`) : l'autorisation reste donc
-  valable d'un partage à l'autre. Windows l'attache à l'emplacement de `ardoise.exe` : si vous déplacez ou copiez le
-  programme ailleurs, il peut la redemander.
+- Windows attache cette autorisation au *programme*, à son emplacement : `ardoise.exe` dans ce dossier, quel que soit
+  le port. Si vous déplacez ou renommez `ardoise.exe`, ou lancez une autre copie, Windows repose la question :
+  répondez de la même façon. Changer de port ne la repose pas.
+- Le *port est fixe* (8765, réglage `port` de la section `[share]` de `ardoise.toml`) : l'adresse reste la même d'un
+  partage à l'autre, et le service informatique peut ouvrir ce port. Aucun autre programme ne peut prendre ce port
+  pendant un partage.
 - Si un autre programme utilise déjà ce port, Ardoise le dit et ne démarre pas le partage : fermez l'autre programme,
   ou changez le port dans `ardoise.toml` (par exemple `[share]`, puis `port = 8766` sur la ligne suivante), puis
   relancez le partage.
@@ -427,7 +430,11 @@ l'adresse *et* le code.
   autre jour : elle peut changer.
 - Le pare-feu a-t-il été autorisé pour ce type de réseau (voir plus haut) ? C'est la cause la plus fréquente.
 - La page dit que le code est incorrect : relisez le code du panneau (il n'y a ni `0`, ni `O`, ni `1`, ni `I`, ni `L`).
-- La page dit qu'il y a trop d'écrans : le partage accepte 32 écrans à la fois.
+- La page dit qu'il y a trop d'écrans : le partage accepte 32 écrans à la fois (4 par ordinateur). Elle réessaie
+  toute seule toutes les 5 secondes.
+- Le navigateur affiche seulement « Misdirected Request » : tapez l'adresse en chiffres que montre le panneau. Par
+  sécurité, le partage refuse les noms avec un point (comme `pc.ecole.lan`) ; il accepte le nom court de
+  l'ordinateur, si le réseau le connaît.
 - Un logiciel de sécurité ou le réseau de l'école peut aussi bloquer les connexions entre ordinateurs : demandez au
   service informatique d'ouvrir le port 8765 vers votre PC.
 

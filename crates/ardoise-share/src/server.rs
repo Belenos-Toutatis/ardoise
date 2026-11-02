@@ -4,10 +4,14 @@
 //! that reads one request head (bounded in size and time) and answers it, or holds the event
 //! stream open. A watch channel tells every task that the share stops.
 //!
-//! One machine of the network must not be able to take the share from the others: connections
-//! and event streams are limited per address, a request must start within 3 s, and when every
-//! connection slot is taken the oldest connection still waiting for its request head makes room
-//! for the newcomer (an event stream, or a request being answered, is never closed for that).
+//! One machine of the network must not be able to take the share from the others (a hostile
+//! classmate's PC must never keep the projector's PC out): connections and event streams are
+//! limited per address, a request must start within 3 s and be answered within 5 s, part of
+//! the connection slots is kept for addresses that joined with the code, and when there is no
+//! room a connection is closed for the newcomer by fair share: one still waiting for its request
+//! head, else a request of the address that holds the most slots if it holds at least two more
+//! (never an event stream). An address may open an event stream only so often (each one copies
+//! the whole page).
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
@@ -19,18 +23,21 @@ use std::time::Duration;
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedWriteHalf;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::{Notify, watch};
 use tokio::task::JoinSet;
 use tokio::time::{Instant, MissedTickBehavior, timeout, timeout_at};
 
-use crate::access::{self, Access, Verdict};
+use crate::access::{self, Access, StreamRate, Verdict};
 use crate::content::{Content, Frame, JoinRefused, Viewer, end_frame};
 use crate::http::{self, ContentLength, Head, HeadError, ResponseHead};
 use crate::{Assets, Limits, LiveFeed, OnChange, ShareConfig, ShareError, ShareStatus};
 
-/// Time to write an answer (the largest is a WebAssembly file of a few hundred KB).
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Time to write an answer: the largest, a script of about 200 KB, takes milliseconds on a
+/// LAN; a client that does not read must not hold its slot long.
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Connections waiting to be accepted (std's value).
+const LISTEN_BACKLOG: u32 = 128;
 /// Time to write one batch of messages to an event stream before the viewer counts as gone.
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(15);
 /// After an answer, how long (and how many bytes) the client's leftovers are read before the
@@ -59,7 +66,11 @@ pub(crate) struct Server {
     pub content: Content,
     limits: Limits,
     assets: Assets,
+    /// This computer's name (Windows), accepted in the `Host` header besides IPv4 addresses
+    /// and `localhost`.
+    host_name: Option<String>,
     access: Mutex<Access>,
+    stream_rate: Mutex<StreamRate>,
     connections: Mutex<Connections>,
     shutdown: watch::Sender<bool>,
     on_change: OnChange,
@@ -84,25 +95,15 @@ pub(crate) fn start(
         Some(code) if !code.is_empty() => code,
         _ => access::random_code().map_err(|error| ShareError::Random(error.to_string()))?,
     };
-    let listener = std::net::TcpListener::bind(SocketAddrV4::new(config.bind, config.port))
-        .map_err(|error| match error.kind() {
-            // Also a port that Windows reserves (Hyper-V's excluded ranges answer "access
-            // denied"): the remedy is the same, another port.
-            std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied => {
-                ShareError::PortInUse { port: config.port }
-            }
-            _ => ShareError::Io(error),
-        })?;
-    listener.set_nonblocking(true)?;
-    let port = listener.local_addr()?.port();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
         .build()?;
     let listener = {
         let _context = runtime.enter();
-        TcpListener::from_std(listener)?
+        listen(SocketAddrV4::new(config.bind, config.port))?
     };
+    let port = listener.local_addr()?.port();
     let (shutdown, _) = watch::channel(false);
     let server = Arc::new(Server {
         port,
@@ -110,7 +111,12 @@ pub(crate) fn start(
         content: Content::new(feed, limits.streams, limits.streams_per_address),
         limits,
         assets,
-        access: Mutex::new(Access::new(code)),
+        host_name: http::computer_name(),
+        access: Mutex::new(Access::new(code, crate::addresses::local_ipv4())),
+        stream_rate: Mutex::new(StreamRate::new(
+            limits.stream_opens,
+            limits.stream_open_every,
+        )),
         connections: Mutex::new(Connections::default()),
         shutdown,
         on_change,
@@ -132,39 +138,121 @@ pub(crate) fn start(
     })
 }
 
-/// The connections open, oldest first, and how many come from each address.
+/// The listener on `address`, within the runtime's context. On Windows it takes the port for
+/// itself (`SO_EXCLUSIVEADDRUSE`): another program, even one that sets `SO_REUSEADDR`, cannot
+/// bind it too and take the connections. Elsewhere `SO_REUSEADDR`, as std and mio set it: a
+/// share started again at once binds the port despite its last connections in `TIME_WAIT`.
+fn listen(address: SocketAddrV4) -> Result<TcpListener, ShareError> {
+    let socket = TcpSocket::new_v4()?;
+    #[cfg(windows)]
+    exclusive_address_use(&socket)?;
+    #[cfg(not(windows))]
+    socket.set_reuseaddr(true)?;
+    socket
+        .bind(address.into())
+        .map_err(|error| match error.kind() {
+            // Also a port that Windows reserves (Hyper-V's excluded ranges answer "access
+            // denied"): the remedy is the same, another port.
+            std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied => {
+                ShareError::PortInUse {
+                    port: address.port(),
+                }
+            }
+            _ => ShareError::Io(error),
+        })?;
+    Ok(socket.listen(LISTEN_BACKLOG)?)
+}
+
+/// Sets `SO_EXCLUSIVEADDRUSE` on a socket not yet bound (no administrator rights needed).
+#[cfg(windows)]
+fn exclusive_address_use(socket: &TcpSocket) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawSocket;
+    use windows_sys::Win32::Networking::WinSock::{
+        SO_EXCLUSIVEADDRUSE, SOCKET, SOCKET_ERROR, SOL_SOCKET, setsockopt,
+    };
+    let enable: i32 = 1;
+    let raw = socket.as_raw_socket() as SOCKET;
+    // SAFETY: `raw` is the open socket that `socket` owns for the whole call; the option value
+    // points to a live `i32` and its length is that of an `i32`.
+    let result = unsafe {
+        setsockopt(
+            raw,
+            SOL_SOCKET,
+            SO_EXCLUSIVEADDRUSE,
+            (&raw const enable).cast(),
+            size_of::<i32>() as i32,
+        )
+    };
+    if result == SOCKET_ERROR {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// The connections open, oldest first, how many come from each address, and how many from
+/// addresses without a session token.
 #[derive(Default)]
 struct Connections {
     open: BTreeMap<u64, Connection>,
     per_address: HashMap<IpAddr, usize>,
+    untrusted: usize,
     next: u64,
+}
+
+/// What a connection is doing, for the choice of one to close when there is no room.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    /// Waiting for its request head: the first to make room (for its own address, or for one
+    /// that holds fewer slots).
+    Head,
+    /// Its request is read or answered (or the answer lingers): it makes room only for a
+    /// connection with a token when it has none, or by fair share.
+    Request,
+    /// An event stream: never closed to make room (the stream limits bound them).
+    Stream,
 }
 
 struct Connection {
     address: IpAddr,
-    /// It sent a whole request head: it is never closed to make room.
-    headed: bool,
+    /// Its address held a session token when it connected: it may take the reserved slots,
+    /// and a connection from an address without one never takes its slot.
+    trusted: bool,
+    phase: Phase,
     /// Closes it to make room for a newcomer.
     evict: Arc<Notify>,
 }
 
 impl Connections {
-    /// Takes a slot for a connection from `address`: its id and what closes it to make room.
-    /// `None`: closed at once (too many from this address, or every slot taken by connections
-    /// that sent their request head). When every slot is taken, the oldest connection still
-    /// waiting for its head is closed to make room.
-    fn admit(&mut self, address: IpAddr, limits: &Limits) -> Option<(u64, Arc<Notify>)> {
-        let from_address = self.per_address.get(&address).copied().unwrap_or(0);
-        if from_address >= limits.connections_per_address {
+    /// Slots held by `address`.
+    fn held(&self, address: IpAddr) -> usize {
+        self.per_address.get(&address).copied().unwrap_or(0)
+    }
+
+    /// Takes a slot for a connection from `address` (`trusted`: the address holds a session
+    /// token): its id and what closes it to make room. `None`: closed at once (too many from
+    /// this address, or no room and no connection to close for it). Without a token, an
+    /// address only takes the slots that are not reserved.
+    fn admit(
+        &mut self,
+        address: IpAddr,
+        trusted: bool,
+        limits: &Limits,
+    ) -> Option<(u64, Arc<Notify>)> {
+        let held = self.held(address);
+        if held >= limits.connections_per_address {
             return None;
         }
-        if self.open.len() >= limits.connections {
-            let oldest = self
-                .open
-                .iter()
-                .find(|(_, connection)| !connection.headed)
-                .map(|(id, _)| *id)?;
-            if let Some(evicted) = self.remove(oldest) {
+        let shared = limits.connections.saturating_sub(limits.reserved);
+        if self.open.len() >= limits.connections || (!trusted && self.untrusted >= shared) {
+            let victim = if trusted {
+                // A screen that joined comes first: the oldest connection without a token
+                // that is not an event stream, else fair share among those with one.
+                self.oldest_untrusted()
+                    .or_else(|| self.victim(address, held, true))
+            } else {
+                self.victim(address, held, false)
+            }?;
+            if let Some(evicted) = self.remove(victim) {
                 evicted.evict.notify_one();
             }
         }
@@ -175,20 +263,71 @@ impl Connections {
             id,
             Connection {
                 address,
-                headed: false,
+                trusted,
+                phase: Phase::Head,
                 evict: Arc::clone(&evict),
             },
         );
         *self.per_address.entry(address).or_default() += 1;
+        if !trusted {
+            self.untrusted += 1;
+        }
         Some((id, evict))
     }
 
-    /// The connection `id` sent its whole request head; false if it was closed to make room
-    /// meanwhile.
-    fn headed(&mut self, id: u64) -> bool {
+    /// The oldest connection without a token that is not an event stream (one still waiting
+    /// for its head first).
+    fn oldest_untrusted(&self) -> Option<u64> {
+        let candidates = || {
+            self.open
+                .iter()
+                .filter(|(_, c)| !c.trusted && c.phase != Phase::Stream)
+        };
+        candidates()
+            .find(|(_, c)| c.phase == Phase::Head)
+            .or_else(|| candidates().next())
+            .map(|(id, _)| *id)
+    }
+
+    /// The connection to close for a newcomer from `address`, which holds `held` slots, among
+    /// those whose address held a token (`trusted`) or not: the oldest one still waiting for
+    /// its request head, of the newcomer's own address or of one that holds more; else the
+    /// oldest request of the address that holds the most slots, if it holds at least two more
+    /// than the newcomer's. Fair share: an address that holds few always gets in, one that
+    /// holds as many as others never takes their slots (not even a connection that has just
+    /// opened and not yet sent its request), and two addresses that hold about as many never
+    /// take slots from each other back and forth.
+    fn victim(&self, address: IpAddr, held: usize, trusted: bool) -> Option<u64> {
+        let candidates = || {
+            self.open
+                .iter()
+                .filter(move |(_, connection)| connection.trusted == trusted)
+        };
+        let idle = candidates().find(|(_, c)| {
+            c.phase == Phase::Head && (c.address == address || self.held(c.address) > held)
+        });
+        if let Some((id, _)) = idle {
+            return Some(*id);
+        }
+        let mut best: Option<(usize, u64)> = None;
+        for (id, connection) in candidates() {
+            if connection.phase != Phase::Request {
+                continue;
+            }
+            let its = self.held(connection.address);
+            // Oldest first: a later connection replaces it only if its address holds more.
+            if best.is_none_or(|(most, _)| its > most) {
+                best = Some((its, *id));
+            }
+        }
+        best.filter(|(most, _)| *most >= held + 2).map(|(_, id)| id)
+    }
+
+    /// The connection `id` moves to `phase`; false if it was closed to make room meanwhile.
+    fn advance(&mut self, id: u64, phase: Phase) -> bool {
         match self.open.get_mut(&id) {
             Some(connection) => {
-                connection.headed = true;
+                connection.phase = phase;
                 true
             }
             None => false,
@@ -203,6 +342,9 @@ impl Connections {
             if *count.get() == 0 {
                 count.remove();
             }
+        }
+        if !connection.trusted {
+            self.untrusted = self.untrusted.saturating_sub(1);
         }
         Some(connection)
     }
@@ -259,7 +401,9 @@ impl Server {
                 Some(_) = tasks.join_next(), if !tasks.is_empty() => {}
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
-                        let admitted = lock(&self.connections).admit(peer.ip(), &self.limits);
+                        let trusted = lock(&self.access).holds_token(peer.ip());
+                        let admitted =
+                            lock(&self.connections).admit(peer.ip(), trusted, &self.limits);
                         // Not admitted: dropped, so closed at once.
                         let Some((id, evict)) = admitted else { continue };
                         let slot = Slot { server: Arc::clone(&self), id };
@@ -298,7 +442,7 @@ impl Server {
 
     async fn connection(
         self: Arc<Self>,
-        mut stream: TcpStream,
+        stream: TcpStream,
         peer: SocketAddr,
         id: u64,
         evict: Arc<Notify>,
@@ -308,36 +452,57 @@ impl Server {
         if *shutdown.borrow() {
             return;
         }
+        // Closed at once when it makes room for a newcomer (never once it is an event stream:
+        // then it is no longer chosen).
+        tokio::select! {
+            _ = self.serve(stream, peer, id, &mut shutdown) => {}
+            _ = evict.notified() => {}
+        }
+    }
+
+    /// Reads the request of the connection `id` and answers it (or holds its event stream).
+    async fn serve(
+        &self,
+        mut stream: TcpStream,
+        peer: SocketAddr,
+        id: u64,
+        shutdown: &mut watch::Receiver<bool>,
+    ) {
         let now = Instant::now();
         let deadline = now + self.limits.request;
         let first_byte = now + self.limits.first_byte;
         let read = tokio::select! {
             read = timeout_at(deadline, read_head(&mut stream, first_byte)) => read,
-            _ = evict.notified() => return,
-            _ = stopping(&mut shutdown) => return,
+            _ = stopping(shutdown) => return,
         };
         let (head, rest) = match read {
             Ok(Ok(request)) => request,
             Ok(Err(ReadError::Head(error))) => {
                 let answer = http::text(error.status(), &[]);
-                reply(stream, &answer, &[], &mut shutdown).await;
+                reply(stream, &answer, &[], shutdown).await;
                 return;
             }
             Ok(Err(ReadError::Gone)) | Err(_) => return,
         };
-        if !lock(&self.connections).headed(id) {
+        if !lock(&self.connections).advance(id, Phase::Request) {
+            return;
+        }
+        // A page of another site whose name was pointed at this PC (DNS rebinding) names its
+        // own host: it gets nothing, and spends no attempt.
+        if !head.host_allowed(self.port, self.host_name.as_deref()) {
+            reply(stream, &http::text(421, &[]), &[], shutdown).await;
             return;
         }
         let address = peer.ip();
         match (head.method.as_str(), head.path()) {
-            ("GET", "/events") => self.events(stream, &head, address, &mut shutdown).await,
+            ("GET", "/events") => self.events(stream, &head, address, id, shutdown).await,
             ("POST", "/join") => {
                 let answer = tokio::select! {
                     answer = timeout_at(deadline, self.join(&mut stream, &head, rest, address)) => answer,
-                    _ = stopping(&mut shutdown) => return,
+                    _ = stopping(shutdown) => return,
                 };
                 if let Ok(Some(answer)) = answer {
-                    reply(stream, &answer, &[], &mut shutdown).await;
+                    reply(stream, &answer, &[], shutdown).await;
                 }
             }
             ("GET", path) => {
@@ -357,12 +522,12 @@ impl Server {
                             head.header("Cache-Control", http::IMMUTABLE)
                         };
                         let bytes = Arc::clone(&asset.bytes);
-                        reply(stream, &head.finish(), &bytes, &mut shutdown).await;
+                        reply(stream, &head.finish(), &bytes, shutdown).await;
                     }
-                    None => reply(stream, &http::text(404, &[]), &[], &mut shutdown).await,
+                    None => reply(stream, &http::text(404, &[]), &[], shutdown).await,
                 }
             }
-            _ => reply(stream, &http::text(404, &[]), &[], &mut shutdown).await,
+            _ => reply(stream, &http::text(404, &[]), &[], shutdown).await,
         }
     }
 
@@ -437,13 +602,15 @@ impl Server {
         Some(answer)
     }
 
-    /// `GET /events`: checks the cookie, then holds the stream open until the viewer leaves,
-    /// is too slow, or the share stops.
+    /// `GET /events` on the connection `id`: checks the cookie and how often this address
+    /// opens streams, then holds the stream open until the viewer leaves, is too slow, or the
+    /// share stops.
     async fn events(
         &self,
         stream: TcpStream,
         head: &Head,
         address: IpAddr,
+        id: u64,
         shutdown: &mut watch::Receiver<bool>,
     ) {
         let authorised = {
@@ -454,6 +621,16 @@ impl Server {
         };
         if !authorised {
             reply(stream, &http::text(401, &[]), &[], shutdown).await;
+            return;
+        }
+        // Each new stream makes the app copy the whole page: a holder of the code looping on
+        // reconnections waits like a browser told "too many screens" (503, retried).
+        let now = std::time::Instant::now();
+        let allowed = lock(&self.stream_rate).check(address, now);
+        if let Err(wait) = allowed {
+            let seconds = access::whole_seconds(wait).to_string();
+            let answer = http::text(503, &[("Retry-After", &seconds)]);
+            reply(stream, &answer, &[], shutdown).await;
             return;
         }
         let viewer = match self.content.join(address) {
@@ -470,6 +647,10 @@ impl Server {
             content: &self.content,
             id: viewer.id(),
         };
+        lock(&self.stream_rate).spend(address, now);
+        if !lock(&self.connections).advance(id, Phase::Stream) {
+            return;
+        }
         stream_events(stream, &viewer, self.limits.ping, shutdown).await;
     }
 }
@@ -706,63 +887,263 @@ mod tests {
         Limits {
             connections,
             connections_per_address: per_address,
+            reserved: 0,
             ..Limits::default()
         }
+    }
+
+    /// Whether `evict` was told to close its connection.
+    fn evicted(evict: &Notify) -> bool {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            timeout(Duration::from_millis(10), evict.notified())
+                .await
+                .is_ok()
+        })
+    }
+
+    /// Admits a connection from `address` that sent its request head.
+    fn request(
+        connections: &mut Connections,
+        address: IpAddr,
+        trusted: bool,
+        limits: &Limits,
+    ) -> Option<(u64, Arc<Notify>)> {
+        let (id, evict) = connections.admit(address, trusted, limits)?;
+        assert!(connections.advance(id, Phase::Request));
+        Some((id, evict))
     }
 
     #[test]
     fn connections_per_address() {
         let limits = limits(64, 2);
         let mut connections = Connections::default();
-        let (first, _) = connections.admit(ip(1), &limits).unwrap();
-        connections.admit(ip(1), &limits).unwrap();
-        assert!(connections.admit(ip(1), &limits).is_none());
-        assert!(connections.admit(ip(2), &limits).is_some());
+        let (first, _) = connections.admit(ip(1), false, &limits).unwrap();
+        connections.admit(ip(1), false, &limits).unwrap();
+        assert!(connections.admit(ip(1), false, &limits).is_none());
+        assert!(connections.admit(ip(1), true, &limits).is_none());
+        assert!(connections.admit(ip(2), false, &limits).is_some());
         connections.remove(first);
-        assert!(connections.admit(ip(1), &limits).is_some());
+        assert!(connections.admit(ip(1), false, &limits).is_some());
         assert_eq!(connections.per_address[&ip(1)], 2);
+        assert_eq!(connections.untrusted, 3);
     }
 
     #[test]
     fn the_oldest_connection_without_a_head_makes_room() {
         let limits = limits(3, 8);
         let mut connections = Connections::default();
-        let (a, evict_a) = connections.admit(ip(1), &limits).unwrap();
-        let (b, evict_b) = connections.admit(ip(2), &limits).unwrap();
-        let (c, _) = connections.admit(ip(3), &limits).unwrap();
-        assert!(connections.headed(a), "a sent its head");
+        let (a, evict_a) = connections.admit(ip(1), false, &limits).unwrap();
+        let (b, evict_b) = connections.admit(ip(2), false, &limits).unwrap();
+        let (c, _) = connections.admit(ip(3), false, &limits).unwrap();
+        assert!(connections.advance(a, Phase::Request), "a sent its head");
         // Full: b, the oldest still waiting for its head, makes room.
-        let (d, _) = connections.admit(ip(4), &limits).unwrap();
+        let (d, _) = connections.admit(ip(4), false, &limits).unwrap();
         assert!(!connections.open.contains_key(&b));
         assert!(!connections.per_address.contains_key(&ip(2)));
-        assert!(!connections.headed(b), "b was closed meanwhile");
+        assert!(
+            !connections.advance(b, Phase::Request),
+            "b was closed meanwhile"
+        );
         connections.remove(b);
         assert_eq!(connections.open.len(), 3);
         // Then c.
-        connections.admit(ip(5), &limits).unwrap();
+        connections.admit(ip(5), false, &limits).unwrap();
         assert!(!connections.open.contains_key(&c));
-        // When every connection sent its head, the newcomer is refused.
-        assert!(connections.headed(d));
+        // When every connection sent its head and no address holds two more than the
+        // newcomer's, the newcomer is refused.
+        assert!(connections.advance(d, Phase::Request));
         let last = *connections.open.keys().last().unwrap();
-        assert!(connections.headed(last));
-        assert!(connections.admit(ip(6), &limits).is_none());
+        assert!(connections.advance(last, Phase::Request));
+        assert!(connections.admit(ip(6), false, &limits).is_none());
         assert_eq!(connections.open.len(), 3);
+        assert_eq!(connections.untrusted, 3);
         // The evicted connections were told; the others were not.
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
+        assert!(evicted(&evict_b));
+        assert!(!evicted(&evict_a));
+    }
+
+    #[test]
+    fn a_connection_waiting_for_its_head_makes_room_only_for_fewer_or_its_own() {
+        let limits = limits(3, 8);
+        let mut connections = Connections::default();
+        // A hostile address holds 2 requests; the projector has just connected and not yet
+        // sent its request (found in a real run: the hostile PC reconnecting took it).
+        for _ in 0..2 {
+            request(&mut connections, ip(66), false, &limits).unwrap();
+        }
+        let (_, fresh) = connections.admit(ip(1), false, &limits).unwrap();
+        // The hostile address holds more: it may not take it.
+        assert!(connections.admit(ip(66), false, &limits).is_none());
+        assert!(!evicted(&fresh));
+        // The projector's own next connection may (a browser's spare connection).
+        connections.admit(ip(1), false, &limits).unwrap();
+        assert!(evicted(&fresh));
+        assert_eq!(connections.held(ip(1)), 1);
+    }
+
+    #[test]
+    fn an_address_that_holds_few_takes_the_room_of_one_that_holds_many() {
+        let limits = limits(6, 4);
+        let mut connections = Connections::default();
+        // A hostile address holds 4 slots with requests it never finishes; another holds a
+        // request and an event stream.
+        let hostile: Vec<_> = (0..4)
+            .map(|_| request(&mut connections, ip(66), false, &limits).unwrap())
+            .collect();
+        let (_, other_evict) = request(&mut connections, ip(7), false, &limits).unwrap();
+        let (stream, stream_evict) = connections.admit(ip(7), false, &limits).unwrap();
+        connections.advance(stream, Phase::Stream);
+
+        // A newcomer takes the oldest slot of the address that holds the most (4 ≥ 0 + 2).
+        request(&mut connections, ip(1), false, &limits).unwrap();
+        assert!(evicted(&hostile[0].1));
+        assert_eq!(connections.held(ip(66)), 3);
+        // Again (3 ≥ 1 + 2).
+        request(&mut connections, ip(1), false, &limits).unwrap();
+        assert!(evicted(&hostile[1].1));
+        assert_eq!(connections.held(ip(66)), 2);
+        assert_eq!(connections.held(ip(1)), 2);
+        // Every address holds 2: nobody holds two more than anyone, nothing moves.
+        assert!(request(&mut connections, ip(1), false, &limits).is_none());
+        // The hostile address cannot take its slots back, even by reconnecting at once.
+        assert!(request(&mut connections, ip(66), false, &limits).is_none());
+        assert!(request(&mut connections, ip(66), false, &limits).is_none());
+        // A new address can (2 ≥ 0 + 2): the oldest request among the largest holders, which
+        // is the hostile address's (older than ip(1)'s).
+        request(&mut connections, ip(9), false, &limits).unwrap();
+        assert!(evicted(&hostile[2].1));
+        assert_eq!(connections.held(ip(1)), 2);
+        // The other address's request and its event stream were never touched.
+        assert!(!evicted(&other_evict));
+        assert!(!evicted(&stream_evict));
+        assert!(connections.open.contains_key(&stream));
+    }
+
+    #[test]
+    fn an_event_stream_never_makes_room() {
+        let limits = limits(2, 8);
+        let mut connections = Connections::default();
+        for _ in 0..2 {
+            let (id, _) = connections.admit(ip(66), false, &limits).unwrap();
+            connections.advance(id, Phase::Stream);
+        }
+        assert!(connections.admit(ip(1), false, &limits).is_none());
+        assert!(connections.admit(ip(1), true, &limits).is_none());
+    }
+
+    #[test]
+    fn addresses_without_a_token_never_take_the_reserved_slots() {
+        let limits = Limits {
+            reserved: 2,
+            ..limits(6, 8)
+        };
+        let mut connections = Connections::default();
+        // Without a token: 4 slots, the others are reserved.
+        let hostile: Vec<_> = (0..4)
+            .map(|_| request(&mut connections, ip(66), false, &limits).unwrap())
+            .collect();
+        assert_eq!(connections.untrusted, 4);
+        assert!(connections.admit(ip(66), false, &limits).is_none());
+        // Another address without a token takes one of these 4 slots (fair share), not a
+        // reserved one.
+        request(&mut connections, ip(5), false, &limits).unwrap();
+        assert!(evicted(&hostile[0].1));
+        assert_eq!(connections.untrusted, 4);
+        assert_eq!(connections.open.len(), 4);
+        // An address that joined takes the reserved slots without closing anything.
+        let (stream, _) = connections.admit(ip(1), true, &limits).unwrap();
+        connections.advance(stream, Phase::Stream);
+        let (_, page_evict) = request(&mut connections, ip(1), true, &limits).unwrap();
+        assert_eq!(connections.open.len(), 6);
+        assert!(!evicted(&hostile[1].1));
+        // Full: an address without a token takes the room of one without (the hostile address
+        // holds 3 ≥ 0 + 2), never of one with a token.
+        request(&mut connections, ip(9), false, &limits).unwrap();
+        assert!(evicted(&hostile[1].1));
+        assert!(!evicted(&page_evict));
+        assert_eq!(connections.untrusted, 4);
+        // With a token, it takes the room of the oldest without a token, whatever it holds.
+        request(&mut connections, ip(1), true, &limits).unwrap();
+        assert!(evicted(&hostile[2].1));
+        assert_eq!(connections.held(ip(1)), 3);
+        assert_eq!(connections.untrusted, 3);
+        assert!(!evicted(&page_evict));
+    }
+
+    #[test]
+    fn an_address_without_a_token_never_closes_one_with_a_token() {
+        let limits = Limits {
+            reserved: 2,
+            ..limits(4, 8)
+        };
+        let mut connections = Connections::default();
+        // With a token: a request and a connection that sent nothing yet.
+        let (_, request_evict) = request(&mut connections, ip(1), true, &limits).unwrap();
+        let (_, idle_evict) = connections.admit(ip(1), true, &limits).unwrap();
+        // Without a token: one still waiting for its head, one request.
+        let (_, waiting) = connections.admit(ip(2), false, &limits).unwrap();
+        let (_, other) = request(&mut connections, ip(3), false, &limits).unwrap();
+        // Full: a newcomer without a token takes the room of the one without a head of its
+        // kind…
+        request(&mut connections, ip(4), false, &limits).unwrap();
+        assert!(evicted(&waiting));
+        // …then finds nothing it may close: the connections with a token are never its to
+        // take, even the one waiting for its head, though ip(1) holds two more than ip(5).
+        assert!(connections.admit(ip(5), false, &limits).is_none());
+        assert!(!evicted(&request_evict));
+        assert!(!evicted(&idle_evict));
+        assert!(!evicted(&other));
+        assert_eq!(connections.untrusted, 2);
+        assert_eq!(connections.open.len(), 4);
+    }
+
+    /// The listener holds `SO_EXCLUSIVEADDRUSE` (read back from the socket).
+    #[cfg(windows)]
+    #[test]
+    fn the_listener_takes_its_port_for_itself() {
+        use std::os::windows::io::AsRawSocket;
+        use windows_sys::Win32::Networking::WinSock::{
+            SO_EXCLUSIVEADDRUSE, SOCKET, SOL_SOCKET, getsockopt,
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
             .build()
             .unwrap();
-        rt.block_on(async {
-            assert!(
-                timeout(Duration::from_millis(10), evict_b.notified())
-                    .await
-                    .is_ok()
-            );
-            assert!(
-                timeout(Duration::from_millis(10), evict_a.notified())
-                    .await
-                    .is_err()
-            );
-        });
+        let _context = runtime.enter();
+        let listener = listen(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut value: i32 = 0;
+        let mut length = size_of::<i32>() as i32;
+        // SAFETY: the socket is open for the call; `value` and `length` are live and sized.
+        let result = unsafe {
+            getsockopt(
+                listener.as_raw_socket() as SOCKET,
+                SOL_SOCKET,
+                SO_EXCLUSIVEADDRUSE,
+                (&raw mut value).cast(),
+                &raw mut length,
+            )
+        };
+        assert_eq!(result, 0);
+        assert_eq!(value, 1);
+    }
+
+    #[test]
+    fn among_addresses_with_a_token_fair_share_too() {
+        let limits = Limits {
+            reserved: 1,
+            ..limits(3, 8)
+        };
+        let mut connections = Connections::default();
+        let first: Vec<_> = (0..3)
+            .map(|_| request(&mut connections, ip(1), true, &limits).unwrap())
+            .collect();
+        // No connection without a token to close: fair share among those with one.
+        request(&mut connections, ip(2), true, &limits).unwrap();
+        assert!(evicted(&first[0].1));
+        assert!(request(&mut connections, ip(2), true, &limits).is_none());
     }
 }

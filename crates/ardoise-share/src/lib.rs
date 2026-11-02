@@ -200,16 +200,27 @@ impl ShareError {
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-    /// Connections open at once. When all are taken, the oldest connection that has not yet
-    /// sent a whole request head is closed for the newcomer; if every one has, the newcomer is
-    /// closed at once.
+    /// Connections open at once. When there is no room, a connection is closed for the
+    /// newcomer (fair share): the oldest one that has not yet sent a whole request head, of the
+    /// newcomer's address or of one that holds more connections; else the oldest request of the
+    /// address that holds the most, if it holds at least two more than the newcomer's (and an
+    /// address holding a session token takes the room of one without first); never an event
+    /// stream. Otherwise the newcomer is closed at once.
     pub connections: usize,
+    /// Of [`Limits::connections`], the slots that only an address holding a session token may
+    /// take: a screen that has joined always finds room, whatever the PCs without the code do.
+    pub reserved: usize,
     /// Connections open at once from one address (more are closed at once).
     pub connections_per_address: usize,
     /// Event streams open at once (more get 503).
     pub streams: usize,
     /// Event streams open at once from one address (more get 503).
     pub streams_per_address: usize,
+    /// Event streams one address may open in a row (more get 503): each new stream makes the
+    /// app copy and serialise the whole page.
+    pub stream_opens: u32,
+    /// Then one more stream per address every this long.
+    pub stream_open_every: Duration,
     /// Time for the first byte of a request to arrive.
     pub first_byte: Duration,
     /// Time for the whole request head (and the body of `POST /join`) to arrive.
@@ -222,9 +233,12 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             connections: 64,
+            reserved: 16,
             connections_per_address: 8,
             streams: 32,
             streams_per_address: 4,
+            stream_opens: 8,
+            stream_open_every: Duration::from_secs(2),
             first_byte: Duration::from_secs(3),
             request: Duration::from_secs(10),
             ping: Duration::from_secs(15),

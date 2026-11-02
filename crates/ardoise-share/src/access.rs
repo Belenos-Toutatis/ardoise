@@ -1,10 +1,11 @@
 //! Who may read the event stream (`docs/design/lan-share.md`, "Access: code, token, attempts"):
-//! the 6-character code, the session tokens it gives, and the limit of wrong codes per address.
+//! the 6-character code, the session tokens it gives, the limit of wrong codes per address, and
+//! how often an address may open a stream.
 //!
 //! Time is passed in (`now`) so that the tests can move the clock.
 
 use std::collections::{HashMap, VecDeque};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 /// The 31 unambiguous symbols of a code (no `0 O 1 I L`).
@@ -18,13 +19,21 @@ pub(crate) const WINDOW: Duration = Duration::from_secs(5 * 60);
 /// Session tokens kept per address: a new join from an address that has as many forgets that
 /// address's oldest token, so that one address can never push out the others' tokens.
 pub(crate) const MAX_TOKENS_PER_ADDRESS: usize = 8;
-/// Session tokens kept in all (a last resort: 32 addresses at their own limit; the oldest is
-/// forgotten first).
+/// Session tokens kept in all (a last resort: 32 addresses at their own limit). When full, the
+/// oldest token of the address that holds the most is forgotten: an address with a single
+/// token (the projector) keeps it while others hold several.
 pub(crate) const MAX_TOKENS: usize = 256;
 /// Addresses whose wrong codes are remembered. When it is full of records still running, an
 /// address without one gets 429 until the first record expires: nothing is forgotten early,
-/// which would let many addresses reset each other's count.
+/// which would let many addresses reset each other's count. Nearby addresses have a table of
+/// their own (see [`Access::try_code`]).
 pub(crate) const MAX_ADDRESSES: usize = 4096;
+/// Addresses that joined, remembered (the first ones) so that they always have room to try a
+/// code again.
+pub(crate) const MAX_JOINED: usize = 64;
+/// Addresses whose stream openings are counted ([`StreamRate`]); each is forgotten once its
+/// allowance is whole again.
+pub(crate) const MAX_RATE_ADDRESSES: usize = 4096;
 
 /// Random bytes accepted by the rejection sampling: the largest multiple of 31 that fits in a
 /// byte, so that every symbol is equally likely.
@@ -95,47 +104,71 @@ pub(crate) struct Access {
     code: String,
     /// Tokens given, oldest first, with the address that joined.
     tokens: VecDeque<(IpAddr, String)>,
+    /// Recent wrong codes of the other addresses: at most [`MAX_ADDRESSES`].
     wrong: HashMap<IpAddr, VecDeque<Instant>>,
+    /// Recent wrong codes of the nearby addresses (see [`Access::is_near`]): never refused for
+    /// want of room, and bounded by construction (254 per address of this PC, plus
+    /// [`MAX_JOINED`]).
+    near: HashMap<IpAddr, VecDeque<Instant>>,
+    /// This PC's addresses when the share started: their /24 networks are "nearby".
+    local: Vec<Ipv4Addr>,
+    /// The first addresses that joined.
+    joined: Vec<IpAddr>,
 }
 
 impl Access {
-    pub fn new(code: String) -> Self {
+    /// `local`: this PC's IPv4 addresses (their /24 networks keep room in the attempts table).
+    pub fn new(code: String, local: Vec<Ipv4Addr>) -> Self {
         Self {
             code,
             tokens: VecDeque::new(),
             wrong: HashMap::new(),
+            near: HashMap::new(),
+            local,
+            joined: Vec::new(),
+        }
+    }
+
+    /// Whether `address` counts its wrong codes in the reserved table: it is on the same /24
+    /// network as one of this PC's addresses (at most 254 such addresses each, however many
+    /// addresses a PC elsewhere takes), or it already joined (it had the code). The projector,
+    /// usually in the classroom's network, can then always try the code, even when PCs with
+    /// thousands of addresses fill the general table.
+    fn is_near(&self, address: IpAddr) -> bool {
+        let same_network = match address {
+            IpAddr::V4(v4) => self
+                .local
+                .iter()
+                .any(|local| u32::from(*local) >> 8 == u32::from(v4) >> 8),
+            IpAddr::V6(_) => false,
+        };
+        same_network || self.joined.contains(&address)
+    }
+
+    /// The table of wrong codes of `address`'s kind.
+    fn table(&mut self, near: bool) -> &mut HashMap<IpAddr, VecDeque<Instant>> {
+        if near {
+            &mut self.near
+        } else {
+            &mut self.wrong
         }
     }
 
     /// Checks a code typed from `address` at `now`.
     pub fn try_code(&mut self, address: IpAddr, typed: &str, now: Instant) -> Verdict {
-        if let Some(times) = self.wrong.get_mut(&address) {
-            forget_old(times, now);
-            if times.len() >= MAX_WRONG {
-                let oldest = times.front().copied().unwrap_or(now);
-                return Verdict::TooMany {
-                    retry_after: seconds_until_expiry(oldest, now),
-                };
-            }
-        } else if self.wrong.len() >= MAX_ADDRESSES {
-            // A new address and no room to count its attempts: refused before the code is
-            // compared, or the limit could be dodged from new addresses.
-            self.wrong.retain(|_, times| {
-                forget_old(times, now);
-                !times.is_empty()
-            });
-            if self.wrong.len() >= MAX_ADDRESSES {
-                let first_to_expire = self.wrong.values().filter_map(|t| t.back().copied()).min();
-                return Verdict::TooMany {
-                    retry_after: seconds_until_expiry(first_to_expire.unwrap_or(now), now),
-                };
-            }
+        let near = self.is_near(address);
+        if let Some(refused) = self.refusal(address, near, now) {
+            return refused;
         }
         if constant_time_eq(normalize_code(typed).as_bytes(), self.code.as_bytes()) {
             self.wrong.remove(&address);
+            self.near.remove(&address);
+            if self.joined.len() < MAX_JOINED && !self.joined.contains(&address) {
+                self.joined.push(address);
+            }
             return Verdict::Right;
         }
-        let times = self.wrong.entry(address).or_default();
+        let times = self.table(near).entry(address).or_default();
         times.push_back(now);
         let remaining = MAX_WRONG.saturating_sub(times.len());
         Verdict::Wrong {
@@ -143,8 +176,38 @@ impl Access {
         }
     }
 
+    /// `TooMany` if `address` may not try a code at `now`: too many wrong codes lately, or a
+    /// new address of the general kind while its table is full.
+    fn refusal(&mut self, address: IpAddr, near: bool, now: Instant) -> Option<Verdict> {
+        let table = self.table(near);
+        if let Some(times) = table.get_mut(&address) {
+            forget_old(times, now);
+            if times.len() >= MAX_WRONG {
+                let oldest = times.front().copied().unwrap_or(now);
+                return Some(Verdict::TooMany {
+                    retry_after: seconds_until_expiry(oldest, now),
+                });
+            }
+        } else if !near && table.len() >= MAX_ADDRESSES {
+            // A new address and no room to count its attempts: refused before the code is
+            // compared, or the limit could be dodged from new addresses.
+            table.retain(|_, times| {
+                forget_old(times, now);
+                !times.is_empty()
+            });
+            if table.len() >= MAX_ADDRESSES {
+                let first_to_expire = table.values().filter_map(|t| t.back().copied()).min();
+                return Some(Verdict::TooMany {
+                    retry_after: seconds_until_expiry(first_to_expire.unwrap_or(now), now),
+                });
+            }
+        }
+        None
+    }
+
     /// Keeps a token given to a viewer at `address`: at most [`MAX_TOKENS_PER_ADDRESS`] per
-    /// address (that address's oldest is forgotten), [`MAX_TOKENS`] in all.
+    /// address (that address's oldest is forgotten), [`MAX_TOKENS`] in all (the oldest token of
+    /// the address that holds the most is forgotten).
     pub fn add_token(&mut self, address: IpAddr, token: String) {
         let own = self.tokens.iter().filter(|(a, _)| *a == address).count();
         if own >= MAX_TOKENS_PER_ADDRESS
@@ -153,7 +216,23 @@ impl Access {
             self.tokens.remove(index);
         }
         while self.tokens.len() >= MAX_TOKENS {
-            self.tokens.pop_front();
+            let mut held: HashMap<IpAddr, usize> = HashMap::new();
+            for (a, _) in &self.tokens {
+                *held.entry(*a).or_default() += 1;
+            }
+            let most = held.values().copied().max().unwrap_or(0);
+            match self
+                .tokens
+                .iter()
+                .position(|(a, _)| held.get(a) == Some(&most))
+            {
+                Some(index) => {
+                    self.tokens.remove(index);
+                }
+                None => {
+                    self.tokens.pop_front();
+                }
+            }
         }
         self.tokens.push_back((address, token));
     }
@@ -165,17 +244,91 @@ impl Access {
         })
     }
 
+    /// True if a token given to `address` is still valid: its connections may use the slots
+    /// reserved for screens that joined.
+    pub fn holds_token(&self, address: IpAddr) -> bool {
+        self.tokens.iter().any(|(a, _)| *a == address)
+    }
+
     /// Addresses remembered (tests).
     #[cfg(test)]
     fn addresses(&self) -> usize {
-        self.wrong.len()
+        self.wrong.len() + self.near.len()
     }
+}
+
+/// How often each address may open an event stream: [`Limits::stream_opens`] in a row, then one
+/// more every [`Limits::stream_open_every`] (a token bucket, kept as the time at which the
+/// address's allowance is whole again: the "generic cell rate algorithm").
+///
+/// [`Limits::stream_opens`]: crate::Limits::stream_opens
+/// [`Limits::stream_open_every`]: crate::Limits::stream_open_every
+#[derive(Debug)]
+pub(crate) struct StreamRate {
+    every: Duration,
+    /// How far ahead of now an address's "whole again" time may be: `every × (burst − 1)`.
+    tolerance: Duration,
+    /// When the allowance of each address is whole again; only addresses for which that is
+    /// still to come are kept.
+    whole_at: HashMap<IpAddr, Instant>,
+}
+
+impl StreamRate {
+    pub fn new(burst: u32, every: Duration) -> Self {
+        Self {
+            every,
+            tolerance: every.saturating_mul(burst.max(1) - 1),
+            whole_at: HashMap::new(),
+        }
+    }
+
+    /// `Ok` if `address` may open a stream at `now`, else how long to wait.
+    pub fn check(&self, address: IpAddr, now: Instant) -> Result<(), Duration> {
+        let ahead = self
+            .whole_at
+            .get(&address)
+            .map_or(Duration::ZERO, |whole| whole.saturating_duration_since(now));
+        if ahead > self.tolerance {
+            Err(ahead - self.tolerance)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Counts a stream opened by `address` at `now` (after [`StreamRate::check`] allowed it).
+    pub fn spend(&mut self, address: IpAddr, now: Instant) {
+        if !self.whole_at.contains_key(&address) && self.whole_at.len() >= MAX_RATE_ADDRESSES {
+            self.whole_at.retain(|_, whole| *whole > now);
+            if self.whole_at.len() >= MAX_RATE_ADDRESSES {
+                // Thousands of addresses holding the code, all within a few seconds: not
+                // counted rather than refused (the connection limits still hold).
+                return;
+            }
+        }
+        let start = self
+            .whole_at
+            .get(&address)
+            .copied()
+            .map_or(now, |whole| whole.max(now));
+        let whole = start.checked_add(self.every).unwrap_or(start);
+        self.whole_at.insert(address, whole);
+    }
+
+    /// Addresses counted (tests).
+    #[cfg(test)]
+    fn addresses(&self) -> usize {
+        self.whole_at.len()
+    }
+}
+
+/// Whole seconds (at least 1) in `wait`, for a `Retry-After` header.
+pub(crate) fn whole_seconds(wait: Duration) -> u64 {
+    (wait.as_secs() + u64::from(wait.subsec_nanos() > 0)).max(1)
 }
 
 /// Whole seconds (at least 1) until a wrong code made at `at` stops counting.
 fn seconds_until_expiry(at: Instant, now: Instant) -> u64 {
-    let wait = WINDOW.saturating_sub(now.saturating_duration_since(at));
-    (wait.as_secs() + u64::from(wait.subsec_nanos() > 0)).max(1)
+    whole_seconds(WINDOW.saturating_sub(now.saturating_duration_since(at)))
 }
 
 /// Drops the wrong codes older than [`WINDOW`].
@@ -266,7 +419,7 @@ mod tests {
         );
         assert_ne!(token, random_token().unwrap());
 
-        let mut access = Access::new("ABCDEF".into());
+        let mut access = Access::new("ABCDEF".into(), Vec::new());
         assert!(!access.token_valid(&token));
         access.add_token(ip(1), token.clone());
         assert!(access.token_valid(&token));
@@ -276,7 +429,7 @@ mod tests {
 
     #[test]
     fn one_address_cannot_push_out_the_others_tokens() {
-        let mut access = Access::new("ABCDEF".into());
+        let mut access = Access::new("ABCDEF".into(), Vec::new());
         let first = random_token().unwrap();
         access.add_token(ip(1), first.clone());
         let mut own = Vec::new();
@@ -295,23 +448,159 @@ mod tests {
         assert!(old.iter().all(|t| !access.token_valid(t)));
         assert_eq!(access.tokens.len(), 1 + MAX_TOKENS_PER_ADDRESS);
 
-        // The global limit, as a last resort: 40 addresses at their own limit.
-        let mut access = Access::new("ABCDEF".into());
+        // The global limit, as a last resort: one address with a single token (the projector),
+        // then 40 addresses at their own limit. Tokens are taken from the addresses that hold
+        // the most, oldest first: the single token stays, every address keeps some.
+        let mut access = Access::new("ABCDEF".into(), Vec::new());
+        let projector = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let single = random_token().unwrap();
+        access.add_token(projector, single.clone());
         for a in 0..40u8 {
             for _ in 0..MAX_TOKENS_PER_ADDRESS {
                 access.add_token(ip(a), random_token().unwrap());
             }
         }
         assert_eq!(access.tokens.len(), MAX_TOKENS);
-        assert!(
-            access.tokens.iter().all(|(a, _)| *a >= ip(8)),
-            "the oldest forgotten"
+        assert!(access.token_valid(&single));
+        assert!(access.holds_token(projector));
+        for a in 0..40u8 {
+            let held = access.tokens.iter().filter(|(t, _)| *t == ip(a)).count();
+            assert!((6..=MAX_TOKENS_PER_ADDRESS).contains(&held), "{a}: {held}");
+        }
+        assert!(!access.holds_token(ip(200)));
+    }
+
+    #[test]
+    fn nearby_addresses_always_have_room_to_try() {
+        let local = Ipv4Addr::new(192, 168, 1, 23);
+        let mut access = Access::new("K7MQ2X".into(), vec![local]);
+        let start = Instant::now();
+        // PCs elsewhere fill the general table.
+        let far = |i: u32| IpAddr::V4(Ipv4Addr::from(0x0a00_0000 + i));
+        for i in 0..MAX_ADDRESSES as u32 {
+            access.try_code(far(i), "WRONG1", start);
+        }
+        let later = start + Duration::from_secs(10);
+        let stranger = IpAddr::V4(Ipv4Addr::new(172, 16, 0, 9));
+        assert_eq!(
+            access.try_code(stranger, "K7MQ2X", later),
+            Verdict::TooMany { retry_after: 290 }
         );
+        // The same /24 as this PC: counted, and the right code works.
+        assert_eq!(
+            access.try_code(ip(40), "WRONG1", later),
+            Verdict::Wrong { remaining: 4 }
+        );
+        assert_eq!(access.try_code(ip(41), "k7m q2x", later), Verdict::Right);
+        // Still limited to 5 wrong codes in 5 minutes.
+        for remaining in (0..4).rev() {
+            assert_eq!(
+                access.try_code(ip(40), "WRONG1", later),
+                Verdict::Wrong { remaining }
+            );
+        }
+        assert_eq!(
+            access.try_code(ip(40), "K7MQ2X", later),
+            Verdict::TooMany { retry_after: 300 }
+        );
+        // Another /24 is not near.
+        let neighbour = IpAddr::V4(Ipv4Addr::new(192, 168, 2, 5));
+        assert!(matches!(
+            access.try_code(neighbour, "K7MQ2X", later),
+            Verdict::TooMany { .. }
+        ));
+        assert_eq!(access.wrong.len(), MAX_ADDRESSES);
+    }
+
+    #[test]
+    fn addresses_that_joined_always_have_room_to_try() {
+        let mut access = Access::new("K7MQ2X".into(), Vec::new());
+        let start = Instant::now();
+        let projector = IpAddr::V4(Ipv4Addr::new(172, 20, 5, 7));
+        assert_eq!(access.try_code(projector, "K7MQ2X", start), Verdict::Right);
+        let far = |i: u32| IpAddr::V4(Ipv4Addr::from(0x0a00_0000 + i));
+        for i in 0..MAX_ADDRESSES as u32 {
+            access.try_code(far(i), "WRONG1", start);
+        }
+        // The projector, which joined before, may try again (after a new share of its token,
+        // a lost cookie…); its wrong codes still count.
+        assert_eq!(
+            access.try_code(projector, "WRONG1", start),
+            Verdict::Wrong { remaining: 4 }
+        );
+        assert_eq!(access.try_code(projector, "K7MQ2X", start), Verdict::Right);
+        // Only the first addresses that joined are remembered.
+        let mut access = Access::new("K7MQ2X".into(), Vec::new());
+        for i in 0..(MAX_JOINED as u32 + 10) {
+            assert_eq!(access.try_code(far(i), "K7MQ2X", start), Verdict::Right);
+        }
+        assert_eq!(access.joined.len(), MAX_JOINED);
+        assert!(access.is_near(far(0)));
+        assert!(!access.is_near(far(MAX_JOINED as u32)));
+    }
+
+    #[test]
+    fn stream_openings_per_address() {
+        let every = Duration::from_secs(2);
+        let mut rate = StreamRate::new(3, every);
+        let start = Instant::now();
+        let a = ip(1);
+        for _ in 0..3 {
+            assert_eq!(rate.check(a, start), Ok(()));
+            rate.spend(a, start);
+        }
+        // The fourth in a row waits for the next one: 2 s.
+        assert_eq!(rate.check(a, start), Err(every));
+        assert_eq!(whole_seconds(every), 2);
+        // Another address is not affected.
+        assert_eq!(rate.check(ip(2), start), Ok(()));
+        // 1.5 s later, half a second more.
+        let later = start + Duration::from_millis(1500);
+        assert_eq!(rate.check(a, later), Err(Duration::from_millis(500)));
+        assert_eq!(whole_seconds(Duration::from_millis(500)), 1);
+        // Then one every 2 s.
+        let later = start + every;
+        assert_eq!(rate.check(a, later), Ok(()));
+        rate.spend(a, later);
+        assert!(rate.check(a, later).is_err());
+        assert_eq!(rate.check(a, later + every), Ok(()));
+        // After a long pause, a whole burst again.
+        let much_later = start + Duration::from_secs(60);
+        for _ in 0..3 {
+            assert_eq!(rate.check(a, much_later), Ok(()));
+            rate.spend(a, much_later);
+        }
+        assert!(rate.check(a, much_later).is_err());
+        // A burst of one: one every `every`.
+        let mut rate = StreamRate::new(0, every);
+        assert_eq!(rate.check(a, start), Ok(()));
+        rate.spend(a, start);
+        assert_eq!(rate.check(a, start), Err(every));
+    }
+
+    #[test]
+    fn the_stream_rate_table_is_bounded() {
+        let mut rate = StreamRate::new(2, Duration::from_secs(2));
+        let start = Instant::now();
+        let address = |i: u32| IpAddr::V4(Ipv4Addr::from(0x0a00_0000 + i));
+        for i in 0..MAX_RATE_ADDRESSES as u32 {
+            rate.spend(address(i), start);
+        }
+        assert_eq!(rate.addresses(), MAX_RATE_ADDRESSES);
+        // Full of running allowances: a new address is not counted (never refused).
+        let extra = address(MAX_RATE_ADDRESSES as u32);
+        rate.spend(extra, start);
+        assert_eq!(rate.addresses(), MAX_RATE_ADDRESSES);
+        assert_eq!(rate.check(extra, start), Ok(()));
+        // Once the allowances are whole again, they are forgotten for newcomers.
+        let later = start + Duration::from_secs(3);
+        rate.spend(extra, later);
+        assert_eq!(rate.addresses(), 1);
     }
 
     #[test]
     fn right_and_wrong_codes() {
-        let mut access = Access::new("K7MQ2X".into());
+        let mut access = Access::new("K7MQ2X".into(), Vec::new());
         let now = Instant::now();
         assert_eq!(
             access.try_code(ip(1), "AAAAAA", now),
@@ -328,7 +617,7 @@ mod tests {
 
     #[test]
     fn attempts_limit_and_window() {
-        let mut access = Access::new("K7MQ2X".into());
+        let mut access = Access::new("K7MQ2X".into(), Vec::new());
         let start = Instant::now();
         for i in 0..5u32 {
             let at = start + Duration::from_secs(u64::from(i) * 10);
@@ -368,7 +657,7 @@ mod tests {
 
     #[test]
     fn a_full_table_refuses_new_addresses_without_forgetting() {
-        let mut access = Access::new("K7MQ2X".into());
+        let mut access = Access::new("K7MQ2X".into(), Vec::new());
         let start = Instant::now();
         let address = |i: u32| IpAddr::V4(Ipv4Addr::from(0x0a00_0000 + i));
         for i in 0..MAX_ADDRESSES as u32 {

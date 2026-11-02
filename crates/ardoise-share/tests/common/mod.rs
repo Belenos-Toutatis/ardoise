@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use std::io::{ErrorKind, Read, Write};
-use std::net::{Ipv4Addr, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -211,6 +211,37 @@ pub fn connect(port: u16) -> TcpStream {
     stream
 }
 
+/// Another PC of the network, as the share sees it: a loopback address other than 127.0.0.1
+/// (127.0.0.0/8 is loopback on Windows and Linux).
+pub fn pc(n: u8) -> Ipv4Addr {
+    Ipv4Addr::new(127, 0, 0, n)
+}
+
+/// Connects to the share from `source` (one of [`pc`]).
+pub fn connect_from(source: Ipv4Addr, port: u16) -> TcpStream {
+    try_connect_from(source, port)
+        .unwrap_or_else(|error| panic!("{source} connects to {port}: {error}"))
+}
+
+/// [`connect_from`], or why it failed.
+pub fn try_connect_from(source: Ipv4Addr, port: u16) -> std::io::Result<TcpStream> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
+    socket.bind(&SocketAddr::from((source, 0)).into())?;
+    // A blocking connect: it ends with the handshake, even when the server then closes the
+    // connection at once (`connect_timeout` reports that as an error on Windows).
+    socket.connect(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)).into())?;
+    let stream: TcpStream = socket.into();
+    stream.set_read_timeout(Some(SOON))?;
+    stream.set_write_timeout(Some(SOON))?;
+    Ok(stream)
+}
+
+/// [`exchange`] from `source`.
+pub fn exchange_from(source: Ipv4Addr, port: u16, raw: &[u8]) -> std::io::Result<Response> {
+    read_answer(connect_from(source, port), raw)
+}
+
 /// An HTTP answer.
 #[derive(Debug, Clone)]
 pub struct Response {
@@ -264,7 +295,11 @@ fn parse_head(bytes: &[u8]) -> Option<(Response, usize)> {
 
 /// Sends `raw` and reads the answer until the server closes the connection.
 pub fn exchange(port: u16, raw: &[u8]) -> std::io::Result<Response> {
-    let mut stream = connect(port);
+    read_answer(connect(port), raw)
+}
+
+/// Sends `raw` on `stream` and reads the answer until the server closes the connection.
+fn read_answer(mut stream: TcpStream, raw: &[u8]) -> std::io::Result<Response> {
     stream.write_all(raw)?;
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes)?;
@@ -287,10 +322,27 @@ pub fn request(port: u16, method: &str, target: &str) -> Response {
 pub fn join_request(code: &str) -> Vec<u8> {
     let body = serde_json::json!({ "code": code }).to_string();
     format!(
-        "POST /join HTTP/1.1\r\nHost: share\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        "POST /join HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     )
     .into_bytes()
+}
+
+/// Joins from `source`: the cookie to send (`ardoise_share=…`).
+pub fn cookie_from(source: Ipv4Addr, port: u16) -> String {
+    let answer = exchange_from(source, port, &join_request(CODE)).expect("join answered");
+    assert_eq!(answer.status, 204, "{answer:?}");
+    session_cookie(&answer)
+}
+
+/// The `GET /events` request with `cookie`.
+fn events_request(port: u16, cookie: Option<&str>) -> String {
+    let cookie = cookie
+        .map(|c| format!("Cookie: {c}\r\n"))
+        .unwrap_or_default();
+    format!(
+        "GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: text/event-stream\r\n{cookie}\r\n"
+    )
 }
 
 /// The `name=value` part of the session cookie set by a join.
@@ -332,13 +384,27 @@ pub fn open_events(port: u16, cookie: Option<&str>) -> Result<EventStream, Respo
 
 /// [`open_events`], or `None` when the server closed the connection without an answer.
 pub fn try_open_events(port: u16, cookie: Option<&str>) -> Option<Result<EventStream, Response>> {
-    let mut stream = connect(port);
-    let cookie = cookie
-        .map(|c| format!("Cookie: {c}\r\n"))
-        .unwrap_or_default();
-    let raw =
-        format!("GET /events HTTP/1.1\r\nHost: share\r\nAccept: text/event-stream\r\n{cookie}\r\n");
-    stream.write_all(raw.as_bytes()).ok()?;
+    open_events_on(connect(port), port, cookie)
+}
+
+/// [`open_events`] from `source`.
+pub fn open_events_from(
+    source: Ipv4Addr,
+    port: u16,
+    cookie: Option<&str>,
+) -> Result<EventStream, Response> {
+    open_events_on(connect_from(source, port), port, cookie).expect("an answer")
+}
+
+/// Opens `/events` on `stream`.
+fn open_events_on(
+    mut stream: TcpStream,
+    port: u16,
+    cookie: Option<&str>,
+) -> Option<Result<EventStream, Response>> {
+    stream
+        .write_all(events_request(port, cookie).as_bytes())
+        .ok()?;
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     let (head, at) = loop {
