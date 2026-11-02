@@ -176,7 +176,7 @@ Ajouté à la demande de l'utilisateur le 2026-11-02 (SPEC §4.10, `docs/questio
   - l'arrêt du partage ;
   - les traductions FR et EN.
 - [x] Guide FR et EN (pare-feu, réseau privé, adresse à taper) ; procédure H4 dans `docs/hardware-tests.md`.
-- [ ] Port déjà pris (`docs/questions.md` Q7) : Ardoise prend le premier port libre qui suit, le dit et le retient pour ce PC ; réglage « Port du partage » dans les réglages.
+- [x] Port déjà pris (`docs/questions.md` Q7) : Ardoise prend le premier port libre qui suit, le dit et le retient pour ce PC ; réglage « Port du partage » dans les réglages.
 
 **Critères de fin** :
 - `CHECK OK` et `E2E OK` ;
@@ -184,14 +184,14 @@ Ajouté à la demande de l'utilisateur le 2026-11-02 (SPEC §4.10, `docs/questio
 - le partage s'arrête bien (port fermé, écrans déconnectés) ;
 - l'exécutable reste sous 30 Mo et les licences sont vérifiées.
 
-Vérifié sous Windows le 2026-11-02 : `CHECK OK`, `E2E OK` (60 parcours, FR et EN), `SELFTEST OK` (exécutable de 22,0 Mo, page de visionnage embarquée), licences vérifiées. Le parcours du partage compte 24 étapes :
+Vérifié sous Windows le 2026-11-02 : `CHECK OK`, `E2E OK` (62 parcours, FR et EN), `SELFTEST OK` (exécutable de 22,0 Mo, page de visionnage embarquée), licences vérifiées. Le parcours du partage compte 24 étapes :
 - le code, et toute autre adresse refusée ;
 - le mode direct avec les annotations de la présentation, la pause, puis la note de l'éditeur ;
 - la page de visionnage ouverte dans un vrai Edge ;
 - rien de personnel dans le flux ;
 - l'arrêt, avec le port fermé.
 
-Une relecture indépendante a été faite, et ses remarques sont corrigées : calques masqués jamais envoyés, liste blanche du flux, places de connexion réservées et partage équitable, contrôle de l'en-tête `Host`, port exclusif sous Windows, rythme des reconnexions. Les annotations écrites par-dessus la présentation sont partagées aussi, à la demande de l'utilisateur (`docs/questions.md`, Q6). Restent à essayer sur un vrai réseau (H4) : l'alerte du pare-feu, l'adresse tapée et le QR code, le délai ressenti, la reconnexion après une coupure, un téléphone et d'autres navigateurs.
+Une relecture indépendante a été faite, et ses remarques sont corrigées : calques masqués jamais envoyés, liste blanche du flux, places de connexion réservées et partage équitable, contrôle de l'en-tête `Host`, port exclusif sous Windows, rythme des reconnexions. Les annotations écrites par-dessus la présentation sont partagées aussi, à la demande de l'utilisateur (`docs/questions.md`, Q6). Le 2026-11-03, après un port pris par un autre programme sur le PC de l'utilisateur (Q7) : un parcours occupe le port avant de partager et vérifie que le partage prend le suivant, le dit, le retient pour ce PC et le réutilise. Restent à essayer sur un vrai réseau (H4) : l'alerte du pare-feu, l'adresse tapée et le QR code, le délai ressenti, la reconnexion après une coupure, un téléphone et d'autres navigateurs.
 
 ### Point de contrôle H4 [matériel]
 

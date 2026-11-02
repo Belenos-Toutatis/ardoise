@@ -997,10 +997,11 @@ export const shareJourneys = [
           if (server) server.close(() => resolve());
           else resolve();
         });
-      /** The `share_port` written in the table of this machine in ardoise.toml, or null. */
+      /** The `share_port` written in the table of this machine in ardoise.toml, or null. The key is
+       * bare when the machine's name allows it (`[machines.PC]`), quoted otherwise. */
       const keptPort = () => {
         const file = readFileSync(settingsFile, 'utf8');
-        const table = /\[machines\."[^"]+"\]\r?\n((?:[^[\r\n].*\r?\n?)*)/.exec(file);
+        const table = /\[machines\.(?:"[^"]+"|[\w-]+)\]\r?\n((?:[^[\r\n].*\r?\n?)*)/.exec(file);
         const match = table && /^share_port\s*=\s*(\d+)\s*$/m.exec(table[1]);
         return match ? Number(match[1]) : null;
       };
