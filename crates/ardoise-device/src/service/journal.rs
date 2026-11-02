@@ -21,6 +21,8 @@ use crate::transport::Clock;
 /// Lines kept in memory for one connection. Beyond, the log starts again (written first when
 /// it must be), so that hours of live mode in class do not fill the memory.
 pub(super) const MAX_ENTRIES: usize = 20_000;
+/// Start of the last line of a log, after the disconnection: why the connection ended.
+pub(super) const END_LINE: &str = "end of this log: ";
 
 pub(super) struct Journal {
     shared: SharedLog,
@@ -36,6 +38,8 @@ pub(super) struct Journal {
     /// Files that a background write ([`Journal::roll`]) has not finished yet: never chosen for
     /// another log meanwhile.
     writing: Arc<Mutex<HashSet<PathBuf>>>,
+    /// The end line is in this log.
+    ended: bool,
 }
 
 impl Journal {
@@ -49,6 +53,7 @@ impl Journal {
             path: None,
             last_reason: None,
             writing: Arc::default(),
+            ended: false,
         }
     }
 
@@ -62,6 +67,16 @@ impl Journal {
         *lock(&self.shared) = DiagnosticLog::in_memory(self.transport, self.clock.clone());
         self.reason = None;
         self.path = None;
+        self.ended = false;
+    }
+
+    /// Ends this log with why its connection ended ([`END_LINE`]), once: every written log
+    /// then shows how it ended (after the `disconnect` / `disconnected` event of the link).
+    pub(super) fn end(&mut self, why: &str) {
+        if !self.ended {
+            self.ended = true;
+            self.note(format!("{END_LINE}{why}"));
+        }
     }
 
     pub(super) fn note(&self, text: impl Into<String>) {
@@ -101,6 +116,7 @@ impl Journal {
             return;
         }
         let target = self.target(root);
+        self.note("this log goes on in the next file (too long)");
         let old = std::mem::replace(
             &mut *lock(&self.shared),
             DiagnosticLog::in_memory(self.transport, self.clock.clone()),
@@ -255,6 +271,37 @@ mod tests {
             .filter(|path| *path != next)
             .collect();
         assert_eq!(others.len(), 1, "{others:?}");
-        assert_eq!(read_log(&others[0]).unwrap().1.len(), MAX_ENTRIES);
+        let (_, old) = read_log(&others[0]).unwrap();
+        assert_eq!(old.len(), MAX_ENTRIES + 1);
+        assert!(
+            old.last()
+                .unwrap()
+                .info
+                .contains("goes on in the next file")
+        );
+    }
+
+    #[test]
+    fn a_log_ends_once_with_why() {
+        let root = tempfile::tempdir().unwrap();
+        let mut journal = journal();
+        journal.keep("tabletRefused");
+        journal.end("closed after a failure");
+        journal.end("the tablet service stopped");
+        let path = journal.write(Some(root.path())).unwrap();
+        let (_, entries) = read_log(&path).unwrap();
+        let ends: Vec<_> = entries
+            .iter()
+            .filter(|e| e.info.starts_with(END_LINE))
+            .collect();
+        assert_eq!(ends.len(), 1);
+        assert_eq!(
+            entries.last().unwrap().info,
+            "end of this log: closed after a failure"
+        );
+        // A new connection's log ends again.
+        journal.begin();
+        journal.end("the tablet disconnected");
+        assert_eq!(lock(&journal.shared()).entries().len(), 1);
     }
 }

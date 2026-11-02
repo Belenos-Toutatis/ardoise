@@ -14,7 +14,9 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use ardoise_core::library::Library;
 use ardoise_core::note::PageSize;
+use ardoise_proto::Reply;
 use ardoise_proto::live::{self, LivePacket};
+use ardoise_proto::sysevent::{self, SysEvent};
 
 use super::journal::Journal;
 use super::{
@@ -22,7 +24,7 @@ use super::{
     LastSync, LiveInput, LiveSink, LiveState, PageContext, PageStore, Pending, REGISTER_SEARCH,
     RETRY_DELAY, RegisterStep, RegisteredTablet, Request, SEARCH_SLICE, Sent, ServiceConfig,
     ServiceHooks, StatusCallback, StatusError, SyncProgress, TabletOptions, TabletStatus,
-    model_name,
+    model_name, sync_error,
 };
 use crate::identity::{self, DeviceRecord};
 use crate::manager::Manager;
@@ -139,6 +141,8 @@ pub(super) struct Worker {
     /// When the page count was last read on this connection (the session clock's monotonic
     /// time), `None` without a connection.
     counted_at: Option<Duration>,
+    /// The page count is due now (after a sync that deleted pages), whatever `counted_at`.
+    count_now: bool,
     stop: bool,
 }
 
@@ -169,6 +173,7 @@ impl Worker {
             want_sync: false,
             live: None,
             counted_at: None,
+            count_now: false,
             stop: false,
         }
     }
@@ -347,17 +352,6 @@ impl Worker {
                 self.connected(&info, pages);
             }
             Err(DeviceError::Cancelled) => {}
-            // A tablet of someone else, accepted because the registered address was not seen:
-            // not an error of ours.
-            Err(DeviceError::NotRegistered)
-                if !tablet.address.eq_ignore_ascii_case(&record.address) =>
-            {
-                self.note(format!(
-                    "{} is registered with someone else: ignored",
-                    tablet.address
-                ));
-                self.wait(Some(RETRY_DELAY));
-            }
             Err(error) => self.connection_failed(&error),
         }
     }
@@ -367,8 +361,10 @@ impl Worker {
         if let Some(journal) = self.journal.as_mut() {
             journal.success();
             journal.note(format!(
-                "connected to {} ({}), {pages} pages stored",
-                info.name, info.firmware
+                "connected to {} ({}), {} stored",
+                info.name,
+                info.firmware,
+                pages_text(pages)
             ));
         }
         self.remember_info(info);
@@ -386,6 +382,8 @@ impl Worker {
             status.pending = pending;
             status.error = None;
         });
+        // A level announced while the information was read is newer than the one read.
+        self.battery_events();
     }
 
     /// A connection attempt failed: shown, logged, tried again later.
@@ -402,6 +400,7 @@ impl Worker {
             return;
         }
         self.problem(error);
+        self.end_journal("the connection attempt failed");
         let pending = self.pending();
         self.publisher.update(|status| {
             status.connection = Connection::Searching;
@@ -411,6 +410,7 @@ impl Worker {
     }
 
     fn connected_step(&mut self) {
+        self.battery_events();
         if self.sync.is_some() {
             self.sync_step();
         } else if self.live.is_some() {
@@ -437,6 +437,9 @@ impl Worker {
     /// Whether the page count is due again (connected and idle, [`PAGE_COUNT_INTERVAL`] after
     /// the last time it was read).
     fn page_count_due(&self) -> bool {
+        if self.count_now && self.session.is_some() {
+            return true;
+        }
         match (self.counted_at, self.session_time()) {
             (Some(counted), Some(now)) => now.saturating_sub(counted) >= PAGE_COUNT_INTERVAL,
             _ => false,
@@ -448,6 +451,7 @@ impl Worker {
     /// link.
     fn count_pages(&mut self) {
         self.counted_at = self.session_time();
+        self.count_now = false;
         let counted = match self.session.as_mut() {
             Some(session) => session.stored_pages(),
             None => return,
@@ -458,7 +462,10 @@ impl Worker {
         };
         let before = self.stored_pages();
         if pages != before {
-            self.note(format!("{pages} pages stored (were {before})"));
+            self.note(format!(
+                "page count: {} on the tablet now, {before} after the last count or sync",
+                pages_text(pages)
+            ));
         }
         if self.config.options.auto_sync && pages > before {
             self.want_sync = true;
@@ -480,7 +487,7 @@ impl Worker {
             other => {
                 self.problem(&other);
                 // The link is in an unknown state: start again from a fresh connection.
-                self.close_session();
+                self.close_session("closed after a failure");
                 self.publish(Connection::Searching);
             }
         }
@@ -491,6 +498,7 @@ impl Worker {
         self.note("the tablet disconnected");
         self.session = None;
         self.counted_at = None;
+        self.count_now = false;
         if let Some(run) = self.sync.take() {
             // The page in transfer stays on the tablet; the sync goes on at the next connection.
             self.want_sync = true;
@@ -503,7 +511,7 @@ impl Worker {
             run.active = false;
             run.sink.input(LiveInput::State(LiveState::Reconnecting));
         }
-        self.write_journal();
+        self.end_journal("the tablet disconnected");
         let pending = self.pending();
         self.publisher.update(|status| {
             status.connection = Connection::Searching;
@@ -542,18 +550,16 @@ impl Worker {
                 return;
             }
         };
+        // `ec` when this link needs it (required to download), then paper mode and the count.
         let counted = match self.session.as_mut() {
             Some(session) => session
-                .set_file_transfer_reporting()
+                .ensure_file_transfer_reporting()
                 .and_then(|()| session.stored_pages()),
             None => return,
         };
         let total = match counted {
             Ok(total) => total,
-            Err(error) => {
-                self.session_failed(error);
-                return;
-            }
+            Err(error) => return self.sync_not_started(error),
         };
         let delete = self.config.options.delete_after_import;
         // Without deletion the tablet only lets us read its oldest page.
@@ -599,6 +605,40 @@ impl Worker {
             self.finish_sync(run, None);
         } else {
             self.sync = Some(run);
+        }
+    }
+
+    /// The sync could not even count the pages (the tablet refused `ec` or paper mode...): a
+    /// failed sync, shown as such (`last_sync` with its error) and logged; the pages stay on the
+    /// tablet. The link is closed (its state is unknown) and the next connection tries again.
+    fn sync_not_started(&mut self, error: DeviceError) {
+        match error {
+            DeviceError::Cancelled => {}
+            DeviceError::Disconnected => {
+                // Tried again at the next connection.
+                self.want_sync = true;
+                self.link_lost();
+            }
+            other => {
+                self.note(format!(
+                    "sync failed before the first page: {other}; the pages stay on the tablet"
+                ));
+                self.keep(format!("sync failed: {other}"));
+                let at = self.now_ms();
+                let shown = sync_error(&other);
+                self.publisher.update(|status| {
+                    status.sync = None;
+                    status.last_sync = Some(LastSync {
+                        at,
+                        saved: Vec::new(),
+                        deleted: 0,
+                        error: Some(shown.clone()),
+                    });
+                    status.error = Some(shown);
+                });
+                self.close_session("closed after a failed sync");
+                self.publish(Connection::Searching);
+            }
         }
     }
 
@@ -700,19 +740,30 @@ impl Worker {
         }
     }
 
-    /// Ends a sync: `last_sync`, the page count, back to connected.
+    /// Ends a sync: `last_sync`, the page count, back to connected. After a sync that deleted
+    /// pages the count is read again at once: a page finished meanwhile (the tablet stays
+    /// connected) is synced on the same connection.
     fn finish_sync(&mut self, run: SyncRun, error: Option<&DeviceError>) {
-        self.note(format!(
-            "sync finished: {} of {} pages saved, {} deleted",
-            run.saved.len(),
-            run.to_read,
-            run.deleted
-        ));
+        match error {
+            None => self.note(format!(
+                "sync finished: {} of {} pages saved, {} deleted",
+                run.saved.len(),
+                run.to_read,
+                run.deleted
+            )),
+            Some(error) => self.note(format!(
+                "sync failed after {} of {} pages saved, {} deleted: {error}",
+                run.saved.len(),
+                run.to_read,
+                run.deleted
+            )),
+        }
         let at = self.now_ms();
         let remaining = run.total.saturating_sub(run.deleted);
-        // The sync just counted the pages.
+        // The sync just counted the pages; after deletions, the count is due again now.
         self.counted_at = self.session_time();
-        let error = error.map(StatusError::from);
+        self.count_now = error.is_none() && run.deleted > 0;
+        let error = error.map(sync_error);
         let connection = if self.session.is_some() {
             Connection::Connected
         } else {
@@ -727,6 +778,7 @@ impl Worker {
                 at,
                 saved: run.saved,
                 deleted: run.deleted,
+                error: error.clone(),
             });
             if let Some(device) = status.device.as_mut() {
                 device.stored_pages = remaining;
@@ -857,8 +909,10 @@ impl Worker {
     }
 
     /// Hands a live notification to the sink: pen data (oriented), proximity, the button.
-    /// Anything else is written to the log, so that the real signature of the button can be
-    /// found at H2 (`BUTTON_SYSEVENTS` is a hypothesis).
+    /// What is known and means nothing for live mode (the battery level, which
+    /// [`Self::battery_events`] shows; the frames of a real Slate whose meaning is unknown) is
+    /// only in the log's `rx` lines. Anything else is noted and keeps the log, so that the real
+    /// signature of the button can be found at H2 (`BUTTON_SYSEVENTS` is a hypothesis).
     fn forward(&mut self, notification: LiveNotification) {
         let (width, height) = self.tablet_size();
         let orientation = self.config.options.orientation;
@@ -874,12 +928,22 @@ impl Worker {
                 Ok(LivePacket::ProximityIn { .. }) => Some(LiveInput::ProximityIn {
                     received: notification.received,
                 }),
+                Ok(LivePacket::Unexplained(_)) => return,
                 Ok(LivePacket::Status { .. } | LivePacket::Unknown(_)) | Err(_) => None,
             },
             Channel::SysEvent if live::is_button_sysevent(&notification.data) => {
                 Some(LiveInput::Button)
             }
-            Channel::Command | Channel::PageData | Channel::SysEvent => None,
+            Channel::SysEvent => match sysevent::decode(&notification.data) {
+                SysEvent::BatteryLevel { .. } | SysEvent::Unexplained { .. } => return,
+                SysEvent::Unknown(_) => None,
+            },
+            Channel::Command
+                if Reply::decode(&notification.data).is_ok_and(|reply| reply.is_unexplained()) =>
+            {
+                return;
+            }
+            Channel::Command | Channel::PageData => None,
         };
         match input {
             Some(input) => {
@@ -965,7 +1029,7 @@ impl Worker {
             return;
         }
         // Registering takes the tablet over: a link open to it is closed.
-        self.close_session();
+        self.close_session("registering takes the tablet over");
         if let Some(journal) = self.journal.as_mut() {
             journal.begin();
             journal.note("registration");
@@ -1029,7 +1093,7 @@ impl Worker {
             self.note("registration cancelled");
         } else {
             self.keep(error.to_string());
-            self.write_journal();
+            self.end_journal("the registration failed");
         }
         let connection = if self.record.is_some() {
             Connection::Searching
@@ -1133,7 +1197,7 @@ impl Worker {
             self.finish_sync(run, None);
         }
         self.stop_live();
-        self.close_session();
+        self.close_session("the registration is forgotten");
         self.want_sync = false;
         identity::forget(&root).map_err(|e| DeviceError::Storage(e.to_string()))?;
         self.record = None;
@@ -1165,7 +1229,7 @@ impl Worker {
             return;
         }
         self.stop_live();
-        self.close_session();
+        self.close_session("another library is chosen");
         self.write_journal();
         self.manager = None;
         self.journal = None;
@@ -1183,23 +1247,49 @@ impl Worker {
         self.load_record();
     }
 
-    /// Leaves live mode and closes the link (shutdown).
+    /// Leaves live mode and closes the link (shutdown: the application closes, or the guided
+    /// test takes the tablet).
     fn close(&mut self) {
         if let Some(run) = self.sync.take() {
             self.finish_sync(run, None);
         }
         self.stop_live();
-        self.close_session();
+        self.close_session("the tablet service stopped");
         self.write_journal();
     }
 
-    fn close_session(&mut self) {
+    /// Closes the link to the tablet, if any: the log gets the disconnection and its end line
+    /// (`why`), and is written again when it must be.
+    fn close_session(&mut self, why: &str) {
         self.counted_at = None;
-        if let Some(session) = self.session.take()
-            && let Err(error) = session.disconnect()
-        {
+        self.count_now = false;
+        let Some(session) = self.session.take() else {
+            return;
+        };
+        if let Err(error) = session.disconnect() {
             self.note(format!("disconnect failed: {error}"));
         }
+        self.end_journal(why);
+    }
+
+    /// Ends the log of this connection with `why` and writes it when it must be.
+    fn end_journal(&mut self, why: &str) {
+        if let Some(journal) = self.journal.as_mut() {
+            journal.end(why);
+        }
+        self.write_journal();
+    }
+
+    /// Shows the battery level the tablet announced on its own (sysevent `f1`), if it did.
+    fn battery_events(&mut self) {
+        let Some(percent) = self.session.as_mut().and_then(Session::take_battery_event) else {
+            return;
+        };
+        self.publisher.update(|status| {
+            if let Some(device) = status.device.as_mut() {
+                device.battery_percent = percent;
+            }
+        });
     }
 
     // --- helpers ----------------------------------------------------------------------------
@@ -1360,6 +1450,15 @@ impl Worker {
         if let Some(journal) = self.journal.as_mut() {
             journal.write(root.as_deref());
         }
+    }
+}
+
+/// `1 page`, `3 pages`.
+fn pages_text(count: u16) -> String {
+    if count == 1 {
+        "1 page".into()
+    } else {
+        format!("{count} pages")
     }
 }
 

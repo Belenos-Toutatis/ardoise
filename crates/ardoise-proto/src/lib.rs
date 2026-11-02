@@ -15,6 +15,8 @@
 //! - [`stroke`]: stored page files (Slate and Intuos Pro formats): decoder, and an encoder for
 //!   Slate files used by the simulator.
 //! - [`live`]: live-mode pen notifications: decoder, and encoders used by the simulator.
+//! - [`sysevent`]: notifications of the sysevent characteristic (battery level, and frames seen
+//!   from a real Slate whose meaning is unknown).
 //! - [`crc`]: the CRC-32 that checks a downloaded page.
 //! - [`describe`]: one-line English interpretation of any frame or packet, for the diagnostic
 //!   log. It never fails.
@@ -27,12 +29,14 @@ pub mod hex;
 pub mod live;
 pub mod message;
 pub mod stroke;
+pub mod sysevent;
 pub mod time;
 
 pub use crc::crc32;
 pub use frame::{Frame, FrameError};
 pub use message::{
     Dimension, FirmwarePart, HostId, MessageError, Mode, NameAssembler, Reply, Request, StatusCode,
+    firmware_digits_frame,
 };
 pub use time::{BcdTime, TimeError};
 

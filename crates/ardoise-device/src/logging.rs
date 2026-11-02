@@ -30,7 +30,7 @@ pub fn describe_received(channel: Channel, data: &[u8]) -> String {
         Channel::Command => ardoise_proto::describe::describe_reply(data),
         Channel::PageData => ardoise_proto::describe::describe_page_data(data),
         Channel::Live => ardoise_proto::describe::describe_live(data),
-        Channel::SysEvent => format!("SYSEVENT {} bytes", data.len()),
+        Channel::SysEvent => ardoise_proto::describe::describe_sysevent(data),
     }
 }
 

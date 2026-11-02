@@ -249,7 +249,8 @@ for (const language of ['fr', 'en']) {
       passed = true;
     } catch (error) {
       failures++;
-      const shot = await app.screenshot('failure').catch(() => null);
+      // A window that no longer answers must not keep the error from being printed.
+      const shot = await Promise.race([app.screenshot('failure').catch(() => null), sleep(5000).then(() => null)]);
       console.log(`  ✘ ${step + 1}. ${error.message}`);
       console.log(`  → ${label} : ÉCHEC${shot ? ` (capture : ${shot})` : ''}`);
     } finally {

@@ -51,7 +51,7 @@ pub mod opcode {
     pub const NAME_CHUNK: u8 = 0xbc;
     /// Reply: clock value (`bd 06 <bcd>`).
     pub const TIME_VALUE: u8 = 0xbd;
-    /// Reply: firmware version part (`b8 n <part> <ascii>`).
+    /// Reply: firmware version part (`b8 n <part> <digits>`).
     pub const FIRMWARE_VALUE: u8 = 0xb8;
     /// Reply: battery state (`ba 02 <percent> <charging>`).
     pub const BATTERY_VALUE: u8 = 0xba;
@@ -63,6 +63,10 @@ pub mod opcode {
     pub const FILE_INFO_VALUE: u8 = 0xcf;
     /// Reply: download start (`c8 n be ...`) or end (`c8 05 ed <crc32>`).
     pub const DOWNLOAD: u8 = 0xc8;
+    /// Unasked frame seen once from a real Slate A4 during live mode (`cb 01 00`, protocol.md
+    /// §12). Meaning unknown: it decodes as [`Reply::Unknown`](super::Reply::Unknown), and
+    /// [`Reply::is_unexplained`](super::Reply::is_unexplained) tells it apart.
+    pub const UNEXPLAINED_CB: u8 = 0xcb;
 }
 
 /// First argument of a `c8` reply that starts a download.
@@ -313,7 +317,7 @@ pub enum Request {
     GetTime,
     /// `b6 06 <bcd>`: set the clock (UTC). Reply `b3 01 00`.
     SetTime(BcdTime),
-    /// `b7 01 <part>`: read half of the firmware version. Reply `b8 n <part> <ascii>`.
+    /// `b7 01 <part>`: read half of the firmware version. Reply `b8 n <part> <digits>`.
     GetFirmware {
         /// Which half.
         part: FirmwarePart,
@@ -498,11 +502,12 @@ pub enum Reply {
     NameChunk(Vec<u8>),
     /// `bd 06 <bcd>`: clock value.
     Time(BcdTime),
-    /// `b8 n <part> <ascii>`: half of the firmware version.
+    /// `b8 n <part> <digits>`: half of the firmware version.
     Firmware {
         /// Which half.
         part: FirmwarePart,
-        /// Version text, e.g. `B160805A` (trailing NUL bytes and whitespace removed).
+        /// Version text, e.g. `B160805A`: the digits a Slate sends one per byte, or the ASCII
+        /// text of other devices (trailing NUL bytes and whitespace removed).
         text: String,
     },
     /// `ba 02 <percent> <charging>`: battery state.
@@ -544,6 +549,12 @@ pub enum Reply {
 }
 
 impl Reply {
+    /// Whether this is a frame seen from a real Slate whose meaning is unknown (the unasked
+    /// `cb 01 00`, [`opcode::UNEXPLAINED_CB`]): named in the log and ignored.
+    pub fn is_unexplained(&self) -> bool {
+        matches!(self, Self::Unknown(frame) if frame.opcode == opcode::UNEXPLAINED_CB)
+    }
+
     /// The frame to send (used by the simulator).
     pub fn to_frame(&self) -> Frame {
         match self {
@@ -697,6 +708,10 @@ impl fmt::Display for Reply {
                 write!(f, "DOWNLOAD_START extra={}", hex::encode(extra))
             }
             Self::DownloadEnd { crc } => write!(f, "DOWNLOAD_END crc={crc:08x}"),
+            Self::Unknown(frame) if frame.opcode == opcode::UNEXPLAINED_CB => write!(
+                f,
+                "{frame}, seen once during live mode, meaning unknown (ignored)"
+            ),
             Self::Unknown(frame) => write!(f, "unknown reply {frame}"),
         }
     }
@@ -753,12 +768,31 @@ pub fn decode_name(bytes: &[u8]) -> String {
     String::from_utf8_lossy(name).trim_end().to_owned()
 }
 
-/// Firmware text: ASCII in every real trace; read leniently as UTF-8, trailing NUL bytes and
-/// whitespace removed.
+/// The firmware version text of a `b8` reply. A Bamboo Slate sends one byte per hexadecimal
+/// digit: `0b 01 06 00 09 02 09 0a` is `B160929A` (real Slate A4, 2026-11-02). The Intuos Pro
+/// sends the digits as ASCII (issue #256): `42 31 38 30 31 33 31 61` is `B180131a`; that form is
+/// read leniently as UTF-8, trailing NUL bytes and whitespace removed.
 fn firmware_text(bytes: &[u8]) -> String {
+    if !bytes.is_empty() && bytes.iter().all(|b| *b < 0x10) {
+        return bytes
+            .iter()
+            .map(|b| char::from_digit(u32::from(*b), 16).map_or('?', |c| c.to_ascii_uppercase()))
+            .collect();
+    }
     String::from_utf8_lossy(bytes)
         .trim_end_matches(|c: char| c == '\0' || c.is_whitespace())
         .to_owned()
+}
+
+/// The `b8` reply of a Bamboo Slate for a firmware half: one byte per hexadecimal digit of
+/// `text` (see [`Reply::Firmware`]). `None` when `text` holds anything but hexadecimal digits.
+/// [`Reply::encode`] writes the ASCII form of other devices instead.
+pub fn firmware_digits_frame(part: FirmwarePart, text: &str) -> Option<Frame> {
+    let mut args = vec![part.to_byte()];
+    for c in text.chars() {
+        args.push(u8::try_from(c.to_digit(16)?).ok()?);
+    }
+    Some(Frame::new(opcode::FIRMWARE_VALUE, args))
 }
 
 fn empty_request(op: u8) -> Frame {
@@ -918,6 +952,35 @@ mod tests {
             assert_eq!(result.as_deref(), Some(name));
         }
         assert_eq!(Reply::name_chunks("Bamboo Slate Small").len(), 2);
+    }
+
+    #[test]
+    fn slate_firmware_is_one_byte_per_digit() {
+        // Real Bamboo Slate A4 (registration of 2026-11-02).
+        let high = Reply::decode(&bytes("b8 09 00 0b 01 06 00 09 02 09 0a")).unwrap();
+        let low = Reply::decode(&bytes("b8 09 01 0c 01 07 00 07 00 04 0a")).unwrap();
+        assert_eq!(
+            high,
+            Reply::Firmware {
+                part: FirmwarePart::High,
+                text: "B160929A".to_owned()
+            }
+        );
+        assert_eq!(
+            low,
+            Reply::Firmware {
+                part: FirmwarePart::Low,
+                text: "C170704A".to_owned()
+            }
+        );
+        assert_eq!(
+            firmware_digits_frame(FirmwarePart::High, "B160929A")
+                .unwrap()
+                .encode()
+                .unwrap(),
+            bytes("b8 09 00 0b 01 06 00 09 02 09 0a")
+        );
+        assert_eq!(firmware_digits_frame(FirmwarePart::Low, "B18013-1"), None);
     }
 
     #[test]

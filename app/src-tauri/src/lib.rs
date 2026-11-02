@@ -46,9 +46,14 @@ mod video;
 mod watcher;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use ardoise_core::settings::SettingsStore;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+/// Longest wait, as the application exits, for the tablet's link to close (and its log to end
+/// with the disconnection) and for a guided test under way to stop.
+const EXIT_TABLET_WAIT: Duration = Duration::from_secs(3);
 
 /// Command-line options. Normal launches have none.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -398,15 +403,30 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!());
 
-    if let Err(error) = result {
-        if cli.self_test {
-            println!("SELF-TEST FAILED: {error}");
+    let app = match result {
+        Ok(app) => app,
+        Err(error) => {
+            if cli.self_test {
+                println!("SELF-TEST FAILED: {error}");
+            }
+            eprintln!("Ardoise could not start: {error}");
+            std::process::exit(1);
         }
-        eprintln!("Ardoise could not start: {error}");
-        std::process::exit(1);
-    }
+    };
+    // What `Builder::run` does, plus the end of the tablet's link at exit: the diagnostic logs
+    // of the connection (and of a guided test under way) end with the disconnection.
+    app.run(|handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            handle
+                .state::<diagnostic::DiagnosticRuns>()
+                .cancel_within(EXIT_TABLET_WAIT);
+            handle
+                .state::<tablet::TabletRuntime>()
+                .stop_within(EXIT_TABLET_WAIT);
+        }
+    });
 }
 
 #[cfg(test)]

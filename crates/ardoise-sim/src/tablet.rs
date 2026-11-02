@@ -23,21 +23,30 @@
 //! - Time get/set in BCD UTC, kept as an offset from the virtual wall clock; name in `bc`
 //!   chunks ending with `0a`; firmware halves; battery; dimensions; `ec`; modes (live 0, paper
 //!   1, idle 2).
+//! - `ec` (set the file-transfer reporting type) is refused with `b3 01 02` in paper mode, as a
+//!   real Slate A4 does (our captures of 2026-11-02: refused 19 times right after `b1 01 01`,
+//!   accepted right after `b1 01 02`; protocol.md §5.3). **Assumption:** refused in live mode
+//!   too (never observed; the host only sends it from idle mode or before any mode).
 //! - Pages: `c1` count, `cc` size and BCD time of the oldest page, `c3` -> `c8 01 be`, the page
 //!   bytes in notifications of at most 20 bytes on [`Channel::PageData`], then
 //!   `c8 05 ed <crc32 LE>` on [`Channel::Command`]; `ca` deletes the oldest page.
 //!   **Assumptions:** `cc`, `c3` and `ca` with no stored page get `b3 01 02`; page commands in
-//!   live mode get `b3 01 02`; drawing in live mode does not store a page.
+//!   live mode get `b3 01 02`; drawing in live mode does not store a page; `c3` on a link where
+//!   `ec` was not accepted gets `b3 01 02` (Tuhi says `ec` must come first, protocol.md §5.1).
 //! - Live mode streams the queued pen movement ([`SimTablet::draw_live`]): `a2` when the pen
 //!   comes near, `a1` notifications of up to 3 records, one record per 5 ms, an all-`ff`
 //!   record when the pen leaves. **Assumption:** the stream starts again only when the host
 //!   sends `b1 00` on a new connection; pen movement made while not streaming is lost; when
 //!   streaming resumes with the pen already near, an `a2` is sent first.
-//! - **Assumption:** a new connection starts in paper mode.
-//! - Right after a connection the tablet sends the sysevent `f1 02 13 00` (seen on a real
-//!   Slate, issue #212; meaning unknown).
+//! - **Assumption:** a new connection starts in idle mode, not in paper mode: Tuhi sends `ec`
+//!   right after connecting (protocol.md §3.3) and a real Slate accepts it, whereas it refuses
+//!   `ec` in paper mode ([`CONNECTION_MODE`]).
+//! - The battery level is announced on the sysevent characteristic, `f1 02 <percent> <flag>`
+//!   (protocol.md §12): right after a connection (issue #212 saw `f1 02 13 00` then) and
+//!   whenever [`SimTablet::set_battery`] changes the level while a host is connected (a real
+//!   Slate A4 sent one per percent lost). **Assumption:** the flag is the charging state.
 //! - **Assumption (to check at H2):** a button press while live mode streams sends the
-//!   sysevent [`LIVE_BUTTON_SYSEVENT`] (`f1 02 14 01`, invented: protocol.md does not say what
+//!   sysevent [`LIVE_BUTTON_SYSEVENT`] (`f2 01 01`, invented: protocol.md does not say what
 //!   the Slate sends) and stores nothing.
 //! - One connection at a time: the tablet does not advertise while connected, and a second
 //!   `connect` times out. A host disconnection, a lost link or a dropped transport frees it.
@@ -58,6 +67,7 @@ use std::time::Duration;
 use ardoise_device::transport::{Advertisement, Channel, TransportError, TransportEvent};
 use ardoise_proto::live::{self, LiveRecord, MAX_RECORDS_PER_NOTIFICATION};
 use ardoise_proto::stroke::{self, Stroke, StrokeTime};
+use ardoise_proto::sysevent;
 use ardoise_proto::{
     BcdTime, Dimension, FirmwarePart, MAX_NOTIFICATION_PAYLOAD, Mode, Reply, Request, StatusCode,
 };
@@ -66,13 +76,15 @@ use crate::clock::{VirtualClock, millis, unix_seconds};
 use crate::connector::SimConnector;
 use crate::pen::{self, PenEvent, PenScript, SAMPLE_INTERVAL, TimedPen};
 
-/// Sysevent a real Slate sends right after a connection (issue #212), meaning unknown.
-pub const CONNECT_SYSEVENT: [u8; 4] = [0xf1, 0x02, 0x13, 0x00];
-
 /// Sysevent the simulated tablet sends when its button is pressed while live mode streams.
 /// **Invented** (protocol.md says nothing about it): the device layer recognises it through
-/// `ardoise_proto::live::BUTTON_SYSEVENTS`, until the H2 log shows the real signature.
-pub const LIVE_BUTTON_SYSEVENT: [u8; 4] = [0xf1, 0x02, 0x14, 0x01];
+/// `ardoise_proto::live::BUTTON_SYSEVENTS`, until the H2 log shows the real signature. It must
+/// not look like the battery-level sysevent `f1 02 <percent> <flag>`.
+pub const LIVE_BUTTON_SYSEVENT: [u8; 3] = [0xf2, 0x01, 0x01];
+
+/// Mode of a new connection. **Assumption** (see the module documentation): idle, since a real
+/// Slate accepts `ec` right after connecting but refuses it in paper mode.
+pub const CONNECTION_MODE: Mode = Mode::Idle;
 
 /// The Slate stroke-header clock is a 16-bit count of 5 ms ticks: it wraps after this long.
 const STROKE_CLOCK_WRAP_MS: u64 = 65_536 * 5;
@@ -105,8 +117,9 @@ pub struct SimConfig {
     pub register_manufacturer_data: Vec<u8>,
     /// Tablet clock minus the virtual wall clock before the host sets it, in seconds.
     pub clock_offset: i64,
-    /// Sent on [`Channel::SysEvent`] right after each connection, if any.
-    pub connect_sysevent: Option<Vec<u8>>,
+    /// Whether the battery-level sysevent is sent on [`Channel::SysEvent`] right after each
+    /// connection.
+    pub battery_sysevent_on_connect: bool,
     /// The tablet drops the link when the host wrote nothing for this long (issue #97), if set.
     pub idle_timeout: Option<Duration>,
 }
@@ -128,7 +141,7 @@ impl SimConfig {
             manufacturer_data: vec![0x91, 0x3c, 0x7b, 0x2e, 0x5a, 0xd4, 0x00],
             register_manufacturer_data: vec![0x91, 0x3c, 0x7b, 0x2e],
             clock_offset: 0,
-            connect_sysevent: Some(CONNECT_SYSEVENT.to_vec()),
+            battery_sysevent_on_connect: true,
             idle_timeout: None,
         }
     }
@@ -209,6 +222,8 @@ struct State {
     drop_at: Option<Duration>,
     /// Number of coming page downloads that send a corrupted byte.
     corrupt_transfers: u32,
+    /// Requests refused with `b3 01 02` whatever the state: (opcode, how many more).
+    refusals: Vec<(u8, u32)>,
     stats: SimStats,
 }
 
@@ -219,6 +234,8 @@ struct Link {
     authenticated: bool,
     /// Identity received with `e7`, waiting for the button.
     pending_registration: Option<[u8; 6]>,
+    /// `ec` was accepted on this link.
+    transfer_reporting: bool,
     queue: VecDeque<Outgoing>,
     /// Present while live mode streams on this link.
     stream: Option<LiveStream>,
@@ -274,7 +291,7 @@ impl SimTablet {
                     clock_offset,
                     pages: VecDeque::new(),
                     sketch: Vec::new(),
-                    mode: Mode::Paper,
+                    mode: CONNECTION_MODE,
                     pen_queue: VecDeque::new(),
                     pen: Vec::new(),
                     pen_end: Duration::ZERO,
@@ -282,6 +299,7 @@ impl SimTablet {
                     next_link_id: 1,
                     drop_at: None,
                     corrupt_transfers: 0,
+                    refusals: Vec::new(),
                     stats: SimStats::default(),
                 }),
             }),
@@ -406,11 +424,25 @@ impl SimTablet {
         }
     }
 
-    /// Changes the battery state reported by `b9`.
+    /// Changes the battery state reported by `b9`. A connected host is told of a new level by
+    /// the battery-level sysevent, as a real Slate does.
     pub fn set_battery(&self, percent: u8, charging: bool) {
-        let mut state = self.state();
+        let now = self.now();
+        let mut guard = self.state();
+        let state = &mut *guard;
+        let changed = state.config.battery_percent != percent;
         state.config.battery_percent = percent;
         state.config.charging = charging;
+        if changed
+            && state.alive(now)
+            && let Some(link) = state.link.as_mut()
+        {
+            link.queue.push_back(Outgoing {
+                due: now,
+                channel: Channel::SysEvent,
+                data: sysevent::encode_battery_level(percent, charging).to_vec(),
+            });
+        }
     }
 
     /// Replaces the stored identity, as when another application (Inkspace, the phone app)
@@ -458,6 +490,14 @@ impl SimTablet {
         state.corrupt_transfers = state.corrupt_transfers.saturating_add(1);
     }
 
+    /// The next `count` requests with this opcode (from an authenticated host) are refused with
+    /// `b3 01 02`, whatever the state, as a tablet in an unexpected state would.
+    pub fn refuse_next_requests(&self, opcode: u8, count: u32) {
+        let mut state = self.state();
+        state.refusals.retain(|(op, _)| *op != opcode);
+        state.refusals.push((opcode, count));
+    }
+
     // --- inspection -----------------------------------------------------------------------
 
     /// The pages stored on the tablet, oldest first.
@@ -474,7 +514,7 @@ impl SimTablet {
         self.state().registered
     }
 
-    /// Current mode (a new connection starts in paper mode).
+    /// Current mode (a new connection starts in [`CONNECTION_MODE`]).
     pub fn mode(&self) -> Mode {
         self.state().mode
     }
@@ -549,22 +589,27 @@ impl SimTablet {
         let id = state.next_link_id;
         state.next_link_id += 1;
         let mut queue = VecDeque::new();
-        if let Some(data) = &state.config.connect_sysevent {
+        if state.config.battery_sysevent_on_connect {
             queue.push_back(Outgoing {
                 due: now,
                 channel: Channel::SysEvent,
-                data: data.clone(),
+                data: sysevent::encode_battery_level(
+                    state.config.battery_percent,
+                    state.config.charging,
+                )
+                .to_vec(),
             });
         }
         state.link = Some(Link {
             id,
             authenticated: false,
             pending_registration: None,
+            transfer_reporting: false,
             queue,
             stream: None,
             last_write: now,
         });
-        state.mode = Mode::Paper;
+        state.mode = CONNECTION_MODE;
         state.stats.connections += 1;
         Ok((id, state.advertisement()))
     }
@@ -678,7 +723,7 @@ impl SimTablet {
         let mut state = self.state();
         if state.link.as_ref().is_some_and(|l| l.id == id) {
             state.link = None;
-            state.mode = Mode::Paper;
+            state.mode = CONNECTION_MODE;
         }
     }
 }
@@ -702,7 +747,7 @@ impl State {
 
     fn lose_link(&mut self, at: Duration) {
         self.link = None;
-        self.mode = Mode::Paper;
+        self.mode = CONNECTION_MODE;
         if self.drop_at.is_some_and(|drop| drop <= at) {
             self.drop_at = None;
         }
@@ -847,6 +892,7 @@ impl State {
                 Vec::new()
             }
             _ if !authenticated => status(StatusCode::InvalidState),
+            _ if self.take_refusal(bytes.first().copied()) => status(StatusCode::InvalidState),
             _ if page_command && self.mode == Mode::Live => status(StatusCode::InvalidState),
             Request::GetName => Reply::name_chunks(&self.config.name)
                 .iter()
@@ -869,7 +915,12 @@ impl State {
                     FirmwarePart::High => self.config.firmware_high.clone(),
                     FirmwarePart::Low => self.config.firmware_low.clone(),
                 };
-                vec![command(&Reply::Firmware { part, text })]
+                // Like a real Slate: one byte per hexadecimal digit (protocol.md §4.2); any other
+                // text goes out as ASCII.
+                let reply = ardoise_proto::firmware_digits_frame(part, &text)
+                    .and_then(|frame| frame.encode().ok())
+                    .unwrap_or_else(|| encode(&Reply::Firmware { part, text }));
+                vec![(Channel::Command, reply)]
             }
             Request::GetBattery => vec![command(&Reply::Battery {
                 percent: self.config.battery_percent,
@@ -882,7 +933,18 @@ impl State {
                 };
                 vec![command(&Reply::Dimension { which, value })]
             }
-            Request::SetFileTransferReportingType => status(StatusCode::Success),
+            // Refused in paper mode like a real Slate A4; in live mode by assumption.
+            Request::SetFileTransferReportingType
+                if matches!(self.mode, Mode::Paper | Mode::Live) =>
+            {
+                status(StatusCode::InvalidState)
+            }
+            Request::SetFileTransferReportingType => {
+                if let Some(link) = self.link.as_mut() {
+                    link.transfer_reporting = true;
+                }
+                status(StatusCode::Success)
+            }
             Request::SetMode(mode) => {
                 self.set_mode(mode, now);
                 status(StatusCode::Success)
@@ -901,12 +963,37 @@ impl State {
                     Err(_) => status(StatusCode::GeneralError),
                 },
             },
+            // Assumption: without `ec` the tablet does not know where to send the page.
+            Request::DownloadOldestFile
+                if !self.link.as_ref().is_some_and(|l| l.transfer_reporting) =>
+            {
+                status(StatusCode::InvalidState)
+            }
             Request::DownloadOldestFile => self.download(),
             Request::DeleteOldestFile => match self.pages.pop_front() {
                 Some(_) => status(StatusCode::Success),
                 None => status(StatusCode::InvalidState),
             },
             Request::Unknown(_) => status(StatusCode::CommandNotSupported),
+        }
+    }
+
+    /// Whether a request with `opcode` must be refused ([`SimTablet::refuse_next_requests`]);
+    /// counts the refusal.
+    fn take_refusal(&mut self, opcode: Option<u8>) -> bool {
+        let Some(opcode) = opcode else {
+            return false;
+        };
+        match self
+            .refusals
+            .iter_mut()
+            .find(|(op, left)| *op == opcode && *left > 0)
+        {
+            Some((_, left)) => {
+                *left -= 1;
+                true
+            }
+            None => false,
         }
     }
 

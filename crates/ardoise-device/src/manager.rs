@@ -110,9 +110,14 @@ impl Manager {
         })
     }
 
-    /// Waits up to `timeout` for the registered tablet. Its saved address is preferred (a
-    /// school may hold several Slates); if it is not seen within two thirds of the time, any
-    /// Wacom tablet is accepted, in case the address changed.
+    /// Waits up to `timeout` for the registered tablet, at its saved address only: another
+    /// tablet in range (a school may hold several Slates) is never connected to without the
+    /// user (a new registration). Another Wacom tablet seen meanwhile is noted once per call.
+    ///
+    /// The real Slate A4 keeps its address (a static random one, `DD:…`): in the first hardware
+    /// session every connection used it. Its advertisements come at any moment of a scan, which
+    /// is why the scan is not cut short (the former "any tablet after two thirds of the time"
+    /// fallback accepted the registered tablet itself, seen late).
     pub fn find_registered(
         &mut self,
         record: &DeviceRecord,
@@ -122,19 +127,23 @@ impl Manager {
             "looking for the registered tablet {}",
             record.address
         ));
-        let preferred = timeout * 2 / 3;
         let address = record.address.clone();
-        let found = self.scan(preferred, &mut |ad: &Advertisement| {
-            ad.is_wacom() && ad.address.eq_ignore_ascii_case(&address)
-        })?;
-        if found.is_some() {
-            return Ok(found);
+        let mut others = Vec::<String>::new();
+        let found = self.scan(timeout, &mut |ad: &Advertisement| {
+            if ad.address.eq_ignore_ascii_case(&address) {
+                return ad.is_wacom();
+            }
+            if ad.is_wacom() && !others.contains(&ad.address) {
+                others.push(ad.address.clone());
+            }
+            false
+        });
+        for other in others {
+            self.note(format!(
+                "another tablet ({other}) is in range: ignored, it is not the registered one"
+            ));
         }
-        self.note("the registered address was not seen, accepting any tablet");
-        self.scan(
-            timeout.saturating_sub(preferred),
-            &mut |ad: &Advertisement| ad.is_wacom(),
-        )
+        found
     }
 
     /// Scans in slices (so that cancellation is noticed) until `filter` accepts a tablet.
@@ -457,21 +466,36 @@ mod tests {
     }
 
     #[test]
-    fn prefers_the_registered_address() {
+    fn only_the_registered_address_is_accepted() {
         let library = tempfile::tempdir().unwrap();
         let connector = ScriptConnector::new(vec![], false);
         let mut manager = manager(connector, library.path());
         let mut other = record();
         other.address = "AA:BB:CC:DD:EE:FF".into();
-        // The scripted tablet has another address: it is only accepted after the preferred
-        // part of the wait.
+        // The scripted tablet has another address: never accepted, only noted.
         let found = manager
             .find_registered(&other, Duration::from_secs(3))
-            .unwrap()
             .unwrap();
-        assert_eq!(found.address, "E2:43:03:67:0E:01");
+        assert_eq!(found, None);
+        assert_eq!(manager.clock().monotonic(), Duration::from_secs(3));
+        let notes: Vec<String> = lock(manager.log())
+            .entries()
+            .iter()
+            .map(|e| e.info.clone())
+            .collect();
+        assert!(
+            notes.contains(
+                &"another tablet (E2:43:03:67:0E:01) is in range: ignored, it is not the registered one"
+                    .to_owned()
+            ),
+            "{notes:?}"
+        );
+        assert!(!notes.iter().any(|n| n.contains("accepting any tablet")));
+        // Its own address: found at once, whatever the case of the letters.
+        let mut lower = record();
+        lower.address = "e2:43:03:67:0e:01".into();
         let found = manager
-            .find_registered(&record(), Duration::from_secs(3))
+            .find_registered(&lower, Duration::from_secs(3))
             .unwrap()
             .unwrap();
         assert_eq!(found.address, "E2:43:03:67:0E:01");

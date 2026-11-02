@@ -63,7 +63,7 @@ Defined in `tuhi/wacom.py` (module constants at the top) and `tools/parse_log.py
 | Offline pen data | | `ffee0003-bbaa-9988-7766-554433221100` | **Notified**: raw stored-drawing bytes during a download (section 5). Subscribed in `WacomProtocolBase.__init__`. |
 | Offline "FW data" | | `ffee0002-bbaa-9988-7766-554433221100` | Named `WACOM_OFFLINE_FW_DATA_UUID` only in `tools/parse_log.py` ("Sending FW Data"). Not used by Tuhi. |
 | "Sysevent" service (named "mysterious" in `parse_log.py`) | `3a340720-c572-11e5-86c5-0002a5d5c51b` | | |
-| Sysevent notification | | `3a340721-c572-11e5-86c5-0002a5d5c51b` | **Notified**, only subscribed by Slate and later (`WacomProtocolSlate.__init__`). Tuhi just logs it. Meaning unknown. |
+| Sysevent notification | | `3a340721-c572-11e5-86c5-0002a5d5c51b` | **Notified**, only subscribed by Slate and later (`WacomProtocolSlate.__init__`). Tuhi just logs it. Our Slate A4 sends the battery level there (`f1 02 <percent> <flag>`), see section 12. |
 | Nordic DFU (firmware update) | `00001530-1212-efde-1523-785feabcd123` | `00001531-...` control point, `00001532-...` packet, `00001534-...` unknown | Listed in `tools/parse_log.py` only. **Never touch it** (firmware update, risk of bricking). |
 | Standard services | `1800` GAP, `1801` GATT, `180f` Battery, `180a` Device Info | | Present on a Slate (gatttool dump in issue #212), not used by Tuhi. Battery comes from opcode `b9`. |
 
@@ -76,7 +76,7 @@ properties and use whichever write type is supported (inferred).
 Subscription order in Tuhi: Nordic RX (in `WacomProtocolLowLevelComm.__init__`), then live `00001524`, then offline
 `ffee0003` (in `WacomProtocolBase.__init__`), then sysevent `3a340721` (Slate only). All happen right after the BLE
 connection is established and before the first command. Sysevent traffic seen on connect: `f1 02 13 00` (issue #212),
-meaning unknown.
+which our captures read as a battery level of 19 % (section 12).
 
 Advertising and scan filter (`tuhi/base.py :: Tuhi._add_device`, `WACOM_COMPANY_IDS`):
 
@@ -162,7 +162,7 @@ Requests (host to device) and their replies, **as used for the Slate**:
 | SET_NAME | `bb n+1 <name bytes> 0a` | `b3 01 00` | `MsgSetName` | 4 |
 | GET_TIME | `b6 01 00` | `bd 06 <6 BCD bytes>` | `MsgGetTime` | 4 |
 | SET_TIME | `b6 06 <6 BCD bytes>` | `b3 01 00` | `MsgSetTime` | 4 |
-| GET_FIRMWARE | `b7 01 00` then `b7 01 01` | `b8 n <idx> <ascii>` (twice) | `MsgGetFirmwareVersion` | 4 |
+| GET_FIRMWARE | `b7 01 00` then `b7 01 01` | `b8 n <idx> <digits>` (twice; one byte per hex digit on a Slate) | `MsgGetFirmwareVersion` | 4 |
 | GET_BATTERY | `b9 01 00` | `ba 02 <pct> <charging>` | `MsgGetBattery` | 4 |
 | GET_WIDTH | `ea 02 03 00` | `eb 06 03 00 <u32>` | `MsgGetWidthSlate` | 4 |
 | GET_HEIGHT | `ea 02 04 00` | `eb 06 04 00 <u32>` | `MsgGetHeightSlate` | 4 |
@@ -240,6 +240,7 @@ Sources: `tuhi/wacom.py :: WacomRegisterHelper.register_device`, `WacomDevice.re
 4. `b9` GET_BATTERY, then `ea 03`, `ea 04` dimensions.
 5. `b7` x2 firmware, `ec` transfer reporting type (once per session).
 6. Offline sync (section 5): `b1 01 01` PAPER mode, `c1` count, loop of `cc`, `c3`, data, `c8 ed`, `ca`.
+   **The order of 5 and 6 matters on a real Slate A4: `ec` sent after `b1 01 01` is refused (`b3 01 02`), see 5.3.**
 7. Tuhi disconnects (`_on_fetching_finished`). The device also disconnects by itself after a few seconds idle (README says about 10 s on the Spark; issue #97 says the device "disconnects itself" even in live mode).
 
 Warning for the port: on any error (`DeviceError.INVALID_STATE`) Tuhi just logs "no data, please make sure the LED is blue and the button is pressed to switch
@@ -303,12 +304,14 @@ All via `tuhi/protocol.py` message classes; high-level wrappers in `tuhi/wacom.p
 
 ### 4.2 Firmware version
 
-`b7 01 00` -> `b8 n 00 <ascii...>` ("hi" part) and `b7 01 01` -> `b8 n 01 <ascii...>` ("lo" part). Result string = `hi-lo`.
+`b7 01 00` -> `b8 n 00 <digits...>` ("hi" part) and `b7 01 01` -> `b8 n 01 <digits...>` ("lo" part). Result string = `hi-lo`.
 Real values: Slate A4 `B160805A-C170704A` (issue #117), Slate (issue #115) `B160805A-C160909B`, Intuos Pro `B180131a-C325.003` (issue #256,
 trace `b8 09 00 42 31 38 30 31 33 31 61`).
-**Quirk/uncertainty:** the current code for ANY/SPARK/SLATE (`MsgGetFirmwareVersion`) builds the string with `hex(d)[2:]` (hex of each byte) whereas the Intuos
-version uses `chr(d)`. The real traces show ASCII bytes, so decode as ASCII in the port. The Tuhi unit test for the Slate feeds nibble values, which does not match real
-devices (inferred: Tuhi bug or older/newer format; ignore).
+**Encoding, settled by our own capture (real Bamboo Slate A4, 2026-11-02):** the Slate sends **one byte per hexadecimal digit**, not ASCII:
+`b8 09 00 0b 01 06 00 09 02 09 0a` and `b8 09 01 0c 01 07 00 07 00 04 0a` are `B160929A` and `C170704A`. This is what Tuhi's `hex(d)[2:]`
+(`MsgGetFirmwareVersion`, ANY/SPARK/SLATE) and its Slate unit test do; the versions quoted in issues #115/#117 are that hex rendering. The Intuos
+Pro sends ASCII (`chr(d)`, trace of issue #256). Ardoise reads a reply whose bytes are all below `10` as digits, anything else as ASCII. Note that
+the digit `0a` is not a line feed here: trimming whitespace from an ASCII reading loses the last digit.
 
 ### 4.3 Battery
 
@@ -403,12 +406,32 @@ Details:
 - `ca 01 00` on Slate replies `b3 01 00`. On Spark there is no reply.
 - `ec 06 06 00 00 00 00 00` (SET_FILE_TRANSFER_REPORTING_TYPE) must be sent first on Slate/Intuos. The docstring says "Changes where the device needs to send the data to. 0x00 is on the
   FFEE0003 GATT". The meaning of the first byte `06` is unknown (it looks like a sub-command or length); the fixed 6 argument bytes are `06 00 00 00 00 00` in every trace.
-  The Spark flow does not send it.
+  The Spark flow does not send it. A real Slate A4 refuses it in paper mode: section 5.3.
 - Quirk: `set_paper_mode` calls `.execute()` on an already executed message, so `b1 01 01` is sent **twice** (visible in the issue #256 log). Harmless; one is enough (inferred).
 
 ### 5.2 Loop control in Tuhi
 
 `read_offline_data`: `set_paper_mode` -> `n = count` -> `while n > 0: info; download; wait_end_read(crc); parse; emit; n -= 1; delete`. Returns whether any file was available.
+
+### 5.3 `ec` and the modes on a real Slate A4 (our captures, 2026-11-02)
+
+Source: Ardoise's diagnostic journals of the user's Bamboo Slate A4 (firmware `B160929A-C170704A`), 23 sessions on 2026-11-02.
+The journals are private; only the command frames below are quoted.
+
+- `ec 06 06 00 00 00 00 00` sent right after `b1 01 01` (paper mode, answered `b3 01 00`) is answered **`b3 01 02` (INVALID_STATE)**, every
+  time: 19 automatic connections and the guided test. Nothing can be downloaded after that.
+- In the one session where it was sent right after `b1 01 02` (idle mode, which followed `b1 01 00` live mode), it was answered `b3 01 00`;
+  `b1 01 01`, `c1` (4), then four `cc` / `c3` / data / `c8 05 ed <crc>` / `ca` cycles followed, every CRC matched and every `ca` was answered
+  `b3 01 00`.
+- Later on that same link, `b1 01 01` then `ec` again: refused again (`b3 01 02`).
+- This agrees with Tuhi's order (3.3: `ec` before `b1 01 01`, "once per session"), where `ec` comes right after the connection and the
+  information commands, and is accepted (issue #117, Slate Small, during the registration).
+
+What Ardoise does since (and the simulator models): `ec` once per link before the first paper mode; again after live mode, from idle mode;
+never in paper or live mode; a refusal is retried once after `b1 01 02`. **Not observed yet** (to check at H1): `ec` right after the
+connection on this tablet (Tuhi's order); whether a second sync on the same link works without a new `ec` (assumed, as Tuhi: once per session);
+whether a download without `ec` is refused (the simulator assumes `b3 01 02`); `ec` in live mode (the simulator assumes a refusal); the mode of a
+fresh connection (the simulator assumes idle, since Tuhi's `ec` right after connecting is accepted).
 
 ---
 
@@ -630,6 +653,10 @@ Sources: `tuhi/wacom.py :: WacomProtocolBase.start_live / stop_live / _on_pen_da
 Not answered by Tuhi's code or wiki. Tuhi never queries the file count while live and the modes are distinct (LIVE vs PAPER), so the natural reading is that live mode streams without
 storing (inferred), but this is **unverified**. Test on the real device: count (`c1`) before and after a live session.
 
+Our captures (Slate A4, 2026-11-02) partly answer: in one session the count read 4 right before and right after about 9 s of drawing in live mode
+(no file appeared at once). About 30 s after the 4 pages had been downloaded and deleted, the count read 1: a page was finished meanwhile, but whether
+it held the live strokes (stored when the button was pressed?) is not known. To check at H2: draw in live mode, leave live mode, press the button, count.
+
 ---
 
 ## 8. Known quirks, timeouts, retries, firmware differences, workarounds
@@ -646,7 +673,7 @@ Timeouts and retries (all from `tuhi/wacom.py` and `tuhi/protocol.py`):
 - Stroke parser tolerance: header byte values other than `ff` for POINT/STROKE_END; DELTA with a zero delta is a hard error; unknown packets are skipped by popcount;
   a "lost point" packet is parsed but not interpolated; point counts in the Intuos file header are unreliable.
 - Spark first point may be a delta (no absolute): default previous point to (0, 0, 0) (issue #111).
-- Unsolicited/other frames: Slate sends sysevent notifications (`f1 02 13 00` on connect) and a stray extra `bc` frame was seen in a Slate Small trace; the Nordic buffer logic must tolerate them.
+- Unsolicited/other frames: Slate sends sysevent notifications (`f1 02 13 00` on connect: a battery level, section 12) and a stray extra `bc` frame was seen in a Slate Small trace; the Nordic buffer logic must tolerate them. Our Slate A4 also sent `ef 01 00`, `a3 …` and `cb 01 00` (section 12).
 - Name reading quirk (4.1), firmware decoding quirk (4.2), double `b1 01 01` (5.1).
 - `UNKNOWN_E3` (`e3 01 00`) is sent only by the Spark/base `retrieve_data` and `check`; the Slate path skips it.
 - Spark specifics (not needed for Slate): only connects when drawings are pending, device disconnects after about 10 s, "A successful communication with the controller deletes the drawings" (README).
@@ -701,8 +728,26 @@ Real device wire traces useful as simulator data (all from GitHub issues, not th
 2. Confirm the Slate Large's `ea 03`/`ea 04` replies (expected width 29700 = `04 74 00 00` and height 21600 = `60 54 00 00`) and its name string and firmware string format.
 3. Whether the Slate `c8 be` start reply carries the size and timestamp like the Intuos Pro (`c8 0b be ...`), and what exactly the `cf` "count" field is (bytes vs something else).
 4. Real Slate stroke data: confirm `62 38 62 74` magic, `ff ee ee` stroke header layout, whether pressure max is really 2047 on the Large, how the time offset behaves, and whether `dd dd` lost-point packets occur.
-5. The meaning of the sysevent characteristic and of the `ec 06 06 00 00 00 00 00` argument bytes.
+5. The meaning of the sysevent characteristic and of the `ec 06 06 00 00 00 00 00` argument bytes. Partly answered (section 12): `f1` is the battery
+   level; `ef 01 00` is still unknown. When `ec` is accepted: section 5.3.
 6. Whether live mode stores pages on the device (section 7.3).
 7. The `10 ..` live report (button state) and `a2` bytes 2..3.
 8. Timing: how soon after connect the first command must be sent, and the exact idle disconnect time of the Slate.
 9. Windows specifics (inferred, not from Tuhi): bonding is not needed according to Tuhi, but Windows may cache an old GATT database after firmware changes or after another app re-registered the device.
+
+---
+
+## 12. Frames seen from our Slate A4 (2026-11-02)
+
+Source: Ardoise's diagnostic journals of the user's Bamboo Slate A4 (section 5.3). Ardoise decodes the battery level and names the others
+"meaning unknown (ignored)" (`ardoise_proto::sysevent`, `live::LivePacket::Unexplained`, `Reply::is_unexplained`), so that they no longer show as
+unexpected in the logs.
+
+| Characteristic | Frame | When | Reading | How sure |
+|---|---|---|---|---|
+| sysevent | `f1 02 <pp> 00` | Unasked, at any moment of a connection: `2f`, `2e`, `2d` about 55 s apart during a long session (the third in live mode); once 30 ms after a `ba` reply | **Battery level changed**, `pp` = percent. The values follow the `ba` readings: 47, 46, 45 % after a reading of 48 %; 41 % right after a reading of 42 %, and the next session read 41 %. Issue #212's `f1 02 13 00` on connect fits (19 %). The last byte was always `00` while discharging: probably the charging state, like `ba` (supposed, not used) | High for `pp`; low for the last byte |
+| sysevent | `ef 01 00` | Once, right after `e7` (registration request), before the button press | Unknown | — |
+| live `00001524` | `a3 06 dd dd dd dd 01 00` | Once, in the same notification batch as an `a2` proximity-in, before the samples of a stroke | Unknown. The `dd dd` bytes recall the stroke-file lost-point packet (`dd dd` + u16 count), so perhaps "1 sample lost" (supposed) | Low |
+| Nordic RX (command) | `cb 01 00` | Once, unasked, during live mode (about 2.4 s after the pen came near) | Unknown (a button press? a page event?) | — |
+
+Also seen: the `a2` proximity-in carries `ee ee` in bytes 2..3 (`a2 06 ee ee 00 02 00 00`), the same marker as the Slate stroke header `ff ee ee`.

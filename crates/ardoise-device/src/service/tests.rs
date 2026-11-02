@@ -327,7 +327,7 @@ fn the_interrupt_flag_stays_up_while_an_interrupting_request_waits() {
 }
 
 /// The scripted Slate's connection: authentication, clock, name, firmware, battery, size, page
-/// count (`pages`, two hex bytes).
+/// count (`pages`, two hex bytes) in paper mode, `ec` before it (protocol.md §3.3, §5.3).
 fn connection_script(pages: &'static str) -> Script {
     use crate::testutil::cmd;
     vec![
@@ -344,6 +344,7 @@ fn connection_script(pages: &'static str) -> Script {
         ("b9 01 00", vec![cmd("ba 02 57 00")]),
         ("ea 02 03 00", vec![cmd("eb 06 03 00 04 74 00 00")]),
         ("ea 02 04 00", vec![cmd("eb 06 04 00 60 54 00 00")]),
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
         ("b1 01 01", vec![cmd("b3 01 00")]),
         ("c1 01 00", vec![cmd(pages)]),
     ]
@@ -368,11 +369,11 @@ fn the_page_count_is_read_again_while_the_tablet_stays_connected() {
     crate::identity::save(library.path(), &scripted_record()).unwrap();
     let mut script = connection_script("c2 02 00 00");
     // 30 s later: a page was finished on the tablet; the automatic sync starts, and finds the
-    // page gone (the script keeps it short).
+    // page gone (the script keeps it short). `ec` was sent on this link: not again (a real
+    // Slate A4 refuses it in paper mode).
     script.extend([
         ("b1 01 01", vec![cmd("b3 01 00")]),
         ("c1 01 00", vec![cmd("c2 02 01 00")]),
-        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
         ("b1 01 01", vec![cmd("b3 01 00")]),
         ("c1 01 00", vec![cmd("c2 02 00 00")]),
     ]);
@@ -443,6 +444,7 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
         ("b9 01 00", vec![cmd("ba 02 57 00")]),
         ("ea 02 03 00", vec![cmd("eb 06 03 00 04 74 00 00")]),
         ("ea 02 04 00", vec![cmd("eb 06 04 00 60 54 00 00")]),
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
         ("b1 01 01", vec![cmd("b3 01 00")]),
         ("c1 01 00", vec![cmd("c2 02 00 00")]),
         (
@@ -450,12 +452,17 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
             vec![
                 cmd("b3 01 00"),
                 on(Channel::Live, hex("a2 06 00 00 e8 03 00 00")),
+                // Seen from a real Slate A4: named, ignored.
+                on(Channel::Live, hex("a3 06 dd dd dd dd 01 00")),
                 on(
                     Channel::Live,
                     hex("a1 0c c4 09 f4 01 00 04 ff ff ff ff ff ff"),
                 ),
-                // The hypothetical button signature, then two unknown notifications.
-                on(Channel::SysEvent, hex("f1 02 14 01")),
+                // The hypothetical button signature, the battery level and an unasked frame
+                // of a real Slate A4 (ignored), then two unknown notifications.
+                on(Channel::SysEvent, hex("f2 01 01")),
+                on(Channel::SysEvent, hex("f1 02 2a 00")),
+                cmd("cb 01 00"),
                 on(Channel::SysEvent, hex("f1 02 99 00")),
                 on(Channel::Live, hex("10 02 2a 00")),
             ],
@@ -528,6 +535,10 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
     );
     assert_eq!(next(), LiveInput::Button);
     wait_for(&statuses, |s| s.connection == Connection::Live);
+    // The battery level announced during live mode is shown (it was 87 % at the connection).
+    wait_for(&statuses, |s| {
+        s.device.as_ref().is_some_and(|d| d.battery_percent == 42)
+    });
     service.stop_live();
     assert_eq!(next(), LiveInput::State(LiveState::Stopped));
     wait_for(&statuses, |s| s.connection == Connection::Connected);
@@ -547,10 +558,34 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
         "{text}"
     );
     assert!(
-        text.contains("button pressed (sysevent f1 02 14 01)"),
+        text.contains("button pressed (sysevent f2 01 01)"),
         "{text}"
     );
-    assert!(!text.contains("unclassified during live mode: sys_event f1 02 14 01"));
-    let (header, _) = crate::log::parse_log(&text).unwrap();
+    assert!(!text.contains("unclassified during live mode: sys_event f2 01 01"));
+    // Known frames are described in their `rx` lines, and not flagged.
+    for known in ["f1 02 2a 00", "a3 06 dd dd dd dd 01 00", "cb 01 00"] {
+        assert!(
+            !text.contains(&format!("unclassified during live mode: {known}"))
+                && !text.contains(&format!(": sys_event {known}"))
+                && !text.contains(&format!(": live {known}"))
+                && !text.contains(&format!(": command {known}")),
+            "{known} flagged: {text}"
+        );
+    }
+    assert!(text.contains("BATTERY_LEVEL 42% (flag 00)"), "{text}");
+    assert!(text.contains("meaning unknown (ignored)"), "{text}");
+    let (header, entries) = crate::log::parse_log(&text).unwrap();
     assert_eq!(header.transport, "ble");
+    // The log ends with the disconnection, then why.
+    let last: Vec<&str> = entries
+        .iter()
+        .rev()
+        .take(2)
+        .map(|e| e.info.as_str())
+        .collect();
+    assert_eq!(
+        last,
+        ["end of this log: the tablet service stopped", "disconnect"],
+        "{text}"
+    );
 }

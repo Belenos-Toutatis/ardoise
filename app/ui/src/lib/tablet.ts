@@ -61,6 +61,11 @@ export interface LastSync {
   /** Paths of the notes written. */
   saved: string[];
   deleted: number;
+  /**
+   * Why the sync stopped before the end (refused by the tablet, page not saved...): `code`
+   * selects `errorCodes.*`. Stays until the next sync, across reconnections.
+   */
+  error: { code: string; message: string } | null;
 }
 
 export interface TabletStatus {

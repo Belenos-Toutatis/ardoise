@@ -6,6 +6,9 @@
 //! - `a2 LL ?? ?? <ticks...>`: the pen entered proximity; the bytes from offset 4 are a
 //!   little-endian count of 5 ms ticks (since power-up, probably). Bytes 2..4 are unknown.
 //! - `10 ..`: status report with the pressure at bytes 2..4 and the buttons at byte 10.
+//! - `a3 06 dd dd dd dd 01 00`: seen once from a real Slate A4, right after an `a2` (protocol.md
+//!   §12). Meaning unknown (the `dd dd` bytes recall the lost-point packet of stored pages);
+//!   decoded as [`LivePacket::Unexplained`] and ignored.
 
 use std::fmt;
 
@@ -18,6 +21,8 @@ pub const SAMPLES: u8 = 0xa1;
 pub const PROXIMITY_IN: u8 = 0xa2;
 /// First byte of a status notification.
 pub const STATUS: u8 = 0x10;
+/// First byte of a notification seen from a real Slate whose meaning is unknown.
+pub const UNEXPLAINED_A3: u8 = 0xa3;
 /// Size of one pen record.
 pub const RECORD_LEN: usize = 6;
 /// Most records in one notification of at most 20 bytes.
@@ -34,11 +39,12 @@ const TICK_MS: u64 = 5;
 /// **Hypothesis, to check at the hardware checkpoint H2:** protocol.md does not say what the
 /// Slate sends when its button is pressed in live mode (§7.2 only knows the stylus button byte
 /// of the `10` report, which Tuhi ignores; §11 lists the sysevent characteristic as unknown).
-/// The working guess is a sysevent like the `f1 02 13 00` sent after each connection (issue
-/// #212). For now the list holds only the simulator's invented signature `f1 02 14 01`; the
-/// real one goes here once an H2 log shows it (every other notification received during live
-/// mode is logged as "unclassified during live mode" for that purpose).
-pub const BUTTON_SYSEVENTS: &[&[u8]] = &[&[0xf1, 0x02, 0x14, 0x01]];
+/// The working guess is a sysevent. For now the list holds only the simulator's invented
+/// signature `f2 01 01`; the real one goes here once an H2 log shows it (every other
+/// notification received during live mode is logged as "unclassified during live mode" for that
+/// purpose). It must not look like the battery-level sysevent `f1 02 <percent> <flag>` (see
+/// [`crate::sysevent`]), which a real Slate sends whenever its level changes.
+pub const BUTTON_SYSEVENTS: &[&[u8]] = &[&[0xf2, 0x01, 0x01]];
 
 /// Whether a sysevent notification is a press of the tablet's button (see
 /// [`BUTTON_SYSEVENTS`]).
@@ -72,6 +78,8 @@ pub enum LivePacket {
         /// Byte 10, when the notification is long enough.
         buttons: Option<u8>,
     },
+    /// `a3`: seen from a real Slate, meaning unknown; kept verbatim and ignored.
+    Unexplained(Vec<u8>),
     /// Any other first byte, kept verbatim.
     Unknown(Vec<u8>),
 }
@@ -156,6 +164,7 @@ pub fn decode(value: &[u8]) -> Result<LivePacket, LiveError> {
                 buttons: value.get(STATUS_BUTTONS_OFFSET).copied(),
             })
         }
+        UNEXPLAINED_A3 => Ok(LivePacket::Unexplained(value.to_vec())),
         _ => Ok(LivePacket::Unknown(value.to_vec())),
     }
 }
@@ -244,6 +253,11 @@ impl fmt::Display for LivePacket {
                 }
                 Ok(())
             }
+            Self::Unexplained(bytes) => write!(
+                f,
+                "LIVE {}, seen once after a proximity in, meaning unknown (ignored)",
+                hex::encode(bytes)
+            ),
             Self::Unknown(bytes) => write!(f, "unknown live packet {}", hex::encode(bytes)),
         }
     }
@@ -392,12 +406,36 @@ mod tests {
 
     #[test]
     fn button_sysevents_are_recognised_exactly() {
-        assert!(is_button_sysevent(&bytes("f1 02 14 01")));
-        // The connection sysevent (issue #212) is not the button.
+        assert!(is_button_sysevent(&bytes("f2 01 01")));
+        // Battery levels (issue #212, our captures) are not the button, charging or not.
         assert!(!is_button_sysevent(&bytes("f1 02 13 00")));
-        assert!(!is_button_sysevent(&bytes("f1 02 14")));
-        assert!(!is_button_sysevent(&bytes("f1 02 14 01 00")));
+        assert!(!is_button_sysevent(&bytes("f1 02 14 01")));
+        assert!(!is_button_sysevent(&bytes("f2 01")));
+        assert!(!is_button_sysevent(&bytes("f2 01 01 00")));
         assert!(!is_button_sysevent(&[]));
+        for signature in BUTTON_SYSEVENTS {
+            assert!(
+                matches!(
+                    crate::sysevent::decode(signature),
+                    crate::sysevent::SysEvent::Unknown(_)
+                ),
+                "{signature:02x?} looks like a known sysevent"
+            );
+        }
+    }
+
+    #[test]
+    fn the_a3_packet_of_a_real_slate_is_named_and_ignored() {
+        // Our capture (Slate A4, 2026-11-02), right after `a2 06 ee ee 00 02 00 00`.
+        let packet = decode(&bytes("a3 06 dd dd dd dd 01 00")).unwrap();
+        assert_eq!(
+            packet,
+            LivePacket::Unexplained(bytes("a3 06 dd dd dd dd 01 00"))
+        );
+        assert_eq!(
+            packet.to_string(),
+            "LIVE a3 06 dd dd dd dd 01 00, seen once after a proximity in, meaning unknown (ignored)"
+        );
     }
 
     #[test]

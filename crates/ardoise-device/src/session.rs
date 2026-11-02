@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ardoise_proto::message::opcode;
+use ardoise_proto::sysevent::{self, SysEvent};
 use ardoise_proto::{
     BcdTime, Dimension, FirmwarePart, Mode, NameAssembler, Reply, Request, StatusCode,
 };
@@ -141,6 +142,14 @@ pub struct Session {
     live: VecDeque<LiveNotification>,
     /// Live mode was entered with [`Session::start_live`] and not left.
     live_mode: bool,
+    /// The last mode the tablet accepted on this link; `None` before any (or after a failed
+    /// switch, when the tablet's mode is not known).
+    mode: Option<Mode>,
+    /// `ec` was accepted on this link and still holds (see
+    /// [`Session::ensure_file_transfer_reporting`]).
+    transfer_reporting: bool,
+    /// Battery level the tablet announced on its own (sysevent `f1`), not taken yet.
+    battery_event: Option<u8>,
     connected: bool,
     reply_timeout: Duration,
 }
@@ -156,6 +165,9 @@ impl Session {
             last_page_data: None,
             live: VecDeque::new(),
             live_mode: false,
+            mode: None,
+            transfer_reporting: false,
+            battery_event: None,
             connected: true,
             reply_timeout: REPLY_TIMEOUT,
         }
@@ -234,10 +246,38 @@ impl Session {
         }
     }
 
-    /// Tells the tablet to send page bytes on the page-data characteristic (once per session,
-    /// before any download).
-    pub fn set_file_transfer_reporting(&mut self) -> Result<(), DeviceError> {
-        self.expect_success(&Request::SetFileTransferReportingType)
+    /// Makes sure the tablet sends page bytes on the page-data characteristic (`ec`,
+    /// protocol.md §5.1): once per connection, before the first paper mode, as Tuhi does (§3.3),
+    /// and again after live mode. A real Slate A4 refuses `ec` in paper mode (`b3 01 02`) and
+    /// accepts it in idle mode (§5.3, our captures of 2026-11-02): it is therefore never sent in
+    /// paper or live mode, and a refusal is retried once from idle mode (the tablet may be in
+    /// paper mode without our knowing). [`Session::set_mode`] tries it before paper mode, so
+    /// every path (connection, registration, page count) sends it in the right place, and
+    /// [`Session::sync`] requires it.
+    pub fn ensure_file_transfer_reporting(&mut self) -> Result<(), DeviceError> {
+        if self.transfer_reporting {
+            return Ok(());
+        }
+        if matches!(self.mode, Some(Mode::Paper | Mode::Live)) {
+            self.switch_mode(Mode::Idle)?;
+        }
+        match self.expect_success(&Request::SetFileTransferReportingType) {
+            Err(DeviceError::Refused(StatusCode::InvalidState))
+                if self.mode != Some(Mode::Idle) =>
+            {
+                self.switch_mode(Mode::Idle)?;
+                self.expect_success(&Request::SetFileTransferReportingType)?;
+            }
+            other => other?,
+        }
+        self.transfer_reporting = true;
+        Ok(())
+    }
+
+    /// The battery level the tablet announced on its own since the last call (the sysevent
+    /// `f1 02 <percent> <flag>`, protocol.md §12), if any.
+    pub fn take_battery_event(&mut self) -> Option<u8> {
+        self.battery_event.take()
     }
 
     /// The tablet's name. Long names may come in several chunks ending with a line feed.
@@ -329,12 +369,41 @@ impl Session {
         })
     }
 
-    /// Switches the tablet to a mode (`b1`).
+    /// Switches the tablet to a mode (`b1`). Paper mode is preceded by `ec` when needed
+    /// ([`Session::ensure_file_transfer_reporting`]). Paper mode itself does not need `ec`: a
+    /// refusal is left to the sync, which asks again and fails with it, so that a tablet
+    /// refusing `ec` still connects (page count, live mode) and the failure shows as a sync's.
     pub fn set_mode(&mut self, mode: Mode) -> Result<(), DeviceError> {
-        self.expect_success(&Request::SetMode(mode))
+        if mode == Mode::Paper {
+            match self.ensure_file_transfer_reporting() {
+                Err(DeviceError::Refused(_)) => {}
+                other => other?,
+            }
+        }
+        self.switch_mode(mode)
     }
 
-    /// Number of pages stored on the tablet. Switches it to paper mode first.
+    /// `b1 01 <mode>`, and what it changes: after live mode, `ec` is sent again before the next
+    /// paper mode (the only sync seen working on a real Slate A4 sent it after live mode, from
+    /// idle mode: Tuhi never syncs after live mode on the same link).
+    fn switch_mode(&mut self, mode: Mode) -> Result<(), DeviceError> {
+        match self.expect_success(&Request::SetMode(mode)) {
+            Ok(()) => {
+                self.mode = Some(mode);
+                if mode == Mode::Live {
+                    self.transfer_reporting = false;
+                }
+                Ok(())
+            }
+            Err(error) => {
+                self.mode = None;
+                Err(error)
+            }
+        }
+    }
+
+    /// Number of pages stored on the tablet. Switches it to paper mode first (with `ec` before
+    /// it when needed).
     pub fn stored_pages(&mut self) -> Result<u16, DeviceError> {
         self.set_mode(Mode::Paper)?;
         match self.exchange(&Request::AvailableFilesCount, "page count", |r| {
@@ -346,8 +415,8 @@ impl Session {
     }
 
     /// Downloads the oldest stored page without deleting it. Requires paper mode and the
-    /// file-transfer reporting type (see [`Session::stored_pages`] and
-    /// [`Session::set_file_transfer_reporting`]).
+    /// file-transfer reporting type: [`Session::ensure_file_transfer_reporting`] then
+    /// [`Session::stored_pages`], as [`Session::sync`] does.
     pub fn download_oldest(&mut self) -> Result<DownloadedPage, DeviceError> {
         let (announced_size, timestamp) = self.file_info()?;
         // A tablet streaming bytes without ever ending the transfer must not exhaust memory.
@@ -442,7 +511,8 @@ impl Session {
         delete: bool,
         sink: &mut dyn FnMut(DownloadedPage, u16, u16) -> Result<(), String>,
     ) -> Result<SyncSummary, DeviceError> {
-        self.set_file_transfer_reporting()?;
+        // `ec` if this link has not sent it since its last live mode, then paper mode.
+        self.ensure_file_transfer_reporting()?;
         let available = self.stored_pages()?;
         let mut summary = SyncSummary {
             available,
@@ -692,7 +762,12 @@ impl Session {
                         self.page_data.extend_from_slice(&data);
                         self.last_page_data = Some(self.clock.monotonic());
                     }
-                    Channel::Live | Channel::SysEvent => {}
+                    Channel::SysEvent => {
+                        if let SysEvent::BatteryLevel { percent, .. } = sysevent::decode(&data) {
+                            self.battery_event = Some(percent);
+                        }
+                    }
+                    Channel::Live => {}
                 }
                 if channel == Channel::Live || self.live_mode {
                     if self.live.len() >= MAX_LIVE_QUEUE {
