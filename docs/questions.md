@@ -39,3 +39,9 @@ L'utilisateur demande qu'un autre ordinateur du même réseau puisse afficher la
 - Les protections proposées sont retenues : partage lancé à la main, lecture seule, code d'accès, arrêt à la fermeture.
 
 SPEC §4.10 est ajouté, la ligne « Réseau » du §6.2 est mise à jour, et le jalon M11 est ajouté à ROADMAP.md.
+
+## Q5 — Ajouter `ardoise-share` à la liste des crates de SPEC §6.1 ? (jalon M11) — **à confirmer**
+
+Le serveur du partage sur le réseau local (§4.10) est une nouvelle bibliothèque, `crates/ardoise-share`, indépendante de Tauri pour être testée sous Linux avec un vrai client TCP (`docs/design/lan-share.md`). SPEC §6.1 ne la cite pas, et SPEC.md ne se modifie pas sans l'accord de l'utilisateur.
+
+**En attendant** : la crate existe, son rôle est écrit en tête de son `lib.rs` et dans `docs/design/lan-share.md`. Ligne proposée pour §6.1 : `ardoise-share     partage de la feuille sur le réseau local : petit serveur HTTP en lecture seule (code, flux d'évènements)`.

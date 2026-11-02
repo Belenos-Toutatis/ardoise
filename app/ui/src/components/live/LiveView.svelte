@@ -32,9 +32,11 @@
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
   import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
   import { ORIENTATIONS, type Orientation } from '../../lib/orientation';
+  import { share } from '../../lib/share-state.svelte';
   import type { NarrationSaved } from '../../lib/video';
   import Modal from '../Modal.svelte';
   import RecordPanel from '../narration/RecordPanel.svelte';
+  import ShareButton from '../share/ShareButton.svelte';
   import OrientationIcon from '../tablet/OrientationIcon.svelte';
   import { NarrationRecorder } from '../narration/recorder.svelte';
   import LiveCanvas from './LiveCanvas.svelte';
@@ -154,6 +156,9 @@
 
   onMount(() => {
     let alive = true;
+    // The share on the network shows the live sheet while this view is open (the library says
+    // « waiting » again when it is back, `Home.svelte`).
+    share.showLive();
     exposeLatency(latency);
     loadInk()
       .then((module) => {
@@ -422,7 +427,7 @@
 
   function onkeydown(e: KeyboardEvent) {
     // The question about ending live mode has its own keys.
-    if (e.defaultPrevented || confirmLeave) return;
+    if (e.defaultPrevented || confirmLeave || share.panelOpen) return;
     const action = liveKeyAction(e);
     if (!action) return;
     e.preventDefault();
@@ -431,7 +436,7 @@
 
   /** Space is "next page" already on key down: a focused button must not also be pressed on key up. */
   function onkeyup(e: KeyboardEvent) {
-    if (isSpaceKey(e.key) && !confirmLeave && !isTypingTarget(e.target)) e.preventDefault();
+    if (isSpaceKey(e.key) && !confirmLeave && !share.panelOpen && !isTypingTarget(e.target)) e.preventDefault();
   }
 
   const mm = (units: number) => (units / 100).toFixed(units < 100 ? 2 : 1);
@@ -622,6 +627,10 @@
           <OrientationIcon {orientation} size={26} />
         </button>
       {/each}
+    </div>
+
+    <div class="group" role="group" data-slot="share">
+      <ShareButton />
     </div>
   </div>
 

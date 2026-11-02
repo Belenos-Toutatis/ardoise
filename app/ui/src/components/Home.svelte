@@ -6,6 +6,7 @@
   import { inkspaceOffer } from '../lib/inkspace-offer.svelte';
   import { SORT_ORDERS, displayTitle, type SortOrder } from '../lib/library-logic';
   import { LibraryState } from '../lib/library-state.svelte';
+  import { share } from '../lib/share-state.svelte';
   import type { NoteSummary } from '../lib/note';
   import Diagnostic from './Diagnostic.svelte';
   import LiveView from './live/LiveView.svelte';
@@ -22,6 +23,8 @@
   import Sidebar from './library/Sidebar.svelte';
   import TrashView from './library/TrashView.svelte';
   import Logo from './Logo.svelte';
+  import ShareIndicator from './share/ShareIndicator.svelte';
+  import SharePanel from './share/SharePanel.svelte';
   import Settings from './Settings.svelte';
 
   let { app, onchange }: { app: AppState; onchange: (next: AppState) => void } = $props();
@@ -43,7 +46,14 @@
 
   const inTrash = $derived(lib.view.kind === 'trash');
 
+  // What the share on the network shows is what the main window shows: the library, the settings
+  // and the panels are the waiting screen; the editor and live mode say what they show themselves.
+  $effect(() => {
+    if (!away) share.showWaiting();
+  });
+
   onMount(() => {
+    share.follow();
     // Started with `--diagnostic`: the tablet test is shown right away.
     if (app.openDiagnostic) panel = 'diagnostic';
     // The wizard offered to import Inkspace's notes and the user accepted: the dialog opens once.
@@ -178,7 +188,7 @@
 
   function shortcuts(event: KeyboardEvent) {
     // Not under the editor, live mode or a dialog of the library (« Depuis un PDF » would be unmounted).
-    if (away || lib.dialog || fromFile || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+    if (away || lib.dialog || fromFile || share.panelOpen || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
     const key = event.key.toLowerCase();
     if (key === 'f') {
       event.preventDefault();
@@ -251,6 +261,7 @@
     <button type="button" class="button" data-action="new-from-file" title={t('background.library.openHint')} onclick={() => (fromFile = true)}>
       {t('background.library.open')}
     </button>
+    <ShareIndicator />
     <button
       type="button"
       class="button ghost"
@@ -337,4 +348,7 @@
     onshow={(binder) => void showImported(binder)}
     ondone={() => void lib.refresh()}
   />
+{/if}
+{#if share.panelOpen}
+  <SharePanel />
 {/if}

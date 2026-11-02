@@ -332,6 +332,82 @@ note.* Two fingers zoom the projected area.
 The same keys work in the control window and in the presentation (a presentation remote sends Page Down and Page
 Up): see chapter 17.
 
+### Showing the sheet on another computer of the network
+
+*Sharing live mode needs the tablet; sharing a note open in the editor does not. This sharing has been checked by
+automated tests (server, the other screen's page, simulated tablet), but not yet on two real computers nor with the
+school's firewall: test H4 is planned at work.*
+
+Another computer on the same network (for instance the classroom PC linked to the projector) can show the sheet in a
+*plain web browser*: nothing to install on it. It shows:
+
+- during live mode, the live sheet, like the presentation window (zoomed area, blackboard, laser pointer);
+- when a note is open in the editor, that note's page, including your unsaved changes;
+- otherwise (library, settings), a waiting screen.
+
+*Nothing else is reachable*: not the library, not the notes' titles, not the other notes, not a file of the PC. The
+other computer cannot change anything: it only watches.
+
+**On the Ardoise side.** Click **Share on the network**, in the live mode control window or in the editor toolbar. The
+panel that opens gives:
+
+- the *address* to type in the other computer's browser, like `http://192.168.1.23:8765` (if the PC has several, all
+  are listed);
+- a *QR code* of that address, to scan with a phone or a tablet;
+- the 6-character *access code*, in two groups of three (for example `K7M Q2X`);
+- the *number of connected screens*, and what is shown;
+- **Pause** (the image freezes on the screens; you keep writing, then **Resume** shows the current state) and **Stop
+  sharing**.
+
+While a share is running, an indicator with the number of screens stays at the top of the library and of the
+toolbars: a click reopens the panel.
+
+**On the other computer.**
+
+1. Open a browser (Edge, Chrome, Firefox…) and type the address *in full, with `http://` and the port number*:
+   `http://192.168.1.23:8765`.
+2. Type the access code (upper or lower case, with or without the space).
+3. The sheet appears. Press `F11` or the page's full-screen button (or double-click) to show it on the whole screen;
+   the button disappears with the cursor.
+
+If the connection drops for a moment, the page reconnects by itself and catches up. When you stop the share or close
+Ardoise, it says that the sharing has ended.
+
+**The Windows firewall.** The first time, Windows shows a "Windows Security Alert" window (*Windows Defender Firewall
+has blocked some features of this app*). Tick **Private networks**, then click **Allow access**. Administrator rights
+are needed: on your own PC that is you; otherwise ask your IT department to allow `ardoise.exe` on the private
+network. Ardoise never changes the firewall itself.
+
+- *A network Windows calls "public".* Many school networks are classed "Public". Either set this network to "Private"
+  (**Settings** > **Network & internet** > the properties of the Wi-Fi or Ethernet network > **Network profile type**:
+  **Private network**), or also tick **Public networks** in the firewall window, knowing that the access code is then
+  the only protection.
+- *The window was closed without choosing.* Open **Windows Defender Firewall** > **Allow an app or feature through
+  Windows Defender Firewall** > **Change settings** > **Allow another app…** > **Browse…** > `ardoise.exe`, then tick
+  **Private** (and **Public** if need be) for Ardoise.
+- The *port is fixed* (8765, the `port` setting of the `[share]` section of `ardoise.toml`), so the permission stays
+  valid from one share to the next. Windows ties it to the location of `ardoise.exe`: if you move or copy the program
+  elsewhere, it may ask again.
+- If another program already uses this port, Ardoise says so and does not start the share: close the other program, or
+  change the port in `ardoise.toml` (for example `[share]`, then `port = 8766` on the next line), then start the share again.
+
+**Privacy.** The share starts only when you click, and stops with **Stop sharing** or when Ardoise closes (the port is
+then closed again). The code changes at each share. After 5 wrong codes in 5 minutes, the computer concerned has to
+wait (the page says how long), without bothering the others. The exchanges are *not encrypted* (it is plain `http` on
+the local network): use this sharing only on a network you trust, and not for confidential notes on an open network.
+The writing and the image of the shared notes can be seen by anyone who has the address *and* the code.
+
+**If it does not connect.**
+
+- Are the two computers on the *same network* (same Wi-Fi or same network socket, not an isolated "guest" network)?
+- Is the address typed with `http://` and the port (`:8765`)? Use the one the panel shows, not one from another day:
+  it may change.
+- Has the firewall been allowed for this type of network (see above)? This is the most frequent cause.
+- The page says the code is wrong: read the panel's code again (there is no `0`, `O`, `1`, `I` or `L`).
+- The page says there are too many screens: the share accepts 32 screens at a time.
+- Security software or the school network may also block connections between computers: ask your IT department to open
+  port 8765 to your PC.
+
 ## 7. The library
 
 ### Browsing
@@ -680,6 +756,11 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
   desktop, into Word, OneNote or an email (one image per note if several are selected). Keep the button pressed while
   the image is prepared.
 
+### Showing the live sheet
+
+To have the sheet (or the open note) appear in the browser of another computer of the network, with no file to send:
+**Share on the network**, see the end of chapter 6.
+
 ## 11. Importing your Inkspace notes
 
 If you have used Wacom Inkspace on this PC, Ardoise can take over its notes. Ardoise changes and deletes nothing in
@@ -816,7 +897,8 @@ it under the text to copy.
 
 - Your notes stay in *your* folder, on your computers. Ardoise has no account and sends nothing anywhere.
 - The only outgoing connection: the download of OpenH264 from Cisco, *only if you ask for it*. Ardoise does not listen
-  on any network port.
+  on any network port, except during a network share that *you* started (chapter 6), which shows only the shared sheet
+  and stops with Ardoise.
 - Handwriting recognition is Windows', offline, and the recognised text stays in a cache local to each PC.
 - Backup copies and caches are under `%LOCALAPPDATA%\Ardoise`, never in the library.
 - The *diagnostic logs* are in the library (so in Nextcloud): put nothing personal there.
@@ -859,6 +941,8 @@ of every component used, with its licence.
 | "Unreadable files: N" | Ardoise cannot read these files and has not changed them; the reason is written next to each one (chapters 2 and 7). |
 | Windows says "Ardoise is preventing shutdown" | A note has unsaved changes: go back to Ardoise and save, or shut down anyway (the backup copy is already written, chapter 8). |
 | "Ardoise did not find Wacom Inkspace on this computer" | Click **Choose a folder…** and give Inkspace's `LocalState` folder or a copy (chapter 11). If Ardoise says to close Inkspace, close it and try again. |
+| The other computer cannot connect to the share | Same network? Address typed with `http://` and the port? Windows firewall allowed for this network (**Private networks**, or the network set to **Private**)? See "Showing the sheet on another computer of the network", chapter 6. |
+| A message says, when sharing, that the port is already in use | Another program uses the share's port: close it, or change `port` in the `[share]` section of `ardoise.toml` (chapter 6). |
 | A second double-click on `ardoise.exe` seems to do nothing new | That is intended: the window that is already open comes back to the front (chapter 2). |
 
 If the problem comes from the tablet, run **Test the tablet** (chapter 13): the log, brought back by Nextcloud, makes it

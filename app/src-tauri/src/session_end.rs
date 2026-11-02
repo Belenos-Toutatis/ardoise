@@ -28,6 +28,7 @@ const MAIN: &str = "main";
 const MAX_REASON: usize = 255;
 
 /// The `lParam` bit of `WM_QUERYENDSESSION` for an end that cannot be held back (WinUser.h).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const ENDSESSION_CRITICAL: u32 = 0x4000_0000;
 
 /// Unsaved work is reported by the interface.
@@ -35,6 +36,7 @@ static UNSAVED: AtomicBool = AtomicBool::new(false);
 
 /// Whether `WM_QUERYENDSESSION` with these `lParam` flags is answered FALSE: only while work is
 /// unsaved, and never for a critical end (Windows ends the process whatever the answer).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn blocks_session_end(unsaved: bool, flags: u32) -> bool {
     unsaved && flags & ENDSESSION_CRITICAL == 0
 }

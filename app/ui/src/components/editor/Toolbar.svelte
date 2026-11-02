@@ -5,6 +5,7 @@
   import { t } from '../../lib/i18n.svelte';
   import { TOOLS, type Tool } from '../../lib/ink';
   import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
+  import ShareButton from '../share/ShareButton.svelte';
 
   let {
     tools,
@@ -240,6 +241,7 @@
       <span aria-hidden="true">▣</span>
       {t('editor.video.button')}
     </button>
+    <ShareButton />
   </div>
 </div>
 

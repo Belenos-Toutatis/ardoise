@@ -36,6 +36,7 @@ ardoise-media = { path = "../../crates/ardoise-media" }
 ardoise-proto = { path = "../../crates/ardoise-proto" }
 ardoise-render = { path = "../../crates/ardoise-render" }
 ardoise-sim = { path = "../../crates/ardoise-sim" }
+ardoise-share = { path = "../../crates/ardoise-share" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tauri = { version = "2.12", features = [] }
 tauri-plugin-dialog = "2.8"

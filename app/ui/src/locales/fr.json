@@ -698,7 +698,10 @@
     "inkspaceTooLarge": "la base de notes d'Inkspace est trop volumineuse pour être importée ({detail})",
     "inkspaceNoteDamaged": "cette note d'Inkspace ne peut pas être lue ({detail})",
     "inkspaceBusy": "un import depuis Inkspace est déjà en cours",
-    "inkspaceTarget": "ce classeur se trouve dans le dossier d'Inkspace ({detail}) ; choisissez un classeur de la bibliothèque"
+    "inkspaceTarget": "ce classeur se trouve dans le dossier d'Inkspace ({detail}) ; choisissez un classeur de la bibliothèque",
+    "sharePortInUse": "le port {detail} du partage est déjà utilisé par un autre programme ; pour en changer, modifiez « port » dans la section [share] du fichier ardoise.toml, puis relancez le partage",
+    "shareUnavailable": "cette version d'Ardoise ne peut pas partager sur le réseau : la page destinée aux autres écrans n'est pas incluse",
+    "shareFailed": "le partage n'a pas pu démarrer ({detail})"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -1510,6 +1513,53 @@
     "canvas": "Page projetée {page}",
     "clearMarks": "Effacer les annotations"
   },
+  "share": {
+    "button": "Partager sur le réseau",
+    "buttonHint": "Montrer cet écran dans le navigateur d'un autre ordinateur du réseau local",
+    "buttonActive": {
+      "one": "Partage en cours : 1 écran connecté. Ouvrir le partage.",
+      "other": "Partage en cours : {count} écrans connectés. Ouvrir le partage."
+    },
+    "indicator": "Partage réseau",
+    "indicatorHint": {
+      "one": "Partage sur le réseau : 1 écran connecté. Cliquez pour ouvrir le partage.",
+      "other": "Partage sur le réseau : {count} écrans connectés. Cliquez pour ouvrir le partage."
+    },
+    "panel": {
+      "title": "Partager sur le réseau",
+      "close": "Fermer",
+      "starting": "Démarrage du partage…",
+      "retry": "Réessayer"
+    },
+    "open": "Sur l'autre ordinateur, ouvrez un navigateur et tapez :",
+    "noAddress": "Ardoise ne trouve aucune adresse réseau sur ce PC : vérifiez qu'il est bien connecté au Wi-Fi ou au réseau de l'établissement, puis arrêtez et relancez le partage.",
+    "otherAddresses": "Autres adresses possibles :",
+    "copy": "Copier",
+    "copied": "Adresse copiée",
+    "qr": "Code QR de l'adresse du partage",
+    "qrHint": "Ou scannez-le avec un téléphone.",
+    "codeLabel": "Code",
+    "codeIntro": "Puis tapez ce code :",
+    "viewersNone": "Aucun écran connecté",
+    "viewers": {
+      "one": "{count} écran connecté",
+      "other": "{count} écrans connectés"
+    },
+    "shown": {
+      "label": "Affiché sur les écrans",
+      "heading": "Affiché sur les écrans :",
+      "live": "La feuille en direct",
+      "note": "La note en cours de modification",
+      "waiting": "L'écran d'attente"
+    },
+    "pause": "Pause",
+    "resume": "Reprendre",
+    "paused": "En pause : l'image partagée est figée",
+    "stop": "Arrêter le partage",
+    "helpTitle": "À savoir",
+    "helpFirewall": "La première fois, Windows demande l'autorisation du pare-feu : acceptez pour les réseaux privés (« réseau privé »).",
+    "helpEnd": "Le partage s'arrête quand vous le décidez ou quand vous fermez Ardoise. Seul l'ordinateur d'Ardoise envoie : les autres écrans ne font que regarder."
+  },
   "handwriting": {
     "languages": {
       "fr": "Français",
@@ -1743,6 +1793,44 @@
       "foundCount": "Ardoise a trouvé des notes de Wacom Inkspace sur cet ordinateur ({count} notes).",
       "check": "Les importer dans la bibliothèque (classeur « {binder} »)",
       "hint": "Vous confirmerez l'import avant qu'il ne commence."
+    }
+  },
+  "viewer": {
+    "title": "Ardoise : écran partagé",
+    "brand": "Ardoise",
+    "canvas": "Page partagée par le PC d'Ardoise",
+    "connecting": "Connexion au PC d'Ardoise…",
+    "reconnecting": "Connexion perdue, nouvelle tentative…",
+    "paused": "En pause",
+    "waiting": {
+      "title": "En attente",
+      "text": "Le PC d'Ardoise ne partage rien pour l'instant. La page s'affichera ici dès que le partage commencera."
+    },
+    "ended": {
+      "title": "Le partage est terminé",
+      "text": "Cette page reprendra d'elle-même si le PC d'Ardoise partage de nouveau (un nouveau code sera peut-être demandé)."
+    },
+    "tooMany": {
+      "title": "Trop d'écrans connectés",
+      "text": "Le PC d'Ardoise a atteint le nombre d'écrans qu'il accepte. Nouvelle tentative automatique dans quelques secondes."
+    },
+    "code": {
+      "help": "Saisissez le code affiché sur le PC d'Ardoise.",
+      "label": "Code de partage (6 caractères)",
+      "submit": "Rejoindre",
+      "checking": "Vérification…",
+      "wrong": {
+        "one": "Code incorrect. Il vous reste {count} essai.",
+        "other": "Code incorrect. Il vous reste {count} essais."
+      },
+      "tooMany": "Trop d'essais. Réessayez dans {seconds} s.",
+      "network": "Impossible de joindre le PC d'Ardoise. Vérifiez le réseau, puis réessayez.",
+      "error": "Le PC d'Ardoise a refusé la demande (erreur {status}).",
+      "cookies": "Le code est bon, mais le navigateur n'a pas gardé l'autorisation. Autorisez les cookies pour cette page, puis réessayez."
+    },
+    "fullscreen": {
+      "enter": "Plein écran",
+      "exit": "Quitter le plein écran"
     }
   }
 }
