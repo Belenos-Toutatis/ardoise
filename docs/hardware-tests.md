@@ -232,6 +232,24 @@ Ce qui ne revient pas tout seul :
 | Une photo du message de Windows s'il y en a un (pare-feu, Bluetooth, écran) | partout |
 
 
+## H1 bis — Après la première session réelle (2 novembre 2026)
+
+**Durée** : 20 minutes. **Tablette** : déjà enregistrée. **Téléphone** : Bluetooth **coupé**.
+
+La première session avec la vraie tablette a montré que la synchronisation était refusée presque à chaque fois : la tablette refuse la commande qui prépare le transfert des pages (`ec`) quand elle est déjà en mode papier. Ardoise l'envoie maintenant avant le mode papier, cherche la tablette enregistrée seulement à sa propre adresse, lit la batterie que la tablette annonce d'elle-même, et une synchronisation qui échoue s'affiche en rouge (« a échoué ») au lieu de passer inaperçue. Ces essais vérifient tout cela.
+
+1. Fermer Ardoise, remplacer `ardoise.exe` par la nouvelle version, puis lancer `.\ardoise.exe --self-test | Out-String` : dernière ligne `SELF-TEST OK`.
+2. **Test guidé** : dessiner les 3 pages de référence (bouton après chacune), puis **Tester la tablette**, effacement coché, Simulation décochée. Un appui bref suffit à l'étape « Recherche ». Attendu : « Téléchargement des pages » réussit (3 pages, ou 4 si la page restée sur la tablette le 2 novembre y est encore). En **Mode direct (30 s)**, appuyer **une fois** sur le bouton de la tablette et noter vers quelle seconde.
+3. **Synchronisation normale** : fermer le test, dessiner une page, appuyer sur le bouton, attendre. Le panneau doit afficher « Dernière synchronisation : … 1 note enregistrée. 1 page effacée… ».
+4. **Deuxième synchronisation sans déconnexion** : juste après, tablette toujours connectée, dessiner une autre page et appuyer sur le bouton. Elle doit arriver dans les secondes qui suivent.
+5. **Après le mode direct** : ouvrir le mode direct, dessiner, le terminer, puis enregistrer une page avec le bouton. Elle doit se synchroniser.
+6. **Batterie** : rester connecté (ou en mode direct) plusieurs minutes : le pourcentage du panneau doit baisser d'environ 1 par minute.
+7. Fermer Ardoise pendant que la tablette est connectée.
+
+**À me signaler** : tout message « a échoué » (texte exact), une page qui n'arrive pas, le pourcentage de batterie qui ne bouge pas. Les journaux de `_ardoise\diagnostics\` reviennent seuls ; ils ne sont écrits qu'en cas de problème ou de message inconnu.
+
+---
+
 ## H3 — Stylet et tactile (PC tactile)
 
 **Durée** : 15 à 20 minutes. **Matériel** : un PC avec écran tactile et stylet (la Surface de l'essai précédent) ; un vidéoprojecteur ou un second écran pour le dernier point. Pas de tablette Bamboo Slate ici. Ouvrir une note de la bibliothèque de démonstration (ou en créer une avec quelques traits) dans l'éditeur.
