@@ -33,6 +33,7 @@ pub use crc::crc32;
 pub use frame::{Frame, FrameError};
 pub use message::{
     Dimension, FirmwarePart, HostId, MessageError, Mode, NameAssembler, Reply, Request, StatusCode,
+    firmware_digits_frame,
 };
 pub use time::{BcdTime, TimeError};
 

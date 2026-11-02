@@ -257,8 +257,9 @@ fn registers_with_the_button_then_answers_every_command() {
     assert_eq!(tablet.config().name, "Ardoise");
 
     say!("firmware, battery, dimensions");
-    link.ask("b7 01 00", "b8 09 00 42 31 36 30 38 30 35 41");
-    link.ask("b7 01 01", "b8 09 01 43 31 37 30 37 30 34 41");
+    // One byte per digit, as a real Slate A4 sends them: B160805A, C170704A.
+    link.ask("b7 01 00", "b8 09 00 0b 01 06 00 08 00 05 0a");
+    link.ask("b7 01 01", "b8 09 01 0c 01 07 00 07 00 04 0a");
     link.ask("b9 01 00", "ba 02 57 00");
     tablet.set_battery(100, true);
     link.ask("b9 01 00", "ba 02 64 01");

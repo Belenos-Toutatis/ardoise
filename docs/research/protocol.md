@@ -162,7 +162,7 @@ Requests (host to device) and their replies, **as used for the Slate**:
 | SET_NAME | `bb n+1 <name bytes> 0a` | `b3 01 00` | `MsgSetName` | 4 |
 | GET_TIME | `b6 01 00` | `bd 06 <6 BCD bytes>` | `MsgGetTime` | 4 |
 | SET_TIME | `b6 06 <6 BCD bytes>` | `b3 01 00` | `MsgSetTime` | 4 |
-| GET_FIRMWARE | `b7 01 00` then `b7 01 01` | `b8 n <idx> <ascii>` (twice) | `MsgGetFirmwareVersion` | 4 |
+| GET_FIRMWARE | `b7 01 00` then `b7 01 01` | `b8 n <idx> <digits>` (twice; one byte per hex digit on a Slate) | `MsgGetFirmwareVersion` | 4 |
 | GET_BATTERY | `b9 01 00` | `ba 02 <pct> <charging>` | `MsgGetBattery` | 4 |
 | GET_WIDTH | `ea 02 03 00` | `eb 06 03 00 <u32>` | `MsgGetWidthSlate` | 4 |
 | GET_HEIGHT | `ea 02 04 00` | `eb 06 04 00 <u32>` | `MsgGetHeightSlate` | 4 |
@@ -303,12 +303,14 @@ All via `tuhi/protocol.py` message classes; high-level wrappers in `tuhi/wacom.p
 
 ### 4.2 Firmware version
 
-`b7 01 00` -> `b8 n 00 <ascii...>` ("hi" part) and `b7 01 01` -> `b8 n 01 <ascii...>` ("lo" part). Result string = `hi-lo`.
+`b7 01 00` -> `b8 n 00 <digits...>` ("hi" part) and `b7 01 01` -> `b8 n 01 <digits...>` ("lo" part). Result string = `hi-lo`.
 Real values: Slate A4 `B160805A-C170704A` (issue #117), Slate (issue #115) `B160805A-C160909B`, Intuos Pro `B180131a-C325.003` (issue #256,
 trace `b8 09 00 42 31 38 30 31 33 31 61`).
-**Quirk/uncertainty:** the current code for ANY/SPARK/SLATE (`MsgGetFirmwareVersion`) builds the string with `hex(d)[2:]` (hex of each byte) whereas the Intuos
-version uses `chr(d)`. The real traces show ASCII bytes, so decode as ASCII in the port. The Tuhi unit test for the Slate feeds nibble values, which does not match real
-devices (inferred: Tuhi bug or older/newer format; ignore).
+**Encoding, settled by our own capture (real Bamboo Slate A4, 2026-11-02):** the Slate sends **one byte per hexadecimal digit**, not ASCII:
+`b8 09 00 0b 01 06 00 09 02 09 0a` and `b8 09 01 0c 01 07 00 07 00 04 0a` are `B160929A` and `C170704A`. This is what Tuhi's `hex(d)[2:]`
+(`MsgGetFirmwareVersion`, ANY/SPARK/SLATE) and its Slate unit test do; the versions quoted in issues #115/#117 are that hex rendering. The Intuos
+Pro sends ASCII (`chr(d)`, trace of issue #256). Ardoise reads a reply whose bytes are all below `10` as digits, anything else as ASCII. Note that
+the digit `0a` is not a line feed here: trimming whitespace from an ASCII reading loses the last digit.
 
 ### 4.3 Battery
 

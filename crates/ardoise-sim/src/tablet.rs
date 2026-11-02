@@ -869,7 +869,12 @@ impl State {
                     FirmwarePart::High => self.config.firmware_high.clone(),
                     FirmwarePart::Low => self.config.firmware_low.clone(),
                 };
-                vec![command(&Reply::Firmware { part, text })]
+                // Like a real Slate: one byte per hexadecimal digit (protocol.md §4.2); any other
+                // text goes out as ASCII.
+                let reply = ardoise_proto::firmware_digits_frame(part, &text)
+                    .and_then(|frame| frame.encode().ok())
+                    .unwrap_or_else(|| encode(&Reply::Firmware { part, text }));
+                vec![(Channel::Command, reply)]
             }
             Request::GetBattery => vec![command(&Reply::Battery {
                 percent: self.config.battery_percent,
