@@ -91,8 +91,13 @@ impl ShareStatus {
 }
 
 /// Error for the interface.
+/// Error for the interface. A port in use carries only the port's number, which the translated
+/// sentence (`errorCodes.sharePortInUse`) shows as `{detail}`.
 fn share_error(error: &ShareError) -> CommandError {
-    CommandError::new(error.code(), error)
+    match error {
+        ShareError::PortInUse { port } => CommandError::new(error.code(), port),
+        other => CommandError::new(other.code(), other),
+    }
 }
 
 /// A window following the status: false from `send` drops it.
@@ -107,6 +112,8 @@ struct Running {
 
 struct Inner {
     running: Mutex<Option<Running>>,
+    /// Held during a start, so that two starts never make two servers.
+    starting: Mutex<()>,
     /// The last content the main window gave, also while no share runs.
     content: Mutex<ShareContent>,
     /// Bumped by each content given: only the latest one is applied.
@@ -129,6 +136,7 @@ impl Default for ShareRuntime {
         Self {
             inner: Arc::new(Inner {
                 running: Mutex::new(None),
+                starting: Mutex::new(()),
                 content: Mutex::new(ShareContent::Waiting),
                 sequence: AtomicU64::new(0),
                 notes: Mutex::new(NoteSharer::default()),
@@ -227,8 +235,15 @@ impl Inner {
             return;
         };
         match content {
-            ShareContent::Waiting => share.show_waiting(),
-            ShareContent::Live => share.show_live(),
+            // The viewers leave the note: the next one goes whole, even the same note again.
+            ShareContent::Waiting => {
+                notes.reset();
+                share.show_waiting();
+            }
+            ShareContent::Live => {
+                notes.reset();
+                share.show_live();
+            }
             ShareContent::Note { note, image_key } => {
                 if let Some(update) = notes.update(*note, image_key, render_paper) {
                     share.show_note(update);
@@ -254,10 +269,23 @@ impl ShareRuntime {
         let _ = self.assets.set(source);
     }
 
+    /// Whether the viewer is embedded (`--self-test`): the number of its files.
+    pub fn viewer_check(&self) -> Result<usize, String> {
+        let source = self
+            .assets
+            .get()
+            .ok_or_else(|| "the interface is not embedded in this build".to_owned())?;
+        viewer_assets(source.as_ref())
+            .map(|assets| assets.len())
+            .map_err(|error| error.to_string())
+    }
+
     /// Starts sharing (or returns the share running) on `bind:port`, live mode from `hub`.
     fn start(&self, bind: Ipv4Addr, port: u16, hub: Arc<LiveHub>) -> CommandResult<ShareStatus> {
-        let mut running = lock(&self.inner.running);
-        if running.is_none() {
+        // One start at a time (a double click); `running` itself is only held briefly, never
+        // while the server starts, so that its status callback can always read it.
+        let _starting = lock(&self.inner.starting);
+        if lock(&self.inner.running).is_none() {
             let source = self.assets.get().ok_or_else(|| {
                 CommandError::new(
                     "shareUnavailable",
@@ -283,15 +311,12 @@ impl ShareRuntime {
             let port = share.port();
             let addresses = addresses_for(bind, port);
             let qr = addresses.first().and_then(|address| qr_code(address));
-            *running = Some(Running {
+            *lock(&self.inner.running) = Some(Running {
                 share: Arc::new(share),
                 addresses,
                 qr,
             });
-            drop(running);
             self.inner.reapply();
-        } else {
-            drop(running);
         }
         let status = self.inner.status(port);
         self.inner.broadcast(&status);
@@ -305,6 +330,8 @@ impl ShareRuntime {
             running.share.stop();
             lock(&self.inner.notes).reset();
         }
+        // What the window showed then may be gone by the next share: it says again.
+        *lock(&self.inner.content) = ShareContent::Waiting;
     }
 
     fn status(&self, configured_port: u16) -> ShareStatus {

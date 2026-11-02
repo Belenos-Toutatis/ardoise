@@ -11,7 +11,8 @@ use serde::Serialize;
 /// needs about this much).
 pub const PAPER_PX: u32 = 2560;
 
-/// What the viewer draws of a note (`SharedPage` in `share.ts`): no title, tags, file or dates.
+/// What the viewer draws of a note (`SharedPage` in `share.ts`): no title, tags, file, dates or
+/// layer names.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SharedPage {
     pub id: String,
@@ -27,7 +28,15 @@ impl SharedPage {
             id: note.id,
             page: note.page,
             background: note.background,
-            layers: note.layers,
+            // Their names are typed by the user; the viewer only needs whether they show.
+            layers: note
+                .layers
+                .into_iter()
+                .map(|layer| Layer {
+                    name: String::new(),
+                    ..layer
+                })
+                .collect(),
             strokes: note.strokes,
         }
     }
@@ -70,27 +79,25 @@ impl Paper {
     }
 }
 
+/// The strokes added at the end of the page last sent.
 #[derive(Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-enum Message<'a> {
-    Note {
-        page: &'a SharedPage,
-        background: Option<&'a str>,
-    },
-    NoteStrokes {
-        strokes: &'a [Stroke],
-    },
+#[serde(tag = "type", rename = "noteStrokes")]
+struct NoteStrokes<'a> {
+    strokes: &'a [Stroke],
 }
 
 /// The note last shared, its paper and the paper's picture.
 #[derive(Default)]
 pub struct NoteSharer {
     last: Option<SharedPage>,
-    paper: Option<(Paper, Option<String>)>,
+    /// The paper last seen and its picture as JSON (`"data:image/png;base64,…"` or `null`),
+    /// rendered and encoded once.
+    paper: Option<(Paper, String)>,
 }
 
 impl NoteSharer {
-    /// Forgets what was sent (a new share: the next note goes whole).
+    /// Forgets what the viewers show (a new share, or they left the note): the next note goes
+    /// whole. The paper's picture is kept: it does not need rendering again.
     pub fn reset(&mut self) {
         self.last = None;
     }
@@ -98,6 +105,12 @@ impl NoteSharer {
     /// The messages for `note`: `None` when the viewers already show exactly this. `render`
     /// makes the paper's picture (a PNG data URL) when the paper is not plain and changed;
     /// `None` from it leaves the paper colour.
+    ///
+    /// `full` is the whole page with its paper (for a viewer that joins, or that showed something
+    /// else). For the viewers already showing the previous note, `append` is the strokes added
+    /// when that is all that changed, else the whole page *without* its paper when the paper did
+    /// not change (an erased stroke, an undo, a colour: the picture, which may weigh megabytes,
+    /// is not sent again), else nothing (`full` goes).
     pub fn update(
         &mut self,
         note: Note,
@@ -117,35 +130,37 @@ impl NoteSharer {
             } else {
                 render(&paper)
             };
-            self.paper = Some((paper, picture));
+            let json = serde_json::to_string(&picture).ok()?;
+            self.paper = Some((paper, json));
         }
-        let picture = self.paper.as_ref().and_then(|(_, p)| p.as_deref());
+        let picture = self
+            .paper
+            .as_ref()
+            .map_or("null", |(_, json)| json.as_str());
 
-        let added = match &self.last {
-            Some(last) if !paper_changed && last.same_sheet(&page) => {
-                let known = last.strokes.len();
-                if page.strokes.len() >= known && page.strokes[..known] == last.strokes[..] {
-                    Some(known)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        };
+        let previous = self.last.as_ref().filter(|_| !paper_changed);
+        let added = previous.and_then(|last| {
+            let known = last.strokes.len();
+            (last.same_sheet(&page)
+                && page.strokes.len() >= known
+                && page.strokes[..known] == last.strokes[..])
+                .then_some(known)
+        });
         if added == Some(page.strokes.len()) {
             return None;
         }
-        let full = serde_json::to_string(&Message::Note {
-            page: &page,
-            background: picture,
-        })
-        .ok()?;
-        let append = added.and_then(|known| {
-            serde_json::to_string(&Message::NoteStrokes {
-                strokes: &page.strokes[known..],
-            })
-            .ok()
-        });
+        let page_json = serde_json::to_string(&page).ok()?;
+        let full = format!(r#"{{"type":"note","page":{page_json},"background":{picture}}}"#);
+        let append = match added {
+            Some(known) => Some(
+                serde_json::to_string(&NoteStrokes {
+                    strokes: &page.strokes[known..],
+                })
+                .ok()?,
+            ),
+            None if previous.is_some() => Some(format!(r#"{{"type":"note","page":{page_json}}}"#)),
+            None => None,
+        };
         self.last = Some(page);
         Some(NoteUpdate { full, append })
     }

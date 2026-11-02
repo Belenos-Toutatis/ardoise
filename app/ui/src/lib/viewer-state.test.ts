@@ -166,7 +166,35 @@ describe('viewer state: pause', () => {
   });
 });
 
+describe('viewer state: a stream opening again', () => {
+  it('drops a pause badge left from before the cut (a paused share says so again)', () => {
+    const v = new ViewerState();
+    v.handle({ type: 'waiting' });
+    v.handle({ type: 'pause', paused: true });
+    v.status('reconnecting');
+    v.status('open');
+    expect(v.paused).toBe(false);
+    v.handle({ type: 'pause', paused: true });
+    expect(v.paused).toBe(true);
+  });
+});
+
 describe('viewer state: a note', () => {
+  it('keeps the paper shown when an update of the page comes without one', () => {
+    const v = new ViewerState();
+    v.handle({ type: 'note', page: shared('n1', [stroke(100), stroke(400)]), background: 'data:image/png;base64,AA' });
+    v.handle({ type: 'note', page: shared('n1', [stroke(100)]) });
+    expect(v.background).toBe('data:image/png;base64,AA');
+    expect(v.live.strokes).toHaveLength(1);
+    // A note given with plain paper drops the picture; one after the waiting screen has none.
+    v.handle({ type: 'note', page: shared('n1'), background: null });
+    expect(v.background).toBeNull();
+    v.handle({ type: 'note', page: shared('n2'), background: 'data:image/png;base64,BB' });
+    v.handle({ type: 'waiting' });
+    v.handle({ type: 'note', page: shared('n2') });
+    expect(v.background).toBeNull();
+  });
+
   it('becomes a snapshot of one page, the whole page in view, idle, no laser', () => {
     const v = new ViewerState();
     const strokes = [stroke(100), stroke(400)];

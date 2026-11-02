@@ -22,6 +22,19 @@ function parseAll(chunks: string[]): { payloads: string[]; retry: number | null 
 }
 
 describe('SSE parser', () => {
+  it('reads a message of megabytes arriving in small chunks in one pass', () => {
+    const big = JSON.stringify({ type: 'note', page: { strokes: 'x'.repeat(3_000_000) } });
+    const text = `data: ${big}\n\ndata: {"type":"waiting"}\r\n\r\n`;
+    const parser = new SseParser();
+    const payloads: string[] = [];
+    const began = performance.now();
+    for (let i = 0; i < text.length; i += 4096) payloads.push(...parser.feed(text.slice(i, i + 4096)));
+    const took = performance.now() - began;
+    expect(payloads).toEqual([big, '{"type":"waiting"}']);
+    // Searching the whole buffer again at every chunk took seconds here.
+    expect(took).toBeLessThan(1500);
+  });
+
   it('returns the data of each event once its blank line arrived', () => {
     const parser = new SseParser();
     expect(parser.feed('data: {"type":"waiting"}\n')).toEqual([]);

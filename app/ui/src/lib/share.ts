@@ -75,8 +75,12 @@ export type ShareMessage =
    * from it.
    */
   | { type: 'live'; reset: boolean; batch: LiveBatch }
-  /** The whole page of the note open in the editor; `background`: PNG data URL of the paper, null for plain paper. */
-  | { type: 'note'; page: SharedPage; background: string | null }
+  /**
+   * The whole page of the note open in the editor; `background`: PNG data URL of the paper, null
+   * for plain paper, absent when the paper is the one already shown (a stroke erased, an undo:
+   * the picture, which may weigh megabytes, is sent only when it changes).
+   */
+  | { type: 'note'; page: SharedPage; background?: string | null }
   /** Strokes added at the end of the page last sent. */
   | { type: 'noteStrokes'; strokes: Stroke[] }
   /** The image is frozen (`true`) or follows again (`false`). */

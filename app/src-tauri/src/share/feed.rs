@@ -88,8 +88,8 @@ pub fn strip_events(events: Vec<LiveEvent>) -> Vec<LiveEvent> {
 }
 
 /// No library paths, no screen name, and of the page only what is drawn (its id, dates, size,
-/// paper, layers and strokes): the title, tags and favourite mark a page may have been given in
-/// the library stay on the PC.
+/// paper, layers and strokes): the title, tags, favourite mark and layer names a page may have
+/// been given stay on the PC.
 pub fn strip_snapshot(snapshot: &mut LiveSnapshot) {
     snapshot.saved.clear();
     snapshot.presentation = None;
@@ -98,4 +98,8 @@ pub fn strip_snapshot(snapshot: &mut LiveSnapshot) {
     page.tags.clear();
     page.favorite = false;
     page.background_image = None;
+    // Layer names are typed by the user; the viewer only needs whether a layer shows.
+    for layer in &mut page.layers {
+        layer.name.clear();
+    }
 }

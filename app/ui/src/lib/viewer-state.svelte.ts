@@ -87,6 +87,8 @@ export class ViewerState {
       case 'open':
         this.reconnecting = false;
         this.tooMany = false;
+        // A paused share says so to every stream it opens: a badge from before a cut must not stay.
+        this.paused = false;
         break;
       case 'needsCode':
         this.reconnecting = false;
@@ -120,7 +122,9 @@ export class ViewerState {
         this.liveBatch(message.batch, message.reset);
         break;
       case 'note':
-        this.setNote(message.page, message.background);
+        // Without `background`, the paper is the one already shown (the server sends its
+        // picture, which can be large, only when it changes).
+        this.setNote(message.page, 'background' in message ? (message.background ?? null) : undefined);
         break;
       case 'noteStrokes':
         this.appendStrokes(message.strokes);
@@ -173,12 +177,14 @@ export class ViewerState {
     this.screen = 'live';
   }
 
-  private setNote(shared: SharedPage, background: string | null): void {
+  /** `background` undefined: the paper of the note shown stays. */
+  private setNote(shared: SharedPage, background: string | null | undefined): void {
+    const keep = background === undefined && this.screen === 'note' ? this.background : null;
     this.live.close();
     const fresh = new LiveState();
     fresh.initial(noteSnapshot(shared));
     this.live = fresh;
-    this.background = background;
+    this.background = background === undefined ? keep : background;
     this.screen = 'note';
   }
 

@@ -296,7 +296,8 @@
   $effect(() => {
     const present = history?.present;
     if (!present) return;
-    const shown = { ...present.note, title };
+    // Not the title: it never leaves the PC (Rust keeps only what is drawn), so typing it sends nothing.
+    const shown = present.note;
     const imageKey = present.backgroundPixels?.key ?? null;
     untrack(() => share.showNote(shown, imageKey));
   });
@@ -926,7 +927,7 @@
 
   /** Whether the editing keys are free to act now (no dialog, split panel or replay). */
   function canEditNow(target: EventTarget | null): boolean {
-    return !!doc && !leaving && !offer && !exporting && !video && !split && !replaying && !isTyping(target);
+    return !!doc && !leaving && !offer && !exporting && !video && !split && !replaying && !share.panelOpen && !isTyping(target);
   }
 
   /** Pastes strokes from the clipboard as one undoable step (the copies are then selected). */

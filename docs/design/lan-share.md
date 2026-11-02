@@ -131,7 +131,10 @@ reconnects gets a fresh snapshot. Messages (`type` field; TypeScript in `app/ui/
 | `{"type":"end"}` | the share stops: the viewer closes the stream and shows "sharing ended" |
 
 `SharedPage = { id, page: PageSize, background: Background, layers: Layer[], strokes: Stroke[] }` (the `Note`
-shapes of `note.ts`).
+shapes of `note.ts`; layer names are emptied, the viewer only needs `visible`). A `note` message **without**
+`background` (sent to the viewers already showing a note, when only the page changed) keeps the paper shown: the
+picture, which may weigh megabytes (texture, background image), goes only when the paper changes, to a viewer that
+joins, and when the viewers come back from another content.
 
 ### Content, always chosen by the Ardoise PC
 
@@ -353,6 +356,52 @@ written and flushed per message) → LAN → `fetch` reader → `LiveState` → 
   (snapshot, points, latency), 404s, the viewer page and its assets; then a note open in the editor (note message,
   then a change), pause, stop (`end`, port closed).
 - Hardware: H4 in `docs/hardware-tests.md`.
+
+## Decisions made while building M11
+
+Server (package A):
+
+- `on_change` runs on the share's own thread, never on the caller's: calls stay in order, several changes in a
+  row are merged into one call with the latest status, and it is never called by nor after `stop()` (the app
+  tells its windows itself). `show_waiting` / `show_live` do nothing when already shown; `show_note` nothing for
+  a byte-identical `full`.
+- Pause on a note or the waiting screen: the viewers get only `pause: true` (they already show that image);
+  resume sends the content again only when it changed meanwhile. `freeze()` giving `None` freezes on `waiting`.
+- **Stale live subscriptions**: every `LiveFeed::start` gets a subscription of its own; once the share stopped it
+  (pause, another content, the viewer left, stop), `LiveViewer::send` on it returns `Err`, so a batch the hub's
+  flusher had already taken never reaches a viewer after what replaced live mode (a frozen image that moves, a
+  `note` overtaken by an old snapshot).
+- Viewer queues: 1 024 messages **and 64 MiB** (one larger message still goes through an empty queue). A full
+  queue closes that stream without `end`; the browser reconnects and starts again from a snapshot.
+- `PermissionDenied` on bind is also `PortInUse` (Windows answers so for ports reserved by Hyper-V).
+- After each non-stream answer, a "lingering close" (write side shut, client's leftover bytes read for up to 1 s)
+  so that a refusal such as `431` is not destroyed by a reset. A stream also ends when the client sends anything.
+- `stop()`: each stream drops its backlog and writes `end` (500 ms at most), connections get 1 s to finish; it
+  normally takes well under a millisecond, about 1 s with a viewer that does not read.
+- Address probes: 8.8.8.8, then 10.0.0.1, 172.16.0.1, 192.168.0.1, 192.168.1.1 (routing lookups only).
+
+App (package B) and review fixes:
+
+- `share_start` never holds the runtime's `running` lock while the server starts (a separate `starting` lock keeps
+  two starts from making two servers), so the status callback can always read it.
+- Leaving a note (waiting screen, live mode) forgets the note sent: the same note opened again goes whole (it was
+  never sent again before, the viewers stayed on the waiting screen).
+- `share_stop` forgets the content shown; the window says it again after the next start.
+- A port in use is reported with its number (`{detail}`); the port is read again at each start, so changing it
+  needs a new share, not a new launch.
+- `--self-test` checks that the viewer is embedded (`share:` line; a build without it fails the self-test).
+- The editor sends its note without the title (Rust keeps only what is drawn): typing a title sends nothing.
+
+Interfaces (packages C, D):
+
+- The viewer replaces its `LiveState` for each `note` and each `live` batch with `reset: true` (a full redraw even
+  for a same-id note); `noteStrokes` go through `receive` as `strokeStart` + `strokeEnd`. After `end` the page stays
+  "ended" while the port is closed, and a `401` (a new share) shows the code form. A 45 s silence (the server pings
+  every 15 s) aborts and reconnects a half-open stream. The SSE parser searches each character once (a message of
+  megabytes in small chunks). An opening stream clears the pause badge.
+- The share panel is a modal of `Home.svelte`, over the library, the editor and live mode; while it is open the
+  editor's and the live window's shortcuts (and cut / paste) are off, Esc closes the panel only; closing it never
+  stops the share. Notes are sent 100 ms after the last change, at most every 300 ms.
 
 ## Work packages
 

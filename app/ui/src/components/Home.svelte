@@ -188,7 +188,7 @@
 
   function shortcuts(event: KeyboardEvent) {
     // Not under the editor, live mode or a dialog of the library (« Depuis un PDF » would be unmounted).
-    if (away || lib.dialog || fromFile || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+    if (away || lib.dialog || fromFile || share.panelOpen || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
     const key = event.key.toLowerCase();
     if (key === 'f') {
       event.preventDefault();

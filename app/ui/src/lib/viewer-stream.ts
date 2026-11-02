@@ -26,6 +26,8 @@ export class SseParser {
   private buffer = '';
   private data: string[] = [];
   private first = true;
+  /** Characters at the start of `buffer` known to hold no line end. */
+  private scanned = 0;
 
   /** Adds the next chunk of text; returns the payloads of the events it completed. */
   feed(chunk: string): string[] {
@@ -36,14 +38,27 @@ export class SseParser {
     }
     const out: string[] = [];
     let start = 0;
+    // Only the text not searched yet is searched: a message of megabytes arriving in small
+    // chunks costs one pass, not one pass per chunk.
+    let from = this.scanned;
+    // The next `\r` (the server never sends one): searched once, not once per line.
+    let cr = -2;
     for (;;) {
-      let end = start;
-      while (end < this.buffer.length && this.buffer[end] !== '\n' && this.buffer[end] !== '\r') end++;
-      if (end >= this.buffer.length) break;
+      if (cr !== -1 && cr < from) cr = this.buffer.indexOf('\r', from);
+      const lf = this.buffer.indexOf('\n', from);
+      const end = lf < 0 ? cr : cr < 0 ? lf : Math.min(lf, cr);
+      if (end < 0) {
+        this.scanned = this.buffer.length - start;
+        break;
+      }
       // A `\r` at the very end may be the first half of `\r\n`: wait for the next chunk.
-      if (this.buffer[end] === '\r' && end + 1 >= this.buffer.length) break;
+      if (this.buffer[end] === '\r' && end + 1 >= this.buffer.length) {
+        this.scanned = end - start;
+        break;
+      }
       const line = this.buffer.slice(start, end);
       start = end + (this.buffer[end] === '\r' && this.buffer[end + 1] === '\n' ? 2 : 1);
+      from = start;
       const payload = this.line(line);
       if (payload !== null) out.push(payload);
     }

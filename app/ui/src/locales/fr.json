@@ -699,7 +699,7 @@
     "inkspaceNoteDamaged": "cette note d'Inkspace ne peut pas être lue ({detail})",
     "inkspaceBusy": "un import depuis Inkspace est déjà en cours",
     "inkspaceTarget": "ce classeur se trouve dans le dossier d'Inkspace ({detail}) ; choisissez un classeur de la bibliothèque",
-    "sharePortInUse": "le port du partage est déjà utilisé par un autre programme ; pour en changer, modifiez « port » dans la section [share] du fichier ardoise.toml, puis relancez le partage",
+    "sharePortInUse": "le port {detail} du partage est déjà utilisé par un autre programme ; pour en changer, modifiez « port » dans la section [share] du fichier ardoise.toml, puis relancez le partage",
     "shareUnavailable": "cette version d'Ardoise ne peut pas partager sur le réseau : la page destinée aux autres écrans n'est pas incluse",
     "shareFailed": "le partage n'a pas pu démarrer ({detail})"
   },
@@ -1532,6 +1532,7 @@
       "retry": "Réessayer"
     },
     "open": "Sur l'autre ordinateur, ouvrez un navigateur et tapez :",
+    "noAddress": "Ardoise ne trouve aucune adresse réseau sur ce PC : vérifiez qu'il est bien connecté au Wi-Fi ou au réseau de l'établissement, puis arrêtez et relancez le partage.",
     "otherAddresses": "Autres adresses possibles :",
     "copy": "Copier",
     "copied": "Adresse copiée",
@@ -1546,6 +1547,7 @@
     },
     "shown": {
       "label": "Affiché sur les écrans",
+      "heading": "Affiché sur les écrans :",
       "live": "La feuille en direct",
       "note": "La note en cours de modification",
       "waiting": "L'écran d'attente"

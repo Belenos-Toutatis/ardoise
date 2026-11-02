@@ -177,6 +177,12 @@ fn the_real_build_of_the_interface_gives_the_viewer_its_files() {
 }
 
 #[test]
+fn a_port_in_use_is_told_with_its_number() {
+    let error = super::share_error(&ardoise_share::ShareError::PortInUse { port: 8765 });
+    assert_eq!(error.parts(), ("sharePortInUse", "8765"));
+}
+
+#[test]
 fn content_types_follow_the_extension() {
     assert_eq!(content_type("a.CSS"), "text/css; charset=utf-8");
     assert_eq!(content_type("a.woff2"), "font/woff2");
@@ -357,16 +363,26 @@ fn a_note_goes_whole_then_as_the_strokes_added() {
         3
     );
 
-    // A stroke erased: whole page only.
+    // A stroke erased: the whole page, without its paper for the viewers showing it.
     let erased = sharer
         .update(note_with(vec![pen_stroke(1000.0, 3)]), None, render)
         .unwrap();
-    assert_eq!(erased.append, None);
+    let replaced = parse(erased.append.as_deref().unwrap());
+    assert_eq!(replaced["type"], "note");
+    assert!(replaced.get("background").is_none(), "{replaced}");
+    assert_eq!(replaced["page"]["strokes"].as_array().unwrap().len(), 1);
+    assert_eq!(parse(&erased.full)["background"], Value::Null);
 
-    // A layer hidden: whole page.
+    // A layer hidden: the whole page (without its paper); layer names never leave.
     let mut hidden = note_with(vec![pen_stroke(1000.0, 3), pen_stroke(3000.0, 2)]);
     hidden.layers[0].visible = false;
-    assert_eq!(sharer.update(hidden, None, render).unwrap().append, None);
+    hidden.layers[0].name = "Corrigé de Léa".into();
+    let update = sharer.update(hidden, None, render).unwrap();
+    let replaced = parse(update.append.as_deref().unwrap());
+    assert_eq!(replaced["type"], "note");
+    assert_eq!(replaced["page"]["layers"][0]["visible"], false);
+    assert_eq!(replaced["page"]["layers"][0]["name"], "");
+    assert!(!update.full.contains("Léa"));
 
     // Lined paper: rendered once, sent with the page, not rendered again for a new stroke.
     let mut lined = note_with(vec![pen_stroke(1000.0, 3)]);
@@ -386,10 +402,28 @@ fn a_note_goes_whole_then_as_the_strokes_added() {
     );
     assert_eq!(renders.load(Ordering::SeqCst), 1);
 
-    // Another note: whole.
+    // Another note on the same paper: the whole page, the paper already shown.
     let mut other = note_with(vec![pen_stroke(1000.0, 3)]);
     other.id = "another".into();
-    assert_eq!(sharer.update(other, None, render).unwrap().append, None);
+    other.background.template = Template::Lined;
+    let update = sharer.update(other.clone(), None, render).unwrap();
+    assert!(
+        parse(update.append.as_deref().unwrap())
+            .get("background")
+            .is_none()
+    );
+    assert_eq!(renders.load(Ordering::SeqCst), 1);
+
+    // The viewers left the note (waiting screen, live mode): the same note again goes whole,
+    // with its paper, although nothing in it changed.
+    sharer.reset();
+    let again = sharer.update(other, None, render).unwrap();
+    assert_eq!(again.append, None);
+    assert_eq!(
+        parse(&again.full)["background"],
+        "data:image/png;base64,AAAA"
+    );
+    assert_eq!(renders.load(Ordering::SeqCst), 1);
 
     // A new share starts from scratch.
     sharer.reset();
@@ -651,13 +685,15 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     let hub = Arc::new(LiveHub::new(hub_config()));
     let runtime = ShareRuntime::default();
 
-    // Without the embedded interface there is nothing to serve.
+    // Without the embedded interface there is nothing to serve (and `--self-test` says so).
+    assert!(runtime.viewer_check().is_err());
     let refused = runtime
         .start(Ipv4Addr::LOCALHOST, 0, hub.clone())
         .unwrap_err();
     assert!(refused.is_code("shareUnavailable"));
 
     runtime.set_assets(source(built(MANIFEST)));
+    assert_eq!(runtime.viewer_check(), Ok(6));
     // The window says live mode before the share starts: it is remembered.
     runtime.inner.show(ShareContent::Live);
     let status = runtime.start(Ipv4Addr::LOCALHOST, 0, hub.clone()).unwrap();
@@ -696,7 +732,7 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
         assert_eq!(status, 404, "{path}");
     }
 
-    let mut sink = start_session(&hub, &library);
+    let sink = start_session(&hub, &library);
     let cookie = join(port, &code.to_lowercase());
     let mut viewer = Viewer::open(port, &cookie);
     let first = viewer.until("the first live batch", Duration::from_secs(5), |m| {
@@ -710,9 +746,14 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
 
     // Strokes arrive as increments, fast; the page written meanwhile is never announced.
     let mut delays = Vec::new();
-    for i in 0..5 {
-        write_stroke(&mut sink, 2000 + 2000 * i, 30);
-    }
+    // The tablet writes while the viewer reads (as for real).
+    let writer = std::thread::spawn(move || {
+        let mut sink = sink;
+        for i in 0..5 {
+            write_stroke(&mut sink, 2000 + 2000 * i, 30);
+        }
+        sink
+    });
     let mut strokes_ended = 0;
     let deadline = Instant::now() + Duration::from_secs(10);
     while strokes_ended < 5 {
@@ -738,6 +779,7 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
             }
         }
     }
+    let _sink = writer.join().unwrap();
     delays.sort_by(f64::total_cmp);
     let median = delays[delays.len() / 2];
     println!(
@@ -786,6 +828,20 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
         m["type"] == "noteStrokes"
     });
     assert_eq!(added["strokes"].as_array().unwrap().len(), 1);
+
+    // Back to the library, then the same note opened again, unchanged: it shows again.
+    runtime.inner.show(ShareContent::Waiting);
+    viewer.until("the waiting screen", Duration::from_secs(5), |m| {
+        m["type"] == "waiting"
+    });
+    runtime.inner.show(ShareContent::Note {
+        note: Box::new(note.clone()),
+        image_key: None,
+    });
+    let reopened = viewer.until("the note again", Duration::from_secs(5), |m| {
+        m["type"] == "note"
+    });
+    assert_eq!(reopened["page"]["strokes"].as_array().unwrap().len(), 2);
 
     // Nothing of the library ever went out: no folder, no title, no tag.
     for text in &viewer.texts {

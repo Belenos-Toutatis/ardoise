@@ -45,6 +45,9 @@
   <div class="share-panel" aria-busy={share.starting}>
     {#if status.active}
       <section class="block" aria-labelledby="share-open">
+        {#if !mainAddress}
+          <p class="no-address" role="status">{t('share.noAddress')}</p>
+        {/if}
         <p id="share-open">{t('share.open')}</p>
         <div class="address-row">
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -93,7 +96,7 @@
           {status.viewers === 0 ? t('share.viewersNone') : tn('share.viewers', status.viewers)}
         </p>
         <p class="small" data-share-shown={status.shown}>
-          <span class="muted">{t('share.shown.label')} :</span>
+          <span class="muted">{t('share.shown.heading')}</span>
           {t(`share.shown.${status.shown}`)}
         </p>
         {#if status.paused}
@@ -236,6 +239,10 @@
   }
 
   .share-viewers {
+    font-weight: 600;
+  }
+
+  .no-address {
     font-weight: 600;
   }
 

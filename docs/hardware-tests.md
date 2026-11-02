@@ -358,6 +358,7 @@ Ce test vérifie le partage de la feuille (SPEC §4.10) : l'autorisation du pare
 2. Ouvrir une note de la bibliothèque : l'autre écran montre **la page de cette note**, avec son papier (lignes, quadrillage…) ou son image de fond. Comparer avec l'éditeur : mêmes traits, mêmes couleurs, même fond.
 3. Dans l'éditeur, **tracer un trait** : il apparaît sur l'autre écran en moins d'une seconde. Changer la couleur de tous les traits, effacer un trait, annuler (`Ctrl + Z`) : l'autre écran suit-il, **sans enregistrer** la note ?
 4. Changer de note : l'autre écran change. Revenir à la bibliothèque : écran d'attente. Vérifier que **le titre de la note et le nom du dossier n'apparaissent nulle part** sur l'autre écran.
+4 bis. Rouvrir **la même note, sans la modifier** : l'autre écran doit la remontrer (et pas rester sur l'écran d'attente). Avec une note qui a une image ou un PDF de fond : effacer un trait, puis annuler ; noter si l'autre écran suit vite (l'image de fond n'est renvoyée que quand elle change).
 5. Rouvrir le **Mode direct** (tablette connectée) : l'autre écran repasse à la feuille en direct.
 
 #### G. Arrêt, fermeture et deuxième partage
