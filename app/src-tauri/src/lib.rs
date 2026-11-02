@@ -39,6 +39,7 @@ mod print;
 mod print_windows;
 mod selftest;
 mod session_end;
+mod share;
 mod tablet;
 mod textdoc;
 mod thumbnails;
@@ -228,6 +229,12 @@ pub fn run() {
         std::process::exit(diagnostic::run_simulated_cli(&context));
     }
 
+    // The interface embedded in the executable, also read by the share on the network (M11:
+    // the viewer's files, by exact path, never through Tauri's resolver).
+    let mut tauri_context = tauri::generate_context!();
+    let share = share::ShareRuntime::default();
+    share.set_assets(share::assets::share_context_assets(&mut tauri_context));
+
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(context)
@@ -245,6 +252,7 @@ pub fn run() {
         .manage(app_bridge::BridgeRuntime::default())
         .manage(import::InkspaceImport::default())
         .manage(drafts)
+        .manage(share)
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -364,6 +372,12 @@ pub fn run() {
             drafts::draft_stage_image,
             drafts::draft_restore_copy,
             session_end::set_unsaved_work,
+            share::share_status,
+            share::share_subscribe,
+            share::share_start,
+            share::share_stop,
+            share::share_set_paused,
+            share::share_show,
         ])
         .setup(move |app| {
             if cli.self_test {
@@ -403,7 +417,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!());
+        .build(tauri_context);
 
     let app = match result {
         Ok(app) => app,
@@ -415,10 +429,13 @@ pub fn run() {
             std::process::exit(1);
         }
     };
-    // What `Builder::run` does, plus the end of the tablet's link at exit: the diagnostic logs
-    // of the connection (and of a guided test under way) end with the disconnection.
+    // What `Builder::run` does, plus at exit the end of the share on the network and of the
+    // tablet's link: the diagnostic logs of the connection (and of a guided test under way) end
+    // with the disconnection.
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {
+            // The share first: the port closes and every browser is told it ended.
+            share::stop_at_exit(handle);
             handle
                 .state::<diagnostic::DiagnosticRuns>()
                 .cancel_within(EXIT_TABLET_WAIT);

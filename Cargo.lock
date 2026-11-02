@@ -145,6 +145,7 @@ dependencies = [
  "ardoise-media",
  "ardoise-proto",
  "ardoise-render",
+ "ardoise-share",
  "ardoise-sim",
  "chrono",
  "lopdf",

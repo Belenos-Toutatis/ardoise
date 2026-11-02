@@ -429,6 +429,64 @@ pub struct HandwritingSettings {
     pub extra: toml::Table,
 }
 
+/// Port of the share on the local network when `ardoise.toml` does not choose one.
+pub const DEFAULT_SHARE_PORT: u16 = 8765;
+
+/// Sharing the sheet on the local network (SPEC §4.10), shared by every computer. The port is
+/// fixed so that the firewall's permission given the first time stays valid. A missing, zero or
+/// invalid value loads as [`DEFAULT_SHARE_PORT`] (and is written back as such).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "RawShareSettings", into = "RawShareSettings")]
+pub struct ShareSettings {
+    /// TCP port listened on while sharing.
+    pub port: u16,
+    /// Keys this version does not know about, kept verbatim.
+    pub extra: toml::Table,
+}
+
+impl Default for ShareSettings {
+    fn default() -> Self {
+        Self {
+            port: DEFAULT_SHARE_PORT,
+            extra: toml::Table::new(),
+        }
+    }
+}
+
+/// The share table as stored: any value under `port`, so that a typing error in the file does
+/// not make the whole file unreadable.
+#[derive(Serialize, Deserialize)]
+struct RawShareSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    port: Option<toml::Value>,
+    #[serde(flatten)]
+    extra: toml::Table,
+}
+
+impl From<RawShareSettings> for ShareSettings {
+    fn from(raw: RawShareSettings) -> Self {
+        let port = raw
+            .port
+            .and_then(|value| value.as_integer())
+            .and_then(|port| u16::try_from(port).ok())
+            .filter(|port| *port != 0)
+            .unwrap_or(DEFAULT_SHARE_PORT);
+        Self {
+            port,
+            extra: raw.extra,
+        }
+    }
+}
+
+impl From<ShareSettings> for RawShareSettings {
+    fn from(settings: ShareSettings) -> Self {
+        Self {
+            port: Some(toml::Value::Integer(i64::from(settings.port))),
+            extra: settings.extra,
+        }
+    }
+}
+
 /// Settings that only make sense on one computer.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MachineSettings {
@@ -473,6 +531,9 @@ pub struct Settings {
     /// Handwriting recognition.
     #[serde(default)]
     pub handwriting: HandwritingSettings,
+    /// Sharing the sheet on the local network.
+    #[serde(default)]
+    pub share: ShareSettings,
     /// Per-computer settings, keyed by machine name.
     #[serde(default)]
     pub machines: BTreeMap<String, MachineSettings>,
@@ -1119,6 +1180,37 @@ mod tests {
         assert!(text.contains("language = \"de\""), "{text}");
         assert!(text.contains("engine = \"x\""), "{text}");
         assert_eq!(HandwritingLanguage::Fr.known(), HandwritingLanguage::Fr);
+    }
+
+    #[test]
+    fn the_share_port_is_shared_defaults_to_8765_and_keeps_unknown_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        assert_eq!(store.load().unwrap().share.port, DEFAULT_SHARE_PORT);
+        assert_eq!(DEFAULT_SHARE_PORT, 8765);
+
+        fs::write(store.path(), "[share]\nport = 18765\nfuture = \"x\"\n").unwrap();
+        // Not per machine: another PC reads the same port.
+        let other = SettingsStore::locate(dir.path(), dir.path(), "PC-B");
+        assert_eq!(other.load().unwrap().share.port, 18765);
+        store.update(|s| s.theme = Theme::Dark).unwrap();
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("[share]"), "{text}");
+        assert!(text.contains("port = 18765"), "{text}");
+        assert!(text.contains("future = \"x\""), "{text}");
+
+        // A zero, out of range or mistyped port loads as the default, and the rest of the file
+        // is still read.
+        for wrong in ["0", "70000", "-1", "\"huit\"", "87.65"] {
+            fs::write(
+                store.path(),
+                format!("theme = \"dark\"\n\n[share]\nport = {wrong}\n"),
+            )
+            .unwrap();
+            let loaded = store.load().unwrap();
+            assert_eq!(loaded.share.port, DEFAULT_SHARE_PORT, "{wrong}");
+            assert_eq!(loaded.theme, Theme::Dark, "{wrong}");
+        }
     }
 
     #[test]

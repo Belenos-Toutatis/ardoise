@@ -806,6 +806,17 @@ impl LiveHub {
         self.shared.lock().session.snapshot()
     }
 
+    /// The session as it is now, as the first events of a subscription give it: the snapshot,
+    /// then the stroke in progress. The frozen image of a paused share on the network.
+    pub fn current_events(&self) -> Vec<LiveEvent> {
+        let state = self.shared.lock();
+        let mut events = vec![LiveEvent::Snapshot {
+            snapshot: Box::new(state.session.snapshot()),
+        }];
+        events.extend(state.session.in_progress());
+        events
+    }
+
     /// Sends the session's batches to `sink` from now on, replacing the window's previous
     /// subscription. The first batch starts with the returned snapshot (and the stroke in
     /// progress), so a window may apply the batches in order whatever the order in which the
@@ -840,6 +851,17 @@ impl LiveHub {
     #[cfg(test)]
     pub fn subscriber_count(&self) -> usize {
         self.shared.lock().subscribers.len()
+    }
+
+    /// Labels of the subscriptions (windows, viewers of the share).
+    #[cfg(test)]
+    pub fn subscriber_labels(&self) -> Vec<String> {
+        self.shared
+            .lock()
+            .subscribers
+            .iter()
+            .map(|s| s.label.clone())
+            .collect()
     }
 
     /// Starts a session (or returns the running one). The previous session's changes are
