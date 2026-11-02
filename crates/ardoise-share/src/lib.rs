@@ -14,12 +14,17 @@
 //! This crate knows nothing of Tauri: live batches and notes arrive as JSON text, live mode
 //! through a [`LiveFeed`] the app implements over its `LiveHub`.
 
+mod access;
 pub mod addresses;
+mod content;
+mod http;
 pub mod qr;
+mod server;
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -100,7 +105,9 @@ pub struct NoteUpdate {
 
 /// The live session, for the share: the app implements it over its `LiveHub` (one hub
 /// subscription per viewer). Its methods may be called while the share holds its own lock: they
-/// must not call back into [`Share`].
+/// must not call back into [`Share`] (calling [`LiveViewer::send`] is fine: it never takes that
+/// lock). They are called from the thread that changed what is shown (`show_*`, `set_paused`,
+/// `stop`) or from the share's thread (a viewer connects or leaves).
 pub trait LiveFeed: Send + Sync + 'static {
     /// Sends the live session to `viewer` from now on: first a batch that starts with a snapshot
     /// (and the stroke in progress), then every batch, until [`LiveFeed::stop`] or until a send
@@ -113,11 +120,24 @@ pub trait LiveFeed: Send + Sync + 'static {
     fn freeze(&self) -> Option<String>;
 }
 
-/// A viewer seen by the [`LiveFeed`]: where its live batches go.
+/// A viewer seen by the [`LiveFeed`]: where its live batches go. Each [`LiveFeed::start`] gives a
+/// new one; it is refused (`Err(ViewerGone)`) once the share stopped that subscription, so a
+/// batch sent late never arrives after what replaced live mode.
 #[derive(Clone)]
 pub struct LiveViewer {
     id: u64,
-    // Filled by package A (the viewer's queue, whether its first batch was sent).
+    /// The live subscription this handle belongs to.
+    subscription: u64,
+    viewer: Arc<content::Viewer>,
+}
+
+impl std::fmt::Debug for LiveViewer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveViewer")
+            .field("id", &self.id)
+            .field("subscription", &self.subscription)
+            .finish()
+    }
 }
 
 /// The viewer went away, or was too slow and was disconnected: stop sending to it.
@@ -132,15 +152,19 @@ impl LiveViewer {
     }
 
     /// Queues one live batch (`LiveBatch` JSON) for the viewer, wrapped as a `live` message
-    /// (`reset: true` for the first one). Never blocks: a full queue disconnects the viewer.
+    /// (`reset: true` for the first one). Never blocks and never takes the share's lock (only
+    /// this viewer's queue lock, briefly): a full queue (1 024 messages) disconnects the viewer.
+    /// `Err` means: stop sending to this handle (the viewer left, was too slow, or the share
+    /// stopped this subscription).
     pub fn send(&self, batch_json: &str) -> Result<(), ViewerGone> {
-        let _ = batch_json;
-        unimplemented!("package A")
+        self.viewer.send_live(self.subscription, batch_json)
     }
 }
 
 /// Called when the number of viewers, the pause or what is shown changes (outside the share's
-/// lock, from its thread).
+/// lock, from its thread). Changes in quick succession may give a single call, always with the
+/// latest status. It runs on the share's thread: it must return quickly. Never called once
+/// [`Share::stop`] has returned.
 pub type OnChange = Box<dyn Fn(ShareStatus) + Send + Sync>;
 
 /// Failure to start a share.
@@ -169,9 +193,14 @@ impl ShareError {
     }
 }
 
+/// Longest wait for the server's thread in [`Share::stop`].
+const STOP_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// A running share. Dropping it stops it.
 pub struct Share {
-    // Filled by package A.
+    server: Arc<server::Server>,
+    /// The server's thread and its end signal, until stopped.
+    thread: Mutex<Option<(std::thread::JoinHandle<()>, std::sync::mpsc::Receiver<()>)>>,
 }
 
 impl Share {
@@ -184,55 +213,118 @@ impl Share {
         feed: Arc<dyn LiveFeed>,
         on_change: OnChange,
     ) -> Result<Share, ShareError> {
-        let _ = (config, assets, feed, on_change);
-        unimplemented!("package A")
+        let running = server::start(config, assets, feed, on_change)?;
+        Ok(Share {
+            server: running.server,
+            thread: Mutex::new(Some((running.thread, running.done))),
+        })
     }
 
     /// The port listened on.
     pub fn port(&self) -> u16 {
-        unimplemented!("package A")
+        self.server.port
     }
 
     /// The code, 6 characters without separator.
     pub fn code(&self) -> String {
-        unimplemented!("package A")
+        self.server.code.clone()
     }
 
     pub fn status(&self) -> ShareStatus {
-        unimplemented!("package A")
+        self.server.status()
     }
 
-    /// Shows the waiting screen.
+    /// Shows the waiting screen. Ignored when already shown or once stopped.
     pub fn show_waiting(&self) {
-        unimplemented!("package A")
+        self.server.content.show_waiting();
     }
 
-    /// Shows the live sheet: every viewer is handed to the feed.
+    /// Shows the live sheet: every viewer is handed to the feed. Ignored when already shown or
+    /// once stopped.
     pub fn show_live(&self) {
-        unimplemented!("package A")
+        self.server.content.show_live();
     }
 
-    /// Shows (or updates) the note's page.
+    /// Shows (or updates) the note's page. Ignored when `update.full` is what is shown already.
     pub fn show_note(&self, update: NoteUpdate) {
-        let _ = update;
-        unimplemented!("package A")
+        self.server.content.show_note(update);
     }
 
     /// Freezes the shared image (`true`) or follows the content again (`false`).
     pub fn set_paused(&self, paused: bool) {
-        let _ = paused;
-        unimplemented!("package A")
+        self.server.content.set_paused(paused);
     }
 
     /// Tells every viewer `end`, closes every connection and the port, and waits for the
-    /// server's thread (at most 2 s). Can be repeated.
+    /// server's thread (at most 2 s). Can be repeated. Called from the share's own thread (from
+    /// `on_change`), it does not wait.
     pub fn stop(&self) {
-        unimplemented!("package A")
+        // Held until the thread is joined: a second caller also returns with the port closed.
+        let mut thread = self.thread.lock().unwrap_or_else(PoisonError::into_inner);
+        self.server.content.stop();
+        self.server.signal_shutdown();
+        let Some((handle, done)) = thread.take() else {
+            return;
+        };
+        if handle.thread().id() == std::thread::current().id() {
+            return;
+        }
+        match done.recv_timeout(STOP_TIMEOUT) {
+            Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = handle.join();
+            }
+            // Should not happen (every wait of the server is bounded): leave the thread.
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
     }
 }
 
-/// `K7MQ2X` → `K7M Q2X` (how the app shows the code).
+impl Drop for Share {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// `K7MQ2X` → `K7M Q2X` (how the app shows the code): groups of three characters.
 pub fn format_code(code: &str) -> String {
-    let _ = code;
-    unimplemented!("package A")
+    let chars: Vec<char> = code.chars().collect();
+    chars
+        .chunks(3)
+        .map(|group| group.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codes_are_shown_in_groups_of_three() {
+        assert_eq!(format_code("K7MQ2X"), "K7M Q2X");
+        assert_eq!(format_code("ABC"), "ABC");
+        assert_eq!(format_code("ABCDEFG"), "ABC DEF G");
+        assert_eq!(format_code(""), "");
+    }
+
+    #[test]
+    fn error_codes() {
+        assert_eq!(
+            ShareError::PortInUse { port: 8765 }.code(),
+            "sharePortInUse"
+        );
+        assert_eq!(ShareError::Random("x".into()).code(), "shareFailed");
+        assert!(
+            ShareError::PortInUse { port: 8765 }
+                .to_string()
+                .contains("8765")
+        );
+    }
+
+    #[test]
+    fn share_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Share>();
+        assert_send_sync::<LiveViewer>();
+    }
 }
