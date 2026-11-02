@@ -116,6 +116,14 @@ pub fn viewer_assets(get: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Assets, Vi
         }
     }
 
+    // Without its geometry module the viewer would draw no stroke: a build where Vite stopped
+    // listing it is refused rather than served half-working.
+    if !files.iter().any(|file| file.ends_with(".wasm")) {
+        return Err(ViewerAssetsError::Manifest(
+            "no WebAssembly module for viewer.html".into(),
+        ));
+    }
+
     let mut assets = Assets::new();
     assets.insert(
         "/".to_owned(),

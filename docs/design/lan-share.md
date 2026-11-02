@@ -215,8 +215,8 @@ wrapped in an `Arc` (`ShareAssets`, a delegating `tauri::Assets`), so the share 
 Tauri's resolver** (which percent-decodes paths and falls back to `index.html`). At share start
 `viewer_assets(get)` reads `/.vite/manifest.json` (Vite's build manifest, `build.manifest: true`), takes the
 entry `viewer.html` and, recursively, its `file`, `css`, `assets` and `imports` (the shared chunks, the stylesheet,
-`ardoise_ink-*.wasm`), and copies those files into the `Assets` map (`viewer.html` under `/`). A missing manifest
-or file (a development build that loads the interface from the dev server) is `shareUnavailable`. Content types by
+`ardoise_ink-*.wasm`), and copies those files into the `Assets` map (`viewer.html` under `/`). A missing manifest,
+a missing WebAssembly module in that closure (the viewer would draw no stroke), or a missing file (a development build that loads the interface from the dev server) is `shareUnavailable`. Content types by
 extension (`html`, `js`, `css`, `wasm`, `svg`, `png`, `woff2`, else `application/octet-stream`). Done once per
 share start, a few hundred KB.
 
@@ -304,8 +304,8 @@ when the share starts (the UI sends it again after a start anyway).
 ### The viewer (other PC, any browser)
 
 - Second Vite entry `app/viewer.html` → `ui/src/viewer/main.ts` → `Viewer.svelte`. **No import of `@tauri-apps/*` nor
-  of `lib/api.ts`** (a vitest test checks the module graph). `vite.config.ts`: `build.rollupOptions.input` with both
-  pages, `build.manifest: true`.
+  of `lib/api.ts`** (a vitest test checks the module graph). `vite.config.ts`: `build.rolldownOptions.input` (Vite 8's name
+  for `rollupOptions`) with both pages, `build.manifest: true`.
 - Reuses `lib/live-state.svelte.ts` (`LiveState`: snapshots and batches, exactly as the presentation window),
   `lib/live-render.ts` (`LiveRenderer`, `buildScene`, mode `presentation`: zoom, pan, blackboard, laser dot),
   `lib/live-view.ts` and `lib/ink.ts` (the `ardoise-ink` WebAssembly outlines), so it looks exactly like the app.

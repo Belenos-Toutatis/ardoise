@@ -122,7 +122,8 @@ fn a_build_without_the_viewer_or_with_odd_names_is_refused() {
         "index.html",
     ] {
         let manifest = format!(
-            r#"{{ "viewer.html": {{ "file": "assets/viewer-D4.js", "assets": [{}] }} }}"#,
+            r#"{{ "viewer.html": {{ "file": "assets/viewer-D4.js",
+                    "assets": ["assets/ardoise_ink-G7.wasm", {}] }} }}"#,
             serde_json::to_string(odd).unwrap()
         );
         let mut files = built(&manifest);
@@ -133,11 +134,46 @@ fn a_build_without_the_viewer_or_with_odd_names_is_refused() {
             "{odd}"
         );
     }
+    // A viewer without its WebAssembly module would draw no stroke.
+    let no_wasm = built(r#"{ "viewer.html": { "file": "assets/viewer-D4.js" } }"#);
+    assert!(matches!(
+        viewer_assets(&|path: &str| no_wasm.get(path).cloned()),
+        Err(ViewerAssetsError::Manifest(_))
+    ));
     let broken = built("{ not json");
     assert!(matches!(
         viewer_assets(&|path: &str| broken.get(path).cloned()),
         Err(ViewerAssetsError::Manifest(_))
     ));
+}
+
+#[test]
+fn the_real_build_of_the_interface_gives_the_viewer_its_files() {
+    // `npm run build` (run by `cargo xtask check` before the Rust tests) writes `app/dist`.
+    let dist = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../dist");
+    if !dist.join(".vite/manifest.json").exists() {
+        println!("no built interface in {}: skipped", dist.display());
+        return;
+    }
+    let assets = viewer_assets(&|path: &str| std::fs::read(dist.join(path)).ok()).unwrap();
+    let page = String::from_utf8_lossy(&assets["/"].bytes).into_owned();
+    // Every script and style sheet the page references is served.
+    for reference in page.split('"').filter(|part| part.starts_with("/assets/")) {
+        assert!(assets.contains_key(reference), "{reference} not served");
+    }
+    assert!(
+        assets
+            .iter()
+            .any(|(path, asset)| path.ends_with(".wasm") && asset.bytes.starts_with(b"\0asm"))
+    );
+    // Nothing of the main window's page.
+    let main = std::fs::read_to_string(dist.join("index.html")).unwrap();
+    for reference in main
+        .split('"')
+        .filter(|part| part.starts_with("/assets/index-"))
+    {
+        assert!(!assets.contains_key(reference), "{reference} served");
+    }
 }
 
 #[test]
@@ -254,7 +290,8 @@ fn a_viewer_never_gets_library_paths_titles_tags_nor_the_screen() {
     assert_eq!(snapshot["presentation"], Value::Null);
     assert_eq!(snapshot["page"]["title"], "");
     assert_eq!(snapshot["page"]["tags"], json!([]));
-    assert_eq!(snapshot["page"]["favorite"], false);
+    // Not a favourite (the field is left out when false).
+    assert_ne!(snapshot["page"]["favorite"], true);
     // What is drawn stays.
     assert_eq!(snapshot["page"]["strokes"].as_array().unwrap().len(), 1);
     assert_eq!(snapshot["page"]["layers"][0]["visible"], true);

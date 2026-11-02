@@ -699,7 +699,7 @@
     "inkspaceNoteDamaged": "this Inkspace note cannot be read ({detail})",
     "inkspaceBusy": "an Inkspace import is already running",
     "inkspaceTarget": "this binder is inside Inkspace's folder ({detail}); choose a binder of the library",
-    "sharePortInUse": "the share's port is already used by another program; to change it, edit \"port\" in the [share] section of the ardoise.toml file",
+    "sharePortInUse": "the share's port is already used by another program; to change it, edit \"port\" in the [share] section of the ardoise.toml file, then start the share again",
     "shareUnavailable": "this build of Ardoise cannot share on the network: the page for the other screens is not included",
     "shareFailed": "the share could not start ({detail})"
   },
