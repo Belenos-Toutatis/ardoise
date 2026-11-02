@@ -799,7 +799,7 @@ export const shareJourneys = [
             'a message with the new stroke (noteStrokes with one stroke, or note with one more stroke)',
             { from: mark, timeout: 3000 },
           );
-          console.log(`    trait reçu ${update.at - released} ms après le relâchement (${update.msg.type})`);
+          console.log(`    trait reçu ${Math.round(update.at - released)} ms après le relâchement (${update.msg.type})`);
           const added = update.msg.type === 'noteStrokes' ? update.msg.strokes[0] : update.msg.page.strokes.at(-1);
           if (!Array.isArray(added.points) || added.points.length < 2) throw new Error('the new stroke has no points');
         });
