@@ -323,6 +323,7 @@ Ce test vérifie le partage de la feuille (SPEC §4.10) : l'autorisation du pare
      Test-NetConnection 192.168.x.x -Port 8765
      ```
      `TcpTestSucceeded : True` veut dire que le réseau et le pare-feu laissent passer (le problème est alors dans le navigateur) ; `False` veut dire que le pare-feu du PC d'Ardoise ou le réseau bloque. Noter le résultat, puis revoir l'étape A3 / A4. Essayer ensuite les autres adresses du panneau.
+1 bis. *Facultatif* : dans un autre onglet, taper `http://<nom du PC d'Ardoise>:8765` (le nom court, celui de **Paramètres** > **Système** > **Informations** > *Nom de l'appareil*). La page de saisie du code s'ouvre-t-elle ? (Ardoise accepte ce nom ; c'est le réseau qui doit le connaître.) Puis taper le même nom suivi d'un point et d'un mot (par exemple `http://<nom>.ecole:8765`) : si le navigateur trouve le PC, la page doit afficher seulement « Misdirected Request » (refus voulu). Noter les deux résultats.
 2. **Mauvais code d'abord** : taper un code faux (par exemple `ZZZZZZ`). Un message doit dire que le code est incorrect et combien d'essais restent. Le noter.
 3. **Bon code** : taper le code du panneau, en minuscules et sans espace. La feuille en direct s'affiche. Le panneau d'Ardoise passe à **1 écran**.
 4. **Plein écran** : appuyer sur `F11`, puis essayer le bouton plein écran de la page (et le double-clic). Le bouton et le curseur disparaissent-ils après 2 secondes d'immobilité ?
@@ -366,9 +367,11 @@ Ce test vérifie le partage de la feuille (SPEC §4.10) : l'autorisation du pare
 1. Cliquer sur **Arrêter le partage** : l'autre écran indique que le partage est **terminé**. Le panneau d'Ardoise n'affiche plus d'adresse ni de code. Sur le second ordinateur, rafraîchir la page : elle doit ne plus répondre, ou demander un code ; la commande `Test-NetConnection` de l'étape B1 doit donner `False`.
 2. Relancer un partage : un **nouveau code** s'affiche (différent du précédent), la même adresse et le même port. Le second ordinateur, resté sur la page, passe tout seul à la saisie du code (l'ancien code ne marche plus) : taper le nouveau.
 3. **Fermer Ardoise pendant le partage** (croix de la fenêtre, après avoir terminé le mode direct). L'autre écran doit indiquer que le partage est terminé ou qu'il se reconnecte, et `Test-NetConnection` doit donner `False` : le port est refermé.
-4. **Deuxième lancement** : relancer `ardoise.exe` (même emplacement) et partager de nouveau. **Windows ne doit pas redemander** l'autorisation du pare-feu : le port est le même et l'autorisation reste valable. Le noter. (Si la fenêtre revient, noter si l'exe a changé de dossier entre-temps.)
-5. *Facultatif* : changer le port dans `ardoise.toml` (section `[share]`, `port = 8766`), relancer, partager : Windows redemande-t-il l'autorisation ? Remettre ensuite 8765 (ou supprimer la section).
-6. *Facultatif* : lancer sur le même PC un programme qui occupe déjà le port 8765 (ou lancer deux copies d'Ardoise placées dans deux dossiers différents et partager dans les deux) : la seconde doit dire que le port est utilisé et comment le changer, sans planter.
+4. **Deuxième lancement** : relancer `ardoise.exe` (même emplacement) et partager de nouveau. **Windows ne doit pas redemander** l'autorisation du pare-feu : elle est attachée au programme à cet emplacement (pas au port) et reste valable. Le noter. (Si la fenêtre revient, noter si l'exe a changé de dossier ou de nom entre-temps.)
+5. *Facultatif* : changer le port dans `ardoise.toml` (section `[share]`, `port = 8766`), relancer, partager : Windows redemande-t-il l'autorisation ? (Attendu : non, l'autorisation suit le programme, quel que soit le port.) Le second ordinateur se connecte-t-il sur `:8766` ? Remettre ensuite 8765 (ou supprimer la section).
+6. *Facultatif* : lancer sur le même PC un programme qui occupe déjà le port 8765 (ou lancer deux copies d'Ardoise placées dans deux dossiers différents et partager dans les deux) : la seconde doit dire que le port est utilisé et comment le changer, sans planter. (Ardoise prend le port pour lui seul pendant un partage : c'est aussi la seconde copie qui doit être refusée si on inverse l'ordre.)
+7. *Facultatif* : fermer Ardoise, **copier `ardoise.exe` dans un autre dossier** (ou le renommer, par exemple `ardoise2.exe`), le lancer et partager : Windows **doit** reposer la question du pare-feu (attendu : oui, l'autorisation suit l'emplacement du programme). Le noter, puis supprimer la copie et revenir à l'exe habituel.
+8. *Facultatif* : arrêter le partage puis le relancer **aussitôt** (dans les 5 secondes) : il doit redémarrer sur le même port, sans message « port utilisé ».
 
 ### Ce qui revient par Nextcloud
 
@@ -384,14 +387,15 @@ Ce qui ne revient pas tout seul :
 |---|---|
 | La **fenêtre du pare-feu** telle que Windows l'a montrée (photo) : cases proposées et cochées, droits d'administrateur demandés ou non ; si aucune fenêtre n'est apparue | A3 |
 | Le **profil du réseau** (Public ou Privé) et le **type de réseau** (Wi-Fi ou prise réseau), le système et le navigateur du second ordinateur, ceux du téléphone ou de la tablette | A4, B1, B5 |
-| Les adresses listées par le panneau, laquelle a marché, et le résultat de `Test-NetConnection` en cas d'échec | A2, B1 |
+| Les adresses listées par le panneau, laquelle a marché, et le résultat de `Test-NetConnection` en cas d'échec ; si le nom court du PC a ouvert la page, et ce qu'a affiché le nom suivi d'un point | A2, B1, B1 bis |
 | Le texte exact de toute erreur (dans Ardoise ou dans la page), et celui du message de code faux | partout, B2 |
 | Le **délai perçu** (*instantané*, *léger retard*, *retard gênant*) et la mesure à la caméra (nombre d'images et cadence) ; si le tracé reste fluide pendant 2 minutes | C2, C3, C8 |
 | Si le tableau noir, le pointeur laser, le zoom, le déplacement et les pages suivent sur l'autre écran | C4 à C7 |
 | Si la pause fige bien l'image, y compris pour une page ouverte pendant la pause, et si la reprise remet à jour | D |
-| Si plusieurs écrans passent par **une même adresse** (point d'accès Wi-Fi en mode routeur, proxy) : le partage accepte au plus 4 écrans et 8 connexions par adresse ; noter si un écran a été refusé (« trop d'écrans ») ou a redemandé le code | B, E |
+| Si plusieurs écrans passent par **une même adresse** (point d'accès Wi-Fi en mode routeur, proxy) : le partage accepte au plus 4 écrans et 8 connexions par adresse, et 8 ouvertures d'écran de suite par adresse puis une toutes les 2 secondes ; noter si un écran a été refusé (« trop d'écrans ») ou a redemandé le code | B, E |
 | Le comportement après la coupure du réseau (page grisée ou non, reconnexion seule, temps de reprise, code redemandé ou non) | E |
 | Si la note ouverte s'affiche comme dans l'éditeur (fond compris), le délai d'un nouveau trait, et si un titre ou un chemin apparaît quelque part | F |
 | Ce que dit l'autre écran à l'arrêt du partage et à la fermeture d'Ardoise ; si le port est refermé | G1, G3 |
-| Si Windows a redemandé l'autorisation au deuxième lancement ; si le nouveau code est bien différent | G2, G4 |
+| Si Windows a redemandé l'autorisation au deuxième lancement, après un changement de port, après une copie ou un renommage de l'exe ; si le nouveau code est bien différent | G2, G4, G5, G7 |
+| Si un partage relancé aussitôt a retrouvé son port | G8 |
 | Le port utilisé s'il a été changé dans `ardoise.toml` | A, G5 |

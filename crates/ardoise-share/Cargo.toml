@@ -21,7 +21,15 @@ thiserror = "2"
 # enabled in the app's build by Tauri, btleplug and rmcp: no extra code from tokio itself.
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync", "macros"] }
 
+# `SO_EXCLUSIVEADDRUSE` on the listener (no other program can take its port over). The version
+# and the feature mio already compiles into the Windows build: no extra code.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
+
 [dev-dependencies]
+# Test clients bound to other loopback addresses (127.0.0.2…) and a socket with `SO_REUSEADDR`
+# that tries to take the port. Already in the tree through tokio (MIT OR Apache-2.0).
+socket2 = "0.6"
 
 [lints]
 workspace = true

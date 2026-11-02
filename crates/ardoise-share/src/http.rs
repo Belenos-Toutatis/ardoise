@@ -3,6 +3,7 @@
 //! security headers. One request per connection (`Connection: close`); nothing pipelined is read.
 
 use std::fmt::Write as _;
+use std::net::Ipv4Addr;
 
 /// Longest request head accepted (request line and headers).
 pub(crate) const MAX_HEAD: usize = 16 * 1024;
@@ -64,8 +65,21 @@ impl Head {
         }
     }
 
+    /// No `Host` header (not a browser: a browser always sends one), or one that names this
+    /// share: an IPv4 address, `localhost` or `name` (this computer's name), with `port` or
+    /// without a port. A browser sends the host of the page's address: a page of another site
+    /// whose DNS name was pointed at this PC (DNS rebinding) names its own, and is refused.
+    pub fn host_allowed(&self, port: u16, name: Option<&str>) -> bool {
+        match self.hosts.as_slice() {
+            [] => true,
+            [host] => allowed_host(host, port, name),
+            _ => false,
+        }
+    }
+
     /// No `Origin` header (not a browser, or a request that is not cross-site), or one that is
-    /// `http://` followed by the `Host` header: the page served by this share.
+    /// `http://` followed by the `Host` header: the page served by this share (whose `Host`
+    /// [`Head::host_allowed`] checked first).
     pub fn same_origin(&self) -> bool {
         match (self.origins.as_slice(), self.hosts.as_slice()) {
             ([], _) => true,
@@ -75,6 +89,42 @@ impl Head {
             _ => false,
         }
     }
+}
+
+/// A `Host` header value that names this share (see [`Head::host_allowed`]).
+pub(crate) fn allowed_host(value: &str, port: u16, name: Option<&str>) -> bool {
+    let (host, given_port) = match value.split_once(':') {
+        Some((host, digits)) => (host, Some(digits)),
+        None => (value, None),
+    };
+    if let Some(digits) = given_port {
+        let ours = !digits.is_empty()
+            && digits.bytes().all(|b| b.is_ascii_digit())
+            && digits.parse::<u16>().ok() == Some(port);
+        if !ours {
+            return false;
+        }
+    }
+    host.parse::<Ipv4Addr>().is_ok()
+        || host.eq_ignore_ascii_case("localhost")
+        || name.is_some_and(|name| host.eq_ignore_ascii_case(name))
+}
+
+/// This computer's name, as another PC of the network may type it (`http://PC-SALLE12:8765/`):
+/// Windows' `COMPUTERNAME`, if it is a plain name (letters, digits, `-`); `None` elsewhere.
+pub(crate) fn computer_name() -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let name = std::env::var("COMPUTERNAME").ok()?;
+    plain_name(&name).then_some(name)
+}
+
+/// A host name of letters, digits and `-` (a single DNS label, as a NetBIOS name is).
+fn plain_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 63
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 /// True if `bytes` hold the blank line that ends a request head (`\n\n` or `\n\r\n`): only
@@ -208,6 +258,7 @@ fn reason(status: u16) -> &'static str {
         404 => "Not Found",
         413 => "Content Too Large",
         415 => "Unsupported Media Type",
+        421 => "Misdirected Request",
         429 => "Too Many Requests",
         431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
@@ -464,6 +515,58 @@ mod tests {
             "Host: a\r\nOrigin: http://a\r\nOrigin: http://a\r\n",
         ] {
             assert!(!head(other).same_origin(), "{other}");
+        }
+    }
+
+    #[test]
+    fn hosts() {
+        let head = |headers: &str| {
+            parse(&format!("GET / HTTP/1.1\r\n{headers}\r\n"))
+                .unwrap()
+                .unwrap()
+        };
+        let allowed = |headers: &str| head(headers).host_allowed(8765, Some("PC-SALLE12"));
+        for ours in [
+            "",
+            "Host: 192.168.1.23:8765\r\n",
+            "Host: 192.168.1.23\r\n",
+            "Host: 10.0.0.7:8765\r\n",
+            "Host: 127.0.0.1:8765\r\n",
+            "Host: localhost:8765\r\n",
+            "Host: LocalHost\r\n",
+            "Host: pc-salle12:8765\r\n",
+            "Host: PC-SALLE12\r\n",
+        ] {
+            assert!(allowed(ours), "{ours:?}");
+        }
+        for other in [
+            "Host: evil.example\r\n",
+            "Host: evil.example:8765\r\n",
+            "Host: 192.168.1.23.evil.example:8765\r\n",
+            "Host: pc-salle12.evil.example:8765\r\n",
+            "Host: localhost.evil.example\r\n",
+            "Host: 192.168.1.23:8766\r\n",
+            "Host: 192.168.1.23:\r\n",
+            "Host: 192.168.1.23:+8765\r\n",
+            "Host: 192.168.1.23:8765:8765\r\n",
+            "Host: 192.168.1.256:8765\r\n",
+            "Host: [::1]:8765\r\n",
+            "Host: \r\n",
+            "Host: 192.168.1.23:8765\r\nHost: 192.168.1.23:8765\r\n",
+        ] {
+            assert!(!allowed(other), "{other:?}");
+        }
+        // Without a name of this computer, only addresses and `localhost`.
+        assert!(!head("Host: pc-salle12\r\n").host_allowed(8765, None));
+        assert!(head("Host: localhost\r\n").host_allowed(8765, None));
+        // Plain names only.
+        assert!(plain_name("PC-SALLE12"));
+        assert!(!plain_name(""));
+        assert!(!plain_name("pc.example"));
+        assert!(!plain_name("pc salle"));
+        assert!(!plain_name(&"a".repeat(64)));
+        if let Some(name) = computer_name() {
+            assert!(plain_name(&name), "{name}");
         }
     }
 

@@ -385,9 +385,12 @@ network. Ardoise never changes the firewall itself.
 - *The window was closed without choosing.* Open **Windows Defender Firewall** > **Allow an app or feature through
   Windows Defender Firewall** > **Change settings** > **Allow another app…** > **Browse…** > `ardoise.exe`, then tick
   **Private** (and **Public** if need be) for Ardoise.
-- The *port is fixed* (8765, the `port` setting of the `[share]` section of `ardoise.toml`), so the permission stays
-  valid from one share to the next. Windows ties it to the location of `ardoise.exe`: if you move or copy the program
-  elsewhere, it may ask again.
+- Windows ties this permission to the *program* at its location: `ardoise.exe` in this folder, whatever the port. If
+  you move or rename `ardoise.exe`, or start another copy, Windows asks again: answer the same way. Changing the port
+  does not make it ask again.
+- The *port is fixed* (8765, the `port` setting of the `[share]` section of `ardoise.toml`): the address stays the
+  same from one share to the next, and your IT department can open that port. No other program can take this port
+  during a share.
 - If another program already uses this port, Ardoise says so and does not start the share: close the other program, or
   change the port in `ardoise.toml` (for example `[share]`, then `port = 8766` on the next line), then start the share again.
 
@@ -404,7 +407,11 @@ The writing and the image of the shared notes can be seen by anyone who has the 
   it may change.
 - Has the firewall been allowed for this type of network (see above)? This is the most frequent cause.
 - The page says the code is wrong: read the panel's code again (there is no `0`, `O`, `1`, `I` or `L`).
-- The page says there are too many screens: the share accepts 32 screens at a time.
+- The page says there are too many screens: the share accepts 32 screens at a time (4 per computer). It tries again
+  by itself every 5 seconds.
+- The browser only shows "Misdirected Request": type the address in figures that the panel shows. For safety, the
+  share refuses names with a dot (like `pc.school.lan`); it accepts the computer's short name, if the network knows
+  it.
 - Security software or the school network may also block connections between computers: ask your IT department to open
   port 8765 to your PC.
 

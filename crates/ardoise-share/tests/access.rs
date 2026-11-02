@@ -155,7 +155,7 @@ fn bad_join_requests() {
     let h = Harness::start();
     let bad = [
         // No body.
-        format!("POST /join HTTP/1.1\r\nHost: x\r\n{JSON}\r\n"),
+        format!("POST /join HTTP/1.1\r\nHost: localhost\r\n{JSON}\r\n"),
         format!("POST /join HTTP/1.1\r\n{JSON}Content-Length: 0\r\n\r\n"),
         // Not JSON, not the expected shape.
         String::from_utf8(join_with(JSON, "K7MQ2X")).unwrap(),
@@ -249,6 +249,98 @@ fn join_from_another_site_is_refused() {
 }
 
 #[test]
+fn join_from_a_page_of_another_site_is_misdirected() {
+    let h = Harness::start();
+    let port = h.port();
+    let body = r#"{"code":"K7MQ2X"}"#;
+    for host in [
+        "Host: evil.example\r\n".to_owned(),
+        format!("Host: evil.example:{port}\r\n"),
+        // The page's origin matches its (foreign) host: still refused.
+        format!("Host: evil.example:{port}\r\nOrigin: http://evil.example:{port}\r\n"),
+    ] {
+        let answer = exchange(port, &join_with(&format!("{host}{JSON}"), body)).unwrap();
+        assert_eq!(answer.status, 421, "{host:?}");
+        assert_eq!(answer.header("set-cookie"), None);
+    }
+    // Wrong codes from such a page are not counted either.
+    for _ in 0..10 {
+        let raw = join_with(
+            &format!("Host: evil.example\r\n{JSON}"),
+            r#"{"code":"WRONG2"}"#,
+        );
+        assert_eq!(exchange(port, &raw).unwrap().status, 421);
+    }
+    assert_no_attempt_counted(port);
+    // The share's own name with the page's origin.
+    let same = format!("Host: localhost:{port}\r\nOrigin: http://localhost:{port}\r\n{JSON}");
+    assert_eq!(exchange(port, &join_with(&same, body)).unwrap().status, 204);
+}
+
+#[test]
+fn event_streams_are_opened_only_so_often() {
+    let every = Duration::from_millis(1000);
+    let h = Harness::with_limits(Limits {
+        stream_opens: 3,
+        stream_open_every: every,
+        ..Limits::default()
+    });
+    let port = h.port();
+    let cookie = h.cookie();
+    // Three in a row (each closed before the next).
+    for _ in 0..3 {
+        let mut stream = open_events(port, Some(&cookie)).expect("200");
+        assert_eq!(stream.next_event(SOON), Some(SseEvent::Retry(2000)));
+        assert_eq!(stream.expect(), waiting());
+    }
+    // The fourth waits: 503, which the viewer retries 5 s later ("too many screens").
+    let started = std::time::Instant::now();
+    let refused = open_events(port, Some(&cookie)).expect_err("refused");
+    assert_eq!(refused.status, 503);
+    let retry_after: u64 = refused.header("retry-after").unwrap().parse().unwrap();
+    assert_eq!(retry_after, 1);
+    // Another address is not affected.
+    let mut other = open_events_from(pc(2), port, Some(&cookie)).expect("200");
+    assert_eq!(other.next_event(SOON), Some(SseEvent::Retry(2000)));
+    assert_eq!(other.expect(), waiting());
+    drop(other);
+    // One more every second.
+    let wait = every.saturating_sub(started.elapsed()) + Duration::from_millis(100);
+    std::thread::sleep(wait);
+    let mut again = open_events(port, Some(&cookie)).expect("200");
+    assert_eq!(again.next_event(SOON), Some(SseEvent::Retry(2000)));
+    assert_eq!(again.expect(), waiting());
+    assert_eq!(
+        open_events(port, Some(&cookie))
+            .expect_err("refused")
+            .status,
+        503
+    );
+}
+
+#[test]
+fn a_viewer_reconnecting_quickly_gets_eight_streams_in_a_row() {
+    // The viewer's own delays after a cut (`viewer-stream.ts`: 0.5 s, 1, 2, 4, then 5 s; the
+    // count starts again after each stream that opens): with the default limits (8 in a row,
+    // then one every 2 s), a stream cut at once every time is refused only after its 8th quick
+    // reconnection, and the viewer's 5 s retry after a 503 is then always let in.
+    let defaults = Limits::default();
+    assert_eq!(defaults.stream_opens, 8);
+    assert_eq!(defaults.stream_open_every, Duration::from_secs(2));
+    let h = Harness::start();
+    let cookie = h.cookie();
+    for _ in 0..8 {
+        let mut stream = open_events(h.port(), Some(&cookie)).expect("200");
+        assert_eq!(stream.next_event(SOON), Some(SseEvent::Retry(2000)));
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let refused = open_events(h.port(), Some(&cookie)).expect_err("refused");
+    assert_eq!(refused.status, 503);
+    let retry_after: u64 = refused.header("retry-after").unwrap().parse().unwrap();
+    assert!(retry_after <= 2, "{retry_after}");
+}
+
+#[test]
 fn a_body_sent_in_pieces() {
     let h = Harness::start();
     let mut stream = connect(h.port());
@@ -256,7 +348,7 @@ fn a_body_sent_in_pieces() {
     stream
         .write_all(
             format!(
-                "POST /join HTTP/1.1\r\n{JSON}Content-Length: {}\r\n\r\n",
+                "POST /join HTTP/1.1\r\nHost: 127.0.0.1\r\n{JSON}Content-Length: {}\r\n\r\n",
                 body.len()
             )
             .as_bytes(),
@@ -326,6 +418,7 @@ fn event_streams_are_limited() {
     let h = Harness::with_limits(Limits {
         connections_per_address: 64,
         streams_per_address: 64,
+        stream_opens: 64,
         ..Limits::default()
     });
     let cookie = h.cookie();
