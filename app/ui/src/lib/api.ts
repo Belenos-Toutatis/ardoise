@@ -7,7 +7,7 @@ import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic'
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
 import type { InkspaceProgress, InkspaceReport, InkspaceSource } from './inkspace';
-import type { LiveBatch, LiveCommand, LiveSnapshot, LiveStyle, LiveViewState, MonitorInfo } from './live';
+import type { LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState, MonitorInfo } from './live';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
 import { mockShareSubscribe } from './mock-share';
@@ -329,6 +329,11 @@ export const api = {
   /** « Undo the clearing »: gives the current page the ink of the last « Clear the page » back. */
   liveRestoreCleared: () => call<boolean>('live_restore_cleared'),
   liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
+  /**
+   * The marks written over the presentation on page `pageIndex`, the whole list: the viewers of
+   * the share draw them (temporary, never saved; ignored when the page is another one).
+   */
+  liveSetMarks: (pageIndex: number, marks: LiveMark[]) => call<void>('live_set_marks', { pageIndex, marks }),
   listMonitors: () => call<MonitorInfo[]>('list_monitors'),
   /** Opens the presentation window full screen on `monitor` (null: the saved or default screen). */
   /** `remember: false` (the assistant's bridge): the screen is not saved as this PC's choice. */

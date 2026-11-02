@@ -19,6 +19,7 @@ import type {
   LiveBatch,
   LiveCommand,
   LiveEvent,
+  LiveMark,
   LivePoint,
   LiveSessionState,
   LiveSnapshot,
@@ -523,6 +524,10 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
     case 'live_set_view':
       setView(running(), args.view as LiveViewState);
       return undefined;
+    case 'live_set_marks':
+      running();
+      mockLiveMarks.push({ pageIndex: args.pageIndex as number, marks: args.marks as LiveMark[] });
+      return undefined;
     case 'list_monitors':
       return monitors();
     case 'open_presentation': {
@@ -552,8 +557,12 @@ export async function mockLiveSubscribe(onBatch: (batch: LiveBatch) => void): Pr
 
 // --- For tests ----------------------------------------------------------------------------------
 
-/** Stops the session, forgets subscribers, screens and settings. */
+/** The lists of marks the presentation window sent (`live_set_marks`), in order. */
+export const mockLiveMarks: { pageIndex: number; marks: LiveMark[] }[] = [];
+
+/** Stops the session, forgets subscribers, screens, settings and marks. */
 export function resetMockLive(): void {
+  mockLiveMarks.length = 0;
   if (session) stopTimers(session);
   session = null;
   subscribers.clear();

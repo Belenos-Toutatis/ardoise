@@ -79,6 +79,26 @@ export interface LivePoint {
   recv: number;
 }
 
+/** A point of a mark written over the presentation. */
+export interface LiveMarkPoint {
+  x: number;
+  y: number;
+  /** Pressure, 0..1. */
+  p: number;
+}
+
+/**
+ * A temporary mark written over the presentation, as Rust holds it for the viewers of the share
+ * (`live_set_marks`, the `marks` event): the ink and the points, in page units.
+ */
+export interface LiveMark {
+  tool: Tool;
+  color: Rgba;
+  /** Line diameter at full pressure, page units. */
+  width: number;
+  points: LiveMarkPoint[];
+}
+
 /** A stroke as `strokeStart` sends it: its points carry their receipt time. */
 export type LiveStroke = Omit<Stroke, 'points'> & { points: LivePoint[] };
 
@@ -90,6 +110,11 @@ export type LiveEvent =
   | { type: 'hover'; x: number; y: number }
   | { type: 'hoverEnd' }
   | { type: 'view'; view: LiveViewState }
+  /**
+   * The marks written over the presentation, the whole list for the current page (empty: none, or
+   * the page changed). Only the share's viewers draw them.
+   */
+  | { type: 'marks'; marks: LiveMark[] }
   | { type: 'saved'; paths: string[] }
   /**
    * A page could not be written into the library (sent once per page while the error repeats).

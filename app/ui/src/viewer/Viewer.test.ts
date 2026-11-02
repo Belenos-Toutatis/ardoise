@@ -3,7 +3,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLocale } from '../lib/i18n.svelte';
 import { FakeContext } from '../lib/live-fake-canvas';
-import type { LiveSnapshot } from '../lib/live';
+import type { LiveEvent, LiveSnapshot } from '../lib/live';
 import type { Layer, Note, Stroke } from '../lib/note';
 import type { ShareMessage, SharedPage } from '../lib/share';
 import Viewer from './Viewer.svelte';
@@ -353,6 +353,40 @@ describe('viewer page: the shared page', () => {
       },
     });
     await vi.waitFor(() => expect(view.canvas()!.dataset.strokes).toBe('2'));
+  });
+
+  it('draws the marks written over the presentation, on top of the page, and stops when they go', async () => {
+    const contexts: FakeContext[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => {
+      const ctx = new FakeContext();
+      contexts.push(ctx);
+      return ctx as unknown as RenderingContext;
+    });
+    const red = { r: 216, g: 0, b: 0, a: 255 };
+    /** Fills of the colour of the marks: the page itself is black ink on white. */
+    const redFills = () => contexts.flatMap((c) => c.ops('fill')).filter((call) => call.fillStyle === 'rgb(216, 0, 0)').length;
+    const send = (events: LiveEvent[], reset = false) =>
+      pc.send({ type: 'live', reset, batch: { sentAt: 0, events } });
+    const view = render();
+    await join(view);
+    send([{ type: 'snapshot', snapshot: liveSnapshot([stroke(1000)]) }], true);
+    await vi.waitFor(() => expect(view.canvas()).not.toBeNull());
+    await vi.waitFor(() => expect(contexts.some((c) => c.ops('fill').length > 0)).toBe(true));
+    expect(redFills()).toBe(0);
+
+    const points = Array.from({ length: 6 }, (_, i) => ({ x: 3000 + 400 * i, y: 8000 + 200 * i, p: 0.5 }));
+    send([{ type: 'marks', marks: [{ tool: 'feltTip', color: red, width: 140, points }] }]);
+    await vi.waitFor(() => expect(redFills()).toBeGreaterThan(0));
+    // The marks are not strokes of the page.
+    expect(view.canvas()!.dataset.strokes).toBe('1');
+
+    // Gone: the next frames no longer draw them.
+    send([{ type: 'marks', marks: [] }]);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const before = redFills();
+    send([{ type: 'view', view: { zoom: 2, x: 14850, y: 10800, board: false, laser: false } }]);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(redFills()).toBe(before);
   });
 
   it('draws the page: the surround, the paper colour and the strokes', async () => {

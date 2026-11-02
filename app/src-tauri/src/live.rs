@@ -38,7 +38,7 @@ pub use activity::Activity;
 pub use hub::{
     ButtonSetting, HubConfig, LiveError, LiveHub, LiveOverview, PagePosition, Start, StartOptions,
 };
-pub use model::{LiveBatch, LiveCommand, LiveSnapshot, LiveStyle, LiveViewState};
+pub use model::{LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState};
 
 use crate::narration::{self, NarrationRuntime};
 
@@ -316,4 +316,19 @@ pub async fn live_set_view(
     view: LiveViewState,
 ) -> CommandResult<()> {
     runtime.hub.set_view(view).map_err(LiveError::command_error)
+}
+
+/// The marks written over the presentation on page `page_index`, the whole list: the share's
+/// viewers draw them. Temporary, kept in memory only; the list is bounded (`MAX_MARKS`,
+/// `MAX_MARKS_POINTS`).
+#[tauri::command]
+pub async fn live_set_marks(
+    runtime: State<'_, LiveRuntime>,
+    page_index: usize,
+    marks: Vec<LiveMark>,
+) -> CommandResult<()> {
+    runtime
+        .hub
+        .set_marks(page_index, marks)
+        .map_err(LiveError::command_error)
 }

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../lib/api';
 import { FakeContext } from '../../lib/live-fake-canvas';
 import { resetMockLibrary } from '../../lib/mock-data';
-import { mockLiveConfig, mockLiveInvoke, resetMockLive } from '../../lib/mock-live';
+import { mockLiveConfig, mockLiveInvoke, mockLiveMarks, resetMockLive } from '../../lib/mock-live';
 import Presentation from './Presentation.svelte';
 
 vi.mock('../../lib/ink', async (importOriginal) => {
@@ -191,5 +191,83 @@ describe('writing over the presentation', () => {
     await tick();
     expect(view.clearButton()).toBeNull();
     await vi.waitFor(async () => expect((await api.liveSubscribe(() => {})).view.zoom).toBeGreaterThan(base.zoom + 0.5));
+  });
+});
+
+describe('marks reported for the viewers of the share', () => {
+  /** The last list the window sent. */
+  const lastSent = () => mockLiveMarks[mockLiveMarks.length - 1];
+
+  it('sends the marks while one is written, not on every move, and the whole mark once the pen is up', async () => {
+    const view = await render();
+    expect(mockLiveMarks).toHaveLength(0);
+    await view.write({ pointerType: 'mouse' });
+    await vi.waitFor(() => expect(lastSent()?.marks[0]?.points.length).toBeGreaterThan(5));
+    // The first point went at once; the 10 moves were merged.
+    expect(mockLiveMarks.length).toBeGreaterThanOrEqual(2);
+    expect(mockLiveMarks.length).toBeLessThanOrEqual(4);
+    expect(mockLiveMarks[0].marks[0].points).toHaveLength(1);
+    expect(lastSent()).toMatchObject({ pageIndex: 0, marks: [{ tool: 'feltTip', color: { r: 216, g: 0, b: 0, a: 255 } }] });
+    // Only the ink and the points leave the window.
+    expect(Object.keys(lastSent().marks[0]).sort()).toEqual(['color', 'points', 'tool', 'width']);
+    expect(Object.keys(lastSent().marks[0].points[0]).sort()).toEqual(['p', 'x', 'y']);
+
+    // A second mark: both are in the list.
+    await view.write({ pointerType: 'pen', pointerId: 2, t: 10_000 }, 400);
+    await vi.waitFor(() => expect(lastSent().marks).toHaveLength(2));
+    // The window still draws its own marks; the viewers' copy is no business of its canvas.
+    expect(view.clearButton()).toBeTruthy();
+  });
+
+  it('sends the list again, shorter, when the back of the pen erases a mark', async () => {
+    const view = await render();
+    await view.write({ pointerType: 'mouse' }, 200);
+    await view.write({ pointerType: 'mouse', t: 5000 }, 500);
+    await vi.waitFor(() => expect(lastSent()?.marks).toHaveLength(2));
+    view.fire('pointerdown', 600, 200, { pointerType: 'pen', buttons: 32, pointerId: 2, t: 9000 });
+    view.fire('pointerup', 600, 200, { pointerType: 'pen', buttons: 0, pointerId: 2, t: 9010 });
+    await vi.waitFor(() => expect(lastSent().marks).toHaveLength(1));
+  });
+
+  it('sends an empty list when the marks are cleared, by the button or by Delete', async () => {
+    const view = await render();
+    await view.write({ pointerType: 'mouse' });
+    await vi.waitFor(() => expect(lastSent()?.marks).toHaveLength(1));
+    view.clearButton()!.click();
+    await vi.waitFor(() => expect(lastSent().marks).toEqual([]));
+
+    await view.write({ pointerType: 'mouse', t: 5000 });
+    await vi.waitFor(() => expect(lastSent().marks).toHaveLength(1));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(lastSent().marks).toEqual([]));
+    const sent = mockLiveMarks.length;
+    // Clearing nothing says nothing.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(mockLiveMarks).toHaveLength(sent);
+  });
+
+  it('sends an empty list for the new page when the page changes, and drops a mark cut short by a second finger', async () => {
+    const view = await render();
+    await view.write({ pointerType: 'mouse' });
+    await vi.waitFor(() => expect(lastSent()?.marks).toHaveLength(1));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(lastSent()).toEqual({ pageIndex: 1, marks: [] }));
+
+    const sent = mockLiveMarks.length;
+    view.fire('pointerdown', 500, 300, { pointerType: 'touch', pointerId: 1, t: 0 });
+    await vi.waitFor(() => expect(mockLiveMarks.length).toBeGreaterThan(sent));
+    view.fire('pointerdown', 600, 300, { pointerType: 'touch', pointerId: 2, t: 20 });
+    await vi.waitFor(() => expect(lastSent().marks).toEqual([]));
+  });
+
+  it('takes its marks off the viewers when the window closes', async () => {
+    const view = await render();
+    await view.write({ pointerType: 'mouse' });
+    await vi.waitFor(() => expect(lastSent()?.marks).toHaveLength(1));
+    cleanup?.();
+    cleanup = null;
+    expect(lastSent().marks).toEqual([]);
+    expect(view.canvas.isConnected).toBe(false);
   });
 });

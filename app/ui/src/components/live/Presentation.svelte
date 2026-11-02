@@ -9,7 +9,8 @@
    * The teacher can write over the page with the pen, a finger or the mouse (temporary marks, not
    * saved; the back of the pen, Delete or the button that shows with the cursor erase them) and
    * pinch with two fingers to zoom the projected area (docs/design/tablet-live-classroom.md,
-   * "M8: writing over the presentation").
+   * "M8: writing over the presentation"). The marks stay in this window, which draws them itself;
+   * they are also reported to Rust (`MarksSender`) for the viewers of the share.
    */
   import { onMount } from 'svelte';
   import { api } from '../../lib/api';
@@ -19,6 +20,7 @@
   import { LatencyRecorder, exposeLatency } from '../../lib/latency';
   import { runKeyAction, type LiveActions } from '../../lib/live-actions';
   import { liveKeyAction } from '../../lib/live-keys';
+  import { MarksSender } from '../../lib/live-marks-sender';
   import { changeView } from '../../lib/live-actions';
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
   import { aspectOf } from '../../lib/live-view';
@@ -35,6 +37,7 @@
   let canvas = $state<ReturnType<typeof LiveCanvas>>();
   /** Marks written over the page (the clear button shows while there are some). */
   let markCount = $state(0);
+  const marksSender = new MarksSender((pageIndex, marks) => api.liveSetMarks(pageIndex, marks));
 
   const actions: LiveActions = {
     live,
@@ -72,6 +75,7 @@
     return () => {
       alive = false;
       clearTimeout(cursorTimer);
+      marksSender.close();
       live.close();
     };
   });
@@ -114,6 +118,7 @@
     label={t('presentation.canvas', { page: `${live.pageIndex + 1} / ${live.pageCount}` })}
     onview={(view) => changeView(actions, view)}
     onmarks={(count) => (markCount = count)}
+    onmarkschange={(marks, current) => marksSender.update(live.pageIndex, marks, current)}
   />
   {#if markCount > 0 && !cursorHidden}
     <button type="button" class="clear-marks" data-action="clear-marks" onclick={() => canvas?.clearMarks()}>
