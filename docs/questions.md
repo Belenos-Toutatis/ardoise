@@ -47,3 +47,9 @@ Le serveur du partage sur le réseau local (§4.10) est une nouvelle bibliothèq
 **En attendant** : la crate existe, son rôle est écrit en tête de son `lib.rs` et dans `docs/design/lan-share.md`. Ligne proposée pour §6.1 : `ardoise-share     partage de la feuille sur le réseau local : petit serveur HTTP en lecture seule (code, flux d'évènements)`.
 
 **Décision de l'utilisateur (2026-11-02)** : accord ; la ligne proposée est ajoutée à SPEC §6.1.
+
+## Q6 — Montrer sur l'autre écran les annotations écrites par-dessus la présentation ? (jalon M11, 2026-11-02) — **tranchée**
+
+La relecture de M11 a relevé que les annotations écrites au stylet, au doigt ou à la souris sur la fenêtre de présentation (rouges, jaunes sur le tableau noir, temporaires, jamais enregistrées dans la note) restaient sur le PC : le partage ne montrait que l'écriture de la tablette et la vue (zoom, déplacement, tableau noir, pointeur laser).
+
+**Décision de l'utilisateur (2026-11-02)** : les montrer aussi sur l'autre écran, pour qu'il affiche exactement ce que montre le vidéoprojecteur. SPEC §4.10 et ROADMAP M11 sont mis à jour.

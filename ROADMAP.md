@@ -167,7 +167,7 @@ Ajouté à la demande de l'utilisateur le 2026-11-02 (SPEC §4.10, `docs/questio
 - [ ] Serveur de partage dans l'exécutable : HTTP et flux d'évènements vers le navigateur ; démarré et arrêté à la main ; port réglable ; code de 6 caractères avec tentatives limitées ; lecture seule. Aucune adresse ne donne accès à autre chose que la feuille partagée.
 - [ ] Page de visionnage pour le navigateur (rien à installer) : même rendu des traits que l'application (WebAssembly), plein écran, reconnexion automatique, écran d'attente.
 - [ ] Contenu partagé, choisi par le PC d'Ardoise :
-  - la feuille du mode direct, avec la vue de la présentation (zoom, déplacement, tableau noir, pointeur laser) ;
+  - la feuille du mode direct, avec la vue de la présentation (zoom, déplacement, tableau noir, pointeur laser) et les annotations écrites par-dessus la présentation ;
   - ou la page de la note ouverte, mise à jour à chaque modification ;
   - et une pause qui fige l'image.
 - [ ] Interface :
