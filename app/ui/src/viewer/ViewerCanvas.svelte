@@ -2,8 +2,8 @@
   /**
    * The shared page on a `<canvas>`, full window on a black surround, as the presentation window
    * shows it (`components/live/LiveCanvas.svelte`, mode `presentation`: zoom, pan, blackboard,
-   * laser dot), without what the viewer does not do: no pointer, no marks, no latency, no call
-   * to Rust. Drawing is `lib/live-render.ts`; this component sizes the canvas (CSS pixels ×
+   * laser dot, and the marks written over the presentation, which the hub sends), without what
+   * the viewer does not do: no pointer, no latency, no call to Rust. Drawing is `lib/live-render.ts`; this component sizes the canvas (CSS pixels ×
    * `devicePixelRatio`), shows the paper image of the message instead of `render_background`
    * (`background`: PNG data URL, null for plain paper, which `LiveRenderer` fills with the paper
    * colour), and paints on the next animation frame after a change.
@@ -90,7 +90,14 @@
     if (el.height !== height) el.height = height;
     renderer.paint(
       context,
-      buildScene(live, { mode: 'presentation', viewport: size, pixelRatio, aspect: DEFAULT_ASPECT, backgroundImage }),
+      buildScene(live, {
+        mode: 'presentation',
+        viewport: size,
+        pixelRatio,
+        aspect: DEFAULT_ASPECT,
+        backgroundImage,
+        marks: live.marks,
+      }),
     );
     // Nobody measures the latency here: the points painted are not kept.
     live.takeUnpainted();

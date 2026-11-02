@@ -18,7 +18,8 @@
    * double tap shows the whole page. `presentation`: the pen, a finger or the mouse write
    * temporary marks over the page (the back of the pen erases them; they are not saved and go
    * with the page), two fingers pinch the projected area. A finger is ignored while a pen is in
-   * contact or hovering (palm rejection).
+   * contact or hovering (palm rejection). `onmarkschange` reports every change of the marks, the
+   * one in progress included, for the window to pass them on to the viewers of the share.
    */
   import { api } from '../../lib/api';
   import type { Vec } from '../../lib/editor/geometry';
@@ -60,6 +61,7 @@
     latency = null,
     onview,
     onmarks,
+    onmarkschange,
   }: {
     live: LiveState;
     ink: Ink | null;
@@ -74,6 +76,8 @@
     onview?: (view: LiveViewState) => void;
     /** Presentation: the number of marks written over the page changed. */
     onmarks?: (count: number) => void;
+    /** Presentation: the marks changed, or the mark being written grew (its points change in place). */
+    onmarkschange?: (marks: readonly Stroke[], current: Stroke | null) => void;
   } = $props();
 
   /** jsdom (tests) has no layout: a nominal size. */
@@ -310,6 +314,7 @@
     if (next === marks) return;
     marks = next;
     onmarks?.(next.length);
+    onmarkschange?.(marks, markCurrent);
     schedule();
   }
 
@@ -318,6 +323,7 @@
     markCurrent = null;
     markDrag = null;
     setMarks([]);
+    onmarkschange?.(marks, null);
     schedule();
   }
 
@@ -370,6 +376,7 @@
     const dark = isDarkPaper(effectiveBackground(live.background, live.view.board).paper);
     markDrag = { id, kind: 'write', t0: e.timeStamp };
     markCurrent = newMark(markStyle(dark), sample(e, kind, p, e.timeStamp), scale);
+    onmarkschange?.(marks, markCurrent);
     schedule();
   }
 
@@ -386,10 +393,12 @@
       if (second) {
         // Two fingers: whatever the first one began is dropped, the pinch takes over.
         e.preventDefault();
+        const dropped = markCurrent !== null;
         markCurrent = null;
         markDrag = null;
         drag = null;
         dragging = false;
+        if (dropped) onmarkschange?.(marks, null);
         schedule();
         return;
       }
@@ -442,6 +451,7 @@
         if (Math.hypot(q.x - last.x, q.y - last.y) * scale < 0.5) continue;
         current.points.push(sample(ev, kind, q, markDrag.t0));
       }
+      onmarkschange?.(marks, current);
       schedule();
       return;
     }
@@ -465,6 +475,7 @@
       markDrag = null;
       markCurrent = null;
       if (current && !cancelled) setMarks([...marks, current]);
+      else if (current) onmarkschange?.(marks, null);
       schedule();
     }
     if (!drag || id !== drag.id) return;

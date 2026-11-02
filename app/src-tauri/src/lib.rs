@@ -306,6 +306,7 @@ pub fn run() {
             live::live_command,
             live::live_restore_cleared,
             live::live_set_view,
+            live::live_set_marks,
             presentation::list_monitors,
             presentation::open_presentation,
             presentation::close_presentation,

@@ -17,8 +17,8 @@ use ardoise_proto::live::LiveRecord;
 use ardoise_proto::stroke::Point as PenPoint;
 
 use super::model::{
-    HoverPoint, LiveCommandKind, LiveEvent, LivePoint, LiveSessionState, LiveSnapshot, LiveStroke,
-    LiveStyle, LiveViewState,
+    HoverPoint, LiveCommandKind, LiveEvent, LiveMark, LivePoint, LiveSessionState, LiveSnapshot,
+    LiveStroke, LiveStyle, LiveViewState, sanitize_marks,
 };
 use crate::library::path_text;
 use crate::presentation::MonitorInfo;
@@ -197,6 +197,10 @@ pub struct LiveSession {
     presentation: Option<MonitorInfo>,
     /// The ink of the page last cleared, kept so that "Undo the clearing" can give it back.
     cleared: Option<Cleared>,
+    /// The marks written over the presentation, and the page they were written on (as it is
+    /// held). Temporary: not part of any page, never written, gone when the page changes.
+    marks: Vec<LiveMark>,
+    marks_page: Option<(usize, Orientation, PageSize)>,
 }
 
 /// The strokes a page had before « Clear the page », for [`LiveSession::restore_cleared`].
@@ -233,6 +237,8 @@ impl LiveSession {
             french,
             presentation: None,
             cleared: None,
+            marks: Vec::new(),
+            marks_page: None,
         };
         let page = session.new_page(now_ms);
         session.pages.push(page);
@@ -331,6 +337,10 @@ impl LiveSession {
         if presentation != self.presentation {
             self.presentation = presentation;
             self.push_snapshot(out);
+            // The window that wrote the marks is gone: they would stay on the viewers for good.
+            if self.presentation.is_none() {
+                self.clear_marks(out);
+            }
         }
     }
 
@@ -400,12 +410,61 @@ impl LiveSession {
         }
     }
 
-    /// A snapshot, then the stroke in progress (it is not in the snapshot's page).
-    fn push_snapshot(&self, out: &mut Vec<LiveEvent>) {
+    /// A snapshot, then the stroke in progress (it is not in the snapshot's page). If the page
+    /// is no longer the one the marks were written on, they go (an empty list follows).
+    fn push_snapshot(&mut self, out: &mut Vec<LiveEvent>) {
         out.push(LiveEvent::Snapshot {
             snapshot: Box::new(self.snapshot()),
         });
         out.extend(self.in_progress());
+        if !self.marks.is_empty() && self.marks_page != Some(self.held_page()) {
+            self.clear_marks(out);
+        }
+    }
+
+    /// The page on screen as the marks see it: another page, or the same one turned (the quick
+    /// switch of the orientation), is another page for them.
+    fn held_page(&self) -> (usize, Orientation, PageSize) {
+        (
+            self.current,
+            self.orientation,
+            self.current_page().note.page,
+        )
+    }
+
+    /// The marks written over the presentation, as a late window starts from them (`None`
+    /// when there are none).
+    pub fn marks_event(&self) -> Option<LiveEvent> {
+        (!self.marks.is_empty()).then(|| LiveEvent::Marks {
+            marks: self.marks.clone(),
+        })
+    }
+
+    /// The presentation window's marks for page `page_index`, whole (see
+    /// [`sanitize_marks`] for what is kept). Ignored when the page on screen is another one:
+    /// the list was written before a page change the window had not seen yet.
+    pub fn set_marks(&mut self, page_index: usize, marks: Vec<LiveMark>, out: &mut Vec<LiveEvent>) {
+        if page_index != self.current {
+            return;
+        }
+        let marks = sanitize_marks(marks, self.current_page().note.page);
+        if marks == self.marks {
+            return;
+        }
+        self.marks_page = Some(self.held_page());
+        self.marks = marks;
+        out.push(LiveEvent::Marks {
+            marks: self.marks.clone(),
+        });
+    }
+
+    /// Removes every mark (an event only when there were some).
+    pub fn clear_marks(&mut self, out: &mut Vec<LiveEvent>) {
+        self.marks_page = None;
+        if !self.marks.is_empty() {
+            self.marks.clear();
+            out.push(LiveEvent::Marks { marks: Vec::new() });
+        }
     }
 
     /// The stroke in progress as already sent, to follow a snapshot.

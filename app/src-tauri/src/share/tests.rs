@@ -27,7 +27,9 @@ use super::{ShareContent, ShareRuntime, render_paper};
 use crate::library::tests::library;
 use crate::live::LiveHub;
 use crate::live::hub::{HubConfig, HubSink, Start, StartOptions};
-use crate::live::model::{LiveBatch, LiveEvent, LiveSnapshot, LiveStyle, LiveViewState};
+use crate::live::model::{
+    LiveBatch, LiveEvent, LiveMark, LiveSnapshot, LiveStyle, LiveViewState, MarkPoint,
+};
 use crate::presentation::MonitorInfo;
 
 // --- The viewer's files ----------------------------------------------------------------------
@@ -365,6 +367,74 @@ fn a_viewer_gets_only_the_fields_the_viewer_draws() {
     assert_eq!(page["origin"], json!({"kind": "ardoise"}));
     assert_eq!(keys(&page["layers"][0]), ["name", "visible"]);
     assert_eq!(page["layers"][0]["name"], "");
+}
+
+/// A red mark of two points.
+fn red_mark() -> LiveMark {
+    LiveMark {
+        tool: Tool::FeltTip,
+        color: Rgba {
+            r: 220,
+            g: 38,
+            b: 38,
+            a: 255,
+        },
+        width: 140.0,
+        points: vec![
+            MarkPoint {
+                x: 100.0,
+                y: 500.0,
+                p: 0.5,
+            },
+            MarkPoint {
+                x: 200.0,
+                y: 600.0,
+                p: 1.0,
+            },
+        ],
+    }
+}
+
+/// The marks of the events of a viewer's message.
+fn marks_in(message: &Value) -> Vec<Value> {
+    live_events(message)
+        .into_iter()
+        .filter(|event| event["type"] == "marks")
+        .map(|event| event["marks"].clone())
+        .collect()
+}
+
+#[test]
+fn a_viewer_gets_the_marks_with_only_what_is_drawn() {
+    let batch = LiveBatch {
+        events: vec![LiveEvent::Marks {
+            marks: vec![red_mark()],
+        }],
+        sent_at: 1.0,
+    };
+    let value: Value = serde_json::from_str(&batch_json(&batch).unwrap()).unwrap();
+    let event = &value["events"][0];
+    assert_eq!(keys(event), ["marks", "type"]);
+    assert_eq!(event["type"], "marks");
+    let mark = &event["marks"][0];
+    assert_eq!(keys(mark), ["color", "points", "tool", "width"]);
+    assert_eq!(keys(&mark["points"][0]), ["p", "x", "y"]);
+    assert_eq!(
+        mark,
+        &json!({
+            "tool": "feltTip",
+            "color": { "r": 220, "g": 38, "b": 38, "a": 255 },
+            "width": 140.0,
+            "points": [{ "x": 100.0, "y": 500.0, "p": 0.5 }, { "x": 200.0, "y": 600.0, "p": 1.0 }]
+        })
+    );
+    // An empty list is sent too: it is how the viewer's marks go.
+    let none = LiveBatch {
+        events: vec![LiveEvent::Marks { marks: Vec::new() }],
+        sent_at: 1.0,
+    };
+    let value: Value = serde_json::from_str(&batch_json(&none).unwrap()).unwrap();
+    assert_eq!(value["events"][0], json!({ "type": "marks", "marks": [] }));
 }
 
 #[test]
@@ -988,12 +1058,21 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     assert!(median < 50.0, "median {median} ms");
     assert_eq!(runtime.status(8765).viewers, 1);
 
-    // Pause: a frozen batch, then the badge; resume: a fresh subscription.
+    // The marks written over the presentation reach the viewer as increments of the stream.
+    hub.set_marks(0, vec![red_mark()]).unwrap();
+    let marked = viewer.until("the marks", Duration::from_secs(5), |m| {
+        m["type"] == "live" && !marks_in(m).is_empty()
+    });
+    assert_eq!(marked["reset"], false);
+    assert_eq!(marks_in(&marked)[0].as_array().unwrap().len(), 1);
+
+    // Pause: a frozen batch (with the marks), then the badge; resume: a fresh subscription.
     runtime.inner.share().unwrap().set_paused(true);
     let frozen = viewer.until("the frozen batch", Duration::from_secs(5), |m| {
         m["type"] == "live" && m["reset"] == true
     });
     assert_eq!(live_events(&frozen)[0]["type"], "snapshot");
+    assert_eq!(marks_in(&frozen)[0].as_array().unwrap().len(), 1);
     viewer.until("the pause", Duration::from_secs(5), |m| {
         m["type"] == "pause"
     });
@@ -1001,9 +1080,17 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     viewer.until("the resume", Duration::from_secs(5), |m| {
         m["type"] == "pause" && m["paused"] == false
     });
-    viewer.until("a fresh snapshot", Duration::from_secs(5), |m| {
+    let fresh = viewer.until("a fresh snapshot", Duration::from_secs(5), |m| {
         m["type"] == "live" && m["reset"] == true
     });
+    // The marks are still there for the viewer that comes back; a page change removes them.
+    assert_eq!(marks_in(&fresh)[0].as_array().unwrap().len(), 1);
+    hub.command(crate::live::model::LiveCommandKind::NextPage)
+        .unwrap();
+    let cleared = viewer.until("the marks gone", Duration::from_secs(5), |m| {
+        m["type"] == "live" && !marks_in(m).is_empty()
+    });
+    assert!(marks_in(&cleared).iter().all(|marks| marks == &json!([])));
 
     // Live mode stops; the main window goes back to the library, then opens a note.
     hub.stop().unwrap();

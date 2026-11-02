@@ -10,7 +10,9 @@
 // What is checked: the viewer page and its assets, the access code and its cookie, a list of paths that
 // must all answer 404, the stream (snapshot first, stripped of anything personal, points arriving with a
 // median delay under 50 ms from the app's own timestamps; the network and the other PC's drawing are
-// what H4 judges by eye), pause and resume, the note open in the editor (`note`, then `noteStrokes`),
+// what H4 judges by eye), the marks written over the presentation (set through `live_set_marks`, as the
+// presentation window does: `marks` events with only what is drawn, ink on the viewer's canvas, an empty list
+// when the page changes), pause and resume, the note open in the editor (`note`, then `noteStrokes`),
 // and the stop (`end`, port closed). Same pattern as the other journeys (labels from the translation files).
 //
 // The page itself is opened too, in a real browser: headless Microsoft Edge (if this PC has it) driven over
@@ -444,6 +446,32 @@ const DARK_PIXELS = `(() => {
   return n;
 })()`;
 
+/**
+ * Red pixels on the canvas (a sample): the marks written over the presentation are red (216, 0, 0) on a light
+ * page, and the simulated pen writes in black.
+ */
+const RED_PIXELS = `(() => {
+  const c = document.querySelector(${j(SHEET)});
+  if (!c) return -1;
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 16) if (d[i] > 150 && d[i + 1] < 80 && d[i + 2] < 80) n++;
+  return n;
+})()`;
+
+/** A wavy red mark across `page`, as the presentation window reports it (`LiveMark`: the ink and the points). */
+export function wavyMark(page, y, n = 14) {
+  return {
+    tool: 'feltTip',
+    color: { r: 216, g: 0, b: 0, a: 255 },
+    width: page.height / 60,
+    points: Array.from({ length: n }, (_, i) => ({ x: page.width * (0.1 + (0.8 * i) / (n - 1)), y: page.height * y + 300 * Math.sin(i), p: 0.7 })),
+  };
+}
+
+/** The `marks` events of a message of the stream (several in a batch are possible). */
+const marksOf = (msg) => (msg.type === 'live' ? msg.batch.events.filter((e) => e.type === 'marks') : []);
+
 // --- Steps shared with the other live journeys ------------------------------------------------------------
 
 /** Registers the simulated tablet (it starts unregistered), opens live mode from the tablet panel and waits for the first strokes. */
@@ -720,6 +748,74 @@ export const shareJourneys = [
           await browser.waitFor(`Number(document.querySelector(${j(SHEET)})?.dataset.strokes) > ${strokes}`, 'one more stroke', 30_000);
           await browser.waitFor(`${DARK_PIXELS} > ${before}`, 'more ink on the canvas (is the geometry module loaded?)', 10_000);
           assertNoBrowserProblem(browser);
+        });
+
+        let page = { width: 29700, height: 21600 };
+        let redBefore = 0;
+        // What the presentation window does when the teacher writes over the page, without a projector: it reports the marks.
+        const invoke = (command, args) => app.evaluate(`window.__TAURI_INTERNALS__.invoke(${j(command)}, ${j(args)}).then(() => true)`);
+        const livePage = async () => Number((await app.evaluate(canvasData('page'))).split('/')[0]) - 1;
+
+        await check('marques sur la présentation : le flux reçoit la liste entière, avec seulement ce qui se dessine', async () => {
+          const size = stream.messages[0].msg.batch.events[0].snapshot.page.page;
+          if (!(size?.width > 0 && size?.height > 0)) throw new Error(`no page size in the first snapshot: ${j(size)}`);
+          page = size;
+          redBefore = browser ? await browser.evaluate(RED_PIXELS) : 0;
+          const mark = stream.mark();
+          const pageIndex = await livePage();
+          await invoke('live_set_marks', { pageIndex, marks: [wavyMark(page, 0.3)] });
+          const first = await stream.next((msg) => marksOf(msg).some((e) => e.marks.length === 1), 'a marks event with one mark', { from: mark, timeout: 5000 });
+          const event = marksOf(first.msg).find((e) => e.marks.length === 1);
+          const keys = (o) => Object.keys(o).sort().join();
+          if (keys(event) !== 'marks,type') throw new Error(`the marks event has the keys ${keys(event)}`);
+          if (keys(event.marks[0]) !== 'color,points,tool,width') throw new Error(`a mark has the keys ${keys(event.marks[0])}`);
+          if (keys(event.marks[0].points[0]) !== 'p,x,y') throw new Error(`a mark point has the keys ${keys(event.marks[0].points[0])}`);
+          if (event.marks[0].points.length !== 14 || event.marks[0].tool !== 'feltTip') throw new Error(`unexpected mark ${j(event.marks[0]).slice(0, 160)}`);
+          // The whole list each time: a second mark comes with the first.
+          const marksAt = stream.mark();
+          await invoke('live_set_marks', { pageIndex, marks: [wavyMark(page, 0.3), wavyMark(page, 0.6)] });
+          await stream.next((msg) => marksOf(msg).some((e) => e.marks.length === 2), 'a marks event with two marks', { from: marksAt, timeout: 5000 });
+          // A viewer arriving now starts from them: its first message is the snapshot, then the marks.
+          const late = await EventStream.open(port, cookie);
+          try {
+            const joined = await late.next((msg) => msg.type === 'live' && msg.reset === true, 'the first message of a late viewer', { timeout: 5000 });
+            const events = joined.msg.batch.events;
+            if (events[0]?.type !== 'snapshot') throw new Error(`the late viewer's batch starts with ${events[0]?.type}`);
+            if (!marksOf(joined.msg).some((e) => e.marks.length === 2)) throw new Error('the late viewer does not get the two marks with its snapshot');
+          } finally {
+            late.close();
+          }
+        });
+
+        await check('vrai navigateur : les marques ajoutent de l’encre rouge sur la feuille du visionneur', async () => {
+          if (!browser) return;
+          await browser.waitFor(`${RED_PIXELS} > ${redBefore}`, 'red ink on the canvas of the viewer (the marks)', 10_000);
+          assertNoBrowserProblem(browser);
+        });
+
+        await check('changement de page : le flux reçoit une liste vide, et plus aucune marque de la page quittée', async () => {
+          const pageIndex = await livePage();
+          const mark = stream.mark();
+          await invoke('live_command', { command: { kind: 'nextPage' } });
+          const cleared = await stream.next((msg) => marksOf(msg).some((e) => e.marks.length === 0), 'an empty marks event after the page change', { from: mark, timeout: 5000 });
+          // It follows the snapshot of the new page, in the same message or after it.
+          const snapshot = stream.messages.find(
+            (m) => m.i >= mark && m.msg.type === 'live' && m.msg.batch.events.some((e) => e.type === 'snapshot' && e.snapshot.pageIndex === pageIndex + 1),
+          );
+          if (!snapshot || snapshot.i > cleared.i) throw new Error(`the snapshot of page ${pageIndex + 2} did not come before the empty marks (message ${cleared.i})`);
+          // Marks sent for the page just left are refused.
+          const after = stream.mark();
+          await invoke('live_set_marks', { pageIndex, marks: [wavyMark(page, 0.4)] });
+          await sleep(500);
+          if (stream.messages.some((m) => m.i >= after && marksOf(m.msg).some((e) => e.marks.length > 0))) {
+            throw new Error('marks written for the page just left reached the viewers');
+          }
+          if (browser) {
+            await browser.waitFor(`${RED_PIXELS} <= ${redBefore}`, 'the red ink to go with the page', 10_000);
+          }
+          // Back to the first page, as the later steps found it.
+          await invoke('live_command', { command: { kind: 'previousPage' } });
+          await app.waitFor(`${canvasData('page')}.startsWith(${j(`${pageIndex + 1}/`)})`, 'the first page again');
         });
 
         await check('Pause : l’image figée (instantané) puis « pause », puis plus aucun point pendant 1 s', async () => {

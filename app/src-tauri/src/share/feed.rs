@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use ardoise_core::note::{Background, Origin, PageSize, Timing};
 use ardoise_core::settings::Orientation;
-use ardoise_ink::Stroke;
+use ardoise_ink::{Rgba, Stroke, Tool};
 use ardoise_share::{LiveFeed, LiveViewer};
 use serde::Serialize;
 
@@ -16,8 +16,8 @@ use super::page::is_drawn;
 use crate::live::LiveHub;
 use crate::live::hub::BatchSink;
 use crate::live::model::{
-    HoverPoint, LiveBatch, LiveEvent, LivePoint, LiveSessionState, LiveSnapshot, LiveStroke,
-    LiveStyle, LiveViewState, wall_now_ms,
+    HoverPoint, LiveBatch, LiveEvent, LiveMark, LivePoint, LiveSessionState, LiveSnapshot,
+    LiveStroke, LiveStyle, LiveViewState, wall_now_ms,
 };
 
 /// The hub's subscription label of viewer `id` (never a window's label).
@@ -158,6 +158,10 @@ enum SharedEvent<'a> {
     View {
         view: &'a LiveViewState,
     },
+    /// The marks written over the presentation, drawn on top of the page.
+    Marks {
+        marks: Vec<SharedMark>,
+    },
 }
 
 impl<'a> SharedEvent<'a> {
@@ -180,8 +184,46 @@ impl<'a> SharedEvent<'a> {
             LiveEvent::Hover { x, y } => SharedEvent::Hover { x: *x, y: *y },
             LiveEvent::HoverEnd => SharedEvent::HoverEnd,
             LiveEvent::View { view } => SharedEvent::View { view },
+            LiveEvent::Marks { marks } => SharedEvent::Marks {
+                marks: marks.iter().map(SharedMark::of).collect(),
+            },
             LiveEvent::Saved { .. } | LiveEvent::SaveFailed { .. } => return None,
         })
+    }
+}
+
+/// A mark as the viewer draws it: the ink and the points, nothing else.
+#[derive(Serialize)]
+struct SharedMark {
+    tool: Tool,
+    color: Rgba,
+    width: f32,
+    points: Vec<SharedMarkPoint>,
+}
+
+#[derive(Serialize)]
+struct SharedMarkPoint {
+    x: f32,
+    y: f32,
+    p: f32,
+}
+
+impl SharedMark {
+    fn of(mark: &LiveMark) -> SharedMark {
+        SharedMark {
+            tool: mark.tool,
+            color: mark.color,
+            width: mark.width,
+            points: mark
+                .points
+                .iter()
+                .map(|p| SharedMarkPoint {
+                    x: p.x,
+                    y: p.y,
+                    p: p.p,
+                })
+                .collect(),
+        }
     }
 }
 

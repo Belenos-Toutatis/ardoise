@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { LiveBatch, LiveEvent, LivePoint, LiveSnapshot } from './live';
+import type { LiveBatch, LiveEvent, LiveMark, LivePoint, LiveSnapshot } from './live';
 import { DEFAULT_VIEW } from './live-state.svelte';
 import type { Layer, Note, Stroke } from './note';
 import type { SharedPage } from './share';
@@ -346,6 +346,56 @@ describe('viewer state: live mode', () => {
     expect(v.live.current).toBeNull();
     expect(v.live.strokes).toHaveLength(1);
     expect(v.live.strokeCount).toBe(1);
+  });
+
+  it('shows the marks written over the presentation, the whole list each time, and drops them with the page', () => {
+    const red = { r: 216, g: 0, b: 0, a: 255 };
+    const mark = (x: number, n: number): LiveMark => ({
+      tool: 'feltTip',
+      color: red,
+      width: 140,
+      points: Array.from({ length: n }, (_, i) => ({ x: x + 10 * i, y: 500, p: 0.5 })),
+    });
+    const v = new ViewerState();
+    // A viewer arriving late: the marks follow the snapshot of its first batch.
+    v.handle({
+      type: 'live',
+      reset: true,
+      batch: batch({ type: 'snapshot', snapshot: snapshot('p1') }, { type: 'marks', marks: [mark(0, 3)] }),
+    });
+    const live = v.live;
+    expect(live.marks).toHaveLength(1);
+    expect(live.marks[0]).toMatchObject({ tool: 'feltTip', layer: 0, color: red, width: 140 });
+    expect(live.marks[0].points).toHaveLength(3);
+    // Nothing of the note: no stroke, and the count of strokes does not change.
+    expect(live.strokes).toHaveLength(0);
+    expect(live.strokeCount).toBe(0);
+
+    // The list grows: the marks that did not change are the same objects.
+    const first = live.marks[0];
+    const told = vi.fn();
+    live.subscribe(told);
+    v.handle({ type: 'live', reset: false, batch: batch({ type: 'marks', marks: [mark(0, 3), mark(100, 2)] }) });
+    expect(live.marks).toHaveLength(2);
+    expect(live.marks[0]).toBe(first);
+    expect(told).toHaveBeenCalled();
+
+    // A style change of the snapshot (same page) keeps them; another page, or an empty list, removes them.
+    v.handle({ type: 'live', reset: false, batch: batch({ type: 'snapshot', snapshot: snapshot('p1', [], { style: { tool: 'chalk', color: red, width: 90 } }) }) });
+    expect(live.marks).toHaveLength(2);
+    v.handle({ type: 'live', reset: false, batch: batch({ type: 'snapshot', snapshot: snapshot('p2', [], { pageIndex: 1, pageCount: 2 }) }) });
+    expect(live.marks).toHaveLength(0);
+    v.handle({ type: 'live', reset: false, batch: batch({ type: 'marks', marks: [mark(5, 2)] }) });
+    expect(live.marks).toHaveLength(1);
+    v.handle({ type: 'live', reset: false, batch: batch({ type: 'marks', marks: [] }) });
+    expect(live.marks).toHaveLength(0);
+
+    // A new reset starts without marks, and a note has none.
+    v.handle({ type: 'live', reset: false, batch: batch({ type: 'marks', marks: [mark(5, 2)] }) });
+    v.handle({ type: 'live', reset: true, batch: batch({ type: 'snapshot', snapshot: snapshot('p2') }) });
+    expect(v.live.marks).toHaveLength(0);
+    v.handle({ type: 'note', page: shared('n1', [stroke(1)]), background: null });
+    expect(v.live.marks).toHaveLength(0);
   });
 
   it('goes from a note to live mode and back', () => {

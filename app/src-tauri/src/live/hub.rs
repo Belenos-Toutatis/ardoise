@@ -29,7 +29,7 @@ use tauri::ipc::Channel;
 
 use super::activity::Activity;
 use super::model::{
-    LiveBatch, LiveCommandKind, LiveEvent, LiveSessionState, LiveSnapshot, LiveStyle,
+    LiveBatch, LiveCommandKind, LiveEvent, LiveMark, LiveSessionState, LiveSnapshot, LiveStyle,
     LiveViewState, wall_ms, wall_now_ms,
 };
 use super::session::{LiveSession, Page, SavedFile};
@@ -239,7 +239,7 @@ fn default_size() -> PageSize {
 }
 
 /// Adds `event` to a window's queue, merging what does not need to be sent twice: points join
-/// the stroke they continue, only the latest hover position and view are kept.
+/// the stroke they continue, only the latest hover position, view and list of marks are kept.
 fn enqueue(queue: &mut Vec<LiveEvent>, event: LiveEvent) {
     match event {
         LiveEvent::Points { page_index, points } => match queue.last_mut() {
@@ -259,6 +259,10 @@ fn enqueue(queue: &mut Vec<LiveEvent>, event: LiveEvent) {
         }
         LiveEvent::View { .. } => {
             queue.retain(|e| !matches!(e, LiveEvent::View { .. }));
+            queue.push(event);
+        }
+        LiveEvent::Marks { .. } => {
+            queue.retain(|e| !matches!(e, LiveEvent::Marks { .. }));
             queue.push(event);
         }
         LiveEvent::Saved { .. } => {
@@ -807,13 +811,15 @@ impl LiveHub {
     }
 
     /// The session as it is now, as the first events of a subscription give it: the snapshot,
-    /// then the stroke in progress. The frozen image of a paused share on the network.
+    /// then the stroke in progress and the marks written over the presentation. The frozen
+    /// image of a paused share on the network.
     pub fn current_events(&self) -> Vec<LiveEvent> {
         let state = self.shared.lock();
         let mut events = vec![LiveEvent::Snapshot {
             snapshot: Box::new(state.session.snapshot()),
         }];
         events.extend(state.session.in_progress());
+        events.extend(state.session.marks_event());
         events
     }
 
@@ -828,6 +834,7 @@ impl LiveHub {
             snapshot: Box::new(snapshot.clone()),
         }];
         queue.extend(state.session.in_progress());
+        queue.extend(state.session.marks_event());
         queue.extend(state.session.save_failures());
         let id = state.next_subscriber;
         state.next_subscriber += 1;
@@ -908,6 +915,8 @@ impl LiveHub {
             .with_orientation(options.orientation);
         session.set_presentation(old.presentation().cloned(), &mut Vec::new());
         let mut out = Vec::new();
+        // The old session's marks are not the new one's.
+        state.session.clear_marks(&mut out);
         session.set_state(LiveSessionState::Waiting, &mut out);
         state.session = session;
         state.accepting = Some(id);
@@ -1019,6 +1028,16 @@ impl LiveHub {
         self.change(
             |session| view.board != session.view().board,
             |session, out| session.set_view(view, out),
+        )
+    }
+
+    /// The marks the presentation window wrote over page `page_index`, the whole list (see
+    /// [`LiveMark`]); sent to the viewers of the share. Allowed once the session is stopped, like
+    /// the view: the presentation stays up.
+    pub fn set_marks(&self, page_index: usize, marks: Vec<LiveMark>) -> Result<(), LiveError> {
+        self.change(
+            |_| false,
+            |session, out| session.set_marks(page_index, marks, out),
         )
     }
 
