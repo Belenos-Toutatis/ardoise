@@ -309,7 +309,7 @@ export async function startBrowser(exe) {
   const port = await freePort();
   const child = spawn(
     exe,
-    ['--headless=new', `--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', 'about:blank'],
+    ['--headless=new', '--window-size=1280,480', `--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', 'about:blank'],
     { stdio: 'ignore' },
   );
   let spawnError = null;
@@ -800,6 +800,8 @@ export const shareJourneys = [
           await browser.waitFor(fitIs('page'), 'the whole page fit');
           const whole = await geometry();
           if (!(whole.scale * pageWidth <= whole.width + 1.5) || !(whole.scale <= wide.scale + 1e-9)) throw new Error(`whole page: scale ${whole.scale}, window ${whole.width} px`);
+          // The window is much wider than tall (see startBrowser): the whole page leaves room at the sides.
+          if (!(wide.scale > whole.scale * 1.05)) throw new Error(`full width (${wide.scale}) is not larger than the whole page (${whole.scale})`);
           // The same by keyboard.
           await browser.press('w');
           await browser.waitFor(fitIs('width'), 'the full width fit by the W key');
@@ -984,7 +986,7 @@ export const shareJourneys = [
           await control('fit-width');
           await browser.waitFor(fitIs('width'), 'the full width fit of the note');
           const wide = await geometry();
-          if (!(wide.scale >= noteWidth.scale - 1e-9)) throw new Error(`note: scale ${noteWidth.scale} (whole page) then ${wide.scale} (full width)`);
+          if (!(wide.scale > noteWidth.scale * 1.05)) throw new Error(`note: scale ${noteWidth.scale} (whole page) then ${wide.scale} (full width)`);
           if (await browser.evaluate(`document.querySelector('.controls [data-action="follow"]') !== null`)) throw new Error('« Suivre le PC » is shown for a note');
           await control('fit-page');
           await browser.waitFor(fitIs('page'), 'the whole page of the note again');
