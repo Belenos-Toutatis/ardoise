@@ -176,6 +176,7 @@ Ajouté à la demande de l'utilisateur le 2026-11-02 (SPEC §4.10, `docs/questio
   - l'arrêt du partage ;
   - les traductions FR et EN.
 - [x] Guide FR et EN (pare-feu, réseau privé, adresse à taper) ; procédure H4 dans `docs/hardware-tests.md`.
+- [ ] Port déjà pris (`docs/questions.md` Q7) : Ardoise prend le premier port libre qui suit, le dit et le retient pour ce PC ; réglage « Port du partage » dans les réglages.
 
 **Critères de fin** :
 - `CHECK OK` et `E2E OK` ;
