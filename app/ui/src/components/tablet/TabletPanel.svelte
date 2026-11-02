@@ -6,6 +6,7 @@
    * (`tablet-state.svelte.ts`).
    */
   import { onMount, untrack } from 'svelte';
+  import { errorMessage } from '../../lib/api';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { formatDate } from '../../lib/library-logic';
   import { sizeInMillimetres, tablet, validTabletName } from '../../lib/tablet-state.svelte';
@@ -188,15 +189,29 @@
           </button>
         </div>
       {/if}
-      <p class="muted small last-sync" data-slot="last-sync">
-        {#if lastSync}
-          {t('tablet.sync.last', { date: formatDate(lastSync.at, currentLocale()) })}
-          {savedText(lastSync.saved.length)}
-          {#if lastSync.deleted > 0}{deletedText(lastSync.deleted)}{/if}
-        {:else}
-          {t('tablet.sync.never')}
-        {/if}
-      </p>
+      {#if lastSync?.error}
+        <p class="small last-sync failed error" role="alert" data-slot="last-sync" data-failed="true">
+          <span>
+            {t('tablet.sync.failed', {
+              date: formatDate(lastSync.at, currentLocale()),
+              reason: errorMessage(lastSync.error),
+            })}
+          </span>
+          {#if lastSync.saved.length > 0}<span>{savedText(lastSync.saved.length)}</span>{/if}
+          {#if lastSync.deleted > 0}<span>{deletedText(lastSync.deleted)}</span>{/if}
+          <span>{t('tablet.sync.failedKept')}</span>
+        </p>
+      {:else}
+        <p class="muted small last-sync" data-slot="last-sync">
+          {#if lastSync}
+            {t('tablet.sync.last', { date: formatDate(lastSync.at, currentLocale()) })}
+            {savedText(lastSync.saved.length)}
+            {#if lastSync.deleted > 0}{deletedText(lastSync.deleted)}{/if}
+          {:else}
+            {t('tablet.sync.never')}
+          {/if}
+        </p>
+      {/if}
       {#if pagesWaiting > 1}
         <p class="banner notice" role="status" data-slot="pages-waiting">
           {t('tablet.sync.pagesWaiting', { count: pagesWaiting, option: t('tablet.options.deleteAfterImport') })}
@@ -355,6 +370,10 @@
 
   .last-sync {
     margin: 0.6rem 0 0;
+  }
+
+  .last-sync.failed span {
+    display: block;
   }
 
   .inline {

@@ -72,6 +72,35 @@ pub struct DiagnosticRuns {
     current: Arc<Mutex<Option<RunHandle>>>,
 }
 
+impl DiagnosticRuns {
+    /// Cancels the run in progress as the application exits, and waits at most `limit` for it
+    /// to end: its log then ends as any cancelled test ("diagnostic finished"), after the
+    /// disconnection.
+    pub fn cancel_within(&self, limit: Duration) {
+        {
+            let current = self
+                .current
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(run) = current.as_ref() else {
+                return;
+            };
+            run.cancel.store(true, Ordering::SeqCst);
+            let _ = run.answers.send(Decision::Cancel);
+        }
+        let deadline = std::time::Instant::now() + limit;
+        while std::time::Instant::now() < deadline
+            && self
+                .current
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_some()
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
 struct RunHandle {
     answers: Sender<Decision>,
     cancel: Arc<AtomicBool>,

@@ -339,6 +339,25 @@ impl TabletRuntime {
         }
     }
 
+    /// Stops the service as the application exits: the link is closed, and the log of a
+    /// connection that must be kept ends with the disconnection and its end line. Waits at most
+    /// `limit`, so that a Bluetooth operation that cannot be cut short never holds up the exit.
+    pub fn stop_within(&self, limit: Duration) {
+        let Some(service) = lock(&self.service).take() else {
+            return;
+        };
+        let (done, finished) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("tablet-stop".into())
+            .spawn(move || {
+                service.shutdown();
+                let _ = done.send(());
+            });
+        if spawned.is_ok() {
+            let _ = finished.recv_timeout(limit);
+        }
+    }
+
     /// Stops the service while the guided test talks to the real tablet: two programs cannot
     /// hold it at once, and the test may register it again. The windows are told the tablet is
     /// busy until [`resume_in`](Self::resume_in). Returns whether the service was stopped:

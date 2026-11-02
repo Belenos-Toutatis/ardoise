@@ -494,3 +494,98 @@ fn a_link_lost_before_writing_is_a_disconnection() {
     assert_eq!(session.start_live().err(), Some(DeviceError::Disconnected));
     assert!(!session.is_connected());
 }
+
+/// `ec` and paper mode, as a real Slate A4 needs them (protocol.md §5.3): `ec` once per link,
+/// before the first paper mode, never in paper mode.
+#[test]
+fn ec_comes_once_per_link_before_the_first_paper_mode() {
+    let (mut session, harness) = connected(vec![
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 01 00")]),
+        // The next count (and the sync after it): paper mode again, no `ec`.
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 00 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 00 00")]),
+    ]);
+    assert_eq!(session.stored_pages(), Ok(1));
+    assert_eq!(session.stored_pages(), Ok(0));
+    let summary = session.sync(true, &mut |_, _, _| Ok(())).unwrap();
+    assert_eq!(summary.available, 0);
+    assert_eq!(harness.writes.lock().unwrap().len(), 8);
+}
+
+#[test]
+fn after_live_mode_ec_is_sent_again_from_idle_mode() {
+    // The order of the only sync that worked in the first hardware session.
+    let (mut session, _) = connected(vec![
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 00 00")]),
+        ("b1 01 00", vec![cmd("b3 01 00")]),
+        ("b1 01 02", vec![cmd("b3 01 00")]),
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 00 00")]),
+        // Live mode left straight for paper mode: idle mode first, for `ec`.
+        ("b1 01 00", vec![cmd("b3 01 00")]),
+        ("b1 01 02", vec![cmd("b3 01 00")]),
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 00 00")]),
+    ]);
+    assert_eq!(session.stored_pages(), Ok(0));
+    session.start_live().unwrap();
+    session.stop_live().unwrap();
+    assert_eq!(session.stored_pages(), Ok(0));
+    session.start_live().unwrap();
+    assert_eq!(session.stored_pages(), Ok(0));
+}
+
+#[test]
+fn a_refused_ec_is_retried_once_from_idle_mode() {
+    let (mut session, _) = connected(vec![
+        // The tablet answers as in paper mode (the 2026-11-02 captures): idle mode, then again.
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 02")]),
+        ("b1 01 02", vec![cmd("b3 01 00")]),
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 00")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 03 00")]),
+    ]);
+    assert_eq!(session.stored_pages(), Ok(3));
+
+    // Refused twice: paper mode and the count still work (the connection goes on); the sync
+    // asks again, from idle mode, and fails with the tablet's answer.
+    let (mut session, harness) = connected(vec![
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 02")]),
+        ("b1 01 02", vec![cmd("b3 01 00")]),
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 02")]),
+        ("b1 01 01", vec![cmd("b3 01 00")]),
+        ("c1 01 00", vec![cmd("c2 02 03 00")]),
+        ("b1 01 02", vec![cmd("b3 01 00")]),
+        ("ec 06 06 00 00 00 00 00", vec![cmd("b3 01 02")]),
+    ]);
+    assert_eq!(session.stored_pages(), Ok(3));
+    assert_eq!(
+        session.sync(true, &mut |_, _, _| Ok(())).err(),
+        Some(DeviceError::Refused(StatusCode::InvalidState))
+    );
+    assert_eq!(harness.writes.lock().unwrap().len(), 8);
+}
+
+#[test]
+fn battery_levels_announced_by_the_tablet_are_kept_for_the_caller() {
+    // Our capture: `f1 02 29 00` (41 %) right after a reading of 42 %.
+    let (mut session, _) = connected(vec![(
+        "b9 01 00",
+        vec![
+            cmd("ba 02 2a 00"),
+            on(Channel::SysEvent, hex("f1 02 29 00")),
+        ],
+    )]);
+    assert_eq!(session.battery().unwrap(), (42, false));
+    session.idle(Duration::ZERO).unwrap();
+    assert_eq!(session.take_battery_event(), Some(41));
+    assert_eq!(session.take_battery_event(), None);
+}

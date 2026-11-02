@@ -6,6 +6,7 @@ use crate::frame::Frame;
 use crate::live;
 use crate::message::{Reply, Request, opcode};
 use crate::stroke::{self, FileFormat, INTUOS_PRO_MAGIC, SLATE_MAGIC};
+use crate::sysevent;
 
 /// Describes a frame written by the host, e.g. `CONNECT uuid=89ea7888ffcb`.
 pub fn describe_request(bytes: &[u8]) -> String {
@@ -90,6 +91,17 @@ pub fn describe_live(value: &[u8]) -> String {
         Ok(packet) => packet.to_string(),
         Err(error) => format!("malformed live packet: {error}"),
     }
+}
+
+/// Describes a notification of the sysevent characteristic, e.g. `BATTERY_LEVEL 41% (flag 00)`.
+pub fn describe_sysevent(value: &[u8]) -> String {
+    if live::is_button_sysevent(value) {
+        return format!(
+            "SYSEVENT {}, live-mode button (hypothesis of the simulator)",
+            crate::hex::encode(value)
+        );
+    }
+    sysevent::decode(value).to_string()
 }
 
 fn request_name(op: u8) -> &'static str {
@@ -211,6 +223,10 @@ mod tests {
             ("c8 05 ed 26 39 f4 cb", "DOWNLOAD_END crc=cbf43926"),
             ("f1 02 13 00", "unknown reply f1 02 13 00"),
             (
+                "cb 01 00",
+                "cb 01 00, seen once during live mode, meaning unknown (ignored)",
+            ),
+            (
                 "c8 01 aa",
                 "malformed DOWNLOAD_START/DOWNLOAD_END reply: \
                  opcode c8: first argument aa is neither be (start) nor ed (end)",
@@ -223,6 +239,27 @@ mod tests {
         for (text, expected) in cases {
             assert_eq!(describe_reply(&bytes(text)), expected, "{text}");
         }
+    }
+
+    #[test]
+    fn sysevents() {
+        assert_eq!(
+            describe_sysevent(&bytes("f1 02 2f 00")),
+            "BATTERY_LEVEL 47% (flag 00)"
+        );
+        assert_eq!(
+            describe_sysevent(&bytes("ef 01 00")),
+            "SYSEVENT ef 01 00, seen right after REGISTER, meaning unknown (ignored)"
+        );
+        assert_eq!(
+            describe_sysevent(&bytes("f2 01 01")),
+            "SYSEVENT f2 01 01, live-mode button (hypothesis of the simulator)"
+        );
+        assert_eq!(
+            describe_sysevent(&bytes("f1 02 99 00")),
+            "unknown sysevent f1 02 99 00"
+        );
+        assert_eq!(describe_sysevent(&[]), "unknown sysevent ");
     }
 
     #[test]

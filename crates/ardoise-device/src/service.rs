@@ -125,6 +125,10 @@ pub struct LastSync {
     pub saved: Vec<String>,
     /// Pages deleted from the tablet after being saved.
     pub deleted: u16,
+    /// Why the sync stopped before the end (refused by the tablet, page not saved, transfer
+    /// corrupted...); `None` when it read every page it meant to. Unlike
+    /// [`TabletStatus::error`], it stays until the next sync, even across reconnections.
+    pub error: Option<StatusError>,
 }
 
 /// A failure shown to the user: `code` selects a translated sentence (`errorCodes.*`).
@@ -334,6 +338,17 @@ pub const RETRY_DELAY: Duration = Duration::from_secs(5);
 pub const ADAPTER_RECHECK: Duration = Duration::from_secs(10);
 /// How long a blocking request (rename, set the clock, forget) waits for the worker.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The failure of a sync as the interface shows it: like [`error_code`], except that a refusal
+/// of the tablet is `syncRefused` (the pages stay on the tablet; nothing says the registration
+/// is lost, which `tabletRefused` suggests).
+pub fn sync_error(error: &DeviceError) -> StatusError {
+    let code = match error {
+        DeviceError::Refused(_) => "syncRefused",
+        other => error_code(other),
+    };
+    StatusError::new(code, error)
+}
 
 /// The `errorCodes.*` key of a device error (the interface translates it).
 pub fn error_code(error: &DeviceError) -> &'static str {

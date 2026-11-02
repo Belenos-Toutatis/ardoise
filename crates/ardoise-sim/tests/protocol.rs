@@ -15,8 +15,9 @@ use ardoise_device::transport::{
 };
 use ardoise_proto::live::{self, LivePacket, LiveRecord};
 use ardoise_proto::stroke::{self, Point};
+use ardoise_proto::sysevent;
 use ardoise_proto::{BcdTime, Mode, crc32};
-use ardoise_sim::{CONNECT_SYSEVENT, PenScript, SimConfig, SimTablet, drawings};
+use ardoise_sim::{PenScript, SimConfig, SimTablet, drawings};
 use common::{bytes, hex, points};
 
 const ID: [u8; 6] = [0x89, 0xea, 0x78, 0x88, 0xff, 0xcb];
@@ -30,9 +31,10 @@ struct Link {
 }
 
 impl Link {
-    /// Connects and checks the sysevent the tablet sends first.
+    /// Connects and checks the sysevent the tablet sends first: its battery level.
     fn open(tablet: &SimTablet) -> Self {
-        let address = tablet.config().address;
+        let config = tablet.config();
+        let address = config.address;
         let transport = tablet
             .connector()
             .connect(&address, CONNECT_TIMEOUT)
@@ -41,7 +43,13 @@ impl Link {
             tablet: tablet.clone(),
             transport,
         };
-        link.expect(Channel::SysEvent, &hex(&CONNECT_SYSEVENT));
+        link.expect(
+            Channel::SysEvent,
+            &hex(&sysevent::encode_battery_level(
+                config.battery_percent,
+                config.charging,
+            )),
+        );
         link
     }
 
@@ -261,17 +269,31 @@ fn registers_with_the_button_then_answers_every_command() {
     link.ask("b7 01 00", "b8 09 00 0b 01 06 00 08 00 05 0a");
     link.ask("b7 01 01", "b8 09 01 0c 01 07 00 07 00 04 0a");
     link.ask("b9 01 00", "ba 02 57 00");
+    say!("a new battery level is announced on the sysevent characteristic");
     tablet.set_battery(100, true);
+    link.expect(Channel::SysEvent, "f1 02 64 01");
     link.ask("b9 01 00", "ba 02 64 01");
+    tablet.set_battery(100, false);
+    link.silent();
     link.ask("ea 02 03 00", "eb 06 03 00 04 74 00 00");
     link.ask("ea 02 04 00", "eb 06 04 00 60 54 00 00");
 
-    say!("transfer reporting type and modes");
+    say!("transfer reporting type and modes: a connection starts in idle mode (assumption)");
+    assert_eq!(tablet.mode(), Mode::Idle);
     link.ask("ec 06 06 00 00 00 00 00", "b3 01 00");
     link.ask("b1 01 02", "b3 01 00");
     assert_eq!(tablet.mode(), Mode::Idle);
     link.ask("b1 01 01", "b3 01 00");
     assert_eq!(tablet.mode(), Mode::Paper);
+    say!("ec in paper mode: invalid state, as a real Slate A4 answers");
+    link.ask("ec 06 06 00 00 00 00 00", "b3 01 02");
+    say!("ec in live mode: invalid state (assumption)");
+    link.ask("b1 01 00", "b3 01 00");
+    link.ask("ec 06 06 00 00 00 00 00", "b3 01 02");
+    say!("accepted again in idle mode, as after live mode on a real Slate A4");
+    link.ask("b1 01 02", "b3 01 00");
+    link.ask("ec 06 06 00 00 00 00 00", "b3 01 00");
+    link.ask("b1 01 01", "b3 01 00");
 
     say!("no stored page: count 0; file info, download and delete refused (assumption)");
     link.ask("c1 01 00", "c2 02 00 00");
@@ -383,6 +405,7 @@ fn pages_are_served_oldest_first() {
         tablet.draw_page(page);
     }
     let mut link = Link::authenticated(&tablet);
+    link.ask("ec 06 06 00 00 00 00 00", "b3 01 00");
     link.ask("c1 01 00", "c2 02 03 00");
     for page in &pages {
         link.send("c3 01 00");
@@ -410,6 +433,7 @@ fn a_corrupted_transfer_fails_its_crc_once() {
     tablet.draw_page(&drawings::pressure_lines(29_700, 21_600));
     tablet.corrupt_next_transfer();
     let mut link = Link::authenticated(&tablet);
+    link.ask("ec 06 06 00 00 00 00 00", "b3 01 00");
     let download = |link: &mut Link| {
         link.send("c3 01 00");
         let mut data = Vec::new();
@@ -448,6 +472,42 @@ fn page_commands_are_refused_in_live_mode() {
     link.ask("c3 01 00", "b3 01 02");
     link.ask("b1 01 02", "b3 01 00");
     link.ask("c1 01 00", "c2 02 01 00");
+}
+
+#[test]
+fn a_download_needs_the_transfer_reporting_type_of_this_link() {
+    let _report = common::report("a_download_needs_the_transfer_reporting_type_of_this_link");
+    let tablet = registered_tablet();
+    tablet.draw_page(&drawings::pressure_lines(29_700, 21_600));
+    let mut link = Link::authenticated(&tablet);
+    say!("the order of the Slate A4 captures: paper mode, then ec, refused");
+    link.ask("b1 01 01", "b3 01 00");
+    link.ask("c1 01 00", "c2 02 01 00");
+    link.ask("ec 06 06 00 00 00 00 00", "b3 01 02");
+    say!("assumption: without ec on this link, no download");
+    link.ask("cc 01 00", &format!("cf 0a {}", page_info(&tablet)));
+    link.ask("c3 01 00", "b3 01 02");
+    say!("from idle mode ec is accepted, and the download starts");
+    link.ask("b1 01 02", "b3 01 00");
+    link.ask("ec 06 06 00 00 00 00 00", "b3 01 00");
+    link.ask("b1 01 01", "b3 01 00");
+    link.send("c3 01 00");
+    link.expect(Channel::Command, "c8 01 be");
+    link.transport.disconnect().unwrap();
+
+    say!("a new link must send ec again");
+    let mut link = Link::authenticated(&tablet);
+    link.ask("b1 01 01", "b3 01 00");
+    link.ask("c3 01 00", "b3 01 02");
+    assert_eq!(tablet.stats().downloads, 1);
+    assert_eq!(tablet.stored_page_count(), 1, "nothing deleted");
+}
+
+/// The arguments of the `cf` reply for the oldest page of `tablet`: size and BCD time.
+fn page_info(tablet: &SimTablet) -> String {
+    let page = tablet.stored_pages().remove(0);
+    let size = u32::try_from(page.bytes.len()).unwrap();
+    format!("{} {}", hex(&size.to_le_bytes()), bcd(page.timestamp))
 }
 
 fn pt(x: u16, y: u16, pressure: u16) -> Point {
@@ -623,7 +683,7 @@ fn the_link_drops_at_the_injected_time() {
     );
     assert_eq!(lost_at, t0 + 52);
     assert!(!tablet.is_connected());
-    assert_eq!(tablet.mode(), Mode::Paper);
+    assert_eq!(tablet.mode(), ardoise_sim::CONNECTION_MODE);
     assert!(matches!(
         link.transport.write(&bytes("b9 01 00")),
         Err(TransportError::NotConnected)

@@ -184,14 +184,41 @@ describe('tablet panel: sync', () => {
 
   it('words one page, and no page', async () => {
     const { q } = await render();
-    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a'], deleted: 1 } });
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a'], deleted: 1, error: null } });
     await settle();
     expect(q('[data-slot="last-sync"]')!.textContent).toContain('1 note enregistrée.');
     expect(q('[data-slot="last-sync"]')!.textContent).toContain('1 page effacée de la tablette.');
-    mockTabletPatch({ lastSync: { at: Date.now(), saved: [], deleted: 0 } });
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: [], deleted: 0, error: null } });
     await settle();
     expect(q('[data-slot="last-sync"]')!.textContent).toContain('Aucune nouvelle page.');
     expect(q('[data-slot="last-sync"]')!.textContent).not.toContain('effacée');
+  });
+
+  it('shows a failed sync as a failure, even once the error banner is gone', async () => {
+    const { q } = await render();
+    // The first hardware session: the tablet refused the sync, nothing was downloaded.
+    const refused = { code: 'syncRefused', message: 'the tablet refused the command (InvalidState)' };
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: [], deleted: 0, error: refused }, error: null });
+    await settle();
+    const last = q('[data-slot="last-sync"]')!;
+    expect(last.getAttribute('data-failed')).toBe('true');
+    expect(last.getAttribute('role')).toBe('alert');
+    expect(last.textContent).toContain('a échoué');
+    expect(last.textContent).toContain('la tablette a refusé la synchronisation (the tablet refused the command (InvalidState))');
+    expect(last.textContent).toContain('Les pages non reçues restent sur la tablette');
+    expect(last.textContent).not.toContain('Aucune nouvelle page.');
+    // Some pages saved before the failure are said too.
+    mockTabletPatch({
+      lastSync: { at: Date.now(), saved: ['a'], deleted: 1, error: { code: 'libraryAccess', message: 'disk full' } },
+    });
+    await settle();
+    expect(q('[data-slot="last-sync"]')!.textContent).toContain('1 note enregistrée.');
+    expect(q('[data-slot="last-sync"]')!.textContent).toContain('disk full');
+    // The next sync that works replaces it.
+    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a', 'b'], deleted: 2, error: null } });
+    await settle();
+    expect(q('[data-slot="last-sync"]')!.getAttribute('data-failed')).toBeNull();
+    expect(q('[data-slot="last-sync"]')!.textContent).toContain('2 notes enregistrées.');
   });
 
   it('says that only the oldest page can be read when nothing is deleted', async () => {
@@ -229,7 +256,10 @@ describe('tablet panel: sync', () => {
     expect(q('[data-slot="pages-waiting"]')).toBeNull();
 
     await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', button: 'newPage' });
-    mockTabletPatch({ lastSync: { at: Date.now(), saved: ['a'], deleted: 0 }, device: { ...tablet.status!.device!, storedPages: 1 } });
+    mockTabletPatch({
+      lastSync: { at: Date.now(), saved: ['a'], deleted: 0, error: null },
+      device: { ...tablet.status!.device!, storedPages: 1 },
+    });
     await settle();
     expect(q('[data-slot="pages-waiting"]')).toBeNull();
     mockTabletPatch({ device: { ...tablet.status!.device!, storedPages: 2 } });

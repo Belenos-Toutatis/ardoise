@@ -288,7 +288,7 @@ function startSync(s: Sim): void {
     update(s, {
       connection: 'connected',
       sync: null,
-      lastSync: { at: Date.now(), saved, deleted },
+      lastSync: { at: Date.now(), saved, deleted, error: null },
       device: info ? details(info, s.stored.length) : s.status.device,
     });
   };

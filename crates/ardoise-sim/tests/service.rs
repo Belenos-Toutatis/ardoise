@@ -356,6 +356,129 @@ fn a_page_that_cannot_be_saved_stays_on_the_tablet() {
 }
 
 #[test]
+fn a_page_finished_during_the_sync_is_synced_on_the_same_connection() {
+    // The first hardware session (2026-11-02) left a page behind: counted after the sync, then
+    // refused (`ec` in paper mode). It is now read at once, on the same connection.
+    let _report = common::report("service: a page finished during the sync");
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    with_pages(&tablet, 3);
+    registered_beforehand(&tablet, library.path());
+    // While page 2 is stored, the user finishes another page on the tablet (a new drawing:
+    // the reference pages moved aside).
+    let drawing = tablet.clone();
+    let before = move |n: u16| {
+        if n == 2 {
+            let config = drawing.config();
+            let mut page = drawings::square_and_circle(config.width, config.height);
+            for stroke in &mut page {
+                for point in &mut stroke.points {
+                    point.x -= 1_000;
+                }
+            }
+            drawing.draw_page(&page);
+        }
+    };
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, Some(Box::new(before))),
+    );
+    let first = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.saved.len() == 3));
+    assert_eq!(first.last_sync.unwrap().error, None);
+    let second = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.saved.len() == 1));
+    let last = second.last_sync.clone().unwrap();
+    assert_eq!((last.deleted, last.error), (1, None));
+    assert_eq!(second.error, None);
+    assert_eq!(tablet.stored_page_count(), 0);
+    assert_eq!(notes(library.path()).len(), 4);
+    assert_eq!(tablet.stats().connections, 1, "the same connection");
+    assert_eq!(second.device.unwrap().stored_pages, 0);
+    say!("3 pages synced, a 4th finished meanwhile: synced right after, same connection");
+    run.service.shutdown();
+}
+
+#[test]
+fn a_sync_refused_by_the_tablet_is_shown_as_failed_and_its_log_ends_with_the_disconnection() {
+    let _report = common::report("service: a sync refused by the tablet");
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    with_pages(&tablet, 2);
+    registered_beforehand(&tablet, library.path());
+    // `ec` refused at the connection (then again from idle mode) and once more by the sync.
+    tablet.refuse_next_requests(
+        ardoise_proto::message::opcode::FILE_TRANSFER_REPORTING_TYPE,
+        3,
+    );
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, None),
+    );
+    let failed = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error.is_some()));
+    let last = failed.last_sync.clone().unwrap();
+    assert_eq!((last.saved.len(), last.deleted), (0, 0));
+    let error = last.error.unwrap();
+    assert_eq!(error.code, "syncRefused");
+    assert!(error.message.contains("InvalidState"), "{error:?}");
+    assert_eq!(failed.error.as_ref().unwrap().code, "syncRefused");
+    assert_eq!(tablet.stored_page_count(), 2, "nothing deleted");
+
+    // The next connection syncs: the failure is replaced by the success.
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error.is_none()));
+    assert_eq!(status.last_sync.unwrap().saved.len(), 2);
+    assert_eq!(status.error, None);
+    assert_eq!(tablet.stored_page_count(), 0);
+    assert_eq!(tablet.stats().connections, 2);
+    run.service.shutdown();
+
+    // The failed connection's log: why, then the disconnection and the end line.
+    let logs = library.path().join("_ardoise").join("diagnostics");
+    let files: Vec<_> = std::fs::read_dir(&logs).unwrap().flatten().collect();
+    assert_eq!(files.len(), 1, "only the failure is written");
+    let (_, entries) = ardoise_device::log::read_log(&files[0].path()).unwrap();
+    let infos: Vec<&str> = entries.iter().map(|e| e.info.as_str()).collect();
+    assert!(
+        infos
+            .iter()
+            .any(|i| i.starts_with("sync failed before the first page")),
+        "{infos:#?}"
+    );
+    assert_eq!(
+        infos[infos.len() - 2..],
+        ["disconnect", "end of this log: closed after a failed sync"],
+        "{infos:#?}"
+    );
+    say!(
+        "sync refused: shown ({}), {} pages kept, log ends with the disconnection; next connection synced",
+        error.code,
+        2
+    );
+}
+
+#[test]
+fn a_battery_level_announced_by_the_tablet_is_shown() {
+    let library = new_library();
+    let tablet = SimTablet::slate_large();
+    registered_beforehand(&tablet, library.path());
+    let mut run = Running::virtual_time(
+        &tablet,
+        library.path(),
+        TabletOptions::default(),
+        library_store(None, None),
+    );
+    let status = run.connected();
+    assert_eq!(status.device.unwrap().battery_percent, 87);
+    // As the real Slate A4 does, about once a minute while discharging: `f1 02 29 00`.
+    tablet.set_battery(41, false);
+    let status = run.wait(|s| s.device.as_ref().is_some_and(|d| d.battery_percent == 41));
+    assert_eq!(status.connection, Connection::Connected);
+    run.service.shutdown();
+}
+
+#[test]
 fn without_deletion_a_page_is_imported_once() {
     let _report = common::report("service: sync without deletion");
     let library = new_library();
