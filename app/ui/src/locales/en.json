@@ -698,7 +698,10 @@
     "inkspaceTooLarge": "Inkspace's note database is too large to import ({detail})",
     "inkspaceNoteDamaged": "this Inkspace note cannot be read ({detail})",
     "inkspaceBusy": "an Inkspace import is already running",
-    "inkspaceTarget": "this binder is inside Inkspace's folder ({detail}); choose a binder of the library"
+    "inkspaceTarget": "this binder is inside Inkspace's folder ({detail}); choose a binder of the library",
+    "sharePortInUse": "the share's port is already used by another program; to change it, edit \"port\" in the [share] section of the ardoise.toml file",
+    "shareUnavailable": "this build of Ardoise cannot share on the network: the page for the other screens is not included",
+    "shareFailed": "the share could not start ({detail})"
   },
   "editor": {
     "back": "Library",
@@ -1509,6 +1512,51 @@
     "title": "Presentation",
     "canvas": "Projected page {page}",
     "clearMarks": "Clear the marks"
+  },
+  "share": {
+    "button": "Share on the network",
+    "buttonHint": "Show this screen in the browser of another computer on the local network",
+    "buttonActive": {
+      "one": "Sharing: 1 screen connected. Open the share.",
+      "other": "Sharing: {count} screens connected. Open the share."
+    },
+    "indicator": "Network share",
+    "indicatorHint": {
+      "one": "Sharing on the network: 1 screen connected. Click to open the share.",
+      "other": "Sharing on the network: {count} screens connected. Click to open the share."
+    },
+    "panel": {
+      "title": "Share on the network",
+      "close": "Close",
+      "starting": "Starting the share…",
+      "retry": "Try again"
+    },
+    "open": "On the other computer, open a browser and type:",
+    "otherAddresses": "Other possible addresses:",
+    "copy": "Copy",
+    "copied": "Address copied",
+    "qr": "QR code of the share's address",
+    "qrHint": "Or scan it with a phone.",
+    "codeLabel": "Code",
+    "codeIntro": "Then type this code:",
+    "viewersNone": "No screen connected",
+    "viewers": {
+      "one": "{count} screen connected",
+      "other": "{count} screens connected"
+    },
+    "shown": {
+      "label": "Shown on the screens",
+      "live": "The live sheet",
+      "note": "The note being edited",
+      "waiting": "The waiting screen"
+    },
+    "pause": "Pause",
+    "resume": "Resume",
+    "paused": "Paused: the shared image is frozen",
+    "stop": "Stop sharing",
+    "helpTitle": "Good to know",
+    "helpFirewall": "The first time, Windows asks for the firewall's permission: allow it for private networks (\"Private network\").",
+    "helpEnd": "The share stops when you decide, or when you close Ardoise. Only the Ardoise computer sends: the other screens just watch."
   },
   "handwriting": {
     "languages": {

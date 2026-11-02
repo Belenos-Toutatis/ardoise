@@ -698,7 +698,10 @@
     "inkspaceTooLarge": "la base de notes d'Inkspace est trop volumineuse pour être importée ({detail})",
     "inkspaceNoteDamaged": "cette note d'Inkspace ne peut pas être lue ({detail})",
     "inkspaceBusy": "un import depuis Inkspace est déjà en cours",
-    "inkspaceTarget": "ce classeur se trouve dans le dossier d'Inkspace ({detail}) ; choisissez un classeur de la bibliothèque"
+    "inkspaceTarget": "ce classeur se trouve dans le dossier d'Inkspace ({detail}) ; choisissez un classeur de la bibliothèque",
+    "sharePortInUse": "le port du partage est déjà utilisé par un autre programme ; pour en changer, modifiez « port » dans la section [share] du fichier ardoise.toml",
+    "shareUnavailable": "cette version d'Ardoise ne peut pas partager sur le réseau : la page destinée aux autres écrans n'est pas incluse",
+    "shareFailed": "le partage n'a pas pu démarrer ({detail})"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -1509,6 +1512,51 @@
     "title": "Présentation",
     "canvas": "Page projetée {page}",
     "clearMarks": "Effacer les annotations"
+  },
+  "share": {
+    "button": "Partager sur le réseau",
+    "buttonHint": "Montrer cet écran dans le navigateur d'un autre ordinateur du réseau local",
+    "buttonActive": {
+      "one": "Partage en cours : 1 écran connecté. Ouvrir le partage.",
+      "other": "Partage en cours : {count} écrans connectés. Ouvrir le partage."
+    },
+    "indicator": "Partage réseau",
+    "indicatorHint": {
+      "one": "Partage sur le réseau : 1 écran connecté. Cliquez pour ouvrir le partage.",
+      "other": "Partage sur le réseau : {count} écrans connectés. Cliquez pour ouvrir le partage."
+    },
+    "panel": {
+      "title": "Partager sur le réseau",
+      "close": "Fermer",
+      "starting": "Démarrage du partage…",
+      "retry": "Réessayer"
+    },
+    "open": "Sur l'autre ordinateur, ouvrez un navigateur et tapez :",
+    "otherAddresses": "Autres adresses possibles :",
+    "copy": "Copier",
+    "copied": "Adresse copiée",
+    "qr": "Code QR de l'adresse du partage",
+    "qrHint": "Ou scannez-le avec un téléphone.",
+    "codeLabel": "Code",
+    "codeIntro": "Puis tapez ce code :",
+    "viewersNone": "Aucun écran connecté",
+    "viewers": {
+      "one": "{count} écran connecté",
+      "other": "{count} écrans connectés"
+    },
+    "shown": {
+      "label": "Affiché sur les écrans",
+      "live": "La feuille en direct",
+      "note": "La note en cours de modification",
+      "waiting": "L'écran d'attente"
+    },
+    "pause": "Pause",
+    "resume": "Reprendre",
+    "paused": "En pause : l'image partagée est figée",
+    "stop": "Arrêter le partage",
+    "helpTitle": "À savoir",
+    "helpFirewall": "La première fois, Windows demande l'autorisation du pare-feu : acceptez pour les réseaux privés (« réseau privé »).",
+    "helpEnd": "Le partage s'arrête quand vous le décidez ou quand vous fermez Ardoise. Seul l'ordinateur d'Ardoise envoie : les autres écrans ne font que regarder."
   },
   "handwriting": {
     "languages": {
