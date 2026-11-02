@@ -57,7 +57,10 @@ Behaviour:
   `store_page` (which writes the note and reads it back); only when it returned `Ok` is the page deleted from the
   tablet, and only when `delete_after_import`. Without deletion the tablet only lets us read its oldest page: a page
   already imported (same deterministic note id, `pages::page_note_id`) is not stored twice. `cancel()` stops between
-  pages (pages already saved stay saved and deleted). At the end `last_sync = { at, saved: [paths], deleted }`.
+  pages (pages already saved stay saved and deleted). At the end `last_sync = { at, saved: [paths], deleted, error }`
+  (`error` when the sync stopped early or could not start, e.g. `syncRefused`; it stays until the next sync, across
+  reconnections, unlike `status.error`). After a sync that deleted pages the count is read again at once: a page
+  finished meanwhile is synced on the same connection (H1, see device-stack.md).
   When the tablet is not connected, `sync_now()` waits for it (connection `searching`, `pending = "sync"`).
 - **Live mode**: `start_live(sink)` enters live mode when connected (or as soon as the tablet connects: `pending =
   "live"`), calls `hooks.live_started()`, then forwards every notification to `sink` as `LiveInput` (decoded records
@@ -67,12 +70,19 @@ Behaviour:
   as `LiveInput::State(Reconnecting)` then `Live`. `stop_live()` leaves live mode (`b1 02`) and stays connected.
 - **Button in live mode**: protocol.md does not say what the Slate sends. Working hypothesis, to be checked at H2:
   a sysevent notification. `ardoise_proto::live::BUTTON_SYSEVENTS` lists the known signatures (for now the
-  simulator's hypothetical `f1 02 14 01`); a match becomes `LiveInput::Button`. **Every other notification received
-  during live mode that is not pen data is written to the diagnostic log with the note `unclassified during live
-  mode`**, so that the H2 log shows the real signature.
+  simulator's hypothetical `f2 01 01`; it was `f1 02 14 01` until H1 showed that `f1 02 <percent> <flag>` is the
+  battery level); a match becomes `LiveInput::Button`. **Every other notification received during live mode that is
+  not pen data is written to the diagnostic log with the note `unclassified during live mode`**, so that the H2 log
+  shows the real signature, except the frames already known (battery level, and the frames of the real Slate whose
+  meaning is unknown: protocol.md §12), which are only in their `rx` lines.
+- **Battery**: the battery level announced by the tablet (sysevent `f1`, protocol.md §12) replaces
+  `device.batteryPercent` at once, in any state (idle, sync, live).
 - **Log**: the service keeps an in-memory diagnostic log; when an error happens it is written to
   `<identity_root>/_ardoise/diagnostics/` (atomic, one file per failing session) so that problems come back by
-  Nextcloud. Live mode sessions are not written unless they fail.
+  Nextcloud. Live mode sessions are not written unless they fail. A written log always ends with the link's
+  `disconnect` (or `disconnected`) event and a last note `end of this log: <why>` (closed after a failure, the tablet
+  disconnected, the tablet service stopped...), also when the application exits (it stops the service, waiting at
+  most 3 s).
 - `set_library(None, ..)`: no library, connection `unavailable` with error code `noLibrary`.
 - BLE adapter missing / off: connection `unavailable`, error `bluetoothOff` / `bluetoothMissing`, checked again every 10 s.
 
@@ -85,7 +95,7 @@ Behaviour:
 | `device` | last information read: `name, firmware, batteryPercent, charging, width, height, storedPages, model, readAt` (unix ms) or null |
 | `registerStep` | `holdButton`, `searching`, `connecting`, `pressButton`, `done`, or null |
 | `sync` | `{ current, total, saved }` while syncing, else null |
-| `lastSync` | `{ at, saved: string[], deleted }` (paths of the notes written) or null |
+| `lastSync` | `{ at, saved: string[], deleted, error }` (paths of the notes written; `error`: `{ code, message }` when the sync failed, else null) or null |
 | `pending` | `sync`, `live` or null: what waits for the tablet to connect |
 | `error` | `{ code, message }` of the last failure (translated by `errorCodes.*`), cleared by the next success |
 | `simulated` | started with `--simulated-tablet` |
@@ -288,7 +298,7 @@ Tablet service (package A):
 - `tablet_rename`, `tablet_set_time` and `forget_tablet` run in `spawn_blocking` (they wait for the worker).
 - Simulator: `realtime::RealTimeConnector` (the virtual clock follows the wall clock), `SimFactory`, `SimHooks`
   (1 s delays in the app, none in tests; 10 min of handwriting when live mode starts), `app_tablet()` (3 reference
-  pages, battery 87 %), `SimStats::live_buttons`; the button pressed while live mode streams sends `f1 02 14 01` on
+  pages, battery 87 %), `SimStats::live_buttons`; the button pressed while live mode streams sends `f2 01 01` on
   the sysevent channel (hypothesis, see "Button in live mode").
 
 Live session and presentation (package B):

@@ -127,6 +127,34 @@ Public surface (names may be refined, the shape must stay):
   deleted); live mode would show gaps. If H1 shows it, move the notification handler to direct WinRT
   `ValueChanged` callbacks feeding an unbounded channel (the plan B of SPEC §6.2).
 
+## H1: what the first real-tablet session changed (2026-11-02)
+
+Evidence: the diagnostic journals of the user's Slate A4 (protocol.md §5.3 and §12; the journals are private and
+stay out of git).
+
+- **`ec` before paper mode.** The Slate refuses `ec` in paper mode (`b3 01 02`), and the connection read the page
+  count in paper mode before the sync sent `ec`: nothing synced in 19 of 23 sessions. `Session` now sends `ec` once
+  per link before the first paper mode (Tuhi's order), again after live mode (from idle mode: the only sync that
+  worked did that), never in paper or live mode; a refusal is retried once after `b1 01 02`. `set_mode(Paper)` tries
+  it (a refusal does not stop the page count, so the tablet still connects); `sync` and the service's sync require
+  it. The simulator refuses `ec` in paper mode (live mode too, supposed), refuses `c3` on a link without `ec`
+  (supposed) and starts a connection in idle mode (supposed): the order mistake fails the guided test, the service
+  and replay tests, and `ardoise-sim/tests/sync_order.rs`.
+- **Failed syncs are failures.** A sync that cannot start (refusal) or stops early sets `LastSync.error` (kept
+  across reconnections, shown in the panel) and `status.error` (`syncRefused` for a refusal), is noted in the log and
+  writes it. The link is closed after a sync that could not start (the next connection tries again).
+- **Recount after a sync.** After a sync that deleted pages the count is read at once (not 30 s later), so a page
+  finished during the sync is synced on the same connection.
+- **No "any tablet" fallback.** The registered tablet came late in the scan slice (its advertisements arrive at any
+  moment) and was accepted by the "any tablet after two thirds" fallback; its address never changed. The scan now
+  waits for the registered address only and notes other Wacom tablets in range; another tablet is never connected
+  to without the user.
+- **Battery event, known frames.** `ardoise_proto::sysevent` decodes `f1 02 <percent> <flag>` (battery level, shown
+  at once) and names `ef 01 00`; `live` names `a3 …` and `Reply::is_unexplained` names `cb 01 00`. They are not
+  "unclassified" any more. The simulator's invented live-mode button moved to `f2 01 01`, out of the battery family.
+- **Logs end.** Each written service log ends with the disconnection and `end of this log: <why>`; the app stops the
+  tablet service (and cancels a guided test) at exit, waiting at most 3 s.
+
 ## M10: the guided test keeps the tablet's pages as notes
 
 `DiagnosticConfig::page_import` (a `PageImport`, shareable) turns each downloaded page into a note of the library
