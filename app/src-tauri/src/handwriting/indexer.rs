@@ -1188,9 +1188,12 @@ mod tests {
             .unwrap()
             .path;
         h.indexer.refresh();
+        // One search only: the index may change between two of them while it follows the rename.
         h.wait("the renamed note", |_| {
-            !h.indexer.search("chat").is_empty()
-                && h.indexer.search("chat")[0].path == path_text(&renamed)
+            h.indexer
+                .search("chat")
+                .first()
+                .is_some_and(|hit| hit.path == path_text(&renamed))
         });
         h.idle(1);
         assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
