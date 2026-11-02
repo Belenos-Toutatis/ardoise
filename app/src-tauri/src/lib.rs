@@ -376,6 +376,8 @@ pub fn run() {
             share::share_status,
             share::share_subscribe,
             share::share_start,
+            share::share_port,
+            share::set_share_port,
             share::share_stop,
             share::share_set_paused,
             share::share_show,

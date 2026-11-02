@@ -299,6 +299,16 @@
       "title": "Micro",
       "hint": "Le micro utilisé pour la narration des vidéos et du mode direct. Le choix est mémorisé sur cet ordinateur."
     },
+    "sharePort": {
+      "title": "Partage sur le réseau",
+      "label": "Port du partage",
+      "hint": "Le port que le partage utilise sur ce PC. L'autre ordinateur tape l'adresse avec ce numéro. Le pare-feu autorise le programme, pas le port : changer de port ne redemande pas l'autorisation. Un partage en cours garde son port ; le nouveau port sert au partage suivant.",
+      "range": "Un nombre entier de 1024 à 65535.",
+      "invalid": "Le port doit être un nombre entier de 1024 à 65535.",
+      "save": "Enregistrer",
+      "saved": "Port enregistré : {port}.",
+      "own": "Ce port est retenu pour ce PC. Les autres ordinateurs qui partagent ce fichier de réglages gardent le port {shared}."
+    },
     "penTouch": {
       "title": "Stylet et tactile",
       "drawWithFinger": "Dessiner au doigt",
@@ -699,7 +709,9 @@
     "inkspaceNoteDamaged": "cette note d'Inkspace ne peut pas être lue ({detail})",
     "inkspaceBusy": "un import depuis Inkspace est déjà en cours",
     "inkspaceTarget": "ce classeur se trouve dans le dossier d'Inkspace ({detail}) ; choisissez un classeur de la bibliothèque",
-    "sharePortInUse": "le port {detail} du partage est déjà utilisé par un autre programme ; pour en changer, modifiez « port » dans la section [share] du fichier ardoise.toml, puis relancez le partage",
+    "sharePortInUse": "le port {detail} du partage est déjà utilisé par un autre programme ; choisissez-en un autre dans les réglages d'Ardoise (« Port du partage »), puis relancez le partage",
+    "shareNoFreePort": "aucun port libre dans la plage {detail} pour le partage : d'autres programmes les utilisent tous ; choisissez un autre port dans les réglages d'Ardoise (« Port du partage »), puis relancez le partage",
+    "sharePortInvalid": "le port du partage doit être un nombre entier de 1024 à 65535",
     "shareUnavailable": "cette version d'Ardoise ne peut pas partager sur le réseau : la page destinée aux autres écrans n'est pas incluse",
     "shareFailed": "le partage n'a pas pu démarrer ({detail})"
   },
@@ -1555,6 +1567,7 @@
     "pause": "Pause",
     "resume": "Reprendre",
     "paused": "En pause : l'image partagée est figée",
+    "portMoved": "Le port {requested} est utilisé par un autre programme : le partage utilise le port {port}, retenu pour ce PC.",
     "stop": "Arrêter le partage",
     "helpTitle": "À savoir",
     "helpFirewall": "La première fois, Windows demande l'autorisation du pare-feu : acceptez pour les réseaux privés (« réseau privé »).",

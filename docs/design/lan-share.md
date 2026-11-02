@@ -65,7 +65,8 @@ OR Apache-2.0, already in the tree through tokio) for clients bound to other loo
 
 ### Threads and lifetime
 
-- `Share::start` binds the listener **synchronously** (so a port already in use is an error at once), builds a
+- `Share::start` binds the listener **synchronously** (so a port that cannot be bound is an error at once, after the
+  following ports were tried: see "Port choice and fallback"), builds a
   current-thread tokio runtime and runs it on a thread of its own (`ardoise-share`). Each connection is a task.
 - `Share::stop` (also on `Drop`): every stream gets the `end` message, every connection is closed, the listener is
   dropped, and the thread is joined (at most 2 s). When `stop` returns, the port is closed: a new connection is
@@ -84,8 +85,16 @@ OR Apache-2.0, already in the tree through tokio) for clients bound to other loo
   prompt; a unit test reads the option back from the socket. A share stopped and started again at once still gets
   its port back (tested on Windows: the connections it closed first stay in `TIME_WAIT` without blocking the new
   bind). Elsewhere `SO_REUSEADDR`, as std and mio set it on Unix (a listening port is never shared there).
-- Port already used by another program: `ShareError::PortInUse { port }` (code `sharePortInUse`; the message tells to
-  close the other program or change `[share] port` in `ardoise.toml`).
+- Port choice and fallback (Q7, user's decision of 2026-11-02): a program already on the port (the Python helper of
+  an MCP server held 127.0.0.1:8765 on the user's PC, which conflicts with our exclusive `0.0.0.0` bind) must not
+  stop the share. `ShareConfig::fallback_ports` (the app passes `FALLBACK_PORTS` = 20) is how many ports after
+  `port` are tried in order, never past 65535; port 0 is bound once. Each port is **really bound** (no "is it free?"
+  check followed by a bind, so nothing can take it in between); only `AddrInUse` and `PermissionDenied` (what
+  Windows answers for the ports of Hyper-V / WSL excluded ranges) move on to the next port, any other error ends
+  the search. `Share::port()` is the port bound, `Share::requested_port()` the one asked for. Errors:
+  `ShareError::PortInUse { port }` (code `sharePortInUse`) when only one port was asked for, and
+  `ShareError::NoFreePort { first, last }` (code `shareNoFreePort`) when a range was tried and nothing bound. Neither
+  message points to `ardoise.toml`: they point to the setting "Port du partage".
 - Limits (a hostile classmate's PC must never keep the projector's PC out; `Limits` in `lib.rs`):
   - **64 connections** at once, **8 per address** (more are closed at once). **16 of the 64 are reserved for the
     addresses that hold a session token** (they joined with the code): the PCs without the code share the other
@@ -223,7 +232,7 @@ The crate keeps what is shown (`Shown::Waiting | Live | Note`), the last note me
 ### Public API (fixed in the contracts commit; changes only with a reason in the report)
 
 ```rust
-pub struct ShareConfig { pub bind: Ipv4Addr /* UNSPECIFIED */, pub port: u16, pub code: Option<String> /* tests */ }
+pub struct ShareConfig { pub bind: Ipv4Addr /* UNSPECIFIED */, pub port: u16, pub fallback_ports: u16 /* 20 */, pub code: Option<String> /* tests */ }
 pub struct Asset { pub content_type: String, pub bytes: Arc<[u8]> }
 pub type Assets = HashMap<String, Asset>;           // "/" and "/assets/<file>"
 pub enum Shown { Waiting, Live, Note }              // serde camelCase
@@ -238,7 +247,7 @@ pub trait LiveFeed: Send + Sync + 'static {
 pub type OnChange = Box<dyn Fn(ShareStatus) + Send + Sync>;
 impl Share {
     pub fn start(config, assets, feed: Arc<dyn LiveFeed>, on_change: OnChange) -> Result<Share, ShareError>;
-    pub fn port(&self) -> u16; pub fn code(&self) -> String; pub fn status(&self) -> ShareStatus;
+    pub fn port(&self) -> u16; pub fn requested_port(&self) -> u16; pub fn code(&self) -> String; pub fn status(&self) -> ShareStatus;
     pub fn show_waiting(&self); pub fn show_live(&self); pub fn show_note(&self, update: NoteUpdate);
     pub fn set_paused(&self, paused: bool); pub fn stop(&self);
 }
@@ -269,7 +278,20 @@ lock) when the number of viewers, the pause or what is shown changes.
 ### Settings
 
 `ardoise_core::settings::ShareSettings` (`[share]`, shared by every PC, unknown keys kept): `port: u16` (default
-8765; 0 or a missing value loads as 8765). Test-only environment variable **`ARDOISE_SHARE_LOOPBACK=1`**: the
+8765; 0 or a missing value loads as 8765).
+
+**The port of this PC.** `ardoise.toml` sits next to the portable `ardoise.exe`, in a folder (Nextcloud) that several
+PCs share, and a conflict on a port belongs to one PC. So the port found by the fallback is kept in this machine's
+table, `[machines."<NAME>"] share_port = 8766` (`MachineSettings::share_port`), and `[share] port` stays the shared
+default. The effective port (`Settings::share_port_for(machine)`) is this machine's `share_port` if set, else
+`[share] port`, else 8765. A zero, out of range or mistyped value of either loads as unset (the rest of the file is
+still read); writes go through the usual atomic `SettingsStore::update`, which re-reads the file first, so the
+sections of the other PCs and the unknown keys are kept. `share_start` asks for the effective port; when the share
+bound another one it writes that one as this machine's `share_port` (a settings file that cannot be written is only
+logged: the share runs). The settings screen sets the same key (`set_share_port`, 1024 to 65535; the next share uses
+it; a running share keeps its port).
+
+Test-only environment variable **`ARDOISE_SHARE_LOOPBACK=1`**: the
 server listens on `127.0.0.1` instead of `0.0.0.0` (the e2e journeys: no firewall prompt, no firewall rule left
 for each temporary copy of the exe).
 
@@ -342,7 +364,9 @@ slate with the blackboard): the viewer draws their paper colour, as the app does
 |---|---|---|
 | `share_status` | – | `ShareStatus` |
 | `share_subscribe` | `onEvent: Channel<ShareStatus>` | current `ShareStatus`; then the status at every change (one subscription per window) |
-| `share_start` | – | `ShareStatus` (starts, or returns the running share). Errors `sharePortInUse`, `shareUnavailable`, `shareFailed` |
+| `share_start` | – | `ShareStatus` (starts, or returns the running share). Errors `shareNoFreePort`, `sharePortInUse`, `shareUnavailable`, `shareFailed` |
+| `share_port` | – | `SharePortSetting` `{ port, sharedPort, own }`: the port this PC asks for, `[share] port`, whether this PC has a port of its own |
+| `set_share_port` | `port: number` | `SharePortSetting`; `sharePortInvalid` unless 1024 to 65535 |
 | `share_stop` | – | `ShareStatus` (inactive); can be repeated |
 | `share_set_paused` | `paused: boolean` | `ShareStatus` |
 | `share_show` | `content: ShareContent` | – (ignored while no share runs) |
@@ -351,7 +375,8 @@ slate with the blackboard): the viewer draws their paper colour, as the app does
 type ShareContent = { kind: 'waiting' } | { kind: 'live' } | { kind: 'note'; note: Note; imageKey: string | null };
 interface ShareStatus {
   active: boolean;
-  port: number;                       // the configured one when inactive
+  port: number;                       // the port listened on; the one this PC asks for when inactive
+  requestedPort: number;              // the port asked for at the start; differs from `port` when it was held
   code: string | null;                // "K7M Q2X" while active
   addresses: string[];                // "http://192.168.1.23:8765/", private LAN first; [] when inactive
   qr: { size: number; path: string } | null;   // of addresses[0]
@@ -361,7 +386,8 @@ interface ShareStatus {
 }
 ```
 
-New error codes (`errorCodes.*`): `sharePortInUse`, `shareUnavailable`, `shareFailed`. `share_start` while the UI
+New error codes (`errorCodes.*`): `sharePortInUse`, `shareNoFreePort`, `sharePortInvalid`, `shareUnavailable`,
+`shareFailed`. `share_start` while the UI
 already said what it shows: the runtime remembers the last `share_show` content even while inactive, and shows it
 when the share starts (the UI sends it again after a start anyway).
 
@@ -386,8 +412,16 @@ when the share starts (the UI sends it again after a start anyway).
   large, the others below), the QR code (`svg.share-qr`), the code (`[data-share-code]`, large, monospace), the
   number of connected screens (`[data-share-viewers]`, the number as the attribute value), what is shown, **Pause /
   Resume** (`button[data-action="share-pause"]`), **Stop sharing** (`button[data-action="share-stop"]`), a short help
-  line (type the address in the other PC's browser, then the code; the firewall prompt: "Réseau privé"), errors in
-  words (port in use: which port and how to change it).
+  line (type the address in the other PC's browser, then the code; the firewall prompt: "Réseau privé"), a notice
+  when the port asked for was held (`[data-share-port-moved]`, `status.port !== status.requestedPort`: "Port 8765 is
+  used by another program: the share uses port 8766, kept for this PC."), errors in words (port in use, no free port:
+  the range tried, and the setting to change). A failure is shown as the explanation alone (`sentence()` in `api.ts`:
+  a capital and a full stop), without the "Something went wrong." that `genericError` puts before it elsewhere: the
+  phrase of the error code already tells what to do.
+- **Settings, "Partage sur le réseau"** (`components/SharePortSection.svelte`): "Port du partage", a number field
+  (1024 to 65535, validated before saving, with a message in words), saved for this PC through `set_share_port`; says
+  that the other computer types the new address, that the firewall permission follows the program (no new prompt),
+  and that a running share keeps its port.
 - While a share runs, an indicator in the top bar of the library and in the two toolbars
   (`.share-indicator`, with the number of screens) reopens the panel: the teacher always sees that the port is open.
 - Texts: `share.*` (panel, buttons) and `errorCodes.share*` in both locales.
@@ -437,9 +471,13 @@ written and flushed per message) → LAN → `fetch` reader → `LiveState` → 
   loopback): hostile PCs holding every shared slot and reconnecting at once while the projector loads the page,
   joins and opens its stream; PCs without the code never taking the reserved slots; the stream rate (`503`, another
   address unaffected, one more after the interval); `421` for foreign `Host` values (no attempt counted); a socket
-  with `SO_REUSEADDR` that tries to take the port; a share started again at once on the same port. Unit tests for
+  with `SO_REUSEADDR` that tries to take the port; a share started again at once on the same port; the port fallback
+  (a plain listener on the port asked for, then on the following ones, a range with nothing free, a share started
+  on a free port, 65535). Unit tests for
   the slot choice, the nearby attempts table, the token limit and the stream rate (injected clock).
-- App (Linux): settings `[share] port`, manifest walk (`viewer_assets` with a fake manifest), stripping of live
+- App (Linux): settings `[share] port` and this machine's `share_port` (order, bad values, atomic write), the fallback
+  with a real listener on the port asked for (both ports reported, the port kept for this PC and asked for at the
+  next share, nothing written when the port asked for is free), manifest walk (`viewer_assets` with a fake manifest), stripping of live
   batches, note diff (append / full), a share started with a real `LiveHub` and a TCP client receiving live points
   without any path.
 - vitest: SSE parser, stream client (fake `fetch`: 401, 503, reconnect, `end`), viewer state (note → snapshot,
@@ -448,7 +486,9 @@ written and flushed per message) → LAN → `fetch` reader → `LiveState` → 
 - e2e (`app/e2e/journeys-m11-share.mjs`, wired in `run.mjs`, `ARDOISE_SHARE_LOOPBACK=1` and a free port in
   `[share]`): live mode with the simulated tablet, share, Node joins with the code and checks the events
   (snapshot, points, latency), 404s, the viewer page and its assets; then a note open in the editor (note message,
-  then a change), pause, stop (`end`, port closed).
+  then a change), pause, stop (`end`, port closed). A second journey holds the configured port with a Node `net`
+  server on 127.0.0.1 before the share starts: another port with the notice, `GET /` there, `share_port` in this
+  PC's table of `ardoise.toml`, the same port without notice at the next share.
 - Hardware: H4 in `docs/hardware-tests.md`.
 
 ## Decisions made while building M11
@@ -499,8 +539,8 @@ App (package B) and review fixes:
 - Leaving a note (waiting screen, live mode) forgets the note sent: the same note opened again goes whole (it was
   never sent again before, the viewers stayed on the waiting screen).
 - `share_stop` forgets the content shown; the window says it again after the next start.
-- A port in use is reported with its number (`{detail}`); the port is read again at each start, so changing it
-  needs a new share, not a new launch.
+- A port in use is reported with its number (`{detail}`), no free port with the range (`8765-8785`); the port is read
+  again at each start, so changing it needs a new share, not a new launch.
 - `--self-test` checks that the viewer is embedded (`share:` line; a build without it fails the self-test).
 - The editor sends its note without the title (Rust keeps only what is drawn): typing a title sends nothing.
 

@@ -186,6 +186,7 @@ pub fn test_config() -> ShareConfig {
     ShareConfig {
         bind: Ipv4Addr::LOCALHOST,
         port: 0,
+        fallback_ports: 0,
         code: Some(CODE.into()),
     }
 }

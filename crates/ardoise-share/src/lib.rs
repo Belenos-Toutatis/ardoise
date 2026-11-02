@@ -31,13 +31,21 @@ use serde::Serialize;
 /// Port used when `ardoise.toml` does not choose one (`[share] port`).
 pub const DEFAULT_PORT: u16 = 8765;
 
+/// How many ports after the wanted one are tried when it cannot be bound (another program uses
+/// it, or Windows reserves it): the first that binds is used.
+pub const FALLBACK_PORTS: u16 = 20;
+
 /// Where and how the server listens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShareConfig {
     /// `0.0.0.0` (every IPv4 interface) in the app; `127.0.0.1` in the tests.
     pub bind: Ipv4Addr,
-    /// 0 takes a free port (tests): [`Share::port`] says which.
+    /// The port wanted. 0 takes a free port (tests): [`Share::port`] says which.
     pub port: u16,
+    /// How many ports after `port` are tried, in order, when it cannot be bound (the largest
+    /// is 65535); [`Share::port`] says which one was bound. 0 tries `port` alone. Ignored when
+    /// `port` is 0.
+    pub fallback_ports: u16,
     /// The code to ask for, instead of a random one (tests only). Normalised like the codes typed
     /// in the page.
     pub code: Option<String>,
@@ -48,6 +56,7 @@ impl Default for ShareConfig {
         Self {
             bind: Ipv4Addr::UNSPECIFIED,
             port: DEFAULT_PORT,
+            fallback_ports: FALLBACK_PORTS,
             code: None,
         }
     }
@@ -171,11 +180,16 @@ pub type OnChange = Box<dyn Fn(ShareStatus) + Send + Sync>;
 /// Failure to start a share.
 #[derive(Debug, thiserror::Error)]
 pub enum ShareError {
-    /// Another program listens on the port.
+    /// Another program listens on the port (or Windows reserves it), and no other was asked for.
     #[error(
-        "port {port} is already used by another program: close it, or choose another port in ardoise.toml ([share] port)"
+        "port {port} is already used by another program: close it, or choose another port in the settings of Ardoise"
     )]
     PortInUse { port: u16 },
+    /// Not one of the ports from `first` to `last` could be bound.
+    #[error(
+        "no free port from {first} to {last}: close the programs that use them, or choose another port in the settings of Ardoise"
+    )]
+    NoFreePort { first: u16, last: u16 },
     /// Any other failure to listen or to start the server's thread.
     #[error("cannot start sharing: {0}")]
     Io(#[from] std::io::Error),
@@ -189,6 +203,7 @@ impl ShareError {
     pub fn code(&self) -> &'static str {
         match self {
             ShareError::PortInUse { .. } => "sharePortInUse",
+            ShareError::NoFreePort { .. } => "shareNoFreePort",
             ShareError::Io(_) | ShareError::Random(_) => "shareFailed",
         }
     }
@@ -258,7 +273,7 @@ pub struct Share {
 
 impl Share {
     /// Listens on `config.bind:config.port` (bound before returning: a port in use is an error at
-    /// once) and serves `assets`, live mode through `feed`, until [`Share::stop`]. Shows the
+    /// once, after the following ports `config.fallback_ports` were tried) and serves `assets`, live mode through `feed`, until [`Share::stop`]. Shows the
     /// waiting screen until told otherwise; a new random code unless `config.code` is set.
     pub fn start(
         config: ShareConfig,
@@ -288,6 +303,12 @@ impl Share {
     /// The port listened on.
     pub fn port(&self) -> u16 {
         self.server.port
+    }
+
+    /// The port that was wanted (`config.port`); [`Share::port`] differs when another program
+    /// held it and a following one was taken. 0 when any port was asked for.
+    pub fn requested_port(&self) -> u16 {
+        self.server.requested_port
     }
 
     /// The code, 6 characters without separator.
@@ -384,6 +405,12 @@ mod tests {
                 .to_string()
                 .contains("8765")
         );
+        let none = ShareError::NoFreePort {
+            first: 8765,
+            last: 8785,
+        };
+        assert_eq!(none.code(), "shareNoFreePort");
+        assert!(none.to_string().contains("8765") && none.to_string().contains("8785"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ import { mockLiveSubscribe } from './mock-live';
 import { mockShareSubscribe } from './mock-share';
 import { mockTabletSubscribe } from './mock-tablet';
 import type { Orientation } from './orientation';
-import type { ShareContent, ShareStatus } from './share';
+import type { SharePortSetting, ShareContent, ShareStatus } from './share';
 import type { BridgeAnswer, BridgeEvent } from './app-bridge.svelte';
 import type { TabletEvent, TabletOptions, TabletStatus } from './tablet';
 import type {
@@ -351,8 +351,17 @@ export const api = {
     channel.onmessage = onStatus;
     return invoke<ShareStatus>('share_subscribe', { onEvent: channel });
   },
-  /** Starts the share, or returns the running one. Fails with `sharePortInUse`, `shareUnavailable`, `shareFailed`. */
+  /**
+   * Starts the share, or returns the running one. If the port is held by another program the
+   * share takes the first free port after it (`status.port` against `status.requestedPort`) and
+   * keeps it for this PC. Fails with `shareNoFreePort`, `sharePortInUse`, `shareUnavailable`,
+   * `shareFailed`.
+   */
   shareStart: () => call<ShareStatus>('share_start'),
+  /** The port of the share on this PC (settings screen). */
+  sharePort: () => call<SharePortSetting>('share_port'),
+  /** Chooses the port of the share on this PC (1024 to 65535; else `sharePortInvalid`); applies to the next share. */
+  setSharePort: (port: number) => call<SharePortSetting>('set_share_port', { port }),
   shareStop: () => call<ShareStatus>('share_stop'),
   /** Freezes the shared image (true) or resumes it (false). */
   shareSetPaused: (paused: boolean) => call<ShareStatus>('share_set_paused', { paused }),
@@ -652,10 +661,21 @@ export async function onLibraryChanged(handler: () => void): Promise<() => void>
  * sentences), so this gives the first letter a capital and the end a full stop.
  */
 export function genericError(message: string): string {
-  const text = message.trim();
+  const text = sentence(message);
   if (text === '') return t('errors.generic', { message: '' }).trim();
-  const sentence = text.charAt(0).toLocaleUpperCase() + text.slice(1);
-  return t('errors.generic', { message: /[.!?…]$/.test(sentence) ? sentence : `${sentence}.` });
+  return t('errors.generic', { message: text });
+}
+
+/**
+ * An `errorCodes.*` phrase as a sentence by itself: a capital first and a full stop at the end,
+ * without the "An error occurred." of `genericError`. For the places where the phrase explains
+ * the problem fully (the share panel).
+ */
+export function sentence(message: string): string {
+  const text = message.trim();
+  if (text === '') return '';
+  const capital = text.charAt(0).toLocaleUpperCase() + text.slice(1);
+  return /[.!?…]$/.test(capital) ? capital : `${capital}.`;
 }
 
 /**

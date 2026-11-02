@@ -202,7 +202,8 @@ describe('the share panel, while it starts or when it cannot', () => {
   });
 
   const failures: [string, string, string[]][] = [
-    ['sharePortInUse', '8765', ['déjà utilisé par un autre programme', '[share]', 'port', 'ardoise.toml']],
+    ['sharePortInUse', '8765', ['déjà utilisé par un autre programme', 'réglages d\'Ardoise', 'Port du partage']],
+    ['shareNoFreePort', '8765-8785', ['plage 8765-8785', 'réglages d\'Ardoise', 'Port du partage']],
     ['shareUnavailable', 'no assets', ['version d\'Ardoise ne peut pas partager']],
     ['shareFailed', 'bind: boom', ['n\'a pas pu démarrer', 'bind: boom']],
   ];
@@ -214,6 +215,9 @@ describe('the share panel, while it starts or when it cannot', () => {
       expect(error.getAttribute('role')).toBe('alert');
       for (const part of expected) expect(error.textContent, part).toContain(part);
       expect(error.textContent).not.toContain('errorCodes');
+      // The explanation alone, as a sentence: no « Une erreur est survenue. » before it.
+      expect(error.textContent).not.toContain('Une erreur est survenue');
+      expect(error.textContent).toMatch(/^[A-ZÀ-Ý].*\.$/);
       expect(share.status.active).toBe(false);
       expect(view.action('share-stop')).toBeNull();
 
@@ -231,7 +235,52 @@ describe('the share panel, while it starts or when it cannot', () => {
     await render();
     const text = document.querySelector('[data-share-error]')!.textContent!;
     expect(text).toContain('already used by another program');
-    expect(text).toContain('[share]');
-    expect(text).toContain('ardoise.toml');
+    expect(text).toContain('Share port');
+    expect(text).not.toContain('ardoise.toml');
+    expect(text).not.toContain('Something went wrong');
+    expect(text.startsWith('The share')).toBe(true);
+  });
+
+  it('says that the port asked for was held and which one the share uses', async () => {
+    mockShare.fallbackPort = 8766;
+    mockShare.addresses = ['http://192.168.1.23:8766/'];
+    await render();
+    expect(share.status.port).toBe(8766);
+    expect(share.status.requestedPort).toBe(8765);
+    const notice = document.querySelector<HTMLElement>('[data-share-port-moved]')!;
+    expect(notice.getAttribute('role')).toBe('status');
+    expect(notice.textContent!.trim()).toBe(
+      'Le port 8765 est utilisé par un autre programme : le partage utilise le port 8766, retenu pour ce PC.',
+    );
+    expect(document.querySelector('[data-share-address]')!.textContent).toBe('http://192.168.1.23:8766/');
+  });
+
+  it('says it in English too', async () => {
+    setLocale('en');
+    mockShare.fallbackPort = 8766;
+    await render();
+    expect(document.querySelector('[data-share-port-moved]')!.textContent!.trim()).toBe(
+      'Port 8765 is used by another program: the share uses port 8766, kept for this PC.',
+    );
+  });
+
+  it('says nothing about the port when the port asked for is the one used', async () => {
+    await render();
+    expect(share.status.port).toBe(share.status.requestedPort);
+    expect(document.querySelector('[data-share-port-moved]')).toBeNull();
+  });
+
+  it('keeps the port found for the next share, with no notice then', async () => {
+    mockShare.fallbackPort = 8766;
+    const view = await render();
+    expect(document.querySelector('[data-share-port-moved]')).not.toBeNull();
+    view.action('share-stop')!.click();
+    await settle();
+    expect(share.status.port).toBe(8766);
+    expect(share.status.requestedPort).toBe(8766);
+    share.openPanel();
+    await settle();
+    expect(share.status.active).toBe(true);
+    expect(document.querySelector('[data-share-port-moved]')).toBeNull();
   });
 });

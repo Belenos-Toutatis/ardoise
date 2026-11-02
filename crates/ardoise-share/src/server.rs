@@ -15,7 +15,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
-use std::net::{IpAddr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -62,6 +62,8 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// State shared by the share's handle and its thread.
 pub(crate) struct Server {
     pub port: u16,
+    /// The port that was asked for (`ShareConfig::port`), which `port` follows unless it was taken.
+    pub requested_port: u16,
     pub code: String,
     pub content: Content,
     limits: Limits,
@@ -101,12 +103,13 @@ pub(crate) fn start(
         .build()?;
     let listener = {
         let _context = runtime.enter();
-        listen(SocketAddrV4::new(config.bind, config.port))?
+        listen_from(config.bind, config.port, config.fallback_ports)?
     };
     let port = listener.local_addr()?.port();
     let (shutdown, _) = watch::channel(false);
     let server = Arc::new(Server {
         port,
+        requested_port: config.port,
         code: code.clone(),
         content: Content::new(feed, limits.streams, limits.streams_per_address),
         limits,
@@ -136,6 +139,28 @@ pub(crate) fn start(
         thread,
         done,
     })
+}
+
+/// The listener on `port`, or else on the first of the `fallback` ports after it that binds,
+/// within the runtime's context. Each port is really tried (no check, then bind: another
+/// program could take it in between); only a port in use or reserved moves on to the next, any
+/// other failure ends the search. Port 0 (any port) is tried once.
+fn listen_from(bind: Ipv4Addr, port: u16, fallback: u16) -> Result<TcpListener, ShareError> {
+    let last = if port == 0 {
+        0
+    } else {
+        port.saturating_add(fallback)
+    };
+    let mut candidate = port;
+    loop {
+        match listen(SocketAddrV4::new(bind, candidate)) {
+            Err(ShareError::PortInUse { .. }) if candidate < last => candidate += 1,
+            Err(ShareError::PortInUse { .. }) if last > port => {
+                return Err(ShareError::NoFreePort { first: port, last });
+            }
+            result => return result,
+        }
+    }
 }
 
 /// The listener on `address`, within the runtime's context. On Windows it takes the port for

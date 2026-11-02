@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{Ipv4Addr, TcpStream};
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime};
@@ -182,6 +182,167 @@ fn the_real_build_of_the_interface_gives_the_viewer_its_files() {
 fn a_port_in_use_is_told_with_its_number() {
     let error = super::share_error(&ardoise_share::ShareError::PortInUse { port: 8765 });
     assert_eq!(error.parts(), ("sharePortInUse", "8765"));
+}
+
+#[test]
+fn no_free_port_is_told_with_the_range() {
+    let error = super::share_error(&ardoise_share::ShareError::NoFreePort {
+        first: 8765,
+        last: 8785,
+    });
+    assert_eq!(error.parts(), ("shareNoFreePort", "8765-8785"));
+}
+
+/// A plain listener on a port of the loopback interface chosen by the system, as another
+/// program has it.
+fn other_program() -> (TcpListener, u16) {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    (listener, port)
+}
+
+fn sharing_runtime() -> (ShareRuntime, Arc<LiveHub>) {
+    let runtime = ShareRuntime::default();
+    runtime.set_assets(source(built(MANIFEST)));
+    (runtime, Arc::new(LiveHub::new(hub_config())))
+}
+
+#[test]
+fn a_port_held_by_another_program_moves_the_share_to_the_next_one() {
+    let (runtime, hub) = sharing_runtime();
+    let (_other, taken) = other_program();
+    let status = runtime.start(Ipv4Addr::LOCALHOST, taken, hub).unwrap();
+    assert!(status.active);
+    assert_eq!(status.requested_port, taken);
+    assert!(
+        status.port > taken && u32::from(status.port) <= u32::from(taken) + 20,
+        "{} for {taken}",
+        status.port
+    );
+    assert_eq!(
+        status.addresses,
+        [format!("http://127.0.0.1:{}/", status.port)]
+    );
+    // The status keeps saying both ports while the share runs.
+    let later = runtime.status(taken);
+    assert_eq!((later.port, later.requested_port), (status.port, taken));
+    let (_, body) = exchange_ok(status.port);
+    assert!(!body.is_empty());
+    // Stopped, it is the port asked for that is shown.
+    runtime.stop();
+    let after = runtime.status(taken);
+    assert!(!after.active);
+    assert_eq!((after.port, after.requested_port), (taken, taken));
+}
+
+/// `GET /` on the loopback interface: the status line and the body.
+fn exchange_ok(port: u16) -> (u16, Vec<u8>) {
+    let (status, _, body) = exchange(
+        port,
+        "GET / HTTP/1.1
+Host: 127.0.0.1
+
+",
+    );
+    assert_eq!(status, 200);
+    (status, body)
+}
+
+#[test]
+fn the_port_found_is_kept_for_this_pc_and_used_by_the_next_share() {
+    let dir = tempfile::tempdir().unwrap();
+    let context = crate::library::tests::context(dir.path());
+    let (runtime, hub) = sharing_runtime();
+    let (_other, taken) = other_program();
+
+    // The PC asks for `taken`: another program holds it.
+    super::set_port_in(&context, i64::from(taken)).unwrap();
+    assert_eq!(super::configured_port(&context), taken);
+    let status =
+        super::start_and_remember(&runtime, &context, Ipv4Addr::LOCALHOST, hub.clone()).unwrap();
+    let found = status.port;
+    assert_ne!(found, taken);
+    assert_eq!(status.requested_port, taken);
+
+    // Kept in the section of this PC; the shared `[share] port` is left alone.
+    let settings = super::store(&context).unwrap().load().unwrap();
+    assert_eq!(settings.machine_share_port("PC-A"), Some(found));
+    assert_eq!(
+        settings.share.port,
+        ardoise_core::settings::DEFAULT_SHARE_PORT
+    );
+    assert_eq!(super::configured_port(&context), found);
+    assert_eq!(super::port_setting(&context).port, found);
+
+    // Starting again returns the share running, and the setting is not written again.
+    let again =
+        super::start_and_remember(&runtime, &context, Ipv4Addr::LOCALHOST, hub.clone()).unwrap();
+    assert_eq!(again.port, found);
+    runtime.stop();
+
+    // The next share asks for the port kept: no notice to give.
+    let next =
+        super::start_and_remember(&runtime, &context, Ipv4Addr::LOCALHOST, hub.clone()).unwrap();
+    assert_eq!((next.port, next.requested_port), (found, found));
+    runtime.stop();
+}
+
+#[test]
+fn a_share_on_the_port_asked_keeps_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let context = crate::library::tests::context(dir.path());
+    let (runtime, hub) = sharing_runtime();
+    let free = other_program().1;
+    super::set_port_in(&context, i64::from(free)).unwrap();
+    let before = std::fs::read_to_string(super::store(&context).unwrap().path()).unwrap();
+    let status = super::start_and_remember(&runtime, &context, Ipv4Addr::LOCALHOST, hub).unwrap();
+    assert_eq!((status.port, status.requested_port), (free, free));
+    let after = std::fs::read_to_string(super::store(&context).unwrap().path()).unwrap();
+    assert_eq!(before, after);
+    runtime.stop();
+}
+
+#[test]
+fn the_port_setting_is_this_pc_s_then_the_shared_one_then_8765() {
+    let dir = tempfile::tempdir().unwrap();
+    let context = crate::library::tests::context(dir.path());
+    let setting = super::port_setting(&context);
+    assert_eq!(
+        (setting.port, setting.shared_port, setting.own),
+        (8765, 8765, false)
+    );
+
+    std::fs::write(
+        super::store(&context).unwrap().path(),
+        "[share]
+port = 18765
+",
+    )
+    .unwrap();
+    let setting = super::port_setting(&context);
+    assert_eq!(
+        (setting.port, setting.shared_port, setting.own),
+        (18765, 18765, false)
+    );
+
+    let setting = super::set_port_in(&context, 9000).unwrap();
+    assert_eq!(
+        (setting.port, setting.shared_port, setting.own),
+        (9000, 18765, true)
+    );
+    assert_eq!(super::configured_port(&context), 9000);
+    // Another PC of the same file still reads the shared port.
+    let other = ardoise_core::settings::SettingsStore::locate(dir.path(), dir.path(), "PC-B");
+    assert_eq!(other.load().unwrap().share_port_for("PC-B"), 18765);
+
+    // The edges are accepted, anything else is refused and changes nothing.
+    assert_eq!(super::set_port_in(&context, 1024).unwrap().port, 1024);
+    assert_eq!(super::set_port_in(&context, 65_535).unwrap().port, 65_535);
+    for wrong in [0, 80, 1023, 65_536, 70_000, -1, i64::MAX] {
+        let error = super::set_port_in(&context, wrong).unwrap_err();
+        assert_eq!(error.parts(), ("sharePortInvalid", "1024-65535"), "{wrong}");
+    }
+    assert_eq!(super::port_setting(&context).port, 65_535);
 }
 
 #[test]

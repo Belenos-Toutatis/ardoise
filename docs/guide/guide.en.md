@@ -390,11 +390,16 @@ network. Ardoise never changes the firewall itself.
 - Windows ties this permission to the *program* at its location: `ardoise.exe` in this folder, whatever the port. If
   you move or rename `ardoise.exe`, or start another copy, Windows asks again: answer the same way. Changing the port
   does not make it ask again.
-- The *port is fixed* (8765, the `port` setting of the `[share]` section of `ardoise.toml`): the address stays the
-  same from one share to the next, and your IT department can open that port. No other program can take this port
-  during a share.
-- If another program already uses this port, Ardoise says so and does not start the share: close the other program, or
-  change the port in `ardoise.toml` (for example `[share]`, then `port = 8766` on the next line), then start the share again.
+- The *port* is 8765 by default. It does not change from one share to the next, so the address stays the same, and your
+  IT department can open that port. No other program can take this port during a share.
+- If another program already uses this port, Ardoise takes the first free port after it (8766, 8767…) by itself and
+  says so at the top of the panel: "Port 8765 is used by another program: the share uses port 8766, kept for this PC."
+  That port is remembered for this PC: at the next shares the address stays the same. Just type the address the panel
+  shows. If none of the 20 ports after it is free, Ardoise says so and does not start the share.
+- To choose the port yourself, open **Settings** > **Sharing on the network** > **Share port**, type a number from 1024
+  to 65535 and click **Save**. The choice applies to this PC only. A share that is already running keeps its port; the
+  new one is used by the next share. Changing the port does not ask for the firewall permission again, but the other
+  computer must type the new address.
 
 **Privacy.** The share starts only when you click, and stops with **Stop sharing** or when Ardoise closes (the port is
 then closed again). The code changes at each share. After 5 wrong codes in 5 minutes, the computer concerned has to
@@ -406,7 +411,7 @@ The writing and the image of the shared notes can be seen by anyone who has the 
 
 - Are the two computers on the *same network* (same Wi-Fi or same network socket, not an isolated "guest" network)?
 - Is the address typed with `http://` and the port (`:8765`)? Use the one the panel shows, not one from another day:
-  it may change.
+  the port may have changed if another program held 8765.
 - Has the firewall been allowed for this type of network (see above)? This is the most frequent cause.
 - The page says the code is wrong: read the panel's code again (there is no `0`, `O`, `1`, `I` or `L`).
 - The page says there are too many screens: the share accepts 32 screens at a time (4 per computer). It tries again
@@ -415,7 +420,7 @@ The writing and the image of the shared notes can be seen by anyone who has the 
   share refuses names with a dot (like `pc.school.lan`); it accepts the computer's short name, if the network knows
   it.
 - Security software or the school network may also block connections between computers: ask your IT department to open
-  port 8765 to your PC.
+  the port the panel shows (usually 8765) to your PC.
 
 ## 7. The library
 
@@ -951,7 +956,7 @@ of every component used, with its licence.
 | Windows says "Ardoise is preventing shutdown" | A note has unsaved changes: go back to Ardoise and save, or shut down anyway (the backup copy is already written, chapter 8). |
 | "Ardoise did not find Wacom Inkspace on this computer" | Click **Choose a folder…** and give Inkspace's `LocalState` folder or a copy (chapter 11). If Ardoise says to close Inkspace, close it and try again. |
 | The other computer cannot connect to the share | Same network? Address typed with `http://` and the port? Windows firewall allowed for this network (**Private networks**, or the network set to **Private**)? See "Showing the sheet on another computer of the network", chapter 6. |
-| A message says, when sharing, that the port is already in use | Another program uses the share's port: close it, or change `port` in the `[share]` section of `ardoise.toml` (chapter 6). |
+| A message says, when sharing, that the port is already in use, or that no port is free | Ardoise normally takes the next free port by itself and says so in the panel. If none of the 20 ports after it is free, choose another one in **Settings** > **Sharing on the network** > **Share port** (chapter 6). |
 | A second double-click on `ardoise.exe` seems to do nothing new | That is intended: the window that is already open comes back to the front (chapter 2). |
 
 If the problem comes from the tablet, run **Test the tablet** (chapter 13): the log, brought back by Nextcloud, makes it

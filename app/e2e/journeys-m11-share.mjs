@@ -19,6 +19,10 @@
 // the DevTools protocol like the app's window. It types the code, waits for the live sheet to be drawn
 // (ink on the canvas, so the WebAssembly module loaded under the page's policy), follows the switch to
 // the editor's note and the end of the share, and no console message may mention the policy or WebAssembly.
+//
+// A second, short journey holds the share's configured port with a Node server (as another program does on a
+// real PC) before the share starts: the share must take the next free port, say so in its panel, answer there,
+// keep that port in this PC's table of ardoise.toml (`share_port`) and ask for it again at the next share.
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import http from 'node:http';
@@ -974,4 +978,129 @@ export const shareJourneys = [
       }
     },
   },
+  {
+    name: 'partage sur le réseau : port déjà pris, le partage prend le suivant et le retient',
+    args: ['--simulated-tablet'],
+    // The port of `[share]` is held by a Node server (as the Python helper of the user's PC held 8765), on 127.0.0.1
+    // like the app's listener here: Windows refuses the second socket on that address and port.
+    settings: (ctx) => `[share]\nport = ${ctx.sharePort}\n`,
+    env: { ARDOISE_SHARE_LOOPBACK: '1' },
+    async run(app, check) {
+      const l = (key) => text(app.language, key);
+      const wanted = app.sharePort;
+      const settingsFile = join(app.dir, 'ardoise.toml');
+      let held = null;
+      const release = () =>
+        new Promise((resolve) => {
+          const server = held;
+          held = null;
+          if (server) server.close(() => resolve());
+          else resolve();
+        });
+      /** The `share_port` written in the table of this machine in ardoise.toml, or null. */
+      const keptPort = () => {
+        const file = readFileSync(settingsFile, 'utf8');
+        const table = /\[machines\."[^"]+"\]\r?\n((?:[^[\r\n].*\r?\n?)*)/.exec(file);
+        const match = table && /^share_port\s*=\s*(\d+)\s*$/m.exec(table[1]);
+        return match ? Number(match[1]) : null;
+      };
+
+      try {
+        await startLive(app, check);
+
+        await check('un autre programme tient le port du partage (serveur Node sur 127.0.0.1)', async () => {
+          held = await new Promise((resolve, reject) => {
+            const server = net.createServer((socket) => socket.destroy());
+            server.once('error', (error) => reject(new Error(`cannot hold port ${wanted}: ${error.message}`)));
+            server.listen(wanted, '127.0.0.1', () => resolve(server));
+          });
+        });
+
+        let found = 0;
+        await check('« Partager sur le réseau » : le partage démarre sur un autre port et le dit', async () => {
+          await app.click('button[data-action="share"]');
+          await app.waitFor(`document.querySelector(${j(PANEL)}) !== null`, 'the share panel', 15_000);
+          await app.waitFor(`document.querySelector('[data-share-code]') !== null`, 'the access code', 15_000);
+          if (await app.evaluate(`document.querySelector('[data-share-error]') !== null`)) {
+            throw new Error('the panel shows an error instead of taking another port');
+          }
+          found = await app.waitFor(shownPortExpression(), 'an address in the panel', 15_000);
+          if (found === wanted) throw new Error(`the share took port ${wanted}, which another program holds`);
+          if (found < wanted || found > wanted + 20) throw new Error(`port ${found} is not one of the 20 following ${wanted}`);
+          const notice = await app.evaluate(`document.querySelector('[data-share-port-moved]')?.textContent?.trim() ?? null`);
+          const expected = l('share.portMoved').replace('{requested}', String(wanted)).replace('{port}', String(found));
+          if (notice !== expected) throw new Error(`the notice is ${j(notice)}, expected ${j(expected)}`);
+        });
+
+        await check('GET / répond sur le port trouvé', async () => {
+          const page = await request(found, { path: '/' });
+          if (page.status !== 200) throw new Error(`GET / on port ${found} answered ${page.status}`);
+          if (!String(page.headers['content-type']).startsWith('text/html')) throw new Error(`content type ${page.headers['content-type']}`);
+        });
+
+        await check('ardoise.toml retient ce port dans la section de ce PC, sans toucher à [share]', async () => {
+          await until(() => keptPort() === found, `share_port = ${found} in the machine's table of ardoise.toml`, 5000);
+          const file = readFileSync(settingsFile, 'utf8');
+          if (!new RegExp(`\\[share\\]\\r?\\nport\\s*=\\s*${wanted}\\b`).test(file)) {
+            throw new Error(`[share] port is no longer ${wanted}:\n${file}`);
+          }
+        });
+
+        await check('Arrêter le partage puis le relancer : même port, plus d’avis', async () => {
+          await app.click('button[data-action="share-stop"]');
+          await app.waitFor(`document.querySelector(${j(PANEL)}) === null`, 'the panel to close', 5000);
+          await until(
+            () =>
+              new Promise((resolve) => {
+                const socket = net.connect({ host: '127.0.0.1', port: found });
+                socket.once('connect', () => {
+                  socket.destroy();
+                  resolve(false);
+                });
+                socket.once('error', () => resolve(true));
+              }),
+            `port ${found} to close`,
+            10_000,
+          );
+          await app.click('button[data-action="share"]');
+          await app.waitFor(`document.querySelector('[data-share-code]') !== null`, 'the access code', 15_000);
+          const again = await app.waitFor(shownPortExpression(), 'an address in the panel', 15_000);
+          if (again !== found) throw new Error(`the second share is on port ${again}, expected the port kept, ${found}`);
+          if (await app.evaluate(`document.querySelector('[data-share-port-moved]') !== null`)) {
+            throw new Error('the notice is still shown although the port asked for is the one kept');
+          }
+          const page = await request(found, { path: '/' });
+          if (page.status !== 200) throw new Error(`GET / on port ${found} answered ${page.status}`);
+        });
+
+        await check('Arrêter le partage : le port trouvé est fermé, l’autre programme garde le sien', async () => {
+          await app.click('button[data-action="share-stop"]');
+          await until(
+            () =>
+              new Promise((resolve) => {
+                const socket = net.connect({ host: '127.0.0.1', port: found });
+                socket.once('connect', () => {
+                  socket.destroy();
+                  resolve(false);
+                });
+                socket.once('error', () => resolve(true));
+              }),
+            `port ${found} to close`,
+            10_000,
+          );
+          if (held === null || !held.listening) throw new Error(`the other program lost port ${wanted}`);
+        });
+      } finally {
+        await release();
+      }
+    },
+  },
 ];
+
+/** Page expression: the port of the panel's first address, or null (for `app.waitFor`). */
+function shownPortExpression() {
+  return `(() => {
+    const match = /:(\\d+)\\/?$/.exec(document.querySelector('[data-share-address]')?.textContent ?? '');
+    return match ? Number(match[1]) : null;
+  })()`;
+}

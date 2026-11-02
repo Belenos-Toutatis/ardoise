@@ -12,6 +12,7 @@
   import LibrarySetting from './LibrarySetting.svelte';
   import OpenH264Section from './OpenH264Section.svelte';
   import PenTouchSection from './PenTouchSection.svelte';
+  import SharePortSection from './SharePortSection.svelte';
   import TabletOptions from './tablet/TabletOptions.svelte';
 
   let { app, onchange, onclose, ontest }: {
@@ -182,6 +183,8 @@
     <p class="muted small">{t('settings.microphone.hint')}</p>
     <MicrophonePicker device={app.microphone} monitor onchange={(device) => run(() => api.setMicrophone(device))} />
   </section>
+
+  <SharePortSection />
 
   <OpenH264Section />
 

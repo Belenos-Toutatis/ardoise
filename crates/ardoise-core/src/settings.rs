@@ -504,6 +504,16 @@ pub struct MachineSettings {
     /// downloaded on request, and can be turned off and removed).
     #[serde(default, skip_serializing_if = "is_false")]
     pub openh264: bool,
+    /// Port of the share on the local network on this computer (SPEC §4.10): the first free
+    /// one after `[share] port` once that one was taken by another program here. Overrides
+    /// `[share] port`, which every computer reads. A zero, out of range or mistyped value
+    /// loads as unset.
+    #[serde(
+        default,
+        deserialize_with = "lenient_port",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub share_port: Option<u16>,
     /// Keys this version does not know about, kept verbatim.
     #[serde(flatten)]
     pub extra: toml::Table,
@@ -511,6 +521,18 @@ pub struct MachineSettings {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// A TCP port as stored: anything but an integer from 1 to 65535 reads as unset, so that a
+/// typing error in the file does not make the whole file unreadable.
+fn lenient_port<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u16>, D::Error> {
+    let value = Option::<toml::Value>::deserialize(deserializer)?;
+    Ok(value
+        .and_then(|value| value.as_integer())
+        .and_then(|port| u16::try_from(port).ok())
+        .filter(|port| *port != 0))
 }
 
 /// Contents of `ardoise.toml`.
@@ -588,6 +610,32 @@ impl Settings {
                     .entry(machine.to_owned())
                     .or_default()
                     .openh264 = true;
+            }
+            None => {}
+        }
+    }
+
+    /// Port the share listens on first on `machine`: its own `share_port` if it has one, else
+    /// `[share] port` (shared by every computer; 8765 by default).
+    pub fn share_port_for(&self, machine: &str) -> u16 {
+        self.machine_share_port(machine).unwrap_or(self.share.port)
+    }
+
+    /// Port of the share kept for `machine` alone, if any.
+    pub fn machine_share_port(&self, machine: &str) -> Option<u16> {
+        self.machines.get(machine)?.share_port
+    }
+
+    /// Keeps `port` for the share of `machine` (`None`: back to `[share] port`). A machine
+    /// without a section gets one only for a port.
+    pub fn set_share_port(&mut self, machine: &str, port: Option<u16>) {
+        match self.machines.get_mut(machine) {
+            Some(settings) => settings.share_port = port,
+            None if port.is_some() => {
+                self.machines
+                    .entry(machine.to_owned())
+                    .or_default()
+                    .share_port = port;
             }
             None => {}
         }
@@ -1210,6 +1258,90 @@ mod tests {
             let loaded = store.load().unwrap();
             assert_eq!(loaded.share.port, DEFAULT_SHARE_PORT, "{wrong}");
             assert_eq!(loaded.theme, Theme::Dark, "{wrong}");
+        }
+    }
+
+    #[test]
+    fn the_share_port_of_a_machine_overrides_the_shared_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.share_port_for("PC-A"), DEFAULT_SHARE_PORT);
+        assert_eq!(loaded.machine_share_port("PC-A"), None);
+
+        // A machine's port wins over `[share] port`; another machine keeps the shared one.
+        fs::write(
+            store.path(),
+            "[share]
+port = 18765
+
+[machines.\"PC-A\"]
+share_port = 8766
+monitor = 2
+",
+        )
+        .unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.share_port_for("PC-A"), 8766);
+        assert_eq!(loaded.machine_share_port("PC-A"), Some(8766));
+        assert_eq!(loaded.share_port_for("PC-B"), 18765);
+
+        // Saved atomically with the rest, unknown keys kept; no section made for nothing.
+        store
+            .update(|s| {
+                s.set_share_port("PC-B", None);
+                s.set_share_port("PC-C", Some(9000));
+            })
+            .unwrap();
+        let reloaded = store.load().unwrap();
+        assert_eq!(reloaded.share_port_for("PC-A"), 8766);
+        assert_eq!(reloaded.share_port_for("PC-C"), 9000);
+        assert!(!reloaded.machines.contains_key("PC-B"));
+        assert_eq!(
+            reloaded.machines["PC-A"].extra["monitor"].as_integer(),
+            Some(2)
+        );
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("share_port = 8766"), "{text}");
+        assert!(text.contains("port = 18765"), "{text}");
+
+        // Cleared: the machine follows `[share] port` again, the file no longer says it.
+        store.update(|s| s.set_share_port("PC-A", None)).unwrap();
+        let cleared = store.load().unwrap();
+        assert_eq!(cleared.share_port_for("PC-A"), 18765);
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(!text.contains("share_port = 8766"), "{text}");
+        assert!(text.contains("share_port = 9000"), "{text}");
+    }
+
+    #[test]
+    fn a_wrong_share_port_of_a_machine_loads_as_unset() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        for wrong in ["0", "70000", "-1", "\"huit\"", "87.65", "true"] {
+            fs::write(
+                store.path(),
+                format!(
+                    "theme = \"dark\"
+
+[share]
+port = 18765
+
+[machines.\"PC-A\"]
+share_port = {wrong}
+monitor = 2
+"
+                ),
+            )
+            .unwrap();
+            let loaded = store.load().unwrap();
+            assert_eq!(loaded.machine_share_port("PC-A"), None, "{wrong}");
+            assert_eq!(loaded.share_port_for("PC-A"), 18765, "{wrong}");
+            assert_eq!(loaded.theme, Theme::Dark, "{wrong}");
+            assert_eq!(
+                loaded.machines["PC-A"].extra["monitor"].as_integer(),
+                Some(2)
+            );
         }
     }
 

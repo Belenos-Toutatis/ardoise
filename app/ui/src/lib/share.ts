@@ -29,8 +29,14 @@ export interface QrCode {
 
 export interface ShareStatus {
   active: boolean;
-  /** The port listened on; the configured one (`[share] port`) when inactive. */
+  /** The port listened on; the one this PC asks for first (see `SharePortSetting`) when inactive. */
   port: number;
+  /**
+   * The port the share was started asking for. It differs from `port` when another program held
+   * that one and the share took the first free port after it (kept for this PC); equal when
+   * inactive.
+   */
+  requestedPort: number;
   /** The code the page asks for, shown as `K7M Q2X`; null when inactive. */
   code: string | null;
   /** `http://192.168.1.23:8765/`…, private LAN addresses first; [] when inactive. */
@@ -43,9 +49,32 @@ export interface ShareStatus {
   shown: Shown;
 }
 
+/** The share's port as the settings screen shows it (`share_port`, `set_share_port`). */
+export interface SharePortSetting {
+  /** The port this PC asks for first: its own if it has one, else `shared`. */
+  port: number;
+  /** `[share] port` of `ardoise.toml`, which every PC without a port of its own uses. */
+  sharedPort: number;
+  /** This PC has a port of its own (chosen here, or kept after a conflict). */
+  own: boolean;
+}
+
+/** Lowest and highest port the settings accept. */
+export const SHARE_PORT_MIN = 1024;
+export const SHARE_PORT_MAX = 65535;
+
+/** Whether `text` is a whole number from `SHARE_PORT_MIN` to `SHARE_PORT_MAX` (no sign, no decimals). */
+export function parseSharePort(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^\d{1,5}$/.test(trimmed)) return null;
+  const port = Number(trimmed);
+  return port >= SHARE_PORT_MIN && port <= SHARE_PORT_MAX ? port : null;
+}
+
 export const INACTIVE_SHARE: ShareStatus = {
   active: false,
   port: 8765,
+  requestedPort: 8765,
   code: null,
   addresses: [],
   qr: null,

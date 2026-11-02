@@ -6,9 +6,13 @@
    * teacher needs — how many screens are connected, what they show, pause, stop, what to do
    * about the firewall. Esc and « Fermer » close the panel only: the share keeps running (an
    * indicator stays on screen); « Arrêter le partage » ends it.
+   *
+   * When another program held the port asked for, the share took the next free one: the panel
+   * says so (and that it is kept for this PC). A failure to start is shown as the sentence of its
+   * error code alone, which explains what to do; no « Une erreur est survenue. » before it.
    */
   import { onDestroy } from 'svelte';
-  import { genericError } from '../../lib/api';
+  import { sentence } from '../../lib/api';
   import { t, tn } from '../../lib/i18n.svelte';
   import { share } from '../../lib/share-state.svelte';
   import Modal from '../Modal.svelte';
@@ -20,6 +24,8 @@
   const qr = $derived(status.qr);
   const mainAddress = $derived(status.addresses[0] ?? '');
   const otherAddresses = $derived(status.addresses.slice(1));
+  /** The port asked for was held by another program. */
+  const portMoved = $derived(status.active && status.port !== status.requestedPort);
 
   let copied = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -44,6 +50,11 @@
 <Modal title={t('share.panel.title')} onclose={() => share.closePanel()}>
   <div class="share-panel" aria-busy={share.starting}>
     {#if status.active}
+      {#if portMoved}
+        <p class="port-moved" role="status" data-share-port-moved>
+          {t('share.portMoved', { requested: status.requestedPort, port: status.port })}
+        </p>
+      {/if}
       <section class="block" aria-labelledby="share-open">
         {#if !mainAddress}
           <p class="no-address" role="status">{t('share.noAddress')}</p>
@@ -140,7 +151,7 @@
     {/if}
 
     {#if share.error}
-      <p class="error" role="alert" data-share-error>{genericError(share.error)}</p>
+      <p class="error" role="alert" data-share-error>{sentence(share.error)}</p>
     {/if}
 
     <div class="actions close">
@@ -244,6 +255,14 @@
 
   .no-address {
     font-weight: 600;
+  }
+
+  .port-moved {
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    border-left: 3px solid var(--accent);
+    background: var(--surface);
+    font-size: 0.9rem;
   }
 
   .paused {
