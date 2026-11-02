@@ -698,7 +698,10 @@
     "inkspaceTooLarge": "Inkspace's note database is too large to import ({detail})",
     "inkspaceNoteDamaged": "this Inkspace note cannot be read ({detail})",
     "inkspaceBusy": "an Inkspace import is already running",
-    "inkspaceTarget": "this binder is inside Inkspace's folder ({detail}); choose a binder of the library"
+    "inkspaceTarget": "this binder is inside Inkspace's folder ({detail}); choose a binder of the library",
+    "sharePortInUse": "the share's port {detail} is already used by another program; to change it, edit \"port\" in the [share] section of the ardoise.toml file, then start the share again",
+    "shareUnavailable": "this build of Ardoise cannot share on the network: the page for the other screens is not included",
+    "shareFailed": "the share could not start ({detail})"
   },
   "editor": {
     "back": "Library",
@@ -1510,6 +1513,53 @@
     "canvas": "Projected page {page}",
     "clearMarks": "Clear the marks"
   },
+  "share": {
+    "button": "Share on the network",
+    "buttonHint": "Show this screen in the browser of another computer on the local network",
+    "buttonActive": {
+      "one": "Sharing: 1 screen connected. Open the share.",
+      "other": "Sharing: {count} screens connected. Open the share."
+    },
+    "indicator": "Network share",
+    "indicatorHint": {
+      "one": "Sharing on the network: 1 screen connected. Click to open the share.",
+      "other": "Sharing on the network: {count} screens connected. Click to open the share."
+    },
+    "panel": {
+      "title": "Share on the network",
+      "close": "Close",
+      "starting": "Starting the share…",
+      "retry": "Try again"
+    },
+    "open": "On the other computer, open a browser and type:",
+    "noAddress": "Ardoise finds no network address on this PC: check that it is connected to the Wi-Fi or the school's network, then stop and start the share again.",
+    "otherAddresses": "Other possible addresses:",
+    "copy": "Copy",
+    "copied": "Address copied",
+    "qr": "QR code of the share's address",
+    "qrHint": "Or scan it with a phone.",
+    "codeLabel": "Code",
+    "codeIntro": "Then type this code:",
+    "viewersNone": "No screen connected",
+    "viewers": {
+      "one": "{count} screen connected",
+      "other": "{count} screens connected"
+    },
+    "shown": {
+      "label": "Shown on the screens",
+      "heading": "Shown on the screens:",
+      "live": "The live sheet",
+      "note": "The note being edited",
+      "waiting": "The waiting screen"
+    },
+    "pause": "Pause",
+    "resume": "Resume",
+    "paused": "Paused: the shared image is frozen",
+    "stop": "Stop sharing",
+    "helpTitle": "Good to know",
+    "helpFirewall": "The first time, Windows asks for the firewall's permission: allow it for private networks (\"Private network\").",
+    "helpEnd": "The share stops when you decide, or when you close Ardoise. Only the Ardoise computer sends: the other screens just watch."
+  },
   "handwriting": {
     "languages": {
       "fr": "French",
@@ -1743,6 +1793,44 @@
       "foundCount": "Ardoise found Wacom Inkspace notes on this computer ({count} notes).",
       "check": "Import them into the library (binder “{binder}”)",
       "hint": "You will confirm the import before it starts."
+    }
+  },
+  "viewer": {
+    "title": "Ardoise: shared screen",
+    "brand": "Ardoise",
+    "canvas": "Page shared by the Ardoise PC",
+    "connecting": "Connecting to the Ardoise PC…",
+    "reconnecting": "Connection lost, trying again…",
+    "paused": "Paused",
+    "waiting": {
+      "title": "Waiting",
+      "text": "The Ardoise PC is not sharing anything right now. The page will appear here as soon as sharing starts."
+    },
+    "ended": {
+      "title": "Sharing has ended",
+      "text": "This page will resume by itself if the Ardoise PC shares again (a new code may be asked for)."
+    },
+    "tooMany": {
+      "title": "Too many screens connected",
+      "text": "The Ardoise PC has reached the number of screens it accepts. Trying again automatically in a few seconds."
+    },
+    "code": {
+      "help": "Enter the code shown on the Ardoise PC.",
+      "label": "Sharing code (6 characters)",
+      "submit": "Join",
+      "checking": "Checking…",
+      "wrong": {
+        "one": "Wrong code. {count} try left.",
+        "other": "Wrong code. {count} tries left."
+      },
+      "tooMany": "Too many tries. Try again in {seconds} s.",
+      "network": "Cannot reach the Ardoise PC. Check the network, then try again.",
+      "error": "The Ardoise PC refused the request (error {status}).",
+      "cookies": "The code is right, but the browser did not keep the permission. Allow cookies for this page, then try again."
+    },
+    "fullscreen": {
+      "enter": "Full screen",
+      "exit": "Exit full screen"
     }
   }
 }

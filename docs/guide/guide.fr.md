@@ -343,12 +343,101 @@ jamais sur ce bouton (c'est ce qui évite d'effacer la page suivante par mégard
 Sur la fenêtre projetée, vous pouvez annoter la page au stylet, au doigt ou à la souris : les annotations sont
 rouges (jaunes sur le tableau noir). Le dos du stylet les efface une à une ; le bouton **Effacer les annotations**
 (qui apparaît avec le curseur) ou la touche `Suppr` les efface toutes ; elles disparaissent aussi au changement de page.
-*Elles ne sont jamais enregistrées dans la note.* Deux doigts zooment la zone projetée.
+*Elles ne sont jamais enregistrées dans la note.* Pendant un partage sur le réseau (voir plus bas), l'autre ordinateur
+les montre aussi. Deux doigts zooment la zone projetée.
 
 ### Au clavier
 
 Les mêmes touches marchent dans la fenêtre de commande et dans la présentation (une télécommande de présentation
 envoie Page suivante et Page précédente) : voir le chapitre 17.
+
+### Montrer la feuille sur un autre ordinateur du réseau
+
+*Le partage du mode direct demande la tablette ; celui d'une note ouverte dans l'éditeur n'en demande pas. Ce partage a
+été vérifié par des tests automatiques (serveur, page de l'autre écran, tablette simulée), mais pas encore sur deux
+vrais ordinateurs ni avec le pare-feu de l'école : l'essai H4 est prévu au travail.*
+
+Un autre ordinateur du même réseau (par exemple le PC de la salle, relié au vidéoprojecteur) peut afficher la feuille
+dans un *simple navigateur* : rien à installer dessus. Il montre :
+
+- pendant le mode direct, la feuille en direct, comme la fenêtre de présentation (zone zoomée, tableau noir, pointeur
+  laser, annotations écrites par-dessus la présentation) ;
+- quand une note est ouverte dans l'éditeur, la page de cette note, y compris vos modifications non enregistrées ;
+- sinon (bibliothèque, réglages), un écran d'attente.
+
+*Rien d'autre n'est accessible* : ni la bibliothèque, ni les titres des notes, ni les autres notes, ni un fichier du PC.
+L'autre ordinateur ne peut rien modifier : il ne fait que regarder.
+
+**Côté Ardoise.** Cliquez sur **Partager sur le réseau**, dans la fenêtre de commande du mode direct ou dans la barre
+d'outils de l'éditeur. Le panneau qui s'ouvre donne :
+
+- l'*adresse* à taper dans le navigateur de l'autre ordinateur, de la forme `http://192.168.1.23:8765` (si le PC en a
+  plusieurs, elles sont toutes listées) ;
+- un *code QR* de cette adresse, à scanner avec un téléphone ou une tablette ;
+- le *code d'accès* à 6 caractères, en deux groupes de trois (par exemple `K7M Q2X`) ;
+- le *nombre d'écrans connectés*, et ce qui est montré ;
+- **Pause** (l'image se fige sur les écrans ; vous continuez d'écrire, puis **Reprendre** montre l'état actuel) et
+  **Arrêter le partage**.
+
+Tant qu'un partage est en cours, un indicateur avec le nombre d'écrans reste en haut de la bibliothèque et des barres
+d'outils : un clic rouvre le panneau.
+
+**Côté autre ordinateur.**
+
+1. Ouvrez un navigateur (Edge, Chrome, Firefox…) et tapez l'adresse *en entier, avec `http://` et le numéro de port* :
+   `http://192.168.1.23:8765`.
+2. Tapez le code d'accès (majuscules ou minuscules, avec ou sans espace).
+3. La feuille s'affiche. Appuyez sur `F11` ou sur le bouton plein écran de la page (ou double-cliquez) pour la montrer
+   sur tout l'écran ; le bouton disparaît avec le curseur.
+
+Si la connexion se coupe un instant, la page se reconnecte toute seule et se remet à jour. Quand vous arrêtez le
+partage ou fermez Ardoise, elle indique que le partage est terminé.
+
+**Le pare-feu de Windows.** La première fois, Windows affiche une fenêtre « Alerte de sécurité Windows » (*le Pare-feu
+Windows Defender a bloqué certaines fonctionnalités de cette application*). Cochez **Réseaux privés** puis cliquez sur
+**Autoriser l'accès**. Il faut des droits d'administrateur pour cela : sur votre PC personnel, c'est vous ; sinon,
+demandez au service informatique d'autoriser `ardoise.exe` sur le réseau privé. Ardoise ne modifie jamais le pare-feu
+lui-même.
+
+- *Réseau « public » pour Windows.* Beaucoup de réseaux d'école sont classés « Public ». Soit vous passez ce réseau en
+  « Privé » (**Paramètres** > **Réseau et Internet** > propriétés du réseau Wi-Fi ou Ethernet > **Profil réseau** :
+  **Privé**), soit vous cochez aussi **Réseaux publics** dans la fenêtre du pare-feu, en sachant que le code d'accès est
+  alors la seule protection.
+- *La fenêtre a été fermée sans choisir.* Ouvrez **Pare-feu Windows Defender** > **Autoriser une application ou une
+  fonctionnalité via le Pare-feu Windows Defender** > **Modifier les paramètres** > **Autoriser une autre
+  application…** > **Parcourir…** > `ardoise.exe`, puis cochez **Privé** (et **Public** si besoin) pour Ardoise.
+- Windows attache cette autorisation au *programme*, à son emplacement : `ardoise.exe` dans ce dossier, quel que soit
+  le port. Si vous déplacez ou renommez `ardoise.exe`, ou lancez une autre copie, Windows repose la question :
+  répondez de la même façon. Changer de port ne la repose pas.
+- Le *port est fixe* (8765, réglage `port` de la section `[share]` de `ardoise.toml`) : l'adresse reste la même d'un
+  partage à l'autre, et le service informatique peut ouvrir ce port. Aucun autre programme ne peut prendre ce port
+  pendant un partage.
+- Si un autre programme utilise déjà ce port, Ardoise le dit et ne démarre pas le partage : fermez l'autre programme,
+  ou changez le port dans `ardoise.toml` (par exemple `[share]`, puis `port = 8766` sur la ligne suivante), puis
+  relancez le partage.
+
+**Confidentialité.** Le partage ne démarre que si vous cliquez, et s'arrête avec **Arrêter le partage** ou à la
+fermeture d'Ardoise (le port est alors refermé). Le code change à chaque partage. Après 5 codes faux en 5 minutes,
+l'ordinateur concerné doit attendre (la page dit combien de temps), sans gêner les autres. Les échanges ne sont *pas
+chiffrés* (c'est du `http` sur le réseau local) : n'utilisez ce partage que sur un réseau de confiance, et pas pour des
+notes confidentielles sur un réseau ouvert. L'écriture et l'image des notes partagées sont visibles par quiconque a
+l'adresse *et* le code.
+
+**Si ça ne se connecte pas.**
+
+- Les deux ordinateurs sont-ils sur le *même réseau* (même Wi-Fi ou même prise réseau, pas un réseau « invités »
+  isolé) ?
+- L'adresse est-elle tapée avec `http://` et le port (`:8765`) ? Prenez celle que le panneau affiche, pas celle d'un
+  autre jour : elle peut changer.
+- Le pare-feu a-t-il été autorisé pour ce type de réseau (voir plus haut) ? C'est la cause la plus fréquente.
+- La page dit que le code est incorrect : relisez le code du panneau (il n'y a ni `0`, ni `O`, ni `1`, ni `I`, ni `L`).
+- La page dit qu'il y a trop d'écrans : le partage accepte 32 écrans à la fois (4 par ordinateur). Elle réessaie
+  toute seule toutes les 5 secondes.
+- Le navigateur affiche seulement « Misdirected Request » : tapez l'adresse en chiffres que montre le panneau. Par
+  sécurité, le partage refuse les noms avec un point (comme `pc.ecole.lan`) ; il accepte le nom court de
+  l'ordinateur, si le réseau le connaît.
+- Un logiciel de sécurité ou le réseau de l'école peut aussi bloquer les connexions entre ordinateurs : demandez au
+  service informatique d'ouvrir le port 8765 vers votre PC.
 
 ## 7. La bibliothèque
 
@@ -721,6 +810,11 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
   l'Explorateur, sur le bureau, dans Word, OneNote ou un courriel (une image par note si plusieurs sont sélectionnées).
   Gardez le bouton enfoncé pendant la préparation de l'image.
 
+### Montrer la feuille en direct
+
+Pour que la feuille (ou la note ouverte) s'affiche dans le navigateur d'un autre ordinateur du réseau, sans fichier à
+envoyer : **Partager sur le réseau**, voir la fin du chapitre 6.
+
 ## 11. Importer les notes d'Inkspace
 
 Si vous avez utilisé Wacom Inkspace sur ce PC, Ardoise peut reprendre ses notes. Ardoise ne modifie ni ne supprime rien
@@ -864,7 +958,8 @@ le rappelle sous le texte à copier.
 
 - Vos notes restent dans *votre* dossier, sur vos ordinateurs. Ardoise n'a pas de compte et n'envoie rien nulle part.
 - Seule connexion sortante : le téléchargement d'OpenH264 chez Cisco, *seulement si vous le demandez*. Ardoise
-  n'écoute sur aucun port réseau.
+  n'écoute sur aucun port réseau, sauf pendant un partage sur le réseau que *vous* avez lancé (chapitre 6), qui ne
+  montre que la feuille partagée et s'arrête avec Ardoise.
 - La reconnaissance d'écriture est celle de Windows, hors connexion, et le texte reconnu reste dans un cache local à
   chaque PC.
 - Les copies de secours et caches sont sous `%LOCALAPPDATA%\Ardoise`, jamais dans la bibliothèque.
@@ -908,6 +1003,8 @@ de tous les composants utilisés avec leur licence.
 | « Fichiers illisibles : N » | Ardoise ne sait pas lire ces fichiers et ne les a pas modifiés ; la raison est écrite à côté de chacun (chapitres 2 et 7). |
 | Windows dit qu'« Ardoise empêche l'arrêt » | Une note a des modifications non enregistrées : revenez dans Ardoise et enregistrez, ou arrêtez quand même (la copie de secours est déjà écrite, chapitre 8). |
 | « Ardoise n'a pas trouvé Wacom Inkspace sur cet ordinateur » | Cliquez sur **Choisir un dossier…** et indiquez le dossier `LocalState` d'Inkspace ou une copie (chapitre 11). Si Ardoise dit de fermer Inkspace, fermez-le et réessayez. |
+| L'autre ordinateur n'arrive pas à se connecter au partage | Même réseau ? Adresse tapée avec `http://` et le port ? Pare-feu de Windows autorisé pour ce réseau (**Réseaux privés**, ou réseau passé en **Privé**) ? Voir « Montrer la feuille sur un autre ordinateur du réseau », chapitre 6. |
+| Un message dit, en partageant, que le port est déjà utilisé | Un autre programme utilise le port du partage : fermez-le, ou changez `port` dans la section `[share]` de `ardoise.toml` (chapitre 6). |
 | Un second double-clic sur `ardoise.exe` ne fait rien de nouveau | C'est voulu : la fenêtre déjà ouverte revient au premier plan (chapitre 2). |
 
 Si le problème tient à la tablette, lancez **Tester la tablette** (chapitre 13) : le journal, ramené par Nextcloud,

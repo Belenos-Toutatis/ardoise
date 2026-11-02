@@ -10,7 +10,8 @@
  *   on the next animation frame: the finished strokes of the page (`strokes`, appended in
  *   place; `generation` changes when they are replaced), the stroke in progress (`current`,
  *   whose points grow in place), the hovering pen (`hover`), and the points not painted yet
- *   (for the latency).
+ *   (for the latency), and the marks written over the presentation (`marks`, replaced whole by
+ *   each `marks` event; the viewers of the share draw them, the windows draw their own).
  *
  * Assumptions about the Rust side (package B), each handled both ways where it is unclear:
  * - (supposé) A snapshot's `page.strokes` holds the finished strokes only. If its last stroke is
@@ -34,6 +35,7 @@ import type {
   LiveViewState,
   MonitorInfo,
 } from './live';
+import { marksFromWire, reuseMarks } from './live-marks';
 import { roundView, sameView } from './live-view';
 import type { Orientation } from './orientation';
 import type { Background, Layer, PageSize, Rgba, Stroke } from './note';
@@ -133,6 +135,11 @@ export class LiveState {
   current: Stroke | null = null;
   /** Where the pen hovers (page units), or null. */
   hover: { x: number; y: number } | null = null;
+  /**
+   * The marks written over the presentation, for the page shown (the `marks` events; gone when
+   * the page changes). Strokes that did not change keep their object from one list to the next.
+   */
+  marks: readonly Stroke[] = [];
 
   private unpainted: PendingSample[] = [];
   private early: { batch: LiveBatch; arrival: number }[] = [];
@@ -239,6 +246,9 @@ export class LiveState {
       case 'view':
         this.incomingView(event.view);
         break;
+      case 'marks':
+        this.marks = reuseMarks(this.marks, marksFromWire(event.marks));
+        break;
       case 'saved':
         this.mergeSaved(event.paths);
         // A successful save means that everything is written, the failed pages included.
@@ -281,6 +291,7 @@ export class LiveState {
     let incoming = s.page.strokes;
     if (!samePage) {
       this.current = null;
+      this.marks = [];
     } else if (this.current && incoming.length > 0 && sameStart(incoming[incoming.length - 1], this.current)) {
       // The stroke in progress is already in the page: it stays the one drawn as in progress.
       incoming = incoming.slice(0, -1);

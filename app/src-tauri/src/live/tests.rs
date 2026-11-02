@@ -23,8 +23,8 @@ use super::hub::{
     BatchSink, ButtonSetting, HubConfig, HubSink, LiveError, LiveHub, Start, StartOptions,
 };
 use super::model::{
-    LiveBatch, LiveCommand, LiveCommandKind, LiveEvent, LivePoint, LiveSessionState, LiveStyle,
-    LiveViewState,
+    LiveBatch, LiveCommand, LiveCommandKind, LiveEvent, LiveMark, LivePoint, LiveSessionState,
+    LiveStyle, LiveViewState, MAX_MARK_POINTS, MAX_MARKS, MAX_MARKS_POINTS, MarkPoint,
 };
 use super::session::LiveSession;
 use crate::library::tests::library;
@@ -869,6 +869,294 @@ fn the_presentation_window_is_announced_to_every_window() {
             })
             .collect();
         presentations == [None, Some(screen.clone()), None]
+    });
+}
+
+/// A red mark of `n` points starting at `x`.
+fn mark(x: f32, n: usize) -> LiveMark {
+    LiveMark {
+        tool: Tool::FeltTip,
+        color: Rgba {
+            r: 220,
+            g: 38,
+            b: 38,
+            a: 255,
+        },
+        width: 140.0,
+        points: (0..n)
+            .map(|i| MarkPoint {
+                x: x + i as f32 * 10.0,
+                y: 500.0,
+                p: 0.5,
+            })
+            .collect(),
+    }
+}
+
+fn marks_of(events: &[LiveEvent]) -> Vec<Vec<LiveMark>> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            LiveEvent::Marks { marks } => Some(marks.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn marks_session() -> LiveSession {
+    let mut session = LiveSession::new(
+        1,
+        A5,
+        LiveStyle::default(),
+        LiveViewState::whole(A5),
+        false,
+        0,
+    );
+    let mut out = Vec::new();
+    session.set_state(LiveSessionState::Waiting, &mut out);
+    session.started(A5.width, A5.height, Orientation::Landscape, &mut out);
+    session
+}
+
+#[test]
+fn the_marks_of_a_page_are_kept_until_the_page_changes() {
+    let mut session = marks_session();
+    let mut out = Vec::new();
+    assert_eq!(session.marks_event(), None);
+
+    session.set_marks(0, vec![mark(100.0, 5)], &mut out);
+    assert_eq!(marks_of(&out), [vec![mark(100.0, 5)]]);
+    assert_eq!(
+        session.marks_event(),
+        Some(LiveEvent::Marks {
+            marks: vec![mark(100.0, 5)]
+        })
+    );
+
+    // The same list again says nothing; a list for another page is not the page's.
+    out.clear();
+    session.set_marks(0, vec![mark(100.0, 5)], &mut out);
+    session.set_marks(3, vec![mark(7.0, 2)], &mut out);
+    assert!(out.is_empty());
+    assert!(session.marks_event().is_some());
+
+    // A change of style does not touch them, nor does clearing the page (the presentation
+    // window keeps its marks then too).
+    session.set_style(LiveStyle::chalk(), &mut out);
+    session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
+    assert!(marks_of(&out).is_empty());
+    assert!(session.marks_event().is_some());
+
+    // The page changes: the snapshot is followed by an empty list, and nothing is kept.
+    out.clear();
+    session.command(LiveCommandKind::NextPage, LiveButton::NewPage, 0, &mut out);
+    assert!(matches!(out[0], LiveEvent::Snapshot { .. }));
+    assert_eq!(marks_of(&out), [Vec::<LiveMark>::new()]);
+    assert_eq!(session.marks_event(), None);
+
+    // On the new page: again, then back to the first page.
+    out.clear();
+    session.set_marks(1, vec![mark(1.0, 3), mark(50.0, 4)], &mut out);
+    session.command(
+        LiveCommandKind::PreviousPage,
+        LiveButton::NewPage,
+        0,
+        &mut out,
+    );
+    assert_eq!(
+        marks_of(&out),
+        [vec![mark(1.0, 3), mark(50.0, 4)], Vec::new()]
+    );
+
+    // The window clearing its marks (an empty list) is a change only when there are some.
+    out.clear();
+    session.set_marks(0, vec![mark(1.0, 1)], &mut out);
+    session.set_marks(0, Vec::new(), &mut out);
+    session.set_marks(0, Vec::new(), &mut out);
+    assert_eq!(marks_of(&out), [vec![mark(1.0, 1)], Vec::new()]);
+}
+
+#[test]
+fn closing_the_presentation_window_removes_its_marks() {
+    let mut session = marks_session();
+    let mut out = Vec::new();
+    // Marks without a presentation window announced (the control window or a test sent them):
+    // they stay.
+    session.set_marks(0, vec![mark(1.0, 2)], &mut out);
+    session.set_presentation(None, &mut out);
+    assert!(session.marks_event().is_some());
+
+    let screen = MonitorInfo::new("HDMI", 1920, 0, 1920, 1080, 1.0, false, None);
+    session.set_presentation(Some(screen), &mut out);
+    out.clear();
+    session.set_presentation(None, &mut out);
+    assert!(matches!(out[0], LiveEvent::Snapshot { .. }));
+    assert_eq!(marks_of(&out), [Vec::<LiveMark>::new()]);
+    assert_eq!(session.marks_event(), None);
+}
+
+#[test]
+fn turning_the_page_over_removes_the_marks() {
+    let mut session = marks_session();
+    let mut out = Vec::new();
+    session.set_marks(0, vec![mark(100.0, 5)], &mut out);
+    out.clear();
+    // The quick switch of the orientation keeps the page index but turns the page.
+    session.reorient(A5.height, A5.width, Orientation::PortraitLeft, &mut out);
+    assert!(matches!(out[0], LiveEvent::Snapshot { .. }));
+    assert_eq!(marks_of(&out), [Vec::<LiveMark>::new()]);
+}
+
+#[test]
+fn the_marks_are_bounded_and_cleaned() {
+    let mut session = marks_session();
+    let mut out = Vec::new();
+
+    // Too many marks: the first ones stay.
+    let many: Vec<LiveMark> = (0..MAX_MARKS + 50).map(|i| mark(i as f32, 2)).collect();
+    session.set_marks(0, many, &mut out);
+    let kept = &marks_of(&out)[0];
+    assert_eq!(kept.len(), MAX_MARKS);
+    assert_eq!(kept[MAX_MARKS - 1].points[0].x, (MAX_MARKS - 1) as f32);
+
+    // Too many points in one mark, and in all of them.
+    out.clear();
+    session.set_marks(0, vec![mark(0.0, MAX_MARK_POINTS + 10)], &mut out);
+    assert_eq!(marks_of(&out)[0][0].points.len(), MAX_MARK_POINTS);
+    out.clear();
+    let wide: Vec<LiveMark> = (0..10).map(|i| mark(i as f32, MAX_MARK_POINTS)).collect();
+    session.set_marks(0, wide, &mut out);
+    let total: usize = marks_of(&out)[0].iter().map(|m| m.points.len()).sum();
+    assert_eq!(total, MAX_MARKS_POINTS);
+
+    // Values a tool cannot draw.
+    out.clear();
+    let mut odd = mark(10.0, 3);
+    odd.points[1].x = f32::NAN;
+    odd.points[2] = MarkPoint {
+        x: 1.0e9,
+        y: -1.0e9,
+        p: 7.0,
+    };
+    odd.points.push(MarkPoint {
+        x: 20.0,
+        y: 20.0,
+        p: f32::NAN,
+    });
+    let mut infinite = mark(0.0, 3);
+    infinite.width = f32::INFINITY;
+    let mut thin = mark(0.0, 3);
+    thin.width = 0.0;
+    let mut huge = mark(5.0, 2);
+    huge.width = 1.0e7;
+    let empty = mark(0.0, 0);
+    session.set_marks(0, vec![odd, infinite, thin, empty, huge], &mut out);
+    let cleaned = &marks_of(&out)[0];
+    assert_eq!(cleaned.len(), 2);
+    // The point without coordinates is gone; the others are brought back within bounds.
+    let points = &cleaned[0].points;
+    assert_eq!(points.len(), 3);
+    assert_eq!(
+        points[1],
+        MarkPoint {
+            x: 2.0 * A5.width as f32,
+            y: -(A5.height as f32),
+            p: 1.0
+        }
+    );
+    assert_eq!(points[2].p, 1.0);
+    assert_eq!(cleaned[1].width, 5000.0);
+}
+
+#[test]
+fn the_marks_json_is_what_the_viewer_draws() {
+    let event = LiveEvent::Marks {
+        marks: vec![mark(100.0, 2)],
+    };
+    assert_eq!(
+        serde_json::to_value(&event).unwrap(),
+        json!({
+            "type": "marks",
+            "marks": [{
+                "tool": "feltTip",
+                "color": { "r": 220, "g": 38, "b": 38, "a": 255 },
+                "width": 140.0,
+                "points": [{ "x": 100.0, "y": 500.0, "p": 0.5 }, { "x": 110.0, "y": 500.0, "p": 0.5 }]
+            }]
+        })
+    );
+    // What the window sends is read as it is written.
+    let read: Vec<LiveMark> = serde_json::from_value(json!([{
+        "tool": "feltTip", "color": { "r": 220, "g": 38, "b": 38, "a": 255 }, "width": 140,
+        "points": [{ "x": 100, "y": 500, "p": 0.5 }, { "x": 110, "y": 500, "p": 0.5 }]
+    }]))
+    .unwrap();
+    assert_eq!(read, vec![mark(100.0, 2)]);
+    let unknown = json!([{ "tool": "laser", "color": {}, "width": 1, "points": [] }]);
+    assert!(serde_json::from_value::<Vec<LiveMark>>(unknown).is_err());
+}
+
+#[test]
+fn the_marks_reach_the_windows_coalesced_and_late_ones_start_from_them() {
+    let (_dir, library) = library();
+    // A long flush interval: the changes made meanwhile wait in the queue and are merged.
+    let hub = LiveHub::new(HubConfig {
+        flush_interval: Duration::from_millis(400),
+        ..config()
+    });
+    assert!(matches!(
+        hub.set_marks(0, vec![mark(1.0, 1)]),
+        Err(LiveError::NotRunning)
+    ));
+    let window = Arc::new(Window::default());
+    hub.subscribe("presentation", window.clone());
+    let _sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    wait_until("the first batch", || !window.events().is_empty());
+
+    for n in 1..=30 {
+        hub.set_marks(0, vec![mark(1.0, n)]).unwrap();
+    }
+    wait_until("the marks", || {
+        marks_of(&window.events())
+            .last()
+            .map(|marks| marks[0].points.len())
+            == Some(30)
+    });
+    let seen = marks_of(&window.events());
+    assert!(seen.len() <= 3, "{} lists for 30 changes", seen.len());
+
+    // A viewer arriving later (and the frozen image of a paused share) start from them.
+    let late = Arc::new(Window::default());
+    hub.subscribe("share:1", late.clone());
+    wait_until("the late window's first batch", || {
+        !late.events().is_empty()
+    });
+    let events = late.events();
+    assert!(matches!(events[0], LiveEvent::Snapshot { .. }));
+    assert_eq!(marks_of(&events), [vec![mark(1.0, 30)]]);
+    assert_eq!(marks_of(&hub.current_events()), [vec![mark(1.0, 30)]]);
+
+    // The page changes: both windows are told, and the image taken after that has no marks.
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    wait_until("the empty lists", || {
+        marks_of(&window.events()).last() == Some(&Vec::new())
+            && marks_of(&late.events()).last() == Some(&Vec::new())
+    });
+    assert!(marks_of(&hub.current_events()).is_empty());
+    // A list written for the page just left is refused.
+    hub.set_marks(0, vec![mark(1.0, 4)]).unwrap();
+    assert!(marks_of(&hub.current_events()).is_empty());
+
+    // Marks stay allowed once the session is stopped (the presentation stays up); a new
+    // session starts without them.
+    hub.set_marks(1, vec![mark(2.0, 4)]).unwrap();
+    hub.stop().unwrap();
+    hub.set_marks(1, vec![mark(2.0, 5)]).unwrap();
+    assert_eq!(marks_of(&hub.current_events()), [vec![mark(2.0, 5)]]);
+    let _again = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    assert!(marks_of(&hub.current_events()).is_empty());
+    wait_until("the empty list of the new session", || {
+        marks_of(&late.events()).last() == Some(&Vec::new())
     });
 }
 

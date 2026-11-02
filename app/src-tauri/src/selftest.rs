@@ -72,7 +72,11 @@ pub fn finish(app: &AppHandle, context: &AppContext, ui: UiReport) {
 }
 
 fn conclude(app: &AppHandle, context: &AppContext, ui: Option<&UiReport>, elapsed: Duration) {
-    let (mut text, ok) = report(context, ui, elapsed, bluetooth());
+    let share = app.try_state::<crate::share::ShareRuntime>().map_or_else(
+        || Err("not set up".to_owned()),
+        |share| share.viewer_check(),
+    );
+    let (mut text, ok) = report(context, ui, elapsed, bluetooth(), share);
     let verdict = if ok {
         "SELF-TEST OK"
     } else {
@@ -124,6 +128,7 @@ fn report(
     ui: Option<&UiReport>,
     elapsed: Duration,
     bluetooth: Result<AdapterInfo, String>,
+    share: Result<usize, String>,
 ) -> (String, bool) {
     let state = current_state(context);
     let mut ok = true;
@@ -198,6 +203,15 @@ fn report(
                     },
                 ),
             );
+        }
+    }
+
+    // The page another PC opens when the sheet is shared on the network (M11).
+    match share {
+        Ok(files) => line("share", format!("viewer embedded ({files} files)")),
+        Err(error) => {
+            ok = false;
+            line("share", format!("error: {error}"));
         }
     }
 

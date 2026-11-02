@@ -170,7 +170,7 @@ Ajouté à la demande de l'utilisateur le 2026-10-28. Ardoise peut être command
 
 Ajouté à la demande de l'utilisateur le 2026-11-02. Un autre ordinateur du même réseau, par exemple le PC du bureau relié au vidéoprojecteur, affiche dans un simple navigateur, sans rien installer, ce que le PC d'Ardoise choisit de montrer. Ce PC est un ordinateur personnel dont l'utilisateur est administrateur.
 
-- **C'est toujours le PC d'Ardoise qui choisit.** Le partage montre la feuille du mode direct pendant le mode direct, avec la vue de la présentation (zoom, déplacement, tableau noir, pointeur laser). Sinon, il montre la page de la note ouverte, pendant qu'on la consulte ou la modifie, mise à jour à chaque modification. Sans l'un ni l'autre, il montre un écran d'attente. Une pause fige l'image partagée.
+- **C'est toujours le PC d'Ardoise qui choisit.** Le partage montre la feuille du mode direct pendant le mode direct, avec la vue de la présentation (zoom, déplacement, tableau noir, pointeur laser) et les annotations écrites par-dessus la présentation (ajout demandé par l'utilisateur le 2026-11-02). Sinon, il montre la page de la note ouverte, pendant qu'on la consulte ou la modifie, mise à jour à chaque modification. Sans l'un ni l'autre, il montre un écran d'attente. Une pause fige l'image partagée.
 - **Rien d'autre n'est accessible** : ni la bibliothèque, ni la liste des notes, ni une autre note ou page. L'autre ordinateur ne peut ni modifier ni choisir ; il peut seulement passer en plein écran.
 - **Lancé à la main** : un bouton « Partager sur le réseau » dans la fenêtre de commande du mode direct et dans l'éditeur. Ardoise affiche l'adresse à taper (`http://<adresse>:<port>`), un QR code, un code de 6 caractères demandé par la page (nouveau code à chaque partage, tentatives limitées) et le nombre d'écrans connectés. « Arrêter le partage » déconnecte tout le monde ; fermer Ardoise aussi.
 - **Réseau** : le port n'est ouvert que pendant un partage. Il est fixe et réglable (8765 par défaut, dans `ardoise.toml`), pour que l'autorisation du pare-feu reste valable. Il n'y a rien sur internet ni aucun relais. La première fois, Windows demande l'autorisation du pare-feu, et le guide explique quoi répondre (« réseau privé »). Plusieurs écrans peuvent se connecter à la fois.
@@ -213,6 +213,8 @@ crates/
   ardoise-inkspace  import des notes Inkspace
   ardoise-hwr       reconnaissance d'écriture (P2)
   ardoise-mcp       serveur MCP : outils et invites pour un assistant (§4.9)
+  ardoise-share     partage de la feuille sur le réseau local : petit serveur HTTP en lecture seule
+                    (code, flux d'évènements) (§4.10)
 app/
   src-tauri/        ardoise.exe : commandes, fenêtres, options en ligne de commande
                     (--self-test, --diagnostic, --import-inkspace, --mcp…)

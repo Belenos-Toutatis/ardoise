@@ -17,8 +17,10 @@ use std::time::Duration;
 use crate::{AppContext, Cli};
 
 /// How long a second launch waits for the first one's window (it may still be starting).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const WAIT_FOR_WINDOW: Duration = Duration::from_secs(20);
 /// How often it looks for the window meanwhile.
+#[cfg_attr(not(windows), allow(dead_code))]
 const POLL: Duration = Duration::from_millis(100);
 
 /// Whether this launch is the windowed app, which claims its copy (the command-line modes do not).
@@ -68,6 +70,7 @@ pub fn names_for(context: &AppContext) -> Option<InstanceNames> {
 }
 
 /// What a launch found.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub enum Launch {
     /// This is the app of its copy; keep the guard as long as the process runs.
     First(Option<imp::Guard>),
@@ -84,6 +87,7 @@ pub fn claim(names: &InstanceNames) -> Launch {
 /// What a second launch does on each look (pure, for the tests): `Show` once the first window
 /// exists, `TakeOver` when the first app went away, `Wait` until the deadline, then `GiveUp`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub enum Step {
     Show,
     TakeOver,
@@ -91,6 +95,7 @@ pub enum Step {
     GiveUp,
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn next_step(window_found: bool, released: bool, waited: Duration) -> Step {
     if window_found {
         Step::Show

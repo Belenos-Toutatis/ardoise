@@ -110,6 +110,79 @@ impl LiveViewState {
     }
 }
 
+/// Most marks kept over a page (the rest of a longer list is dropped).
+pub const MAX_MARKS: usize = 200;
+/// Most points kept in one mark.
+pub const MAX_MARK_POINTS: usize = 4000;
+/// Most points kept in all the marks of a page together (far more than anyone scribbles over a
+/// slide; it bounds what every viewer is sent at each change).
+pub const MAX_MARKS_POINTS: usize = 20_000;
+
+/// A point of a mark written over the presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MarkPoint {
+    pub x: f32,
+    pub y: f32,
+    /// Pressure, 0..=1.
+    pub p: f32,
+}
+
+/// A temporary mark written over the presentation (docs/design/tablet-live-classroom.md, "M8:
+/// writing over the presentation"): only what is drawn, in page units. Held in memory by the
+/// session for the viewers of the share; never part of a page, never written.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveMark {
+    pub tool: Tool,
+    pub color: Rgba,
+    /// Line diameter at full pressure, page units.
+    pub width: f32,
+    pub points: Vec<MarkPoint>,
+}
+
+/// The marks the session keeps from what a window sent: at most [`MAX_MARKS`] marks and
+/// [`MAX_MARKS_POINTS`] points (a mark beyond is dropped, the one crossing the limit is cut),
+/// each mark at most [`MAX_MARK_POINTS`] points, no point without finite coordinates (a missing
+/// pressure counts as full), coordinates within one page size around the page, a width a tool
+/// can draw. A mark left without a point or without a usable width is dropped.
+pub fn sanitize_marks(marks: Vec<LiveMark>, page: PageSize) -> Vec<LiveMark> {
+    let (width, height) = (page.width as f32, page.height as f32);
+    let mut budget = MAX_MARKS_POINTS;
+    let mut kept = Vec::new();
+    for mark in marks.into_iter().take(MAX_MARKS) {
+        if budget == 0 {
+            break;
+        }
+        if !mark.width.is_finite() || mark.width <= 0.0 {
+            continue;
+        }
+        let points: Vec<MarkPoint> = mark
+            .points
+            .iter()
+            .filter(|p| p.x.is_finite() && p.y.is_finite())
+            .take(MAX_MARK_POINTS.min(budget))
+            .map(|p| MarkPoint {
+                x: p.x.clamp(-width, 2.0 * width),
+                y: p.y.clamp(-height, 2.0 * height),
+                p: if p.p.is_finite() {
+                    p.p.clamp(0.0, 1.0)
+                } else {
+                    1.0
+                },
+            })
+            .collect();
+        if points.is_empty() {
+            continue;
+        }
+        budget -= points.len();
+        kept.push(LiveMark {
+            width: mark.width.clamp(MIN_STYLE_WIDTH, MAX_STYLE_WIDTH),
+            points,
+            ..mark
+        });
+    }
+    kept
+}
+
 /// What a [`LiveCommand`] does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -234,6 +307,12 @@ pub enum LiveEvent {
     HoverEnd,
     View {
         view: LiveViewState,
+    },
+    /// The marks written over the presentation, the whole list for the current page (empty:
+    /// none, or the page changed). Only the share's viewers draw them: the presentation window
+    /// keeps its own marks.
+    Marks {
+        marks: Vec<LiveMark>,
     },
     /// Paths of the notes saved so far in this session (the whole list, as in the snapshot).
     /// Pages still failing to be written are announced again right after it (`saveFailed`).

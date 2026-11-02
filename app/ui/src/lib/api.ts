@@ -7,11 +7,13 @@ import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic'
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
 import type { InkspaceProgress, InkspaceReport, InkspaceSource } from './inkspace';
-import type { LiveBatch, LiveCommand, LiveSnapshot, LiveStyle, LiveViewState, MonitorInfo } from './live';
+import type { LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState, MonitorInfo } from './live';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
+import { mockShareSubscribe } from './mock-share';
 import { mockTabletSubscribe } from './mock-tablet';
 import type { Orientation } from './orientation';
+import type { ShareContent, ShareStatus } from './share';
 import type { BridgeAnswer, BridgeEvent } from './app-bridge.svelte';
 import type { TabletEvent, TabletOptions, TabletStatus } from './tablet';
 import type {
@@ -327,12 +329,35 @@ export const api = {
   /** « Undo the clearing »: gives the current page the ink of the last « Clear the page » back. */
   liveRestoreCleared: () => call<boolean>('live_restore_cleared'),
   liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
+  /**
+   * The marks written over the presentation on page `pageIndex`, the whole list: the viewers of
+   * the share draw them (temporary, never saved; ignored when the page is another one).
+   */
+  liveSetMarks: (pageIndex: number, marks: LiveMark[]) => call<void>('live_set_marks', { pageIndex, marks }),
   listMonitors: () => call<MonitorInfo[]>('list_monitors'),
   /** Opens the presentation window full screen on `monitor` (null: the saved or default screen). */
   /** `remember: false` (the assistant's bridge): the screen is not saved as this PC's choice. */
   openPresentation: (monitor: string | null, remember = true) =>
     call<MonitorInfo>('open_presentation', { monitor, remember }),
   closePresentation: () => call<void>('close_presentation'),
+
+  // --- LAN share (M11; Rust side: share.rs, docs/design/lan-share.md) -----------------------
+
+  shareStatus: () => call<ShareStatus>('share_status'),
+  /** Current status; then `onStatus` at every change (start, stop, a screen joining or leaving, pause). */
+  shareSubscribe: (onStatus: (status: ShareStatus) => void) => {
+    if (!inDesktopApp()) return mockShareSubscribe(onStatus);
+    const channel = new Channel<ShareStatus>();
+    channel.onmessage = onStatus;
+    return invoke<ShareStatus>('share_subscribe', { onEvent: channel });
+  },
+  /** Starts the share, or returns the running one. Fails with `sharePortInUse`, `shareUnavailable`, `shareFailed`. */
+  shareStart: () => call<ShareStatus>('share_start'),
+  shareStop: () => call<ShareStatus>('share_stop'),
+  /** Freezes the shared image (true) or resumes it (false). */
+  shareSetPaused: (paused: boolean) => call<ShareStatus>('share_set_paused', { paused }),
+  /** What the main window shows now, hence what the share shows (ignored while no share runs). */
+  shareShow: (content: ShareContent) => call<void>('share_show', { content }),
 
   // --- Replay, video, narration (milestone M6; Rust side: video.rs, narration.rs, codec.rs) ---
 

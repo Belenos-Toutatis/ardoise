@@ -62,7 +62,12 @@ version fait et surtout **ce qui n'a pas encore été essayé**. Le détail tech
 **Autour**
 
 - Interface en français et en anglais, thèmes clair et sombre, application portable (un exécutable, réglages à côté), aucun
-  droit d'administrateur, aucun compte, aucune connexion sauf le téléchargement facultatif d'OpenH264.
+  droit d'administrateur, aucun compte, aucune connexion sauf le téléchargement facultatif d'OpenH264 et le partage sur
+  le réseau local lancé à la main.
+- **Partager sur le réseau** (mode direct et éditeur) : un autre ordinateur du même réseau affiche dans un navigateur la
+  feuille du mode direct (avec les annotations écrites par-dessus la présentation) ou la page de la note ouverte, et
+  rien d'autre ; adresse, QR code, code de 6 caractères, pause, arrêt. La première fois, Windows demande
+  l'autorisation du pare-feu (droits d'administrateur) : répondre « Réseaux privés ».
 - Archive de distribution (`cargo xtask dist`) : un dossier `ardoise-<version>` avec `ardoise.exe`, `LICENSE`,
   `THIRD-PARTY-NOTICES`, `LISEZMOI.txt` et les guides en pages HTML (`guide\`). Écran **À propos** (version, licence,
   crédits, composants).
@@ -84,6 +89,7 @@ tablette simulée uniquement**. Les essais suivants sont encore à faire par l'u
 | **H1** — la tablette parle à Ardoise | L'enregistrement, la lecture des informations, le téléchargement des pages et le mode direct fonctionnent avec une vraie Slate. **Le décodage des pages n'a jamais été vérifié sur une capture réelle de Slate** (seulement sur des données d'une autre tablette et des données synthétiques). |
 | **H2** — synchronisation, mode direct, projecteur | Synchro réelle, latence ressentie, ce que la tablette envoie à l'appui sur son bouton en mode direct (inconnu aujourd'hui), reprise après coupure, projection sur un vrai vidéoprojecteur (et son débranchement), les quatre positions de la tablette. |
 | **H3** — stylet et tactile ; essai complet en classe | Dos du stylet, bouton, paume, gestes des doigts sur un PC tactile ; puis un cours entier avec la tablette. |
+| **H4** — partage sur le réseau | Un second ordinateur du réseau affiche la feuille en direct puis une note ouverte : autorisation du pare-feu, adresse tapée ou QR code, délai ressenti (moins de 150 ms attendus), reconnexion après une coupure. |
 
 D'autres essais à la main restent à faire, car les tests automatiques ne peuvent pas les remplacer :
 
@@ -194,7 +200,11 @@ explained in the [guide](guide/guide.en.md).
 **Around it**
 
 - French and English interface, light and dark themes, portable application (one executable, settings next to it), no
-  administrator rights, no account, no connection except the optional OpenH264 download.
+  administrator rights, no account, no connection except the optional OpenH264 download and the local network share
+  started by hand.
+- **Share on the network** (live mode and editor): another computer of the same network shows in a browser the live
+  sheet or the page of the open note, and nothing else; address, QR code, 6-character code, pause, stop. The first
+  time, Windows asks for the firewall permission (administrator rights): answer "Private networks".
 - Distribution archive (`cargo xtask dist`): an `ardoise-<version>` folder with `ardoise.exe`, `LICENSE`,
   `THIRD-PARTY-NOTICES`, `LISEZMOI.txt` and the guides as HTML pages (`guide\`). An **About** screen (version, licence,
   credits, components).
@@ -216,6 +226,7 @@ simulated tablet only**. The following trials are still to be made by the user, 
 | **H1**: the tablet talks to Ardoise | Registration, reading the information, downloading the pages and live mode work with a real Slate. **Page decoding has never been checked against a real Slate capture** (only against another tablet's data and synthetic data). |
 | **H2**: sync, live mode, projector | Real sync, perceived latency, what the tablet sends when its button is pressed in live mode (unknown today), recovery after a drop, projecting on a real projector (and unplugging it), the four tablet positions. |
 | **H3**: pen and touch; full trial in class | Pen eraser end, button, palm, finger gestures on a touch PC; then a whole lesson with the tablet. |
+| **H4**: sharing on the network | A second computer of the network shows the live sheet, then an open note: firewall permission, address typed or QR code, perceived delay (under 150 ms expected), reconnection after a cut. |
 
 Other hands-on checks remain, because automated tests cannot replace them:
 
