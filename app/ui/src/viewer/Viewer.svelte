@@ -3,13 +3,17 @@
    * Root of the viewer page (`viewer.html`, served by the Ardoise PC to the browsers of the local
    * network; docs/design/lan-share.md, "The viewer"). Receives, never sends but the code. Screens:
    * the code form, "waiting", the shared page full window on black (a live sheet or the note open
-   * in the editor), "reconnecting" over it, "sharing ended", "too many screens". A button (also a
-   * double click on the page) goes full screen; it hides with the cursor after 2 s without moving.
+   * in the editor), "reconnecting" over it, "sharing ended", "too many screens". A bar of buttons
+   * over the page sets this screen's own view (whole page, full width, zoom, "follow the PC": the
+   * keyboard, the wheel and the fingers do the same, see `ViewerCanvas`), and a button (also a
+   * double click on the page, or F) goes full screen; they hide with the cursor after 2 s without
+   * moving. Nothing of this is sent to the PC.
    *
    * No Tauri and no `lib/api.ts` here: this page runs in any browser (a test checks the imports).
    */
   import { onMount } from 'svelte';
   import { t } from '../lib/i18n.svelte';
+  import { isTypingTarget, liveKeyAction } from '../lib/live-keys';
   import { loadInk, type Ink } from '../lib/ink';
   import { ViewerState } from '../lib/viewer-state.svelte';
   import { ViewerStream, join, type JoinResult } from '../lib/viewer-stream';
@@ -90,6 +94,49 @@
     else document.documentElement.requestFullscreen().catch(() => undefined);
   }
 
+  /**
+   * Keys for this screen's view: 0 or Home whole page, W full width, + / − zoom, Shift + arrows move,
+   * Esc back to the PC's view (the live keys of the app's windows, without those that change the
+   * page, which the PC alone does), F full screen. Keys with Ctrl or Alt are the browser's.
+   */
+  function onkeydown(e: KeyboardEvent) {
+    wake();
+    if (!viewer.shown || e.defaultPrevented || isTypingTarget(e.target)) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const view = viewer.view;
+    if (e.key === 'Home') {
+      e.preventDefault();
+      view.showPage();
+      return;
+    }
+    if (!e.repeat && !e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault();
+      toggleFullscreen();
+      return;
+    }
+    const action = liveKeyAction(e);
+    switch (action?.kind) {
+      case 'wholePage':
+        view.showPage();
+        break;
+      case 'fitWidth':
+        view.showWidth();
+        break;
+      case 'zoom':
+        view.zoomStep(action.direction);
+        break;
+      case 'pan':
+        view.step(action.dx, action.dy);
+        break;
+      case 'leave':
+        view.follow();
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  }
+
   function ondblclick(e: MouseEvent) {
     if (viewer.shown && !(e.target instanceof Element && e.target.closest('button'))) toggleFullscreen();
   }
@@ -97,7 +144,7 @@
   const sheet = $derived(viewer.screen === 'waiting' || viewer.shown !== null);
 </script>
 
-<svelte:window onmousemove={wake} onpointerdown={wake} onpointermove={wake} onkeydown={wake} ontouchstart={wake} />
+<svelte:window onmousemove={wake} onpointerdown={wake} onpointermove={wake} {onkeydown} ontouchstart={wake} />
 <svelte:document onfullscreenchange={() => (fullscreen = !!document.fullscreenElement)} />
 
 <!-- A double click is a shortcut for the button, which keyboards use. -->
@@ -131,7 +178,14 @@
       <p>{t('viewer.ended.text')}</p>
     </section>
   {:else if viewer.shown}
-    <ViewerCanvas live={viewer.live} {ink} background={viewer.background} shown={viewer.shown} label={t('viewer.canvas')} />
+    <ViewerCanvas
+      live={viewer.live}
+      {ink}
+      background={viewer.background}
+      shown={viewer.shown}
+      view={viewer.view}
+      label={t('viewer.canvas')}
+    />
   {:else}
     <section class="panel" data-view="connecting">
       <h1 class="brand">{t('viewer.brand')}</h1>
@@ -148,10 +202,57 @@
     {/if}
   {/if}
 
-  {#if canFullscreen && viewer.shown && !idle}
-    <button type="button" class="fullscreen" data-action="fullscreen" onclick={toggleFullscreen}>
-      {fullscreen ? t('viewer.fullscreen.exit') : t('viewer.fullscreen.enter')}
-    </button>
+  {#if viewer.shown && !idle}
+    <div class="controls" role="toolbar" aria-label={t('viewer.view.label')}>
+      <button
+        type="button"
+        data-action="fit-page"
+        aria-pressed={viewer.view.fit === 'page'}
+        title={t('viewer.view.pageTitle')}
+        onclick={() => viewer.view.showPage()}
+      >
+        {t('viewer.view.page')}
+      </button>
+      <button
+        type="button"
+        data-action="fit-width"
+        aria-pressed={viewer.view.fit === 'width'}
+        title={t('viewer.view.widthTitle')}
+        onclick={() => viewer.view.showWidth()}
+      >
+        {t('viewer.view.width')}
+      </button>
+      <button
+        type="button"
+        class="step"
+        data-action="zoom-out"
+        aria-label={t('viewer.view.zoomOut')}
+        title={t('viewer.view.zoomOutTitle')}
+        onclick={() => viewer.view.zoomStep(-1)}
+      >
+        −
+      </button>
+      <button
+        type="button"
+        class="step"
+        data-action="zoom-in"
+        aria-label={t('viewer.view.zoomIn')}
+        title={t('viewer.view.zoomInTitle')}
+        onclick={() => viewer.view.zoomStep(1)}
+      >
+        +
+      </button>
+      {#if viewer.view.canFollow}
+        <button type="button" data-action="follow" title={t('viewer.view.followTitle')} onclick={() => viewer.view.follow()}>
+          {t('viewer.view.follow')}
+        </button>
+      {/if}
+      {#if canFullscreen}
+        <button type="button" data-action="fullscreen" onclick={toggleFullscreen}>
+          {fullscreen ? t('viewer.fullscreen.exit') : t('viewer.fullscreen.enter')}
+        </button>
+      {/if}
+    </div>
   {/if}
 </main>
 
@@ -219,8 +320,7 @@
 
   .badge,
   .banner,
-  .fullscreen {
-    position: fixed;
+  .controls button {
     padding: 0.35rem 0.8rem;
     border: 1px solid rgb(255 255 255 / 35%);
     border-radius: 999px;
@@ -228,6 +328,11 @@
     color: #fff;
     font: inherit;
     font-size: 0.9rem;
+  }
+
+  .badge,
+  .banner {
+    position: fixed;
   }
 
   .badge {
@@ -241,14 +346,37 @@
     transform: translateX(-50%);
   }
 
-  .fullscreen {
-    right: 0.75rem;
+  .controls {
+    position: fixed;
     bottom: 0.75rem;
+    left: 50%;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.4rem;
+    width: max-content;
+    max-width: calc(100vw - 1.5rem);
+    transform: translateX(-50%);
+  }
+
+  .controls button {
     cursor: pointer;
   }
 
-  .fullscreen:hover,
-  .fullscreen:focus-visible {
+  .controls button.step {
+    min-width: 2.4rem;
+    padding-inline: 0.5rem;
+    font-size: 1.05rem;
+    line-height: 1.2;
+  }
+
+  .controls button:hover,
+  .controls button:focus-visible,
+  .controls button[aria-pressed='true'] {
     background: rgb(0 0 0 / 85%);
+  }
+
+  .controls button[aria-pressed='true'] {
+    border-color: rgb(255 255 255 / 70%);
   }
 </style>

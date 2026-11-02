@@ -10,12 +10,15 @@
  *   one page, the whole page in view) in a fresh `LiveState`, so that the strokes are always
  *   drawn again (an eraser changes strokes in the middle, which a snapshot comparison would not
  *   see). `noteStrokes` add finished strokes at the end.
+ * - `view`: this screen's own view of the sheet (whole page, width, zoom, move; `ViewerView`),
+ *   which survives the sheets replaced above and goes when the sheet goes (waiting, ended, code).
  */
 import type { LiveBatch, LiveEvent, LivePoint, LiveSnapshot } from './live';
 import { DEFAULT_STYLE, LiveState } from './live-state.svelte';
 import type { Note, PageSize, Stroke } from './note';
 import type { ShareMessage, SharedPage } from './share';
 import type { StreamStatus } from './viewer-stream';
+import { ViewerView } from './viewer-view.svelte';
 
 /** `connecting`: nothing received yet; `code`: the code is needed. */
 export type ViewerScreen = 'connecting' | 'code' | 'waiting' | 'live' | 'note' | 'ended';
@@ -73,6 +76,8 @@ export class ViewerState {
   background = $state<string | null>(null);
   /** The sheet. Replaced (not reset) by each `note` and each `live` with `reset`: draw the one in hand. */
   live = $state.raw<LiveState>(new LiveState());
+  /** How this screen shows the sheet: the PC's view, or its own. */
+  readonly view = new ViewerView(() => ({ live: this.live, shown: this.shown }));
 
   /** Which content is on the sheet: `live` or `note`, else null. */
   get shown(): 'live' | 'note' | null {
@@ -157,6 +162,7 @@ export class ViewerState {
     this.live.close();
     this.live = new LiveState();
     this.background = null;
+    this.view.reset();
   }
 
   private liveBatch(batch: LiveBatch, reset: boolean): void {

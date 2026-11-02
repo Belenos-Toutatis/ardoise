@@ -366,7 +366,7 @@ dans un *simple navigateur* : rien à installer dessus. Il montre :
 - sinon (bibliothèque, réglages), un écran d'attente.
 
 *Rien d'autre n'est accessible* : ni la bibliothèque, ni les titres des notes, ni les autres notes, ni un fichier du PC.
-L'autre ordinateur ne peut rien modifier : il ne fait que regarder.
+L'autre ordinateur ne peut pas changer ce qui est montré, mais il peut régler son propre affichage (voir plus bas).
 
 **Côté Ardoise.** Cliquez sur **Partager sur le réseau**, dans la fenêtre de commande du mode direct ou dans la barre
 d'outils de l'éditeur. Le panneau qui s'ouvre donne :
@@ -389,6 +389,25 @@ d'outils : un clic rouvre le panneau.
 2. Tapez le code d'accès (majuscules ou minuscules, avec ou sans espace).
 3. La feuille s'affiche. Appuyez sur `F11` ou sur le bouton plein écran de la page (ou double-cliquez) pour la montrer
    sur tout l'écran ; le bouton disparaît avec le curseur.
+
+**Régler l'affichage sur l'autre ordinateur.** Bougez la souris (ou touchez l'écran) : une barre de boutons apparaît
+en bas de la page, puis disparaît au bout de quelques secondes. Ces réglages ne concernent que cet écran : ils ne
+changent rien sur le PC d'Ardoise ni sur les autres écrans.
+
+- **Page entière** : toute la page est visible (touche `0` ou `Début`).
+- **Pleine largeur** : la page occupe toute la largeur de l'écran ; on voit le haut de la page, et on descend en la
+  faisant glisser (touche `W`).
+- **Agrandir** et **Réduire** (touches `+` et `-`) : pour regarder un endroit de plus près. La molette de la souris
+  zoome à l'endroit du curseur ; avec un écran tactile, on écarte ou on rapproche deux doigts.
+- Pour déplacer la page quand elle n'est pas affichée en entier : glissez avec la souris ou avec un doigt, ou
+  utilisez `Maj` + les flèches.
+- **Suivre le PC** (touche `Échap`) : pendant le mode direct, l'écran suit d'abord la vue choisie sur le PC (zoom,
+  déplacement). Dès que vous réglez l'affichage ici, il garde votre réglage ; ce bouton, qui apparaît alors, revient à la
+  vue du PC. Le tableau noir et le pointeur laser restent toujours ceux du PC.
+- `F` : plein écran (comme `F11`).
+
+Si le PC passe à une autre page, « Page entière » et « Pleine largeur » restent actifs ; un zoom libre revient à la
+page entière.
 
 Si la connexion se coupe un instant, la page se reconnecte toute seule et se remet à jour. Quand vous arrêtez le
 partage ou fermez Ardoise, elle indique que le partage est terminé.

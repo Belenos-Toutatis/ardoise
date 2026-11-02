@@ -523,3 +523,260 @@ describe('viewer page: full screen', () => {
     expect(view.fullscreen()).not.toBeNull();
   });
 });
+
+describe("viewer page: this screen's own view", () => {
+  const bar = (view: ReturnType<typeof render>, action: string) =>
+    view.target.querySelector<HTMLButtonElement>(`.controls button[data-action="${action}"]`);
+  const click = async (view: ReturnType<typeof render>, action: string) => {
+    bar(view, action)!.click();
+    await tick();
+  };
+  const data = (view: ReturnType<typeof render>) => {
+    const d = view.canvas()!.dataset;
+    return { fit: d.fit, zoom: Number(d.zoom), scale: Number(d.scale) };
+  };
+  const key = async (init: KeyboardEventInit & { key: string }, target: EventTarget = window) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    target.dispatchEvent(event);
+    await tick();
+    return event;
+  };
+  const sendLive = (zoom = 1) => {
+    const snapshot = liveSnapshot([stroke(1000)]);
+    pc.send({
+      type: 'live',
+      reset: true,
+      batch: { sentAt: 0, events: [{ type: 'snapshot', snapshot: { ...snapshot, view: { ...snapshot.view, zoom } } }] },
+    });
+  };
+  const pcView = (zoom: number) =>
+    pc.send({
+      type: 'live',
+      reset: false,
+      batch: { sentAt: 0, events: [{ type: 'view', view: { zoom, x: 14850, y: 10800, board: false, laser: false } }] },
+    });
+  /** A live sheet drawn, the controls shown. */
+  async function liveSheet() {
+    const view = render();
+    await join(view);
+    sendLive(2);
+    await vi.waitFor(() => expect(view.canvas()).not.toBeNull());
+    return view;
+  }
+  type Touch = { pointerType?: string; pointerId?: number; t?: number };
+  const pointer = (target: EventTarget, type: string, at: { x: number; y: number }, init: Touch = {}) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: at.x, clientY: at.y, button: 0, buttons: 1 });
+    const props = { pointerType: init.pointerType ?? 'mouse', pointerId: init.pointerId ?? 1, pressure: 0.5, timeStamp: init.t ?? 0 };
+    for (const [name, value] of Object.entries(props)) Object.defineProperty(event, name, { value, configurable: true });
+    target.dispatchEvent(event);
+  };
+
+  it('has the controls in French: whole page, full width, zoom out and in; nothing to follow yet', async () => {
+    const view = await liveSheet();
+    expect(view.target.querySelector('.controls')?.getAttribute('role')).toBe('toolbar');
+    expect(bar(view, 'fit-page')!.textContent?.trim()).toBe('Page entière');
+    expect(bar(view, 'fit-width')!.textContent?.trim()).toBe('Pleine largeur');
+    expect(bar(view, 'zoom-out')!.getAttribute('aria-label')).toBe('Réduire');
+    expect(bar(view, 'zoom-in')!.getAttribute('aria-label')).toBe('Agrandir');
+    expect(bar(view, 'follow')).toBeNull();
+    expect(data(view)).toMatchObject({ fit: 'follow', zoom: 2 });
+  });
+
+  it('has the controls in English for an English browser', async () => {
+    setLocale('en');
+    const view = await liveSheet();
+    expect(bar(view, 'fit-page')!.textContent?.trim()).toBe('Whole page');
+    expect(bar(view, 'fit-width')!.textContent?.trim()).toBe('Full width');
+    expect(bar(view, 'zoom-out')!.getAttribute('aria-label')).toBe('Zoom out');
+    expect(bar(view, 'zoom-in')!.getAttribute('aria-label')).toBe('Zoom in');
+    await click(view, 'fit-width');
+    expect(bar(view, 'follow')!.textContent?.trim()).toBe('Follow the PC');
+  });
+
+  it('follows the view of the PC until a control is used, then keeps its own until « Suivre le PC »', async () => {
+    const view = await liveSheet();
+    expect(data(view)).toMatchObject({ fit: 'follow', zoom: 2 });
+    pcView(3);
+    await vi.waitFor(() => expect(data(view).zoom).toBe(3));
+
+    await click(view, 'fit-width');
+    // The nominal 1280 × 720 window: the page across its width.
+    expect(data(view).fit).toBe('width');
+    expect(data(view).scale * A4.width).toBeCloseTo(1280, 0);
+    expect(bar(view, 'fit-width')!.getAttribute('aria-pressed')).toBe('true');
+    expect(bar(view, 'follow')).not.toBeNull();
+
+    const own = data(view);
+    pcView(5);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(data(view)).toEqual(own);
+
+    await click(view, 'follow');
+    await vi.waitFor(() => expect(data(view)).toMatchObject({ fit: 'follow', zoom: 5 }));
+    expect(bar(view, 'follow')).toBeNull();
+  });
+
+  it('shows the whole page, and zooms with the buttons', async () => {
+    const view = await liveSheet();
+    await click(view, 'fit-page');
+    expect(data(view)).toMatchObject({ fit: 'page', zoom: 1 });
+    expect(bar(view, 'fit-page')!.getAttribute('aria-pressed')).toBe('true');
+    const whole = data(view).scale;
+    await click(view, 'zoom-in');
+    expect(data(view).fit).toBe('free');
+    expect(data(view).scale).toBeGreaterThan(whole);
+    await click(view, 'zoom-out');
+    expect(data(view)).toMatchObject({ fit: 'page', zoom: 1 });
+    expect(data(view).scale).toBeCloseTo(whole, 6);
+  });
+
+  it('has no « Suivre le PC » for a note: the whole page by default, and the buttons still work', async () => {
+    const view = render();
+    await join(view);
+    pc.send({ type: 'note', page: sharedPage([stroke(1000)]), background: null });
+    await vi.waitFor(() => expect(view.canvas()).not.toBeNull());
+    expect(data(view)).toMatchObject({ fit: 'page', zoom: 1 });
+    await click(view, 'fit-width');
+    expect(data(view).fit).toBe('width');
+    expect(data(view).scale * A4.width).toBeCloseTo(1280, 0);
+    expect(bar(view, 'follow')).toBeNull();
+    await click(view, 'fit-page');
+    expect(data(view)).toMatchObject({ fit: 'page', zoom: 1 });
+  });
+
+  it('answers the keys: 0, Home, W, + and -, Esc', async () => {
+    const view = await liveSheet();
+    await key({ key: 'w' });
+    expect(data(view).fit).toBe('width');
+    await key({ key: '0' });
+    expect(data(view)).toMatchObject({ fit: 'page', zoom: 1 });
+    await key({ key: '+' });
+    expect(data(view).fit).toBe('free');
+    const zoomed = data(view).zoom;
+    expect(zoomed).toBeCloseTo(1.25, 6);
+    await key({ key: '+' });
+    expect(data(view).zoom).toBeGreaterThan(zoomed);
+    await key({ key: '-' });
+    expect(data(view).zoom).toBeCloseTo(zoomed, 6);
+    await key({ key: 'W' });
+    expect(data(view).fit).toBe('width');
+    await key({ key: 'Home' });
+    expect(data(view).fit).toBe('page');
+    await key({ key: 'Escape' });
+    expect(data(view).fit).toBe('follow');
+    expect(bar(view, 'follow')).toBeNull();
+  });
+
+  it('leaves alone the keys of the browser, of a focused button, and of a field', async () => {
+    const view = await liveSheet();
+    const ctrl = await key({ key: '0', ctrlKey: true });
+    expect(ctrl.defaultPrevented).toBe(false);
+    const space = await key({ key: ' ' }, bar(view, 'fit-page')!);
+    expect(space.defaultPrevented).toBe(false);
+    expect(data(view).fit).toBe('follow');
+    const field = document.createElement('input');
+    document.body.append(field);
+    const typed = await key({ key: 'w' }, field);
+    field.remove();
+    expect(typed.defaultPrevented).toBe(false);
+    expect(data(view).fit).toBe('follow');
+  });
+
+  it('moves with Shift + arrows once zoomed', async () => {
+    const view = await liveSheet();
+    await key({ key: '0' });
+    await key({ key: '+' });
+    await key({ key: '+' });
+    const before = view.canvas()!.dataset.scale;
+    await key({ key: 'ArrowRight', shiftKey: true });
+    expect(data(view).fit).toBe('free');
+    expect(view.canvas()!.dataset.scale).toBe(before);
+  });
+
+  it('goes full screen with F', async () => {
+    Object.defineProperty(document, 'fullscreenEnabled', { configurable: true, value: true });
+    const request = vi.fn(() => Promise.resolve());
+    document.documentElement.requestFullscreen = request;
+    await liveSheet();
+    await key({ key: 'f' });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('zooms with the wheel, without scrolling the page', async () => {
+    const view = await liveSheet();
+    await click(view, 'fit-page');
+    const whole = data(view);
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -300, clientX: 900, clientY: 200 });
+    view.canvas()!.dispatchEvent(event);
+    await tick();
+    expect(event.defaultPrevented).toBe(true);
+    const zoomed = data(view);
+    expect(zoomed.fit).toBe('free');
+    expect(zoomed.zoom).toBeGreaterThan(1.3);
+    expect(zoomed.scale / whole.scale).toBeCloseTo(zoomed.zoom, 3);
+  });
+
+  it('moves the page with a mouse drag, but a drag on a page that fits stays with the PC', async () => {
+    const view = await liveSheet();
+    const canvas = view.canvas()!;
+    // The PC shows zoom 2: dragging moves the area, which is an own view.
+    pointer(canvas, 'pointerdown', { x: 600, y: 400 });
+    await tick();
+    expect(canvas.classList.contains('dragging')).toBe(true);
+    pointer(canvas, 'pointermove', { x: 500, y: 350 });
+    pointer(canvas, 'pointerup', { x: 500, y: 350 });
+    await tick();
+    expect(data(view).fit).toBe('free');
+    expect(canvas.classList.contains('dragging')).toBe(false);
+    await click(view, 'follow');
+    expect(data(view).fit).toBe('follow');
+
+    pcView(1);
+    await vi.waitFor(() => expect(data(view).zoom).toBe(1));
+    pointer(canvas, 'pointerdown', { x: 600, y: 400 });
+    pointer(canvas, 'pointermove', { x: 500, y: 350 });
+    pointer(canvas, 'pointerup', { x: 500, y: 350 });
+    await tick();
+    expect(data(view).fit).toBe('follow');
+  });
+
+  it('moves with one finger and zooms with two', async () => {
+    const view = await liveSheet();
+    const canvas = view.canvas()!;
+    // One finger: past the slop, then the page follows it.
+    pointer(canvas, 'pointerdown', { x: 600, y: 400 }, { pointerType: 'touch', pointerId: 1, t: 0 });
+    pointer(canvas, 'pointermove', { x: 560, y: 380 }, { pointerType: 'touch', pointerId: 1, t: 10 });
+    pointer(canvas, 'pointermove', { x: 500, y: 350 }, { pointerType: 'touch', pointerId: 1, t: 20 });
+    pointer(canvas, 'pointerup', { x: 500, y: 350 }, { pointerType: 'touch', pointerId: 1, t: 30 });
+    await tick();
+    expect(data(view).fit).toBe('free');
+    await click(view, 'fit-page');
+    const whole = data(view);
+
+    // Two fingers moving apart: zoom in.
+    pointer(canvas, 'pointerdown', { x: 600, y: 360 }, { pointerType: 'touch', pointerId: 1, t: 100 });
+    pointer(canvas, 'pointerdown', { x: 680, y: 360 }, { pointerType: 'touch', pointerId: 2, t: 105 });
+    pointer(canvas, 'pointermove', { x: 560, y: 360 }, { pointerType: 'touch', pointerId: 1, t: 120 });
+    pointer(canvas, 'pointermove', { x: 720, y: 360 }, { pointerType: 'touch', pointerId: 2, t: 125 });
+    pointer(canvas, 'pointerup', { x: 560, y: 360 }, { pointerType: 'touch', pointerId: 1, t: 130 });
+    pointer(canvas, 'pointerup', { x: 720, y: 360 }, { pointerType: 'touch', pointerId: 2, t: 135 });
+    await tick();
+    expect(data(view).fit).toBe('free');
+    expect(data(view).zoom).toBeGreaterThan(whole.zoom);
+  });
+
+  it('hides the controls with the cursor, keeps the keys, and shows the controls when the mouse moves', async () => {
+    const view = await liveSheet();
+    expect(view.target.querySelector('.controls')).not.toBeNull();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    window.dispatchEvent(new MouseEvent('mousemove'));
+    await vi.advanceTimersByTimeAsync(2100);
+    flushSync();
+    expect(view.target.querySelector('.controls')).toBeNull();
+    await key({ key: 'w' });
+    expect(data(view).fit).toBe('width');
+    window.dispatchEvent(new MouseEvent('mousemove'));
+    flushSync();
+    expect(view.target.querySelector('.controls')).not.toBeNull();
+  });
+});

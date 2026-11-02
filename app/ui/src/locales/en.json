@@ -1844,6 +1844,19 @@
     "fullscreen": {
       "enter": "Full screen",
       "exit": "Exit full screen"
+    },
+    "view": {
+      "label": "Display of this screen",
+      "page": "Whole page",
+      "pageTitle": "Show the whole page (0)",
+      "width": "Full width",
+      "widthTitle": "Show the page across the full width of the screen (W)",
+      "zoomIn": "Zoom in",
+      "zoomInTitle": "Zoom in (+ or mouse wheel)",
+      "zoomOut": "Zoom out",
+      "zoomOutTitle": "Zoom out (− or mouse wheel)",
+      "follow": "Follow the PC",
+      "followTitle": "Go back to the view chosen on the Ardoise PC (Esc)"
     }
   }
 }

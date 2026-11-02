@@ -1844,6 +1844,19 @@
     "fullscreen": {
       "enter": "Plein écran",
       "exit": "Quitter le plein écran"
+    },
+    "view": {
+      "label": "Affichage de cet écran",
+      "page": "Page entière",
+      "pageTitle": "Afficher la page entière (0)",
+      "width": "Pleine largeur",
+      "widthTitle": "Afficher la page sur toute la largeur de l'écran (W)",
+      "zoomIn": "Agrandir",
+      "zoomInTitle": "Agrandir (+ ou molette)",
+      "zoomOut": "Réduire",
+      "zoomOutTitle": "Réduire (− ou molette)",
+      "follow": "Suivre le PC",
+      "followTitle": "Revenir à la vue choisie sur le PC d'Ardoise (Échap)"
     }
   }
 }

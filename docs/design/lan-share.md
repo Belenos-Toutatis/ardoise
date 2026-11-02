@@ -435,7 +435,8 @@ when the share starts (the UI sends it again after a start anyway).
   `lib/live-render.ts` (`LiveRenderer`, `buildScene`, mode `presentation`: zoom, pan, blackboard, laser dot),
   `lib/live-view.ts` and `lib/ink.ts` (the `ardoise-ink` WebAssembly outlines), so it looks exactly like the app.
   `ViewerCanvas.svelte` is a small canvas component (size, pixel ratio, animation frame, background image from the
-  message instead of `render_background`); no pointer handling, no marks.
+  message instead of `render_background`); no marks, no pen: its pointer handling only moves the viewer's own view
+  (below).
 - A `note` message becomes a `LiveSnapshot` for the same `LiveState` (state `idle`, one page, whole-page view, no
   laser); `noteStrokes` appends; every `note` replaces the strokes (new generation).
 - `lib/viewer-stream.ts`: reads `/events` with `fetch` (so that it sees the status: `401` → code form, `503` → "too
@@ -447,6 +448,29 @@ when the share starts (the UI sends it again after a start anyway).
 - Screens: code form (6 characters, autofocus, errors: wrong code with the attempts left, too many attempts with the
   wait), waiting screen, the page full window (black around, like the projector), a full-screen button (Fullscreen
   API; also a double click) that hides with the cursor after 2 s still, "reconnecting" overlay, "sharing ended".
+- **The viewer's own view** (Q8, decided 2026-11-03; purely local: nothing is sent, no route, the server stays
+  read-only). `lib/viewer-view.ts` (pure, on the geometry of `live-view.ts`) and `lib/viewer-view.svelte.ts`
+  (`ViewerView`, owned by `ViewerState` as `view`). The viewer *follows* the PC: it draws `live.view`, the view
+  events of the PC. A fit button, the wheel, a drag, a pinch or a key *takes an own view* (`own`): a fit mode
+  (`page`: zoom 1; `width`: `fitWidthView`, the top of the page) or a `free` zoom and centre (`LiveViewState`
+  vocabulary, zoom 1 to 8, centre clamped by `clampView` so that the page cannot be lost). The view drawn is then
+  `resolveView`: the own zoom and centre on the *PC's* blackboard and laser, so that they are always the PC's, and
+  `LiveRenderer` draws the page, the marks and the dot in page coordinates at any zoom. `page` and `width` are
+  worked out again from the window's size at each frame (a resize or full screen keeps them). While an own view
+  is in force, `view` events of the PC change nothing that is drawn; « Follow the PC » (button, or Esc) drops it.
+  An action that changes nothing (a drag when the whole page is shown, a zoom out at the limit) does not leave the
+  PC's view. A `free` zoom is bound to a page key (`pageKey`: live page index and size, or the note's id) and
+  becomes the whole page when the PC shows another page or another note; a fit mode survives page changes, new notes,
+  reconnections, pauses and the switch between live and note. The waiting, ended and code screens drop the own
+  view. For a note there is no PC view: the default is the whole page and « Follow the PC » is not shown (Esc goes
+  back to the whole page).
+- Controls: a bar (`role="toolbar"`, `data-action` `fit-page`, `fit-width`, `zoom-out`, `zoom-in`, `follow`,
+  and the full-screen button) hidden with the cursor after 2 s like the full-screen button alone was. Mouse: wheel
+  zooms around the pointer (like the editor and the live preview), drag moves. Touch: `TouchGestures` of
+  `lib/gestures.ts` (one finger moves, two pinch; a double tap is left to full screen). Keys (`liveKeyAction`,
+  those of the live windows, minus what changes the PC's page): `0`/`Home`, `W`, `+`/`-`, Shift + arrows, Esc,
+  `F`; combinations with Ctrl or Alt are the browser's. The canvas exposes `data-fit` (`follow`, `page`,
+  `width`, `free`), `data-zoom` and `data-scale` (CSS pixels per page unit) for the tests.
 - Language: French if `navigator.language` starts with `fr`, else English (`resolveLocale('auto', …)`), texts in
   `viewer.*` of the same locale files (parity test).
 
