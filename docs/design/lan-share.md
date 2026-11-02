@@ -112,7 +112,7 @@ bytes. The server only ever does `map.get(path)`: `/assets/../x`, `/assets/%2e%2
 - **Attempts**, per IP address: at most **5 wrong codes in 5 minutes**; the 6th attempt (right or wrong) within the
   window gets `429` with the seconds until the oldest wrong code is 5 minutes old. A right code clears the
   address's record. At most 4 096 addresses remembered (the oldest dropped). Per address only: a classmate's PC
-  can lock itself out, never the projector's PC. Brute force: 100 PCs × 1 try a minute ≈ 8 000 years on average.
+  can lock itself out, never the projector's PC. Brute force: the code changes at each share; during a share of one hour, 100 PCs each trying all the time (1 code a minute) make 6 000 tries out of 8.9 × 10⁸ codes, about 1 chance in 150 000.
 - The page and its assets are public (they are the GPL viewer, no data); only `/events` needs the token.
 
 ### The event stream
