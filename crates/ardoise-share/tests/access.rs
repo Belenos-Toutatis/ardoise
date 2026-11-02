@@ -8,6 +8,8 @@ mod common;
 use std::io::Write;
 use std::time::Duration;
 
+use ardoise_share::Limits;
+
 use common::*;
 
 fn is_token(value: &str) -> bool {
@@ -126,23 +128,47 @@ fn too_many_wrong_codes() {
     assert_eq!(h.get("/").status, 200);
 }
 
+/// A `POST /join` with `headers` (each ending with CRLF) and `body`.
+fn join_with(headers: &str, body: &str) -> Vec<u8> {
+    format!(
+        "POST /join HTTP/1.1\r\n{headers}Content-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
+const JSON: &str = "Content-Type: application/json\r\n";
+
+/// Two wrong codes still allowed for the address: the requests before did not count.
+fn assert_no_attempt_counted(port: u16) {
+    let wrong = exchange(port, &join_request("WRONG2")).unwrap();
+    assert_eq!(
+        wrong.json(),
+        serde_json::json!({ "error": "wrongCode", "remaining": 4 })
+    );
+    let right = exchange(port, &join_request(CODE)).unwrap();
+    assert_eq!(right.status, 204);
+}
+
 #[test]
 fn bad_join_requests() {
     let h = Harness::start();
     let bad = [
         // No body.
-        "POST /join HTTP/1.1\r\nHost: x\r\n\r\n".to_owned(),
-        "POST /join HTTP/1.1\r\nContent-Length: 0\r\n\r\n".to_owned(),
+        format!("POST /join HTTP/1.1\r\nHost: x\r\n{JSON}\r\n"),
+        format!("POST /join HTTP/1.1\r\n{JSON}Content-Length: 0\r\n\r\n"),
         // Not JSON, not the expected shape.
-        "POST /join HTTP/1.1\r\nContent-Length: 6\r\n\r\nK7MQ2X".to_owned(),
-        "POST /join HTTP/1.1\r\nContent-Length: 11\r\n\r\n{\"code\":42}".to_owned(),
-        "POST /join HTTP/1.1\r\nContent-Length: 2\r\n\r\n[]".to_owned(),
+        String::from_utf8(join_with(JSON, "K7MQ2X")).unwrap(),
+        String::from_utf8(join_with(JSON, "{\"code\":42}")).unwrap(),
+        String::from_utf8(join_with(JSON, "[]")).unwrap(),
         // Chunked bodies are not accepted.
-        "POST /join HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n12\r\n{\"code\":\"K7MQ2X\"}\r\n0\r\n\r\n"
-            .to_owned(),
+        format!(
+            "POST /join HTTP/1.1\r\n{JSON}Transfer-Encoding: chunked\r\n\r\n12\r\n{{\"code\":\"K7MQ2X\"}}\r\n0\r\n\r\n"
+        ),
         // Two different lengths.
-        "POST /join HTTP/1.1\r\nContent-Length: 17\r\nContent-Length: 18\r\n\r\n{\"code\":\"K7MQ2X\"}"
-            .to_owned(),
+        format!(
+            "POST /join HTTP/1.1\r\n{JSON}Content-Length: 17\r\nContent-Length: 18\r\n\r\n{{\"code\":\"K7MQ2X\"}}"
+        ),
     ];
     for raw in &bad {
         let answer = exchange(h.port(), raw.as_bytes()).unwrap();
@@ -150,14 +176,76 @@ fn bad_join_requests() {
         assert_eq!(answer.json(), serde_json::json!({ "error": "badRequest" }));
     }
 
-    let too_long = "POST /join HTTP/1.1\r\nContent-Length: 1025\r\n\r\n";
+    let too_long = format!("POST /join HTTP/1.1\r\n{JSON}Content-Length: 1025\r\n\r\n");
     let answer = exchange(h.port(), too_long.as_bytes()).unwrap();
     assert_eq!(answer.status, 413);
     assert_eq!(answer.json(), serde_json::json!({ "error": "tooLarge" }));
 
-    // None of these counted as a wrong code.
-    let right = exchange(h.port(), &join_request(CODE)).unwrap();
-    assert_eq!(right.status, 204);
+    assert_no_attempt_counted(h.port());
+}
+
+#[test]
+fn join_needs_a_json_content_type() {
+    let h = Harness::start();
+    let body = r#"{"code":"K7MQ2X"}"#;
+    for headers in [
+        "",
+        "Content-Type: text/plain\r\n",
+        "Content-Type: text/plain;charset=UTF-8\r\n",
+        "Content-Type: application/x-www-form-urlencoded\r\n",
+        "Content-Type: multipart/form-data; boundary=x\r\n",
+        "Content-Type: application/json\r\nContent-Type: text/plain\r\n",
+    ] {
+        let answer = exchange(h.port(), &join_with(headers, body)).unwrap();
+        assert_eq!(answer.status, 415, "{headers:?}");
+        assert_eq!(answer.json(), serde_json::json!({ "error": "badRequest" }));
+        assert_eq!(answer.header("set-cookie"), None);
+    }
+    for headers in [
+        "Content-Type: application/json; charset=utf-8\r\n",
+        "content-type: Application/JSON\r\n",
+    ] {
+        let answer = exchange(h.port(), &join_with(headers, body)).unwrap();
+        assert_eq!(answer.status, 204, "{headers:?}");
+    }
+    assert_no_attempt_counted(h.port());
+}
+
+#[test]
+fn join_from_another_site_is_refused() {
+    let h = Harness::start();
+    let port = h.port();
+    let body = r#"{"code":"K7MQ2X"}"#;
+    let host = format!("Host: 127.0.0.1:{port}\r\n");
+    for origin in [
+        "Origin: http://evil.example\r\n".to_owned(),
+        "Origin: null\r\n".to_owned(),
+        format!("Origin: https://127.0.0.1:{port}\r\n"),
+        "Origin: http://127.0.0.1\r\n".to_owned(),
+        format!("Origin: http://127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n"),
+    ] {
+        let answer = exchange(port, &join_with(&format!("{host}{origin}{JSON}"), body)).unwrap();
+        assert_eq!(answer.status, 403, "{origin:?}");
+        assert_eq!(answer.json(), serde_json::json!({ "error": "badOrigin" }));
+        assert_eq!(answer.header("set-cookie"), None);
+    }
+    // An origin without a host to compare with.
+    let answer = exchange(
+        port,
+        &join_with(&format!("Origin: http://127.0.0.1:{port}\r\n{JSON}"), body),
+    )
+    .unwrap();
+    assert_eq!(answer.status, 403);
+    // The page's own origin, or no origin at all (not a browser).
+    let same = format!("{host}Origin: http://127.0.0.1:{port}\r\n{JSON}");
+    assert_eq!(exchange(port, &join_with(&same, body)).unwrap().status, 204);
+    assert_eq!(
+        exchange(port, &join_with(&format!("{host}{JSON}"), body))
+            .unwrap()
+            .status,
+        204
+    );
+    assert_no_attempt_counted(port);
 }
 
 #[test]
@@ -168,7 +256,7 @@ fn a_body_sent_in_pieces() {
     stream
         .write_all(
             format!(
-                "POST /join HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+                "POST /join HTTP/1.1\r\n{JSON}Content-Length: {}\r\n\r\n",
                 body.len()
             )
             .as_bytes(),
@@ -185,11 +273,61 @@ fn a_body_sent_in_pieces() {
         "{}",
         String::from_utf8_lossy(&bytes)
     );
+
+    // The whole request one byte at a time.
+    let mut stream = connect(h.port());
+    stream.set_nodelay(true).unwrap();
+    for byte in join_request(CODE) {
+        stream.write_all(&[byte]).unwrap();
+    }
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut stream, &mut bytes).unwrap();
+    assert!(bytes.starts_with(b"HTTP/1.1 204 No Content\r\n"));
+}
+
+#[test]
+fn an_address_keeps_its_last_eight_tokens() {
+    let h = Harness::start();
+    let cookies: Vec<String> = (0..9).map(|_| h.cookie()).collect();
+    // The first was forgotten for the ninth.
+    let refused = open_events(h.port(), Some(&cookies[0])).expect_err("refused");
+    assert_eq!(refused.status, 401);
+    // The last ones open streams (4 at a time from one address).
+    for cookie in &cookies[5..] {
+        let mut stream = open_events(h.port(), Some(cookie)).expect("200");
+        assert_eq!(stream.next_event(SOON), Some(SseEvent::Retry(2000)));
+        assert_eq!(stream.expect(), waiting());
+    }
+}
+
+#[test]
+fn event_streams_per_address_are_limited() {
+    let h = Harness::start();
+    let cookie = h.cookie();
+    let mut streams: Vec<EventStream> = (0..4)
+        .map(|_| open_events(h.port(), Some(&cookie)).expect("200"))
+        .collect();
+    assert_eq!(h.share.status().viewers, 4);
+    let refused = open_events(h.port(), Some(&cookie)).expect_err("refused");
+    assert_eq!(refused.status, 503);
+    assert_eq!(refused.header("retry-after"), Some("5"));
+    assert_eq!(h.share.status().viewers, 4);
+
+    // One leaves: another may come.
+    drop(streams.pop());
+    assert!(wait_until(SOON, || h.share.status().viewers == 3));
+    let mut again = open_events(h.port(), Some(&cookie)).expect("200");
+    assert_eq!(again.next_event(SOON), Some(SseEvent::Retry(2000)));
+    assert_eq!(again.expect(), waiting());
 }
 
 #[test]
 fn event_streams_are_limited() {
-    let h = Harness::start();
+    let h = Harness::with_limits(Limits {
+        connections_per_address: 64,
+        streams_per_address: 64,
+        ..Limits::default()
+    });
     let cookie = h.cookie();
     let mut streams: Vec<EventStream> = (0..32)
         .map(|_| open_events(h.port(), Some(&cookie)).expect("200"))

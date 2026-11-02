@@ -3,9 +3,16 @@
 //! One current-thread tokio runtime on the thread `ardoise-share`; each connection is a task
 //! that reads one request head (bounded in size and time) and answers it, or holds the event
 //! stream open. A watch channel tells every task that the share stops.
+//!
+//! One machine of the network must not be able to take the share from the others: connections
+//! and event streams are limited per address, a request must start within 3 s, and when every
+//! connection slot is taken the oldest connection still waiting for its request head makes room
+//! for the newcomer (an event stream, or a request being answered, is never closed for that).
 
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, SocketAddr, SocketAddrV4};
-use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -13,31 +20,27 @@ use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::{Notify, watch};
+use tokio::task::JoinSet;
 use tokio::time::{Instant, MissedTickBehavior, timeout, timeout_at};
 
 use crate::access::{self, Access, Verdict};
-use crate::content::{Content, JoinRefused, Viewer, end_frame};
+use crate::content::{Content, Frame, JoinRefused, Viewer, end_frame};
 use crate::http::{self, ContentLength, Head, HeadError, ResponseHead};
-use crate::{Assets, LiveFeed, OnChange, ShareConfig, ShareError, ShareStatus};
+use crate::{Assets, Limits, LiveFeed, OnChange, ShareConfig, ShareError, ShareStatus};
 
-/// Connections open at once; more are closed at once.
-pub(crate) const MAX_CONNECTIONS: usize = 64;
-/// Time a client has to send its request (head, and body for `POST /join`).
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// Time to write an answer (the largest is a WebAssembly file of a few hundred KB).
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Time to write one batch of messages to an event stream before the viewer counts as gone.
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(15);
-/// A comment line on idle event streams, so that dead connections are found.
-const PING_INTERVAL: Duration = Duration::from_secs(15);
 /// After an answer, how long (and how many bytes) the client's leftovers are read before the
 /// socket closes, so that unread bytes do not turn the close into a reset that could destroy
 /// the answer in flight.
 const LINGER_TIME: Duration = Duration::from_secs(1);
 const LINGER_BYTES: usize = 64 * 1024;
-/// At stop, time to write `end`, then time for every connection to finish.
-const END_TIMEOUT: Duration = Duration::from_millis(500);
+/// At stop: time for a stream to finish the message it is writing, then time to write `end`;
+/// then time for every connection to finish (more than both).
+const END_TIMEOUT: Duration = Duration::from_millis(400);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
 /// Messages written to an event stream are gathered up to this size per write.
 const COALESCE_BYTES: usize = 64 * 1024;
@@ -45,13 +48,19 @@ const COALESCE_BYTES: usize = 64 * 1024;
 const STREAM_PREAMBLE: &str = "retry: 2000\n\n";
 const PING: &[u8] = b": ping\n\n";
 
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// State shared by the share's handle and its thread.
 pub(crate) struct Server {
     pub port: u16,
     pub code: String,
     pub content: Content,
+    limits: Limits,
     assets: Assets,
     access: Mutex<Access>,
+    connections: Mutex<Connections>,
     shutdown: watch::Sender<bool>,
     on_change: OnChange,
 }
@@ -66,6 +75,7 @@ pub(crate) struct Running {
 /// Binds the listener (synchronously), then runs the server on its own thread.
 pub(crate) fn start(
     config: ShareConfig,
+    limits: Limits,
     assets: Assets,
     feed: Arc<dyn LiveFeed>,
     on_change: OnChange,
@@ -97,9 +107,11 @@ pub(crate) fn start(
     let server = Arc::new(Server {
         port,
         code: code.clone(),
-        content: Content::new(feed),
+        content: Content::new(feed, limits.streams, limits.streams_per_address),
+        limits,
         assets,
         access: Mutex::new(Access::new(code)),
+        connections: Mutex::new(Connections::default()),
         shutdown,
         on_change,
     });
@@ -118,6 +130,94 @@ pub(crate) fn start(
         thread,
         done,
     })
+}
+
+/// The connections open, oldest first, and how many come from each address.
+#[derive(Default)]
+struct Connections {
+    open: BTreeMap<u64, Connection>,
+    per_address: HashMap<IpAddr, usize>,
+    next: u64,
+}
+
+struct Connection {
+    address: IpAddr,
+    /// It sent a whole request head: it is never closed to make room.
+    headed: bool,
+    /// Closes it to make room for a newcomer.
+    evict: Arc<Notify>,
+}
+
+impl Connections {
+    /// Takes a slot for a connection from `address`: its id and what closes it to make room.
+    /// `None`: closed at once (too many from this address, or every slot taken by connections
+    /// that sent their request head). When every slot is taken, the oldest connection still
+    /// waiting for its head is closed to make room.
+    fn admit(&mut self, address: IpAddr, limits: &Limits) -> Option<(u64, Arc<Notify>)> {
+        let from_address = self.per_address.get(&address).copied().unwrap_or(0);
+        if from_address >= limits.connections_per_address {
+            return None;
+        }
+        if self.open.len() >= limits.connections {
+            let oldest = self
+                .open
+                .iter()
+                .find(|(_, connection)| !connection.headed)
+                .map(|(id, _)| *id)?;
+            if let Some(evicted) = self.remove(oldest) {
+                evicted.evict.notify_one();
+            }
+        }
+        let id = self.next;
+        self.next += 1;
+        let evict = Arc::new(Notify::new());
+        self.open.insert(
+            id,
+            Connection {
+                address,
+                headed: false,
+                evict: Arc::clone(&evict),
+            },
+        );
+        *self.per_address.entry(address).or_default() += 1;
+        Some((id, evict))
+    }
+
+    /// The connection `id` sent its whole request head; false if it was closed to make room
+    /// meanwhile.
+    fn headed(&mut self, id: u64) -> bool {
+        match self.open.get_mut(&id) {
+            Some(connection) => {
+                connection.headed = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Frees the slot of `id` (if it was not already given to a newcomer).
+    fn remove(&mut self, id: u64) -> Option<Connection> {
+        let connection = self.open.remove(&id)?;
+        if let Entry::Occupied(mut count) = self.per_address.entry(connection.address) {
+            *count.get_mut() -= 1;
+            if *count.get() == 0 {
+                count.remove();
+            }
+        }
+        Some(connection)
+    }
+}
+
+/// A connection's slot, freed when its task ends (or is dropped).
+struct Slot {
+    server: Arc<Server>,
+    id: u64,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        lock(&self.server.connections).remove(self.id);
+    }
 }
 
 #[derive(Deserialize)]
@@ -151,20 +251,21 @@ impl Server {
 
     async fn run(self: Arc<Self>, listener: TcpListener) {
         let mut shutdown = self.shutdown.subscribe();
-        let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+        let mut tasks = JoinSet::new();
         let notifier = tokio::spawn(Arc::clone(&self).notify_changes());
         loop {
             tokio::select! {
                 _ = stopping(&mut shutdown) => break,
+                Some(_) = tasks.join_next(), if !tasks.is_empty() => {}
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
-                        let Ok(slot) = Arc::clone(&slots).try_acquire_owned() else {
-                            // Too many connections: this one is closed at once.
-                            continue;
-                        };
+                        let admitted = lock(&self.connections).admit(peer.ip(), &self.limits);
+                        // Not admitted: dropped, so closed at once.
+                        let Some((id, evict)) = admitted else { continue };
+                        let slot = Slot { server: Arc::clone(&self), id };
                         let server = Arc::clone(&self);
-                        tokio::spawn(async move {
-                            server.connection(stream, peer).await;
+                        tasks.spawn(async move {
+                            server.connection(stream, peer, id, evict).await;
                             drop(slot);
                         });
                     }
@@ -175,8 +276,11 @@ impl Server {
         }
         // The port closes now; the connections write `end` and finish.
         drop(listener);
-        let all = u32::try_from(MAX_CONNECTIONS).unwrap_or(u32::MAX);
-        let _ = timeout(SHUTDOWN_GRACE, slots.acquire_many(all)).await;
+        let _ = timeout(SHUTDOWN_GRACE, async {
+            while tasks.join_next().await.is_some() {}
+        })
+        .await;
+        tasks.abort_all();
         notifier.abort();
     }
 
@@ -192,15 +296,24 @@ impl Server {
         }
     }
 
-    async fn connection(self: Arc<Self>, mut stream: TcpStream, peer: SocketAddr) {
+    async fn connection(
+        self: Arc<Self>,
+        mut stream: TcpStream,
+        peer: SocketAddr,
+        id: u64,
+        evict: Arc<Notify>,
+    ) {
         let _ = stream.set_nodelay(true);
         let mut shutdown = self.shutdown.subscribe();
         if *shutdown.borrow() {
             return;
         }
-        let deadline = Instant::now() + REQUEST_TIMEOUT;
+        let now = Instant::now();
+        let deadline = now + self.limits.request;
+        let first_byte = now + self.limits.first_byte;
         let read = tokio::select! {
-            read = timeout_at(deadline, read_head(&mut stream)) => read,
+            read = timeout_at(deadline, read_head(&mut stream, first_byte)) => read,
+            _ = evict.notified() => return,
             _ = stopping(&mut shutdown) => return,
         };
         let (head, rest) = match read {
@@ -212,12 +325,15 @@ impl Server {
             }
             Ok(Err(ReadError::Gone)) | Err(_) => return,
         };
+        if !lock(&self.connections).headed(id) {
+            return;
+        }
+        let address = peer.ip();
         match (head.method.as_str(), head.path()) {
-            ("GET", "/events") => self.events(stream, &head, &mut shutdown).await,
+            ("GET", "/events") => self.events(stream, &head, address, &mut shutdown).await,
             ("POST", "/join") => {
-                let ip = peer.ip();
                 let answer = tokio::select! {
-                    answer = timeout_at(deadline, self.join(&mut stream, &head, rest, ip)) => answer,
+                    answer = timeout_at(deadline, self.join(&mut stream, &head, rest, address)) => answer,
                     _ = stopping(&mut shutdown) => return,
                 };
                 if let Ok(Some(answer)) = answer {
@@ -250,15 +366,25 @@ impl Server {
         }
     }
 
-    /// `POST /join`: the answer, or `None` when the client went away.
+    /// `POST /join`: the answer, or `None` when the client went away. Only a request whose JSON
+    /// body was read counts as an attempt.
     async fn join(
         &self,
         stream: &mut TcpStream,
         head: &Head,
         mut body: Vec<u8>,
-        ip: IpAddr,
+        address: IpAddr,
     ) -> Option<Vec<u8>> {
         let bad_request = || http::json(400, r#"{"error":"badRequest"}"#, &[]);
+        // Another site's page: refused (a browser always says where a POST comes from).
+        if !head.same_origin() {
+            return Some(http::json(403, r#"{"error":"badOrigin"}"#, &[]));
+        }
+        // A form of another site could post `text/plain` without asking first; JSON needs the
+        // browser to ask (OPTIONS), which gets 404.
+        if !head.is_json() {
+            return Some(http::json(415, r#"{"error":"badRequest"}"#, &[]));
+        }
         if head.transfer_encoding {
             return Some(bad_request());
         }
@@ -281,15 +407,15 @@ impl Server {
         let Ok(JoinBody { code }) = serde_json::from_slice::<JoinBody>(&body) else {
             return Some(bad_request());
         };
-        let mut access = self.access.lock().unwrap_or_else(PoisonError::into_inner);
-        let answer = match access.try_code(ip, &code, std::time::Instant::now()) {
+        let mut access = lock(&self.access);
+        let answer = match access.try_code(address, &code, std::time::Instant::now()) {
             Verdict::Right => match access::random_token() {
                 Ok(token) => {
                     let cookie = format!(
                         "{}={token}; Path=/; HttpOnly; SameSite=Strict",
                         http::COOKIE
                     );
-                    access.add_token(token);
+                    access.add_token(address, token);
                     ResponseHead::new(204)
                         .header("Cache-Control", http::NO_STORE)
                         .header("Set-Cookie", &cookie)
@@ -313,9 +439,15 @@ impl Server {
 
     /// `GET /events`: checks the cookie, then holds the stream open until the viewer leaves,
     /// is too slow, or the share stops.
-    async fn events(&self, stream: TcpStream, head: &Head, shutdown: &mut watch::Receiver<bool>) {
+    async fn events(
+        &self,
+        stream: TcpStream,
+        head: &Head,
+        address: IpAddr,
+        shutdown: &mut watch::Receiver<bool>,
+    ) {
         let authorised = {
-            let access = self.access.lock().unwrap_or_else(PoisonError::into_inner);
+            let access = lock(&self.access);
             head.session_cookies
                 .iter()
                 .fold(false, |found, token| found | access.token_valid(token))
@@ -324,7 +456,7 @@ impl Server {
             reply(stream, &http::text(401, &[]), &[], shutdown).await;
             return;
         }
-        let viewer = match self.content.join() {
+        let viewer = match self.content.join(address) {
             Ok(viewer) => viewer,
             Err(JoinRefused::TooMany) => {
                 let answer = http::text(503, &[("Retry-After", "5")]);
@@ -338,7 +470,7 @@ impl Server {
             content: &self.content,
             id: viewer.id(),
         };
-        stream_events(stream, &viewer, shutdown).await;
+        stream_events(stream, &viewer, self.limits.ping, shutdown).await;
     }
 }
 
@@ -360,8 +492,12 @@ async fn stopping(shutdown: &mut watch::Receiver<bool>) {
     let _ = shutdown.wait_for(|stop| *stop).await;
 }
 
-/// Reads a request head: the head and the bytes read after it.
-async fn read_head(stream: &mut TcpStream) -> Result<(Head, Vec<u8>), ReadError> {
+/// Reads a request head: the head and the bytes read after it. The first byte must arrive by
+/// `first_byte`.
+async fn read_head(
+    stream: &mut TcpStream,
+    first_byte: Instant,
+) -> Result<(Head, Vec<u8>), ReadError> {
     let mut buf = Vec::with_capacity(1024);
     let mut chunk = [0u8; 4096];
     loop {
@@ -369,11 +505,25 @@ async fn read_head(stream: &mut TcpStream) -> Result<(Head, Vec<u8>), ReadError>
         if room == 0 {
             return Err(ReadError::Head(HeadError::TooLarge));
         }
-        let n = match stream.read(&mut chunk[..room]).await {
+        let read = stream.read(&mut chunk[..room]);
+        let read = if buf.is_empty() {
+            timeout_at(first_byte, read)
+                .await
+                .map_err(|_| ReadError::Gone)?
+        } else {
+            read.await
+        };
+        let n = match read {
             Ok(0) | Err(_) => return Err(ReadError::Gone),
             Ok(n) => n,
         };
+        let start = buf.len();
         buf.extend_from_slice(&chunk[..n]);
+        // Parsed again only when the blank line that ends a head may have arrived (with the 3
+        // bytes before, for one split between two reads): never once per byte.
+        if !http::has_blank_line(&buf[start.saturating_sub(3)..]) {
+            continue;
+        }
         match http::parse_head(&buf) {
             Ok(Some(head)) => {
                 let rest = buf.split_off(head.len.min(buf.len()));
@@ -427,21 +577,29 @@ async fn reply(
 }
 
 /// The event stream of one viewer.
-async fn stream_events(stream: TcpStream, viewer: &Viewer, shutdown: &mut watch::Receiver<bool>) {
+async fn stream_events(
+    stream: TcpStream,
+    viewer: &Viewer,
+    ping_every: Duration,
+    shutdown: &mut watch::Receiver<bool>,
+) {
     let (mut reader, mut writer) = stream.into_split();
     let mut head = ResponseHead::new(200)
         .header("Content-Type", "text/event-stream")
         .header("Cache-Control", http::NO_STORE)
         .finish();
     head.extend_from_slice(STREAM_PREAMBLE.as_bytes());
-    if !write_stream(&mut writer, &head, viewer).await {
+    if !write_stream(&mut writer, &head, viewer, shutdown).await {
         return;
     }
-    let mut ping = tokio::time::interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
+    // A zero period would make the timer panic.
+    let ping_every = ping_every.max(Duration::from_millis(1));
+    let mut ping = tokio::time::interval_at(Instant::now() + ping_every, ping_every);
     ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut scratch = [0u8; 64];
     loop {
         if *shutdown.borrow() {
+            // What was queued is dropped: `end` comes at once.
             let _ = timeout(END_TIMEOUT, async {
                 writer.write_all(&end_frame()).await?;
                 writer.flush().await?;
@@ -455,9 +613,10 @@ async fn stream_events(stream: TcpStream, viewer: &Viewer, shutdown: &mut watch:
             return;
         }
         if !pending.frames.is_empty() {
-            if !write_frames(&mut writer, &pending.frames, viewer).await {
+            if !write_frames(&mut writer, &pending.frames, viewer, shutdown).await {
                 return;
             }
+            viewer.written();
             continue;
         }
         tokio::select! {
@@ -466,7 +625,7 @@ async fn stream_events(stream: TcpStream, viewer: &Viewer, shutdown: &mut watch:
             _ = viewer.kicked() => {}
             _ = viewer.queued() => {}
             _ = ping.tick() => {
-                if !write_stream(&mut writer, PING, viewer).await {
+                if !write_stream(&mut writer, PING, viewer, shutdown).await {
                     return;
                 }
             }
@@ -477,42 +636,133 @@ async fn stream_events(stream: TcpStream, viewer: &Viewer, shutdown: &mut watch:
     }
 }
 
-/// Writes queued messages, gathered into writes of up to [`COALESCE_BYTES`].
+/// Writes queued messages, gathered into writes of up to [`COALESCE_BYTES`]. Once the share
+/// stops, it stops after the write under way (the rest is dropped for `end`).
 async fn write_frames(
     writer: &mut OwnedWriteHalf,
-    frames: &[crate::content::Frame],
+    frames: &[Frame],
     viewer: &Viewer,
+    shutdown: &mut watch::Receiver<bool>,
 ) -> bool {
     let mut gathered: Vec<u8> = Vec::new();
     for frame in frames {
+        if *shutdown.borrow() {
+            return true;
+        }
         if frame.len() >= COALESCE_BYTES {
-            if !gathered.is_empty() && !write_stream(writer, &gathered, viewer).await {
+            if !gathered.is_empty() && !write_stream(writer, &gathered, viewer, shutdown).await {
                 return false;
             }
             gathered.clear();
-            if !write_stream(writer, frame, viewer).await {
+            if !write_stream(writer, frame, viewer, shutdown).await {
                 return false;
             }
         } else {
             gathered.extend_from_slice(frame);
             if gathered.len() >= COALESCE_BYTES {
-                if !write_stream(writer, &gathered, viewer).await {
+                if !write_stream(writer, &gathered, viewer, shutdown).await {
                     return false;
                 }
                 gathered.clear();
             }
         }
     }
-    gathered.is_empty() || write_stream(writer, &gathered, viewer).await
+    gathered.is_empty() || write_stream(writer, &gathered, viewer, shutdown).await
 }
 
 /// Writes and flushes `bytes`; false if the viewer is gone, too slow, or was kicked meanwhile.
-async fn write_stream(writer: &mut OwnedWriteHalf, bytes: &[u8], viewer: &Viewer) -> bool {
+/// If the share stops meanwhile, the write gets [`END_TIMEOUT`] more to finish, so that `end`
+/// follows a whole message.
+async fn write_stream(
+    writer: &mut OwnedWriteHalf,
+    bytes: &[u8],
+    viewer: &Viewer,
+    shutdown: &mut watch::Receiver<bool>,
+) -> bool {
+    let write = timeout(STREAM_WRITE_TIMEOUT, async {
+        writer.write_all(bytes).await?;
+        writer.flush().await
+    });
+    tokio::pin!(write);
     tokio::select! {
-        written = timeout(STREAM_WRITE_TIMEOUT, async {
-            writer.write_all(bytes).await?;
-            writer.flush().await
-        }) => matches!(written, Ok(Ok(()))),
-        _ = viewer.kicked() => false,
+        biased;
+        written = &mut write => return matches!(written, Ok(Ok(()))),
+        _ = viewer.kicked() => return false,
+        _ = stopping(shutdown) => {}
+    }
+    matches!(timeout(END_TIMEOUT, &mut write).await, Ok(Ok(Ok(()))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    fn ip(last: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(192, 168, 1, last))
+    }
+
+    fn limits(connections: usize, per_address: usize) -> Limits {
+        Limits {
+            connections,
+            connections_per_address: per_address,
+            ..Limits::default()
+        }
+    }
+
+    #[test]
+    fn connections_per_address() {
+        let limits = limits(64, 2);
+        let mut connections = Connections::default();
+        let (first, _) = connections.admit(ip(1), &limits).unwrap();
+        connections.admit(ip(1), &limits).unwrap();
+        assert!(connections.admit(ip(1), &limits).is_none());
+        assert!(connections.admit(ip(2), &limits).is_some());
+        connections.remove(first);
+        assert!(connections.admit(ip(1), &limits).is_some());
+        assert_eq!(connections.per_address[&ip(1)], 2);
+    }
+
+    #[test]
+    fn the_oldest_connection_without_a_head_makes_room() {
+        let limits = limits(3, 8);
+        let mut connections = Connections::default();
+        let (a, evict_a) = connections.admit(ip(1), &limits).unwrap();
+        let (b, evict_b) = connections.admit(ip(2), &limits).unwrap();
+        let (c, _) = connections.admit(ip(3), &limits).unwrap();
+        assert!(connections.headed(a), "a sent its head");
+        // Full: b, the oldest still waiting for its head, makes room.
+        let (d, _) = connections.admit(ip(4), &limits).unwrap();
+        assert!(!connections.open.contains_key(&b));
+        assert!(!connections.per_address.contains_key(&ip(2)));
+        assert!(!connections.headed(b), "b was closed meanwhile");
+        connections.remove(b);
+        assert_eq!(connections.open.len(), 3);
+        // Then c.
+        connections.admit(ip(5), &limits).unwrap();
+        assert!(!connections.open.contains_key(&c));
+        // When every connection sent its head, the newcomer is refused.
+        assert!(connections.headed(d));
+        let last = *connections.open.keys().last().unwrap();
+        assert!(connections.headed(last));
+        assert!(connections.admit(ip(6), &limits).is_none());
+        assert_eq!(connections.open.len(), 3);
+        // The evicted connections were told; the others were not.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            assert!(
+                timeout(Duration::from_millis(10), evict_b.notified())
+                    .await
+                    .is_ok()
+            );
+            assert!(
+                timeout(Duration::from_millis(10), evict_a.notified())
+                    .await
+                    .is_err()
+            );
+        });
     }
 }
