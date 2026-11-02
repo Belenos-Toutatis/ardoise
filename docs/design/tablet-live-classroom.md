@@ -361,6 +361,9 @@ Review fixes (after the independent review of M4):
 
 ## M8: pen and touch, writing over the presentation
 
+*Since M11 (decision Q6, 2026-11-02) the marks are also reported to Rust for the LAN share's viewers: see
+docs/design/lan-share.md, "Marks written over the presentation". The window still draws its own marks locally.*
+
 **Writing over the presentation.** Until M8 the presentation window was only a mirror: no pointer handling at all
 (`touch-action: none` and a cursor that hides after 2 s). Now, in the **presentation window only**, the pen, a finger
 or the mouse write **temporary marks** over the projected page:

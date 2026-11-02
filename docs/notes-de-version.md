@@ -65,9 +65,9 @@ version fait et surtout **ce qui n'a pas encore été essayé**. Le détail tech
   droit d'administrateur, aucun compte, aucune connexion sauf le téléchargement facultatif d'OpenH264 et le partage sur
   le réseau local lancé à la main.
 - **Partager sur le réseau** (mode direct et éditeur) : un autre ordinateur du même réseau affiche dans un navigateur la
-  feuille du mode direct ou la page de la note ouverte, et rien d'autre ; adresse, QR code, code de 6 caractères, pause,
-  arrêt. La première fois, Windows demande l'autorisation du pare-feu (droits d'administrateur) : répondre « Réseaux
-  privés ».
+  feuille du mode direct (avec les annotations écrites par-dessus la présentation) ou la page de la note ouverte, et
+  rien d'autre ; adresse, QR code, code de 6 caractères, pause, arrêt. La première fois, Windows demande
+  l'autorisation du pare-feu (droits d'administrateur) : répondre « Réseaux privés ».
 - Archive de distribution (`cargo xtask dist`) : un dossier `ardoise-<version>` avec `ardoise.exe`, `LICENSE`,
   `THIRD-PARTY-NOTICES`, `LISEZMOI.txt` et les guides en pages HTML (`guide\`). Écran **À propos** (version, licence,
   crédits, composants).

@@ -306,6 +306,26 @@ share start, a few hundred KB.
   the viewers' sinks keeps the last batch and its text (`Arc<str>`): viewers that were up to date get equal batches
   one after the other, and the text (the whole page, after a page change) is written once for all of them.
 
+### Marks written over the presentation (Q6, decided 2026-11-02)
+
+The viewers show the temporary marks written over the presentation window (M8, `lib/live-marks.ts`), so that the
+other screen shows exactly what the projector shows. The presentation window keeps drawing its own marks locally
+(no echo, no added latency on the projector) and also reports them:
+
+- `MarksSender` (`lib/live-marks-sender.ts`) calls `live_set_marks(pageIndex, marks)` with the whole list for the
+  page, the mark in progress included, reduced to tool, colour, width and rounded points `{x, y, p}`; at most every
+  50 ms, one call at a time (order kept); an empty list goes at once; closing the window sends `[]`.
+- `LiveSession` keeps the list with the page it belongs to (index, orientation, page size). `set_marks` ignores a
+  list for another page (one sent late for the page just left). `sanitize_marks` bounds it (200 marks, 4 000 points
+  per mark, 20 000 in all, the first ones kept), drops non-finite points and clamps coordinates, pressure and width.
+  A snapshot of another page, orientation or page size clears the marks, as the window does; so do closing the
+  presentation window and a new session. Clearing the page, a style or a view change keep them, as in the window.
+- `LiveEvent::Marks { marks }` is coalesced like `View` (the latest list wins); a late subscriber gets it after its
+  snapshot, and `current_events` includes it, so the frozen image of a pause shows the marks of that moment.
+- `feed.rs` writes it from the allow list (`SharedMark`, `SharedMarkPoint`); the viewer's `LiveState.marks` feeds
+  `buildScene`, which draws them as the presentation does. The control window stores the event and never draws it.
+- Nothing about the marks reaches the note or the library.
+
 ### Note of the editor
 
 `share_show({ kind: 'note', note, imageKey })`: the runtime builds `SharedPage` from the editor's note (unsaved state

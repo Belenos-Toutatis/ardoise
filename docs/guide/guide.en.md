@@ -325,7 +325,8 @@ mistake).
 On the projected window you can annotate the page with the pen, a finger or the mouse: the annotations are red (yellow
 on the blackboard). The back of the pen erases them one by one; the **Clear the marks** button (which appears with the
 cursor) or the `Delete` key erases them all; they also disappear when the page changes. *They are never saved in the
-note.* Two fingers zoom the projected area.
+note.* While the sheet is shared on the network (see below), the other computer shows them too. Two fingers
+zoom the projected area.
 
 ### On the keyboard
 
@@ -341,7 +342,8 @@ school's firewall: test H4 is planned at work.*
 Another computer on the same network (for instance the classroom PC linked to the projector) can show the sheet in a
 *plain web browser*: nothing to install on it. It shows:
 
-- during live mode, the live sheet, like the presentation window (zoomed area, blackboard, laser pointer);
+- during live mode, the live sheet, like the presentation window (zoomed area, blackboard, laser pointer, marks
+  written over the presentation);
 - when a note is open in the editor, that note's page, including your unsaved changes;
 - otherwise (library, settings), a waiting screen.
 

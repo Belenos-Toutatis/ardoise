@@ -343,7 +343,8 @@ jamais sur ce bouton (c'est ce qui évite d'effacer la page suivante par mégard
 Sur la fenêtre projetée, vous pouvez annoter la page au stylet, au doigt ou à la souris : les annotations sont
 rouges (jaunes sur le tableau noir). Le dos du stylet les efface une à une ; le bouton **Effacer les annotations**
 (qui apparaît avec le curseur) ou la touche `Suppr` les efface toutes ; elles disparaissent aussi au changement de page.
-*Elles ne sont jamais enregistrées dans la note.* Deux doigts zooment la zone projetée.
+*Elles ne sont jamais enregistrées dans la note.* Pendant un partage sur le réseau (voir plus bas), l'autre ordinateur
+les montre aussi. Deux doigts zooment la zone projetée.
 
 ### Au clavier
 
@@ -360,7 +361,7 @@ Un autre ordinateur du même réseau (par exemple le PC de la salle, relié au v
 dans un *simple navigateur* : rien à installer dessus. Il montre :
 
 - pendant le mode direct, la feuille en direct, comme la fenêtre de présentation (zone zoomée, tableau noir, pointeur
-  laser) ;
+  laser, annotations écrites par-dessus la présentation) ;
 - quand une note est ouverte dans l'éditeur, la page de cette note, y compris vos modifications non enregistrées ;
 - sinon (bibliothèque, réglages), un écran d'attente.
 
