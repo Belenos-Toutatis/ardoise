@@ -213,6 +213,8 @@ crates/
   ardoise-inkspace  import des notes Inkspace
   ardoise-hwr       reconnaissance d'écriture (P2)
   ardoise-mcp       serveur MCP : outils et invites pour un assistant (§4.9)
+  ardoise-share     partage de la feuille sur le réseau local : petit serveur HTTP en lecture seule
+                    (code, flux d'évènements) (§4.10)
 app/
   src-tauri/        ardoise.exe : commandes, fenêtres, options en ligne de commande
                     (--self-test, --diagnostic, --import-inkspace, --mcp…)
