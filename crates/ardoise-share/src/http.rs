@@ -35,6 +35,10 @@ pub(crate) struct Head {
     pub transfer_encoding: bool,
     /// Values of the session cookie, in the order given.
     pub session_cookies: Vec<String>,
+    /// Values of the `Content-Type`, `Origin` and `Host` headers, in the order given.
+    pub content_types: Vec<String>,
+    pub origins: Vec<String>,
+    pub hosts: Vec<String>,
 }
 
 impl Head {
@@ -46,6 +50,37 @@ impl Head {
             None => &self.target,
         }
     }
+
+    /// One `Content-Type` header whose media type is `application/json` (parameters such as
+    /// `charset` allowed). A browser sends this type across origins only after a preflight
+    /// `OPTIONS`, which gets 404.
+    pub fn is_json(&self) -> bool {
+        match self.content_types.as_slice() {
+            [content_type] => content_type
+                .split(';')
+                .next()
+                .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/json")),
+            _ => false,
+        }
+    }
+
+    /// No `Origin` header (not a browser, or a request that is not cross-site), or one that is
+    /// `http://` followed by the `Host` header: the page served by this share.
+    pub fn same_origin(&self) -> bool {
+        match (self.origins.as_slice(), self.hosts.as_slice()) {
+            ([], _) => true,
+            ([origin], [host]) => origin
+                .strip_prefix("http://")
+                .is_some_and(|origin_host| origin_host.eq_ignore_ascii_case(host)),
+            _ => false,
+        }
+    }
+}
+
+/// True if `bytes` hold the blank line that ends a request head (`\n\n` or `\n\r\n`): only
+/// then is the head worth parsing again (parsing at every byte would be quadratic).
+pub(crate) fn has_blank_line(bytes: &[u8]) -> bool {
+    bytes.windows(2).any(|w| w == b"\n\n") || bytes.windows(3).any(|w| w == b"\n\r\n")
 }
 
 /// The `Content-Length` of a request.
@@ -98,15 +133,27 @@ pub(crate) fn parse_head(buf: &[u8]) -> Result<Option<Head>, HeadError> {
     let mut content_length = ContentLength::Absent;
     let mut transfer_encoding = false;
     let mut session_cookies = Vec::new();
+    let mut content_types = Vec::new();
+    let mut origins = Vec::new();
+    let mut hosts = Vec::new();
+    // A value that is not UTF-8 is kept lossily: it then matches nothing expected.
+    let text = |value: &[u8]| String::from_utf8_lossy(value).trim().to_owned();
     for header in request.headers.iter() {
-        if header.name.eq_ignore_ascii_case("content-length") {
+        let name = header.name;
+        if name.eq_ignore_ascii_case("content-length") {
             content_length = merge_length(content_length, header.value);
-        } else if header.name.eq_ignore_ascii_case("transfer-encoding") {
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
             transfer_encoding = true;
-        } else if header.name.eq_ignore_ascii_case("cookie")
+        } else if name.eq_ignore_ascii_case("cookie")
             && let Ok(value) = std::str::from_utf8(header.value)
         {
             session_cookies.extend(cookie_values(value, COOKIE).map(str::to_owned));
+        } else if name.eq_ignore_ascii_case("content-type") {
+            content_types.push(text(header.value));
+        } else if name.eq_ignore_ascii_case("origin") {
+            origins.push(text(header.value));
+        } else if name.eq_ignore_ascii_case("host") {
+            hosts.push(text(header.value));
         }
     }
     Ok(Some(Head {
@@ -116,6 +163,9 @@ pub(crate) fn parse_head(buf: &[u8]) -> Result<Option<Head>, HeadError> {
         content_length,
         transfer_encoding,
         session_cookies,
+        content_types,
+        origins,
+        hosts,
     }))
 }
 
@@ -157,6 +207,7 @@ fn reason(status: u16) -> &'static str {
         403 => "Forbidden",
         404 => "Not Found",
         413 => "Content Too Large",
+        415 => "Unsupported Media Type",
         429 => "Too Many Requests",
         431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
@@ -357,6 +408,73 @@ mod tests {
             head.session_cookies,
             vec!["one".to_owned(), "two".to_owned()]
         );
+    }
+
+    #[test]
+    fn json_content_type() {
+        let head = |headers: &str| {
+            parse(&format!("POST /join HTTP/1.1\r\n{headers}\r\n"))
+                .unwrap()
+                .unwrap()
+        };
+        for json in [
+            "Content-Type: application/json\r\n",
+            "content-type: Application/JSON\r\n",
+            "Content-Type: application/json; charset=utf-8\r\n",
+            "Content-Type:  application/json ;charset=UTF-8\r\n",
+        ] {
+            assert!(head(json).is_json(), "{json}");
+        }
+        for other in [
+            "",
+            "Content-Type: text/plain\r\n",
+            "Content-Type: application/x-www-form-urlencoded\r\n",
+            "Content-Type: multipart/form-data; boundary=x\r\n",
+            "Content-Type: application/jsonx\r\n",
+            "Content-Type: text/plain; a=application/json\r\n",
+            "Content-Type: application/json\r\nContent-Type: application/json\r\n",
+        ] {
+            assert!(!head(other).is_json(), "{other}");
+        }
+    }
+
+    #[test]
+    fn origins() {
+        let head = |headers: &str| {
+            parse(&format!("POST /join HTTP/1.1\r\n{headers}\r\n"))
+                .unwrap()
+                .unwrap()
+        };
+        for same in [
+            "Host: 192.168.1.23:8765\r\n",
+            "",
+            "Host: 192.168.1.23:8765\r\nOrigin: http://192.168.1.23:8765\r\n",
+            "Origin: http://PC.local:8765\r\nHost: pc.local:8765\r\n",
+        ] {
+            assert!(head(same).same_origin(), "{same}");
+        }
+        for other in [
+            "Host: 192.168.1.23:8765\r\nOrigin: http://evil.example\r\n",
+            "Host: 192.168.1.23:8765\r\nOrigin: null\r\n",
+            "Host: 192.168.1.23:8765\r\nOrigin: https://192.168.1.23:8765\r\n",
+            "Host: 192.168.1.23:8765\r\nOrigin: http://192.168.1.23\r\n",
+            "Host: 192.168.1.23:8765\r\nOrigin: http://192.168.1.23:8765/\r\n",
+            "Origin: http://192.168.1.23:8765\r\n",
+            "Host: a\r\nHost: a\r\nOrigin: http://a\r\n",
+            "Host: a\r\nOrigin: http://a\r\nOrigin: http://a\r\n",
+        ] {
+            assert!(!head(other).same_origin(), "{other}");
+        }
+    }
+
+    #[test]
+    fn blank_lines() {
+        assert!(has_blank_line(b"GET / HTTP/1.1\r\n\r\n"));
+        assert!(has_blank_line(b"\n\r\n"));
+        assert!(has_blank_line(b"x\n\n"));
+        assert!(!has_blank_line(b"GET / HTTP/1.1\r\nHost: x\r\n"));
+        assert!(!has_blank_line(b"\r\n\r"));
+        assert!(!has_blank_line(b""));
     }
 
     #[test]

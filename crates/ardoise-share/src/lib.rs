@@ -163,8 +163,9 @@ impl LiveViewer {
 
 /// Called when the number of viewers, the pause or what is shown changes (outside the share's
 /// lock, from its thread). Changes in quick succession may give a single call, always with the
-/// latest status. It runs on the share's thread: it must return quickly. Never called once
-/// [`Share::stop`] has returned.
+/// latest status. It runs on the share's thread: it must return quickly, and it must not call
+/// [`Share::stop`] (nor drop the [`Share`]): `stop` could not wait for the thread it runs on, so
+/// the port might still be open when it returns. Never called once [`Share::stop`] has returned.
 pub type OnChange = Box<dyn Fn(ShareStatus) + Send + Sync>;
 
 /// Failure to start a share.
@@ -193,6 +194,44 @@ impl ShareError {
     }
 }
 
+/// The server's limits (`docs/design/lan-share.md`, "Threads and lifetime"). Not part of the
+/// interface: the defaults are the design's; the tests shrink them to reach them from one
+/// loopback address.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// Connections open at once. When all are taken, the oldest connection that has not yet
+    /// sent a whole request head is closed for the newcomer; if every one has, the newcomer is
+    /// closed at once.
+    pub connections: usize,
+    /// Connections open at once from one address (more are closed at once).
+    pub connections_per_address: usize,
+    /// Event streams open at once (more get 503).
+    pub streams: usize,
+    /// Event streams open at once from one address (more get 503).
+    pub streams_per_address: usize,
+    /// Time for the first byte of a request to arrive.
+    pub first_byte: Duration,
+    /// Time for the whole request head (and the body of `POST /join`) to arrive.
+    pub request: Duration,
+    /// Time between two comments on an idle event stream.
+    pub ping: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            connections: 64,
+            connections_per_address: 8,
+            streams: 32,
+            streams_per_address: 4,
+            first_byte: Duration::from_secs(3),
+            request: Duration::from_secs(10),
+            ping: Duration::from_secs(15),
+        }
+    }
+}
+
 /// Longest wait for the server's thread in [`Share::stop`].
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -213,7 +252,19 @@ impl Share {
         feed: Arc<dyn LiveFeed>,
         on_change: OnChange,
     ) -> Result<Share, ShareError> {
-        let running = server::start(config, assets, feed, on_change)?;
+        Self::start_with_limits(config, Limits::default(), assets, feed, on_change)
+    }
+
+    /// [`Share::start`] with other limits (tests).
+    #[doc(hidden)]
+    pub fn start_with_limits(
+        config: ShareConfig,
+        limits: Limits,
+        assets: Assets,
+        feed: Arc<dyn LiveFeed>,
+        on_change: OnChange,
+    ) -> Result<Share, ShareError> {
+        let running = server::start(config, limits, assets, feed, on_change)?;
         Ok(Share {
             server: running.server,
             thread: Mutex::new(Some((running.thread, running.done))),
@@ -256,8 +307,8 @@ impl Share {
     }
 
     /// Tells every viewer `end`, closes every connection and the port, and waits for the
-    /// server's thread (at most 2 s). Can be repeated. Called from the share's own thread (from
-    /// `on_change`), it does not wait.
+    /// server's thread (at most 2 s). Can be repeated. Must not be called from `on_change`: on
+    /// the share's own thread it cannot wait (it then only asks the thread to stop).
     pub fn stop(&self) {
         // Held until the thread is joined: a second caller also returns with the port closed.
         let mut thread = self.thread.lock().unwrap_or_else(PoisonError::into_inner);

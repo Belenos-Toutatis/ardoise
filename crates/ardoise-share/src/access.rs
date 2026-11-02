@@ -15,9 +15,15 @@ pub(crate) const CODE_LEN: usize = 6;
 pub(crate) const MAX_WRONG: usize = 5;
 /// How long a wrong code counts.
 pub(crate) const WINDOW: Duration = Duration::from_secs(5 * 60);
-/// Session tokens kept (the oldest is forgotten first).
+/// Session tokens kept per address: a new join from an address that has as many forgets that
+/// address's oldest token, so that one address can never push out the others' tokens.
+pub(crate) const MAX_TOKENS_PER_ADDRESS: usize = 8;
+/// Session tokens kept in all (a last resort: 32 addresses at their own limit; the oldest is
+/// forgotten first).
 pub(crate) const MAX_TOKENS: usize = 256;
-/// Addresses whose wrong codes are remembered (the oldest is forgotten first).
+/// Addresses whose wrong codes are remembered. When it is full of records still running, an
+/// address without one gets 429 until the first record expires: nothing is forgotten early,
+/// which would let many addresses reset each other's count.
 pub(crate) const MAX_ADDRESSES: usize = 4096;
 
 /// Random bytes accepted by the rejection sampling: the largest multiple of 31 that fits in a
@@ -87,7 +93,8 @@ pub(crate) enum Verdict {
 #[derive(Debug)]
 pub(crate) struct Access {
     code: String,
-    tokens: VecDeque<String>,
+    /// Tokens given, oldest first, with the address that joined.
+    tokens: VecDeque<(IpAddr, String)>,
     wrong: HashMap<IpAddr, VecDeque<Instant>>,
 }
 
@@ -106,19 +113,27 @@ impl Access {
             forget_old(times, now);
             if times.len() >= MAX_WRONG {
                 let oldest = times.front().copied().unwrap_or(now);
-                let wait = WINDOW.saturating_sub(now.saturating_duration_since(oldest));
-                let retry_after = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
                 return Verdict::TooMany {
-                    retry_after: retry_after.max(1),
+                    retry_after: seconds_until_expiry(oldest, now),
+                };
+            }
+        } else if self.wrong.len() >= MAX_ADDRESSES {
+            // A new address and no room to count its attempts: refused before the code is
+            // compared, or the limit could be dodged from new addresses.
+            self.wrong.retain(|_, times| {
+                forget_old(times, now);
+                !times.is_empty()
+            });
+            if self.wrong.len() >= MAX_ADDRESSES {
+                let first_to_expire = self.wrong.values().filter_map(|t| t.back().copied()).min();
+                return Verdict::TooMany {
+                    retry_after: seconds_until_expiry(first_to_expire.unwrap_or(now), now),
                 };
             }
         }
         if constant_time_eq(normalize_code(typed).as_bytes(), self.code.as_bytes()) {
             self.wrong.remove(&address);
             return Verdict::Right;
-        }
-        if !self.wrong.contains_key(&address) && self.wrong.len() >= MAX_ADDRESSES {
-            self.make_room(now);
         }
         let times = self.wrong.entry(address).or_default();
         times.push_back(now);
@@ -128,36 +143,24 @@ impl Access {
         }
     }
 
-    /// Forgets the addresses whose wrong codes are all too old; if that is not enough, the one
-    /// whose last wrong code is the oldest.
-    fn make_room(&mut self, now: Instant) {
-        self.wrong.retain(|_, times| {
-            forget_old(times, now);
-            !times.is_empty()
-        });
-        if self.wrong.len() >= MAX_ADDRESSES {
-            let oldest = self
-                .wrong
-                .iter()
-                .min_by_key(|(_, times)| times.back().copied())
-                .map(|(address, _)| *address);
-            if let Some(address) = oldest {
-                self.wrong.remove(&address);
-            }
+    /// Keeps a token given to a viewer at `address`: at most [`MAX_TOKENS_PER_ADDRESS`] per
+    /// address (that address's oldest is forgotten), [`MAX_TOKENS`] in all.
+    pub fn add_token(&mut self, address: IpAddr, token: String) {
+        let own = self.tokens.iter().filter(|(a, _)| *a == address).count();
+        if own >= MAX_TOKENS_PER_ADDRESS
+            && let Some(index) = self.tokens.iter().position(|(a, _)| *a == address)
+        {
+            self.tokens.remove(index);
         }
-    }
-
-    /// Keeps a token given to a viewer (at most [`MAX_TOKENS`]).
-    pub fn add_token(&mut self, token: String) {
         while self.tokens.len() >= MAX_TOKENS {
             self.tokens.pop_front();
         }
-        self.tokens.push_back(token);
+        self.tokens.push_back((address, token));
     }
 
     /// True if `candidate` is one of the tokens given (compared in constant time).
     pub fn token_valid(&self, candidate: &str) -> bool {
-        self.tokens.iter().fold(false, |found, token| {
+        self.tokens.iter().fold(false, |found, (_, token)| {
             found | constant_time_eq(token.as_bytes(), candidate.as_bytes())
         })
     }
@@ -167,6 +170,12 @@ impl Access {
     fn addresses(&self) -> usize {
         self.wrong.len()
     }
+}
+
+/// Whole seconds (at least 1) until a wrong code made at `at` stops counting.
+fn seconds_until_expiry(at: Instant, now: Instant) -> u64 {
+    let wait = WINDOW.saturating_sub(now.saturating_duration_since(at));
+    (wait.as_secs() + u64::from(wait.subsec_nanos() > 0)).max(1)
 }
 
 /// Drops the wrong codes older than [`WINDOW`].
@@ -259,15 +268,45 @@ mod tests {
 
         let mut access = Access::new("ABCDEF".into());
         assert!(!access.token_valid(&token));
-        access.add_token(token.clone());
+        access.add_token(ip(1), token.clone());
         assert!(access.token_valid(&token));
         assert!(!access.token_valid(&token[..63]));
         assert!(!access.token_valid(""));
-        for _ in 0..MAX_TOKENS {
-            access.add_token(random_token().unwrap());
+    }
+
+    #[test]
+    fn one_address_cannot_push_out_the_others_tokens() {
+        let mut access = Access::new("ABCDEF".into());
+        let first = random_token().unwrap();
+        access.add_token(ip(1), first.clone());
+        let mut own = Vec::new();
+        for _ in 0..1000 {
+            let token = random_token().unwrap();
+            access.add_token(ip(2), token.clone());
+            own.push(token);
         }
-        assert!(!access.token_valid(&token), "the oldest token is forgotten");
+        assert!(
+            access.token_valid(&first),
+            "another address's token is kept"
+        );
+        // The address keeps its last 8 tokens only.
+        let (old, last) = own.split_at(own.len() - MAX_TOKENS_PER_ADDRESS);
+        assert!(last.iter().all(|t| access.token_valid(t)));
+        assert!(old.iter().all(|t| !access.token_valid(t)));
+        assert_eq!(access.tokens.len(), 1 + MAX_TOKENS_PER_ADDRESS);
+
+        // The global limit, as a last resort: 40 addresses at their own limit.
+        let mut access = Access::new("ABCDEF".into());
+        for a in 0..40u8 {
+            for _ in 0..MAX_TOKENS_PER_ADDRESS {
+                access.add_token(ip(a), random_token().unwrap());
+            }
+        }
         assert_eq!(access.tokens.len(), MAX_TOKENS);
+        assert!(
+            access.tokens.iter().all(|(a, _)| *a >= ip(8)),
+            "the oldest forgotten"
+        );
     }
 
     #[test]
@@ -328,28 +367,54 @@ mod tests {
     }
 
     #[test]
-    fn addresses_remembered_are_bounded() {
+    fn a_full_table_refuses_new_addresses_without_forgetting() {
         let mut access = Access::new("K7MQ2X".into());
         let start = Instant::now();
+        let address = |i: u32| IpAddr::V4(Ipv4Addr::from(0x0a00_0000 + i));
         for i in 0..MAX_ADDRESSES as u32 {
-            let address = IpAddr::V4(Ipv4Addr::from(0x0a00_0000 + i));
             let at = start + Duration::from_millis(u64::from(i));
-            access.try_code(address, "WRONG1", at);
+            access.try_code(address(i), "WRONG1", at);
         }
         assert_eq!(access.addresses(), MAX_ADDRESSES);
+
+        // A new address is refused, even with the right code, until the first record expires
+        // (the one made at `start`): 300 s - 10 s = 290 s.
         let late = start + Duration::from_secs(10);
-        access.try_code(ip(1), "WRONG1", late);
-        assert_eq!(access.addresses(), MAX_ADDRESSES);
-        // The oldest (10.0.0.0) was forgotten; the newest are still there.
-        assert!(
-            !access
-                .wrong
-                .contains_key(&IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)))
+        assert_eq!(
+            access.try_code(ip(1), "K7MQ2X", late),
+            Verdict::TooMany { retry_after: 290 }
         );
-        assert!(access.wrong.contains_key(&ip(1)));
-        // After the window, the expired records make room at once.
-        let later = start + WINDOW + Duration::from_secs(5);
-        access.try_code(ip(2), "WRONG1", later);
-        assert_eq!(access.addresses(), 2);
+        assert_eq!(
+            access.try_code(ip(1), "WRONG1", late),
+            Verdict::TooMany { retry_after: 290 }
+        );
+        assert_eq!(access.addresses(), MAX_ADDRESSES);
+        assert!(!access.wrong.contains_key(&ip(1)));
+        // Nothing was forgotten: the first address still has its wrong code.
+        assert_eq!(access.wrong[&address(0)].len(), 1);
+        // An address already counted goes on as before.
+        assert_eq!(
+            access.try_code(address(7), "WRONG1", late),
+            Verdict::Wrong { remaining: 3 }
+        );
+        assert_eq!(access.try_code(address(8), "K7MQ2X", late), Verdict::Right);
+        // A right code freed a place: the next new address is counted.
+        assert_eq!(
+            access.try_code(ip(1), "WRONG1", late),
+            Verdict::Wrong { remaining: 4 }
+        );
+        assert_eq!(
+            access.try_code(ip(2), "K7MQ2X", late),
+            Verdict::TooMany { retry_after: 290 }
+        );
+
+        // Once the first records expire, they make room at once.
+        let later = start + WINDOW + Duration::from_secs(1);
+        assert_eq!(access.try_code(ip(2), "K7MQ2X", later), Verdict::Right);
+        assert_eq!(
+            access.try_code(ip(3), "WRONG1", later),
+            Verdict::Wrong { remaining: 4 }
+        );
+        assert!(access.addresses() < MAX_ADDRESSES);
     }
 }

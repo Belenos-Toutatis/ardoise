@@ -5,12 +5,12 @@
 
 mod common;
 
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, TcpStream};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ardoise_share::{LiveFeed, Share, ShareConfig, ShareError};
+use ardoise_share::{Limits, LiveFeed, Share, ShareConfig, ShareError};
 use common::*;
 
 const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -189,32 +189,181 @@ fn a_silent_client_does_not_block_others() {
     assert!(started.elapsed() < Duration::from_secs(1));
 }
 
-#[test]
-fn connections_are_limited() {
-    let h = Harness::start();
-    let idle: Vec<TcpStream> = (0..64).map(|_| connect(h.port())).collect();
-    // Let the server accept them all.
-    std::thread::sleep(Duration::from_millis(300));
-    let mut extra = connect(h.port());
-    let started = Instant::now();
+/// The server closed `stream` (end of stream or reset) within `within`, not a read timeout.
+fn closed_soon(stream: &mut TcpStream, within: Duration) -> bool {
+    stream.set_read_timeout(Some(within)).unwrap();
     let mut byte = [0u8; 1];
-    // Closed at once: end of stream or reset, not a timeout.
-    match extra.read(&mut byte) {
-        Ok(n) => assert_eq!(n, 0),
-        Err(error) => assert!(
-            !matches!(
-                error.kind(),
-                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-            ),
-            "{error}"
-        ),
+    match stream.read(&mut byte) {
+        Ok(n) => n == 0,
+        Err(error) => !matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
     }
+}
+
+/// Nothing comes on `stream` within `wait`, and it is not closed.
+fn still_open(stream: &mut TcpStream, wait: Duration) -> bool {
+    stream.set_read_timeout(Some(wait)).unwrap();
+    let mut byte = [0u8; 1];
+    matches!(
+        stream.read(&mut byte),
+        Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut)
+    )
+}
+
+fn serves(port: u16) -> bool {
+    exchange(port, b"GET / HTTP/1.1\r\n\r\n").is_ok_and(|answer| answer.status == 200)
+}
+
+#[test]
+fn connections_per_address_are_limited() {
+    let h = Harness::start();
+    let mut idle: Vec<TcpStream> = (0..8).map(|_| connect(h.port())).collect();
+    // Let the server accept them all.
+    std::thread::sleep(Duration::from_millis(200));
+    let mut ninth = connect(h.port());
+    let started = Instant::now();
+    assert!(closed_soon(&mut ninth, SOON), "the ninth is closed at once");
     assert!(started.elapsed() < Duration::from_secs(2));
-    drop(idle);
-    // The idle connections end when their clients close: the server serves again.
+    for stream in &mut idle {
+        assert!(still_open(stream, Duration::from_millis(20)));
+    }
+    // One leaves: room for another.
+    drop(idle.pop());
+    assert!(wait_until(SOON, || serves(h.port())));
+}
+
+#[test]
+fn the_oldest_connection_without_a_request_makes_room() {
+    let h = Harness::with_limits(Limits {
+        connections: 4,
+        connections_per_address: 64,
+        ..Limits::default()
+    });
+    let mut idle = Vec::new();
+    for _ in 0..4 {
+        idle.push(connect(h.port()));
+        // Accepted in this order.
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    // Every slot is taken by a connection that sent nothing: a newcomer is served, and the
+    // oldest of them was closed for it.
+    let answer = exchange(h.port(), b"GET / HTTP/1.1\r\n\r\n").unwrap();
+    assert_eq!(answer.status, 200);
+    assert!(closed_soon(&mut idle[0], SOON));
+    for stream in &mut idle[1..] {
+        assert!(still_open(stream, Duration::from_millis(20)));
+    }
+}
+
+#[test]
+fn connections_that_sent_their_request_never_make_room() {
+    let h = Harness::with_limits(Limits {
+        connections: 2,
+        connections_per_address: 64,
+        streams_per_address: 32,
+        ..Limits::default()
+    });
+    let cookie = h.cookie();
+    // Until the join's connection has ended, the second stream finds no room.
+    let mut opened = Vec::new();
     assert!(wait_until(SOON, || {
-        exchange(h.port(), b"GET / HTTP/1.1\r\n\r\n").is_ok_and(|answer| answer.status == 200)
+        if let Some(Ok(stream)) = try_open_events(h.port(), Some(&cookie)) {
+            opened.push(stream);
+        }
+        opened.len() == 2
     }));
+    let (mut a, mut b) = (opened.remove(0), opened.remove(0));
+    // Both slots hold event streams: a newcomer is closed at once.
+    let mut extra = connect(h.port());
+    assert!(closed_soon(&mut extra, SOON));
+    for stream in [&mut a, &mut b] {
+        assert_eq!(stream.next_event(SOON), Some(SseEvent::Retry(2000)));
+        assert_eq!(stream.expect(), waiting());
+    }
+    h.share.show_note(ardoise_share::NoteUpdate {
+        full: note("n", 1),
+        append: None,
+    });
+    assert_eq!(a.expect(), json(&note("n", 1)));
+    assert_eq!(b.expect(), json(&note("n", 1)));
+}
+
+#[test]
+fn a_request_must_start_soon_and_end_in_time() {
+    let h = Harness::with_limits(Limits {
+        first_byte: Duration::from_millis(200),
+        request: Duration::from_millis(800),
+        ..Limits::default()
+    });
+    // Nothing sent: closed once the first byte is late, without an answer.
+    let mut silent = connect(h.port());
+    let started = Instant::now();
+    let mut bytes = Vec::new();
+    let _ = silent.read_to_end(&mut bytes);
+    let took = started.elapsed();
+    assert!(bytes.is_empty());
+    assert!(
+        took >= Duration::from_millis(150) && took < Duration::from_secs(2),
+        "{took:?}"
+    );
+
+    // A head begun in time and never finished: closed when the request is late.
+    let mut slow = connect(h.port());
+    slow.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n").unwrap();
+    let started = Instant::now();
+    let mut bytes = Vec::new();
+    let _ = slow.read_to_end(&mut bytes);
+    let took = started.elapsed();
+    assert!(bytes.is_empty());
+    assert!(
+        took >= Duration::from_millis(500) && took < Duration::from_secs(3),
+        "{took:?}"
+    );
+
+    // A head that keeps coming in time is served.
+    let mut steady = connect(h.port());
+    steady.set_nodelay(true).unwrap();
+    for byte in b"GET / HTTP/1.1\r\nHost: x\r\n\r\n" {
+        steady.write_all(&[*byte]).unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let mut bytes = Vec::new();
+    steady.read_to_end(&mut bytes).unwrap();
+    assert!(bytes.starts_with(b"HTTP/1.1 200 OK\r\n"));
+}
+
+#[test]
+fn a_head_sent_one_byte_at_a_time() {
+    let h = Harness::start();
+    for head in [
+        "GET /?x HTTP/1.1\r\nHost: share\r\nAccept: */*\r\n\r\n".to_owned(),
+        // Bare line feeds.
+        "GET / HTTP/1.1\nHost: share\n\n".to_owned(),
+        // A long head (12 KiB), still under the limit.
+        format!(
+            "GET / HTTP/1.1\r\nHost: share\r\nX-Long: {}\r\n\r\n",
+            "a".repeat(12 * 1024)
+        ),
+    ] {
+        let mut stream = connect(h.port());
+        stream.set_nodelay(true).unwrap();
+        let started = Instant::now();
+        for byte in head.as_bytes() {
+            stream.write_all(&[*byte]).unwrap();
+        }
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).unwrap();
+        assert!(
+            bytes.starts_with(b"HTTP/1.1 200 OK\r\n"),
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
+        assert!(bytes.ends_with(PAGE.as_bytes()));
+        eprintln!(
+            "{} bytes one at a time: {:?}",
+            head.len(),
+            started.elapsed()
+        );
+    }
 }
 
 #[test]

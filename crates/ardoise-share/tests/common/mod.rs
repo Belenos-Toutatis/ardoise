@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ardoise_share::{
-    Asset, Assets, LiveFeed, LiveViewer, OnChange, Share, ShareConfig, ShareStatus,
+    Asset, Assets, Limits, LiveFeed, LiveViewer, OnChange, Share, ShareConfig, ShareStatus,
 };
 use serde_json::Value;
 
@@ -129,12 +129,18 @@ pub struct Harness {
 
 impl Harness {
     pub fn start() -> Self {
+        Self::with_limits(Limits::default())
+    }
+
+    /// A share with other limits (the per-address ones are reached from one loopback address).
+    pub fn with_limits(limits: Limits) -> Self {
         let feed = Arc::new(FakeFeed::default());
         let changes = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&changes);
         let on_change: OnChange = Box::new(move |status| recorded.lock().unwrap().push(status));
-        let share = Share::start(
+        let share = Share::start_with_limits(
             test_config(),
+            limits,
             assets(),
             Arc::clone(&feed) as Arc<dyn LiveFeed>,
             on_change,
@@ -306,6 +312,8 @@ pub struct EventStream {
     pub stream: TcpStream,
     pub head: Response,
     buf: Vec<u8>,
+    /// `buf` holds no blank line before this offset (only new bytes are searched).
+    scanned: usize,
     closed: bool,
 }
 
@@ -319,34 +327,41 @@ impl std::fmt::Debug for EventStream {
 
 /// Opens `/events`: the stream, or the answer when it is not 200.
 pub fn open_events(port: u16, cookie: Option<&str>) -> Result<EventStream, Response> {
+    try_open_events(port, cookie).expect("an answer")
+}
+
+/// [`open_events`], or `None` when the server closed the connection without an answer.
+pub fn try_open_events(port: u16, cookie: Option<&str>) -> Option<Result<EventStream, Response>> {
     let mut stream = connect(port);
     let cookie = cookie
         .map(|c| format!("Cookie: {c}\r\n"))
         .unwrap_or_default();
     let raw =
         format!("GET /events HTTP/1.1\r\nHost: share\r\nAccept: text/event-stream\r\n{cookie}\r\n");
-    stream.write_all(raw.as_bytes()).unwrap();
+    stream.write_all(raw.as_bytes()).ok()?;
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     let (head, at) = loop {
         if let Some(parsed) = parse_head(&buf) {
             break parsed;
         }
-        let n = stream.read(&mut chunk).expect("an answer");
-        assert!(n > 0, "closed before the answer");
-        buf.extend_from_slice(&chunk[..n]);
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => return None,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        }
     };
     if head.status != 200 {
         let mut rest = buf[at..].to_vec();
         let _ = stream.read_to_end(&mut rest);
-        return Err(Response { body: rest, ..head });
+        return Some(Err(Response { body: rest, ..head }));
     }
-    Ok(EventStream {
+    Some(Ok(EventStream {
         stream,
         head,
         buf: buf[at..].to_vec(),
+        scanned: 0,
         closed: false,
-    })
+    }))
 }
 
 impl EventStream {
@@ -386,13 +401,28 @@ impl EventStream {
     pub fn next_event(&mut self, timeout: Duration) -> Option<SseEvent> {
         let deadline = Instant::now() + timeout;
         loop {
-            if let Some(end) = self.buf.windows(2).position(|w| w == b"\n\n") {
-                let block: Vec<u8> = self.buf.drain(..end + 2).collect();
-                let text = String::from_utf8(block[..end].to_vec()).expect("UTF-8 events");
-                return Some(parse_event(&text));
+            if let Some(block) = self.take_block() {
+                return Some(parse_event(&block));
             }
             if !self.fill(deadline) {
                 return None;
+            }
+        }
+    }
+
+    /// The next whole event in the buffer, if any.
+    fn take_block(&mut self) -> Option<String> {
+        let from = self.scanned.saturating_sub(1);
+        match self.buf[from..].windows(2).position(|w| w == b"\n\n") {
+            Some(at) => {
+                let end = from + at;
+                let block: Vec<u8> = self.buf.drain(..end + 2).collect();
+                self.scanned = 0;
+                Some(String::from_utf8(block[..end].to_vec()).expect("UTF-8 events"))
+            }
+            None => {
+                self.scanned = self.buf.len();
+                None
             }
         }
     }
@@ -423,24 +453,27 @@ impl EventStream {
         }
     }
 
+    /// Bytes received and not yet read as a whole event.
+    pub fn leftover(&self) -> usize {
+        self.buf.len()
+    }
+
     /// Reads until the server closes the stream (true) or `timeout` (false); the messages read
     /// meanwhile are returned through `seen`.
     pub fn read_until_closed(&mut self, timeout: Duration, seen: &mut Vec<Value>) -> bool {
         let deadline = Instant::now() + timeout;
-        loop {
-            while let Some(end) = self.buf.windows(2).position(|w| w == b"\n\n") {
-                let block: Vec<u8> = self.buf.drain(..end + 2).collect();
-                if let SseEvent::Data(data) = parse_event(&String::from_utf8_lossy(&block[..end])) {
-                    seen.push(serde_json::from_str(&data).expect("JSON data"));
-                }
-            }
-            if self.closed {
-                return true;
-            }
+        // Everything first (as fast as a browser would), then the events.
+        while !self.closed {
             if !self.fill(deadline) && !self.closed {
                 return false;
             }
         }
+        while let Some(block) = self.take_block() {
+            if let SseEvent::Data(data) = parse_event(&block) {
+                seen.push(serde_json::from_str(&data).expect("JSON data"));
+            }
+        }
+        true
     }
 }
 

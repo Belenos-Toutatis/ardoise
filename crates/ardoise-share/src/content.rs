@@ -8,19 +8,19 @@
 //! never waits for the share.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::Notify;
 
 use crate::{LiveFeed, LiveViewer, NoteUpdate, Shown, ViewerGone};
 
-/// Messages a viewer's queue holds before the viewer is disconnected as too slow.
+/// Messages a viewer's queue holds before the viewer is disconnected as too slow, counting those
+/// taken by its stream and not yet written.
 pub(crate) const QUEUE_MESSAGES: usize = 1024;
-/// Bytes a viewer's queue holds before the viewer is disconnected as too slow (a single message
-/// larger than this still goes through an empty queue).
+/// Bytes a viewer's queue holds before the viewer is disconnected as too slow, counted the same
+/// way (a single message larger than this still goes through an empty queue).
 pub(crate) const QUEUE_BYTES: usize = 64 * 1024 * 1024;
-/// Event streams open at once.
-pub(crate) const MAX_STREAMS: usize = 32;
 
 /// One Server-Sent Event, ready to write.
 pub(crate) type Frame = Arc<[u8]>;
@@ -79,6 +79,8 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// One event stream: its queue of messages and its live subscription.
 pub(crate) struct Viewer {
     id: u64,
+    /// Where it connected from (the streams per address are limited).
+    address: IpAddr,
     queue: Mutex<Queue>,
     /// Messages were queued.
     data: Notify,
@@ -90,6 +92,10 @@ pub(crate) struct Viewer {
 struct Queue {
     frames: VecDeque<Frame>,
     bytes: usize,
+    /// Messages (and their bytes) taken by the stream and not yet written: they still count
+    /// against the limits, so that a viewer never holds more than them in memory.
+    in_flight: usize,
+    in_flight_bytes: usize,
     /// The current live subscription, if live batches are expected.
     live: Option<LiveSubscription>,
     /// The queue overflowed: the stream is closed without `end`.
@@ -112,9 +118,10 @@ pub(crate) struct Pending {
 }
 
 impl Viewer {
-    fn new(id: u64) -> Self {
+    fn new(id: u64, address: IpAddr) -> Self {
         Self {
             id,
+            address,
             queue: Mutex::new(Queue::default()),
             data: Notify::new(),
             kick: Notify::new(),
@@ -135,14 +142,22 @@ impl Viewer {
         self.kick.notified().await
     }
 
-    /// Takes the queued messages.
+    /// Takes the queued messages; they count as in flight until [`Viewer::written`].
     pub fn take(&self) -> Pending {
         let mut queue = lock(&self.queue);
-        queue.bytes = 0;
+        queue.in_flight += queue.frames.len();
+        queue.in_flight_bytes += std::mem::take(&mut queue.bytes);
         Pending {
             frames: queue.frames.drain(..).collect(),
             kicked: queue.kicked,
         }
+    }
+
+    /// The messages taken were written.
+    pub fn written(&self) {
+        let mut queue = lock(&self.queue);
+        queue.in_flight = 0;
+        queue.in_flight_bytes = 0;
     }
 
     /// Queues a message; a full queue disconnects the viewer.
@@ -155,8 +170,10 @@ impl Viewer {
         if queue.closed || queue.kicked {
             return Err(ViewerGone);
         }
-        let full = queue.frames.len() >= QUEUE_MESSAGES
-            || (!queue.frames.is_empty() && queue.bytes.saturating_add(frame.len()) > QUEUE_BYTES);
+        let messages = queue.frames.len() + queue.in_flight;
+        let bytes = queue.bytes.saturating_add(queue.in_flight_bytes);
+        let full = messages >= QUEUE_MESSAGES
+            || (messages > 0 && bytes.saturating_add(frame.len()) > QUEUE_BYTES);
         if full {
             queue.kicked = true;
             queue.frames.clear();
@@ -220,7 +237,7 @@ impl Viewer {
 /// Why a stream cannot be opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum JoinRefused {
-    /// [`MAX_STREAMS`] streams are open.
+    /// The streams allowed are open (in all, or from this address).
     TooMany,
     /// The share is stopping.
     Stopped,
@@ -229,6 +246,9 @@ pub(crate) enum JoinRefused {
 /// What is shown, to whom, and the pause.
 pub(crate) struct Content {
     feed: Arc<dyn LiveFeed>,
+    /// Event streams open at once, in all and per address.
+    max_streams: usize,
+    max_streams_per_address: usize,
     state: Mutex<State>,
     /// The viewers, the pause or what is shown changed (`on_change`).
     changed: Notify,
@@ -255,9 +275,15 @@ struct Paused {
 }
 
 impl Content {
-    pub fn new(feed: Arc<dyn LiveFeed>) -> Self {
+    pub fn new(
+        feed: Arc<dyn LiveFeed>,
+        max_streams: usize,
+        max_streams_per_address: usize,
+    ) -> Self {
         Self {
             feed,
+            max_streams,
+            max_streams_per_address,
             state: Mutex::new(State {
                 stopped: false,
                 shown: Shown::Waiting,
@@ -341,18 +367,24 @@ impl Content {
         }
     }
 
-    /// A new event stream: it gets what is shown (or the frozen image and the pause).
-    pub fn join(&self) -> Result<Arc<Viewer>, JoinRefused> {
+    /// A new event stream from `address`: it gets what is shown (or the frozen image and the
+    /// pause).
+    pub fn join(&self, address: IpAddr) -> Result<Arc<Viewer>, JoinRefused> {
         let mut state = self.lock();
         if state.stopped {
             return Err(JoinRefused::Stopped);
         }
-        if state.viewers.len() >= MAX_STREAMS {
+        let from_address = state
+            .viewers
+            .values()
+            .filter(|viewer| viewer.address == address)
+            .count();
+        if state.viewers.len() >= self.max_streams || from_address >= self.max_streams_per_address {
             return Err(JoinRefused::TooMany);
         }
         let id = state.next_viewer;
         state.next_viewer += 1;
-        let viewer = Arc::new(Viewer::new(id));
+        let viewer = Arc::new(Viewer::new(id, address));
         state.viewers.insert(id, Arc::clone(&viewer));
         if let Some(paused) = &state.paused {
             let _ = viewer.push(Arc::clone(&paused.frozen));
@@ -532,9 +564,11 @@ mod tests {
         assert_eq!(text(&data_frame(&["{", "\n}"])), "data: {\ndata: }\n\n");
     }
 
+    const HERE: IpAddr = IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+
     #[test]
     fn queue_limits() {
-        let viewer = Viewer::new(1);
+        let viewer = Viewer::new(1, HERE);
         for _ in 0..QUEUE_MESSAGES {
             viewer.push(waiting_frame()).unwrap();
         }
@@ -545,15 +579,85 @@ mod tests {
         assert_eq!(viewer.push(waiting_frame()), Err(ViewerGone));
 
         // A single message larger than the byte limit passes through an empty queue.
-        let viewer = Viewer::new(2);
+        let viewer = Viewer::new(2, HERE);
         let big: Frame = Arc::from(vec![b'x'; QUEUE_BYTES + 1]);
         viewer.push(Arc::clone(&big)).unwrap();
         assert_eq!(viewer.push(waiting_frame()), Err(ViewerGone));
     }
 
     #[test]
+    fn messages_in_flight_count_until_written() {
+        // Taken but not yet written: still counted.
+        let viewer = Viewer::new(4, HERE);
+        for _ in 0..1000 {
+            viewer.push(waiting_frame()).unwrap();
+        }
+        assert_eq!(viewer.take().frames.len(), 1000);
+        for _ in 0..QUEUE_MESSAGES - 1000 {
+            viewer.push(waiting_frame()).unwrap();
+        }
+        assert_eq!(viewer.push(waiting_frame()), Err(ViewerGone));
+
+        // Written: only the queued ones count.
+        let viewer = Viewer::new(7, HERE);
+        for _ in 0..1000 {
+            viewer.push(waiting_frame()).unwrap();
+        }
+        viewer.take();
+        viewer.written();
+        for _ in 0..QUEUE_MESSAGES {
+            viewer.push(waiting_frame()).unwrap();
+        }
+        assert_eq!(viewer.push(waiting_frame()), Err(ViewerGone));
+
+        // The same for bytes.
+        let viewer = Viewer::new(5, HERE);
+        let half: Frame = Arc::from(vec![b'x'; QUEUE_BYTES / 2 + 1]);
+        viewer.push(Arc::clone(&half)).unwrap();
+        assert_eq!(viewer.take().frames.len(), 1);
+        assert_eq!(viewer.push(Arc::clone(&half)), Err(ViewerGone));
+        let viewer = Viewer::new(6, HERE);
+        viewer.push(Arc::clone(&half)).unwrap();
+        viewer.take();
+        viewer.written();
+        viewer.push(Arc::clone(&half)).unwrap();
+    }
+
+    struct NoFeed;
+
+    impl LiveFeed for NoFeed {
+        fn start(&self, _: LiveViewer) {}
+        fn stop(&self, _: u64) {}
+        fn freeze(&self) -> Option<String> {
+            None
+        }
+    }
+
+    #[test]
+    fn streams_per_address() {
+        let content = Content::new(Arc::new(NoFeed), 5, 2);
+        let a = IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 2));
+        let b = IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 3));
+        let first = content.join(a).unwrap();
+        content.join(a).unwrap();
+        assert_eq!(content.join(a).err(), Some(JoinRefused::TooMany));
+        content.join(b).unwrap();
+        content.join(b).unwrap();
+        content.join(HERE).unwrap();
+        assert_eq!(
+            content.join(HERE).err(),
+            Some(JoinRefused::TooMany),
+            "5 in all"
+        );
+        content.leave(first.id());
+        content.join(a).unwrap();
+        content.stop();
+        assert_eq!(content.join(b).err(), Some(JoinRefused::Stopped));
+    }
+
+    #[test]
     fn live_subscriptions() {
-        let viewer = Viewer::new(3);
+        let viewer = Viewer::new(3, HERE);
         assert_eq!(viewer.send_live(1, "{}"), Err(ViewerGone));
         assert!(viewer.begin_live(1));
         viewer.send_live(1, "{}").unwrap();
