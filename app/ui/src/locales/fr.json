@@ -1744,5 +1744,43 @@
       "check": "Les importer dans la bibliothèque (classeur « {binder} »)",
       "hint": "Vous confirmerez l'import avant qu'il ne commence."
     }
+  },
+  "viewer": {
+    "title": "Ardoise : écran partagé",
+    "brand": "Ardoise",
+    "canvas": "Page partagée par le PC d'Ardoise",
+    "connecting": "Connexion au PC d'Ardoise…",
+    "reconnecting": "Connexion perdue, nouvelle tentative…",
+    "paused": "En pause",
+    "waiting": {
+      "title": "En attente",
+      "text": "Le PC d'Ardoise ne partage rien pour l'instant. La page s'affichera ici dès que le partage commencera."
+    },
+    "ended": {
+      "title": "Le partage est terminé",
+      "text": "Cette page reprendra d'elle-même si le PC d'Ardoise partage de nouveau (un nouveau code sera peut-être demandé)."
+    },
+    "tooMany": {
+      "title": "Trop d'écrans connectés",
+      "text": "Le PC d'Ardoise a atteint le nombre d'écrans qu'il accepte. Nouvelle tentative automatique dans quelques secondes."
+    },
+    "code": {
+      "help": "Saisissez le code affiché sur le PC d'Ardoise.",
+      "label": "Code de partage (6 caractères)",
+      "submit": "Rejoindre",
+      "checking": "Vérification…",
+      "wrong": {
+        "one": "Code incorrect. Il vous reste {count} essai.",
+        "other": "Code incorrect. Il vous reste {count} essais."
+      },
+      "tooMany": "Trop d'essais. Réessayez dans {seconds} s.",
+      "network": "Impossible de joindre le PC d'Ardoise. Vérifiez le réseau, puis réessayez.",
+      "error": "Le PC d'Ardoise a refusé la demande (erreur {status}).",
+      "cookies": "Le code est bon, mais le navigateur n'a pas gardé l'autorisation. Autorisez les cookies pour cette page, puis réessayez."
+    },
+    "fullscreen": {
+      "enter": "Plein écran",
+      "exit": "Quitter le plein écran"
+    }
   }
 }
