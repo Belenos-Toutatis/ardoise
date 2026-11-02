@@ -16,7 +16,7 @@ mod tests;
 
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError};
 
 use ardoise_core::note::Note;
 use ardoise_share::qr::{QrCode, qr_code};
@@ -252,6 +252,17 @@ impl Inner {
         }
     }
 
+    /// Forgets the note the viewers showed, unless a content is being applied: it may be
+    /// rendering a paper, which takes seconds, and closing Ardoise must not wait for it. Nothing
+    /// is lost by skipping: `reapply` forgets it again when a share starts.
+    fn forget_note(&self) {
+        match self.notes.try_lock() {
+            Ok(mut notes) => notes.reset(),
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner().reset(),
+            Err(TryLockError::WouldBlock) => {}
+        }
+    }
+
     /// Applies the recorded content again (a share that just started).
     fn reapply(&self) {
         let (sequence, content) = {
@@ -328,7 +339,7 @@ impl ShareRuntime {
         let running = lock(&self.inner.running).take();
         if let Some(running) = running {
             running.share.stop();
-            lock(&self.inner.notes).reset();
+            self.inner.forget_note();
         }
         // What the window showed then may be gone by the next share: it says again.
         *lock(&self.inner.content) = ShareContent::Waiting;
