@@ -415,7 +415,8 @@ impl Session {
     }
 
     /// Downloads the oldest stored page without deleting it. Requires paper mode and the
-    /// file-transfer reporting type (see [`Session::stored_pages`], which sets both).
+    /// file-transfer reporting type: [`Session::ensure_file_transfer_reporting`] then
+    /// [`Session::stored_pages`], as [`Session::sync`] does.
     pub fn download_oldest(&mut self) -> Result<DownloadedPage, DeviceError> {
         let (announced_size, timestamp) = self.file_info()?;
         // A tablet streaming bytes without ever ending the transfer must not exhaust memory.

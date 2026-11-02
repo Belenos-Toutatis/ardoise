@@ -361,8 +361,10 @@ impl Worker {
         if let Some(journal) = self.journal.as_mut() {
             journal.success();
             journal.note(format!(
-                "connected to {} ({}), {pages} pages stored",
-                info.name, info.firmware
+                "connected to {} ({}), {} stored",
+                info.name,
+                info.firmware,
+                pages_text(pages)
             ));
         }
         self.remember_info(info);
