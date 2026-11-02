@@ -347,17 +347,6 @@ impl Worker {
                 self.connected(&info, pages);
             }
             Err(DeviceError::Cancelled) => {}
-            // A tablet of someone else, accepted because the registered address was not seen:
-            // not an error of ours.
-            Err(DeviceError::NotRegistered)
-                if !tablet.address.eq_ignore_ascii_case(&record.address) =>
-            {
-                self.note(format!(
-                    "{} is registered with someone else: ignored",
-                    tablet.address
-                ));
-                self.wait(Some(RETRY_DELAY));
-            }
             Err(error) => self.connection_failed(&error),
         }
     }
