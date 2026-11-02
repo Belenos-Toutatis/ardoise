@@ -7,7 +7,7 @@ Developer document (English). Requirements: SPEC §4.10, §6.2 ("Réseau"), §8;
 ```
  tablet ─► LiveHub ── LiveBatch (4 ms) ──► main window, presentation window      (unchanged)
               │
-              └── one subscription per viewer ("share:<id>") ── HubFeed (app share.rs: strip, JSON)
+              └── one subscription per viewer ("share:<id>") ── HubFeed (app share/feed.rs: allow list, JSON)
                                                                      │
  editor ── share_show { note } (debounced) ── ShareRuntime ──────────┤
  Home / LiveView ── share_show { live | waiting }                     ▼
@@ -193,7 +193,7 @@ reconnects gets a fresh snapshot. Messages (`type` field; TypeScript in `app/ui/
 | `{"type":"end"}` | the share stops: the viewer closes the stream and shows "sharing ended" |
 
 `SharedPage = { id, page: PageSize, background: Background, layers: Layer[], strokes: Stroke[] }` (the `Note`
-shapes of `note.ts`; layer names are emptied, the viewer only needs `visible`). A `note` message **without**
+shapes of `note.ts`; layer names are emptied, the viewer only needs `visible`; strokes of a hidden layer are left out). A `note` message **without**
 `background` (sent to the viewers already showing a note, when only the page changed) keeps the paper shown: the
 picture, which may weigh megabytes (texture, background image), goes only when the paper changes, to a viewer that
 joins, and when the viewers come back from another content.
@@ -294,11 +294,17 @@ share start, a few hundred KB.
   with the snapshot and the stroke in progress, exactly as for a window.
 - `stop(id)`: `hub.unsubscribe("share:<id>")`. `freeze()`: `hub.current_events()` (new: the snapshot and the stroke
   in progress, taken under the hub's lock) as one batch.
-- `ShareSink::send(batch)` strips the batch, serialises it, and calls `viewer.send`; an `Err` drops the
-  subscription (the hub's existing rule). **Stripping**: `saved` and `saveFailed` events are dropped (library paths,
-  system messages); in a snapshot `saved` = `[]`, `presentation` = `null`, and the page keeps only what is drawn:
-  `id`, `page`, `background`, `layers`, `strokes`, `created`, `modified` (title, tags, favourite, origin… emptied).
-- Serialising runs on the hub's flusher thread, as for the windows' channels, and never waits.
+- `ShareSink::send(batch)` writes the batch from an **allow list** (`batch_json`: `SharedEvent`, `SharedSnapshot`,
+  `SharedLivePage` in `share/feed.rs`, borrowed views of the hub's types) and calls `viewer.send`; an `Err` drops
+  the subscription (the hub's existing rule). A field added later to `LiveSnapshot` or `Note` therefore never
+  reaches a browser until it is added there on purpose. `saved` and `saveFailed` events are left out (library
+  paths, system messages); in a snapshot `saved` = `[]`, `presentation` = `null`, `origin` = `{"kind":"ardoise"}`,
+  and the page keeps only what is drawn: `id`, `page`, `background`, `layers` (names emptied), `strokes`, `created`,
+  `modified`. Strokes of a hidden layer are left out here as in `SharedPage` (a teacher hides an "answers" layer to
+  keep it to themselves); the layer list stays whole so that stroke indices stay valid.
+- Serialising runs on the hub's flusher thread, as for the windows' channels, and never waits. A `Memo` shared by
+  the viewers' sinks keeps the last batch and its text (`Arc<str>`): viewers that were up to date get equal batches
+  one after the other, and the text (the whole page, after a page change) is written once for all of them.
 
 ### Note of the editor
 
