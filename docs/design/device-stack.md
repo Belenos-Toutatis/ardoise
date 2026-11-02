@@ -107,6 +107,15 @@ Public surface (names may be refined, the shape must stay):
   deliver (the clock advances by `timeout`). `connected` / `disconnect` events delimit successive connections. A
   recorded registration is replayed by giving the recorded identity to `Manager::with_host_id` (or
   `DiagnosticConfig::host_id`).
+- **Real captures (H1).** `crates/ardoise-sim/tests/real_captures.rs` runs on the journals of the real Slate A4 in
+  `testdata/private/captures/` (git-ignored; the tests skip themselves without it, and nothing taken from a journal is
+  written in the test). It checks that every frame of every journal decodes with `ardoise-proto` (the unexplained
+  frames of protocol.md §12 count as named), that the pages downloaded in a former-order session decode, and that the
+  guided test recorded with the current command order replays through `diagnostic::run` with the same report, the
+  same page files and the same exchanges (SET_TIME aside). The replay rules above are unchanged; the test only adds
+  what a journal shows in its notes and times: the person's waiting time before a prompt, the duration of a scan or of
+  a connection attempt, and that an attempt failed ("direct reconnection failed", `TransportError::NotFound`).
+  Journals of the former order (`ec` after paper mode) cannot replay against the current host: decoding only.
 - **Simulated user.** `SimulatedUser` performs the physical actions on the simulated tablet: draws the reference pages
   on `DrawReferencePages`, holds the button on `HoldButtonToRegister`, presses it on `PressButtonToConfirm` and
   `PressButton`, queues pen movement on `DrawLive`. Wrapping another operator (the interface), it first forwards the

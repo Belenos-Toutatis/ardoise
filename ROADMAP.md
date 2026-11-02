@@ -48,8 +48,16 @@ Règles permanentes :
 
 ### Point de contrôle H1 [matériel]
 
-- [ ] [matériel] L'utilisateur suit `docs/hardware-tests.md` (H1) au travail ; les journaux arrivent via Nextcloud.
-- [ ] [matériel] Analyse des journaux reçus, corrections du protocole, ajout des captures réelles aux tests de non-régression (nécessite les journaux de H1).
+- [x] [matériel] L'utilisateur suit `docs/hardware-tests.md` (H1) au travail ; les journaux arrivent via Nextcloud.
+- [x] [matériel] Analyse des journaux reçus, corrections du protocole, ajout des captures réelles aux tests de non-régression (nécessite les journaux de H1).
+
+Fait le 2026-11-02 avec la vraie Slate A4 de l'utilisateur. Les journaux ont montré :
+- une version du firmware mal lue (un octet par chiffre hexadécimal) ;
+- une synchronisation refusée (`ec` envoyé après le mode papier) ;
+- une recherche qui se rabattait sur n'importe quelle tablette ;
+- l'évènement de batterie.
+
+Tout est corrigé (`docs/research/protocol.md` §5.3 et §12). Le test guidé suivant a réussi ses 8 étapes. Les captures réelles sont rejouées par `crates/ardoise-sim/tests/real_captures.rs` : elles sont lues dans `testdata/private/captures/`, et le test se saute de lui-même sans elles. Reste à confirmer à l'usage, avec la section H1 bis de `docs/hardware-tests.md` : une deuxième synchronisation sur la même connexion, et la baisse du pourcentage de batterie.
 
 ## M2 — Notes, bibliothèque, rendu et import Inkspace
 
@@ -151,6 +159,33 @@ Vérifié sous Windows le 2026-10-29 : `CHECK OK`, `E2E OK` (58 parcours, FR et 
 
 - [ ] [matériel] Test complet au travail et en classe (procédure H3).
 - [ ] Publication sur GitHub **après accord explicite de l'utilisateur**.
+
+## M11 — Partage de la feuille sur le réseau local
+
+Ajouté à la demande de l'utilisateur le 2026-11-02 (SPEC §4.10, `docs/questions.md` Q4). Conception technique : `docs/design/lan-share.md`.
+
+- [ ] Serveur de partage dans l'exécutable : HTTP et flux d'évènements vers le navigateur ; démarré et arrêté à la main ; port réglable ; code de 6 caractères avec tentatives limitées ; lecture seule. Aucune adresse ne donne accès à autre chose que la feuille partagée.
+- [ ] Page de visionnage pour le navigateur (rien à installer) : même rendu des traits que l'application (WebAssembly), plein écran, reconnexion automatique, écran d'attente.
+- [ ] Contenu partagé, choisi par le PC d'Ardoise :
+  - la feuille du mode direct, avec la vue de la présentation (zoom, déplacement, tableau noir, pointeur laser) ;
+  - ou la page de la note ouverte, mise à jour à chaque modification ;
+  - et une pause qui fige l'image.
+- [ ] Interface :
+  - un bouton « Partager sur le réseau » dans la fenêtre de commande du mode direct et dans l'éditeur ;
+  - l'adresse, un QR code, le code et le nombre d'écrans connectés ;
+  - l'arrêt du partage ;
+  - les traductions FR et EN.
+- [ ] Guide FR et EN (pare-feu, réseau privé, adresse à taper) ; procédure H4 dans `docs/hardware-tests.md`.
+
+**Critères de fin** :
+- `CHECK OK` et `E2E OK` ;
+- un test démarre le partage et se connecte comme un navigateur. Il vérifie le code, reçoit les traits du mode direct et les modifications d'une note, et vérifie qu'aucune autre adresse ne donne accès à la bibliothèque ;
+- le partage s'arrête bien (port fermé, écrans déconnectés) ;
+- l'exécutable reste sous 30 Mo et les licences sont vérifiées.
+
+### Point de contrôle H4 [matériel]
+
+- [ ] [matériel] Un second ordinateur du réseau affiche la feuille en direct, puis une note ouverte. À noter : le délai perçu, l'autorisation du pare-feu, l'adresse tapée ou le QR code.
 
 ---
 

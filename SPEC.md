@@ -166,7 +166,17 @@ Ajouté à la demande de l'utilisateur le 2026-10-28. Ardoise peut être command
 - **Passerelle vers l'application ouverte** : ouvrir une note, lancer la présentation, changer de page, proposer une version propre à la fin du mode direct.
 - **Vie privée** : ce que l'assistant lit part chez son fournisseur, selon les réglages du compte de l'utilisateur ; le guide le rappelle (noms d'élèves). Les outils d'écriture sont séparés des outils de lecture, pour qu'on puisse limiter l'assistant à la lecture.
 
-### 4.10 Hors périmètre de la version 1
+### 4.10 Partage de la feuille sur le réseau local (P1)
+
+Ajouté à la demande de l'utilisateur le 2026-11-02. Un autre ordinateur du même réseau, par exemple le PC du bureau relié au vidéoprojecteur, affiche dans un simple navigateur, sans rien installer, ce que le PC d'Ardoise choisit de montrer. Ce PC est un ordinateur personnel dont l'utilisateur est administrateur.
+
+- **C'est toujours le PC d'Ardoise qui choisit.** Le partage montre la feuille du mode direct pendant le mode direct, avec la vue de la présentation (zoom, déplacement, tableau noir, pointeur laser). Sinon, il montre la page de la note ouverte, pendant qu'on la consulte ou la modifie, mise à jour à chaque modification. Sans l'un ni l'autre, il montre un écran d'attente. Une pause fige l'image partagée.
+- **Rien d'autre n'est accessible** : ni la bibliothèque, ni la liste des notes, ni une autre note ou page. L'autre ordinateur ne peut ni modifier ni choisir ; il peut seulement passer en plein écran.
+- **Lancé à la main** : un bouton « Partager sur le réseau » dans la fenêtre de commande du mode direct et dans l'éditeur. Ardoise affiche l'adresse à taper (`http://<adresse>:<port>`), un QR code, un code de 6 caractères demandé par la page (nouveau code à chaque partage, tentatives limitées) et le nombre d'écrans connectés. « Arrêter le partage » déconnecte tout le monde ; fermer Ardoise aussi.
+- **Réseau** : le port n'est ouvert que pendant un partage. Il est fixe et réglable (8765 par défaut, dans `ardoise.toml`), pour que l'autorisation du pare-feu reste valable. Il n'y a rien sur internet ni aucun relais. La première fois, Windows demande l'autorisation du pare-feu, et le guide explique quoi répondre (« réseau privé »). Plusieurs écrans peuvent se connecter à la fois.
+- **Fluidité** : sur le réseau local, un trait apparaît sur l'autre écran moins de 150 ms après avoir été tracé, et le mode direct y reste fluide. La page se reconnecte d'elle-même après une coupure.
+
+### 4.11 Hors périmètre de la version 1
 
 - Le cloud Wacom et la collaboration en temps réel d'Inkspace.
 - macOS et Linux (l'architecture ne doit pas les empêcher plus tard).
@@ -223,7 +233,7 @@ testdata/private/   copies de notes personnelles pour les tests locaux — ignor
 | Rust → interface | `Channel` Tauri avec envoi groupé à chaque image (pas un évènement par point). | Débit du mode direct (un point toutes les 5 ms). |
 | Fenêtres | Écrans listés par `available_monitors` (coordonnées physiques) ; fenêtres créées depuis des commandes asynchrones. | Projecteur en bureau étendu ; évite un blocage connu de Tauri sous Windows. |
 | Exécutable | CRT lié statiquement ; interface embarquée dans l'exe ; dossier de données WebView2 fixé explicitement dans `%LOCALAPPDATA%\Ardoise\webview`. | Fonctionne sur un PC vierge ; aucun cache dans Nextcloud. |
-| Réseau | Aucun port en écoute. Seule connexion sortante : téléchargement d'OpenH264 sur demande. | Une alerte du pare-feu demanderait des droits admin. |
+| Réseau | Aucun port en écoute, sauf pendant un partage sur le réseau local lancé à la main (§4.10) : serveur HTTP en lecture seule, arrêté avec le partage. Seule connexion sortante : téléchargement d'OpenH264 sur demande. | Une alerte du pare-feu demande des droits admin : seul le partage en a besoin, sur un PC personnel dont l'utilisateur est administrateur (décision de l'utilisateur, 2026-11-02). |
 | Vidéo MP4 | Par défaut : Media Foundation de Windows (`IMFSinkWriter` via la crate `windows`) qui produit à la fois le H.264, l'AAC et le fichier MP4, avec accélération matérielle si disponible. Secours si Media Foundation manque : H.264 par OpenH264 2.6.0 chargé à l'exécution (`openh264` + `libloading`), téléchargé chez Cisco (empreinte SHA-256 vérifiée), multiplexé par `shiguredo_mp4`, son en Opus (lisible dans les navigateurs et VLC, pas dans le Lecteur multimédia de Windows). | Rien à télécharger dans le cas courant. Pour le secours, conditions de Cisco : téléchargement par l'utilisateur, désactivable et supprimable, mention « OpenH264 Video Codec provided by Cisco Systems, Inc. », licence affichée. |
 | Vidéo WebM | AV1 par `rav1e` + `webm` (son Opus). | libvpx impossible à compiler ici. AV1 est lent sans assembleur : `nasm` portable sera nécessaire sur la machine de compilation (pas chez l'utilisateur). |
 | GIF / WebP | `gif` + quantification des couleurs ; `webp-animation`. | `gifski` exclu (licence AGPL). |

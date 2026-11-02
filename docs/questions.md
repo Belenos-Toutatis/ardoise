@@ -27,3 +27,15 @@ SPEC §6.2 (ligne « Vidéo MP4 ») prévoit que le MP4 du secours OpenH264 soit
 **En attendant** : le secours utilise `shiguredo_mp4`. Le test de fin de M6 relit le fichier produit avec un lecteur indépendant (`mp4parse`, celui de Firefox), et Media Foundation le lit aussi.
 
 **Décision de l'utilisateur (2026-10-24)** : `shiguredo_mp4` est retenu ; SPEC §6.2 est mis à jour (ligne « Vidéo MP4 » et risque des bibliothèques vidéo jeunes).
+
+## Q4 — Afficher la feuille sur un autre ordinateur du réseau local ? (2026-11-02) — **tranchée**
+
+L'utilisateur demande qu'un autre ordinateur du même réseau puisse afficher la feuille en direct, ou la feuille consultée. SPEC §6.2 interdisait tout port en écoute, parce que l'alerte du pare-feu de Windows demande des droits d'administrateur.
+
+**Décision de l'utilisateur (2026-11-02)** : c'est autorisé.
+- Le partage tourne sur un ordinateur personnel dont l'utilisateur est administrateur.
+- Le réseau de son établissement laisse déjà un appareil afficher son écran sur le PC du bureau.
+- L'autre ordinateur n'affiche jamais la bibliothèque, seulement la feuille du mode direct ou la feuille consultée ou modifiée ; c'est toujours le PC d'Ardoise qui choisit.
+- Les protections proposées sont retenues : partage lancé à la main, lecture seule, code d'accès, arrêt à la fermeture.
+
+SPEC §4.10 est ajouté, la ligne « Réseau » du §6.2 est mise à jour, et le jalon M11 est ajouté à ROADMAP.md.
