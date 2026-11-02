@@ -15,6 +15,7 @@ import { mockLiveInvoke } from './mock-live';
 import { mockNarrationInvoke } from './mock-narration';
 import { mockNotesInvoke } from './mock-notes';
 import { mockOrganizeInvoke } from './mock-organize';
+import { mockShareInvoke } from './mock-share';
 import { mockTabletInvoke } from './mock-tablet';
 import { mockAboutInvoke } from './mock-about';
 import { mockVideoInvoke } from './mock-video';
@@ -105,6 +106,7 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
           mockExportInvoke,
           mockDragInvoke,
           mockTabletInvoke,
+          mockShareInvoke,
           mockLiveInvoke,
           mockVideoInvoke,
           mockNarrationInvoke,

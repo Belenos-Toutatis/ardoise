@@ -85,6 +85,7 @@
   import { defaultWindowClose, type WindowClose } from '../../lib/editor/window-close';
   import { largestFittingDpi } from '../../lib/export-options';
   import { currentLocale, t } from '../../lib/i18n.svelte';
+  import { share } from '../../lib/share-state.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
   import type { BackgroundImage, ExportSource, FileStamp, Note, Rgba, SplitSpec, Stroke } from '../../lib/note';
   import type { NoteOriginal } from '../../lib/original';
@@ -288,6 +289,16 @@
           }
         : null;
     untrack(() => drafts.update(snapshot));
+  });
+
+  // The share on the network shows the note being edited, unsaved changes included, from the same
+  // source as the drafts (the library says « waiting » again when the editor is closed).
+  $effect(() => {
+    const present = history?.present;
+    if (!present) return;
+    const shown = { ...present.note, title };
+    const imageKey = present.backgroundPixels?.key ?? null;
+    untrack(() => share.showNote(shown, imageKey));
   });
 
   /** False once the editor was closed or destroyed: late results call back no one. */
@@ -1425,7 +1436,7 @@
       return;
     }
     // A dialog or the split panel is open: the editing keys wait; Escape closes the panel.
-    if (exporting || printing || video) return;
+    if (exporting || printing || video || share.panelOpen) return;
     if (split) {
       if (key === 'Escape') {
         e.preventDefault();
