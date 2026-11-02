@@ -198,7 +198,7 @@ Une relecture indépendante a été faite, et ses remarques sont corrigées : ca
 
 - [ ] [matériel] Un second ordinateur du réseau affiche la feuille en direct, puis une note ouverte. À noter : le délai perçu, l'autorisation du pare-feu, l'adresse tapée ou le QR code.
 
-Essai à la maison le 2026-11-03, sur deux ordinateurs du même réseau : le partage fonctionne. Reste l'essai au travail, sur le réseau de l'établissement.
+Essai à la maison le 2026-11-03, sur deux ordinateurs du même réseau : le partage fonctionne, la transmission est rapide et le bon document s'affiche correctement. Demande qui en est sortie : des options d'affichage sur l'autre écran (Q8). Reste l'essai au travail, sur le réseau de l'établissement.
 
 ---
 
