@@ -298,7 +298,7 @@ Ce test vérifie le partage de la feuille (SPEC §4.10) : l'autorisation du pare
 
 1. Fermer Ardoise sur tous les PC, puis remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version.
 2. Ne **pas** utiliser `--simulated-tablet`. Ne **pas** ajouter la variable `ARDOISE_SHARE_LOOPBACK` (elle sert aux tests automatiques et enferme le partage sur le PC lui-même).
-3. Vérifier que `ardoise.toml` ne contient pas de section `[share]` : le port par défaut est 8765. Si une section `[share]` existe, noter son port.
+3. Noter le port affiché dans **Réglages** > **Partage sur le réseau** > **Port du partage** (8765 par défaut). Si le panneau du partage annonce plus tard qu'il utilise un autre port (port pris par un autre programme), noter les deux.
 
 ### Au travail
 
@@ -368,8 +368,8 @@ Ce test vérifie le partage de la feuille (SPEC §4.10) : l'autorisation du pare
 2. Relancer un partage : un **nouveau code** s'affiche (différent du précédent), la même adresse et le même port. Le second ordinateur, resté sur la page, passe tout seul à la saisie du code (l'ancien code ne marche plus) : taper le nouveau.
 3. **Fermer Ardoise pendant le partage** (croix de la fenêtre, après avoir terminé le mode direct). L'autre écran doit indiquer que le partage est terminé ou qu'il se reconnecte, et `Test-NetConnection` doit donner `False` : le port est refermé.
 4. **Deuxième lancement** : relancer `ardoise.exe` (même emplacement) et partager de nouveau. **Windows ne doit pas redemander** l'autorisation du pare-feu : elle est attachée au programme à cet emplacement (pas au port) et reste valable. Le noter. (Si la fenêtre revient, noter si l'exe a changé de dossier ou de nom entre-temps.)
-5. *Facultatif* : changer le port dans `ardoise.toml` (section `[share]`, `port = 8766`), relancer, partager : Windows redemande-t-il l'autorisation ? (Attendu : non, l'autorisation suit le programme, quel que soit le port.) Le second ordinateur se connecte-t-il sur `:8766` ? Remettre ensuite 8765 (ou supprimer la section).
-6. *Facultatif* : lancer sur le même PC un programme qui occupe déjà le port 8765 (ou lancer deux copies d'Ardoise placées dans deux dossiers différents et partager dans les deux) : la seconde doit dire que le port est utilisé et comment le changer, sans planter. (Ardoise prend le port pour lui seul pendant un partage : c'est aussi la seconde copie qui doit être refusée si on inverse l'ordre.)
+5. *Facultatif* : changer le **Port du partage** dans les Réglages (par exemple 8766), partager : Windows redemande-t-il l'autorisation ? (Attendu : non, l'autorisation suit le programme, quel que soit le port.) Le second ordinateur se connecte-t-il sur `:8766` ? Remettre ensuite 8765.
+6. *Facultatif* : lancer sur le même PC un programme qui occupe déjà le port 8765 (ou lancer deux copies d'Ardoise placées dans deux dossiers différents et partager dans les deux) : la seconde doit prendre d'elle-même le port suivant et le dire dans le panneau (« Le port 8765 est utilisé par un autre programme… »), sans planter. (Ardoise prend le port pour lui seul pendant un partage : c'est aussi la seconde copie qui doit être refusée si on inverse l'ordre.)
 7. *Facultatif* : fermer Ardoise, **copier `ardoise.exe` dans un autre dossier** (ou le renommer, par exemple `ardoise2.exe`), le lancer et partager : Windows **doit** reposer la question du pare-feu (attendu : oui, l'autorisation suit l'emplacement du programme). Le noter, puis supprimer la copie et revenir à l'exe habituel.
 8. *Facultatif* : arrêter le partage puis le relancer **aussitôt** (dans les 5 secondes) : il doit redémarrer sur le même port, sans message « port utilisé ».
 
