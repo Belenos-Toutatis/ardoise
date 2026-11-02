@@ -389,6 +389,7 @@ Ce qui ne revient pas tout seul :
 | Le **délai perçu** (*instantané*, *léger retard*, *retard gênant*) et la mesure à la caméra (nombre d'images et cadence) ; si le tracé reste fluide pendant 2 minutes | C2, C3, C8 |
 | Si le tableau noir, le pointeur laser, le zoom, le déplacement et les pages suivent sur l'autre écran | C4 à C7 |
 | Si la pause fige bien l'image, y compris pour une page ouverte pendant la pause, et si la reprise remet à jour | D |
+| Si plusieurs écrans passent par **une même adresse** (point d'accès Wi-Fi en mode routeur, proxy) : le partage accepte au plus 4 écrans et 8 connexions par adresse ; noter si un écran a été refusé (« trop d'écrans ») ou a redemandé le code | B, E |
 | Le comportement après la coupure du réseau (page grisée ou non, reconnexion seule, temps de reprise, code redemandé ou non) | E |
 | Si la note ouverte s'affiche comme dans l'éditeur (fond compris), le délai d'un nouveau trait, et si un titre ou un chemin apparaît quelque part | F |
 | Ce que dit l'autre écran à l'arrêt du partage et à la fermeture d'Ardoise ; si le port est refermé | G1, G3 |

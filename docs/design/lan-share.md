@@ -73,8 +73,12 @@ the tokens. `serde` / `serde_json` as everywhere.
 - Port already used by another program: `ShareError::PortInUse { port }` (code `sharePortInUse`; the message tells to
   close the other program or change `[share] port` in `ardoise.toml`). Std's listener does not set `SO_REUSEADDR` on
   Windows, so another program can never share the port with us.
-- Limits: 64 connections at once (more are closed at once), 32 event streams (more get `503`), request head 16 KiB
-  and 10 s to arrive, body 1 KiB, 32 headers. `TCP_NODELAY` on every socket (no Nagle delay on the stream).
+- Limits (a hostile classmate's PC must not keep the projector's PC out): 64 connections at once and **8 per
+  address** (more are closed at once; when all 64 are taken, the oldest connection that has not sent a whole
+  request head is closed for the newcomer, never a stream or a request being answered), 32 event streams and **4
+  per address** (more get `503`), the first byte of a request within 3 s and its head (16 KiB) within 10 s, body
+  1 KiB, 32 headers; a head is parsed again only when a blank line may have arrived. `TCP_NODELAY` on every socket
+  (no Nagle delay on the stream).
 
 ### Routes
 
@@ -85,7 +89,7 @@ The only `(method, path)` pairs that exist; the query string is ignored, nothing
 |---|---|
 | `GET /` | `viewer.html` |
 | `GET /assets/<file>` | that viewer asset, if `/assets/<file>` is a key of the asset map; else 404 |
-| `POST /join` | body `{"code":"K7M Q2X"}` (JSON). Right code: `204` + `Set-Cookie: ardoise_share=<token>; Path=/; HttpOnly; SameSite=Strict`. Wrong: `403` `{"error":"wrongCode","remaining":n}`. Too many attempts: `429` + `Retry-After: s`, `{"error":"tooManyAttempts","retryAfter":s}`. Bad request (no JSON, too long, chunked): `400` / `413` |
+| `POST /join` | body `{"code":"K7M Q2X"}` (JSON). Right code: `204` + `Set-Cookie: ardoise_share=<token>; Path=/; HttpOnly; SameSite=Strict`. Wrong: `403` `{"error":"wrongCode","remaining":n}`. Too many attempts: `429` + `Retry-After: s`, `{"error":"tooManyAttempts","retryAfter":s}`. Bad request (no JSON, too long, chunked): `400` / `413`. `Content-Type` other than `application/json`: `415`; an `Origin` header other than `http://<Host>`: `403` `{"error":"badOrigin"}` (a page of another site cannot spend the attempts of the projector's browser); neither counts as an attempt |
 | `GET /events` | valid cookie: `200`, `text/event-stream`, the stream (below). Missing or unknown token: `401`. Too many streams: `503` + `Retry-After: 5` |
 
 Headers of every answer: `Connection: close`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
@@ -107,12 +111,16 @@ bytes. The server only ever does `map.get(path)`: `/assets/../x`, `/assets/%2e%2
 - **Code**: 6 characters drawn uniformly (rejection sampling on `getrandom` bytes) from the 31 unambiguous symbols
   `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no `0 O 1 I L`): 31⁶ ≈ 8.9 × 10⁸ codes. New for each share. Shown as two
   groups of three (`K7M Q2X`); the page accepts it in any case, with or without spaces or a dash.
-- **Token**: 32 random bytes in hex, one per successful join, valid until the share stops (at most 256 kept; the
-  oldest is forgotten first). Compared in constant time.
+- **Token**: 32 random bytes in hex, one per successful join, valid until the share stops; at most 8 per address
+  (an address's new join forgets its own oldest, never another address's) and 256 in all. Compared in constant
+  time.
 - **Attempts**, per IP address: at most **5 wrong codes in 5 minutes**; the 6th attempt (right or wrong) within the
   window gets `429` with the seconds until the oldest wrong code is 5 minutes old. A right code clears the
-  address's record. At most 4 096 addresses remembered (the oldest dropped). Per address only: a classmate's PC
-  can lock itself out, never the projector's PC. Brute force: the code changes at each share; during a share of one hour, 100 PCs each trying all the time (1 code a minute) make 6 000 tries out of 8.9 × 10⁸ codes, about 1 chance in 150 000.
+  address's record. At most 4 096 addresses remembered: when all have running records, nothing is evicted and a
+  new address gets `429` until the first record expires (cycling through addresses gains nothing). Per address
+  only: a classmate's PC can lock itself out, never the projector's PC. Brute force: the code changes at each
+  share; during a share of one hour, 100 PCs each trying all the time (1 code a minute) make 6 000 tries out of
+  8.9 × 10⁸ codes, about 1 chance in 150 000.
 - The page and its assets are public (they are the GPL viewer, no data); only `/events` needs the token.
 
 ### The event stream
@@ -378,7 +386,12 @@ Server (package A):
   so that a refusal such as `431` is not destroyed by a reset. A stream also ends when the client sends anything.
 - `stop()`: each stream drops its backlog and writes `end` (500 ms at most), connections get 1 s to finish; it
   normally takes well under a millisecond, about 1 s with a viewer that does not read.
-- Address probes: 8.8.8.8, then 10.0.0.1, 172.16.0.1, 192.168.0.1, 192.168.1.1 (routing lookups only).
+- Address probes: 8.8.8.8, then 10.0.0.1, 172.16.0.1, 192.168.0.1, 192.168.1.1 (routing lookups only). Known
+  limit: with a VPN that takes the default route, its address may come first (the panel lists every address).
+- After the independent review: the per-address limits, no eviction from the attempts table, tokens per address,
+  `Content-Type` and `Origin` on `/join`, heads parsed only when complete, the bytes of messages being written
+  counted against the queue limit, and at stop a message being written gets 400 ms to finish before `end`. No
+  `Host` check (DNS rebinding would still need the code). `on_change` must not call `stop()`.
 
 App (package B) and review fixes:
 
