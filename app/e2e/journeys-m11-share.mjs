@@ -631,7 +631,8 @@ export const shareJourneys = [
                 socket.once('error', (error) => resolve(error.code ?? String(error)));
               }),
             'the port to refuse connections',
-            5000,
+            // Windows retries a refused connection for about 2 s before reporting it.
+            10_000,
           );
           if (code !== 'ECONNREFUSED') throw new Error(`connecting to the port failed with ${code}, expected ECONNREFUSED`);
           const reached = await request(port, { path: '/', timeout: 2000 }).then(
