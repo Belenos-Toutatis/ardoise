@@ -11,8 +11,19 @@ use serde::Serialize;
 /// needs about this much).
 pub const PAPER_PX: u32 = 2560;
 
-/// What the viewer draws of a note (`SharedPage` in `share.ts`): no title, tags, file, dates or
-/// layer names.
+/// Whether the viewer draws `stroke`: its layer is not hidden (a stroke of a layer that does not
+/// exist is drawn, as `drawingOrder` in `live-render.ts` does). Strokes of a hidden layer never
+/// leave the PC: anyone with the code could read them in the stream, and a teacher hides an
+/// "answers" layer precisely to keep it to themselves.
+pub fn is_drawn(layers: &[Layer], stroke: &Stroke) -> bool {
+    usize::try_from(stroke.layer)
+        .ok()
+        .and_then(|index| layers.get(index))
+        .is_none_or(|layer| layer.visible)
+}
+
+/// What the viewer draws of a note (`SharedPage` in `share.ts`): no title, tags, file, dates,
+/// layer names or stroke of a hidden layer.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SharedPage {
     pub id: String,
@@ -24,6 +35,9 @@ pub struct SharedPage {
 
 impl SharedPage {
     pub fn of(note: Note) -> SharedPage {
+        // Strokes refer to their layer by index: the layer list stays whole.
+        let mut strokes = note.strokes;
+        strokes.retain(|stroke| is_drawn(&note.layers, stroke));
         SharedPage {
             id: note.id,
             page: note.page,
@@ -37,7 +51,7 @@ impl SharedPage {
                     ..layer
                 })
                 .collect(),
-            strokes: note.strokes,
+            strokes,
         }
     }
 

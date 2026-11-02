@@ -12,9 +12,16 @@
 // median delay under 50 ms from the app's own timestamps; the network and the other PC's drawing are
 // what H4 judges by eye), pause and resume, the note open in the editor (`note`, then `noteStrokes`),
 // and the stop (`end`, port closed). Same pattern as the other journeys (labels from the translation files).
-import { readFileSync } from 'node:fs';
+//
+// The page itself is opened too, in a real browser: headless Microsoft Edge (if this PC has it) driven over
+// the DevTools protocol like the app's window. It types the code, waits for the live sheet to be drawn
+// (ink on the canvas, so the WebAssembly module loaded under the page's policy), follows the switch to
+// the editor's note and the end of the share, and no console message may mention the policy or WebAssembly.
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,9 +34,14 @@ const text = (language, key) => key.split('.').reduce((node, part) => node?.[par
 
 const j = JSON.stringify;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Wall-clock time in fractional milliseconds, as the app's `recv` (a `SystemTime`): `Date.now()` is whole milliseconds, rounded down, which made
+// a delay of a few hundred microseconds come out negative.
+const wallMs = () => performance.timeOrigin + performance.now();
 const STROKES = '.editor g.ink path[data-stroke]';
 const strokeCount = `document.querySelectorAll(${j(STROKES)}).length`;
-const LIVE_CANVAS = 'canvas.live-canvas';
+/** The title given to the note of the editor: the stream must never carry it. */
+const SECRET_TITLE = 'Secret E2E 4821';
+const LIVE_CANVAS ='canvas.live-canvas';
 const canvasData = (field) => `document.querySelector(${j(LIVE_CANVAS)})?.dataset.${field}`;
 
 // --- Pure helpers (also run in a local Node snippet, see the report) ----------------------------------
@@ -215,7 +227,7 @@ class EventStream {
             }
           });
           res.on('data', (chunk) => {
-            stream.chunkAt = Date.now();
+            stream.chunkAt = wallMs();
             parser.feed(chunk);
           });
           res.on('end', () => (stream.closed = true));
@@ -257,6 +269,180 @@ class EventStream {
     this.res?.destroy();
   }
 }
+
+// --- A real browser ------------------------------------------------------------------------------------
+
+/** Microsoft Edge on this PC (it ships with Windows 11), or null. */
+export function findEdge() {
+  const roots = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles].filter(Boolean);
+  return roots.map((root) => join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe')).find((path) => existsSync(path)) ?? null;
+}
+
+/** A TCP port nobody listens on (asked of the system, then released). */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+/** What the console said (or an exception) that is about the page's policy or about WebAssembly. */
+export const BROWSER_PROBLEM = /content security policy|\bcsp\b|refused to|webassembly|\.wasm/i;
+
+/**
+ * Headless Edge on a temporary profile, one page, driven over the DevTools protocol (same calls as the app's
+ * window in `run.mjs`). `close()` kills the whole process tree and removes the profile: call it in a `finally`.
+ * `messages`: every console message of level error or warning, log entry and uncaught exception of the page.
+ */
+export async function startBrowser(exe) {
+  const dir = mkdtempSync(join(tmpdir(), 'ardoise-e2e-edge-'));
+  const port = await freePort();
+  const child = spawn(
+    exe,
+    ['--headless=new', `--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', 'about:blank'],
+    { stdio: 'ignore' },
+  );
+  let spawnError = null;
+  child.once('error', (error) => (spawnError = error));
+  let ws = null;
+  let closed = false;
+  const messages = [];
+  const browser = {
+    messages,
+    async close() {
+      if (closed) return;
+      closed = true;
+      try {
+        ws?.close();
+      } catch {
+        // Already closed.
+      }
+      if (child.pid !== undefined && child.exitCode === null) {
+        try {
+          // Edge starts a process per tab, for the GPU...: the whole tree, or the profile stays locked.
+          execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+        } catch {
+          child.kill();
+        }
+      }
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          rmSync(dir, { recursive: true, force: true });
+          return;
+        } catch {
+          await sleep(250);
+        }
+      }
+    },
+  };
+  try {
+    let target;
+    for (let i = 0; i < 120 && !target; i++) {
+      if (spawnError) throw spawnError;
+      await sleep(250);
+      try {
+        const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+        target = list.find((t) => t.type === 'page');
+      } catch {
+        // Not listening yet.
+      }
+    }
+    if (!target) throw new Error('Edge did not open its DevTools endpoint');
+    ws = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise((resolve, reject) => {
+      ws.addEventListener('open', resolve);
+      ws.addEventListener('error', () => reject(new Error('cannot connect to the DevTools endpoint of Edge')));
+    });
+    let id = 0;
+    const pending = new Map();
+    ws.addEventListener('message', (message) => {
+      const data = JSON.parse(message.data);
+      if (data.id !== undefined) {
+        pending.get(data.id)?.(data);
+        pending.delete(data.id);
+      } else if (data.method === 'Runtime.consoleAPICalled') {
+        const { type, args } = data.params;
+        if (type === 'error' || type === 'warning') messages.push(`console.${type}: ${args.map((a) => a.value ?? a.description ?? '').join(' ')}`);
+      } else if (data.method === 'Log.entryAdded') {
+        const { level, source, text, url } = data.params.entry;
+        if (level === 'error' || level === 'warning') messages.push(`log ${level} (${source}): ${text}${url ? ` ${url}` : ''}`);
+      } else if (data.method === 'Runtime.exceptionThrown') {
+        const details = data.params.exceptionDetails;
+        messages.push(`uncaught: ${details.exception?.description ?? details.text}`);
+      }
+    });
+    const send = (method, params = {}) =>
+      new Promise((resolve) => {
+        const n = ++id;
+        pending.set(n, resolve);
+        ws.send(JSON.stringify({ id: n, method, params }));
+      });
+    await send('Runtime.enable');
+    await send('Log.enable');
+    await send('Page.enable');
+
+    browser.navigate = (url) => send('Page.navigate', { url });
+    browser.evaluate = async (expression) => {
+      const reply = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+      if (reply.result?.exceptionDetails) throw new Error(`page error: ${reply.result.exceptionDetails.exception?.description ?? 'unknown'}`);
+      return reply.result?.result?.value;
+    };
+    browser.waitFor = async (expression, what, timeout = 10_000) => {
+      const deadline = Date.now() + timeout;
+      for (;;) {
+        const value = await browser.evaluate(expression).catch(() => undefined);
+        if (value) return value;
+        if (Date.now() > deadline) throw new Error(`browser: timed out waiting for ${what}`);
+        await sleep(100);
+      }
+    };
+    /** A real mouse click at the centre of the first element matching `selector`. */
+    browser.click = async (selector) => {
+      const box = await browser.evaluate(`(() => {
+        const el = document.querySelector(${j(selector)});
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`);
+      if (!box) throw new Error(`browser: no element ${selector}`);
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y, button: 'none', buttons: 0 });
+      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', buttons: 1, clickCount: 1 });
+      await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x, y: box.y, button: 'left', buttons: 0, clickCount: 1 });
+    };
+    browser.type = (text) => send('Input.insertText', { text });
+    return browser;
+  } catch (error) {
+    await browser.close();
+    throw error;
+  }
+}
+
+/** Throws if the console of the browser mentioned the page's policy or WebAssembly, or if the page threw. */
+export function assertNoBrowserProblem(browser) {
+  const problems = browser.messages.filter((m) => BROWSER_PROBLEM.test(m) || m.startsWith('uncaught:'));
+  if (problems.length > 0) throw new Error(`the browser reported: ${problems.slice(0, 3).join(' | ')}`);
+}
+
+/** The canvas of the viewer's sheet; `strokes` is a condition on `c.dataset.strokes`. */
+const SHEET = 'canvas.viewer-canvas';
+const sheetIs = (shown, strokes) =>
+  `(() => { const c = document.querySelector(${j(SHEET)}); return c !== null && c.dataset.shown === ${j(shown)} && ${strokes}; })()`;
+/**
+ * Dark pixels on the canvas (a sample): the ink is black on the white paper. Only the geometry module
+ * (WebAssembly) draws them, `data-strokes` counts the strokes whether they are drawn or not.
+ */
+const DARK_PIXELS = `(() => {
+  const c = document.querySelector(${j(SHEET)});
+  if (!c) return -1;
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 16) if (d[i] + d[i + 1] + d[i + 2] < 150) n++;
+  return n;
+})()`;
 
 // --- Steps shared with the other live journeys ------------------------------------------------------------
 
@@ -335,6 +521,7 @@ export const shareJourneys = [
       let code = '';
       let cookie = '';
       let stream;
+      let browser = null;
 
       try {
         await startLive(app, check);
@@ -512,6 +699,29 @@ export const shareJourneys = [
           if (!(median < 50)) throw new Error(`median delay ${median.toFixed(1)} ms (p95 ${p95.toFixed(1)} ms), expected less than 50 ms`);
         });
 
+        await check('vrai navigateur (Edge sans fenêtre) : la page demande le code, puis dessine le direct sans erreur de politique ni de WebAssembly', async () => {
+          const edge = findEdge();
+          if (!edge) {
+            console.log('    skipped: Edge not found (C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe)');
+            return;
+          }
+          browser = await startBrowser(edge);
+          await browser.navigate(`${origin}/`);
+          await browser.waitFor(`document.querySelector('main.viewer')?.dataset.screen === 'code'`, 'the code form', 30_000);
+          await browser.click('#viewer-code');
+          await browser.type(code);
+          await browser.waitFor(`document.querySelector('form button[type="submit"]')?.disabled === false`, 'the join button');
+          await browser.click('form button[type="submit"]');
+          await browser.waitFor(`document.querySelector('main.viewer')?.dataset.screen === 'live'`, 'the live sheet', 20_000);
+          await browser.waitFor(sheetIs('live', 'Number(c.dataset.strokes) > 0'), 'strokes on the canvas of the viewer', 20_000);
+          const strokes = Number(await browser.evaluate(`document.querySelector(${j(SHEET)}).dataset.strokes`));
+          const before = await browser.evaluate(DARK_PIXELS);
+          // The simulated pen keeps writing: one more stroke, and more ink drawn.
+          await browser.waitFor(`Number(document.querySelector(${j(SHEET)})?.dataset.strokes) > ${strokes}`, 'one more stroke', 30_000);
+          await browser.waitFor(`${DARK_PIXELS} > ${before}`, 'more ink on the canvas (is the geometry module loaded?)', 10_000);
+          assertNoBrowserProblem(browser);
+        });
+
         await check('Pause : l’image figée (instantané) puis « pause », puis plus aucun point pendant 1 s', async () => {
           const mark = stream.mark();
           await app.click('button[data-action="share-pause"]');
@@ -552,10 +762,18 @@ export const shareJourneys = [
           const waitingAt = stream.mark();
           await app.click('.note-card .card-open');
           await app.waitFor(`${strokeCount} > 0`, 'the strokes of the note');
+          // A title worth searching for in the stream (the demo note may have none): typed in the editor's field, which also renames the file.
+          await app.click('.title-field input');
+          await app.key('a', { ctrl: true });
+          await app.type(SECRET_TITLE);
+          await app.key('Enter');
+          await app.waitFor(`document.querySelector('.editor').dataset.path.includes(${j(SECRET_TITLE)})`, 'the renamed note');
+          await app.waitFor(`${strokeCount} > 0`, 'the strokes of the renamed note');
           // The page is fitted once the editor has measured its stage.
           await sleep(300);
           noteStrokes = await app.evaluate(strokeCount);
           title = (await app.evaluate(`document.querySelector('.title-field input')?.value ?? ''`)).trim();
+          if (title !== SECRET_TITLE) throw new Error(`the title field holds ${j(title)}, expected ${j(SECRET_TITLE)}`);
           const note = await stream.next((msg) => msg.type === 'note', 'the note message', { from: waitingAt, timeout: 5000 });
           const shared = note.msg.page;
           if (!shared || !Array.isArray(shared.strokes)) throw new Error(`the note message has no page: ${note.raw.slice(0, 160)}`);
@@ -573,7 +791,7 @@ export const shareJourneys = [
             y: box.y + box.h * (0.5 + 0.08 * Math.sin(i / 3)),
           }));
           await app.drag(points);
-          const released = Date.now();
+          const released = wallMs();
           await app.waitFor(`${strokeCount} === ${noteStrokes + 1}`, 'the new stroke in the editor');
           const update = await stream.next(
             (msg) =>
@@ -584,6 +802,15 @@ export const shareJourneys = [
           console.log(`    trait reçu ${update.at - released} ms après le relâchement (${update.msg.type})`);
           const added = update.msg.type === 'noteStrokes' ? update.msg.strokes[0] : update.msg.page.strokes.at(-1);
           if (!Array.isArray(added.points) || added.points.length < 2) throw new Error('the new stroke has no points');
+        });
+
+        await check('vrai navigateur : la note de l’éditeur remplace le direct (ses traits, avec le trait de plus)', async () => {
+          if (!browser) return;
+          await browser.waitFor(sheetIs('note', `Number(c.dataset.strokes) === ${noteStrokes + 1}`), `the note with ${noteStrokes + 1} strokes`, 15_000);
+          if ((await browser.evaluate(`document.querySelector('main.viewer').dataset.paused`)) !== 'false') {
+            throw new Error('the viewer shows the pause badge');
+          }
+          assertNoBrowserProblem(browser);
         });
 
         await check('rien de personnel dans le flux : ni dossier de la bibliothèque, ni titre de la note, ni événement « saved »', async () => {
@@ -617,6 +844,9 @@ export const shareJourneys = [
           await app.click('button[data-action="share-stop"]');
           await stream.next((msg) => msg.type === 'end', 'the end message', { from: mark, timeout: 5000 });
           await until(() => stream.closed, 'the stream to close', 5000);
+          if (browser) {
+            await browser.waitFor(`document.querySelector('main.viewer')?.dataset.screen === 'ended'`, 'the viewer to say that sharing ended', 10_000);
+          }
         });
 
         await check('le port est fermé : connexion refusée, GET / échoue', async () => {
@@ -643,6 +873,8 @@ export const shareJourneys = [
         });
       } finally {
         stream?.close();
+        // Edge and its profile, also when a step failed.
+        await browser?.close();
       }
     },
   },

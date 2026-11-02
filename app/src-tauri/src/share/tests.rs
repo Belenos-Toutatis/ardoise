@@ -21,7 +21,7 @@ use ardoise_proto::stroke::Point as PenPoint;
 use serde_json::{Value, json};
 
 use super::assets::{AssetSource, ViewerAssetsError, content_type, viewer_assets};
-use super::feed::{strip_batch, subscriber_label};
+use super::feed::{Memo, batch_json, subscriber_label};
 use super::page::{NoteSharer, PAPER_PX, Paper as SharedPaper};
 use super::{ShareContent, ShareRuntime, render_paper};
 use crate::library::tests::library;
@@ -276,8 +276,7 @@ fn a_viewer_never_gets_library_paths_titles_tags_nor_the_screen() {
         ],
         sent_at: 1.0,
     };
-    let stripped = strip_batch(batch);
-    let text = serde_json::to_string(&stripped).unwrap();
+    let text = batch_json(&batch).unwrap();
     for secret in [
         "Nextcloud",
         "Léa",
@@ -303,6 +302,130 @@ fn a_viewer_never_gets_library_paths_titles_tags_nor_the_screen() {
     assert_eq!(snapshot["page"]["layers"][0]["visible"], true);
     assert_eq!(snapshot["view"]["zoom"], 1.0);
     assert_eq!(subscriber_label(7), "share:7");
+}
+
+fn keys(value: &Value) -> Vec<&str> {
+    let mut keys: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    keys
+}
+
+#[test]
+fn a_viewer_gets_only_the_fields_the_viewer_draws() {
+    // An allow list: a field added later to the hub's types is not in this set, so it does not
+    // reach a browser until someone adds it here on purpose.
+    let batch = LiveBatch {
+        events: vec![LiveEvent::Snapshot {
+            snapshot: Box::new(snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]))),
+        }],
+        sent_at: 1.0,
+    };
+    let value: Value = serde_json::from_str(&batch_json(&batch).unwrap()).unwrap();
+    assert_eq!(keys(&value), ["events", "sentAt"]);
+    let snapshot = &value["events"][0]["snapshot"];
+    assert_eq!(
+        keys(snapshot),
+        [
+            "hover",
+            "layer",
+            "orientation",
+            "page",
+            "pageCount",
+            "pageIndex",
+            "presentation",
+            "saved",
+            "state",
+            "style",
+            "view"
+        ]
+    );
+    let page = &snapshot["page"];
+    assert_eq!(
+        keys(page),
+        [
+            "background",
+            "created",
+            "id",
+            "layers",
+            "modified",
+            "origin",
+            "page",
+            "strokes",
+            "tags",
+            "timing",
+            "title"
+        ]
+    );
+    // The page's origin (here a live page) is not told.
+    assert_eq!(page["origin"], json!({"kind": "ardoise"}));
+    assert_eq!(keys(&page["layers"][0]), ["name", "visible"]);
+    assert_eq!(page["layers"][0]["name"], "");
+}
+
+#[test]
+fn live_strokes_of_a_hidden_layer_never_reach_a_viewer() {
+    let mut note = note_with(vec![pen_stroke(1000.0, 3), pen_stroke(5000.0, 3)]);
+    note.layers.push(Layer {
+        name: "Corrigé".into(),
+        visible: true,
+    });
+    note.layers[0].visible = false;
+    note.strokes[1].layer = 1;
+    // A stroke of a layer that does not exist is drawn by the viewer: it stays.
+    let mut orphan = pen_stroke(9000.0, 2);
+    orphan.layer = 7;
+    note.strokes.push(orphan);
+    let batch = LiveBatch {
+        events: vec![LiveEvent::Snapshot {
+            snapshot: Box::new(snapshot_of(note)),
+        }],
+        sent_at: 1.0,
+    };
+    let text = batch_json(&batch).unwrap();
+    let value: Value = serde_json::from_str(&text).unwrap();
+    let page = &value["events"][0]["snapshot"]["page"];
+    assert_eq!(page["layers"][0]["visible"], false);
+    let layers: Vec<u64> = page["strokes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|stroke| stroke["layer"].as_u64().unwrap())
+        .collect();
+    assert_eq!(layers, [1, 7]);
+    assert!(!text.contains("Corrigé"));
+}
+
+#[test]
+fn viewers_with_the_same_batch_share_one_text() {
+    let memo = Memo::default();
+    let batch = |x: f32| LiveBatch {
+        events: vec![
+            LiveEvent::Snapshot {
+                snapshot: Box::new(snapshot_of(note_with(vec![pen_stroke(x, 4)]))),
+            },
+            LiveEvent::HoverEnd,
+        ],
+        sent_at: 1.0,
+    };
+    let first = memo.json(batch(1000.0)).unwrap();
+    let second = memo.json(batch(1000.0)).unwrap();
+    assert!(Arc::ptr_eq(&first, &second));
+    // A viewer that missed something gets what it is owed.
+    let other = memo.json(batch(2000.0)).unwrap();
+    assert!(!Arc::ptr_eq(&first, &other));
+    assert_ne!(first, other);
+    // Only library events: nothing to send, and nothing remembered over the last text.
+    let only_library = LiveBatch {
+        events: vec![LiveEvent::Saved { paths: Vec::new() }],
+        sent_at: 1.0,
+    };
+    assert!(memo.json(only_library).is_none());
+    assert!(Arc::ptr_eq(&other, &memo.json(batch(2000.0)).unwrap()));
 }
 
 // --- The editor's note -------------------------------------------------------------------------
@@ -428,6 +551,82 @@ fn a_note_goes_whole_then_as_the_strokes_added() {
     // A new share starts from scratch.
     sharer.reset();
     assert_eq!(sharer.update(lined, None, render).unwrap().append, None);
+}
+
+#[test]
+fn a_hidden_layer_is_not_sent_to_the_viewers() {
+    let mut sharer = NoteSharer::default();
+    let render = |_: &SharedPaper| None;
+    let mut note = note_with(vec![pen_stroke(1000.0, 3), pen_stroke(4000.0, 3)]);
+    note.layers.push(Layer {
+        name: "Corrigé de Léa".into(),
+        visible: false,
+    });
+    note.strokes[1].layer = 1;
+
+    // The answers layer is hidden: its stroke is not in the page, the layer still is (strokes
+    // refer to layers by index).
+    let first = sharer.update(note.clone(), None, render).unwrap();
+    let full = parse(&first.full);
+    assert_eq!(full["page"]["strokes"].as_array().unwrap().len(), 1);
+    assert_eq!(full["page"]["strokes"][0]["layer"], 0);
+    assert_eq!(full["page"]["layers"].as_array().unwrap().len(), 2);
+    assert_eq!(full["page"]["layers"][1]["visible"], false);
+    assert!(!first.full.contains("Léa"));
+
+    // Writing on the hidden layer changes nothing the viewers see: nothing is sent.
+    note.strokes.push(pen_stroke(7000.0, 3));
+    note.strokes[2].layer = 1;
+    assert!(sharer.update(note.clone(), None, render).is_none());
+
+    // Showing the layer sends the page whole, with its strokes; hiding it again takes them back.
+    note.layers[1].visible = true;
+    let shown = sharer.update(note.clone(), None, render).unwrap();
+    assert_eq!(
+        parse(shown.append.as_deref().unwrap())["page"]["strokes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    note.layers[1].visible = false;
+    let hidden = sharer.update(note, None, render).unwrap();
+    let replaced = parse(hidden.append.as_deref().unwrap());
+    assert_eq!(replaced["type"], "note");
+    assert_eq!(replaced["page"]["strokes"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn stopping_does_not_wait_for_a_note_being_applied() {
+    let runtime = ShareRuntime::default();
+    let render = |_: &SharedPaper| None;
+    let note = || note_with(vec![pen_stroke(1000.0, 3)]);
+    assert!(
+        super::lock(&runtime.inner.notes)
+            .update(note(), None, render)
+            .is_some()
+    );
+
+    // A content is being applied (its paper rendering): the lock is taken, `stop` goes on.
+    {
+        let _applying = super::lock(&runtime.inner.notes);
+        runtime.inner.forget_note();
+        runtime.stop();
+    }
+    // Nothing was forgotten then: the viewers' note is the same one.
+    assert!(
+        super::lock(&runtime.inner.notes)
+            .update(note(), None, render)
+            .is_none()
+    );
+
+    // Nothing applied: the note is forgotten, the next one goes whole.
+    runtime.inner.forget_note();
+    assert!(
+        super::lock(&runtime.inner.notes)
+            .update(note(), None, render)
+            .is_some()
+    );
 }
 
 #[test]

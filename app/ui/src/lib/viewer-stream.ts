@@ -353,8 +353,12 @@ export async function join(code: string, doFetch: typeof fetch = (input, init) =
   if (response.status === 204) return { ok: true };
   if (response.status === 403) {
     const body = await refusal(response);
-    const remaining = body && 'remaining' in body && typeof body.remaining === 'number' ? Math.max(0, body.remaining) : 0;
-    return { ok: false, reason: 'wrongCode', remaining };
+    // Only a wrong code is a wrong code: a refused `Origin` (`badOrigin`), or a proxy's 403, is not.
+    if (body?.error === 'wrongCode') {
+      const remaining = 'remaining' in body && typeof body.remaining === 'number' ? Math.max(0, body.remaining) : 0;
+      return { ok: false, reason: 'wrongCode', remaining };
+    }
+    return { ok: false, reason: 'error', status: 403 };
   }
   if (response.status === 429) {
     const body = await refusal(response);

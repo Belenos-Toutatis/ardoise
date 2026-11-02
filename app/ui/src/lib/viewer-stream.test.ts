@@ -481,8 +481,19 @@ describe('join', () => {
   it('reports a wrong code with the attempts left', async () => {
     const f = fakeFetch(() => Response.json({ error: 'wrongCode', remaining: 3 }, { status: 403 }));
     expect(await join('AAAAAA', f.doFetch)).toEqual({ ok: false, reason: 'wrongCode', remaining: 3 });
-    const broken = fakeFetch(() => new Response('<html>', { status: 403 }));
-    expect(await join('AAAAAA', broken.doFetch)).toEqual({ ok: false, reason: 'wrongCode', remaining: 0 });
+    // The attempts left never go below zero, and a missing number counts as none.
+    const spent = fakeFetch(() => Response.json({ error: 'wrongCode', remaining: -1 }, { status: 403 }));
+    expect(await join('AAAAAA', spent.doFetch)).toEqual({ ok: false, reason: 'wrongCode', remaining: 0 });
+    const bare = fakeFetch(() => Response.json({ error: 'wrongCode' }, { status: 403 }));
+    expect(await join('AAAAAA', bare.doFetch)).toEqual({ ok: false, reason: 'wrongCode', remaining: 0 });
+  });
+
+  it('does not take any other 403 for a wrong code', async () => {
+    // A refused Origin does not spend an attempt: "wrong code, 0 attempts left" would be false.
+    const origin = fakeFetch(() => Response.json({ error: 'badOrigin' }, { status: 403 }));
+    expect(await join('AAAAAA', origin.doFetch)).toEqual({ ok: false, reason: 'error', status: 403 });
+    const proxy = fakeFetch(() => new Response('<html>', { status: 403 }));
+    expect(await join('AAAAAA', proxy.doFetch)).toEqual({ ok: false, reason: 'error', status: 403 });
   });
 
   it('reports too many attempts with the wait in seconds', async () => {

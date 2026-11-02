@@ -8,7 +8,21 @@ import Viewer from './Viewer.svelte';
 const target = document.getElementById('viewer');
 if (!target) throw new Error('#viewer element missing from viewer.html');
 
+/** What the viewer needs besides ES modules and ES2022 (a browser without them never gets here). */
+function supported(): boolean {
+  return (
+    typeof WebAssembly === 'object' &&
+    typeof fetch === 'function' &&
+    typeof ReadableStream === 'function' &&
+    typeof TextDecoder === 'function'
+  );
+}
+
 // French if the browser is in French, English otherwise.
 setLocale(resolveLocale('auto', navigator.language));
 
-export default mount(Viewer, { target });
+// `viewer.html` holds a message for a browser too old to get here; it stays if this one lacks
+// something the viewer needs.
+if (supported()) target.replaceChildren();
+
+export default supported() ? mount(Viewer, { target }) : undefined;
