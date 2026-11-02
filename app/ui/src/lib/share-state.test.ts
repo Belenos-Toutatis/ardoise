@@ -215,7 +215,7 @@ describe('the share', () => {
     mockShare.failStart = { code: 'sharePortInUse', message: '8765' };
     expect(await share.start()).toBe(false);
     expect(share.error).toContain('port');
-    expect(share.error).toContain('ardoise.toml');
+    expect(share.error).toContain('Port du partage');
     expect(share.active).toBe(false);
     expect(share.starting).toBe(false);
     mockShare.failStart = null;

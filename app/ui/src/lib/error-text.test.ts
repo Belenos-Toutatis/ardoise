@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { errorMessage, genericError } from './api';
+import { errorMessage, genericError, sentence } from './api';
 import { setLocale } from './i18n.svelte';
 
 afterEach(() => setLocale('fr'));
@@ -24,6 +24,13 @@ describe('the sentence of an error shown under « Something went wrong »', () =
       'Something went wrong. The library cannot be read (denied).',
     );
     expect(genericError('Already a sentence!')).toBe('Something went wrong. Already a sentence!');
+  });
+
+  it('can show the coded phrase alone, as a sentence', () => {
+    setLocale('fr');
+    expect(sentence('le port 8765 est pris')).toBe('Le port 8765 est pris.');
+    expect(sentence('Déjà une phrase !')).toBe('Déjà une phrase !');
+    expect(sentence('  ')).toBe('');
   });
 
   it('copes with an empty message', () => {

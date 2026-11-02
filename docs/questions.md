@@ -53,3 +53,15 @@ Le serveur du partage sur le réseau local (§4.10) est une nouvelle bibliothèq
 La relecture de M11 a relevé que les annotations écrites au stylet, au doigt ou à la souris sur la fenêtre de présentation (rouges, jaunes sur le tableau noir, temporaires, jamais enregistrées dans la note) restaient sur le PC : le partage ne montrait que l'écriture de la tablette et la vue (zoom, déplacement, tableau noir, pointeur laser).
 
 **Décision de l'utilisateur (2026-11-02)** : les montrer aussi sur l'autre écran, pour qu'il affiche exactement ce que montre le vidéoprojecteur. SPEC §4.10 et ROADMAP M11 sont mis à jour.
+
+## Q7 — Que faire quand le port du partage est déjà pris ? (jalon M11, 2026-11-02) — **tranchée**
+
+Sur le PC de l'utilisateur, le port 8765 était pris par un autre programme (l'aide Python d'un serveur MCP pour
+LibreOffice, qui démarre avec Claude Desktop) : le partage refusait de démarrer et renvoyait vers `ardoise.toml`.
+
+**Décision de l'utilisateur (2026-11-02)** : les deux propositions.
+- Si le port est pris, Ardoise essaie les ports suivants et prend le premier libre ; le panneau du partage le dit, et le
+  port trouvé est retenu pour ce PC (section de la machine dans `ardoise.toml`), pour que l'adresse reste la même.
+- Un réglage « Port du partage » dans les réglages d'Ardoise, pour choisir un port sans modifier `ardoise.toml` à la main.
+
+SPEC §4.10 (ligne « Réseau ») est mis à jour.

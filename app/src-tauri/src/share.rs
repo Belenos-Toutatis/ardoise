@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError};
 
 use ardoise_core::note::Note;
+use ardoise_core::settings::DEFAULT_SHARE_PORT;
 use ardoise_share::qr::{QrCode, qr_code};
 use ardoise_share::{Share, ShareConfig, ShareError, Shown};
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,7 @@ use tauri::{AppHandle, Manager, State, Webview};
 
 use crate::AppContext;
 use crate::background::staging;
-use crate::commands::{CommandError, CommandResult, store};
+use crate::commands::{CommandError, CommandResult, store, update};
 use crate::live::{LiveHub, LiveRuntime};
 use crate::notes::background_png;
 use crate::thumbnails::png_data_url;
@@ -63,7 +64,11 @@ pub enum ShareContent {
 #[serde(rename_all = "camelCase")]
 pub struct ShareStatus {
     pub active: bool,
+    /// The port listened on; the one this PC would ask for (`configured_port`) when inactive.
     pub port: u16,
+    /// The port the share was started asking for; it differs from `port` when another
+    /// program held that one and a following port was taken.
+    pub requested_port: u16,
     /// `K7M Q2X` while active.
     pub code: Option<String>,
     /// `http://192.168.1.23:8765/`…, private LAN addresses first.
@@ -80,6 +85,7 @@ impl ShareStatus {
         ShareStatus {
             active: false,
             port,
+            requested_port: port,
             code: None,
             addresses: Vec::new(),
             qr: None,
@@ -90,12 +96,15 @@ impl ShareStatus {
     }
 }
 
-/// Error for the interface.
-/// Error for the interface. A port in use carries only the port's number, which the translated
-/// sentence (`errorCodes.sharePortInUse`) shows as `{detail}`.
+/// Error for the interface. A port in use carries only the port's number, and no free port the
+/// range tried (`8765-8785`): the translated sentences (`errorCodes.sharePortInUse`,
+/// `errorCodes.shareNoFreePort`) show it as `{detail}`.
 fn share_error(error: &ShareError) -> CommandError {
     match error {
         ShareError::PortInUse { port } => CommandError::new(error.code(), port),
+        ShareError::NoFreePort { first, last } => {
+            CommandError::new(error.code(), format!("{first}-{last}"))
+        }
         other => CommandError::new(other.code(), other),
     }
 }
@@ -106,6 +115,8 @@ type Subscriber = Box<dyn Fn(&ShareStatus) -> bool + Send + Sync>;
 /// A running share and what was worked out when it started.
 struct Running {
     share: Arc<Share>,
+    /// The port asked for when it started (`ShareStatus::requested_port`).
+    requested_port: u16,
     addresses: Vec<String>,
     qr: Option<QrCode>,
 }
@@ -189,6 +200,7 @@ impl Inner {
                 ShareStatus {
                     active: true,
                     port: crate_status.port,
+                    requested_port: running.requested_port,
                     code: Some(ardoise_share::format_code(&crate_status.code)),
                     addresses: running.addresses.clone(),
                     qr: running.qr.clone(),
@@ -291,7 +303,8 @@ impl ShareRuntime {
             .map_err(|error| error.to_string())
     }
 
-    /// Starts sharing (or returns the share running) on `bind:port`, live mode from `hub`.
+    /// Starts sharing (or returns the share running) on `bind:port` or, when another program
+    /// holds it, on the first free port after it; live mode from `hub`.
     fn start(&self, bind: Ipv4Addr, port: u16, hub: Arc<LiveHub>) -> CommandResult<ShareStatus> {
         // One start at a time (a double click); `running` itself is only held briefly, never
         // while the server starts, so that its status callback can always read it.
@@ -315,15 +328,16 @@ impl ShareRuntime {
             let config = ShareConfig {
                 bind,
                 port,
+                fallback_ports: ardoise_share::FALLBACK_PORTS,
                 code: None,
             };
             let share = Share::start(config, assets, Arc::new(HubFeed::new(hub)), on_change)
                 .map_err(|error| share_error(&error))?;
-            let port = share.port();
-            let addresses = addresses_for(bind, port);
+            let addresses = addresses_for(bind, share.port());
             let qr = addresses.first().and_then(|address| qr_code(address));
             *lock(&self.inner.running) = Some(Running {
                 share: Arc::new(share),
+                requested_port: port,
                 addresses,
                 qr,
             });
@@ -356,14 +370,93 @@ impl ShareRuntime {
     }
 }
 
-/// `[share] port` of `ardoise.toml` (the default when the settings cannot be read).
+/// The port this PC asks for first: its own `share_port` in `ardoise.toml` (the section of this
+/// computer), else `[share] port`, else 8765 (also when the settings cannot be read).
 fn configured_port(context: &AppContext) -> u16 {
-    store(context)
+    port_setting(context).port
+}
+
+/// Keeps `port`, the one a share had to move to, for this PC: the address stays the same from
+/// one share to the next. The share runs either way: a settings file that cannot be written
+/// only costs the next share the same search.
+fn remember_port(context: &AppContext, port: u16) {
+    let Ok(store) = store(context) else {
+        return;
+    };
+    let machine = store.machine().to_owned();
+    if let Err(error) = update(context, |settings| {
+        settings.set_share_port(&machine, Some(port));
+    }) {
+        eprintln!(
+            "share: cannot keep port {port} for this PC: {}",
+            error.parts().1
+        );
+    }
+}
+
+/// Starts the share on this PC's port; when it had to take another one, keeps that one.
+fn start_and_remember(
+    runtime: &ShareRuntime,
+    context: &AppContext,
+    bind: Ipv4Addr,
+    hub: Arc<LiveHub>,
+) -> CommandResult<ShareStatus> {
+    let wanted = configured_port(context);
+    let status = runtime.start(bind, wanted, hub)?;
+    if status.active && status.port != wanted && status.requested_port == wanted {
+        remember_port(context, status.port);
+    }
+    Ok(status)
+}
+
+/// What the settings screen shows of the share's port (`SharePortSetting` in `share.ts`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharePortSetting {
+    /// The port this PC asks for first.
+    pub port: u16,
+    /// `[share] port` of `ardoise.toml`, which every PC without a port of its own uses.
+    pub shared_port: u16,
+    /// This PC has a port of its own (chosen in the settings, or kept after a conflict).
+    pub own: bool,
+}
+
+/// Lowest and highest ports the settings accept (below 1024 the ports are the system's).
+const LOWEST_PORT: u16 = 1024;
+const HIGHEST_PORT: u16 = u16::MAX;
+
+fn port_setting(context: &AppContext) -> SharePortSetting {
+    let loaded = store(context).ok().and_then(|store| {
+        let settings = store.load().ok()?;
+        Some((settings, store.machine().to_owned()))
+    });
+    match loaded {
+        Some((settings, machine)) => SharePortSetting {
+            port: settings.share_port_for(&machine),
+            shared_port: settings.share.port,
+            own: settings.machine_share_port(&machine).is_some(),
+        },
+        None => SharePortSetting {
+            port: DEFAULT_SHARE_PORT,
+            shared_port: DEFAULT_SHARE_PORT,
+            own: false,
+        },
+    }
+}
+
+/// Keeps `port` for the share of this PC (`sharePortInvalid` unless from 1024 to 65535).
+fn set_port_in(context: &AppContext, port: i64) -> CommandResult<SharePortSetting> {
+    let port = u16::try_from(port)
         .ok()
-        .and_then(|store| store.load().ok())
-        .map_or(ardoise_core::settings::DEFAULT_SHARE_PORT, |settings| {
-            settings.share.port
-        })
+        .filter(|port| (LOWEST_PORT..=HIGHEST_PORT).contains(port))
+        .ok_or_else(|| {
+            CommandError::new("sharePortInvalid", format!("{LOWEST_PORT}-{HIGHEST_PORT}"))
+        })?;
+    let machine = store(context)?.machine().to_owned();
+    update(context, |settings| {
+        settings.set_share_port(&machine, Some(port));
+    })?;
+    Ok(port_setting(context))
 }
 
 /// Every IPv4 interface, or the loopback one for the e2e journeys ([`LOOPBACK_VARIABLE`]).
@@ -412,9 +505,25 @@ pub async fn share_start(app: AppHandle) -> CommandResult<ShareStatus> {
         let context = app.state::<AppContext>();
         let runtime = app.state::<ShareRuntime>();
         let hub = app.state::<LiveRuntime>().shared_hub();
-        runtime.start(bind_address(), configured_port(&context), hub)
+        start_and_remember(&runtime, &context, bind_address(), hub)
     })
     .await
+}
+
+/// The port of the share on this PC (settings screen).
+#[tauri::command]
+pub async fn share_port(context: State<'_, AppContext>) -> CommandResult<SharePortSetting> {
+    Ok(port_setting(&context))
+}
+
+/// Chooses the port of the share on this PC, from 1024 to 65535 (`sharePortInvalid` otherwise).
+/// A share running keeps its port; the next one uses the new one.
+#[tauri::command]
+pub async fn set_share_port(
+    context: State<'_, AppContext>,
+    port: i64,
+) -> CommandResult<SharePortSetting> {
+    set_port_in(&context, port)
 }
 
 #[tauri::command]

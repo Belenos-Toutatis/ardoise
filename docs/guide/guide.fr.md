@@ -409,12 +409,17 @@ lui-même.
 - Windows attache cette autorisation au *programme*, à son emplacement : `ardoise.exe` dans ce dossier, quel que soit
   le port. Si vous déplacez ou renommez `ardoise.exe`, ou lancez une autre copie, Windows repose la question :
   répondez de la même façon. Changer de port ne la repose pas.
-- Le *port est fixe* (8765, réglage `port` de la section `[share]` de `ardoise.toml`) : l'adresse reste la même d'un
-  partage à l'autre, et le service informatique peut ouvrir ce port. Aucun autre programme ne peut prendre ce port
-  pendant un partage.
-- Si un autre programme utilise déjà ce port, Ardoise le dit et ne démarre pas le partage : fermez l'autre programme,
-  ou changez le port dans `ardoise.toml` (par exemple `[share]`, puis `port = 8766` sur la ligne suivante), puis
-  relancez le partage.
+- Le *port* est 8765 d'office. Il ne change pas d'un partage à l'autre, donc l'adresse reste la même, et le service
+  informatique peut ouvrir ce port. Aucun autre programme ne peut prendre ce port pendant un partage.
+- Si un autre programme utilise déjà ce port, Ardoise prend de lui-même le premier port libre qui suit (8766, 8767…)
+  et le dit en haut du panneau : « Le port 8765 est utilisé par un autre programme : le partage utilise le port 8766,
+  retenu pour ce PC. » Ce port est mémorisé pour ce PC : aux partages suivants, l'adresse reste la même. Tapez
+  simplement l'adresse que le panneau affiche. Si aucun des 20 ports qui suivent n'est libre, Ardoise le dit et ne
+  démarre pas le partage.
+- Pour choisir vous-même le port, ouvrez **Réglages** > **Partage sur le réseau** > **Port du partage**, tapez un
+  nombre de 1024 à 65535 et cliquez sur **Enregistrer**. Ce choix vaut pour ce PC seulement. Un partage déjà lancé
+  garde son port ; le nouveau sert au partage suivant. Changer de port ne redemande pas l'autorisation du pare-feu,
+  mais l'autre ordinateur doit taper la nouvelle adresse.
 
 **Confidentialité.** Le partage ne démarre que si vous cliquez, et s'arrête avec **Arrêter le partage** ou à la
 fermeture d'Ardoise (le port est alors refermé). Le code change à chaque partage. Après 5 codes faux en 5 minutes,
@@ -428,7 +433,7 @@ l'adresse *et* le code.
 - Les deux ordinateurs sont-ils sur le *même réseau* (même Wi-Fi ou même prise réseau, pas un réseau « invités »
   isolé) ?
 - L'adresse est-elle tapée avec `http://` et le port (`:8765`) ? Prenez celle que le panneau affiche, pas celle d'un
-  autre jour : elle peut changer.
+  autre jour : le port peut avoir changé si un autre programme tenait le 8765.
 - Le pare-feu a-t-il été autorisé pour ce type de réseau (voir plus haut) ? C'est la cause la plus fréquente.
 - La page dit que le code est incorrect : relisez le code du panneau (il n'y a ni `0`, ni `O`, ni `1`, ni `I`, ni `L`).
 - La page dit qu'il y a trop d'écrans : le partage accepte 32 écrans à la fois (4 par ordinateur). Elle réessaie
@@ -437,7 +442,7 @@ l'adresse *et* le code.
   sécurité, le partage refuse les noms avec un point (comme `pc.ecole.lan`) ; il accepte le nom court de
   l'ordinateur, si le réseau le connaît.
 - Un logiciel de sécurité ou le réseau de l'école peut aussi bloquer les connexions entre ordinateurs : demandez au
-  service informatique d'ouvrir le port 8765 vers votre PC.
+  service informatique d'ouvrir vers votre PC le port que le panneau affiche (8765 d'habitude).
 
 ## 7. La bibliothèque
 
@@ -1004,7 +1009,7 @@ de tous les composants utilisés avec leur licence.
 | Windows dit qu'« Ardoise empêche l'arrêt » | Une note a des modifications non enregistrées : revenez dans Ardoise et enregistrez, ou arrêtez quand même (la copie de secours est déjà écrite, chapitre 8). |
 | « Ardoise n'a pas trouvé Wacom Inkspace sur cet ordinateur » | Cliquez sur **Choisir un dossier…** et indiquez le dossier `LocalState` d'Inkspace ou une copie (chapitre 11). Si Ardoise dit de fermer Inkspace, fermez-le et réessayez. |
 | L'autre ordinateur n'arrive pas à se connecter au partage | Même réseau ? Adresse tapée avec `http://` et le port ? Pare-feu de Windows autorisé pour ce réseau (**Réseaux privés**, ou réseau passé en **Privé**) ? Voir « Montrer la feuille sur un autre ordinateur du réseau », chapitre 6. |
-| Un message dit, en partageant, que le port est déjà utilisé | Un autre programme utilise le port du partage : fermez-le, ou changez `port` dans la section `[share]` de `ardoise.toml` (chapitre 6). |
+| Un message dit, en partageant, que le port est déjà utilisé, ou qu'aucun port n'est libre | Ardoise prend normalement de lui-même le port libre suivant et le dit dans le panneau. Si aucun des 20 ports qui suivent n'est libre, choisissez-en un autre dans **Réglages** > **Partage sur le réseau** > **Port du partage** (chapitre 6). |
 | Un second double-clic sur `ardoise.exe` ne fait rien de nouveau | C'est voulu : la fenêtre déjà ouverte revient au premier plan (chapitre 2). |
 
 Si le problème tient à la tablette, lancez **Tester la tablette** (chapitre 13) : le journal, ramené par Nextcloud,

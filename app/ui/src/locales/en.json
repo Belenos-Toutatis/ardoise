@@ -299,6 +299,16 @@
       "title": "Microphone",
       "hint": "The microphone used for the narration of videos and live mode. The choice is remembered on this computer."
     },
+    "sharePort": {
+      "title": "Sharing on the network",
+      "label": "Share port",
+      "hint": "The port the share uses on this PC. The other computer types the address with this number. The firewall allows the program, not the port: changing the port does not ask for the permission again. A share that is running keeps its port; the new port is used by the next share.",
+      "range": "A whole number from 1024 to 65535.",
+      "invalid": "The port must be a whole number from 1024 to 65535.",
+      "save": "Save",
+      "saved": "Port saved: {port}.",
+      "own": "This port is kept for this PC. The other computers that share this settings file keep port {shared}."
+    },
     "penTouch": {
       "title": "Pen and touch",
       "drawWithFinger": "Draw with a finger",
@@ -699,7 +709,9 @@
     "inkspaceNoteDamaged": "this Inkspace note cannot be read ({detail})",
     "inkspaceBusy": "an Inkspace import is already running",
     "inkspaceTarget": "this binder is inside Inkspace's folder ({detail}); choose a binder of the library",
-    "sharePortInUse": "the share's port {detail} is already used by another program; to change it, edit \"port\" in the [share] section of the ardoise.toml file, then start the share again",
+    "sharePortInUse": "the share's port {detail} is already used by another program; choose another one in the Ardoise settings (\"Share port\"), then start the share again",
+    "shareNoFreePort": "no free port in the range {detail} for the share: other programs use all of them; choose another port in the Ardoise settings (\"Share port\"), then start the share again",
+    "sharePortInvalid": "the share's port must be a whole number from 1024 to 65535",
     "shareUnavailable": "this build of Ardoise cannot share on the network: the page for the other screens is not included",
     "shareFailed": "the share could not start ({detail})"
   },
@@ -1555,6 +1567,7 @@
     "pause": "Pause",
     "resume": "Resume",
     "paused": "Paused: the shared image is frozen",
+    "portMoved": "Port {requested} is used by another program: the share uses port {port}, kept for this PC.",
     "stop": "Stop sharing",
     "helpTitle": "Good to know",
     "helpFirewall": "The first time, Windows asks for the firewall's permission: allow it for private networks (\"Private network\").",

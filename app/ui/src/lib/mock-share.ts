@@ -6,7 +6,16 @@
  * ignored while no share runs, but every call is logged in `mockShareShown` for the tests.
  */
 import { UNHANDLED } from './mock-data';
-import { INACTIVE_SHARE, type QrCode, type ShareContent, type ShareStatus } from './share';
+import {
+  INACTIVE_SHARE,
+  parseSharePort,
+  SHARE_PORT_MAX,
+  SHARE_PORT_MIN,
+  type QrCode,
+  type ShareContent,
+  type SharePortSetting,
+  type ShareStatus,
+} from './share';
 
 /** Knobs of the stand-in; tests change them (`resetMockShare` puts them back). */
 export const mockShare = {
@@ -19,7 +28,15 @@ export const mockShare = {
   addresses: ['http://192.168.1.23:8765/'],
   /** Pause before `share_start` answers, in milliseconds (to see the spinner). */
   startDelayMs: 0,
+  /**
+   * Port another program holds: a share started on the port asked takes this one instead (the
+   * stand-in's `addresses` are not changed: a test that wants them to follow sets them too).
+   */
+  fallbackPort: null as number | null,
 };
+
+/** The port setting as `share_port` answers (this PC's own port, the shared one). */
+const portSetting: SharePortSetting = { port: 8765, sharedPort: 8765, own: false };
 
 export const MOCK_SHARE_CODE = 'K7M Q2X';
 
@@ -81,6 +98,8 @@ export function resetMockShare(): void {
   mockShare.addresses = ['http://192.168.1.23:8765/'];
   mockShare.failStart = null;
   mockShare.startDelayMs = 0;
+  mockShare.fallbackPort = null;
+  Object.assign(portSetting, { port: 8765, sharedPort: 8765, own: false });
 }
 
 /** Sets the number of screens connected (tests, and the browser stand-in's demo). */
@@ -101,8 +120,10 @@ function shownBy(content: ShareContent): ShareStatus['shown'] {
 
 export function mockShareInvoke(command: string, args: Record<string, unknown>): unknown {
   switch (command) {
-    case 'share_status':
-      return structuredClone(getSim().status);
+    case 'share_status': {
+      const { status } = getSim();
+      return structuredClone(status.active ? status : { ...status, port: portSetting.port, requestedPort: portSetting.port });
+    }
 
     case 'share_start': {
       const s = getSim();
@@ -111,8 +132,14 @@ export function mockShareInvoke(command: string, args: Record<string, unknown>):
         if (failure) throw { ...failure };
         if (s.status.active) return structuredClone(s.status);
         const last = mockShareShown[mockShareShown.length - 1];
+        const requestedPort = portSetting.port;
+        const port = mockShare.fallbackPort ?? requestedPort;
+        // As the real share: the port found is kept for this PC.
+        if (port !== requestedPort) Object.assign(portSetting, { port, own: true });
         const started = change(s, {
           active: true,
+          port,
+          requestedPort,
           code: MOCK_SHARE_CODE,
           addresses: [...mockShare.addresses],
           qr: fixedQr(),
@@ -144,7 +171,17 @@ export function mockShareInvoke(command: string, args: Record<string, unknown>):
       const s = getSim();
       if (s.timer) clearTimeout(s.timer);
       s.timer = null;
-      return change(s, { ...INACTIVE_SHARE });
+      return change(s, { ...INACTIVE_SHARE, port: portSetting.port, requestedPort: portSetting.port });
+    }
+
+    case 'share_port':
+      return { ...portSetting };
+
+    case 'set_share_port': {
+      const port = typeof args.port === 'number' ? parseSharePort(String(args.port)) : null;
+      if (port === null) throw { code: 'sharePortInvalid', message: `${SHARE_PORT_MIN}-${SHARE_PORT_MAX}` };
+      Object.assign(portSetting, { port, own: true });
+      return { ...portSetting };
     }
 
     case 'share_set_paused': {

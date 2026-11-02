@@ -6,7 +6,7 @@
 mod common;
 
 use std::io::{ErrorKind, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -691,6 +691,124 @@ fn a_port_in_use_is_an_error_at_once() {
     assert_eq!(error.code(), "sharePortInUse");
     // The first share still serves.
     assert_eq!(h.get("/").status, 200);
+}
+
+/// Plain listeners (as another program has them) on `count` consecutive ports of the loopback
+/// interface, and the first port. The ports come from the system's, then the next ones are tried:
+/// the search starts again when one of them is taken.
+fn hold_consecutive_ports(count: u16) -> (Vec<TcpListener>, u16) {
+    for _ in 0..200 {
+        let first = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = first.local_addr().unwrap().port();
+        if u32::from(port) + u32::from(count) > 65_535 {
+            continue;
+        }
+        let mut held = vec![first];
+        for next in 1..count {
+            match TcpListener::bind((Ipv4Addr::LOCALHOST, port + next)) {
+                Ok(listener) => held.push(listener),
+                Err(_) => break,
+            }
+        }
+        if held.len() == usize::from(count) {
+            return (held, port);
+        }
+    }
+    panic!("no {count} consecutive free ports");
+}
+
+fn start_on(port: u16, fallback_ports: u16) -> Result<Share, ShareError> {
+    Share::start(
+        ShareConfig {
+            port,
+            fallback_ports,
+            ..test_config()
+        },
+        assets(),
+        Arc::new(FakeFeed::default()) as Arc<dyn LiveFeed>,
+        Box::new(|_| {}),
+    )
+}
+
+#[test]
+fn a_port_in_use_moves_to_the_next_free_one() {
+    let (held, port) = hold_consecutive_ports(1);
+    let share = start_on(port, 20).expect("a following port is taken");
+    assert_eq!(share.requested_port(), port);
+    assert!(
+        share.port() > port && share.port() <= port + 20,
+        "{} for {port}",
+        share.port()
+    );
+    // The share really listens there, and the other program still has its port.
+    assert_eq!(request(share.port(), "GET", "/").status, 200);
+    assert_eq!(share.status().port, share.port());
+    drop(held);
+}
+
+#[test]
+fn several_ports_in_use_are_skipped_in_order() {
+    let (held, port) = hold_consecutive_ports(4);
+    let share = start_on(port, 20).expect("a port after the four held ones");
+    assert!(share.port() >= port + 4, "{} for {port}", share.port());
+    assert_eq!(request(share.port(), "GET", "/").status, 200);
+    // A second share takes the next port still: ports once bound are in use too.
+    let second = start_on(port, 20).expect("the port after the first share's");
+    assert!(second.port() > share.port(), "{}", second.port());
+    drop(held);
+}
+
+#[test]
+fn a_free_port_is_taken_as_asked() {
+    let free = {
+        let probe = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        probe.local_addr().unwrap().port()
+    };
+    let share = start_on(free, 20).expect("a free port");
+    assert_eq!((share.port(), share.requested_port()), (free, free));
+    // Port 0 asks for any port: it is bound once, whatever the fallback.
+    let any = start_on(0, 20).expect("any port");
+    assert_ne!(any.port(), 0);
+    assert_eq!(any.requested_port(), 0);
+}
+
+#[test]
+fn without_a_free_port_in_the_range_the_error_names_the_range() {
+    let (held, port) = hold_consecutive_ports(3);
+    let error = start_on(port, 2)
+        .err()
+        .expect("every port of the range is held");
+    assert!(
+        matches!(error, ShareError::NoFreePort { first, last } if first == port && last == port + 2),
+        "{error:?}"
+    );
+    assert_eq!(error.code(), "shareNoFreePort");
+    let text = error.to_string();
+    assert!(
+        text.contains(&port.to_string()) && text.contains(&(port + 2).to_string()),
+        "{text}"
+    );
+    // Only the port wanted: the single-port error, as before.
+    let error = start_on(port, 0).err().expect("held");
+    assert!(
+        matches!(error, ShareError::PortInUse { port: p } if p == port),
+        "{error:?}"
+    );
+    drop(held);
+}
+
+#[test]
+fn the_search_stops_at_port_65535() {
+    // Whatever the port, the range never goes past 65535 (no wrap-around to 0, which would
+    // take any port).
+    let share = start_on(65_535, 20);
+    match share {
+        Ok(share) => assert_eq!(share.port(), 65_535),
+        Err(error) => assert!(
+            matches!(error, ShareError::PortInUse { port: 65_535 }),
+            "{error:?}"
+        ),
+    }
 }
 
 #[test]
