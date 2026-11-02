@@ -1,0 +1,368 @@
+# Sharing the sheet on the local network (milestone M11)
+
+Developer document (English). Requirements: SPEC §4.10, §6.2 ("Réseau"), §8; ROADMAP M11 and H4;
+`docs/questions.md` Q4 (the user's decision). Builds on [tablet-live-classroom.md](tablet-live-classroom.md)
+(`LiveHub`, batches, presentation) and [interface.md](interface.md) (editor, translations, browser stand-in).
+
+```
+ tablet ─► LiveHub ── LiveBatch (4 ms) ──► main window, presentation window      (unchanged)
+              │
+              └── one subscription per viewer ("share:<id>") ── HubFeed (app share.rs: strip, JSON)
+                                                                     │
+ editor ── share_show { note } (debounced) ── ShareRuntime ──────────┤
+ Home / LiveView ── share_show { live | waiting }                     ▼
+                                                     ardoise-share::Share (own thread, tokio current-thread)
+                                                       ├─ GET  /              viewer.html  ┐ bytes from the exe's
+                                                       ├─ GET  /assets/<file> viewer only ┘ embedded build
+                                                       ├─ POST /join          code → HttpOnly cookie
+                                                       └─ GET  /events        Server-Sent Events (read only)
+                                                                     │  LAN, IPv4, port 8765
+                                                                     ▼
+                                       other PC: any browser ─ viewer.html (no Tauri): code form,
+                                       LiveState + LiveRenderer + ardoise-ink WebAssembly, full screen
+```
+
+## Rules
+
+- Everything in [tablet-live-classroom.md](tablet-live-classroom.md) still holds. The tablet's input is never held up
+  by the share: sends to viewers never block (bounded queues, a slow viewer is disconnected and reconnects).
+- **Only the Ardoise PC sends.** The browser receives; the only thing it sends is the code. No request path ever
+  reaches the file system, the library or Tauri's asset resolver: the server looks paths up, verbatim, in a map of
+  bytes built when the share starts.
+- **Nothing personal leaves the PC**: no library path, note title, tag, file name, monitor name or error message
+  is ever in a message (see "What a viewer receives").
+- Started by hand, stopped by hand or when Ardoise exits. Never runs `netsh` nor changes any system setting.
+- No panic on network input; no `unwrap`/`expect` outside tests; typed errors (`thiserror`) in the crate.
+- CRLF files keep CRLF.
+
+## Server: crate `ardoise-share`
+
+Independent of Tauri, tested on Linux with real TCP clients (`crates/ardoise-share/tests/`).
+
+### Choice of the HTTP server
+
+A **minimal HTTP/1.1 server written for this crate on `tokio` (`net`, `io-util`, `time`, `sync`, `rt`, `macros`) and
+`httparse`**, instead of a framework:
+
+| Option | In the Windows build today | Effect on the exe | Notes |
+|---|---|---|---|
+| hyper 1 + hyper-util | no (only in the Linux build, through Tauri's `reqwest`) | +~400 KB | general purpose: keep-alive, chunked bodies, HTTP/2 we do not need |
+| axum | no | more | brings hyper, tower, routing |
+| tiny_http | no | +~150 KB, 4 crates | one thread per connection; stopping it cleanly is awkward |
+| **tokio + httparse** | **yes, both** (`tokio` with these features through btleplug, rmcp and Tauri; `httparse` through `ureq`) | **our code only** | three routes, bounded requests, close after each response |
+
+The server has three routes and answers one request per connection (`Connection: close`), except the event stream,
+which stays open. That is a few hundred lines with a very small attack surface: request heads are read with a size
+limit and a timeout and parsed by `httparse` (the parser hyper uses), bodies only on `POST /join` with
+`Content-Length` ≤ 1 KiB, no chunked request bodies, nothing pipelined is read. Licences: tokio MIT, httparse
+MIT OR Apache-2.0, both already listed in `THIRD-PARTY-NOTICES`.
+
+New crates: **`qrcodegen` 1.8** (MIT, Project Nayuki, no dependency, a few tens of KB) for the QR code. `getrandom`
+0.4 (MIT OR Apache-2.0) is already in the tree (through `uuid`); the crate depends on it directly for the code and
+the tokens. `serde` / `serde_json` as everywhere.
+
+### Threads and lifetime
+
+- `Share::start` binds the listener **synchronously** (so a port already in use is an error at once), builds a
+  current-thread tokio runtime and runs it on a thread of its own (`ardoise-share`). Each connection is a task.
+- `Share::stop` (also on `Drop`): every stream gets the `end` message, every connection is closed, the listener is
+  dropped, and the thread is joined (at most 2 s). When `stop` returns, the port is closed: a new connection is
+  refused. The app calls it from `share_stop` and from `RunEvent::Exit`.
+- Listening: `0.0.0.0:<port>` (all IPv4 interfaces), `port` from `ardoise.toml` (`[share] port = 8765`), so that the
+  firewall's permission stays valid. Port 0 (tests) takes a free port; `Share::port()` says which.
+- Port already used by another program: `ShareError::PortInUse { port }` (code `sharePortInUse`; the message tells to
+  close the other program or change `[share] port` in `ardoise.toml`). Std's listener does not set `SO_REUSEADDR` on
+  Windows, so another program can never share the port with us.
+- Limits: 64 connections at once (more are closed at once), 32 event streams (more get `503`), request head 16 KiB
+  and 10 s to arrive, body 1 KiB, 32 headers. `TCP_NODELAY` on every socket (no Nagle delay on the stream).
+
+### Routes
+
+The only `(method, path)` pairs that exist; the query string is ignored, nothing is percent-decoded or normalised.
+**Any other request gets `404`** (also another method on a known path).
+
+| Request | Answer |
+|---|---|
+| `GET /` | `viewer.html` |
+| `GET /assets/<file>` | that viewer asset, if `/assets/<file>` is a key of the asset map; else 404 |
+| `POST /join` | body `{"code":"K7M Q2X"}` (JSON). Right code: `204` + `Set-Cookie: ardoise_share=<token>; Path=/; HttpOnly; SameSite=Strict`. Wrong: `403` `{"error":"wrongCode","remaining":n}`. Too many attempts: `429` + `Retry-After: s`, `{"error":"tooManyAttempts","retryAfter":s}`. Bad request (no JSON, too long, chunked): `400` / `413` |
+| `GET /events` | valid cookie: `200`, `text/event-stream`, the stream (below). Missing or unknown token: `401`. Too many streams: `503` + `Retry-After: 5` |
+
+Headers of every answer: `Connection: close`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+`Cache-Control: no-store` (assets: `public, max-age=31536000, immutable`, their names carry a hash). `viewer.html`
+also gets `Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'
+'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none';
+frame-ancestors 'none'` and `X-Frame-Options: DENY`. Content types come from the asset map.
+
+### Assets
+
+`Assets` is a map from the request path (`/` is stored as `/`, the others as `/assets/<file>`) to
+`Asset { content_type, bytes: Arc<[u8]> }`, built by the app when the share starts (below) or by the tests from
+bytes. The server only ever does `map.get(path)`: `/assets/../x`, `/assets/%2e%2e/x`, `//assets/x`, `/assets\x`,
+`/ASSETS/x`, `/assets/x?y` (query ignored → `/assets/x` if it exists), `/index.html`, `/viewer.html`,
+`/_ardoise/…` are not keys, so 404. The tests check these and more.
+
+### Access: code, token, attempts
+
+- **Code**: 6 characters drawn uniformly (rejection sampling on `getrandom` bytes) from the 31 unambiguous symbols
+  `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no `0 O 1 I L`): 31⁶ ≈ 8.9 × 10⁸ codes. New for each share. Shown as two
+  groups of three (`K7M Q2X`); the page accepts it in any case, with or without spaces or a dash.
+- **Token**: 32 random bytes in hex, one per successful join, valid until the share stops (at most 256 kept; the
+  oldest is forgotten first). Compared in constant time.
+- **Attempts**, per IP address: at most **5 wrong codes in 5 minutes**; the 6th attempt (right or wrong) within the
+  window gets `429` with the seconds until the oldest wrong code is 5 minutes old. A right code clears the
+  address's record. At most 4 096 addresses remembered (the oldest dropped). Per address only: a classmate's PC
+  can lock itself out, never the projector's PC. Brute force: 100 PCs × 1 try a minute ≈ 8 000 years on average.
+- The page and its assets are public (they are the GPL viewer, no data); only `/events` needs the token.
+
+### The event stream
+
+`text/event-stream`, one SSE message per server message: `data: <JSON on one line>\n\n`; a comment `: ping\n\n`
+every 15 s (a dead connection is found and dropped); `retry: 2000` at the start. No event ids: a viewer that
+reconnects gets a fresh snapshot. Messages (`type` field; TypeScript in `app/ui/src/lib/share.ts`):
+
+| Message | Meaning |
+|---|---|
+| `{"type":"waiting"}` | the Ardoise PC shows nothing to share: waiting screen |
+| `{"type":"live","reset":bool,"batch":LiveBatch}` | a batch of live mode, as the presentation window gets it (stripped, see below). `reset: true` on the first batch of a subscription: it starts with a snapshot, the viewer starts again from it |
+| `{"type":"note","page":SharedPage,"background":string\|null}` | the whole page of the note open in the editor; `background`: the paper (template, texture, background image) as a PNG data URL, `null` when it is plain paper (the paper colour is drawn) |
+| `{"type":"noteStrokes","strokes":Stroke[]}` | strokes added at the end of the page last sent (the common case while writing in the editor) |
+| `{"type":"pause","paused":bool}` | the share is paused (the image is frozen; the viewer shows a discreet badge) or resumed |
+| `{"type":"end"}` | the share stops: the viewer closes the stream and shows "sharing ended" |
+
+`SharedPage = { id, page: PageSize, background: Background, layers: Layer[], strokes: Stroke[] }` (the `Note`
+shapes of `note.ts`).
+
+### Content, always chosen by the Ardoise PC
+
+The crate keeps what is shown (`Shown::Waiting | Live | Note`), the last note message, and whether it is paused:
+
+- `show_waiting()`: every viewer gets `waiting`.
+- `show_note(NoteUpdate { full, append })`: `full` is the complete `note` message, kept for viewers that join later;
+  `append` (optional) a `noteStrokes` message relative to the previous `show_note`. Viewers already showing that
+  note get `append` when given, else `full`; switching from another content always sends `full`.
+- `show_live()`: every viewer is handed to the `LiveFeed` (`start`), which sends it a first batch starting with a
+  snapshot (`reset: true`), then every batch. Leaving live mode calls `LiveFeed::stop` for each viewer.
+- **A viewer that connects** gets what is shown: `waiting`, the last `full` note message, or a live subscription
+  (snapshot, then increments). **Late joiners therefore get a snapshot, then increments**, in every case.
+- **Pause** (`set_paused(true)`): live viewers are stopped (`LiveFeed::stop`); the frozen image is what is shown at
+  that moment: for live mode `LiveFeed::freeze()` (the session as one batch starting with a snapshot, sent with
+  `reset: true` to every viewer so that all show the same frozen frame), for a note its last `full`, else
+  `waiting`; then `pause` true. Viewers joining during the pause get the frozen image and `pause` true. Content
+  changes during the pause are recorded and sent nowhere. `set_paused(false)`: `pause` false, then the current
+  content as for a new viewer (live: a new subscription with a fresh snapshot).
+- **Queues**: each viewer has a bounded queue (1 024 messages). A send never blocks; a full queue disconnects that
+  viewer (`LiveViewer::send` returns `Err`, the hub drops the subscription), and the browser reconnects and gets a
+  fresh snapshot. This keeps the hub's flusher thread free whatever a viewer's network does.
+
+### Public API (fixed in the contracts commit; changes only with a reason in the report)
+
+```rust
+pub struct ShareConfig { pub bind: Ipv4Addr /* UNSPECIFIED */, pub port: u16, pub code: Option<String> /* tests */ }
+pub struct Asset { pub content_type: String, pub bytes: Arc<[u8]> }
+pub type Assets = HashMap<String, Asset>;           // "/" and "/assets/<file>"
+pub enum Shown { Waiting, Live, Note }              // serde camelCase
+pub struct ShareStatus { pub port: u16, pub code: String, pub viewers: usize, pub paused: bool, pub shown: Shown }
+pub struct NoteUpdate { pub full: String, pub append: Option<String> }   // complete JSON messages
+pub trait LiveFeed: Send + Sync + 'static {
+    fn start(&self, viewer: LiveViewer);            // first batch: a snapshot; then every batch
+    fn stop(&self, viewer: u64);
+    fn freeze(&self) -> Option<String>;             // LiveBatch JSON starting with a snapshot
+}
+#[derive(Clone)] pub struct LiveViewer { .. }       // id(), send(&self, batch_json: &str) -> Result<(), ViewerGone>
+pub type OnChange = Box<dyn Fn(ShareStatus) + Send + Sync>;
+impl Share {
+    pub fn start(config, assets, feed: Arc<dyn LiveFeed>, on_change: OnChange) -> Result<Share, ShareError>;
+    pub fn port(&self) -> u16; pub fn code(&self) -> String; pub fn status(&self) -> ShareStatus;
+    pub fn show_waiting(&self); pub fn show_live(&self); pub fn show_note(&self, update: NoteUpdate);
+    pub fn set_paused(&self, paused: bool); pub fn stop(&self);
+}
+pub fn format_code(code: &str) -> String;           // "K7MQ2X" → "K7M Q2X"
+pub mod addresses { pub fn local_ipv4() -> Vec<Ipv4Addr>; }
+pub mod qr { pub struct QrCode { pub size: u32, pub path: String } pub fn qr_code(text: &str) -> Option<QrCode>; }
+```
+
+`LiveFeed` methods may be called with the crate's lock held: they must not call back into `Share`.
+`LiveViewer::send` never takes that lock (it only pushes to the viewer's queue). `on_change` is called (outside the
+lock) when the number of viewers, the pause or what is shown changes.
+
+### Addresses and QR code
+
+- `addresses::local_ipv4()`: the IPv4 address of the interface with the default route, found by "connecting" a UDP
+  socket to a public address (a routing lookup: no packet is sent), then the same for the private ranges
+  (`10.x`, `172.16–31.x`, `192.168.x`) in case the LAN has no gateway; loopback, `0.0.0.0` and link-local
+  `169.254.x` are dropped, duplicates removed, **private addresses first** (RFC 1918), then the others. No
+  dependency, no `unsafe`, the same code on Windows and Linux. Virtual adapters (WSL, Hyper-V) are not listed
+  unless the route goes through them, which avoids proposing an address the other PC cannot reach.
+- `qr::qr_code(text)`: `qrcodegen`, error correction Medium, no border (the interface adds the quiet zone);
+  `path` is SVG path data, one `M x y h1v1h-1z` per dark module, drawn in a `viewBox="0 0 size size"`.
+- The QR code holds the first address only (`http://192.168.1.23:8765/`), never the code: the page asks for it
+  (SPEC §4.10).
+
+## App: `app/src-tauri/src/share.rs`
+
+### Settings
+
+`ardoise_core::settings::ShareSettings` (`[share]`, shared by every PC, unknown keys kept): `port: u16` (default
+8765; 0 or a missing value loads as 8765). Test-only environment variable **`ARDOISE_SHARE_LOOPBACK=1`**: the
+server listens on `127.0.0.1` instead of `0.0.0.0` (the e2e journeys: no firewall prompt, no firewall rule left
+for each temporary copy of the exe).
+
+### Viewer assets from the executable
+
+`lib.rs` takes the embedded assets out of `tauri::generate_context!()` (`Context::set_assets`) and puts them back
+wrapped in an `Arc` (`ShareAssets`, a delegating `tauri::Assets`), so the share reads them **by exact key, without
+Tauri's resolver** (which percent-decodes paths and falls back to `index.html`). At share start
+`viewer_assets(get)` reads `/.vite/manifest.json` (Vite's build manifest, `build.manifest: true`), takes the
+entry `viewer.html` and, recursively, its `file`, `css`, `assets` and `imports` (the shared chunks, the stylesheet,
+`ardoise_ink-*.wasm`), and copies those files into the `Assets` map (`viewer.html` under `/`). A missing manifest
+or file (a development build that loads the interface from the dev server) is `shareUnavailable`. Content types by
+extension (`html`, `js`, `css`, `wasm`, `svg`, `png`, `woff2`, else `application/octet-stream`). Done once per
+share start, a few hundred KB.
+
+### What a viewer receives (`HubFeed`, stripping)
+
+`HubFeed { hub: Arc<LiveHub> }` implements `LiveFeed`:
+
+- `start(viewer)`: `hub.subscribe("share:<id>", ShareSink)`: the hub's own per-window queue, so a viewer is a
+  subscriber like a window and the pipeline is the presentation window's (no second one). Its first batch starts
+  with the snapshot and the stroke in progress, exactly as for a window.
+- `stop(id)`: `hub.unsubscribe("share:<id>")`. `freeze()`: `hub.current_events()` (new: the snapshot and the stroke
+  in progress, taken under the hub's lock) as one batch.
+- `ShareSink::send(batch)` strips the batch, serialises it, and calls `viewer.send`; an `Err` drops the
+  subscription (the hub's existing rule). **Stripping**: `saved` and `saveFailed` events are dropped (library paths,
+  system messages); in a snapshot `saved` = `[]`, `presentation` = `null`, and the page keeps only what is drawn:
+  `id`, `page`, `background`, `layers`, `strokes`, `created`, `modified` (title, tags, favourite, origin… emptied).
+- Serialising runs on the hub's flusher thread, as for the windows' channels, and never waits.
+
+### Note of the editor
+
+`share_show({ kind: 'note', note, imageKey })`: the runtime builds `SharedPage` from the editor's note (unsaved state
+included) and keeps the previous one: same `id`, page, background, background image and layers, and the old strokes
+a prefix of the new ones → `append` = the new strokes; otherwise only `full`. The background is rendered by
+`notes::background_png` (with the staged picture under `imageKey`, like `render_background`) at 2 560 px on the
+longer side, **only when it changed** (cached by page size, background and image placement), in `spawn_blocking`;
+plain paper (template `blank`, no texture, no image) gives `null`. The live pages are always plain paper (white, or
+slate with the blackboard): the viewer draws their paper colour, as the app does before its PNG arrives.
+
+### Commands (`share.rs`)
+
+| Command | Arguments | Returns |
+|---|---|---|
+| `share_status` | – | `ShareStatus` |
+| `share_subscribe` | `onEvent: Channel<ShareStatus>` | current `ShareStatus`; then the status at every change (one subscription per window) |
+| `share_start` | – | `ShareStatus` (starts, or returns the running share). Errors `sharePortInUse`, `shareUnavailable`, `shareFailed` |
+| `share_stop` | – | `ShareStatus` (inactive); can be repeated |
+| `share_set_paused` | `paused: boolean` | `ShareStatus` |
+| `share_show` | `content: ShareContent` | – (ignored while no share runs) |
+
+```ts
+type ShareContent = { kind: 'waiting' } | { kind: 'live' } | { kind: 'note'; note: Note; imageKey: string | null };
+interface ShareStatus {
+  active: boolean;
+  port: number;                       // the configured one when inactive
+  code: string | null;                // "K7M Q2X" while active
+  addresses: string[];                // "http://192.168.1.23:8765/", private LAN first; [] when inactive
+  qr: { size: number; path: string } | null;   // of addresses[0]
+  viewers: number;
+  paused: boolean;
+  shown: 'waiting' | 'live' | 'note';
+}
+```
+
+New error codes (`errorCodes.*`): `sharePortInUse`, `shareUnavailable`, `shareFailed`. `share_start` while the UI
+already said what it shows: the runtime remembers the last `share_show` content even while inactive, and shows it
+when the share starts (the UI sends it again after a start anyway).
+
+`RunEvent::Exit` (`lib.rs`) stops the share before the tablet: the port closes and every browser is told `end`.
+
+## Interface
+
+### In the app (main window)
+
+- `lib/share.ts`: the types above and the messages. `lib/api.ts` section "LAN share (M11)": `shareStatus`,
+  `shareSubscribe`, `shareStart`, `shareStop`, `shareSetPaused`, `shareShow`; browser stand-in `lib/mock-share.ts`
+  (routed by `lib/mock.ts`).
+- `lib/share-state.svelte.ts`: one subscription for the app, the status, the panel open or not, and **what is shown**:
+  `showLive()`, `showNote(note, imageKey)` (debounced: sent 100 ms after the last change, at most every 300 ms while
+  changes keep coming), `showWaiting()`. It always remembers the last content and sends it after `start`.
+- Who says what is shown: `LiveView.svelte` (mounted → `showLive()`), `Editor.svelte` (open and every change of the
+  note, from the same `doc` the drafts use → `showNote(...)`), `Home.svelte` (library, settings: `showWaiting()` when
+  neither is open). The rule is "what the main window shows"; nothing else is ever shared.
+- **"Partager sur le réseau"** button (`button[data-action="share"]`) in the live control window's toolbar and in the
+  editor's toolbar; it opens the share panel (`.share-panel`), which starts the share.
+- **Share panel** (`components/share/SharePanel.svelte`): the address(es) (`[data-share-address]`, the first one
+  large, the others below), the QR code (`svg.share-qr`), the code (`[data-share-code]`, large, monospace), the
+  number of connected screens (`[data-share-viewers]`, the number as the attribute value), what is shown, **Pause /
+  Resume** (`button[data-action="share-pause"]`), **Stop sharing** (`button[data-action="share-stop"]`), a short help
+  line (type the address in the other PC's browser, then the code; the firewall prompt: "Réseau privé"), errors in
+  words (port in use: which port and how to change it).
+- While a share runs, an indicator in the top bar of the library and in the two toolbars
+  (`.share-indicator`, with the number of screens) reopens the panel: the teacher always sees that the port is open.
+- Texts: `share.*` (panel, buttons) and `errorCodes.share*` in both locales.
+
+### The viewer (other PC, any browser)
+
+- Second Vite entry `app/viewer.html` → `ui/src/viewer/main.ts` → `Viewer.svelte`. **No import of `@tauri-apps/*` nor
+  of `lib/api.ts`** (a vitest test checks the module graph). `vite.config.ts`: `build.rollupOptions.input` with both
+  pages, `build.manifest: true`.
+- Reuses `lib/live-state.svelte.ts` (`LiveState`: snapshots and batches, exactly as the presentation window),
+  `lib/live-render.ts` (`LiveRenderer`, `buildScene`, mode `presentation`: zoom, pan, blackboard, laser dot),
+  `lib/live-view.ts` and `lib/ink.ts` (the `ardoise-ink` WebAssembly outlines), so it looks exactly like the app.
+  `ViewerCanvas.svelte` is a small canvas component (size, pixel ratio, animation frame, background image from the
+  message instead of `render_background`); no pointer handling, no marks.
+- A `note` message becomes a `LiveSnapshot` for the same `LiveState` (state `idle`, one page, whole-page view, no
+  laser); `noteStrokes` appends; every `note` replaces the strokes (new generation).
+- `lib/viewer-stream.ts`: reads `/events` with `fetch` (so that it sees the status: `401` → code form, `503` → "too
+  many screens", retried) and a pure SSE parser; reconnects by itself after a cut (0.5 s, 1, 2, 4, then every 5 s),
+  shows "reconnecting" meanwhile; after `end` it shows "sharing ended" and keeps trying every 5 s (a new share
+  answers `401`: the code form).
+- `lib/viewer-state.svelte.ts`: the screen (`code`, `connecting`, `waiting`, `live`, `note`, `ended`), the pause badge,
+  the background image; pure and tested.
+- Screens: code form (6 characters, autofocus, errors: wrong code with the attempts left, too many attempts with the
+  wait), waiting screen, the page full window (black around, like the projector), a full-screen button (Fullscreen
+  API; also a double click) that hides with the cursor after 2 s still, "reconnecting" overlay, "sharing ended".
+- Language: French if `navigator.language` starts with `fr`, else English (`resolveLocale('auto', …)`), texts in
+  `viewer.*` of the same locale files (parity test).
+
+## Latency (SPEC §4.10: < 150 ms from the stroke drawn to the other screen, on a LAN)
+
+Path: tablet → service → hub (batched every 4 ms) → `ShareSink` (JSON) → viewer queue → socket (`TCP_NODELAY`,
+written and flushed per message) → LAN → `fetch` reader → `LiveState` → next animation frame. Measured:
+
+- Crate test: `LiveViewer::send` → bytes read by a TCP client on localhost (median printed, must stay < 20 ms).
+- App test: hub input (`LivePoint.recv`) → SSE message read by a TCP client (median printed).
+- e2e (Windows, same PC): `recv` of the points → arrival in Node (same wall clock), median < 50 ms asserted; the
+  network and the other PC's drawing are what H4 judges by eye (less than 150 ms in total).
+
+## Tests
+
+- `ardoise-share` (Linux, real TCP): wrong / right code, cookie, `401` without it, attempts limit (`429`, then
+  allowed again after the window, with an injected clock in the unit tests), 404 for every other path including
+  traversal and encoded variants and other methods, snapshot then increments for a late joiner, live batches,
+  note full then append, pause (frozen, late joiner during pause, resume), waiting, stop (streams get `end`, port
+  refused), slow viewer disconnected without blocking the sender, limits (header size), latency median.
+- App (Linux): settings `[share] port`, manifest walk (`viewer_assets` with a fake manifest), stripping of live
+  batches, note diff (append / full), a share started with a real `LiveHub` and a TCP client receiving live points
+  without any path.
+- vitest: SSE parser, stream client (fake `fetch`: 401, 503, reconnect, `end`), viewer state (note → snapshot,
+  append, pause, reset), no Tauri import in the viewer, share state (debounce, content after start), panel
+  component (address, code, viewers, pause, stop, errors), locales parity.
+- e2e (`app/e2e/journeys-m11-share.mjs`, wired in `run.mjs`, `ARDOISE_SHARE_LOOPBACK=1` and a free port in
+  `[share]`): live mode with the simulated tablet, share, Node joins with the code and checks the events
+  (snapshot, points, latency), 404s, the viewer page and its assets; then a note open in the editor (note message,
+  then a change), pause, stop (`end`, port closed).
+- Hardware: H4 in `docs/hardware-tests.md`.
+
+## Work packages
+
+| Package | Profile | Owns |
+|---|---|---|
+| A — server crate | specialiste | `crates/ardoise-share/**` |
+| B — app integration | specialiste | `crates/ardoise-core/src/settings.rs` (`ShareSettings`), `app/src-tauri/src/share.rs` (+ `share/`), `app/src-tauri/src/lib.rs`, `app/src-tauri/src/live.rs`, `app/src-tauri/src/live/hub.rs` (`current_events`, `Arc`), `app/src-tauri/Cargo.toml` |
+| C — viewer | developpeur | `app/viewer.html`, `app/vite.config.ts`, `app/ui/src/viewer/**`, `lib/viewer-*.ts` (+ tests), locales section `viewer` |
+| D — share in the app's interface | developpeur | `lib/api.ts` (share section), `lib/mock-share.ts`, `lib/mock.ts`, `lib/share-state.svelte.ts`, `components/share/**`, hooks in `LiveView.svelte`, `Editor.svelte`, `Home.svelte`, locales section `share` and `errorCodes.share*` |
+| E — e2e, guide, H4 | developpeur | `app/e2e/journeys-m11-share.mjs`, `app/e2e/run.mjs`, `docs/guide/guide.fr.md`, `docs/guide/guide.en.md`, `docs/hardware-tests.md` |
+
+Contracts (this document, `crates/ardoise-share/src/lib.rs` signatures, `app/ui/src/lib/share.ts`) are set in the
+contracts commit; a package that needs to change one says so in its report.

@@ -1,0 +1,27 @@
+[package]
+name = "ardoise-share"
+description = "Sharing of the sheet on the local network: a small read-only HTTP server (Server-Sent Events) for a browser on another PC."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The code and the session tokens (the version `uuid` already brings: one copy compiled).
+getrandom = "0.4"
+# Request heads (the parser hyper uses; already in the Windows build through `ureq`).
+httparse = "1.10"
+# The QR code of the address (MIT, no dependency).
+qrcodegen = "1.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# The server's own current-thread runtime, on a thread of its own. These features are already
+# enabled in the app's build by Tauri, btleplug and rmcp: no extra code from tokio itself.
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync", "macros"] }
+
+[dev-dependencies]
+
+[lints]
+workspace = true
