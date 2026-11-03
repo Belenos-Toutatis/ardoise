@@ -15,6 +15,7 @@ pub mod page;
 mod tests;
 
 use std::net::Ipv4Addr;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError};
 
@@ -304,8 +305,15 @@ impl ShareRuntime {
     }
 
     /// Starts sharing (or returns the share running) on `bind:port` or, when another program
-    /// holds it, on the first free port after it; live mode from `hub`.
-    fn start(&self, bind: Ipv4Addr, port: u16, hub: Arc<LiveHub>) -> CommandResult<ShareStatus> {
+    /// holds it, on the first free port after it; live mode from `hub`; the journal of its
+    /// connections in `journal`, if given.
+    fn start(
+        &self,
+        bind: Ipv4Addr,
+        port: u16,
+        hub: Arc<LiveHub>,
+        journal: Option<PathBuf>,
+    ) -> CommandResult<ShareStatus> {
         // One start at a time (a double click); `running` itself is only held briefly, never
         // while the server starts, so that its status callback can always read it.
         let _starting = lock(&self.inner.starting);
@@ -330,6 +338,7 @@ impl ShareRuntime {
                 port,
                 fallback_ports: ardoise_share::FALLBACK_PORTS,
                 code: None,
+                journal,
             };
             let share = Share::start(config, assets, Arc::new(HubFeed::new(hub)), on_change)
                 .map_err(|error| share_error(&error))?;
@@ -394,6 +403,32 @@ fn remember_port(context: &AppContext, port: u16) {
     }
 }
 
+/// Where a share writes the journal of its connections: `share_YYYY-MM-DD_HHMMSS.log` beside
+/// the tablet's diagnostic logs (`<library>/_ardoise/diagnostics/`), which come back to the
+/// developer through the synchronised library. `None` without a library.
+fn journal_path(context: &AppContext) -> Option<PathBuf> {
+    let store = store(context).ok()?;
+    let settings = store.load().ok()?;
+    let library = settings.library_for(store.machine())?;
+    journal_path_in(library, chrono::Local::now())
+}
+
+/// A free `share_<local time>.log` in `library`'s diagnostics folder (created if needed).
+fn journal_path_in(library: &Path, now: chrono::DateTime<chrono::Local>) -> Option<PathBuf> {
+    let dir = library
+        .join(ardoise_core::library::META_DIR)
+        .join(ardoise_device::log::DIAGNOSTICS_DIR);
+    std::fs::create_dir_all(&dir).ok()?;
+    let stem = format!("share_{}", now.format("%Y-%m-%d_%H%M%S"));
+    let mut path = dir.join(format!("{stem}.log"));
+    let mut n = 2;
+    while path.exists() {
+        path = dir.join(format!("{stem}-{n}.log"));
+        n += 1;
+    }
+    Some(path)
+}
+
 /// Starts the share on this PC's port; when it had to take another one, keeps that one.
 fn start_and_remember(
     runtime: &ShareRuntime,
@@ -402,7 +437,7 @@ fn start_and_remember(
     hub: Arc<LiveHub>,
 ) -> CommandResult<ShareStatus> {
     let wanted = configured_port(context);
-    let status = runtime.start(bind, wanted, hub)?;
+    let status = runtime.start(bind, wanted, hub, journal_path(context))?;
     if status.active && status.port != wanted && status.requested_port == wanted {
         remember_port(context, status.port);
     }

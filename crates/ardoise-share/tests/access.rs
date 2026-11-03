@@ -36,8 +36,8 @@ fn wrong_then_right_code() {
     let mut tokens = Vec::new();
     for typed in ["K7MQ2X", "k7m q2x", "k7m-Q2X", " K7M Q2X "] {
         let right = exchange(h.port(), &join_request(typed)).unwrap();
-        assert_eq!(right.status, 204, "{typed}");
-        assert!(right.body.is_empty());
+        assert_eq!(right.status, 200, "{typed}");
+        assert_eq!(right.json(), serde_json::json!({ "joined": true }));
         assert_eq!(right.header("connection"), Some("close"));
         assert_eq!(right.header("cache-control"), Some("no-store"));
         let set_cookie = right.header("set-cookie").unwrap();
@@ -147,7 +147,7 @@ fn assert_no_attempt_counted(port: u16) {
         serde_json::json!({ "error": "wrongCode", "remaining": 4 })
     );
     let right = exchange(port, &join_request(CODE)).unwrap();
-    assert_eq!(right.status, 204);
+    assert_eq!(right.status, 200);
 }
 
 #[test]
@@ -206,7 +206,7 @@ fn join_needs_a_json_content_type() {
         "content-type: Application/JSON\r\n",
     ] {
         let answer = exchange(h.port(), &join_with(headers, body)).unwrap();
-        assert_eq!(answer.status, 204, "{headers:?}");
+        assert_eq!(answer.status, 200, "{headers:?}");
     }
     assert_no_attempt_counted(h.port());
 }
@@ -238,12 +238,12 @@ fn join_from_another_site_is_refused() {
     assert_eq!(answer.status, 403);
     // The page's own origin, or no origin at all (not a browser).
     let same = format!("{host}Origin: http://127.0.0.1:{port}\r\n{JSON}");
-    assert_eq!(exchange(port, &join_with(&same, body)).unwrap().status, 204);
+    assert_eq!(exchange(port, &join_with(&same, body)).unwrap().status, 200);
     assert_eq!(
         exchange(port, &join_with(&format!("{host}{JSON}"), body))
             .unwrap()
             .status,
-        204
+        200
     );
     assert_no_attempt_counted(port);
 }
@@ -274,7 +274,7 @@ fn join_from_a_page_of_another_site_is_misdirected() {
     assert_no_attempt_counted(port);
     // The share's own name with the page's origin.
     let same = format!("Host: localhost:{port}\r\nOrigin: http://localhost:{port}\r\n{JSON}");
-    assert_eq!(exchange(port, &join_with(&same, body)).unwrap().status, 204);
+    assert_eq!(exchange(port, &join_with(&same, body)).unwrap().status, 200);
 }
 
 #[test]
@@ -361,7 +361,7 @@ fn a_body_sent_in_pieces() {
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut stream, &mut bytes).unwrap();
     assert!(
-        bytes.starts_with(b"HTTP/1.1 204 No Content\r\n"),
+        bytes.starts_with(b"HTTP/1.1 200 OK\r\n"),
         "{}",
         String::from_utf8_lossy(&bytes)
     );
@@ -374,7 +374,7 @@ fn a_body_sent_in_pieces() {
     }
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut stream, &mut bytes).unwrap();
-    assert!(bytes.starts_with(b"HTTP/1.1 204 No Content\r\n"));
+    assert!(bytes.starts_with(b"HTTP/1.1 200 OK\r\n"));
 }
 
 #[test]

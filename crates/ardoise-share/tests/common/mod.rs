@@ -164,7 +164,7 @@ impl Harness {
     /// Joins with the code: the cookie to send (`ardoise_share=…`).
     pub fn cookie(&self) -> String {
         let answer = exchange(self.port(), &join_request(CODE)).expect("join answered");
-        assert_eq!(answer.status, 204, "{answer:?}");
+        assert_eq!(answer.status, 200, "{answer:?}");
         session_cookie(&answer)
     }
 
@@ -188,6 +188,7 @@ pub fn test_config() -> ShareConfig {
         port: 0,
         fallback_ports: 0,
         code: Some(CODE.into()),
+        journal: None,
     }
 }
 
@@ -299,11 +300,35 @@ pub fn exchange(port: u16, raw: &[u8]) -> std::io::Result<Response> {
     read_answer(connect(port), raw)
 }
 
-/// Sends `raw` on `stream` and reads the answer until the server closes the connection.
+/// Sends `raw` on `stream` and reads the answer, then closes the connection as a browser does
+/// (`Connection: close`): as soon as the answer is complete (its `Content-Length`, or no body
+/// for `204`), else when the server closes.
 fn read_answer(mut stream: TcpStream, raw: &[u8]) -> std::io::Result<Response> {
     stream.write_all(raw)?;
     let mut bytes = Vec::new();
-    stream.read_to_end(&mut bytes)?;
+    let mut chunk = [0u8; 8192];
+    loop {
+        if let Some((response, at)) = parse_head(&bytes) {
+            let length = match response.header("content-length") {
+                Some(length) => Some(length.parse::<usize>().unwrap()),
+                None if response.status == 204 => Some(0),
+                None => None,
+            };
+            if let Some(length) = length
+                && bytes.len() >= at + length
+            {
+                let mut response = response;
+                response.body = bytes[at..].to_vec();
+                assert_eq!(response.body.len(), length, "nothing after the body");
+                return Ok(response);
+            }
+        }
+        let n = stream.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..n]);
+    }
     let (mut response, at) = parse_head(&bytes)
         .ok_or_else(|| std::io::Error::new(ErrorKind::InvalidData, "no HTTP answer"))?;
     response.body = bytes[at..].to_vec();
@@ -332,7 +357,7 @@ pub fn join_request(code: &str) -> Vec<u8> {
 /// Joins from `source`: the cookie to send (`ardoise_share=…`).
 pub fn cookie_from(source: Ipv4Addr, port: u16) -> String {
     let answer = exchange_from(source, port, &join_request(CODE)).expect("join answered");
-    assert_eq!(answer.status, 204, "{answer:?}");
+    assert_eq!(answer.status, 200, "{answer:?}");
     session_cookie(&answer)
 }
 
@@ -418,8 +443,17 @@ fn open_events_on(
         }
     };
     if head.status != 200 {
+        // Read as a browser does: up to the `Content-Length`, then closed from here.
+        let length = head
+            .header("content-length")
+            .map_or(usize::MAX, |length| length.parse().unwrap());
         let mut rest = buf[at..].to_vec();
-        let _ = stream.read_to_end(&mut rest);
+        while rest.len() < length {
+            match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => rest.extend_from_slice(&chunk[..n]),
+            }
+        }
         return Some(Err(Response { body: rest, ..head }));
     }
     Some(Ok(EventStream {

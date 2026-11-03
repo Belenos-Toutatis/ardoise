@@ -337,7 +337,7 @@ async function refusal(response: Response): Promise<Partial<JoinRefusal> | null>
   }
 }
 
-/** `POST /join` with `code`: `204` and the cookie, or why not. */
+/** `POST /join` with `code`: `200` and the cookie, or why not (`204` from older versions too). */
 export async function join(code: string, doFetch: typeof fetch = (input, init) => fetch(input, init)): Promise<JoinResult> {
   let response: Response;
   try {
@@ -350,7 +350,7 @@ export async function join(code: string, doFetch: typeof fetch = (input, init) =
   } catch {
     return { ok: false, reason: 'network' };
   }
-  if (response.status === 204) return { ok: true };
+  if (response.status === 200 || response.status === 204) return { ok: true };
   if (response.status === 403) {
     const body = await refusal(response);
     // Only a wrong code is a wrong code: a refused `Origin` (`badOrigin`), or a proxy's 403, is not.

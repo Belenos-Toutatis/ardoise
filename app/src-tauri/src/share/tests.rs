@@ -211,7 +211,9 @@ fn sharing_runtime() -> (ShareRuntime, Arc<LiveHub>) {
 fn a_port_held_by_another_program_moves_the_share_to_the_next_one() {
     let (runtime, hub) = sharing_runtime();
     let (_other, taken) = other_program();
-    let status = runtime.start(Ipv4Addr::LOCALHOST, taken, hub).unwrap();
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, taken, hub, None)
+        .unwrap();
     assert!(status.active);
     assert_eq!(status.requested_port, taken);
     assert!(
@@ -292,10 +294,23 @@ fn a_share_on_the_port_asked_keeps_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let context = crate::library::tests::context(dir.path());
     let (runtime, hub) = sharing_runtime();
-    let free = other_program().1;
-    super::set_port_in(&context, i64::from(free)).unwrap();
-    let before = std::fs::read_to_string(super::store(&context).unwrap().path()).unwrap();
-    let status = super::start_and_remember(&runtime, &context, Ipv4Addr::LOCALHOST, hub).unwrap();
+    // A port found free can be taken by another test's client before the share binds it (a
+    // client that closed first keeps its port for a while): a few tries.
+    let (status, free, before) = (0..10)
+        .find_map(|_| {
+            let free = other_program().1;
+            super::set_port_in(&context, i64::from(free)).unwrap();
+            let before = std::fs::read_to_string(super::store(&context).unwrap().path()).unwrap();
+            let status =
+                super::start_and_remember(&runtime, &context, Ipv4Addr::LOCALHOST, hub.clone())
+                    .unwrap();
+            if status.port == free {
+                return Some((status, free, before));
+            }
+            runtime.stop();
+            None
+        })
+        .expect("a free port taken as asked");
     assert_eq!((status.port, status.requested_port), (free, free));
     let after = std::fs::read_to_string(super::store(&context).unwrap().path()).unwrap();
     assert_eq!(before, after);
@@ -1012,7 +1027,7 @@ fn join(port: u16, code: &str) -> String {
             body.len()
         ),
     );
-    assert_eq!(status, 204, "{head}");
+    assert_eq!(status, 200, "{head}");
     let cookie = head
         .lines()
         .find_map(|line| {
@@ -1118,7 +1133,7 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     // Without the embedded interface there is nothing to serve (and `--self-test` says so).
     assert!(runtime.viewer_check().is_err());
     let refused = runtime
-        .start(Ipv4Addr::LOCALHOST, 0, hub.clone())
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
         .unwrap_err();
     assert!(refused.is_code("shareUnavailable"));
 
@@ -1126,7 +1141,9 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     assert_eq!(runtime.viewer_check(), Ok(6));
     // The window says live mode before the share starts: it is remembered.
     runtime.inner.show(ShareContent::Live);
-    let status = runtime.start(Ipv4Addr::LOCALHOST, 0, hub.clone()).unwrap();
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
     assert!(status.active && status.port != 0);
     assert_eq!(
         status.addresses,
@@ -1139,7 +1156,7 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     // Starting again returns the share running.
     assert_eq!(
         runtime
-            .start(Ipv4Addr::LOCALHOST, 0, hub.clone())
+            .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
             .unwrap()
             .code,
         Some(code.clone())

@@ -196,9 +196,15 @@ Une relecture indépendante a été faite, et ses remarques sont corrigées : ca
 
 ### Point de contrôle H4 [matériel]
 
-- [ ] [matériel] Un second ordinateur du réseau affiche la feuille en direct, puis une note ouverte. À noter : le délai perçu, l'autorisation du pare-feu, l'adresse tapée ou le QR code.
+- [x] [matériel] Un second ordinateur du réseau affiche la feuille en direct, puis une note ouverte. À noter : le délai perçu, l'autorisation du pare-feu, l'adresse tapée ou le QR code.
 
-Essai à la maison le 2026-11-03, sur deux ordinateurs du même réseau : le partage fonctionne, la transmission est rapide et le bon document s'affiche correctement. Demande qui en est sortie : des options d'affichage sur l'autre écran (Q8). Reste l'essai au travail, sur le réseau de l'établissement.
+Essai à la maison le 2026-11-03, sur deux ordinateurs du même réseau : le partage fonctionne, la transmission est rapide et le bon document s'affiche correctement. Demande qui en est sortie : des options d'affichage sur l'autre écran (Q8).
+
+Deux problèmes vus le même jour avec des navigateurs et des réseaux réels, corrigés et vérifiés sous Windows (`CHECK OK`, `E2E OK`) :
+- les navigateurs complètent souvent l'adresse en `https://`. Le panneau et le guide rappellent maintenant de taper `http://`. Chrome sur Android abandonnait aussi (`ERR_TOO_MANY_RETRIES`) : le serveur fermait trop tôt les connexions ouvertes à l'avance ;
+- au travail, l'ordinateur de l'établissement passe par le filtre web (proxy e2guardian), même pour le réseau local, et la connexion prenait 2 minutes après le code. Un journal des connexions du partage (`_ardoise/diagnostics/share_….log`) a montré la cause : la réponse « 204 » au code, retenue par le filtre. Ardoise répond maintenant « 200 » avec sa longueur, et la connexion est instantanée au travail (2026-11-03, `docs/design/lan-share.md`).
+
+Reste à confirmer à l'usage : Chrome sur Android après le correctif, et une note ouverte partagée sur le réseau de l'établissement.
 
 ---
 

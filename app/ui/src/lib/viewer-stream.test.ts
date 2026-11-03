@@ -468,8 +468,8 @@ describe('normalizeCode', () => {
 });
 
 describe('join', () => {
-  it('posts the code as JSON and accepts 204', async () => {
-    const f = fakeFetch(() => new Response(null, { status: 204 }));
+  it('posts the code as JSON and accepts 200', async () => {
+    const f = fakeFetch(() => new Response('{"joined":true}', { status: 200 }));
     expect(await join('k7m q2x', f.doFetch)).toEqual({ ok: true });
     expect(f.calls).toHaveLength(1);
     expect(f.calls[0].url).toBe('/join');

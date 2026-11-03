@@ -126,7 +126,7 @@ OR Apache-2.0, already in the tree through tokio) for clients bound to other loo
     the first closed to make room. A first byte that is not a letter is no HTTP request — above all a browser
     trying `https://` (a TLS handshake starts with 0x16) — and is closed at once, so that the browser falls back
     to `http://` without waiting; **an answer written within 5 s** (the largest, a script of about 200 KB, takes milliseconds on a LAN),
-    then the lingering close (1 s at most). A head is parsed again only when a blank line may have arrived.
+    then the browser closes first (the server waits up to 2 s, see "Through a school's filtering proxy"). A head is parsed again only when a blank line may have arrived.
     `TCP_NODELAY` on every socket (no Nagle delay on the stream).
 
 ### Routes
@@ -147,7 +147,7 @@ browser: browsers always send one) is accepted; two are refused. Other names of 
 |---|---|
 | `GET /` | `viewer.html` |
 | `GET /assets/<file>` | that viewer asset, if `/assets/<file>` is a key of the asset map; else 404 |
-| `POST /join` | body `{"code":"K7M Q2X"}` (JSON). Right code: `204` + `Set-Cookie: ardoise_share=<token>; Path=/; HttpOnly; SameSite=Strict`. Wrong: `403` `{"error":"wrongCode","remaining":n}`. Too many attempts: `429` + `Retry-After: s`, `{"error":"tooManyAttempts","retryAfter":s}`. Bad request (no JSON, too long, chunked): `400` / `413`. `Content-Type` other than `application/json`: `415`; an `Origin` header other than `http://<Host>` (the `Host` already checked, see above): `403` `{"error":"badOrigin"}` (a page of another site cannot spend the attempts of the projector's browser); neither counts as an attempt |
+| `POST /join` | body `{"code":"K7M Q2X"}` (JSON). Right code: `200` `{"joined":true}` (a body with its length: a `204`, which has none, held the browser 2 minutes behind a school's filtering proxy) + `Set-Cookie: ardoise_share=<token>; Path=/; HttpOnly; SameSite=Strict`. Wrong: `403` `{"error":"wrongCode","remaining":n}`. Too many attempts: `429` + `Retry-After: s`, `{"error":"tooManyAttempts","retryAfter":s}`. Bad request (no JSON, too long, chunked): `400` / `413`. `Content-Type` other than `application/json`: `415`; an `Origin` header other than `http://<Host>` (the `Host` already checked, see above): `403` `{"error":"badOrigin"}` (a page of another site cannot spend the attempts of the projector's browser); neither counts as an attempt |
 | `GET /events` | valid cookie: `200`, `text/event-stream`, the stream (below). Missing or unknown token: `401`. Too many streams, or this address opened streams too often: `503` + `Retry-After` |
 
 Headers of every answer: `Connection: close`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
@@ -332,6 +332,32 @@ share start, a few hundred KB.
 - Serialising runs on the hub's flusher thread, as for the windows' channels, and never waits. A `Memo` shared by
   the viewers' sinks keeps the last batch and its text (`Arc<str>`): viewers that were up to date get equal batches
   one after the other, and the text (the whole page, after a page change) is written once for all of them.
+
+### Through a school's filtering proxy (2026-11-03, measured at school)
+
+At school, the viewer's browser reached the share through the school's filtering proxy (e2guardian on the router
+`192.168.228.254`, port 3128: the browsers there use it even for local addresses). Joining took 2 minutes, then
+everything was instant. The share's journal showed it three times: `POST /join` answered in a few milliseconds, then
+`GET /events` arriving 119–120 s later. The cause was the join's answer: a `204` has no length, and some
+intermediaries wait for the connection to time out (2 minutes) before passing such an answer on (the same symptom is
+described on squid-users, November 2010). Since then the join answers `200 {"joined":true}` with its
+`Content-Length`, and `GET /events` follows 70 ms after it through the same proxy. The event stream itself is not
+held back by e2guardian: live strokes arrive at once.
+
+A first guess was wrong and is noted here so that it is not made again: that this PC, closing each connection first,
+kept its address pairs reserved for 2 minutes (TIME_WAIT) and that the router's reused ports fell on them. Making the
+browser close first changed nothing at school. It stays, as most servers do: after an answer the server waits up to
+2 s for the browser to close (browsers close a `Connection: close` connection as soon as they have read the answer),
+then closes itself.
+
+### Journal
+
+While a share runs, `<library>/_ardoise/diagnostics/share_<local time>.log` gets one line per connection event:
+connected (address and port), what was asked (a route of the share, else "(other)"; "through a proxy" when a
+`Via`, `Forwarded` or `X-Forwarded-For` header says so) and after how long, the status
+answered and in how long, streams opened and closed, connections refused or closed to make room. Never the code, a
+cookie, a token, a query string or an unknown path. It comes back to the developer with the library, like the tablet's
+diagnostic logs.
 
 ### Marks written over the presentation (Q6, decided 2026-11-02)
 
@@ -537,8 +563,9 @@ Server (package A):
 - Viewer queues: 1 024 messages **and 64 MiB** (one larger message still goes through an empty queue). A full
   queue closes that stream without `end`; the browser reconnects and starts again from a snapshot.
 - `PermissionDenied` on bind is also `PortInUse` (Windows answers so for ports reserved by Hyper-V).
-- After each non-stream answer, a "lingering close" (write side shut, client's leftover bytes read for up to 1 s)
-  so that a refusal such as `431` is not destroyed by a reset. A stream also ends when the client sends anything.
+- After each non-stream answer, the server does not close first: it reads the client's leftovers (up to 64 KiB)
+  until the client closes, for 2 s at most, then closes itself (see "Through a school's filtering proxy" below); a refusal
+  such as `431` is thus never destroyed by a reset. A stream also ends when the client sends anything.
 - `stop()`: each stream drops its backlog and writes `end` (500 ms at most), connections get 1 s to finish; it
   normally takes well under a millisecond, about 1 s with a viewer that does not read.
 - Address probes: 8.8.8.8, then 10.0.0.1, 172.16.0.1, 192.168.0.1, 192.168.1.1 (routing lookups only). Known

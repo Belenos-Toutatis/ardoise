@@ -742,7 +742,10 @@ fn hold_consecutive_ports(count: u16) -> (Vec<TcpListener>, u16) {
                 Err(_) => break,
             }
         }
-        if held.len() == usize::from(count) {
+        // The port after them must be free too, for the share to move there: not one that
+        // Windows reserves (Hyper-V ranges answer "permission denied" to everyone).
+        let room = TcpListener::bind((Ipv4Addr::LOCALHOST, port.saturating_add(count))).is_ok();
+        if held.len() == usize::from(count) && room {
             return (held, port);
         }
     }
@@ -792,11 +795,17 @@ fn several_ports_in_use_are_skipped_in_order() {
 
 #[test]
 fn a_free_port_is_taken_as_asked() {
-    let free = {
-        let probe = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        probe.local_addr().unwrap().port()
-    };
-    let share = start_on(free, 20).expect("a free port");
+    // A port found free can be taken by another test's client before the share binds it (a
+    // client that closed first keeps its port for a while): a few tries.
+    let (share, free) = (0..10)
+        .find_map(|_| {
+            let probe = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).ok()?;
+            let free = probe.local_addr().ok()?.port();
+            drop(probe);
+            let share = start_on(free, 20).ok()?;
+            (share.port() == free).then_some((share, free))
+        })
+        .expect("a free port taken as asked");
     assert_eq!((share.port(), share.requested_port()), (free, free));
     // Port 0 asks for any port: it is bound once, whatever the fallback.
     let any = start_on(0, 20).expect("any port");
@@ -888,4 +897,105 @@ fn dropping_the_share_closes_the_port() {
     assert!(started.elapsed() < Duration::from_secs(2));
     let refused = TcpStream::connect((Ipv4Addr::LOCALHOST, port));
     assert!(refused.is_err(), "the port is closed");
+}
+
+#[test]
+fn the_journal_tells_each_connection_without_the_code_the_cookie_or_the_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("share.log");
+    let share = Share::start(
+        ShareConfig {
+            journal: Some(path.clone()),
+            ..test_config()
+        },
+        assets(),
+        Arc::new(FakeFeed::default()) as Arc<dyn LiveFeed>,
+        Box::new(|_| {}),
+    )
+    .unwrap();
+    let port = share.port();
+    assert_eq!(request(port, "GET", "/").status, 200);
+    let joined = exchange(port, &join_request(CODE)).unwrap();
+    assert_eq!(joined.status, 200);
+    let cookie = session_cookie(&joined);
+    assert_eq!(request(port, "GET", "/secret-folder?name=x").status, 404);
+    share.stop();
+    let text = std::fs::read_to_string(&path).unwrap();
+    for wanted in [
+        "share started on port",
+        "connected",
+        "GET / after",
+        "POST /join after",
+        "answered 200 in",
+        "GET (other) after",
+        "answered 404 in",
+    ] {
+        assert!(
+            text.contains(wanted),
+            "{wanted:?} missing from:
+{text}"
+        );
+    }
+    let token = cookie
+        .split_once('=')
+        .map_or(cookie.as_str(), |(_, token)| token);
+    for secret in [CODE, token, "secret-folder", "name=x"] {
+        assert!(
+            !text.contains(secret),
+            "{secret:?} in:
+{text}"
+        );
+    }
+}
+
+#[test]
+fn the_browser_closes_first_so_this_pc_keeps_no_address_pair_reserved() {
+    let h = Harness::start();
+    let mut stream = connect(h.port());
+    stream
+        .write_all(format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", h.port()).as_bytes())
+        .unwrap();
+    // The whole answer arrives…
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 8192];
+    stream
+        .set_read_timeout(Some(Duration::from_millis(300)))
+        .unwrap();
+    let complete = |bytes: &[u8]| {
+        let text = String::from_utf8_lossy(bytes);
+        let Some(end) = text.find("\r\n\r\n") else {
+            return false;
+        };
+        let length: usize = text
+            .lines()
+            .find_map(|line| line.strip_prefix("Content-Length: "))
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or(0);
+        bytes.len() >= end + 4 + length
+    };
+    while !complete(&bytes) {
+        let n = stream.read(&mut chunk).unwrap();
+        assert!(n > 0, "closed before the end of the answer");
+        bytes.extend_from_slice(&chunk[..n]);
+    }
+    // …but the server does not close first: it waits for the browser, which closes as soon as
+    // it has read a `Connection: close` answer (the side that closes first keeps the address
+    // pair reserved for 2 minutes).
+    let error = stream.read(&mut chunk).expect_err("still open");
+    assert!(
+        matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
+        "{error:?}"
+    );
+    // A client that never closes is closed by the server after a while.
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let started = Instant::now();
+    let n = stream.read(&mut chunk).unwrap_or(0);
+    assert_eq!(n, 0);
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
 }
