@@ -556,7 +556,8 @@ Server (package A):
   queue closes that stream without `end`; the browser reconnects and starts again from a snapshot.
 - `PermissionDenied` on bind is also `PortInUse` (Windows answers so for ports reserved by Hyper-V).
 - After each non-stream answer, the server does not close first: it reads the client's leftovers (up to 64 KiB)
-  until the client closes, for 2 s at most, then closes itself. See "Who closes a connection" below.
+  until the client closes, for 2 s at most, then closes itself (see "Who closes a connection" below); a refusal
+  such as `431` is thus never destroyed by a reset. A stream also ends when the client sends anything.
 - `stop()`: each stream drops its backlog and writes `end` (500 ms at most), connections get 1 s to finish; it
   normally takes well under a millisecond, about 1 s with a viewer that does not read.
 - Address probes: 8.8.8.8, then 10.0.0.1, 172.16.0.1, 192.168.0.1, 192.168.1.1 (routing lookups only). Known
