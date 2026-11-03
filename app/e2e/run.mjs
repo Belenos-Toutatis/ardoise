@@ -158,13 +158,16 @@ async function startApp(language, port, args = [], { settings = '', env = {} } =
         await sleep(100);
       }
     },
-    /** Centre of the first element matching `selector` (optionally containing `text`). */
-    async centre(selector, text) {
+    /**
+     * Centre of the first element matching `selector` (optionally containing `text`), scrolled into
+     * view unless `scroll` is false; `hit`: the element is the one on top at that point.
+     */
+    async centre(selector, text, { scroll = true } = {}) {
       const box = await app.evaluate(`(() => {
         const all = [...document.querySelectorAll(${JSON.stringify(selector)})];
         const el = ${text === undefined ? 'all[0]' : `all.find((e) => e.textContent.includes(${JSON.stringify(text)}))`};
         if (!el) return null;
-        el.scrollIntoView({ block: 'center', inline: 'center' });
+        if (${scroll}) el.scrollIntoView({ block: 'center', inline: 'center' });
         const r = el.getBoundingClientRect();
         const x = r.left + r.width / 2;
         const y = r.top + r.height / 2;
@@ -184,8 +187,11 @@ async function startApp(language, port, args = [], { settings = '', env = {} } =
     async click(selector, text, { clickCount = 1 } = {}) {
       let box = await app.centre(selector, text);
       for (let attempt = 0; attempt < 20; attempt++) {
-        await sleep(30);
-        const again = await app.centre(selector, text);
+        await sleep(40);
+        // Measured where it is, without scrolling it back (scrolling would hide a move); scrolled
+        // again only when it is no longer the element on top there (moved away or out of view).
+        let again = await app.centre(selector, text, { scroll: false });
+        if (!again.hit) again = await app.centre(selector, text);
         const still = Math.abs(again.x - box.x) < 1 && Math.abs(again.y - box.y) < 1;
         box = again;
         if (still && again.hit) break;
