@@ -947,6 +947,10 @@ select {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #ffffff;
+  /* The card's button is the target of the pointer, never the picture: when the thumbnail
+     replaces its placeholder between the press and the release, a click whose press landed on
+     the removed placeholder would be lost (Chromium sends no click). */
+  pointer-events: none;
 }
 
 .thumb img {
