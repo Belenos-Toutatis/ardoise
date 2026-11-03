@@ -166,14 +166,31 @@ async function startApp(language, port, args = [], { settings = '', env = {} } =
         if (!el) return null;
         el.scrollIntoView({ block: 'center', inline: 'center' });
         const r = el.getBoundingClientRect();
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        const x = r.left + r.width / 2;
+        const y = r.top + r.height / 2;
+        const top = document.elementFromPoint(x, y);
+        const hit = !!top && (top === el || el.contains(top) || (top.tagName === 'LABEL' && top.contains(el)));
+        return { x, y, hit };
       })()`);
       if (!box) throw new Error(`no element ${selector}${text === undefined ? '' : ` containing "${text}"`}`);
       return box;
     },
-    /** A real mouse click at the centre of an element. */
+    /**
+     * A real mouse click at the centre of an element, once it is the element on top there and has
+     * stopped moving: a section that fills in above it (settings loaded, a status line, a thumbnail)
+     * would otherwise move it between the measure and the press, and the click would land elsewhere.
+     * After about a second it clicks anyway (an element covered on purpose).
+     */
     async click(selector, text, { clickCount = 1 } = {}) {
-      const { x, y } = await app.centre(selector, text);
+      let box = await app.centre(selector, text);
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await sleep(30);
+        const again = await app.centre(selector, text);
+        const still = Math.abs(again.x - box.x) < 1 && Math.abs(again.y - box.y) < 1;
+        box = again;
+        if (still && again.hit) break;
+      }
+      const { x, y } = box;
       await app.mouse('mouseMoved', x, y);
       await app.mouse('mousePressed', x, y, { clickCount });
       await app.mouse('mouseReleased', x, y, { clickCount });
