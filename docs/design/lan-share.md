@@ -126,7 +126,7 @@ OR Apache-2.0, already in the tree through tokio) for clients bound to other loo
     the first closed to make room. A first byte that is not a letter is no HTTP request — above all a browser
     trying `https://` (a TLS handshake starts with 0x16) — and is closed at once, so that the browser falls back
     to `http://` without waiting; **an answer written within 5 s** (the largest, a script of about 200 KB, takes milliseconds on a LAN),
-    then the browser closes first (the server waits up to 2 s, see "Who closes a connection"). A head is parsed again only when a blank line may have arrived.
+    then the browser closes first (the server waits up to 2 s, see "Through a school's filtering proxy"). A head is parsed again only when a blank line may have arrived.
     `TCP_NODELAY` on every socket (no Nagle delay on the stream).
 
 ### Routes
@@ -333,20 +333,28 @@ share start, a few hundred KB.
   the viewers' sinks keeps the last batch and its text (`Arc<str>`): viewers that were up to date get equal batches
   one after the other, and the text (the whole page, after a page change) is written once for all of them.
 
-### Who closes a connection (2026-11-03, measured at school)
+### Through a school's filtering proxy (2026-11-03, measured at school)
 
-The side that closes a TCP connection first keeps its address pair reserved for 2 minutes (TIME_WAIT). The server
-used to close first after each answer (one request per connection). At school, the viewer's computer reached the
-share through the school's router (`192.168.228.254`, NAT), which reuses its ports: a new connection that fell on a
-pair this PC still reserved was ignored until the pair expired. The share's journal showed it twice: `POST /join`
-answered in 5 ms, then `GET /events` arriving 119–120 s later, exactly when the join's connection expired. At home,
-without a router between the two computers, nothing showed. Since then the server waits for the browser to close
-(browsers close a `Connection: close` connection as soon as they have read the answer), for 2 s at most.
+At school, the viewer's browser reached the share through the school's filtering proxy (e2guardian on the router
+`192.168.228.254`, port 3128: the browsers there use it even for local addresses). Joining took 2 minutes, then
+everything was instant. The share's journal showed it three times: `POST /join` answered in a few milliseconds, then
+`GET /events` arriving 119–120 s later. The cause was the join's answer: a `204` has no length, and some
+intermediaries wait for the connection to time out (2 minutes) before passing such an answer on (the same symptom is
+described on squid-users, November 2010). Since then the join answers `200 {"joined":true}` with its
+`Content-Length`, and `GET /events` follows 70 ms after it through the same proxy. The event stream itself is not
+held back by e2guardian: live strokes arrive at once.
+
+A first guess was wrong and is noted here so that it is not made again: that this PC, closing each connection first,
+kept its address pairs reserved for 2 minutes (TIME_WAIT) and that the router's reused ports fell on them. Making the
+browser close first changed nothing at school. It stays, as most servers do: after an answer the server waits up to
+2 s for the browser to close (browsers close a `Connection: close` connection as soon as they have read the answer),
+then closes itself.
 
 ### Journal
 
 While a share runs, `<library>/_ardoise/diagnostics/share_<local time>.log` gets one line per connection event:
-connected (address and port), what was asked (a route of the share, else "(other)") and after how long, the status
+connected (address and port), what was asked (a route of the share, else "(other)"; "through a proxy" when a
+`Via`, `Forwarded` or `X-Forwarded-For` header says so) and after how long, the status
 answered and in how long, streams opened and closed, connections refused or closed to make room. Never the code, a
 cookie, a token, a query string or an unknown path. It comes back to the developer with the library, like the tablet's
 diagnostic logs.
@@ -556,7 +564,7 @@ Server (package A):
   queue closes that stream without `end`; the browser reconnects and starts again from a snapshot.
 - `PermissionDenied` on bind is also `PortInUse` (Windows answers so for ports reserved by Hyper-V).
 - After each non-stream answer, the server does not close first: it reads the client's leftovers (up to 64 KiB)
-  until the client closes, for 2 s at most, then closes itself (see "Who closes a connection" below); a refusal
+  until the client closes, for 2 s at most, then closes itself (see "Through a school's filtering proxy" below); a refusal
   such as `431` is thus never destroyed by a reset. A stream also ends when the client sends anything.
 - `stop()`: each stream drops its backlog and writes `end` (500 ms at most), connections get 1 s to finish; it
   normally takes well under a millisecond, about 1 s with a viewer that does not read.

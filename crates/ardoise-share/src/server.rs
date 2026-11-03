@@ -43,11 +43,11 @@ const LISTEN_BACKLOG: u32 = 128;
 /// Time to write one batch of messages to an event stream before the viewer counts as gone.
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(15);
 /// After an answer, how long the server waits for the client to close (reading its leftovers,
-/// up to `LINGER_BYTES`) before it closes the socket itself. The side that closes first keeps
-/// the connection's address pair reserved for 2 minutes (TIME_WAIT): it must be the browser.
-/// Through a school's router that reuses its ports, a new connection that fell on a pair this
-/// PC still reserved was ignored for those 2 minutes (2026-11-03: joining took 2 minutes). A
-/// browser closes a `Connection: close` connection as soon as it has read the answer.
+/// up to `LINGER_BYTES`) before it closes the socket itself, as most servers do: the side that
+/// closes first keeps the connection's address pair reserved for 2 minutes (TIME_WAIT), better
+/// the browser than this PC. A browser closes a `Connection: close` connection as soon as it
+/// has read the answer. (This was a first, wrong guess at 2-minute joins through a school's
+/// proxy: see docs/design/lan-share.md, "Through a school's filtering proxy".)
 const LINGER_TIME: Duration = Duration::from_secs(2);
 const LINGER_BYTES: usize = 64 * 1024;
 /// At stop: time for a stream to finish the message it is writing, then time to write `end`;
