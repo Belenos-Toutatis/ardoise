@@ -65,3 +65,16 @@ LibreOffice, qui démarre avec Claude Desktop) : le partage refusait de démarre
 - Un réglage « Port du partage » dans les réglages d'Ardoise, pour choisir un port sans modifier `ardoise.toml` à la main.
 
 SPEC §4.10 (ligne « Réseau ») est mis à jour.
+
+## Q8 — Laisser l'autre écran régler son affichage ? (jalon M11, 2026-11-03) — **tranchée**
+
+Premier essai du partage par l'utilisateur, sur deux ordinateurs de son réseau à la maison (2026-11-03) : il fonctionne.
+Mais sur l'ordinateur qui reçoit l'image, on ne peut rien faire, alors qu'il serait utile de mieux voir la page.
+
+**Décision de l'utilisateur (2026-11-03)** : l'autre écran a des options d'affichage pour lui seul :
+- page entière et pleine largeur ;
+- zoom sur un endroit, et déplacement dans la page quand elle n'est pas affichée en entier.
+
+Ces réglages ne changent rien sur le PC d'Ardoise, ni le contenu partagé : c'est toujours le PC qui choisit ce qui est
+montré. Pendant le mode direct, l'autre écran suit la vue de la présentation tant qu'on n'y touche pas, et un bouton l'y
+ramène. SPEC §4.10 est mis à jour.

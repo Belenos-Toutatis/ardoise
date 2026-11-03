@@ -348,7 +348,7 @@ Another computer on the same network (for instance the classroom PC linked to th
 - otherwise (library, settings), a waiting screen.
 
 *Nothing else is reachable*: not the library, not the notes' titles, not the other notes, not a file of the PC. The
-other computer cannot change anything: it only watches.
+other computer cannot change what is shown, but it can adjust its own display (see below).
 
 **On the Ardoise side.** Click **Share on the network**, in the live mode control window or in the editor toolbar. The
 panel that opens gives:
@@ -371,6 +371,23 @@ toolbars: a click reopens the panel.
 2. Type the access code (upper or lower case, with or without the space).
 3. The sheet appears. Press `F11` or the page's full-screen button (or double-click) to show it on the whole screen;
    the button disappears with the cursor.
+
+**Adjusting the display on the other computer.** Move the mouse (or touch the screen): a bar of buttons appears at the
+bottom of the page, then disappears after a few seconds. These settings only concern this screen: they change nothing
+on the Ardoise PC or on the other screens.
+
+- **Whole page**: the entire page is visible (key `0` or `Home`).
+- **Full width**: the page fills the width of the screen; you see the top of the page, and you go down by dragging it
+  (key `W`).
+- **Zoom in** and **Zoom out** (keys `+` and `-`): to look at a spot more closely. The mouse wheel zooms at the
+  cursor; on a touch screen, spread or pinch two fingers.
+- To move the page when it is not shown whole: drag with the mouse or with a finger, or use `Shift` + the arrow keys.
+- **Follow the PC** (key `Esc`): during live mode, the screen first follows the view chosen on the PC (zoom, position).
+  As soon as you adjust the display here, it keeps your setting; this button, which then appears, goes back to the PC's
+  view. The blackboard and the laser pointer always stay the PC's.
+- `F`: full screen (like `F11`).
+
+If the PC moves to another page, "Whole page" and "Full width" stay on; a free zoom goes back to the whole page.
 
 If the connection drops for a moment, the page reconnects by itself and catches up. When you stop the share or close
 Ardoise, it says that the sharing has ended.

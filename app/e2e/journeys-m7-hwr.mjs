@@ -19,6 +19,8 @@ const catalogs = {
 const text = (language, key) => key.split('.').reduce((node, part) => node?.[part], catalogs[language]);
 
 const NOTE = "Cours d'optique";
+// The status line of the handwriting section: the OpenH264 section above it has a `data-slot="status"` too.
+const HANDWRITING_STATUS = 'section[aria-labelledby="settings-handwriting"] [data-slot="status"]';
 const cardTitles = (app) =>
   app.evaluate(`[...document.querySelectorAll('.note-card .card-title')].map((c) => c.textContent.trim())`);
 
@@ -88,9 +90,9 @@ export const journeys = [
         await app.waitFor(`document.querySelector('[data-slot="recognizers"] li') !== null`, 'the installed recognizers');
         const idle = l('handwriting.status.idle').replace('{total}', '8');
         try {
-          await app.waitFor(`document.querySelector('[data-slot="status"]')?.textContent === ${j(idle)}`, 'every demo note read', 60_000);
+          await app.waitFor(`document.querySelector(${j(HANDWRITING_STATUS)})?.textContent === ${j(idle)}`, 'every demo note read', 60_000);
         } catch (error) {
-          const shown = await app.evaluate(`document.querySelector('[data-slot="status"]')?.textContent ?? null`);
+          const shown = await app.evaluate(`document.querySelector(${j(HANDWRITING_STATUS)})?.textContent ?? null`);
           throw new Error(`${error.message}: the status says ${j(shown)}, expected ${j(idle)}`);
         }
         await app.click('.topbar button', l('settings.title'));

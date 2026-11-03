@@ -309,7 +309,7 @@ export async function startBrowser(exe) {
   const port = await freePort();
   const child = spawn(
     exe,
-    ['--headless=new', `--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', 'about:blank'],
+    ['--headless=new', '--window-size=1280,480', `--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', 'about:blank'],
     { stdio: 'ignore' },
   );
   let spawnError = null;
@@ -420,6 +420,14 @@ export async function startBrowser(exe) {
       await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x, y: box.y, button: 'left', buttons: 0, clickCount: 1 });
     };
     browser.type = (text) => send('Input.insertText', { text });
+    /** The mouse moves (a different point each time): the page shows its controls, which hide after 2 s without it. */
+    let wiggle = 0;
+    browser.wake = () => send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 3 + (wiggle++ % 5), y: 3, button: 'none', buttons: 0 });
+    /** A real key press (the page listens to keydown on the window). */
+    browser.press = async (key) => {
+      await send('Input.dispatchKeyEvent', { type: 'keyDown', key, text: key.length === 1 ? key : undefined });
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', key });
+    };
     return browser;
   } catch (error) {
     await browser.close();
@@ -754,6 +762,64 @@ export const shareJourneys = [
           assertNoBrowserProblem(browser);
         });
 
+        // The viewer's own display (docs/design/lan-share.md, "The viewer"): purely local, the sheet drawn is the one of the PC.
+        const geometry = () =>
+          browser.evaluate(`(() => {
+            const c = document.querySelector(${j(SHEET)});
+            return c ? { fit: c.dataset.fit, zoom: Number(c.dataset.zoom), scale: Number(c.dataset.scale), width: c.clientWidth } : null;
+          })()`);
+        const fitIs = (fit) => `document.querySelector(${j(SHEET)})?.dataset.fit === ${j(fit)}`;
+        /** Clicks a control of the viewer's bar, which hides with the cursor: wake it first. */
+        const control = async (action) => {
+          await browser.wake();
+          await browser.waitFor(`document.querySelector('.controls [data-action="${action}"]') !== null`, `the "${action}" control`, 5000);
+          await browser.click(`.controls [data-action="${action}"]`);
+        };
+
+        await check('vrai navigateur : pleine largeur, zoom, page entière, puis « Suivre le PC » rend la vue du PC (direct)', async () => {
+          if (!browser) return;
+          const pageWidth = stream.messages[0].msg.batch.events[0].snapshot.page.page.width;
+          if (!(pageWidth > 0)) throw new Error('no page width in the first snapshot');
+          const followed = await geometry();
+          if (followed.fit !== 'follow') throw new Error(`the viewer starts with fit "${followed.fit}", expected "follow"`);
+          await browser.wake();
+          if (await browser.evaluate(`document.querySelector('.controls [data-action="follow"]') !== null`)) throw new Error('« Suivre le PC » is shown before any local change');
+
+          // Full width: the page across the window (the view of the PC is left).
+          await control('fit-width');
+          await browser.waitFor(fitIs('width'), 'the full width fit');
+          const wide = await geometry();
+          if (Math.abs(wide.scale * pageWidth - wide.width) > 1.5) throw new Error(`full width: the page is ${wide.scale * pageWidth} px wide in a ${wide.width} px window`);
+          // Zoom in: the page is drawn larger, as its own view.
+          await control('zoom-in');
+          await browser.waitFor(fitIs('free'), 'a free zoom');
+          const zoomed = await geometry();
+          if (!(zoomed.scale > wide.scale * 1.1)) throw new Error(`zoom in: scale ${wide.scale} then ${zoomed.scale}`);
+          // Whole page: all of it inside the window.
+          await control('fit-page');
+          await browser.waitFor(fitIs('page'), 'the whole page fit');
+          const whole = await geometry();
+          if (!(whole.scale * pageWidth <= whole.width + 1.5) || !(whole.scale <= wide.scale + 1e-9)) throw new Error(`whole page: scale ${whole.scale}, window ${whole.width} px`);
+          // The window is much wider than tall (see startBrowser): the whole page leaves room at the sides.
+          if (!(wide.scale > whole.scale * 1.05)) throw new Error(`full width (${wide.scale}) is not larger than the whole page (${whole.scale})`);
+          // The same by keyboard.
+          await browser.press('w');
+          await browser.waitFor(fitIs('width'), 'the full width fit by the W key');
+          await browser.press('0');
+          await browser.waitFor(fitIs('page'), 'the whole page by the 0 key');
+
+          // The PC's view again.
+          await control('follow');
+          await browser.waitFor(fitIs('follow'), 'the PC view followed again');
+          const back = await geometry();
+          if (Math.abs(back.zoom - followed.zoom) > 1e-3 || Math.abs(back.scale - followed.scale) > followed.scale * 1e-3) {
+            throw new Error(`« Suivre le PC »: zoom ${followed.zoom} then ${back.zoom}, scale ${followed.scale} then ${back.scale}`);
+          }
+          await browser.wake();
+          if (await browser.evaluate(`document.querySelector('.controls [data-action="follow"]') !== null`)) throw new Error('« Suivre le PC » stays after following the PC again');
+          assertNoBrowserProblem(browser);
+        });
+
         let page = { width: 29700, height: 21600 };
         let redBefore = 0;
         // What the presentation window does when the teacher writes over the page, without a projector: it reports the marks.
@@ -910,6 +976,22 @@ export const shareJourneys = [
           if ((await browser.evaluate(`document.querySelector('main.viewer').dataset.paused`)) !== 'false') {
             throw new Error('the viewer shows the pause badge');
           }
+          assertNoBrowserProblem(browser);
+        });
+
+        await check('vrai navigateur : la note de l’éditeur s’affiche en page entière, pleine largeur et page entière au choix, sans « Suivre le PC »', async () => {
+          if (!browser) return;
+          await browser.waitFor(fitIs('page'), 'the whole page by default for a note');
+          const noteWidth = await geometry();
+          await control('fit-width');
+          await browser.waitFor(fitIs('width'), 'the full width fit of the note');
+          const wide = await geometry();
+          if (!(wide.scale > noteWidth.scale * 1.05)) throw new Error(`note: scale ${noteWidth.scale} (whole page) then ${wide.scale} (full width)`);
+          if (await browser.evaluate(`document.querySelector('.controls [data-action="follow"]') !== null`)) throw new Error('« Suivre le PC » is shown for a note');
+          await control('fit-page');
+          await browser.waitFor(fitIs('page'), 'the whole page of the note again');
+          const again = await geometry();
+          if (Math.abs(again.scale - noteWidth.scale) > noteWidth.scale * 1e-3) throw new Error(`note: scale ${noteWidth.scale} then ${again.scale} at the whole page`);
           assertNoBrowserProblem(browser);
         });
 

@@ -7,20 +7,28 @@
    * `devicePixelRatio`), shows the paper image of the message instead of `render_background`
    * (`background`: PNG data URL, null for plain paper, which `LiveRenderer` fills with the paper
    * colour), and paints on the next animation frame after a change.
+   * The view drawn is the PC's or this screen's own (`ViewerView`: `view.current`). The mouse wheel
+   * zooms around the pointer (as in the editor), a drag with the mouse or the pen and one finger
+   * move the page, two fingers pinch it (`TouchGestures`); each takes the own view.
    * Attributes for tests: `data-strokes` (strokes of the page, the one in progress included),
-   * `data-page` (`n/N`), `data-shown` (`live` or `note`).
+   * `data-page` (`n/N`), `data-shown` (`live` or `note`), `data-fit` (`follow`, `page`, `width`
+   * or `free`), `data-zoom` and `data-scale` (CSS pixels per page unit) of the view drawn.
    */
   import { onMount } from 'svelte';
+  import type { Vec } from '../lib/editor/geometry';
+  import { TouchGestures, pointerKind, type TouchAction } from '../lib/gestures';
   import type { Ink } from '../lib/ink';
-  import { LiveRenderer, buildScene, type Ctx2D, type Surface } from '../lib/live-render';
+  import { LiveRenderer, buildScene, type Ctx2D, type LiveSource, type Surface } from '../lib/live-render';
   import type { LiveState } from '../lib/live-state.svelte';
   import { DEFAULT_ASPECT, type Size } from '../lib/live-view';
+  import type { ViewerView } from '../lib/viewer-view.svelte';
 
   let {
     live,
     ink,
     background,
     shown,
+    view,
     label,
   }: {
     live: LiveState;
@@ -28,6 +36,8 @@
     /** The paper as a PNG data URL, or null (the paper colour only). */
     background: string | null;
     shown: 'live' | 'note';
+    /** The view drawn (the PC's, or this screen's own) and what changes it. */
+    view: ViewerView;
     /** Accessible name of the canvas. */
     label: string;
   } = $props();
@@ -46,6 +56,10 @@
   let context: Ctx2D | null = null;
   let scheduled = false;
   let destroyed = false;
+  let dragging = $state(false);
+  /** The mouse or pen drag moving the page. */
+  let drag: { id: number; last: Vec } | null = null;
+  const fingers = new TouchGestures();
 
   const renderer = new LiveRenderer(createSurface);
 
@@ -88,9 +102,19 @@
     const height = Math.max(1, Math.round(size.height * pixelRatio));
     if (el.width !== width) el.width = width;
     if (el.height !== height) el.height = height;
+    const source: LiveSource = {
+      pageSize: live.pageSize,
+      background: live.background,
+      layers: live.layers,
+      strokes: live.strokes,
+      generation: live.generation,
+      current: live.current,
+      hover: live.hover,
+      view: view.current,
+    };
     renderer.paint(
       context,
-      buildScene(live, {
+      buildScene(source, {
         mode: 'presentation',
         viewport: size,
         pixelRatio,
@@ -114,11 +138,12 @@
     return stop;
   });
 
-  // Geometry module and size: draw again.
+  // Geometry module, size, view (the PC's or the own one): draw again.
   $effect(() => {
     renderer.setInk(ink);
     void size;
     void pixelRatio;
+    void view.current;
     schedule();
   });
 
@@ -129,7 +154,10 @@
     const measure = () => {
       const width = el.clientWidth;
       const height = el.clientHeight;
-      if (width > 0 && height > 0 && (width !== size.width || height !== size.height)) size = { width, height };
+      if (width > 0 && height > 0 && (width !== size.width || height !== size.height)) {
+        size = { width, height };
+        view.setSize(size);
+      }
       const ratio = currentPixelRatio();
       if (ratio !== pixelRatio) pixelRatio = ratio;
     };
@@ -142,6 +170,87 @@
       observer?.disconnect();
     };
   });
+
+  // The wheel zooms around the pointer, as in the editor (a non-passive listener: no page scroll
+  // nor browser zoom).
+  $effect(() => {
+    const el = canvas;
+    if (!el) return;
+    const onwheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
+      view.zoomAt(Math.exp(-e.deltaY * unit * 0.0015), localPoint(e));
+    };
+    el.addEventListener('wheel', onwheel, { passive: false });
+    return () => el.removeEventListener('wheel', onwheel);
+  });
+
+  /** The pointer in CSS pixels relative to the canvas. */
+  function localPoint(e: MouseEvent): Vec {
+    const r = canvas?.getBoundingClientRect();
+    return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
+  }
+
+  function pointerId(e: PointerEvent): number {
+    return typeof e.pointerId === 'number' ? e.pointerId : 1;
+  }
+
+  function capture(id: number) {
+    try {
+      canvas?.setPointerCapture?.(id);
+    } catch {
+      // Synthetic events cannot be captured; moves still reach the canvas.
+    }
+  }
+
+  function applyTouch(action: TouchAction) {
+    if (action.kind === 'pan') view.drag(action.dx, action.dy);
+    else if (action.kind === 'pinch') view.pinch(action.from, action.to, action.factor);
+  }
+
+  /** The mouse and the pen grab the page; a finger is followed by `fingers` (pan, pinch). */
+  function onpointerdown(e: PointerEvent) {
+    const kind = pointerKind(e);
+    const id = pointerId(e);
+    if (kind === 'eraser') return;
+    if (kind === 'touch') {
+      e.preventDefault();
+      capture(id);
+      if (fingers.down(id, localPoint(e), e.timeStamp)) drag = null;
+      return;
+    }
+    if (e.button !== 0) return;
+    e.preventDefault();
+    capture(id);
+    drag = { id, last: localPoint(e) };
+    dragging = true;
+  }
+
+  function onpointermove(e: PointerEvent) {
+    const id = pointerId(e);
+    if (pointerKind(e) === 'touch') {
+      if (!fingers.has(id)) return;
+      const action = fingers.move(id, localPoint(e), { mode: 'navigate' });
+      if (action) applyTouch(action);
+      return;
+    }
+    if (!drag || drag.id !== id) return;
+    const p = localPoint(e);
+    view.drag(p.x - drag.last.x, p.y - drag.last.y);
+    drag = { id, last: p };
+  }
+
+  function release(e: PointerEvent, cancelled = false) {
+    const id = pointerId(e);
+    if (pointerKind(e) === 'touch') {
+      if (cancelled) fingers.cancel(id);
+      else fingers.up(id, e.timeStamp, { mode: 'navigate' });
+      return;
+    }
+    if (!drag || drag.id !== id) return;
+    drag = null;
+    dragging = false;
+  }
 
   // The paper image of the message (a data URL): shown once decoded; without one the paper
   // colour shows.
@@ -170,6 +279,16 @@
     data-strokes={live.strokeCount}
     data-page="{live.pageIndex + 1}/{live.pageCount}"
     data-shown={shown}
+    data-fit={view.fit}
+    data-zoom={view.current.zoom.toFixed(3)}
+    data-scale={view.transform.scale.toPrecision(5)}
+    class:grab={view.current.zoom > 1.001}
+    class:dragging
+    {onpointerdown}
+    {onpointermove}
+    onpointerup={(e) => release(e)}
+    onpointercancel={(e) => release(e, true)}
+    onlostpointercapture={(e) => release(e, true)}
   ></canvas>
 </div>
 
@@ -188,5 +307,14 @@
     width: 100%;
     height: 100%;
     user-select: none;
+    touch-action: none;
+  }
+
+  .viewer-canvas.grab {
+    cursor: grab;
+  }
+
+  .viewer-canvas.dragging {
+    cursor: grabbing;
   }
 </style>
