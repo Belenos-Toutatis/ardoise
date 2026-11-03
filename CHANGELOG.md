@@ -12,6 +12,7 @@
 
 ### Corrigé (jalon M11)
 
+- Partage sur le réseau : à travers le routeur d'un établissement, la connexion de l'autre écran pouvait prendre 2 minutes après le code. Ardoise fermait le premier chaque connexion, et Windows garde alors l'adresse de la connexion réservée 2 minutes ; le routeur réutilisait ses ports, et la connexion suivante tombait dessus. C'est maintenant le navigateur qui ferme en premier. Le partage écrit aussi un journal de ses connexions (`_ardoise/diagnostics/share_….log`, sans le code ni aucune donnée personnelle), pour comprendre un problème de réseau.
 - Partage sur le réseau : Chrome sur Android affichait « Ce site est inaccessible » (`ERR_TOO_MANY_RETRIES`). Le serveur fermait au bout de 3 secondes les connexions que le navigateur ouvre à l'avance, au moment même où il s'en servait ; il les garde maintenant 20 secondes. Un navigateur qui essaie `https://` est aussi refusé tout de suite, pour qu'il revienne aussitôt à `http://` au lieu d'attendre 10 secondes. Le panneau du partage et le guide rappellent de taper l'adresse avec `http://`.
 - Bibliothèque : un clic sur une carte pouvait être perdu, et la note ne s'ouvrait pas, quand sa miniature apparaissait juste entre l'appui et le relâchement du bouton. Le clic arrive maintenant toujours à la carte.
 

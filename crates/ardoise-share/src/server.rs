@@ -42,10 +42,13 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 const LISTEN_BACKLOG: u32 = 128;
 /// Time to write one batch of messages to an event stream before the viewer counts as gone.
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(15);
-/// After an answer, how long (and how many bytes) the client's leftovers are read before the
-/// socket closes, so that unread bytes do not turn the close into a reset that could destroy
-/// the answer in flight.
-const LINGER_TIME: Duration = Duration::from_secs(1);
+/// After an answer, how long the server waits for the client to close (reading its leftovers,
+/// up to `LINGER_BYTES`) before it closes the socket itself. The side that closes first keeps
+/// the connection's address pair reserved for 2 minutes (TIME_WAIT): it must be the browser.
+/// Through a school's router that reuses its ports, a new connection that fell on a pair this
+/// PC still reserved was ignored for those 2 minutes (2026-11-03: joining took 2 minutes). A
+/// browser closes a `Connection: close` connection as soon as it has read the answer.
+const LINGER_TIME: Duration = Duration::from_secs(2);
 const LINGER_BYTES: usize = 64 * 1024;
 /// At stop: time for a stream to finish the message it is writing, then time to write `end`;
 /// then time for every connection to finish (more than both).
@@ -855,32 +858,36 @@ async fn reply(
         written = timeout(RESPONSE_TIMEOUT, async {
             stream.write_all(head).await?;
             stream.write_all(body).await?;
-            stream.flush().await?;
-            stream.shutdown().await
+            stream.flush().await
         }) => matches!(written, Ok(Ok(()))),
         _ = stopping(shutdown) => false,
     };
     if !written {
         return;
     }
+    // No FIN from here yet: the client closes first (see `LINGER_TIME`).
     let drain = async {
         let mut scratch = [0u8; 4096];
         let mut total = 0;
         loop {
             match stream.read(&mut scratch).await {
-                Ok(0) | Err(_) => break,
+                Ok(0) | Err(_) => return true,
                 Ok(n) => {
                     total += n;
                     if total >= LINGER_BYTES {
-                        break;
+                        return false;
                     }
                 }
             }
         }
     };
-    tokio::select! {
-        _ = timeout(LINGER_TIME, drain) => {}
-        _ = stopping(shutdown) => {}
+    let closed_by_client = tokio::select! {
+        drained = timeout(LINGER_TIME, drain) => matches!(drained, Ok(true)),
+        _ = stopping(shutdown) => false,
+    };
+    if !closed_by_client {
+        // A client that keeps the connection open: closed from here after all.
+        let _ = timeout(LINGER_TIME, stream.shutdown()).await;
     }
 }
 
