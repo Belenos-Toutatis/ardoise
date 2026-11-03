@@ -236,9 +236,14 @@ pub struct Limits {
     pub stream_opens: u32,
     /// Then one more stream per address every this long.
     pub stream_open_every: Duration,
-    /// Time for the first byte of a request to arrive.
+    /// Time for the first byte of a request to arrive. Longer than browsers keep a connection
+    /// they opened ahead of a request (Chrome: 10 s): a browser that sends its request on such
+    /// a connection just as the server closes it gets nothing, retries on the next one, and
+    /// gives up after two (`ERR_TOO_MANY_RETRIES`, seen on a phone). A connection that waits
+    /// takes no room from others: it is the first closed to make room (fair share).
     pub first_byte: Duration,
-    /// Time for the whole request head (and the body of `POST /join`) to arrive.
+    /// Time for the whole request head (and the body of `POST /join`) to arrive, counted from
+    /// the connection.
     pub request: Duration,
     /// Time between two comments on an idle event stream.
     pub ping: Duration,
@@ -254,8 +259,8 @@ impl Default for Limits {
             streams_per_address: 4,
             stream_opens: 8,
             stream_open_every: Duration::from_secs(2),
-            first_byte: Duration::from_secs(3),
-            request: Duration::from_secs(10),
+            first_byte: Duration::from_secs(20),
+            request: Duration::from_secs(30),
             ping: Duration::from_secs(15),
         }
     }

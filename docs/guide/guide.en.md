@@ -973,6 +973,7 @@ of every component used, with its licence.
 | Windows says "Ardoise is preventing shutdown" | A note has unsaved changes: go back to Ardoise and save, or shut down anyway (the backup copy is already written, chapter 8). |
 | "Ardoise did not find Wacom Inkspace on this computer" | Click **Choose a folder…** and give Inkspace's `LocalState` folder or a copy (chapter 11). If Ardoise says to close Inkspace, close it and try again. |
 | The other computer cannot connect to the share | Same network? Address typed with `http://` and the port? Windows firewall allowed for this network (**Private networks**, or the network set to **Private**)? See "Showing the sheet on another computer of the network", chapter 6. |
+| "This site can't provide a secure connection" on the other computer or the phone | The browser opened the address with `https://`, often by completing it on its own. Ardoise's share uses `http://` (it stays on the local network, protected by the code): change the address to `http://…`. |
 | A message says, when sharing, that the port is already in use, or that no port is free | Ardoise normally takes the next free port by itself and says so in the panel. If none of the 20 ports after it is free, choose another one in **Settings** > **Sharing on the network** > **Share port** (chapter 6). |
 | A second double-click on `ardoise.exe` seems to do nothing new | That is intended: the window that is already open comes back to the front (chapter 2). |
 

@@ -65,6 +65,7 @@
           <code class="share-address main" data-share-address={mainAddress} tabindex="0">{mainAddress}</code>
           <button type="button" class="button" data-action="share-copy" onclick={copy}>{t('share.copy')}</button>
         </div>
+        <p class="muted small" data-share-http-hint>{t('share.httpHint')}</p>
         <p class="muted small copied" role="status">{copied ? t('share.copied') : ''}</p>
         {#if otherAddresses.length > 0}
           <p class="muted small">{t('share.otherAddresses')}</p>

@@ -119,8 +119,13 @@ OR Apache-2.0, already in the tree through tokio) for clients bound to other loo
     stream is cut over and over gets 8 quick reconnections, then about one every 2 s, with a 5 s wait after a
     refusal. A holder of the code looping on reconnections makes the app copy the page at most every 2 s per
     address.
-  - The first byte of a request within 3 s, its head (16 KiB) within 10 s (and the body of `/join`, 1 KiB), 32
-    headers; **an answer written within 5 s** (the largest, a script of about 200 KB, takes milliseconds on a LAN),
+  - The first byte of a request within 20 s, its head (16 KiB) within 30 s of the connection (and the body of
+    `/join`, 1 KiB), 32 headers. 20 s is longer than browsers keep a connection opened ahead of a request (Chrome:
+    10 s): with 3 s, Chrome on Android sent its request on such connections just as the server closed them, retried
+    twice and gave up (`ERR_TOO_MANY_RETRIES`, 2026-11-03). A waiting connection takes no room from others: it is
+    the first closed to make room. A first byte that is not a letter is no HTTP request — above all a browser
+    trying `https://` (a TLS handshake starts with 0x16) — and is closed at once, so that the browser falls back
+    to `http://` without waiting; **an answer written within 5 s** (the largest, a script of about 200 KB, takes milliseconds on a LAN),
     then the lingering close (1 s at most). A head is parsed again only when a blank line may have arrived.
     `TCP_NODELAY` on every socket (no Nagle delay on the stream).
 

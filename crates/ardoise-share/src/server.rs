@@ -723,6 +723,12 @@ async fn read_head(
             Ok(0) | Err(_) => return Err(ReadError::Gone),
             Ok(n) => n,
         };
+        // A request starts with its method, a word. Anything else is no HTTP request: above all
+        // a browser trying `https://` (a TLS handshake starts with 0x16), which must fail at once
+        // so that it falls back to `http://`, instead of waiting for a head that never comes.
+        if buf.is_empty() && !chunk[0].is_ascii_alphabetic() {
+            return Err(ReadError::Gone);
+        }
         let start = buf.len();
         buf.extend_from_slice(&chunk[..n]);
         // Parsed again only when the blank line that ends a head may have arrived (with the 3

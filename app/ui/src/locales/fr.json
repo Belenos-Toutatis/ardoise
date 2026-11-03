@@ -1544,6 +1544,7 @@
       "retry": "Réessayer"
     },
     "open": "Sur l'autre ordinateur, ouvrez un navigateur et tapez :",
+    "httpHint": "L'adresse en entier, avec http:// (pas https://) : si le navigateur la change en https://, retirez le « s ».",
     "noAddress": "Ardoise ne trouve aucune adresse réseau sur ce PC : vérifiez qu'il est bien connecté au Wi-Fi ou au réseau de l'établissement, puis arrêtez et relancez le partage.",
     "otherAddresses": "Autres adresses possibles :",
     "copy": "Copier",
