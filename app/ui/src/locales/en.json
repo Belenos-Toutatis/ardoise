@@ -1544,6 +1544,7 @@
       "retry": "Try again"
     },
     "open": "On the other computer, open a browser and type:",
+    "httpHint": "The whole address, with http:// (not https://): if the browser changes it to https://, remove the \"s\".",
     "noAddress": "Ardoise finds no network address on this PC: check that it is connected to the Wi-Fi or the school's network, then stop and start the share again.",
     "otherAddresses": "Other possible addresses:",
     "copy": "Copy",

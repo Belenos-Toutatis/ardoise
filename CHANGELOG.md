@@ -12,6 +12,7 @@
 
 ### Corrigé (jalon M11)
 
+- Partage sur le réseau : Chrome sur Android affichait « Ce site est inaccessible » (`ERR_TOO_MANY_RETRIES`). Le serveur fermait au bout de 3 secondes les connexions que le navigateur ouvre à l'avance, au moment même où il s'en servait ; il les garde maintenant 20 secondes. Un navigateur qui essaie `https://` est aussi refusé tout de suite, pour qu'il revienne aussitôt à `http://` au lieu d'attendre 10 secondes. Le panneau du partage et le guide rappellent de taper l'adresse avec `http://`.
 - Bibliothèque : un clic sur une carte pouvait être perdu, et la note ne s'ouvrait pas, quand sa miniature apparaissait juste entre l'appui et le relâchement du bouton. Le clic arrive maintenant toujours à la carte.
 
 ### Ajouté (jalon M10 — finition)

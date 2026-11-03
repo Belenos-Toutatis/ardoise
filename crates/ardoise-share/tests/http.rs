@@ -590,6 +590,38 @@ fn a_share_started_again_at_once_gets_its_port_back() {
 }
 
 #[test]
+fn a_browser_trying_https_is_turned_away_at_once() {
+    let h = Harness::start();
+    // The start of a TLS handshake (a browser that turned `http://` into `https://`): closed
+    // at once, without an answer, so that the browser falls back to `http://` without waiting.
+    let mut tls = connect(h.port());
+    tls.write_all(&[
+        0x16, 0x03, 0x01, 0x02, 0x00, 0x01, 0x00, 0x01, 0xfc, 0x03, 0x03,
+    ])
+    .unwrap();
+    let started = Instant::now();
+    let mut bytes = Vec::new();
+    let _ = tls.read_to_end(&mut bytes);
+    let took = started.elapsed();
+    assert!(bytes.is_empty());
+    assert!(took < Duration::from_secs(1), "{took:?}");
+    // The page is still served.
+    assert_eq!(request(h.port(), "GET", "/").status, 200);
+}
+
+#[test]
+fn a_connection_opened_ahead_of_its_request_is_kept_longer_than_browsers_keep_it() {
+    // Chrome keeps a connection it opened ahead (preconnect) for 10 s.
+    let limits = Limits::default();
+    assert!(
+        limits.first_byte > Duration::from_secs(10),
+        "{:?}",
+        limits.first_byte
+    );
+    assert!(limits.request > limits.first_byte, "{:?}", limits.request);
+}
+
+#[test]
 fn a_request_must_start_soon_and_end_in_time() {
     let h = Harness::with_limits(Limits {
         first_byte: Duration::from_millis(200),
