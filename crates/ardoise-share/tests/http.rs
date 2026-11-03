@@ -742,7 +742,10 @@ fn hold_consecutive_ports(count: u16) -> (Vec<TcpListener>, u16) {
                 Err(_) => break,
             }
         }
-        if held.len() == usize::from(count) {
+        // The port after them must be free too, for the share to move there: not one that
+        // Windows reserves (Hyper-V ranges answer "permission denied" to everyone).
+        let room = TcpListener::bind((Ipv4Addr::LOCALHOST, port.saturating_add(count))).is_ok();
+        if held.len() == usize::from(count) && room {
             return (held, port);
         }
     }
