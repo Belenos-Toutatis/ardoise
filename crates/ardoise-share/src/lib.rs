@@ -18,6 +18,7 @@ mod access;
 pub mod addresses;
 mod content;
 mod http;
+mod journal;
 pub mod qr;
 mod server;
 
@@ -49,6 +50,9 @@ pub struct ShareConfig {
     /// The code to ask for, instead of a random one (tests only). Normalised like the codes typed
     /// in the page.
     pub code: Option<String>,
+    /// A file where the share writes one line per connection event (diagnostics: what was asked,
+    /// from which address, how long each step took; never the code, a cookie or a query string).
+    pub journal: Option<std::path::PathBuf>,
 }
 
 impl Default for ShareConfig {
@@ -58,6 +62,7 @@ impl Default for ShareConfig {
             port: DEFAULT_PORT,
             fallback_ports: FALLBACK_PORTS,
             code: None,
+            journal: None,
         }
     }
 }

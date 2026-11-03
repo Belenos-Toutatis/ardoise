@@ -889,3 +889,52 @@ fn dropping_the_share_closes_the_port() {
     let refused = TcpStream::connect((Ipv4Addr::LOCALHOST, port));
     assert!(refused.is_err(), "the port is closed");
 }
+
+#[test]
+fn the_journal_tells_each_connection_without_the_code_the_cookie_or_the_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("share.log");
+    let share = Share::start(
+        ShareConfig {
+            journal: Some(path.clone()),
+            ..test_config()
+        },
+        assets(),
+        Arc::new(FakeFeed::default()) as Arc<dyn LiveFeed>,
+        Box::new(|_| {}),
+    )
+    .unwrap();
+    let port = share.port();
+    assert_eq!(request(port, "GET", "/").status, 200);
+    let joined = exchange(port, &join_request(CODE)).unwrap();
+    assert_eq!(joined.status, 204);
+    let cookie = session_cookie(&joined);
+    assert_eq!(request(port, "GET", "/secret-folder?name=x").status, 404);
+    share.stop();
+    let text = std::fs::read_to_string(&path).unwrap();
+    for wanted in [
+        "share started on port",
+        "connected",
+        "GET / after",
+        "POST /join after",
+        "answered 204 in",
+        "GET (other) after",
+        "answered 404 in",
+    ] {
+        assert!(
+            text.contains(wanted),
+            "{wanted:?} missing from:
+{text}"
+        );
+    }
+    let token = cookie
+        .split_once('=')
+        .map_or(cookie.as_str(), |(_, token)| token);
+    for secret in [CODE, token, "secret-folder", "name=x"] {
+        assert!(
+            !text.contains(secret),
+            "{secret:?} in:
+{text}"
+        );
+    }
+}

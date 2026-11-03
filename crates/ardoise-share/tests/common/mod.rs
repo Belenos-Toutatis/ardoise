@@ -188,6 +188,7 @@ pub fn test_config() -> ShareConfig {
         port: 0,
         fallback_ports: 0,
         code: Some(CODE.into()),
+        journal: None,
     }
 }
 

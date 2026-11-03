@@ -211,7 +211,9 @@ fn sharing_runtime() -> (ShareRuntime, Arc<LiveHub>) {
 fn a_port_held_by_another_program_moves_the_share_to_the_next_one() {
     let (runtime, hub) = sharing_runtime();
     let (_other, taken) = other_program();
-    let status = runtime.start(Ipv4Addr::LOCALHOST, taken, hub).unwrap();
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, taken, hub, None)
+        .unwrap();
     assert!(status.active);
     assert_eq!(status.requested_port, taken);
     assert!(
@@ -1118,7 +1120,7 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     // Without the embedded interface there is nothing to serve (and `--self-test` says so).
     assert!(runtime.viewer_check().is_err());
     let refused = runtime
-        .start(Ipv4Addr::LOCALHOST, 0, hub.clone())
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
         .unwrap_err();
     assert!(refused.is_code("shareUnavailable"));
 
@@ -1126,7 +1128,9 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     assert_eq!(runtime.viewer_check(), Ok(6));
     // The window says live mode before the share starts: it is remembered.
     runtime.inner.show(ShareContent::Live);
-    let status = runtime.start(Ipv4Addr::LOCALHOST, 0, hub.clone()).unwrap();
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
     assert!(status.active && status.port != 0);
     assert_eq!(
         status.addresses,
@@ -1139,7 +1143,7 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     // Starting again returns the share running.
     assert_eq!(
         runtime
-            .start(Ipv4Addr::LOCALHOST, 0, hub.clone())
+            .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
             .unwrap()
             .code,
         Some(code.clone())

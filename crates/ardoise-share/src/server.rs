@@ -15,6 +15,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::JoinHandle;
@@ -31,6 +32,7 @@ use tokio::time::{Instant, MissedTickBehavior, timeout, timeout_at};
 use crate::access::{self, Access, StreamRate, Verdict};
 use crate::content::{Content, Frame, JoinRefused, Viewer, end_frame};
 use crate::http::{self, ContentLength, Head, HeadError, ResponseHead};
+use crate::journal::Journal;
 use crate::{Assets, Limits, LiveFeed, OnChange, ShareConfig, ShareError, ShareStatus};
 
 /// Time to write an answer: the largest, a script of about 200 KB, takes milliseconds on a
@@ -76,6 +78,8 @@ pub(crate) struct Server {
     connections: Mutex<Connections>,
     shutdown: watch::Sender<bool>,
     on_change: OnChange,
+    /// Diagnostics, when the app asked for them ([`ShareConfig::journal`]).
+    journal: Option<Journal>,
 }
 
 /// A started server: its state, its thread, and a signal sent when the thread ends.
@@ -106,6 +110,13 @@ pub(crate) fn start(
         listen_from(config.bind, config.port, config.fallback_ports)?
     };
     let port = listener.local_addr()?.port();
+    let journal = config.journal.as_deref().and_then(Journal::create);
+    if let Some(journal) = &journal {
+        journal.note(format_args!(
+            "share started on port {port} (asked for {})",
+            config.port
+        ));
+    }
     let (shutdown, _) = watch::channel(false);
     let server = Arc::new(Server {
         port,
@@ -123,6 +134,7 @@ pub(crate) fn start(
         connections: Mutex::new(Connections::default()),
         shutdown,
         on_change,
+        journal,
     });
     let (done_sender, done) = mpsc::channel();
     let thread_server = Arc::clone(&server);
@@ -416,6 +428,31 @@ impl Server {
         self.shutdown.send_replace(true);
     }
 
+    /// One line in the journal, if there is one.
+    fn note(&self, line: fmt::Arguments<'_>) {
+        if let Some(journal) = &self.journal {
+            journal.note(line);
+        }
+    }
+
+    /// Writes an answer on the connection `id`, then notes its status and how long it took.
+    async fn answer(
+        &self,
+        id: u64,
+        stream: TcpStream,
+        head: &[u8],
+        body: &[u8],
+        shutdown: &mut watch::Receiver<bool>,
+    ) {
+        let started = Instant::now();
+        reply(stream, head, body, shutdown).await;
+        self.note(format_args!(
+            "#{id} answered {} in {} ms",
+            status_of(head),
+            started.elapsed().as_millis()
+        ));
+    }
+
     async fn run(self: Arc<Self>, listener: TcpListener) {
         let mut shutdown = self.shutdown.subscribe();
         let mut tasks = JoinSet::new();
@@ -430,7 +467,11 @@ impl Server {
                         let admitted =
                             lock(&self.connections).admit(peer.ip(), trusted, &self.limits);
                         // Not admitted: dropped, so closed at once.
-                        let Some((id, evict)) = admitted else { continue };
+                        let Some((id, evict)) = admitted else {
+                            self.note(format_args!("{peer} refused at once (too many connections)"));
+                            continue;
+                        };
+                        self.note(format_args!("#{id} {peer} connected"));
                         let slot = Slot { server: Arc::clone(&self), id };
                         let server = Arc::clone(&self);
                         tasks.spawn(async move {
@@ -481,7 +522,7 @@ impl Server {
         // then it is no longer chosen).
         tokio::select! {
             _ = self.serve(stream, peer, id, &mut shutdown) => {}
-            _ = evict.notified() => {}
+            _ = evict.notified() => self.note(format_args!("#{id} closed to make room")),
         }
     }
 
@@ -500,22 +541,31 @@ impl Server {
             read = timeout_at(deadline, read_head(&mut stream, first_byte)) => read,
             _ = stopping(shutdown) => return,
         };
+        let waited = now.elapsed().as_millis();
         let (head, rest) = match read {
             Ok(Ok(request)) => request,
             Ok(Err(ReadError::Head(error))) => {
+                self.note(format_args!("#{id} unreadable request after {waited} ms"));
                 let answer = http::text(error.status(), &[]);
-                reply(stream, &answer, &[], shutdown).await;
+                self.answer(id, stream, &answer, &[], shutdown).await;
                 return;
             }
-            Ok(Err(ReadError::Gone)) | Err(_) => return,
+            Ok(Err(ReadError::Gone)) | Err(_) => {
+                self.note(format_args!(
+                    "#{id} closed without a request after {waited} ms"
+                ));
+                return;
+            }
         };
+        self.note(format_args!("#{id} {} after {waited} ms", describe(&head)));
         if !lock(&self.connections).advance(id, Phase::Request) {
             return;
         }
         // A page of another site whose name was pointed at this PC (DNS rebinding) names its
         // own host: it gets nothing, and spends no attempt.
         if !head.host_allowed(self.port, self.host_name.as_deref()) {
-            reply(stream, &http::text(421, &[]), &[], shutdown).await;
+            self.answer(id, stream, &http::text(421, &[]), &[], shutdown)
+                .await;
             return;
         }
         let address = peer.ip();
@@ -526,8 +576,10 @@ impl Server {
                     answer = timeout_at(deadline, self.join(&mut stream, &head, rest, address)) => answer,
                     _ = stopping(shutdown) => return,
                 };
-                if let Ok(Some(answer)) = answer {
-                    reply(stream, &answer, &[], shutdown).await;
+                match answer {
+                    Ok(Some(answer)) => self.answer(id, stream, &answer, &[], shutdown).await,
+                    Ok(None) => self.note(format_args!("#{id} left during the request")),
+                    Err(_) => self.note(format_args!("#{id} request not finished in time")),
                 }
             }
             ("GET", path) => {
@@ -547,12 +599,19 @@ impl Server {
                             head.header("Cache-Control", http::IMMUTABLE)
                         };
                         let bytes = Arc::clone(&asset.bytes);
-                        reply(stream, &head.finish(), &bytes, shutdown).await;
+                        self.answer(id, stream, &head.finish(), &bytes, shutdown)
+                            .await;
                     }
-                    None => reply(stream, &http::text(404, &[]), &[], shutdown).await,
+                    None => {
+                        self.answer(id, stream, &http::text(404, &[]), &[], shutdown)
+                            .await
+                    }
                 }
             }
-            _ => reply(stream, &http::text(404, &[]), &[], shutdown).await,
+            _ => {
+                self.answer(id, stream, &http::text(404, &[]), &[], shutdown)
+                    .await
+            }
         }
     }
 
@@ -645,7 +704,8 @@ impl Server {
                 .fold(false, |found, token| found | access.token_valid(token))
         };
         if !authorised {
-            reply(stream, &http::text(401, &[]), &[], shutdown).await;
+            self.answer(id, stream, &http::text(401, &[]), &[], shutdown)
+                .await;
             return;
         }
         // Each new stream makes the app copy the whole page: a holder of the code looping on
@@ -655,14 +715,14 @@ impl Server {
         if let Err(wait) = allowed {
             let seconds = access::whole_seconds(wait).to_string();
             let answer = http::text(503, &[("Retry-After", &seconds)]);
-            reply(stream, &answer, &[], shutdown).await;
+            self.answer(id, stream, &answer, &[], shutdown).await;
             return;
         }
         let viewer = match self.content.join(address) {
             Ok(viewer) => viewer,
             Err(JoinRefused::TooMany) => {
                 let answer = http::text(503, &[("Retry-After", "5")]);
-                reply(stream, &answer, &[], shutdown).await;
+                self.answer(id, stream, &answer, &[], shutdown).await;
                 return;
             }
             Err(JoinRefused::Stopped) => return,
@@ -676,8 +736,44 @@ impl Server {
         if !lock(&self.connections).advance(id, Phase::Stream) {
             return;
         }
+        self.note(format_args!("#{id} stream open"));
+        let started = Instant::now();
         stream_events(stream, &viewer, self.limits.ping, shutdown).await;
+        self.note(format_args!(
+            "#{id} stream closed after {:.1} s",
+            started.elapsed().as_secs_f64()
+        ));
     }
+}
+
+/// The status code of an answer's head (`HTTP/1.1 204 No Content`), for the journal.
+fn status_of(head: &[u8]) -> &str {
+    head.get(9..12)
+        .and_then(|code| std::str::from_utf8(code).ok())
+        .unwrap_or("?")
+}
+
+/// What a request asked for, for the journal: a route of the share, or "(other)" (never a path
+/// typed by someone else, nor a query string).
+fn describe(head: &Head) -> String {
+    let path = head.path();
+    let asset = path.strip_prefix("/assets/").is_some_and(|name| {
+        name.len() <= 64
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+    });
+    let route = if matches!(path, "/" | "/join" | "/events") || asset {
+        path
+    } else {
+        "(other)"
+    };
+    let method = if head.method.len() <= 8 && head.method.bytes().all(|b| b.is_ascii_uppercase()) {
+        head.method.as_str()
+    } else {
+        "?"
+    };
+    format!("{method} {route}")
 }
 
 /// Removes a viewer from the content when its stream ends.

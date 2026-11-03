@@ -30,6 +30,8 @@ windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
 # Test clients bound to other loopback addresses (127.0.0.2…) and a socket with `SO_REUSEADDR`
 # that tries to take the port. Already in the tree through tokio (MIT OR Apache-2.0).
 socket2 = "0.6"
+# A folder for the journal written by a test share (already a dev-dependency of the other crates).
+tempfile = "3"
 
 [lints]
 workspace = true
