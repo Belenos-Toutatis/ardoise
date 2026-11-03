@@ -164,7 +164,7 @@ impl Harness {
     /// Joins with the code: the cookie to send (`ardoise_share=…`).
     pub fn cookie(&self) -> String {
         let answer = exchange(self.port(), &join_request(CODE)).expect("join answered");
-        assert_eq!(answer.status, 204, "{answer:?}");
+        assert_eq!(answer.status, 200, "{answer:?}");
         session_cookie(&answer)
     }
 
@@ -357,7 +357,7 @@ pub fn join_request(code: &str) -> Vec<u8> {
 /// Joins from `source`: the cookie to send (`ardoise_share=…`).
 pub fn cookie_from(source: Ipv4Addr, port: u16) -> String {
     let answer = exchange_from(source, port, &join_request(CODE)).expect("join answered");
-    assert_eq!(answer.status, 204, "{answer:?}");
+    assert_eq!(answer.status, 200, "{answer:?}");
     session_cookie(&answer)
 }
 

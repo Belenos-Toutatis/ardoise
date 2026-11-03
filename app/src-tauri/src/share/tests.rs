@@ -294,10 +294,23 @@ fn a_share_on_the_port_asked_keeps_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let context = crate::library::tests::context(dir.path());
     let (runtime, hub) = sharing_runtime();
-    let free = other_program().1;
-    super::set_port_in(&context, i64::from(free)).unwrap();
-    let before = std::fs::read_to_string(super::store(&context).unwrap().path()).unwrap();
-    let status = super::start_and_remember(&runtime, &context, Ipv4Addr::LOCALHOST, hub).unwrap();
+    // A port found free can be taken by another test's client before the share binds it (a
+    // client that closed first keeps its port for a while): a few tries.
+    let (status, free, before) = (0..10)
+        .find_map(|_| {
+            let free = other_program().1;
+            super::set_port_in(&context, i64::from(free)).unwrap();
+            let before = std::fs::read_to_string(super::store(&context).unwrap().path()).unwrap();
+            let status =
+                super::start_and_remember(&runtime, &context, Ipv4Addr::LOCALHOST, hub.clone())
+                    .unwrap();
+            if status.port == free {
+                return Some((status, free, before));
+            }
+            runtime.stop();
+            None
+        })
+        .expect("a free port taken as asked");
     assert_eq!((status.port, status.requested_port), (free, free));
     let after = std::fs::read_to_string(super::store(&context).unwrap().path()).unwrap();
     assert_eq!(before, after);
@@ -1014,7 +1027,7 @@ fn join(port: u16, code: &str) -> String {
             body.len()
         ),
     );
-    assert_eq!(status, 204, "{head}");
+    assert_eq!(status, 200, "{head}");
     let cookie = head
         .lines()
         .find_map(|line| {

@@ -659,14 +659,14 @@ export const shareJourneys = [
           if (reply.headers['set-cookie']) throw new Error('a wrong code received a cookie');
         });
 
-        await check('POST /join avec le bon code (en minuscules, sans espace) : 204 et un cookie HttpOnly', async () => {
+        await check('POST /join avec le bon code (en minuscules, sans espace) : 200 et un cookie HttpOnly', async () => {
           const reply = await request(port, {
             method: 'POST',
             path: '/join',
             headers: { 'Content-Type': 'application/json' },
             body: j({ code: code.replace(/\s/g, '').toLowerCase() }),
           });
-          if (reply.status !== 204) throw new Error(`answered ${reply.status}, expected 204 (${reply.body.toString('utf8').slice(0, 120)})`);
+          if (reply.status !== 200) throw new Error(`answered ${reply.status}, expected 200 (${reply.body.toString('utf8').slice(0, 120)})`);
           const set = [reply.headers['set-cookie'] ?? []].flat().join('\n');
           if (!/HttpOnly/i.test(set)) throw new Error(`the cookie is not HttpOnly: ${j(set)}`);
           cookie = set.split(';')[0].trim();

@@ -913,7 +913,7 @@ fn the_journal_tells_each_connection_without_the_code_the_cookie_or_the_path() {
     let port = share.port();
     assert_eq!(request(port, "GET", "/").status, 200);
     let joined = exchange(port, &join_request(CODE)).unwrap();
-    assert_eq!(joined.status, 204);
+    assert_eq!(joined.status, 200);
     let cookie = session_cookie(&joined);
     assert_eq!(request(port, "GET", "/secret-folder?name=x").status, 404);
     share.stop();
@@ -923,7 +923,7 @@ fn the_journal_tells_each_connection_without_the_code_the_cookie_or_the_path() {
         "connected",
         "GET / after",
         "POST /join after",
-        "answered 204 in",
+        "answered 200 in",
         "GET (other) after",
         "answered 404 in",
     ] {

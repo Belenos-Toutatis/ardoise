@@ -668,10 +668,10 @@ impl Server {
                         http::COOKIE
                     );
                     access.add_token(address, token);
-                    ResponseHead::new(204)
-                        .header("Cache-Control", http::NO_STORE)
-                        .header("Set-Cookie", &cookie)
-                        .finish()
+                    // `200` with a body and its length, not `204`: through a school's filtering
+                    // proxy, a `204` (which has no length) held the browser 2 minutes
+                    // (2026-11-03).
+                    http::json(200, r#"{"joined":true}"#, &[("Set-Cookie", &cookie)])
                 }
                 Err(_) => http::text(500, &[]),
             },
