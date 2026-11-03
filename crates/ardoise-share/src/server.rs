@@ -776,7 +776,12 @@ fn describe(head: &Head) -> String {
     } else {
         "?"
     };
-    format!("{method} {route}")
+    let proxy = if head.proxied {
+        " (through a proxy)"
+    } else {
+        ""
+    };
+    format!("{method} {route}{proxy}")
 }
 
 /// Removes a viewer from the content when its stream ends.

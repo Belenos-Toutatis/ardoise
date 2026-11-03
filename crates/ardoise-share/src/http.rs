@@ -40,6 +40,8 @@ pub(crate) struct Head {
     pub content_types: Vec<String>,
     pub origins: Vec<String>,
     pub hosts: Vec<String>,
+    /// A proxy forwarded it (`Via`, `Forwarded` or `X-Forwarded-For` given): for the journal.
+    pub proxied: bool,
 }
 
 impl Head {
@@ -186,6 +188,7 @@ pub(crate) fn parse_head(buf: &[u8]) -> Result<Option<Head>, HeadError> {
     let mut content_types = Vec::new();
     let mut origins = Vec::new();
     let mut hosts = Vec::new();
+    let mut proxied = false;
     // A value that is not UTF-8 is kept lossily: it then matches nothing expected.
     let text = |value: &[u8]| String::from_utf8_lossy(value).trim().to_owned();
     for header in request.headers.iter() {
@@ -204,6 +207,11 @@ pub(crate) fn parse_head(buf: &[u8]) -> Result<Option<Head>, HeadError> {
             origins.push(text(header.value));
         } else if name.eq_ignore_ascii_case("host") {
             hosts.push(text(header.value));
+        } else if ["via", "forwarded", "x-forwarded-for"]
+            .iter()
+            .any(|proxy| name.eq_ignore_ascii_case(proxy))
+        {
+            proxied = true;
         }
     }
     Ok(Some(Head {
@@ -216,6 +224,7 @@ pub(crate) fn parse_head(buf: &[u8]) -> Result<Option<Head>, HeadError> {
         content_types,
         origins,
         hosts,
+        proxied,
     }))
 }
 
