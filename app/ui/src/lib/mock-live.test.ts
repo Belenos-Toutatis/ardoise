@@ -40,6 +40,16 @@ afterEach(() => {
 });
 
 describe('browser stand-in for live mode', () => {
+  it('renders the paper of a page, like the session', () => {
+    const url = mockLiveInvoke('live_page_background', {
+      pageIndex: 0,
+      page: { width: 29700, height: 21600 },
+      background: { paper: 'slate', template: 'blank', texture: false },
+      widthPx: 512,
+    });
+    expect(String(url)).toMatch(/^data:image\/svg\+xml/);
+  });
+
   it('starts idle, waits for the tablet, then streams batches of 3 points every 15 ms', async () => {
     const sub = await subscribe();
     expect(sub.first.state).toBe('idle');

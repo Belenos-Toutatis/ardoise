@@ -6,7 +6,8 @@
    * the canvas (presentation window).
    *
    * Drawing is `lib/live-render.ts`; this component sizes the canvas (CSS pixels ×
-   * `devicePixelRatio`), loads the paper (`render_background`), and paints on the next
+   * `devicePixelRatio`), loads the paper (`render_background`; `live_page_background` for a
+   * resumed sheet with a background image, whose pixels the session holds), and paints on the next
    * animation frame after a change, then records the latency of the points it painted: the
    * interface part when the drawing ends, the end-to-end figure at the start of the next frame
    * (`lib/latency.ts`).
@@ -240,13 +241,17 @@
     return () => document.removeEventListener('visibilitychange', onvisibility);
   });
 
-  // The paper, rendered by Rust at the width the zoom needs (re-rendered when it doubles).
+  // The paper, rendered by Rust at the width the zoom needs (re-rendered when it doubles). The
+  // picture covers the whole page and goes under the strokes in page coordinates: the image of a
+  // resumed sheet, placed by Rust as in the editor, is aligned with them at every zoom.
   $effect(() => {
     const page = live.pageSize;
     const background = effectiveBackground(live.background, live.view.board);
+    const sheetImage = live.pageImage;
     const transform = sceneTransform({ pageSize: page, view: live.view }, { mode, viewport: size });
     const widthPx = backgroundPixels({ page, transform, pixelRatio });
-    const paper = JSON.stringify([page, background]);
+    // Two notes may place an image alike: the note tells their pixels apart.
+    const paper = JSON.stringify(sheetImage ? [page, background, sheetImage, live.noteId] : [page, background]);
     const wanted = `${paper}@${widthPx}`;
     if (wanted === backgroundFor) return;
     // Another paper: the old image must not show meanwhile (the paper colour does).
@@ -257,15 +262,23 @@
     backgroundFor = wanted;
     const request = ++backgroundRequest;
     const current = () => !destroyed && request === backgroundRequest;
-    api
-      .renderBackground(page, background, widthPx)
+    const rendered = sheetImage
+      ? api.livePageBackground(live.pageIndex, page, background, widthPx)
+      : api.renderBackground(page, background, widthPx);
+    rendered
       .then((url) => {
         if (!current() || typeof Image === 'undefined') return;
         const image = new Image();
-        image.onload = () => {
+        const show = () => {
           if (!current()) return;
           backgroundImage = image;
           schedule();
+        };
+        // A photo or a page of a PDF is large: decoded before it is drawn, away from the frames
+        // that show the pen.
+        image.onload = () => {
+          if (sheetImage && typeof image.decode === 'function') image.decode().then(show, show);
+          else show();
         };
         image.src = url;
       })

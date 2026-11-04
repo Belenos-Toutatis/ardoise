@@ -22,6 +22,11 @@ pub fn is_drawn(layers: &[Layer], stroke: &Stroke) -> bool {
         .is_none_or(|layer| layer.visible)
 }
 
+/// Plain paper: the viewer fills the page with the paper colour, nothing to render.
+pub fn is_plain_paper(background: Background, image: bool) -> bool {
+    background.template == Template::Blank && !background.texture && !image
+}
+
 /// What the viewer draws of a note (`SharedPage` in `share.ts`): no title, tags, file, dates,
 /// layer names or stroke of a hidden layer.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -74,11 +79,9 @@ pub struct Paper {
 }
 
 impl Paper {
-    /// Plain paper: the viewer fills the page with the paper colour, nothing to render.
+    /// Plain paper: nothing to render.
     pub fn is_plain(&self) -> bool {
-        self.background.template == Template::Blank
-            && !self.background.texture
-            && self.image.is_none()
+        is_plain_paper(self.background, self.image.is_some())
     }
 
     /// Width in pixels at which to render it ([`PAPER_PX`] on the longer side).

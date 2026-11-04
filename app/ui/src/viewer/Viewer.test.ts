@@ -428,6 +428,95 @@ describe('viewer page: the shared page', () => {
     expect(ops).toContain('drawImage');
   });
 
+  describe('the paper of a live page', () => {
+    const PICTURE = 'data:image/png;base64,QUJD';
+
+    /** Images that load as soon as they are given a source. */
+    class FakeImage {
+      onload: (() => void) | null = null;
+      private url = '';
+      get src() {
+        return this.url;
+      }
+      set src(url: string) {
+        this.url = url;
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+
+    function recordContexts() {
+      const contexts: FakeContext[] = [];
+      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => {
+        const ctx = new FakeContext();
+        contexts.push(ctx);
+        return ctx as unknown as RenderingContext;
+      });
+      vi.stubGlobal('Image', FakeImage);
+      return contexts;
+    }
+
+    /** The paper's images drawn since `from`, with the transform in force and the strokes drawn over them. */
+    function papersDrawn(contexts: FakeContext[]) {
+      const drawn: { args: unknown[]; transform: unknown[]; inkAfter: unknown[][] }[] = [];
+      for (const ctx of contexts) {
+        let transform: unknown[] = [];
+        for (const [i, call] of ctx.calls.entries()) {
+          if (call.op === 'setTransform') transform = call.args;
+          if (call.op === 'drawImage' && call.args[0] instanceof FakeImage) {
+            let after = transform;
+            const inkAfter: unknown[][] = [];
+            for (const later of ctx.calls.slice(i + 1)) {
+              if (later.op === 'setTransform') after = later.args;
+              if (later.op === 'fill') inkAfter.push(after);
+            }
+            drawn.push({ args: call.args, transform, inkAfter });
+          }
+        }
+      }
+      return drawn;
+    }
+
+    const live = (snapshot: LiveSnapshot, reset = true): ShareMessage => ({
+      type: 'live',
+      reset,
+      batch: { events: [{ type: 'snapshot', snapshot }], sentAt: 0 },
+    });
+
+    it('draws it under the strokes, over the whole page in page units, then goes on a plain page', async () => {
+      const contexts = recordContexts();
+      const view = render();
+      await join(view);
+      const sheet = { ...liveSnapshot([stroke(1000)]), paperKey: 'k1' };
+      pc.send(live(sheet));
+      await vi.waitFor(() => expect(view.canvas()?.dataset.shown).toBe('live'));
+      pc.send({ type: 'livePaper', key: 'k1', picture: PICTURE });
+
+      await vi.waitFor(() => expect(papersDrawn(contexts).at(-1)?.inkAfter.length).toBeGreaterThan(0));
+      const drawn = papersDrawn(contexts).at(-1)!;
+      expect((drawn.args[0] as FakeImage).src).toBe(PICTURE);
+      // The whole page, under the same transform as the strokes that follow: a stroke at a spot of
+      // the page falls on the same spot of the picture, whatever the view.
+      expect(drawn.args.slice(1)).toEqual([0, 0, A4.width, A4.height]);
+      expect(drawn.inkAfter[0]).toEqual(drawn.transform);
+
+      // The next page is plain: its snapshot alone takes the picture away.
+      for (const ctx of contexts) ctx.reset();
+      pc.send(live({ ...liveSnapshot([]), page: { ...liveSnapshot([]).page, id: 'p2' }, pageIndex: 1 }, false));
+      await vi.waitFor(() => expect(view.canvas()?.dataset.page).toBe('2/2'));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(papersDrawn(contexts)).toEqual([]);
+    });
+
+    it('shows no picture on an ordinary page', async () => {
+      const contexts = recordContexts();
+      const view = render();
+      await join(view);
+      pc.send(live(liveSnapshot([stroke(1000)])));
+      await vi.waitFor(() => expect(contexts.some((c) => c.count('fill') > 0)).toBe(true));
+      expect(papersDrawn(contexts)).toEqual([]);
+    });
+  });
+
   it('shows the waiting screen when the PC shares nothing', async () => {
     const view = render();
     await join(view);

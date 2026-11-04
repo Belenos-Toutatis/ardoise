@@ -437,3 +437,124 @@ describe('viewer state: live mode', () => {
     expect(v.live.saved).toEqual([]);
   });
 });
+
+describe('viewer state: the paper of a live page', () => {
+  const PICTURE = 'data:image/png;base64,QUJD';
+  const OTHER = 'data:image/png;base64,REVG';
+
+  function live(snap: LiveSnapshot, reset = true) {
+    return { type: 'live', reset, batch: batch({ type: 'snapshot', snapshot: snap }) } as const;
+  }
+  const sheet = (extra: Partial<LiveSnapshot> = {}) => snapshot('sheet', [], { paperKey: 'k1', ...extra });
+  const plain = () => snapshot('next', [], { pageIndex: 1, pageCount: 2 });
+
+  it('has none on an ordinary page, as before', () => {
+    const v = new ViewerState();
+    v.handle(live(snapshot()));
+    expect(v.live.paperKey).toBeNull();
+    expect(v.paper).toBeNull();
+    expect(v.background).toBeNull();
+  });
+
+  it('shows the picture the page asks for, in whichever order they arrive', () => {
+    const v = new ViewerState();
+    v.handle(live(sheet()));
+    expect(v.paper).toBeNull();
+    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    expect(v.paper).toBe(PICTURE);
+
+    const before = new ViewerState();
+    before.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    expect(before.paper).toBeNull();
+    before.handle(live(sheet()));
+    expect(before.paper).toBe(PICTURE);
+  });
+
+  it('does not touch the sheet or its strokes: the picture goes apart', () => {
+    const v = new ViewerState();
+    v.handle(live(sheet({ page: { ...snapshot('sheet').page, strokes: [stroke(100)] } })));
+    const { live: state, live: { strokes, generation } } = v;
+    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    expect(v.live).toBe(state);
+    expect(v.live.strokes).toBe(strokes);
+    expect(v.live.generation).toBe(generation);
+  });
+
+  it('clears at once on a plain page, and comes back with the sheet without anything sent', () => {
+    const v = new ViewerState();
+    v.handle(live(sheet()));
+    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    v.handle(live(plain(), false));
+    expect(v.paper).toBeNull();
+    v.handle(live(sheet(), false));
+    expect(v.paper).toBe(PICTURE);
+  });
+
+  it('never shows a picture for another paper: the blackboard, a page not yet drawn', () => {
+    const v = new ViewerState();
+    v.handle(live(sheet()));
+    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    v.handle(live(sheet({ paperKey: 'k2', view: { ...DEFAULT_VIEW, board: true } }), false));
+    expect(v.paper).toBeNull();
+    v.handle({ type: 'livePaper', key: 'k2', picture: OTHER });
+    expect(v.paper).toBe(OTHER);
+    // A later picture replaces it; a picture for a key nobody asks for shows nothing.
+    v.handle({ type: 'livePaper', key: 'k3', picture: PICTURE });
+    expect(v.paper).toBeNull();
+  });
+
+  it('survives what replaces the sheet: a new subscription, a pause, a reconnection', () => {
+    const v = new ViewerState();
+    v.handle(live(sheet()));
+    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    const first = v.live;
+    // Pause: the frozen image, then the badge; resume: a fresh snapshot.
+    v.handle(live(sheet()));
+    expect(v.live).not.toBe(first);
+    v.handle({ type: 'pause', paused: true });
+    expect(v.paper).toBe(PICTURE);
+    v.handle({ type: 'pause', paused: false });
+    v.handle(live(sheet()));
+    expect(v.paper).toBe(PICTURE);
+    // The connection is cut: the last image stays, and the new stream brings the picture anyway.
+    v.status('reconnecting');
+    expect(v.paper).toBe(PICTURE);
+    v.status('open');
+    v.handle(live(sheet()));
+    expect(v.paper).toBe(PICTURE);
+  });
+
+  it('leaves the note its own paper, and comes back after it', () => {
+    const v = new ViewerState();
+    v.handle(live(sheet()));
+    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    v.handle({ type: 'note', page: shared('n1'), background: OTHER });
+    expect(v.paper).toBe(OTHER);
+    v.handle({ type: 'note', page: shared('n2'), background: null });
+    expect(v.paper).toBeNull();
+    // The PC remembers having sent it: back in live mode it does not send it again.
+    v.handle(live(sheet()));
+    expect(v.paper).toBe(PICTURE);
+    expect(v.background).toBeNull();
+    v.handle({ type: 'waiting' });
+    expect(v.paper).toBeNull();
+    v.handle(live(sheet()));
+    expect(v.paper).toBe(PICTURE);
+  });
+
+  it('forgets it when the share ends or asks the code again: a new share sends it again', () => {
+    for (const leave of [
+      (v: ViewerState) => v.handle({ type: 'end' }),
+      (v: ViewerState) => v.status('needsCode'),
+      (v: ViewerState) => v.status('ended'),
+    ]) {
+      const v = new ViewerState();
+      v.handle(live(sheet()));
+      v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+      leave(v);
+      expect(v.paper).toBeNull();
+      v.handle(live(sheet()));
+      expect(v.paper).toBeNull();
+    }
+  });
+});

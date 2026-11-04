@@ -40,7 +40,7 @@ import type {
 import { marksFromWire, reuseMarks } from './live-marks';
 import { roundView, sameView } from './live-view';
 import type { Orientation } from './orientation';
-import type { Background, Layer, PageSize, Rgba, Stroke } from './note';
+import type { Background, BackgroundImage, Layer, PageSize, Rgba, Stroke } from './note';
 
 /** A page Rust failed to write into the library. */
 export interface SaveError {
@@ -121,6 +121,10 @@ export class LiveState {
   noteId = $state('');
   pageSize = $state.raw<PageSize>(DEFAULT_PAGE);
   background = $state.raw<Background>(DEFAULT_BACKGROUND);
+  /** The background image of a resumed sheet: where it goes (its pixels are Rust's). Null elsewhere. */
+  pageImage = $state.raw<BackgroundImage | null>(null);
+  /** The share's viewers: the picture of the paper this page wants (`LiveSnapshot.paperKey`). */
+  paperKey = $state<string | null>(null);
   layers = $state.raw<Layer[]>([]);
 
   /** Finished strokes of the page, in arrival order (appended in place). */
@@ -303,6 +307,9 @@ export class LiveState {
       this.pageSize = s.page.page;
     }
     if (JSON.stringify(this.background) !== JSON.stringify(s.page.background)) this.background = s.page.background;
+    const image = s.page.backgroundImage ?? null;
+    if (JSON.stringify(this.pageImage) !== JSON.stringify(image)) this.pageImage = image;
+    this.paperKey = s.paperKey ?? null;
     if (JSON.stringify(this.layers) !== JSON.stringify(s.page.layers)) this.layers = s.page.layers;
     this.incomingStyle(s.style);
     this.incomingView(s.view);
