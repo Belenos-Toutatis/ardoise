@@ -318,6 +318,8 @@ faut aussi ne choisir qu'une seule note.
   original, sa narration, son texte reconnu et tout ce qu'elle contient sont gardés. Si vous ne tracez rien, le fichier
   n'est pas touché.
 - **Le tableau noir** ne fait pas perdre le fond de la feuille : en le quittant, vous retrouvez son papier et son image.
+  Si vous terminez sans l'avoir quitté, la feuille garde son papier tant que vous n'avez rien écrit ; si vous y avez
+  écrit à la craie, elle est enregistrée en ardoise pour que la craie reste lisible.
 - **Le format** : si la feuille n'a pas le format de la tablette, ce que vous écrivez est réduit ou agrandi pour tenir
   en entier dans la feuille, au milieu, sans déformation. L'épaisseur du trait ne change pas.
 - **L'orientation** : la feuille n'est jamais tournée. Si elle est en paysage et que la tablette est réglée en portrait
@@ -326,20 +328,21 @@ faut aussi ne choisir qu'une seule note.
 - **La page suivante** crée une note neuve, à la racine de la bibliothèque, et suit de nouveau la position réglée pour
   la tablette : les boutons de position fonctionnent alors.
 - **La narration** : si vous enregistrez, le son s'ajoute après l'ancien sans le recouvrir, et la relecture reste juste
-  malgré le temps passé entre les deux séances.
+  malgré le temps passé entre les deux séances. Si le son ne peut pas s'y ajouter (plus de 4 heures en tout, ou ancienne
+  narration illisible), il part dans une note neuve à côté de la feuille, et Ardoise vous le dit en terminant.
 - **Terminer** enregistre la note comme d'habitude (compteur « N notes enregistrées »).
 
 **Revenir à l'original, après une reprise.** La note garde sa *première version* (voir le chapitre 8, « Revenir à
 l'original »). Une reprise n'en crée pas une nouvelle à chaque fois :
 
-- une note qui a de l'encre mais pas d'original (écrite en direct, importée, faite dans Ardoise) retrouve la feuille
-  *telle qu'elle était avant la reprise* ;
+- une note qui n'a pas encore d'original (écrite en direct, importée, faite dans Ardoise, ou fiche encore vierge) retrouve
+  la feuille *telle qu'elle était avant la reprise* ;
 - une note reçue de la tablette retrouve la page *telle qu'elle a été synchronisée* ;
-- une note déjà modifiée retrouve *sa première version*, pas l'état juste avant la reprise ;
-- une note vide n'a pas d'original.
+- une note déjà modifiée retrouve *sa première version*, pas l'état juste avant la reprise.
 
 Seuls le format de la page, les calques, les traits et la place de l'image de fond reviennent ; le titre, les
-étiquettes, le favori, le papier et la narration restent comme ils sont.
+étiquettes, le favori et la narration restent comme ils sont. Le papier aussi, sauf si l'ardoise du tableau noir l'a
+remplacé : le papier de la première version revient alors. `Ctrl + Z` annule le tout.
 
 **Si la feuille change ailleurs pendant le direct** (une copie arrive par Nextcloud, ou la note est modifiée ou
 supprimée sur un autre PC), Ardoise n'écrase rien. Un avis s'affiche : « Cette feuille a été modifiée ailleurs pendant
@@ -1125,7 +1128,7 @@ de tous les composants utilisés avec leur licence.
 | Des pages du direct n'ont pas pu être enregistrées | Elles restent en mémoire. Vérifiez le dossier de la bibliothèque (place, droits, synchronisation) ; une copie de secours est écrite dans `%LOCALAPPDATA%\Ardoise\live-backup`. |
 | « Ardoise s'est fermé sans enregistrer des modifications » (bandeau de la bibliothèque), ou fenêtre « Modifications récupérées » | Ardoise s'est arrêté avant que vous enregistriez. Rouvrez la note et récupérez les modifications (chapitre 8). |
 | « Fichiers illisibles : N » | Ardoise ne sait pas lire ces fichiers et ne les a pas modifiés ; la raison est écrite à côté de chacun (chapitres 2 et 7). |
-| Windows dit qu'« Ardoise empêche l'arrêt » | Une note a des modifications non enregistrées : revenez dans Ardoise et enregistrez, ou arrêtez quand même (la copie de secours est déjà écrite, chapitre 8). |
+| Windows dit qu'« Ardoise empêche l'arrêt » | Le mode direct est en cours : ce qui est écrit est enregistré, et vous pouvez arrêter ; ou bien une note a des modifications non enregistrées : revenez dans Ardoise et enregistrez, ou arrêtez quand même (la copie de secours est déjà écrite, chapitre 8). |
 | « Ardoise n'a pas trouvé Wacom Inkspace sur cet ordinateur » | Cliquez sur **Choisir un dossier…** et indiquez le dossier `LocalState` d'Inkspace ou une copie (chapitre 11). Si Ardoise dit de fermer Inkspace, fermez-le et réessayez. |
 | L'autre ordinateur n'arrive pas à se connecter au partage | Même réseau ? Adresse tapée avec `http://` et le port ? Pare-feu de Windows autorisé pour ce réseau (**Réseaux privés**, ou réseau passé en **Privé**) ? Voir « Montrer la feuille sur un autre ordinateur du réseau », chapitre 6. |
 | « Ce site ne peut pas fournir de connexion sécurisée » sur l'autre ordinateur ou le téléphone | Le navigateur a ouvert l'adresse en `https://`, souvent en la complétant tout seul. Le partage d'Ardoise est en `http://` (il reste sur le réseau local, protégé par le code) : corrigez l'adresse en `http://…`. |
