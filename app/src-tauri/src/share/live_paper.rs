@@ -10,17 +10,17 @@
 //! - **Rendering** runs on a thread of its own ([`LivePapers::run`]), started when there is a paper
 //!   to make and ended when there is none: the hub's lock is held only to look up the sheet's file.
 //!   The picture is what `page.rs` makes for the editor's note, kept for when the teacher comes back
-//!   to the sheet; it reaches the share through [`ardoise_share::Share::show_live_paper`], outside
-//!   the live batches.
+//!   to the sheet; it reaches the share through [`ardoise_share::Share::show_live_paper`], which
+//!   holds it for the viewers to fetch, apart from the event stream.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use ardoise_core::note::{Background, BackgroundImage, PageSize, Paper as PaperColour};
-use serde::Serialize;
+use ardoise_share::LivePaper;
 
 use super::page::{Paper, is_plain_paper};
-use super::render_paper_with;
+use super::render_paper_png;
 use crate::background::key_of;
 use crate::live::LiveHub;
 use crate::live::model::LiveSnapshot;
@@ -28,8 +28,8 @@ use crate::live::model::LiveSnapshot;
 /// Pictures kept, most recent first: the sheet, and the sheet on the blackboard.
 const PICTURES_KEPT: usize = 2;
 
-/// Where a finished message goes (the share, once it runs).
-pub type Deliver = Box<dyn Fn(Option<&str>) + Send + Sync>;
+/// Where a finished picture goes (the share, once it runs).
+pub type Deliver = Box<dyn Fn(Option<LivePaper>) + Send + Sync>;
 
 /// The background drawn: the page's own, or slate paper while the blackboard is on
 /// (`effectiveBackground` in `live-render.ts`).
@@ -47,7 +47,8 @@ fn effective_background(background: Background, board: bool) -> Background {
 /// What the live page of `snapshot` wants drawn under its strokes, without the title, tags or
 /// anything else of the note: an opaque name, `None` on plain paper. It changes with the note, the
 /// page size, the paper, the template, the texture and the image (its file's name goes only into
-/// the digest). A fork gives the note a new id, hence a new key: the picture goes once more.
+/// the digest). A fork does not change it: the snapshot carries the id the page started with
+/// (`Page::shown_id`), so the key stays and the picture is not sent again.
 pub fn paper_key(snapshot: &LiveSnapshot) -> Option<String> {
     let note = &snapshot.page;
     let background = effective_background(note.background, snapshot.view.board);
@@ -95,16 +96,6 @@ impl Sheet {
     }
 }
 
-/// The `livePaper` message: the only thing a viewer gets of the sheet's paper.
-#[derive(Serialize)]
-#[serde(tag = "type", rename = "livePaper")]
-struct Message<'a> {
-    /// The [`paper_key`] it answers.
-    key: &'a str,
-    /// PNG data URL.
-    picture: &'a str,
-}
-
 #[derive(Default)]
 struct Work {
     /// The paper of the page shown, `None` on plain paper.
@@ -120,8 +111,8 @@ pub struct LivePapers {
     hub: Arc<LiveHub>,
     /// Never held while rendering.
     work: Mutex<Work>,
-    /// Only the thread takes it.
-    pictures: Mutex<Vec<(Paper, String)>>,
+    /// PNG files. Only the thread takes it. Shared with the share, which holds the one in use.
+    pictures: Mutex<Vec<(Paper, Arc<[u8]>)>>,
     deliver: OnceLock<Deliver>,
     #[cfg(test)]
     renders: std::sync::atomic::AtomicUsize,
@@ -204,20 +195,19 @@ impl LivePapers {
                 work.dirty = false;
                 work.wanted.clone()
             };
-            let message = wanted.as_ref().and_then(|sheet| self.message(sheet));
+            let picture = wanted.as_ref().and_then(|sheet| self.picture(sheet));
             if lock(&self.work).dirty {
                 continue;
             }
             if let Some(deliver) = self.deliver.get() {
-                deliver(message.as_deref());
+                deliver(picture);
             }
         }
     }
 
-    /// The message for `sheet`, its picture rendered unless it is among those kept; `None` when
-    /// it turns out plain (the image's pixels are gone) or cannot be made: the viewer shows the
-    /// paper colour.
-    fn message(&self, sheet: &Sheet) -> Option<String> {
+    /// The picture for `sheet`, rendered unless it is among those kept; `None` when it turns out
+    /// plain (the image's pixels are gone) or cannot be made: the viewer shows the paper colour.
+    fn picture(&self, sheet: &Sheet) -> Option<LivePaper> {
         let source = self.hub.page_image(sheet.page_index);
         let paper = Paper {
             page: sheet.page,
@@ -239,18 +229,17 @@ impl LivePapers {
                 self.renders
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let pixels = source.as_ref().and_then(|(_, base)| base.picture());
-                let picture = render_paper_with(&paper, pixels)?;
-                (paper, picture)
+                let png = render_paper_png(&paper, pixels)?;
+                (paper, Arc::from(png))
             }
         };
-        let message = serde_json::to_string(&Message {
-            key: &sheet.key,
-            picture: &entry.1,
-        })
-        .ok();
+        let png = Arc::clone(&entry.1);
         pictures.insert(0, entry);
         pictures.truncate(PICTURES_KEPT);
-        message
+        Some(LivePaper {
+            key: sheet.key.clone(),
+            png,
+        })
     }
 
     /// Pictures rendered so far.

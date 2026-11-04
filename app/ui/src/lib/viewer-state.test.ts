@@ -3,6 +3,7 @@ import type { LiveBatch, LiveEvent, LiveMark, LivePoint, LiveSnapshot } from './
 import { DEFAULT_VIEW } from './live-state.svelte';
 import type { Layer, Note, Stroke } from './note';
 import type { SharedPage } from './share';
+import type { PaperEnv } from './viewer-paper';
 import { ViewerState, noteSnapshot } from './viewer-state.svelte';
 
 const BLACK = { r: 0, g: 0, b: 0, a: 255 };
@@ -439,120 +440,210 @@ describe('viewer state: live mode', () => {
 });
 
 describe('viewer state: the paper of a live page', () => {
-  const PICTURE = 'data:image/png;base64,QUJD';
   const OTHER = 'data:image/png;base64,REVG';
+
+  /** The PC's address `/paper/<key>`, answering at once with a picture, unless `refuse` says no. */
+  function pc() {
+    const urls: string[] = [];
+    const revoked: string[] = [];
+    const state = { refuse: false };
+    let count = 0;
+    const env: PaperEnv = {
+      fetch: async (url) => {
+        urls.push(url);
+        if (state.refuse) return new Response(null, { status: 404 });
+        return new Response('png', { status: 200, headers: { 'Content-Type': 'image/png' } });
+      },
+      setTimeout: () => 0,
+      clearTimeout: () => undefined,
+      createUrl: () => `blob:${++count}`,
+      revokeUrl: (url) => revoked.push(url),
+    };
+    return { env, urls, revoked, state };
+  }
+
+  /** The picture fetched has arrived. */
+  const fetched = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   function live(snap: LiveSnapshot, reset = true) {
     return { type: 'live', reset, batch: batch({ type: 'snapshot', snapshot: snap }) } as const;
   }
+  const told = (key = 'k1', version = 'v1') => ({ type: 'livePaper', key, version }) as const;
   const sheet = (extra: Partial<LiveSnapshot> = {}) => snapshot('sheet', [], { paperKey: 'k1', ...extra });
   const plain = () => snapshot('next', [], { pageIndex: 1, pageCount: 2 });
 
   it('has none on an ordinary page, as before', () => {
-    const v = new ViewerState();
+    const { env, urls } = pc();
+    const v = new ViewerState(env);
     v.handle(live(snapshot()));
     expect(v.live.paperKey).toBeNull();
     expect(v.paper).toBeNull();
     expect(v.background).toBeNull();
+    expect(urls).toEqual([]);
   });
 
-  it('shows the picture the page asks for, in whichever order they arrive', () => {
-    const v = new ViewerState();
+  it('fetches the picture the page asks for and shows it, in whichever order they arrive', async () => {
+    const { env, urls } = pc();
+    const v = new ViewerState(env);
     v.handle(live(sheet()));
     expect(v.paper).toBeNull();
-    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
-    expect(v.paper).toBe(PICTURE);
+    v.handle(told());
+    expect(urls).toEqual(['/paper/k1']);
+    // The paper colour until it is there.
+    expect(v.paper).toBeNull();
+    await fetched();
+    expect(v.paper).toBe('blob:1');
 
-    const before = new ViewerState();
-    before.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    const before = new ViewerState(pc().env);
+    before.handle(told());
+    await fetched();
     expect(before.paper).toBeNull();
     before.handle(live(sheet()));
-    expect(before.paper).toBe(PICTURE);
+    expect(before.paper).toBe('blob:1');
   });
 
-  it('does not touch the sheet or its strokes: the picture goes apart', () => {
-    const v = new ViewerState();
+  it('does not touch the sheet or its strokes: the picture goes apart', async () => {
+    const v = new ViewerState(pc().env);
     v.handle(live(sheet({ page: { ...snapshot('sheet').page, strokes: [stroke(100)] } })));
     const { live: state, live: { strokes, generation } } = v;
-    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    v.handle(told());
+    await fetched();
     expect(v.live).toBe(state);
     expect(v.live.strokes).toBe(strokes);
     expect(v.live.generation).toBe(generation);
   });
 
-  it('clears at once on a plain page, and comes back with the sheet without anything sent', () => {
-    const v = new ViewerState();
+  it('a fetch that fails disturbs nothing: the strokes go on on the paper colour', async () => {
+    const { env, state } = pc();
+    state.refuse = true;
+    const v = new ViewerState(env);
     v.handle(live(sheet()));
-    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    v.handle(told());
+    await fetched();
+    expect(v.paper).toBeNull();
+    expect(v.screen).toBe('live');
+    expect(v.reconnecting).toBe(false);
+    v.handle(live(sheet({ page: { ...snapshot('sheet').page, strokes: [stroke(100)] } }), false));
+    expect(v.live.strokes.length).toBe(1);
+
+    // Told again (a new subscription), it arrives.
+    state.refuse = false;
+    v.handle(told());
+    await fetched();
+    expect(v.paper).toBe('blob:1');
+  });
+
+  it('clears at once on a plain page, and comes back with the sheet without a new fetch', async () => {
+    const { env, urls } = pc();
+    const v = new ViewerState(env);
+    v.handle(live(sheet()));
+    v.handle(told());
+    await fetched();
     v.handle(live(plain(), false));
     expect(v.paper).toBeNull();
     v.handle(live(sheet(), false));
-    expect(v.paper).toBe(PICTURE);
+    expect(v.paper).toBe('blob:1');
+    v.handle(told());
+    await fetched();
+    expect(urls).toEqual(['/paper/k1']);
   });
 
-  it('never shows a picture for another paper: the blackboard, a page not yet drawn', () => {
-    const v = new ViewerState();
+  it('never shows a picture for another paper: the blackboard, a page not yet drawn', async () => {
+    const { env, urls, revoked } = pc();
+    const v = new ViewerState(env);
     v.handle(live(sheet()));
-    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    v.handle(told());
+    await fetched();
     v.handle(live(sheet({ paperKey: 'k2', view: { ...DEFAULT_VIEW, board: true } }), false));
     expect(v.paper).toBeNull();
-    v.handle({ type: 'livePaper', key: 'k2', picture: OTHER });
-    expect(v.paper).toBe(OTHER);
+    v.handle(told('k2'));
+    await fetched();
+    expect(v.paper).toBe('blob:2');
+    expect(revoked).toEqual(['blob:1']);
     // A later picture replaces it; a picture for a key nobody asks for shows nothing.
-    v.handle({ type: 'livePaper', key: 'k3', picture: PICTURE });
+    v.handle(told('k3'));
+    await fetched();
     expect(v.paper).toBeNull();
+    expect(urls).toEqual(['/paper/k1', '/paper/k2', '/paper/k3']);
   });
 
-  it('survives what replaces the sheet: a new subscription, a pause, a reconnection', () => {
-    const v = new ViewerState();
+  it('survives what replaces the sheet: a new subscription, a pause, a reconnection', async () => {
+    const { env, urls } = pc();
+    const v = new ViewerState(env);
     v.handle(live(sheet()));
-    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    v.handle(told());
+    await fetched();
     const first = v.live;
-    // Pause: the frozen image, then the badge; resume: a fresh snapshot.
+    // Pause: the frozen image, its paper, then the badge; resume: a fresh snapshot.
     v.handle(live(sheet()));
+    v.handle(told());
     expect(v.live).not.toBe(first);
     v.handle({ type: 'pause', paused: true });
-    expect(v.paper).toBe(PICTURE);
+    expect(v.paper).toBe('blob:1');
     v.handle({ type: 'pause', paused: false });
     v.handle(live(sheet()));
-    expect(v.paper).toBe(PICTURE);
-    // The connection is cut: the last image stays, and the new stream brings the picture anyway.
+    v.handle(told());
+    expect(v.paper).toBe('blob:1');
+    // The connection is cut: the last image stays, and the new stream tells of the same picture.
     v.status('reconnecting');
-    expect(v.paper).toBe(PICTURE);
+    expect(v.paper).toBe('blob:1');
     v.status('open');
     v.handle(live(sheet()));
-    expect(v.paper).toBe(PICTURE);
+    v.handle(told());
+    await fetched();
+    expect(v.paper).toBe('blob:1');
+    expect(urls).toEqual(['/paper/k1']);
   });
 
-  it('leaves the note its own paper, and comes back after it', () => {
-    const v = new ViewerState();
+  it('fetches again when the file got other pixels under the same key', async () => {
+    const { env, urls } = pc();
+    const v = new ViewerState(env);
     v.handle(live(sheet()));
-    v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+    v.handle(told());
+    await fetched();
+    v.handle(told('k1', 'v2'));
+    expect(v.paper).toBe('blob:1');
+    await fetched();
+    expect(v.paper).toBe('blob:2');
+    expect(urls).toEqual(['/paper/k1', '/paper/k1']);
+  });
+
+  it('leaves the note its own paper, and comes back after it', async () => {
+    const { env, urls } = pc();
+    const v = new ViewerState(env);
+    v.handle(live(sheet()));
+    v.handle(told());
+    await fetched();
     v.handle({ type: 'note', page: shared('n1'), background: OTHER });
     expect(v.paper).toBe(OTHER);
     v.handle({ type: 'note', page: shared('n2'), background: null });
     expect(v.paper).toBeNull();
-    // The PC remembers having sent it: back in live mode it does not send it again.
+    // Back in live mode the PC tells of it again; it is in hand.
     v.handle(live(sheet()));
-    expect(v.paper).toBe(PICTURE);
+    expect(v.paper).toBe('blob:1');
     expect(v.background).toBeNull();
     v.handle({ type: 'waiting' });
     expect(v.paper).toBeNull();
     v.handle(live(sheet()));
-    expect(v.paper).toBe(PICTURE);
+    expect(v.paper).toBe('blob:1');
+    expect(urls).toEqual(['/paper/k1']);
   });
 
-  it('forgets it when the share ends or asks the code again: a new share sends it again', () => {
+  it('forgets it when the share ends or asks the code again: a new share tells again', async () => {
     for (const leave of [
       (v: ViewerState) => v.handle({ type: 'end' }),
       (v: ViewerState) => v.status('needsCode'),
       (v: ViewerState) => v.status('ended'),
+      (v: ViewerState) => v.close(),
     ]) {
-      const v = new ViewerState();
+      const { env, revoked } = pc();
+      const v = new ViewerState(env);
       v.handle(live(sheet()));
-      v.handle({ type: 'livePaper', key: 'k1', picture: PICTURE });
+      v.handle(told());
+      await fetched();
       leave(v);
       expect(v.paper).toBeNull();
+      expect(revoked).toEqual(['blob:1']);
       v.handle(live(sheet()));
       expect(v.paper).toBeNull();
     }

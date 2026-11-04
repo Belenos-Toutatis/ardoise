@@ -5,16 +5,21 @@ import type { NoteOriginal } from '../original';
 import { nearestVisibleLayer, type Doc } from './state';
 
 /**
- * The doc with the original's page size, layers and strokes (one undoable step); the title,
- * tags, favourite, paper and everything else of the note stay, the background image too, placed
- * for the restored page (`imageForOriginal`). Nothing is selected afterwards, and new ink goes
- * on the top visible layer. `doc` itself without an original.
+ * The doc with the original's page size, layers and strokes (one undoable step; no stroke at all
+ * for a blank sheet that live mode wrote on); the title, tags, favourite, paper and everything else
+ * of the note stay, the background image too, placed for the restored page (`imageForOriginal`).
+ * One exception for the paper: slate over a first version on other paper is what writing under
+ * live mode's blackboard leaves, and the chalk that needed it is going. Nothing is selected
+ * afterwards, and new ink goes on the top visible layer. `doc` itself without an original.
  */
 export function revertToOriginal(doc: Doc, original: NoteOriginal): Doc {
   if (original.source === 'none' || original.layers.length === 0) return doc;
   const note = { ...doc.note, page: original.page, layers: original.layers, strokes: original.strokes };
   const image = doc.note.backgroundImage;
   if (image) note.backgroundImage = imageForOriginal(image, doc.note.page, original, doc.backgroundPixels);
+  if (original.paper !== undefined && original.paper !== 'slate' && doc.note.background.paper === 'slate') {
+    note.background = { ...doc.note.background, paper: original.paper };
+  }
   const top = note.layers.length - 1;
   // The rest of the document (the background image's pixels) stays.
   return { ...doc, note, selection: [], activeLayer: nearestVisibleLayer(note, top) ?? top };

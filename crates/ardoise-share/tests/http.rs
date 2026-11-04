@@ -99,6 +99,10 @@ fn every_other_request_is_not_found() {
         "/%2e%2e/",
         "/..",
         "/favicon.ico",
+        "/paper",
+        "//paper/x",
+        "/PAPER/x",
+        "/paper%2Fx",
         "http://host/",
         "http://127.0.0.1/assets/viewer-abc123.js",
         "*",
@@ -125,6 +129,9 @@ fn every_other_request_is_not_found() {
         ("PUT", "/join"),
         ("post", "/join"),
         ("POST", "/events"),
+        ("POST", "/paper/x"),
+        ("HEAD", "/paper/x"),
+        ("OPTIONS", "/paper/x"),
         ("HEAD", "/events"),
         ("PATCH", "/events"),
         ("CONNECT", "127.0.0.1:80"),
@@ -480,7 +487,7 @@ fn a_page_of_another_site_gets_nothing() {
         format!("127.0.0.1:{}", port.wrapping_add(1)),
         format!("[::1]:{port}"),
     ] {
-        for target in ["/", SCRIPT_PATH, "/events", "/nothing"] {
+        for target in ["/", SCRIPT_PATH, "/events", "/paper/x", "/nothing"] {
             let answer = get(target, &host);
             assert_eq!(answer.status, 421, "{host} {target}");
             assert_common_headers(&answer);
@@ -540,17 +547,16 @@ fn another_program_cannot_take_the_port() {
         bound.is_err(),
         "127.0.0.1:{port} was bound by another socket"
     );
-    // On all addresses: Linux refuses it too; Windows lets a socket bind the wildcard next to
-    // one bound to a single address (the share in this test; in the app the share binds the
-    // wildcard itself, which leaves no address to take), and connections to the share's
-    // address still reach the share.
-    let wildcard = reusing();
-    let bound = wildcard.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)).into());
-    if bound.is_ok() {
-        wildcard.listen(8).unwrap();
-    }
+    // On all addresses: Linux refuses it too. Not tried on Windows, where listening on the wildcard
+    // brings up the firewall's prompt each time this test is rebuilt; there a socket may bind the
+    // wildcard next to one bound to a single address (the share in this test; in the app the share
+    // binds the wildcard itself, which leaves no address to take).
     #[cfg(not(windows))]
-    assert!(bound.is_err(), "0.0.0.0:{port} was bound by another socket");
+    {
+        let wildcard = reusing();
+        let bound = wildcard.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)).into());
+        assert!(bound.is_err(), "0.0.0.0:{port} was bound by another socket");
+    }
     for _ in 0..5 {
         assert_eq!(h.get("/").status, 200);
     }

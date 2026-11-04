@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LiveBatch, LiveEvent, LiveSnapshot, MonitorInfo } from './live';
+import type { LiveBatch, LiveEvent, LiveSnapshot, LiveStopped, MonitorInfo } from './live';
 import { LiveState } from './live-state.svelte';
 import { mockLibrary, resetMockLibrary } from './mock-data';
 import {
@@ -326,7 +326,7 @@ describe('browser stand-in for live mode', () => {
     expect(() => invoke('live_command', { command: { kind: 'nextPage' } })).toThrow();
     expect(() => invoke('live_set_view', { view: {} })).toThrow();
     expect(() => invoke('live_set_style', { style: {} })).toThrow();
-    expect(invoke('live_stop')).toEqual([]);
+    expect(invoke('live_stop')).toEqual({ saved: [], forks: [], narration: null });
     expect(invoke('unknown_command')).toBeTypeOf('symbol');
   });
 
@@ -368,7 +368,7 @@ describe('browser stand-in for live mode', () => {
     invoke('live_command', { command: { kind: 'nextPage' } });
     vi.advanceTimersByTime(15 * 150);
     invoke('live_command', { command: { kind: 'newPage' } });
-    const paths = invoke('live_stop') as string[];
+    const paths = (invoke('live_stop') as LiveStopped).saved;
     expect(paths).toHaveLength(2);
     expect(new Set(paths).size).toBe(2);
     expect(mockLibrary().notes.size).toBe(before + 2);
@@ -408,8 +408,7 @@ describe('browser stand-in for live mode', () => {
     expect(saved.length).toBeGreaterThan(0);
     expect(mockLibrary().notes.size).toBe(before + 2);
     expect(failures()).toHaveLength(2);
-    const paths = invoke('live_stop') as string[];
-    expect(paths).toHaveLength(2);
+    expect((invoke('live_stop') as LiveStopped).saved).toHaveLength(2);
   });
 
   it('does not say that everything is saved when stopping with a page that failed', async () => {

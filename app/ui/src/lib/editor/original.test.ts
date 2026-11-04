@@ -18,7 +18,13 @@ function withImage(staged: StagedBackground): Doc {
 
 /** What `note_original` gives for the note as it is in `doc` (saved once, then edited). */
 function firstVersion(n: Note): NoteOriginal {
-  const original: NoteOriginal = { source: 'firstVersion', page: n.page, layers: n.layers, strokes: n.strokes };
+  const original: NoteOriginal = {
+    source: 'firstVersion',
+    page: n.page,
+    layers: n.layers,
+    strokes: n.strokes,
+    paper: n.background.paper,
+  };
   if (n.backgroundImage) original.backgroundImage = structuredClone(n.backgroundImage);
   return original;
 }
@@ -52,6 +58,42 @@ describe('back to the original', () => {
     const { strokes: _s, layers: _l, page: _p, ...rest } = back.note;
     const { strokes: _s2, layers: _l2, page: _p2, ...kept } = edited;
     expect(rest).toEqual(kept);
+  });
+
+  it('goes back to a blank worksheet: no stroke, the image where it was, the paper it had', () => {
+    const blank = withImage(PAGE2);
+    blank.note.strokes = [];
+    blank.note.background = { paper: 'kraft', template: 'blank', texture: false };
+    const original = firstVersion(blank.note);
+    // Written on in live mode, under the blackboard: chalk, a layer of its own, slate paper.
+    const written = docFromNote({
+      ...blank.note,
+      layers: [...blank.note.layers, { name: 'Calque 2', visible: true }],
+      strokes: [hline(0, 1000, 100, 100, 1)],
+      background: { ...blank.note.background, paper: 'slate' },
+    });
+    const back = revertToOriginal({ ...written, backgroundPixels: blank.backgroundPixels }, original);
+    expect(back.note.strokes).toEqual([]);
+    expect(back.note.layers).toEqual(blank.note.layers);
+    expect(back.note.background).toEqual(blank.note.background);
+    expect(back.note.backgroundImage).toEqual(blank.note.backgroundImage);
+    expect(back.backgroundPixels).toEqual(blank.backgroundPixels);
+    expect(back.activeLayer).toBe(0);
+  });
+
+  it('leaves the paper as it is but for that slate', () => {
+    const saved = docFromNote({ ...note([hline(0, 1000, 100)]), background: { paper: 'cream', template: 'seyes', texture: true } });
+    const original = firstVersion(saved.note);
+    // Another paper chosen since stays.
+    const kraft = docFromNote({ ...saved.note, background: { ...saved.note.background, paper: 'kraft' } });
+    expect(revertToOriginal(kraft, original).note.background.paper).toBe('kraft');
+    // Slate over a first version on slate stays too, and a tablet page says nothing of its paper.
+    const slate = docFromNote({ ...saved.note, background: { ...saved.note.background, paper: 'slate' } });
+    expect(revertToOriginal(slate, { ...original, paper: 'slate' } as NoteOriginal).note.background.paper).toBe('slate');
+    const { paper: _paper, ...tablet } = original as Extract<NoteOriginal, { source: 'firstVersion' | 'tablet' }>;
+    expect(revertToOriginal(slate, { ...tablet, source: 'tablet' }).note.background.paper).toBe('slate');
+    // Its template and texture are not concerned.
+    expect(revertToOriginal(slate, original).note.background).toEqual(saved.note.background);
   });
 
   it('changes nothing without an original', () => {

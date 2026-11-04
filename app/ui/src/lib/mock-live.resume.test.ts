@@ -2,7 +2,7 @@
 // (docs/design/tablet-live-classroom.md, "M12").
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recoveryOf } from './editor/drafts';
-import type { LiveBatch, LiveEvent, LiveSnapshot } from './live';
+import type { LiveBatch, LiveEvent, LiveSnapshot, LiveStopped } from './live';
 import { freshStamp, mockLibrary, resetMockLibrary } from './mock-data';
 import { mockLiveConfig, mockLiveInvoke, mockLiveSubscribe, resetMockLive, setMockLiveOrientation } from './mock-live';
 
@@ -33,6 +33,7 @@ afterEach(() => {
 
 const sheetPath = () => [...mockLibrary().notes].find(([, s]) => s.note.title === 'Cours de physique')![0];
 const resume = (path = sheetPath()) => invoke('live_resume', { path }) as LiveSnapshot;
+const stop = () => invoke('live_stop') as LiveStopped;
 
 describe('browser stand-in: resuming a sheet', () => {
   it('opens the note as the first page, never turned, and starts a new note at the next page', async () => {
@@ -70,8 +71,7 @@ describe('browser stand-in: resuming a sheet', () => {
     // Untouched, the sheet is not written.
     expect(mockLibrary().notes.get(path)!.stamp).toBe(stamp);
     vi.advanceTimersByTime(15 * 200);
-    const paths = invoke('live_stop') as string[];
-    expect(paths).toEqual([path]);
+    expect(stop()).toEqual({ saved: [path], forks: [], narration: null });
     const after = mockLibrary().notes.get(path)!;
     expect(mockLibrary().notes.size).toBe(notes);
     expect(after.stamp).not.toBe(stamp);
@@ -86,8 +86,52 @@ describe('browser stand-in: resuming a sheet', () => {
     const path = sheetPath();
     const stamp = mockLibrary().notes.get(path)!.stamp;
     resume();
-    expect(invoke('live_stop')).toEqual([]);
+    expect(stop()).toEqual({ saved: [], forks: [], narration: null });
     expect(mockLibrary().notes.get(path)!.stamp).toBe(stamp);
+  });
+
+  it('leaves the sheet as it is when only the blackboard was pressed', () => {
+    const path = sheetPath();
+    const stored = mockLibrary().notes.get(path)!;
+    stored.note.background.paper = 'kraft';
+    const stamp = stored.stamp;
+    const snapshot = resume();
+    invoke('live_set_view', { view: { ...snapshot.view, board: true } });
+    expect(stop().saved).toEqual([]);
+    expect(mockLibrary().notes.get(path)!.stamp).toBe(stamp);
+    expect(mockLibrary().notes.get(path)!.note.background.paper).toBe('kraft');
+  });
+
+  it('gives a sheet its own paper back, and writes slate only with ink under the blackboard', () => {
+    mockLiveConfig.waitMs = 0;
+    const path = sheetPath();
+    mockLibrary().notes.get(path)!.note.background.paper = 'kraft';
+    const snapshot = resume();
+    invoke('live_set_view', { view: { ...snapshot.view, board: true } });
+    invoke('live_set_view', { view: { ...snapshot.view, board: false } });
+    vi.advanceTimersByTime(15 * 200);
+    stop();
+    expect(mockLibrary().notes.get(path)!.note.background.paper).toBe('kraft');
+
+    const again = resume();
+    invoke('live_set_view', { view: { ...again.view, board: true } });
+    vi.advanceTimersByTime(15 * 200);
+    stop();
+    expect(mockLibrary().notes.get(path)!.note.background.paper).toBe('slate');
+  });
+
+  it('keeps a blank sheet as the original of what is written on it', () => {
+    mockLiveConfig.waitMs = 0;
+    const path = sheetPath();
+    const stored = mockLibrary().notes.get(path)!;
+    stored.note.strokes = [];
+    stored.original = undefined;
+    resume();
+    vi.advanceTimersByTime(15 * 200);
+    stop();
+    const written = mockLibrary().notes.get(path)!;
+    expect(written.note.strokes.length).toBeGreaterThan(0);
+    expect(written.original).toMatchObject({ source: 'firstVersion', strokes: [] });
   });
 
   it('holds a portrait sheet on the same side and keeps its ink when the position is switched', async () => {
@@ -175,6 +219,16 @@ describe('browser stand-in: resuming a sheet', () => {
     await mockLiveSubscribe((b) => late.push(b));
     await Promise.resolve();
     expect(late.flatMap((b) => b.events).filter((e) => e.type === 'sheetForked')).toEqual([fork]);
+
+    // The stop says so as well: the view closes on it.
+    const { type: _type, ...told } = fork;
+    expect(stop().forks).toEqual([told]);
+
+    // The view of the next lesson is not told.
+    const next: LiveBatch[] = [];
+    await mockLiveSubscribe((b) => next.push(b));
+    await Promise.resolve();
+    expect(next.flatMap((b) => b.events).filter((e) => e.type === 'sheetForked')).toEqual([]);
   });
 
   it('forks into a new note when the sheet was deleted meanwhile', async () => {

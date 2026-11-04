@@ -4,7 +4,8 @@
 //! again from an allow list of what the viewer draws: nothing else of the hub's types can reach
 //! a browser, whatever fields they get later.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use ardoise_core::note::{Background, Origin, PageSize, Timing};
 use ardoise_core::settings::Orientation;
@@ -114,7 +115,7 @@ impl Memo {
     pub fn json(&self, batch: LiveBatch) -> Option<Arc<str>> {
         let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((events, json)) = last.as_ref()
-            && *events == batch.events
+            && same_events(events, &batch.events)
         {
             return Some(json.clone());
         }
@@ -122,6 +123,18 @@ impl Memo {
         *last = Some((batch.events, json.clone()));
         Some(json)
     }
+}
+
+/// Whether two batches hold the same events. Viewers up to date were all queued the same snapshot,
+/// which is not worth comparing point by point with itself.
+fn same_events(a: &[LiveEvent], b: &[LiveEvent]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|pair| match pair {
+            (LiveEvent::Snapshot { snapshot: a }, LiveEvent::Snapshot { snapshot: b }) => {
+                Arc::ptr_eq(a, b) || a == b
+            }
+            (a, b) => a == b,
+        })
 }
 
 /// `batch` as the viewers get it (`LiveBatch` of `live.ts`), `None` when it holds nothing that
@@ -332,14 +345,28 @@ impl<'a> SharedSnapshot<'a> {
     }
 }
 
+/// What the viewers call the page with id `id`: stable for this run of the app, one per page, which
+/// is all the viewer's page-change detection needs (`LiveState.noteId`). Not the id itself, which
+/// on a resumed sheet is the identity of a note of the library, nor a digest anyone could check
+/// against an id they know: the salt is drawn at each run.
+fn viewer_page_id(id: &str) -> String {
+    static SALT: OnceLock<u128> = OnceLock::new();
+    let salt = SALT.get_or_init(|| uuid::Uuid::new_v4().as_u128());
+    let mut hasher = DefaultHasher::new();
+    salt.hash(&mut hasher);
+    id.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
 /// The page of a snapshot as the viewer reads a `Note` (`note.ts`): what is drawn, and the
-/// fields the type requires with neutral values. The title, dates, tags, favourite mark, layer
+/// fields the type requires with neutral values. The id, title, dates, tags, favourite mark, layer
 /// names, background image and origin of the page stay on the PC, and so do the strokes of a layer
 /// that is hidden (a resumed sheet may have some: it is an old note, with its own date).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SharedLivePage<'a> {
-    id: &'a str,
+    /// [`viewer_page_id`].
+    id: String,
     /// Always empty.
     title: &'static str,
     /// Always 0, like `modified`: the point times need no date.
@@ -366,7 +393,7 @@ impl<'a> SharedLivePage<'a> {
     fn of(snapshot: &'a LiveSnapshot) -> SharedLivePage<'a> {
         let note = &snapshot.page;
         SharedLivePage {
-            id: &note.id,
+            id: viewer_page_id(&note.id),
             title: "",
             created: 0,
             modified: 0,

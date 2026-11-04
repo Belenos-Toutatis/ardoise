@@ -1034,6 +1034,32 @@ fn backup_copies_live_outside_the_library() {
 }
 
 #[test]
+fn pieces_of_a_page_too_far_apart_for_one_track_are_not_lost_to_one_another() {
+    let far = 5 * 3600 * 1000;
+    let piece = |start_ms| Narration {
+        clip: tone(4_800, 1),
+        base: NarrationBase::Note,
+        options: ReplayOptions::default(),
+        start_ms,
+    };
+    let pieces = vec![
+        (0, piece(0)),
+        (1, piece(100)),
+        (0, piece(far)),
+        (0, piece(far + 500)),
+    ];
+    let merged = merge_by_page(pieces);
+    let starts: Vec<(usize, i64, usize)> = merged
+        .iter()
+        .map(|(page, n)| (*page, n.start_ms, n.clip.samples.len()))
+        .collect();
+    assert_eq!(
+        starts,
+        [(0, 0, 4_800), (1, 100, 4_800), (0, far, 500 * 48 + 4_800)]
+    );
+}
+
+#[test]
 fn a_recording_on_one_page_keeps_its_buffer() {
     let clip = tone(48_000, 1);
     let buffer = clip.samples.as_ptr();

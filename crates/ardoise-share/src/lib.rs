@@ -3,10 +3,10 @@
 //! see what the Ardoise PC chooses to show (the live sheet, the page of the note open in the
 //! editor, or a waiting screen).
 //!
-//! - Three routes only: `GET /` and `GET /assets/<file>` (the viewer, served from bytes the app
-//!   hands over), `POST /join` (the 6-character code gives an HttpOnly session cookie) and
-//!   `GET /events` (Server-Sent Events). Every other request gets 404; no path ever reaches a
-//!   file.
+//! - Few routes: `GET /` and `GET /assets/<file>` (the viewer, served from bytes the app hands
+//!   over), `POST /join` (the 6-character code gives an HttpOnly session cookie), `GET /events`
+//!   (Server-Sent Events) and `GET /paper/<key>` (the picture of the live page's paper, the one
+//!   picture held). Every other request gets 404; no path ever reaches a file.
 //! - Only the Ardoise PC sends; the browser receives.
 //! - Started and stopped by hand ([`Share::start`], [`Share::stop`]); dropping the [`Share`] stops
 //!   it too. When `stop` returns the port is closed.
@@ -115,6 +115,16 @@ pub struct NoteUpdate {
     /// The `noteStrokes` message relative to the previous [`Share::show_note`], when the change
     /// only added strokes at the end; sent instead of `full` to the viewers already showing it.
     pub append: Option<String>,
+}
+
+/// The picture under the strokes of a live page that is not plain paper (`docs/design/lan-share.md`,
+/// "The paper of a live page"): viewers fetch it apart from the event stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LivePaper {
+    /// What the page's snapshots ask for (`paperKey`): the picture's address is `/paper/<key>`.
+    pub key: String,
+    /// The PNG. Shared, never copied: the share holds this one until the paper changes or it stops.
+    pub png: Arc<[u8]>,
 }
 
 /// The live session, for the share: the app implements it over its `LiveHub` (one hub
@@ -252,6 +262,12 @@ pub struct Limits {
     pub request: Duration,
     /// Time between two comments on an idle event stream.
     pub ping: Duration,
+    /// Time for 64 KiB of an event stream or of a picture to go, whatever the whole weighs: a client
+    /// that still reads goes on, one that stopped reading is gone after this long.
+    pub stall: Duration,
+    /// Time for a whole picture to go (`GET /paper/<key>`): how long a slow client may hold its
+    /// connection slot. Enough for 10 MB at 35 KB/s.
+    pub paper_answer: Duration,
 }
 
 impl Default for Limits {
@@ -267,6 +283,8 @@ impl Default for Limits {
             first_byte: Duration::from_secs(20),
             request: Duration::from_secs(30),
             ping: Duration::from_secs(15),
+            stall: Duration::from_secs(15),
+            paper_answer: Duration::from_secs(300),
         }
     }
 }
@@ -346,13 +364,14 @@ impl Share {
         self.server.content.show_note(update);
     }
 
-    /// The paper of the live page: a complete `livePaper` message (`docs/design/lan-share.md`, "The
-    /// paper of a live page"), `None` on plain paper. Sent outside the live batches, once to each
-    /// viewer, after its snapshot to a viewer that joins; recorded only while the share is paused
-    /// or shows something else. Ignored once stopped. Not to be called from a [`LiveFeed`]
-    /// method, nor from the hub's flusher: it takes the share's lock.
-    pub fn show_live_paper(&self, message: Option<&str>) {
-        self.server.content.show_live_paper(message);
+    /// The paper of the live page, `None` on plain paper (`docs/design/lan-share.md`, "The paper of a
+    /// live page"). It replaces the one held; the viewers are told in the stream, after its snapshot
+    /// to a viewer that joins, and fetch it with `GET /paper/<key>` while it is what they are shown.
+    /// Recorded only while the share is paused or shows something else. Ignored once stopped. Not
+    /// to be called from a [`LiveFeed`] method, nor from the hub's flusher: it takes the share's
+    /// lock, and reads the whole picture once.
+    pub fn show_live_paper(&self, paper: Option<LivePaper>) {
+        self.server.content.show_live_paper(paper);
     }
 
     /// Freezes the shared image (`true`) or follows the content again (`false`).

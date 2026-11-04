@@ -8,7 +8,7 @@ mod common;
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
-use ardoise_share::Limits;
+use ardoise_share::{Limits, NoteUpdate};
 use common::*;
 
 #[test]
@@ -68,6 +68,62 @@ fn a_slow_viewer_is_disconnected_without_blocking_the_sender() {
     // The fast viewer still gets everything.
     fast_feed.send(&point_batch(1)).unwrap();
     assert_eq!(fast.expect(), live(false, &point_batch(1)));
+}
+
+/// A note's paper travels in the stream: whatever it weighs, what counts is that the viewer keeps
+/// reading (it had 15 s for the whole message, which at less than about 700 KB/s for 10 MB got the
+/// viewer disconnected again and again).
+#[test]
+fn a_large_message_goes_as_slowly_as_the_viewer_reads() {
+    let h = Harness::with_limits(Limits {
+        stall: Duration::from_millis(500),
+        ..Limits::default()
+    });
+    let mut viewer = h.viewer();
+    assert_eq!(viewer.expect(), waiting());
+    let paper = "x".repeat(8_000_000);
+    let message = format!(r#"{{"type":"note","background":"{paper}"}}"#);
+    h.share.show_note(NoteUpdate {
+        full: message,
+        append: None,
+    });
+    // About 1 MB/s: many times what is allowed for any 64 KiB, and all of it gets through.
+    let started = Instant::now();
+    let mut received = Vec::new();
+    let mut chunk = vec![0u8; 50_000];
+    viewer
+        .stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    while !received.ends_with(b"}\n\n") {
+        assert!(started.elapsed() < Duration::from_secs(60));
+        let n = viewer.stream.read(&mut chunk).unwrap();
+        assert_ne!(n, 0, "closed after {:?}", started.elapsed());
+        received.extend_from_slice(&chunk[..n]);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(started.elapsed() > Duration::from_secs(2));
+    assert!(received.len() > 8_000_000);
+    assert_eq!(h.share.status().viewers, 1);
+}
+
+#[test]
+fn a_stream_that_stops_reading_is_dropped_soon() {
+    let h = Harness::with_limits(Limits {
+        stall: Duration::from_millis(300),
+        ..Limits::default()
+    });
+    let mut viewer = h.viewer();
+    assert_eq!(viewer.expect(), waiting());
+    let message = format!(
+        r#"{{"type":"note","background":"{}"}}"#,
+        "x".repeat(64 * 1024 * 1024)
+    );
+    h.share.show_note(NoteUpdate {
+        full: message,
+        append: None,
+    });
+    assert!(wait_until(SOON, || h.share.status().viewers == 0));
 }
 
 #[test]

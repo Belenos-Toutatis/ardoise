@@ -188,3 +188,78 @@ describe('touching up the selection', () => {
     expect(selection.indices).toEqual([]);
   });
 });
+
+describe('one edit at a time', () => {
+  /** Commands that answer when the test says so, to hold an edit under way. */
+  function held() {
+    const releases: (() => void)[] = [];
+    const wait = <T>(value: T) => new Promise<T>((resolve) => releases.push(() => resolve(value)));
+    const calls = { edit: 0, undo: 0, redo: 0 };
+    const stuck: TouchUpCommands = {
+      liveEditStrokes: () => (calls.edit++, wait(1)),
+      liveUndoEdit: () => (calls.undo++, wait(true)),
+      liveRedoEdit: () => (calls.redo++, wait(true)),
+    };
+    const release = async () => {
+      releases.shift()?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    return { stuck, calls, release };
+  }
+
+  it('ignores a second delete, a colour, an undo and a redo while one edit is under way', async () => {
+    const { touch, selection, errors, writeUntil, choose } = await open();
+    writeUntil(3);
+    const { stuck, calls, release } = held();
+    const slow: TouchUp = { ...touch, commands: stuck };
+    choose([1]);
+    const first = deleteSelected(slow);
+    // The selection is still there until the answer: the second press would be refused as stale.
+    expect(selection.any).toBe(true);
+    await deleteSelected(slow);
+    await recolourSelected(slow, RED);
+    await stepHistory(slow);
+    await stepHistory(slow, true);
+    expect(calls).toEqual({ edit: 1, undo: 0, redo: 0 });
+    await release();
+    await first;
+    expect(errors).toEqual([]);
+    expect(selection.any).toBe(false);
+  });
+
+  it('takes the next edit once the first is over, also after a refusal', async () => {
+    const { touch, selection, errors, writeUntil, choose } = await open();
+    writeUntil(3);
+    const calls: string[] = [];
+    const refusing: TouchUp = {
+      ...touch,
+      commands: {
+        liveEditStrokes: (...args) => {
+          calls.push('edit');
+          return calls.length === 1 ? Promise.reject({ code: 'liveEditInvalid', message: 'no' }) : commands.liveEditStrokes(...args);
+        },
+        liveUndoEdit: commands.liveUndoEdit,
+        liveRedoEdit: commands.liveRedoEdit,
+      },
+    };
+    choose([0]);
+    await deleteSelected(refusing);
+    expect(errors).toEqual([expect.objectContaining({ code: 'liveEditInvalid' })]);
+    await deleteSelected(refusing);
+    expect(calls).toEqual(['edit', 'edit']);
+    expect(selection.any).toBe(false);
+  });
+
+  it('ignores an undo pressed while a redo is under way', async () => {
+    const { touch, writeUntil } = await open();
+    writeUntil(2);
+    const { stuck, calls, release } = held();
+    const slow: TouchUp = { ...touch, commands: stuck };
+    const first = stepHistory(slow, true);
+    await stepHistory(slow);
+    expect(calls).toEqual({ edit: 0, undo: 0, redo: 1 });
+    await release();
+    await first;
+  });
+});
