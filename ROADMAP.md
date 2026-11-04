@@ -203,6 +203,7 @@ Essai à la maison le 2026-11-03, sur deux ordinateurs du même réseau : le par
 Deux problèmes vus le même jour avec des navigateurs et des réseaux réels, corrigés et vérifiés sous Windows (`CHECK OK`, `E2E OK`) :
 - les navigateurs complètent souvent l'adresse en `https://`. Le panneau et le guide rappellent maintenant de taper `http://`. Chrome sur Android abandonnait aussi (`ERR_TOO_MANY_RETRIES`) : le serveur fermait trop tôt les connexions ouvertes à l'avance ;
 - au travail, l'ordinateur de l'établissement passe par le filtre web (proxy e2guardian), même pour le réseau local, et la connexion prenait 2 minutes après le code. Un journal des connexions du partage (`_ardoise/diagnostics/share_….log`) a montré la cause : la réponse « 204 » au code, retenue par le filtre. Ardoise répond maintenant « 200 » avec sa longueur, et la connexion est instantanée au travail (2026-11-03, `docs/design/lan-share.md`).
+- le lendemain, au travail, une page peu chargée restait sur le formulaire du code alors que le PC comptait un écran connecté : le filtre retient toute réponse tant qu'elle n'a pas assez de contenu à analyser (retenue jusqu'à 450 Ko, passe à partir de 512 Ko, mesuré le 2026-11-04). Un flux qui passe par un proxy commence maintenant par 2 Mo de remplissage invisible, et la page quitte le formulaire dès que le code est accepté. Essai réussi au travail.
 
 Reste à confirmer à l'usage : Chrome sur Android après le correctif, et une note ouverte partagée sur le réseau de l'établissement.
 
