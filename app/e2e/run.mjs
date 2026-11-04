@@ -29,12 +29,13 @@ import { inkspaceJourneys } from './journeys-m10-inkspace.mjs';
 import { libraryJourneys } from './journeys-m10-library.mjs';
 import { uiJourneys } from './journeys-m10-ui.mjs';
 import { shareJourneys } from './journeys-m11-share.mjs';
+import { resumeJourneys } from './journeys-m12-resume.mjs';
 import { mcpJourney } from './mcp.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -139,6 +140,8 @@ async function startApp(language, port, args = [], { settings = '', env = {} } =
     dir,
     library,
     language,
+    /** The remote debugging port of this window: a journey attaches to the other windows (presentation) through it. */
+    port,
     send,
     /** Value of a JavaScript expression in the page (awaited). */
     async evaluate(expression) {

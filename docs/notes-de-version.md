@@ -18,6 +18,7 @@ version fait et surtout **ce qui n'a pas encore été essayé**. Le détail tech
   `Espace` veut toujours dire « page suivante » ; `Échap` ferme la projection quand elle est affichée, sinon demande
   confirmation avant de terminer le mode direct ; **Effacer la page** se rattrape pendant 8 secondes avec **Annuler
   l'effacement**.
+- **Reprendre le mode direct sur une feuille** déjà enregistrée (menu de la note ou éditeur) : on continue d'écrire dans la même note, avec son image de fond, son original et sa narration, sans rien écraser si elle change ailleurs ; *pas encore essayé avec la vraie tablette (essai H5)*.
 
 **Ranger et retrouver**
 
@@ -90,6 +91,7 @@ tablette simulée uniquement**. Les essais suivants sont encore à faire par l'u
 | **H2** — synchronisation, mode direct, projecteur | Synchro réelle, latence ressentie, ce que la tablette envoie à l'appui sur son bouton en mode direct (inconnu aujourd'hui), reprise après coupure, projection sur un vrai vidéoprojecteur (et son débranchement), les quatre positions de la tablette. |
 | **H3** — stylet et tactile ; essai complet en classe | Dos du stylet, bouton, paume, gestes des doigts sur un PC tactile ; puis un cours entier avec la tablette. |
 | **H4** — partage sur le réseau | Un second ordinateur du réseau affiche la feuille en direct puis une note ouverte : autorisation du pare-feu, adresse tapée ou QR code, délai ressenti (moins de 150 ms attendus), reconnexion après une coupure. |
+| **H5** — reprendre une feuille en direct | Avec la vraie tablette, en classe : interrompre un direct, reprendre la feuille (menu de la note ou éditeur), écrire dessus ; format et position de la tablette différents de la feuille ; fond visible au vidéoprojecteur et sur un autre écran du réseau. |
 
 D'autres essais à la main restent à faire, car les tests automatiques ne peuvent pas les remplacer :
 
@@ -159,6 +161,7 @@ explained in the [guide](guide/guide.en.md).
   projector (extended desktop) with annotations over it that are not saved. Built for the classroom: `Space` always
   means "next page"; `Esc` closes the projection when it is shown, otherwise asks before ending live mode; **Clear the
   page** can be taken back for 8 seconds with **Undo clearing**.
+- **Resuming live mode on a sheet** you already saved (note menu or editor): you keep writing in the same note, with its background image, original and narration, and nothing is overwritten if it changes elsewhere; *not yet tried with the real tablet (test H5)*.
 
 **Filing and finding**
 
@@ -227,6 +230,7 @@ simulated tablet only**. The following trials are still to be made by the user, 
 | **H2**: sync, live mode, projector | Real sync, perceived latency, what the tablet sends when its button is pressed in live mode (unknown today), recovery after a drop, projecting on a real projector (and unplugging it), the four tablet positions. |
 | **H3**: pen and touch; full trial in class | Pen eraser end, button, palm, finger gestures on a touch PC; then a whole lesson with the tablet. |
 | **H4**: sharing on the network | A second computer of the network shows the live sheet, then an open note: firewall permission, address typed or QR code, perceived delay (under 150 ms expected), reconnection after a cut. |
+| **H5**: resuming a sheet in live mode | With the real tablet, in class: interrupt a live session, resume the sheet (note menu or editor), write on it; a tablet whose size and position differ from the sheet's; background shown on the projector and on another screen of the network. |
 
 Other hands-on checks remain, because automated tests cannot replace them:
 

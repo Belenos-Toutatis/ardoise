@@ -296,6 +296,58 @@ projection et la séance, et ferme la fenêtre.
 Si une note de la séance est renommée ou étiquetée pendant le cours (par l'assistant, par exemple), les pages suivantes
 continuent d'y être écrites au lieu d'être dupliquées.
 
+### Reprendre le mode direct sur une feuille
+
+*Demande la tablette.* Le cours a été interrompu, ou vous voulez ajouter de l'écriture à une feuille déjà
+enregistrée ? Vous pouvez reprendre le mode direct sur cette feuille.
+
+- **Depuis la bibliothèque** : ouvrez le menu **⋯** de la carte de la note et choisissez **Reprendre en mode direct**.
+- **Depuis l'éditeur** : cliquez sur **Reprendre en mode direct** dans la barre d'outils. S'il y a des modifications non
+  enregistrées, Ardoise le demande : **Enregistrer et reprendre le direct**, **Reprendre sans enregistrer** ou
+  **Rester**.
+
+Le bouton est grisé tant que la tablette n'est pas enregistrée ou qu'elle est occupée (synchronisation en cours). Il
+faut aussi ne choisir qu'une seule note.
+
+**Ce qui se passe**
+
+- La fenêtre de commande, la présentation et l'autre écran du réseau montrent la feuille avec son fond (modèle,
+  texture, image ou page de PDF) et ses traits. Ce que vous écrivez s'ajoute, sur le dernier calque visible. Les
+  calques masqués ne sont jamais montrés à la présentation ni sur l'autre écran.
+- **C'est la note elle-même qui est écrite** : même fichier, même titre, pas de copie. Son image de fond, son
+  original, sa narration, son texte reconnu et tout ce qu'elle contient sont gardés. Si vous ne tracez rien, le fichier
+  n'est pas touché.
+- **Le tableau noir** ne fait pas perdre le fond de la feuille : en le quittant, vous retrouvez son papier et son image.
+- **Le format** : si la feuille n'a pas le format de la tablette, ce que vous écrivez est réduit ou agrandi pour tenir
+  en entier dans la feuille, au milieu, sans déformation. L'épaisseur du trait ne change pas.
+- **L'orientation** : la feuille n'est jamais tournée. Si elle est en paysage et que la tablette est réglée en portrait
+  (ou l'inverse), un avis dit comment tenir la tablette : « Pour écrire sur cette feuille, tenez la tablette ainsi : … ».
+  Les quatre boutons de position sont grisés pour cette feuille.
+- **La page suivante** crée une note neuve, à la racine de la bibliothèque, et suit de nouveau la position réglée pour
+  la tablette : les boutons de position fonctionnent alors.
+- **La narration** : si vous enregistrez, le son s'ajoute après l'ancien sans le recouvrir, et la relecture reste juste
+  malgré le temps passé entre les deux séances.
+- **Terminer** enregistre la note comme d'habitude (compteur « N notes enregistrées »).
+
+**Revenir à l'original, après une reprise.** La note garde sa *première version* (voir le chapitre 8, « Revenir à
+l'original »). Une reprise n'en crée pas une nouvelle à chaque fois :
+
+- une note qui a de l'encre mais pas d'original (écrite en direct, importée, faite dans Ardoise) retrouve la feuille
+  *telle qu'elle était avant la reprise* ;
+- une note reçue de la tablette retrouve la page *telle qu'elle a été synchronisée* ;
+- une note déjà modifiée retrouve *sa première version*, pas l'état juste avant la reprise ;
+- une note vide n'a pas d'original.
+
+Seuls le format de la page, les calques, les traits et la place de l'image de fond reviennent ; le titre, les
+étiquettes, le favori, le papier et la narration restent comme ils sont.
+
+**Si la feuille change ailleurs pendant le direct** (une copie arrive par Nextcloud, ou la note est modifiée ou
+supprimée sur un autre PC), Ardoise n'écrase rien. Un avis s'affiche : « Cette feuille a été modifiée ailleurs pendant
+le direct : pour ne rien écraser, l'écriture continue dans une nouvelle note, à côté d'elle. » (ou « supprimée
+ailleurs » si le fichier a disparu). La nouvelle note est dans le même classeur, avec l'image, l'original et la
+narration de la feuille ; la version écrite ailleurs reste telle qu'elle est. Fermez l'avis avec **Fermer le message**.
+Un simple changement de titre, d'étiquette ou de favori fait ailleurs ne crée pas de nouvelle note.
+
 ### La fenêtre de commande
 
 - **Outil** (stylo à bille, plume, feutre, crayon, pinceau, surligneur, craie), **Couleur** (dont **Blanc craie** et
@@ -715,7 +767,9 @@ Pour une note reçue de la tablette, **Revenir à l'original** (panneau **Origin
 arrivée, sans vos modifications. Ardoise précise ce qui est perdu (traits ajoutés, effacés, déplacés, calques, rotation,
 format) et ce qui reste (titre, étiquettes, favori, papier, narration, image de fond). L'action est annulable
 (`Ctrl + Z`) ; enregistrez ensuite pour la garder. Pour une note qui n'a jamais été modifiée, il n'y a pas encore
-d'original : Ardoise garde la version précédente la première fois que vous enregistrez une modification de l'encre.
+d'original : Ardoise garde la version précédente la première fois que vous enregistrez une modification de l'encre, ou
+la fois où le mode direct reprend la feuille et y écrit (voir le chapitre 6). L'original est toujours la *première*
+version de la note, jamais l'état juste avant la dernière modification.
 
 ## 9. Relecture, narration et vidéo
 
