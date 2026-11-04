@@ -1,16 +1,31 @@
 <script lang="ts">
   /** The note grid of the current view, with its heading, selection bar, empty states and problem list. */
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { errorMessage } from '../../lib/api';
   import { t } from '../../lib/i18n.svelte';
   import type { LibraryState } from '../../lib/library-state.svelte';
+  import { tablet } from '../../lib/tablet-state.svelte';
   import type { NoteSummary } from '../../lib/note';
   import { LIBRARY_LISTED_MARK, markWhenDrawn } from '../../lib/perf';
   import HandwritingResults from './HandwritingResults.svelte';
   import NoteCard from './NoteCard.svelte';
   import SelectionBar from './SelectionBar.svelte';
 
-  let { lib, onopen, onnew }: { lib: LibraryState; onopen: (note: NoteSummary) => void; onnew: () => void } = $props();
+  let {
+    lib,
+    onopen,
+    onnew,
+    onresume,
+  }: {
+    lib: LibraryState;
+    onopen: (note: NoteSummary) => void;
+    onnew: () => void;
+    /** « Reprendre en mode direct » in a card's menu (M12). */
+    onresume?: (note: NoteSummary) => void;
+  } = $props();
+
+  // The menu of a card offers « Reprendre en mode direct » only with a registered tablet.
+  onMount(() => tablet.start());
 
   let grid = $state<HTMLElement | null>(null);
   let activeIndex = $state(0);
@@ -151,6 +166,7 @@
           onnavigate={navigate}
           onfocuscard={(i) => (activeIndex = i)}
           onrenamed={focusPath}
+          {onresume}
         />
       {/each}
     </ul>
