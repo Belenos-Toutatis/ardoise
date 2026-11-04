@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ardoise_core::library::FileStamp;
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Timing};
@@ -91,6 +91,9 @@ pub struct Page {
     pub urgent: bool,
     /// Last write attempt (set by the hub).
     pub last_attempt: Option<Instant>,
+    /// How long the last write that succeeded took (set by the hub): a slow one waits longer for
+    /// the next (`hub::save_wait`).
+    pub last_write: Option<Duration>,
     /// Why the last write failed, once the windows were told (set by the hub): cleared by the
     /// next write that succeeds: the library error's code (`errorCodes.*`) and its detail.
     pub save_error: Option<(&'static str, String)>,
@@ -149,6 +152,7 @@ impl Page {
             file: None,
             urgent: false,
             last_attempt: None,
+            last_write: None,
             save_error: None,
             audio: None,
             orientation,

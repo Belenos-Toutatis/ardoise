@@ -6,8 +6,9 @@
 //!   each window has its own queue, so a window that subscribes in the middle of a stroke gets
 //!   exactly what follows its snapshot;
 //! - the **saver** writes the pages to the library: a page becomes a note when its first stroke
-//!   ends, then is rewritten atomically at most every 5 s while it changes, and at once when it
-//!   is left or when live mode stops. A page's narration (recorded in live mode, cut per page
+//!   ends, then is rewritten atomically at most every 5 s while it changes (less often when a write
+//!   takes long: [`save_wait`]), and at once when it is left or when live mode stops. A page's
+//!   narration (recorded in live mode, cut per page
 //!   by `narration.rs`) is attached to it here and written with it, as its `audio.opus`. A
 //!   resumed sheet ([`LiveHub::resume`], `resume.rs`) is written through the file it came from.
 //!
@@ -75,6 +76,13 @@ impl BatchSink for Channel<LiveBatch> {
 
 /// Reads what the tablet's button does (`[tablet] button`), when it is pressed.
 pub type ButtonSetting = Arc<dyn Fn() -> LiveButton + Send + Sync>;
+
+/// A write of a page takes at most about one part in this many of the time while it changes: a page
+/// whose write takes longer than a tenth of the save interval waits longer than that interval.
+const WRITE_SHARE: u32 = 10;
+/// A page that keeps changing is written at least every this many save intervals, however long a
+/// write takes: 30 s with the default interval, which is what a crash can lose at worst.
+const MAX_SAVE_WAIT: u32 = 6;
 
 /// Why a new narration could not join the one its page already has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,14 +338,25 @@ fn enqueue(queue: &mut Vec<LiveEvent>, event: LiveEvent) {
     }
 }
 
-/// When `page` is due to be written: now when it is urgent or never tried, else one interval
-/// after the last attempt; `None` when it has nothing to write.
+/// How long a page that keeps changing waits between two writes: the save interval, longer when
+/// its last write took long ([`WRITE_SHARE`]), never more than [`MAX_SAVE_WAIT`] intervals. A note of
+/// hours of sound or tens of thousands of strokes is not rewritten in full every 5 s: what this
+/// costs is a little more to lose in a crash, nothing when the page is left or live mode stops.
+pub(super) fn save_wait(interval: Duration, last_write: Option<Duration>) -> Duration {
+    let scaled = last_write.unwrap_or_default().saturating_mul(WRITE_SHARE);
+    scaled
+        .min(interval.saturating_mul(MAX_SAVE_WAIT))
+        .max(interval)
+}
+
+/// When `page` is due to be written: now when it is urgent or never tried, else one wait
+/// ([`save_wait`]) after the last attempt; `None` when it has nothing to write.
 fn page_due(page: &Page, now: Instant, interval: Duration) -> Option<Instant> {
     if !page.needs_write() {
         return None;
     }
     Some(match page.last_attempt {
-        Some(last) if !page.urgent => last + interval,
+        Some(last) if !page.urgent => last + save_wait(interval, page.last_write),
         _ => now,
     })
 }
@@ -894,10 +913,12 @@ impl Shared {
         };
         let mut first_error = None;
         for job in jobs {
+            let begun = Instant::now();
             let result = write_page(&library, &job);
+            let took = begun.elapsed();
             let mut state = self.lock();
             match result {
-                Ok(written) => self.written(&mut state, &job, written),
+                Ok(written) => self.written(&mut state, &job, written, took),
                 Err(error) => {
                     self.write_failed(&mut state, &job, &error);
                     drop(state);
@@ -911,7 +932,7 @@ impl Shared {
 
     /// Records a page written; tells the windows when a note appeared, or when a page whose
     /// write had failed is safe again (then the pages still failing are announced again).
-    fn written(&self, state: &mut HubState, job: &SaveJob, written: Written) {
+    fn written(&self, state: &mut HubState, job: &SaveJob, written: Written, took: Duration) {
         if state.session.id() != job.session {
             return;
         }
@@ -925,6 +946,7 @@ impl Shared {
             path: path_text(&written.file.path),
         });
         page.file = Some(written.file);
+        page.last_write = Some(took);
         // The note's id, which the windows never see change (`Page::shown_id`).
         page.note.id = written.id;
         if let Some(outside) = written.outside {

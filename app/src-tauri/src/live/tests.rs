@@ -22,6 +22,7 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 
 use super::hub::{
     BatchSink, ButtonSetting, HubConfig, HubSink, LiveError, LiveHub, Start, StartOptions,
+    save_wait,
 };
 use super::model::{
     ForkReason, ForkedSheet, LiveBatch, LiveCommand, LiveCommandKind, LiveEvent, LiveMark,
@@ -1828,3 +1829,60 @@ fn a_fork_at_the_last_write_is_in_what_live_stop_answers() {
     );
 }
 
+// --- How often a page is written -----------------------------------------------------------------
+
+#[test]
+fn a_slow_write_waits_longer_within_a_bound() {
+    let five = Duration::from_secs(5);
+    let wait = |ms| save_wait(five, Some(Duration::from_millis(ms)));
+    assert_eq!(save_wait(five, None), five);
+    assert_eq!(wait(1), five);
+    assert_eq!(wait(500), five, "a tenth of the interval: as before");
+    assert_eq!(wait(1_000), Duration::from_secs(10));
+    assert_eq!(wait(2_500), Duration::from_secs(25));
+    assert_eq!(wait(3_000), Duration::from_secs(30));
+    assert_eq!(
+        wait(60_000),
+        Duration::from_secs(30),
+        "the most a crash loses"
+    );
+}
+
+#[test]
+fn a_page_whose_write_was_slow_is_written_later_and_at_once_when_it_is_left() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    let path = notes_in(&library).remove(0);
+    hub.change_at_once(|session, _| {
+        let page = session.page_mut(0).unwrap();
+        assert!(page.last_write.is_some(), "the hub measures its writes");
+        page.last_write = Some(Duration::from_secs(60));
+    });
+
+    // Six intervals, not one.
+    let begun = Instant::now();
+    stroke(&mut sink, 4000, 5);
+    std::thread::sleep(config().save_interval * 2);
+    if begun.elapsed() < config().save_interval * 4 {
+        assert_eq!(stroke_count(&library, &path), Some(1));
+    }
+    wait_until("the slow page written", || {
+        stroke_count(&library, &path) == Some(2)
+    });
+
+    // Leaving it does not wait.
+    hub.change_at_once(|session, _| {
+        session.page_mut(0).unwrap().last_write = Some(Duration::from_secs(60));
+    });
+    stroke(&mut sink, 5000, 5);
+    let begun = Instant::now();
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    wait_until("the page left written", || {
+        stroke_count(&library, &path) == Some(3)
+    });
+    assert!(begun.elapsed() < config().save_interval * 6);
+    hub.stop().unwrap();
+}
