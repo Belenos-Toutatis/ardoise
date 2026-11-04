@@ -2,7 +2,7 @@
 //! events, what is written, the simulated pen writing meanwhile). The resumed sheet has its own in
 //! `resume/tests.rs`, the viewers in `share/tests.rs`.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ardoise_core::note::{A4_LANDSCAPE, Layer};
@@ -15,9 +15,10 @@ use super::{
     grouped, insert_at, remove_at,
 };
 use crate::library::tests::library;
-use crate::live::hub::{HubConfig, LiveError, LiveHub};
+use crate::live::hub::{BatchSink, HubConfig, LiveError, LiveHub};
 use crate::live::model::{
-    LiveCommandKind, LiveEvent, LiveSessionState, LiveStyle, LiveViewState, ViewerIndices,
+    LiveBatch, LiveCommandKind, LiveEvent, LiveSessionState, LiveStyle, LiveViewState,
+    ViewerIndices,
 };
 use crate::live::session::LiveSession;
 use crate::live::tests::{
@@ -344,7 +345,7 @@ fn a_window_that_follows_the_events_has_the_list_of_the_page() {
     let mut session = with_strokes(5);
     let mut window = Follower::default();
     window.follow(&[LiveEvent::Snapshot {
-        snapshot: Box::new(session.snapshot()),
+        snapshot: Arc::new(session.snapshot()),
     }]);
     let mut out = Vec::new();
     session.edit(delete(&[0, 2, 4]), &mut out).unwrap();
@@ -709,7 +710,7 @@ fn on_a_page_with_a_hidden_layer_a_viewer_is_told_in_its_own_numbering() {
         ..Follower::default()
     };
     viewer.follow(&[LiveEvent::Snapshot {
-        snapshot: Box::new(snapshot),
+        snapshot: Arc::new(snapshot),
     }]);
     let mut out = Vec::new();
     let drawn = |session: &LiveSession| -> Vec<Stroke> {
@@ -1482,7 +1483,7 @@ fn an_edit_on_a_large_page_costs_a_pass_over_its_list() {
     let some: Vec<u32> = (0..1000).map(|i| i * 50).collect();
     let snapshot = timed("what one window's snapshot clones", &mut || {
         out.push(LiveEvent::Snapshot {
-            snapshot: Box::new(session.snapshot()),
+            snapshot: Arc::new(session.snapshot()),
         });
     });
     out.clear();
@@ -1525,6 +1526,90 @@ fn an_edit_on_a_large_page_costs_a_pass_over_its_list() {
         delete_time < snapshot,
         "{delete_time:?} against {snapshot:?}"
     );
+}
+
+/// What a change of style costs under the hub's lock with 32 windows and viewers on a page of
+/// 50 000 strokes, against what it cost when each had its own copy of the snapshot (one clone per
+/// subscriber, two more per subscription). `cargo test -p ardoise large_page -- --nocapture`
+/// prints the figures; what the test fails on is that the windows do not share one snapshot.
+#[test]
+fn a_snapshot_on_a_large_page_is_copied_once_however_many_windows_there_are() {
+    const STROKES: usize = 50_000;
+    const POINTS: usize = 100;
+    const WINDOWS: usize = 32;
+
+    /// Keeps which snapshots it was sent, by address.
+    #[derive(Default)]
+    struct Seen(Mutex<Vec<usize>>);
+
+    impl BatchSink for Seen {
+        fn send(&self, batch: LiveBatch) -> Result<(), String> {
+            let mut seen = self.0.lock().unwrap();
+            for event in &batch.events {
+                if let LiveEvent::Snapshot { snapshot } = event {
+                    seen.push(Arc::as_ptr(snapshot) as usize);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    let (_dir, library) = library();
+    let hub = LiveHub::new(HubConfig {
+        flush_interval: Duration::from_millis(4),
+        save_interval: Duration::from_secs(3600),
+    });
+    let _sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    hub.change_at_once(|session, _| {
+        session.page_mut(0).unwrap().note.strokes = (0..STROKES)
+            .map(|i| Stroke {
+                tool: Tool::Ballpoint,
+                color: Rgba::BLACK,
+                width: 60.0,
+                layer: 0,
+                points: (0..POINTS)
+                    .map(|n| Point {
+                        x: i as f32,
+                        y: n as f32,
+                        pressure: 0.5,
+                        t: n as u32,
+                    })
+                    .collect(),
+            })
+            .collect();
+    });
+    let windows: Vec<Arc<Seen>> = (0..WINDOWS).map(|_| Arc::default()).collect();
+    for (n, window) in windows.iter().enumerate() {
+        hub.subscribe(&format!("window{n}"), window.clone());
+    }
+
+    let snapshot = hub.snapshot();
+    let begin = Instant::now();
+    for _ in 0..WINDOWS {
+        drop(snapshot.clone());
+    }
+    let before = begin.elapsed();
+    let begin = Instant::now();
+    hub.set_style(LiveStyle {
+        color: RED,
+        ..snapshot.style
+    })
+    .unwrap();
+    let after = begin.elapsed();
+    println!(
+        "{STROKES} strokes of {POINTS} points, {WINDOWS} windows: a change of style held the lock \
+         for {after:?}; one copy per window was {before:?}, not counting the snapshot taken"
+    );
+
+    wait_until("every window told", || {
+        windows.iter().all(|w| w.0.lock().unwrap().len() == 2)
+    });
+    let last: Vec<usize> = windows
+        .iter()
+        .map(|w| *w.0.lock().unwrap().last().unwrap())
+        .collect();
+    assert!(last.iter().all(|address| *address == last[0]), "{last:?}");
+    hub.stop().unwrap();
 }
 
 impl LiveSession {

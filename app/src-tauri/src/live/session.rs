@@ -706,7 +706,7 @@ impl LiveSession {
     /// is no longer the one the marks were written on, they go (an empty list follows).
     fn push_snapshot(&mut self, out: &mut Vec<LiveEvent>) {
         out.push(LiveEvent::Snapshot {
-            snapshot: Box::new(self.snapshot()),
+            snapshot: Arc::new(self.snapshot()),
         });
         out.extend(self.in_progress());
         if !self.marks.is_empty() && self.marks_page != Some(self.held_page()) {

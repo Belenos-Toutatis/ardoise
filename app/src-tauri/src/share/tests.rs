@@ -456,7 +456,7 @@ fn a_viewer_never_gets_library_paths_titles_tags_nor_the_screen() {
     let batch = LiveBatch {
         events: vec![
             LiveEvent::Snapshot {
-                snapshot: Box::new(snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]))),
+                snapshot: Arc::new(snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]))),
             },
             LiveEvent::Saved {
                 paths: vec!["C:\\Users\\Prof\\Nextcloud\\Notes\\page.ardoise".into()],
@@ -516,7 +516,7 @@ fn a_viewer_gets_only_the_fields_the_viewer_draws() {
     // reach a browser until someone adds it here on purpose.
     let batch = LiveBatch {
         events: vec![LiveEvent::Snapshot {
-            snapshot: Box::new(snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]))),
+            snapshot: Arc::new(snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]))),
         }],
         sent_at: 1.0,
     };
@@ -645,7 +645,7 @@ fn live_strokes_of_a_hidden_layer_never_reach_a_viewer() {
     note.strokes.push(orphan);
     let batch = LiveBatch {
         events: vec![LiveEvent::Snapshot {
-            snapshot: Box::new(snapshot_of(note)),
+            snapshot: Arc::new(snapshot_of(note)),
         }],
         sent_at: 1.0,
     };
@@ -669,7 +669,7 @@ fn viewers_with_the_same_batch_share_one_text() {
     let batch = |x: f32| LiveBatch {
         events: vec![
             LiveEvent::Snapshot {
-                snapshot: Box::new(snapshot_of(note_with(vec![pen_stroke(x, 4)]))),
+                snapshot: Arc::new(snapshot_of(note_with(vec![pen_stroke(x, 4)]))),
             },
             LiveEvent::HoverEnd,
         ],

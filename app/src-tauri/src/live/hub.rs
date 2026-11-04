@@ -1013,7 +1013,7 @@ impl LiveHub {
     pub fn current_events(&self) -> Vec<LiveEvent> {
         let state = self.shared.lock();
         let mut events = vec![LiveEvent::Snapshot {
-            snapshot: Box::new(state.session.snapshot()),
+            snapshot: Arc::new(state.session.snapshot()),
         }];
         events.extend(state.session.in_progress());
         events.extend(state.session.marks_event());
@@ -1032,12 +1032,14 @@ impl LiveHub {
     /// Sends the session's batches to `sink` from now on, replacing the window's previous
     /// subscription. The first batch starts with the returned snapshot (and the stroke in
     /// progress), so a window may apply the batches in order whatever the order in which the
-    /// command's answer and the first batch arrive.
-    pub fn subscribe(&self, label: &str, sink: Arc<dyn BatchSink>) -> LiveSnapshot {
+    /// command's answer and the first batch arrive. A sheet that went on in a new note is told to a
+    /// late window while its session runs; a stopped session's are not, or the view of the next
+    /// lesson would open on a notice about this one (`live_stop` gave them back).
+    pub fn subscribe(&self, label: &str, sink: Arc<dyn BatchSink>) -> Arc<LiveSnapshot> {
         let mut state = self.shared.lock();
-        let snapshot = state.session.snapshot();
+        let snapshot = Arc::new(state.session.snapshot());
         let mut queue = vec![LiveEvent::Snapshot {
-            snapshot: Box::new(snapshot.clone()),
+            snapshot: snapshot.clone(),
         }];
         queue.extend(state.session.in_progress());
         queue.extend(state.session.marks_event());

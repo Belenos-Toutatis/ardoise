@@ -45,7 +45,9 @@ pub use edits::StrokesEdit;
 pub use hub::{
     ButtonSetting, HubConfig, LiveError, LiveHub, LiveOverview, PagePosition, Start, StartOptions,
 };
-pub use model::{LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState};
+pub use model::{
+    LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState, SnapshotReply,
+};
 
 use self::resume::ResumeBase;
 use crate::narration::{self, NarrationRuntime};
@@ -217,8 +219,10 @@ pub async fn live_subscribe(
     webview: Webview,
     runtime: State<'_, LiveRuntime>,
     on_event: Channel<LiveBatch>,
-) -> CommandResult<LiveSnapshot> {
-    Ok(runtime.hub.subscribe(webview.label(), Arc::new(on_event)))
+) -> CommandResult<SnapshotReply> {
+    Ok(SnapshotReply(
+        runtime.hub.subscribe(webview.label(), Arc::new(on_event)),
+    ))
 }
 
 /// What a new session needs, from what the app knows now.

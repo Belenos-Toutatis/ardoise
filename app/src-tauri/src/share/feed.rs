@@ -114,7 +114,7 @@ impl Memo {
     pub fn json(&self, batch: LiveBatch) -> Option<Arc<str>> {
         let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((events, json)) = last.as_ref()
-            && *events == batch.events
+            && same_events(events, &batch.events)
         {
             return Some(json.clone());
         }
@@ -122,6 +122,18 @@ impl Memo {
         *last = Some((batch.events, json.clone()));
         Some(json)
     }
+}
+
+/// Whether two batches hold the same events. Viewers up to date were all queued the same snapshot,
+/// which is not worth comparing point by point with itself.
+fn same_events(a: &[LiveEvent], b: &[LiveEvent]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|pair| match pair {
+            (LiveEvent::Snapshot { snapshot: a }, LiveEvent::Snapshot { snapshot: b }) => {
+                Arc::ptr_eq(a, b) || a == b
+            }
+            (a, b) => a == b,
+        })
 }
 
 /// `batch` as the viewers get it (`LiveBatch` of `live.ts`), `None` when it holds nothing that

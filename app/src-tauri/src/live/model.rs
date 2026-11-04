@@ -330,6 +330,25 @@ fn shared_strokes<S: Serializer>(
     strokes.as_slice().serialize(serializer)
 }
 
+/// Nor is a snapshot: every window's queue holds the same one (see [`LiveEvent::Snapshot`]).
+fn shared_snapshot<S: Serializer>(
+    snapshot: &Arc<LiveSnapshot>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    snapshot.as_ref().serialize(serializer)
+}
+
+/// The answer to a command that returns the snapshot a window's queue already holds: written once
+/// more as it is, not copied first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SnapshotReply(pub Arc<LiveSnapshot>);
+
+impl Serialize for SnapshotReply {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        shared_snapshot(&self.0, serializer)
+    }
+}
+
 /// One thing that happened, in order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(
@@ -339,9 +358,12 @@ fn shared_strokes<S: Serializer>(
 )]
 pub enum LiveEvent {
     /// Page change, clear, layer, style, state, blackboard, presentation opened or closed. Not an
-    /// edit of strokes: [`StrokesEdited`](Self::StrokesEdited) says that for less.
+    /// edit of strokes: [`StrokesEdited`](Self::StrokesEdited) says that for less. Shared, since
+    /// each window and viewer has its own queue: the page is not copied for each under the hub's
+    /// lock.
     Snapshot {
-        snapshot: Box<LiveSnapshot>,
+        #[serde(serialize_with = "shared_snapshot")]
+        snapshot: Arc<LiveSnapshot>,
     },
     /// A stroke with its first point(s).
     StrokeStart {

@@ -1557,7 +1557,7 @@ fn the_shapes_of_live_ts() {
     assert!(keys(&snapshot).contains(&"canTurnPage"));
     let shared = batch_json(&super::super::model::LiveBatch {
         events: vec![LiveEvent::Snapshot {
-            snapshot: Box::new(session.snapshot()),
+            snapshot: Arc::new(session.snapshot()),
         }],
         sent_at: 1.0,
     })
