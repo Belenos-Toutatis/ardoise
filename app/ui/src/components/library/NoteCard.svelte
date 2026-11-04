@@ -8,6 +8,8 @@
   import { whenNearViewport } from '../../lib/near-viewport';
   import type { NoteSummary } from '../../lib/note';
   import { noteDrawn } from '../../lib/perf';
+  import { resumeBlock } from '../../lib/live-resume.svelte';
+  import { tablet } from '../../lib/tablet-state.svelte';
   import Menu from './Menu.svelte';
 
   let {
@@ -19,6 +21,7 @@
     onnavigate,
     onfocuscard,
     onrenamed,
+    onresume,
   }: {
     note: NoteSummary;
     lib: LibraryState;
@@ -29,6 +32,8 @@
     onnavigate: (event: KeyboardEvent, index: number) => void;
     onfocuscard: (index: number) => void;
     onrenamed: (path: string) => void;
+    /** « Reprendre en mode direct » (M12): live mode takes the window, on this note. */
+    onresume?: (note: NoteSummary) => void;
   } = $props();
 
   let src = $state<string | null>(null);
@@ -44,6 +49,15 @@
   const dragCount = $derived(lib.dragOutCount(note.path));
   const dragLabel = $derived(
     dragCount > 1 ? t('library.drag.handleMany', { count: dragCount }) : t('library.drag.handle'),
+  );
+  /** Why the note cannot be resumed in live mode now (a tablet is needed; one note at a time). */
+  const resumeHint = $derived(
+    lib.selected.length > 1
+      ? t('live.resume.severalSelected')
+      : (() => {
+          const block = resumeBlock(tablet.status);
+          return block === 'noTablet' ? t('live.resume.noTablet') : block === 'busy' ? t('live.resume.tabletBusy') : null;
+        })(),
   );
   const stampKey = $derived(
     `${note.stamp.modified.secs_since_epoch}.${note.stamp.modified.nanos_since_epoch}.${note.stamp.len}`,
@@ -252,6 +266,17 @@
           label: note.favorite ? t('library.card.unfavorite') : t('library.card.favorite'),
           onselect: () => void lib.toggleFavorite(note),
         },
+        ...(onresume
+          ? [
+              {
+                id: 'resume',
+                label: t('live.resume.action'),
+                disabled: resumeHint !== null,
+                hint: resumeHint ?? undefined,
+                onselect: () => onresume(note),
+              },
+            ]
+          : []),
         { id: 'trash', label: t('library.card.trash'), danger: true, onselect: () => void lib.trashNotes([note.path]) },
       ]}
     />

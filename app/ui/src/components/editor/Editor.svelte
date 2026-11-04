@@ -86,6 +86,8 @@
   import { largestFittingDpi } from '../../lib/export-options';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { share } from '../../lib/share-state.svelte';
+  import { resumeBlock } from '../../lib/live-resume.svelte';
+  import { tablet } from '../../lib/tablet-state.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
   import type { BackgroundImage, ExportSource, FileStamp, Note, Rgba, SplitSpec, Stroke } from '../../lib/note';
   import type { NoteOriginal } from '../../lib/original';
@@ -114,6 +116,7 @@
     app,
     onclose,
     onsaved,
+    onresume,
     onchange,
     windowClose = defaultWindowClose(),
   }: {
@@ -121,6 +124,12 @@
     app: AppState;
     onclose: () => void;
     onsaved?: (path: string) => void;
+    /**
+     * « Reprendre en mode direct » (M12): the note was saved (or its changes let go, or it had
+     * none) and live mode takes the window on it, like leaving the editor; given the note's path.
+     * Without it the toolbar has no such button.
+     */
+    onresume?: (path: string) => void;
     /** The app state changed (the microphone chosen here): the screen holding it takes the new one. */
     onchange?: (next: AppState) => void;
     /** How a window close is held back while there are unsaved changes (tests replace it). */
@@ -197,6 +206,8 @@
   let renameFailures = 0;
   /** The leave dialog was opened by a window close (not by the Back button). */
   let closing = $state(false);
+  /** The leave dialog was opened by « Reprendre en mode direct »: its answer resumes live mode. */
+  let resuming = $state(false);
   let spaceDown = $state(false);
   let canvas = $state<ReturnType<typeof Canvas>>();
   /** What the video export dialog exports; null while it is closed. */
@@ -229,6 +240,11 @@
   const doc = $derived(history?.present ?? null);
   const dirty = $derived(!!doc && doc.note !== savedNote);
   const hasSelection = $derived((doc?.selection.length ?? 0) > 0);
+  /** Live mode cannot resume this note now (no tablet, or it is busy): the toolbar button says why. */
+  const resumeHint = $derived.by(() => {
+    const block = resumeBlock(tablet.status);
+    return block === 'noTablet' ? t('live.resume.noTablet') : block === 'busy' ? t('live.resume.tabletBusy') : null;
+  });
   const range = $derived(doc ? timeRange(doc.note) : null);
   const splitSpec = $derived.by((): SplitSpec | null => {
     if (!split) return null;
@@ -323,6 +339,7 @@
       // Unsaved edits are never dropped silently, nor writes still queued (opening drops them).
       if (doc && (dirty || titleEdited())) {
         switching = next;
+        resuming = false;
         leaving = true;
       } else if (pendingWrites > 0) {
         void settled().then(() => {
@@ -366,6 +383,8 @@
   // teardown runs once, when the editor goes away.
   $effect(() => {
     const closer = untrack(() => windowClose);
+    // « Reprendre en mode direct » needs to know whether a tablet is registered.
+    tablet.start();
     let stopped = false;
     const stops: (() => void)[] = [];
     const keep = (unlisten: () => void) => {
@@ -757,7 +776,7 @@
    * Back to the library, once the queued writes are done (a "save as a copy" still under way
    * needs the background image's pixels, which the editor releases when it goes away).
    */
-  function close() {
+  function close(done: () => void = onclose) {
     if (pendingWrites > 0) {
       if (closeAfterWrites) return;
       closeAfterWrites = true;
@@ -765,12 +784,17 @@
       void settled().then(() => {
         closeAfterWrites = false;
         // A rename that failed meanwhile (the title field's blur): its error is shown, not lost.
-        if (alive && renameFailures === failures) close();
+        if (alive && renameFailures === failures) close(done);
       });
       return;
     }
     alive = false;
-    onclose();
+    done();
+  }
+
+  /** Live mode takes the window on this note (after the same waits and checks as leaving). */
+  function goLive() {
+    onresume?.(currentPath);
   }
 
   function back() {
@@ -778,6 +802,20 @@
     if (videoRunning) return showNotice(t('videoExport.closeBusy'), true);
     if (dirty || titleEdited()) leaving = true;
     else close();
+  }
+
+  /**
+   * « Reprendre en mode direct »: leaving the editor as the Back button does (unsaved changes ask
+   * first: save, let go, or stay), then live mode reads the note from the library.
+   */
+  function resumeLive() {
+    if (!onresume || resumeHint !== null) return;
+    if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
+    if (videoRunning) return showNotice(t('videoExport.closeBusy'), true);
+    if (dirty || titleEdited()) {
+      resuming = true;
+      leaving = true;
+    } else close(goLive);
   }
 
   /** The window is asked to close: true holds it back (unsaved changes, or a write under way). */
@@ -796,6 +834,7 @@
     if (windowClose.destroy) {
       if (dirty || titleEdited()) {
         closing = true;
+        resuming = false;
         leaving = true;
       } else {
         void closeWindow();
@@ -815,24 +854,32 @@
   async function saveAndLeave() {
     const fromWindow = closing;
     const target = switching;
+    const resume = resuming;
     const failures = renameFailures;
     const ok = await save();
     await settled();
     leaving = false;
     closing = false;
     switching = null;
+    resuming = false;
     // Nothing leaves while the save or the rename failed: their error stays in view.
     if (!ok || renameFailures !== failures) return;
     if (target !== null) void open(target);
     else if (fromWindow) await closeWindow();
+    else if (resume) close(goLive);
     else close();
   }
 
   function discardAndLeave() {
     void drafts.discard(noteId);
     const target = switching;
+    const resume = resuming;
     switching = null;
-    if (target !== null) {
+    resuming = false;
+    if (resume) {
+      leaving = false;
+      close(goLive);
+    } else if (target !== null) {
       leaving = false;
       void open(target);
     } else if (closing) void closeWindow();
@@ -846,6 +893,7 @@
     const wanted = switching;
     leaving = false;
     closing = false;
+    resuming = false;
     switching = null;
     // The library screen asked for another note: it goes back to following this one.
     if (wanted !== null) notifySaved(currentPath);
@@ -1641,6 +1689,9 @@
       {replaying}
       replayDisabled={split !== null || recorder.busy}
       {copying}
+      resumeDisabled={resumeHint !== null || recorder.busy || videoRunning}
+      {resumeHint}
+      onresume={onresume ? resumeLive : undefined}
       onsplit={toggleSplit}
       oncopy={copyImage}
       onexport={openExport}
@@ -1862,10 +1913,10 @@
       <p>{t('editor.leave.message')}</p>
       <div class="actions">
         <button type="button" class="button primary" data-autofocus onclick={saveAndLeave} disabled={saving}>
-          {switching !== null ? t('editor.leave.saveSwitch') : closing ? t('editor.leave.saveClose') : t('editor.leave.save')}
+          {resuming ? t('editor.leave.saveResume') : switching !== null ? t('editor.leave.saveSwitch') : closing ? t('editor.leave.saveClose') : t('editor.leave.save')}
         </button>
         <button type="button" class="button danger" onclick={discardAndLeave}>
-          {switching !== null ? t('editor.leave.discardSwitch') : closing ? t('editor.leave.discardClose') : t('editor.leave.discard')}
+          {resuming ? t('editor.leave.discardResume') : switching !== null ? t('editor.leave.discardSwitch') : closing ? t('editor.leave.discardClose') : t('editor.leave.discard')}
         </button>
         <button type="button" class="button" onclick={stay}>{t('editor.leave.cancel')}</button>
       </div>

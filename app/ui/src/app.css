@@ -1117,6 +1117,11 @@ select {
   color: var(--danger);
 }
 
+.menu-list button.disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
 .badge {
   align-self: flex-start;
   padding: 0.05rem 0.5rem;
