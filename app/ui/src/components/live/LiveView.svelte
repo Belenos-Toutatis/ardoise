@@ -9,6 +9,12 @@
    * the presentation window (screen, project / stop), the measured latency, the narration (SPEC
    * §4.5: record the microphone during the session; it is cut per page and saved with the notes),
    * and "Finish" (the narration stops first, then `live_stop`, then `onclose`).
+   *
+   * Touching up (M12, this window only): the Select tool (V) lets the mouse and the pen choose strokes of
+   * the preview with a lasso or a click; a bar then deletes them (Delete, Backspace), the colour swatches
+   * recolour them (and, as in the editor, set the pen's colour too), Esc deselects first. Undo and Redo
+   * (Ctrl+Z, Ctrl+Y) go through the page's history: a delete, a change of colour, « Clear the page »,
+   * never what the tablet wrote. The selection is dropped when the page or its revision changes.
    */
   import { onMount } from 'svelte';
   import { api, errorMessage, type AppState } from '../../lib/api';
@@ -29,9 +35,11 @@
     zoomStep,
     type LiveActions,
   } from '../../lib/live-actions';
-  import { isSpaceKey, isTypingTarget, liveKeyAction } from '../../lib/live-keys';
+  import { isSpaceKey, isTypingTarget, liveEditKeyAction, liveKeyAction, type LiveEditKeyAction } from '../../lib/live-keys';
   import { ResumeWatch } from '../../lib/live-resume.svelte';
+  import { LiveSelection } from '../../lib/live-select.svelte';
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
+  import { deleteSelected, recolourSelected, stepHistory, type TouchUp } from '../../lib/live-touch-up';
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
   import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
   import { ORIENTATIONS, type Orientation } from '../../lib/orientation';
@@ -81,10 +89,26 @@
   const UNDO_CLEAR_MS = 8000;
   /** How often the latency shown is refreshed. */
   const LATENCY_REFRESH_MS = 500;
-  const KEYS = ['next', 'previous', 'clear', 'board', 'laser', 'zoom', 'whole', 'width', 'pan', 'marks', 'leave'] as const;
+  const KEYS = [
+    'next',
+    'previous',
+    'clear',
+    'board',
+    'laser',
+    'select',
+    'delete',
+    'undo',
+    'zoom',
+    'whole',
+    'width',
+    'pan',
+    'marks',
+    'leave',
+  ] as const;
 
   const live = new LiveState();
   const sheet = new ResumeWatch();
+  const selection = new LiveSelection();
   const latency = new LatencyRecorder();
   const recorder = new NarrationRecorder();
 
@@ -163,6 +187,19 @@
     onerror: (error) => (notice = t('live.commandFailed', { message: errorMessage(error) })),
     onCleared: offerUndo,
   };
+
+  const touchUp: TouchUp = {
+    live,
+    selection,
+    commands: api,
+    onerror: (error) => (notice = errorMessage(error)),
+    onhistory: dropUndo,
+  };
+
+  // A selection belongs to a page and to its revision: another page, a delete or an undo drops it.
+  $effect(() => {
+    selection.follow(live);
+  });
 
   // The offer concerns the page that was cleared: it goes when the page changes.
   $effect(() => {
@@ -393,6 +430,38 @@
     setStyle({ ...style, tool, width: widths[tool] ?? DEFAULT_WIDTHS[tool] });
   }
 
+  /** A swatch: recolours the selection if there is one; the pen takes the colour too, as in the editor. */
+  function pickColor(color: Rgba) {
+    const next = { ...color };
+    if (selection.any) void recolourSelected(touchUp, next);
+    setStyle({ ...live.style, color: next });
+  }
+
+  function undoEdit(again = false) {
+    if (again ? !live.canRedo : !live.canUndo) return;
+    void stepHistory(touchUp, again);
+  }
+
+  function runEditKey(action: LiveEditKeyAction) {
+    switch (action.kind) {
+      case 'select':
+        selection.toggle();
+        break;
+      case 'deselect':
+        selection.clear();
+        break;
+      case 'deleteSelection':
+        void deleteSelected(touchUp);
+        break;
+      case 'undo':
+        undoEdit();
+        break;
+      case 'redo':
+        undoEdit(true);
+        break;
+    }
+  }
+
   function setView(view: LiveViewState) {
     changeView(actions, view);
   }
@@ -456,6 +525,13 @@
   function onkeydown(e: KeyboardEvent) {
     // The question about ending live mode has its own keys.
     if (e.defaultPrevented || confirmLeave || share.panelOpen) return;
+    // Touching up first: V, undo and redo, and Delete and Esc while something is selected.
+    const edit = live.ready ? liveEditKeyAction(e, selection.any) : null;
+    if (edit) {
+      e.preventDefault();
+      runEditKey(edit);
+      return;
+    }
     const action = liveKeyAction(e);
     if (!action) return;
     e.preventDefault();
@@ -586,7 +662,7 @@
             aria-pressed={sameColor(color, live.style.color)}
             aria-label={t(label)}
             title={t(label)}
-            onclick={() => setStyle({ ...live.style, color: { ...color } })}
+            onclick={() => pickColor(color)}
           ></button>
         {/each}
       </div>
@@ -663,6 +739,41 @@
       </button>
     </div>
 
+    <div class="group" role="group" aria-label={t('live.select.label')} data-slot="touch-up">
+      <button
+        type="button"
+        class="button small-button toggle"
+        data-action="select"
+        class:active={selection.active}
+        aria-pressed={selection.active}
+        title={t('live.select.hint')}
+        disabled={sessionState === 'idle'}
+        onclick={() => selection.toggle()}
+      >
+        {t('live.select.toggle')}
+      </button>
+      <button
+        type="button"
+        class="button small-button"
+        data-action="undo-edit"
+        title={t('live.undoHint')}
+        disabled={!live.canUndo}
+        onclick={() => undoEdit()}
+      >
+        {t('live.undo')}
+      </button>
+      <button
+        type="button"
+        class="button small-button"
+        data-action="redo-edit"
+        title={t('live.redoHint')}
+        disabled={!live.canRedo}
+        onclick={() => undoEdit(true)}
+      >
+        {t('live.redo')}
+      </button>
+    </div>
+
     <div
       class="group"
       role="group"
@@ -702,7 +813,22 @@
         {latency}
         label={t('live.preview.label', { page: `${live.pageIndex + 1} / ${live.pageCount}` })}
         onview={setView}
+        selecting={selection.active}
+        selection={selection.indices}
+        onselect={(picked, combine) => selection.choose(live, picked, combine)}
       />
+      {#if selection.any}
+        <div class="select-bar" role="toolbar" aria-label={t('live.select.bar')} data-slot="select-bar">
+          <span class="select-count" role="status" data-count={selection.count}>{t('live.select.count', { count: selection.count })}</span>
+          <button type="button" class="button small-button danger" data-action="delete-selection" onclick={() => void deleteSelected(touchUp)}>
+            {t('live.select.delete')}
+          </button>
+          <button type="button" class="button small-button" data-action="deselect" onclick={() => selection.clear()}>
+            {t('live.select.clear')}
+          </button>
+          <span class="muted small">{t('live.select.colors')}</span>
+        </div>
+      {/if}
       {#if sessionState === 'waiting'}
         <div class="live-overlay" role="status">
           <span class="pulse" aria-hidden="true"></span>
@@ -815,6 +941,9 @@
           </button>
         </div>
         <p class="muted small">{t('live.preview.hint')}</p>
+        {#if selection.active}
+          <p class="muted small" data-slot="select-hint">{t('live.select.help')}</p>
+        {/if}
       </section>
 
       <section class="side-block" aria-labelledby="live-keys-title">
@@ -1032,6 +1161,28 @@
     flex: 1;
     min-width: 0;
     background: var(--surface-2);
+  }
+
+  .select-bar {
+    position: absolute;
+    bottom: 0.5rem;
+    left: 50%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.6rem;
+    max-width: 94%;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    transform: translateX(-50%);
+  }
+
+  .select-count {
+    font-weight: 600;
+    font-size: 0.875rem;
   }
 
   .live-overlay {

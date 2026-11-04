@@ -613,19 +613,30 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   view, never under the hub's lock, and not measured here (no window: `cargo xtask perf`). Also under the lock, as before: the clone of
   the page by a save pass (`SaveJob`) every 5 s, which an edit now triggers too.
 
-**Touch up, the selection** (package 7, nothing built yet).
-- **Reusable.** `lib/editor/hit.ts` (`selectInLasso`, `hitStroke`; relax `Note` to a `Pick`), `geometry.ts`,
-  `ops.strokesBounds`. The viewer's import graph must stay free of `api` (`viewer/imports.test.ts`). The lasso gesture and
-  overlay of `Canvas.svelte` and `Doc`/history are bound to the editor; Rust owns the live state, so undo belongs there. Strokes of
-  a hidden layer must not be picked: Rust refuses them.
-- **Selection.** Indices in `LiveState.strokes`, with the `pageIndex` and `revision` they were chosen at; drop it when either
-  changes (a recolour keeps the revision: the selection goes on). The lasso and the selection are scene fields local to the control
-  window.
-- **Pointers.** In the control window's preview: drag moves the area, wheel zooms, finger navigates. A Select toggle: mouse and
-  pen lasso, click picks, finger and wheel stay navigation. The preview shows the whole page, so precision is limited: say if
-  it proves too small. The presentation window stays as it is (marks).
-- **Keys.** Delete and Backspace clear the marks (`live-keys`): with a selection they delete it. Ctrl+Z is free. Esc clears the
-  selection first. Swatches recolour the selection, as in the editor.
+**Touch up, the selection, as built** (package 7; `lib/live-select.svelte.ts`, `lib/live-touch-up.ts`, `lib/live-keys.ts`
+`liveEditKeyAction`, `LiveCanvas`, `live-render`, `LiveView`).
+- **Reused.** `selectInLasso` and `hitStroke` of `lib/editor/hit.ts` (typed `Hittable = Pick<Note, 'strokes' | 'layers'>`), through
+  `pickStrokes` (a gesture under 4 screen pixels is a click: ink within 6 px, as in the editor; else the lasso). Shift adds, Ctrl
+  removes, a gesture on nothing clears, as in the editor. Hidden layers are never picked. The stroke in progress is not in
+  `LiveState.strokes`, so it cannot be.
+- **Selection.** `LiveSelection` (control window only): `active` (the Select toggle), `indices` (a new array at each change) and the
+  `revision`, `noteId`, `pageIndex` they were chosen at. `follow(live)` (an effect of `LiveView`) drops them when the page or the
+  revision changes (a delete, an undo, « Clear the page »); the tablet's strokes and a recolour keep them. Turning the tool off clears.
+  Nothing of it is sent to Rust, the projector or the share.
+- **Drawing.** `Scene.selection` and `Scene.lasso` (always empty for `presentation`). The renderer draws the highlight (outlines
+  from the same outline cache, a glow, and a dashed box) on a surface of its own, redrawn only when the selection, the strokes'
+  generation, the layers, the view or the size change; a frame copies it. The page cache is never redrawn for a selection
+  (`PaintReport.selectionDrawn`). The lasso being drawn is a polyline per frame. Colours: `SELECTION_COLORS` (a lighter blue on
+  dark paper: slate or blackboard).
+- **Pointers.** `LiveCanvas` `selecting`: mouse and pen draw the lasso instead of dragging the area; finger (pan, pinch, double
+  tap) and wheel stay navigation. The check runs once, on release: 24 000 strokes of 30 samples take about 0.4 s the first time (bounds
+  are cached per stroke object) and 0.15 s after; a click takes about 10 ms.
+- **Actions.** `lib/live-touch-up.ts`: delete, recolour (keeps the selection), undo, redo, with the selection's revision; a
+  `liveEditStale` drops the selection and every refusal shows its `errorCodes.*` sentence. A swatch with a selection recolours it and,
+  as in the editor, sets the pen's colour too; without one it only sets the pen.
+- **Keys** (control window only, `liveEditKeyAction`, tried before `liveKeyAction`; the presentation window's mapping is unchanged):
+  V toggles Select (the editor's key); Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo (only when the session says there is a step);
+  Delete and Backspace delete the selection, else clear the marks; Esc deselects, else closes the projection or asks to leave.
 
 **Work packages**, in order. Packages 2, 3 and 6 share `session.rs` and `hub.rs`: one after the other.
 

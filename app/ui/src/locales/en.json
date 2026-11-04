@@ -1438,6 +1438,21 @@
     "clear": "Clear the page",
     "board": "Blackboard",
     "laser": "Laser pointer",
+    "select": {
+      "label": "Touch up",
+      "toggle": "Select",
+      "hint": "Pick strokes with a lasso or a click to delete them or change their colour (V)",
+      "help": "Lasso: select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect. The colour swatches change the colour of the selection. What the tablet writes is never part of the selection.",
+      "bar": "Touch up the selection",
+      "count": "Selected strokes: {count}",
+      "delete": "Delete",
+      "clear": "Deselect",
+      "colors": "The colour swatches recolour the selection."
+    },
+    "undo": "Undo",
+    "redo": "Redo",
+    "undoHint": "Undo the last touch-up or the last clearing of the page (Ctrl+Z); what the tablet wrote is not undone",
+    "redoHint": "Redo what was just undone (Ctrl+Y)",
     "preview": {
       "label": "Preview of page {page}; the blue rectangle shows the projected area",
       "hint": "Drag the blue rectangle to move the projected area; the mouse wheel zooms."
@@ -1513,11 +1528,23 @@
         },
         "leave": {
           "keys": "Esc",
-          "action": "Close the projection if it is shown, otherwise end live mode (after confirmation)"
+          "action": "Deselect first if something is selected; then close the projection if it is shown, otherwise end live mode (after confirmation)"
         },
         "marks": {
           "keys": "Delete, Backspace",
           "action": "Clear the annotations drawn over the presentation (projected window)"
+        },
+        "select": {
+          "keys": "V",
+          "action": "Select tool (lasso or click on a stroke)"
+        },
+        "delete": {
+          "keys": "Delete, Backspace",
+          "action": "With a selection: delete it (without one: clear the annotations)"
+        },
+        "undo": {
+          "keys": "Ctrl + Z, Ctrl + Y",
+          "action": "Undo, redo a delete, a change of colour or the clearing of the page"
         }
       }
     },

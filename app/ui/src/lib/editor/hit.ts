@@ -15,14 +15,17 @@ import {
   type Vec,
 } from './geometry';
 
+/** What the hit tests read of a page: the editor's note, or the live session's strokes and layers. */
+export type Hittable = Pick<Note, 'strokes' | 'layers'>;
+
 /** A stroke on a layer index without entry counts as visible. */
-export function layerVisible(note: Note, layer: number): boolean {
+export function layerVisible(note: Hittable, layer: number): boolean {
   const entry = note.layers[layer];
   return entry ? entry.visible : true;
 }
 
 /** Indices of the visible strokes, in drawing order: layer by layer, then file order. */
-export function drawingOrder(note: Note): number[] {
+export function drawingOrder(note: Hittable): number[] {
   const buckets: number[][] = note.layers.map(() => []);
   const orphans: number[] = [];
   note.strokes.forEach((stroke, i) => {
@@ -42,7 +45,7 @@ export function drawingOrder(note: Note): number[] {
  * Strokes enclosed by the lasso `polygon`: at least `share` of their samples inside it. Indices
  * in file order.
  */
-export function selectInLasso(note: Note, polygon: readonly Vec[], share = 0.5): number[] {
+export function selectInLasso(note: Hittable, polygon: readonly Vec[], share = 0.5): number[] {
   const area = boundsOfPoints(polygon);
   if (!area || polygon.length < 3) return [];
   const selected: number[] = [];
@@ -66,7 +69,7 @@ function touches(stroke: Stroke, path: readonly Vec[], radius: number): boolean 
 }
 
 /** The topmost visible stroke whose ink passes within `tolerance` of `p`, or null. */
-export function hitStroke(note: Note, p: Vec, tolerance: number): number | null {
+export function hitStroke(note: Hittable, p: Vec, tolerance: number): number | null {
   const order = drawingOrder(note);
   for (let k = order.length - 1; k >= 0; k--) {
     const stroke = note.strokes[order[k]];
@@ -79,7 +82,7 @@ export function hitStroke(note: Note, p: Vec, tolerance: number): number | null 
 }
 
 /** Visible strokes whose ink the eraser path (a polyline of radius `radius`) touches. */
-export function strokesTouched(note: Note, path: readonly Vec[], radius: number): number[] {
+export function strokesTouched(note: Hittable, path: readonly Vec[], radius: number): number[] {
   const touched: number[] = [];
   note.strokes.forEach((stroke, i) => {
     if (layerVisible(note, stroke.layer) && touches(stroke, path, radius)) touched.push(i);

@@ -11,11 +11,18 @@
  *   `ink.ts`, the geometry of the exports), the laser dot and, on the control window's preview,
  *   the projected area.
  *
+ * - The control window's selection (M12, `Scene.selection`, `Scene.lasso`) is drawn apart from that
+ *   cache: the highlight of the chosen strokes (their outlines, found in the same cache of outlines,
+ *   and the box around them) has a surface of its own, redrawn only when the selection, the view,
+ *   the size or the strokes change, so that choosing strokes never redraws the page, and a stroke
+ *   the tablet ends meanwhile is appended as usual. The lasso being drawn is a few lines per frame.
+ *   The presentation and the share's viewers never get a selection.
+ *
  * Strokes are filled with the non-zero rule. Looks follow `ardoise-render/src/look.rs` where a
  * flat fill can: felt-tip core at 0.9, chalk at 0.95, highlighter multiplied on light paper and
  * screened on dark paper; the pencil and chalk grains are not drawn on screen (as in the editor).
  */
-import type { Rect, Vec } from './editor/geometry';
+import { strokeBounds, union, type Rect, type Vec } from './editor/geometry';
 import { backgroundWidth } from './editor/view';
 import type { Ink, Tool } from './ink';
 import type { LiveViewState } from './live';
@@ -49,6 +56,8 @@ export interface Ctx2D {
   arc(x: number, y: number, radius: number, startAngle: number, endAngle: number): void;
   fill(fillRule?: CanvasFillRule): void;
   stroke(): void;
+  /** Dashes of the lines (absent on a stand-in that does not draw them). */
+  setLineDash?(segments: number[]): void;
 }
 
 /** An offscreen drawing surface (a canvas element in the app). */
@@ -68,6 +77,16 @@ const OUTSIDE_DIM = 'rgba(0, 0, 0, 0.28)';
 const LASER = '#ff1f1f';
 const LASER_GLOW = 'rgba(255, 31, 31, 0.28)';
 const PEN_RING = 'rgba(47, 111, 223, 0.9)';
+
+/** The selection's colours on light paper and on dark paper (the editor's accent, then a lighter blue). */
+export const SELECTION_COLORS = {
+  light: { line: '#2f6fdf', halo: 'rgba(47, 111, 223, 0.28)', box: 'rgba(47, 111, 223, 0.08)' },
+  dark: { line: '#8fb8ff', halo: 'rgba(143, 184, 255, 0.32)', box: 'rgba(143, 184, 255, 0.12)' },
+} as const;
+/** Width of the selection's outline and of the glow around it, CSS pixels. */
+const SELECTION_LINE_PX = 1.5;
+const SELECTION_HALO_PX = 6;
+const NO_SELECTION: readonly number[] = [];
 
 /** Paper colours of `ardoise-render/src/background.rs`. */
 const PAPERS: Record<Exclude<Paper, { custom: Rgba }>, [number, number, number]> = {
@@ -134,6 +153,9 @@ export interface Scene {
   /** Temporary marks written over the presentation (not part of the note), and the one in progress. */
   marks: readonly Stroke[];
   markCurrent: Stroke | null;
+  /** The control window's selection: indices into `strokes` (a new array when it changes), and the lasso being drawn (page units). */
+  selection: readonly number[];
+  lasso: readonly Vec[] | null;
   hover: Vec | null;
   laser: boolean;
   /** The pen's position as a ring when the laser is off (control window). */
@@ -173,6 +195,9 @@ export interface SceneOptions {
   /** Presentation: temporary marks (page units) and the one being written. */
   marks?: readonly Stroke[];
   markCurrent?: Stroke | null;
+  /** Preview: the selection (indices into the finished strokes) and the lasso being drawn. */
+  selection?: readonly number[];
+  lasso?: readonly Vec[] | null;
 }
 
 export function sceneTransform(live: Pick<LiveSource, 'pageSize' | 'view'>, options: Pick<SceneOptions, 'mode' | 'viewport'>): Transform {
@@ -195,6 +220,8 @@ export function buildScene(live: LiveSource, options: SceneOptions): Scene {
     current: live.current,
     marks: options.marks ?? [],
     markCurrent: options.markCurrent ?? null,
+    selection: preview ? (options.selection ?? NO_SELECTION) : NO_SELECTION,
+    lasso: preview ? (options.lasso ?? null) : null,
     hover: live.hover,
     laser: live.view.laser,
     penRing: preview,
@@ -220,16 +247,22 @@ export interface PaintReport {
   appended: number;
   /** Samples of the stroke in progress drawn. */
   currentPoints: number;
+  /** Set when the selection's highlight was drawn again (it is copied from its own surface otherwise). */
+  selectionDrawn?: true;
 }
 
-function fillContours(ctx: Ctx2D, contours: readonly Float32Array[]): void {
-  ctx.beginPath();
+function addContours(ctx: Ctx2D, contours: readonly Float32Array[]): void {
   for (const c of contours) {
     if (c.length < 2) continue;
     ctx.moveTo(c[0], c[1]);
     for (let i = 2; i < c.length; i += 2) ctx.lineTo(c[i], c[i + 1]);
     ctx.closePath();
   }
+}
+
+function fillContours(ctx: Ctx2D, contours: readonly Float32Array[]): void {
+  ctx.beginPath();
+  addContours(ctx, contours);
   ctx.fill('nonzero');
 }
 
@@ -246,6 +279,11 @@ export class LiveRenderer {
   private topRank = -1;
   /** Outlines of finished strokes (they never change). */
   private outlines = new WeakMap<Stroke, Float32Array[]>();
+  /** The selection's highlight: its own surface, and what it was drawn for. */
+  private selectionLayer: Surface | null = null;
+  private selectionKey = '';
+  private selectionSize = '';
+  private selectionFor: readonly number[] | null = null;
 
   constructor(createSurface: () => Surface | null, ink: Ink | null = null) {
     this.createSurface = createSurface;
@@ -262,6 +300,7 @@ export class LiveRenderer {
   /** The next paint redraws the cache. */
   invalidate(): void {
     this.cacheKey = '';
+    this.selectionKey = '';
   }
 
   private contours(stroke: Stroke): Float32Array[] {
@@ -383,6 +422,7 @@ export class LiveRenderer {
       target.clearRect(0, 0, width, height);
       target.drawImage(cache.image, 0, 0);
     }
+    this.paintSelection(target, scene, key, report);
     const current = scene.current;
     if (current && current.points.length > 0 && this.ink && this.visible(current, scene.layers)) {
       this.pageTransform(target, scene);
@@ -402,10 +442,96 @@ export class LiveRenderer {
     return report;
   }
 
+  /**
+   * The selection's highlight over the cache. Its surface is redrawn only when the selection (a new
+   * array each time), the strokes' generation, the layers, the view or the size change — not when the
+   * tablet appends a stroke: the indices of the others do not move.
+   */
+  private paintSelection(target: Ctx2D, scene: Scene, key: string, report: PaintReport): void {
+    if (scene.selection.length === 0) {
+      this.selectionFor = null;
+      return;
+    }
+    const width = Math.max(1, Math.round(scene.viewport.width * scene.pixelRatio));
+    const height = Math.max(1, Math.round(scene.viewport.height * scene.pixelRatio));
+    const dark = isDarkPaper(scene.background.paper);
+    if (!this.selectionLayer) this.selectionLayer = this.createSurface();
+    const layer = this.selectionLayer;
+    const wanted = `${key}|${dark}`;
+    if (!layer) {
+      // No surface (a stand-in): drawn on the frame itself.
+      this.pageTransform(target, scene);
+      this.drawSelection(target, scene, dark);
+      report.selectionDrawn = true;
+      return;
+    }
+    if (wanted !== this.selectionKey || scene.selection !== this.selectionFor) {
+      if (this.selectionSize !== `${width}x${height}`) {
+        layer.resize(width, height);
+        this.selectionSize = `${width}x${height}`;
+      }
+      layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      layer.ctx.clearRect(0, 0, width, height);
+      this.pageTransform(layer.ctx, scene);
+      this.drawSelection(layer.ctx, scene, dark);
+      this.selectionKey = wanted;
+      this.selectionFor = scene.selection;
+      report.selectionDrawn = true;
+    }
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.drawImage(layer.image, 0, 0);
+  }
+
+  /** The chosen strokes (visible ones) outlined with a glow, and a dashed box around them, in page units. */
+  private drawSelection(ctx: Ctx2D, scene: Scene, dark: boolean): void {
+    const colors = dark ? SELECTION_COLORS.dark : SELECTION_COLORS.light;
+    const scale = scene.transform.scale || 1;
+    let box: Rect | null = null;
+    ctx.beginPath();
+    for (const i of scene.selection) {
+      const stroke = scene.strokes[i];
+      if (!stroke || !this.visible(stroke, scene.layers)) continue;
+      addContours(ctx, this.contours(stroke));
+      box = union(box, strokeBounds(stroke));
+    }
+    ctx.strokeStyle = colors.halo;
+    ctx.lineWidth = SELECTION_HALO_PX / scale;
+    ctx.stroke();
+    ctx.strokeStyle = colors.line;
+    ctx.lineWidth = SELECTION_LINE_PX / scale;
+    ctx.stroke();
+    if (!box) return;
+    ctx.fillStyle = colors.box;
+    ctx.fillRect(box.x, box.y, box.width, box.height);
+    ctx.setLineDash?.([6 / scale, 4 / scale]);
+    ctx.lineWidth = 1.5 / scale;
+    ctx.strokeRect(box.x, box.y, box.width, box.height);
+    ctx.setLineDash?.([]);
+  }
+
+  /** The lasso being drawn, in screen pixels. */
+  private drawLasso(ctx: Ctx2D, scene: Scene, lasso: readonly Vec[]): void {
+    const colors = isDarkPaper(scene.background.paper) ? SELECTION_COLORS.dark : SELECTION_COLORS.light;
+    ctx.beginPath();
+    lasso.forEach((p, i) => {
+      const at = pageToScreen(scene.transform, p);
+      if (i === 0) ctx.moveTo(at.x, at.y);
+      else ctx.lineTo(at.x, at.y);
+    });
+    ctx.fillStyle = colors.box;
+    ctx.fill('nonzero');
+    ctx.strokeStyle = colors.line;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash?.([4, 3]);
+    ctx.stroke();
+    ctx.setLineDash?.([]);
+  }
+
   /** Projected area, pen ring and laser dot, in screen pixels. */
   private overlay(ctx: Ctx2D, scene: Scene): void {
     const k = scene.pixelRatio;
     ctx.setTransform(k, 0, 0, k, 0, 0);
+    if (scene.lasso && scene.lasso.length > 1) this.drawLasso(ctx, scene, scene.lasso);
     if (scene.projected) {
       const t = scene.transform;
       const a = pageToScreen(t, { x: scene.projected.x, y: scene.projected.y });

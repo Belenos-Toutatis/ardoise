@@ -21,6 +21,12 @@
    * with the page), two fingers pinch the projected area. A finger is ignored while a pen is in
    * contact or hovering (palm rejection). `onmarkschange` reports every change of the marks, the
    * one in progress included, for the window to pass them on to the viewers of the share.
+   *
+   * Selecting (M12, control window only, `selecting`): the mouse and the pen draw a lasso, or click a
+   * stroke (`lib/live-select.svelte.ts`), instead of dragging the projected area; Shift adds to the
+   * selection and Ctrl removes from it. A finger and the wheel keep navigating. The result goes to
+   * `onselect`; the chosen strokes (`selection`, indices of the finished strokes) and the lasso being
+   * drawn are painted over the page in this window only (`LiveRenderer`, apart from its cache).
    */
   import { api } from '../../lib/api';
   import type { Vec } from '../../lib/editor/geometry';
@@ -40,6 +46,7 @@
   } from '../../lib/live-render';
   import type { LiveState } from '../../lib/live-state.svelte';
   import { MARK_ERASER_PX, eraseMarks, markStyle, newMark } from '../../lib/live-marks';
+  import { pickStrokes, type Combine } from '../../lib/live-select.svelte';
   import {
     DEFAULT_ASPECT,
     moveViewTo,
@@ -63,6 +70,9 @@
     onview,
     onmarks,
     onmarkschange,
+    selecting = false,
+    selection = [],
+    onselect,
   }: {
     live: LiveState;
     ink: Ink | null;
@@ -79,6 +89,12 @@
     onmarks?: (count: number) => void;
     /** Presentation: the marks changed, or the mark being written grew (its points change in place). */
     onmarkschange?: (marks: readonly Stroke[], current: Stroke | null) => void;
+    /** Preview: the selection tool is on (the mouse and the pen choose strokes instead of moving the area). */
+    selecting?: boolean;
+    /** Preview: the chosen strokes (indices of the finished strokes; a new array at each change). */
+    selection?: readonly number[];
+    /** Preview: a lasso or a click ended; `picked` is empty when it found nothing. */
+    onselect?: (picked: number[], combine: Combine) => void;
   } = $props();
 
   /** jsdom (tests) has no layout: a nominal size. */
@@ -105,6 +121,8 @@
   let marks: readonly Stroke[] = [];
   let markCurrent: Stroke | null = null;
   let markDrag: { id: number; kind: 'write' | 'erase'; t0: number } | null = null;
+  /** The lasso being drawn with the mouse or the pen (page units; the points grow in place). */
+  let lassoDrag: { id: number; points: Vec[]; combine: Combine } | null = null;
   const presence = new PenPresence();
   const fingers = new TouchGestures();
   /** Bumped when the window is hidden or shown: frames awaited across that say nothing. */
@@ -162,7 +180,20 @@
     const height = Math.max(1, Math.round(size.height * pixelRatio));
     if (el.width !== width) el.width = width;
     if (el.height !== height) el.height = height;
-    renderer.paint(context, buildScene(live, { mode, viewport: size, pixelRatio, aspect, backgroundImage, marks, markCurrent }));
+    renderer.paint(
+      context,
+      buildScene(live, {
+        mode,
+        viewport: size,
+        pixelRatio,
+        aspect,
+        backgroundImage,
+        marks,
+        markCurrent,
+        selection,
+        lasso: lassoDrag?.points ?? null,
+      }),
+    );
     const drawEnd = wallClock();
     const painted = live.takeUnpainted();
     // Points drawn without their outline (geometry still loading) or in a hidden window say
@@ -204,7 +235,18 @@
     void size;
     void pixelRatio;
     void aspect;
+    void selection;
     schedule();
+  });
+
+  // Turning the tool off, or turning the page, drops the lasso being drawn.
+  $effect(() => {
+    void live.pageIndex;
+    void selecting;
+    if (lassoDrag) {
+      lassoDrag = null;
+      schedule();
+    }
   });
 
   // Follow the size of the box and the screen's pixel density.
@@ -393,6 +435,21 @@
     schedule();
   }
 
+  /** Selecting: the mouse or the pen starts a lasso; Shift adds to the selection, Ctrl removes from it. */
+  function startLasso(e: PointerEvent, id: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    capture(id);
+    lassoDrag = { id, points: [pagePoint(e)], combine: e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace' };
+    schedule();
+  }
+
+  /** The lasso (or click) ended: the strokes it picks go to `onselect`. */
+  function endLasso(drag: { points: Vec[]; combine: Combine }) {
+    const { scale } = sceneTransform(live, { mode, viewport: size });
+    onselect?.(pickStrokes({ strokes: live.strokes, layers: live.layers }, drag.points, scale), drag.combine);
+  }
+
   /** Preview: grabs the projected area (or, outside it, centres it there first). Presentation: starts a mark. */
   function onpointerdown(e: PointerEvent) {
     const kind = pointerKind(e);
@@ -419,6 +476,10 @@
     }
     if (mode === 'presentation') {
       startMark(e, kind, id);
+      return;
+    }
+    if (selecting && onselect && (kind === 'mouse' || kind === 'pen')) {
+      startLasso(e, id);
       return;
     }
     if (!onview || e.button !== 0 || kind === 'eraser') return;
@@ -468,6 +529,18 @@
       schedule();
       return;
     }
+    if (lassoDrag) {
+      if (id !== lassoDrag.id) return;
+      const { scale } = sceneTransform(live, { mode, viewport: size });
+      const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+      for (const ev of events.length > 0 ? events : [e]) {
+        const q = pagePoint(ev);
+        const last = lassoDrag.points[lassoDrag.points.length - 1];
+        if (Math.hypot(q.x - last.x, q.y - last.y) * scale >= 0.5) lassoDrag.points.push(q);
+      }
+      schedule();
+      return;
+    }
     if (!drag || !onview || id !== drag.id) return;
     const p = pagePoint(e);
     onview(moveViewTo(live.view, { x: p.x + drag.offset.x, y: p.y + drag.offset.y }, live.pageSize, aspect));
@@ -491,6 +564,12 @@
       else if (current) onmarkschange?.(marks, null);
       schedule();
     }
+    if (lassoDrag && lassoDrag.id === id) {
+      const done = lassoDrag;
+      lassoDrag = null;
+      if (!cancelled) endLasso(done);
+      schedule();
+    }
     if (!drag || id !== drag.id) return;
     drag = null;
     dragging = false;
@@ -508,7 +587,8 @@
     class="live-canvas"
     class:interactive={mode === 'preview' && !!onview}
     class:dragging
-    class:zoomed={live.view.zoom > 1.001}
+    class:zoomed={live.view.zoom > 1.001 && !selecting}
+    class:selecting={selecting && mode === 'preview'}
     class:writable={mode === 'presentation'}
     data-strokes={live.strokeCount}
     data-page="{live.pageIndex + 1}/{live.pageCount}"
@@ -551,6 +631,10 @@
   }
 
   .live-canvas.interactive {
+    cursor: crosshair;
+  }
+
+  .live-canvas.selecting {
     cursor: crosshair;
   }
 
