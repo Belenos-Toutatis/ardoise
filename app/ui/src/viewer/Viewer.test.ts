@@ -82,6 +82,9 @@ class FakePc {
   joinOverride: (() => Response) | null = null;
   joins: string[] = [];
   eventRequests = 0;
+  paperRequests: string[] = [];
+  /** Status of `/paper/<key>` when the cookie is there. */
+  paperStatus = 200;
   private controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
 
   fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -96,6 +99,11 @@ class FakePc {
       }
       this.remaining -= 1;
       return Response.json({ error: 'wrongCode', remaining: this.remaining }, { status: 403 });
+    }
+    if (url.startsWith('/paper/')) {
+      this.paperRequests.push(url);
+      if (!this.joined) return new Response(null, { status: 401 });
+      return new Response('png', { status: this.paperStatus, headers: { 'Content-Type': 'image/png' } });
     }
     if (url === '/events') {
       this.eventRequests += 1;
@@ -429,7 +437,11 @@ describe('viewer page: the shared page', () => {
   });
 
   describe('the paper of a live page', () => {
-    const PICTURE = 'data:image/png;base64,QUJD';
+    const PICTURE = 'blob:the-picture';
+
+    beforeEach(() => {
+      vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => PICTURE, revokeObjectURL: () => undefined }));
+    });
 
     /** Images that load as soon as they are given a source. */
     class FakeImage {
@@ -489,9 +501,10 @@ describe('viewer page: the shared page', () => {
       const sheet = { ...liveSnapshot([stroke(1000)]), paperKey: 'k1' };
       pc.send(live(sheet));
       await vi.waitFor(() => expect(view.canvas()?.dataset.shown).toBe('live'));
-      pc.send({ type: 'livePaper', key: 'k1', picture: PICTURE });
+      pc.send({ type: 'livePaper', key: 'k1', version: 'v1' });
 
       await vi.waitFor(() => expect(papersDrawn(contexts).at(-1)?.inkAfter.length).toBeGreaterThan(0));
+      expect(pc.paperRequests).toEqual(['/paper/k1']);
       const drawn = papersDrawn(contexts).at(-1)!;
       expect((drawn.args[0] as FakeImage).src).toBe(PICTURE);
       // The whole page, under the same transform as the strokes that follow: a stroke at a spot of
@@ -505,6 +518,22 @@ describe('viewer page: the shared page', () => {
       await vi.waitFor(() => expect(view.canvas()?.dataset.page).toBe('2/2'));
       await new Promise((resolve) => setTimeout(resolve, 60));
       expect(papersDrawn(contexts)).toEqual([]);
+    });
+
+    it('keeps drawing the strokes on the paper colour when the picture cannot be fetched', async () => {
+      const contexts = recordContexts();
+      const view = render();
+      await join(view);
+      const streams = pc.eventRequests;
+      pc.paperStatus = 404;
+      pc.send(live({ ...liveSnapshot([stroke(1000)]), paperKey: 'k1' }));
+      await vi.waitFor(() => expect(view.canvas()?.dataset.shown).toBe('live'));
+      pc.send({ type: 'livePaper', key: 'k1', version: 'v1' });
+      await vi.waitFor(() => expect(pc.paperRequests).toEqual(['/paper/k1']));
+      await vi.waitFor(() => expect(contexts.some((c) => c.count('fill') > 0)).toBe(true));
+      expect(papersDrawn(contexts)).toEqual([]);
+      expect(view.view('reconnecting')).toBeNull();
+      expect(pc.eventRequests).toBe(streams);
     });
 
     it('shows no picture on an ordinary page', async () => {

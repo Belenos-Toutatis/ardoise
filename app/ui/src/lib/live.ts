@@ -64,7 +64,7 @@ export interface LiveSnapshot {
   /** The current page (a note: strokes so far, background, layers). */
   page: Note;
   /**
-   * The share's viewers only: which `livePaper` picture the page wants drawn under its strokes;
+   * The share's viewers only: which picture (`livePaper`, `/paper/<key>`) the page wants drawn under its strokes;
    * absent on plain paper (ordinary live pages), where the paper colour is drawn.
    */
   paperKey?: string;

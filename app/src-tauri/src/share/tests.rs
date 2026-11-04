@@ -24,6 +24,7 @@ use ardoise_proto::stroke::Point as PenPoint;
 use ardoise_render::{
     Image, NoteView, Picture, RenderOptions, decode_png, encode_png, render_note,
 };
+use ardoise_share::LivePaper;
 use serde_json::{Value, json};
 
 use super::assets::{AssetSource, ViewerAssetsError, content_type, viewer_assets};
@@ -1792,7 +1793,7 @@ impl Viewer {
         self
     }
 
-    /// `livePaper` messages received so far.
+    /// Messages telling of a paper received so far.
     fn papers(&self) -> usize {
         self.texts
             .iter()
@@ -1822,8 +1823,52 @@ impl Viewer {
     }
 }
 
-fn pixels_of(paper: &Value) -> Image {
-    decode_png(&png_of(paper["picture"].as_str().unwrap())).unwrap()
+/// A request of a browser that joined, on a connection of its own: the status and the head of the
+/// answer as text, and its body.
+fn fetch(port: u16, target: &str, cookie: Option<&str>) -> (u16, String, Vec<u8>) {
+    let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+    stream.set_read_timeout(Some(SOON)).unwrap();
+    let cookie = cookie.map_or(String::new(), |cookie| format!("Cookie: {cookie}\r\n"));
+    write!(
+        stream,
+        "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{cookie}\r\n"
+    )
+    .unwrap();
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 64 * 1024];
+    let (head, length) = loop {
+        let n = stream.read(&mut chunk).unwrap();
+        assert_ne!(n, 0, "closed without an answer");
+        bytes.extend_from_slice(&chunk[..n]);
+        let Some(at) = bytes.windows(4).position(|w| w == b"\r\n\r\n") else {
+            continue;
+        };
+        let head = String::from_utf8(bytes.drain(..at + 4).collect()).unwrap();
+        let length: usize = head
+            .lines()
+            .find_map(|line| line.strip_prefix("Content-Length: "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        break (head, length);
+    };
+    while bytes.len() < length {
+        let n = stream.read(&mut chunk).unwrap();
+        assert_ne!(n, 0, "the answer was cut");
+        bytes.extend_from_slice(&chunk[..n]);
+    }
+    let status = head[9..12].parse().unwrap();
+    (status, head, bytes)
+}
+
+/// The picture a `livePaper` message tells of, fetched as a viewer does.
+fn fetch_paper(port: u16, cookie: &str, paper: &Value) -> Vec<u8> {
+    let target = format!("/paper/{}", paper["key"].as_str().unwrap());
+    let (status, head, png) = fetch(port, &target, Some(cookie));
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: image/png\r\n"), "{head}");
+    assert!(head.contains("Cache-Control: no-store\r\n"), "{head}");
+    png
 }
 
 fn rgb(image: &Image, x: u32, y: u32) -> [u8; 3] {
@@ -1854,7 +1899,7 @@ fn paper_shows(drawn: &Image, colour: [u8; 3]) -> bool {
 }
 
 #[test]
-fn a_resumed_sheet_gives_each_viewer_its_paper_once() {
+fn a_resumed_sheet_lets_each_viewer_fetch_its_paper() {
     let (dir, library) = library();
     let library_name = dir
         .path()
@@ -1892,11 +1937,30 @@ fn a_resumed_sheet_gives_each_viewer_its_paper_once() {
         json!([{"name": "", "visible": false}, {"name": "", "visible": true}])
     );
     let paper = a.until("the paper", RENDERING, |m| m["type"] == "livePaper");
-    // Only that: nothing else of the note can travel with it.
-    assert_eq!(keys(&paper), ["key", "picture", "type"]);
+    // Only that: the stream carries no picture, and nothing else of the note can travel with it.
+    assert_eq!(keys(&paper), ["key", "type", "version"]);
     assert_eq!(paper["key"], key.as_str());
+    assert!(paper.to_string().len() < 100, "{paper}");
+    // The picture is one request away, for those who joined, under this key alone.
+    let target = format!("/paper/{key}");
+    assert_eq!(fetch(port, &target, None).0, 401);
+    assert_eq!(fetch(port, "/paper/ffffffffffffffff", None).0, 401);
+    assert_eq!(fetch(port, "/paper/ffffffffffffffff", Some(&cookie)).0, 404);
+    assert_eq!(
+        fetch(port, &format!("/paper/{key}/../.."), Some(&cookie)).0,
+        404
+    );
+    let png = fetch_paper(port, &cookie, &paper);
+    // Nothing of the note in the file either, metadata included.
+    for secret in ["Léa", "élèves", "Consignes", "photo de la classe"] {
+        let bytes = secret.as_bytes();
+        assert!(
+            !png.windows(bytes.len()).any(|w| w == bytes),
+            "{secret} in the picture"
+        );
+    }
     // The page's whole paper, with the image where the note says: strokes in page units fall on it.
-    let drawn = pixels_of(&paper);
+    let drawn = decode_png(&png).unwrap();
     assert_eq!(drawn.width, PAPER_PX);
     assert!(drawn.height.abs_diff(A5.height * PAPER_PX / A5.width) <= 1);
     let (x, y) = at(7_000, 4_000);
@@ -1905,12 +1969,12 @@ fn a_resumed_sheet_gives_each_viewer_its_paper_once() {
     assert!(near(rgb(&drawn, x, y), BLUE), "{:?}", rgb(&drawn, x, y));
     assert!(paper_shows(&drawn, CREAM));
 
-    // It goes outside the coalesced batches, and writing does not send it again.
+    // Writing tells nothing again.
     write_stroke(&mut sink, 2000, 10);
     a.stroke_written();
     assert_eq!(a.papers(), 1);
 
-    // A late joiner gets it right after its snapshot, the others nothing.
+    // A late joiner is told right after its snapshot, the others nothing.
     let mut b = Viewer::open(port, &cookie).patient();
     let (message, _) = b.next().unwrap();
     assert_eq!(message["reset"], true);
@@ -1926,8 +1990,8 @@ fn a_resumed_sheet_gives_each_viewer_its_paper_once() {
     b.stroke_written();
     assert_eq!((a.papers(), b.papers()), (1, 1));
 
-    // The next page is plain: its snapshot wants no picture, which hides it at once, and a viewer
-    // joining there gets none.
+    // The next page is plain: its snapshot wants no picture, which hides it at once, a viewer
+    // joining there is told of none, and the picture cannot be fetched any more.
     hub.command(crate::live::model::LiveCommandKind::NextPage)
         .unwrap();
     assert!(a.snapshot_of_page(1).get("paperKey").is_none());
@@ -1945,23 +2009,29 @@ fn a_resumed_sheet_gives_each_viewer_its_paper_once() {
         viewer.stroke_written();
     }
     assert_eq!((a.papers(), b.papers(), c.papers()), (1, 1, 0));
+    assert_eq!(fetch(port, &target, Some(&cookie)).0, 404);
 
-    // Back on the sheet: nothing to send to those who kept the picture, the picture for the other.
+    // Back on the sheet: everyone is told (those who kept the picture fetch nothing), and it can be
+    // fetched again.
     hub.command(crate::live::model::LiveCommandKind::PreviousPage)
         .unwrap();
     for viewer in [&mut a, &mut b, &mut c] {
         assert_eq!(viewer.snapshot_of_page(0)["paperKey"], key.as_str());
     }
-    c.until("the paper", SOON, |m| m["type"] == "livePaper");
+    for viewer in [&mut a, &mut b, &mut c] {
+        let told = viewer.until("the paper", SOON, |m| m["type"] == "livePaper");
+        assert_eq!(told, paper, "the same key and the same version");
+    }
+    assert_eq!(fetch_paper(port, &cookie, &paper), png);
     std::thread::sleep(Duration::from_millis(300));
     write_stroke(&mut sink, 8000, 10);
     for viewer in [&mut a, &mut b, &mut c] {
         viewer.stroke_written();
     }
-    assert_eq!((a.papers(), b.papers(), c.papers()), (1, 1, 1));
+    assert_eq!((a.papers(), b.papers(), c.papers()), (2, 2, 1));
 
-    // Pause: the frozen image asks for the paper the viewers have; a viewer joining during the
-    // pause gets it between the frozen image and the badge.
+    // Pause: the frozen image, the paper it asks for and the badge; the same for a viewer joining
+    // during the pause, and the picture can still be fetched.
     let share = runtime.inner.share().unwrap();
     share.set_paused(true);
     let frozen = a.until("the frozen image", SOON, |m| {
@@ -1972,12 +2042,13 @@ fn a_resumed_sheet_gives_each_viewer_its_paper_once() {
         key.as_str()
     );
     a.until("the pause", SOON, |m| m["type"] == "pause");
+    assert_eq!(fetch_paper(port, &cookie, &paper), png);
     let mut d = Viewer::open(port, &cookie).patient();
     let types: Vec<Value> = (0..3)
         .map(|_| d.next().unwrap().0["type"].clone())
         .collect();
     assert_eq!(types, ["live", "livePaper", "pause"]);
-    // Resume: a fresh snapshot, and no picture again.
+    // Resume: a fresh snapshot, and the same paper: nothing to fetch.
     share.set_paused(false);
     for viewer in [&mut a, &mut b, &mut c, &mut d] {
         viewer.until("the resume", SOON, |m| {
@@ -1986,17 +2057,15 @@ fn a_resumed_sheet_gives_each_viewer_its_paper_once() {
         viewer.until("the fresh snapshot", SOON, |m| {
             m["type"] == "live" && m["reset"] == true
         });
+        let told = viewer.until("the paper", RENDERING, |m| m["type"] == "livePaper");
+        assert_eq!(told, paper);
     }
     write_stroke(&mut sink, 10_000, 10);
     for viewer in [&mut a, &mut b, &mut c, &mut d] {
         viewer.stroke_written();
     }
-    assert_eq!(
-        (a.papers(), b.papers(), c.papers(), d.papers()),
-        (1, 1, 1, 1)
-    );
 
-    // A viewer that reconnects is a new viewer: it gets the picture again.
+    // A viewer that reconnects is a new viewer: it is told again.
     let texts_b = std::mem::take(&mut b.texts);
     drop(b);
     let deadline = Instant::now() + SOON;
@@ -2020,13 +2089,18 @@ fn a_resumed_sheet_gives_each_viewer_its_paper_once() {
     assert_ne!(board_key, key);
     let paper = a.until("the slate paper", RENDERING, |m| m["type"] == "livePaper");
     assert_eq!(paper["key"], board_key.as_str());
-    let drawn = pixels_of(&paper);
+    let drawn = decode_png(&fetch_paper(port, &cookie, &paper)).unwrap();
     assert!(paper_shows(&drawn, SLATE));
     let (x, y) = at(7_000, 4_000);
     assert!(near(rgb(&drawn, x, y), RED), "{:?}", rgb(&drawn, x, y));
     hub.set_view(LiveViewState::whole(A5)).unwrap();
     let paper = a.until("the paper again", RENDERING, |m| m["type"] == "livePaper");
     assert_eq!(paper["key"], key.as_str());
+    // The previous paper is gone from the server.
+    assert_eq!(
+        fetch(port, &format!("/paper/{board_key}"), Some(&cookie)).0,
+        404
+    );
 
     // Nothing else of the note ever went out, and nothing of the hidden layer.
     let hidden_x = format!("\"x\":{HIDDEN_X}");
@@ -2049,6 +2123,44 @@ fn a_resumed_sheet_gives_each_viewer_its_paper_once() {
 
     runtime.stop();
     assert!(!hub_has_share_subscribers(&hub));
+}
+
+/// The fix for a photo on a shared Wi-Fi, with the real hub: the picture takes its time, and the
+/// strokes keep coming on the stream meanwhile.
+#[test]
+fn the_strokes_do_not_wait_for_a_slow_download_of_the_paper() {
+    let (_dir, library) = library();
+    let path = classroom_sheet(&library);
+    let hub = Arc::new(LiveHub::new(hub_config()));
+    let runtime = ShareRuntime::default();
+    runtime.set_assets(source(built(MANIFEST)));
+    runtime.inner.show(ShareContent::Live);
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
+    let (port, code) = (status.port, status.code.clone().unwrap());
+    let mut sink = resume_sheet(&hub, &library, &path);
+    let cookie = join(port, &code);
+    let mut viewer = Viewer::open(port, &cookie).patient();
+    let paper = viewer.until("the paper", RENDERING, |m| m["type"] == "livePaper");
+
+    // Asked for, and not read at all.
+    let mut download = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+    write!(
+        download,
+        "GET /paper/{} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\n\r\n",
+        paper["key"].as_str().unwrap()
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    for x in [2000, 4000, 6000] {
+        write_stroke(&mut sink, x, 10);
+        viewer.stroke_written();
+    }
+    assert_eq!(runtime.status(8765).viewers, 1);
+    assert_eq!(viewer.papers(), 1);
+    drop(download);
+    runtime.stop();
 }
 
 #[test]
@@ -2098,10 +2210,10 @@ fn the_paper_is_made_apart_once_and_kept_for_the_way_back() {
     let path = classroom_sheet(&library);
     let hub = Arc::new(LiveHub::new(hub_config()));
     let papers = LivePapers::new(hub.clone());
-    let sent: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
+    let sent: Arc<Mutex<Vec<Option<LivePaper>>>> = Arc::default();
     let log = sent.clone();
-    papers.attach(Box::new(move |message| {
-        log.lock().unwrap().push(message.map(str::to_owned));
+    papers.attach(Box::new(move |paper| {
+        log.lock().unwrap().push(paper);
     }));
 
     // Plain paper: no key, no thread, nothing to send, as long as it lasts.
@@ -2123,6 +2235,8 @@ fn the_paper_is_made_apart_once_and_kept_for_the_way_back() {
     settled(&papers);
     assert_eq!(papers.renders(), 1);
     let first = sent.lock().unwrap().first().cloned().flatten().unwrap();
+    assert_eq!(Some(first.key.as_str()), paper_key(&sheet).as_deref());
+    assert_eq!(&first.png[..8], b"\x89PNG\r\n\x1a\n");
     let mut written = sheet.clone();
     written.page.strokes.clear();
     papers.saw(&written);
@@ -2136,6 +2250,9 @@ fn the_paper_is_made_apart_once_and_kept_for_the_way_back() {
     settled(&papers);
     assert_eq!(sent.lock().unwrap().last(), Some(&Some(first.clone())));
     assert_eq!(papers.renders(), 1);
+    // The bytes themselves, not a copy: the share and the cache hold one picture.
+    let last = sent.lock().unwrap().last().cloned().flatten().unwrap();
+    assert!(Arc::ptr_eq(&last.png, &first.png));
 
     // A viewer coming back looks again, in case the file changed; here it has not.
     let count = sent.lock().unwrap().len();
@@ -2164,10 +2281,10 @@ fn a_paper_asked_before_the_share_runs_goes_when_it_does() {
     let _sink = resume_sheet(&hub, &library, &path);
     papers.saw(&hub.snapshot());
     assert_eq!(papers.renders(), 0);
-    let sent: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
+    let sent: Arc<Mutex<Vec<Option<LivePaper>>>> = Arc::default();
     let log = sent.clone();
-    papers.attach(Box::new(move |message| {
-        log.lock().unwrap().push(message.map(str::to_owned));
+    papers.attach(Box::new(move |paper| {
+        log.lock().unwrap().push(paper);
     }));
     settled(&papers);
     assert_eq!(sent.lock().unwrap().len(), 1);

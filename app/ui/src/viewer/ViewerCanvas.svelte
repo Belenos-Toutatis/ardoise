@@ -4,9 +4,9 @@
    * shows it (`components/live/LiveCanvas.svelte`, mode `presentation`: zoom, pan, blackboard,
    * laser dot, and the marks written over the presentation, which the hub sends), without what
    * the viewer does not do: no pointer, no latency, no call to Rust. Drawing is `lib/live-render.ts`; this component sizes the canvas (CSS pixels ×
-   * `devicePixelRatio`), shows the paper image of the message instead of `render_background`
-   * (`background`: PNG data URL, null for plain paper, which `LiveRenderer` fills with the paper
-   * colour), and paints on the next animation frame after a change.
+   * `devicePixelRatio`), shows the paper image it is given instead of `render_background`
+   * (`background`: a URL an image can load, null for plain paper, which `LiveRenderer` fills with the
+   * paper colour), and paints on the next animation frame after a change.
    * The view drawn is the PC's or this screen's own (`ViewerView`: `view.current`). The mouse wheel
    * zooms around the pointer (as in the editor), a drag with the mouse or the pen and one finger
    * move the page, two fingers pinch it (`TouchGestures`); each takes the own view.
@@ -33,7 +33,7 @@
   }: {
     live: LiveState;
     ink: Ink | null;
-    /** The paper as a PNG data URL (of the note, or of a live page), or null (the paper colour only). */
+    /** The paper as a URL an image can load (a note's: data, a live page's: blob), or null (the paper colour only). */
     background: string | null;
     shown: 'live' | 'note';
     /** The view drawn (the PC's, or this screen's own) and what changes it. */
@@ -252,8 +252,8 @@
     dragging = false;
   }
 
-  // The paper image of the message (a data URL): shown once decoded; without one the paper
-  // colour shows.
+  // The paper image (a data URL from the message, or a blob URL of what was fetched): shown once
+  // decoded; without one the paper colour shows.
   $effect(() => {
     const url = background;
     const request = ++backgroundRequest;

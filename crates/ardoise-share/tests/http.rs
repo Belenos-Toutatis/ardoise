@@ -99,6 +99,10 @@ fn every_other_request_is_not_found() {
         "/%2e%2e/",
         "/..",
         "/favicon.ico",
+        "/paper",
+        "//paper/x",
+        "/PAPER/x",
+        "/paper%2Fx",
         "http://host/",
         "http://127.0.0.1/assets/viewer-abc123.js",
         "*",
@@ -125,6 +129,9 @@ fn every_other_request_is_not_found() {
         ("PUT", "/join"),
         ("post", "/join"),
         ("POST", "/events"),
+        ("POST", "/paper/x"),
+        ("HEAD", "/paper/x"),
+        ("OPTIONS", "/paper/x"),
         ("HEAD", "/events"),
         ("PATCH", "/events"),
         ("CONNECT", "127.0.0.1:80"),
@@ -480,7 +487,7 @@ fn a_page_of_another_site_gets_nothing() {
         format!("127.0.0.1:{}", port.wrapping_add(1)),
         format!("[::1]:{port}"),
     ] {
-        for target in ["/", SCRIPT_PATH, "/events", "/nothing"] {
+        for target in ["/", SCRIPT_PATH, "/events", "/paper/x", "/nothing"] {
             let answer = get(target, &host);
             assert_eq!(answer.status, 421, "{host} {target}");
             assert_common_headers(&answer);
