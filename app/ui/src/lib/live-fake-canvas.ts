@@ -26,6 +26,7 @@ export class FakeContext implements Ctx2D {
   /** moveTo + lineTo calls since the last `reset`. */
   pathPoints = 0;
   transform: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0];
+  private saved: (typeof this.transform)[] = [];
 
   /** Forgets the recorded calls. */
   reset(): void {
@@ -52,6 +53,20 @@ export class FakeContext implements Ctx2D {
     return this.calls.filter((c) => c.op === op);
   }
 
+  save(): void {
+    this.saved.push(this.transform);
+    this.record('save', []);
+  }
+  restore(): void {
+    this.transform = this.saved.pop() ?? this.transform;
+    this.record('restore', []);
+  }
+  rect(x: number, y: number, width: number, height: number): void {
+    this.record('rect', [x, y, width, height]);
+  }
+  clip(): void {
+    this.record('clip', []);
+  }
   setTransform(a: number, b: number, c: number, d: number, e: number, f: number): void {
     this.transform = [a, b, c, d, e, f];
     this.record('setTransform', [a, b, c, d, e, f]);

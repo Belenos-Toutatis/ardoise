@@ -373,8 +373,8 @@ touch up in the control window, and **the tablet keeps writing meanwhile**.
 
 **Deleting**: click **Delete** in the bar, or press `Delete` or `Backspace`.
 
-**Changing the colour**: click a **Colour** swatch. Only the chosen strokes change. They stay chosen, so that you can
-try another colour. **The pen's colour does not change**: what the tablet writes next keeps its colour. With nothing
+**Changing the colour**: click a **Colour** swatch. Only the chosen strokes change, and the new colour shows at once
+inside the blue outline. They stay chosen, so that you can try another colour. **The pen's colour does not change**: what the tablet writes next keeps its colour. With nothing
 chosen, a swatch sets the pen's colour, as before.
 
 **Undo and redo**

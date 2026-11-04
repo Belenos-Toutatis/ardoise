@@ -3,8 +3,16 @@
  * "M12"), in place and in one pass whatever the number of strokes named: a stroke keeps its object,
  * so the renderer keeps its outline. Shared by `LiveState` and the browser stand-in.
  */
-import type { PlacedStroke, RecolouredStrokes } from './live';
+import type { LiveStrokesEdited, PlacedStroke, RecolouredStrokes } from './live';
 import type { Stroke } from './note';
+
+/** What one edit changed on the page, for a canvas to redraw only there (`LiveRenderer`). */
+export interface StrokeEdit {
+  /** `LiveState.generation` right after this edit. */
+  generation: number;
+  /** The strokes that left the page, came to it or changed colour. */
+  touched: readonly Stroke[];
+}
 
 /** Takes out the strokes at `removed` (ascending). */
 export function removeStrokes(strokes: Stroke[], removed: readonly number[]): void {
@@ -42,4 +50,24 @@ export function recolourStrokes(strokes: readonly Stroke[], recoloured: readonly
       if (stroke) stroke.color = color;
     }
   }
+}
+
+/** Applies a `strokesEdited` event to `strokes`; returns the strokes it touched (those it removes included). */
+export function applyStrokeEdit(strokes: Stroke[], edit: Pick<LiveStrokesEdited, 'removed' | 'inserted' | 'recoloured'>): Stroke[] {
+  const touched: Stroke[] = [];
+  for (const index of edit.removed) {
+    const stroke = strokes[index];
+    if (stroke) touched.push(stroke);
+  }
+  removeStrokes(strokes, edit.removed);
+  insertStrokes(strokes, edit.inserted);
+  for (const { stroke } of edit.inserted) touched.push(stroke);
+  recolourStrokes(strokes, edit.recoloured);
+  for (const { indices } of edit.recoloured) {
+    for (const index of indices) {
+      const stroke = strokes[index];
+      if (stroke) touched.push(stroke);
+    }
+  }
+  return touched;
 }

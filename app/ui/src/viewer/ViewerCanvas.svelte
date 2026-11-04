@@ -21,6 +21,7 @@
   import { LiveRenderer, buildScene, type Ctx2D, type LiveSource, type Surface } from '../lib/live-render';
   import type { LiveState } from '../lib/live-state.svelte';
   import { DEFAULT_ASPECT, type Size } from '../lib/live-view';
+  import { exposeRepaints, noteLiveRedraw } from '../lib/perf';
   import type { ViewerView } from '../lib/viewer-view.svelte';
 
   let {
@@ -108,11 +109,13 @@
       layers: live.layers,
       strokes: live.strokes,
       generation: live.generation,
+      edits: live.edits,
       current: live.current,
       hover: live.hover,
       view: view.current,
     };
-    renderer.paint(
+    const startedAt = performance.now();
+    const report = renderer.paint(
       context,
       buildScene(source, {
         mode: 'presentation',
@@ -123,12 +126,17 @@
         marks: live.marks,
       }),
     );
+    noteLiveRedraw(el, report, startedAt);
     // Nobody measures the latency here: the points painted are not kept.
     live.takeUnpainted();
   }
 
   onMount(() => () => {
     destroyed = true;
+  });
+
+  $effect(() => {
+    if (canvas) exposeRepaints(canvas, paint, () => renderer.invalidate());
   });
 
   // Every change of the sheet asks for a frame; another sheet (a new `LiveState`) starts again.

@@ -228,7 +228,7 @@ describe('the Select tool', () => {
     await tick();
     view.first();
     await vi.waitFor(() =>
-      expect(contexts.some((c) => c.ops('stroke').length >= 2 && c.count('strokeRect') === 1 && c.count('fillRect') === 1)).toBe(true),
+      expect(contexts.some((c) => c.ops('fill').length >= 3 && c.count('strokeRect') === 1 && c.count('fillRect') === 1)).toBe(true),
     );
     expect(sent.map((spy) => spy.mock.calls.length)).toEqual([0, 0, 0, 0]);
   });
@@ -498,7 +498,7 @@ describe('the blackboard', () => {
     await vi.waitFor(() => expect(view.bar()!.textContent).toContain('Traits sélectionnés : 2'));
     // On the dark paper the highlight uses its light colour.
     await vi.waitFor(() =>
-      expect(contexts.some((c) => c.ops('stroke').some((call) => call.strokeStyle === SELECTION_COLORS.dark.halo))).toBe(true),
+      expect(contexts.some((c) => c.ops('fill').some((call) => call.fillStyle === SELECTION_COLORS.dark.halo))).toBe(true),
     );
     view.action('delete-selection')!.click();
     await vi.waitFor(() => expect(view.strokes()).toBe(0));

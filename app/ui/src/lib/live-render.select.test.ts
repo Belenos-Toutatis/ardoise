@@ -86,9 +86,15 @@ describe('selection highlight', () => {
     expect(report.full).toBe(false);
     expect(report.selectionDrawn).toBe(true);
     expect(page().ctx.calls).toEqual([]);
-    // The highlight: a glow and a line round the chosen stroke only, then the box.
+    // The highlight: a ring round the chosen stroke only, a band of paper inside it, a hole for the ink, then the box.
     const selected = layer().ctx;
-    expect(selected.ops('stroke').map((c) => c.strokeStyle)).toEqual([SELECTION_COLORS.light.halo, SELECTION_COLORS.light.line]);
+    expect(selected.ops('fill').map((c) => [c.fillStyle, c.composite])).toEqual([
+      [SELECTION_COLORS.light.halo, 'source-over'],
+      ['rgb(255, 255, 255)', 'source-over'],
+      ['#000', 'destination-out'],
+    ]);
+    // No line along the strokes: `stroke()` is what makes a frame late on a real canvas.
+    expect(selected.ops('stroke')).toEqual([]);
     expect(selected.pathPoints).toBeGreaterThan(10);
     expect(selected.ops('fillRect')).toHaveLength(1);
     expect(selected.ops('strokeRect')).toHaveLength(1);
@@ -123,14 +129,14 @@ describe('selection highlight', () => {
     const live = source(strokes);
     const selection = [0];
     renderer.paint(target, preview(live, selection));
-    const drawn = layer().ctx.count('stroke');
+    const drawn = layer().ctx.count('fill');
 
     // The tablet ends a stroke: it is appended to the page cache, the highlight is untouched.
     strokes.push(stroke(9000));
     const appended = renderer.paint(target, preview(live, selection));
     expect(appended.appended).toBe(1);
     expect(appended.selectionDrawn).toBeUndefined();
-    expect(layer().ctx.count('stroke')).toBe(drawn);
+    expect(layer().ctx.count('fill')).toBe(drawn);
 
     // The page turned a quarter: another page size, so another transform.
     const portrait = source(strokes, { pageSize: { width: A4.height, height: A4.width } });
@@ -158,10 +164,39 @@ describe('selection highlight', () => {
     expect(renderer.paint(target, preview(edited, [0, 1, 7])).selectionDrawn).toBe(true);
   });
 
+  it('computes the outlines of a stroke\'s highlight once for a scale: a recolour and a new selection find them', () => {
+    let computed = 0;
+    const spy: Ink = {
+      ...ink,
+      contours: (s) => {
+        computed += 1;
+        return ink.contours(s);
+      },
+    };
+    const surfaces: FakeSurface[] = [];
+    const renderer = new LiveRenderer(() => {
+      const s = new FakeSurface();
+      surfaces.push(s);
+      return s;
+    }, spy);
+    const live = source([stroke(1000), stroke(5000)]);
+    const target = new FakeContext();
+    renderer.paint(target, preview(live, []));
+    expect(computed).toBe(2);
+    renderer.paint(target, preview(live, [0]));
+    // The ring, its band, the hole.
+    expect(computed).toBe(5);
+    renderer.paint(target, preview({ ...live, generation: 2 }, [0]));
+    renderer.paint(target, preview(live, [0]));
+    expect(computed).toBe(5);
+    renderer.paint(target, preview(live, [0, 1]));
+    expect(computed).toBe(8);
+  });
+
   it('shows on dark paper with its lighter colours', () => {
     const { renderer, target, layer } = setup();
     renderer.paint(target, preview(source([stroke(1000)], { background: SLATE }), [0]));
-    expect(layer().ctx.ops('stroke').map((c) => c.strokeStyle)[0]).toBe(SELECTION_COLORS.dark.halo);
+    expect(layer().ctx.ops('fill').map((c) => c.fillStyle)[0]).toBe(SELECTION_COLORS.dark.halo);
     expect(layer().ctx.ops('fillRect')[0].fillStyle).toBe(SELECTION_COLORS.dark.box);
     // The blackboard of a white sheet: the same.
     const board = setup();
@@ -169,7 +204,7 @@ describe('selection highlight', () => {
       board.target,
       preview(source([stroke(1000)], { view: { zoom: 1, x: 0, y: 0, board: true, laser: false } }), [0]),
     );
-    expect(board.layer().ctx.ops('stroke').map((c) => c.strokeStyle)[0]).toBe(SELECTION_COLORS.dark.halo);
+    expect(board.layer().ctx.ops('fill').map((c) => c.fillStyle)[0]).toBe(SELECTION_COLORS.dark.halo);
   });
 
   it('is drawn over the paper image too (a resumed sheet): after it, never under it', () => {
@@ -230,6 +265,9 @@ describe('selection highlight', () => {
     renderer.paint(target, preview(live, []));
     target.reset();
     renderer.paint(target, preview(live, [0]));
-    expect(target.ops('stroke').length).toBe(2);
+    // The ring and its band; no hole in the frame itself (it would take the page out): the ink is drawn again over the ring.
+    const fills = target.ops('fill');
+    expect(fills.every((c) => c.composite === 'source-over')).toBe(true);
+    expect(fills.map((c) => c.fillStyle).slice(-3)).toEqual([SELECTION_COLORS.light.halo, 'rgb(255, 255, 255)', 'rgb(0, 0, 0)']);
   });
 });

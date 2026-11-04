@@ -175,14 +175,18 @@ export function line(x0, y0, x1, y1, start, count = 24) {
   };
 }
 
-/** `strokes.bin` for `strokes` (docs/file-format.md §3): black fountain pen, 0.6 mm, first layer. */
+/**
+ * `strokes.bin` for `strokes` (docs/file-format.md §3): black fountain pen, 0.6 mm, first layer, unless a stroke says
+ * otherwise (`tool`: its code in `Tool::ALL`, `color`, `width`, `layer`).
+ */
 export function strokesBin(strokes) {
   const bytes = [0x41, 0x53, 0x54, 0x4b, 1, ...varint(strokes.length)];
   let last = { x: 0, y: 0, p: 0, t: 0 };
   for (const stroke of strokes) {
     const width = Buffer.alloc(4);
-    width.writeFloatLE(60, 0);
-    bytes.push(1, 0, 0, 0, 255, ...width, ...varint(0), ...varint(stroke.points.length));
+    width.writeFloatLE(stroke.width ?? 60, 0);
+    const { r, g, b, a } = stroke.color ?? { r: 0, g: 0, b: 0, a: 255 };
+    bytes.push(stroke.tool ?? 1, r, g, b, a, ...width, ...varint(stroke.layer ?? 0), ...varint(stroke.points.length));
     for (const point of stroke.points) {
       const next = { x: Math.round(point.x * 100), y: Math.round(point.y * 100), p: Math.round(point.p * 65535), t: point.t };
       bytes.push(...svarint(next.x - last.x), ...svarint(next.y - last.y), ...svarint(next.p - last.p), ...svarint(next.t - last.t));
@@ -229,7 +233,7 @@ const elsewhereInkOf = (page) => [
  * `original.ardoise` (the first version, which has the same background image placement), `background.png`,
  * `audio.opus` (opaque bytes), `text.json` and a member nobody knows. Returns `{ bytes, members, id }`.
  */
-export function sheet({ title, orientation = 'landscape', index = 1, image = true, ink, mark = 'kept as it is' }) {
+export function sheet({ title, orientation = 'landscape', index = 1, image = true, ink, layers = [{ name: 'Layer 1', visible: true }], mark = 'kept as it is' }) {
   const page = PAGE[orientation];
   const id = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
   const noteJson = (extra = {}) => ({
@@ -240,7 +244,7 @@ export function sheet({ title, orientation = 'landscape', index = 1, image = tru
       : {}),
     created: CREATED,
     id,
-    layers: [{ name: 'Layer 1', visible: true }],
+    layers,
     modified: CREATED,
     origin: { kind: 'ardoise' },
     page,

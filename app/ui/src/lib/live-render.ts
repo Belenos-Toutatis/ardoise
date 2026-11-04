@@ -5,8 +5,11 @@
  * - The page background (paper colour, then the image `render_background` made of the paper,
  *   template and texture; slate paper while the blackboard is on) and the finished strokes are
  *   drawn once on an offscreen surface, the cache. New finished strokes are added to it; it is
- *   redrawn only when the strokes are replaced (page change, clear), when the view, the size or
- *   the background changes.
+ *   redrawn only when the strokes are replaced (page change), when the view, the size or the
+ *   background changes.
+ * - An edit (a delete, a colour, an undo: `LiveState.edits`) repaints only the area of the strokes it
+ *   touched: the device pixels around them are cleared and drawn again by the same code as a full
+ *   redraw, restricted to the strokes crossing them, so that they end up the same (`planRepaint`).
  * - Each frame copies the cache, then draws the stroke in progress (its outline recomputed by
  *   `ink.ts`, the geometry of the exports), the laser dot and, on the control window's preview,
  *   the projected area.
@@ -15,8 +18,9 @@
  *   cache: the highlight of the chosen strokes (their outlines, found in the same cache of outlines,
  *   and the box around them) has a surface of its own, redrawn only when the selection, the view,
  *   the size or the strokes change, so that choosing strokes never redraws the page, and a stroke
- *   the tablet ends meanwhile is appended as usual. The lasso being drawn is a few lines per frame.
- *   The presentation and the share's viewers never get a selection.
+ *   the tablet ends meanwhile is appended as usual. The highlight goes around the ink and leaves a hole
+ *   where the ink is: the page below shows there, so that the strokes keep their real colour. The lasso
+ *   being drawn is a few lines per frame. The presentation and the share's viewers never get a selection.
  *
  * Strokes are filled with the non-zero rule. Looks follow `ardoise-render/src/look.rs` where a
  * flat fill can: felt-tip core at 0.9, chalk at 0.95, highlighter multiplied on light paper and
@@ -26,6 +30,7 @@ import { strokeBounds, union, type Rect, type Vec } from './editor/geometry';
 import { backgroundWidth } from './editor/view';
 import type { Ink, Tool } from './ink';
 import type { LiveViewState } from './live';
+import type { StrokeEdit } from './live-edits';
 import {
   fitTransform,
   intersect,
@@ -49,7 +54,11 @@ export interface Ctx2D {
   fillRect(x: number, y: number, width: number, height: number): void;
   strokeRect(x: number, y: number, width: number, height: number): void;
   drawImage(image: CanvasImageSource, dx: number, dy: number, dw?: number, dh?: number): void;
+  save(): void;
+  restore(): void;
   beginPath(): void;
+  rect(x: number, y: number, width: number, height: number): void;
+  clip(): void;
   moveTo(x: number, y: number): void;
   lineTo(x: number, y: number): void;
   closePath(): void;
@@ -80,13 +89,30 @@ const PEN_RING = 'rgba(47, 111, 223, 0.9)';
 
 /** The selection's colours on light paper and on dark paper (the editor's accent, then a lighter blue). */
 export const SELECTION_COLORS = {
-  light: { line: '#2f6fdf', halo: 'rgba(47, 111, 223, 0.28)', box: 'rgba(47, 111, 223, 0.08)' },
-  dark: { line: '#8fb8ff', halo: 'rgba(143, 184, 255, 0.32)', box: 'rgba(143, 184, 255, 0.12)' },
+  light: { line: '#2f6fdf', halo: '#4f87e6', box: 'rgba(47, 111, 223, 0.08)' },
+  dark: { line: '#8fb8ff', halo: '#8fb8ff', box: 'rgba(143, 184, 255, 0.12)' },
 } as const;
-/** Width of the selection's outline and of the glow around it, CSS pixels. */
-const SELECTION_LINE_PX = 1.5;
-const SELECTION_HALO_PX = 6;
+/**
+ * The ring around the chosen strokes: the same strokes, wider than the ink by these many CSS pixels (half
+ * on each side). The halo's colour (opaque: rings that overlap do not add up), then a band of paper colour
+ * between it and the ink, which keeps blue ink apart from the blue halo.
+ */
+const SELECTION_HALO_PX = 7;
+const SELECTION_GAP_PX = 3;
+/** The hole left for the ink goes half of this past its outline: antialiased edges keep their real colour too. */
+const SELECTION_HOLE_PX = 1;
 const NO_SELECTION: readonly number[] = [];
+
+/**
+ * Device pixels added around the strokes an edit touched, and around the strokes tried against that area:
+ * antialiasing may touch the pixel next to the one the outline ends in.
+ */
+const REPAINT_MARGIN_PX = 2;
+/** Beyond these shares of the canvas or of the strokes, an edit redraws everything: little would be saved. */
+const REPAINT_MAX_AREA = 0.6;
+const REPAINT_MAX_STROKES = 0.6;
+/** So few strokes cost nothing, whatever their share of the page. */
+const REPAINT_FEW_STROKES = 16;
 
 /** Paper colours of `ardoise-render/src/background.rs`. */
 const PAPERS: Record<Exclude<Paper, { custom: Rgba }>, [number, number, number]> = {
@@ -146,9 +172,11 @@ export interface Scene {
   /** The rendered paper, drawn over the paper colour once loaded. */
   backgroundImage: CanvasImageSource | null;
   layers: readonly Layer[];
-  /** Finished strokes; `generation` changes when they are replaced rather than appended to. */
+  /** Finished strokes; `generation` changes when they are replaced or edited rather than appended to. */
   strokes: readonly Stroke[];
   generation: number;
+  /** What the last edits touched: a change of `generation` found here repaints only that area. */
+  edits: readonly StrokeEdit[];
   current: Stroke | null;
   /** Temporary marks written over the presentation (not part of the note), and the one in progress. */
   marks: readonly Stroke[];
@@ -179,6 +207,7 @@ export interface LiveSource {
   layers: readonly Layer[];
   strokes: readonly Stroke[];
   generation: number;
+  edits?: readonly StrokeEdit[];
   current: Stroke | null;
   hover: Vec | null;
   view: LiveViewState;
@@ -217,6 +246,7 @@ export function buildScene(live: LiveSource, options: SceneOptions): Scene {
     layers: live.layers,
     strokes: live.strokes,
     generation: live.generation,
+    edits: live.edits ?? [],
     current: live.current,
     marks: options.marks ?? [],
     markCurrent: options.markCurrent ?? null,
@@ -243,6 +273,8 @@ export function backgroundPixels(scene: Pick<Scene, 'page' | 'transform' | 'pixe
 export interface PaintReport {
   /** The cache was redrawn from scratch. */
   full: boolean;
+  /** Set when an edit repainted an area of the cache: the strokes drawn in it. */
+  repainted?: number;
   /** Finished strokes added to the cache. */
   appended: number;
   /** Samples of the stroke in progress drawn. */
@@ -266,6 +298,59 @@ function fillContours(ctx: Ctx2D, contours: readonly Float32Array[]): void {
   ctx.fill('nonzero');
 }
 
+/** A finished stroke's geometry, kept per stroke. */
+interface Outline {
+  contours: Float32Array[];
+  /** The box of the contours, page units; null when there are none. */
+  bounds: Rect | null;
+  /** The cache redraw (`LiveRenderer.cacheRedraw`) that has this stroke on it. */
+  onCache: number;
+  /** Its selection's highlight, for the page scale it was made at (a selection often comes back: a colour, then Esc). */
+  rings?: Rings;
+}
+
+/** The outlines of the highlight of a stroke, each the stroke made wider. */
+interface Rings {
+  scale: number;
+  halo: Float32Array[];
+  gap: Float32Array[];
+  hole: Float32Array[];
+}
+
+function contoursBounds(contours: readonly Float32Array[]): Rect | null {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const c of contours) {
+    for (let i = 0; i + 1 < c.length; i += 2) {
+      if (c[i] < x0) x0 = c[i];
+      if (c[i] > x1) x1 = c[i];
+      if (c[i + 1] < y0) y0 = c[i + 1];
+      if (c[i + 1] > y1) y1 = c[i + 1];
+    }
+  }
+  return x1 < x0 ? null : { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+}
+
+/** A box of device pixels, whole numbers. */
+interface PixelBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/** What an edit needs done to the cache. */
+interface Repaint {
+  /** Null when no pixel of the canvas changes. */
+  area: PixelBox | null;
+  /** The strokes crossing `area`, in drawing order. */
+  crossing: Stroke[];
+  /** The strokes finished since the last paint and not touched by the edit: they go on top of everything. */
+  added: Stroke[];
+}
+
 export class LiveRenderer {
   private ink: Ink | null;
   private readonly createSurface: () => Surface | null;
@@ -274,11 +359,14 @@ export class LiveRenderer {
   private cacheSize = '';
   private cacheImage: CanvasImageSource | null = null;
   private cacheStrokes: readonly Stroke[] | null = null;
+  private cacheGeneration = 0;
+  /** Counts the full redraws of the cache, which say whether a stroke is on it (`Outline.onCache`). */
+  private cacheRedraw = 0;
   /** Strokes of `cacheStrokes` already on the cache, and the highest layer rank among them. */
   private drawn = 0;
   private topRank = -1;
-  /** Outlines of finished strokes (they never change). */
-  private outlines = new WeakMap<Stroke, Float32Array[]>();
+  /** Outlines of finished strokes (their points never change, and the colour is not part of them). */
+  private outlines = new WeakMap<Stroke, Outline>();
   /** The selection's highlight: its own surface, and what it was drawn for. */
   private selectionLayer: Surface | null = null;
   private selectionKey = '';
@@ -303,14 +391,27 @@ export class LiveRenderer {
     this.selectionKey = '';
   }
 
-  private contours(stroke: Stroke): Float32Array[] {
-    if (!this.ink) return [];
-    let c = this.outlines.get(stroke);
-    if (!c) {
-      c = this.ink.contours(stroke);
-      this.outlines.set(stroke, c);
+  private outline(stroke: Stroke): Outline | null {
+    if (!this.ink) return null;
+    let outline = this.outlines.get(stroke);
+    if (!outline) {
+      const contours = this.ink.contours(stroke);
+      outline = { contours, bounds: contoursBounds(contours), onCache: 0 };
+      this.outlines.set(stroke, outline);
     }
-    return c;
+    return outline;
+  }
+
+  private contours(stroke: Stroke): Float32Array[] {
+    return this.outline(stroke)?.contours ?? [];
+  }
+
+  /** Draws a finished stroke on the cache. */
+  private drawOnCache(ctx: Ctx2D, stroke: Stroke, dark: boolean): void {
+    const outline = this.outline(stroke);
+    if (!outline) return;
+    outline.onCache = this.cacheRedraw;
+    this.drawStroke(ctx, stroke, outline.contours, dark);
   }
 
   private drawStroke(ctx: Ctx2D, stroke: Stroke, contours: readonly Float32Array[], dark: boolean): void {
@@ -338,8 +439,8 @@ export class LiveRenderer {
     return layers[stroke.layer]?.visible !== false;
   }
 
-  /** Background and every finished stroke, from scratch. */
-  private redraw(ctx: Ctx2D, scene: Scene, width: number, height: number): void {
+  /** What is under the strokes: the surround, the paper, its picture. Ends with the page transform set. */
+  private drawBackground(ctx: Ctx2D, scene: Scene, width: number, height: number): void {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, width, height);
     if (scene.surround) {
@@ -351,12 +452,115 @@ export class LiveRenderer {
     ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
     ctx.fillRect(0, 0, scene.page.width, scene.page.height);
     if (scene.backgroundImage) ctx.drawImage(scene.backgroundImage, 0, 0, scene.page.width, scene.page.height);
-    const dark = isDarkPaper(scene.background.paper);
-    for (const stroke of drawingOrder(scene.strokes, scene.layers)) {
-      this.drawStroke(ctx, stroke, this.contours(stroke), dark);
-    }
+  }
+
+  private noteDrawn(scene: Scene): void {
     this.drawn = scene.strokes.length;
     this.topRank = scene.strokes.reduce((top, s) => Math.max(top, this.rank(s, scene.layers)), -1);
+    this.cacheGeneration = scene.generation;
+  }
+
+  /** Background and every finished stroke, from scratch. */
+  private redraw(ctx: Ctx2D, scene: Scene, width: number, height: number): void {
+    this.cacheRedraw += 1;
+    this.drawBackground(ctx, scene, width, height);
+    const dark = isDarkPaper(scene.background.paper);
+    for (const stroke of drawingOrder(scene.strokes, scene.layers)) this.drawOnCache(ctx, stroke, dark);
+    this.noteDrawn(scene);
+  }
+
+  /** The edits since the last paint; null when one of those changes is not an edit. */
+  private editsSince(scene: Scene): StrokeEdit[] | null {
+    const since = this.cacheGeneration;
+    const missed = scene.generation - since;
+    if (missed <= 0) return null;
+    const edits = scene.edits.filter((edit) => edit.generation > since && edit.generation <= scene.generation);
+    return edits.length === missed ? edits : null;
+  }
+
+  /**
+   * What the edits since the last paint ask of the cache, or null if only a full redraw is right or
+   * worth it. Nothing is drawn here. Whole device pixels: a pixel of the area is replaced entirely, so
+   * it owes nothing to what was there, and no stroke outside the list can reach it (it would have to
+   * come within `REPAINT_MARGIN_PX`). Strokes finished meanwhile stay out of the area and are appended
+   * after it, which is right only if they come last in the drawing order: that is checked here.
+   */
+  private planRepaint(scene: Scene, width: number, height: number): Repaint | null {
+    if (!this.ink) return null;
+    const edits = this.editsSince(scene);
+    if (!edits) return null;
+    const scale = scene.transform.scale * scene.pixelRatio;
+    const originX = scene.transform.x * scene.pixelRatio;
+    const originY = scene.transform.y * scene.pixelRatio;
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const edit of edits) {
+      for (const stroke of edit.touched) {
+        const outline = this.outline(stroke);
+        if (!outline) continue;
+        // The area covers it: it needs no drawing of its own, even if it was finished just now.
+        outline.onCache = this.cacheRedraw;
+        const b = outline.bounds;
+        if (!b || !this.visible(stroke, scene.layers)) continue;
+        x0 = Math.min(x0, b.x);
+        y0 = Math.min(y0, b.y);
+        x1 = Math.max(x1, b.x + b.width);
+        y1 = Math.max(y1, b.y + b.height);
+      }
+    }
+    let area: PixelBox | null = null;
+    if (x1 >= x0) {
+      const box = {
+        x0: Math.max(0, Math.floor(x0 * scale + originX) - REPAINT_MARGIN_PX),
+        y0: Math.max(0, Math.floor(y0 * scale + originY) - REPAINT_MARGIN_PX),
+        x1: Math.min(width, Math.ceil(x1 * scale + originX) + REPAINT_MARGIN_PX),
+        y1: Math.min(height, Math.ceil(y1 * scale + originY) + REPAINT_MARGIN_PX),
+      };
+      if (box.x1 > box.x0 && box.y1 > box.y0) area = box;
+    }
+    if (area && (area.x1 - area.x0) * (area.y1 - area.y0) > REPAINT_MAX_AREA * width * height) return null;
+
+    const crossing: Stroke[] = [];
+    const added: Stroke[] = [];
+    const order = drawingOrder(scene.strokes, scene.layers);
+    for (const stroke of order) {
+      const outline = this.outline(stroke);
+      if (!outline) continue;
+      if (outline.onCache !== this.cacheRedraw) {
+        added.push(stroke);
+        continue;
+      }
+      // Under a stroke that is not on the cache yet: drawing that one last would put it on top of this one.
+      if (added.length > 0) return null;
+      const b = outline.bounds;
+      if (
+        area &&
+        b &&
+        b.x * scale + originX < area.x1 + REPAINT_MARGIN_PX &&
+        (b.x + b.width) * scale + originX > area.x0 - REPAINT_MARGIN_PX &&
+        b.y * scale + originY < area.y1 + REPAINT_MARGIN_PX &&
+        (b.y + b.height) * scale + originY > area.y0 - REPAINT_MARGIN_PX
+      ) {
+        crossing.push(stroke);
+      }
+    }
+    if (crossing.length > REPAINT_MAX_STROKES * order.length && crossing.length > REPAINT_FEW_STROKES) return null;
+    return { area, crossing, added };
+  }
+
+  /** The area of the cache, drawn by the same code as a full redraw, with what crosses it. */
+  private repaintArea(ctx: Ctx2D, scene: Scene, width: number, height: number, area: PixelBox, crossing: readonly Stroke[]): void {
+    const dark = isDarkPaper(scene.background.paper);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.beginPath();
+    ctx.rect(area.x0, area.y0, area.x1 - area.x0, area.y1 - area.y0);
+    ctx.clip();
+    this.drawBackground(ctx, scene, width, height);
+    for (const stroke of crossing) this.drawOnCache(ctx, stroke, dark);
+    ctx.restore();
   }
 
   /** Paints `scene` on `target`. */
@@ -373,7 +577,6 @@ export class LiveRenderer {
       t.y,
       scene.page.width,
       scene.page.height,
-      scene.generation,
       JSON.stringify(scene.background),
       JSON.stringify(scene.layers),
       scene.surround,
@@ -384,13 +587,17 @@ export class LiveRenderer {
     if (!this.cache) this.cache = this.createSurface();
     const cache = this.cache;
     const surface = cache?.ctx ?? target;
-    const stale =
-      !cache ||
-      key !== this.cacheKey ||
-      scene.backgroundImage !== this.cacheImage ||
-      scene.strokes !== this.cacheStrokes ||
-      scene.strokes.length < this.drawn;
-    if (stale) {
+    const stale = !cache || key !== this.cacheKey || scene.backgroundImage !== this.cacheImage || scene.strokes !== this.cacheStrokes;
+    const edited = !stale && scene.generation !== this.cacheGeneration;
+    const repaint = edited ? this.planRepaint(scene, width, height) : null;
+    if (repaint) {
+      if (repaint.area) this.repaintArea(surface, scene, width, height, repaint.area, repaint.crossing);
+      if (repaint.added.length > 0) this.pageTransform(surface, scene);
+      for (const s of repaint.added) this.drawOnCache(surface, s, dark);
+      this.noteDrawn(scene);
+      report.repainted = repaint.area ? repaint.crossing.length : 0;
+      report.appended = repaint.added.length;
+    } else if (stale || edited || scene.strokes.length < this.drawn) {
       if (cache && this.cacheSize !== `${width}x${height}`) {
         cache.resize(width, height);
         this.cacheSize = `${width}x${height}`;
@@ -409,7 +616,7 @@ export class LiveRenderer {
       } else {
         this.pageTransform(surface, scene);
         for (const s of added) {
-          if (this.visible(s, scene.layers)) this.drawStroke(surface, s, this.contours(s), dark);
+          if (this.visible(s, scene.layers)) this.drawOnCache(surface, s, dark);
           this.topRank = Math.max(this.topRank, this.rank(s, scene.layers));
         }
         this.drawn = scene.strokes.length;
@@ -422,7 +629,7 @@ export class LiveRenderer {
       target.clearRect(0, 0, width, height);
       target.drawImage(cache.image, 0, 0);
     }
-    this.paintSelection(target, scene, key, report);
+    this.paintSelection(target, scene, `${key}|${scene.generation}`, report);
     const current = scene.current;
     if (current && current.points.length > 0 && this.ink && this.visible(current, scene.layers)) {
       this.pageTransform(target, scene);
@@ -459,9 +666,13 @@ export class LiveRenderer {
     const layer = this.selectionLayer;
     const wanted = `${key}|${dark}`;
     if (!layer) {
-      // No surface (a stand-in): drawn on the frame itself.
+      // No surface (a stand-in): drawn on the frame itself, where no hole can be made: the ink goes back over the ring.
       this.pageTransform(target, scene);
-      this.drawSelection(target, scene, dark);
+      this.drawSelection(target, scene, dark, false);
+      for (const i of scene.selection) {
+        const stroke = scene.strokes[i];
+        if (stroke && this.visible(stroke, scene.layers)) this.drawStroke(target, stroke, this.contours(stroke), dark);
+      }
       report.selectionDrawn = true;
       return;
     }
@@ -473,7 +684,7 @@ export class LiveRenderer {
       layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
       layer.ctx.clearRect(0, 0, width, height);
       this.pageTransform(layer.ctx, scene);
-      this.drawSelection(layer.ctx, scene, dark);
+      this.drawSelection(layer.ctx, scene, dark, true);
       this.selectionKey = wanted;
       this.selectionFor = scene.selection;
       report.selectionDrawn = true;
@@ -482,27 +693,55 @@ export class LiveRenderer {
     target.drawImage(layer.image, 0, 0);
   }
 
-  /** The chosen strokes (visible ones) outlined with a glow, and a dashed box around them, in page units. */
-  private drawSelection(ctx: Ctx2D, scene: Scene, dark: boolean): void {
+  private rings(stroke: Stroke, scale: number): Rings | null {
+    const outline = this.outline(stroke);
+    if (!outline || !this.ink) return null;
+    if (outline.rings?.scale === scale) return outline.rings;
+    const { tool, width, points } = stroke;
+    // A width is scaled by the pressure: this one gives the wanted pixels where the pen pressed hardest.
+    const pressure = points.reduce((most, p) => Math.max(most, p.pressure), 0);
+    const share = this.ink.widthAt(tool, width, pressure) / width || 1;
+    const wider = (px: number) => this.ink?.contours({ tool, points, width: width + px / scale / share }) ?? [];
+    outline.rings = { scale, halo: wider(SELECTION_HALO_PX), gap: wider(SELECTION_GAP_PX), hole: wider(SELECTION_HOLE_PX) };
+    return outline.rings;
+  }
+
+  /**
+   * The chosen strokes (visible ones) ringed, and a dashed box around them, in page units. Everything drawn
+   * here is then taken out where the ink is: this surface goes over the page, and the page below it shows
+   * the strokes as they are, with their colour, their tool's look and whatever lies over them.
+   *
+   * Fills, one path per stroke: measured on 100 strokes of 30 samples in a real WebView2, one path holding the
+   * whole selection takes 70 to 90 ms of calls and two frames are late, and `stroke()` makes one frame very late
+   * (some 90 ms in the graphics process) on strokes it has not seen yet.
+   */
+  private drawSelection(ctx: Ctx2D, scene: Scene, dark: boolean, hole: boolean): void {
     const colors = dark ? SELECTION_COLORS.dark : SELECTION_COLORS.light;
     const scale = scene.transform.scale || 1;
     let box: Rect | null = null;
-    ctx.beginPath();
+    const rings: Rings[] = [];
     for (const i of scene.selection) {
       const stroke = scene.strokes[i];
       if (!stroke || !this.visible(stroke, scene.layers)) continue;
-      addContours(ctx, this.contours(stroke));
+      const ring = this.rings(stroke, scale);
+      if (ring) rings.push(ring);
       box = union(box, strokeBounds(stroke));
     }
-    ctx.strokeStyle = colors.halo;
-    ctx.lineWidth = SELECTION_HALO_PX / scale;
-    ctx.stroke();
-    ctx.strokeStyle = colors.line;
-    ctx.lineWidth = SELECTION_LINE_PX / scale;
-    ctx.stroke();
     if (!box) return;
     ctx.fillStyle = colors.box;
     ctx.fillRect(box.x, box.y, box.width, box.height);
+    ctx.fillStyle = colors.halo;
+    for (const ring of rings) fillContours(ctx, ring.halo);
+    const [r, g, b] = paperRgb(scene.background.paper);
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    for (const ring of rings) fillContours(ctx, ring.gap);
+    if (hole) {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = '#000';
+      for (const ring of rings) fillContours(ctx, ring.hole);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.strokeStyle = colors.line;
     ctx.setLineDash?.([6 / scale, 4 / scale]);
     ctx.lineWidth = 1.5 / scale;
     ctx.strokeRect(box.x, box.y, box.width, box.height);
