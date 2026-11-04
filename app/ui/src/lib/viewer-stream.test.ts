@@ -22,6 +22,15 @@ function parseAll(chunks: string[]): { payloads: string[]; retry: number | null 
 }
 
 describe('SSE parser', () => {
+  it('ignores the padding sent through a proxy, line after line, and finds the message after it', () => {
+    const parser = new SseParser();
+    const line = `:${' '.repeat(1022)}\n`;
+    const padded = `retry: 2000\n\n${line.repeat(2048)}data: {"type":"waiting"}\n\n`;
+    const messages: string[] = [];
+    for (let at = 0; at < padded.length; at += 4096) messages.push(...parser.feed(padded.slice(at, at + 4096)));
+    expect(messages).toEqual(['{"type":"waiting"}']);
+  });
+
   it('reads a message of megabytes arriving in small chunks in one pass', () => {
     const big = JSON.stringify({ type: 'note', page: { strokes: 'x'.repeat(3_000_000) } });
     const text = `data: ${big}\n\ndata: {"type":"waiting"}\r\n\r\n`;

@@ -344,6 +344,16 @@ described on squid-users, November 2010). Since then the join answers `200 {"joi
 `Content-Length`, and `GET /events` follows 70 ms after it through the same proxy. The event stream itself is not
 held back by e2guardian: live strokes arrive at once.
 
+The next day the page stayed on its code form with "1 screen connected" on the PC (2026-11-04). e2guardian keeps any
+answer to itself until it has read enough of it to scan, whatever its type (`text/event-stream`, `text/plain`,
+`application/octet-stream`, `application/json`…): measured through it, a stream was held up to 450 KB and passed from
+512 KB, and each message then arrived at once. A note with a large paper had got through the day before; a small page or
+the waiting screen never did. So a stream whose request says it came through a proxy (`Via`, `Forwarded`,
+`X-Forwarded-For`) starts with 2 MiB of blank SSE comments (a few hundred ms on a LAN, each time it connects). A filter
+that adds none of these headers gets no padding: the page then says, after 12 s of "connecting", that a web filter may be
+holding the connection. It leaves the code form as soon as the code is accepted: another click would only open one more
+stream, counted as one more screen on the PC.
+
 A first guess was wrong and is noted here so that it is not made again: that this PC, closing each connection first,
 kept its address pairs reserved for 2 minutes (TIME_WAIT) and that the router's reused ports fell on them. Making the
 browser close first changed nothing at school. It stays, as most servers do: after an answer the server waits up to

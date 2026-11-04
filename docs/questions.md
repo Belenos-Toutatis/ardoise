@@ -78,3 +78,23 @@ Mais sur l'ordinateur qui reçoit l'image, on ne peut rien faire, alors qu'il se
 Ces réglages ne changent rien sur le PC d'Ardoise, ni le contenu partagé : c'est toujours le PC qui choisit ce qui est
 montré. Pendant le mode direct, l'autre écran suit la vue de la présentation tant qu'on n'y touche pas, et un bouton l'y
 ramène. SPEC §4.10 est mis à jour.
+
+## Q9 — Reprendre le direct sur une feuille, et retoucher pendant le direct (jalon M12, 2026-11-04) — **tranchée**
+
+L'utilisateur demande de pouvoir reprendre le mode direct sur une feuille existante après une interruption, et de sélectionner quelque chose pendant le direct pour le supprimer ou changer sa couleur, sans passer par l'éditeur.
+
+**Décisions de l'utilisateur (2026-11-04)** :
+- On sélectionne dans la **fenêtre de commande seulement** : rien de la sélection n'apparaît au vidéoprojecteur, seul le résultat.
+- La reprise écrit dans la **même note**, dont l'état d'origine reste récupérable.
+- On reprend **une feuille** (depuis le menu d'une note ou l'éditeur), pas un cours entier.
+- **Ctrl+Z** annule la suppression, le changement de couleur et l'effacement de la page, pas l'écriture de la tablette.
+
+**Choix par défaut, à contester si besoin** (ils ne changent pas la demande) :
+- La page suivante, après une feuille reprise, crée une note neuve.
+- Si la feuille n'est pas tenue comme la tablette (portrait ou paysage), le direct suit la feuille pour cette session : la note n'est jamais tournée, et le bouton pour tourner est désactivé sur cette page.
+- Si la feuille n'a pas le format de la tablette, l'écriture est mise à l'échelle pour couvrir la feuille, sans déformation.
+- Si la feuille a changé ailleurs pendant le direct, une nouvelle note est créée dans le même classeur, et Ardoise le dit.
+- Le vidéoprojecteur et les écrans du partage montrent le fond de la feuille reprise (modèle, texture, image ou page de PDF), et jamais ses calques masqués.
+- Déplacer une sélection reste réservé à l'éditeur.
+
+SPEC §4.2 est mis à jour et le jalon M12 est ajouté à ROADMAP.md. Conception : `docs/design/tablet-live-classroom.md`, « M12 ».

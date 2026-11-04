@@ -84,6 +84,11 @@ export class ViewerState {
     return this.screen === 'live' || this.screen === 'note' ? this.screen : null;
   }
 
+  /** The code was accepted: the form goes, the stream comes next (a `401` brings the form back). */
+  joined(): void {
+    this.screen = 'connecting';
+  }
+
   /** The connection changed. */
   status(status: StreamStatus): void {
     switch (status) {

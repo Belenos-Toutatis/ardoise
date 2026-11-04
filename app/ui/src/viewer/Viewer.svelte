@@ -20,6 +20,8 @@
   import CodeForm from './CodeForm.svelte';
   import ViewerCanvas from './ViewerCanvas.svelte';
 
+  /** Still nothing from the PC after this long: a web filter of the network may be holding it. */
+  const SLOW_MS = 12_000;
   /** The cursor and the full-screen button hide after this long without moving. */
   const HIDE_CURSOR_MS = 2000;
 
@@ -30,6 +32,7 @@
   /** The code was just accepted: a `401` right after it means that the browser dropped the cookie. */
   let joined = false;
   let cookiesRefused = $state(false);
+  let slow = $state(false);
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
 
   const canFullscreen = typeof document !== 'undefined' && document.fullscreenEnabled === true;
@@ -71,11 +74,19 @@
     document.title = t('viewer.title');
   });
 
+  $effect(() => {
+    if (viewer.screen !== 'connecting') return;
+    slow = false;
+    const timer = setTimeout(() => (slow = true), SLOW_MS);
+    return () => clearTimeout(timer);
+  });
+
   async function onjoin(code: string): Promise<JoinResult> {
     cookiesRefused = false;
     const result = await join(code);
     if (result.ok) {
       joined = true;
+      viewer.joined();
       stream.start();
     }
     return result;
@@ -190,6 +201,9 @@
     <section class="panel" data-view="connecting">
       <h1 class="brand">{t('viewer.brand')}</h1>
       <p role="status">{viewer.reconnecting ? t('viewer.reconnecting') : t('viewer.connecting')}</p>
+      {#if slow}
+        <p data-hint="slow">{t('viewer.slow')}</p>
+      {/if}
     </section>
   {/if}
 

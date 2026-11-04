@@ -59,6 +59,13 @@ const COALESCE_BYTES: usize = 64 * 1024;
 /// First bytes of an event stream: the browser waits 2 s before reconnecting.
 const STREAM_PREAMBLE: &str = "retry: 2000\n\n";
 const PING: &[u8] = b": ping\n\n";
+/// What starts an event stream that came through a proxy: blank comments, which the viewer
+/// ignores. A filtering proxy keeps an answer to itself until it has read enough of it to scan,
+/// whatever its type: e2guardian at a school held every small stream, so that the page stayed on
+/// its code form (measured 2026-11-04: held up to 450 KB, passed from 512 KB, and each message
+/// at once after that). Twice that and more, for other settings; a few hundred ms on a LAN.
+const PROXY_PADDING_LINE: usize = 1024;
+const PROXY_PADDING_LINES: usize = 2048;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -739,9 +746,16 @@ impl Server {
         if !lock(&self.connections).advance(id, Phase::Stream) {
             return;
         }
-        self.note(format_args!("#{id} stream open"));
+        self.note(format_args!(
+            "#{id} stream open{}",
+            if head.proxied {
+                " (padded for the proxy)"
+            } else {
+                ""
+            }
+        ));
         let started = Instant::now();
-        stream_events(stream, &viewer, self.limits.ping, shutdown).await;
+        stream_events(stream, &viewer, self.limits.ping, head.proxied, shutdown).await;
         self.note(format_args!(
             "#{id} stream closed after {:.1} s",
             started.elapsed().as_secs_f64()
@@ -896,11 +910,20 @@ async fn reply(
     }
 }
 
+/// See `PROXY_PADDING_LINE`.
+fn proxy_padding() -> Vec<u8> {
+    let mut line = vec![b' '; PROXY_PADDING_LINE];
+    line[0] = b':';
+    line[PROXY_PADDING_LINE - 1] = b'\n';
+    line.repeat(PROXY_PADDING_LINES)
+}
+
 /// The event stream of one viewer.
 async fn stream_events(
     stream: TcpStream,
     viewer: &Viewer,
     ping_every: Duration,
+    padded: bool,
     shutdown: &mut watch::Receiver<bool>,
 ) {
     let (mut reader, mut writer) = stream.into_split();
@@ -909,6 +932,9 @@ async fn stream_events(
         .header("Cache-Control", http::NO_STORE)
         .finish();
     head.extend_from_slice(STREAM_PREAMBLE.as_bytes());
+    if padded {
+        head.extend_from_slice(&proxy_padding());
+    }
     if !write_stream(&mut writer, &head, viewer, shutdown).await {
         return;
     }
