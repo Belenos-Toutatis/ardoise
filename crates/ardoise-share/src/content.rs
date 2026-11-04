@@ -98,6 +98,9 @@ struct Queue {
     in_flight_bytes: usize,
     /// The current live subscription, if live batches are expected.
     live: Option<LiveSubscription>,
+    /// The picture of the paper last queued for this viewer, which its browser keeps: the same one
+    /// is not sent twice to it (compared by identity, see [`State::last_paper`]).
+    paper: Option<Frame>,
     /// The queue overflowed: the stream is closed without `end`.
     kicked: bool,
     /// The viewer left (or the share stopped): nothing is queued any more.
@@ -108,6 +111,41 @@ struct LiveSubscription {
     id: u64,
     /// A first batch was queued (the next ones get `reset: false`).
     started: bool,
+    /// The picture of the paper to queue right after the first batch: after its snapshot.
+    paper: Option<Frame>,
+}
+
+impl Queue {
+    /// Adds `frame`; a full queue is emptied and marked, and false tells the caller to wake the
+    /// stream ([`Viewer::settled`]).
+    fn add(&mut self, frame: Frame) -> bool {
+        let messages = self.frames.len() + self.in_flight;
+        let bytes = self.bytes.saturating_add(self.in_flight_bytes);
+        let full = messages >= QUEUE_MESSAGES
+            || (messages > 0 && bytes.saturating_add(frame.len()) > QUEUE_BYTES);
+        if full {
+            self.kicked = true;
+            self.frames.clear();
+            self.bytes = 0;
+            return false;
+        }
+        self.bytes += frame.len();
+        self.frames.push_back(frame);
+        true
+    }
+
+    /// Adds the picture of the paper, unless this viewer got that one last.
+    fn add_paper(&mut self, paper: &Frame) -> bool {
+        if self
+            .paper
+            .as_ref()
+            .is_some_and(|known| Arc::ptr_eq(known, paper))
+        {
+            return true;
+        }
+        self.paper = Some(Arc::clone(paper));
+        self.add(Arc::clone(paper))
+    }
 }
 
 /// What a stream has to write.
@@ -170,23 +208,21 @@ impl Viewer {
         if queue.closed || queue.kicked {
             return Err(ViewerGone);
         }
-        let messages = queue.frames.len() + queue.in_flight;
-        let bytes = queue.bytes.saturating_add(queue.in_flight_bytes);
-        let full = messages >= QUEUE_MESSAGES
-            || (messages > 0 && bytes.saturating_add(frame.len()) > QUEUE_BYTES);
-        if full {
-            queue.kicked = true;
-            queue.frames.clear();
-            queue.bytes = 0;
-            drop(queue);
-            self.kick.notify_one();
-            return Err(ViewerGone);
-        }
-        queue.bytes += frame.len();
-        queue.frames.push_back(frame);
+        let added = queue.add(frame);
+        self.settled(queue, added)
+    }
+
+    /// Lets the queue go and wakes the stream: messages to write, or (`added` false) a queue that
+    /// overflowed.
+    fn settled(&self, queue: MutexGuard<'_, Queue>, added: bool) -> Result<(), ViewerGone> {
         drop(queue);
-        self.data.notify_one();
-        Ok(())
+        if added {
+            self.data.notify_one();
+            Ok(())
+        } else {
+            self.kick.notify_one();
+            Err(ViewerGone)
+        }
     }
 
     /// A live batch of the subscription `subscription` ([`LiveViewer::send`]).
@@ -195,19 +231,28 @@ impl Viewer {
         if queue.closed || queue.kicked {
             return Err(ViewerGone);
         }
-        let reset = match queue.live.as_mut() {
-            Some(live) if live.id == subscription => !std::mem::replace(&mut live.started, true),
+        let (reset, paper) = match queue.live.as_mut() {
+            Some(live) if live.id == subscription => (
+                !std::mem::replace(&mut live.started, true),
+                live.paper.take(),
+            ),
             // An earlier subscription that the share stopped: its batches must not arrive
             // after what replaced it.
             _ => return Err(ViewerGone),
         };
         // Built under the lock: `reset` must be true for the first batch in the queue.
         let frame = live_frame(reset, batch_json);
-        self.enqueue(queue, frame)
+        let mut added = queue.add(frame);
+        // The first batch holds the snapshot: the paper comes right after it.
+        if let Some(paper) = paper {
+            added = added && queue.add_paper(&paper);
+        }
+        self.settled(queue, added)
     }
 
-    /// Starts expecting the live batches of `subscription`; false if the viewer is gone.
-    fn begin_live(&self, subscription: u64) -> bool {
+    /// Starts expecting the live batches of `subscription`, with `paper` to follow the first one;
+    /// false if the viewer is gone.
+    fn begin_live(&self, subscription: u64, paper: Option<Frame>) -> bool {
         let mut queue = lock(&self.queue);
         if queue.closed || queue.kicked {
             return false;
@@ -215,8 +260,40 @@ impl Viewer {
         queue.live = Some(LiveSubscription {
             id: subscription,
             started: false,
+            paper,
         });
         true
+    }
+
+    /// The paper of the live page changed: a viewer waiting for its snapshot gets it after that,
+    /// a viewer following gets it now. No message for plain paper: the snapshot says that the page
+    /// wants no picture. Nothing for a viewer out of live mode: its next subscription brings it.
+    fn live_paper(&self, paper: Option<&Frame>) {
+        let mut queue = lock(&self.queue);
+        if queue.closed || queue.kicked {
+            return;
+        }
+        let Some(live) = queue.live.as_mut() else {
+            return;
+        };
+        if !live.started {
+            live.paper = paper.cloned();
+            return;
+        }
+        if let Some(paper) = paper {
+            let added = queue.add_paper(paper);
+            let _ = self.settled(queue, added);
+        }
+    }
+
+    /// The paper of the frozen image, right after it.
+    fn frozen_paper(&self, paper: &Frame) {
+        let mut queue = lock(&self.queue);
+        if queue.closed || queue.kicked {
+            return;
+        }
+        let added = queue.add_paper(paper);
+        let _ = self.settled(queue, added);
     }
 
     /// Stops expecting live batches; true if a subscription was running.
@@ -259,6 +336,12 @@ struct State {
     shown: Shown,
     /// The last `note` message, while a note is shown.
     note: Option<Frame>,
+    /// The `livePaper` message of the live page, `None` on plain paper.
+    live_paper: Option<Frame>,
+    /// The last `livePaper` message there was. A picture sent again (the teacher came back to the
+    /// sheet) keeps this frame: viewers compare frames by identity, under their queue's lock, which
+    /// the hub's flusher takes; the bytes are compared once, here.
+    last_paper: Option<Frame>,
     paused: Option<Paused>,
     /// Counts the changes of content, to know at resume whether anything changed.
     version: u64,
@@ -270,6 +353,8 @@ struct State {
 struct Paused {
     /// What viewers show while paused (and what a viewer joining during the pause gets).
     frozen: Frame,
+    /// The paper of the frozen image.
+    paper: Option<Frame>,
     /// [`State::version`] when paused.
     version: u64,
 }
@@ -288,6 +373,8 @@ impl Content {
                 stopped: false,
                 shown: Shown::Waiting,
                 note: None,
+                live_paper: None,
+                last_paper: None,
                 paused: None,
                 version: 0,
                 viewers: BTreeMap::new(),
@@ -325,7 +412,7 @@ impl Content {
     fn start_live(&self, state: &mut State, viewer: &Arc<Viewer>) {
         let subscription = state.next_subscription;
         state.next_subscription += 1;
-        if viewer.begin_live(subscription) {
+        if viewer.begin_live(subscription, state.live_paper.clone()) {
             self.feed.start(LiveViewer {
                 id: viewer.id,
                 subscription,
@@ -388,6 +475,9 @@ impl Content {
         state.viewers.insert(id, Arc::clone(&viewer));
         if let Some(paused) = &state.paused {
             let _ = viewer.push(Arc::clone(&paused.frozen));
+            if let Some(paper) = &paused.paper {
+                viewer.frozen_paper(paper);
+            }
             let _ = viewer.push(pause_frame(true));
         } else {
             self.send_current(&mut state, &viewer);
@@ -478,29 +568,72 @@ impl Content {
         }
     }
 
+    /// The paper of the live page (`docs/design/lan-share.md`, "The paper of a live page"): a
+    /// complete `livePaper` message, `None` on plain paper. Sent outside the live batches, once to
+    /// each viewer; a viewer that joins gets it after its snapshot. Recorded and sent to nobody
+    /// while the share is paused or shows something else.
+    pub fn show_live_paper(&self, message: Option<&str>) {
+        // Built outside the lock: a picture may weigh megabytes.
+        let frame = message.map(|message| data_frame(&[message]));
+        let mut state = self.lock();
+        if state.stopped {
+            return;
+        }
+        let frame = frame.map(|frame| match &state.last_paper {
+            Some(last) if *last == frame => Arc::clone(last),
+            _ => frame,
+        });
+        if frame.is_some() {
+            state.last_paper.clone_from(&frame);
+        }
+        let same = match (&state.live_paper, &frame) {
+            (None, None) => true,
+            (Some(current), Some(new)) => Arc::ptr_eq(current, new),
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        state.live_paper = frame;
+        if state.shown == Shown::Live && state.paused.is_none() {
+            for viewer in state.viewers.values() {
+                viewer.live_paper(state.live_paper.as_ref());
+            }
+        }
+    }
+
     pub fn set_paused(&self, paused: bool) {
         let mut state = self.lock();
         if state.stopped || state.paused.is_some() == paused {
             return;
         }
         if paused {
-            let frozen = match state.shown {
+            let (frozen, paper) = match state.shown {
                 Shown::Live => {
                     self.stop_all_live(&state);
-                    let frozen = match self.feed.freeze() {
-                        Some(batch) => live_frame(true, &batch),
-                        None => waiting_frame(),
+                    let (frozen, paper) = match self.feed.freeze() {
+                        Some(batch) => (live_frame(true, &batch), state.live_paper.clone()),
+                        None => (waiting_frame(), None),
                     };
                     Self::push_all(&state, &frozen);
-                    frozen
+                    if let Some(paper) = &paper {
+                        for viewer in state.viewers.values() {
+                            viewer.frozen_paper(paper);
+                        }
+                    }
+                    (frozen, paper)
                 }
                 // The viewers show it already.
-                Shown::Note => state.note.clone().unwrap_or_else(waiting_frame),
-                Shown::Waiting => waiting_frame(),
+                Shown::Note => (state.note.clone().unwrap_or_else(waiting_frame), None),
+                Shown::Waiting => (waiting_frame(), None),
             };
             Self::push_all(&state, &pause_frame(true));
             let version = state.version;
-            state.paused = Some(Paused { frozen, version });
+            state.paused = Some(Paused {
+                frozen,
+                paper,
+                version,
+            });
         } else {
             let Some(paused) = state.paused.take() else {
                 return;
@@ -659,11 +792,11 @@ mod tests {
     fn live_subscriptions() {
         let viewer = Viewer::new(3, HERE);
         assert_eq!(viewer.send_live(1, "{}"), Err(ViewerGone));
-        assert!(viewer.begin_live(1));
+        assert!(viewer.begin_live(1, None));
         viewer.send_live(1, "{}").unwrap();
         viewer.send_live(1, "{}").unwrap();
         assert!(viewer.end_live());
-        assert!(viewer.begin_live(2));
+        assert!(viewer.begin_live(2, None));
         assert_eq!(
             viewer.send_live(1, "{}"),
             Err(ViewerGone),
@@ -686,6 +819,49 @@ mod tests {
         );
         assert!(viewer.close());
         assert_eq!(viewer.send_live(2, "{}"), Err(ViewerGone));
-        assert!(!viewer.begin_live(3));
+        assert!(!viewer.begin_live(3, None));
+    }
+
+    #[test]
+    fn the_paper_follows_the_first_batch_and_goes_once() {
+        let paper = data_frame(&[r#"{"type":"livePaper"}"#]);
+        let viewer = Viewer::new(8, HERE);
+        assert!(viewer.begin_live(1, Some(Arc::clone(&paper))));
+        let taken = |viewer: &Viewer| {
+            let frames = viewer.take().frames;
+            viewer.written();
+            frames.len()
+        };
+        assert_eq!(taken(&viewer), 0);
+        viewer.send_live(1, "{}").unwrap();
+        assert_eq!(taken(&viewer), 2, "the snapshot, then the paper");
+        viewer.send_live(1, "{}").unwrap();
+        assert_eq!(taken(&viewer), 1);
+        // The same picture, whatever comes through: only once for this viewer.
+        viewer.live_paper(Some(&paper));
+        viewer.frozen_paper(&paper);
+        assert_eq!(taken(&viewer), 0);
+        assert!(viewer.end_live());
+        assert!(viewer.begin_live(2, Some(Arc::clone(&paper))));
+        viewer.send_live(2, "{}").unwrap();
+        assert_eq!(taken(&viewer), 1, "the snapshot alone");
+
+        // A paper that changes before the first batch replaces the one waiting; none cancels it.
+        let viewer = Viewer::new(9, HERE);
+        assert!(viewer.begin_live(1, Some(Arc::clone(&paper))));
+        viewer.live_paper(None);
+        viewer.send_live(1, "{}").unwrap();
+        assert_eq!(taken(&viewer), 1);
+    }
+
+    #[test]
+    fn a_paper_too_large_for_the_queue_disconnects_the_viewer() {
+        let big: Frame = Arc::from(vec![b'x'; QUEUE_BYTES / 2 + 1]);
+        let other: Frame = Arc::from(vec![b'y'; QUEUE_BYTES / 2 + 1]);
+        let viewer = Viewer::new(10, HERE);
+        assert!(viewer.begin_live(1, Some(big)));
+        viewer.send_live(1, "{}").unwrap();
+        viewer.live_paper(Some(&other));
+        assert!(viewer.take().kicked);
     }
 }

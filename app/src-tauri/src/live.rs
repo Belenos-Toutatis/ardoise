@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ardoise_core::library::Library;
-use ardoise_core::note::PageSize;
+use ardoise_core::note::{Background, BackgroundImage, PageSize};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{TabletService, TabletStatus};
 use tauri::ipc::Channel;
@@ -44,7 +44,10 @@ pub use hub::{
 };
 pub use model::{LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState};
 
+use self::resume::ResumeBase;
 use crate::narration::{self, NarrationRuntime};
+use crate::notes::background_png;
+use crate::thumbnails::png_data_url;
 
 /// The live session of the running app.
 pub struct LiveRuntime {
@@ -350,6 +353,41 @@ pub async fn live_command(
         .hub
         .command(command.kind)
         .map_err(LiveError::command_error)
+}
+
+/// The paper of page `page_index` of the session as a PNG data URL, like `render_background`, with
+/// the background image of a resumed sheet: its pixels are the session's (`ResumeBase`), not in the
+/// editor's staging area, which the editor empties when it closes. The page's strokes and the
+/// tablet's input never wait for it: the hub's lock is held only to find the file, and the windows
+/// load the picture apart from the strokes.
+#[tauri::command]
+pub async fn live_page_background(
+    runtime: State<'_, LiveRuntime>,
+    page_index: usize,
+    page: PageSize,
+    background: Background,
+    width_px: u32,
+) -> CommandResult<String> {
+    let source = runtime.hub.page_image(page_index);
+    tauri::async_runtime::spawn_blocking(move || {
+        page_background_url(source, page, background, width_px)
+    })
+    .await
+    .map_err(|error| CommandError::new("render", error))?
+}
+
+/// The paper as a PNG data URL, with the image of `source` ([`LiveHub::page_image`]). Slow: the first
+/// time decodes the sheet's image.
+pub(crate) fn page_background_url(
+    source: Option<(BackgroundImage, Arc<ResumeBase>)>,
+    page: PageSize,
+    background: Background,
+    width_px: u32,
+) -> CommandResult<String> {
+    let image = source
+        .as_ref()
+        .and_then(|(image, base)| Some((image.clone(), base.picture()?)));
+    background_png(page, background, width_px, image).map(|png| png_data_url(&png))
 }
 
 /// « Undo the clearing » after « Clear the page »: true when the ink came back.

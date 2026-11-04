@@ -143,6 +143,7 @@ export function parseMessage(payload: string): ShareMessage | null {
     case 'waiting':
     case 'end':
     case 'live':
+    case 'livePaper':
     case 'note':
     case 'noteStrokes':
     case 'pause':

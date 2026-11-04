@@ -145,6 +145,7 @@ Live and classroom (`live.rs`, `presentation.rs`, package B):
 | `live_subscribe` | `onEvent: Channel<LiveBatch>` | `LiveSnapshot`; then batches until the window goes away (a failed send drops the subscriber) |
 | `live_start` | – | `LiveSnapshot` (`state: 'waiting'` until the tablet streams) |
 | `live_resume` | `path` (a note of the library) | `LiveSnapshot`, like `live_start`, on that note (M12) |
+| `live_page_background` | `pageIndex`, `page`, `background`, `widthPx` | PNG data URL of the page's paper, like `render_background`, with the background image of a resumed sheet (M12) |
 | `live_stop` | – | paths of the notes saved |
 | `live_set_style` | `style: LiveStyle` | – (broadcast as a snapshot) |
 | `live_command` | `command: LiveCommand` | – |
@@ -453,8 +454,8 @@ bottom left, button at the bottom right); to be confirmed with the real tablet (
 ## M12: resume a sheet, touch up during live
 
 Decisions: `docs/questions.md` Q9, SPEC §4.2. "Live" paths are under `app/src-tauri/src/live/`. "Resume" below is built
-and tested (packages 2 and 3, Rust side only). "Paper" and "Touch up" were written from reading the code on 2026-11-04,
-nothing run: check each point against the code.
+and tested (packages 2 and 3, Rust side only), and so is "Paper" (package 5). "Touch up" was written from reading the code
+on 2026-11-04, nothing run: check each point against the code.
 
 **Today.** Live starts only from the tablet panel: `live_start` → `LiveHub::start`, one blank page. Several pages per
 session, one note per page, created at the first stroke's end, in the library root, then rewritten at most every 5 s and
@@ -519,9 +520,25 @@ and the stroke in progress are lost.
   note. Nothing to change; tested on the Rust side.
 - **Viewers.** `sheetForked` and `canTurnPage` are not in the allow list (feed.rs). `created` and `modified` are now always 0 there:
   a resumed note would give its real date; nothing in the viewer reads them.
-- **Paper.** Templates and texture render in `LiveCanvas`, the background image does not (`renderBackground` gets none;
-  `stage_note_background` exists). Live viewers get no paper picture (viewer-state, feed.rs): reuse what `page.rs` does
-  for the editor's note, once per sheet, never in the coalesced live events.
+
+**Paper, as built.** Ordinary pages are plain paper and pay nothing: the same `render_background` as before, no key, no
+message, no thread.
+- **Windows.** `LiveState.pageImage` is the snapshot's `backgroundImage`. With one, `LiveCanvas` asks `live_page_background`
+  instead of `render_background`, with the same arguments (the paper as drawn: slate on the blackboard, as the editor draws
+  slate paper; the width of the zoom's bucket) plus the page's index. Not `stage_note_background`: the staging area is the
+  editor's, which empties it when it closes, whichever window draws. Rust takes the hub's lock once (`LiveHub::page_image`:
+  the image's place and an `Arc` of the file, no pixels), then decodes (`ResumeBase::picture`, once per session, shared with
+  the thumbnails) and renders on a blocking thread. The window decodes the picture (`HTMLImageElement.decode`) before
+  drawing it, then only the cache is redrawn with it, as for any paper: a frame of the pen copies the cache, which holds it.
+- **Alignment.** The picture is the whole page, `drawImage` under the page's transform, the one the strokes use, at any zoom
+  and in both windows; Rust places the image in it (`rect`, `quarter_turns`, `opacity`) as for the editor and the exports. A
+  page's picture is stretched to the page, as the editor's `<image preserveAspectRatio="none">`. Tested: `LiveCanvas` gives
+  the renderer that scene in both modes (vitest), and `background_png` under ink gives, pixel by pixel, `render_note`'s
+  picture of the same note (Rust, a turned image reaching outside the page included).
+- **Viewers.** [lan-share.md](lan-share.md), "The paper of a live page": the snapshot names the paper (`paperKey`, absent on
+  plain paper), a `livePaper` message outside the batches brings the picture, once per viewer. The hub's flusher only
+  compares; rendering is on a thread of its own. Hidden layers: `SharedSnapshot` filters them on a resumed page too, and the
+  picture is made without any stroke.
 
 **Touch up.**
 - **Reusable.** `lib/editor/hit.ts` (`selectInLasso`, `hitStroke`; relax `Note` to a `Pick`), `geometry.ts`,

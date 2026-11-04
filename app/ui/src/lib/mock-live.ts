@@ -28,7 +28,8 @@ import type {
   MonitorInfo,
 } from './live';
 import { fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, UNHANDLED } from './mock-data';
-import type { Note, Rgba, Stroke } from './note';
+import { backgroundDataUrl } from './mock-notes';
+import type { Background, Note, PageSize, Rgba, Stroke } from './note';
 import { orientPoint, pageSizeFor, turnPoint, turnsFrom, turnStrokes, type Orientation } from './orientation';
 
 /** Pace of the stand-in; tests change it (and `resetMockLive` restores it). */
@@ -535,6 +536,13 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
       broadcastSnapshot();
       return true;
     }
+    case 'live_page_background':
+      return backgroundDataUrl(
+        args.page as PageSize,
+        args.background as Background,
+        args.widthPx as number,
+        session?.pages[args.pageIndex as number]?.backgroundImage,
+      );
     case 'live_set_view':
       setView(running(), args.view as LiveViewState);
       return undefined;

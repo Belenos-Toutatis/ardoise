@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use ardoise_core::format::{FormatError, NoteFile};
 use ardoise_core::fsutil::write_atomic_new;
 use ardoise_core::library::{Library, LibraryError};
-use ardoise_core::note::{Note, PageSize};
+use ardoise_core::note::{BackgroundImage, Note, PageSize};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::pages::oriented_size;
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
@@ -1001,6 +1001,15 @@ impl LiveHub {
         events.extend(state.session.in_progress());
         events.extend(state.session.marks_event());
         events
+    }
+
+    /// The background image of page `index` and the file holding its pixels: a resumed sheet is
+    /// the only page with one. Only a look under the lock: decoding and rendering are the caller's,
+    /// after it (`share::live_paper`, `live_page_background`).
+    pub fn page_image(&self, index: usize) -> Option<(BackgroundImage, Arc<ResumeBase>)> {
+        let state = self.shared.lock();
+        let page = state.session.pages().get(index)?;
+        Some((page.note.background_image.clone()?, page.base()?.clone()))
     }
 
     /// Sends the session's batches to `sink` from now on, replacing the window's previous

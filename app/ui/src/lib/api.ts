@@ -233,6 +233,12 @@ export const api = {
     image?: { image: BackgroundImage; key: string },
   ) => call<string>('render_background', { page, background, widthPx, image }),
   /**
+   * PNG data URL of the paper of page `pageIndex` of the live session, like `renderBackground`,
+   * with the background image of a resumed sheet (its pixels are the session's).
+   */
+  livePageBackground: (pageIndex: number, page: PageSize, background: Background, widthPx: number) =>
+    call<string>('live_page_background', { pageIndex, page, background, widthPx }),
+  /**
    * The ink the note can go back to ("Revenir à l'original"): `{ source: 'none' }` when there is
    * nothing to go back to; rejects with `originalDamaged` when the original cannot be read.
    */

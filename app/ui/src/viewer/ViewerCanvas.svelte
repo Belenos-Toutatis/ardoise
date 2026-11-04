@@ -33,7 +33,7 @@
   }: {
     live: LiveState;
     ink: Ink | null;
-    /** The paper as a PNG data URL, or null (the paper colour only). */
+    /** The paper as a PNG data URL (of the note, or of a live page), or null (the paper colour only). */
     background: string | null;
     shown: 'live' | 'note';
     /** The view drawn (the PC's, or this screen's own) and what changes it. */
