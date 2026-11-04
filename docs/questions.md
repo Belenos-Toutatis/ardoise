@@ -92,7 +92,7 @@ L'utilisateur demande de pouvoir reprendre le mode direct sur une feuille exista
 **Choix par défaut, à contester si besoin** (ils ne changent pas la demande) :
 - La page suivante, après une feuille reprise, crée une note neuve.
 - Si la feuille n'est pas tenue comme la tablette (portrait ou paysage), le direct suit la feuille pour cette session : la note n'est jamais tournée, et le bouton pour tourner est désactivé sur cette page.
-- Si la feuille n'a pas le format de la tablette, l'écriture est mise à l'échelle pour couvrir la feuille, sans déformation.
+- Si la feuille n'a pas le format de la tablette, l'écriture est mise à l'échelle pour tenir entière dans la feuille, centrée et sans déformation.
 - Si la feuille a changé ailleurs pendant le direct, une nouvelle note est créée dans le même classeur, et Ardoise le dit.
 - Le vidéoprojecteur et les écrans du partage montrent le fond de la feuille reprise (modèle, texture, image ou page de PDF), et jamais ses calques masqués.
 - Déplacer une sélection reste réservé à l'éditeur.
