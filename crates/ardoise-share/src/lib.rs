@@ -346,6 +346,15 @@ impl Share {
         self.server.content.show_note(update);
     }
 
+    /// The paper of the live page: a complete `livePaper` message (`docs/design/lan-share.md`, "The
+    /// paper of a live page"), `None` on plain paper. Sent outside the live batches, once to each
+    /// viewer, after its snapshot to a viewer that joins; recorded only while the share is paused
+    /// or shows something else. Ignored once stopped. Not to be called from a [`LiveFeed`]
+    /// method, nor from the hub's flusher: it takes the share's lock.
+    pub fn show_live_paper(&self, message: Option<&str>) {
+        self.server.content.show_live_paper(message);
+    }
+
     /// Freezes the shared image (`true`) or follows the content again (`false`).
     pub fn set_paused(&self, paused: bool) {
         self.server.content.set_paused(paused);

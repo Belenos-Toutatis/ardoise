@@ -309,6 +309,7 @@ pub fn run() {
             live::live_edit_strokes,
             live::live_undo_edit,
             live::live_redo_edit,
+            live::live_page_background,
             live::live_set_view,
             live::live_set_marks,
             presentation::list_monitors,

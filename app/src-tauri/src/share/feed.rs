@@ -12,6 +12,7 @@ use ardoise_ink::{Rgba, Stroke, Tool};
 use ardoise_share::{LiveFeed, LiveViewer};
 use serde::Serialize;
 
+use super::live_paper::{LivePapers, paper_key};
 use super::page::is_drawn;
 use crate::live::LiveHub;
 use crate::live::hub::BatchSink;
@@ -30,14 +31,22 @@ pub struct HubFeed {
     hub: Arc<LiveHub>,
     /// Shared by the viewers' sinks, so that a batch they all get is written once.
     memo: Arc<Memo>,
+    /// The paper of the live page, which goes outside the batches.
+    papers: Arc<LivePapers>,
 }
 
 impl HubFeed {
     pub fn new(hub: Arc<LiveHub>) -> HubFeed {
         HubFeed {
+            papers: LivePapers::new(hub.clone()),
             hub,
             memo: Arc::new(Memo::default()),
         }
+    }
+
+    /// The paper of the live page: the share receives it once it runs.
+    pub fn papers(&self) -> Arc<LivePapers> {
+        self.papers.clone()
     }
 }
 
@@ -47,8 +56,10 @@ impl LiveFeed for HubFeed {
         let sink = ShareSink {
             viewer,
             memo: self.memo.clone(),
+            papers: self.papers.clone(),
         };
-        self.hub.subscribe(&label, Arc::new(sink));
+        let snapshot = self.hub.subscribe(&label, Arc::new(sink));
+        self.papers.subscribed(&snapshot);
     }
 
     fn stop(&self, viewer: u64) {
@@ -68,10 +79,17 @@ impl LiveFeed for HubFeed {
 struct ShareSink {
     viewer: LiveViewer,
     memo: Arc<Memo>,
+    papers: Arc<LivePapers>,
 }
 
 impl BatchSink for ShareSink {
     fn send(&self, batch: LiveBatch) -> Result<(), String> {
+        // A comparison per snapshot, here on the flusher; the paper is made elsewhere.
+        for event in &batch.events {
+            if let LiveEvent::Snapshot { snapshot } = event {
+                self.papers.saw(snapshot);
+            }
+        }
         match self.memo.json(batch) {
             Some(json) => self.viewer.send(&json).map_err(|error| error.to_string()),
             // Only what is never shared (a page written to the library).
@@ -278,6 +296,10 @@ impl SharedMark {
 struct SharedSnapshot<'a> {
     state: LiveSessionState,
     page: SharedLivePage<'a>,
+    /// The paper's picture the page wants ([`paper_key`]), which comes in a `livePaper` message:
+    /// absent on plain paper.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paper_key: Option<String>,
     page_index: usize,
     page_count: usize,
     orientation: Orientation,
@@ -296,6 +318,7 @@ impl<'a> SharedSnapshot<'a> {
         SharedSnapshot {
             state: snapshot.state,
             page: SharedLivePage::of(snapshot),
+            paper_key: paper_key(snapshot),
             page_index: snapshot.page_index,
             page_count: snapshot.page_count,
             orientation: snapshot.orientation,

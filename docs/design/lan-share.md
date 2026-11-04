@@ -201,6 +201,7 @@ reconnects gets a fresh snapshot. Messages (`type` field; TypeScript in `app/ui/
 |---|---|
 | `{"type":"waiting"}` | the Ardoise PC shows nothing to share: waiting screen |
 | `{"type":"live","reset":bool,"batch":LiveBatch}` | a batch of live mode, as the presentation window gets it (stripped, see below). `reset: true` on the first batch of a subscription: it starts with a snapshot, the viewer starts again from it |
+| `{"type":"livePaper","key":string,"picture":string}` | the paper of a live page that is not plain (a resumed sheet: template, texture, background image, page of a PDF), a PNG data URL, drawn under the strokes while the page's snapshot has `paperKey` = `key`. Never inside a batch, at most once per picture to each viewer, right after the snapshot to a viewer that joins. Ordinary live pages never get one (see "The paper of a live page") |
 | `{"type":"note","page":SharedPage,"background":string\|null}` | the whole page of the note open in the editor; `background`: the paper (template, texture, background image) as a PNG data URL, `null` when it is plain paper (the paper colour is drawn) |
 | `{"type":"noteStrokes","strokes":Stroke[]}` | strokes added at the end of the page last sent (the common case while writing in the editor) |
 | `{"type":"pause","paused":bool}` | the share is paused (the image is frozen; the viewer shows a discreet badge) or resumed |
@@ -222,14 +223,18 @@ The crate keeps what is shown (`Shown::Waiting | Live | Note`), the last note me
   note get `append` when given, else `full`; switching from another content always sends `full`.
 - `show_live()`: every viewer is handed to the `LiveFeed` (`start`), which sends it a first batch starting with a
   snapshot (`reset: true`), then every batch. Leaving live mode calls `LiveFeed::stop` for each viewer.
+- `show_live_paper(message)`: the `livePaper` message of the live page, `None` on plain paper (see "The paper of a live
+  page"). Recorded; sent at once only to the viewers following live mode.
 - **A viewer that connects** gets what is shown: `waiting`, the last `full` note message, or a live subscription
-  (snapshot, then increments). **Late joiners therefore get a snapshot, then increments**, in every case.
+  (snapshot, then the paper if any, then increments). **Late joiners therefore get a snapshot, then increments**, in
+  every case.
 - **Pause** (`set_paused(true)`): live viewers are stopped (`LiveFeed::stop`); the frozen image is what is shown at
   that moment: for live mode `LiveFeed::freeze()` (the session as one batch starting with a snapshot, sent with
   `reset: true` to every viewer so that all show the same frozen frame), for a note its last `full`, else
-  `waiting`; then `pause` true. Viewers joining during the pause get the frozen image and `pause` true. Content
-  changes during the pause are recorded and sent nowhere. `set_paused(false)`: `pause` false, then the current
-  content as for a new viewer (live: a new subscription with a fresh snapshot).
+  `waiting`; then `pause` true. Viewers joining during the pause get the frozen image (with the paper it had, between
+  the image and the badge) and `pause` true. Content changes during the pause are recorded and sent nowhere, a new
+  paper included. `set_paused(false)`: `pause` false, then the current content as for a new viewer (live: a new
+  subscription with a fresh snapshot, then the paper if the viewer does not have that one).
 - **Queues**: each viewer has a bounded queue (1 024 messages). A send never blocks; a full queue disconnects that
   viewer (`LiveViewer::send` returns `Err`, the hub drops the subscription), and the browser reconnects and gets a
   fresh snapshot. This keeps the hub's flusher thread free whatever a viewer's network does.
@@ -254,6 +259,7 @@ impl Share {
     pub fn start(config, assets, feed: Arc<dyn LiveFeed>, on_change: OnChange) -> Result<Share, ShareError>;
     pub fn port(&self) -> u16; pub fn requested_port(&self) -> u16; pub fn code(&self) -> String; pub fn status(&self) -> ShareStatus;
     pub fn show_waiting(&self); pub fn show_live(&self); pub fn show_note(&self, update: NoteUpdate);
+    pub fn show_live_paper(&self, message: Option<&str>);   // not from a LiveFeed method, nor the hub's flusher
     pub fn set_paused(&self, paused: bool); pub fn stop(&self);
 }
 pub fn format_code(code: &str) -> String;           // "K7MQ2X" → "K7M Q2X"
@@ -328,12 +334,55 @@ share start, a few hundred KB.
   (library paths, system messages); in a snapshot `saved` = `[]`, `presentation` = `null`, `origin` =
   `{"kind":"ardoise"}`, and the page keeps only what is drawn: `id`, `page`, `background`, `layers` (names emptied),
   `strokes`; `created` and `modified` are 0 (a resumed note keeps its date on the PC). Strokes of a hidden layer are left out here as in `SharedPage` (a teacher hides an "answers" layer to
-  keep it to themselves); the layer list stays whole so that stroke indices stay valid. `strokesEdited` (M12) carries only
-  `pageIndex`, `removed`, `inserted`, `recoloured`, numbered as in the viewer's list: `ViewerIndices`, worked out with the edit
-  on a page with a hidden layer (no revision, no history: nothing there is drawn).
+  keep it to themselves); the layer list stays whole so that stroke indices stay valid. The background image's
+  description (file name, PDF page, place) is not sent either: only `paperKey`, next to the page, when the paper is not
+  plain (below). `strokesEdited` (M12) carries only `pageIndex`, `removed`, `inserted`, `recoloured`, numbered as in the
+  viewer's list: `ViewerIndices`, worked out with the edit on a page with a hidden layer (no revision, no history: nothing
+  there is drawn).
 - Serialising runs on the hub's flusher thread, as for the windows' channels, and never waits. A `Memo` shared by
   the viewers' sinks keeps the last batch and its text (`Arc<str>`): viewers that were up to date get equal batches
   one after the other, and the text (the whole page, after a page change) is written once for all of them.
+
+### The paper of a live page (M12)
+
+A session seeded from a note (`live_resume`) has a page that may have a template, a texture and a background image or
+page of a PDF. A browser cannot draw them, and the hub's events carry no pixels. Every other live page is plain paper:
+white, or slate with the blackboard, which the viewer fills with the paper colour; **nothing below happens for them**: no
+key, no message, no thread (a test checks it).
+
+- **The key** (`paper_key`, `share/live_paper.rs`). `SharedSnapshot` has `paperKey`: 16 hex digits, a digest of the note's
+  id, the page size, the paper as drawn (slate while the blackboard is on, like `effectiveBackground`), the template, the
+  texture and the image's description. Absent on plain paper. It is opaque and tells nothing of the note; it costs a
+  hash per snapshot of such a page.
+- **The picture.** The viewer keeps the last `livePaper` apart from the sheet (`ViewerState.livePaper`, which a `live` with
+  `reset` does not touch) and draws it (`ViewerState.paper`) only while `live.paperKey` equals its `key`. So a page change
+  shows or hides it with the snapshot itself, at once, in whatever order the two arrive (the paper may overtake the
+  batch: the two go by different roads), and going to a plain page clears it **without any message**. Back on the sheet
+  the viewer still has the picture: nothing is sent, nothing flashes.
+- **Rendering.** What `page.rs` does for the editor's note: `background_png` at `PAPER_PX` (2 560 px) on the longer side, as
+  a PNG data URL; the pixels are the session's (`ResumeBase::picture`, decoded once), not the editor's staging area. The
+  two last pictures are kept (`LivePapers::pictures`): the sheet and the sheet on the blackboard.
+- **Threads.** `ShareSink::send`, on the hub's flusher, calls `LivePapers::saw` for each snapshot in a batch: a comparison
+  under a small lock of its own. Only when the paper changed does it start the `share-paper` thread, which ends when
+  there is nothing more to do. That thread takes the hub's lock once, to find the file (`LiveHub::page_image`, no pixels
+  copied), renders with no lock, and then calls `Share::show_live_paper` (the content's lock, which the flusher never
+  takes). A paper overtaken while it was rendering is not sent. A new subscription (`LiveFeed::start`) asks for a pass
+  even for the same key: viewers come back from the editor, where the note's file may have got other pixels under the same
+  name and place; the pixels' hash finds out (same pixels: the same message, no render, nothing sent).
+- **Once per viewer** (`content.rs`). Each viewer's queue remembers the frame it last got (`Queue::paper`, compared by
+  identity); `show_live_paper` compares the bytes once with the last frame there was (`State::last_paper`) and keeps
+  that frame when they are the same. So a viewer gets a picture once whatever goes back and forth: strokes, plain page and
+  back, pause and resume, the editor's note or the waiting screen and back. A viewer that reconnects is a new viewer: it
+  gets it again. A new share too (the viewer forgets the picture on `end` and on `401`).
+- **Pause.** The frozen image keeps the paper of that moment, also for a viewer joining during the pause. A paper that
+  comes during the pause goes to nobody: it may be a sheet the teacher does not show yet. Known limit: a pause pressed in
+  the second it takes to render a new paper freezes that sheet on its paper colour until the resume.
+- **What leaves the PC.** `key` and `picture`, written from an allow list (`Message` in `live_paper.rs`). The PNG is made
+  from a blank note with the paper and the image only: no stroke, hidden or not, can be in it. The real-TCP test looks
+  for the title, tags, layer names, file names, the library and the hidden stroke in every message.
+- **Cost for a viewer.** A photo may weigh several MB: the strokes that follow wait behind it on that viewer's stream
+  only, once, as for a note's paper. The windows and the other viewers are not held up: sends never block. A fork (the
+  sheet changed elsewhere) gives the page a new id, hence a new key: the picture goes once more.
 
 ### Through a school's filtering proxy (2026-11-03, measured at school)
 
@@ -398,8 +447,9 @@ included) and keeps the previous one: same `id`, page, background, background im
 a prefix of the new ones → `append` = the new strokes; otherwise only `full`. The background is rendered by
 `notes::background_png` (with the staged picture under `imageKey`, like `render_background`) at 2 560 px on the
 longer side, **only when it changed** (cached by page size, background and image placement), in `spawn_blocking`;
-plain paper (template `blank`, no texture, no image) gives `null`. The live pages are always plain paper (white, or
-slate with the blackboard): the viewer draws their paper colour, as the app does before its PNG arrives.
+plain paper (template `blank`, no texture, no image) gives `null`. Ordinary live pages are plain paper too (white, or
+slate with the blackboard): the viewer draws their paper colour, as the app does before its PNG arrives. A resumed sheet
+is not: "The paper of a live page" above.
 
 ### Commands (`share.rs`)
 
@@ -487,7 +537,7 @@ when the share starts (the UI sends it again after a start anyway).
   shows "reconnecting" meanwhile; after `end` it shows "sharing ended" and keeps trying every 5 s (a new share
   answers `401`: the code form).
 - `lib/viewer-state.svelte.ts`: the screen (`code`, `connecting`, `waiting`, `live`, `note`, `ended`), the pause badge,
-  the background image; pure and tested.
+  the background image (`paper`: the note's, or the live page's when its key matches); pure and tested.
 - Screens: code form (6 characters, autofocus, errors: wrong code with the attempts left, too many attempts with the
   wait), waiting screen, the page full window (black around, like the projector), a full-screen button (Fullscreen
   API; also a double click) that hides with the cursor after 2 s still, "reconnecting" overlay, "sharing ended".
@@ -540,15 +590,19 @@ written and flushed per message) → LAN → `fetch` reader → `LiveState` → 
   address unaffected, one more after the interval); `421` for foreign `Host` values (no attempt counted); a socket
   with `SO_REUSEADDR` that tries to take the port; a share started again at once on the same port; the port fallback
   (a plain listener on the port asked for, then on the following ones, a range with nothing free, a share started
-  on a free port, 65535). Unit tests for
+  on a free port, 65535), the paper of a live page (after the snapshot, once per viewer, pause, other contents,
+  reconnection). Unit tests for
   the slot choice, the nearby attempts table, the token limit and the stream rate (injected clock).
 - App (Linux): settings `[share] port` and this machine's `share_port` (order, bad values, atomic write), the fallback
   with a real listener on the port asked for (both ports reported, the port kept for this PC and asked for at the
   next share, nothing written when the port asked for is free), manifest walk (`viewer_assets` with a fake manifest), stripping of live
   batches, note diff (append / full), a share started with a real `LiveHub` and a TCP client receiving live points
-  without any path.
+  without any path. A resumed sheet with a template, an image and a hidden layer over real TCP (the picture and its
+  pixels, once per viewer, late joiner, plain page and back, pause, reconnection, blackboard, nothing else of the note in
+  any message); ordinary pages (no key, no message); `LivePapers` (no work on plain paper, rendered once); ink on the
+  paper against the editor's scene, pixel by pixel, with the image's `rect` and `quarter_turns`.
 - vitest: SSE parser, stream client (fake `fetch`: 401, 503, reconnect, `end`), viewer state (note → snapshot,
-  append, pause, reset), no Tauri import in the viewer, share state (debounce, content after start), panel
+  append, pause, reset, the paper of a live page), the viewer page drawing that paper, no Tauri import in the viewer, share state (debounce, content after start), panel
   component (address, code, viewers, pause, stop, errors), locales parity.
 - e2e (`app/e2e/journeys-m11-share.mjs`, wired in `run.mjs`, `ARDOISE_SHARE_LOOPBACK=1` and a free port in
   `[share]`): live mode with the simulated tablet, share, Node joins with the code and checks the events
