@@ -32,14 +32,14 @@ const catalogs = {
   fr: JSON.parse(readFileSync(join(locales, 'fr.json'), 'utf8')),
   en: JSON.parse(readFileSync(join(locales, 'en.json'), 'utf8')),
 };
-const text = (language, key) => key.split('.').reduce((node, part) => node?.[part], catalogs[language]);
+export const text = (language, key) => key.split('.').reduce((node, part) => node?.[part], catalogs[language]);
 
 const j = JSON.stringify;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const EDITOR_STROKES = '.editor g.ink path[data-stroke]';
-const LIVE_CANVAS = 'canvas.live-canvas';
-const canvasData = (field) => `document.querySelector(${j(LIVE_CANVAS)})?.dataset.${field}`;
-const IMAGE_NAME = 'quadrants.png';
+export const EDITOR_STROKES = '.editor g.ink path[data-stroke]';
+export const LIVE_CANVAS = 'canvas.live-canvas';
+export const canvasData = (field) => `document.querySelector(${j(LIVE_CANVAS)})?.dataset.${field}`;
+export const IMAGE_NAME = 'quadrants.png';
 
 // --- A ZIP archive, a PNG, the strokes of a note ----------------------------------------------------------
 
@@ -207,7 +207,7 @@ export function strokesOf(bytes) {
 
 // --- Sheets written into the library ----------------------------------------------------------------------
 
-const PAGE = { landscape: { width: 29700, height: 21600 }, portrait: { width: 21600, height: 29700 } };
+export const PAGE = { landscape: { width: 29700, height: 21600 }, portrait: { width: 21600, height: 29700 } };
 const CREATED = Date.UTC(2026, 9, 28, 9, 0, 0);
 
 /** The ink of a sheet before anything is resumed: three strokes across the page (two diagonals and a base line). */
@@ -270,7 +270,7 @@ export function sheet({ title, orientation = 'landscape', index = 1, image = tru
 }
 
 /** Writes `bytes` to `path` the way a sync does: a temporary name in the same folder, then a rename. */
-function dropFile(path, bytes) {
+export function dropFile(path, bytes) {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.part`;
   writeFileSync(temporary, bytes);
@@ -287,7 +287,7 @@ function dropFile(path, bytes) {
 }
 
 /** Every `.ardoise` file of the library (the trash and the app's folder aside): `{ path, members, note }`. */
-function notesOf(library) {
+export function notesOf(library) {
   const found = [];
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -305,15 +305,15 @@ function notesOf(library) {
 }
 
 /** JSON with its keys in alphabetical order, to compare values whatever order the app wrote them in. */
-const canon = (value) => j(value, (_, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
+export const canon = (value) => j(value, (_, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
 
-const titled = (library, title) => notesOf(library).filter((n) => n.note.title === title);
-const strokeCountOf = (members) => strokesOf(members.get('strokes.bin')).count;
+export const titled = (library, title) => notesOf(library).filter((n) => n.note.title === title);
+export const strokeCountOf = (members) => strokesOf(members.get('strokes.bin')).count;
 
 // --- Windows other than the app's own ---------------------------------------------------------------------
 
 /** A DevTools connection to another window of the app (the presentation window): `evaluate`, `waitFor`, `close`. */
-async function attach(port, predicate, what, timeout = 20_000) {
+export async function attach(port, predicate, what, timeout = 20_000) {
   const deadline = Date.now() + timeout;
   let target;
   while (!target) {
@@ -410,11 +410,11 @@ const quadrantsDrawn = (selector, where) => async (target) => {
 
 // --- Steps shared by the journeys -------------------------------------------------------------------------
 
-const STATUS = '.tablet-status';
+export const STATUS = '.tablet-status';
 const WIZARD = '.register-wizard';
 
 /** Registers the simulated tablet (it starts unregistered) and waits until it is connected and has synced. */
-async function registerTablet(app, check) {
+export async function registerTablet(app, check) {
   await check('enregistrer la tablette simulée', async () => {
     await app.waitFor(`document.querySelector(${j(`${STATUS}[data-connection="notRegistered"]`)}) !== null`, 'the sidebar block');
     await app.click(STATUS);
@@ -432,7 +432,7 @@ async function registerTablet(app, check) {
 }
 
 /** Puts a sheet into the library of the run in `binder` ('' = the root) and waits until the grid shows its card. */
-async function dropSheet(app, { binder, file, ...options }) {
+export async function dropSheet(app, { binder, file, ...options }) {
   const made = sheet(options);
   const path = join(app.library, binder, file);
   dropFile(path, made.bytes);
@@ -444,10 +444,10 @@ async function dropSheet(app, { binder, file, ...options }) {
   return { ...made, path };
 }
 
-const card = (file) => `.note-card[data-path*=${j(file)}]`;
+export const card = (file) => `.note-card[data-path*=${j(file)}]`;
 
 /** « Reprendre en mode direct » in the menu of a card. */
-async function resumeFromCard(app, file) {
+export async function resumeFromCard(app, file) {
   await app.click(`${card(file)} .card-menu button[aria-haspopup="menu"]`);
   await app.waitFor(`document.querySelector('[role="menu"] [role="menuitem"]') !== null`, 'the card menu');
   await app.click('[role="menu"] [role="menuitem"]', text(app.language, 'live.resume.action'));
@@ -455,10 +455,10 @@ async function resumeFromCard(app, file) {
 }
 
 /** Waits until the library grid is back (live mode closed). */
-const libraryBack = (app) => app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library', 30_000);
+export const libraryBack = (app) => app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library', 30_000);
 
 /** Stops live mode with the button and waits for the library. */
-async function stopLive(app) {
+export async function stopLive(app) {
   await app.click('button[data-action="stop-live"]');
   await libraryBack(app);
 }
@@ -472,7 +472,7 @@ const editorFacts = (app) =>
   })`);
 
 /** Opens the sheet in the editor; waits for its strokes, its image section and the answer about its original. */
-async function openInEditor(app, file, strokes) {
+export async function openInEditor(app, file, strokes) {
   await app.click(`${card(file)} .card-open`);
   await app.waitFor(`document.querySelectorAll(${j(EDITOR_STROKES)}).length >= ${strokes}`, 'the strokes of the note');
   await app.waitFor(
@@ -483,7 +483,7 @@ async function openInEditor(app, file, strokes) {
 }
 
 /** Back from the editor to the library; discards an unsaved change. */
-async function closeEditor(app, { discard = false } = {}) {
+export async function closeEditor(app, { discard = false } = {}) {
   await app.click('.editor-top button');
   if (discard) {
     await app.waitFor(`document.querySelector('[role="alertdialog"]') !== null`, 'the leave dialog');

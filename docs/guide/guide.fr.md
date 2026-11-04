@@ -354,7 +354,7 @@ Un simple changement de titre, d'étiquette ou de favori fait ailleurs ne crée 
   **Jaune**) et **Épaisseur** : le trait suivant en tient compte, pas les précédents.
 - **Pages** : **Page précédente**, **Page suivante** (la position s'affiche : « Page 2 / 5 »), **Nouvelle page**.
   **Nouveau calque** ajoute un calque à la page en cours. **Effacer la page** (ou `Ctrl + Suppr`) efface la page en cours
-  seulement ; un message « Page effacée. » propose pendant 8 secondes **Annuler l'effacement**, qui rend l'encre. Si la
+  seulement ; un message « Page effacée. » propose pendant 8 secondes **Annuler l'effacement**, qui rend l'encre (`Ctrl + Z` la rend aussi, sans limite de temps : voir **Retoucher pendant le direct**). Si la
   page a changé entre-temps, Ardoise dit que l'effacement ne peut plus être annulé.
 - **Tableau noir** : fond ardoise et craie blanche. **Pointeur laser** : le stylet en survol, sans toucher la tablette,
   montre un point rouge à l'écran *sans rien écrire* ; en touchant la tablette on écrit de nouveau.
@@ -371,6 +371,52 @@ Un simple changement de titre, d'étiquette ou de favori fait ailleurs ne crée 
 Le *bouton de la tablette* fait, pendant le direct, ce que l'option **Bouton de la tablette en mode direct** indique
 (nouvelle page ou nouveau calque). *Ce que la Bamboo Slate envoie à l'appui n'est pas encore vérifié sur la vraie
 tablette.* Les touches de la page suivante et précédente marchent dans tous les cas.
+
+### Retoucher pendant le direct
+
+*Demande la tablette.* Une faute à enlever, un mot à mettre en rouge ? Vous n'avez pas besoin de quitter le mode direct
+ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tablette continue d'écrire pendant ce temps**.
+
+**Choisir des traits**
+
+- Cliquez sur **Sélection** dans la barre d'outils, ou appuyez sur `V`. Un second appui quitte
+  l'outil.
+- **Lasso** : dans l'aperçu, appuyez avec la souris et entourez les traits, puis relâchez. Un trait est choisi quand la
+  moitié au moins de ses points est dans le lasso.
+- **Clic** : cliquez sur un trait pour le choisir seul. Cliquez sur l'encre elle-même, pas à côté.
+- `Maj` + lasso ou clic ajoute des traits à ceux déjà choisis. `Ctrl` + lasso ou clic en retire.
+- Un geste dans le vide, ou `Échap`, enlève la sélection. `Échap` ne ferme rien d'autre tant que des traits sont choisis.
+- Un doigt et la molette continuent de déplacer et de zoomer l'aperçu.
+- Les traits choisis sont entourés de bleu dans l'aperçu. Une barre dit « Traits sélectionnés : 3 ».
+- On ne peut pas choisir le trait que la tablette est en train d'écrire, ni les traits d'un calque masqué. Sur une
+  feuille reprise, on peut choisir les anciens traits de la feuille.
+
+**Supprimer** : cliquez sur **Supprimer** dans la barre, ou appuyez sur `Suppr` ou `Retour arrière`.
+
+**Changer la couleur** : cliquez sur une pastille de **Couleur**. Seuls les traits choisis changent. Ils restent
+choisis, pour essayer une autre couleur. **La couleur du stylo ne change pas** : ce que la tablette écrit ensuite garde
+sa couleur. Sans sélection, une pastille règle la couleur du stylo, comme avant.
+
+**Annuler et rétablir**
+
+- `Ctrl + Z` (ou **Annuler**) annule la dernière retouche : une suppression, un changement de couleur, ou **Effacer la
+  page**. Les traits supprimés reviennent à leur place.
+- `Ctrl + Y` ou `Ctrl + Maj + Z` (ou **Rétablir**) refait ce qui vient d'être annulé. Une nouvelle retouche vide ce qui
+  pouvait être rétabli.
+- **Ce qui n'est jamais annulé** : ce que la tablette a écrit. Un trait écrit entre-temps reste, dans quelque ordre que
+  vous annuliez ou rétablissiez. Les changements d'outil, de couleur du stylo ou d'épaisseur, et les changements de
+  page, ne sont pas non plus des retouches.
+- Chaque page a sa propre liste, qui garde les 100 dernières retouches. Si vous quittez une page puis y revenez,
+  `Ctrl + Z` annule encore ses retouches. Les listes disparaissent quand vous terminez le mode direct.
+- Les boutons **Annuler** et **Rétablir** sont grisés quand il n'y a rien à faire.
+
+**Le vidéoprojecteur et l'autre écran du réseau ne voient que le résultat.** Jamais le contour bleu ni le lasso : un
+trait supprimé disparaît, un trait recoloré change de couleur. Les annotations tracées sur la présentation ne sont pas
+des traits de la page : on ne les choisit pas.
+
+**Dans la note.** Quand vous terminez, la note contient ce qu'il y avait à l'écran : traits supprimés absents, couleurs
+changées. Sur une feuille reprise, la retouche d'un ancien trait est enregistrée dans la note elle-même ;
+« Revenir à l'original » (chapitre 8) rend toujours la première version.
 
 ### Projeter sur un vidéoprojecteur
 
@@ -1152,8 +1198,11 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte.
 | `0` (au clavier AZERTY, la touche `à`) | **Page entière** |
 | `W` | **Largeur** |
 | `Maj + flèches` | Déplacer la zone projetée |
-| `Suppr` ou `Retour arrière` | Effacer les annotations écrites sur la présentation |
-| `Échap` | Fermer la projection si elle est affichée ; sinon, demander s'il faut **Terminer** le mode direct |
+| `Suppr` ou `Retour arrière` | Effacer les annotations écrites sur la présentation ; **avec des traits choisis** (fenêtre de commande), les supprimer |
+| `V` | Outil **Sélection** (fenêtre de commande) : lasso ou clic sur un trait |
+| `Ctrl + Z` | Annuler une suppression, un changement de couleur ou **Effacer la page** (fenêtre de commande) |
+| `Ctrl + Y` ou `Ctrl + Maj + Z` | Rétablir (fenêtre de commande) |
+| `Échap` | Enlever la sélection s'il y en a une ; sinon fermer la projection si elle est affichée ; sinon, demander s'il faut **Terminer** le mode direct |
 
 ### Dans les fenêtres
 

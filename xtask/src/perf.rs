@@ -1,9 +1,9 @@
-//! `cargo xtask perf [--write] [--only start,library,live,export,size]`: measures the targets of
+//! `cargo xtask perf [--write] [--only start,library,live,touchup,export,size]`: measures the targets of
 //! SPEC §8 on the production executable (`target/release/ardoise.exe`, built by `cargo xtask
 //! check`), prints a table (target, measured value, verdict) and, with `--write`, puts it in
 //! `docs/performance.md`.
 //!
-//! - start, library of 1,000 notes, live mode: `app/e2e/perf.mjs` drives a portable copy of the
+//! - start, library of 1,000 notes, live mode, live mode touched up (M12): `app/e2e/perf.mjs` drives a portable copy of the
 //!   executable through WebView2's DevTools protocol and returns raw measures (times, frame
 //!   intervals); the statistics and the verdicts are computed here, where they are unit-tested.
 //! - MP4 1080p of a 2-minute replay: the release benchmark `export_speed_mp4_2min` of
@@ -39,7 +39,7 @@ const EXPORT_SECONDS: f64 = 120.0;
 /// SPEC §8: executable under 30 MB (the same bound as `cargo xtask selftest`).
 const MAX_EXE_BYTES: u64 = 30 * 1024 * 1024;
 
-const PARTS: [&str; 5] = ["start", "library", "live", "export", "size"];
+const PARTS: [&str; 6] = ["start", "library", "live", "touchup", "export", "size"];
 const START_MARK: &str = "<!-- perf:start -->";
 const END_MARK: &str = "<!-- perf:end -->";
 
@@ -140,6 +140,22 @@ pub struct Live {
     pub strokes: (i64, i64),
 }
 
+/// Live mode on a loaded page while strokes are deleted, recoloured and brought back (M12).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TouchUp {
+    pub stats: Option<FrameStats>,
+    /// The same page for a few seconds before the first touch-up: what the page costs by itself.
+    pub idle: Option<FrameStats>,
+    /// Strokes on the live canvas before and after the measure: the tablet must have written.
+    pub strokes: (i64, i64),
+    /// Strokes of the page when the measure began (the sheet that was resumed).
+    pub loaded: u64,
+    /// Edits made through the interface during the measure (colours, deletions, undos, redos).
+    pub edits: u64,
+    /// Strokes a deletion took away from the canvas, on average: the edits must have shown.
+    pub removed_per_delete: f64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Export {
     pub frames: u64,
@@ -154,6 +170,7 @@ pub struct Measures {
     pub start: Option<Start>,
     pub library: Option<Library>,
     pub live: Option<Live>,
+    pub touch_up: Option<TouchUp>,
     pub export: Option<Export>,
     pub exe_bytes: Option<u64>,
 }
@@ -198,6 +215,19 @@ pub fn parse_harness(json: &str, into: &mut Measures) -> Result<(), String> {
                 live["strokesBefore"].as_i64().unwrap_or(-1),
                 live["strokesAfter"].as_i64().unwrap_or(-1),
             ),
+        });
+    }
+    if let Some(touch_up) = value.get("liveTouchUp") {
+        into.touch_up = Some(TouchUp {
+            stats: FrameStats::of(&numbers(&touch_up["intervals"])),
+            idle: FrameStats::of(&numbers(&touch_up["idleIntervals"])),
+            strokes: (
+                touch_up["strokesBefore"].as_i64().unwrap_or(-1),
+                touch_up["strokesAfter"].as_i64().unwrap_or(-1),
+            ),
+            loaded: touch_up["loaded"].as_u64().unwrap_or(0),
+            edits: touch_up["edits"].as_u64().unwrap_or(0),
+            removed_per_delete: touch_up["removedPerDelete"].as_f64().unwrap_or(0.0),
         });
     }
     Ok(())
@@ -428,6 +458,69 @@ fn build_rows(m: &Measures, lang: Lang) -> Vec<Row> {
             measured,
             verdict,
         });
+    }
+    if let Some(touch) = &m.touch_up {
+        let (measured, verdict) = match &touch.stats {
+            Some(stats)
+                if touch.strokes.1 > touch.strokes.0
+                    && touch.edits > 0
+                    && touch.removed_per_delete >= 1.0 =>
+            {
+                (
+                    format!(
+                        "{}; {} {}",
+                        frames_text(stats, lang),
+                        touch.edits,
+                        t("edits", "retouches")
+                    ),
+                    judge(
+                        stats.mean_fps >= LIVE_MIN_FPS
+                            && stats.percent(stats.dropped) <= LIVE_DROPPED_MAX_PERCENT,
+                    ),
+                )
+            }
+            Some(_) => (
+                t(
+                    "invalid: no stroke arrived or no edit showed during the measure",
+                    "invalide : aucun trait reçu ou aucune retouche visible pendant la mesure",
+                ),
+                Verdict::Missed,
+            ),
+            None => (
+                t("no frame measured", "aucune image mesurée"),
+                Verdict::Missed,
+            ),
+        };
+        rows.push(Row {
+            target: t(
+                &format!(
+                    "Live mode, page of {} strokes touched up (>= 60 fps, <= 1 % late frames)",
+                    touch.loaded
+                ),
+                &format!(
+                    "Mode direct, page de {} traits retouchée (>= 60 images/s, <= 1 % d'images en retard)",
+                    touch.loaded
+                ),
+            ),
+            measured,
+            verdict,
+        });
+        if let Some(idle) = &touch.idle {
+            rows.push(Row {
+                target: t(
+                    &format!(
+                        "Same page, tablet writing, nothing touched up ({} strokes)",
+                        touch.loaded
+                    ),
+                    &format!(
+                        "Même page, la tablette écrit, sans retouche ({} traits)",
+                        touch.loaded
+                    ),
+                ),
+                measured: frames_text(idle, lang),
+                verdict: Verdict::Info,
+            });
+        }
     }
     if let Some(export) = &m.export {
         rows.push(Row {
@@ -665,7 +758,7 @@ pub fn command(args: &[&str], root: &Path) -> ExitCode {
         measures.exe_bytes = fs::metadata(&exe).ok().map(|m| m.len());
     }
 
-    let harness: Vec<&str> = ["start", "library", "live"]
+    let harness: Vec<&str> = ["start", "library", "live", "touchup"]
         .into_iter()
         .filter(|p| wanted(&only, p))
         .collect();
@@ -856,6 +949,14 @@ mod tests {
                 stats: Some(steady(16.7, 480)),
                 strokes: (100, 1500),
             }),
+            touch_up: Some(TouchUp {
+                stats: Some(steady(16.7, 600)),
+                idle: Some(steady(16.7, 240)),
+                strokes: (4000, 4010),
+                loaded: 4000,
+                edits: 60,
+                removed_per_delete: 100.0,
+            }),
             export: Some(Export {
                 frames: 3600,
                 seconds: 47.3,
@@ -874,7 +975,10 @@ mod tests {
     fn the_verdicts_follow_spec_section_8() {
         use Verdict::*;
         // The start is judged warm; the unfilled cache only informs.
-        assert_eq!(verdicts(&measures()), [Ok, Ok, Ok, Ok, Info, Ok, Ok, Ok]);
+        assert_eq!(
+            verdicts(&measures()),
+            [Ok, Ok, Ok, Ok, Info, Ok, Ok, Info, Ok, Ok]
+        );
 
         let mut slow = measures();
         slow.start.as_mut().unwrap().warm_ms = vec![2100.0, 2200.0, 2300.0];
@@ -901,7 +1005,37 @@ mod tests {
         late.export.as_mut().unwrap().seconds = 121.0;
         late.exe_bytes = Some(MAX_EXE_BYTES);
         let v = verdicts(&late);
-        assert_eq!((v[6], v[7]), (Missed, Missed));
+        assert_eq!((v[8], v[9]), (Missed, Missed));
+    }
+
+    #[test]
+    fn live_mode_touched_up_is_judged_like_live_mode_and_must_have_been_touched() {
+        use Verdict::*;
+        let touch_up = |m: &Measures| rows(m, Lang::En)[6].clone();
+        assert!(
+            touch_up(&measures())
+                .target
+                .contains("4000 strokes touched up")
+        );
+
+        // 5 % late frames while the page is touched up.
+        let mut stutter = measures();
+        let mut intervals = vec![16.7; 95];
+        intervals.extend([40.0; 5]);
+        stutter.touch_up.as_mut().unwrap().stats = FrameStats::of(&intervals);
+        assert_eq!(touch_up(&stutter).verdict, Missed);
+
+        // Nothing was written, or no edit reached the canvas: the measure says nothing.
+        let mut quiet = measures();
+        quiet.touch_up.as_mut().unwrap().strokes = (4000, 4000);
+        assert!(touch_up(&quiet).measured.starts_with("invalid"));
+        let mut untouched = measures();
+        untouched.touch_up.as_mut().unwrap().removed_per_delete = 0.0;
+        assert_eq!(touch_up(&untouched).verdict, Missed);
+        let mut none = measures();
+        none.touch_up.as_mut().unwrap().edits = 0;
+        assert_eq!(touch_up(&none).verdict, Missed);
+        assert_eq!(touch_up(&measures()).verdict, Ok);
     }
 
     #[test]
@@ -918,7 +1052,7 @@ mod tests {
     fn tables_are_aligned_and_translated() {
         let table = text_table(&rows(&measures(), Lang::En), Lang::En);
         let lines: Vec<&str> = table.lines().collect();
-        assert_eq!(lines.len(), 9);
+        assert_eq!(lines.len(), 11);
         assert!(lines[0].starts_with("Target"));
         // The third column starts at the same place on every line.
         let column = lines[0].find("Result").unwrap();
@@ -932,7 +1066,7 @@ mod tests {
         assert!(french.contains("14,0 Mo"));
         assert!(french.contains("médiane de 3 ; à froid"));
         assert!(french.contains("à titre indicatif"));
-        assert_eq!(french.lines().count(), 10);
+        assert_eq!(french.lines().count(), 12);
     }
 
     #[test]
@@ -943,7 +1077,9 @@ mod tests {
                        "scroll":{"intervals":[16,17,16,60],"scrolledPx":18000,"cards":1000}},
               "second":{"listedMs":1100,"thumbnailsMs":1300,"visibleCards":12,"settleMs":null,
                        "scroll":{"intervals":[16,16],"scrolledPx":18000,"cards":1000}}},
-            "live":{"intervals":[16,17],"strokesBefore":10,"strokesAfter":400,"measuredMs":8000}}"#;
+            "live":{"intervals":[16,17],"strokesBefore":10,"strokesAfter":400,"measuredMs":8000},
+            "liveTouchUp":{"intervals":[16,17,18],"strokesBefore":4000,"strokesAfter":4012,"measuredMs":10000,
+                           "loaded":4000,"iterations":10,"edits":60,"removedPerDelete":98.5}}"#;
         let mut m = Measures::default();
         parse_harness(json, &mut m).unwrap();
         assert!(close(m.start.as_ref().unwrap().cold_ms, 2500.5));
@@ -952,6 +1088,11 @@ mod tests {
         assert_eq!(library.first.scroll.as_ref().unwrap().over_50, 1);
         assert_eq!(library.second.settle_ms, None);
         assert_eq!(m.live.unwrap().strokes, (10, 400));
+        let touch_up = m.touch_up.unwrap();
+        assert_eq!(touch_up.strokes, (4000, 4012));
+        assert_eq!((touch_up.loaded, touch_up.edits), (4000, 60));
+        assert!(close(touch_up.removed_per_delete, 98.5));
+        assert_eq!(touch_up.stats.unwrap().frames, 3);
 
         let mut m = Measures::default();
         assert!(parse_harness("not json", &mut m).is_err());
