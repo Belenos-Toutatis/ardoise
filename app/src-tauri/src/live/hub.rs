@@ -39,7 +39,7 @@ use super::model::{
 use super::resume::{ResumeBase, ResumeSeed, merged_keeping_both, placed_for_merge};
 use super::session::{LiveSession, Page, SavedFile, SheetFork};
 use crate::library::{now_ms, path_text};
-use crate::original::keep_original;
+use crate::original::keep_resumed_original;
 use crate::presentation::MonitorInfo;
 use crate::thumbnails::{thumbnail_png, thumbnail_view};
 
@@ -139,6 +139,8 @@ struct SaveJob {
     file: Option<SavedFile>,
     /// A resumed sheet: the file it came from.
     base: Option<Arc<ResumeBase>>,
+    /// A resumed sheet: ink was added under the blackboard ([`written_sheet`]).
+    on_board: bool,
 }
 
 /// Where live mode stands, for the narration's page watcher.
@@ -376,22 +378,42 @@ pub(super) fn file_fingerprint(file: &NoteFile) -> Option<u64> {
     Some(hasher.finish())
 }
 
+/// The note a resumed sheet writes, from the page's `note` and the sheet as it was read. A sheet
+/// that received no ink is the sheet it was: what the session did around it stays out of the file
+/// (the blackboard turned on in front of it, a layer added to write on, an edit undone). Slate
+/// paper reaches the file only with ink written under the blackboard (`on_board`), which white
+/// chalk needs, and only as long as that ink makes a difference.
+fn written_sheet(note: &Note, before: &Note, on_board: bool) -> Note {
+    let mut written = note.clone();
+    let same_ink = note.strokes == before.strokes;
+    if same_ink {
+        written.layers.clone_from(&before.layers);
+    }
+    if same_ink || !on_board {
+        written.background.paper = before.background.paper;
+    }
+    written
+}
+
 /// What is written for a page, its thumbnail apart. A page of the session holds only its note and
-/// its narration. A resumed sheet is the file it came from with the note and the narration
-/// replaced, so that nothing else of it is lost; the version before the resume is kept for "back
-/// to the original" as soon as the ink differs from it (`original::keep_original`: never over an
-/// original the file already has). Recomputed from that file at each write: the first write may
-/// change only the narration, and a fork needs it as much as the note's own file does.
+/// its narration. A resumed sheet is the file it came from with the note ([`written_sheet`]) and
+/// the narration replaced, so that nothing else of it is lost; the version before the resume is
+/// kept for "back to the original" as soon as the ink differs from it, blank or not
+/// (`original::keep_resumed_original`: never over an original the file already has). Recomputed from
+/// that file at each write: the first write may change only the narration, and a fork needs it as
+/// much as the note's own file does.
 fn page_file(
     note: &Note,
     audio: Option<&Arc<Vec<u8>>>,
     base: Option<&ResumeBase>,
+    on_board: bool,
 ) -> Result<NoteFile, FormatError> {
     let mut file = match base {
         Some(base) => {
+            let written = written_sheet(note, &base.file.note, on_board);
             let mut file = base.file.clone();
-            keep_original(&mut file, note)?;
-            file.note = note.clone();
+            keep_resumed_original(&mut file, &written)?;
+            file.note = written;
             file.note.modified = base.file.note.modified;
             file
         }
@@ -420,16 +442,18 @@ fn page_thumbnail(file: &mut NoteFile, base: Option<&ResumeBase>) {
 /// changed elsewhere, or that was deleted, is left alone and the page becomes a new note next
 /// to it, so that nothing is ever overwritten: in the library root for a page of the session, in
 /// the note's binder for a resumed sheet, which says so ([`Written::fork`]). A resumed sheet that
-/// holds what its file holds (the blackboard turned on and off) is not written at all.
+/// holds what its file holds (the blackboard pressed, nothing written) is not written at all.
 fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError> {
     let base = job.base.as_deref();
     let mut file =
-        page_file(&job.note, job.audio.as_ref(), base).map_err(|source| LibraryError::Format {
-            path: job
-                .file
-                .as_ref()
-                .map_or_else(|| library.root().to_path_buf(), |file| file.path.clone()),
-            source,
+        page_file(&job.note, job.audio.as_ref(), base, job.on_board).map_err(|source| {
+            LibraryError::Format {
+                path: job
+                    .file
+                    .as_ref()
+                    .map_or_else(|| library.root().to_path_buf(), |file| file.path.clone()),
+                source,
+            }
         })?;
     let content = file_fingerprint(&file);
     if let (Some(_), Some(previous)) = (base, &job.file)
@@ -833,6 +857,7 @@ impl Shared {
                     audio: page.audio.clone(),
                     file: page.file.clone(),
                     base: page.base().cloned(),
+                    on_board: page.ink_on_board(),
                 });
             }
             (library, jobs)
@@ -1082,7 +1107,8 @@ impl LiveHub {
 
     /// Starts a session (or returns the running one). The previous session's changes are
     /// written first; if that fails nothing starts. The style and the view (blackboard, laser)
-    /// carry over; the view shows the whole page again.
+    /// carry over, except a blackboard that came on by itself with a slate sheet
+    /// ([`LiveSession::carried_ink`]); the view shows the whole page again.
     pub fn start(&self, options: StartOptions) -> Result<Start, LiveError> {
         // The previous session is replaced only once everything in it is written (a command may
         // change it between the write and the lock: a few attempts, then it is replaced).
@@ -1110,13 +1136,15 @@ impl LiveHub {
         state.next_session += 1;
         let size = page_size_of(&options);
         let old = &state.session;
+        let (style, style_before_board, board) = old.carried_ink();
         let view = LiveViewState {
-            board: old.view().board,
+            board,
             laser: old.view().laser,
             ..LiveViewState::whole(size)
         };
-        let session = LiveSession::new(id, size, old.style(), view, options.french, now_ms())
-            .with_orientation(options.orientation);
+        let session = LiveSession::new(id, size, style, view, options.french, now_ms())
+            .with_orientation(options.orientation)
+            .with_style_before_board(style_before_board);
         Ok(self.install(state, session, options))
     }
 
@@ -1352,7 +1380,13 @@ impl LiveHub {
     /// changes are not in the library: the end of the app when the library cannot be written,
     /// so that nothing drawn is lost. Returns each page (0-based) with its copy or the error.
     pub fn back_up_unsaved(&self, dir: &Path) -> Vec<(usize, std::io::Result<PathBuf>)> {
-        type Unsaved = (usize, Note, Option<Arc<Vec<u8>>>, Option<Arc<ResumeBase>>);
+        type Unsaved = (
+            usize,
+            Note,
+            Option<Arc<Vec<u8>>>,
+            Option<Arc<ResumeBase>>,
+            bool,
+        );
         let pages: Vec<Unsaved> = {
             let state = self.shared.lock();
             state
@@ -1367,14 +1401,15 @@ impl LiveHub {
                         page.note.clone(),
                         page.audio.clone(),
                         page.base().cloned(),
+                        page.ink_on_board(),
                     )
                 })
                 .collect()
         };
         pages
             .into_iter()
-            .map(|(index, note, audio, base)| {
-                let copy = page_file(&note, audio.as_ref(), base.as_deref())
+            .map(|(index, note, audio, base, on_board)| {
+                let copy = page_file(&note, audio.as_ref(), base.as_deref(), on_board)
                     .and_then(|mut file| {
                         file.note.id = uuid::Uuid::new_v4().to_string();
                         page_thumbnail(&mut file, base.as_deref());

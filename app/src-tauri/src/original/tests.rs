@@ -308,6 +308,39 @@ fn the_original_is_taken_at_the_first_change_of_the_ink() {
 }
 
 #[test]
+fn only_live_mode_takes_a_blank_page_for_an_original() {
+    let mut blank = NoteFile::new(crate::library::blank_note("Fiche", "Calque 1", 1));
+    let mut filled = blank.note.clone();
+    filled.strokes = sample_note("A").strokes;
+
+    // The editor's rule: nothing to go back to.
+    let mut editor = blank.clone();
+    keep_original(&mut editor, &filled).unwrap();
+    assert!(editor.original_note.is_none());
+
+    // Live mode's: the worksheet before the lesson, once the ink changes, never replaced.
+    let unchanged = blank.note.clone();
+    keep_resumed_original(&mut blank, &unchanged).unwrap();
+    assert!(blank.original_note.is_none());
+    keep_resumed_original(&mut blank, &filled).unwrap();
+    let kept = blank.original_note.clone().expect("original.ardoise");
+    let nested = read_from_bytes(&kept).unwrap();
+    assert!(nested.note.strokes.is_empty());
+    assert_eq!(nested.note.layers.len(), 1);
+    blank.note = filled.clone();
+    let mut again = filled;
+    again.strokes.clear();
+    keep_resumed_original(&mut blank, &again).unwrap();
+    assert_eq!(blank.original_note, Some(kept));
+    // Nor over a tablet's page.
+    let mut tablet = NoteFile::new(sample_note("B"));
+    tablet.original = Some(vec![1, 2, 3]);
+    let edited = crate::library::blank_note("B", "Calque 1", 1);
+    keep_resumed_original(&mut tablet, &edited).unwrap();
+    assert!(tablet.original_note.is_none());
+}
+
+#[test]
 fn keep_original_never_replaces_an_original() {
     let mut file = NoteFile::new(sample_note("A"));
     let mut edited = file.note.clone();
@@ -366,11 +399,13 @@ fn the_answer_has_the_shape_of_the_interface() {
         page: note.page,
         layers: note.layers.clone(),
         strokes: note.strokes.clone(),
+        paper: Paper::Kraft,
         background_image: None,
     })
     .unwrap();
     assert!(json.get("backgroundImage").is_none());
     assert_eq!(json["source"], "firstVersion");
+    assert_eq!(json["paper"], "kraft");
     assert_eq!(json["page"]["width"], note.page.width);
     assert_eq!(json["layers"][0]["visible"], true);
     assert!(json["strokes"][0]["points"][0]["pressure"].is_number());
@@ -383,10 +418,12 @@ fn the_answer_has_the_shape_of_the_interface() {
     .unwrap();
     assert_eq!(tablet["source"], "tablet");
     assert!(tablet.get("backgroundImage").is_none());
+    assert!(tablet.get("paper").is_none());
     let with_image = serde_json::to_value(NoteOriginal::FirstVersion {
         page: note.page,
         layers: vec![],
         strokes: vec![],
+        paper: Paper::White,
         background_image: Some(fiche()),
     })
     .unwrap();
