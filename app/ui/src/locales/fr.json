@@ -1438,6 +1438,21 @@
     "clear": "Effacer la page",
     "board": "Tableau noir",
     "laser": "Pointeur laser",
+    "select": {
+      "label": "Retouche",
+      "toggle": "Sélection",
+      "hint": "Sélectionner des traits au lasso ou d'un clic pour les supprimer ou changer leur couleur (V)",
+      "help": "Lasso : sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner. Les pastilles de couleur changent la couleur de la sélection. Ce que la tablette écrit reste hors de la sélection.",
+      "bar": "Retoucher la sélection",
+      "count": "Traits sélectionnés : {count}",
+      "delete": "Supprimer",
+      "clear": "Désélectionner",
+      "colors": "Les pastilles de couleur recolorent la sélection."
+    },
+    "undo": "Annuler",
+    "redo": "Rétablir",
+    "undoHint": "Annuler la dernière retouche ou le dernier effacement de la page (Ctrl+Z) ; ce que la tablette a écrit n'est pas annulé",
+    "redoHint": "Rétablir ce qui vient d'être annulé (Ctrl+Y)",
     "preview": {
       "label": "Aperçu de la page {page} ; le rectangle bleu montre la zone projetée",
       "hint": "Faites glisser le rectangle bleu pour déplacer la zone projetée ; la molette zoome."
@@ -1513,11 +1528,23 @@
         },
         "leave": {
           "keys": "Échap",
-          "action": "Fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
+          "action": "Désélectionner d'abord s'il y a une sélection ; puis fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
         },
         "marks": {
           "keys": "Suppr, Retour arrière",
           "action": "Effacer les annotations tracées sur la présentation (fenêtre projetée)"
+        },
+        "select": {
+          "keys": "V",
+          "action": "Outil Sélection (lasso ou clic sur un trait)"
+        },
+        "delete": {
+          "keys": "Suppr, Retour arrière",
+          "action": "Avec une sélection : la supprimer (sans sélection : effacer les annotations)"
+        },
+        "undo": {
+          "keys": "Ctrl + Z, Ctrl + Y",
+          "action": "Annuler, rétablir une suppression, un changement de couleur ou l'effacement de la page"
         }
       }
     },

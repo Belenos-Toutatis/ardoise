@@ -17,6 +17,8 @@
  * | Shift + arrows                         | move the projected area |
  * | Esc                                    | leave                   |
  *
+ * The control window also has the keys of touching up (`liveEditKeyAction`, at the end).
+ *
  * Presentation remotes send Page Up / Page Down. Keys typed in a field are left alone. Space
  * always means "next page", even with a button focused (the button of a tool just used would
  * otherwise be pressed again: « Clear the page » by Space wiped the new page). Esc closes the
@@ -131,4 +133,38 @@ export function liveKeyAction(e: KeyInput): LiveKeyAction | null {
     default:
       return null;
   }
+}
+
+/** What the control window's keys do to the page's ink (M12): not used by the presentation window. */
+export type LiveEditKeyAction =
+  | { kind: 'select' }
+  | { kind: 'deselect' }
+  | { kind: 'deleteSelection' }
+  | { kind: 'undo' }
+  | { kind: 'redo' };
+
+/**
+ * The keys of touching up, tried by the control window before `liveKeyAction`:
+ *
+ * | Keys                               | Action                                          |
+ * |------------------------------------|-------------------------------------------------|
+ * | V                                  | the Select tool on or off (the editor's key)    |
+ * | Ctrl + Z                           | undo a delete, a change of colour, a clearing   |
+ * | Ctrl + Y, Ctrl + Shift + Z         | redo                                            |
+ * | Delete, Backspace (with selection) | delete the selection (otherwise: the marks)     |
+ * | Esc (with selection)               | deselect (otherwise: what Esc does)             |
+ */
+export function liveEditKeyAction(e: KeyInput, hasSelection: boolean): LiveEditKeyAction | null {
+  if (isTypingTarget(e.target)) return null;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (e.ctrlKey || e.metaKey) {
+    if (e.altKey || e.repeat) return null;
+    if (key === 'z') return e.shiftKey ? { kind: 'redo' } : { kind: 'undo' };
+    return key === 'y' && !e.shiftKey ? { kind: 'redo' } : null;
+  }
+  if (e.altKey || e.repeat) return null;
+  if (key === 'v') return { kind: 'select' };
+  if (!hasSelection || e.shiftKey) return null;
+  if (key === 'Delete' || key === 'Backspace') return { kind: 'deleteSelection' };
+  return key === 'Escape' ? { kind: 'deselect' } : null;
 }
