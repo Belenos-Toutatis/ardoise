@@ -924,7 +924,9 @@
       "saveClose": "Save and close",
       "discardClose": "Close without saving",
       "saveSwitch": "Save and open the other note",
-      "discardSwitch": "Open without saving"
+      "discardSwitch": "Open without saving",
+      "saveResume": "Save and resume live mode",
+      "discardResume": "Resume without saving"
     },
     "share": {
       "label": "Split, copy, export"
@@ -1368,6 +1370,22 @@
     "orientation": {
       "label": "Tablet position",
       "hint": "Changes at once: the page in progress turns with the tablet, with what is already drawn on it."
+    },
+    "resume": {
+      "action": "Resume in live mode",
+      "hint": "Resumes live mode on this sheet: what you write on the tablet is added to the note.",
+      "noTablet": "Resuming in live mode needs a registered tablet: register it from the tablet panel.",
+      "tabletBusy": "The tablet is busy (sync or registration under way).",
+      "severalSelected": "Select a single note to resume in live mode.",
+      "failed": "Live mode could not resume this sheet.",
+      "back": "Back to the library",
+      "cannotTurn": "A resumed sheet is never turned: the next page follows the tablet's position again.",
+      "hold": "To write on this sheet, hold the tablet like this: {position}.",
+      "forked": {
+        "sheet": "Sheet “{title}”",
+        "changed": "This sheet was changed elsewhere during live mode: so that nothing is overwritten, the writing continues in a new note, next to it.",
+        "deleted": "This sheet was deleted elsewhere during live mode: the writing continues in a new note."
+      }
     },
     "starting": "Starting live mode…",
     "waiting": {

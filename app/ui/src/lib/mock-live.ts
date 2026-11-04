@@ -10,6 +10,11 @@
  * when the page changes and at the end), layers, style, view (blackboard: slate paper and white
  * chalk), and a presentation window on one of two fictitious screens.
  *
+ * `live_resume` (M12) takes a note of the demo library as the first page: never turned
+ * (`canTurnPage: false`, `orientation` = how to hold it), written into the same note only once it
+ * changed, forked into a new note of the same binder (`sheetForked`) when the file changed or went
+ * away meanwhile, refused with `mockLiveConfig.resumeError`.
+ *
  * Deterministic: the pen follows a seeded script (no `Math.random`), so that a test under
  * `vi.useFakeTimers` sees the same strokes every time.
  */
@@ -27,9 +32,9 @@ import type {
   LiveViewState,
   MonitorInfo,
 } from './live';
-import { fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, UNHANDLED } from './mock-data';
-import type { Note, Rgba, Stroke } from './note';
-import { orientPoint, pageSizeFor, turnPoint, turnsFrom, turnStrokes, type Orientation } from './orientation';
+import { fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, sameStamp, UNHANDLED } from './mock-data';
+import type { FileStamp, Note, Rgba, Stroke } from './note';
+import { isPortrait, orientPoint, pageSizeFor, turnPoint, turnsFrom, turnStrokes, type Orientation } from './orientation';
 
 /** Pace of the stand-in; tests change it (and `resetMockLive` restores it). */
 export const mockLiveConfig = {
@@ -43,6 +48,8 @@ export const mockLiveConfig = {
   monitors: 2,
   /** A message makes every write of a page into the library fail with it (null: writes succeed). */
   saveError: null as string | null,
+  /** The code `live_resume` refuses with (`noteDamaged`, `noteNewerVersion`...); null: it resumes. */
+  resumeError: null as string | null,
 };
 
 /** Records per second of the Slate: one every 5 ms. */
@@ -155,9 +162,26 @@ interface Session {
   pen: PenScript;
   /** The ink of the page last cleared, for « Undo the clearing ». */
   cleared: { pageIndex: number; strokes: Stroke[] } | null;
+  /** The sheets resumed (M12), by note id. */
+  resumed: Map<string, ResumedSheet>;
+  /** The `sheetForked` events so far: a window that subscribes later gets them too. */
+  forks: LiveEvent[];
   wait?: ReturnType<typeof setTimeout>;
   tick?: ReturnType<typeof setInterval>;
   reconnect?: ReturnType<typeof setTimeout>;
+}
+
+/** A sheet of the library that live mode took up again (`live_resume`). */
+interface ResumedSheet {
+  /** Where the note is, and the binder it stays in. */
+  path: string;
+  binder: string;
+  /** The file's stamp when last read or written; null once the page went on in a new note. */
+  stamp: FileStamp | null;
+  /** The ink and layers as read: a page that still looks like this is not written. */
+  seed: string;
+  /** Time of the first new point, ms since the note's `created` (after the last stroke). */
+  timeBase: number;
 }
 
 let session: Session | null = null;
@@ -206,6 +230,7 @@ function snapshot(): LiveSnapshot {
       pageIndex: 0,
       pageCount: 1,
       orientation: heldAs,
+      canTurnPage: true,
       layer: 0,
       style: DEFAULT_STYLE,
       view: IDLE_VIEW,
@@ -219,7 +244,8 @@ function snapshot(): LiveSnapshot {
     page: s.pages[s.pageIndex],
     pageIndex: s.pageIndex,
     pageCount: s.pages.length,
-    orientation: heldAs,
+    orientation: holdFor(s.pages[s.pageIndex], s),
+    canTurnPage: !s.resumed.has(s.pages[s.pageIndex].id),
     layer: s.layer,
     style: s.style,
     view: s.view,
@@ -227,6 +253,23 @@ function snapshot(): LiveSnapshot {
     presentation,
     saved: [...s.saved.values()],
   } satisfies LiveSnapshot);
+}
+
+/**
+ * How the current page is to be held: the setting, except for a resumed sheet that is not the same
+ * way round (a quarter turn on the same side: the button stays away from the writing hand).
+ */
+function holdFor(page: Note, s: Session): Orientation {
+  if (!s.resumed.has(page.id)) return heldAs;
+  const { width, height } = page.page;
+  if (width === height || isPortrait(heldAs) === height > width) return heldAs;
+  const other: Record<Orientation, Orientation> = {
+    landscape: 'portraitLeft',
+    landscapeFlipped: 'portraitRight',
+    portraitLeft: 'landscape',
+    portraitRight: 'landscapeFlipped',
+  };
+  return other[heldAs];
 }
 
 function broadcast(events: LiveEvent[]): void {
@@ -258,20 +301,53 @@ function running(): Session {
   return session;
 }
 
-/** A free file name in the library root, like `create_unique`. */
-function uniquePath(note: Note): string {
+/** A free file name in `binder` (the library root by default), like `create_unique`. */
+function uniquePath(note: Note, binder = ''): string {
   const library = mockLibrary();
   const name = fileName(note).replace(/\.ardoise$/, '');
-  let path = notePath(library.root, '', `${name}.ardoise`);
-  for (let n = 2; library.notes.has(path); n++) path = notePath(library.root, '', `${name} (${n}).ardoise`);
+  let path = notePath(library.root, binder, `${name}.ardoise`);
+  for (let n = 2; library.notes.has(path); n++) path = notePath(library.root, binder, `${name} (${n}).ardoise`);
   return path;
 }
 
-function writePage(s: Session, page: Note): void {
-  const path = s.saved.get(page.id) ?? uniquePath(page);
-  mockLibrary().notes.set(path, { note: copy({ ...page, modified: Date.now() }), stamp: freshStamp(), binder: '' });
+/** What tells that a resumed page was not touched. */
+function looksLike(page: Note): string {
+  return JSON.stringify({ strokes: page.strokes, layers: page.layers });
+}
+
+/**
+ * Writes `page` into the demo library. A resumed sheet that changed elsewhere since it was read
+ * (or is gone) is not overwritten: the page goes on in a new note of the same binder, and
+ * `sheetForked` is sent once. Returns the events to send.
+ */
+function writePage(s: Session, page: Note): LiveEvent[] {
+  const library = mockLibrary();
+  const events: LiveEvent[] = [];
+  const sheet = s.resumed.get(page.id);
+  let path = s.saved.get(page.id) ?? sheet?.path ?? uniquePath(page);
+  if (sheet?.stamp) {
+    const current = library.notes.get(sheet.path);
+    const reason = !current ? 'deleted' : sameStamp(current.stamp, sheet.stamp) ? null : 'changed';
+    if (reason) {
+      path = uniquePath(page, sheet.binder);
+      const fork: LiveEvent = { type: 'sheetForked', pageIndex: s.pages.indexOf(page), reason, original: sheet.path, path };
+      s.forks.push(fork);
+      events.push(fork);
+      sheet.stamp = null;
+    }
+  }
+  const stamp = freshStamp();
+  const kept = library.notes.get(path);
+  library.notes.set(path, {
+    note: copy({ ...page, modified: Date.now() }),
+    stamp,
+    binder: sheet?.binder ?? kept?.binder ?? '',
+    original: kept?.original,
+  });
+  if (sheet?.stamp) sheet.stamp = stamp;
   s.saved.set(page.id, path);
   notifyLibraryChanged();
+  return events;
 }
 
 /**
@@ -281,17 +357,20 @@ function writePage(s: Session, page: Note): void {
  * the error repeats), nothing otherwise.
  */
 function savePage(s: Session, page: Note): LiveEvent[] {
-  if (!s.saved.has(page.id) && page.strokes.length === 0) return [];
+  const sheet = s.resumed.get(page.id);
+  // A resumed sheet that looks as it was read is left as it is, as is a blank page.
+  if (!s.saved.has(page.id) && (sheet ? looksLike(page) === sheet.seed : page.strokes.length === 0)) return [];
   const failure = mockLiveConfig.saveError;
   if (failure !== null) {
     if (s.failed.has(page.id)) return [];
     s.failed.add(page.id);
     return [{ type: 'saveFailed', pageIndex: s.pages.indexOf(page), code: 'libraryAccess', message: failure }];
   }
-  for (const other of s.pages) if (s.failed.has(other.id)) writePage(s, other);
+  const events: LiveEvent[] = [];
+  for (const other of s.pages) if (s.failed.has(other.id)) events.push(...writePage(s, other));
   s.failed.clear();
-  writePage(s, page);
-  return [savedEvent(s)];
+  events.push(...writePage(s, page), savedEvent(s));
+  return events;
 }
 
 function savedEvent(s: Session): LiveEvent {
@@ -326,7 +405,7 @@ function tick(s: Session): void {
         x: Math.round(sample.x),
         y: Math.round(sample.y),
         p: Math.round(sample.p * 2047) / 2047,
-        t: (s.record - (s.pageStart.get(page.id) ?? 0)) * RECORD_MS,
+        t: (s.resumed.get(page.id)?.timeBase ?? 0) + (s.record - (s.pageStart.get(page.id) ?? 0)) * RECORD_MS,
         // Received with the notification, a little before the batch left Rust.
         recv: now - 0.4 - 0.3 * ((s.record * 7) % 5),
       };
@@ -450,8 +529,8 @@ function setView(s: Session, requested: LiveViewState): void {
   broadcastSnapshot();
 }
 
-function startSession(): LiveSnapshot {
-  if (session) return snapshot();
+/** A session waiting for the tablet, with its first page: blank, or the sheet resumed. */
+function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSnapshot {
   const s: Session = {
     state: 'waiting',
     pages: [],
@@ -468,8 +547,22 @@ function startSession(): LiveSnapshot {
     pageStart: new Map(),
     pen: new PenScript(),
     cleared: null,
+    resumed: new Map(),
+    forks: [],
   };
-  addPage(s);
+  if (first) {
+    const { page, sheet } = first;
+    s.pages.push(page);
+    s.pageStart.set(page.id, s.record);
+    s.resumed.set(page.id, sheet);
+    // The blackboard is on only for a slate sheet; new ink goes on the last visible layer.
+    s.view = { ...s.view, x: page.page.width / 2, y: page.page.height / 2, board: page.background.paper === 'slate' };
+    if (s.view.board) s.style = CHALK_STYLE;
+    if (!page.layers.some((layer) => layer.visible)) page.layers.push({ name: `Calque ${page.layers.length + 1}`, visible: true });
+    s.layer = page.layers.map((layer) => layer.visible).lastIndexOf(true);
+  } else {
+    addPage(s);
+  }
   session = s;
   s.wait = setTimeout(() => {
     s.state = 'live';
@@ -480,12 +573,38 @@ function startSession(): LiveSnapshot {
   return snapshot();
 }
 
+function startSession(): LiveSnapshot {
+  if (session) return snapshot();
+  return openSession(null);
+}
+
+/** `live_resume`: refused first (the running session, if any, goes on), then like a stop and a start. */
+function resumeSession(path: string): LiveSnapshot {
+  const library = mockLibrary();
+  const refusal = mockLiveConfig.resumeError;
+  if (refusal !== null) throw { code: refusal, message: path };
+  const stored = library.notes.get(path);
+  if (!stored) throw { code: path.startsWith(library.root) ? 'noteNotFound' : 'notInLibrary', message: path };
+  stopSession();
+  const page = copy(stored.note);
+  pageOrientation.set(page.id, heldAs);
+  const last = page.strokes.reduce((end, stroke) => Math.max(end, stroke.points.at(-1)?.t ?? 0), 0);
+  const sheet: ResumedSheet = {
+    path,
+    binder: stored.binder,
+    stamp: stored.stamp,
+    seed: looksLike(page),
+    timeBase: last + 1000,
+  };
+  return openSession({ page, sheet });
+}
+
 function stopSession(): string[] {
   const s = session;
   if (!s) return [];
   stopTimers(s);
   const events = endStroke(s);
-  for (const page of s.pages) events.push(...savePage(s, page).filter((e) => e.type === 'saveFailed'));
+  for (const page of s.pages) events.push(...savePage(s, page).filter((e) => e.type !== 'saved'));
   const paths = [...s.saved.values()];
   // A `saved` after a failure means that everything is written: not sent while a page failed.
   if (s.failed.size === 0) events.push({ type: 'saved', paths });
@@ -514,6 +633,8 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
   switch (command) {
     case 'live_start':
       return startSession();
+    case 'live_resume':
+      return resumeSession(String(args.path));
     case 'live_stop':
       return stopSession();
     case 'live_set_style': {
@@ -566,6 +687,9 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
 /** `live_subscribe` in the browser: the current session, then every batch. */
 export async function mockLiveSubscribe(onBatch: (batch: LiveBatch) => void): Promise<LiveSnapshot> {
   subscribers.add(onBatch);
+  // Like Rust: a sheet forked before this window subscribed is told to it too, once.
+  const forks = session?.forks ?? [];
+  if (forks.length > 0) queueMicrotask(() => onBatch(copy({ events: forks, sentAt: wallClock() })));
   return snapshot();
 }
 
@@ -585,7 +709,7 @@ export function resetMockLive(): void {
   pageCounter = 0;
   heldAs = 'landscape';
   pageOrientation.clear();
-  Object.assign(mockLiveConfig, { waitMs: 1200, tickMs: 15, pen: true, monitors: 2, saveError: null });
+  Object.assign(mockLiveConfig, { waitMs: 1200, tickMs: 15, pen: true, monitors: 2, saveError: null, resumeError: null });
 }
 
 /** Sends `events` to every subscriber as one batch. */
@@ -614,6 +738,8 @@ export function mockLiveTick(count = 1): void {
 
 /** Turns `page` with its ink to the way the tablet is held. */
 function followTablet(page: Note): void {
+  // A resumed sheet is never turned: the session follows it instead (`holdFor`).
+  if (session?.resumed.has(page.id)) return;
   const from = pageOrientation.get(page.id) ?? 'landscape';
   const turns = turnsFrom(heldAs, from);
   pageOrientation.set(page.id, heldAs);
@@ -634,13 +760,13 @@ export function setMockLiveOrientation(orientation: Orientation): void {
   if (orientation === heldAs) return;
   const s = session;
   const before = s ? { ...s.pages[s.pageIndex].page } : null;
-  const turns = s ? turnsFrom(orientation, pageOrientation.get(s.pages[s.pageIndex].id) ?? 'landscape') : 0;
+  const turns = s && !s.resumed.has(s.pages[s.pageIndex].id) ? turnsFrom(orientation, pageOrientation.get(s.pages[s.pageIndex].id) ?? 'landscape') : 0;
   const events = s ? endStroke(s) : [];
   heldAs = orientation;
   if (!s || !before) return;
   s.hover = null;
   s.pages.forEach((page, index) => {
-    if (page.strokes.length === 0 && !s.saved.has(page.id)) {
+    if (page.strokes.length === 0 && !s.saved.has(page.id) && !s.resumed.has(page.id)) {
       page.page = pageSizeFor(orientation, PAGE.width, PAGE.height);
       pageOrientation.set(page.id, orientation);
     } else if (index === s.pageIndex) {

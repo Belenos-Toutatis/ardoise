@@ -1,7 +1,9 @@
 <script lang="ts">
   /**
    * Live mode and the classroom's control window (SPEC §4.2; docs/design/tablet-live-classroom.md,
-   * "Interface"). Starts live mode when it opens (`live_start`) and follows the session
+   * "Interface"). Starts live mode when it opens (`live_start`; `live_resume` on the note `resume`
+   * when one is given, M12: the sheet is never turned, and a notice says how to hold the tablet
+   * for it and, if it changed elsewhere meanwhile, that the writing went on in a new note) and follows the session
    * (`live_subscribe`): toolbar (tool, colour, width), pages, layer, clear, blackboard, laser
    * pointer, the preview of the whole page with the projected area (drag to move it), zoom,
    * the presentation window (screen, project / stop), the measured latency, the narration (SPEC
@@ -28,11 +30,13 @@
     type LiveActions,
   } from '../../lib/live-actions';
   import { isSpaceKey, isTypingTarget, liveKeyAction } from '../../lib/live-keys';
+  import { ResumeWatch } from '../../lib/live-resume.svelte';
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
   import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
   import { ORIENTATIONS, type Orientation } from '../../lib/orientation';
   import { share } from '../../lib/share-state.svelte';
+  import { tablet } from '../../lib/tablet-state.svelte';
   import type { NarrationSaved } from '../../lib/video';
   import Modal from '../Modal.svelte';
   import RecordPanel from '../narration/RecordPanel.svelte';
@@ -43,10 +47,13 @@
 
   let {
     app,
+    resume = null,
     onclose,
     onchange,
   }: {
     app: AppState;
+    /** The note of the library to resume live mode on (M12); null: a new session on a blank page. */
+    resume?: string | null;
     onclose: () => void;
     /** The app state changed (the microphone chosen here): the screen holding it takes the new one. */
     onchange?: (next: AppState) => void;
@@ -77,6 +84,7 @@
   const KEYS = ['next', 'previous', 'clear', 'board', 'laser', 'zoom', 'whole', 'width', 'pan', 'marks', 'leave'] as const;
 
   const live = new LiveState();
+  const sheet = new ResumeWatch();
   const latency = new LatencyRecorder();
   const recorder = new NarrationRecorder();
 
@@ -123,6 +131,14 @@
           ? t('live.narration.savedOne')
           : t('live.narration.savedMany', { count: narrated.pages }),
   );
+  /** The sheet is resumed and cannot be turned: the quick position buttons wait for the next page. */
+  const locked = $derived(!sheet.canTurnPage);
+  /** How to hold the tablet for the resumed sheet, when that is not how the setting says. */
+  const hold = $derived(
+    locked && sessionState !== 'idle' && tablet.status && tablet.status.options.orientation !== live.orientation
+      ? live.orientation
+      : null,
+  );
   const savedCount = $derived(live.saved.length);
   const savedText = $derived(
     savedCount === 0 ? t('live.saved.none') : savedCount === 1 ? t('live.saved.one') : t('live.saved.many', { count: savedCount }),
@@ -160,6 +176,8 @@
     // « waiting » again when it is back, `Home.svelte`).
     share.showLive();
     exposeLatency(latency);
+    // The position set for the tablet is compared with how the resumed sheet is held.
+    tablet.start();
     loadInk()
       .then((module) => {
         if (alive) ink = module;
@@ -169,7 +187,7 @@
       });
     void (async () => {
       try {
-        await subscribeLive(live, api.liveSubscribe);
+        await subscribeLive(live, sheet.watch(api.liveSubscribe));
       } catch {
         // `live_start` gives the session too; batches then follow it.
       }
@@ -219,12 +237,13 @@
     starting = true;
     startError = null;
     try {
-      const snapshot = await api.liveStart();
+      const snapshot = resume === null ? await api.liveStart() : await api.liveResume(resume);
       if (destroyed) {
         // The view was closed while the session started: nobody would stop it.
         void api.liveStop().catch(() => {});
         return;
       }
+      if (resume !== null) sheet.begin(snapshot);
       live.adoptStart(snapshot);
     } catch (error) {
       if (!destroyed) startError = errorMessage(error);
@@ -314,6 +333,15 @@
     onclose();
   }
 
+  /**
+   * "Back to the library" after a refused resume: nothing was started on this side (a session
+   * that was running goes on), so only the view closes.
+   */
+  function leaveRefused() {
+    live.close();
+    onclose();
+  }
+
   function offerUndo() {
     clearTimeout(undoTimer);
     undoClear = true;
@@ -350,7 +378,7 @@
 
   /** The quick switch of the tablet's position: applies at once, the snapshot that follows shows it. */
   function setOrientation(orientation: Orientation) {
-    if (orientation === live.orientation) return;
+    if (locked || orientation === live.orientation) return;
     notice = null;
     api.tabletSetOrientation(orientation).catch((error: unknown) => actions.onerror(error));
   }
@@ -473,11 +501,34 @@
   </header>
 
   {#if startError}
-    <div class="banner error live-banner" role="alert">
-      <strong>{t('live.startFailed')}</strong>
+    <div class="banner error live-banner" role="alert" data-slot={resume === null ? 'start-failed' : 'resume-failed'}>
+      <strong>{resume === null ? t('live.startFailed') : t('live.resume.failed')}</strong>
       <p>{startError}</p>
       <button type="button" class="button small-button primary" onclick={start}>{t('live.retry')}</button>
-      <button type="button" class="button small-button" disabled={stopping} onclick={closeAnyway}>{t('common.close')}</button>
+      {#if resume === null}
+        <button type="button" class="button small-button" disabled={stopping} onclick={closeAnyway}>{t('common.close')}</button>
+      {:else}
+        <button type="button" class="button small-button" data-action="resume-back" onclick={leaveRefused}>
+          {t('live.resume.back')}
+        </button>
+      {/if}
+    </div>
+  {/if}
+  <!-- A sheet that went on in a new note: the notice stays until it is dismissed. -->
+  {#each sheet.forks as fork (fork.path)}
+    <div class="banner notice live-banner" role="status" data-slot="sheet-forked" data-reason={fork.reason}>
+      {#if sheet.title}
+        <strong>{t('live.resume.forked.sheet', { title: sheet.title })}</strong>
+      {/if}
+      <p>{t(`live.resume.forked.${fork.reason}`)}</p>
+      <button type="button" class="button small-button" data-action="dismiss-fork" onclick={() => sheet.dismiss(fork)}>
+        {t('live.dismiss')}
+      </button>
+    </div>
+  {/each}
+  {#if hold}
+    <div class="banner notice live-banner" role="status" data-slot="resume-hold" data-orientation={hold}>
+      <p>{t('live.resume.hold', { position: t(`tablet.orientation.${hold}`) })}</p>
     </div>
   {/if}
   {#if stopError}
@@ -612,7 +663,13 @@
       </button>
     </div>
 
-    <div class="group" role="group" aria-label={t('live.orientation.label')} title={t('live.orientation.hint')} data-slot="orientation">
+    <div
+      class="group"
+      role="group"
+      aria-label={t('live.orientation.label')}
+      title={locked ? t('live.resume.cannotTurn') : t('live.orientation.hint')}
+      data-slot="orientation"
+    >
       {#each ORIENTATIONS as orientation (orientation)}
         <button
           type="button"
@@ -621,7 +678,8 @@
           data-orientation={orientation}
           aria-pressed={live.orientation === orientation}
           aria-label={t(`tablet.orientation.${orientation}`)}
-          title={t(`tablet.orientation.${orientation}`)}
+          title={locked ? t('live.resume.cannotTurn') : t(`tablet.orientation.${orientation}`)}
+          disabled={locked}
           onclick={() => setOrientation(orientation)}
         >
           <OrientationIcon {orientation} size={26} />

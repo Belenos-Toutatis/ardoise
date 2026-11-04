@@ -924,7 +924,9 @@
       "saveClose": "Enregistrer et fermer",
       "discardClose": "Fermer sans enregistrer",
       "saveSwitch": "Enregistrer et ouvrir l'autre note",
-      "discardSwitch": "Ouvrir sans enregistrer"
+      "discardSwitch": "Ouvrir sans enregistrer",
+      "saveResume": "Enregistrer et reprendre le direct",
+      "discardResume": "Reprendre sans enregistrer"
     },
     "share": {
       "label": "Découper, copier, exporter"
@@ -1368,6 +1370,22 @@
     "orientation": {
       "label": "Position de la tablette",
       "hint": "Change aussitôt : la page en cours tourne avec la tablette, avec ce qui y est déjà dessiné."
+    },
+    "resume": {
+      "action": "Reprendre en mode direct",
+      "hint": "Reprend le mode direct sur cette feuille : ce que vous écrivez sur la tablette s'ajoute à la note.",
+      "noTablet": "Reprendre en mode direct demande une tablette enregistrée : enregistrez-la depuis le panneau de la tablette.",
+      "tabletBusy": "La tablette est occupée (synchronisation ou enregistrement en cours).",
+      "severalSelected": "Sélectionnez une seule note pour reprendre le mode direct.",
+      "failed": "Le mode direct n'a pas pu reprendre cette feuille.",
+      "back": "Retour à la bibliothèque",
+      "cannotTurn": "Une feuille reprise ne se tourne jamais : la page suivante suivra de nouveau la position de la tablette.",
+      "hold": "Pour écrire sur cette feuille, tenez la tablette ainsi : {position}.",
+      "forked": {
+        "sheet": "Feuille « {title} »",
+        "changed": "Cette feuille a été modifiée ailleurs pendant le direct : pour ne rien écraser, l'écriture continue dans une nouvelle note, à côté d'elle.",
+        "deleted": "Cette feuille a été supprimée ailleurs pendant le direct : l'écriture continue dans une nouvelle note."
+      }
     },
     "starting": "Démarrage du mode direct…",
     "waiting": {
