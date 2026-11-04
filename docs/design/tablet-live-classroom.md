@@ -632,8 +632,9 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   tap) and wheel stay navigation. The check runs once, on release: 24 000 strokes of 30 samples take about 0.4 s the first time (bounds
   are cached per stroke object) and 0.15 s after; a click takes about 10 ms.
 - **Actions.** `lib/live-touch-up.ts`: delete, recolour (keeps the selection), undo, redo, with the selection's revision; a
-  `liveEditStale` drops the selection and every refusal shows its `errorCodes.*` sentence. A swatch with a selection recolours it and,
-  as in the editor, sets the pen's colour too; without one it only sets the pen.
+  `liveEditStale` drops the selection and every refusal shows its `errorCodes.*` sentence. A swatch with a selection recolours it and
+  leaves the pen's colour alone (unlike the editor: a correction made in front of the class must not change the ink under the
+  pen); without one it only sets the pen.
 - **Keys** (control window only, `liveEditKeyAction`, tried before `liveKeyAction`; the presentation window's mapping is unchanged):
   V toggles Select (the editor's key); Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo (only when the session says there is a step);
   Delete and Backspace delete the selection, else clear the marks; Esc deselects, else closes the projection or asks to leave.
