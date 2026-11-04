@@ -31,6 +31,7 @@ use ardoise_render::NoteView;
 use tauri::ipc::Channel;
 
 use super::activity::Activity;
+use super::edits::{LiveEditError, Prepared, StrokesEdit};
 use super::model::{
     ForkReason, LiveBatch, LiveCommandKind, LiveEvent, LiveMark, LiveSessionState, LiveSnapshot,
     LiveStyle, LiveViewState, wall_ms, wall_now_ms,
@@ -88,6 +89,9 @@ pub enum LiveError {
     /// (nothing was changed).
     #[error("cannot store the narration of the page: {0}")]
     Narration(MediaError),
+    /// An edit of strokes was refused (nothing was changed).
+    #[error(transparent)]
+    Edit(#[from] LiveEditError),
 }
 
 /// What a new session needs.
@@ -306,11 +310,17 @@ fn page_due(page: &Page, now: Instant, interval: Duration) -> Option<Instant> {
     })
 }
 
-/// Whether `events` may have made a page worth writing (a stroke ended, a page changed).
+/// Whether `events` may have made a page worth writing (a stroke ended, strokes were edited, a
+/// page changed).
 fn may_need_save(events: &[LiveEvent]) -> bool {
-    events
-        .iter()
-        .any(|e| matches!(e, LiveEvent::StrokeEnd { .. } | LiveEvent::Snapshot { .. }))
+    events.iter().any(|e| {
+        matches!(
+            e,
+            LiveEvent::StrokeEnd { .. }
+                | LiveEvent::StrokesEdited { .. }
+                | LiveEvent::Snapshot { .. }
+        )
+    })
 }
 
 /// Fingerprint of what live mode writes into a note: the ink, the layers, the paper, the page
@@ -990,6 +1000,13 @@ impl LiveHub {
         self.shared.lock().session.snapshot()
     }
 
+    /// Several changes of the session under one hold of the lock (no pass of the saver between
+    /// them), and what they emitted sent.
+    #[cfg(test)]
+    pub fn change_at_once(&self, change: impl FnOnce(&mut LiveSession, &mut Vec<LiveEvent>)) {
+        self.change(|_| true, change).unwrap();
+    }
+
     /// The session as it is now, as the first events of a subscription give it: the snapshot,
     /// then the stroke in progress and the marks written over the presentation. The frozen
     /// image of a paused share on the network.
@@ -1247,14 +1264,64 @@ impl LiveHub {
     }
 
     /// « Undo the clearing »: gives the current page the ink of the last « Clear the page »
-    /// back. Returns whether anything was restored (the page was changed or left meanwhile).
+    /// back, through its history. Returns whether anything was restored (the page was left
+    /// meanwhile).
     pub fn restore_cleared(&self) -> Result<bool, LiveError> {
+        let prepared = self.prepared_undo();
         let mut restored = false;
         self.change(
             |_| true,
-            |session, out| restored = session.restore_cleared(out),
+            |session, out| restored = session.restore_cleared_with(prepared, out),
         )?;
         Ok(restored)
+    }
+
+    /// Deletes or recolours strokes a window chose on page `page_index` at `revision` (see
+    /// [`LiveSession::edit_strokes`]). The list is checked and sorted before the lock is taken.
+    /// Returns the page's revision after the edit.
+    pub fn edit_strokes(
+        &self,
+        page_index: usize,
+        revision: u64,
+        edit: StrokesEdit,
+    ) -> Result<u64, LiveError> {
+        let edit = edit.checked()?;
+        let mut outcome = Err(LiveEditError::Stale);
+        self.change(
+            |_| true,
+            |session, out| outcome = session.edit_strokes(page_index, revision, edit, out),
+        )?;
+        Ok(outcome?)
+    }
+
+    /// Undoes the last edit of page `page_index` (the one on screen). Returns whether there was
+    /// anything to undo.
+    pub fn undo_edit(&self, page_index: usize) -> Result<bool, LiveError> {
+        let prepared = self.prepared_undo();
+        let mut outcome = Ok(false);
+        self.change(
+            |_| true,
+            |session, out| outcome = session.undo_edit(page_index, prepared, out),
+        )?;
+        Ok(outcome?)
+    }
+
+    /// Does again the last edit undone on page `page_index` (the one on screen): the strokes move
+    /// from the page to its history, nothing is copied. Returns whether there was anything to redo.
+    pub fn redo_edit(&self, page_index: usize) -> Result<bool, LiveError> {
+        let mut outcome = Ok(false);
+        self.change(
+            |_| true,
+            |session, out| outcome = session.redo_edit(page_index, out),
+        )?;
+        Ok(outcome?)
+    }
+
+    /// A copy of the strokes the next undo gives back, made without holding the lock: those points
+    /// can be many, and the tablet's input waits for that lock.
+    fn prepared_undo(&self) -> Option<Prepared> {
+        let stored = self.shared.lock().session.next_restored()?;
+        Some(Prepared::of(stored))
     }
 
     pub fn set_style(&self, style: LiveStyle) -> Result<(), LiveError> {

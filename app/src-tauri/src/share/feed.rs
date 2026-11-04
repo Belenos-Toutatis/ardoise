@@ -18,7 +18,7 @@ use crate::live::LiveHub;
 use crate::live::hub::BatchSink;
 use crate::live::model::{
     HoverPoint, LiveBatch, LiveEvent, LiveMark, LivePoint, LiveSessionState, LiveSnapshot,
-    LiveStroke, LiveStyle, LiveViewState, wall_now_ms,
+    LiveStroke, LiveStyle, LiveViewState, RecolouredStrokes, wall_now_ms,
 };
 
 /// The hub's subscription label of viewer `id` (never a window's label).
@@ -180,6 +180,21 @@ enum SharedEvent<'a> {
     Marks {
         marks: Vec<SharedMark>,
     },
+    /// Strokes deleted, back or recoloured, numbered as in the viewer's list, which has no hidden
+    /// strokes (`ViewerIndices`); the edits never touch one.
+    StrokesEdited {
+        page_index: usize,
+        removed: &'a [u32],
+        inserted: Vec<SharedPlaced<'a>>,
+        recoloured: &'a [RecolouredStrokes],
+    },
+}
+
+/// A stroke that comes back, at its place in the viewer's list.
+#[derive(Serialize)]
+struct SharedPlaced<'a> {
+    index: u32,
+    stroke: &'a Stroke,
 }
 
 impl<'a> SharedEvent<'a> {
@@ -204,6 +219,33 @@ impl<'a> SharedEvent<'a> {
             LiveEvent::View { view } => SharedEvent::View { view },
             LiveEvent::Marks { marks } => SharedEvent::Marks {
                 marks: marks.iter().map(SharedMark::of).collect(),
+            },
+            LiveEvent::StrokesEdited {
+                page_index,
+                removed,
+                inserted,
+                recoloured,
+                viewers,
+                ..
+            } => SharedEvent::StrokesEdited {
+                page_index: *page_index,
+                removed: viewers
+                    .as_deref()
+                    .map_or(removed, |viewers| &viewers.removed),
+                inserted: inserted
+                    .iter()
+                    .enumerate()
+                    .map(|(i, placed)| SharedPlaced {
+                        index: viewers
+                            .as_deref()
+                            .and_then(|viewers| viewers.inserted.get(i).copied())
+                            .unwrap_or(placed.index),
+                        stroke: &placed.stroke,
+                    })
+                    .collect(),
+                recoloured: viewers
+                    .as_deref()
+                    .map_or(recoloured, |viewers| &viewers.recoloured),
             },
             LiveEvent::Saved { .. }
             | LiveEvent::SaveFailed { .. }

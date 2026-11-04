@@ -1,13 +1,14 @@
 //! Shapes exchanged with the interface (mirrored by `app/ui/src/lib/live.ts`; contract:
 //! docs/design/tablet-live-classroom.md, "TypeScript mirror").
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ardoise_core::note::{Note, PageSize};
 use ardoise_core::settings::Orientation;
 use ardoise_device::pages::TABLET_PEN_WIDTH;
-use ardoise_ink::{Rgba, Tool};
-use serde::{Deserialize, Serialize};
+use ardoise_ink::{Rgba, Stroke, Tool};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::presentation::MonitorInfo;
 
@@ -261,6 +262,14 @@ pub struct LiveSnapshot {
     pub presentation: Option<MonitorInfo>,
     /// Paths of the notes saved so far in this session, in the order they were created.
     pub saved: Vec<String>,
+    /// What the indices of the current page's strokes mean: a command that names strokes
+    /// (`live_edit_strokes`) gives it back and is refused once it changed. It changes only when
+    /// strokes leave or come back ([`LiveEvent::StrokesEdited`], « Clear the page »), never when
+    /// the tablet appends a stroke. Absent on the share's viewers.
+    pub revision: u64,
+    /// The current page has an edit to undo, or to redo. Absent on the share's viewers.
+    pub can_undo: bool,
+    pub can_redo: bool,
 }
 
 /// A point of the stroke in progress.
@@ -287,6 +296,40 @@ pub struct LiveStroke {
     pub points: Vec<LivePoint>,
 }
 
+/// A stroke that comes back on a page, and where it stands once it is back.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PlacedStroke {
+    pub index: u32,
+    pub stroke: Stroke,
+}
+
+/// Strokes that take one colour.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RecolouredStrokes {
+    pub color: Rgba,
+    /// Ascending.
+    pub indices: Vec<u32>,
+}
+
+/// A `strokesEdited` in the numbering of the share's viewers, for a page with hidden layers: they
+/// have no hidden strokes, so their list is shorter than the page's. Worked out with the edit
+/// (`feed.rs` knows nothing of the page), the same fields in the same order; `inserted` follows the
+/// order of the event's `inserted`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewerIndices {
+    pub removed: Vec<u32>,
+    pub inserted: Vec<u32>,
+    pub recoloured: Vec<RecolouredStrokes>,
+}
+
+/// The strokes of an event are not copied for each window (see [`LiveEvent::StrokesEdited`]).
+fn shared_strokes<S: Serializer>(
+    strokes: &Arc<Vec<PlacedStroke>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    strokes.as_slice().serialize(serializer)
+}
+
 /// One thing that happened, in order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(
@@ -295,7 +338,8 @@ pub struct LiveStroke {
     rename_all_fields = "camelCase"
 )]
 pub enum LiveEvent {
-    /// Page change, clear, layer, style, state, blackboard, presentation opened or closed.
+    /// Page change, clear, layer, style, state, blackboard, presentation opened or closed. Not an
+    /// edit of strokes: [`StrokesEdited`](Self::StrokesEdited) says that for less.
     Snapshot {
         snapshot: Box<LiveSnapshot>,
     },
@@ -352,6 +396,32 @@ pub enum LiveEvent {
         original: String,
         /// The new note.
         path: String,
+    },
+    /// Finished strokes of page `page_index` were deleted, came back or changed colour (an edit,
+    /// its undo or redo). Applied to the list in this order: `removed`, then `inserted`, then
+    /// `recoloured`; the stroke in progress is not concerned. Strokes that are not named keep
+    /// their place in the list and their object in the window, so that their outlines are not
+    /// computed again. Never merged with another event. « Clear the page » is a snapshot instead:
+    /// it also drops the stroke in progress.
+    StrokesEdited {
+        page_index: usize,
+        /// The page's revision after this event.
+        revision: u64,
+        /// Indices of the strokes that leave, in the list before this event, ascending.
+        removed: Vec<u32>,
+        /// The strokes that come back, each with its index in the list after this event,
+        /// ascending. Shared, since each window has its own queue: their points are not copied
+        /// under the hub's lock.
+        #[serde(serialize_with = "shared_strokes")]
+        inserted: Arc<Vec<PlacedStroke>>,
+        /// New colours; indices in the list after this event.
+        recoloured: Vec<RecolouredStrokes>,
+        can_undo: bool,
+        can_redo: bool,
+        /// For the share only (`feed.rs`): `None` when the page has no hidden layer, and then a
+        /// viewer's list and the page's are numbered alike.
+        #[serde(skip)]
+        viewers: Option<Box<ViewerIndices>>,
     },
 }
 

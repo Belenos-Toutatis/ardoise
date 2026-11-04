@@ -8,7 +8,7 @@
  *   presentation, saved notes, pages that failed to save, stroke count;
  * - plain ones for the canvases, which are told of every change through `subscribe` and draw
  *   on the next animation frame: the finished strokes of the page (`strokes`, appended in
- *   place; `generation` changes when they are replaced), the stroke in progress (`current`,
+ *   place; `generation` changes when they are replaced or edited), the stroke in progress (`current`,
  *   whose points grow in place), the hovering pen (`hover`), and the points not painted yet
  *   (for the latency), and the marks written over the presentation (`marks`, replaced whole by
  *   each `marks` event; the viewers of the share draw them, the windows draw their own).
@@ -33,10 +33,12 @@ import type {
   LivePoint,
   LiveSessionState,
   LiveSnapshot,
+  LiveStrokesEdited,
   LiveStyle,
   LiveViewState,
   MonitorInfo,
 } from './live';
+import { insertStrokes, recolourStrokes, removeStrokes } from './live-edits';
 import { marksFromWire, reuseMarks } from './live-marks';
 import { roundView, sameView } from './live-view';
 import type { Orientation } from './orientation';
@@ -126,10 +128,19 @@ export class LiveState {
   /** The share's viewers: the picture of the paper this page wants (`LiveSnapshot.paperKey`). */
   paperKey = $state<string | null>(null);
   layers = $state.raw<Layer[]>([]);
+  /**
+   * What the indices of `strokes` mean: `api.liveEditStrokes` gives it back, and a selection made
+   * at another revision is to be dropped. Not changed by the tablet's writing: a selection stays
+   * valid while it writes. Stays 0 on the share's viewers, which edit nothing.
+   */
+  revision = $state(0);
+  /** The page has an edit to undo (`api.liveUndoEdit`), or to redo (`api.liveRedoEdit`). */
+  canUndo = $state(false);
+  canRedo = $state(false);
 
   /** Finished strokes of the page, in arrival order (appended in place). */
   strokes: Stroke[] = [];
-  /** Changes whenever `strokes` is replaced rather than appended to. */
+  /** Changes whenever `strokes` is replaced or edited rather than appended to. */
   generation = 0;
   /** The stroke in progress (its points grow in place). */
   current: Stroke | null = null;
@@ -249,6 +260,9 @@ export class LiveState {
       case 'marks':
         this.marks = reuseMarks(this.marks, marksFromWire(event.marks));
         break;
+      case 'strokesEdited':
+        if (event.pageIndex === this.pageIndex) this.applyEdit(event);
+        break;
       case 'saved':
         this.mergeSaved(event.paths);
         // A successful save means that everything is written, the failed pages included.
@@ -261,6 +275,22 @@ export class LiveState {
         ].sort((a, b) => a.pageIndex - b.pageIndex);
         break;
     }
+  }
+
+  /**
+   * The list is changed in place, a pass over it: a stroke that is not named keeps its object, and
+   * so its outline in the renderer; a recoloured one too (an outline does not depend on the colour:
+   * `Ink.contours`). The new `generation` makes the renderer draw its cache again.
+   */
+  private applyEdit(edit: LiveStrokesEdited): void {
+    removeStrokes(this.strokes, edit.removed);
+    insertStrokes(this.strokes, edit.inserted);
+    recolourStrokes(this.strokes, edit.recoloured);
+    this.generation += 1;
+    this.strokeCount = this.strokes.length + (this.current ? 1 : 0);
+    if (edit.revision !== undefined) this.revision = edit.revision;
+    if (edit.canUndo !== undefined) this.canUndo = edit.canUndo;
+    if (edit.canRedo !== undefined) this.canRedo = edit.canRedo;
   }
 
   private finishStroke(): void {
@@ -317,6 +347,9 @@ export class LiveState {
     if (JSON.stringify(this.presentation) !== JSON.stringify(s.presentation)) this.presentation = s.presentation;
     this.mergeSaved(s.saved);
     this.strokeCount = this.strokes.length;
+    this.revision = s.revision ?? 0;
+    this.canUndo = s.canUndo ?? false;
+    this.canRedo = s.canRedo ?? false;
   }
 
   // --- Changes made in this window ------------------------------------------------------------

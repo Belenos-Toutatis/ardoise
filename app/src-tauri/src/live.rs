@@ -6,6 +6,7 @@
 //!
 //! - [`model`]: the shapes the interface receives and sends (`app/ui/src/lib/live.ts`);
 //! - [`session`]: the session itself, pure (strokes, hover, pages, layers, view);
+//! - [`edits`]: touching up a page while the tablet writes (what is checked, undo and redo);
 //! - [`hub`]: the session shared between threads, the batches sent to the windows, the pages
 //!   written to the library;
 //! - [`resume`]: a session that starts from an existing note (the sheet's file, the pen on a
@@ -14,6 +15,7 @@
 //!   (background work waits meanwhile).
 
 pub mod activity;
+pub mod edits;
 pub mod hub;
 pub mod model;
 pub mod resume;
@@ -39,6 +41,7 @@ use crate::library::{library_error, library_of};
 use crate::tablet::TabletRuntime;
 
 pub use activity::Activity;
+pub use edits::StrokesEdit;
 pub use hub::{
     ButtonSetting, HubConfig, LiveError, LiveHub, LiveOverview, PagePosition, Start, StartOptions,
 };
@@ -81,6 +84,7 @@ impl LiveError {
             LiveError::NotRunning | LiveError::Stopped => CommandError::new("liveNotRunning", self),
             LiveError::Library(error) => library_error(error),
             LiveError::Narration(error) => narration::narration_error(error),
+            LiveError::Edit(error) => CommandError::new(error.code(), error),
         }
     }
 }
@@ -396,6 +400,50 @@ pub async fn live_restore_cleared(runtime: State<'_, LiveRuntime>) -> CommandRes
     runtime
         .hub
         .restore_cleared()
+        .map_err(LiveError::command_error)
+}
+
+/// Deletes or recolours strokes the window chose on page `page_index` at `revision` (the snapshot's
+/// and the events'): refused as `liveEditStale` once that page is left or its strokes moved,
+/// `liveEditInvalid` when the list or the colour makes no sense. Returns the page's revision after
+/// the edit; every window hears of it through a `strokesEdited` event.
+#[tauri::command]
+pub async fn live_edit_strokes(
+    runtime: State<'_, LiveRuntime>,
+    page_index: usize,
+    revision: u64,
+    edit: StrokesEdit,
+) -> CommandResult<u64> {
+    runtime
+        .hub
+        .edit_strokes(page_index, revision, edit)
+        .map_err(LiveError::command_error)
+}
+
+/// Undoes the last edit of page `page_index` (delete, change of colour, « Clear the page »; never
+/// what the tablet wrote): true when there was one. Refused as `liveEditStale` when another page
+/// is on screen.
+#[tauri::command]
+pub async fn live_undo_edit(
+    runtime: State<'_, LiveRuntime>,
+    page_index: usize,
+) -> CommandResult<bool> {
+    runtime
+        .hub
+        .undo_edit(page_index)
+        .map_err(LiveError::command_error)
+}
+
+/// Does again the last edit undone on page `page_index`: true when there was one. Refused as
+/// `liveEditStale` when another page is on screen.
+#[tauri::command]
+pub async fn live_redo_edit(
+    runtime: State<'_, LiveRuntime>,
+    page_index: usize,
+) -> CommandResult<bool> {
+    runtime
+        .hub
+        .redo_edit(page_index)
         .map_err(LiveError::command_error)
 }
 

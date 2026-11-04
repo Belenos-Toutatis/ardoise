@@ -107,7 +107,7 @@ pub(super) fn options(library: &Library, button: ButtonSetting) -> StartOptions 
 }
 
 /// Starts a session that streams from an A5 tablet.
-fn start(hub: &LiveHub, options: StartOptions) -> HubSink {
+pub(super) fn start(hub: &LiveHub, options: StartOptions) -> HubSink {
     let Start::New { mut sink, snapshot } = hub.start(options).unwrap() else {
         panic!("a session is already running");
     };
@@ -1229,7 +1229,9 @@ fn the_json_has_the_shapes_of_live_ts() {
     assert_eq!(
         keys(snapshot),
         [
+            "canRedo",
             "canTurnPage",
+            "canUndo",
             "hover",
             "layer",
             "orientation",
@@ -1237,6 +1239,7 @@ fn the_json_has_the_shapes_of_live_ts() {
             "pageCount",
             "pageIndex",
             "presentation",
+            "revision",
             "saved",
             "state",
             "style",

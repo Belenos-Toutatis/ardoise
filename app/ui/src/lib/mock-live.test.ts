@@ -122,7 +122,9 @@ describe('browser stand-in for live mode', () => {
     invoke('live_command', { command: { kind: 'clearPage' } });
     expect(sub.last()!.page.strokes).toHaveLength(0);
     expect(invoke('live_restore_cleared')).toBe(true);
-    expect(sub.last()!.page.strokes.length).toBeGreaterThan(0);
+    // Through the page's history: an event with the strokes, not the whole page again.
+    expect(sub.events().at(-1)).toMatchObject({ type: 'strokesEdited', removed: [] });
+    expect((invoke('live_start') as LiveSnapshot).page.strokes.length).toBeGreaterThan(0);
     // Only once, and not from another page.
     expect(invoke('live_restore_cleared')).toBe(false);
     invoke('live_command', { command: { kind: 'clearPage' } });
