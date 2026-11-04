@@ -48,7 +48,9 @@
       : original.source === 'tablet'
         ? t('editor.original.helpTablet')
         : original.source === 'firstVersion'
-          ? t('editor.original.helpFirst')
+          ? original.strokes.length === 0
+            ? t('editor.original.helpBlank')
+            : t('editor.original.helpFirst')
           : t('editor.original.none'),
   );
 </script>

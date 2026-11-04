@@ -38,9 +38,10 @@ impl Activity {
         self.flags.presentation.load(Ordering::Acquire) != 0
     }
 
-    /// Live mode started or stopped (the hub, after every change of its session).
-    pub(crate) fn set_live(&self, running: bool) {
-        self.flags.live.store(running, Ordering::Release);
+    /// Live mode started or stopped (the hub, after every change of its session). Returns what it
+    /// was before.
+    pub(crate) fn set_live(&self, running: bool) -> bool {
+        self.flags.live.swap(running, Ordering::AcqRel)
     }
 
     /// A presentation window is being created: it counts as open until

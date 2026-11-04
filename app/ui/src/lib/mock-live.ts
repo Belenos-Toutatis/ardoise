@@ -32,6 +32,7 @@ import type {
   LivePoint,
   LiveSessionState,
   LiveSnapshot,
+  LiveStopped,
   LiveStrokesEdit,
   LiveStrokesEdited,
   LiveStyle,
@@ -191,6 +192,10 @@ interface ResumedSheet {
   seed: string;
   /** Time of the first new point, ms since the note's `created` (after the last stroke). */
   timeBase: number;
+  /** The note as read. */
+  before: Note;
+  /** Ink was added while the blackboard was on. */
+  inkOnBoard: boolean;
 }
 
 /** Most strokes one edit may name, steps a page keeps (`live/edits.rs`). */
@@ -534,11 +539,34 @@ function writePage(s: Session, page: Note): LiveEvent[] {
   }
   const stamp = freshStamp();
   const kept = library.notes.get(path);
+  // Like `hub::written_sheet`: a sheet without new ink is the sheet it was, and the blackboard's
+  // slate is written only with ink under it.
+  const same = sheet && JSON.stringify(page.strokes) === JSON.stringify(sheet.before.strokes);
+  const written: Note =
+    sheet && (same || !sheet.inkOnBoard)
+      ? {
+          ...page,
+          layers: same ? sheet.before.layers : page.layers,
+          background: { ...page.background, paper: sheet.before.background.paper },
+        }
+      : page;
   library.notes.set(path, {
-    note: copy({ ...page, modified: Date.now() }),
+    note: copy({ ...written, modified: Date.now() }),
     stamp,
     binder: sheet?.binder ?? kept?.binder ?? '',
-    original: kept?.original,
+    // Like `original::keep_resumed_original`: the sheet before the resume, blank or not.
+    original:
+      kept?.original ??
+      (sheet && !same
+        ? copy({
+            source: 'firstVersion',
+            page: sheet.before.page,
+            layers: sheet.before.layers,
+            strokes: sheet.before.strokes,
+            paper: sheet.before.background.paper,
+            ...(sheet.before.backgroundImage ? { backgroundImage: sheet.before.backgroundImage } : {}),
+          })
+        : undefined),
   });
   if (sheet?.stamp) sheet.stamp = stamp;
   s.saved.set(page.id, path);
@@ -579,6 +607,8 @@ function endStroke(s: Session): LiveEvent[] {
   const page = s.pages[s.pageIndex];
   page.strokes.push(s.current);
   s.current = null;
+  const sheet = s.resumed.get(page.id);
+  if (sheet && s.view.board) sheet.inkOnBoard = true;
   const events: LiveEvent[] = [{ type: 'strokeEnd', pageIndex: s.pageIndex }];
   // A page becomes a note when its first stroke ends.
   if (!s.saved.has(page.id)) events.push(...savePage(s, page));
@@ -720,7 +750,8 @@ function setView(s: Session, requested: LiveViewState): void {
   }
   // Blackboard: slate paper and white chalk; switched off, the paper and style come back.
   const page = s.pages[s.pageIndex];
-  page.background = { ...page.background, paper: view.board ? 'slate' : 'white' };
+  const own = s.resumed.get(page.id)?.before.background.paper ?? 'white';
+  page.background = { ...page.background, paper: view.board ? 'slate' : own };
   if (view.board) {
     s.styleBeforeBoard = s.style;
     s.style = CHALK_STYLE;
@@ -797,13 +828,15 @@ function resumeSession(path: string): LiveSnapshot {
     stamp: stored.stamp,
     seed: looksLike(page),
     timeBase: last + 1000,
+    before: copy(stored.note),
+    inkOnBoard: false,
   };
   return openSession({ page, sheet });
 }
 
-function stopSession(): string[] {
+function stopSession(): LiveStopped {
   const s = session;
-  if (!s) return [];
+  if (!s) return { saved: [], forks: [], narration: null };
   stopTimers(s);
   const events = endStroke(s);
   for (const page of s.pages) events.push(...savePage(s, page).filter((e) => e.type !== 'saved'));
@@ -812,7 +845,12 @@ function stopSession(): string[] {
   if (s.failed.size === 0) events.push({ type: 'saved', paths });
   session = null;
   broadcast([...events, { type: 'snapshot', snapshot: snapshot() }]);
-  return paths;
+  const forks = s.forks.flatMap((fork) => (fork.type === 'sheetForked' ? [fork] : []));
+  return {
+    saved: paths,
+    forks: forks.map(({ pageIndex, reason, original, path }) => ({ pageIndex, reason, original, path })),
+    narration: null,
+  };
 }
 
 function monitors(): MonitorInfo[] {

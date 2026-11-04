@@ -8,8 +8,10 @@
  * Also `resumeBlock`: whether a note can be resumed now, from the tablet's status (the same rule
  * as the tablet panel's « Mode direct » button).
  */
-import type { LiveBatch, LiveSnapshot, SheetForkReason } from './live';
+import type { LiveBatch, LiveSnapshot, SheetFork } from './live';
 import type { TabletStatus } from './tablet';
+
+export type { SheetFork };
 
 /** Why a note cannot be resumed now; null when it can. */
 export type ResumeBlock = 'noTablet' | 'busy';
@@ -21,15 +23,6 @@ export type ResumeBlock = 'noTablet' | 'busy';
 export function resumeBlock(status: TabletStatus | null): ResumeBlock | null {
   if (!status || !status.registered) return 'noTablet';
   return status.connection === 'syncing' || status.connection === 'registering' ? 'busy' : null;
-}
-
-/** A resumed sheet whose page went on in another note. */
-export interface SheetFork {
-  pageIndex: number;
-  reason: SheetForkReason;
-  /** The note left as it is, and the new one. */
-  original: string;
-  path: string;
 }
 
 export class ResumeWatch {

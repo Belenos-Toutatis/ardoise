@@ -123,7 +123,7 @@ clock follows the wall clock (recv waits for real), so live mode streams at 200 
 Errors are `{ code, message }`. New codes: `tabletNotConnected`, `tabletBusy`, `tabletNotRegistered`,
 `bluetoothOff`, `bluetoothMissing`, `tabletTimeout`, `tabletRefused`, `liveNotRunning`, `noMonitor`,
 `simulationOnly`, `invalidName`, `tablet` (any other device error, `message` = detail), `liveEditStale`,
-`liveEditInvalid` (M12).
+`liveEditInvalid`, `narrationTooLong`, `narrationUnreadable`, `narrationNotKept` (M12).
 
 Tablet (`tablet.rs`, package A):
 
@@ -147,7 +147,7 @@ Live and classroom (`live.rs`, `presentation.rs`, package B):
 | `live_start` | – | `LiveSnapshot` (`state: 'waiting'` until the tablet streams) |
 | `live_resume` | `path` (a note of the library) | `LiveSnapshot`, like `live_start`, on that note (M12) |
 | `live_page_background` | `pageIndex`, `page`, `background`, `widthPx` | PNG data URL of the page's paper, like `render_background`, with the background image of a resumed sheet (M12) |
-| `live_stop` | – | paths of the notes saved |
+| `live_stop` | – | `LiveStopped`: `{ saved: string[]; forks: SheetFork[]; narration: { code, message } \| null }` (paths of the notes saved; the sheets that went on in a new note, the last write included; a recording under way that could not join its pages) |
 | `live_set_style` | `style: LiveStyle` | – (broadcast as a snapshot) |
 | `live_command` | `command: LiveCommand` | – |
 | `live_restore_cleared` | – | whether the ink of the page's last clearing came back (through its history, M12) |
@@ -162,8 +162,9 @@ Live and classroom (`live.rs`, `presentation.rs`, package B):
 
 - A session holds **pages**; each page is one note (`origin: live`, page size = tablet size, background white, or
   `slate` paper while the blackboard is on), created in the library root when its first stroke ends, then rewritten
-  atomically (`Library::save` with the stamp it got) at most every 5 s while dirty, and when the page changes and at
-  `live_stop`. The title is empty (the library grid shows the date), like synced pages.
+  atomically (`Library::save` with the stamp it got) at most every 5 s while dirty (`save_wait`: ten times the last write's
+  duration when that is longer, at most 6 intervals, 30 s), and when the page changes and at `live_stop`. The title is empty
+  (the library grid shows the date), like synced pages.
 - Strokes: pressure > 0 starts or continues a stroke (tool, colour, width from the current `LiveStyle`, current layer);
   pressure 0 or "pen left" ends it. Pressure is normalised (0..2047 → 0..1); point time = ms since the note's
   `created`, from the record stamps (5 ms per record).
@@ -482,20 +483,34 @@ and the stroke in progress are lost.
   (`ResumeBase`, in memory: a note deleted meanwhile must still give its image to the new note); `page_file` builds both from it,
   replacing only the note, the narration and the thumbnail (drawn with the image, decoded once, at the first write).
 - **Unchanged.** A seeded page is not dirty, and `write_page` skips the disk when the fingerprint is the one on disk (clearing an
-  empty sheet). `Page::saved_file` hides the file until the session wrote it: `saved`, `live_stop` and the bridge's
-  `last_live_note` (`LiveOverview.notes`) do not count a note left as it was.
-- **Original.** `keep_original` runs at every write from the version read at the resume, not just at the first: the first write
-  may change only the narration, and the original is taken at the first change of the ink. It also does nothing for a blank
-  note, and never replaces an existing original. What the user gets from « Revenir à l'original », and only the page size, layers,
-  strokes and image placement come back:
-  a note without original: the sheet before the resume; a tablet note: the page as synced (`original.bin`); a note edited
-  before: its first version (`original.ardoise`), older than the resume; a blank note: nothing.
+  empty sheet). What a resumed sheet writes is `written_sheet`: while its strokes are the ones it was read with, its layers and
+  paper are too, whatever the session did around it (the blackboard pressed, the layer added when every layer is hidden, a new
+  layer from the tablet's button, an edit undone), so a note that received no ink is not written at all. `Page::saved_file` hides
+  the file until the session wrote it: `saved`, `live_stop` and the bridge's `last_live_note` (`LiveOverview.notes`) do not count a
+  note left as it was.
+- **Original.** `keep_resumed_original` runs at every write from the version read at the resume, not just at the first: the first
+  write may change only the narration, and the original is taken at the first change of the ink. Unlike the editor's `keep_original`
+  it keeps a blank sheet too: a page of a PDF or an image taken up to write on is the common case for a teacher, and its blank state
+  is what Q9 says stays recoverable. A new note in the editor keeps the editor's rule. It never replaces an existing original.
+  What the user gets from « Revenir à l'original », and the page size, layers, strokes and image placement come back: a note
+  without original: the sheet before the resume, blank or not; a tablet note: the page as synced (`original.bin`); a note edited
+  before: its first version (`original.ardoise`), older than the resume. An original of no stroke is an ordinary one for the editor
+  (`revertToOriginal`; a note always has a layer, `format.rs`), the panel says « feuille vierge » (`helpBlank`). The paper stays what
+  it is now, except slate over a first version on another paper: chalk needed it, and the chalk is going
+  (`NoteOriginal::FirstVersion.paper`, `revertToOriginal`; the confirmation says so). The rule cannot tell that slate from one
+  chosen in the editor: a deliberate slate goes too, which Ctrl+Z undoes.
 - **Stamp.** `SavedFile` is seeded with the path, stamp and fingerprint read. A change elsewhere forks: a new note in the note's
   binder (`write_beside`; created again if it went with the note), with every member, the original, and a new id, and a
   `sheetForked` event (`reason: 'changed' | 'deleted'`, `original`, `path`), once, also to a window that subscribes later, never
   to viewers. The next writes go to the new note. Not a fork: only the title, tags or favourite mark changed (`merge_outside`,
   M10), or the file moved (followed). The fingerprint (`file_fingerprint`, all pages) now covers the narration and the members
   too: a narration replaced elsewhere was overwritten silently before. An ordinary page still forks to the root, silently.
+  The last write happens as the view closes: `live_stop` also answers with the session's forks (`LiveStopped.forks`), the interface
+  telling the user. A window that subscribes later is told only while the session runs: the view of the next lesson subscribes
+  to the stopped session first, and must not open on a notice about the last one.
+- **Id.** A fork gives the note a new id; the windows never see it (`Page::shown_id`, the id the page started with, in every
+  snapshot). A window takes another id for another page: it would drop its marks and outlines, and a viewer would download the
+  paper's picture again, with nothing changed on screen. `Page.note.id` is the real one: writes, `LiveOverview.notes`.
 - **Coordinates.** Pen points are raw tablet units, already oriented (worker.rs, session.rs). `PenMapping` (computed at each
   notification from the session's state): a quarter turn when the sheet is held otherwise than the service orients the points,
   then a uniform scale and an offset, the tablet's whole area fitted in the sheet, centred (Q9 says "couvrir"; a fit reaches
@@ -518,17 +533,51 @@ and the stroke in progress are lost.
   recorded in a replay at another speed or with pauses trimmed is in that replay's time: `placed_for_merge` converts the start (and
   never over the older sound; aligned at its start only, a known limit), and `merged_keeping_both` moves a clip too far away right
   after the older one. This also holds on ordinary pages.
+- **A sound that cannot join.** Two cases: together longer than a track (4 hours), or the page's own `audio.opus` cannot be decoded.
+  The page's narration stays as it is and the new sound is never dropped (`LiveHub::keep_apart`): a new note next to the page's,
+  holding the page as it is now with that sound and a new id. A note rather than a backup file: it is in the library, where the
+  teacher looks, in time with its ink, and synced. If the library cannot be written, an `.opus` copy in `narration-backup`
+  (`narration.rs`). Typed errors (`LiveError::NarrationKeptApart`, `NarrationLost`) and sentences saying where the sound is:
+  `narrationTooLong`, `narrationUnreadable` (`message` = the path), `narrationNotKept`. They come back through `narration_stop`, which
+  `LiveView` shows, and `LiveStopped.narration` for a recording stopped by `live_stop`. Other pages of the recording still get
+  their pieces (`give_to_hub`), and pieces of one page too far apart for a track stay apart (`merge_by_page`). `live_start` and
+  `live_resume` have no way to say it (a recording still running there is a race): `live-backup.log` only.
 - **Layers.** New ink goes on the last visible layer. Every layer hidden: the page gets a new visible layer (named like any
   new one) when it is seeded, which is no change until something is written on it; none is shown (one may hold the answers).
 - **Blackboard.** Each page keeps the paper to give back (`paper_before_board`). A slate sheet has slate as its own paper: turning
   the blackboard off keeps it. A resumed sheet starts with the blackboard on only if it is slate (with chalk), whatever the
-  last session did, since turning it on rewrites the paper; the style from before the blackboard carries over. Ordinary pages are
-  only ever white or slate: same behaviour as before.
+  last session did; the style from before the blackboard carries over. Such a blackboard stays with the sheet: a plain
+  `live_start` after it opens on paper with that earlier style (`carried_ink`, `board_imposed`); one that was asked for carries over,
+  and gives back the ink it replaced. On a resumed sheet the page in memory shows slate while the file keeps its paper: slate is
+  written only once ink was added under the blackboard (`Resumed.ink_on_board`, also on a sheet it was not turned on over), for
+  white chalk, and until that ink is gone. A blackboard left on at « Finish » or turned off on another page changes nothing in the
+  file; shown again with it off, the sheet has its paper back in memory too (`settle_paper`). Ordinary pages are only ever white or
+  slate: same behaviour as before.
 - **Editor.** Never mounted with live (Home.svelte): the editor saves and closes first (package 4). A draft left for the note (a
   crash) keeps the older stamp: once live mode wrote the note, `recoveryOf` (`lib/editor/drafts.ts`) offers it only as a new
   note. Nothing to change; tested on the Rust side.
 - **Viewers.** `sheetForked` and `canTurnPage` are not in the allow list (feed.rs). `created` and `modified` are now always 0 there:
-  a resumed note would give its real date; nothing in the viewer reads them.
+  a resumed note would give its real date; nothing in the viewer reads them. The page's `id` there is a digest, salted at each run
+  (`viewer_page_id`): one per page, all the viewer's page-change detection needs, without the identity of a note of the library.
+
+**Session end.** Windows ending the session while live runs (shutdown, an update's restart, logoff, Restart Manager;
+`session_end.rs`, `live.rs`, `narration.rs`). Before: nothing was written, the editor alone reported unsaved work, and tao's hidden
+window calls `exit(0)` on `WM_ENDSESSION`, so the unattached narration and up to 5 s of ink were lost.
+- **Reported.** While live runs (`Activity::live`, read in the window procedure without a lock) `WM_QUERYENDSESSION` answers FALSE
+  unless critical, and the main window has a block reason, in the interface's language, from Rust (`live_reason`, like the layer
+  names: live may run with no view); the hub tells of the transitions (`LiveHub::watch_running`). The editor's reason goes first. The
+  query also writes the pages now, without stopping anything (`write_now`): the user may refuse.
+- **Closed.** The first `WM_ENDSESSION` (`wParam` TRUE) to arrive runs `session_ending` on a thread of its own and waits at most
+  `SESSION_END_BUDGET` (4 s; Windows allows about 5, assumed, not measured). Tao's window is subclassed too, by class name
+  (`Tao Thread Event Target`, tao 0.37.2): nothing says the main window hears first, and the subclass runs before tao's procedure.
+- **Order** (`close_at_session_end`), what loses least if the process ends halfway: the pages (stroke in progress included, a backup
+  copy for what the library refuses), then a WAV copy of the recording under way (a plain write, 345 MB per hour: encoding hours of
+  sound takes far longer than the budget), then its pages as usual, written again, and the copy removed. Last the tablet.
+- **Tested** without a shutdown: the order, the copy, the budget (`run_within`), and the window procedure on real hidden windows with
+  messages sent as Windows sends them (answers, critical, the end called off, once for two windows). **Not tested**: a real shutdown,
+  how long Windows really waits, in which order it tells the windows, and that the class name still matches after an upgrade of tao
+  (the main window's route remains, should tao's window be told second). A WAV copy left by an end that came too soon is named in
+  `live-backup.log`; nothing offers it at the next start.
 
 **Paper, as built.** Ordinary pages are plain paper and pay nothing: the same `render_background` as before, no key, no
 message, no thread.
@@ -566,9 +615,9 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   this code rather than Tauri's rejection of the arguments. A colour the strokes already have is no step and no event.
 - **Event.** `strokesEdited { pageIndex, revision, removed, inserted, recoloured, canUndo, canRedo }`, applied in that order:
   `removed` in the list before it, `inserted` (`{ index, stroke }`) and `recoloured` (`{ color, indices }`, one per colour) in the
-  list after it. Never coalesced (the default arm of `enqueue`), in `may_need_save` so that the saver wakes. Not a snapshot: each
-  snapshot clones the page per subscriber under the hub's lock, and a changed snapshot makes `applySnapshot` recompute every
-  outline. `clearPage` stays a snapshot: the page is empty by then, and it also drops the stroke in progress. `canUndo` and
+  list after it. Never coalesced (the default arm of `enqueue`), in `may_need_save` so that the saver wakes. Not a snapshot: a
+  snapshot clones the page once under the hub's lock (`LiveEvent::Snapshot` shares it between the queues, `Arc`, same JSON), and
+  a changed snapshot makes `applySnapshot` recompute every outline. `clearPage` stays a snapshot: the page is empty by then, and it also drops the stroke in progress. `canUndo` and
   `canRedo` are also in the snapshot, so the interface always knows them.
 - **Under the lock.** Sorting and the checks that need no page are done before it (`StrokesEdit::checked`). A delete moves
   the structs after the first place (`extract_if`), no point is copied, and the strokes go to the history. An undo gives them back
@@ -608,10 +657,11 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   the grains of pencil and chalk are not drawn on screen. Tested on the fake canvas, with outlines counted.
 - **Cost.** Page of 50 000 strokes of 100 points, measured in the unoptimised test build (`cargo test -p ardoise large_page --
   --nocapture`; the app is much faster): under the lock, delete 1 000 strokes 2.4 ms, undo them 2.8 ms, recolour all 22 ms, clear 13 ms,
-  against 58 ms for the clone of a single snapshot, one per window. In the window (`live-state.edits.test.ts`), 1 to 3 ms per event.
+  against 58 ms for the clone of a single snapshot, once per snapshot whatever the number of windows since `LiveEvent::Snapshot` is an
+  `Arc`. In the window (`live-state.edits.test.ts`), 1 to 3 ms per event.
   What stays costly is the redraw of the cache: one fill per stroke of the page, on the window's thread, as after any change of
   view, never under the hub's lock, and not measured here (no window: `cargo xtask perf`). Also under the lock, as before: the clone of
-  the page by a save pass (`SaveJob`) every 5 s, which an edit now triggers too.
+  the page by a save pass (`SaveJob`) every 5 s, less often when writes are slow (`save_wait`), which an edit now triggers too.
 
 **Touch up, the selection, as built** (package 7; `lib/live-select.svelte.ts`, `lib/live-touch-up.ts`, `lib/live-keys.ts`
 `liveEditKeyAction`, `LiveCanvas`, `live-render`, `LiveView`).

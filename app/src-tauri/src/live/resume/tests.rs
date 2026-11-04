@@ -25,10 +25,11 @@ use serde_json::json;
 use super::super::edits::LiveEditError;
 use super::super::edits::tests::{delete, recolour};
 use super::super::hub::{
-    HubConfig, HubSink, LiveError, LiveHub, Start, StartOptions, file_fingerprint,
+    HubConfig, HubSink, LiveError, LiveHub, NarrationApart, Start, StartOptions, file_fingerprint,
 };
 use super::super::model::{
-    ForkReason, LiveCommandKind, LiveEvent, LiveSessionState, LiveStyle, LiveViewState,
+    ForkReason, LiveCommandKind, LiveEvent, LiveMark, LiveSessionState, LiveStyle, LiveViewState,
+    MarkPoint,
 };
 use super::super::session::LiveSession;
 use super::super::tests::{
@@ -46,6 +47,7 @@ use crate::library::{blank_note, now_ms, path_text};
 use crate::narration::{PageLog, give_to_hub};
 use crate::original::{NoteOriginal, TabletContext, original_of};
 use crate::share::feed::batch_json;
+use crate::share::live_paper::paper_key;
 
 /// Note written a long time ago (2 months before the resume of the tests below).
 const CREATED: i64 = 1_787_000_000_000;
@@ -553,7 +555,7 @@ fn a_late_narration_lands_after_the_older_sound() {
     // Too far apart for one track: `merge` alone would keep the later one only.
     let far = note_narration(1.0, 5 * 3600 * 1000);
     assert!(!earlier.fits_with(&far));
-    let merged = merged_keeping_both(earlier.clone(), far);
+    let merged = merged_keeping_both(earlier.clone(), far).unwrap();
     assert_eq!(merged.start_ms, 0);
     assert_eq!(merged.duration(), Duration::from_secs(2));
     assert_eq!(merged.base, NarrationBase::Note);
@@ -813,6 +815,7 @@ fn a_resumed_note_keeps_every_member_through_a_real_save_and_reload() {
         strokes,
         page,
         layers,
+        paper,
         background_image,
     } = original_of(&written, &tablet_context()).unwrap()
     else {
@@ -823,6 +826,7 @@ fn a_resumed_note_keeps_every_member_through_a_real_save_and_reload() {
         (page, layers),
         (before.note.page, before.note.layers.clone())
     );
+    assert_eq!(paper, before.note.background.paper);
     assert_eq!(background_image, before.note.background_image);
     // No fork, no notice.
     assert!(forks(&window).is_empty());
@@ -900,16 +904,15 @@ fn what_an_original_becomes_when_a_note_is_resumed() {
     assert_keeps_all_but_ink(&written, &before);
     assert_eq!(written.original_note, Some(b"first version".to_vec()));
 
-    // A blank note has nothing to go back to.
+    // A blank note goes back to being blank: see the worksheet below.
     let blank = NoteFile::new(blank_note("Vide", "Calque 1", CREATED));
     let path = filed(&library, "", &blank);
     let written = write_once(&path);
     assert_eq!(written.note.strokes.len(), 1);
-    assert_eq!(written.original_note, None);
-    assert_eq!(
+    assert!(matches!(
         original_of(&written, &tablet_context()).unwrap(),
-        NoteOriginal::None
-    );
+        NoteOriginal::FirstVersion { strokes, .. } if strokes.is_empty()
+    ));
 
     // A first write without new ink (its narration) keeps no original; the next one does, with
     // the ink of before the resume.
@@ -931,6 +934,92 @@ fn what_an_original_becomes_when_a_note_is_resumed() {
         panic!("no first version");
     };
     assert_eq!(strokes, before.note.strokes);
+}
+
+/// A sheet with a page of a PDF under it and no ink, as a teacher prepares one.
+fn blank_worksheet(page: PageSize) -> NoteFile {
+    let mut file = full_file(page);
+    file.note.strokes.clear();
+    file.note.background.paper = Paper::Kraft;
+    file.audio = None;
+    file
+}
+
+/// What the editor does with « Back to the original »: the original's ink in the note, saved, as
+/// `lib/editor/original.ts` does.
+fn back_to_the_original(library: &Library, path: &Path) -> NoteFile {
+    let loaded = library.read(path).unwrap();
+    let NoteOriginal::FirstVersion {
+        page,
+        layers,
+        strokes,
+        paper,
+        background_image,
+    } = original_of(&loaded.file, &tablet_context()).unwrap()
+    else {
+        panic!("no first version");
+    };
+    let mut note = loaded.file.note.clone();
+    (note.page, note.layers, note.strokes) = (page, layers, strokes);
+    note.background_image = background_image;
+    if note.background.paper == Paper::Slate && paper != Paper::Slate {
+        note.background.paper = paper;
+    }
+    crate::notes::save_in(library, path, note, &loaded.stamp).unwrap();
+    library.read(path).unwrap().file
+}
+
+#[test]
+fn a_blank_worksheet_written_on_can_go_back_to_being_blank() {
+    let (_dir, library) = library();
+    let path = filed(&library, "Classe", &blank_worksheet(A5));
+    let before = library.read(&path).unwrap().file;
+    assert!(before.note.strokes.is_empty());
+    let hub = LiveHub::new(config());
+    let mut sink = resume(&hub, &library, &path, A5);
+    stroke(&mut sink, 3000, 5);
+    wait_until("the first write", || {
+        stroke_count(&library, &path) == Some(1)
+    });
+
+    // After a reload: the original is the sheet before the resume, with no stroke at all.
+    let written = library.read(&path).unwrap().file;
+    let kept = written.original_note.clone().expect("original.ardoise");
+    let NoteOriginal::FirstVersion {
+        strokes,
+        layers,
+        page,
+        paper,
+        background_image,
+    } = original_of(&written, &tablet_context()).unwrap()
+    else {
+        panic!("no first version");
+    };
+    assert!(strokes.is_empty());
+    assert_eq!(
+        (page, layers, paper),
+        (before.note.page, before.note.layers.clone(), Paper::Kraft)
+    );
+    assert_eq!(background_image, before.note.background_image);
+
+    // More ink: the original stays what it was.
+    stroke(&mut sink, 4000, 5);
+    hub.stop().unwrap();
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.strokes.len(), 2);
+    assert_eq!(written.original_note, Some(kept.clone()));
+    assert_eq!(written.background, before.background);
+
+    // Back to it, saved, and read again: the blank sheet, its picture and paper as they were.
+    let restored = back_to_the_original(&library, &path);
+    assert!(restored.note.strokes.is_empty());
+    assert_eq!(restored.note.layers, before.note.layers);
+    assert_eq!(restored.note.background, before.note.background);
+    assert_eq!(restored.note.background_image, before.note.background_image);
+    assert_eq!(restored.background, before.background);
+    assert_eq!(restored.original_note, Some(kept), "it stays recoverable");
+
+    // A new blank note filled in the editor keeps today's rule: see `original/tests.rs`.
 }
 
 #[test]
@@ -990,17 +1079,97 @@ fn a_note_changed_elsewhere_is_left_alone_and_the_page_goes_on_in_its_binder() {
     wait_until("the new note rewritten", || {
         stroke_count(&library, &new_path) == Some(4)
     });
+    // A window opened later is told too, while the session runs.
+    let late = Arc::new(Window::default());
+    hub.subscribe("presentation", late.clone());
+    wait_until("the notice in the late window", || forks(&late).len() == 1);
+
     let saved = hub.stop().unwrap();
     assert_eq!(saved, [path_text(&new_path)]);
     assert_eq!(forks(&window).len(), 1);
     assert_eq!(std::fs::read(&path).unwrap(), kept);
-    assert_eq!(hub.snapshot().page.id, written.note.id);
-    assert_eq!(hub.overview().unwrap().notes[0].2, new_path);
+    let overview = hub.overview().unwrap();
+    assert_eq!(overview.notes[0].1, written.note.id, "the note's real id");
+    assert_eq!(overview.notes[0].2, new_path);
 
-    // A window opened later is told too.
-    let late = Arc::new(Window::default());
-    hub.subscribe("presentation", late.clone());
-    wait_until("the notice in the late window", || forks(&late).len() == 1);
+    // The view of the next lesson does not open on a notice about this one.
+    let next = Arc::new(Window::default());
+    hub.subscribe("main", next.clone());
+    wait_until("the first batch", || !next.events().is_empty());
+    std::thread::sleep(config().flush_interval * 5);
+    assert_eq!(forks(&next), []);
+    let _sink = {
+        let Start::New { sink, .. } = hub
+            .start(options(&library, fixed(LiveButton::NewPage)))
+            .unwrap()
+        else {
+            panic!("already running");
+        };
+        sink
+    };
+    let fresh = Arc::new(Window::default());
+    hub.subscribe("main", fresh.clone());
+    wait_until("the first batch", || !fresh.events().is_empty());
+    assert_eq!(forks(&fresh), []);
+    assert_eq!(hub.forked_sheets(), []);
+}
+
+#[test]
+fn a_fork_changes_nothing_on_screen_nor_for_the_viewers() {
+    let (_dir, library) = library();
+    let path = filed(&library, "Classe", &full_file(A5));
+    let hub = LiveHub::new(config());
+    let mut sink = resume(&hub, &library, &path, A5);
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let before = hub.snapshot();
+    let mark = LiveMark {
+        tool: Tool::Ballpoint,
+        color: Rgba::BLACK,
+        width: 60.0,
+        points: vec![MarkPoint {
+            x: 10.0,
+            y: 10.0,
+            p: 1.0,
+        }],
+    };
+    hub.set_marks(0, vec![mark.clone()]).unwrap();
+
+    std::fs::remove_file(&path).unwrap();
+    stroke(&mut sink, 3000, 5);
+    wait_until("the notice", || !forks(&window).is_empty());
+
+    // The note has its own id now; the page is the same page for everyone who shows it.
+    let new_path = PathBuf::from(&forks(&window)[0].3);
+    let written = library.read(&new_path).unwrap().file;
+    assert_ne!(written.note.id, before.page.id);
+    let after = hub.snapshot();
+    assert_eq!(after.page.id, before.page.id);
+    assert_eq!(after.page.strokes.len(), before.page.strokes.len() + 1);
+    assert_eq!(paper_key(&after), paper_key(&before), "no new picture");
+    // The marks stay, here and for the windows (which keep theirs while the id stays).
+    let ids: Vec<String> = window
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            LiveEvent::Snapshot { snapshot } => Some(snapshot.page.id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(ids.iter().all(|id| *id == before.page.id), "{ids:?}");
+    assert!(matches!(
+        hub.current_events().last(),
+        Some(LiveEvent::Marks { marks }) if *marks == [mark]
+    ));
+    // Later writes still go through the note's own id.
+    stroke(&mut sink, 4000, 5);
+    hub.stop().unwrap();
+    assert_eq!(notes_in(&library), std::slice::from_ref(&new_path));
+    assert_eq!(hub.overview().unwrap().notes[0].1, written.note.id);
+    assert_eq!(
+        library.read(&new_path).unwrap().file.note.id,
+        written.note.id
+    );
 }
 
 #[test]
@@ -1126,25 +1295,213 @@ fn a_note_only_retitled_or_moved_goes_on_receiving_the_page_with_all_it_holds() 
     assert!(forks(&window).is_empty());
 }
 
-#[test]
-fn the_blackboard_on_a_resumed_note_is_written_and_gives_its_paper_back() {
-    let (_dir, library) = library();
+/// A kraft sheet with ink, resumed by a new hub, its bytes and stamp as a test compares them.
+fn kraft_sheet(library: &Library) -> (PathBuf, Vec<u8>, FileStamp) {
     let mut file = full_file(A5);
     file.note.background.paper = Paper::Kraft;
-    let path = filed(&library, "", &file);
+    let path = filed(library, "", &file);
+    let (bytes, stamp) = (std::fs::read(&path).unwrap(), FileStamp::of(&path).unwrap());
+    (path, bytes, stamp)
+}
+
+fn press_board(hub: &LiveHub, on: bool) {
+    let mut view = hub.snapshot().view;
+    view.board = on;
+    hub.set_view(view).unwrap();
+}
+
+/// The session stopped, the note reloaded: not one byte of it was written.
+fn assert_untouched(hub: &LiveHub, path: &Path, bytes: &[u8], stamp: &FileStamp) {
+    assert_eq!(hub.stop().unwrap(), Vec::<String>::new());
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    assert_eq!(FileStamp::of(path).unwrap(), *stamp);
+    assert!(hub.overview().unwrap().notes.is_empty());
+}
+
+#[test]
+fn the_blackboard_left_on_over_a_sheet_does_not_reach_its_file() {
+    let (_dir, library) = library();
+    let (path, bytes, stamp) = kraft_sheet(&library);
     let hub = LiveHub::new(config());
     let _sink = resume(&hub, &library, &path, A5);
-    let paper = || library.read(&path).unwrap().file.note.background.paper;
-    let mut view = hub.snapshot().view;
-    view.board = true;
-    hub.set_view(view).unwrap();
-    wait_until("the slate written", || paper() == Paper::Slate);
-    view.board = false;
-    hub.set_view(view).unwrap();
-    wait_until("the kraft written", || paper() == Paper::Kraft);
+    press_board(&hub, true);
+    assert_eq!(hub.snapshot().page.background.paper, Paper::Slate);
+    std::thread::sleep(config().save_interval * 2);
+    assert_untouched(&hub, &path, &bytes, &stamp);
+}
+
+#[test]
+fn the_blackboard_turned_on_and_off_leaves_the_sheet_untouched() {
+    let (_dir, library) = library();
+    let (path, bytes, stamp) = kraft_sheet(&library);
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    press_board(&hub, true);
+    press_board(&hub, false);
+    assert_eq!(hub.snapshot().page.background.paper, Paper::Kraft);
+    std::thread::sleep(config().save_interval * 2);
+    assert_untouched(&hub, &path, &bytes, &stamp);
+}
+
+#[test]
+fn the_blackboard_turned_off_on_the_next_page_leaves_the_sheet_untouched() {
+    let (_dir, library) = library();
+    let (path, bytes, stamp) = kraft_sheet(&library);
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    press_board(&hub, true);
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    press_board(&hub, false);
+    // Shown again, the sheet has its own paper back.
+    hub.command(LiveCommandKind::PreviousPage).unwrap();
+    assert_eq!(hub.snapshot().page.background.paper, Paper::Kraft);
+    std::thread::sleep(config().save_interval * 2);
+    assert_untouched(&hub, &path, &bytes, &stamp);
+}
+
+#[test]
+fn turned_off_from_a_page_it_was_not_turned_on_from_the_sheet_keeps_its_paper() {
+    let (_dir, library) = library();
+    let (path, bytes, stamp) = kraft_sheet(&library);
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    press_board(&hub, true);
+    hub.command(LiveCommandKind::PreviousPage).unwrap();
+    press_board(&hub, false);
+    assert_eq!(hub.snapshot().page.background.paper, Paper::Kraft);
+    assert_untouched(&hub, &path, &bytes, &stamp);
+}
+
+#[test]
+fn ink_written_under_the_blackboard_keeps_the_slate_it_needs() {
+    let (_dir, library) = library();
+    let (path, _, _) = kraft_sheet(&library);
+    let before = library.read(&path).unwrap().file;
+    let hub = LiveHub::new(config());
+    let mut sink = resume(&hub, &library, &path, A5);
+    press_board(&hub, true);
+    stroke(&mut sink, 3000, 5);
+    assert_eq!(hub.stop().unwrap(), [path_text(&path)]);
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.background.paper, Paper::Slate);
+    assert_eq!(written.note.strokes.len(), 3);
+    assert_eq!(written.note.strokes[2].tool, Tool::Chalk);
+    // The paper comes back with the ink, in the one case where it should.
+    let restored = back_to_the_original(&library, &path);
+    assert_eq!(restored.note.background.paper, Paper::Kraft);
+    assert_eq!(restored.note.strokes, before.note.strokes);
+}
+
+#[test]
+fn chalk_from_a_blackboard_turned_on_elsewhere_keeps_the_slate_too() {
+    let (_dir, library) = library();
+    let (path, _, _) = kraft_sheet(&library);
+    let hub = LiveHub::new(config());
+    let mut sink = resume(&hub, &library, &path, A5);
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    press_board(&hub, true);
+    hub.command(LiveCommandKind::PreviousPage).unwrap();
+    stroke(&mut sink, 3000, 5);
     hub.stop().unwrap();
-    // Only the ink counts for the original: the paper is what the sheet has.
-    assert_eq!(library.read(&path).unwrap().file.original_note, None);
+    assert_eq!(
+        library.read(&path).unwrap().file.note.background.paper,
+        Paper::Slate
+    );
+}
+
+#[test]
+fn ink_without_the_blackboard_keeps_the_sheets_paper_whatever_it_is_pressed_to_after() {
+    let (_dir, library) = library();
+    let (path, _, _) = kraft_sheet(&library);
+    let hub = LiveHub::new(config());
+    let mut sink = resume(&hub, &library, &path, A5);
+    stroke(&mut sink, 3000, 5);
+    press_board(&hub, true);
+    assert_eq!(hub.stop().unwrap(), [path_text(&path)]);
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.strokes.len(), 3);
+    assert_eq!(written.note.background.paper, Paper::Kraft);
+}
+
+#[test]
+fn the_slate_goes_when_the_ink_under_it_goes() {
+    let (_dir, library) = library();
+    let (path, _, _) = kraft_sheet(&library);
+    let before = library.read(&path).unwrap().file;
+    let hub = LiveHub::new(config());
+    let mut sink = resume(&hub, &library, &path, A5);
+    press_board(&hub, true);
+    stroke(&mut sink, 3000, 5);
+    wait_until("the slate written", || {
+        stroke_count(&library, &path) == Some(3)
+    });
+    assert_eq!(
+        library.read(&path).unwrap().file.note.background.paper,
+        Paper::Slate
+    );
+    // The chalk is deleted: the sheet is as it was, on its paper, even with the blackboard on.
+    let snapshot = hub.snapshot();
+    hub.edit_strokes(0, snapshot.revision, delete(&[2]))
+        .unwrap();
+    hub.stop().unwrap();
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.strokes, before.note.strokes);
+    assert_eq!(written.note.background, before.note.background);
+    assert_eq!(written.original_note, None, "nothing to go back to");
+}
+
+#[test]
+fn a_new_session_does_not_inherit_the_blackboard_of_a_slate_sheet() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let red = LiveStyle {
+        tool: Tool::FeltTip,
+        color: Rgba::rgb(200, 0, 0),
+        width: 110.0,
+    };
+    let start_plain = |hub: &LiveHub| {
+        let Start::New { sink, .. } = hub
+            .start(options(&library, fixed(LiveButton::NewPage)))
+            .unwrap()
+        else {
+            panic!("already running");
+        };
+        sink
+    };
+    let _sink = start_plain(&hub);
+    hub.set_style(red).unwrap();
+    hub.stop().unwrap();
+
+    // The blackboard came on by itself with the sheet; a plain start is back on paper, with the
+    // ink from before it.
+    let mut slate = NoteFile::new(sheet(A5));
+    slate.note.background.paper = Paper::Slate;
+    let path = filed(&library, "", &slate);
+    let _sink = resume(&hub, &library, &path, A5);
+    assert!(hub.snapshot().view.board);
+    assert_eq!(hub.snapshot().style, LiveStyle::chalk());
+    hub.stop().unwrap();
+    let _sink = start_plain(&hub);
+    let snapshot = hub.snapshot();
+    assert!(!snapshot.view.board);
+    assert_eq!(snapshot.page.background.paper, Paper::White);
+    assert_eq!(snapshot.style, red);
+    hub.stop().unwrap();
+
+    // Asked for on that sheet (off and on again), it is carried like any blackboard.
+    let _sink = resume(&hub, &library, &path, A5);
+    press_board(&hub, false);
+    press_board(&hub, true);
+    hub.stop().unwrap();
+    let _sink = start_plain(&hub);
+    assert!(hub.snapshot().view.board);
+    assert_eq!(hub.snapshot().style, LiveStyle::chalk());
+    assert_eq!(hub.snapshot().page.background.paper, Paper::Slate);
+    // And gives back the ink it replaced, through the new session.
+    press_board(&hub, false);
+    assert_eq!(hub.snapshot().style, red);
+    hub.stop().unwrap();
 }
 
 #[test]
@@ -1201,6 +1558,15 @@ fn hidden_layers_stay_hidden_and_reach_no_viewer() {
     std::thread::sleep(config().save_interval * 2);
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
     assert_eq!(FileStamp::of(&path).unwrap(), stamp);
+    // Nor with what leaves the ink as it was: clearing nothing (the ink is on a hidden layer), the
+    // blackboard on and off.
+    hub.command(LiveCommandKind::ClearPage).unwrap();
+    press_board(&hub, true);
+    press_board(&hub, false);
+    std::thread::sleep(config().save_interval * 2);
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(FileStamp::of(&path).unwrap(), stamp);
+    assert_eq!(hub.snapshot().saved, Vec::<String>::new());
     // A viewer gets the layers as they are and none of the hidden strokes.
     let shared = batch_json(&super::super::model::LiveBatch {
         events: hub.current_events(),
@@ -1223,6 +1589,43 @@ fn hidden_layers_stay_hidden_and_reach_no_viewer() {
         written.note.strokes[0].layer, 1,
         "the hidden ink stays on its layer"
     );
+}
+
+#[test]
+fn a_note_that_received_no_ink_stays_untouched_whatever_was_added_around_it() {
+    let (_dir, library) = library();
+    let mut file = full_file(A5);
+    file.note.layers = vec![layer("Cours", false)];
+    let path = filed(&library, "", &file);
+    let (bytes, stamp) = (std::fs::read(&path).unwrap(), FileStamp::of(&path).unwrap());
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    hub.command(LiveCommandKind::NewLayer).unwrap();
+    assert_eq!(hub.snapshot().page.layers.len(), 3);
+    hub.command(LiveCommandKind::ClearPage).unwrap();
+    std::thread::sleep(config().save_interval * 2);
+    assert_untouched(&hub, &path, &bytes, &stamp);
+    let read = library.read(&path).unwrap().file;
+    assert_eq!(read.original_note, None);
+    assert_eq!(read.note.layers.len(), 1);
+
+    // Ink, then taken back before the end: the file goes back to the layers it had.
+    let hub = LiveHub::new(config());
+    let mut sink = resume(&hub, &library, &path, A5);
+    stroke(&mut sink, 3000, 5);
+    wait_until("the ink written", || {
+        stroke_count(&library, &path) == Some(3)
+    });
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.layers.len(), 2);
+    assert!(written.original_note.is_some());
+    let snapshot = hub.snapshot();
+    hub.edit_strokes(0, snapshot.revision, delete(&[2]))
+        .unwrap();
+    hub.stop().unwrap();
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.layers.len(), 1);
+    assert_eq!(written.original_note, None);
 }
 
 #[test]
@@ -1475,6 +1878,210 @@ fn a_new_narration_too_far_from_the_notes_own_loses_neither() {
     );
 }
 
+#[test]
+fn a_new_sound_too_long_to_join_the_notes_own_comes_back_whole() {
+    // 4 hours of silence, never touched (the pages are not even committed), then one second.
+    let long = Narration {
+        clip: ardoise_media::AudioClip {
+            channels: 1,
+            samples: vec![0; 4 * 3600 * 48_000],
+        },
+        ..note_narration(0.0, 0)
+    };
+    let later = note_narration(1.0, 4 * 3600 * 1000);
+    assert!(!long.fits_with(&later));
+    let kept = merged_keeping_both(long, later.clone()).unwrap_err();
+    assert_eq!(kept.clip, later.clip);
+}
+
+/// A page with ink, and strokes for a second page, resumed from `path`: the hub with sound to give.
+fn with_a_page_written(library: &Library, hub: &LiveHub, path: &Path) -> HubSink {
+    let mut sink = resume(hub, library, path, A5);
+    stroke(&mut sink, 3000, 5);
+    wait_until("the ink written", || stroke_count(library, path) == Some(3));
+    sink
+}
+
+#[test]
+fn a_sound_that_cannot_join_a_narration_it_cannot_read_goes_in_a_new_note() {
+    let (dir, library) = library();
+    let mut file = full_file(A5);
+    file.audio = Some(b"OggS damaged".to_vec());
+    let path = filed(&library, "Classe", &file);
+    let hub = LiveHub::new(config());
+    let _sink = with_a_page_written(&library, &hub, &path);
+    let session = hub.page_position().unwrap().session;
+    let sound = note_narration(1.0, 8_000);
+    let LiveError::NarrationKeptApart {
+        why: NarrationApart::Unreadable,
+        kept,
+    } = hub.attach_narration(session, 0, sound.clone()).unwrap_err()
+    else {
+        panic!("not kept apart");
+    };
+
+    // Beside the note, with the page as it is and this sound, in time with its ink.
+    assert_eq!(kept.parent(), Some(dir.path().join("Classe")).as_deref());
+    assert_ne!(kept, path);
+    let written = library.read(&kept).unwrap().file;
+    let page = hub.snapshot().page;
+    assert_eq!(written.note.strokes.len(), page.strokes.len());
+    assert_ne!(written.note.id, page.id);
+    assert_eq!(written.background, file.background);
+    let got = decode_narration(written.audio.as_ref().unwrap()).unwrap();
+    assert_eq!(got.start_ms, 8_000);
+    let ms = got.duration().as_millis();
+    assert!((990..=1010).contains(&ms), "{ms}");
+
+    // The page and its own narration are as they were.
+    hub.stop().unwrap();
+    assert_eq!(audio_of(&library, &path), file.audio);
+    assert_eq!(notes_in(&library).len(), 2);
+
+    // Said to the user: the sentence and where the sound is.
+    let error = LiveError::NarrationKeptApart {
+        why: NarrationApart::Unreadable,
+        kept: kept.clone(),
+    }
+    .command_error();
+    assert_eq!(error.code(), "narrationUnreadable");
+    assert_eq!(error.parts().1, path_text(&kept));
+    assert_eq!(
+        LiveError::NarrationLost {
+            why: NarrationApart::TooLong,
+            detail: "disk full".to_owned(),
+        }
+        .command_error()
+        .code(),
+        "narrationNotKept"
+    );
+}
+
+#[test]
+fn a_sound_kept_apart_has_its_place_in_note_time_on_a_page_of_the_session() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let Start::New { mut sink, .. } = hub
+        .start(options(&library, fixed(LiveButton::NewPage)))
+        .unwrap()
+    else {
+        panic!("already running");
+    };
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    let page_note = notes_in(&library).remove(0);
+    let session = hub.page_position().unwrap().session;
+    let error = hub.keep_apart(
+        session,
+        0,
+        &note_narration(1.0, 2_000),
+        NarrationApart::TooLong,
+    );
+    let LiveError::NarrationKeptApart { kept, .. } = &error else {
+        panic!("{error}");
+    };
+    let kept = kept.clone();
+    assert_eq!(error.command_error().code(), "narrationTooLong");
+    assert_ne!(kept, page_note);
+    let written = library.read(&kept).unwrap().file;
+    assert_eq!(written.note.strokes.len(), 1);
+    let got = decode_narration(written.audio.as_ref().unwrap()).unwrap();
+    assert_eq!(got.start_ms, 2_000);
+    hub.stop().unwrap();
+}
+
+#[test]
+fn a_sound_that_goes_in_no_note_is_kept_as_a_copy_and_the_error_says_where() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Notes");
+    std::fs::create_dir(&root).unwrap();
+    ardoise_core::library::init(&root).unwrap();
+    let library = Library::open(&root).unwrap();
+    let mut file = full_file(A5);
+    file.audio = Some(b"OggS damaged".to_vec());
+    let path = filed(&library, "", &file);
+    let backup = dir.path().join("narration-backup");
+    let hub = LiveHub::new(config());
+    hub.set_narration_backup(backup.clone());
+    let mut sink = resume(&hub, &library, &path, A5);
+    stroke(&mut sink, 3000, 5);
+    wait_until("the ink written", || {
+        stroke_count(&library, &path) == Some(3)
+    });
+    let session = hub.page_position().unwrap().session;
+
+    break_folder(&root, true);
+    let error = hub
+        .attach_narration(session, 0, note_narration(1.0, 8_000))
+        .unwrap_err();
+    let LiveError::NarrationKeptApart { kept, .. } = &error else {
+        panic!("{error}");
+    };
+    assert_eq!(kept.parent(), Some(backup.as_path()));
+    let got = decode_narration(&std::fs::read(kept).unwrap()).unwrap();
+    assert_eq!(got.start_ms, 8_000);
+
+    // Nowhere to put it at all: the sound is lost, and that is said too.
+    std::fs::remove_dir_all(&backup).unwrap();
+    std::fs::write(&backup, b"not a folder").unwrap();
+    let error = hub
+        .attach_narration(session, 0, note_narration(1.0, 8_000))
+        .unwrap_err();
+    assert!(matches!(error, LiveError::NarrationLost { .. }), "{error}");
+    break_folder(&root, false);
+    hub.stop().unwrap();
+}
+
+#[test]
+fn a_page_that_cannot_take_its_sound_does_not_cost_the_next_pages_theirs() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let Start::New { mut sink, .. } = hub
+        .start(options(&library, fixed(LiveButton::NewPage)))
+        .unwrap()
+    else {
+        panic!("already running");
+    };
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    stroke(&mut sink, 3000, 5);
+    wait_until("the first note", || notes_in(&library).len() == 1);
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    stroke(&mut sink, 4000, 5);
+    wait_until("the second note", || notes_in(&library).len() == 2);
+    let session = hub.page_position().unwrap().session;
+    assert!(hub.set_page_audio(0, b"OggS damaged".to_vec()));
+
+    let log = PageLog {
+        changes: vec![
+            change(Duration::ZERO, 0),
+            change(Duration::from_millis(500), 1),
+        ],
+        anchor_ms: None,
+    };
+    let clip = simulated_narration(Duration::from_secs(1), 1);
+    let error = give_to_hub(&hub, session, &log, now_ms() as f64, clip).unwrap_err();
+    assert_eq!(error.code(), "narrationUnreadable");
+    let saved = hub.stop().unwrap();
+    // The second page has its piece; the first keeps what it had, its piece in a third note.
+    let second = audio_of(&library, Path::new(&saved[1])).unwrap();
+    let ms = decode_narration(&second).unwrap().duration().as_millis();
+    assert!((490..=510).contains(&ms), "{ms}");
+    assert_eq!(
+        audio_of(&library, Path::new(&saved[0])),
+        Some(b"OggS damaged".to_vec())
+    );
+    assert_eq!(notes_in(&library).len(), 3);
+}
+
 // --- From the simulated tablet, through the tablet service ---------------------------------------
 
 /// The whole way: the simulated A4 tablet streams in real time through the service (which tells
@@ -1557,7 +2164,7 @@ fn the_shapes_of_live_ts() {
     assert!(keys(&snapshot).contains(&"canTurnPage"));
     let shared = batch_json(&super::super::model::LiveBatch {
         events: vec![LiveEvent::Snapshot {
-            snapshot: Box::new(session.snapshot()),
+            snapshot: Arc::new(session.snapshot()),
         }],
         sent_at: 1.0,
     })

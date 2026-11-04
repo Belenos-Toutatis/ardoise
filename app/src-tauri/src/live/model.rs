@@ -330,6 +330,38 @@ fn shared_strokes<S: Serializer>(
     strokes.as_slice().serialize(serializer)
 }
 
+/// Nor is a snapshot: every window's queue holds the same one (see [`LiveEvent::Snapshot`]).
+fn shared_snapshot<S: Serializer>(
+    snapshot: &Arc<LiveSnapshot>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    snapshot.as_ref().serialize(serializer)
+}
+
+/// The answer to a command that returns the snapshot a window's queue already holds: written once
+/// more as it is, not copied first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SnapshotReply(pub Arc<LiveSnapshot>);
+
+impl Serialize for SnapshotReply {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        shared_snapshot(&self.0, serializer)
+    }
+}
+
+/// A resumed sheet that went on in a new note: what [`LiveEvent::SheetForked`] says, and what
+/// `live_stop` gives back for a fork made by the last write, when the window is about to close.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkedSheet {
+    pub page_index: usize,
+    pub reason: ForkReason,
+    /// The note left as it is.
+    pub original: String,
+    /// The new note.
+    pub path: String,
+}
+
 /// One thing that happened, in order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(
@@ -339,9 +371,12 @@ fn shared_strokes<S: Serializer>(
 )]
 pub enum LiveEvent {
     /// Page change, clear, layer, style, state, blackboard, presentation opened or closed. Not an
-    /// edit of strokes: [`StrokesEdited`](Self::StrokesEdited) says that for less.
+    /// edit of strokes: [`StrokesEdited`](Self::StrokesEdited) says that for less. Shared, since
+    /// each window and viewer has its own queue: the page is not copied for each under the hub's
+    /// lock.
     Snapshot {
-        snapshot: Box<LiveSnapshot>,
+        #[serde(serialize_with = "shared_snapshot")]
+        snapshot: Arc<LiveSnapshot>,
     },
     /// A stroke with its first point(s).
     StrokeStart {
@@ -388,7 +423,9 @@ pub enum LiveEvent {
     },
     /// The resumed sheet on page `page_index` changed elsewhere or was deleted: nothing was
     /// overwritten, and the page goes on in a new note in the same binder. Sent once, and to a
-    /// window that subscribes later. About the library: never sent to the viewers of the share.
+    /// window that subscribes later while the session runs (a stopped session's forks are for
+    /// `live_stop` to give back, not for the next lesson's view). About the library: never sent to
+    /// the viewers of the share.
     SheetForked {
         page_index: usize,
         reason: ForkReason,

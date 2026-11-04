@@ -31,13 +31,14 @@ use ardoise_core::library::Library;
 use ardoise_core::note::{Background, BackgroundImage, PageSize};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{TabletService, TabletStatus};
+use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State, Webview};
 
 use crate::AppContext;
 use crate::commands::{CommandError, CommandResult, store};
 use crate::diagnostic::report_language;
-use crate::library::{library_error, library_of};
+use crate::library::{library_error, library_of, path_text};
 use crate::tablet::TabletRuntime;
 
 pub use activity::Activity;
@@ -45,7 +46,10 @@ pub use edits::StrokesEdit;
 pub use hub::{
     ButtonSetting, HubConfig, LiveError, LiveHub, LiveOverview, PagePosition, Start, StartOptions,
 };
-pub use model::{LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState};
+pub use model::{
+    ForkedSheet, LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState,
+    SnapshotReply,
+};
 
 use self::resume::ResumeBase;
 use crate::narration::{self, NarrationRuntime};
@@ -84,18 +88,34 @@ impl LiveError {
             LiveError::NotRunning | LiveError::Stopped => CommandError::new("liveNotRunning", self),
             LiveError::Library(error) => library_error(error),
             LiveError::Narration(error) => narration::narration_error(error),
+            LiveError::NarrationKeptApart { why, kept } => {
+                CommandError::new(why.code(), path_text(&kept))
+            }
+            LiveError::NarrationLost { detail, .. } => {
+                CommandError::new(NARRATION_NOT_KEPT, detail)
+            }
             LiveError::Edit(error) => CommandError::new(error.code(), error),
         }
     }
 }
 
+/// A new sound could not join its page's narration, nor be kept anywhere.
+pub const NARRATION_NOT_KEPT: &str = "narrationNotKept";
+
 /// A narration recorded in live mode goes to its pages before they are written for the last
-/// time (live mode stops, the app closes, a new session starts). A failure is logged: leaving
-/// live mode must not fail because of the microphone.
-fn finish_live_narration(narration: &NarrationRuntime, hub: &LiveHub) {
-    if let Some(Err(error)) = narration::finish_live(narration, hub) {
-        eprintln!("live mode: the narration could not be kept: {error:?}");
-    }
+/// time (live mode stops, the app closes, a new session starts). Leaving live mode must not fail
+/// because of the microphone: a failure does not stop what follows, and comes back for whoever has
+/// someone to tell. Also logged where the copies of the pages go, a windowed app having no console.
+fn finish_live_narration(narration: &NarrationRuntime, hub: &LiveHub) -> Option<CommandError> {
+    let error = narration::finish_live(narration, hub)?.err()?;
+    log_narration_failure(&error, &backup_dir());
+    Some(error)
+}
+
+fn log_narration_failure(error: &CommandError, backup: &Path) {
+    let line = format!("the narration could not go with its pages: {error:?}");
+    eprintln!("live mode: {line}");
+    log_backup(backup, &line);
 }
 
 /// The drawing area of the tablet, from what the service knows (last connection, then the
@@ -153,6 +173,70 @@ pub fn main_window_closed(app: &AppHandle) {
     }
 }
 
+/// Windows may end the session (`session_end.rs`): what is on the page goes to disk now, in case
+/// the end comes without more warning. The session goes on: the user may yet refuse.
+pub fn session_may_end(app: &AppHandle) {
+    if let Some(runtime) = app.try_state::<LiveRuntime>()
+        && let Err(error) = runtime.hub.write_now()
+    {
+        eprintln!("live mode: cannot write the pages before the end of the session: {error}");
+    }
+}
+
+/// Windows is ending the session (`WM_ENDSESSION`, `session_end.rs`): what [`main_window_closed`]
+/// does, in the order that loses least if the process ends halfway.
+pub fn session_ending(app: &AppHandle) {
+    let Some(runtime) = app.try_state::<LiveRuntime>() else {
+        return;
+    };
+    let hub = &runtime.hub;
+    let remember = || {
+        if let Some(context) = app.try_state::<AppContext>() {
+            crate::app_bridge::remember_live_session(&context, hub);
+        }
+    };
+    let narration = app.try_state::<NarrationRuntime>();
+    close_at_session_end(hub, narration.as_deref(), &backup_dir(), remember);
+    if let Some(tablet) = app.try_state::<TabletRuntime>() {
+        let _ = tablet.with_service(TabletService::stop_live);
+    }
+}
+
+/// The ink first, which takes least and loses most: it ends up on disk within moments. Then the
+/// recording under way: a plain copy of its sound, then its pages, which encoding can make far
+/// longer than Windows waits ([`narration::finish_live_ending`]). The copy goes once the pages
+/// holding the sound are written. `remember` tells the assistant's bridge, after each step.
+pub(crate) fn close_at_session_end(
+    hub: &LiveHub,
+    narration: Option<&NarrationRuntime>,
+    backup: &Path,
+    remember: impl Fn(),
+) {
+    close_session(hub, backup);
+    remember();
+    let Some(ended) = narration.and_then(|narration| narration::finish_live_ending(narration, hub))
+    else {
+        return;
+    };
+    if let Some(copy) = &ended.copy {
+        log_backup(
+            backup,
+            &format!("copy of the recording under way: {}", copy.display()),
+        );
+    }
+    if let Err(error) = &ended.saved {
+        log_narration_failure(error, backup);
+    }
+    let failed = close_session(hub, backup);
+    remember();
+    if ended.saved.is_ok()
+        && failed.is_empty()
+        && let Some(copy) = &ended.copy
+    {
+        let _ = std::fs::remove_file(copy);
+    }
+}
+
 /// Where the pages that could not be written to the library go when the app ends:
 /// `%LOCALAPPDATA%\Ardoise\live-backup` (local to this PC, outside the library); under the
 /// temporary folder when `LOCALAPPDATA` is not set (Linux).
@@ -197,10 +281,13 @@ fn close_session(hub: &LiveHub, backup: &Path) -> Vec<PathBuf> {
 /// Appends `line` (with the time) to `live-backup.log` in `dir`. Best effort.
 fn log_backup(dir: &Path, line: &str) {
     use std::io::Write as _;
-    let written = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join("live-backup.log"))
+    let written = std::fs::create_dir_all(dir)
+        .and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("live-backup.log"))
+        })
         .and_then(|mut log| {
             let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
             writeln!(log, "{now} {line}")
@@ -217,8 +304,10 @@ pub async fn live_subscribe(
     webview: Webview,
     runtime: State<'_, LiveRuntime>,
     on_event: Channel<LiveBatch>,
-) -> CommandResult<LiveSnapshot> {
-    Ok(runtime.hub.subscribe(webview.label(), Arc::new(on_event)))
+) -> CommandResult<SnapshotReply> {
+    Ok(SnapshotReply(
+        runtime.hub.subscribe(webview.label(), Arc::new(on_event)),
+    ))
 }
 
 /// What a new session needs, from what the app knows now.
@@ -315,10 +404,36 @@ pub async fn live_resume(app: AppHandle, path: String) -> CommandResult<LiveSnap
     .await
 }
 
-/// Leaves live mode and writes every page; returns the paths of the session's notes. A
-/// narration recording in live mode is stopped first and goes with its pages.
+/// What `live_stop` answers (`LiveStopped` in `live.ts`): the interface closes the view as soon as it
+/// has it, so what the last write and the end of the recording did is said here and not only in the
+/// events.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveStopped {
+    /// Paths of the session's notes.
+    pub saved: Vec<String>,
+    /// The resumed sheets that went on in a new note, in this session (the last write included).
+    pub forks: Vec<ForkedSheet>,
+    /// The recording still running when live mode stopped could not join its pages: why, in the
+    /// usual `{ code, message }`. `narrationTooLong` and `narrationUnreadable` say where its sound
+    /// is kept.
+    pub narration: Option<CommandError>,
+}
+
+/// Stops the session and says what became of it.
+fn stopped(hub: &LiveHub, narration: Option<CommandError>) -> CommandResult<LiveStopped> {
+    let saved = hub.stop().map_err(LiveError::command_error)?;
+    Ok(LiveStopped {
+        saved,
+        forks: hub.forked_sheets(),
+        narration,
+    })
+}
+
+/// Leaves live mode and writes every page. A narration recording in live mode is stopped first and
+/// goes with its pages.
 #[tauri::command]
-pub async fn live_stop(app: AppHandle) -> CommandResult<Vec<String>> {
+pub async fn live_stop(app: AppHandle) -> CommandResult<LiveStopped> {
     // Writing the session's pages (and closing the narration) takes disk time: off the async
     // runtime's threads.
     crate::notes::blocking(move || {
@@ -326,13 +441,13 @@ pub async fn live_stop(app: AppHandle) -> CommandResult<Vec<String>> {
         let tablet = app.state::<TabletRuntime>();
         let runtime = app.state::<LiveRuntime>();
         let narration = app.state::<NarrationRuntime>();
-        finish_live_narration(&narration, &runtime.hub);
+        let recording = finish_live_narration(&narration, &runtime.hub);
         // Without a running service there is nothing to stop on the tablet's side.
         let _ = tablet.with_service(TabletService::stop_live);
-        let saved = runtime.hub.stop().map_err(LiveError::command_error)?;
+        let answer = stopped(&runtime.hub, recording)?;
         // The assistant's `last_live_note` finds the session after a restart too.
         crate::app_bridge::remember_live_session(&context, &runtime.hub);
-        Ok(saved)
+        Ok(answer)
     })
     .await
 }

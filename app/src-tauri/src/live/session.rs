@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ardoise_core::library::FileStamp;
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Timing};
@@ -22,9 +22,9 @@ use super::edits::{
     grouped, hidden_before, insert_at, remove_at, viewer_places,
 };
 use super::model::{
-    ForkReason, HoverPoint, LiveCommandKind, LiveEvent, LiveMark, LivePoint, LiveSessionState,
-    LiveSnapshot, LiveStroke, LiveStyle, LiveViewState, PlacedStroke, RecolouredStrokes,
-    ViewerIndices, sanitize_marks,
+    ForkReason, ForkedSheet, HoverPoint, LiveCommandKind, LiveEvent, LiveMark, LivePoint,
+    LiveSessionState, LiveSnapshot, LiveStroke, LiveStyle, LiveViewState, PlacedStroke,
+    RecolouredStrokes, ViewerIndices, sanitize_marks,
 };
 use super::resume::{PenMapping, ResumeBase, ResumeSeed, hold_for};
 use crate::library::path_text;
@@ -66,12 +66,21 @@ struct Resumed {
     /// This session wrote the file: until then the note is not among the session's notes.
     rewritten: bool,
     fork: Option<SheetFork>,
+    /// Ink was added while the blackboard was on: the sheet then needs the slate it was written
+    /// on, white chalk being invisible on most paper. Until then the blackboard is a matter of
+    /// display, which the file does not hear of (`hub::written_sheet`).
+    ink_on_board: bool,
 }
 
 /// One page of the session: a note, and where it stands on disk.
 #[derive(Debug, Clone)]
 pub struct Page {
     pub note: Note,
+    /// What the windows call this page, for as long as it lasts: the id it started with. The note's
+    /// own id changes when a write has to make a new note (`hub::write_page`), and a window takes
+    /// another id for another page: it would drop its marks and outlines, and a viewer the picture
+    /// of the paper, while nothing on screen changed.
+    shown_id: String,
     /// Bumped at every change of `note`.
     pub version: u64,
     /// `version` of what is on disk (0: nothing).
@@ -82,6 +91,9 @@ pub struct Page {
     pub urgent: bool,
     /// Last write attempt (set by the hub).
     pub last_attempt: Option<Instant>,
+    /// How long the last write that succeeded took (set by the hub): a slow one waits longer for
+    /// the next (`hub::save_wait`).
+    pub last_write: Option<Duration>,
     /// Why the last write failed, once the windows were told (set by the hub): cleared by the
     /// next write that succeeds: the library error's code (`errorCodes.*`) and its detail.
     pub save_error: Option<(&'static str, String)>,
@@ -133,12 +145,14 @@ fn first_revision(id: u64) -> u64 {
 impl Page {
     fn new(note: Note, orientation: Orientation, revision: u64) -> Page {
         Page {
+            shown_id: note.id.clone(),
             note,
             version: 0,
             saved_version: 0,
             file: None,
             urgent: false,
             last_attempt: None,
+            last_write: None,
             save_error: None,
             audio: None,
             orientation,
@@ -181,14 +195,15 @@ impl Page {
         // Its first new sample is at the time base at the earliest: the stamps of a notification
         // go back a little before it arrived, possibly to before the resume.
         page.last_t = time_base.checked_sub(SAMPLE_MS as u32);
-        // A sheet with slate paper has it as its own paper, whatever the blackboard does.
-        page.paper_before_board =
-            (page.note.background.paper == Paper::Slate).then_some(Paper::Slate);
+        // Its own paper, whatever the blackboard does and from whichever page it is turned off: a
+        // sheet with slate paper keeps it too.
+        page.paper_before_board = Some(page.note.background.paper);
         page.resumed = Some(Resumed {
             base,
             origin: now_ms.saturating_sub(i64::from(time_base)),
             rewritten: false,
             fork: None,
+            ink_on_board: false,
         });
         page
     }
@@ -237,6 +252,13 @@ impl Page {
         self.resumed
             .as_ref()
             .and_then(|resumed| resumed.fork.as_ref())
+    }
+
+    /// Ink was added to this resumed sheet under the blackboard: see the field.
+    pub fn ink_on_board(&self) -> bool {
+        self.resumed
+            .as_ref()
+            .is_some_and(|resumed| resumed.ink_on_board)
     }
 
     /// The wall clock (Unix ms) at note time 0 for what this session adds: `note.created`, the
@@ -391,6 +413,8 @@ struct Drawing {
     page: usize,
     style: LiveStyle,
     layer: u32,
+    /// The blackboard was on when it began.
+    on_board: bool,
     points: Vec<LivePoint>,
     /// `strokeStart` was emitted.
     announced: bool,
@@ -437,6 +461,9 @@ pub struct LiveSession {
     style: LiveStyle,
     /// Style before the blackboard was turned on, given back when it is turned off.
     style_before_board: Option<LiveStyle>,
+    /// The blackboard is on because the resumed sheet is slate, not because it was asked for: the
+    /// next session does not inherit it.
+    board_imposed: bool,
     view: LiveViewState,
     state: LiveSessionState,
     hover: Option<HoverPoint>,
@@ -469,6 +496,7 @@ impl LiveSession {
             orientation: Orientation::Landscape,
             style: style.sanitized(),
             style_before_board: None,
+            board_imposed: false,
             view: view.sanitized(size),
             state: LiveSessionState::Idle,
             hover: None,
@@ -509,6 +537,7 @@ impl LiveSession {
         self.current
     }
 
+    #[cfg(test)]
     pub fn style(&self) -> LiveStyle {
         self.style
     }
@@ -553,6 +582,7 @@ impl LiveSession {
         if board {
             self.style_before_board = Some(self.style);
             self.style = LiveStyle::chalk();
+            self.board_imposed = true;
         }
         self.pages = vec![page];
         self.current = 0;
@@ -562,6 +592,24 @@ impl LiveSession {
     /// The style in use, or the one the blackboard replaced.
     pub fn style_off_board(&self) -> LiveStyle {
         self.style_before_board.unwrap_or(self.style)
+    }
+
+    /// The session starts on the blackboard the session before it left on: `before` is the ink to
+    /// give back when it is turned off.
+    pub fn with_style_before_board(mut self, before: Option<LiveStyle>) -> Self {
+        self.style_before_board = before;
+        self
+    }
+
+    /// What a new session takes from this one: the ink in use, the ink the blackboard replaced, and
+    /// whether the blackboard stays on: only if someone turned it on. One that came on by itself
+    /// with a slate sheet stays with that sheet, and the ink from before it comes back.
+    pub fn carried_ink(&self) -> (LiveStyle, Option<LiveStyle>, bool) {
+        if self.view.board && !self.board_imposed {
+            (self.style, self.style_before_board, true)
+        } else {
+            (self.style_off_board(), None, false)
+        }
     }
 
     /// A `saveFailed` event for every page whose last write failed.
@@ -589,19 +637,32 @@ impl LiveSession {
             .collect()
     }
 
-    /// A `sheetForked` event for every resumed sheet that became a new note.
-    pub fn sheet_forks(&self) -> Vec<LiveEvent> {
+    /// Every resumed sheet that became a new note.
+    pub fn forked_sheets(&self) -> Vec<ForkedSheet> {
         self.pages
             .iter()
             .enumerate()
             .filter_map(|(page_index, page)| {
                 let fork = page.fork()?;
-                Some(LiveEvent::SheetForked {
+                Some(ForkedSheet {
                     page_index,
                     reason: fork.reason,
                     original: fork.original.clone(),
                     path: fork.path.clone(),
                 })
+            })
+            .collect()
+    }
+
+    /// A `sheetForked` event for every resumed sheet that became a new note.
+    pub fn sheet_forks(&self) -> Vec<LiveEvent> {
+        self.forked_sheets()
+            .into_iter()
+            .map(|fork| LiveEvent::SheetForked {
+                page_index: fork.page_index,
+                reason: fork.reason,
+                original: fork.original,
+                path: fork.path,
             })
             .collect()
     }
@@ -683,9 +744,11 @@ impl LiveSession {
 
     /// The whole session, for a window that draws it from scratch.
     pub fn snapshot(&self) -> LiveSnapshot {
+        let mut page = self.current_page().note.clone();
+        page.id.clone_from(&self.current_page().shown_id);
         LiveSnapshot {
             state: self.state,
-            page: self.current_page().note.clone(),
+            page,
             page_index: self.current,
             page_count: self.pages.len(),
             orientation: self.current_page().orientation,
@@ -706,7 +769,7 @@ impl LiveSession {
     /// is no longer the one the marks were written on, they go (an empty list follows).
     fn push_snapshot(&mut self, out: &mut Vec<LiveEvent>) {
         out.push(LiveEvent::Snapshot {
-            snapshot: Box::new(self.snapshot()),
+            snapshot: Arc::new(self.snapshot()),
         });
         out.extend(self.in_progress());
         if !self.marks.is_empty() && self.marks_page != Some(self.held_page()) {
@@ -963,6 +1026,7 @@ impl LiveSession {
                 page: self.current,
                 style: self.style,
                 layer: self.current_layer(),
+                on_board: self.view.board,
                 points: Vec::new(),
                 announced: false,
                 unsent: 0,
@@ -1078,6 +1142,14 @@ impl LiveSession {
         if page.file.is_none() {
             page.urgent = true;
         }
+        // White chalk needs the slate it was written on, also on a sheet that was not on the
+        // blackboard when it was turned on (windows draw slate either way).
+        if drawing.on_board
+            && let Some(resumed) = &mut page.resumed
+        {
+            resumed.ink_on_board = true;
+            page.note.background.paper = Paper::Slate;
+        }
         out.push(LiveEvent::StrokeEnd {
             page_index: drawing.page,
         });
@@ -1089,6 +1161,21 @@ impl LiveSession {
             && page.needs_write()
         {
             page.urgent = true;
+        }
+    }
+
+    /// A resumed sheet shown again with the blackboard off (it was turned off on another page)
+    /// gets its paper back, unless chalk was written on it.
+    fn settle_paper(&mut self) {
+        if self.view.board {
+            return;
+        }
+        let page = &mut self.pages[self.current];
+        if page.is_resumed()
+            && !page.ink_on_board()
+            && let Some(paper) = page.paper_before_board
+        {
+            page.note.background.paper = paper;
         }
     }
 
@@ -1133,6 +1220,7 @@ impl LiveSession {
                 }
                 self.leave(left);
                 self.follow();
+                self.settle_paper();
                 self.fit_view(before);
                 self.push_snapshot(out);
             }
@@ -1146,6 +1234,7 @@ impl LiveSession {
                 self.current -= 1;
                 self.leave(left);
                 self.follow();
+                self.settle_paper();
                 self.fit_view(before);
                 self.push_snapshot(out);
             }
@@ -1380,7 +1469,9 @@ impl LiveSession {
     /// The shared view. Turning the blackboard on gives the current page (and new pages) slate
     /// paper and switches to white chalk; turning it off gives back the paper the page had
     /// (white for a page made while the blackboard was on) and the style used before. Other pages
-    /// keep their paper, so that ink written on one stays visible.
+    /// keep their paper, so that ink written on one stays visible. On a resumed sheet that slate
+    /// reaches the file only with ink written under it (`hub::written_sheet`): pressing B in front
+    /// of a sheet is not a change of the sheet.
     pub fn set_view(&mut self, view: LiveViewState, out: &mut Vec<LiveEvent>) {
         let view = view.sanitized(self.current_page().note.page);
         if view == self.view {
@@ -1392,6 +1483,7 @@ impl LiveSession {
         if !board_changed {
             return;
         }
+        self.board_imposed = false;
         let page = &mut self.pages[self.current];
         let paper = if view.board {
             self.style_before_board = Some(self.style);
