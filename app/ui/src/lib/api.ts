@@ -7,7 +7,7 @@ import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic'
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
 import type { InkspaceProgress, InkspaceReport, InkspaceSource } from './inkspace';
-import type { LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStrokesEdit, LiveStyle, LiveViewState, MonitorInfo } from './live';
+import type { LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStopped, LiveStrokesEdit, LiveStyle, LiveViewState, MonitorInfo } from './live';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
 import { mockShareSubscribe } from './mock-share';
@@ -334,8 +334,8 @@ export const api = {
    * `noteNewerVersion` (a running session then goes on).
    */
   liveResume: (path: string) => call<LiveSnapshot>('live_resume', { path }),
-  /** Leaves live mode; returns the paths of the notes saved. */
-  liveStop: () => call<string[]>('live_stop'),
+  /** Leaves live mode; says which notes were saved, and what became of the sheets and the sound. */
+  liveStop: () => call<LiveStopped>('live_stop'),
   liveSetStyle: (style: LiveStyle) => call<void>('live_set_style', { style }),
   liveCommand: (command: LiveCommand) => call<void>('live_command', { command }),
   /** « Undo the clearing »: gives the current page the ink of the last « Clear the page » back. */

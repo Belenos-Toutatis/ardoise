@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+use ardoise_core::format::NoteFile;
 use ardoise_core::library::Library;
 use ardoise_core::note::{Origin, PageSize, Paper};
 use ardoise_core::settings::{LiveButton, Orientation};
@@ -23,11 +24,13 @@ use super::hub::{
     BatchSink, ButtonSetting, HubConfig, HubSink, LiveError, LiveHub, Start, StartOptions,
 };
 use super::model::{
-    LiveBatch, LiveCommand, LiveCommandKind, LiveEvent, LiveMark, LivePoint, LiveSessionState,
-    LiveStyle, LiveViewState, MAX_MARK_POINTS, MAX_MARKS, MAX_MARKS_POINTS, MarkPoint,
+    ForkReason, ForkedSheet, LiveBatch, LiveCommand, LiveCommandKind, LiveEvent, LiveMark,
+    LivePoint, LiveSessionState, LiveStyle, LiveViewState, MAX_MARK_POINTS, MAX_MARKS,
+    MAX_MARKS_POINTS, MarkPoint,
 };
 use super::session::LiveSession;
-use crate::library::tests::library;
+use crate::commands::CommandError;
+use crate::library::tests::{library, sample_note};
 use crate::library::{now_ms, path_text};
 use crate::narration::{PageChange, PageLog, give_to_hub};
 use crate::presentation::MonitorInfo;
@@ -1743,3 +1746,85 @@ fn live_narration_goes_to_its_pages_through_the_hub() {
     let saved = hub.stop().unwrap();
     assert_eq!(audio_of(&library, Path::new(&saved[1])), Some(damaged));
 }
+
+// --- What is said when live mode stops, and the end of the Windows session -----------------------
+
+/// A hub that writes a page at its first stroke, then not again until it is told to.
+fn patient_hub() -> LiveHub {
+    LiveHub::new(HubConfig {
+        flush_interval: Duration::from_millis(4),
+        save_interval: Duration::from_secs(3600),
+    })
+}
+
+#[test]
+fn a_fork_at_the_last_write_is_in_what_live_stop_answers() {
+    let (dir, library) = library();
+    let mut file = NoteFile::new(sample_note("Fiche"));
+    file.note.page = A5;
+    let path = library.create(Path::new("Classe"), &file).unwrap().path;
+    let hub = patient_hub();
+    let Start::New { mut sink, .. } = hub
+        .resume(options(&library, fixed(LiveButton::NewPage)), &path)
+        .unwrap()
+    else {
+        panic!("already running");
+    };
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    let strokes = file.note.strokes.len();
+    stroke(&mut sink, 3000, 5);
+    wait_until("the first write", || {
+        stroke_count(&library, &path) == Some(strokes + 1)
+    });
+    assert_eq!(hub.forked_sheets(), []);
+
+    // Changed elsewhere; the next write, the very last, can only go beside it.
+    let mut elsewhere = library.read(&path).unwrap();
+    elsewhere.file.note.strokes.pop();
+    library
+        .save(&path, &elsewhere.file, &elsewhere.stamp)
+        .unwrap();
+    stroke(&mut sink, 4000, 5);
+    let answer = super::stopped(&hub, None).unwrap();
+    assert_eq!(answer.saved.len(), 1);
+    let new_path = PathBuf::from(&answer.saved[0]);
+    assert_eq!(
+        new_path.parent(),
+        Some(dir.path().join("Classe")).as_deref()
+    );
+    assert_eq!(
+        answer.forks,
+        [ForkedSheet {
+            page_index: 0,
+            reason: ForkReason::Changed,
+            original: path_text(&path),
+            path: answer.saved[0].clone(),
+        }]
+    );
+    assert_eq!(answer.narration.as_ref().map(|e| e.code()), None);
+
+    // As `live.ts` reads it.
+    let json = serde_json::to_value(&answer).unwrap();
+    assert_eq!(keys(&json), ["forks", "narration", "saved"]);
+    assert_eq!(
+        keys(&json["forks"][0]),
+        ["original", "pageIndex", "path", "reason"]
+    );
+    assert_eq!(json["forks"][0]["reason"], "changed");
+    assert_eq!(json["narration"], Value::Null);
+    let told = super::stopped(
+        &hub,
+        Some(CommandError::new("narrationUnreadable", "a.ardoise")),
+    )
+    .unwrap();
+    let json = serde_json::to_value(&told).unwrap();
+    assert_eq!(
+        json["narration"],
+        serde_json::json!({ "code": "narrationUnreadable", "message": "a.ardoise" })
+    );
+}
+

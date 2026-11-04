@@ -28,7 +28,8 @@ use super::super::hub::{
     HubConfig, HubSink, LiveError, LiveHub, NarrationApart, Start, StartOptions, file_fingerprint,
 };
 use super::super::model::{
-    ForkReason, LiveCommandKind, LiveEvent, LiveSessionState, LiveStyle, LiveViewState,
+    ForkReason, LiveCommandKind, LiveEvent, LiveMark, LiveSessionState, LiveStyle, LiveViewState,
+    MarkPoint,
 };
 use super::super::session::LiveSession;
 use super::super::tests::{
@@ -46,6 +47,7 @@ use crate::library::{blank_note, now_ms, path_text};
 use crate::narration::{PageLog, give_to_hub};
 use crate::original::{NoteOriginal, TabletContext, original_of};
 use crate::share::feed::batch_json;
+use crate::share::live_paper::paper_key;
 
 /// Note written a long time ago (2 months before the resume of the tests below).
 const CREATED: i64 = 1_787_000_000_000;
@@ -1077,17 +1079,97 @@ fn a_note_changed_elsewhere_is_left_alone_and_the_page_goes_on_in_its_binder() {
     wait_until("the new note rewritten", || {
         stroke_count(&library, &new_path) == Some(4)
     });
+    // A window opened later is told too, while the session runs.
+    let late = Arc::new(Window::default());
+    hub.subscribe("presentation", late.clone());
+    wait_until("the notice in the late window", || forks(&late).len() == 1);
+
     let saved = hub.stop().unwrap();
     assert_eq!(saved, [path_text(&new_path)]);
     assert_eq!(forks(&window).len(), 1);
     assert_eq!(std::fs::read(&path).unwrap(), kept);
-    assert_eq!(hub.snapshot().page.id, written.note.id);
-    assert_eq!(hub.overview().unwrap().notes[0].2, new_path);
+    let overview = hub.overview().unwrap();
+    assert_eq!(overview.notes[0].1, written.note.id, "the note's real id");
+    assert_eq!(overview.notes[0].2, new_path);
 
-    // A window opened later is told too.
-    let late = Arc::new(Window::default());
-    hub.subscribe("presentation", late.clone());
-    wait_until("the notice in the late window", || forks(&late).len() == 1);
+    // The view of the next lesson does not open on a notice about this one.
+    let next = Arc::new(Window::default());
+    hub.subscribe("main", next.clone());
+    wait_until("the first batch", || !next.events().is_empty());
+    std::thread::sleep(config().flush_interval * 5);
+    assert_eq!(forks(&next), []);
+    let _sink = {
+        let Start::New { sink, .. } = hub
+            .start(options(&library, fixed(LiveButton::NewPage)))
+            .unwrap()
+        else {
+            panic!("already running");
+        };
+        sink
+    };
+    let fresh = Arc::new(Window::default());
+    hub.subscribe("main", fresh.clone());
+    wait_until("the first batch", || !fresh.events().is_empty());
+    assert_eq!(forks(&fresh), []);
+    assert_eq!(hub.forked_sheets(), []);
+}
+
+#[test]
+fn a_fork_changes_nothing_on_screen_nor_for_the_viewers() {
+    let (_dir, library) = library();
+    let path = filed(&library, "Classe", &full_file(A5));
+    let hub = LiveHub::new(config());
+    let mut sink = resume(&hub, &library, &path, A5);
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let before = hub.snapshot();
+    let mark = LiveMark {
+        tool: Tool::Ballpoint,
+        color: Rgba::BLACK,
+        width: 60.0,
+        points: vec![MarkPoint {
+            x: 10.0,
+            y: 10.0,
+            p: 1.0,
+        }],
+    };
+    hub.set_marks(0, vec![mark.clone()]).unwrap();
+
+    std::fs::remove_file(&path).unwrap();
+    stroke(&mut sink, 3000, 5);
+    wait_until("the notice", || !forks(&window).is_empty());
+
+    // The note has its own id now; the page is the same page for everyone who shows it.
+    let new_path = PathBuf::from(&forks(&window)[0].3);
+    let written = library.read(&new_path).unwrap().file;
+    assert_ne!(written.note.id, before.page.id);
+    let after = hub.snapshot();
+    assert_eq!(after.page.id, before.page.id);
+    assert_eq!(after.page.strokes.len(), before.page.strokes.len() + 1);
+    assert_eq!(paper_key(&after), paper_key(&before), "no new picture");
+    // The marks stay, here and for the windows (which keep theirs while the id stays).
+    let ids: Vec<String> = window
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            LiveEvent::Snapshot { snapshot } => Some(snapshot.page.id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(ids.iter().all(|id| *id == before.page.id), "{ids:?}");
+    assert!(matches!(
+        hub.current_events().last(),
+        Some(LiveEvent::Marks { marks }) if *marks == [mark]
+    ));
+    // Later writes still go through the note's own id.
+    stroke(&mut sink, 4000, 5);
+    hub.stop().unwrap();
+    assert_eq!(notes_in(&library), std::slice::from_ref(&new_path));
+    assert_eq!(hub.overview().unwrap().notes[0].1, written.note.id);
+    assert_eq!(
+        library.read(&new_path).unwrap().file.note.id,
+        written.note.id
+    );
 }
 
 #[test]

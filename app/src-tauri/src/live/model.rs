@@ -349,6 +349,19 @@ impl Serialize for SnapshotReply {
     }
 }
 
+/// A resumed sheet that went on in a new note: what [`LiveEvent::SheetForked`] says, and what
+/// `live_stop` gives back for a fork made by the last write, when the window is about to close.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkedSheet {
+    pub page_index: usize,
+    pub reason: ForkReason,
+    /// The note left as it is.
+    pub original: String,
+    /// The new note.
+    pub path: String,
+}
+
 /// One thing that happened, in order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(
@@ -410,7 +423,9 @@ pub enum LiveEvent {
     },
     /// The resumed sheet on page `page_index` changed elsewhere or was deleted: nothing was
     /// overwritten, and the page goes on in a new note in the same binder. Sent once, and to a
-    /// window that subscribes later. About the library: never sent to the viewers of the share.
+    /// window that subscribes later while the session runs (a stopped session's forks are for
+    /// `live_stop` to give back, not for the next lesson's view). About the library: never sent to
+    /// the viewers of the share.
     SheetForked {
         page_index: usize,
         reason: ForkReason,

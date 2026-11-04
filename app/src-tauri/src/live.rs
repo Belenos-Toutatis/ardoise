@@ -31,6 +31,7 @@ use ardoise_core::library::Library;
 use ardoise_core::note::{Background, BackgroundImage, PageSize};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{TabletService, TabletStatus};
+use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State, Webview};
 
@@ -46,7 +47,8 @@ pub use hub::{
     ButtonSetting, HubConfig, LiveError, LiveHub, LiveOverview, PagePosition, Start, StartOptions,
 };
 pub use model::{
-    LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState, SnapshotReply,
+    ForkedSheet, LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState,
+    SnapshotReply,
 };
 
 use self::resume::ResumeBase;
@@ -338,10 +340,36 @@ pub async fn live_resume(app: AppHandle, path: String) -> CommandResult<LiveSnap
     .await
 }
 
-/// Leaves live mode and writes every page; returns the paths of the session's notes. A
-/// narration recording in live mode is stopped first and goes with its pages.
+/// What `live_stop` answers (`LiveStopped` in `live.ts`): the interface closes the view as soon as it
+/// has it, so what the last write and the end of the recording did is said here and not only in the
+/// events.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveStopped {
+    /// Paths of the session's notes.
+    pub saved: Vec<String>,
+    /// The resumed sheets that went on in a new note, in this session (the last write included).
+    pub forks: Vec<ForkedSheet>,
+    /// The recording still running when live mode stopped could not join its pages: why, in the
+    /// usual `{ code, message }`. `narrationTooLong` and `narrationUnreadable` say where its sound
+    /// is kept.
+    pub narration: Option<CommandError>,
+}
+
+/// Stops the session and says what became of it.
+fn stopped(hub: &LiveHub, narration: Option<CommandError>) -> CommandResult<LiveStopped> {
+    let saved = hub.stop().map_err(LiveError::command_error)?;
+    Ok(LiveStopped {
+        saved,
+        forks: hub.forked_sheets(),
+        narration,
+    })
+}
+
+/// Leaves live mode and writes every page. A narration recording in live mode is stopped first and
+/// goes with its pages.
 #[tauri::command]
-pub async fn live_stop(app: AppHandle) -> CommandResult<Vec<String>> {
+pub async fn live_stop(app: AppHandle) -> CommandResult<LiveStopped> {
     // Writing the session's pages (and closing the narration) takes disk time: off the async
     // runtime's threads.
     crate::notes::blocking(move || {
@@ -349,13 +377,13 @@ pub async fn live_stop(app: AppHandle) -> CommandResult<Vec<String>> {
         let tablet = app.state::<TabletRuntime>();
         let runtime = app.state::<LiveRuntime>();
         let narration = app.state::<NarrationRuntime>();
-        finish_live_narration(&narration, &runtime.hub);
+        let recording = finish_live_narration(&narration, &runtime.hub);
         // Without a running service there is nothing to stop on the tablet's side.
         let _ = tablet.with_service(TabletService::stop_live);
-        let saved = runtime.hub.stop().map_err(LiveError::command_error)?;
+        let answer = stopped(&runtime.hub, recording)?;
         // The assistant's `last_live_note` finds the session after a restart too.
         crate::app_bridge::remember_live_session(&context, &runtime.hub);
-        Ok(saved)
+        Ok(answer)
     })
     .await
 }

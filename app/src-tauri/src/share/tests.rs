@@ -511,6 +511,36 @@ fn keys(value: &Value) -> Vec<&str> {
 }
 
 #[test]
+fn a_viewer_never_gets_the_id_of_the_note_but_can_tell_pages_apart() {
+    let shared_id = |note: Note| -> String {
+        let batch = LiveBatch {
+            events: vec![LiveEvent::Snapshot {
+                snapshot: Arc::new(snapshot_of(note)),
+            }],
+            sent_at: 1.0,
+        };
+        let value: Value = serde_json::from_str(&batch_json(&batch).unwrap()).unwrap();
+        value["events"][0]["snapshot"]["page"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let note = note_with(vec![pen_stroke(1000.0, 4)]);
+    let real = note.id.clone();
+    let shared = shared_id(note.clone());
+    assert_ne!(shared, real);
+    assert!(!shared.contains(&real));
+    // The same page is the same page, whatever changes on it.
+    let mut written_on = note.clone();
+    written_on.strokes.push(pen_stroke(2000.0, 4));
+    assert_eq!(shared_id(written_on), shared);
+    // Another page is another page.
+    let mut other = note;
+    other.id = "another".into();
+    assert_ne!(shared_id(other), shared);
+}
+
+#[test]
 fn a_viewer_gets_only_the_fields_the_viewer_draws() {
     // An allow list: a field added later to the hub's types is not in this set, so it does not
     // reach a browser until someone adds it here on purpose.

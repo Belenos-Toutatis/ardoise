@@ -195,7 +195,8 @@ export type LiveEvent =
   /**
    * The resumed sheet on this page changed elsewhere or was deleted: nothing was overwritten, and
    * the page goes on in a new note (`path`) in the same binder; `original` is the note left as it
-   * is. Sent once, and to a window that subscribes later; never to the share's viewers.
+   * is. Sent once, and to a window that subscribes later while the session runs; never to the
+   * share's viewers.
    */
   | { type: 'sheetForked'; pageIndex: number; reason: SheetForkReason; original: string; path: string }
   | LiveStrokesEdited;
@@ -204,4 +205,26 @@ export interface LiveBatch {
   events: LiveEvent[];
   /** Wall-clock time (ms since the Unix epoch, fractional) when Rust sent the batch. */
   sentAt: number;
+}
+
+/** A resumed sheet whose page went on in another note. */
+export interface SheetFork {
+  pageIndex: number;
+  reason: SheetForkReason;
+  /** The note left as it is, and the new one. */
+  original: string;
+  path: string;
+}
+
+/** What `live_stop` answers: the view closes on it, so what the last write did is said here too. */
+export interface LiveStopped {
+  /** Paths of the session's notes. */
+  saved: string[];
+  /** The resumed sheets that went on in a new note in this session, the last write included. */
+  forks: SheetFork[];
+  /**
+   * A recording still running at the stop could not join its pages: `errorMessage` says why, and
+   * where its sound is kept (`narrationTooLong`, `narrationUnreadable`). `null` otherwise.
+   */
+  narration: { code: string; message: string } | null;
 }

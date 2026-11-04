@@ -33,8 +33,8 @@ use tauri::ipc::Channel;
 use super::activity::Activity;
 use super::edits::{LiveEditError, Prepared, StrokesEdit};
 use super::model::{
-    ForkReason, LiveBatch, LiveCommandKind, LiveEvent, LiveMark, LiveSessionState, LiveSnapshot,
-    LiveStyle, LiveViewState, wall_ms, wall_now_ms,
+    ForkReason, ForkedSheet, LiveBatch, LiveCommandKind, LiveEvent, LiveMark, LiveSessionState,
+    LiveSnapshot, LiveStyle, LiveViewState, wall_ms, wall_now_ms,
 };
 use super::resume::{ResumeBase, ResumeSeed, merged_keeping_both, placed_for_merge};
 use super::session::{LiveSession, Page, SavedFile, SheetFork};
@@ -925,6 +925,7 @@ impl Shared {
             path: path_text(&written.file.path),
         });
         page.file = Some(written.file);
+        // The note's id, which the windows never see change (`Page::shown_id`).
         page.note.id = written.id;
         if let Some(outside) = written.outside {
             page.note.title = outside.title;
@@ -1123,7 +1124,9 @@ impl LiveHub {
         queue.extend(state.session.in_progress());
         queue.extend(state.session.marks_event());
         queue.extend(state.session.save_failures());
-        queue.extend(state.session.sheet_forks());
+        if state.session.is_running() {
+            queue.extend(state.session.sheet_forks());
+        }
         let id = state.next_subscriber;
         state.next_subscriber += 1;
         state.subscribers.retain(|s| s.label != label);
@@ -1299,6 +1302,12 @@ impl LiveHub {
         }
         self.shared.save_pass(true)?;
         Ok(self.shared.lock().session.saved())
+    }
+
+    /// Every resumed sheet of the session shown that went on in a new note: told by an event when it
+    /// happens, but the last write happens as the window closes.
+    pub fn forked_sheets(&self) -> Vec<ForkedSheet> {
+        self.shared.lock().session.forked_sheets()
     }
 
     /// Runs `change` on the session and sends what it emitted; [`LiveError::NotRunning`] before

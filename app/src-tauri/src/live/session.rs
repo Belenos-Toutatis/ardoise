@@ -22,9 +22,9 @@ use super::edits::{
     grouped, hidden_before, insert_at, remove_at, viewer_places,
 };
 use super::model::{
-    ForkReason, HoverPoint, LiveCommandKind, LiveEvent, LiveMark, LivePoint, LiveSessionState,
-    LiveSnapshot, LiveStroke, LiveStyle, LiveViewState, PlacedStroke, RecolouredStrokes,
-    ViewerIndices, sanitize_marks,
+    ForkReason, ForkedSheet, HoverPoint, LiveCommandKind, LiveEvent, LiveMark, LivePoint,
+    LiveSessionState, LiveSnapshot, LiveStroke, LiveStyle, LiveViewState, PlacedStroke,
+    RecolouredStrokes, ViewerIndices, sanitize_marks,
 };
 use super::resume::{PenMapping, ResumeBase, ResumeSeed, hold_for};
 use crate::library::path_text;
@@ -76,6 +76,11 @@ struct Resumed {
 #[derive(Debug, Clone)]
 pub struct Page {
     pub note: Note,
+    /// What the windows call this page, for as long as it lasts: the id it started with. The note's
+    /// own id changes when a write has to make a new note (`hub::write_page`), and a window takes
+    /// another id for another page: it would drop its marks and outlines, and a viewer the picture
+    /// of the paper, while nothing on screen changed.
+    shown_id: String,
     /// Bumped at every change of `note`.
     pub version: u64,
     /// `version` of what is on disk (0: nothing).
@@ -137,6 +142,7 @@ fn first_revision(id: u64) -> u64 {
 impl Page {
     fn new(note: Note, orientation: Orientation, revision: u64) -> Page {
         Page {
+            shown_id: note.id.clone(),
             note,
             version: 0,
             saved_version: 0,
@@ -627,19 +633,32 @@ impl LiveSession {
             .collect()
     }
 
-    /// A `sheetForked` event for every resumed sheet that became a new note.
-    pub fn sheet_forks(&self) -> Vec<LiveEvent> {
+    /// Every resumed sheet that became a new note.
+    pub fn forked_sheets(&self) -> Vec<ForkedSheet> {
         self.pages
             .iter()
             .enumerate()
             .filter_map(|(page_index, page)| {
                 let fork = page.fork()?;
-                Some(LiveEvent::SheetForked {
+                Some(ForkedSheet {
                     page_index,
                     reason: fork.reason,
                     original: fork.original.clone(),
                     path: fork.path.clone(),
                 })
+            })
+            .collect()
+    }
+
+    /// A `sheetForked` event for every resumed sheet that became a new note.
+    pub fn sheet_forks(&self) -> Vec<LiveEvent> {
+        self.forked_sheets()
+            .into_iter()
+            .map(|fork| LiveEvent::SheetForked {
+                page_index: fork.page_index,
+                reason: fork.reason,
+                original: fork.original,
+                path: fork.path,
             })
             .collect()
     }
@@ -721,9 +740,11 @@ impl LiveSession {
 
     /// The whole session, for a window that draws it from scratch.
     pub fn snapshot(&self) -> LiveSnapshot {
+        let mut page = self.current_page().note.clone();
+        page.id.clone_from(&self.current_page().shown_id);
         LiveSnapshot {
             state: self.state,
-            page: self.current_page().note.clone(),
+            page,
             page_index: self.current,
             page_count: self.pages.len(),
             orientation: self.current_page().orientation,
