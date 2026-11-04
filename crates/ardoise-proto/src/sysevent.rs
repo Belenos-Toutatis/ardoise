@@ -8,7 +8,6 @@
 //!   probably the charging state, like the second byte of `ba` (**supposed**, not used).
 //! - `ef 01 00`: sent once, right after a registration request (`e7`). Meaning unknown; ignored.
 //!
-//! The live-mode button of the simulator also comes here (`live::BUTTON_SYSEVENTS`).
 
 use std::fmt;
 

@@ -159,8 +159,9 @@ stay out of git).
   waits for the registered address only and notes other Wacom tablets in range; another tablet is never connected
   to without the user.
 - **Battery event, known frames.** `ardoise_proto::sysevent` decodes `f1 02 <percent> <flag>` (battery level, shown
-  at once) and names `ef 01 00`; `live` names `a3 …` and `Reply::is_unexplained` names `cb 01 00`. They are not
-  "unclassified" any more. The simulator's invented live-mode button moved to `f2 01 01`, out of the battery family.
+  at once) and names `ef 01 00`; `live` names `a3 …`. They are not "unclassified" any more. `cb 01 00`, first named the
+  same way, has been taken for the live-mode button since 2026-11-05 (`live::BUTTON_COMMAND`, a hypothesis); the simulator
+  sends it too.
 - **Logs end.** Each written service log ends with the disconnection and `end of this log: <why>`; the app stops the
   tablet service (and cancels a guided test) at exit, waiting at most 3 s.
 

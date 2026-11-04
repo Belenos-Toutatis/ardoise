@@ -435,23 +435,20 @@ fn reply_unknown_opcodes_are_kept() {
     assert!(
         !Reply::decode(&bytes("f1 02 13 00"))
             .unwrap()
-            .is_unexplained()
+            .is_live_button()
     );
 }
 
 #[test]
-fn the_unasked_cb_frame_of_a_real_slate_is_named() {
+fn the_unasked_cb_frame_of_a_real_slate_is_taken_for_its_button() {
     // Our capture (Slate A4, 2026-11-02), on the command channel during live mode.
     let frame = Reply::decode(&bytes("cb 01 00")).unwrap();
     assert_eq!(
         frame,
-        Reply::Unknown(Frame::new(opcode::UNEXPLAINED_CB, [0x00]))
+        Reply::Unknown(Frame::new(opcode::LIVE_BUTTON, [0x00]))
     );
-    assert!(frame.is_unexplained());
-    assert_eq!(
-        frame.to_string(),
-        "cb 01 00, seen once during live mode, meaning unknown (ignored)"
-    );
+    assert!(frame.is_live_button());
+    assert_eq!(frame.to_string(), "cb 01 00, live-mode button (hypothesis)");
 }
 
 #[test]

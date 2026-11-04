@@ -115,7 +115,7 @@ fn classify(entry: &LogEntry) -> Result<Class, String> {
         },
         Direction::Rx => match entry.ch.ok_or("received without a channel")? {
             Channel::Command => match Reply::decode(&bytes) {
-                Ok(reply) if reply.is_unexplained() => Ok(Class::Named),
+                Ok(reply) if reply.is_live_button() => Ok(Class::Named),
                 Ok(Reply::Unknown(_)) => Err("unknown reply".into()),
                 // A Slate sends the firmware version one digit per byte: the decoded text
                 // encodes back as ASCII, not as the same bytes.
