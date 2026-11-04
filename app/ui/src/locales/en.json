@@ -1814,6 +1814,7 @@
     "brand": "Ardoise",
     "canvas": "Page shared by the Ardoise PC",
     "connecting": "Connecting to the Ardoise PC…",
+    "slow": "The connection is taking a while. A web filter on this network may be holding it back: IT can then allow the Ardoise PC's address.",
     "reconnecting": "Connection lost, trying again…",
     "paused": "Paused",
     "waiting": {

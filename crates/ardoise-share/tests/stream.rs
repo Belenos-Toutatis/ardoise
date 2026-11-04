@@ -5,6 +5,7 @@
 
 mod common;
 
+use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
 use ardoise_share::Limits;
@@ -151,4 +152,44 @@ fn at_stop_a_long_write_is_finished_before_end() {
         assert_eq!(viewer.leftover(), 0, "no message cut in the middle");
         assert!(seen[..seen.len() - 1].iter().all(|m| m["type"] == "live"));
     });
+}
+
+/// The bytes of an event stream before its first message.
+fn bytes_before_first_message(port: u16, cookie: &str, extra: &str) -> usize {
+    let mut stream = connect(port);
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(
+        stream,
+        "GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\n{extra}\r\n"
+    )
+    .unwrap();
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 65536];
+    loop {
+        if let Some(at) = bytes.windows(5).position(|w| w == b"data:") {
+            return at;
+        }
+        let n = stream.read(&mut chunk).expect("the stream goes on");
+        assert!(n > 0, "closed before the first message");
+        bytes.extend_from_slice(&chunk[..n]);
+    }
+}
+
+#[test]
+fn a_stream_through_a_proxy_starts_with_enough_to_pass_its_filter() {
+    let h = Harness::start();
+    let cookie = h.cookie();
+    let direct = bytes_before_first_message(h.port(), &cookie, "");
+    assert!(direct < 1024, "{direct} bytes before the first message");
+    // e2guardian held streams up to 450 KB, at a school (2026-11-04).
+    for proxy in [
+        "X-Forwarded-For: 192.168.1.2\r\n",
+        "Via: 1.1 proxy\r\n",
+        "Forwarded: for=192.168.1.2\r\n",
+    ] {
+        let padded = bytes_before_first_message(h.port(), &cookie, proxy);
+        assert!(padded >= 2 * 1024 * 1024, "{proxy:?}: {padded} bytes");
+    }
 }

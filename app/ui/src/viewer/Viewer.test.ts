@@ -76,6 +76,8 @@ class FakePc {
   remaining = 5;
   /** Status of `/events` when the cookie is there; 200 streams. */
   eventsStatus = 200;
+  /** `/events` never answers once the code is accepted (a filtering proxy holding the stream). */
+  holdEvents = false;
   /** A `/join` answer replacing the normal ones. */
   joinOverride: (() => Response) | null = null;
   joins: string[] = [];
@@ -98,6 +100,7 @@ class FakePc {
     if (url === '/events') {
       this.eventRequests += 1;
       if (!this.joined) return new Response(null, { status: 401 });
+      if (this.holdEvents) return new Promise<Response>(() => undefined);
       if (this.eventsStatus !== 200) return new Response(null, { status: this.eventsStatus });
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -277,6 +280,25 @@ describe('viewer page: the code', () => {
     expect(view.submit().textContent?.trim()).toBe('Join');
     expect(document.title).toBe('Ardoise: shared screen');
     expect(document.documentElement.lang).toBe('en');
+  });
+
+  it('leaves the form as soon as the code is accepted, even if the stream is held back, and then says why it may be', async () => {
+    pc.holdEvents = true;
+    const view = render();
+    await vi.waitFor(() => expect(view.view('code')).not.toBeNull());
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await type(view, CODE);
+    await submit(view);
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    // No second « Rejoindre » to press, which would only open one more stream.
+    expect(view.view('code')).toBeNull();
+    expect(view.view('connecting')).not.toBeNull();
+    expect(view.target.querySelector('[data-hint="slow"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(12_000);
+    flushSync();
+    expect(view.target.querySelector('[data-hint="slow"]')?.textContent).toContain('filtre web');
+    expect(pc.joins).toEqual([CODE]);
   });
 
   it('asks again, and says why, if the code was right but the browser dropped the cookie', async () => {

@@ -1814,6 +1814,7 @@
     "brand": "Ardoise",
     "canvas": "Page partagée par le PC d'Ardoise",
     "connecting": "Connexion au PC d'Ardoise…",
+    "slow": "La connexion met du temps. Un filtre web du réseau la retient peut-être : le service informatique peut alors autoriser l'adresse du PC d'Ardoise.",
     "reconnecting": "Connexion perdue, nouvelle tentative…",
     "paused": "En pause",
     "waiting": {
