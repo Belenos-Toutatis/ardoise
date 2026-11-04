@@ -59,6 +59,23 @@ const RED = { r: 216, g: 0, b: 0, a: 255 };
 const GREEN = { r: 132, g: 189, b: 0, a: 255 };
 const BLACK = { r: 0, g: 0, b: 0, a: 255 };
 const sameColor = (a, b) => !!a && !!b && a.r === b.r && a.g === b.g && a.b === b.b && a.a === b.a;
+/**
+ * A key press that is made again when nothing came of it: the control window handles one edit at a time and ignores a
+ * key pressed while the previous edit is still under way (`lib/live-touch-up.ts`), and a teacher presses again.
+ * `done()` says whether the press had its effect.
+ */
+async function pressUntil(app, name, options, done, what, { presses = 4, wait = 2500 } = {}) {
+  for (let k = 0; k < presses; k++) {
+    await press(app, name, options);
+    const end = Date.now() + wait;
+    while (Date.now() < end) {
+      if (done()) return;
+      await sleep(25);
+    }
+  }
+  throw new Error(`timed out waiting for ${what} (${presses} key presses)`);
+}
+
 /** Where the journey is, for the message of a step that does not end (a DevTools call that never answers). */
 let lastPoint = '';
 const at = (point) => {
@@ -958,8 +975,7 @@ export const touchUpJourneys = [
           await app.waitFor(undoable('"undo-edit"'), 'the Undo button to be available');
           const kept = model.sync().tablet.length;
           const mark = stream.mark();
-          await press(app, 'z', { ctrl: true });
-          await until(() => model.editsSince(mark).length >= 1, 'the undo event');
+          await pressUntil(app, 'z', { ctrl: true }, () => model.editsSince(mark).length >= 1, 'the undo event');
           let [edit] = model.editsSince(mark);
           if (!sameSet(edit.inserted, edited.b.prints) || edit.removed.length > 0) throw new Error(`the undo inserted ${edit.inserted} (expected ${edited.b.prints})`);
           model.check('after Ctrl+Z');
@@ -968,8 +984,7 @@ export const touchUpJourneys = [
           await until(() => model.sync().tablet.length > kept + 1, 'a stroke written by the tablet after the undo', 20_000);
           const written = model.tablet.slice(kept);
           const redoMark = stream.mark();
-          await press(app, 'y', { ctrl: true });
-          await until(() => model.editsSince(redoMark).length >= 1, 'the redo event');
+          await pressUntil(app, 'y', { ctrl: true }, () => model.editsSince(redoMark).length >= 1, 'the redo event');
           [edit] = model.editsSince(redoMark);
           if (!sameSet(edit.removed, edited.b.prints)) throw new Error(`the redo removed ${edit.removed} (expected ${edited.b.prints})`);
           model.check('after Ctrl+Y');
@@ -984,8 +999,7 @@ export const touchUpJourneys = [
           const steps = 4; // the red, the green, the two deletions
           for (; undone < steps; undone++) {
             const mark = stream.mark();
-            await press(app, 'z', { ctrl: true });
-            await until(() => model.editsSince(mark).length >= 1, `the event of undo ${undone + 1} (edits so far: ${describeEdits(model)})`);
+            await pressUntil(app, 'z', { ctrl: true }, () => model.editsSince(mark).length >= 1, `the event of undo ${undone + 1} (edits so far: ${describeEdits(model)})`);
           }
           await app.waitFor(`document.querySelector('button[data-action="undo-edit"]').disabled`, `Undo to be out of steps after ${steps} undos (edits so far: ${describeEdits(model)})`);
           model.check('after undoing everything');
@@ -1004,8 +1018,7 @@ export const touchUpJourneys = [
           let redone = 0;
           for (; redone < steps; redone++) {
             const redoMark = stream.mark();
-            await press(app, 'y', { ctrl: true });
-            await until(() => model.editsSince(redoMark).length >= 1, `the event of redo ${redone + 1} (edits so far: ${describeEdits(model)})`);
+            await pressUntil(app, 'y', { ctrl: true }, () => model.editsSince(redoMark).length >= 1, `the event of redo ${redone + 1} (edits so far: ${describeEdits(model)})`);
           }
           await app.waitFor(`document.querySelector('button[data-action="redo-edit"]').disabled`, `Redo to be out of steps after ${steps} redos (edits so far: ${describeEdits(model)})`);
           model.check('after redoing everything');
@@ -1027,8 +1040,7 @@ export const touchUpJourneys = [
           if (cleared.control > 3) throw new Error(`the page still holds ${cleared.control} strokes after the clearing`);
           await until(() => model.sync().strokes.length >= 1, 'the tablet to write on the cleared page', 20_000);
           const since = model.strokes.map(printOf).filter((p) => !before.has(p));
-          await press(app, 'z', { ctrl: true });
-          await until(() => model.editsSince(mark).some((e) => e.inserted.length > 0), 'the undo of the clearing');
+          await pressUntil(app, 'z', { ctrl: true }, () => model.editsSince(mark).some((e) => e.inserted.length > 0), 'the undo of the clearing');
           model.check('after undoing the clearing');
           const back = model.strokes.map(printOf);
           if ([...before].some((p) => !back.includes(p))) throw new Error('the page did not come back whole');
