@@ -96,5 +96,7 @@ L'utilisateur demande de pouvoir reprendre le mode direct sur une feuille exista
 - Si la feuille a changé ailleurs pendant le direct, une nouvelle note est créée dans le même classeur, et Ardoise le dit.
 - Le vidéoprojecteur et les écrans du partage montrent le fond de la feuille reprise (modèle, texture, image ou page de PDF), et jamais ses calques masqués.
 - Déplacer une sélection reste réservé à l'éditeur.
+- Une pastille de couleur, quand une sélection existe, ne change que la sélection : la couleur du stylet ne change pas (dans l'éditeur, elle change aussi).
+- Une note reprise qui n'a pas encore d'original garde son état d'avant la reprise, même vierge.
 
 SPEC §4.2 est mis à jour et le jalon M12 est ajouté à ROADMAP.md. Conception : `docs/design/tablet-live-classroom.md`, « M12 ».
