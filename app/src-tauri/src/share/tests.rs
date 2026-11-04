@@ -415,6 +415,7 @@ fn snapshot_of(note: Note) -> LiveSnapshot {
         page_index: 0,
         page_count: 1,
         orientation: Orientation::Landscape,
+        can_turn_page: true,
         layer: 0,
         style: LiveStyle::default(),
         view: LiveViewState::whole(A4_LANDSCAPE),

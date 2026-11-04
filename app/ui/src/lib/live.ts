@@ -48,15 +48,26 @@ export interface MonitorInfo {
 
 export type LiveSessionState = 'idle' | 'waiting' | 'live' | 'reconnecting';
 
+/** Why a resumed sheet became a new note: it changed elsewhere, or no longer exists. */
+export type SheetForkReason = 'changed' | 'deleted';
+
 export interface LiveSnapshot {
   state: LiveSessionState;
   /** The current page (a note: strokes so far, background, layers). */
   page: Note;
   pageIndex: number;
   pageCount: number;
-  /** How the tablet is held: the page is in this orientation (the live window's quick switch). */
+  /**
+   * How the tablet is held: the page is in this orientation (the live window's quick switch). On a
+   * resumed sheet held the other way round than the setting, how it is to be held for that page.
+   */
   orientation: Orientation;
-  /** Layer receiving new strokes. */
+  /**
+   * Whether the current page turns with the tablet: false on a resumed sheet, which is never turned
+   * (the quick switch is disabled there). Absent on the share's viewers, which do not need it.
+   */
+  canTurnPage?: boolean;
+  /** Layer receiving new strokes: the current page's last visible one. */
   layer: number;
   style: LiveStyle;
   view: LiveViewState;
@@ -120,7 +131,13 @@ export type LiveEvent =
    * A page could not be written into the library (sent once per page while the error repeats).
    * The pages stay in memory; a later `saved` means that everything is written.
    */
-  | { type: 'saveFailed'; pageIndex: number; code: string; message: string };
+  | { type: 'saveFailed'; pageIndex: number; code: string; message: string }
+  /**
+   * The resumed sheet on this page changed elsewhere or was deleted: nothing was overwritten, and
+   * the page goes on in a new note (`path`) in the same binder; `original` is the note left as it
+   * is. Sent once, and to a window that subscribes later; never to the share's viewers.
+   */
+  | { type: 'sheetForked'; pageIndex: number; reason: SheetForkReason; original: string; path: string };
 
 export interface LiveBatch {
   events: LiveEvent[];

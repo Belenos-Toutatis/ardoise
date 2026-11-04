@@ -324,10 +324,10 @@ share start, a few hundred KB.
 - `ShareSink::send(batch)` writes the batch from an **allow list** (`batch_json`: `SharedEvent`, `SharedSnapshot`,
   `SharedLivePage` in `share/feed.rs`, borrowed views of the hub's types) and calls `viewer.send`; an `Err` drops
   the subscription (the hub's existing rule). A field added later to `LiveSnapshot` or `Note` therefore never
-  reaches a browser until it is added there on purpose. `saved` and `saveFailed` events are left out (library
-  paths, system messages); in a snapshot `saved` = `[]`, `presentation` = `null`, `origin` = `{"kind":"ardoise"}`,
-  and the page keeps only what is drawn: `id`, `page`, `background`, `layers` (names emptied), `strokes`, `created`,
-  `modified`. Strokes of a hidden layer are left out here as in `SharedPage` (a teacher hides an "answers" layer to
+  reaches a browser until it is added there on purpose. `saved`, `saveFailed` and `sheetForked` events are left out
+  (library paths, system messages); in a snapshot `saved` = `[]`, `presentation` = `null`, `origin` =
+  `{"kind":"ardoise"}`, and the page keeps only what is drawn: `id`, `page`, `background`, `layers` (names emptied),
+  `strokes`; `created` and `modified` are 0 (a resumed note keeps its date on the PC). Strokes of a hidden layer are left out here as in `SharedPage` (a teacher hides an "answers" layer to
   keep it to themselves); the layer list stays whole so that stroke indices stay valid.
 - Serialising runs on the hub's flusher thread, as for the windows' channels, and never waits. A `Memo` shared by
   the viewers' sinks keeps the last batch and its text (`Arc<str>`): viewers that were up to date get equal batches

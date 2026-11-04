@@ -925,7 +925,9 @@ fn merge_places_both_clips_on_one_track() {
         NarrationBase::Note
     );
 
-    // Hours apart: only the later one.
+    // Hours apart: only the later one, as `fits_with` says.
+    assert!(first.fits_with(&replay(constant(1, 48, 7), 3 * 3600 * 1000)));
+    assert!(!first.fits_with(&replay(constant(1, 48, 7), 5 * 3600 * 1000)));
     let later = replay(constant(1, 48, 7), 5 * 3600 * 1000);
     assert_eq!(first.merge(later.clone()), later);
 }

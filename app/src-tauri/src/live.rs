@@ -8,12 +8,15 @@
 //! - [`session`]: the session itself, pure (strokes, hover, pages, layers, view);
 //! - [`hub`]: the session shared between threads, the batches sent to the windows, the pages
 //!   written to the library;
+//! - [`resume`]: a session that starts from an existing note (the sheet's file, the pen on a
+//!   sheet that was not made for it, its time);
 //! - [`activity`]: whether live mode runs or the presentation window is open, without a lock
 //!   (background work waits meanwhile).
 
 pub mod activity;
 pub mod hub;
 pub mod model;
+pub mod resume;
 pub mod session;
 
 #[cfg(test)]
@@ -22,6 +25,7 @@ pub(crate) mod tests;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use ardoise_core::library::Library;
 use ardoise_core::note::PageSize;
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{TabletService, TabletStatus};
@@ -210,6 +214,44 @@ pub async fn live_subscribe(
     Ok(runtime.hub.subscribe(webview.label(), Arc::new(on_event)))
 }
 
+/// What a new session needs, from what the app knows now.
+fn start_options(context: &AppContext, tablet: &TabletRuntime, library: Library) -> StartOptions {
+    let size = tablet
+        .with_service(|service| tablet_size(&service.status()))
+        .ok()
+        .flatten()
+        .unwrap_or(ardoise_core::note::A4_LANDSCAPE);
+    StartOptions {
+        library,
+        french: report_language(context) == "fr",
+        size,
+        orientation: orientation_setting(context),
+        button: button_setting(context),
+    }
+}
+
+/// Hands a new session to the tablet service (a session already running just gives its snapshot).
+fn start_streaming(
+    start: Start,
+    tablet: &TabletRuntime,
+    hub: &LiveHub,
+) -> CommandResult<LiveSnapshot> {
+    match start {
+        Start::Running(snapshot) => Ok(snapshot),
+        Start::New { snapshot, sink } => {
+            let id = sink.session();
+            // The hub's lock is not held here: the service may call the sink at once.
+            match tablet.with_service(move |service| service.start_live(Box::new(sink))) {
+                Ok(()) => Ok(snapshot),
+                Err(error) => {
+                    hub.abort_start(id);
+                    Err(error)
+                }
+            }
+        }
+    }
+}
+
 /// Starts live mode (or returns the session running): a new session waits for the tablet,
 /// which streams as soon as it is connected.
 #[tauri::command]
@@ -225,36 +267,45 @@ pub async fn live_start(
     if !runtime.hub.page_position().is_some_and(|p| p.running) {
         finish_live_narration(&narration, &runtime.hub);
     }
-    let size = tablet
-        .with_service(|service| tablet_size(&service.status()))
-        .ok()
-        .flatten()
-        .unwrap_or(ardoise_core::note::A4_LANDSCAPE);
-    let options = StartOptions {
-        library,
-        french: report_language(&context) == "fr",
-        size,
-        orientation: orientation_setting(&context),
-        button: button_setting(&context),
-    };
-    match runtime
+    let options = start_options(&context, &tablet, library);
+    let start = runtime
         .hub
         .start(options)
-        .map_err(LiveError::command_error)?
-    {
-        Start::Running(snapshot) => Ok(snapshot),
-        Start::New { snapshot, sink } => {
-            let id = sink.session();
-            // The hub's lock is not held here: the service may call the sink at once.
-            match tablet.with_service(move |service| service.start_live(Box::new(sink))) {
-                Ok(()) => Ok(snapshot),
-                Err(error) => {
-                    runtime.hub.abort_start(id);
-                    Err(error)
-                }
-            }
+        .map_err(LiveError::command_error)?;
+    start_streaming(start, &tablet, &runtime.hub)
+}
+
+/// Resumes live mode on the note at `path` (SPEC §4.2, `docs/questions.md` Q9): its first page is
+/// that note, whose file receives what is written. A session still running goes first, as
+/// `live_stop` would end it (its narration, its pages, what the assistant remembers of it); a
+/// note that cannot be read leaves it running.
+#[tauri::command]
+pub async fn live_resume(app: AppHandle, path: String) -> CommandResult<LiveSnapshot> {
+    // Reading the note and writing the old session's pages take disk time: off the async
+    // runtime's threads.
+    crate::notes::blocking(move || {
+        let context = app.state::<AppContext>();
+        let tablet = app.state::<TabletRuntime>();
+        let runtime = app.state::<LiveRuntime>();
+        let narration = app.state::<NarrationRuntime>();
+        let library = library_of(&context)?;
+        let path = Path::new(&path);
+        library.read(path).map_err(library_error)?;
+        finish_live_narration(&narration, &runtime.hub);
+        if runtime.hub.page_position().is_some_and(|p| p.running) {
+            // Without a running service there is nothing to stop on the tablet's side.
+            let _ = tablet.with_service(TabletService::stop_live);
+            runtime.hub.stop().map_err(LiveError::command_error)?;
+            crate::app_bridge::remember_live_session(&context, &runtime.hub);
         }
-    }
+        let options = start_options(&context, &tablet, library);
+        let start = runtime
+            .hub
+            .resume(options, path)
+            .map_err(LiveError::command_error)?;
+        start_streaming(start, &tablet, &runtime.hub)
+    })
+    .await
 }
 
 /// Leaves live mode and writes every page; returns the paths of the session's notes. A

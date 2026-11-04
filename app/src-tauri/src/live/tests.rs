@@ -32,14 +32,14 @@ use crate::library::{now_ms, path_text};
 use crate::narration::{PageChange, PageLog, give_to_hub};
 use crate::presentation::MonitorInfo;
 
-const A5: PageSize = PageSize {
+pub(super) const A5: PageSize = PageSize {
     width: 21_600,
     height: 14_800,
 };
 
 /// A window: keeps the batches it receives; refuses them once `closed`.
 #[derive(Default)]
-struct Window {
+pub(super) struct Window {
     batches: Mutex<Vec<LiveBatch>>,
     closed: AtomicBool,
 }
@@ -55,7 +55,7 @@ impl BatchSink for Window {
 }
 
 impl Window {
-    fn events(&self) -> Vec<LiveEvent> {
+    pub(super) fn events(&self) -> Vec<LiveEvent> {
         self.batches
             .lock()
             .unwrap()
@@ -64,7 +64,7 @@ impl Window {
             .collect()
     }
 
-    fn has(&self, wanted: impl Fn(&LiveEvent) -> bool) -> bool {
+    pub(super) fn has(&self, wanted: impl Fn(&LiveEvent) -> bool) -> bool {
         self.events().iter().any(wanted)
     }
 }
@@ -85,18 +85,18 @@ fn points_of(events: &[LiveEvent]) -> Vec<LivePoint> {
         .collect()
 }
 
-fn config() -> HubConfig {
+pub(super) fn config() -> HubConfig {
     HubConfig {
         flush_interval: Duration::from_millis(4),
         save_interval: Duration::from_millis(150),
     }
 }
 
-fn fixed(button: LiveButton) -> ButtonSetting {
+pub(super) fn fixed(button: LiveButton) -> ButtonSetting {
     Arc::new(move || button)
 }
 
-fn options(library: &Library, button: ButtonSetting) -> StartOptions {
+pub(super) fn options(library: &Library, button: ButtonSetting) -> StartOptions {
     StartOptions {
         library: library.clone(),
         french: true,
@@ -120,11 +120,11 @@ fn start(hub: &LiveHub, options: StartOptions) -> HubSink {
     sink
 }
 
-fn pen(x: u16, y: u16, pressure: u16) -> LiveRecord {
+pub(super) fn pen(x: u16, y: u16, pressure: u16) -> LiveRecord {
     LiveRecord::Pen(PenPoint { x, y, pressure })
 }
 
-fn send(sink: &mut HubSink, records: &[LiveRecord]) {
+pub(super) fn send(sink: &mut HubSink, records: &[LiveRecord]) {
     sink.input(LiveInput::Records {
         records: records.to_vec(),
         received: SystemTime::now(),
@@ -132,7 +132,7 @@ fn send(sink: &mut HubSink, records: &[LiveRecord]) {
 }
 
 /// `n` samples with pressure, then the pen lifted (hovering), in notifications of 3 records.
-fn stroke(sink: &mut HubSink, x: u16, n: u16) {
+pub(super) fn stroke(sink: &mut HubSink, x: u16, n: u16) {
     let mut records: Vec<LiveRecord> = (0..n)
         .map(|i| pen(x + i * 10, 1000 + i * 5, 800 + i))
         .collect();
@@ -142,7 +142,7 @@ fn stroke(sink: &mut HubSink, x: u16, n: u16) {
     }
 }
 
-fn wait_until(what: &str, condition: impl Fn() -> bool) {
+pub(super) fn wait_until(what: &str, condition: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !condition() {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
@@ -150,11 +150,11 @@ fn wait_until(what: &str, condition: impl Fn() -> bool) {
     }
 }
 
-fn notes_in(library: &Library) -> Vec<PathBuf> {
+pub(super) fn notes_in(library: &Library) -> Vec<PathBuf> {
     library.list().notes.into_iter().map(|e| e.path).collect()
 }
 
-fn stroke_count(library: &Library, path: &Path) -> Option<usize> {
+pub(super) fn stroke_count(library: &Library, path: &Path) -> Option<usize> {
     library
         .read(path)
         .ok()
@@ -624,7 +624,7 @@ fn a_stopped_session_no_longer_changes_its_notes() {
 }
 
 /// Makes the folder of `library` unusable (a file takes its place), or usable again.
-fn break_folder(root: &Path, broken: bool) {
+pub(super) fn break_folder(root: &Path, broken: bool) {
     let away = root.with_extension("away");
     if broken {
         std::fs::rename(root, &away).unwrap();
@@ -1160,7 +1160,7 @@ fn the_marks_reach_the_windows_coalesced_and_late_ones_start_from_them() {
     });
 }
 
-fn keys(value: &Value) -> Vec<&str> {
+pub(super) fn keys(value: &Value) -> Vec<&str> {
     let mut keys: Vec<&str> = value
         .as_object()
         .unwrap()
@@ -1229,6 +1229,7 @@ fn the_json_has_the_shapes_of_live_ts() {
     assert_eq!(
         keys(snapshot),
         [
+            "canTurnPage",
             "hover",
             "layer",
             "orientation",
@@ -1248,6 +1249,7 @@ fn the_json_has_the_shapes_of_live_ts() {
         (json!(0), json!(1))
     );
     assert_eq!(snapshot["layer"], 0);
+    assert_eq!(snapshot["canTurnPage"], true);
     assert_eq!(snapshot["hover"], Value::Null);
     assert_eq!(snapshot["presentation"], Value::Null);
     assert_eq!(snapshot["saved"], json!([]));
@@ -1428,6 +1430,21 @@ pub(crate) fn stream_simulated_live(
     seconds: u32,
     while_live: impl FnOnce(),
 ) -> Vec<f64> {
+    let start = || {
+        hub.start(options(library, fixed(LiveButton::NewPage)))
+            .unwrap()
+    };
+    stream_simulated_start(hub, library, seconds, while_live, start)
+}
+
+/// [`stream_simulated_live`], for the session `start` makes.
+pub(super) fn stream_simulated_start(
+    hub: &LiveHub,
+    library: &Library,
+    seconds: u32,
+    while_live: impl FnOnce(),
+    start: impl FnOnce() -> Start,
+) -> Vec<f64> {
     use ardoise_device::service::{
         ConnectorFactory, PageStore, ServiceConfig, ServiceHooks, TabletOptions, TabletService,
     };
@@ -1489,10 +1506,7 @@ pub(crate) fn stream_simulated_live(
 
     let window = Arc::new(Window::default());
     hub.subscribe("main", window.clone());
-    let Start::New { sink, .. } = hub
-        .start(options(library, fixed(LiveButton::NewPage)))
-        .unwrap()
-    else {
+    let Start::New { sink, .. } = start() else {
         panic!("already running");
     };
     service.start_live(Box::new(sink));
@@ -1552,7 +1566,7 @@ fn simulator_service_hub_latency() {
 
 // --- Narration recorded in live mode ------------------------------------------------------------
 
-fn note_narration(seconds: f64, start_ms: i64) -> Narration {
+pub(super) fn note_narration(seconds: f64, start_ms: i64) -> Narration {
     Narration {
         clip: simulated_narration(Duration::from_secs_f64(seconds), 1),
         base: NarrationBase::Note,
@@ -1561,11 +1575,11 @@ fn note_narration(seconds: f64, start_ms: i64) -> Narration {
     }
 }
 
-fn audio_of(library: &Library, path: &Path) -> Option<Vec<u8>> {
+pub(super) fn audio_of(library: &Library, path: &Path) -> Option<Vec<u8>> {
     library.read(path).ok().and_then(|loaded| loaded.file.audio)
 }
 
-fn change(at: Duration, page: usize) -> PageChange {
+pub(super) fn change(at: Duration, page: usize) -> PageChange {
     PageChange { at, page }
 }
 

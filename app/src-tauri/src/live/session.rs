@@ -5,6 +5,7 @@
 //! threads, sends what it emits to the windows and writes its pages to the library.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use ardoise_core::library::FileStamp;
@@ -17,9 +18,10 @@ use ardoise_proto::live::LiveRecord;
 use ardoise_proto::stroke::Point as PenPoint;
 
 use super::model::{
-    HoverPoint, LiveCommandKind, LiveEvent, LiveMark, LivePoint, LiveSessionState, LiveSnapshot,
-    LiveStroke, LiveStyle, LiveViewState, sanitize_marks,
+    ForkReason, HoverPoint, LiveCommandKind, LiveEvent, LiveMark, LivePoint, LiveSessionState,
+    LiveSnapshot, LiveStroke, LiveStyle, LiveViewState, sanitize_marks,
 };
+use super::resume::{PenMapping, ResumeBase, ResumeSeed, hold_for};
 use crate::library::path_text;
 use crate::presentation::MonitorInfo;
 
@@ -31,10 +33,33 @@ pub const SAMPLE_MS: f64 = 5.0;
 pub struct SavedFile {
     pub path: PathBuf,
     pub stamp: FileStamp,
-    /// Fingerprint of the ink and layout written (not the title, tags or favourite mark, which
-    /// the library changes): tells a note only retitled elsewhere from one whose content was
-    /// changed. `None` when it could not be computed.
+    /// Fingerprint of what was written (`hub::file_fingerprint`: not the title, tags or favourite
+    /// mark, which the library changes): tells a note only retitled elsewhere from one whose
+    /// content was changed. `None` when it could not be computed.
     pub content: Option<u64>,
+}
+
+/// What became of a resumed sheet that changed elsewhere or was deleted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SheetFork {
+    pub reason: ForkReason,
+    /// The note left as it is, as last known.
+    pub original: String,
+    /// The new note in the same binder, where the page goes on.
+    pub path: String,
+}
+
+/// What a page seeded from an existing note has that a page of the session does not.
+#[derive(Debug, Clone)]
+struct Resumed {
+    /// The file as read at the resume: what every write of the page starts from.
+    base: Arc<ResumeBase>,
+    /// Wall clock (Unix ms) at note time 0 for what this session adds: the resume, less the note
+    /// time at which it continues. `note.created` stays what it was (the note's date).
+    origin: i64,
+    /// This session wrote the file: until then the note is not among the session's notes.
+    rewritten: bool,
+    fork: Option<SheetFork>,
 }
 
 /// One page of the session: a note, and where it stands on disk.
@@ -56,15 +81,23 @@ pub struct Page {
     pub save_error: Option<(&'static str, String)>,
     /// The narration recorded on this page in live mode (note time), as the note's `audio.opus`
     /// member written with every version of the page. Only the encoded bytes stay in memory: a
-    /// later recording on the page decodes them again to merge with them.
-    pub audio: Option<Vec<u8>>,
+    /// later recording on the page decodes them again to merge with them. Shared with the writes
+    /// under way: hours of sound (a resumed note may start with them) are not copied under the hub's
+    /// lock at each pass.
+    pub audio: Option<Arc<Vec<u8>>>,
     /// How the tablet was held for the page's ink: the page on screen follows the tablet
-    /// ([`LiveSession::reorient`]).
+    /// ([`LiveSession::reorient`]). On a resumed sheet, how it is to be held: the tablet follows
+    /// the page ([`hold_for`]).
     orientation: Orientation,
     /// No stroke started yet: the note's time origin is still free.
     fresh: bool,
     /// Time of the page's last pen sample, ms since `note.created`.
     last_t: Option<u32>,
+    /// The paper the blackboard took the page from, given back when it is turned off (`None`:
+    /// white, for a page made while the blackboard was on).
+    paper_before_board: Option<Paper>,
+    /// Seeded from an existing note.
+    resumed: Option<Resumed>,
 }
 
 impl Page {
@@ -81,13 +114,96 @@ impl Page {
             orientation,
             fresh: true,
             last_t: None,
+            paper_before_board: None,
+            resumed: None,
         }
     }
 
-    /// The page's time origin (`note.created`, the wall clock of its first stroke in Unix ms),
-    /// or `None` while it has no stroke: a narration has nothing to follow there.
+    /// The page of a note resumed at `now_ms`, for a tablet set to `setting`. A note whose layers
+    /// are all hidden gets a visible layer to write on (hidden layers stay hidden: one may hold
+    /// the answers); that alone is no change, so it is written only with what is written on it.
+    fn resumed(seed: ResumeSeed, setting: Orientation, french: bool, now_ms: i64) -> Page {
+        let ResumeSeed {
+            base,
+            saved,
+            time_base,
+        } = seed;
+        let mut note = base.file.note.clone();
+        if !note.layers.iter().any(|layer| layer.visible) {
+            note.layers.push(Layer {
+                name: layer_name(french, note.layers.len() + 1),
+                visible: true,
+            });
+        }
+        let orientation = hold_for(note.page, setting);
+        let mut page = Page::new(note, orientation);
+        page.file = Some(saved);
+        page.audio = base.file.audio.clone().map(Arc::new);
+        page.fresh = false;
+        // Its first new sample is at the time base at the earliest: the stamps of a notification
+        // go back a little before it arrived, possibly to before the resume.
+        page.last_t = time_base.checked_sub(SAMPLE_MS as u32);
+        // A sheet with slate paper has it as its own paper, whatever the blackboard does.
+        page.paper_before_board =
+            (page.note.background.paper == Paper::Slate).then_some(Paper::Slate);
+        page.resumed = Some(Resumed {
+            base,
+            origin: now_ms.saturating_sub(i64::from(time_base)),
+            rewritten: false,
+            fork: None,
+        });
+        page
+    }
+
+    /// Seeded from an existing note: never turned, and written through its file.
+    pub fn is_resumed(&self) -> bool {
+        self.resumed.is_some()
+    }
+
+    /// The file a resumed sheet came from.
+    pub fn base(&self) -> Option<&Arc<ResumeBase>> {
+        self.resumed.as_ref().map(|resumed| &resumed.base)
+    }
+
+    /// The file of a note this session wrote. A resumed sheet has a file from the start, which
+    /// counts only once the session changed it: a resume without any change wrote nothing.
+    pub fn saved_file(&self) -> Option<&SavedFile> {
+        match &self.resumed {
+            Some(resumed) if !resumed.rewritten => None,
+            _ => self.file.as_ref(),
+        }
+    }
+
+    /// The hub wrote the page's file.
+    pub fn mark_rewritten(&mut self) {
+        if let Some(resumed) = &mut self.resumed {
+            resumed.rewritten = true;
+        }
+    }
+
+    /// The hub wrote the resumed sheet as a new note.
+    pub fn set_fork(&mut self, fork: SheetFork) {
+        if let Some(resumed) = &mut self.resumed {
+            resumed.fork = Some(fork);
+        }
+    }
+
+    /// What became of the resumed sheet, when it became a new note.
+    pub fn fork(&self) -> Option<&SheetFork> {
+        self.resumed
+            .as_ref()
+            .and_then(|resumed| resumed.fork.as_ref())
+    }
+
+    /// The wall clock (Unix ms) at note time 0 for what this session adds: `note.created`, the
+    /// wall clock of the page's first stroke; on a resumed sheet, the origin shifted so that the
+    /// time since the resume follows what the note holds. `None` while a page of the session has
+    /// no stroke: a narration has nothing to follow there.
     pub fn time_origin(&self) -> Option<i64> {
-        (!self.note.strokes.is_empty()).then_some(self.note.created)
+        match &self.resumed {
+            Some(resumed) => Some(resumed.origin),
+            None => (!self.note.strokes.is_empty()).then_some(self.note.created),
+        }
     }
 
     /// Gives the page its narration, as `audio.opus` bytes: it is written again at the next
@@ -96,7 +212,7 @@ impl Page {
         if self.time_origin().is_none() {
             return false;
         }
-        self.audio = Some(audio);
+        self.audio = Some(Arc::new(audio));
         self.touch();
         self.urgent = true;
         true
@@ -108,8 +224,14 @@ impl Page {
 
     /// Turns the page `turns` clockwise quarter turns, ink and all, so that it is held as
     /// `orientation` (the page size is swapped for an odd number of turns). Times, pressures,
-    /// layers and narration are untouched.
+    /// layers and narration are untouched. A resumed sheet is never turned (a turn knows nothing of
+    /// its background image, and would rewrite a note for how the tablet happens to be held): the
+    /// tablet follows it, as near to `orientation` as the sheet allows.
     fn turn(&mut self, turns: u8, orientation: Orientation) {
+        if self.resumed.is_some() {
+            self.orientation = hold_for(self.note.page, orientation);
+            return;
+        }
         if !turns.is_multiple_of(4) {
             let (width, height) = (self.note.page.width as f32, self.note.page.height as f32);
             for stroke in &mut self.note.strokes {
@@ -299,6 +421,32 @@ impl LiveSession {
         self
     }
 
+    /// The session's one page becomes the note of `seed`, resumed at `now_ms`; the next page is a
+    /// new note, as always. The view shows the whole sheet, and the blackboard is on only for a
+    /// sheet with slate paper, whatever it was before: it never changes the paper of a sheet by
+    /// itself. On slate paper the ink is chalk, as when the blackboard is turned on.
+    pub fn resuming(mut self, seed: ResumeSeed, now_ms: i64) -> Self {
+        let page = Page::resumed(seed, self.orientation, self.french, now_ms);
+        let board = page.note.background.paper == Paper::Slate;
+        self.view = LiveViewState {
+            board,
+            laser: self.view.laser,
+            ..LiveViewState::whole(page.note.page)
+        };
+        if board {
+            self.style_before_board = Some(self.style);
+            self.style = LiveStyle::chalk();
+        }
+        self.pages = vec![page];
+        self.current = 0;
+        self
+    }
+
+    /// The style in use, or the one the blackboard replaced.
+    pub fn style_off_board(&self) -> LiveStyle {
+        self.style_before_board.unwrap_or(self.style)
+    }
+
     /// A `saveFailed` event for every page whose last write failed.
     pub fn save_failures(&self) -> Vec<LiveEvent> {
         self.pages
@@ -319,8 +467,25 @@ impl LiveSession {
     pub fn saved(&self) -> Vec<String> {
         self.pages
             .iter()
-            .filter_map(|page| page.file.as_ref())
+            .filter_map(Page::saved_file)
             .map(|file| path_text(&file.path))
+            .collect()
+    }
+
+    /// A `sheetForked` event for every resumed sheet that became a new note.
+    pub fn sheet_forks(&self) -> Vec<LiveEvent> {
+        self.pages
+            .iter()
+            .enumerate()
+            .filter_map(|(page_index, page)| {
+                let fork = page.fork()?;
+                Some(LiveEvent::SheetForked {
+                    page_index,
+                    reason: fork.reason,
+                    original: fork.original.clone(),
+                    path: fork.path.clone(),
+                })
+            })
             .collect()
     }
 
@@ -358,9 +523,15 @@ impl LiveSession {
         &self.pages[self.current]
     }
 
+    /// The layer new ink goes on: the last visible one, never a hidden one (a page always has a
+    /// visible layer: see [`Page::resumed`]).
     fn current_layer(&self) -> u32 {
-        let layers = self.current_page().note.layers.len();
-        u32::try_from(layers.saturating_sub(1)).unwrap_or(0)
+        let layers = &self.current_page().note.layers;
+        let layer = layers
+            .iter()
+            .rposition(|layer| layer.visible)
+            .unwrap_or_else(|| layers.len().saturating_sub(1));
+        u32::try_from(layer).unwrap_or(0)
     }
 
     fn new_page(&self, now_ms: i64) -> Page {
@@ -400,7 +571,8 @@ impl LiveSession {
             page: self.current_page().note.clone(),
             page_index: self.current,
             page_count: self.pages.len(),
-            orientation: self.orientation,
+            orientation: self.current_page().orientation,
+            can_turn_page: !self.current_page().is_resumed(),
             layer: self.current_layer(),
             style: self.style,
             view: self.view,
@@ -530,7 +702,10 @@ impl LiveSession {
     ///   quarter turn); the shared view follows (zoom kept, centre turned);
     /// - blank pages never written to disk just take the new size;
     /// - the other pages keep their ink and orientation, until they are shown again
-    ///   ([`follow`](Self::follow)): the pen's points are always in the current orientation.
+    ///   ([`follow`](Self::follow)): the pen's points are always in the current orientation;
+    /// - a resumed sheet stays as it is, whichever of these it is: only the way it is to be held
+    ///   follows ([`Page::turn`]), and [`pen_mapping`](Self::pen_mapping) takes the pen's points
+    ///   to it from the new orientation.
     ///
     /// Returns whether anything changed.
     fn hold(
@@ -549,7 +724,12 @@ impl LiveSession {
         self.size = size;
         self.orientation = orientation;
         let shown = self.current_page();
-        let (before, turns) = (shown.note.page, orientation.turns_from(shown.orientation));
+        let before = shown.note.page;
+        let turns = if shown.is_resumed() {
+            0
+        } else {
+            orientation.turns_from(shown.orientation)
+        };
         for index in 0..self.pages.len() {
             let page = &mut self.pages[index];
             if page.note.strokes.is_empty() && page.file.is_none() {
@@ -597,6 +777,21 @@ impl LiveSession {
         }
     }
 
+    /// How the pen's points land on the current page: as they come, on a page of the session; on a
+    /// resumed sheet, turned to the way it is held and fitted in it.
+    fn pen_mapping(&self) -> PenMapping {
+        let page = self.current_page();
+        if page.is_resumed() {
+            PenMapping::for_sheet(
+                self.size,
+                page.orientation.turns_from(self.orientation),
+                page.note.page,
+            )
+        } else {
+            PenMapping::direct()
+        }
+    }
+
     /// Pen records of one notification, 5 ms apart, the last one received at `received_ms`
     /// (wall clock, fractional ms). Already oriented by the tablet service.
     pub fn records(&mut self, records: &[LiveRecord], received_ms: f64, out: &mut Vec<LiveEvent>) {
@@ -606,16 +801,17 @@ impl LiveSession {
         if self.state != LiveSessionState::Live {
             self.set_state(LiveSessionState::Live, out);
         }
+        let mapping = self.pen_mapping();
         let last = records.len().saturating_sub(1);
         for (i, record) in records.iter().enumerate() {
             let at = received_ms - SAMPLE_MS * (last - i) as f64;
             match record {
                 LiveRecord::Pen(point) if point.pressure > 0 => {
-                    self.pen_down(point, at, received_ms, out);
+                    self.pen_down(point, mapping, at, received_ms, out);
                 }
                 LiveRecord::Pen(point) => {
                     self.end_stroke(out);
-                    self.hover_at(point, out);
+                    self.hover_at(point, mapping, out);
                 }
                 LiveRecord::ProximityOut => {
                     self.end_stroke(out);
@@ -626,7 +822,14 @@ impl LiveSession {
         self.flush_points(out);
     }
 
-    fn pen_down(&mut self, point: &PenPoint, at: f64, received_ms: f64, out: &mut Vec<LiveEvent>) {
+    fn pen_down(
+        &mut self,
+        point: &PenPoint,
+        mapping: PenMapping,
+        at: f64,
+        received_ms: f64,
+        out: &mut Vec<LiveEvent>,
+    ) {
         if self.drawing.is_none() {
             self.hover_end(out);
             self.drawing = Some(Drawing {
@@ -640,9 +843,10 @@ impl LiveSession {
         }
         let t = self.point_time(at);
         if let Some(drawing) = &mut self.drawing {
+            let (x, y) = mapping.map(point.x, point.y);
             drawing.points.push(LivePoint {
-                x: f32::from(point.x),
-                y: f32::from(point.y),
+                x,
+                y,
                 p: normalized_pressure(point.pressure),
                 t,
                 recv: received_ms,
@@ -654,7 +858,9 @@ impl LiveSession {
     /// Time of a sample taken at `at` (wall clock, ms) on the current page, ms since the note's
     /// `created`. The first sample of a page sets `created`; then samples are at least 5 ms
     /// apart (the tablet's rate) and follow the wall clock across pauses, so times never go
-    /// back even when notifications arrive in bursts.
+    /// back even when notifications arrive in bursts. On a resumed sheet `created` stays and the
+    /// wall clock counts from the page's shifted origin ([`Page::time_origin`]), whatever the age
+    /// of the note.
     fn point_time(&mut self, at: f64) -> u32 {
         let page = &mut self.pages[self.current];
         if page.fresh {
@@ -662,7 +868,11 @@ impl LiveSession {
             page.note.created = at.floor() as i64;
             page.note.modified = page.note.created;
         }
-        let since = at - page.note.created as f64;
+        let origin = page
+            .resumed
+            .as_ref()
+            .map_or(page.note.created, |resumed| resumed.origin);
+        let since = at - origin as f64;
         let t = match page.last_t {
             Some(last) => since.max(f64::from(last) + SAMPLE_MS),
             None => since.max(0.0),
@@ -673,11 +883,9 @@ impl LiveSession {
         t
     }
 
-    fn hover_at(&mut self, point: &PenPoint, out: &mut Vec<LiveEvent>) {
-        let hover = HoverPoint {
-            x: f32::from(point.x),
-            y: f32::from(point.y),
-        };
+    fn hover_at(&mut self, point: &PenPoint, mapping: PenMapping, out: &mut Vec<LiveEvent>) {
+        let (x, y) = mapping.map(point.x, point.y);
+        let hover = HoverPoint { x, y };
         self.hover = Some(hover);
         out.push(LiveEvent::Hover {
             x: hover.x,
@@ -757,6 +965,24 @@ impl LiveSession {
         }
     }
 
+    /// The page on screen changed from one of size `before`: the shared view stays on the page
+    /// (a view of the whole page goes on showing the whole page).
+    fn fit_view(&mut self, before: PageSize) {
+        let page = self.current_page().note.page;
+        if page == before {
+            return;
+        }
+        self.view = if self.view.zoom <= 1.0 {
+            LiveViewState {
+                board: self.view.board,
+                laser: self.view.laser,
+                ..LiveViewState::whole(page)
+            }
+        } else {
+            self.view.sanitized(page)
+        };
+    }
+
     /// Runs a command (`button`: what the tablet's button does, from the settings; `now_ms`:
     /// creation time of a new page).
     pub fn command(
@@ -770,6 +996,7 @@ impl LiveSession {
             LiveCommandKind::NextPage => {
                 self.end_stroke(out);
                 let left = self.current;
+                let before = self.current_page().note.page;
                 if self.current + 1 < self.pages.len() {
                     self.current += 1;
                 } else {
@@ -779,6 +1006,7 @@ impl LiveSession {
                 }
                 self.leave(left);
                 self.follow();
+                self.fit_view(before);
                 self.push_snapshot(out);
             }
             LiveCommandKind::PreviousPage => {
@@ -787,18 +1015,22 @@ impl LiveSession {
                 }
                 self.end_stroke(out);
                 let left = self.current;
+                let before = self.current_page().note.page;
                 self.current -= 1;
                 self.leave(left);
                 self.follow();
+                self.fit_view(before);
                 self.push_snapshot(out);
             }
             LiveCommandKind::NewPage => {
                 self.end_stroke(out);
                 let left = self.current;
+                let before = self.current_page().note.page;
                 let page = self.new_page(now_ms);
                 self.pages.push(page);
                 self.current = self.pages.len() - 1;
                 self.leave(left);
+                self.fit_view(before);
                 self.push_snapshot(out);
             }
             LiveCommandKind::NewLayer => {
@@ -850,7 +1082,10 @@ impl LiveSession {
         let Some(page) = self.pages.get_mut(cleared.page) else {
             return false;
         };
-        if cleared.page != self.current || page.orientation != cleared.orientation {
+        // A resumed sheet is never turned: its ink fits however the tablet is held since.
+        if cleared.page != self.current
+            || (page.orientation != cleared.orientation && !page.is_resumed())
+        {
             return false;
         }
         let mut strokes = cleared.strokes;
@@ -872,8 +1107,9 @@ impl LiveSession {
     }
 
     /// The shared view. Turning the blackboard on gives the current page (and new pages) slate
-    /// paper and switches to white chalk; turning it off gives white paper and the style used
-    /// before back. Other pages keep their paper, so that ink written on one stays visible.
+    /// paper and switches to white chalk; turning it off gives back the paper the page had
+    /// (white for a page made while the blackboard was on) and the style used before. Other pages
+    /// keep their paper, so that ink written on one stays visible.
     pub fn set_view(&mut self, view: LiveViewState, out: &mut Vec<LiveEvent>) {
         let view = view.sanitized(self.current_page().note.page);
         if view == self.view {
@@ -885,15 +1121,18 @@ impl LiveSession {
         if !board_changed {
             return;
         }
+        let page = &mut self.pages[self.current];
         let paper = if view.board {
             self.style_before_board = Some(self.style);
             self.style = LiveStyle::chalk();
+            if page.note.background.paper != Paper::Slate {
+                page.paper_before_board = Some(page.note.background.paper);
+            }
             Paper::Slate
         } else {
             self.style = self.style_before_board.take().unwrap_or_default();
-            Paper::White
+            page.paper_before_board.unwrap_or(Paper::White)
         };
-        let page = &mut self.pages[self.current];
         if page.note.background.paper != paper {
             page.note.background.paper = paper;
             page.touch();
