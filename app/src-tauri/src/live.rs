@@ -37,7 +37,7 @@ use tauri::{AppHandle, Manager, State, Webview};
 use crate::AppContext;
 use crate::commands::{CommandError, CommandResult, store};
 use crate::diagnostic::report_language;
-use crate::library::{library_error, library_of};
+use crate::library::{library_error, library_of, path_text};
 use crate::tablet::TabletRuntime;
 
 pub use activity::Activity;
@@ -86,18 +86,34 @@ impl LiveError {
             LiveError::NotRunning | LiveError::Stopped => CommandError::new("liveNotRunning", self),
             LiveError::Library(error) => library_error(error),
             LiveError::Narration(error) => narration::narration_error(error),
+            LiveError::NarrationKeptApart { why, kept } => {
+                CommandError::new(why.code(), path_text(&kept))
+            }
+            LiveError::NarrationLost { detail, .. } => {
+                CommandError::new(NARRATION_NOT_KEPT, detail)
+            }
             LiveError::Edit(error) => CommandError::new(error.code(), error),
         }
     }
 }
 
+/// A new sound could not join its page's narration, nor be kept anywhere.
+pub const NARRATION_NOT_KEPT: &str = "narrationNotKept";
+
 /// A narration recorded in live mode goes to its pages before they are written for the last
-/// time (live mode stops, the app closes, a new session starts). A failure is logged: leaving
-/// live mode must not fail because of the microphone.
-fn finish_live_narration(narration: &NarrationRuntime, hub: &LiveHub) {
-    if let Some(Err(error)) = narration::finish_live(narration, hub) {
-        eprintln!("live mode: the narration could not be kept: {error:?}");
-    }
+/// time (live mode stops, the app closes, a new session starts). Leaving live mode must not fail
+/// because of the microphone: a failure does not stop what follows, and comes back for whoever has
+/// someone to tell. Also logged where the copies of the pages go, a windowed app having no console.
+fn finish_live_narration(narration: &NarrationRuntime, hub: &LiveHub) -> Option<CommandError> {
+    let error = narration::finish_live(narration, hub)?.err()?;
+    log_narration_failure(&error, &backup_dir());
+    Some(error)
+}
+
+fn log_narration_failure(error: &CommandError, backup: &Path) {
+    let line = format!("the narration could not go with its pages: {error:?}");
+    eprintln!("live mode: {line}");
+    log_backup(backup, &line);
 }
 
 /// The drawing area of the tablet, from what the service knows (last connection, then the
@@ -199,10 +215,13 @@ fn close_session(hub: &LiveHub, backup: &Path) -> Vec<PathBuf> {
 /// Appends `line` (with the time) to `live-backup.log` in `dir`. Best effort.
 fn log_backup(dir: &Path, line: &str) {
     use std::io::Write as _;
-    let written = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join("live-backup.log"))
+    let written = std::fs::create_dir_all(dir)
+        .and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("live-backup.log"))
+        })
         .and_then(|mut log| {
             let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
             writeln!(log, "{now} {line}")

@@ -301,16 +301,21 @@ pub fn placed_for_merge(later: Narration, earlier: &Narration, note: &Note) -> N
 /// `earlier` and `later` on one track, without losing `earlier`: [`Narration::merge`] gives
 /// `later` alone when they are too far apart for one track, so `later` is then moved right after
 /// `earlier` (its timing is off, its sound is kept). Two narrations too long for one track together
-/// (the file format holds 4 hours) keep `earlier`, and the loss is logged.
-pub fn merged_keeping_both(earlier: Narration, mut later: Narration) -> Narration {
-    if !earlier.fits_with(&later) {
-        later.start_ms = earlier.end_ms();
-        if !earlier.fits_with(&later) {
-            eprintln!("live mode: a narration does not fit in the page's track: it is left out");
-            return earlier;
-        }
+/// (the file format holds 4 hours) cannot be merged: `later` comes back, for the caller to keep it
+/// apart, and `earlier` is the caller's still (it has the page's encoded narration).
+pub fn merged_keeping_both(earlier: Narration, later: Narration) -> Result<Narration, Narration> {
+    if earlier.fits_with(&later) {
+        return Ok(earlier.merge(later));
     }
-    earlier.merge(later)
+    let moved = Narration {
+        start_ms: earlier.end_ms(),
+        ..later
+    };
+    if earlier.fits_with(&moved) {
+        Ok(earlier.merge(moved))
+    } else {
+        Err(moved)
+    }
 }
 
 #[cfg(test)]

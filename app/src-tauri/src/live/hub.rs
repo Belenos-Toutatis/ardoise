@@ -15,7 +15,7 @@
 //! so the tablet's input is never held up by a window or by the disk.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use ardoise_core::format::{FormatError, NoteFile};
@@ -39,6 +39,7 @@ use super::model::{
 use super::resume::{ResumeBase, ResumeSeed, merged_keeping_both, placed_for_merge};
 use super::session::{LiveSession, Page, SavedFile, SheetFork};
 use crate::library::{now_ms, path_text};
+use crate::narration::{backup_dir, write_narration_backup};
 use crate::original::keep_resumed_original;
 use crate::presentation::MonitorInfo;
 use crate::thumbnails::{thumbnail_png, thumbnail_view};
@@ -75,6 +76,25 @@ impl BatchSink for Channel<LiveBatch> {
 /// Reads what the tablet's button does (`[tablet] button`), when it is pressed.
 pub type ButtonSetting = Arc<dyn Fn() -> LiveButton + Send + Sync>;
 
+/// Why a new narration could not join the one its page already has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NarrationApart {
+    /// Together they are longer than one track holds (the file format reads 4 hours).
+    TooLong,
+    /// The page's own narration cannot be decoded: it stays as it is.
+    Unreadable,
+}
+
+impl NarrationApart {
+    /// The sentence for the interface (`errorCodes.*`).
+    pub fn code(self) -> &'static str {
+        match self {
+            NarrationApart::TooLong => "narrationTooLong",
+            NarrationApart::Unreadable => "narrationUnreadable",
+        }
+    }
+}
+
 /// Failure of a live command.
 #[derive(Debug, thiserror::Error)]
 pub enum LiveError {
@@ -89,6 +109,13 @@ pub enum LiveError {
     /// (nothing was changed).
     #[error("cannot store the narration of the page: {0}")]
     Narration(MediaError),
+    /// The new sound did not join the page's narration, which is as it was: it is kept in `kept`, a
+    /// new note holding the page with this sound, or a copy of it when the library cannot be written.
+    #[error("the new sound could not join the narration of the page: it is kept in {kept:?}")]
+    NarrationKeptApart { why: NarrationApart, kept: PathBuf },
+    /// The new sound did not join the page's narration, and could not be kept anywhere.
+    #[error("the new sound could not join the narration of the page, nor be kept: {detail}")]
+    NarrationLost { why: NarrationApart, detail: String },
     /// An edit of strokes was refused (nothing was changed).
     #[error(transparent)]
     Edit(#[from] LiveEditError),
@@ -224,6 +251,9 @@ struct Shared {
     /// Held while a narration is merged and encoded for a page (outside the state lock), so
     /// that two narrations given to the same page never lose one another.
     narrating: Mutex<()>,
+    /// Where a sound that cannot go in a note is kept; `narration::backup_dir` unless a test says
+    /// otherwise.
+    narration_backup: OnceLock<PathBuf>,
 }
 
 /// The hub of the running app (see the module documentation). Dropping it stops its threads.
@@ -949,6 +979,29 @@ impl Shared {
     }
 }
 
+/// A new note next to the one at `from` (in the library root without one): the page as it is now,
+/// with `audio` as its narration, a new id and everything else of its file.
+fn write_sound_apart(
+    library: &Library,
+    note: &Note,
+    base: Option<&ResumeBase>,
+    from: Option<&Path>,
+    on_board: bool,
+    audio: &Arc<Vec<u8>>,
+) -> Result<PathBuf, LibraryError> {
+    let mut file =
+        page_file(note, Some(audio), base, on_board).map_err(|source| LibraryError::Format {
+            path: from.map_or_else(|| library.root().to_path_buf(), Path::to_path_buf),
+            source,
+        })?;
+    page_thumbnail(&mut file, base);
+    let written = match from {
+        Some(from) => write_beside(library, file, None, from, ForkReason::Changed)?,
+        None => write_as_new(library, file, None)?,
+    };
+    Ok(written.file.path)
+}
+
 /// A free `<time> page <n>.ardoise` in `dir` (`-2`, `-3`... when taken), written atomically.
 fn write_backup(dir: &Path, page_index: usize, bytes: &[u8]) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
@@ -1003,6 +1056,7 @@ impl LiveHub {
             save_wake: Condvar::new(),
             saving: Mutex::new(()),
             narrating: Mutex::new(()),
+            narration_backup: OnceLock::new(),
         });
         for (name, work) in [
             ("live-flush", Shared::flush_loop as fn(&Shared)),
@@ -1489,6 +1543,9 @@ impl LiveHub {
     /// one again (rare) rather than holding its sound for the rest of the session. A resumed
     /// sheet starts with the narration of its note: nothing of it is replaced, whatever its time
     /// base ([`placed_for_merge`]) or the time since it was recorded ([`merged_keeping_both`]).
+    ///
+    /// A new sound that cannot join the page's narration is never dropped: that narration stays as
+    /// it is, the sound is kept apart ([`keep_apart`](Self::keep_apart)) and the error says where.
     pub fn attach_narration(
         &self,
         session: u64,
@@ -1512,7 +1569,15 @@ impl LiveHub {
         };
         let merged = match existing {
             Some(bytes) => {
-                let earlier = decode_narration(&bytes).map_err(LiveError::Narration)?;
+                let earlier = match decode_narration(&bytes) {
+                    Ok(earlier) => earlier,
+                    Err(error) => {
+                        eprintln!("live mode: the narration of a page cannot be read: {error}");
+                        let why = NarrationApart::Unreadable;
+                        return Err(self.keep_apart(session, page, &narration, why));
+                    }
+                };
+                let start_in_note = narration.start_ms;
                 let later = if earlier.options == ReplayOptions::default() {
                     narration
                 } else {
@@ -1525,7 +1590,17 @@ impl LiveHub {
                         None => narration,
                     }
                 };
-                merged_keeping_both(earlier, later)
+                match merged_keeping_both(earlier, later) {
+                    Ok(merged) => merged,
+                    Err(later) => {
+                        let later = Narration {
+                            start_ms: start_in_note,
+                            ..later
+                        };
+                        let why = NarrationApart::TooLong;
+                        return Err(self.keep_apart(session, page, &later, why));
+                    }
+                }
             }
             None => narration,
         };
@@ -1543,6 +1618,77 @@ impl LiveHub {
             self.shared.save_wake.notify_all();
         }
         Ok(attached)
+    }
+
+    /// Keeps a sound that cannot join the narration of page `page`, and gives the error that says
+    /// so: a new note next to the page's, holding the page as it is now with this sound (in the
+    /// library, where the teacher looks, and in time with its ink), or, when the library cannot be
+    /// written, a copy of the sound among the narration backups.
+    pub(super) fn keep_apart(
+        &self,
+        session: u64,
+        page: usize,
+        narration: &Narration,
+        why: NarrationApart,
+    ) -> LiveError {
+        let audio = match encode_narration(narration) {
+            Ok(audio) => Arc::new(audio),
+            Err(error) => {
+                return LiveError::NarrationLost {
+                    why,
+                    detail: error.to_string(),
+                };
+            }
+        };
+        let (library, source) = {
+            let state = self.shared.lock();
+            let source = (state.session.id() == session)
+                .then(|| state.session.pages().get(page))
+                .flatten()
+                .map(|page| {
+                    (
+                        page.note.clone(),
+                        page.base().cloned(),
+                        page.file.as_ref().map(|file| file.path.clone()),
+                        page.ink_on_board(),
+                    )
+                });
+            (state.library.clone(), source)
+        };
+        let from = source.as_ref().and_then(|(_, _, from, _)| from.clone());
+        if let (Some(library), Some((note, base, from, on_board))) = (&library, &source) {
+            match write_sound_apart(
+                library,
+                note,
+                base.as_deref(),
+                from.as_deref(),
+                *on_board,
+                &audio,
+            ) {
+                Ok(kept) => return LiveError::NarrationKeptApart { why, kept },
+                Err(error) => eprintln!("live mode: cannot write the sound as a new note: {error}"),
+            }
+        }
+        let dir = self
+            .shared
+            .narration_backup
+            .get()
+            .cloned()
+            .unwrap_or_else(backup_dir);
+        let named_after = from.unwrap_or_else(|| PathBuf::from("narration"));
+        match write_narration_backup(&dir, &named_after, &audio) {
+            Ok(kept) => LiveError::NarrationKeptApart { why, kept },
+            Err(error) => LiveError::NarrationLost {
+                why,
+                detail: error.to_string(),
+            },
+        }
+    }
+
+    /// Where a sound that cannot go in a note is kept, instead of `narration::backup_dir`.
+    #[cfg(test)]
+    pub fn set_narration_backup(&self, dir: PathBuf) {
+        let _ = self.shared.narration_backup.set(dir);
     }
 
     /// Gives page `page` of the current session a narration with ready-made `audio` bytes (no

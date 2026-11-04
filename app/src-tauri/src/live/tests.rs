@@ -1733,12 +1733,12 @@ fn live_narration_goes_to_its_pages_through_the_hub() {
     );
 
     // The page keeps only the encoded narration, decoded again to merge: a page whose
-    // narration cannot be read again keeps it as it is.
+    // narration cannot be read again keeps it as it is, and the new sound is kept apart.
     let damaged = b"OggS damaged".to_vec();
     assert!(hub.set_page_audio(1, damaged.clone()));
     assert!(matches!(
         hub.attach_narration(session, 1, note_narration(1.0, 0)),
-        Err(LiveError::Narration(_))
+        Err(LiveError::NarrationKeptApart { .. })
     ));
     let saved = hub.stop().unwrap();
     assert_eq!(audio_of(&library, Path::new(&saved[1])), Some(damaged));

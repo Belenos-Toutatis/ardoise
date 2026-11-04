@@ -25,7 +25,7 @@ use serde_json::json;
 use super::super::edits::LiveEditError;
 use super::super::edits::tests::{delete, recolour};
 use super::super::hub::{
-    HubConfig, HubSink, LiveError, LiveHub, Start, StartOptions, file_fingerprint,
+    HubConfig, HubSink, LiveError, LiveHub, NarrationApart, Start, StartOptions, file_fingerprint,
 };
 use super::super::model::{
     ForkReason, LiveCommandKind, LiveEvent, LiveSessionState, LiveStyle, LiveViewState,
@@ -553,7 +553,7 @@ fn a_late_narration_lands_after_the_older_sound() {
     // Too far apart for one track: `merge` alone would keep the later one only.
     let far = note_narration(1.0, 5 * 3600 * 1000);
     assert!(!earlier.fits_with(&far));
-    let merged = merged_keeping_both(earlier.clone(), far);
+    let merged = merged_keeping_both(earlier.clone(), far).unwrap();
     assert_eq!(merged.start_ms, 0);
     assert_eq!(merged.duration(), Duration::from_secs(2));
     assert_eq!(merged.base, NarrationBase::Note);
@@ -1794,6 +1794,210 @@ fn a_new_narration_too_far_from_the_notes_own_loses_neither() {
         "{}",
         merged.end_ms()
     );
+}
+
+#[test]
+fn a_new_sound_too_long_to_join_the_notes_own_comes_back_whole() {
+    // 4 hours of silence, never touched (the pages are not even committed), then one second.
+    let long = Narration {
+        clip: ardoise_media::AudioClip {
+            channels: 1,
+            samples: vec![0; 4 * 3600 * 48_000],
+        },
+        ..note_narration(0.0, 0)
+    };
+    let later = note_narration(1.0, 4 * 3600 * 1000);
+    assert!(!long.fits_with(&later));
+    let kept = merged_keeping_both(long, later.clone()).unwrap_err();
+    assert_eq!(kept.clip, later.clip);
+}
+
+/// A page with ink, and strokes for a second page, resumed from `path`: the hub with sound to give.
+fn with_a_page_written(library: &Library, hub: &LiveHub, path: &Path) -> HubSink {
+    let mut sink = resume(hub, library, path, A5);
+    stroke(&mut sink, 3000, 5);
+    wait_until("the ink written", || stroke_count(library, path) == Some(3));
+    sink
+}
+
+#[test]
+fn a_sound_that_cannot_join_a_narration_it_cannot_read_goes_in_a_new_note() {
+    let (dir, library) = library();
+    let mut file = full_file(A5);
+    file.audio = Some(b"OggS damaged".to_vec());
+    let path = filed(&library, "Classe", &file);
+    let hub = LiveHub::new(config());
+    let _sink = with_a_page_written(&library, &hub, &path);
+    let session = hub.page_position().unwrap().session;
+    let sound = note_narration(1.0, 8_000);
+    let LiveError::NarrationKeptApart {
+        why: NarrationApart::Unreadable,
+        kept,
+    } = hub.attach_narration(session, 0, sound.clone()).unwrap_err()
+    else {
+        panic!("not kept apart");
+    };
+
+    // Beside the note, with the page as it is and this sound, in time with its ink.
+    assert_eq!(kept.parent(), Some(dir.path().join("Classe")).as_deref());
+    assert_ne!(kept, path);
+    let written = library.read(&kept).unwrap().file;
+    let page = hub.snapshot().page;
+    assert_eq!(written.note.strokes.len(), page.strokes.len());
+    assert_ne!(written.note.id, page.id);
+    assert_eq!(written.background, file.background);
+    let got = decode_narration(written.audio.as_ref().unwrap()).unwrap();
+    assert_eq!(got.start_ms, 8_000);
+    let ms = got.duration().as_millis();
+    assert!((990..=1010).contains(&ms), "{ms}");
+
+    // The page and its own narration are as they were.
+    hub.stop().unwrap();
+    assert_eq!(audio_of(&library, &path), file.audio);
+    assert_eq!(notes_in(&library).len(), 2);
+
+    // Said to the user: the sentence and where the sound is.
+    let error = LiveError::NarrationKeptApart {
+        why: NarrationApart::Unreadable,
+        kept: kept.clone(),
+    }
+    .command_error();
+    assert_eq!(error.code(), "narrationUnreadable");
+    assert_eq!(error.parts().1, path_text(&kept));
+    assert_eq!(
+        LiveError::NarrationLost {
+            why: NarrationApart::TooLong,
+            detail: "disk full".to_owned(),
+        }
+        .command_error()
+        .code(),
+        "narrationNotKept"
+    );
+}
+
+#[test]
+fn a_sound_kept_apart_has_its_place_in_note_time_on_a_page_of_the_session() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let Start::New { mut sink, .. } = hub
+        .start(options(&library, fixed(LiveButton::NewPage)))
+        .unwrap()
+    else {
+        panic!("already running");
+    };
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    let page_note = notes_in(&library).remove(0);
+    let session = hub.page_position().unwrap().session;
+    let error = hub.keep_apart(
+        session,
+        0,
+        &note_narration(1.0, 2_000),
+        NarrationApart::TooLong,
+    );
+    let LiveError::NarrationKeptApart { kept, .. } = &error else {
+        panic!("{error}");
+    };
+    let kept = kept.clone();
+    assert_eq!(error.command_error().code(), "narrationTooLong");
+    assert_ne!(kept, page_note);
+    let written = library.read(&kept).unwrap().file;
+    assert_eq!(written.note.strokes.len(), 1);
+    let got = decode_narration(written.audio.as_ref().unwrap()).unwrap();
+    assert_eq!(got.start_ms, 2_000);
+    hub.stop().unwrap();
+}
+
+#[test]
+fn a_sound_that_goes_in_no_note_is_kept_as_a_copy_and_the_error_says_where() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Notes");
+    std::fs::create_dir(&root).unwrap();
+    ardoise_core::library::init(&root).unwrap();
+    let library = Library::open(&root).unwrap();
+    let mut file = full_file(A5);
+    file.audio = Some(b"OggS damaged".to_vec());
+    let path = filed(&library, "", &file);
+    let backup = dir.path().join("narration-backup");
+    let hub = LiveHub::new(config());
+    hub.set_narration_backup(backup.clone());
+    let mut sink = resume(&hub, &library, &path, A5);
+    stroke(&mut sink, 3000, 5);
+    wait_until("the ink written", || {
+        stroke_count(&library, &path) == Some(3)
+    });
+    let session = hub.page_position().unwrap().session;
+
+    break_folder(&root, true);
+    let error = hub
+        .attach_narration(session, 0, note_narration(1.0, 8_000))
+        .unwrap_err();
+    let LiveError::NarrationKeptApart { kept, .. } = &error else {
+        panic!("{error}");
+    };
+    assert_eq!(kept.parent(), Some(backup.as_path()));
+    let got = decode_narration(&std::fs::read(kept).unwrap()).unwrap();
+    assert_eq!(got.start_ms, 8_000);
+
+    // Nowhere to put it at all: the sound is lost, and that is said too.
+    std::fs::remove_dir_all(&backup).unwrap();
+    std::fs::write(&backup, b"not a folder").unwrap();
+    let error = hub
+        .attach_narration(session, 0, note_narration(1.0, 8_000))
+        .unwrap_err();
+    assert!(matches!(error, LiveError::NarrationLost { .. }), "{error}");
+    break_folder(&root, false);
+    hub.stop().unwrap();
+}
+
+#[test]
+fn a_page_that_cannot_take_its_sound_does_not_cost_the_next_pages_theirs() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let Start::New { mut sink, .. } = hub
+        .start(options(&library, fixed(LiveButton::NewPage)))
+        .unwrap()
+    else {
+        panic!("already running");
+    };
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    stroke(&mut sink, 3000, 5);
+    wait_until("the first note", || notes_in(&library).len() == 1);
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    stroke(&mut sink, 4000, 5);
+    wait_until("the second note", || notes_in(&library).len() == 2);
+    let session = hub.page_position().unwrap().session;
+    assert!(hub.set_page_audio(0, b"OggS damaged".to_vec()));
+
+    let log = PageLog {
+        changes: vec![
+            change(Duration::ZERO, 0),
+            change(Duration::from_millis(500), 1),
+        ],
+        anchor_ms: None,
+    };
+    let clip = simulated_narration(Duration::from_secs(1), 1);
+    let error = give_to_hub(&hub, session, &log, now_ms() as f64, clip).unwrap_err();
+    assert_eq!(error.code(), "narrationUnreadable");
+    let saved = hub.stop().unwrap();
+    // The second page has its piece; the first keeps what it had, its piece in a third note.
+    let second = audio_of(&library, Path::new(&saved[1])).unwrap();
+    let ms = decode_narration(&second).unwrap().duration().as_millis();
+    assert!((490..=510).contains(&ms), "{ms}");
+    assert_eq!(
+        audio_of(&library, Path::new(&saved[0])),
+        Some(b"OggS damaged".to_vec())
+    );
+    assert_eq!(notes_in(&library).len(), 3);
 }
 
 // --- From the simulated tablet, through the tablet service ---------------------------------------
