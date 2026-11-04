@@ -205,6 +205,16 @@ pub struct LiveCommand {
     pub kind: LiveCommandKind,
 }
 
+/// Why a resumed sheet became a new note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ForkReason {
+    /// It changed elsewhere (another PC, Nextcloud) since it was resumed.
+    Changed,
+    /// It no longer exists.
+    Deleted,
+}
+
 /// State of the live session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -236,9 +246,13 @@ pub struct LiveSnapshot {
     /// 0-based.
     pub page_index: usize,
     pub page_count: usize,
-    /// How the tablet is held (the live window's quick switch shows it).
+    /// How the tablet is held (the live window's quick switch shows it). On a resumed sheet held
+    /// the other way round than the setting, how it is to be held for that page.
     pub orientation: Orientation,
-    /// Layer receiving new strokes (the current page's last one).
+    /// Whether the current page turns with the tablet. A resumed sheet never does: the interface
+    /// disables the quick switch on it.
+    pub can_turn_page: bool,
+    /// Layer receiving new strokes (the current page's last visible one).
     pub layer: u32,
     pub style: LiveStyle,
     pub view: LiveViewState,
@@ -327,6 +341,17 @@ pub enum LiveEvent {
         /// The library error's code: the interface says it in words (`errorCodes.*`).
         code: String,
         message: String,
+    },
+    /// The resumed sheet on page `page_index` changed elsewhere or was deleted: nothing was
+    /// overwritten, and the page goes on in a new note in the same binder. Sent once, and to a
+    /// window that subscribes later. About the library: never sent to the viewers of the share.
+    SheetForked {
+        page_index: usize,
+        reason: ForkReason,
+        /// The note left as it is.
+        original: String,
+        /// The new note.
+        path: String,
     },
 }
 

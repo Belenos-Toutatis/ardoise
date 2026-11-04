@@ -340,7 +340,8 @@ fn frame_at(at: Duration, frames: usize) -> usize {
 
 /// Cuts a live recording per page: each stretch between two page changes goes to the page
 /// shown then, in note time (base `Note`, speed 1, no trimming) with `start_ms` = wall clock of
-/// its first sample − the page's time origin (`origins[page]`: its first stroke, Unix ms).
+/// its first sample − the page's time origin (`origins[page]`: its first stroke, Unix ms; on a
+/// resumed sheet, the origin that makes the time since the resume follow what the note holds).
 /// `wall_start_ms` is the wall clock of the clip's first sample. Pieces of pages without any
 /// stroke (`None`, or unknown pages) and empty pieces are left out. A page shown several times
 /// gets several pieces, in order.

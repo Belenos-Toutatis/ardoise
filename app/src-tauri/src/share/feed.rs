@@ -127,8 +127,8 @@ struct SharedBatch<'a> {
     sent_at: f64,
 }
 
-/// The events a viewer gets. Left out: `saved` (paths of notes) and `saveFailed` (the system's
-/// message), which are about the library.
+/// The events a viewer gets. Left out: `saved` and `sheetForked` (paths of notes) and `saveFailed`
+/// (the system's message), which are about the library.
 #[derive(Serialize)]
 #[serde(
     tag = "type",
@@ -187,7 +187,9 @@ impl<'a> SharedEvent<'a> {
             LiveEvent::Marks { marks } => SharedEvent::Marks {
                 marks: marks.iter().map(SharedMark::of).collect(),
             },
-            LiveEvent::Saved { .. } | LiveEvent::SaveFailed { .. } => return None,
+            LiveEvent::Saved { .. }
+            | LiveEvent::SaveFailed { .. }
+            | LiveEvent::SheetForked { .. } => return None,
         })
     }
 }
@@ -266,15 +268,16 @@ impl<'a> SharedSnapshot<'a> {
 }
 
 /// The page of a snapshot as the viewer reads a `Note` (`note.ts`): what is drawn, and the
-/// fields the type requires with neutral values. The title, tags, favourite mark, layer names,
-/// background image and origin of the page stay on the PC, and so do the strokes of a layer
-/// that is hidden (the live pages never hide a layer: the filter is for what comes later).
+/// fields the type requires with neutral values. The title, dates, tags, favourite mark, layer
+/// names, background image and origin of the page stay on the PC, and so do the strokes of a layer
+/// that is hidden (a resumed sheet may have some: it is an old note, with its own date).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SharedLivePage<'a> {
     id: &'a str,
     /// Always empty.
     title: &'static str,
+    /// Always 0, like `modified`: the point times need no date.
     created: i64,
     modified: i64,
     page: PageSize,
@@ -300,8 +303,8 @@ impl<'a> SharedLivePage<'a> {
         SharedLivePage {
             id: &note.id,
             title: "",
-            created: note.created,
-            modified: note.modified,
+            created: 0,
+            modified: 0,
             page: note.page,
             background: &note.background,
             tags: [],

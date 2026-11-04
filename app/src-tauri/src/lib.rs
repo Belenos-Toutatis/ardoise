@@ -301,6 +301,7 @@ pub fn run() {
             tablet::sim_press_button,
             live::live_subscribe,
             live::live_start,
+            live::live_resume,
             live::live_stop,
             live::live_set_style,
             live::live_command,

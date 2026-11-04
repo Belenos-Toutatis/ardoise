@@ -144,6 +144,7 @@ Live and classroom (`live.rs`, `presentation.rs`, package B):
 |---|---|---|
 | `live_subscribe` | `onEvent: Channel<LiveBatch>` | `LiveSnapshot`; then batches until the window goes away (a failed send drops the subscriber) |
 | `live_start` | – | `LiveSnapshot` (`state: 'waiting'` until the tablet streams) |
+| `live_resume` | `path` (a note of the library) | `LiveSnapshot`, like `live_start`, on that note (M12) |
 | `live_stop` | – | paths of the notes saved |
 | `live_set_style` | `style: LiveStyle` | – (broadcast as a snapshot) |
 | `live_command` | `command: LiveCommand` | – |
@@ -179,6 +180,7 @@ LiveStyle = { tool: Tool; color: Rgba; width: number }
 LiveViewState = { zoom: number; x: number; y: number; board: boolean; laser: boolean }
 LiveCommand = { kind: 'nextPage' | 'previousPage' | 'newPage' | 'newLayer' | 'clearPage' | 'button' }
 LiveSnapshot = { state: 'idle' | 'waiting' | 'live' | 'reconnecting'; page: Note; pageIndex: number; pageCount: number;
+                 canTurnPage?: boolean; // M12: false on a resumed sheet; absent on the share's viewers
                  layer: number; style: LiveStyle; view: LiveViewState; hover: { x: number; y: number } | null;
                  presentation: MonitorInfo | null; saved: string[] }
 LivePoint = { x: number; y: number; p: number; t: number; recv: number }   // recv: wall-clock ms (fractional) at receipt
@@ -190,6 +192,7 @@ LiveEvent =
   | { type: 'hover'; x: number; y: number } | { type: 'hoverEnd' }
   | { type: 'view'; view: LiveViewState }
   | { type: 'saved'; paths: string[] }
+  | { type: 'sheetForked'; pageIndex: number; reason: 'changed' | 'deleted'; original: string; path: string } // M12
 LiveBatch = { events: LiveEvent[]; sentAt: number }            // sentAt: wall-clock ms (fractional) when sent
 MonitorInfo = { key: string; name: string; x: number; y: number; width: number; height: number; scale: number;
                 primary: boolean; chosen: boolean }
@@ -449,35 +452,76 @@ bottom left, button at the bottom right); to be confirmed with the real tablet (
 
 ## M12: resume a sheet, touch up during live
 
-Decisions: `docs/questions.md` Q9, SPEC §4.2. Written from reading the code on 2026-11-04, nothing run: check each
-point against the code. "Live" paths are under `app/src-tauri/src/live/`.
+Decisions: `docs/questions.md` Q9, SPEC §4.2. "Live" paths are under `app/src-tauri/src/live/`. "Resume" below is built
+and tested (packages 2 and 3, Rust side only). "Paper" and "Touch up" were written from reading the code on 2026-11-04,
+nothing run: check each point against the code.
 
 **Today.** Live starts only from the tablet panel: `live_start` → `LiveHub::start`, one blank page. Several pages per
 session, one note per page, created at the first stroke's end, in the library root, then rewritten at most every 5 s and
 when the page is left or live stops. The only resume is the same session after a lost link. After a crash the last 5 s
 and the stroke in progress are lost.
 
-**Resume: traps in the current code.**
-- **Data loss.** `write_page` (hub.rs) builds `NoteFile::new(job.note)`, which drops `original`, `original_note`,
-  `background`, `text` and the unknown fields and members (only `thumbnail` and `audio` are set again). A resumed page
-  must carry them, and write through the note's existing file. `keep_original` must run at the first write; it never
-  replaces an existing original, so say what "original" means after a resume in the guide.
-- **Stamp.** Seed `SavedFile` with the note's stamp and content fingerprint. `library.save` is atomic and checked. A change
-  elsewhere forks a new note in the library root today: it must go beside the note, in its binder, with a notice.
-- **Coordinates.** Pen points are raw tablet units, already oriented (worker.rs, session.rs). A page of another size needs a
-  per-page uniform scale and offset.
-- **Orientation.** `started` and `hold` would turn a filed page held differently and rewrite it; `turn` ignores
-  `background_image`. A resumed page follows the note for the session and is never turned.
-- **Time.** `t` is ms since `created` in a clamped u32. Resuming leaves a long gap in the replay and collapses after about
-  49.7 days: shift it (the replay's dead-time removal then handles the gap), and apply the same shift to narration
-  (`page_origins`, narration.rs). Seed the existing `audio`; `attach_narration` merges.
-- **Layers.** `current_layer` is the last layer even if hidden: use the last visible one.
-- **Blackboard.** Toggling overwrites the paper with Slate or White, so Cream or Kraft is lost: keep the paper to restore.
+**Resume, as built** (`resume.rs`, `session.rs`, `hub.rs`; tests in `resume/tests.rs`).
+- **Start.** `live_resume(path)` → `LiveHub::resume`, then the tablet service as `live_start`. A note that cannot be read is
+  refused first (`noteNotFound`, `notInLibrary`, `noteDamaged`...) and what runs goes on. Otherwise what runs ends as
+  `live_stop` ends it (narration, tablet, `hub.stop`, `remember_live_session`), then the session shown is written out, and if
+  that fails nothing starts. The note is read after that: it may be a page of that session. One sheet: page 0 is the note, the
+  next page is a new note in the library root.
+- **Data loss.** `write_page` built `NoteFile::new(job.note)`, which drops `original`, `original_note`, `background`, `text`
+  and the unknown fields and members; `back_up_unsaved` did the same. A resumed page keeps the file as read
+  (`ResumeBase`, in memory: a note deleted meanwhile must still give its image to the new note); `page_file` builds both from it,
+  replacing only the note, the narration and the thumbnail (drawn with the image, decoded once, at the first write).
+- **Unchanged.** A seeded page is not dirty, and `write_page` skips the disk when the fingerprint is the one on disk (clearing an
+  empty sheet). `Page::saved_file` hides the file until the session wrote it: `saved`, `live_stop` and the bridge's
+  `last_live_note` (`LiveOverview.notes`) do not count a note left as it was.
+- **Original.** `keep_original` runs at every write from the version read at the resume, not just at the first: the first write
+  may change only the narration, and the original is taken at the first change of the ink. It also does nothing for a blank
+  note, and never replaces an existing original. What the user gets from « Revenir à l'original », and only the page size, layers,
+  strokes and image placement come back:
+  a note without original: the sheet before the resume; a tablet note: the page as synced (`original.bin`); a note edited
+  before: its first version (`original.ardoise`), older than the resume; a blank note: nothing.
+- **Stamp.** `SavedFile` is seeded with the path, stamp and fingerprint read. A change elsewhere forks: a new note in the note's
+  binder (`write_beside`; created again if it went with the note), with every member, the original, and a new id, and a
+  `sheetForked` event (`reason: 'changed' | 'deleted'`, `original`, `path`), once, also to a window that subscribes later, never
+  to viewers. The next writes go to the new note. Not a fork: only the title, tags or favourite mark changed (`merge_outside`,
+  M10), or the file moved (followed). The fingerprint (`file_fingerprint`, all pages) now covers the narration and the members
+  too: a narration replaced elsewhere was overwritten silently before. An ordinary page still forks to the root, silently.
+- **Coordinates.** Pen points are raw tablet units, already oriented (worker.rs, session.rs). `PenMapping` (computed at each
+  notification from the session's state): a quarter turn when the sheet is held otherwise than the service orients the points,
+  then a uniform scale and an offset, the tablet's whole area fitted in the sheet, centred (Q9 says "couvrir"; a fit reaches
+  everywhere from the tablet except the margins, a cover would lose the tablet's edges). Same size, same way: exact, no rounding.
+  Hover too. The line width is not scaled: the page's units are physical.
+- **Orientation.** `hold` would turn a filed page, `follow` too when it is shown again, and `Page::turn` ignores
+  `background_image`. On a resumed page `turn` only updates how it is to be held (`hold_for`): the setting when the sheet is the
+  same way round (a square one always is), else a quarter turn on the same side (`landscape` ↔ `portraitLeft`, `landscapeFlipped` ↔
+  `portraitRight`: the button stays away from the writing hand; our choice, one table to change). The service keeps orienting
+  for the setting: the session corrects, so nothing changes on the tablet's side and the next page takes the setting at once.
+  `snapshot.orientation` is the way to hold the current page, `snapshot.canTurnPage` is false on a resumed one. A quick switch
+  that still arrives (settings) is safe: the ink stays, the pen follows. The view follows a page of another size (`fit_view`).
+- **Time.** `t` is ms since `created` in a clamped u32, and `created` is the note's date (and file name): it stays. New samples
+  count from a shifted origin (`Page::time_origin`, which `page_origins` gives to the narration): the resume's wall clock less
+  `time_base`, which is after the last stroke (hidden ones too) **and after the end of the narration**, plus 1 s
+  (`RESUME_GAP_MS`). The origin is fixed at the resume, not at the first stroke: a narration started before the first stroke must not
+  land on the older sound. The wait until the first stroke is a pause in the replay, which its dead-time removal handles.
+- **Narration.** `Page::audio` is seeded; `attach_narration` merges, but `Narration::merge` needed care: it assumes the same time
+  base, gives the later clip alone when they are more than 4 hours apart, and the later one wins an overlap. So a narration
+  recorded in a replay at another speed or with pauses trimmed is in that replay's time: `placed_for_merge` converts the start (and
+  never over the older sound; aligned at its start only, a known limit), and `merged_keeping_both` moves a clip too far away right
+  after the older one. This also holds on ordinary pages.
+- **Layers.** New ink goes on the last visible layer. Every layer hidden: the page gets a new visible layer (named like any
+  new one) when it is seeded, which is no change until something is written on it; none is shown (one may hold the answers).
+- **Blackboard.** Each page keeps the paper to give back (`paper_before_board`). A slate sheet has slate as its own paper: turning
+  the blackboard off keeps it. A resumed sheet starts with the blackboard on only if it is slate (with chalk), whatever the
+  last session did, since turning it on rewrites the paper; the style from before the blackboard carries over. Ordinary pages are
+  only ever white or slate: same behaviour as before.
+- **Editor.** Never mounted with live (Home.svelte): the editor saves and closes first (package 4). A draft left for the note (a
+  crash) keeps the older stamp: once live mode wrote the note, `recoveryOf` (`lib/editor/drafts.ts`) offers it only as a new
+  note. Nothing to change; tested on the Rust side.
+- **Viewers.** `sheetForked` and `canTurnPage` are not in the allow list (feed.rs). `created` and `modified` are now always 0 there:
+  a resumed note would give its real date; nothing in the viewer reads them.
 - **Paper.** Templates and texture render in `LiveCanvas`, the background image does not (`renderBackground` gets none;
   `stage_note_background` exists). Live viewers get no paper picture (viewer-state, feed.rs): reuse what `page.rs` does
   for the editor's note, once per sheet, never in the coalesced live events.
-- **Editor.** Never mounted with live (Home.svelte): the editor saves and closes first. A draft left for the note is based on
-  the older stamp: decide and test what happens to it.
 
 **Touch up.**
 - **Reusable.** `lib/editor/hit.ts` (`selectInLasso`, `hitStroke`; relax `Note` to a `Pick`), `geometry.ts`,
