@@ -623,11 +623,11 @@ export const resumeJourneys = [
           for (let attempt = 1; attempt <= 15; attempt++) {
             const bytes = readFileSync(made.path);
             const stamp = statSync(made.path).mtimeMs;
-            const saved = await app.evaluate(`(async () => {
+            const stopped = await app.evaluate(`(async () => {
               await window.__TAURI_INTERNALS__.invoke('live_resume', { path: ${j(made.path)} });
               return await window.__TAURI_INTERNALS__.invoke('live_stop');
             })()`);
-            if (saved.length !== 0) {
+            if (stopped.saved.length !== 0) {
               console.log(`    (essai ${attempt} : le stylet simulé a écrit avant l’arrêt, nouvel essai)`);
               continue;
             }

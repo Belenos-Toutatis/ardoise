@@ -47,7 +47,8 @@ fn effective_background(background: Background, board: bool) -> Background {
 /// What the live page of `snapshot` wants drawn under its strokes, without the title, tags or
 /// anything else of the note: an opaque name, `None` on plain paper. It changes with the note, the
 /// page size, the paper, the template, the texture and the image (its file's name goes only into
-/// the digest). A fork gives the note a new id, hence a new key: the picture goes once more.
+/// the digest). A fork does not change it: the snapshot carries the id the page started with
+/// (`Page::shown_id`), so the key stays and the picture is not sent again.
 pub fn paper_key(snapshot: &LiveSnapshot) -> Option<String> {
     let note = &snapshot.page;
     let background = effective_background(note.background, snapshot.view.board);
