@@ -296,13 +296,68 @@ projection et la séance, et ferme la fenêtre.
 Si une note de la séance est renommée ou étiquetée pendant le cours (par l'assistant, par exemple), les pages suivantes
 continuent d'y être écrites au lieu d'être dupliquées.
 
+### Reprendre le mode direct sur une feuille
+
+*Demande la tablette.* Le cours a été interrompu, ou vous voulez ajouter de l'écriture à une feuille déjà
+enregistrée ? Vous pouvez reprendre le mode direct sur cette feuille.
+
+- **Depuis la bibliothèque** : ouvrez le menu **⋯** de la carte de la note et choisissez **Reprendre en mode direct**.
+- **Depuis l'éditeur** : cliquez sur **Reprendre en mode direct** dans la barre d'outils. S'il y a des modifications non
+  enregistrées, Ardoise le demande : **Enregistrer et reprendre le direct**, **Reprendre sans enregistrer** ou
+  **Rester**.
+
+Le bouton est grisé tant que la tablette n'est pas enregistrée ou qu'elle est occupée (synchronisation en cours). Il
+faut aussi ne choisir qu'une seule note.
+
+**Ce qui se passe**
+
+- La fenêtre de commande, la présentation et l'autre écran du réseau montrent la feuille avec son fond (modèle,
+  texture, image ou page de PDF) et ses traits. Ce que vous écrivez s'ajoute, sur le dernier calque visible. Les
+  calques masqués ne sont jamais montrés à la présentation ni sur l'autre écran.
+- **C'est la note elle-même qui est écrite** : même fichier, même titre, pas de copie. Son image de fond, son
+  original, sa narration, son texte reconnu et tout ce qu'elle contient sont gardés. Si vous ne tracez rien, le fichier
+  n'est pas touché.
+- **Le tableau noir** ne fait pas perdre le fond de la feuille : en le quittant, vous retrouvez son papier et son image.
+  Si vous terminez sans l'avoir quitté, la feuille garde son papier tant que vous n'avez rien écrit ; si vous y avez
+  écrit à la craie, elle est enregistrée en ardoise pour que la craie reste lisible.
+- **Le format** : si la feuille n'a pas le format de la tablette, ce que vous écrivez est réduit ou agrandi pour tenir
+  en entier dans la feuille, au milieu, sans déformation. L'épaisseur du trait ne change pas.
+- **L'orientation** : la feuille n'est jamais tournée. Si elle est en paysage et que la tablette est réglée en portrait
+  (ou l'inverse), un avis dit comment tenir la tablette : « Pour écrire sur cette feuille, tenez la tablette ainsi : … ».
+  Les quatre boutons de position sont grisés pour cette feuille.
+- **La page suivante** crée une note neuve, à la racine de la bibliothèque, et suit de nouveau la position réglée pour
+  la tablette : les boutons de position fonctionnent alors.
+- **La narration** : si vous enregistrez, le son s'ajoute après l'ancien sans le recouvrir, et la relecture reste juste
+  malgré le temps passé entre les deux séances. Si le son ne peut pas s'y ajouter (plus de 4 heures en tout, ou ancienne
+  narration illisible), il part dans une note neuve à côté de la feuille, et Ardoise vous le dit en terminant.
+- **Terminer** enregistre la note comme d'habitude (compteur « N notes enregistrées »).
+
+**Revenir à l'original, après une reprise.** La note garde sa *première version* (voir le chapitre 8, « Revenir à
+l'original »). Une reprise n'en crée pas une nouvelle à chaque fois :
+
+- une note qui n'a pas encore d'original (écrite en direct, importée, faite dans Ardoise, ou fiche encore vierge) retrouve
+  la feuille *telle qu'elle était avant la reprise* ;
+- une note reçue de la tablette retrouve la page *telle qu'elle a été synchronisée* ;
+- une note déjà modifiée retrouve *sa première version*, pas l'état juste avant la reprise.
+
+Seuls le format de la page, les calques, les traits et la place de l'image de fond reviennent ; le titre, les
+étiquettes, le favori et la narration restent comme ils sont. Le papier aussi, sauf si l'ardoise du tableau noir l'a
+remplacé : le papier de la première version revient alors. `Ctrl + Z` annule le tout.
+
+**Si la feuille change ailleurs pendant le direct** (une copie arrive par Nextcloud, ou la note est modifiée ou
+supprimée sur un autre PC), Ardoise n'écrase rien. Un avis s'affiche : « Cette feuille a été modifiée ailleurs pendant
+le direct : pour ne rien écraser, l'écriture continue dans une nouvelle note, à côté d'elle. » (ou « supprimée
+ailleurs » si le fichier a disparu). La nouvelle note est dans le même classeur, avec l'image, l'original et la
+narration de la feuille ; la version écrite ailleurs reste telle qu'elle est. Fermez l'avis avec **Fermer le message**.
+Un simple changement de titre, d'étiquette ou de favori fait ailleurs ne crée pas de nouvelle note.
+
 ### La fenêtre de commande
 
 - **Outil** (stylo à bille, plume, feutre, crayon, pinceau, surligneur, craie), **Couleur** (dont **Blanc craie** et
   **Jaune**) et **Épaisseur** : le trait suivant en tient compte, pas les précédents.
 - **Pages** : **Page précédente**, **Page suivante** (la position s'affiche : « Page 2 / 5 »), **Nouvelle page**.
   **Nouveau calque** ajoute un calque à la page en cours. **Effacer la page** (ou `Ctrl + Suppr`) efface la page en cours
-  seulement ; un message « Page effacée. » propose pendant 8 secondes **Annuler l'effacement**, qui rend l'encre. Si la
+  seulement ; un message « Page effacée. » propose pendant 8 secondes **Annuler l'effacement**, qui rend l'encre (`Ctrl + Z` la rend aussi, sans limite de temps : voir **Retoucher pendant le direct**). Si la
   page a changé entre-temps, Ardoise dit que l'effacement ne peut plus être annulé.
 - **Tableau noir** : fond ardoise et craie blanche. **Pointeur laser** : le stylet en survol, sans toucher la tablette,
   montre un point rouge à l'écran *sans rien écrire* ; en touchant la tablette on écrit de nouveau.
@@ -319,6 +374,52 @@ continuent d'y être écrites au lieu d'être dupliquées.
 Le *bouton de la tablette* fait, pendant le direct, ce que l'option **Bouton de la tablette en mode direct** indique
 (nouvelle page ou nouveau calque). *Ce que la Bamboo Slate envoie à l'appui n'est pas encore vérifié sur la vraie
 tablette.* Les touches de la page suivante et précédente marchent dans tous les cas.
+
+### Retoucher pendant le direct
+
+*Demande la tablette.* Une faute à enlever, un mot à mettre en rouge ? Vous n'avez pas besoin de quitter le mode direct
+ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tablette continue d'écrire pendant ce temps**.
+
+**Choisir des traits**
+
+- Cliquez sur **Sélection** dans la barre d'outils, ou appuyez sur `V`. Un second appui quitte
+  l'outil.
+- **Lasso** : dans l'aperçu, appuyez avec la souris et entourez les traits, puis relâchez. Un trait est choisi quand la
+  moitié au moins de ses points est dans le lasso.
+- **Clic** : cliquez sur un trait pour le choisir seul. Cliquez sur l'encre elle-même, pas à côté.
+- `Maj` + lasso ou clic ajoute des traits à ceux déjà choisis. `Ctrl` + lasso ou clic en retire.
+- Un geste dans le vide, ou `Échap`, enlève la sélection. `Échap` ne ferme rien d'autre tant que des traits sont choisis.
+- Un doigt et la molette continuent de déplacer et de zoomer l'aperçu.
+- Les traits choisis sont entourés de bleu dans l'aperçu. Une barre dit « Traits sélectionnés : 3 ».
+- On ne peut pas choisir le trait que la tablette est en train d'écrire, ni les traits d'un calque masqué. Sur une
+  feuille reprise, on peut choisir les anciens traits de la feuille.
+
+**Supprimer** : cliquez sur **Supprimer** dans la barre, ou appuyez sur `Suppr` ou `Retour arrière`.
+
+**Changer la couleur** : cliquez sur une pastille de **Couleur**. Seuls les traits choisis changent, et la nouvelle
+couleur se voit aussitôt à l'intérieur du contour bleu. Ils restent choisis, pour essayer une autre couleur. **La couleur du stylo ne change pas** : ce que la tablette écrit ensuite garde
+sa couleur. Sans sélection, une pastille règle la couleur du stylo, comme avant.
+
+**Annuler et rétablir**
+
+- `Ctrl + Z` (ou **Annuler**) annule la dernière retouche : une suppression, un changement de couleur, ou **Effacer la
+  page**. Les traits supprimés reviennent à leur place.
+- `Ctrl + Y` ou `Ctrl + Maj + Z` (ou **Rétablir**) refait ce qui vient d'être annulé. Une nouvelle retouche vide ce qui
+  pouvait être rétabli.
+- **Ce qui n'est jamais annulé** : ce que la tablette a écrit. Un trait écrit entre-temps reste, dans quelque ordre que
+  vous annuliez ou rétablissiez. Les changements d'outil, de couleur du stylo ou d'épaisseur, et les changements de
+  page, ne sont pas non plus des retouches.
+- Chaque page a sa propre liste, qui garde les 100 dernières retouches. Si vous quittez une page puis y revenez,
+  `Ctrl + Z` annule encore ses retouches. Les listes disparaissent quand vous terminez le mode direct.
+- Les boutons **Annuler** et **Rétablir** sont grisés quand il n'y a rien à faire.
+
+**Le vidéoprojecteur et l'autre écran du réseau ne voient que le résultat.** Jamais le contour bleu ni le lasso : un
+trait supprimé disparaît, un trait recoloré change de couleur. Les annotations tracées sur la présentation ne sont pas
+des traits de la page : on ne les choisit pas.
+
+**Dans la note.** Quand vous terminez, la note contient ce qu'il y avait à l'écran : traits supprimés absents, couleurs
+changées. Sur une feuille reprise, la retouche d'un ancien trait est enregistrée dans la note elle-même ;
+« Revenir à l'original » (chapitre 8) rend toujours la première version.
 
 ### Projeter sur un vidéoprojecteur
 
@@ -715,7 +816,9 @@ Pour une note reçue de la tablette, **Revenir à l'original** (panneau **Origin
 arrivée, sans vos modifications. Ardoise précise ce qui est perdu (traits ajoutés, effacés, déplacés, calques, rotation,
 format) et ce qui reste (titre, étiquettes, favori, papier, narration, image de fond). L'action est annulable
 (`Ctrl + Z`) ; enregistrez ensuite pour la garder. Pour une note qui n'a jamais été modifiée, il n'y a pas encore
-d'original : Ardoise garde la version précédente la première fois que vous enregistrez une modification de l'encre.
+d'original : Ardoise garde la version précédente la première fois que vous enregistrez une modification de l'encre, ou
+la fois où le mode direct reprend la feuille et y écrit (voir le chapitre 6). L'original est toujours la *première*
+version de la note, jamais l'état juste avant la dernière modification.
 
 ## 9. Relecture, narration et vidéo
 
@@ -1025,7 +1128,7 @@ de tous les composants utilisés avec leur licence.
 | Des pages du direct n'ont pas pu être enregistrées | Elles restent en mémoire. Vérifiez le dossier de la bibliothèque (place, droits, synchronisation) ; une copie de secours est écrite dans `%LOCALAPPDATA%\Ardoise\live-backup`. |
 | « Ardoise s'est fermé sans enregistrer des modifications » (bandeau de la bibliothèque), ou fenêtre « Modifications récupérées » | Ardoise s'est arrêté avant que vous enregistriez. Rouvrez la note et récupérez les modifications (chapitre 8). |
 | « Fichiers illisibles : N » | Ardoise ne sait pas lire ces fichiers et ne les a pas modifiés ; la raison est écrite à côté de chacun (chapitres 2 et 7). |
-| Windows dit qu'« Ardoise empêche l'arrêt » | Une note a des modifications non enregistrées : revenez dans Ardoise et enregistrez, ou arrêtez quand même (la copie de secours est déjà écrite, chapitre 8). |
+| Windows dit qu'« Ardoise empêche l'arrêt » | Le mode direct est en cours : ce qui est écrit est enregistré, et vous pouvez arrêter ; ou bien une note a des modifications non enregistrées : revenez dans Ardoise et enregistrez, ou arrêtez quand même (la copie de secours est déjà écrite, chapitre 8). |
 | « Ardoise n'a pas trouvé Wacom Inkspace sur cet ordinateur » | Cliquez sur **Choisir un dossier…** et indiquez le dossier `LocalState` d'Inkspace ou une copie (chapitre 11). Si Ardoise dit de fermer Inkspace, fermez-le et réessayez. |
 | L'autre ordinateur n'arrive pas à se connecter au partage | Même réseau ? Adresse tapée avec `http://` et le port ? Pare-feu de Windows autorisé pour ce réseau (**Réseaux privés**, ou réseau passé en **Privé**) ? Voir « Montrer la feuille sur un autre ordinateur du réseau », chapitre 6. |
 | « Ce site ne peut pas fournir de connexion sécurisée » sur l'autre ordinateur ou le téléphone | Le navigateur a ouvert l'adresse en `https://`, souvent en la complétant tout seul. Le partage d'Ardoise est en `http://` (il reste sur le réseau local, protégé par le code) : corrigez l'adresse en `http://…`. |
@@ -1098,8 +1201,11 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte.
 | `0` (au clavier AZERTY, la touche `à`) | **Page entière** |
 | `W` | **Largeur** |
 | `Maj + flèches` | Déplacer la zone projetée |
-| `Suppr` ou `Retour arrière` | Effacer les annotations écrites sur la présentation |
-| `Échap` | Fermer la projection si elle est affichée ; sinon, demander s'il faut **Terminer** le mode direct |
+| `Suppr` ou `Retour arrière` | Effacer les annotations écrites sur la présentation ; **avec des traits choisis** (fenêtre de commande), les supprimer |
+| `V` | Outil **Sélection** (fenêtre de commande) : lasso ou clic sur un trait |
+| `Ctrl + Z` | Annuler une suppression, un changement de couleur ou **Effacer la page** (fenêtre de commande) |
+| `Ctrl + Y` ou `Ctrl + Maj + Z` | Rétablir (fenêtre de commande) |
+| `Échap` | Enlever la sélection s'il y en a une ; sinon fermer la projection si elle est affichée ; sinon, demander s'il faut **Terminer** le mode direct |
 
 ### Dans les fenêtres
 

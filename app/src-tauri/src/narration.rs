@@ -35,7 +35,7 @@ use ardoise_media::microphone::{CaptureStatus, Level, Recorder, list_input_devic
 use ardoise_media::replay::{MAX_SPEED, MIN_SPEED, ReplayOptions};
 use ardoise_media::{
     AudioClip, MediaError, NARRATION_SAMPLE_RATE, Narration, NarrationBase, NarrationHeader,
-    encode_narration, narration_header,
+    encode_narration, narration_header, wav_bytes,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -340,7 +340,8 @@ fn frame_at(at: Duration, frames: usize) -> usize {
 
 /// Cuts a live recording per page: each stretch between two page changes goes to the page
 /// shown then, in note time (base `Note`, speed 1, no trimming) with `start_ms` = wall clock of
-/// its first sample − the page's time origin (`origins[page]`: its first stroke, Unix ms).
+/// its first sample − the page's time origin (`origins[page]`: its first stroke, Unix ms; on a
+/// resumed sheet, the origin that makes the time since the resume follow what the note holds).
 /// `wall_start_ms` is the wall clock of the clip's first sample. Pieces of pages without any
 /// stroke (`None`, or unknown pages) and empty pieces are left out. A page shown several times
 /// gets several pieces, in order.
@@ -405,16 +406,18 @@ pub fn split_live_recording(
 }
 
 /// The pieces of each page merged into one narration, pages in the order they first appear
-/// (the pieces are moved, and a page's later piece is appended to its earlier one in place).
+/// (the pieces are moved, and a page's later piece is appended to its earlier one in place). A page
+/// left for so long that one track cannot hold its pieces at their instants keeps them apart: each
+/// goes to the hub in turn, which loses neither ([`LiveHub::attach_narration`]).
 pub fn merge_by_page(pieces: Vec<(usize, Narration)>) -> Vec<(usize, Narration)> {
     let mut merged: Vec<(usize, Narration)> = Vec::new();
     for (page, piece) in pieces {
-        match merged.iter().position(|(p, _)| *p == page) {
-            Some(index) => {
+        match merged.iter().rposition(|(p, _)| *p == page) {
+            Some(index) if merged[index].1.fits_with(&piece) => {
                 let (_, earlier) = merged.remove(index);
                 merged.insert(index, (page, earlier.merge(piece)));
             }
-            None => merged.push((page, piece)),
+            _ => merged.push((page, piece)),
         }
     }
     merged
@@ -1027,7 +1030,9 @@ pub fn narration_opus(library: &Library, path: &Path) -> CommandResult<Vec<u8>> 
     Ok(bytes)
 }
 
-/// Hands the pieces of a live recording to the hub; returns how many pages got narration.
+/// Hands the pieces of a live recording to the hub; returns how many pages got narration. A page
+/// that cannot take its piece does not stop the others: the first error comes back once each piece
+/// was handed over (a piece that could not join its page is kept apart: the error says where).
 pub fn give_to_hub(
     hub: &LiveHub,
     session: u64,
@@ -1043,15 +1048,17 @@ pub fn give_to_hub(
     };
     let pieces = split_live_recording(clip, &log.changes, wall_start_ms, &origins);
     let mut pages = 0;
+    let mut first_error = None;
     for (page, narration) in merge_by_page(pieces) {
-        if hub
-            .attach_narration(session, page, narration)
-            .map_err(crate::live::LiveError::command_error)?
-        {
-            pages += 1;
+        match hub.attach_narration(session, page, narration) {
+            Ok(true) => pages += 1,
+            Ok(false) => {}
+            Err(error) => {
+                first_error.get_or_insert(error.command_error());
+            }
         }
     }
-    Ok(pages)
+    first_error.map_or(Ok(pages), Err)
 }
 
 /// Where the copies of the replay narrations that could not be saved go:
@@ -1092,7 +1099,11 @@ pub fn backup_name(note: &Path, time: &str, n: u32) -> String {
 }
 
 /// Writes `audio` atomically into a free [`backup_name`] in `dir` (created if needed).
-fn write_narration_backup(dir: &Path, note: &Path, audio: &[u8]) -> std::io::Result<PathBuf> {
+pub(crate) fn write_narration_backup(
+    dir: &Path,
+    note: &Path,
+    audio: &[u8],
+) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let time = chrono::Local::now().format("%Y-%m-%d %H%M%S").to_string();
     let mut n = 1;
@@ -1257,6 +1268,64 @@ pub fn finish_live(
         ..StopRequest::default()
     };
     save_stopped(runtime, stopped, clip, &request, None, hub).transpose()
+}
+
+/// What became of a live recording when Windows ended the session ([`finish_live_ending`]).
+pub struct EndedRecording {
+    /// Whether it went to its pages.
+    pub saved: CommandResult<NarrationSaved>,
+    /// A WAV copy of all of it, if it could be written: the caller removes it once the pages are
+    /// written.
+    pub copy: Option<PathBuf>,
+}
+
+/// [`finish_live`] while Windows ends the session, which may leave no time for it: encoding takes
+/// far longer than the seconds allowed when the recording is long, and the process may end at any
+/// moment. So the sound goes to disk first as it is, a WAV copy in the backup folder (345 MB per
+/// hour, a plain write), and is then given to its pages as usual. `None` when no live recording
+/// runs.
+pub fn finish_live_ending(runtime: &NarrationRuntime, hub: &LiveHub) -> Option<EndedRecording> {
+    let capture = runtime.take(true)?;
+    let (stopped, clip) = capture.stop();
+    let copy = clip
+        .as_ref()
+        .ok()
+        .filter(|clip| !clip.samples.is_empty())
+        .and_then(
+            |clip| match write_recording_copy(&runtime.backup_dir, clip) {
+                Ok(path) => Some(path),
+                Err(error) => {
+                    eprintln!("narration: no copy of the recording could be written: {error}");
+                    None
+                }
+            },
+        );
+    let request = StopRequest {
+        save: true,
+        ..StopRequest::default()
+    };
+    let saved = save_stopped(runtime, stopped, clip, &request, None, hub).transpose()?;
+    Some(EndedRecording { saved, copy })
+}
+
+/// Writes `clip` atomically as a WAV file with a free name in `dir` (created if needed).
+fn write_recording_copy(dir: &Path, clip: &AudioClip) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let time = chrono::Local::now().format("%Y-%m-%d %H%M%S");
+    let bytes = wav_bytes(clip);
+    let mut n = 1;
+    loop {
+        let path = if n == 1 {
+            dir.join(format!("{time} live.wav"))
+        } else {
+            dir.join(format!("{time} live-{n}.wav"))
+        };
+        match fsutil::write_atomic_new(&path, &bytes) {
+            Ok(_) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && n < 1000 => n += 1,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 /// Saves the pending replay narration into the note at `path` (checked like

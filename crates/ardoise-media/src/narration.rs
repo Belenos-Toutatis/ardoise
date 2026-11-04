@@ -90,6 +90,15 @@ impl Narration {
             .saturating_add(i64::try_from(ms).unwrap_or(i64::MAX))
     }
 
+    /// Whether [`merge`](Self::merge) keeps both: one track holds them, at their instants.
+    pub fn fits_with(&self, later: &Narration) -> bool {
+        let first_start = i128::from(self.start_ms) * FRAMES_PER_MS;
+        let later_start = i128::from(later.start_ms) * FRAMES_PER_MS;
+        let end = (first_start + frames(&self.clip) as i128)
+            .max(later_start + frames(&later.clip) as i128);
+        end - first_start.min(later_start) <= MAX_MERGED_FRAMES
+    }
+
     /// One narration holding `self` and `later` (same base and options) at their instants,
     /// silence between them; where they overlap, `later` wins.
     ///

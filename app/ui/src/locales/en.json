@@ -667,6 +667,8 @@
     "tabletRefused": "The tablet refused the command ({detail}). If the phone app or Inkspace registered it, register it again in Ardoise.",
     "syncRefused": "the tablet refused the sync ({detail}); if it keeps happening, run \"Test the tablet\"",
     "liveNotRunning": "Live mode is not running.",
+    "liveEditStale": "The page changed in the meantime: select again.",
+    "liveEditInvalid": "This edit is not possible: select again.",
     "noMonitor": "No screen available for the presentation.",
     "simulationOnly": "This command only works with the simulated tablet.",
     "tablet": "Problem with the tablet: {detail}",
@@ -679,6 +681,9 @@
     "noMicrophone": "no microphone is connected to this computer",
     "narrationBusy": "a narration recording is already running",
     "noRecording": "no narration recording is running",
+    "narrationTooLong": "The page's narration and the new sound would run over 4 hours: the narration stays as it is, and the new sound is kept apart, in {detail}",
+    "narrationUnreadable": "The page's narration cannot be read: it stays as it is, and the new sound is kept apart, in {detail}",
+    "narrationNotKept": "The new sound could not join the page's narration, nor be kept apart ({detail}).",
     "openh264DownloadFailed": "the OpenH264 download failed ({detail}); check the internet connection, then try again",
     "noNarration": "This note has no narration.",
     "emptyRecording": "The microphone recorded nothing.",
@@ -856,11 +861,12 @@
       "button": "Back to the original",
       "helpTablet": "Get the ink back as it came from the tablet, without your edits (with the tablet orientation currently chosen in the settings).",
       "helpFirst": "Get back the ink of the first saved version that had any, without the edits made since.",
+      "helpBlank": "Get back the blank sheet from before live mode, without the ink added since.",
       "none": "No original yet: the first time you save a change of the ink, Ardoise keeps the version before it, if it had any ink.",
       "loading": "Looking for the original…",
       "confirmTitle": "Go back to the original?",
       "confirmLost": "Your edits of the ink will be lost: strokes added, erased, moved, straightened or recoloured, layers, page rotation, format and cropping.",
-      "confirmKept": "The title, tags, favourite, paper and narration stay as they are. The background image stays too: it goes back to its original place if the note already had it, otherwise it is placed upright on the restored page.",
+      "confirmKept": "The title, tags, favourite, paper and narration stay as they are. Only slate paper goes back to the original's paper, if it had another. The background image stays too: it goes back to its original place if the note already had it, otherwise it is placed upright on the restored page.",
       "confirmUndo": "You can still undo (Ctrl+Z); save to keep the result.",
       "confirm": "Back to the original",
       "cancel": "Cancel",
@@ -924,7 +930,9 @@
       "saveClose": "Save and close",
       "discardClose": "Close without saving",
       "saveSwitch": "Save and open the other note",
-      "discardSwitch": "Open without saving"
+      "discardSwitch": "Open without saving",
+      "saveResume": "Save and resume live mode",
+      "discardResume": "Resume without saving"
     },
     "share": {
       "label": "Split, copy, export"
@@ -1369,6 +1377,22 @@
       "label": "Tablet position",
       "hint": "Changes at once: the page in progress turns with the tablet, with what is already drawn on it."
     },
+    "resume": {
+      "action": "Resume in live mode",
+      "hint": "Resumes live mode on this sheet: what you write on the tablet is added to the note.",
+      "noTablet": "Resuming in live mode needs a registered tablet: register it from the tablet panel.",
+      "tabletBusy": "The tablet is busy (sync or registration under way).",
+      "severalSelected": "Select a single note to resume in live mode.",
+      "failed": "Live mode could not resume this sheet.",
+      "back": "Back to the library",
+      "cannotTurn": "A resumed sheet is never turned: the next page follows the tablet's position again.",
+      "hold": "To write on this sheet, hold the tablet like this: {position}.",
+      "forked": {
+        "sheet": "Sheet “{title}”",
+        "changed": "This sheet was changed elsewhere during live mode: so that nothing is overwritten, the writing continues in a new note, next to it.",
+        "deleted": "This sheet was deleted elsewhere during live mode: the writing continues in a new note."
+      }
+    },
     "starting": "Starting live mode…",
     "waiting": {
       "title": "Press the tablet's button briefly to connect it.",
@@ -1382,6 +1406,10 @@
     "stopHint": "Ends live mode: each page is saved as a note of the library.",
     "stopFailed": "Live mode did not stop properly.",
     "closeAnyway": "Close anyway",
+    "stopped": {
+      "narration": "The narration could not be added to the pages"
+    },
+    "recordingLost": "The narration being recorded could not be kept: {message}",
     "saved": {
       "none": "No note saved yet",
       "one": "1 note saved",
@@ -1418,6 +1446,21 @@
     "clear": "Clear the page",
     "board": "Blackboard",
     "laser": "Laser pointer",
+    "select": {
+      "label": "Touch up",
+      "toggle": "Select",
+      "hint": "Pick strokes with a lasso or a click to delete them or change their colour (V)",
+      "help": "Lasso: select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect. The colour swatches change the colour of the selection. What the tablet writes is never part of the selection.",
+      "bar": "Touch up the selection",
+      "count": "Selected strokes: {count}",
+      "delete": "Delete",
+      "clear": "Deselect",
+      "colors": "The colour swatches recolour the selection."
+    },
+    "undo": "Undo",
+    "redo": "Redo",
+    "undoHint": "Undo the last touch-up or the last clearing of the page (Ctrl+Z); what the tablet wrote is not undone",
+    "redoHint": "Redo what was just undone (Ctrl+Y)",
     "preview": {
       "label": "Preview of page {page}; the blue rectangle shows the projected area",
       "hint": "Drag the blue rectangle to move the projected area; the mouse wheel zooms."
@@ -1493,11 +1536,23 @@
         },
         "leave": {
           "keys": "Esc",
-          "action": "Close the projection if it is shown, otherwise end live mode (after confirmation)"
+          "action": "Deselect first if something is selected; then close the projection if it is shown, otherwise end live mode (after confirmation)"
         },
         "marks": {
           "keys": "Delete, Backspace",
           "action": "Clear the annotations drawn over the presentation (projected window)"
+        },
+        "select": {
+          "keys": "V",
+          "action": "Select tool (lasso or click on a stroke)"
+        },
+        "delete": {
+          "keys": "Delete, Backspace",
+          "action": "With a selection: delete it (without one: clear the annotations)"
+        },
+        "undo": {
+          "keys": "Ctrl + Z, Ctrl + Y",
+          "action": "Undo, redo a delete, a change of colour or the clearing of the page"
         }
       }
     },

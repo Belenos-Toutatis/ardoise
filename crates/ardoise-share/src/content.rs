@@ -8,12 +8,14 @@
 //! never waits for the share.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use tokio::sync::Notify;
+use serde::Serialize;
+use tokio::sync::{Notify, watch};
 
-use crate::{LiveFeed, LiveViewer, NoteUpdate, Shown, ViewerGone};
+use crate::{LiveFeed, LivePaper, LiveViewer, NoteUpdate, Shown, ViewerGone};
 
 /// Messages a viewer's queue holds before the viewer is disconnected as too slow, counting those
 /// taken by its stream and not yet written.
@@ -76,6 +78,49 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// The `livePaper` message: where to fetch the picture, never the picture itself.
+#[derive(Serialize)]
+#[serde(tag = "type", rename = "livePaper")]
+struct PaperMessage<'a> {
+    key: &'a str,
+    version: &'a str,
+}
+
+/// The picture of the paper of a live page (`docs/design/lan-share.md`, "The paper of a live
+/// page"): `GET /paper/<key>` answers with its bytes while it is what is shown; the stream only
+/// says that it exists.
+pub(crate) struct Picture {
+    pub key: String,
+    pub png: Arc<[u8]>,
+    /// The `livePaper` message. It names the bytes too: a file may get other pixels under the same
+    /// key (same name, same place), and the viewer must then fetch it again.
+    frame: Frame,
+}
+
+impl Picture {
+    /// `None` if the message cannot be written (never, for a string and a digest).
+    fn new(paper: LivePaper) -> Option<Picture> {
+        let mut hasher = DefaultHasher::new();
+        paper.png.hash(&mut hasher);
+        let version = format!("{:016x}", hasher.finish());
+        let message = serde_json::to_string(&PaperMessage {
+            key: &paper.key,
+            version: &version,
+        })
+        .ok()?;
+        Some(Picture {
+            frame: data_frame(&[&message]),
+            key: paper.key,
+            png: paper.png,
+        })
+    }
+
+    /// The `livePaper` message, which tells this picture from any other.
+    pub fn frame(&self) -> &Frame {
+        &self.frame
+    }
+}
+
 /// One event stream: its queue of messages and its live subscription.
 pub(crate) struct Viewer {
     id: u64,
@@ -108,6 +153,28 @@ struct LiveSubscription {
     id: u64,
     /// A first batch was queued (the next ones get `reset: false`).
     started: bool,
+    /// The `livePaper` message to queue right after the first batch: after its snapshot.
+    paper: Option<Frame>,
+}
+
+impl Queue {
+    /// Adds `frame`; a full queue is emptied and marked, and false tells the caller to wake the
+    /// stream ([`Viewer::settled`]).
+    fn add(&mut self, frame: Frame) -> bool {
+        let messages = self.frames.len() + self.in_flight;
+        let bytes = self.bytes.saturating_add(self.in_flight_bytes);
+        let full = messages >= QUEUE_MESSAGES
+            || (messages > 0 && bytes.saturating_add(frame.len()) > QUEUE_BYTES);
+        if full {
+            self.kicked = true;
+            self.frames.clear();
+            self.bytes = 0;
+            return false;
+        }
+        self.bytes += frame.len();
+        self.frames.push_back(frame);
+        true
+    }
 }
 
 /// What a stream has to write.
@@ -170,23 +237,21 @@ impl Viewer {
         if queue.closed || queue.kicked {
             return Err(ViewerGone);
         }
-        let messages = queue.frames.len() + queue.in_flight;
-        let bytes = queue.bytes.saturating_add(queue.in_flight_bytes);
-        let full = messages >= QUEUE_MESSAGES
-            || (messages > 0 && bytes.saturating_add(frame.len()) > QUEUE_BYTES);
-        if full {
-            queue.kicked = true;
-            queue.frames.clear();
-            queue.bytes = 0;
-            drop(queue);
-            self.kick.notify_one();
-            return Err(ViewerGone);
-        }
-        queue.bytes += frame.len();
-        queue.frames.push_back(frame);
+        let added = queue.add(frame);
+        self.settled(queue, added)
+    }
+
+    /// Lets the queue go and wakes the stream: messages to write, or (`added` false) a queue that
+    /// overflowed.
+    fn settled(&self, queue: MutexGuard<'_, Queue>, added: bool) -> Result<(), ViewerGone> {
         drop(queue);
-        self.data.notify_one();
-        Ok(())
+        if added {
+            self.data.notify_one();
+            Ok(())
+        } else {
+            self.kick.notify_one();
+            Err(ViewerGone)
+        }
     }
 
     /// A live batch of the subscription `subscription` ([`LiveViewer::send`]).
@@ -195,19 +260,28 @@ impl Viewer {
         if queue.closed || queue.kicked {
             return Err(ViewerGone);
         }
-        let reset = match queue.live.as_mut() {
-            Some(live) if live.id == subscription => !std::mem::replace(&mut live.started, true),
+        let (reset, paper) = match queue.live.as_mut() {
+            Some(live) if live.id == subscription => (
+                !std::mem::replace(&mut live.started, true),
+                live.paper.take(),
+            ),
             // An earlier subscription that the share stopped: its batches must not arrive
             // after what replaced it.
             _ => return Err(ViewerGone),
         };
         // Built under the lock: `reset` must be true for the first batch in the queue.
         let frame = live_frame(reset, batch_json);
-        self.enqueue(queue, frame)
+        let mut added = queue.add(frame);
+        // The first batch holds the snapshot: the paper comes right after it.
+        if let Some(paper) = paper {
+            added = added && queue.add(paper);
+        }
+        self.settled(queue, added)
     }
 
-    /// Starts expecting the live batches of `subscription`; false if the viewer is gone.
-    fn begin_live(&self, subscription: u64) -> bool {
+    /// Starts expecting the live batches of `subscription`, with `paper` to follow the first one;
+    /// false if the viewer is gone.
+    fn begin_live(&self, subscription: u64, paper: Option<Frame>) -> bool {
         let mut queue = lock(&self.queue);
         if queue.closed || queue.kicked {
             return false;
@@ -215,8 +289,30 @@ impl Viewer {
         queue.live = Some(LiveSubscription {
             id: subscription,
             started: false,
+            paper,
         });
         true
+    }
+
+    /// The paper of the live page changed: a viewer waiting for its snapshot is told after that,
+    /// a viewer following is told now. No message for plain paper: the snapshot says that the page
+    /// wants no picture. Nothing for a viewer out of live mode: its next subscription brings it.
+    fn live_paper(&self, paper: Option<&Frame>) {
+        let mut queue = lock(&self.queue);
+        if queue.closed || queue.kicked {
+            return;
+        }
+        let Some(live) = queue.live.as_mut() else {
+            return;
+        };
+        if !live.started {
+            live.paper = paper.cloned();
+            return;
+        }
+        if let Some(paper) = paper {
+            let added = queue.add(Arc::clone(paper));
+            let _ = self.settled(queue, added);
+        }
     }
 
     /// Stops expecting live batches; true if a subscription was running.
@@ -250,6 +346,9 @@ pub(crate) struct Content {
     max_streams: usize,
     max_streams_per_address: usize,
     state: Mutex<State>,
+    /// The `livePaper` message of the picture `GET /paper/<key>` serves ([`State::served`]): a
+    /// download under way ends when it is no longer that one.
+    served: watch::Sender<Option<Frame>>,
     /// The viewers, the pause or what is shown changed (`on_change`).
     changed: Notify,
 }
@@ -259,6 +358,8 @@ struct State {
     shown: Shown,
     /// The last `note` message, while a note is shown.
     note: Option<Frame>,
+    /// The picture of the paper of the live page, `None` on plain paper.
+    live_paper: Option<Arc<Picture>>,
     paused: Option<Paused>,
     /// Counts the changes of content, to know at resume whether anything changed.
     version: u64,
@@ -267,9 +368,24 @@ struct State {
     next_subscription: u64,
 }
 
+impl State {
+    /// The only picture that can be fetched: the paper of what the viewers are shown. While paused,
+    /// the frozen image's (a paper made meanwhile may be a sheet the teacher does not show yet);
+    /// nothing while a note or the waiting screen is shown.
+    fn served(&self) -> Option<&Arc<Picture>> {
+        match &self.paused {
+            Some(paused) => paused.paper.as_ref(),
+            None if self.shown == Shown::Live => self.live_paper.as_ref(),
+            None => None,
+        }
+    }
+}
+
 struct Paused {
     /// What viewers show while paused (and what a viewer joining during the pause gets).
     frozen: Frame,
+    /// The paper of the frozen image.
+    paper: Option<Arc<Picture>>,
     /// [`State::version`] when paused.
     version: u64,
 }
@@ -288,12 +404,14 @@ impl Content {
                 stopped: false,
                 shown: Shown::Waiting,
                 note: None,
+                live_paper: None,
                 paused: None,
                 version: 0,
                 viewers: BTreeMap::new(),
                 next_viewer: 1,
                 next_subscription: 1,
             }),
+            served: watch::channel(None).0,
             changed: Notify::new(),
         }
     }
@@ -321,11 +439,32 @@ impl Content {
         self.lock().stopped
     }
 
+    /// The picture under `key`, if it is the one that can be fetched now, and what tells when it no
+    /// longer is. The key is only compared: another one reaches nothing.
+    pub fn paper(&self, key: &str) -> Option<(Arc<Picture>, watch::Receiver<Option<Frame>>)> {
+        let state = self.lock();
+        let picture = state.served().filter(|picture| picture.key == key)?;
+        Some((Arc::clone(picture), self.served.subscribe()))
+    }
+
+    /// What can be fetched may have changed: the downloads of another picture end.
+    fn update_served(&self, state: &State) {
+        let now = state.served().map(|picture| Arc::clone(&picture.frame));
+        self.served.send_if_modified(|served| {
+            let changed = *served != now;
+            if changed {
+                served.clone_from(&now);
+            }
+            changed
+        });
+    }
+
     /// Hands `viewer` to the feed under a new subscription.
     fn start_live(&self, state: &mut State, viewer: &Arc<Viewer>) {
         let subscription = state.next_subscription;
         state.next_subscription += 1;
-        if viewer.begin_live(subscription) {
+        let paper = state.live_paper.as_ref().map(|p| Arc::clone(&p.frame));
+        if viewer.begin_live(subscription, paper) {
             self.feed.start(LiveViewer {
                 id: viewer.id,
                 subscription,
@@ -388,6 +527,9 @@ impl Content {
         state.viewers.insert(id, Arc::clone(&viewer));
         if let Some(paused) = &state.paused {
             let _ = viewer.push(Arc::clone(&paused.frozen));
+            if let Some(paper) = &paused.paper {
+                let _ = viewer.push(Arc::clone(&paper.frame));
+            }
             let _ = viewer.push(pause_frame(true));
         } else {
             self.send_current(&mut state, &viewer);
@@ -427,6 +569,7 @@ impl Content {
         state.shown = Shown::Waiting;
         state.note = None;
         state.version += 1;
+        self.update_served(&state);
         drop(state);
         self.notify_change();
     }
@@ -445,6 +588,7 @@ impl Content {
                 self.start_live(&mut state, viewer);
             }
         }
+        self.update_served(&state);
         drop(state);
         self.notify_change();
     }
@@ -472,10 +616,40 @@ impl Content {
         state.shown = Shown::Note;
         state.note = Some(full);
         state.version += 1;
+        self.update_served(&state);
         drop(state);
         if was != Shown::Note {
             self.notify_change();
         }
+    }
+
+    /// The paper of the live page (`docs/design/lan-share.md`, "The paper of a live page"), `None`
+    /// on plain paper. Kept for `GET /paper/<key>`, in place of the one before; each viewer following
+    /// live mode is told, one that joins after its snapshot. Recorded and told to nobody while the
+    /// share is paused or shows something else.
+    pub fn show_live_paper(&self, paper: Option<LivePaper>) {
+        // Outside the lock: a picture may weigh megabytes.
+        let picture = paper.and_then(Picture::new).map(Arc::new);
+        let mut state = self.lock();
+        if state.stopped {
+            return;
+        }
+        let same = match (&state.live_paper, &picture) {
+            (None, None) => true,
+            (Some(current), Some(new)) => current.frame == new.frame,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        state.live_paper = picture;
+        if state.shown == Shown::Live && state.paused.is_none() {
+            let frame = state.live_paper.as_ref().map(|p| Arc::clone(&p.frame));
+            for viewer in state.viewers.values() {
+                viewer.live_paper(frame.as_ref());
+            }
+        }
+        self.update_served(&state);
     }
 
     pub fn set_paused(&self, paused: bool) {
@@ -484,23 +658,30 @@ impl Content {
             return;
         }
         if paused {
-            let frozen = match state.shown {
+            let (frozen, paper) = match state.shown {
                 Shown::Live => {
                     self.stop_all_live(&state);
-                    let frozen = match self.feed.freeze() {
-                        Some(batch) => live_frame(true, &batch),
-                        None => waiting_frame(),
+                    let (frozen, paper) = match self.feed.freeze() {
+                        Some(batch) => (live_frame(true, &batch), state.live_paper.clone()),
+                        None => (waiting_frame(), None),
                     };
                     Self::push_all(&state, &frozen);
-                    frozen
+                    if let Some(paper) = &paper {
+                        Self::push_all(&state, &paper.frame);
+                    }
+                    (frozen, paper)
                 }
                 // The viewers show it already.
-                Shown::Note => state.note.clone().unwrap_or_else(waiting_frame),
-                Shown::Waiting => waiting_frame(),
+                Shown::Note => (state.note.clone().unwrap_or_else(waiting_frame), None),
+                Shown::Waiting => (waiting_frame(), None),
             };
             Self::push_all(&state, &pause_frame(true));
             let version = state.version;
-            state.paused = Some(Paused { frozen, version });
+            state.paused = Some(Paused {
+                frozen,
+                paper,
+                version,
+            });
         } else {
             let Some(paused) = state.paused.take() else {
                 return;
@@ -513,6 +694,7 @@ impl Content {
                 }
             }
         }
+        self.update_served(&state);
         drop(state);
         self.notify_change();
     }
@@ -524,6 +706,12 @@ impl Content {
             return;
         }
         state.stopped = true;
+        // The pictures go with the share: nothing can be fetched any more.
+        state.live_paper = None;
+        if let Some(paused) = &mut state.paused {
+            paused.paper = None;
+        }
+        self.update_served(&state);
         let viewers = std::mem::take(&mut state.viewers);
         for viewer in viewers.values() {
             if viewer.close() {
@@ -659,11 +847,11 @@ mod tests {
     fn live_subscriptions() {
         let viewer = Viewer::new(3, HERE);
         assert_eq!(viewer.send_live(1, "{}"), Err(ViewerGone));
-        assert!(viewer.begin_live(1));
+        assert!(viewer.begin_live(1, None));
         viewer.send_live(1, "{}").unwrap();
         viewer.send_live(1, "{}").unwrap();
         assert!(viewer.end_live());
-        assert!(viewer.begin_live(2));
+        assert!(viewer.begin_live(2, None));
         assert_eq!(
             viewer.send_live(1, "{}"),
             Err(ViewerGone),
@@ -686,6 +874,172 @@ mod tests {
         );
         assert!(viewer.close());
         assert_eq!(viewer.send_live(2, "{}"), Err(ViewerGone));
-        assert!(!viewer.begin_live(3));
+        assert!(!viewer.begin_live(3, None));
+    }
+
+    #[test]
+    fn the_paper_is_told_after_the_first_batch() {
+        let paper = data_frame(&[r#"{"type":"livePaper"}"#]);
+        let viewer = Viewer::new(8, HERE);
+        assert!(viewer.begin_live(1, Some(Arc::clone(&paper))));
+        let taken = |viewer: &Viewer| {
+            let frames = viewer.take().frames;
+            viewer.written();
+            frames.len()
+        };
+        assert_eq!(taken(&viewer), 0);
+        viewer.send_live(1, "{}").unwrap();
+        assert_eq!(taken(&viewer), 2, "the snapshot, then the paper");
+        viewer.send_live(1, "{}").unwrap();
+        assert_eq!(taken(&viewer), 1);
+        // Told again when it changes, and with each subscription: the viewer sees that it has it.
+        viewer.live_paper(Some(&paper));
+        assert_eq!(taken(&viewer), 1);
+        assert!(viewer.end_live());
+        assert!(viewer.begin_live(2, Some(Arc::clone(&paper))));
+        viewer.send_live(2, "{}").unwrap();
+        assert_eq!(taken(&viewer), 2);
+
+        // A paper that changes before the first batch replaces the one waiting; none cancels it.
+        let viewer = Viewer::new(9, HERE);
+        assert!(viewer.begin_live(1, Some(Arc::clone(&paper))));
+        viewer.live_paper(None);
+        viewer.send_live(1, "{}").unwrap();
+        assert_eq!(taken(&viewer), 1);
+    }
+
+    fn paper_of(key: &str, png: &Arc<[u8]>) -> Option<LivePaper> {
+        Some(LivePaper {
+            key: key.to_owned(),
+            png: Arc::clone(png),
+        })
+    }
+
+    fn bytes(of: &[u8]) -> Arc<[u8]> {
+        Arc::from(of)
+    }
+
+    /// A feed with a session to freeze.
+    struct Frozen;
+
+    impl LiveFeed for Frozen {
+        fn start(&self, _: LiveViewer) {}
+        fn stop(&self, _: u64) {}
+        fn freeze(&self) -> Option<String> {
+            Some("{}".to_owned())
+        }
+    }
+
+    #[test]
+    fn the_message_names_the_key_and_the_bytes_not_the_picture() {
+        let message = |png: &[u8]| {
+            let picture = Picture::new(paper_of("k1", &bytes(png)).unwrap()).unwrap();
+            text(picture.frame()).to_owned()
+        };
+        let first = message(b"\x89PNG one");
+        let value: serde_json::Value =
+            serde_json::from_str(first.strip_prefix("data: ").unwrap().trim()).unwrap();
+        assert_eq!(value["type"], "livePaper");
+        assert_eq!(value["key"], "k1");
+        assert_eq!(value["version"].as_str().unwrap().len(), 16);
+        assert_eq!(value.as_object().unwrap().len(), 3);
+        assert!(first.len() < 100, "{first}");
+        // The same bytes, the same message; other pixels under the same key, another one.
+        assert_eq!(first, message(b"\x89PNG one"));
+        assert_ne!(first, message(b"\x89PNG two"));
+    }
+
+    #[test]
+    fn only_the_paper_of_what_is_shown_can_be_fetched() {
+        let content = Content::new(Arc::new(Frozen), 5, 2);
+        let fetched = |key: &str| content.paper(key).map(|(picture, _)| picture.png.len());
+        let (one, two) = (bytes(b"one"), bytes(b"three"));
+
+        // Recorded while live mode is not shown: nothing to fetch yet.
+        content.show_live_paper(paper_of("k1", &one));
+        assert_eq!(fetched("k1"), None);
+        content.show_live();
+        assert_eq!(fetched("k1"), Some(3));
+        // Only this key, compared as it is.
+        for other in ["", "k", "k2", "K1", "k1 ", "../k1", "%6B1", "k1/"] {
+            assert_eq!(fetched(other), None, "{other:?}");
+        }
+
+        // A pause keeps the frozen image's paper; one made meanwhile waits for the resume.
+        content.set_paused(true);
+        assert_eq!(fetched("k1"), Some(3));
+        content.show_live_paper(paper_of("k2", &two));
+        assert_eq!(fetched("k1"), Some(3));
+        assert_eq!(fetched("k2"), None);
+        content.set_paused(false);
+        assert_eq!(fetched("k1"), None);
+        assert_eq!(fetched("k2"), Some(5));
+
+        // A plain page, a note, the waiting screen: nothing.
+        content.show_live_paper(None);
+        assert_eq!(fetched("k2"), None);
+        content.show_live_paper(paper_of("k2", &two));
+        assert_eq!(fetched("k2"), Some(5));
+        content.show_waiting();
+        assert_eq!(fetched("k2"), None);
+        content.show_live();
+        assert_eq!(fetched("k2"), Some(5));
+        content.show_note(NoteUpdate {
+            full: "{}".to_owned(),
+            append: None,
+        });
+        assert_eq!(fetched("k2"), None);
+        // A pause on the note freezes no paper, though one is recorded.
+        content.set_paused(true);
+        assert_eq!(fetched("k2"), None);
+        content.set_paused(false);
+        content.show_live();
+        assert_eq!(fetched("k2"), Some(5));
+        content.stop();
+        assert_eq!(fetched("k2"), None);
+    }
+
+    #[test]
+    fn the_server_holds_one_picture_and_lets_it_go() {
+        let content = Content::new(Arc::new(NoFeed), 5, 2);
+        content.show_live();
+        let (one, two) = (bytes(b"one"), bytes(b"two"));
+        content.show_live_paper(paper_of("k", &one));
+        assert_eq!(Arc::strong_count(&one), 2, "held once");
+        // A plain page lets it go: the viewers keep theirs, and the app its cache.
+        content.show_live_paper(None);
+        assert_eq!(Arc::strong_count(&one), 1);
+        content.show_live_paper(paper_of("k", &one));
+        content.show_live_paper(paper_of("k", &two));
+        assert_eq!(Arc::strong_count(&one), 1, "replaced");
+        assert_eq!(Arc::strong_count(&two), 2);
+        content.stop();
+        assert_eq!(Arc::strong_count(&two), 1, "gone with the share");
+        // Ignored once stopped.
+        content.show_live_paper(paper_of("k", &one));
+        assert_eq!(Arc::strong_count(&one), 1);
+    }
+
+    #[test]
+    fn a_paused_share_holds_the_frozen_paper_until_the_resume() {
+        let (frozen, next) = (bytes(b"frozen"), bytes(b"next"));
+        let content = Content::new(Arc::new(Frozen), 5, 2);
+        content.show_live();
+        content.show_live_paper(paper_of("k1", &frozen));
+        content.set_paused(true);
+        content.show_live_paper(paper_of("k2", &next));
+        // Two while paused: what the viewers see, and what comes next.
+        assert_eq!(
+            (Arc::strong_count(&frozen), Arc::strong_count(&next)),
+            (2, 2)
+        );
+        content.set_paused(false);
+        assert_eq!(
+            (Arc::strong_count(&frozen), Arc::strong_count(&next)),
+            (1, 2)
+        );
+        content.set_paused(true);
+        content.stop();
+        assert_eq!(Arc::strong_count(&next), 1, "gone with the share");
     }
 }

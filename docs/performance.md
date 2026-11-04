@@ -6,7 +6,7 @@ Les objectifs viennent de SPEC §8. `cargo xtask perf` les mesure sur l'exécuta
 
 1. `cargo xtask check` (compile l'exécutable de production).
 2. Fermer les autres programmes, surtout les compilations : les chiffres dépendent de la charge du PC. Brancher le portable sur secteur.
-3. `cargo xtask perf` : environ 5 à 10 minutes (la bibliothèque de 1 000 notes se génère en une minute, le MP4 de 2 minutes est un vrai export). `cargo xtask perf --write` met aussi à jour le tableau de ce document. `--only start,library,live,export,size` ne mesure que certaines parties (sans `--write`).
+3. `cargo xtask perf` : environ 5 à 10 minutes (la bibliothèque de 1 000 notes se génère en une minute, le MP4 de 2 minutes est un vrai export). `cargo xtask perf --write` met aussi à jour le tableau de ce document. `--only start,library,live,touchup,export,size` ne mesure que certaines parties (sans `--write`).
 
 La commande se termine par `PERF OK` si tous les objectifs sont atteints, sinon par `PERF MISSED` (code de sortie 1) ; les lignes « à titre indicatif » ne sont pas jugées. Les seules données relevées sur le PC sont le modèle du processeur, le nombre de cœurs, la mémoire, la carte graphique et la version de Windows.
 
@@ -21,6 +21,7 @@ Le script `app/e2e/perf.mjs` copie `ardoise.exe` dans un dossier temporaire (com
 | **Miniatures visibles dessinées** (< 3 s) | Du lancement jusqu'au moment où toutes les cartes visibles à l'écran ont leur image (`data-drawn-at`, posé à l'événement `load` de l'image). |
 | **Défilement** (p95 ≤ 33 ms, ≤ 1 % d'images au-delà de 50 ms) | Défilement scripté de la bibliothèque à 3 000 pixels par seconde pendant 6 s (un coup de molette rapide, environ 70 rangées de cartes), en notant l'intervalle entre deux images (`requestAnimationFrame`). On juge le défilement avec miniatures en cache ; celui hors cache est donné à titre indicatif. |
 | **Mode direct** (≥ 60 images/s, ≤ 1 % d'images en retard) | La tablette simulée (`--simulated-tablet`, 200 échantillons par seconde comme la vraie) est enregistrée par l'assistant, synchronisée, puis le mode direct est ouvert ; après 2 s, 8 s d'intervalles entre images pendant que le tracé arrive. Une image est « en retard » au-delà de 25 ms (elle a manqué un rafraîchissement à 60 Hz). La mesure est invalide si aucun trait n'est arrivé pendant ce temps. Le seuil de 57 images/s tolère la gigue du minuteur autour d'un écran à 60 Hz. |
+| **Mode direct, page chargée et retouchée** (≥ 60 images/s, ≤ 1 % d'images en retard ; `--only touchup`) | Même mesure sur une feuille de 4 000 traits (50 rangées de 80 petits traits, une note posée dans la bibliothèque avant le démarrage) reprise en mode direct depuis le menu de sa carte, pendant que la tablette simulée écrit. Pendant 10 s d'intervalles entre images, le script joue un enseignant par l'interface réelle (souris et touches du protocole de débogage) : outil Sélection, lasso autour d'une centaine de traits, pastille Rouge, `Suppr`, `Ctrl + Z` deux fois, `Ctrl + Y`, `Ctrl + Z`, puis un autre endroit de la page, sans interruption. La mesure est invalide si la tablette n'a rien écrit, si aucune retouche n'a été faite ou si une suppression n'a pas fait baisser le nombre de traits du canevas. Les images de la page pendant les gestes de la souris du script comptent : c'est ce que voit l'enseignant. Avant les retouches, 4 s de la même page sans retouche (la tablette écrit) sont mesurées à part et données à titre indicatif : elles disent ce que coûte la page seule. Également à titre indicatif, le coût d'une retouche : la plus longue image dans les 230 ms qui suivent chaque retouche (médiane et pire cas), à comparer à la plus longue image après un dessin complet de la page (10 fois, une fois les retouches finies), avec le temps des appels de dessin et le nombre de retouches traitées par un dessin partiel ou complet. |
 | **Export MP4 1080p d'une relecture de 2 min** (< 2 min) | Le banc d'essai de `ardoise-media` (`export_speed_mp4_2min`, compilé en release) exporte 2 minutes d'écriture à 1920 × 1080 et 30 images/s par Media Foundation : c'est le code que l'application exécute, sans l'interface. L'encodeur choisi par Windows (matériel ou logiciel) est indiqué dans le résultat. |
 | **Taille de l'exécutable** (< 30 Mo) | La taille du fichier (la même limite que `cargo xtask selftest`). |
 
@@ -29,18 +30,21 @@ Le WebM (AV1) est plus lent par nature : la durée estimée est affichée avant 
 ## Dernière mesure
 
 <!-- perf:start -->
-Dernière mesure : 2026-10-29, sur 12th Gen Intel(R) Core(TM) i5-1235U, 10 cœurs / 12 threads, 16 Go de RAM, GPU : Intel(R) Iris(R) Xe Graphics, Windows 10.0.26300.0.
+Dernière mesure : 2026-11-04, sur 12th Gen Intel(R) Core(TM) i5-1235U, 10 cœurs / 12 threads, 16 Go de RAM, GPU : Intel(R) Iris(R) Xe Graphics, Windows 10.0.26300.0.
 
 | Objectif | Mesuré | Résultat |
 |---|---|---|
-| Démarrage à chaud (< 2 s) | 0,95 s (médiane de 3 ; à froid : 1,03 s) | OK |
-| 1000 notes affichées (< 2 s) | en cache : 1,77 s ; hors cache : 2,46 s | OK |
-| 1000 notes, miniatures visibles dessinées (< 3 s) | en cache : 1,82 s ; hors cache : 2,76 s (12 cartes) | OK |
+| Démarrage à chaud (< 2 s) | 1,04 s (médiane de 3 ; à froid : 1,51 s) | OK |
+| 1000 notes affichées (< 2 s) | en cache : 2,18 s ; hors cache : 3,13 s | NON ATTEINT |
+| 1000 notes, miniatures visibles dessinées (< 3 s) | en cache : 2,22 s ; hors cache : 3,53 s (12 cartes) | OK |
 | 1000 notes, défilement, miniatures en cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 60,0 fps, p95 16,8 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (360 images) | OK |
 | 1000 notes, défilement, miniatures hors cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 60,0 fps, p95 16,8 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (360 images) | à titre indicatif |
 | Mode direct (>= 60 images/s, <= 1 % d'images en retard) | 60,0 fps, p95 16,9 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (481 images) | OK |
-| MP4 1080p d'une relecture de 2 min (< 2 min) | 14,8 s (3599 images, 120 s de relecture ; Media Foundation: Intel® Quick Sync Video H.264 Encoder MFT (hardware)) | OK |
-| Taille de l'exécutable (< 30 Mo) | 21,4 Mo | OK |
+| Mode direct, page de 4000 traits retouchée (>= 60 images/s, <= 1 % d'images en retard) | 59,1 fps, p95 16,9 ms, 4 en retard (> 25 ms), 2 au-delà de 50 ms (591 images) ; 24 retouches | OK |
+| Même page, la tablette écrit, sans retouche (4000 traits) | 60,0 fps, p95 16,9 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (241 images) | à titre indicatif |
+| Une retouche sur cette page, plus longue image après elle (médiane / pire) | 16,9 / 17,3 ms ; dessin complet : 116,7 / 616,9 ms ; appels 5,2 ms contre 69,4 ms ; 24 dessins partiels, 0 dessins complets | à titre indicatif |
+| MP4 1080p d'une relecture de 2 min (< 2 min) | 15,2 s (3599 images, 120 s de relecture ; Media Foundation: Intel® Quick Sync Video H.264 Encoder MFT (hardware)) | OK |
+| Taille de l'exécutable (< 30 Mo) | 22,3 Mo | OK |
 <!-- perf:end -->
 
 ## Mesure de référence avant les corrections de la bibliothèque (M10)

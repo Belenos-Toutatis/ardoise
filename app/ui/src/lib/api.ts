@@ -7,7 +7,7 @@ import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic'
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
 import type { InkspaceProgress, InkspaceReport, InkspaceSource } from './inkspace';
-import type { LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState, MonitorInfo } from './live';
+import type { LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStopped, LiveStrokesEdit, LiveStyle, LiveViewState, MonitorInfo } from './live';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
 import { mockShareSubscribe } from './mock-share';
@@ -233,6 +233,12 @@ export const api = {
     image?: { image: BackgroundImage; key: string },
   ) => call<string>('render_background', { page, background, widthPx, image }),
   /**
+   * PNG data URL of the paper of page `pageIndex` of the live session, like `renderBackground`,
+   * with the background image of a resumed sheet (its pixels are the session's).
+   */
+  livePageBackground: (pageIndex: number, page: PageSize, background: Background, widthPx: number) =>
+    call<string>('live_page_background', { pageIndex, page, background, widthPx }),
+  /**
    * The ink the note can go back to ("Revenir à l'original"): `{ source: 'none' }` when there is
    * nothing to go back to; rejects with `originalDamaged` when the original cannot be read.
    */
@@ -322,12 +328,33 @@ export const api = {
     return invoke<LiveSnapshot>('live_subscribe', { onEvent: channel });
   },
   liveStart: () => call<LiveSnapshot>('live_start'),
-  /** Leaves live mode; returns the paths of the notes saved. */
-  liveStop: () => call<string[]>('live_stop'),
+  /**
+   * Resumes live mode on an existing sheet of the library (M12): like `liveStart`, with that note
+   * as the first page. Refused with `noteNotFound`, `notInLibrary`, `noteDamaged` or
+   * `noteNewerVersion` (a running session then goes on).
+   */
+  liveResume: (path: string) => call<LiveSnapshot>('live_resume', { path }),
+  /** Leaves live mode; says which notes were saved, and what became of the sheets and the sound. */
+  liveStop: () => call<LiveStopped>('live_stop'),
   liveSetStyle: (style: LiveStyle) => call<void>('live_set_style', { style }),
   liveCommand: (command: LiveCommand) => call<void>('live_command', { command }),
   /** « Undo the clearing »: gives the current page the ink of the last « Clear the page » back. */
   liveRestoreCleared: () => call<boolean>('live_restore_cleared'),
+  /**
+   * Deletes or recolours strokes chosen on page `pageIndex` at `revision` (`LiveState.revision`):
+   * refused with `liveEditStale` once that page is left or its strokes moved, `liveEditInvalid`
+   * when the list or the colour makes no sense. Returns the page's revision after the edit (a change
+   * of colour keeps it, so that the selection goes on); every window gets a `strokesEdited` event.
+   */
+  liveEditStrokes: (pageIndex: number, revision: number, edit: LiveStrokesEdit) =>
+    call<number>('live_edit_strokes', { pageIndex, revision, edit }),
+  /**
+   * Undoes the last edit of page `pageIndex`, the one on screen, or `liveEditStale` (delete, change
+   * of colour, « Clear the page »; never what the tablet wrote). False when there was none.
+   */
+  liveUndoEdit: (pageIndex: number) => call<boolean>('live_undo_edit', { pageIndex }),
+  /** Does again the last edit undone on page `pageIndex`, likewise. False when there was none. */
+  liveRedoEdit: (pageIndex: number) => call<boolean>('live_redo_edit', { pageIndex }),
   liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
   /**
    * The marks written over the presentation on page `pageIndex`, the whole list: the viewers of

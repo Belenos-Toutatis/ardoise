@@ -23,12 +23,15 @@
     copying = false,
     replaying = false,
     replayDisabled = false,
+    resumeDisabled = false,
+    resumeHint = null,
     onsplit,
     oncopy,
     onexport,
     onprint,
     onreplay,
     onvideo,
+    onresume,
     onstraighten,
   }: {
     tools: ToolSettings;
@@ -58,6 +61,12 @@
     onprint: () => void;
     onreplay: () => void;
     onvideo: () => void;
+    /** « Reprendre en mode direct » (M12): absent, no such button. */
+    onresume?: () => void;
+    /** Live mode cannot resume the note now. */
+    resumeDisabled?: boolean;
+    /** Why, when it cannot (no tablet registered, the tablet is busy). */
+    resumeHint?: string | null;
     /** "Redresser les formes" on the selection. */
     onstraighten?: () => void;
   } = $props();
@@ -241,6 +250,19 @@
       <span aria-hidden="true">▣</span>
       {t('editor.video.button')}
     </button>
+    {#if onresume}
+      <button
+        type="button"
+        class="button small-button"
+        data-action="resume-live"
+        disabled={resumeDisabled}
+        title={resumeHint ?? t('live.resume.hint')}
+        onclick={onresume}
+      >
+        <span aria-hidden="true">◉</span>
+        {t('live.resume.action')}
+      </button>
+    {/if}
     <ShareButton />
   </div>
 </div>

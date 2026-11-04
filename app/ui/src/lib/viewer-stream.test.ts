@@ -99,6 +99,8 @@ describe('parseMessage', () => {
     for (const type of ['waiting', 'end', 'live', 'note', 'noteStrokes', 'pause']) {
       expect(parseMessage(JSON.stringify({ type }))).toEqual({ type });
     }
+    const paper = { type: 'livePaper', key: 'k1', version: 'v1' };
+    expect(parseMessage(JSON.stringify(paper))).toEqual(paper);
     expect(parseMessage('{"type":"other"}')).toBeNull();
     expect(parseMessage('{"nothing":1}')).toBeNull();
     expect(parseMessage('null')).toBeNull();

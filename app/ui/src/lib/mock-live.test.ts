@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LiveBatch, LiveEvent, LiveSnapshot, MonitorInfo } from './live';
+import type { LiveBatch, LiveEvent, LiveSnapshot, LiveStopped, MonitorInfo } from './live';
+import { LiveState } from './live-state.svelte';
 import { mockLibrary, resetMockLibrary } from './mock-data';
 import {
   mockLiveConfig,
@@ -39,6 +40,16 @@ afterEach(() => {
 });
 
 describe('browser stand-in for live mode', () => {
+  it('renders the paper of a page, like the session', () => {
+    const url = mockLiveInvoke('live_page_background', {
+      pageIndex: 0,
+      page: { width: 29700, height: 21600 },
+      background: { paper: 'slate', template: 'blank', texture: false },
+      widthPx: 512,
+    });
+    expect(String(url)).toMatch(/^data:image\/svg\+xml/);
+  });
+
   it('starts idle, waits for the tablet, then streams batches of 3 points every 15 ms', async () => {
     const sub = await subscribe();
     expect(sub.first.state).toBe('idle');
@@ -111,7 +122,9 @@ describe('browser stand-in for live mode', () => {
     invoke('live_command', { command: { kind: 'clearPage' } });
     expect(sub.last()!.page.strokes).toHaveLength(0);
     expect(invoke('live_restore_cleared')).toBe(true);
-    expect(sub.last()!.page.strokes.length).toBeGreaterThan(0);
+    // Through the page's history: an event with the strokes, not the whole page again.
+    expect(sub.events().at(-1)).toMatchObject({ type: 'strokesEdited', removed: [] });
+    expect((invoke('live_start') as LiveSnapshot).page.strokes.length).toBeGreaterThan(0);
     // Only once, and not from another page.
     expect(invoke('live_restore_cleared')).toBe(false);
     invoke('live_command', { command: { kind: 'clearPage' } });
@@ -168,6 +181,31 @@ describe('browser stand-in for live mode', () => {
     invoke('live_set_view', { view: { ...view, board: false } });
     expect(sub.last()?.page.background.paper).toBe('white');
     expect(sub.last()?.style).toEqual(red);
+  });
+
+  it('follows a snapshot with the stroke in progress, so a window never holds a partial stroke', async () => {
+    const live = new LiveState();
+    const sub = await subscribe();
+    const snapshot = invoke('live_start') as LiveSnapshot;
+    live.initial(snapshot);
+    const feed = sub.batches.length;
+    const fed = () => sub.batches.slice(feed).forEach((b) => live.receive(b));
+    vi.advanceTimersByTime(mockLiveConfig.waitMs);
+    // Until the pen is down for a while: a stroke in progress.
+    let guard = 0;
+    while ((live.current?.points.length ?? 0) < 4 && guard++ < 1000) {
+      vi.advanceTimersByTime(15);
+      fed();
+      sub.batches.splice(feed);
+    }
+    expect(live.current).not.toBeNull();
+    const finished = live.strokes.length;
+    const red = { tool: 'feltTip', color: { r: 216, g: 0, b: 0, a: 255 }, width: 120 };
+    invoke('live_set_style', { style: red });
+    fed();
+    expect(live.strokes).toHaveLength(finished);
+    expect(live.current?.points.length ?? 0).toBeGreaterThanOrEqual(4);
+    expect(live.strokeCount).toBe(finished + 1);
   });
 
   it('holds the tablet landscape by default and portrait notes follow the position', async () => {
@@ -288,7 +326,7 @@ describe('browser stand-in for live mode', () => {
     expect(() => invoke('live_command', { command: { kind: 'nextPage' } })).toThrow();
     expect(() => invoke('live_set_view', { view: {} })).toThrow();
     expect(() => invoke('live_set_style', { style: {} })).toThrow();
-    expect(invoke('live_stop')).toEqual([]);
+    expect(invoke('live_stop')).toEqual({ saved: [], forks: [], narration: null });
     expect(invoke('unknown_command')).toBeTypeOf('symbol');
   });
 
@@ -330,7 +368,7 @@ describe('browser stand-in for live mode', () => {
     invoke('live_command', { command: { kind: 'nextPage' } });
     vi.advanceTimersByTime(15 * 150);
     invoke('live_command', { command: { kind: 'newPage' } });
-    const paths = invoke('live_stop') as string[];
+    const paths = (invoke('live_stop') as LiveStopped).saved;
     expect(paths).toHaveLength(2);
     expect(new Set(paths).size).toBe(2);
     expect(mockLibrary().notes.size).toBe(before + 2);
@@ -370,8 +408,7 @@ describe('browser stand-in for live mode', () => {
     expect(saved.length).toBeGreaterThan(0);
     expect(mockLibrary().notes.size).toBe(before + 2);
     expect(failures()).toHaveLength(2);
-    const paths = invoke('live_stop') as string[];
-    expect(paths).toHaveLength(2);
+    expect((invoke('live_stop') as LiveStopped).saved).toHaveLength(2);
   });
 
   it('does not say that everything is saved when stopping with a page that failed', async () => {

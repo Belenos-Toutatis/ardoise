@@ -7,14 +7,17 @@
 //!   the orientation of the settings).
 //! - Any other note (live mode, Inkspace import, made in Ardoise) gets `original.ardoise` when
 //!   the editor first saves a change of its ink over it ([`keep_original`], called by
-//!   `notes::save_in`): the version on disk, note and strokes only. It is written once and never
-//!   changed afterwards.
+//!   `notes::save_in`), or when live mode first writes new ink on it ([`keep_resumed_original`],
+//!   called by `live::hub`): the version on disk, note and strokes only. It is written once and
+//!   never changed afterwards.
 //!
 //! Only the page size, the layers and the strokes come back; the title, tags, favourite,
 //! paper and narration stay as they are now. The first version also gives the placement of its
 //! background image (the `backgroundImage` of the `note.json` in `original.ardoise`, whose
 //! pixels are not in it): the editor puts the current image back where it was when it is the
-//! same image (`lib/editor/original.ts`). The tablet's pages have no image.
+//! same image (`lib/editor/original.ts`). The tablet's pages have no image. It also gives its paper,
+//! for one case: a sheet whose slate comes from being written on under live mode's blackboard
+//! gets back the paper it had (same file).
 //!
 //! The tablet's bytes are decoded with today's settings (the orientation, the registered tablet's
 //! area): a note synced with the other orientation, or from another tablet model, comes back in the
@@ -24,7 +27,7 @@ use std::path::Path;
 
 use ardoise_core::format::{FormatError, NoteFile, read_from_bytes, to_bytes};
 use ardoise_core::library::Library;
-use ardoise_core::note::{BackgroundImage, Layer, Note, PageSize};
+use ardoise_core::note::{BackgroundImage, Layer, Note, PageSize, Paper};
 use ardoise_core::settings::{Orientation, Settings};
 use ardoise_device::identity;
 use ardoise_device::pages::note_from_page;
@@ -56,6 +59,8 @@ pub enum NoteOriginal {
         page: PageSize,
         layers: Vec<Layer>,
         strokes: Vec<Stroke>,
+        /// The paper it had.
+        paper: Paper,
         #[serde(rename = "backgroundImage", skip_serializing_if = "Option::is_none")]
         background_image: Option<BackgroundImage>,
     },
@@ -68,14 +73,25 @@ pub enum NoteOriginal {
 /// tags, background or narration change (the original is taken at the first change of the
 /// ink, so it holds the ink before any edit).
 pub fn keep_original(file: &mut NoteFile, edited: &Note) -> Result<(), FormatError> {
-    if file.original.is_some() || file.original_note.is_some() {
+    if file.note.strokes.is_empty() {
         return Ok(());
     }
-    let on_disk = &file.note;
-    if on_disk.strokes.is_empty() || same_ink(on_disk, edited) {
+    keep_first_version(file, edited)
+}
+
+/// [`keep_original`] for live mode writing on a note it resumed: `file` is the note as it was read,
+/// and there a blank page is something to go back to. It is a worksheet (a page of a PDF, an image,
+/// a template) that a teacher takes up to write on, and the sheet before the lesson is what must
+/// stay recoverable (`docs/questions.md` Q9). Nothing is kept for what leaves the ink as it was.
+pub fn keep_resumed_original(file: &mut NoteFile, written: &Note) -> Result<(), FormatError> {
+    keep_first_version(file, written)
+}
+
+fn keep_first_version(file: &mut NoteFile, edited: &Note) -> Result<(), FormatError> {
+    if file.original.is_some() || file.original_note.is_some() || same_ink(&file.note, edited) {
         return Ok(());
     }
-    file.original_note = Some(to_bytes(&NoteFile::new(on_disk.clone()))?);
+    file.original_note = Some(to_bytes(&NoteFile::new(file.note.clone()))?);
     Ok(())
 }
 
@@ -148,6 +164,7 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
             page: note.page,
             layers: note.layers,
             strokes: note.strokes,
+            paper: note.background.paper,
             background_image: note.background_image,
         });
     }

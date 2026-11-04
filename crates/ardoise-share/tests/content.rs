@@ -6,9 +6,10 @@
 mod common;
 
 use std::net::{Ipv4Addr, TcpStream};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ardoise_share::{NoteUpdate, Shown, ViewerGone};
+use ardoise_share::{LivePaper, NoteUpdate, Shown, ViewerGone};
 use common::*;
 
 const QUIET: Duration = Duration::from_millis(150);
@@ -410,4 +411,153 @@ fn stop_with_a_viewer_that_does_not_read() {
     assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, port)).is_err());
     let mut seen = Vec::new();
     assert!(stuck.read_until_closed(Duration::from_secs(10), &mut seen));
+}
+
+fn live_paper(n: u64) -> Option<LivePaper> {
+    Some(LivePaper {
+        key: format!("k{n}"),
+        png: Arc::from(format!("picture {n}").into_bytes()),
+    })
+}
+
+/// The next message tells of the paper `n`, without its picture.
+fn expect_paper(viewer: &mut EventStream, n: u64) {
+    let message = viewer.expect();
+    assert_eq!(message["type"], "livePaper", "{message}");
+    assert_eq!(message["key"], format!("k{n}"));
+    assert!(message.get("picture").is_none(), "{message}");
+}
+
+/// Reads the first batch of a subscription.
+fn expect_reset(viewer: &mut EventStream) {
+    let message = viewer.expect();
+    assert_eq!(message["type"], "live");
+    assert_eq!(message["reset"], true);
+}
+
+#[test]
+fn the_paper_of_a_live_page_is_told_to_each_viewer_after_its_snapshot() {
+    let h = Harness::start();
+    let mut a = h.viewer();
+    assert_eq!(a.expect(), waiting());
+    h.share.show_live();
+    expect_reset(&mut a);
+
+    // Plain paper: no message at all.
+    h.share.show_live_paper(None);
+    a.expect_silence(QUIET);
+
+    // The paper arrives apart from the batches, once however often it is given.
+    h.share.show_live_paper(live_paper(1));
+    expect_paper(&mut a, 1);
+    h.share.show_live_paper(live_paper(1));
+    h.feed.of(1).send(&point_batch(1)).unwrap();
+    assert_eq!(a.expect(), live(false, &point_batch(1)));
+
+    // A late joiner: its snapshot, then the paper; the others get nothing.
+    let mut b = h.viewer();
+    expect_reset(&mut b);
+    expect_paper(&mut b, 1);
+    b.expect_silence(QUIET);
+    a.expect_silence(Duration::ZERO);
+
+    // A plain page: nothing sent (its snapshot says it wants no picture), a viewer joining there
+    // gets none.
+    h.share.show_live_paper(None);
+    let mut c = h.viewer();
+    expect_reset(&mut c);
+    c.expect_silence(QUIET);
+    a.expect_silence(Duration::ZERO);
+
+    // Back on the sheet: everyone is told, and the viewer that has that picture fetches nothing.
+    h.share.show_live_paper(live_paper(1));
+    for viewer in [&mut a, &mut b, &mut c] {
+        expect_paper(viewer, 1);
+    }
+
+    // Another paper: for everyone. A viewer that reconnects is told again.
+    h.share.show_live_paper(live_paper(2));
+    for viewer in [&mut a, &mut b, &mut c] {
+        expect_paper(viewer, 2);
+    }
+    drop(c);
+    let mut d = h.viewer();
+    expect_reset(&mut d);
+    expect_paper(&mut d, 2);
+}
+
+#[test]
+fn the_paper_of_a_live_page_freezes_with_the_pause() {
+    let h = Harness::start();
+    let frozen = r#"{"events":[{"type":"snapshot","frozen":true}],"sentAt":9}"#;
+    *h.feed.frozen.lock().unwrap() = Some(frozen.to_owned());
+    let mut a = h.viewer();
+    assert_eq!(a.expect(), waiting());
+    h.share.show_live();
+    expect_reset(&mut a);
+    h.share.show_live_paper(live_paper(1));
+    expect_paper(&mut a, 1);
+
+    // The frozen image, its paper, the badge.
+    h.share.set_paused(true);
+    assert_eq!(a.expect(), live(true, frozen));
+    expect_paper(&mut a, 1);
+    assert_eq!(a.expect(), pause(true));
+    a.expect_silence(QUIET);
+
+    // A viewer joining during the pause gets the paper between the two.
+    let mut b = h.viewer();
+    assert_eq!(b.expect(), live(true, frozen));
+    expect_paper(&mut b, 1);
+    assert_eq!(b.expect(), pause(true));
+
+    // A paper made during the pause reaches nobody, not even a viewer that joins: what it shows
+    // may be what the teacher does not show yet.
+    h.share.show_live_paper(live_paper(2));
+    a.expect_silence(QUIET);
+    b.expect_silence(Duration::ZERO);
+    let mut c = h.viewer();
+    assert_eq!(c.expect(), live(true, frozen));
+    expect_paper(&mut c, 1);
+    assert_eq!(c.expect(), pause(true));
+
+    // Resume: the fresh snapshot, then the new paper.
+    h.share.set_paused(false);
+    for viewer in [&mut a, &mut b, &mut c] {
+        assert_eq!(viewer.expect(), pause(false));
+        expect_reset(viewer);
+        expect_paper(viewer, 2);
+    }
+}
+
+#[test]
+fn the_paper_of_a_live_page_waits_out_other_contents() {
+    let h = Harness::start();
+    let mut a = h.viewer();
+    assert_eq!(a.expect(), waiting());
+
+    // Recorded, not sent, while live mode is not shown.
+    h.share.show_live_paper(live_paper(1));
+    a.expect_silence(QUIET);
+    h.share.show_live();
+    expect_reset(&mut a);
+    expect_paper(&mut a, 1);
+
+    // Back from the note: told again after the snapshot, and a paper changed meanwhile likewise.
+    h.share.show_note(full("n1", 1));
+    assert_eq!(a.expect(), json(&note("n1", 1)));
+    h.share.show_live();
+    expect_reset(&mut a);
+    expect_paper(&mut a, 1);
+    h.share.show_waiting();
+    assert_eq!(a.expect(), waiting());
+    h.share.show_live_paper(live_paper(2));
+    a.expect_silence(QUIET);
+    h.share.show_live();
+    expect_reset(&mut a);
+    expect_paper(&mut a, 2);
+
+    // Stopped: ignored.
+    h.share.stop();
+    h.share.show_live_paper(live_paper(3));
 }

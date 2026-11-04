@@ -279,13 +279,65 @@ closes the window.
 If a note of the session is renamed or tagged during the lesson (by the assistant, for instance), the following pages
 keep being written to it instead of being duplicated.
 
+### Resuming live mode on a sheet
+
+*Needs the tablet.* Was the lesson interrupted, or do you want to add writing to a sheet you already saved? You can
+resume live mode on that sheet.
+
+- **From the library**: open the **⋯** menu of the note's card and choose **Resume in live mode**.
+- **From the editor**: click **Resume in live mode** in the toolbar. If there are unsaved changes, Ardoise asks:
+  **Save and resume live mode**, **Resume without saving** or **Stay**.
+
+The button is greyed out while the tablet is not registered or is busy (sync under way). Select one note only.
+
+**What happens**
+
+- The control window, the presentation and the other screen on the network show the sheet with its background
+  (template, texture, image or PDF page) and its strokes. What you write is added, on the last visible layer. Hidden
+  layers are never shown in the presentation or on the other screen.
+- **The note itself is written**: same file, same title, no copy. Its background image, its original, its narration,
+  its recognised text and everything else it holds are kept. If you draw nothing, the file is not touched.
+- **The blackboard** does not make you lose the sheet's background: when you leave it, you get the sheet's paper and
+  image back. If you finish without leaving it, the sheet keeps its paper as long as you have written nothing; if you
+  wrote on it in chalk, it is saved as slate so that the chalk stays readable.
+- **The format**: if the sheet is not the size of the tablet, what you write is scaled down or up to fit whole inside
+  the sheet, centred, without distortion. The width of the stroke does not change.
+- **The orientation**: the sheet is never turned. If it is landscape and the tablet is set to portrait (or the other
+  way round), a notice tells you how to hold the tablet: "To write on this sheet, hold the tablet like this: …". The
+  four position buttons are greyed out for this sheet.
+- **The next page** creates a new note, at the root of the library, and follows the position set for the tablet again:
+  the position buttons then work.
+- **The narration**: if you record, the sound is added after the old one without covering it, and the replay stays
+  right despite the time between the two sessions. If the sound cannot be added (more than 4 hours in all, or an old
+  narration that cannot be read), it goes into a new note next to the sheet, and Ardoise tells you when you finish.
+- **Finish** saves the note as usual (counter "N notes saved").
+
+**Back to the original, after a resume.** The note keeps its *first version* (see chapter 8, "Back to the original").
+A resume does not make a new one each time:
+
+- a note with no original yet (written live, imported, made in Ardoise, or a sheet still blank) gets the sheet *as it
+  was before the resume*;
+- a note received from the tablet gets the page *as it was synced*;
+- a note that was already edited gets *its first version*, not the state just before the resume.
+
+Only the page size, the layers, the strokes and the place of the background image come back; the title, tags,
+favourite and narration stay as they are. So does the paper, unless the blackboard's slate replaced it: the first
+version's paper then comes back. `Ctrl + Z` undoes it all.
+
+**If the sheet changes elsewhere during live mode** (a copy arrives through Nextcloud, or the note is changed or deleted
+on another PC), Ardoise overwrites nothing. A notice appears: "This sheet was changed elsewhere during live mode: so
+that nothing is overwritten, the writing continues in a new note, next to it." (or "deleted elsewhere" if the file is
+gone). The new note is in the same binder, with the sheet's image, original and narration; the version written elsewhere
+stays as it is. Close the notice with **Dismiss the message**. A mere change of title, tag or favourite made elsewhere
+does not create a new note.
+
 ### The control window
 
 - **Tool** (ballpoint, fountain pen, felt-tip, pencil, brush, highlighter, chalk), **Colour** (including **Chalk white**
   and **Yellow**) and **Width**: the next stroke follows them, the previous ones do not change.
 - **Pages**: **Previous page**, **Next page** (the position is shown: "Page 2 / 5"), **New page**. **New layer** adds a
   layer to the current page. **Clear the page** (or `Ctrl + Delete`) clears the current page only; a "Page cleared." message offers **Undo
-  clearing** for 8 seconds, which gives the ink back. If the page has changed meanwhile, Ardoise says the clearing can
+  clearing** for 8 seconds, which gives the ink back (`Ctrl + Z` gives it back too, with no time limit: see **Touching up during live mode**). If the page has changed meanwhile, Ardoise says the clearing can
   no longer be undone.
 - **Blackboard**: slate background and white chalk. **Laser pointer**: the pen hovering, without touching the tablet,
   shows a red dot on screen *without writing anything*; touching the tablet writes again.
@@ -302,6 +354,50 @@ keep being written to it instead of being duplicated.
 The *tablet's button* does, during live mode, what the **Tablet button in live mode** option says (new page or new
 layer). *What the Bamboo Slate sends when the button is pressed has not yet been checked on the real tablet.* The keys
 for next and previous page work in any case.
+
+### Touching up during live mode
+
+*Needs the tablet.* A mistake to remove, a word to turn red? You do not need to leave live mode or open the editor. You
+touch up in the control window, and **the tablet keeps writing meanwhile**.
+
+**Choosing strokes**
+
+- Click **Select** in the toolbar, or press `V`. Pressing it again leaves the tool.
+- **Lasso**: in the preview, press with the mouse and draw around the strokes, then release. A stroke is chosen when at
+  least half of its points are inside the lasso.
+- **Click**: click a stroke to choose it alone. Click on the ink itself, not next to it.
+- `Shift` + lasso or click adds strokes to the ones already chosen. `Ctrl` + lasso or click removes some.
+- A gesture on empty paper, or `Esc`, clears the selection. While strokes are chosen, `Esc` does nothing else.
+- A finger and the wheel still move and zoom the preview.
+- The chosen strokes are outlined in blue in the preview. A bar says "Selected strokes: 3".
+- You cannot choose the stroke the tablet is writing right now, nor the strokes of a hidden layer. On a resumed sheet,
+  you can choose the sheet's old strokes.
+
+**Deleting**: click **Delete** in the bar, or press `Delete` or `Backspace`.
+
+**Changing the colour**: click a **Colour** swatch. Only the chosen strokes change, and the new colour shows at once
+inside the blue outline. They stay chosen, so that you can try another colour. **The pen's colour does not change**: what the tablet writes next keeps its colour. With nothing
+chosen, a swatch sets the pen's colour, as before.
+
+**Undo and redo**
+
+- `Ctrl + Z` (or **Undo**) undoes the last touch-up: a deletion, a change of colour, or **Clear the page**. Deleted
+  strokes come back to their place.
+- `Ctrl + Y` or `Ctrl + Shift + Z` (or **Redo**) does again what was just undone. A new touch-up empties what could be
+  redone.
+- **What is never undone**: what the tablet wrote. A stroke written in the meantime stays, whatever order you undo and
+  redo in. Changes of tool, pen colour or width, and page changes, are not touch-ups either.
+- Each page has its own list, which keeps the last 100 touch-ups. If you leave a page and come back to it, `Ctrl + Z`
+  still undoes its touch-ups. The lists are gone when you finish live mode.
+- The **Undo** and **Redo** buttons are greyed out when there is nothing to do.
+
+**The projector and the other screen on the network only see the result.** Never the blue outline or the lasso: a
+deleted stroke disappears, a recoloured stroke changes colour. The annotations drawn over the presentation are not
+strokes of the page: they cannot be chosen.
+
+**In the note.** When you finish, the note holds what was on screen: deleted strokes gone, colours changed. On a resumed
+sheet, the touch-up of an old stroke is written into the note itself; "Back to the original" (chapter 8) always gives
+back the first version.
 
 ### Projecting on a video projector
 
@@ -672,7 +768,8 @@ For a note received from the tablet, **Back to the original** (in the **Original
 arrived, without your edits. Ardoise spells out what is lost (strokes added, erased, moved, layers, rotation, format)
 and what stays (title, tags, favourite, paper, narration, background image). The action can be undone (`Ctrl + Z`); then
 save to keep it. For a note that has never been modified there is no original yet: Ardoise keeps the previous version
-the first time you save a change of the ink.
+the first time you save a change of the ink, or the time live mode resumes the sheet and writes on it (see chapter 6).
+The original is always the *first* version of the note, never the state just before the last change.
 
 ## 9. Replay, narration and video
 
@@ -970,7 +1067,7 @@ of every component used, with its licence.
 | Live pages could not be saved | They stay in memory. Check the library folder (space, permissions, sync); a backup copy is written to `%LOCALAPPDATA%\Ardoise\live-backup`. |
 | "Ardoise closed without saving some changes" (library banner), or a "Recovered changes" window | Ardoise stopped before you saved. Open the note again and recover the changes (chapter 8). |
 | "Unreadable files: N" | Ardoise cannot read these files and has not changed them; the reason is written next to each one (chapters 2 and 7). |
-| Windows says "Ardoise is preventing shutdown" | A note has unsaved changes: go back to Ardoise and save, or shut down anyway (the backup copy is already written, chapter 8). |
+| Windows says "Ardoise is preventing shutdown" | Live mode is running: what was written is saved, and you can shut down; or a note has unsaved changes: go back to Ardoise and save, or shut down anyway (the backup copy is already written, chapter 8). |
 | "Ardoise did not find Wacom Inkspace on this computer" | Click **Choose a folder…** and give Inkspace's `LocalState` folder or a copy (chapter 11). If Ardoise says to close Inkspace, close it and try again. |
 | The other computer cannot connect to the share | Same network? Address typed with `http://` and the port? Windows firewall allowed for this network (**Private networks**, or the network set to **Private**)? See "Showing the sheet on another computer of the network", chapter 6. |
 | "This site can't provide a secure connection" on the other computer or the phone | The browser opened the address with `https://`, often by completing it on its own. Ardoise's share uses `http://` (it stays on the local network, protected by the code): change the address to `http://…`. |
@@ -1043,8 +1140,11 @@ These shortcuts do nothing while you are typing in a text field.
 | `0` (on an AZERTY keyboard, the `à` key) | **Whole page** |
 | `W` | **Width** |
 | `Shift + arrows` | Move the projected area |
-| `Delete` or `Backspace` | Clear the marks written over the presentation |
-| `Esc` | Close the projection if it is shown; otherwise ask whether to end live mode |
+| `Delete` or `Backspace` | Clear the marks written over the presentation; **with strokes chosen** (control window), delete them |
+| `V` | **Select** tool (control window): lasso or click a stroke |
+| `Ctrl + Z` | Undo a deletion, a change of colour or **Clear the page** (control window) |
+| `Ctrl + Y` or `Ctrl + Shift + Z` | Redo (control window) |
+| `Esc` | Clear the selection if there is one; otherwise close the projection if it is shown; otherwise ask whether to end live mode |
 
 ### In windows
 

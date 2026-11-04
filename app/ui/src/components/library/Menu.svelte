@@ -3,6 +3,9 @@
     id: string;
     label: string;
     danger?: boolean;
+    /** Not available now: shown, but nothing happens; `hint` says why. */
+    disabled?: boolean;
+    hint?: string;
     onselect: () => void;
   }
 </script>
@@ -31,6 +34,8 @@
   }
 
   function choose(item: MenuItem) {
+    // Kept focusable (not `disabled`) so that the hint can be read and the arrows still pass over it.
+    if (item.disabled) return;
     close(false);
     item.onselect();
   }
@@ -81,7 +86,15 @@
   {#if open}
     <div class="menu-list" role="menu" aria-label={label}>
       {#each items as item (item.id)}
-        <button type="button" role="menuitem" class:danger={item.danger} onclick={() => choose(item)}>
+        <button
+          type="button"
+          role="menuitem"
+          class:danger={item.danger}
+          class:disabled={item.disabled}
+          aria-disabled={item.disabled ? 'true' : undefined}
+          title={item.disabled ? item.hint : undefined}
+          onclick={() => choose(item)}
+        >
           {item.label}
         </button>
       {/each}

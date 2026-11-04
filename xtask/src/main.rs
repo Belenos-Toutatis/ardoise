@@ -29,7 +29,7 @@ Commands:
   golden           regenerate the reference images in testdata/golden, then check them
   e2e              end-to-end tests of the main journeys, in French and English, on the
                    release executable (run `cargo xtask check` first)
-  perf [--write] [--only start,library,live,export,size]
+  perf [--write] [--only start,library,live,touchup,export,size]
                    measure the SPEC section 8 targets on the release executable and print a
                    table (--write puts it in docs/performance.md; run `cargo xtask check` first)";
 

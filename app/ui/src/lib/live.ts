@@ -31,6 +31,14 @@ export interface LiveCommand {
   kind: LiveCommandKind;
 }
 
+/**
+ * What `live_edit_strokes` does to strokes chosen in the control window: `indices` are places in
+ * `LiveState.strokes` (the finished strokes of the page, in any order, without duplicates).
+ */
+export type LiveStrokesEdit =
+  | { kind: 'delete'; indices: number[] }
+  | { kind: 'recolour'; indices: number[]; color: Rgba };
+
 export interface MonitorInfo {
   /** `name@x,y`: stable when screens are unplugged. */
   key: string;
@@ -48,15 +56,31 @@ export interface MonitorInfo {
 
 export type LiveSessionState = 'idle' | 'waiting' | 'live' | 'reconnecting';
 
+/** Why a resumed sheet became a new note: it changed elsewhere, or no longer exists. */
+export type SheetForkReason = 'changed' | 'deleted';
+
 export interface LiveSnapshot {
   state: LiveSessionState;
   /** The current page (a note: strokes so far, background, layers). */
   page: Note;
+  /**
+   * The share's viewers only: which picture (`livePaper`, `/paper/<key>`) the page wants drawn under its strokes;
+   * absent on plain paper (ordinary live pages), where the paper colour is drawn.
+   */
+  paperKey?: string;
   pageIndex: number;
   pageCount: number;
-  /** How the tablet is held: the page is in this orientation (the live window's quick switch). */
+  /**
+   * How the tablet is held: the page is in this orientation (the live window's quick switch). On a
+   * resumed sheet held the other way round than the setting, how it is to be held for that page.
+   */
   orientation: Orientation;
-  /** Layer receiving new strokes. */
+  /**
+   * Whether the current page turns with the tablet: false on a resumed sheet, which is never turned
+   * (the quick switch is disabled there). Absent on the share's viewers, which do not need it.
+   */
+  canTurnPage?: boolean;
+  /** Layer receiving new strokes: the current page's last visible one. */
   layer: number;
   style: LiveStyle;
   view: LiveViewState;
@@ -65,6 +89,18 @@ export interface LiveSnapshot {
   presentation: MonitorInfo | null;
   /** Paths of the notes saved so far in this session. */
   saved: string[];
+  /**
+   * What the indices of the page's strokes mean (`live_edit_strokes` gives it back, and is refused
+   * once it changed). It changes when strokes leave or come back: a delete, a clearing that removed
+   * something, the undo or redo of either; not when the tablet appends a stroke (a selection stays
+   * valid while the tablet writes), nor for a change of colour or a page turn. Each session has its
+   * own. Absent on the share's viewers, like the next two.
+   */
+  revision?: number;
+  /** The page has an edit to undo. */
+  canUndo?: boolean;
+  /** The page has an edit to redo. */
+  canRedo?: boolean;
 }
 
 /** A point of the stroke in progress. */
@@ -102,6 +138,41 @@ export interface LiveMark {
 /** A stroke as `strokeStart` sends it: its points carry their receipt time. */
 export type LiveStroke = Omit<Stroke, 'points'> & { points: LivePoint[] };
 
+/** A stroke that comes back, and where it stands once it is back. */
+export interface PlacedStroke {
+  index: number;
+  stroke: Stroke;
+}
+
+/** Strokes that take one colour. */
+export interface RecolouredStrokes {
+  color: Rgba;
+  /** Ascending. */
+  indices: number[];
+}
+
+/**
+ * Finished strokes of a page were deleted, came back or changed colour (an edit, its undo or redo).
+ * Applied in this order: `removed`, `inserted`, `recoloured`; the stroke in progress is not
+ * concerned. Strokes that are not named keep their place and their object, hence their outline.
+ * Never merged with another event. On the share's viewers the indices are those of their own list,
+ * which has no hidden strokes, and `revision`, `canUndo` and `canRedo` are absent.
+ */
+export interface LiveStrokesEdited {
+  type: 'strokesEdited';
+  pageIndex: number;
+  /** The page's revision after this event. */
+  revision?: number;
+  /** Indices in the list before this event, ascending. */
+  removed: number[];
+  /** Each with its index in the list after this event, ascending. */
+  inserted: PlacedStroke[];
+  /** Indices in the list after this event. */
+  recoloured: RecolouredStrokes[];
+  canUndo?: boolean;
+  canRedo?: boolean;
+}
+
 export type LiveEvent =
   | { type: 'snapshot'; snapshot: LiveSnapshot }
   | { type: 'strokeStart'; pageIndex: number; stroke: LiveStroke }
@@ -120,10 +191,40 @@ export type LiveEvent =
    * A page could not be written into the library (sent once per page while the error repeats).
    * The pages stay in memory; a later `saved` means that everything is written.
    */
-  | { type: 'saveFailed'; pageIndex: number; code: string; message: string };
+  | { type: 'saveFailed'; pageIndex: number; code: string; message: string }
+  /**
+   * The resumed sheet on this page changed elsewhere or was deleted: nothing was overwritten, and
+   * the page goes on in a new note (`path`) in the same binder; `original` is the note left as it
+   * is. Sent once, and to a window that subscribes later while the session runs; never to the
+   * share's viewers.
+   */
+  | { type: 'sheetForked'; pageIndex: number; reason: SheetForkReason; original: string; path: string }
+  | LiveStrokesEdited;
 
 export interface LiveBatch {
   events: LiveEvent[];
   /** Wall-clock time (ms since the Unix epoch, fractional) when Rust sent the batch. */
   sentAt: number;
+}
+
+/** A resumed sheet whose page went on in another note. */
+export interface SheetFork {
+  pageIndex: number;
+  reason: SheetForkReason;
+  /** The note left as it is, and the new one. */
+  original: string;
+  path: string;
+}
+
+/** What `live_stop` answers: the view closes on it, so what the last write did is said here too. */
+export interface LiveStopped {
+  /** Paths of the session's notes. */
+  saved: string[];
+  /** The resumed sheets that went on in a new note in this session, the last write included. */
+  forks: SheetFork[];
+  /**
+   * A recording still running at the stop could not join its pages: `errorMessage` says why, and
+   * where its sound is kept (`narrationTooLong`, `narrationUnreadable`). `null` otherwise.
+   */
+  narration: { code: string; message: string } | null;
 }

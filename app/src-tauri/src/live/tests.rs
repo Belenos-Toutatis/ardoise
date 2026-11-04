@@ -6,14 +6,15 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+use ardoise_core::format::NoteFile;
 use ardoise_core::library::Library;
 use ardoise_core::note::{Origin, PageSize, Paper};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
 use ardoise_ink::{Rgba, Tool};
-use ardoise_media::microphone::simulated_narration;
+use ardoise_media::microphone::{CaptureStatus, Level, simulated_narration};
 use ardoise_media::replay::ReplayOptions;
-use ardoise_media::{Narration, NarrationBase, decode_narration};
+use ardoise_media::{AudioClip, MediaError, Narration, NarrationBase, decode_narration};
 use ardoise_proto::live::LiveRecord;
 use ardoise_proto::stroke::Point as PenPoint;
 use serde_json::{Value, json};
@@ -21,25 +22,30 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 
 use super::hub::{
     BatchSink, ButtonSetting, HubConfig, HubSink, LiveError, LiveHub, Start, StartOptions,
+    save_wait,
 };
 use super::model::{
-    LiveBatch, LiveCommand, LiveCommandKind, LiveEvent, LiveMark, LivePoint, LiveSessionState,
-    LiveStyle, LiveViewState, MAX_MARK_POINTS, MAX_MARKS, MAX_MARKS_POINTS, MarkPoint,
+    ForkReason, ForkedSheet, LiveBatch, LiveCommand, LiveCommandKind, LiveEvent, LiveMark,
+    LivePoint, LiveSessionState, LiveStyle, LiveViewState, MAX_MARK_POINTS, MAX_MARKS,
+    MAX_MARKS_POINTS, MarkPoint,
 };
 use super::session::LiveSession;
-use crate::library::tests::library;
+use crate::commands::CommandError;
+use crate::library::tests::{library, sample_note};
 use crate::library::{now_ms, path_text};
-use crate::narration::{PageChange, PageLog, give_to_hub};
+use crate::narration::{
+    NarrationRuntime, NarrationTarget, PageChange, PageLog, Source, give_to_hub, start_in,
+};
 use crate::presentation::MonitorInfo;
 
-const A5: PageSize = PageSize {
+pub(super) const A5: PageSize = PageSize {
     width: 21_600,
     height: 14_800,
 };
 
 /// A window: keeps the batches it receives; refuses them once `closed`.
 #[derive(Default)]
-struct Window {
+pub(super) struct Window {
     batches: Mutex<Vec<LiveBatch>>,
     closed: AtomicBool,
 }
@@ -55,7 +61,7 @@ impl BatchSink for Window {
 }
 
 impl Window {
-    fn events(&self) -> Vec<LiveEvent> {
+    pub(super) fn events(&self) -> Vec<LiveEvent> {
         self.batches
             .lock()
             .unwrap()
@@ -64,7 +70,7 @@ impl Window {
             .collect()
     }
 
-    fn has(&self, wanted: impl Fn(&LiveEvent) -> bool) -> bool {
+    pub(super) fn has(&self, wanted: impl Fn(&LiveEvent) -> bool) -> bool {
         self.events().iter().any(wanted)
     }
 }
@@ -85,18 +91,18 @@ fn points_of(events: &[LiveEvent]) -> Vec<LivePoint> {
         .collect()
 }
 
-fn config() -> HubConfig {
+pub(super) fn config() -> HubConfig {
     HubConfig {
         flush_interval: Duration::from_millis(4),
         save_interval: Duration::from_millis(150),
     }
 }
 
-fn fixed(button: LiveButton) -> ButtonSetting {
+pub(super) fn fixed(button: LiveButton) -> ButtonSetting {
     Arc::new(move || button)
 }
 
-fn options(library: &Library, button: ButtonSetting) -> StartOptions {
+pub(super) fn options(library: &Library, button: ButtonSetting) -> StartOptions {
     StartOptions {
         library: library.clone(),
         french: true,
@@ -107,7 +113,7 @@ fn options(library: &Library, button: ButtonSetting) -> StartOptions {
 }
 
 /// Starts a session that streams from an A5 tablet.
-fn start(hub: &LiveHub, options: StartOptions) -> HubSink {
+pub(super) fn start(hub: &LiveHub, options: StartOptions) -> HubSink {
     let Start::New { mut sink, snapshot } = hub.start(options).unwrap() else {
         panic!("a session is already running");
     };
@@ -120,11 +126,11 @@ fn start(hub: &LiveHub, options: StartOptions) -> HubSink {
     sink
 }
 
-fn pen(x: u16, y: u16, pressure: u16) -> LiveRecord {
+pub(super) fn pen(x: u16, y: u16, pressure: u16) -> LiveRecord {
     LiveRecord::Pen(PenPoint { x, y, pressure })
 }
 
-fn send(sink: &mut HubSink, records: &[LiveRecord]) {
+pub(super) fn send(sink: &mut HubSink, records: &[LiveRecord]) {
     sink.input(LiveInput::Records {
         records: records.to_vec(),
         received: SystemTime::now(),
@@ -132,7 +138,7 @@ fn send(sink: &mut HubSink, records: &[LiveRecord]) {
 }
 
 /// `n` samples with pressure, then the pen lifted (hovering), in notifications of 3 records.
-fn stroke(sink: &mut HubSink, x: u16, n: u16) {
+pub(super) fn stroke(sink: &mut HubSink, x: u16, n: u16) {
     let mut records: Vec<LiveRecord> = (0..n)
         .map(|i| pen(x + i * 10, 1000 + i * 5, 800 + i))
         .collect();
@@ -142,7 +148,7 @@ fn stroke(sink: &mut HubSink, x: u16, n: u16) {
     }
 }
 
-fn wait_until(what: &str, condition: impl Fn() -> bool) {
+pub(super) fn wait_until(what: &str, condition: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !condition() {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
@@ -150,11 +156,11 @@ fn wait_until(what: &str, condition: impl Fn() -> bool) {
     }
 }
 
-fn notes_in(library: &Library) -> Vec<PathBuf> {
+pub(super) fn notes_in(library: &Library) -> Vec<PathBuf> {
     library.list().notes.into_iter().map(|e| e.path).collect()
 }
 
-fn stroke_count(library: &Library, path: &Path) -> Option<usize> {
+pub(super) fn stroke_count(library: &Library, path: &Path) -> Option<usize> {
     library
         .read(path)
         .ok()
@@ -624,7 +630,7 @@ fn a_stopped_session_no_longer_changes_its_notes() {
 }
 
 /// Makes the folder of `library` unusable (a file takes its place), or usable again.
-fn break_folder(root: &Path, broken: bool) {
+pub(super) fn break_folder(root: &Path, broken: bool) {
     let away = root.with_extension("away");
     if broken {
         std::fs::rename(root, &away).unwrap();
@@ -1160,7 +1166,7 @@ fn the_marks_reach_the_windows_coalesced_and_late_ones_start_from_them() {
     });
 }
 
-fn keys(value: &Value) -> Vec<&str> {
+pub(super) fn keys(value: &Value) -> Vec<&str> {
     let mut keys: Vec<&str> = value
         .as_object()
         .unwrap()
@@ -1229,6 +1235,9 @@ fn the_json_has_the_shapes_of_live_ts() {
     assert_eq!(
         keys(snapshot),
         [
+            "canRedo",
+            "canTurnPage",
+            "canUndo",
             "hover",
             "layer",
             "orientation",
@@ -1236,6 +1245,7 @@ fn the_json_has_the_shapes_of_live_ts() {
             "pageCount",
             "pageIndex",
             "presentation",
+            "revision",
             "saved",
             "state",
             "style",
@@ -1248,6 +1258,7 @@ fn the_json_has_the_shapes_of_live_ts() {
         (json!(0), json!(1))
     );
     assert_eq!(snapshot["layer"], 0);
+    assert_eq!(snapshot["canTurnPage"], true);
     assert_eq!(snapshot["hover"], Value::Null);
     assert_eq!(snapshot["presentation"], Value::Null);
     assert_eq!(snapshot["saved"], json!([]));
@@ -1428,6 +1439,21 @@ pub(crate) fn stream_simulated_live(
     seconds: u32,
     while_live: impl FnOnce(),
 ) -> Vec<f64> {
+    let start = || {
+        hub.start(options(library, fixed(LiveButton::NewPage)))
+            .unwrap()
+    };
+    stream_simulated_start(hub, library, seconds, while_live, start)
+}
+
+/// [`stream_simulated_live`], for the session `start` makes.
+pub(super) fn stream_simulated_start(
+    hub: &LiveHub,
+    library: &Library,
+    seconds: u32,
+    while_live: impl FnOnce(),
+    start: impl FnOnce() -> Start,
+) -> Vec<f64> {
     use ardoise_device::service::{
         ConnectorFactory, PageStore, ServiceConfig, ServiceHooks, TabletOptions, TabletService,
     };
@@ -1489,10 +1515,7 @@ pub(crate) fn stream_simulated_live(
 
     let window = Arc::new(Window::default());
     hub.subscribe("main", window.clone());
-    let Start::New { sink, .. } = hub
-        .start(options(library, fixed(LiveButton::NewPage)))
-        .unwrap()
-    else {
+    let Start::New { sink, .. } = start() else {
         panic!("already running");
     };
     service.start_live(Box::new(sink));
@@ -1552,7 +1575,7 @@ fn simulator_service_hub_latency() {
 
 // --- Narration recorded in live mode ------------------------------------------------------------
 
-fn note_narration(seconds: f64, start_ms: i64) -> Narration {
+pub(super) fn note_narration(seconds: f64, start_ms: i64) -> Narration {
     Narration {
         clip: simulated_narration(Duration::from_secs_f64(seconds), 1),
         base: NarrationBase::Note,
@@ -1561,11 +1584,11 @@ fn note_narration(seconds: f64, start_ms: i64) -> Narration {
     }
 }
 
-fn audio_of(library: &Library, path: &Path) -> Option<Vec<u8>> {
+pub(super) fn audio_of(library: &Library, path: &Path) -> Option<Vec<u8>> {
     library.read(path).ok().and_then(|loaded| loaded.file.audio)
 }
 
-fn change(at: Duration, page: usize) -> PageChange {
+pub(super) fn change(at: Duration, page: usize) -> PageChange {
     PageChange { at, page }
 }
 
@@ -1716,13 +1739,284 @@ fn live_narration_goes_to_its_pages_through_the_hub() {
     );
 
     // The page keeps only the encoded narration, decoded again to merge: a page whose
-    // narration cannot be read again keeps it as it is.
+    // narration cannot be read again keeps it as it is, and the new sound is kept apart.
     let damaged = b"OggS damaged".to_vec();
     assert!(hub.set_page_audio(1, damaged.clone()));
     assert!(matches!(
         hub.attach_narration(session, 1, note_narration(1.0, 0)),
-        Err(LiveError::Narration(_))
+        Err(LiveError::NarrationKeptApart { .. })
     ));
     let saved = hub.stop().unwrap();
     assert_eq!(audio_of(&library, Path::new(&saved[1])), Some(damaged));
+}
+
+// --- What is said when live mode stops, and the end of the Windows session -----------------------
+
+/// A hub that writes a page at its first stroke, then not again until it is told to.
+fn patient_hub() -> LiveHub {
+    LiveHub::new(HubConfig {
+        flush_interval: Duration::from_millis(4),
+        save_interval: Duration::from_secs(3600),
+    })
+}
+
+#[test]
+fn a_fork_at_the_last_write_is_in_what_live_stop_answers() {
+    let (dir, library) = library();
+    let mut file = NoteFile::new(sample_note("Fiche"));
+    file.note.page = A5;
+    let path = library.create(Path::new("Classe"), &file).unwrap().path;
+    let hub = patient_hub();
+    let Start::New { mut sink, .. } = hub
+        .resume(options(&library, fixed(LiveButton::NewPage)), &path)
+        .unwrap()
+    else {
+        panic!("already running");
+    };
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    let strokes = file.note.strokes.len();
+    stroke(&mut sink, 3000, 5);
+    wait_until("the first write", || {
+        stroke_count(&library, &path) == Some(strokes + 1)
+    });
+    assert_eq!(hub.forked_sheets(), []);
+
+    // Changed elsewhere; the next write, the very last, can only go beside it.
+    let mut elsewhere = library.read(&path).unwrap();
+    elsewhere.file.note.strokes.pop();
+    library
+        .save(&path, &elsewhere.file, &elsewhere.stamp)
+        .unwrap();
+    stroke(&mut sink, 4000, 5);
+    let answer = super::stopped(&hub, None).unwrap();
+    assert_eq!(answer.saved.len(), 1);
+    let new_path = PathBuf::from(&answer.saved[0]);
+    assert_eq!(
+        new_path.parent(),
+        Some(dir.path().join("Classe")).as_deref()
+    );
+    assert_eq!(
+        answer.forks,
+        [ForkedSheet {
+            page_index: 0,
+            reason: ForkReason::Changed,
+            original: path_text(&path),
+            path: answer.saved[0].clone(),
+        }]
+    );
+    assert_eq!(answer.narration.as_ref().map(|e| e.code()), None);
+
+    // As `live.ts` reads it.
+    let json = serde_json::to_value(&answer).unwrap();
+    assert_eq!(keys(&json), ["forks", "narration", "saved"]);
+    assert_eq!(
+        keys(&json["forks"][0]),
+        ["original", "pageIndex", "path", "reason"]
+    );
+    assert_eq!(json["forks"][0]["reason"], "changed");
+    assert_eq!(json["narration"], Value::Null);
+    let told = super::stopped(
+        &hub,
+        Some(CommandError::new("narrationUnreadable", "a.ardoise")),
+    )
+    .unwrap();
+    let json = serde_json::to_value(&told).unwrap();
+    assert_eq!(
+        json["narration"],
+        serde_json::json!({ "code": "narrationUnreadable", "message": "a.ardoise" })
+    );
+}
+
+/// A microphone that has received its whole clip.
+struct FakeMicrophone(AudioClip);
+
+impl Source for FakeMicrophone {
+    fn device_name(&self) -> &str {
+        "Fake microphone"
+    }
+
+    fn level(&self) -> Level {
+        Level::default()
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.0.duration()
+    }
+
+    fn status(&self) -> CaptureStatus {
+        CaptureStatus::Receiving
+    }
+
+    fn stop(self: Box<Self>) -> Result<AudioClip, MediaError> {
+        Ok(self.0)
+    }
+}
+
+/// A runtime recording `seconds` of sound for the session of `hub`, its copies in `backup`.
+fn recording(hub: &LiveHub, seconds: u64, backup: &Path) -> NarrationRuntime {
+    let runtime = NarrationRuntime::new(
+        Box::new(move |_, _| {
+            let clip = simulated_narration(Duration::from_secs(seconds), 1);
+            Ok(Box::new(FakeMicrophone(clip)) as Box<dyn Source>)
+        }),
+        backup.to_path_buf(),
+    );
+    start_in(
+        &runtime,
+        None,
+        NarrationTarget::Live,
+        || Err(CommandError::new("noLibrary", "unused")),
+        hub,
+        Arc::new(|| None),
+    )
+    .unwrap();
+    runtime
+}
+
+#[test]
+fn the_end_of_the_windows_session_writes_the_last_ink_and_the_recording_under_way() {
+    let (dir, library) = library();
+    let hub = patient_hub();
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    let path = notes_in(&library).remove(0);
+    // Not written yet, for an hour; one stroke is still in progress.
+    stroke(&mut sink, 4000, 5);
+    send(&mut sink, &[pen(5000, 1000, 500)]);
+    assert_eq!(stroke_count(&library, &path), Some(1));
+
+    let backup = dir.path().join("backup");
+    let copies = dir.path().join("copies");
+    let runtime = recording(&hub, 1, &copies);
+    let told = std::sync::atomic::AtomicUsize::new(0);
+    super::close_at_session_end(&hub, Some(&runtime), &backup, || {
+        told.fetch_add(1, Ordering::SeqCst);
+    });
+
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.strokes.len(), 3, "the last ink");
+    let narration = decode_narration(written.audio.as_ref().unwrap()).unwrap();
+    let ms = narration.duration().as_millis();
+    assert!((990..=1010).contains(&ms), "{ms}");
+    assert!(!hub.page_position().unwrap().running);
+    assert_eq!(
+        told.load(Ordering::SeqCst),
+        2,
+        "after the ink, and at the end"
+    );
+    assert!(!runtime.is_recording_live());
+    // Everything is in the note: no copy stays, of the sound or of the page.
+    let wavs = |dir: &Path| {
+        std::fs::read_dir(dir).map_or(0, |entries| {
+            entries
+                .flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "wav"))
+                .count()
+        })
+    };
+    assert_eq!(wavs(&copies), 0);
+    assert_eq!(hub.back_up_unsaved(&backup).len(), 0);
+    // Again, for nothing: no harm (Windows may tell two windows).
+    super::close_at_session_end(&hub, Some(&runtime), &backup, || {});
+    assert_eq!(library.read(&path).unwrap().file.note.strokes.len(), 3);
+
+    // Without a recording, or without the narration's state: the ink all the same.
+    let hub = patient_hub();
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 2);
+    stroke(&mut sink, 4000, 5);
+    super::close_at_session_end(&hub, None, &backup, || {});
+    let saved = hub.overview().unwrap().notes[0].2.clone();
+    assert_eq!(stroke_count(&library, &saved), Some(2));
+}
+
+#[test]
+fn at_the_end_of_the_session_a_recording_that_did_not_reach_its_page_stays_as_a_copy() {
+    let (dir, library) = library();
+    let hub = patient_hub();
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    assert!(hub.set_page_audio(0, b"OggS damaged".to_vec()));
+    let (backup, copies) = (dir.path().join("backup"), dir.path().join("copies"));
+    let runtime = recording(&hub, 1, &copies);
+    super::close_at_session_end(&hub, Some(&runtime), &backup, || {});
+
+    let copy = std::fs::read_dir(&copies)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|x| x == "wav"))
+        .expect("a copy of the sound");
+    let bytes = std::fs::read(&copy).unwrap();
+    assert_eq!(&bytes[..4], b"RIFF");
+    assert!(bytes.len() >= 44 + 48_000 * 2);
+    // The log next to the page copies names it, a windowed app having no console.
+    let log = std::fs::read_to_string(backup.join("live-backup.log")).unwrap();
+    assert!(log.contains(&copy.display().to_string()), "{log}");
+    assert!(log.contains("narrationUnreadable"), "{log}");
+}
+
+// --- How often a page is written -----------------------------------------------------------------
+
+#[test]
+fn a_slow_write_waits_longer_within_a_bound() {
+    let five = Duration::from_secs(5);
+    let wait = |ms| save_wait(five, Some(Duration::from_millis(ms)));
+    assert_eq!(save_wait(five, None), five);
+    assert_eq!(wait(1), five);
+    assert_eq!(wait(500), five, "a tenth of the interval: as before");
+    assert_eq!(wait(1_000), Duration::from_secs(10));
+    assert_eq!(wait(2_500), Duration::from_secs(25));
+    assert_eq!(wait(3_000), Duration::from_secs(30));
+    assert_eq!(
+        wait(60_000),
+        Duration::from_secs(30),
+        "the most a crash loses"
+    );
+}
+
+#[test]
+fn a_page_whose_write_was_slow_is_written_later_and_at_once_when_it_is_left() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    let path = notes_in(&library).remove(0);
+    hub.change_at_once(|session, _| {
+        let page = session.page_mut(0).unwrap();
+        assert!(page.last_write.is_some(), "the hub measures its writes");
+        page.last_write = Some(Duration::from_secs(60));
+    });
+
+    // Six intervals, not one.
+    let begun = Instant::now();
+    stroke(&mut sink, 4000, 5);
+    std::thread::sleep(config().save_interval * 2);
+    if begun.elapsed() < config().save_interval * 4 {
+        assert_eq!(stroke_count(&library, &path), Some(1));
+    }
+    wait_until("the slow page written", || {
+        stroke_count(&library, &path) == Some(2)
+    });
+
+    // Leaving it does not wait.
+    hub.change_at_once(|session, _| {
+        session.page_mut(0).unwrap().last_write = Some(Duration::from_secs(60));
+    });
+    stroke(&mut sink, 5000, 5);
+    let begun = Instant::now();
+    hub.command(LiveCommandKind::NextPage).unwrap();
+    wait_until("the page left written", || {
+        stroke_count(&library, &path) == Some(3)
+    });
+    assert!(begun.elapsed() < config().save_interval * 6);
+    hub.stop().unwrap();
 }

@@ -4,7 +4,8 @@
 //! again from an allow list of what the viewer draws: nothing else of the hub's types can reach
 //! a browser, whatever fields they get later.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use ardoise_core::note::{Background, Origin, PageSize, Timing};
 use ardoise_core::settings::Orientation;
@@ -12,12 +13,13 @@ use ardoise_ink::{Rgba, Stroke, Tool};
 use ardoise_share::{LiveFeed, LiveViewer};
 use serde::Serialize;
 
+use super::live_paper::{LivePapers, paper_key};
 use super::page::is_drawn;
 use crate::live::LiveHub;
 use crate::live::hub::BatchSink;
 use crate::live::model::{
     HoverPoint, LiveBatch, LiveEvent, LiveMark, LivePoint, LiveSessionState, LiveSnapshot,
-    LiveStroke, LiveStyle, LiveViewState, wall_now_ms,
+    LiveStroke, LiveStyle, LiveViewState, RecolouredStrokes, wall_now_ms,
 };
 
 /// The hub's subscription label of viewer `id` (never a window's label).
@@ -30,14 +32,22 @@ pub struct HubFeed {
     hub: Arc<LiveHub>,
     /// Shared by the viewers' sinks, so that a batch they all get is written once.
     memo: Arc<Memo>,
+    /// The paper of the live page, which goes outside the batches.
+    papers: Arc<LivePapers>,
 }
 
 impl HubFeed {
     pub fn new(hub: Arc<LiveHub>) -> HubFeed {
         HubFeed {
+            papers: LivePapers::new(hub.clone()),
             hub,
             memo: Arc::new(Memo::default()),
         }
+    }
+
+    /// The paper of the live page: the share receives it once it runs.
+    pub fn papers(&self) -> Arc<LivePapers> {
+        self.papers.clone()
     }
 }
 
@@ -47,8 +57,10 @@ impl LiveFeed for HubFeed {
         let sink = ShareSink {
             viewer,
             memo: self.memo.clone(),
+            papers: self.papers.clone(),
         };
-        self.hub.subscribe(&label, Arc::new(sink));
+        let snapshot = self.hub.subscribe(&label, Arc::new(sink));
+        self.papers.subscribed(&snapshot);
     }
 
     fn stop(&self, viewer: u64) {
@@ -68,10 +80,17 @@ impl LiveFeed for HubFeed {
 struct ShareSink {
     viewer: LiveViewer,
     memo: Arc<Memo>,
+    papers: Arc<LivePapers>,
 }
 
 impl BatchSink for ShareSink {
     fn send(&self, batch: LiveBatch) -> Result<(), String> {
+        // A comparison per snapshot, here on the flusher; the paper is made elsewhere.
+        for event in &batch.events {
+            if let LiveEvent::Snapshot { snapshot } = event {
+                self.papers.saw(snapshot);
+            }
+        }
         match self.memo.json(batch) {
             Some(json) => self.viewer.send(&json).map_err(|error| error.to_string()),
             // Only what is never shared (a page written to the library).
@@ -96,7 +115,7 @@ impl Memo {
     pub fn json(&self, batch: LiveBatch) -> Option<Arc<str>> {
         let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((events, json)) = last.as_ref()
-            && *events == batch.events
+            && same_events(events, &batch.events)
         {
             return Some(json.clone());
         }
@@ -104,6 +123,18 @@ impl Memo {
         *last = Some((batch.events, json.clone()));
         Some(json)
     }
+}
+
+/// Whether two batches hold the same events. Viewers up to date were all queued the same snapshot,
+/// which is not worth comparing point by point with itself.
+fn same_events(a: &[LiveEvent], b: &[LiveEvent]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|pair| match pair {
+            (LiveEvent::Snapshot { snapshot: a }, LiveEvent::Snapshot { snapshot: b }) => {
+                Arc::ptr_eq(a, b) || a == b
+            }
+            (a, b) => a == b,
+        })
 }
 
 /// `batch` as the viewers get it (`LiveBatch` of `live.ts`), `None` when it holds nothing that
@@ -127,8 +158,8 @@ struct SharedBatch<'a> {
     sent_at: f64,
 }
 
-/// The events a viewer gets. Left out: `saved` (paths of notes) and `saveFailed` (the system's
-/// message), which are about the library.
+/// The events a viewer gets. Left out: `saved` and `sheetForked` (paths of notes) and `saveFailed`
+/// (the system's message), which are about the library.
 #[derive(Serialize)]
 #[serde(
     tag = "type",
@@ -162,6 +193,21 @@ enum SharedEvent<'a> {
     Marks {
         marks: Vec<SharedMark>,
     },
+    /// Strokes deleted, back or recoloured, numbered as in the viewer's list, which has no hidden
+    /// strokes (`ViewerIndices`); the edits never touch one.
+    StrokesEdited {
+        page_index: usize,
+        removed: &'a [u32],
+        inserted: Vec<SharedPlaced<'a>>,
+        recoloured: &'a [RecolouredStrokes],
+    },
+}
+
+/// A stroke that comes back, at its place in the viewer's list.
+#[derive(Serialize)]
+struct SharedPlaced<'a> {
+    index: u32,
+    stroke: &'a Stroke,
 }
 
 impl<'a> SharedEvent<'a> {
@@ -187,7 +233,36 @@ impl<'a> SharedEvent<'a> {
             LiveEvent::Marks { marks } => SharedEvent::Marks {
                 marks: marks.iter().map(SharedMark::of).collect(),
             },
-            LiveEvent::Saved { .. } | LiveEvent::SaveFailed { .. } => return None,
+            LiveEvent::StrokesEdited {
+                page_index,
+                removed,
+                inserted,
+                recoloured,
+                viewers,
+                ..
+            } => SharedEvent::StrokesEdited {
+                page_index: *page_index,
+                removed: viewers
+                    .as_deref()
+                    .map_or(removed, |viewers| &viewers.removed),
+                inserted: inserted
+                    .iter()
+                    .enumerate()
+                    .map(|(i, placed)| SharedPlaced {
+                        index: viewers
+                            .as_deref()
+                            .and_then(|viewers| viewers.inserted.get(i).copied())
+                            .unwrap_or(placed.index),
+                        stroke: &placed.stroke,
+                    })
+                    .collect(),
+                recoloured: viewers
+                    .as_deref()
+                    .map_or(recoloured, |viewers| &viewers.recoloured),
+            },
+            LiveEvent::Saved { .. }
+            | LiveEvent::SaveFailed { .. }
+            | LiveEvent::SheetForked { .. } => return None,
         })
     }
 }
@@ -234,6 +309,10 @@ impl SharedMark {
 struct SharedSnapshot<'a> {
     state: LiveSessionState,
     page: SharedLivePage<'a>,
+    /// The paper's picture the page wants ([`paper_key`]), which comes in a `livePaper` message:
+    /// absent on plain paper.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paper_key: Option<String>,
     page_index: usize,
     page_count: usize,
     orientation: Orientation,
@@ -252,6 +331,7 @@ impl<'a> SharedSnapshot<'a> {
         SharedSnapshot {
             state: snapshot.state,
             page: SharedLivePage::of(snapshot),
+            paper_key: paper_key(snapshot),
             page_index: snapshot.page_index,
             page_count: snapshot.page_count,
             orientation: snapshot.orientation,
@@ -265,16 +345,31 @@ impl<'a> SharedSnapshot<'a> {
     }
 }
 
+/// What the viewers call the page with id `id`: stable for this run of the app, one per page, which
+/// is all the viewer's page-change detection needs (`LiveState.noteId`). Not the id itself, which
+/// on a resumed sheet is the identity of a note of the library, nor a digest anyone could check
+/// against an id they know: the salt is drawn at each run.
+fn viewer_page_id(id: &str) -> String {
+    static SALT: OnceLock<u128> = OnceLock::new();
+    let salt = SALT.get_or_init(|| uuid::Uuid::new_v4().as_u128());
+    let mut hasher = DefaultHasher::new();
+    salt.hash(&mut hasher);
+    id.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
 /// The page of a snapshot as the viewer reads a `Note` (`note.ts`): what is drawn, and the
-/// fields the type requires with neutral values. The title, tags, favourite mark, layer names,
-/// background image and origin of the page stay on the PC, and so do the strokes of a layer
-/// that is hidden (the live pages never hide a layer: the filter is for what comes later).
+/// fields the type requires with neutral values. The id, title, dates, tags, favourite mark, layer
+/// names, background image and origin of the page stay on the PC, and so do the strokes of a layer
+/// that is hidden (a resumed sheet may have some: it is an old note, with its own date).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SharedLivePage<'a> {
-    id: &'a str,
+    /// [`viewer_page_id`].
+    id: String,
     /// Always empty.
     title: &'static str,
+    /// Always 0, like `modified`: the point times need no date.
     created: i64,
     modified: i64,
     page: PageSize,
@@ -298,10 +393,10 @@ impl<'a> SharedLivePage<'a> {
     fn of(snapshot: &'a LiveSnapshot) -> SharedLivePage<'a> {
         let note = &snapshot.page;
         SharedLivePage {
-            id: &note.id,
+            id: viewer_page_id(&note.id),
             title: "",
-            created: note.created,
-            modified: note.modified,
+            created: 0,
+            modified: 0,
             page: note.page,
             background: &note.background,
             tags: [],

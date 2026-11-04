@@ -6,36 +6,44 @@
 //!   each window has its own queue, so a window that subscribes in the middle of a stroke gets
 //!   exactly what follows its snapshot;
 //! - the **saver** writes the pages to the library: a page becomes a note when its first stroke
-//!   ends, then is rewritten atomically at most every 5 s while it changes, and at once when it
-//!   is left or when live mode stops. A page's narration (recorded in live mode, cut per page
-//!   by `narration.rs`) is attached to it here and written with it, as its `audio.opus`.
+//!   ends, then is rewritten atomically at most every 5 s while it changes (less often when a write
+//!   takes long: [`save_wait`]), and at once when it is left or when live mode stops. A page's
+//!   narration (recorded in live mode, cut per page
+//!   by `narration.rs`) is attached to it here and written with it, as its `audio.opus`. A
+//!   resumed sheet ([`LiveHub::resume`], `resume.rs`) is written through the file it came from.
 //!
 //! Neither thread does its slow work (sending, writing files) while holding the session lock,
 //! so the tablet's input is never held up by a window or by the disk.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
-use ardoise_core::format::NoteFile;
+use ardoise_core::format::{FormatError, NoteFile};
 use ardoise_core::fsutil::write_atomic_new;
 use ardoise_core::library::{Library, LibraryError};
-use ardoise_core::note::{Note, PageSize};
+use ardoise_core::note::{BackgroundImage, Note, PageSize};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::pages::oriented_size;
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
+use ardoise_media::replay::ReplayOptions;
 use ardoise_media::{MediaError, Narration, decode_narration, encode_narration};
+use ardoise_render::NoteView;
 use tauri::ipc::Channel;
 
 use super::activity::Activity;
+use super::edits::{LiveEditError, Prepared, StrokesEdit};
 use super::model::{
-    LiveBatch, LiveCommandKind, LiveEvent, LiveMark, LiveSessionState, LiveSnapshot, LiveStyle,
-    LiveViewState, wall_ms, wall_now_ms,
+    ForkReason, ForkedSheet, LiveBatch, LiveCommandKind, LiveEvent, LiveMark, LiveSessionState,
+    LiveSnapshot, LiveStyle, LiveViewState, wall_ms, wall_now_ms,
 };
-use super::session::{LiveSession, Page, SavedFile};
-use crate::library::now_ms;
+use super::resume::{ResumeBase, ResumeSeed, merged_keeping_both, placed_for_merge};
+use super::session::{LiveSession, Page, SavedFile, SheetFork};
+use crate::library::{now_ms, path_text};
+use crate::narration::{backup_dir, write_narration_backup};
+use crate::original::keep_resumed_original;
 use crate::presentation::MonitorInfo;
-use crate::thumbnails::thumbnail_png;
+use crate::thumbnails::{thumbnail_png, thumbnail_view};
 
 /// Timing of the hub (shortened by the tests).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +77,35 @@ impl BatchSink for Channel<LiveBatch> {
 /// Reads what the tablet's button does (`[tablet] button`), when it is pressed.
 pub type ButtonSetting = Arc<dyn Fn() -> LiveButton + Send + Sync>;
 
+/// Told when live mode starts or stops; called under the hub's lock: it must not wait for anything.
+pub type RunningWatch = Box<dyn Fn(bool) + Send + Sync>;
+
+/// A write of a page takes at most about one part in this many of the time while it changes: a page
+/// whose write takes longer than a tenth of the save interval waits longer than that interval.
+const WRITE_SHARE: u32 = 10;
+/// A page that keeps changing is written at least every this many save intervals, however long a
+/// write takes: 30 s with the default interval, which is what a crash can lose at worst.
+const MAX_SAVE_WAIT: u32 = 6;
+
+/// Why a new narration could not join the one its page already has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NarrationApart {
+    /// Together they are longer than one track holds (the file format reads 4 hours).
+    TooLong,
+    /// The page's own narration cannot be decoded: it stays as it is.
+    Unreadable,
+}
+
+impl NarrationApart {
+    /// The sentence for the interface (`errorCodes.*`).
+    pub fn code(self) -> &'static str {
+        match self {
+            NarrationApart::TooLong => "narrationTooLong",
+            NarrationApart::Unreadable => "narrationUnreadable",
+        }
+    }
+}
+
 /// Failure of a live command.
 #[derive(Debug, thiserror::Error)]
 pub enum LiveError {
@@ -83,6 +120,16 @@ pub enum LiveError {
     /// (nothing was changed).
     #[error("cannot store the narration of the page: {0}")]
     Narration(MediaError),
+    /// The new sound did not join the page's narration, which is as it was: it is kept in `kept`, a
+    /// new note holding the page with this sound, or a copy of it when the library cannot be written.
+    #[error("the new sound could not join the narration of the page: it is kept in {kept:?}")]
+    NarrationKeptApart { why: NarrationApart, kept: PathBuf },
+    /// The new sound did not join the page's narration, and could not be kept anywhere.
+    #[error("the new sound could not join the narration of the page, nor be kept: {detail}")]
+    NarrationLost { why: NarrationApart, detail: String },
+    /// An edit of strokes was refused (nothing was changed).
+    #[error(transparent)]
+    Edit(#[from] LiveEditError),
 }
 
 /// What a new session needs.
@@ -126,8 +173,12 @@ struct SaveJob {
     version: u64,
     note: Note,
     /// The page's narration (`audio.opus`), encoded once when it was attached.
-    audio: Option<Vec<u8>>,
+    audio: Option<Arc<Vec<u8>>>,
     file: Option<SavedFile>,
+    /// A resumed sheet: the file it came from.
+    base: Option<Arc<ResumeBase>>,
+    /// A resumed sheet: ink was added under the blackboard ([`written_sheet`]).
+    on_board: bool,
 }
 
 /// Where live mode stands, for the narration's page watcher.
@@ -169,6 +220,10 @@ struct Written {
     /// (retitled, tagged) and the page was written into it all the same: the page takes them,
     /// so that its next writes keep them.
     outside: Option<Outside>,
+    /// The file was written. Not when a resumed sheet came back to what its file holds.
+    rewrote: bool,
+    /// The resumed sheet had to become a new note: why, and the note left alone.
+    fork: Option<(ForkReason, PathBuf)>,
 }
 
 /// What the library may change in a note live mode is writing.
@@ -207,6 +262,11 @@ struct Shared {
     /// Held while a narration is merged and encoded for a page (outside the state lock), so
     /// that two narrations given to the same page never lose one another.
     narrating: Mutex<()>,
+    /// See [`RunningWatch`].
+    running_watch: OnceLock<RunningWatch>,
+    /// Where a sound that cannot go in a note is kept; `narration::backup_dir` unless a test says
+    /// otherwise.
+    narration_backup: OnceLock<PathBuf>,
 }
 
 /// The hub of the running app (see the module documentation). Dropping it stops its threads.
@@ -236,6 +296,16 @@ impl HubSink {
 
 fn default_size() -> PageSize {
     ardoise_core::note::A4_LANDSCAPE
+}
+
+/// The size of a new session's new pages: the tablet's area, as the tablet is held.
+fn page_size_of(options: &StartOptions) -> PageSize {
+    let size = if options.size.width > 0 && options.size.height > 0 {
+        options.size
+    } else {
+        default_size()
+    };
+    oriented_size(size, options.orientation)
 }
 
 /// Adds `event` to a window's queue, merging what does not need to be sent twice: points join
@@ -273,23 +343,40 @@ fn enqueue(queue: &mut Vec<LiveEvent>, event: LiveEvent) {
     }
 }
 
-/// When `page` is due to be written: now when it is urgent or never tried, else one interval
-/// after the last attempt; `None` when it has nothing to write.
+/// How long a page that keeps changing waits between two writes: the save interval, longer when
+/// its last write took long ([`WRITE_SHARE`]), never more than [`MAX_SAVE_WAIT`] intervals. A note of
+/// hours of sound or tens of thousands of strokes is not rewritten in full every 5 s: what this
+/// costs is a little more to lose in a crash, nothing when the page is left or live mode stops.
+pub(super) fn save_wait(interval: Duration, last_write: Option<Duration>) -> Duration {
+    let scaled = last_write.unwrap_or_default().saturating_mul(WRITE_SHARE);
+    scaled
+        .min(interval.saturating_mul(MAX_SAVE_WAIT))
+        .max(interval)
+}
+
+/// When `page` is due to be written: now when it is urgent or never tried, else one wait
+/// ([`save_wait`]) after the last attempt; `None` when it has nothing to write.
 fn page_due(page: &Page, now: Instant, interval: Duration) -> Option<Instant> {
     if !page.needs_write() {
         return None;
     }
     Some(match page.last_attempt {
-        Some(last) if !page.urgent => last + interval,
+        Some(last) if !page.urgent => last + save_wait(interval, page.last_write),
         _ => now,
     })
 }
 
-/// Whether `events` may have made a page worth writing (a stroke ended, a page changed).
+/// Whether `events` may have made a page worth writing (a stroke ended, strokes were edited, a
+/// page changed).
 fn may_need_save(events: &[LiveEvent]) -> bool {
-    events
-        .iter()
-        .any(|e| matches!(e, LiveEvent::StrokeEnd { .. } | LiveEvent::Snapshot { .. }))
+    events.iter().any(|e| {
+        matches!(
+            e,
+            LiveEvent::StrokeEnd { .. }
+                | LiveEvent::StrokesEdited { .. }
+                | LiveEvent::Snapshot { .. }
+        )
+    })
 }
 
 /// Fingerprint of what live mode writes into a note: the ink, the layers, the paper, the page
@@ -315,17 +402,127 @@ fn content_fingerprint(note: &Note) -> Option<u64> {
     Some(hasher.finish())
 }
 
+/// Fingerprint of a note file as live mode leaves it: the note's [`content_fingerprint`], its
+/// narration and everything it keeps as read (not its thumbnail, made again by whoever writes it,
+/// nor what [`content_fingerprint`] leaves out). What differs from the fingerprint last written is
+/// a change made elsewhere that a write must not overwrite.
+pub(super) fn file_fingerprint(file: &NoteFile) -> Option<u64> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    content_fingerprint(&file.note)?.hash(&mut hasher);
+    file.audio.hash(&mut hasher);
+    file.original.hash(&mut hasher);
+    file.original_note.hash(&mut hasher);
+    file.text.hash(&mut hasher);
+    if let Some(background) = &file.background {
+        background.extension.hash(&mut hasher);
+        background.bytes.hash(&mut hasher);
+    }
+    // Whatever order the JSON library keeps them in.
+    let mut fields: Vec<_> = file.unknown_fields.iter().collect();
+    fields.sort_by_key(|(name, _)| name.as_str());
+    for (name, value) in fields {
+        name.hash(&mut hasher);
+        serde_json::to_vec(value).ok()?.hash(&mut hasher);
+    }
+    for member in &file.unknown_members {
+        member.name.hash(&mut hasher);
+        member.bytes.hash(&mut hasher);
+    }
+    Some(hasher.finish())
+}
+
+/// The note a resumed sheet writes, from the page's `note` and the sheet as it was read. A sheet
+/// that received no ink is the sheet it was: what the session did around it stays out of the file
+/// (the blackboard turned on in front of it, a layer added to write on, an edit undone). Slate
+/// paper reaches the file only with ink written under the blackboard (`on_board`), which white
+/// chalk needs, and only as long as that ink makes a difference.
+fn written_sheet(note: &Note, before: &Note, on_board: bool) -> Note {
+    let mut written = note.clone();
+    let same_ink = note.strokes == before.strokes;
+    if same_ink {
+        written.layers.clone_from(&before.layers);
+    }
+    if same_ink || !on_board {
+        written.background.paper = before.background.paper;
+    }
+    written
+}
+
+/// What is written for a page, its thumbnail apart. A page of the session holds only its note and
+/// its narration. A resumed sheet is the file it came from with the note ([`written_sheet`]) and
+/// the narration replaced, so that nothing else of it is lost; the version before the resume is
+/// kept for "back to the original" as soon as the ink differs from it, blank or not
+/// (`original::keep_resumed_original`: never over an original the file already has). Recomputed from
+/// that file at each write: the first write may change only the narration, and a fork needs it as
+/// much as the note's own file does.
+fn page_file(
+    note: &Note,
+    audio: Option<&Arc<Vec<u8>>>,
+    base: Option<&ResumeBase>,
+    on_board: bool,
+) -> Result<NoteFile, FormatError> {
+    let mut file = match base {
+        Some(base) => {
+            let written = written_sheet(note, &base.file.note, on_board);
+            let mut file = base.file.clone();
+            keep_resumed_original(&mut file, &written)?;
+            file.note = written;
+            file.note.modified = base.file.note.modified;
+            file
+        }
+        None => NoteFile::new(note.clone()),
+    };
+    file.note.modified = now_ms().max(file.note.modified).max(file.note.created);
+    file.audio = audio.map(|audio| audio.as_ref().clone());
+    Ok(file)
+}
+
+/// The thumbnail of a page: with its background image on a resumed sheet (a page of the session has
+/// none); the one the file had when it cannot be drawn.
+fn page_thumbnail(file: &mut NoteFile, base: Option<&ResumeBase>) {
+    let drawn = match base {
+        Some(base) => thumbnail_view(NoteView::new(&file.note, base.picture())),
+        None => thumbnail_png(&file.note),
+    };
+    if drawn.is_some() {
+        file.thumbnail = drawn;
+    }
+}
+
 /// Writes a page: a new note in the library root the first time, then over its file. A file
 /// moved meanwhile (same note, untouched) is followed; one whose title or tags were changed
 /// elsewhere keeps them and receives the page ([`merge_outside`]); one whose content was
 /// changed elsewhere, or that was deleted, is left alone and the page becomes a new note next
-/// to it, so that nothing is ever overwritten.
+/// to it, so that nothing is ever overwritten: in the library root for a page of the session, in
+/// the note's binder for a resumed sheet, which says so ([`Written::fork`]). A resumed sheet that
+/// holds what its file holds (the blackboard pressed, nothing written) is not written at all.
 fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError> {
-    let mut file = NoteFile::new(job.note.clone());
-    file.note.modified = now_ms().max(file.note.created);
-    file.thumbnail = thumbnail_png(&file.note);
-    file.audio = job.audio.clone();
-    let content = content_fingerprint(&file.note);
+    let base = job.base.as_deref();
+    let mut file =
+        page_file(&job.note, job.audio.as_ref(), base, job.on_board).map_err(|source| {
+            LibraryError::Format {
+                path: job
+                    .file
+                    .as_ref()
+                    .map_or_else(|| library.root().to_path_buf(), |file| file.path.clone()),
+                source,
+            }
+        })?;
+    let content = file_fingerprint(&file);
+    if let (Some(_), Some(previous)) = (base, &job.file)
+        && content.is_some()
+        && previous.content == content
+    {
+        return Ok(Written {
+            file: previous.clone(),
+            id: file.note.id,
+            outside: None,
+            rewrote: false,
+            fork: None,
+        });
+    }
+    page_thumbnail(&mut file, base);
     let Some(previous) = &job.file else {
         let saved = library.create(Path::new(""), &file)?;
         return Ok(Written {
@@ -336,7 +533,17 @@ fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError>
             },
             id: file.note.id,
             outside: None,
+            rewrote: true,
+            fork: None,
         });
+    };
+    // The page can no longer go in its note.
+    let fork = |file: NoteFile, from: &Path, reason: ForkReason| {
+        if base.is_some() {
+            write_beside(library, file, content, from, reason)
+        } else {
+            write_as_new(library, file, content)
+        }
     };
     match library.save(&previous.path, &file, &previous.stamp) {
         Ok(stamp) => Ok(Written {
@@ -347,6 +554,8 @@ fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError>
             },
             id: file.note.id,
             outside: None,
+            rewrote: true,
+            fork: None,
         }),
         Err(LibraryError::NotFound { .. }) => {
             let moved = library
@@ -365,22 +574,24 @@ fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError>
                         },
                         id: file.note.id,
                         outside: None,
+                        rewrote: true,
+                        fork: None,
                     })
                 }
                 // Retitled elsewhere (the file was renamed and rewritten).
                 Some(entry) => {
                     match merge_outside(library, &file, previous, content, &entry.path) {
                         Some(written) => Ok(written),
-                        None => write_as_new(library, file, content),
+                        None => fork(file, &entry.path, ForkReason::Changed),
                     }
                 }
-                None => write_as_new(library, file, content),
+                None => fork(file, &previous.path, ForkReason::Deleted),
             }
         }
         Err(LibraryError::Conflict { .. }) => {
             match merge_outside(library, &file, previous, content, &previous.path) {
                 Some(written) => Ok(written),
-                None => write_as_new(library, file, content),
+                None => fork(file, &previous.path, ForkReason::Changed),
             }
         }
         Err(error) => Err(error),
@@ -391,8 +602,8 @@ fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError>
 /// changes differs (title, tags, favourite mark: the retitle or tags of the library grid, the
 /// assistant's `update_note`), the page is written into it with those kept; the page then goes
 /// on in the same note instead of leaving a duplicate per page. `None` when the note holds
-/// other ink or layout than the page last wrote, is another note, or cannot be written: the
-/// caller then writes a new note.
+/// other ink, layout, narration or members than the page last wrote, is another note, or cannot
+/// be written: the caller then writes a new note.
 fn merge_outside(
     library: &Library,
     file: &NoteFile,
@@ -403,7 +614,7 @@ fn merge_outside(
     let known = previous.content?;
     let loaded = library.read(path).ok()?;
     let mut merged = loaded.file;
-    if merged.note.id != file.note.id || content_fingerprint(&merged.note)? != known {
+    if merged.note.id != file.note.id || file_fingerprint(&merged)? != known {
         return None;
     }
     let outside = Outside {
@@ -423,6 +634,8 @@ fn merge_outside(
     note.origin = file.note.origin.clone();
     merged.thumbnail = file.thumbnail.clone();
     merged.audio = file.audio.clone();
+    // The version before a resume, kept by this very write when it is the first to change the ink.
+    merged.original_note = file.original_note.clone();
     let stamp = library.save(&loaded.path, &merged, &loaded.stamp).ok()?;
     Some(Written {
         file: SavedFile {
@@ -432,6 +645,8 @@ fn merge_outside(
         },
         id: file.note.id.clone(),
         outside: Some(outside),
+        rewrote: true,
+        fork: None,
     })
 }
 
@@ -450,6 +665,40 @@ fn write_as_new(
         },
         id: file.note.id,
         outside: None,
+        rewrote: true,
+        fork: None,
+    })
+}
+
+/// A resumed sheet that can no longer go in its note at `from` becomes a new note in the same
+/// binder (created again if it went with the note; the library root for a folder whose name the
+/// library would not make).
+fn write_beside(
+    library: &Library,
+    mut file: NoteFile,
+    content: Option<u64>,
+    from: &Path,
+    reason: ForkReason,
+) -> Result<Written, LibraryError> {
+    file.note.id = uuid::Uuid::new_v4().to_string();
+    let binder = from
+        .parent()
+        .and_then(|dir| dir.strip_prefix(library.root()).ok())
+        .unwrap_or_else(|| Path::new(""));
+    let saved = match library.create(binder, &file) {
+        Err(LibraryError::InvalidName { .. }) => library.create(Path::new(""), &file)?,
+        saved => saved?,
+    };
+    Ok(Written {
+        file: SavedFile {
+            path: saved.path,
+            stamp: saved.stamp,
+            content,
+        },
+        id: file.note.id,
+        outside: None,
+        rewrote: true,
+        fork: Some((reason, from.to_path_buf())),
     })
 }
 
@@ -462,7 +711,12 @@ impl Shared {
     /// the session ends here (even one without events), which keeps [`Activity::live`] up to
     /// date.
     fn publish(&self, state: &mut HubState, events: Vec<LiveEvent>) {
-        self.activity.set_live(state.session.is_running());
+        let running = state.session.is_running();
+        if self.activity.set_live(running) != running
+            && let Some(watch) = self.running_watch.get()
+        {
+            watch(running);
+        }
         if events.is_empty() {
             return;
         }
@@ -661,16 +915,20 @@ impl Shared {
                     note: page.note.clone(),
                     audio: page.audio.clone(),
                     file: page.file.clone(),
+                    base: page.base().cloned(),
+                    on_board: page.ink_on_board(),
                 });
             }
             (library, jobs)
         };
         let mut first_error = None;
         for job in jobs {
+            let begun = Instant::now();
             let result = write_page(&library, &job);
+            let took = begun.elapsed();
             let mut state = self.lock();
             match result {
-                Ok(written) => self.written(&mut state, &job, written),
+                Ok(written) => self.written(&mut state, &job, written, took),
                 Err(error) => {
                     self.write_failed(&mut state, &job, &error);
                     drop(state);
@@ -684,7 +942,7 @@ impl Shared {
 
     /// Records a page written; tells the windows when a note appeared, or when a page whose
     /// write had failed is safe again (then the pages still failing are announced again).
-    fn written(&self, state: &mut HubState, job: &SaveJob, written: Written) {
+    fn written(&self, state: &mut HubState, job: &SaveJob, written: Written, took: Duration) {
         if state.session.id() != job.session {
             return;
         }
@@ -692,7 +950,14 @@ impl Shared {
         let Some(page) = state.session.page_mut(job.page) else {
             return;
         };
+        let fork = written.fork.map(|(reason, original)| SheetFork {
+            reason,
+            original: path_text(&original),
+            path: path_text(&written.file.path),
+        });
         page.file = Some(written.file);
+        page.last_write = Some(took);
+        // The note's id, which the windows never see change (`Page::shown_id`).
         page.note.id = written.id;
         if let Some(outside) = written.outside {
             page.note.title = outside.title;
@@ -700,13 +965,26 @@ impl Shared {
             page.note.favorite = outside.favorite;
         }
         page.saved_version = job.version;
+        if written.rewrote {
+            page.mark_rewritten();
+        }
+        let forked = fork.is_some();
+        if let Some(fork) = fork {
+            page.set_fork(fork);
+        }
         let recovered = page.save_error.take().is_some();
         let after = state.session.saved();
+        let mut events = Vec::new();
         if after != before || recovered {
-            let mut events = vec![LiveEvent::Saved { paths: after }];
+            events.push(LiveEvent::Saved { paths: after });
             events.extend(state.session.save_failures());
-            self.publish(state, events);
         }
+        if forked {
+            events.extend(state.session.sheet_forks().into_iter().filter(
+                |event| matches!(event, LiveEvent::SheetForked { page_index, .. } if *page_index == job.page),
+            ));
+        }
+        self.publish(state, events);
     }
 
     /// A page could not be written: the windows are told once, until a write of it succeeds.
@@ -732,6 +1010,29 @@ impl Shared {
             }],
         );
     }
+}
+
+/// A new note next to the one at `from` (in the library root without one): the page as it is now,
+/// with `audio` as its narration, a new id and everything else of its file.
+fn write_sound_apart(
+    library: &Library,
+    note: &Note,
+    base: Option<&ResumeBase>,
+    from: Option<&Path>,
+    on_board: bool,
+    audio: &Arc<Vec<u8>>,
+) -> Result<PathBuf, LibraryError> {
+    let mut file =
+        page_file(note, Some(audio), base, on_board).map_err(|source| LibraryError::Format {
+            path: from.map_or_else(|| library.root().to_path_buf(), Path::to_path_buf),
+            source,
+        })?;
+    page_thumbnail(&mut file, base);
+    let written = match from {
+        Some(from) => write_beside(library, file, None, from, ForkReason::Changed)?,
+        None => write_as_new(library, file, None)?,
+    };
+    Ok(written.file.path)
 }
 
 /// A free `<time> page <n>.ardoise` in `dir` (`-2`, `-3`... when taken), written atomically.
@@ -788,6 +1089,8 @@ impl LiveHub {
             save_wake: Condvar::new(),
             saving: Mutex::new(()),
             narrating: Mutex::new(()),
+            running_watch: OnceLock::new(),
+            narration_backup: OnceLock::new(),
         });
         for (name, work) in [
             ("live-flush", Shared::flush_loop as fn(&Shared)),
@@ -810,32 +1113,53 @@ impl LiveHub {
         self.shared.lock().session.snapshot()
     }
 
+    /// Several changes of the session under one hold of the lock (no pass of the saver between
+    /// them), and what they emitted sent.
+    #[cfg(test)]
+    pub fn change_at_once(&self, change: impl FnOnce(&mut LiveSession, &mut Vec<LiveEvent>)) {
+        self.change(|_| true, change).unwrap();
+    }
+
     /// The session as it is now, as the first events of a subscription give it: the snapshot,
     /// then the stroke in progress and the marks written over the presentation. The frozen
     /// image of a paused share on the network.
     pub fn current_events(&self) -> Vec<LiveEvent> {
         let state = self.shared.lock();
         let mut events = vec![LiveEvent::Snapshot {
-            snapshot: Box::new(state.session.snapshot()),
+            snapshot: Arc::new(state.session.snapshot()),
         }];
         events.extend(state.session.in_progress());
         events.extend(state.session.marks_event());
         events
     }
 
+    /// The background image of page `index` and the file holding its pixels: a resumed sheet is
+    /// the only page with one. Only a look under the lock: decoding and rendering are the caller's,
+    /// after it (`share::live_paper`, `live_page_background`).
+    pub fn page_image(&self, index: usize) -> Option<(BackgroundImage, Arc<ResumeBase>)> {
+        let state = self.shared.lock();
+        let page = state.session.pages().get(index)?;
+        Some((page.note.background_image.clone()?, page.base()?.clone()))
+    }
+
     /// Sends the session's batches to `sink` from now on, replacing the window's previous
     /// subscription. The first batch starts with the returned snapshot (and the stroke in
     /// progress), so a window may apply the batches in order whatever the order in which the
-    /// command's answer and the first batch arrive.
-    pub fn subscribe(&self, label: &str, sink: Arc<dyn BatchSink>) -> LiveSnapshot {
+    /// command's answer and the first batch arrive. A sheet that went on in a new note is told to a
+    /// late window while its session runs; a stopped session's are not, or the view of the next
+    /// lesson would open on a notice about this one (`live_stop` gave them back).
+    pub fn subscribe(&self, label: &str, sink: Arc<dyn BatchSink>) -> Arc<LiveSnapshot> {
         let mut state = self.shared.lock();
-        let snapshot = state.session.snapshot();
+        let snapshot = Arc::new(state.session.snapshot());
         let mut queue = vec![LiveEvent::Snapshot {
-            snapshot: Box::new(snapshot.clone()),
+            snapshot: snapshot.clone(),
         }];
         queue.extend(state.session.in_progress());
         queue.extend(state.session.marks_event());
         queue.extend(state.session.save_failures());
+        if state.session.is_running() {
+            queue.extend(state.session.sheet_forks());
+        }
         let id = state.next_subscriber;
         state.next_subscriber += 1;
         state.subscribers.retain(|s| s.label != label);
@@ -873,7 +1197,8 @@ impl LiveHub {
 
     /// Starts a session (or returns the running one). The previous session's changes are
     /// written first; if that fails nothing starts. The style and the view (blackboard, laser)
-    /// carry over; the view shows the whole page again.
+    /// carry over, except a blackboard that came on by itself with a slate sheet
+    /// ([`LiveSession::carried_ink`]); the view shows the whole page again.
     pub fn start(&self, options: StartOptions) -> Result<Start, LiveError> {
         // The previous session is replaced only once everything in it is written (a command may
         // change it between the write and the lock: a few attempts, then it is replaced).
@@ -899,21 +1224,71 @@ impl LiveHub {
         }
         let id = state.next_session;
         state.next_session += 1;
-        let size = if options.size.width > 0 && options.size.height > 0 {
-            options.size
-        } else {
-            default_size()
-        };
-        let size = oriented_size(size, options.orientation);
+        let size = page_size_of(&options);
         let old = &state.session;
+        let (style, style_before_board, board) = old.carried_ink();
         let view = LiveViewState {
-            board: old.view().board,
+            board,
             laser: old.view().laser,
             ..LiveViewState::whole(size)
         };
-        let mut session = LiveSession::new(id, size, old.style(), view, options.french, now_ms())
-            .with_orientation(options.orientation);
-        session.set_presentation(old.presentation().cloned(), &mut Vec::new());
+        let session = LiveSession::new(id, size, style, view, options.french, now_ms())
+            .with_orientation(options.orientation)
+            .with_style_before_board(style_before_board);
+        Ok(self.install(state, session, options))
+    }
+
+    /// Starts a session on the note at `path` (SPEC §4.2): its first page is that note, whose
+    /// file every write of the page goes through, and the next page is a new note. What was
+    /// shown goes first, as for a new session: a session still running is stopped (its tablet
+    /// input is ignored from now on), and if anything in it cannot be written nothing starts. A
+    /// note that cannot be read leaves all of that as it is.
+    pub fn resume(&self, options: StartOptions, path: &Path) -> Result<Start, LiveError> {
+        let mut loaded = options.library.read(path)?;
+        // The same few attempts as `start`: a command may change the old session meanwhile.
+        for _ in 0..3 {
+            let unwritten = {
+                let state = self.shared.lock();
+                state.session.is_running()
+                    || (state.library.is_some()
+                        && state.session.pages().iter().any(Page::needs_write))
+            };
+            if !unwritten {
+                break;
+            }
+            self.stop()?;
+            // The old session may just have written that very note.
+            loaded = options.library.read(path)?;
+        }
+        let seed = ResumeSeed::of(loaded);
+        let mut state = self.shared.lock();
+        if state.session.is_running() {
+            return Ok(Start::Running(state.session.snapshot()));
+        }
+        let id = state.next_session;
+        state.next_session += 1;
+        let size = page_size_of(&options);
+        let old = &state.session;
+        let view = LiveViewState {
+            laser: old.view().laser,
+            ..LiveViewState::whole(size)
+        };
+        let now = now_ms();
+        let session = LiveSession::new(id, size, old.style_off_board(), view, options.french, now)
+            .with_orientation(options.orientation)
+            .resuming(seed, now);
+        Ok(self.install(state, session, options))
+    }
+
+    /// `session` replaces the session shown and waits for the tablet.
+    fn install(
+        &self,
+        mut state: MutexGuard<'_, HubState>,
+        mut session: LiveSession,
+        options: StartOptions,
+    ) -> Start {
+        let id = session.id();
+        session.set_presentation(state.session.presentation().cloned(), &mut Vec::new());
         let mut out = Vec::new();
         // The old session's marks are not the new one's.
         state.session.clear_marks(&mut out);
@@ -925,13 +1300,13 @@ impl LiveHub {
         state.button = options.button;
         let snapshot = state.session.snapshot();
         self.shared.publish(&mut state, out);
-        Ok(Start::New {
+        Start::New {
             snapshot,
             sink: HubSink {
                 shared: self.shared.clone(),
                 session: id,
             },
-        })
+        }
     }
 
     /// The tablet service could not start session `id`: it goes back to idle.
@@ -960,6 +1335,24 @@ impl LiveHub {
         }
         self.shared.save_pass(true)?;
         Ok(self.shared.lock().session.saved())
+    }
+
+    /// Every resumed sheet of the session shown that went on in a new note: told by an event when it
+    /// happens, but the last write happens as the window closes.
+    pub fn forked_sheets(&self) -> Vec<ForkedSheet> {
+        self.shared.lock().session.forked_sheets()
+    }
+
+    /// Writes every page with changes now, without stopping anything: Windows is about to end the
+    /// session, and may not leave time for more.
+    pub fn write_now(&self) -> Result<(), LiveError> {
+        self.shared.save_pass(true)?;
+        Ok(())
+    }
+
+    /// `watch` is told when live mode starts or stops (one watcher, for the life of the hub).
+    pub fn watch_running(&self, watch: RunningWatch) {
+        let _ = self.shared.running_watch.set(watch);
     }
 
     /// Runs `change` on the session and sends what it emitted; [`LiveError::NotRunning`] before
@@ -1009,14 +1402,64 @@ impl LiveHub {
     }
 
     /// « Undo the clearing »: gives the current page the ink of the last « Clear the page »
-    /// back. Returns whether anything was restored (the page was changed or left meanwhile).
+    /// back, through its history. Returns whether anything was restored (the page was left
+    /// meanwhile).
     pub fn restore_cleared(&self) -> Result<bool, LiveError> {
+        let prepared = self.prepared_undo();
         let mut restored = false;
         self.change(
             |_| true,
-            |session, out| restored = session.restore_cleared(out),
+            |session, out| restored = session.restore_cleared_with(prepared, out),
         )?;
         Ok(restored)
+    }
+
+    /// Deletes or recolours strokes a window chose on page `page_index` at `revision` (see
+    /// [`LiveSession::edit_strokes`]). The list is checked and sorted before the lock is taken.
+    /// Returns the page's revision after the edit.
+    pub fn edit_strokes(
+        &self,
+        page_index: usize,
+        revision: u64,
+        edit: StrokesEdit,
+    ) -> Result<u64, LiveError> {
+        let edit = edit.checked()?;
+        let mut outcome = Err(LiveEditError::Stale);
+        self.change(
+            |_| true,
+            |session, out| outcome = session.edit_strokes(page_index, revision, edit, out),
+        )?;
+        Ok(outcome?)
+    }
+
+    /// Undoes the last edit of page `page_index` (the one on screen). Returns whether there was
+    /// anything to undo.
+    pub fn undo_edit(&self, page_index: usize) -> Result<bool, LiveError> {
+        let prepared = self.prepared_undo();
+        let mut outcome = Ok(false);
+        self.change(
+            |_| true,
+            |session, out| outcome = session.undo_edit(page_index, prepared, out),
+        )?;
+        Ok(outcome?)
+    }
+
+    /// Does again the last edit undone on page `page_index` (the one on screen): the strokes move
+    /// from the page to its history, nothing is copied. Returns whether there was anything to redo.
+    pub fn redo_edit(&self, page_index: usize) -> Result<bool, LiveError> {
+        let mut outcome = Ok(false);
+        self.change(
+            |_| true,
+            |session, out| outcome = session.redo_edit(page_index, out),
+        )?;
+        Ok(outcome?)
+    }
+
+    /// A copy of the strokes the next undo gives back, made without holding the lock: those points
+    /// can be many, and the tablet's input waits for that lock.
+    fn prepared_undo(&self) -> Option<Prepared> {
+        let stored = self.shared.lock().session.next_restored()?;
+        Some(Prepared::of(stored))
     }
 
     pub fn set_style(&self, style: LiveStyle) -> Result<(), LiveError> {
@@ -1045,7 +1488,13 @@ impl LiveHub {
     /// changes are not in the library: the end of the app when the library cannot be written,
     /// so that nothing drawn is lost. Returns each page (0-based) with its copy or the error.
     pub fn back_up_unsaved(&self, dir: &Path) -> Vec<(usize, std::io::Result<PathBuf>)> {
-        type Unsaved = (usize, Note, Option<Vec<u8>>);
+        type Unsaved = (
+            usize,
+            Note,
+            Option<Arc<Vec<u8>>>,
+            Option<Arc<ResumeBase>>,
+            bool,
+        );
         let pages: Vec<Unsaved> = {
             let state = self.shared.lock();
             state
@@ -1054,18 +1503,26 @@ impl LiveHub {
                 .iter()
                 .enumerate()
                 .filter(|(_, page)| page.needs_write())
-                .map(|(index, page)| (index, page.note.clone(), page.audio.clone()))
+                .map(|(index, page)| {
+                    (
+                        index,
+                        page.note.clone(),
+                        page.audio.clone(),
+                        page.base().cloned(),
+                        page.ink_on_board(),
+                    )
+                })
                 .collect()
         };
         pages
             .into_iter()
-            .map(|(index, note, audio)| {
-                let mut file = NoteFile::new(note);
-                file.note.id = uuid::Uuid::new_v4().to_string();
-                file.note.modified = now_ms().max(file.note.created);
-                file.thumbnail = thumbnail_png(&file.note);
-                file.audio = audio;
-                let copy = ardoise_core::format::to_bytes(&file)
+            .map(|(index, note, audio, base, on_board)| {
+                let copy = page_file(&note, audio.as_ref(), base.as_deref(), on_board)
+                    .and_then(|mut file| {
+                        file.note.id = uuid::Uuid::new_v4().to_string();
+                        page_thumbnail(&mut file, base.as_deref());
+                        ardoise_core::format::to_bytes(&file)
+                    })
                     .map_err(std::io::Error::other)
                     .and_then(|bytes| write_backup(dir, index, &bytes));
                 (index, copy)
@@ -1108,7 +1565,7 @@ impl LiveHub {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, page)| {
-                    let file = page.file.as_ref()?;
+                    let file = page.saved_file()?;
                     Some((index, page.note.id.clone(), file.path.clone()))
                 })
                 .collect(),
@@ -1137,7 +1594,12 @@ impl LiveHub {
     /// page without any stroke, or a session or page that no longer exists.
     ///
     /// The page keeps only the encoded narration: a second recording on it decodes the first
-    /// one again (rare) rather than holding its sound for the rest of the session.
+    /// one again (rare) rather than holding its sound for the rest of the session. A resumed
+    /// sheet starts with the narration of its note: nothing of it is replaced, whatever its time
+    /// base ([`placed_for_merge`]) or the time since it was recorded ([`merged_keeping_both`]).
+    ///
+    /// A new sound that cannot join the page's narration is never dropped: that narration stays as
+    /// it is, the sound is kept apart ([`keep_apart`](Self::keep_apart)) and the error says where.
     pub fn attach_narration(
         &self,
         session: u64,
@@ -1160,9 +1622,40 @@ impl LiveHub {
             }
         };
         let merged = match existing {
-            Some(bytes) => decode_narration(&bytes)
-                .map_err(LiveError::Narration)?
-                .merge(narration),
+            Some(bytes) => {
+                let earlier = match decode_narration(&bytes) {
+                    Ok(earlier) => earlier,
+                    Err(error) => {
+                        eprintln!("live mode: the narration of a page cannot be read: {error}");
+                        let why = NarrationApart::Unreadable;
+                        return Err(self.keep_apart(session, page, &narration, why));
+                    }
+                };
+                let start_in_note = narration.start_ms;
+                let later = if earlier.options == ReplayOptions::default() {
+                    narration
+                } else {
+                    let note = {
+                        let state = self.shared.lock();
+                        state.session.pages().get(page).map(|p| p.note.clone())
+                    };
+                    match note {
+                        Some(note) => placed_for_merge(narration, &earlier, &note),
+                        None => narration,
+                    }
+                };
+                match merged_keeping_both(earlier, later) {
+                    Ok(merged) => merged,
+                    Err(later) => {
+                        let later = Narration {
+                            start_ms: start_in_note,
+                            ..later
+                        };
+                        let why = NarrationApart::TooLong;
+                        return Err(self.keep_apart(session, page, &later, why));
+                    }
+                }
+            }
             None => narration,
         };
         let audio = encode_narration(&merged).map_err(LiveError::Narration)?;
@@ -1179,6 +1672,77 @@ impl LiveHub {
             self.shared.save_wake.notify_all();
         }
         Ok(attached)
+    }
+
+    /// Keeps a sound that cannot join the narration of page `page`, and gives the error that says
+    /// so: a new note next to the page's, holding the page as it is now with this sound (in the
+    /// library, where the teacher looks, and in time with its ink), or, when the library cannot be
+    /// written, a copy of the sound among the narration backups.
+    pub(super) fn keep_apart(
+        &self,
+        session: u64,
+        page: usize,
+        narration: &Narration,
+        why: NarrationApart,
+    ) -> LiveError {
+        let audio = match encode_narration(narration) {
+            Ok(audio) => Arc::new(audio),
+            Err(error) => {
+                return LiveError::NarrationLost {
+                    why,
+                    detail: error.to_string(),
+                };
+            }
+        };
+        let (library, source) = {
+            let state = self.shared.lock();
+            let source = (state.session.id() == session)
+                .then(|| state.session.pages().get(page))
+                .flatten()
+                .map(|page| {
+                    (
+                        page.note.clone(),
+                        page.base().cloned(),
+                        page.file.as_ref().map(|file| file.path.clone()),
+                        page.ink_on_board(),
+                    )
+                });
+            (state.library.clone(), source)
+        };
+        let from = source.as_ref().and_then(|(_, _, from, _)| from.clone());
+        if let (Some(library), Some((note, base, from, on_board))) = (&library, &source) {
+            match write_sound_apart(
+                library,
+                note,
+                base.as_deref(),
+                from.as_deref(),
+                *on_board,
+                &audio,
+            ) {
+                Ok(kept) => return LiveError::NarrationKeptApart { why, kept },
+                Err(error) => eprintln!("live mode: cannot write the sound as a new note: {error}"),
+            }
+        }
+        let dir = self
+            .shared
+            .narration_backup
+            .get()
+            .cloned()
+            .unwrap_or_else(backup_dir);
+        let named_after = from.unwrap_or_else(|| PathBuf::from("narration"));
+        match write_narration_backup(&dir, &named_after, &audio) {
+            Ok(kept) => LiveError::NarrationKeptApart { why, kept },
+            Err(error) => LiveError::NarrationLost {
+                why,
+                detail: error.to_string(),
+            },
+        }
+    }
+
+    /// Where a sound that cannot go in a note is kept, instead of `narration::backup_dir`.
+    #[cfg(test)]
+    pub fn set_narration_backup(&self, dir: PathBuf) {
+        let _ = self.shared.narration_backup.set(dir);
     }
 
     /// Gives page `page` of the current session a narration with ready-made `audio` bytes (no

@@ -29,12 +29,14 @@ import { inkspaceJourneys } from './journeys-m10-inkspace.mjs';
 import { libraryJourneys } from './journeys-m10-library.mjs';
 import { uiJourneys } from './journeys-m10-ui.mjs';
 import { shareJourneys } from './journeys-m11-share.mjs';
+import { resumeJourneys } from './journeys-m12-resume.mjs';
+import { touchUpJourneys } from './journeys-m12-touchup.mjs';
 import { mcpJourney } from './mcp.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -72,9 +74,11 @@ function freePort() {
 /**
  * Starts a portable copy of the app on a fresh demo library, in `language`, with `args` on its command line.
  * `settings`: extra text of ardoise.toml (tables such as `[share]`, put before the machine's table);
- * `env`: extra environment variables of the process.
+ * `env`: extra environment variables of the process;
+ * `browserArgs`: extra command-line arguments of WebView2 (a journey that keeps a window over the control window asks
+ * for the ones that stop Chromium from pausing a window it thinks hidden).
  */
-async function startApp(language, port, args = [], { settings = '', env = {} } = {}) {
+async function startApp(language, port, args = [], { settings = '', env = {}, browserArgs = '' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), `ardoise-e2e-${language}-`));
   const appExe = join(dir, 'ardoise.exe');
   copyFileSync(exe, appExe);
@@ -95,7 +99,7 @@ async function startApp(language, port, args = [], { settings = '', env = {} } =
     env: {
       ...process.env,
       LOCALAPPDATA: local,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}${browserArgs ? ` ${browserArgs}` : ''}`,
       ...env,
     },
     stdio: 'ignore',
@@ -139,6 +143,8 @@ async function startApp(language, port, args = [], { settings = '', env = {} } =
     dir,
     library,
     language,
+    /** The remote debugging port of this window: a journey attaches to the other windows (presentation) through it. */
+    port,
     send,
     /** Value of a JavaScript expression in the page (awaited). */
     async evaluate(expression) {
@@ -279,7 +285,7 @@ for (const language of ['fr', 'en']) {
     // A journey may ask for settings and environment variables that depend on a free TCP port (`app.sharePort`).
     const context = { sharePort: await freePort() };
     const given = (value) => (typeof value === 'function' ? value(context) : value);
-    const app = await startApp(language, port++, journey.args, { settings: given(journey.settings), env: given(journey.env) });
+    const app = await startApp(language, port++, journey.args, { settings: given(journey.settings), env: given(journey.env), browserArgs: journey.browserArgs });
     app.sharePort = context.sharePort;
     const label = `[${language.toUpperCase()}] ${journey.name}`;
     console.log(`\n${label}`);

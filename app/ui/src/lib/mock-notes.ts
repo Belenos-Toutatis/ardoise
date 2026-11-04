@@ -56,7 +56,9 @@ function keepOriginal(entry: StoredNote, next: Note): void {
     page: before.page,
     layers: before.layers,
     strokes: before.strokes,
-    // The first version's `note.json` describes its background image (a tablet page has none).
+    // The first version's `note.json` tells its paper and describes its background image (a tablet
+    // page has neither).
+    ...(!tablet ? { paper: before.background.paper } : {}),
     ...(!tablet && before.backgroundImage ? { backgroundImage: before.backgroundImage } : {}),
   });
 }

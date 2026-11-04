@@ -1,13 +1,14 @@
 //! Shapes exchanged with the interface (mirrored by `app/ui/src/lib/live.ts`; contract:
 //! docs/design/tablet-live-classroom.md, "TypeScript mirror").
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ardoise_core::note::{Note, PageSize};
 use ardoise_core::settings::Orientation;
 use ardoise_device::pages::TABLET_PEN_WIDTH;
-use ardoise_ink::{Rgba, Tool};
-use serde::{Deserialize, Serialize};
+use ardoise_ink::{Rgba, Stroke, Tool};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::presentation::MonitorInfo;
 
@@ -205,6 +206,16 @@ pub struct LiveCommand {
     pub kind: LiveCommandKind,
 }
 
+/// Why a resumed sheet became a new note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ForkReason {
+    /// It changed elsewhere (another PC, Nextcloud) since it was resumed.
+    Changed,
+    /// It no longer exists.
+    Deleted,
+}
+
 /// State of the live session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -236,9 +247,13 @@ pub struct LiveSnapshot {
     /// 0-based.
     pub page_index: usize,
     pub page_count: usize,
-    /// How the tablet is held (the live window's quick switch shows it).
+    /// How the tablet is held (the live window's quick switch shows it). On a resumed sheet held
+    /// the other way round than the setting, how it is to be held for that page.
     pub orientation: Orientation,
-    /// Layer receiving new strokes (the current page's last one).
+    /// Whether the current page turns with the tablet. A resumed sheet never does: the interface
+    /// disables the quick switch on it.
+    pub can_turn_page: bool,
+    /// Layer receiving new strokes (the current page's last visible one).
     pub layer: u32,
     pub style: LiveStyle,
     pub view: LiveViewState,
@@ -247,6 +262,14 @@ pub struct LiveSnapshot {
     pub presentation: Option<MonitorInfo>,
     /// Paths of the notes saved so far in this session, in the order they were created.
     pub saved: Vec<String>,
+    /// What the indices of the current page's strokes mean: a command that names strokes
+    /// (`live_edit_strokes`) gives it back and is refused once it changed. It changes only when
+    /// strokes leave or come back ([`LiveEvent::StrokesEdited`], « Clear the page »), never when
+    /// the tablet appends a stroke. Absent on the share's viewers.
+    pub revision: u64,
+    /// The current page has an edit to undo, or to redo. Absent on the share's viewers.
+    pub can_undo: bool,
+    pub can_redo: bool,
 }
 
 /// A point of the stroke in progress.
@@ -273,6 +296,72 @@ pub struct LiveStroke {
     pub points: Vec<LivePoint>,
 }
 
+/// A stroke that comes back on a page, and where it stands once it is back.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PlacedStroke {
+    pub index: u32,
+    pub stroke: Stroke,
+}
+
+/// Strokes that take one colour.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RecolouredStrokes {
+    pub color: Rgba,
+    /// Ascending.
+    pub indices: Vec<u32>,
+}
+
+/// A `strokesEdited` in the numbering of the share's viewers, for a page with hidden layers: they
+/// have no hidden strokes, so their list is shorter than the page's. Worked out with the edit
+/// (`feed.rs` knows nothing of the page), the same fields in the same order; `inserted` follows the
+/// order of the event's `inserted`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewerIndices {
+    pub removed: Vec<u32>,
+    pub inserted: Vec<u32>,
+    pub recoloured: Vec<RecolouredStrokes>,
+}
+
+/// The strokes of an event are not copied for each window (see [`LiveEvent::StrokesEdited`]).
+fn shared_strokes<S: Serializer>(
+    strokes: &Arc<Vec<PlacedStroke>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    strokes.as_slice().serialize(serializer)
+}
+
+/// Nor is a snapshot: every window's queue holds the same one (see [`LiveEvent::Snapshot`]).
+fn shared_snapshot<S: Serializer>(
+    snapshot: &Arc<LiveSnapshot>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    snapshot.as_ref().serialize(serializer)
+}
+
+/// The answer to a command that returns the snapshot a window's queue already holds: written once
+/// more as it is, not copied first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SnapshotReply(pub Arc<LiveSnapshot>);
+
+impl Serialize for SnapshotReply {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        shared_snapshot(&self.0, serializer)
+    }
+}
+
+/// A resumed sheet that went on in a new note: what [`LiveEvent::SheetForked`] says, and what
+/// `live_stop` gives back for a fork made by the last write, when the window is about to close.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkedSheet {
+    pub page_index: usize,
+    pub reason: ForkReason,
+    /// The note left as it is.
+    pub original: String,
+    /// The new note.
+    pub path: String,
+}
+
 /// One thing that happened, in order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(
@@ -281,9 +370,13 @@ pub struct LiveStroke {
     rename_all_fields = "camelCase"
 )]
 pub enum LiveEvent {
-    /// Page change, clear, layer, style, state, blackboard, presentation opened or closed.
+    /// Page change, clear, layer, style, state, blackboard, presentation opened or closed. Not an
+    /// edit of strokes: [`StrokesEdited`](Self::StrokesEdited) says that for less. Shared, since
+    /// each window and viewer has its own queue: the page is not copied for each under the hub's
+    /// lock.
     Snapshot {
-        snapshot: Box<LiveSnapshot>,
+        #[serde(serialize_with = "shared_snapshot")]
+        snapshot: Arc<LiveSnapshot>,
     },
     /// A stroke with its first point(s).
     StrokeStart {
@@ -327,6 +420,45 @@ pub enum LiveEvent {
         /// The library error's code: the interface says it in words (`errorCodes.*`).
         code: String,
         message: String,
+    },
+    /// The resumed sheet on page `page_index` changed elsewhere or was deleted: nothing was
+    /// overwritten, and the page goes on in a new note in the same binder. Sent once, and to a
+    /// window that subscribes later while the session runs (a stopped session's forks are for
+    /// `live_stop` to give back, not for the next lesson's view). About the library: never sent to
+    /// the viewers of the share.
+    SheetForked {
+        page_index: usize,
+        reason: ForkReason,
+        /// The note left as it is.
+        original: String,
+        /// The new note.
+        path: String,
+    },
+    /// Finished strokes of page `page_index` were deleted, came back or changed colour (an edit,
+    /// its undo or redo). Applied to the list in this order: `removed`, then `inserted`, then
+    /// `recoloured`; the stroke in progress is not concerned. Strokes that are not named keep
+    /// their place in the list and their object in the window, so that their outlines are not
+    /// computed again. Never merged with another event. « Clear the page » is a snapshot instead:
+    /// it also drops the stroke in progress.
+    StrokesEdited {
+        page_index: usize,
+        /// The page's revision after this event.
+        revision: u64,
+        /// Indices of the strokes that leave, in the list before this event, ascending.
+        removed: Vec<u32>,
+        /// The strokes that come back, each with its index in the list after this event,
+        /// ascending. Shared, since each window has its own queue: their points are not copied
+        /// under the hub's lock.
+        #[serde(serialize_with = "shared_strokes")]
+        inserted: Arc<Vec<PlacedStroke>>,
+        /// New colours; indices in the list after this event.
+        recoloured: Vec<RecolouredStrokes>,
+        can_undo: bool,
+        can_redo: bool,
+        /// For the share only (`feed.rs`): `None` when the page has no hidden layer, and then a
+        /// viewer's list and the page's are numbered alike.
+        #[serde(skip)]
+        viewers: Option<Box<ViewerIndices>>,
     },
 }
 

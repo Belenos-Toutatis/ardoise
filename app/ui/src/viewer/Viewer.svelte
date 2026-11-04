@@ -192,7 +192,7 @@
     <ViewerCanvas
       live={viewer.live}
       {ink}
-      background={viewer.background}
+      background={viewer.paper}
       shown={viewer.shown}
       view={viewer.view}
       label={t('viewer.canvas')}

@@ -37,6 +37,8 @@
   let liveOpen = $state(false);
   /** Path of the note being edited; the editor then takes the whole window. */
   let openPath = $state<string | null>(null);
+  /** Live mode resumes this note (M12) instead of starting on a blank page; null for a new session. */
+  let resumePath = $state<string | null>(null);
   let searchInput = $state<HTMLInputElement | null>(null);
   let shell = $state<HTMLElement | null>(null);
   /** The editor or live mode shows over the library, which stays mounted (hidden) meanwhile. */
@@ -170,12 +172,29 @@
   function openLive() {
     panel = null;
     leaveLibrary(null);
+    resumePath = null;
     liveOpen = true;
   }
 
-  function closeLive() {
+  /**
+   * « Reprendre en mode direct » (M12), from a card's menu or from the editor (which has saved or
+   * let go of its changes first): live mode takes the window on that note.
+   */
+  function resumeLive(path: string) {
+    panel = null;
+    if (openPath !== null && returnTo) returnTo.path = path;
+    else leaveLibrary(path);
+    openPath = null;
+    resumePath = path;
+    liveOpen = true;
+  }
+
+  /** `notice`: what live mode has to say on the way out (a recording that could not be kept). */
+  function closeLive(notice?: unknown) {
     liveOpen = false;
+    resumePath = null;
     void lib.refresh();
+    if (typeof notice === 'string') lib.notice = notice;
     void backToLibrary();
   }
 
@@ -216,7 +235,7 @@
   still there when the user comes back (and a library of 1,000 notes is not built again).
 -->
 {#if liveOpen}
-  <LiveView {app} {onchange} onclose={closeLive} />
+  <LiveView {app} {onchange} resume={resumePath} onclose={closeLive} />
 {:else if openPath}
   <Editor
     path={openPath}
@@ -229,6 +248,7 @@
       if (openPath !== null) openPath = path;
       void lib.refresh();
     }}
+    onresume={resumeLive}
   />
 {/if}
 
@@ -304,7 +324,7 @@
         {#if inTrash}
           <TrashView {lib} />
         {:else}
-          <NoteGrid {lib} onopen={open} onnew={newNote} />
+          <NoteGrid {lib} onopen={open} onnew={newNote} onresume={(note) => resumeLive(note.path)} />
         {/if}
         <ActivityBanner activity={lib.activity} />
       </div>

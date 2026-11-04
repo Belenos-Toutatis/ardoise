@@ -105,6 +105,13 @@ export type ShareMessage =
    */
   | { type: 'live'; reset: boolean; batch: LiveBatch }
   /**
+   * The paper of a live page that is not plain (a resumed sheet) can be fetched at `/paper/<key>`,
+   * apart from this stream, for it may weigh megabytes; it is drawn under the strokes while the
+   * page's snapshot asks for this `key` (`LiveSnapshot.paperKey`). `version` names its bytes: the
+   * same version is the picture already fetched.
+   */
+  | { type: 'livePaper'; key: string; version: string }
+  /**
    * The whole page of the note open in the editor; `background`: PNG data URL of the paper, null
    * for plain paper, absent when the paper is the one already shown (a stroke erased, an undo:
    * the picture, which may weigh megabytes, is sent only when it changes).

@@ -1,21 +1,32 @@
 <script lang="ts">
   /**
    * Live mode and the classroom's control window (SPEC §4.2; docs/design/tablet-live-classroom.md,
-   * "Interface"). Starts live mode when it opens (`live_start`) and follows the session
+   * "Interface"). Starts live mode when it opens (`live_start`; `live_resume` on the note `resume`
+   * when one is given, M12: the sheet is never turned, and a notice says how to hold the tablet
+   * for it and, if it changed elsewhere meanwhile, that the writing went on in a new note) and follows the session
    * (`live_subscribe`): toolbar (tool, colour, width), pages, layer, clear, blackboard, laser
    * pointer, the preview of the whole page with the projected area (drag to move it), zoom,
    * the presentation window (screen, project / stop), the measured latency, the narration (SPEC
    * §4.5: record the microphone during the session; it is cut per page and saved with the notes),
-   * and "Finish" (the narration stops first, then `live_stop`, then `onclose`).
+   * and "Finish" (the narration stops first, then `live_stop`, then `onclose`; what `live_stop` says
+   * of the last write, a sheet that went on in a new note or a narration that could not join its
+   * pages, keeps the view open until it is dismissed: the view is the only place that says it).
+   *
+   * Touching up (M12, this window only): the Select tool (V) lets the mouse and the pen choose strokes of
+   * the preview with a lasso or a click; a bar then deletes them (Delete, Backspace), the colour swatches
+   * recolour them (and only them: with a selection a swatch does not change the pen's colour), Esc
+   * deselects first. Undo and Redo (Ctrl+Z, Ctrl+Y) go through the page's history: a delete, a change
+   * of colour, « Clear the page », never what the tablet wrote. The selection is dropped when the page
+   * or its revision changes, and with the Select tool when the session is over.
    */
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { api, errorMessage, type AppState } from '../../lib/api';
   import { bridgeScreens, drivePresentation, until } from '../../lib/app-bridge.svelte';
   import { INKSPACE_COLOR_NAMES, sameColor } from '../../lib/editor/colors';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { TOOLS, loadInk, type Ink, type Tool } from '../../lib/ink';
   import { LatencyRecorder, exposeLatency } from '../../lib/latency';
-  import type { LiveCommandKind, LiveStyle, LiveViewState, MonitorInfo } from '../../lib/live';
+  import type { LiveCommandKind, LiveStopped, LiveStyle, LiveViewState, MonitorInfo, SheetFork } from '../../lib/live';
   import {
     changeView,
     runKeyAction,
@@ -27,12 +38,15 @@
     zoomStep,
     type LiveActions,
   } from '../../lib/live-actions';
-  import { isSpaceKey, isTypingTarget, liveKeyAction } from '../../lib/live-keys';
+  import { isSpaceKey, isTypingTarget, liveEditKeyAction, liveKeyAction, type LiveEditKeyAction } from '../../lib/live-keys';
+  import { LiveSelection } from '../../lib/live-select.svelte';
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
+  import { deleteSelected, recolourSelected, stepHistory, type TouchUp } from '../../lib/live-touch-up';
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
   import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
   import { ORIENTATIONS, type Orientation } from '../../lib/orientation';
   import { share } from '../../lib/share-state.svelte';
+  import { tablet } from '../../lib/tablet-state.svelte';
   import type { NarrationSaved } from '../../lib/video';
   import Modal from '../Modal.svelte';
   import RecordPanel from '../narration/RecordPanel.svelte';
@@ -43,11 +57,15 @@
 
   let {
     app,
+    resume = null,
     onclose,
     onchange,
   }: {
     app: AppState;
-    onclose: () => void;
+    /** The note of the library to resume live mode on (M12); null: a new session on a blank page. */
+    resume?: string | null;
+    /** The view is done; `notice` is something the library says on coming back (a recording that was lost). */
+    onclose: (notice?: string) => void;
     /** The app state changed (the microphone chosen here): the screen holding it takes the new one. */
     onchange?: (next: AppState) => void;
   } = $props();
@@ -74,9 +92,25 @@
   const UNDO_CLEAR_MS = 8000;
   /** How often the latency shown is refreshed. */
   const LATENCY_REFRESH_MS = 500;
-  const KEYS = ['next', 'previous', 'clear', 'board', 'laser', 'zoom', 'whole', 'width', 'pan', 'marks', 'leave'] as const;
+  const KEYS = [
+    'next',
+    'previous',
+    'clear',
+    'board',
+    'laser',
+    'select',
+    'delete',
+    'undo',
+    'zoom',
+    'whole',
+    'width',
+    'pan',
+    'marks',
+    'leave',
+  ] as const;
 
   const live = new LiveState();
+  const selection = new LiveSelection();
   const latency = new LatencyRecorder();
   const recorder = new NarrationRecorder();
 
@@ -86,6 +120,12 @@
   let stopping = $state(false);
   let stopError = $state<string | null>(null);
   let notice = $state<string | null>(null);
+  /** Title of the sheet resumed ('' when it has none, or on a new session). */
+  let sheetTitle = $state('');
+  /** `live_stop` answered and had something to say: the view stays until it is all dismissed. */
+  let stopped = $state(false);
+  /** Why the recording still running at the stop could not join its pages, as a sentence. */
+  let stoppedNarration = $state<string | null>(null);
   let monitors = $state.raw<MonitorInfo[]>([]);
   let monitorKey = $state('');
   let monitorsLoaded = $state(false);
@@ -123,6 +163,14 @@
           ? t('live.narration.savedOne')
           : t('live.narration.savedMany', { count: narrated.pages }),
   );
+  /** The sheet is resumed and cannot be turned: the quick position buttons wait for the next page. */
+  const locked = $derived(!live.canTurnPage);
+  /** How to hold the tablet for the resumed sheet, when that is not how the setting says. */
+  const hold = $derived(
+    locked && sessionState !== 'idle' && tablet.status && tablet.status.options.orientation !== live.orientation
+      ? live.orientation
+      : null,
+  );
   const savedCount = $derived(live.saved.length);
   const savedText = $derived(
     savedCount === 0 ? t('live.saved.none') : savedCount === 1 ? t('live.saved.one') : t('live.saved.many', { count: savedCount }),
@@ -148,6 +196,24 @@
     onCleared: offerUndo,
   };
 
+  const touchUp: TouchUp = {
+    live,
+    selection,
+    commands: api,
+    onerror: (error) => (notice = errorMessage(error)),
+    onhistory: dropUndo,
+  };
+
+  // A selection belongs to a page and to its revision: another page, a delete or an undo drops it.
+  $effect(() => {
+    selection.follow(live);
+  });
+
+  // The Select tool belongs to a running session: the edits are refused (`liveNotRunning`) at idle.
+  $effect(() => {
+    if (sessionState === 'idle') untrack(() => selection.toggle(false));
+  });
+
   // The offer concerns the page that was cleared: it goes when the page changes.
   $effect(() => {
     void live.pageIndex;
@@ -160,6 +226,8 @@
     // « waiting » again when it is back, `Home.svelte`).
     share.showLive();
     exposeLatency(latency);
+    // The position set for the tablet is compared with how the resumed sheet is held.
+    tablet.start();
     loadInk()
       .then((module) => {
         if (alive) ink = module;
@@ -210,7 +278,8 @@
       clearTimeout(undoTimer);
       live.close();
       recorder.dispose();
-      // A recording is never thrown away silently: the pages get the sound recorded so far.
+      // A recording is never thrown away silently: the pages get the sound recorded so far. (The
+      // ways out of the view stop it first and say what went wrong: `releaseRecording`.)
       if (recorder.phase === 'recording') void api.narrationStop(true, null, null, null).catch(() => {});
     };
   });
@@ -219,12 +288,13 @@
     starting = true;
     startError = null;
     try {
-      const snapshot = await api.liveStart();
+      const snapshot = resume === null ? await api.liveStart() : await api.liveResume(resume);
       if (destroyed) {
         // The view was closed while the session started: nobody would stop it.
         void api.liveStop().catch(() => {});
         return;
       }
+      if (resume !== null) sheetTitle = snapshot.page.title.trim();
       live.adoptStart(snapshot);
     } catch (error) {
       if (!destroyed) startError = errorMessage(error);
@@ -281,13 +351,14 @@
       // A recording with nothing in it (silent or blocked microphone) is nothing to keep: leaving goes on.
       narrated = result.saved;
     }
+    let answer: LiveStopped | null = null;
     try {
       if (live.presentation) {
         await api.closePresentation().catch(() => {
           // Rust closes it with the session anyway.
         });
       }
-      await api.liveStop();
+      answer = await api.liveStop();
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code !== 'liveNotRunning') {
@@ -296,8 +367,57 @@
         return;
       }
     }
+    leaveAfterStop(answer);
+  }
+
+  /** The view goes: the library is shown again, with `message` if there is one to say. */
+  function leave(message?: string) {
     live.close();
-    onclose();
+    onclose(message);
+  }
+
+  /**
+   * The session is over. What its last write did is only told here (the view closes on this answer):
+   * a sheet that went on in a new note that this window was not told of, or a narration that could
+   * not join its pages. Then the view stays, with the notices, until they are all dismissed.
+   */
+  function leaveAfterStop(answer: LiveStopped | null, lost: string | null = null) {
+    const unseen = answer ? live.adoptForks(answer.forks) : [];
+    const problem = answer?.narration ? errorMessage(answer.narration) : lost;
+    if (unseen.length === 0 && problem === null) {
+      leave();
+      return;
+    }
+    stoppedNarration = problem;
+    stopError = null;
+    stopped = true;
+    stopping = false;
+  }
+
+  /** Once the session is over and every notice is dismissed, the view closes. */
+  function leaveWhenDismissed() {
+    if (stopped && live.forks.length === 0 && stoppedNarration === null) leave();
+  }
+
+  function dismissFork(fork: SheetFork) {
+    live.dismissFork(fork);
+    leaveWhenDismissed();
+  }
+
+  function dismissStoppedNarration() {
+    stoppedNarration = null;
+    leaveWhenDismissed();
+  }
+
+  /**
+   * A recording still running as the view goes is stopped, its sound kept (nothing is thrown away
+   * silently). Null when it went well or there was nothing to keep, otherwise a sentence for the library.
+   */
+  async function releaseRecording(): Promise<string | null> {
+    if (recorder.phase !== 'recording') return null;
+    const result = await recorder.stop(true, null);
+    if (result.ok || NOTHING_TO_KEEP.includes(result.code ?? '')) return null;
+    return t('live.recordingLost', { message: recorder.error ?? '' });
   }
 
   /**
@@ -308,10 +428,19 @@
   async function closeAnyway() {
     if (stopping) return;
     stopping = true;
+    const lost = await releaseRecording();
     await api.closePresentation().catch(() => {});
-    await api.liveStop().catch(() => {});
-    live.close();
-    onclose();
+    const answer = await api.liveStop().catch(() => null);
+    leaveAfterStop(answer, lost);
+  }
+
+  /**
+   * "Back to the library" after a refused resume: nothing was started on this side (a session
+   * that was running goes on), so only the view closes.
+   */
+  function leaveRefused() {
+    if (recorder.phase !== 'recording') leave();
+    else void releaseRecording().then((lost) => leave(lost ?? undefined));
   }
 
   function offerUndo() {
@@ -340,7 +469,7 @@
    */
   function escape() {
     if (live.presentation) void stopProjecting();
-    else if (!stopping) confirmLeave = true;
+    else if (!stopping && !stopped) confirmLeave = true;
   }
 
   function command(kind: LiveCommandKind) {
@@ -350,7 +479,7 @@
 
   /** The quick switch of the tablet's position: applies at once, the snapshot that follows shows it. */
   function setOrientation(orientation: Orientation) {
-    if (orientation === live.orientation) return;
+    if (locked || orientation === live.orientation) return;
     notice = null;
     api.tabletSetOrientation(orientation).catch((error: unknown) => actions.onerror(error));
   }
@@ -363,6 +492,40 @@
     const style = live.style;
     widths[style.tool] = style.width;
     setStyle({ ...style, tool, width: widths[tool] ?? DEFAULT_WIDTHS[tool] });
+  }
+
+  /** A swatch: recolours the selection if there is one, otherwise it is the pen's colour. */
+  function pickColor(color: Rgba) {
+    const next = { ...color };
+    // With a selection the colour is for it only: what the tablet writes next keeps its colour, so
+    // that a correction made in front of the class does not change the ink under the pen.
+    if (selection.any) void recolourSelected(touchUp, next);
+    else setStyle({ ...live.style, color: next });
+  }
+
+  function undoEdit(again = false) {
+    if (again ? !live.canRedo : !live.canUndo) return;
+    void stepHistory(touchUp, again);
+  }
+
+  function runEditKey(action: LiveEditKeyAction) {
+    switch (action.kind) {
+      case 'select':
+        selection.toggle();
+        break;
+      case 'deselect':
+        selection.clear();
+        break;
+      case 'deleteSelection':
+        void deleteSelected(touchUp);
+        break;
+      case 'undo':
+        undoEdit();
+        break;
+      case 'redo':
+        undoEdit(true);
+        break;
+    }
   }
 
   function setView(view: LiveViewState) {
@@ -428,6 +591,14 @@
   function onkeydown(e: KeyboardEvent) {
     // The question about ending live mode has its own keys.
     if (e.defaultPrevented || confirmLeave || share.panelOpen) return;
+    // Touching up first: V, undo and redo, and Delete and Esc while something is selected. Only while
+    // a session runs, like the Select button (the edits are refused once it is over).
+    const edit = live.ready && sessionState !== 'idle' ? liveEditKeyAction(e, selection.any) : null;
+    if (edit) {
+      e.preventDefault();
+      runEditKey(edit);
+      return;
+    }
     const action = liveKeyAction(e);
     if (!action) return;
     e.preventDefault();
@@ -460,24 +631,63 @@
       {/if}
     </span>
     <span class="saved muted" data-saved={savedCount}>{savedText}</span>
-    <button
-      type="button"
-      class="button primary"
-      data-action="stop-live"
-      disabled={stopping || starting}
-      title={t('live.stopHint')}
-      onclick={finish}
-    >
-      {stopping ? t('live.stopping') : t('live.stop')}
-    </button>
+    {#if stopped}
+      <!-- The session is over and a notice is waiting: this closes the view and the notices with it. -->
+      <button type="button" class="button primary" data-action="stopped-back" onclick={() => leave()}>
+        {t('live.resume.back')}
+      </button>
+    {:else}
+      <button
+        type="button"
+        class="button primary"
+        data-action="stop-live"
+        disabled={stopping || starting}
+        title={t('live.stopHint')}
+        onclick={finish}
+      >
+        {stopping ? t('live.stopping') : t('live.stop')}
+      </button>
+    {/if}
   </header>
 
   {#if startError}
-    <div class="banner error live-banner" role="alert">
-      <strong>{t('live.startFailed')}</strong>
+    <div class="banner error live-banner" role="alert" data-slot={resume === null ? 'start-failed' : 'resume-failed'}>
+      <strong>{resume === null ? t('live.startFailed') : t('live.resume.failed')}</strong>
       <p>{startError}</p>
       <button type="button" class="button small-button primary" onclick={start}>{t('live.retry')}</button>
-      <button type="button" class="button small-button" disabled={stopping} onclick={closeAnyway}>{t('common.close')}</button>
+      {#if resume === null}
+        <button type="button" class="button small-button" disabled={stopping} onclick={closeAnyway}>{t('common.close')}</button>
+      {:else}
+        <button type="button" class="button small-button" data-action="resume-back" onclick={leaveRefused}>
+          {t('live.resume.back')}
+        </button>
+      {/if}
+    </div>
+  {/if}
+  <!-- A sheet that went on in a new note: the notice stays until it is dismissed. -->
+  {#each live.forks as fork (fork.path)}
+    <div class="banner notice live-banner" role="status" data-slot="sheet-forked" data-reason={fork.reason}>
+      {#if sheetTitle}
+        <strong>{t('live.resume.forked.sheet', { title: sheetTitle })}</strong>
+      {/if}
+      <p>{t(`live.resume.forked.${fork.reason}`)}</p>
+      <button type="button" class="button small-button" data-action="dismiss-fork" onclick={() => dismissFork(fork)}>
+        {t('live.dismiss')}
+      </button>
+    </div>
+  {/each}
+  {#if hold}
+    <div class="banner notice live-banner" role="status" data-slot="resume-hold" data-orientation={hold}>
+      <p>{t('live.resume.hold', { position: t(`tablet.orientation.${hold}`) })}</p>
+    </div>
+  {/if}
+  {#if stoppedNarration}
+    <div class="banner error live-banner" role="alert" data-slot="narration-not-added">
+      <strong>{t('live.stopped.narration')}</strong>
+      <p>{stoppedNarration}</p>
+      <button type="button" class="button small-button" data-action="dismiss-narration-problem" onclick={dismissStoppedNarration}>
+        {t('live.dismiss')}
+      </button>
     </div>
   {/if}
   {#if stopError}
@@ -535,7 +745,7 @@
             aria-pressed={sameColor(color, live.style.color)}
             aria-label={t(label)}
             title={t(label)}
-            onclick={() => setStyle({ ...live.style, color: { ...color } })}
+            onclick={() => pickColor(color)}
           ></button>
         {/each}
       </div>
@@ -612,7 +822,48 @@
       </button>
     </div>
 
-    <div class="group" role="group" aria-label={t('live.orientation.label')} title={t('live.orientation.hint')} data-slot="orientation">
+    <div class="group" role="group" aria-label={t('live.select.label')} data-slot="touch-up">
+      <button
+        type="button"
+        class="button small-button toggle"
+        data-action="select"
+        class:active={selection.active}
+        aria-pressed={selection.active}
+        title={t('live.select.hint')}
+        disabled={sessionState === 'idle'}
+        onclick={() => selection.toggle()}
+      >
+        {t('live.select.toggle')}
+      </button>
+      <button
+        type="button"
+        class="button small-button"
+        data-action="undo-edit"
+        title={t('live.undoHint')}
+        disabled={!live.canUndo}
+        onclick={() => undoEdit()}
+      >
+        {t('live.undo')}
+      </button>
+      <button
+        type="button"
+        class="button small-button"
+        data-action="redo-edit"
+        title={t('live.redoHint')}
+        disabled={!live.canRedo}
+        onclick={() => undoEdit(true)}
+      >
+        {t('live.redo')}
+      </button>
+    </div>
+
+    <div
+      class="group"
+      role="group"
+      aria-label={t('live.orientation.label')}
+      title={locked ? t('live.resume.cannotTurn') : t('live.orientation.hint')}
+      data-slot="orientation"
+    >
       {#each ORIENTATIONS as orientation (orientation)}
         <button
           type="button"
@@ -621,7 +872,8 @@
           data-orientation={orientation}
           aria-pressed={live.orientation === orientation}
           aria-label={t(`tablet.orientation.${orientation}`)}
-          title={t(`tablet.orientation.${orientation}`)}
+          title={locked ? t('live.resume.cannotTurn') : t(`tablet.orientation.${orientation}`)}
+          disabled={locked}
           onclick={() => setOrientation(orientation)}
         >
           <OrientationIcon {orientation} size={26} />
@@ -644,7 +896,22 @@
         {latency}
         label={t('live.preview.label', { page: `${live.pageIndex + 1} / ${live.pageCount}` })}
         onview={setView}
+        selecting={selection.active}
+        selection={selection.indices}
+        onselect={(picked, combine) => selection.choose(live, picked, combine)}
       />
+      {#if selection.any}
+        <div class="select-bar" role="toolbar" aria-label={t('live.select.bar')} data-slot="select-bar">
+          <span class="select-count" role="status" data-count={selection.count}>{t('live.select.count', { count: selection.count })}</span>
+          <button type="button" class="button small-button danger" data-action="delete-selection" onclick={() => void deleteSelected(touchUp)}>
+            {t('live.select.delete')}
+          </button>
+          <button type="button" class="button small-button" data-action="deselect" onclick={() => selection.clear()}>
+            {t('live.select.clear')}
+          </button>
+          <span class="muted small">{t('live.select.colors')}</span>
+        </div>
+      {/if}
       {#if sessionState === 'waiting'}
         <div class="live-overlay" role="status">
           <span class="pulse" aria-hidden="true"></span>
@@ -757,6 +1024,9 @@
           </button>
         </div>
         <p class="muted small">{t('live.preview.hint')}</p>
+        {#if selection.active}
+          <p class="muted small" data-slot="select-hint">{t('live.select.help')}</p>
+        {/if}
       </section>
 
       <section class="side-block" aria-labelledby="live-keys-title">
@@ -974,6 +1244,28 @@
     flex: 1;
     min-width: 0;
     background: var(--surface-2);
+  }
+
+  .select-bar {
+    position: absolute;
+    bottom: 0.5rem;
+    left: 50%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.6rem;
+    max-width: 94%;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    transform: translateX(-50%);
+  }
+
+  .select-count {
+    font-weight: 600;
+    font-size: 0.875rem;
   }
 
   .live-overlay {

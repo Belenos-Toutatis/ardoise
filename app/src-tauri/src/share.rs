@@ -5,10 +5,12 @@
 //!
 //! - [`assets`]: the viewer's files, from the interface embedded in the executable;
 //! - [`feed`]: live mode, one hub subscription per viewer, stripped of library paths;
+//! - [`live_paper`]: the paper of a live page that is not plain (a resumed sheet);
 //! - [`page`]: the editor's note, whole or as the strokes added, with its paper.
 
 pub mod assets;
 pub mod feed;
+pub mod live_paper;
 pub mod page;
 
 #[cfg(test)]
@@ -21,6 +23,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError};
 
 use ardoise_core::note::Note;
 use ardoise_core::settings::DEFAULT_SHARE_PORT;
+use ardoise_render::Picture;
 use ardoise_share::qr::{QrCode, qr_code};
 use ardoise_share::{Share, ShareConfig, ShareError, Shown};
 use serde::{Deserialize, Serialize};
@@ -182,14 +185,22 @@ fn render_paper(paper: &Paper) -> Option<String> {
         .image
         .as_ref()
         .and_then(|(_, key)| staging().picture(key));
+    render_paper_with(paper, picture.as_deref())
+}
+
+/// The paper as a PNG data URL, its background image drawn from `picture`.
+fn render_paper_with(paper: &Paper, picture: Option<&Picture>) -> Option<String> {
+    render_paper_png(paper, picture).map(|png| png_data_url(&png))
+}
+
+/// The paper as a PNG file, its background image drawn from `picture`.
+fn render_paper_png(paper: &Paper, picture: Option<&Picture>) -> Option<Vec<u8>> {
     let image = paper
         .image
         .clone()
-        .zip(picture.as_deref())
+        .zip(picture)
         .map(|((image, _), picture)| (image, picture));
-    background_png(paper.page, paper.background, paper.width_px(), image)
-        .ok()
-        .map(|png| png_data_url(&png))
+    background_png(paper.page, paper.background, paper.width_px(), image).ok()
 }
 
 impl Inner {
@@ -340,12 +351,22 @@ impl ShareRuntime {
                 code: None,
                 journal,
             };
-            let share = Share::start(config, assets, Arc::new(HubFeed::new(hub)), on_change)
-                .map_err(|error| share_error(&error))?;
+            let feed = Arc::new(HubFeed::new(hub));
+            let papers = feed.papers();
+            let share = Arc::new(
+                Share::start(config, assets, feed, on_change)
+                    .map_err(|error| share_error(&error))?,
+            );
+            let held = Arc::downgrade(&share);
+            papers.attach(Box::new(move |paper| {
+                if let Some(share) = held.upgrade() {
+                    share.show_live_paper(paper);
+                }
+            }));
             let addresses = addresses_for(bind, share.port());
             let qr = addresses.first().and_then(|address| qr_code(address));
             *lock(&self.inner.running) = Some(Running {
-                share: Arc::new(share),
+                share,
                 requested_port: port,
                 addresses,
                 qr,

@@ -5,10 +5,13 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+use ardoise_core::format::{BackgroundFile, NoteFile};
+use ardoise_core::library::Library;
 use ardoise_core::note::{
     A4_LANDSCAPE, Background, BackgroundImage, ImageRect, Layer, Note, Origin, PageSize, Paper,
     Template, Timing,
@@ -18,19 +21,30 @@ use ardoise_device::service::{LiveInput, LiveSink};
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_proto::live::LiveRecord;
 use ardoise_proto::stroke::Point as PenPoint;
+use ardoise_render::{
+    Image, NoteView, Picture, RenderOptions, decode_png, encode_png, render_note,
+};
+use ardoise_share::LivePaper;
 use serde_json::{Value, json};
 
 use super::assets::{AssetSource, ViewerAssetsError, content_type, viewer_assets};
 use super::feed::{Memo, batch_json, subscriber_label};
+use super::live_paper::{LivePapers, paper_key};
 use super::page::{NoteSharer, PAPER_PX, Paper as SharedPaper};
 use super::{ShareContent, ShareRuntime, render_paper};
+use crate::background::tests::halves;
+use crate::library::blank_note;
 use crate::library::tests::library;
 use crate::live::LiveHub;
+use crate::live::StrokesEdit;
 use crate::live::hub::{HubConfig, HubSink, Start, StartOptions};
 use crate::live::model::{
     LiveBatch, LiveEvent, LiveMark, LiveSnapshot, LiveStyle, LiveViewState, MarkPoint,
+    PlacedStroke, RecolouredStrokes, ViewerIndices,
 };
+use crate::notes::background_png;
 use crate::presentation::MonitorInfo;
+use crate::thumbnails::tests::png_of;
 
 // --- The viewer's files ----------------------------------------------------------------------
 
@@ -415,6 +429,7 @@ fn snapshot_of(note: Note) -> LiveSnapshot {
         page_index: 0,
         page_count: 1,
         orientation: Orientation::Landscape,
+        can_turn_page: true,
         layer: 0,
         style: LiveStyle::default(),
         view: LiveViewState::whole(A4_LANDSCAPE),
@@ -431,6 +446,9 @@ fn snapshot_of(note: Note) -> LiveSnapshot {
             chosen: true,
         }),
         saved: vec!["C:\\Users\\Prof\\Nextcloud\\Notes\\page.ardoise".into()],
+        revision: 7 << 32,
+        can_undo: true,
+        can_redo: true,
     }
 }
 
@@ -439,7 +457,7 @@ fn a_viewer_never_gets_library_paths_titles_tags_nor_the_screen() {
     let batch = LiveBatch {
         events: vec![
             LiveEvent::Snapshot {
-                snapshot: Box::new(snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]))),
+                snapshot: Arc::new(snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]))),
             },
             LiveEvent::Saved {
                 paths: vec!["C:\\Users\\Prof\\Nextcloud\\Notes\\page.ardoise".into()],
@@ -494,12 +512,42 @@ fn keys(value: &Value) -> Vec<&str> {
 }
 
 #[test]
+fn a_viewer_never_gets_the_id_of_the_note_but_can_tell_pages_apart() {
+    let shared_id = |note: Note| -> String {
+        let batch = LiveBatch {
+            events: vec![LiveEvent::Snapshot {
+                snapshot: Arc::new(snapshot_of(note)),
+            }],
+            sent_at: 1.0,
+        };
+        let value: Value = serde_json::from_str(&batch_json(&batch).unwrap()).unwrap();
+        value["events"][0]["snapshot"]["page"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let note = note_with(vec![pen_stroke(1000.0, 4)]);
+    let real = note.id.clone();
+    let shared = shared_id(note.clone());
+    assert_ne!(shared, real);
+    assert!(!shared.contains(&real));
+    // The same page is the same page, whatever changes on it.
+    let mut written_on = note.clone();
+    written_on.strokes.push(pen_stroke(2000.0, 4));
+    assert_eq!(shared_id(written_on), shared);
+    // Another page is another page.
+    let mut other = note;
+    other.id = "another".into();
+    assert_ne!(shared_id(other), shared);
+}
+
+#[test]
 fn a_viewer_gets_only_the_fields_the_viewer_draws() {
     // An allow list: a field added later to the hub's types is not in this set, so it does not
     // reach a browser until someone adds it here on purpose.
     let batch = LiveBatch {
         events: vec![LiveEvent::Snapshot {
-            snapshot: Box::new(snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]))),
+            snapshot: Arc::new(snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]))),
         }],
         sent_at: 1.0,
     };
@@ -628,7 +676,7 @@ fn live_strokes_of_a_hidden_layer_never_reach_a_viewer() {
     note.strokes.push(orphan);
     let batch = LiveBatch {
         events: vec![LiveEvent::Snapshot {
-            snapshot: Box::new(snapshot_of(note)),
+            snapshot: Arc::new(snapshot_of(note)),
         }],
         sent_at: 1.0,
     };
@@ -652,7 +700,7 @@ fn viewers_with_the_same_batch_share_one_text() {
     let batch = |x: f32| LiveBatch {
         events: vec![
             LiveEvent::Snapshot {
-                snapshot: Box::new(snapshot_of(note_with(vec![pen_stroke(x, 4)]))),
+                snapshot: Arc::new(snapshot_of(note_with(vec![pen_stroke(x, 4)]))),
             },
             LiveEvent::HoverEnd,
         ],
@@ -1331,9 +1379,1145 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     assert!(!hub_has_share_subscribers(&hub));
 }
 
+// --- Touching up during live mode ------------------------------------------------------------------
+
+fn delete_strokes(indices: &[u32]) -> StrokesEdit {
+    serde_json::from_value(json!({ "kind": "delete", "indices": indices })).unwrap()
+}
+
+fn recolour_strokes(indices: &[u32]) -> StrokesEdit {
+    serde_json::from_value(json!({
+        "kind": "recolour",
+        "indices": indices,
+        "color": { "r": 200, "g": 0, "b": 0, "a": 255 },
+    }))
+    .unwrap()
+}
+
+/// The `strokesEdited` events of a message.
+fn edits_in(message: &Value) -> Vec<Value> {
+    live_events(message)
+        .into_iter()
+        .filter(|event| event["type"] == "strokesEdited")
+        .collect()
+}
+
+/// What a viewer's `LiveState` does with the messages it gets: the strokes it draws, each named by
+/// where it starts on the page, with its colour.
+#[derive(Default)]
+struct ViewerList(Vec<(f64, Value)>);
+
+impl ViewerList {
+    fn entry(stroke: &Value) -> (f64, Value) {
+        (
+            stroke["points"][0]["x"].as_f64().unwrap(),
+            stroke["color"].clone(),
+        )
+    }
+
+    fn apply(&mut self, message: &Value) {
+        for event in live_events(message) {
+            match event["type"].as_str() {
+                Some("snapshot") => {
+                    self.0 = event["snapshot"]["page"]["strokes"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(Self::entry)
+                        .collect();
+                }
+                Some("strokesEdited") => {
+                    for index in event["removed"].as_array().unwrap().iter().rev() {
+                        self.0.remove(index.as_u64().unwrap() as usize);
+                    }
+                    for placed in event["inserted"].as_array().unwrap() {
+                        let index = placed["index"].as_u64().unwrap() as usize;
+                        self.0.insert(index, Self::entry(&placed["stroke"]));
+                    }
+                    for group in event["recoloured"].as_array().unwrap() {
+                        for index in group["indices"].as_array().unwrap() {
+                            self.0[index.as_u64().unwrap() as usize].1 = group["color"].clone();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn starts(&self) -> Vec<f64> {
+        self.0.iter().map(|(start, _)| *start).collect()
+    }
+}
+
+/// Reads until a batch holds an edit, keeping `list` up to date.
+fn next_edit(viewer: &mut Viewer, list: &mut ViewerList) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        assert!(Instant::now() < deadline, "timed out waiting for an edit");
+        let (message, _) = viewer.next().expect("the stream");
+        if message["type"] != "live" {
+            continue;
+        }
+        list.apply(&message);
+        if let Some(edit) = edits_in(&message).pop() {
+            return edit;
+        }
+    }
+}
+
+#[test]
+fn a_viewer_gets_an_edit_with_only_what_is_drawn() {
+    let event = LiveEvent::StrokesEdited {
+        page_index: 2,
+        revision: 7 << 32,
+        removed: vec![4],
+        inserted: Arc::new(vec![PlacedStroke {
+            index: 1,
+            stroke: pen_stroke(1000.0, 2),
+        }]),
+        recoloured: vec![RecolouredStrokes {
+            color: Rgba::rgb(200, 0, 0),
+            indices: vec![0],
+        }],
+        can_undo: true,
+        can_redo: false,
+        viewers: None,
+    };
+    let batch = LiveBatch {
+        events: vec![event],
+        sent_at: 1.0,
+    };
+    let value: Value = serde_json::from_str(&batch_json(&batch).unwrap()).unwrap();
+    let edit = &value["events"][0];
+    // An allow list: what the viewer needs to keep its list, nothing of the history or revision.
+    assert_eq!(
+        keys(edit),
+        ["inserted", "pageIndex", "recoloured", "removed", "type"]
+    );
+    assert_eq!(edit["type"], "strokesEdited");
+    assert_eq!(edit["pageIndex"], 2);
+    assert_eq!(edit["removed"], json!([4]));
+    assert_eq!(keys(&edit["inserted"][0]), ["index", "stroke"]);
+    assert_eq!(
+        keys(&edit["inserted"][0]["stroke"]),
+        ["color", "layer", "points", "tool", "width"]
+    );
+    assert_eq!(keys(&edit["recoloured"][0]), ["color", "indices"]);
+}
+
+#[test]
+fn on_a_page_with_a_hidden_layer_an_edit_goes_in_the_numbering_of_the_viewers() {
+    let event = LiveEvent::StrokesEdited {
+        page_index: 0,
+        revision: 1,
+        removed: vec![5],
+        inserted: Arc::new(vec![PlacedStroke {
+            index: 3,
+            stroke: pen_stroke(1000.0, 2),
+        }]),
+        recoloured: vec![RecolouredStrokes {
+            color: Rgba::BLACK,
+            indices: vec![4],
+        }],
+        can_undo: true,
+        can_redo: false,
+        viewers: Some(Box::new(ViewerIndices {
+            removed: vec![2],
+            inserted: vec![1],
+            recoloured: vec![RecolouredStrokes {
+                color: Rgba::BLACK,
+                indices: vec![2],
+            }],
+        })),
+    };
+    let batch = LiveBatch {
+        events: vec![event],
+        sent_at: 1.0,
+    };
+    let value: Value = serde_json::from_str(&batch_json(&batch).unwrap()).unwrap();
+    let edit = &value["events"][0];
+    assert_eq!(edit["removed"], json!([2]));
+    assert_eq!(edit["inserted"][0]["index"], 1);
+    assert_eq!(edit["recoloured"][0]["indices"], json!([2]));
+}
+
+#[test]
+fn a_viewer_follows_the_edits_and_the_paused_share_keeps_its_image() {
+    let (dir, library) = library();
+    let library_name = dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let (runtime, hub) = sharing_runtime();
+    runtime.inner.show(ShareContent::Live);
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
+    let mut sink = start_session(&hub, &library);
+    for i in 0..4 {
+        write_stroke(&mut sink, 1000 + 2000 * i, 3);
+    }
+    let cookie = join(status.port, &status.code.unwrap());
+    let mut viewer = Viewer::open(status.port, &cookie);
+    let mut list = ViewerList::default();
+    let first = viewer.until("the first batch", Duration::from_secs(5), |m| {
+        m["type"] == "live" && m["reset"] == true
+    });
+    list.apply(&first);
+    assert_eq!(list.starts(), [1000.0, 3000.0, 5000.0, 7000.0]);
+    let snapshot = &live_events(&first)[0]["snapshot"];
+    assert!(snapshot.get("revision").is_none() && snapshot.get("canUndo").is_none());
+
+    // Each edit arrives as itself, not as a page sent again; the indices are the page's here.
+    let revision = hub.snapshot().revision;
+    let revision = hub.edit_strokes(0, revision, delete_strokes(&[1])).unwrap();
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(
+        keys(&edit),
+        ["inserted", "pageIndex", "recoloured", "removed", "type"]
+    );
+    assert_eq!(edit["removed"], json!([1]));
+    assert_eq!(list.starts(), [1000.0, 5000.0, 7000.0]);
+    hub.edit_strokes(0, revision, recolour_strokes(&[0]))
+        .unwrap();
+    next_edit(&mut viewer, &mut list);
+    assert_eq!(list.0[0].1, json!({ "r": 200, "g": 0, "b": 0, "a": 255 }));
+    assert!(hub.undo_edit(0).unwrap());
+    next_edit(&mut viewer, &mut list);
+    assert_eq!(list.0[0].1, json!({ "r": 0, "g": 0, "b": 0, "a": 255 }));
+    assert!(hub.undo_edit(0).unwrap());
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(edit["inserted"][0]["index"], 1);
+    assert_eq!(list.starts(), [1000.0, 3000.0, 5000.0, 7000.0]);
+
+    // Paused: its frozen image, then nothing of what happens; on resume, the state as it is.
+    runtime.inner.share().unwrap().set_paused(true);
+    let frozen = viewer.until("the frozen batch", Duration::from_secs(5), |m| {
+        m["type"] == "live" && m["reset"] == true
+    });
+    list.apply(&frozen);
+    assert_eq!(list.starts(), [1000.0, 3000.0, 5000.0, 7000.0]);
+    viewer.until("the pause", Duration::from_secs(5), |m| {
+        m["type"] == "pause"
+    });
+    let revision = hub.snapshot().revision;
+    hub.edit_strokes(0, revision, delete_strokes(&[0, 3]))
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    runtime.inner.share().unwrap().set_paused(false);
+    let mut edits_during_the_pause = 0;
+    let fresh = loop {
+        let (message, _) = viewer.next().expect("the stream");
+        edits_during_the_pause += edits_in(&message).len();
+        if message["type"] == "live" && message["reset"] == true {
+            break message;
+        }
+    };
+    assert_eq!(edits_during_the_pause, 0);
+    list.apply(&fresh);
+    assert_eq!(list.starts(), [3000.0, 5000.0]);
+
+    // Nothing of the library went out with them.
+    for text in &viewer.texts {
+        assert!(!text.contains(&library_name), "{text}");
+    }
+    runtime.stop();
+}
+
+#[test]
+fn over_the_network_a_page_with_a_hidden_layer_keeps_viewers_right_and_its_secret() {
+    let (_dir, library) = library();
+    // The ink hidden on the sheet is at x = 111 and 333: neither may ever be on the wire.
+    let hidden_x = [111.0, 333.0];
+    let at = |x: f32, layer: u32| Stroke {
+        layer,
+        ..pen_stroke(x, 2)
+    };
+    let mut note = note_with(vec![
+        at(hidden_x[0], 1),
+        at(1000.0, 0),
+        at(hidden_x[1], 1),
+        at(2000.0, 0),
+    ]);
+    note.layers.push(Layer {
+        name: "Réponses".into(),
+        visible: false,
+    });
+    note.page = A5;
+    let saved = library
+        .create(
+            std::path::Path::new(""),
+            &ardoise_core::format::NoteFile::new(note),
+        )
+        .unwrap();
+    let (runtime, hub) = sharing_runtime();
+    runtime.inner.show(ShareContent::Live);
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
+    let options = StartOptions {
+        library: library.clone(),
+        french: true,
+        size: A5,
+        orientation: Orientation::Landscape,
+        button: Arc::new(|| LiveButton::NewPage),
+    };
+    let Start::New { mut sink, snapshot } = hub.resume(options, &saved.path).unwrap() else {
+        panic!("a session is already running");
+    };
+    assert_eq!(snapshot.page.strokes.len(), 4);
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    let cookie = join(status.port, &status.code.unwrap());
+    let mut viewer = Viewer::open(status.port, &cookie);
+    let mut list = ViewerList::default();
+    let first = viewer.until("the first batch", Duration::from_secs(5), |m| {
+        m["type"] == "live" && m["reset"] == true
+    });
+    list.apply(&first);
+    assert_eq!(list.starts(), [1000.0, 2000.0]);
+
+    // For the page, stroke 3; for the viewer, its second one.
+    let revision = hub.snapshot().revision;
+    let revision = hub.edit_strokes(0, revision, delete_strokes(&[3])).unwrap();
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(edit["removed"], json!([1]));
+    assert_eq!(list.starts(), [1000.0]);
+    hub.edit_strokes(0, revision, recolour_strokes(&[1]))
+        .unwrap();
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(edit["recoloured"][0]["indices"], json!([0]));
+    assert!(hub.undo_edit(0).unwrap());
+    next_edit(&mut viewer, &mut list);
+    assert!(hub.undo_edit(0).unwrap());
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(edit["inserted"][0]["index"], 1);
+    assert_eq!(list.starts(), [1000.0, 2000.0]);
+
+    // « Clear the page » leaves the hidden ink, and its undo brings back only what shows.
+    hub.command(crate::live::model::LiveCommandKind::ClearPage)
+        .unwrap();
+    let cleared = viewer.until("the clearing", Duration::from_secs(5), |m| {
+        live_events(m).iter().any(|e| e["type"] == "snapshot")
+    });
+    list.apply(&cleared);
+    assert_eq!(list.starts(), Vec::<f64>::new());
+    assert_eq!(hub.snapshot().page.strokes.len(), 2);
+    assert!(hub.restore_cleared().unwrap());
+    next_edit(&mut viewer, &mut list);
+    assert_eq!(list.starts(), [1000.0, 2000.0]);
+
+    for text in &viewer.texts {
+        for x in hidden_x {
+            assert!(!text.contains(&format!("\"x\":{x:.1}")), "{x} in {text}");
+        }
+        assert!(!text.contains("Réponses"), "{text}");
+    }
+    runtime.stop();
+    hub.stop().unwrap();
+}
+
 /// Whether some subscriber of the hub is a viewer of the share.
 fn hub_has_share_subscribers(hub: &LiveHub) -> bool {
     hub.subscriber_labels()
         .iter()
         .any(|label| label.starts_with("share:"))
+}
+
+// --- The paper of a resumed sheet -----------------------------------------------------------------
+
+/// Where the image of [`classroom_sheet`] goes on its A5 page: its left half is red, its right
+/// half blue, on either side of x = 10 000.
+const IMAGE_RECT: ImageRect = ImageRect {
+    x: 5_000.0,
+    y: 2_000.0,
+    width: 10_000.0,
+    height: 5_000.0,
+};
+
+/// Where the hidden answers of [`classroom_sheet`] are: never in a message.
+const HIDDEN_X: f32 = 7_777.0;
+
+fn note_of_the_class() -> Note {
+    let mut note = blank_note("Contrôle de Léa", "Réponses de Léa", 1_787_000_000_000);
+    note.page = A5;
+    note.tags = vec!["élèves".to_owned()];
+    note.background = Background {
+        paper: Paper::Cream,
+        template: Template::Seyes,
+        texture: false,
+    };
+    note.background_image = Some(BackgroundImage {
+        name: "photo de la classe.png".to_owned(),
+        pdf_page: None,
+        rect: IMAGE_RECT,
+        quarter_turns: 0,
+        opacity: 1.0,
+    });
+    note.layers = vec![
+        Layer {
+            name: "Réponses de Léa".to_owned(),
+            visible: false,
+        },
+        Layer {
+            name: "Consignes".to_owned(),
+            visible: true,
+        },
+    ];
+    let mut hidden = pen_stroke(HIDDEN_X, 3);
+    hidden.layer = 0;
+    let mut shown = pen_stroke(1_000.0, 3);
+    shown.layer = 1;
+    note.strokes = vec![hidden, shown];
+    note
+}
+
+/// A note of the library with a template, an image, a hidden layer, a title and tags: only its
+/// paper and its visible ink may reach a viewer.
+fn classroom_sheet(library: &Library) -> PathBuf {
+    let mut file = NoteFile::new(note_of_the_class());
+    file.background = Some(BackgroundFile {
+        extension: "png".to_owned(),
+        bytes: encode_png(&halves(40, 20)).unwrap(),
+    });
+    library.create(Path::new(""), &file).unwrap().path
+}
+
+/// Resumes the note at `path` on an A5 tablet that streams.
+fn resume_sheet(hub: &LiveHub, library: &Library, path: &Path) -> HubSink {
+    let options = StartOptions {
+        library: library.clone(),
+        french: true,
+        size: A5,
+        orientation: Orientation::Landscape,
+        button: Arc::new(|| LiveButton::NewPage),
+    };
+    let Start::New { mut sink, .. } = hub.resume(options, path).unwrap() else {
+        panic!("a session is already running");
+    };
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    sink
+}
+
+/// Rendering a picture takes a while in an unoptimised build.
+const RENDERING: Duration = Duration::from_secs(120);
+const SOON: Duration = Duration::from_secs(10);
+
+impl Viewer {
+    /// Waits as long as a picture takes to render.
+    fn patient(self) -> Viewer {
+        self.reader
+            .get_ref()
+            .set_read_timeout(Some(RENDERING))
+            .unwrap();
+        self
+    }
+
+    /// Messages telling of a paper received so far.
+    fn papers(&self) -> usize {
+        self.texts
+            .iter()
+            .filter(|text| text.contains(r#""type":"livePaper""#))
+            .count()
+    }
+
+    /// Reads up to the end of the stroke just written: what was on its way came before it.
+    fn stroke_written(&mut self) {
+        self.until("the stroke", SOON, |m| {
+            live_events(m).iter().any(|e| e["type"] == "strokeEnd")
+        });
+    }
+
+    /// Reads up to the snapshot of page `index`.
+    fn snapshot_of_page(&mut self, index: usize) -> Value {
+        let of_the_page =
+            |e: &Value| e["type"] == "snapshot" && e["snapshot"]["pageIndex"] == index;
+        let message = self.until("the snapshot", SOON, |m| {
+            live_events(m).iter().any(of_the_page)
+        });
+        live_events(&message)
+            .iter()
+            .find(|e| of_the_page(e))
+            .unwrap()["snapshot"]
+            .clone()
+    }
+}
+
+/// A request of a browser that joined, on a connection of its own: the status and the head of the
+/// answer as text, and its body.
+fn fetch(port: u16, target: &str, cookie: Option<&str>) -> (u16, String, Vec<u8>) {
+    let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+    stream.set_read_timeout(Some(SOON)).unwrap();
+    let cookie = cookie.map_or(String::new(), |cookie| format!("Cookie: {cookie}\r\n"));
+    write!(
+        stream,
+        "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{cookie}\r\n"
+    )
+    .unwrap();
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 64 * 1024];
+    let (head, length) = loop {
+        let n = stream.read(&mut chunk).unwrap();
+        assert_ne!(n, 0, "closed without an answer");
+        bytes.extend_from_slice(&chunk[..n]);
+        let Some(at) = bytes.windows(4).position(|w| w == b"\r\n\r\n") else {
+            continue;
+        };
+        let head = String::from_utf8(bytes.drain(..at + 4).collect()).unwrap();
+        let length: usize = head
+            .lines()
+            .find_map(|line| line.strip_prefix("Content-Length: "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        break (head, length);
+    };
+    while bytes.len() < length {
+        let n = stream.read(&mut chunk).unwrap();
+        assert_ne!(n, 0, "the answer was cut");
+        bytes.extend_from_slice(&chunk[..n]);
+    }
+    let status = head[9..12].parse().unwrap();
+    (status, head, bytes)
+}
+
+/// The picture a `livePaper` message tells of, fetched as a viewer does.
+fn fetch_paper(port: u16, cookie: &str, paper: &Value) -> Vec<u8> {
+    let target = format!("/paper/{}", paper["key"].as_str().unwrap());
+    let (status, head, png) = fetch(port, &target, Some(cookie));
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: image/png\r\n"), "{head}");
+    assert!(head.contains("Cache-Control: no-store\r\n"), "{head}");
+    png
+}
+
+fn rgb(image: &Image, x: u32, y: u32) -> [u8; 3] {
+    let [r, g, b, _] = image.pixel(x, y).unwrap();
+    [r, g, b]
+}
+
+fn near(a: [u8; 3], b: [u8; 3]) -> bool {
+    a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 8)
+}
+
+const RED: [u8; 3] = [220, 30, 30];
+const BLUE: [u8; 3] = [30, 40, 220];
+/// The renderer's cream and slate papers.
+const CREAM: [u8; 3] = [250, 244, 226];
+const SLATE: [u8; 3] = [42, 50, 48];
+
+/// A point of the page in the pixels of a picture [`PAPER_PX`] wide (the A5 page is landscape).
+fn at(x: u32, y: u32) -> (u32, u32) {
+    (x * PAPER_PX / A5.width, y * PAPER_PX / A5.width)
+}
+
+/// Whether `colour` shows outside the image, near the page's lower right corner: between the
+/// lines of the template.
+fn paper_shows(drawn: &Image, colour: [u8; 3]) -> bool {
+    let (x, y) = at(20_350, 13_000);
+    (y..y + 40).any(|y| near(rgb(drawn, x, y), colour))
+}
+
+#[test]
+fn a_resumed_sheet_lets_each_viewer_fetch_its_paper() {
+    let (dir, library) = library();
+    let library_name = dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let path = classroom_sheet(&library);
+    let hub = Arc::new(LiveHub::new(hub_config()));
+    let runtime = ShareRuntime::default();
+    runtime.set_assets(source(built(MANIFEST)));
+    runtime.inner.show(ShareContent::Live);
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
+    let (port, code) = (status.port, status.code.clone().unwrap());
+    let mut sink = resume_sheet(&hub, &library, &path);
+    let cookie = join(port, &code);
+
+    // The first viewer: its snapshot says which paper the page wants; the picture follows.
+    let mut a = Viewer::open(port, &cookie).patient();
+    let first = a.until("the snapshot", SOON, |m| m["type"] == "live");
+    assert_eq!(first["reset"], true);
+    let snapshot = live_events(&first)[0]["snapshot"].clone();
+    let key = snapshot["paperKey"].as_str().unwrap().to_owned();
+    assert_eq!(key.len(), 16);
+    // Nothing of the image's description, and no stroke of the hidden layer; the layer list stays
+    // whole, so that the strokes' indices stay valid.
+    let page = &snapshot["page"];
+    assert!(page.get("backgroundImage").is_none(), "{page}");
+    assert_eq!(page["strokes"].as_array().unwrap().len(), 1);
+    assert_eq!(page["strokes"][0]["layer"], 1);
+    assert_eq!(
+        page["layers"],
+        json!([{"name": "", "visible": false}, {"name": "", "visible": true}])
+    );
+    let paper = a.until("the paper", RENDERING, |m| m["type"] == "livePaper");
+    // Only that: the stream carries no picture, and nothing else of the note can travel with it.
+    assert_eq!(keys(&paper), ["key", "type", "version"]);
+    assert_eq!(paper["key"], key.as_str());
+    assert!(paper.to_string().len() < 100, "{paper}");
+    // The picture is one request away, for those who joined, under this key alone.
+    let target = format!("/paper/{key}");
+    assert_eq!(fetch(port, &target, None).0, 401);
+    assert_eq!(fetch(port, "/paper/ffffffffffffffff", None).0, 401);
+    assert_eq!(fetch(port, "/paper/ffffffffffffffff", Some(&cookie)).0, 404);
+    assert_eq!(
+        fetch(port, &format!("/paper/{key}/../.."), Some(&cookie)).0,
+        404
+    );
+    let png = fetch_paper(port, &cookie, &paper);
+    // Nothing of the note in the file either, metadata included.
+    for secret in ["Léa", "élèves", "Consignes", "photo de la classe"] {
+        let bytes = secret.as_bytes();
+        assert!(
+            !png.windows(bytes.len()).any(|w| w == bytes),
+            "{secret} in the picture"
+        );
+    }
+    // The page's whole paper, with the image where the note says: strokes in page units fall on it.
+    let drawn = decode_png(&png).unwrap();
+    assert_eq!(drawn.width, PAPER_PX);
+    assert!(drawn.height.abs_diff(A5.height * PAPER_PX / A5.width) <= 1);
+    let (x, y) = at(7_000, 4_000);
+    assert!(near(rgb(&drawn, x, y), RED), "{:?}", rgb(&drawn, x, y));
+    let (x, y) = at(13_000, 4_000);
+    assert!(near(rgb(&drawn, x, y), BLUE), "{:?}", rgb(&drawn, x, y));
+    assert!(paper_shows(&drawn, CREAM));
+
+    // Writing tells nothing again.
+    write_stroke(&mut sink, 2000, 10);
+    a.stroke_written();
+    assert_eq!(a.papers(), 1);
+
+    // A late joiner is told right after its snapshot, the others nothing.
+    let mut b = Viewer::open(port, &cookie).patient();
+    let (message, _) = b.next().unwrap();
+    assert_eq!(message["reset"], true);
+    assert_eq!(
+        live_events(&message)[0]["snapshot"]["paperKey"],
+        key.as_str()
+    );
+    let (message, _) = b.next().unwrap();
+    assert_eq!(message["type"], "livePaper");
+    assert_eq!(message["key"], key.as_str());
+    write_stroke(&mut sink, 4000, 10);
+    a.stroke_written();
+    b.stroke_written();
+    assert_eq!((a.papers(), b.papers()), (1, 1));
+
+    // The next page is plain: its snapshot wants no picture, which hides it at once, a viewer
+    // joining there is told of none, and the picture cannot be fetched any more.
+    hub.command(crate::live::model::LiveCommandKind::NextPage)
+        .unwrap();
+    assert!(a.snapshot_of_page(1).get("paperKey").is_none());
+    assert!(b.snapshot_of_page(1).get("paperKey").is_none());
+    std::thread::sleep(Duration::from_millis(300));
+    let mut c = Viewer::open(port, &cookie).patient();
+    let (message, _) = c.next().unwrap();
+    assert!(
+        live_events(&message)[0]["snapshot"]
+            .get("paperKey")
+            .is_none()
+    );
+    write_stroke(&mut sink, 6000, 10);
+    for viewer in [&mut a, &mut b, &mut c] {
+        viewer.stroke_written();
+    }
+    assert_eq!((a.papers(), b.papers(), c.papers()), (1, 1, 0));
+    assert_eq!(fetch(port, &target, Some(&cookie)).0, 404);
+
+    // Back on the sheet: everyone is told (those who kept the picture fetch nothing), and it can be
+    // fetched again.
+    hub.command(crate::live::model::LiveCommandKind::PreviousPage)
+        .unwrap();
+    for viewer in [&mut a, &mut b, &mut c] {
+        assert_eq!(viewer.snapshot_of_page(0)["paperKey"], key.as_str());
+    }
+    for viewer in [&mut a, &mut b, &mut c] {
+        let told = viewer.until("the paper", SOON, |m| m["type"] == "livePaper");
+        assert_eq!(told, paper, "the same key and the same version");
+    }
+    assert_eq!(fetch_paper(port, &cookie, &paper), png);
+    std::thread::sleep(Duration::from_millis(300));
+    write_stroke(&mut sink, 8000, 10);
+    for viewer in [&mut a, &mut b, &mut c] {
+        viewer.stroke_written();
+    }
+    assert_eq!((a.papers(), b.papers(), c.papers()), (2, 2, 1));
+
+    // Pause: the frozen image, the paper it asks for and the badge; the same for a viewer joining
+    // during the pause, and the picture can still be fetched.
+    let share = runtime.inner.share().unwrap();
+    share.set_paused(true);
+    let frozen = a.until("the frozen image", SOON, |m| {
+        m["type"] == "live" && m["reset"] == true
+    });
+    assert_eq!(
+        live_events(&frozen)[0]["snapshot"]["paperKey"],
+        key.as_str()
+    );
+    a.until("the pause", SOON, |m| m["type"] == "pause");
+    assert_eq!(fetch_paper(port, &cookie, &paper), png);
+    let mut d = Viewer::open(port, &cookie).patient();
+    let types: Vec<Value> = (0..3)
+        .map(|_| d.next().unwrap().0["type"].clone())
+        .collect();
+    assert_eq!(types, ["live", "livePaper", "pause"]);
+    // Resume: a fresh snapshot, and the same paper: nothing to fetch.
+    share.set_paused(false);
+    for viewer in [&mut a, &mut b, &mut c, &mut d] {
+        viewer.until("the resume", SOON, |m| {
+            m["type"] == "pause" && m["paused"] == false
+        });
+        viewer.until("the fresh snapshot", SOON, |m| {
+            m["type"] == "live" && m["reset"] == true
+        });
+        let told = viewer.until("the paper", RENDERING, |m| m["type"] == "livePaper");
+        assert_eq!(told, paper);
+    }
+    write_stroke(&mut sink, 10_000, 10);
+    for viewer in [&mut a, &mut b, &mut c, &mut d] {
+        viewer.stroke_written();
+    }
+
+    // A viewer that reconnects is a new viewer: it is told again.
+    let texts_b = std::mem::take(&mut b.texts);
+    drop(b);
+    let deadline = Instant::now() + SOON;
+    while runtime.status(8765).viewers != 3 {
+        assert!(Instant::now() < deadline, "the stream did not close");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let mut b = Viewer::open(port, &cookie).patient();
+    b.texts = texts_b;
+    assert_eq!(b.next().unwrap().0["reset"], true);
+    assert_eq!(b.next().unwrap().0["type"], "livePaper");
+
+    // The blackboard: the same sheet on slate paper, as the editor would show it, a new picture.
+    hub.set_view(LiveViewState {
+        board: true,
+        ..LiveViewState::whole(A5)
+    })
+    .unwrap();
+    let on_board = a.snapshot_of_page(0);
+    let board_key = on_board["paperKey"].as_str().unwrap().to_owned();
+    assert_ne!(board_key, key);
+    let paper = a.until("the slate paper", RENDERING, |m| m["type"] == "livePaper");
+    assert_eq!(paper["key"], board_key.as_str());
+    let drawn = decode_png(&fetch_paper(port, &cookie, &paper)).unwrap();
+    assert!(paper_shows(&drawn, SLATE));
+    let (x, y) = at(7_000, 4_000);
+    assert!(near(rgb(&drawn, x, y), RED), "{:?}", rgb(&drawn, x, y));
+    hub.set_view(LiveViewState::whole(A5)).unwrap();
+    let paper = a.until("the paper again", RENDERING, |m| m["type"] == "livePaper");
+    assert_eq!(paper["key"], key.as_str());
+    // The previous paper is gone from the server.
+    assert_eq!(
+        fetch(port, &format!("/paper/{board_key}"), Some(&cookie)).0,
+        404
+    );
+
+    // Nothing else of the note ever went out, and nothing of the hidden layer.
+    let hidden_x = format!("\"x\":{HIDDEN_X}");
+    for viewer in [&a, &b, &c, &d] {
+        for text in &viewer.texts {
+            for secret in [
+                library_name.as_str(),
+                "Léa",
+                "élèves",
+                "Consignes",
+                "photo de la classe",
+                ".ardoise",
+                "backgroundImage",
+                hidden_x.as_str(),
+            ] {
+                assert!(!text.contains(secret), "{secret} in a message");
+            }
+        }
+    }
+
+    runtime.stop();
+    assert!(!hub_has_share_subscribers(&hub));
+}
+
+/// The fix for a photo on a shared Wi-Fi, with the real hub: the picture takes its time, and the
+/// strokes keep coming on the stream meanwhile.
+#[test]
+fn the_strokes_do_not_wait_for_a_slow_download_of_the_paper() {
+    let (_dir, library) = library();
+    let path = classroom_sheet(&library);
+    let hub = Arc::new(LiveHub::new(hub_config()));
+    let runtime = ShareRuntime::default();
+    runtime.set_assets(source(built(MANIFEST)));
+    runtime.inner.show(ShareContent::Live);
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
+    let (port, code) = (status.port, status.code.clone().unwrap());
+    let mut sink = resume_sheet(&hub, &library, &path);
+    let cookie = join(port, &code);
+    let mut viewer = Viewer::open(port, &cookie).patient();
+    let paper = viewer.until("the paper", RENDERING, |m| m["type"] == "livePaper");
+
+    // Asked for, and not read at all.
+    let mut download = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+    write!(
+        download,
+        "GET /paper/{} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\n\r\n",
+        paper["key"].as_str().unwrap()
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    for x in [2000, 4000, 6000] {
+        write_stroke(&mut sink, x, 10);
+        viewer.stroke_written();
+    }
+    assert_eq!(runtime.status(8765).viewers, 1);
+    assert_eq!(viewer.papers(), 1);
+    drop(download);
+    runtime.stop();
+}
+
+#[test]
+fn ordinary_live_pages_send_no_paper_and_start_no_work() {
+    let (_dir, library) = library();
+    let hub = Arc::new(LiveHub::new(hub_config()));
+    let runtime = ShareRuntime::default();
+    runtime.set_assets(source(built(MANIFEST)));
+    runtime.inner.show(ShareContent::Live);
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
+    let port = status.port;
+    let mut sink = start_session(&hub, &library);
+    let mut viewer = Viewer::open(port, &join(port, &status.code.clone().unwrap()));
+    let first = viewer.until("the snapshot", SOON, |m| m["type"] == "live");
+    assert!(live_events(&first)[0]["snapshot"].get("paperKey").is_none());
+    write_stroke(&mut sink, 2000, 10);
+    viewer.stroke_written();
+    hub.set_view(LiveViewState {
+        board: true,
+        ..LiveViewState::whole(A5)
+    })
+    .unwrap();
+    assert!(viewer.snapshot_of_page(0).get("paperKey").is_none());
+    hub.command(crate::live::model::LiveCommandKind::NextPage)
+        .unwrap();
+    assert!(viewer.snapshot_of_page(1).get("paperKey").is_none());
+    write_stroke(&mut sink, 4000, 10);
+    viewer.stroke_written();
+    assert_eq!(viewer.papers(), 0);
+    runtime.stop();
+}
+
+/// Waits for the paper's thread to be done.
+fn settled(papers: &LivePapers) {
+    let deadline = Instant::now() + RENDERING;
+    while !papers.idle() {
+        assert!(Instant::now() < deadline, "the paper took too long");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn the_paper_is_made_apart_once_and_kept_for_the_way_back() {
+    let (_dir, library) = library();
+    let path = classroom_sheet(&library);
+    let hub = Arc::new(LiveHub::new(hub_config()));
+    let papers = LivePapers::new(hub.clone());
+    let sent: Arc<Mutex<Vec<Option<LivePaper>>>> = Arc::default();
+    let log = sent.clone();
+    papers.attach(Box::new(move |paper| {
+        log.lock().unwrap().push(paper);
+    }));
+
+    // Plain paper: no key, no thread, nothing to send, as long as it lasts.
+    let plain = snapshot_of(note_with(Vec::new()));
+    let mut slate = plain.clone();
+    slate.view.board = true;
+    for snapshot in [&plain, &slate] {
+        papers.saw(snapshot);
+        papers.subscribed(snapshot);
+        assert!(papers.idle());
+    }
+    assert_eq!(papers.renders(), 0);
+    assert!(sent.lock().unwrap().is_empty());
+
+    // The sheet: rendered once, whatever the strokes do.
+    let _sink = resume_sheet(&hub, &library, &path);
+    let sheet = hub.snapshot();
+    papers.saw(&sheet);
+    settled(&papers);
+    assert_eq!(papers.renders(), 1);
+    let first = sent.lock().unwrap().first().cloned().flatten().unwrap();
+    assert_eq!(Some(first.key.as_str()), paper_key(&sheet).as_deref());
+    assert_eq!(&first.png[..8], b"\x89PNG\r\n\x1a\n");
+    let mut written = sheet.clone();
+    written.page.strokes.clear();
+    papers.saw(&written);
+    assert!(papers.idle(), "the same paper asks for nothing");
+
+    // To a plain page and back: told, not rendered again.
+    papers.saw(&plain);
+    settled(&papers);
+    assert_eq!(sent.lock().unwrap().last(), Some(&None));
+    papers.saw(&sheet);
+    settled(&papers);
+    assert_eq!(sent.lock().unwrap().last(), Some(&Some(first.clone())));
+    assert_eq!(papers.renders(), 1);
+    // The bytes themselves, not a copy: the share and the cache hold one picture.
+    let last = sent.lock().unwrap().last().cloned().flatten().unwrap();
+    assert!(Arc::ptr_eq(&last.png, &first.png));
+
+    // A viewer coming back looks again, in case the file changed; here it has not.
+    let count = sent.lock().unwrap().len();
+    papers.subscribed(&sheet);
+    settled(&papers);
+    assert_eq!(sent.lock().unwrap().len(), count + 1);
+    assert_eq!(sent.lock().unwrap().last(), Some(&Some(first)));
+    assert_eq!(papers.renders(), 1);
+
+    // The blackboard is another picture; both stay, turning it on and off renders nothing more.
+    let mut board = sheet.clone();
+    board.view.board = true;
+    for snapshot in [&board, &sheet, &board, &sheet] {
+        papers.saw(snapshot);
+        settled(&papers);
+    }
+    assert_eq!(papers.renders(), 2);
+}
+
+#[test]
+fn a_paper_asked_before_the_share_runs_goes_when_it_does() {
+    let (_dir, library) = library();
+    let path = classroom_sheet(&library);
+    let hub = Arc::new(LiveHub::new(hub_config()));
+    let papers = LivePapers::new(hub.clone());
+    let _sink = resume_sheet(&hub, &library, &path);
+    papers.saw(&hub.snapshot());
+    assert_eq!(papers.renders(), 0);
+    let sent: Arc<Mutex<Vec<Option<LivePaper>>>> = Arc::default();
+    let log = sent.clone();
+    papers.attach(Box::new(move |paper| {
+        log.lock().unwrap().push(paper);
+    }));
+    settled(&papers);
+    assert_eq!(sent.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn the_paper_key_follows_what_the_picture_shows() {
+    let of = |note: Note| paper_key(&snapshot_of(note));
+    // Plain paper of any colour, also on the blackboard.
+    assert_eq!(of(note_with(Vec::new())), None);
+    let mut plain_board = snapshot_of(note_with(Vec::new()));
+    plain_board.view.board = true;
+    assert_eq!(paper_key(&plain_board), None);
+
+    let sheet = note_of_the_class();
+    let key = of(sheet.clone()).unwrap();
+    assert_eq!(key.len(), 16);
+    assert!(key.chars().all(|c| c.is_ascii_hexdigit()));
+    // The strokes, the title and the tags change nothing...
+    let mut same = sheet.clone();
+    same.strokes.clear();
+    same.title = "Autre".to_owned();
+    same.tags.clear();
+    assert_eq!(of(same).as_ref(), Some(&key));
+    // ...the paper does: another place for the image, another image, another template.
+    let mut moved = sheet.clone();
+    moved.background_image.as_mut().unwrap().rect.x += 1.0;
+    assert_ne!(of(moved).as_ref(), Some(&key));
+    let mut page_two = sheet.clone();
+    page_two.background_image.as_mut().unwrap().pdf_page = Some(2);
+    assert_ne!(of(page_two).as_ref(), Some(&key));
+    let mut lined = sheet.clone();
+    lined.background.template = Template::Lined;
+    assert_ne!(of(lined).as_ref(), Some(&key));
+    // The same with the blackboard as with slate paper: the picture is the same.
+    let mut slate = sheet.clone();
+    slate.background.paper = Paper::Slate;
+    let mut board = snapshot_of(sheet.clone());
+    board.view.board = true;
+    assert_eq!(paper_key(&board), of(slate));
+    // A template or a texture alone is enough.
+    let mut textured = note_with(Vec::new());
+    textured.background.texture = true;
+    assert!(of(textured).is_some());
+}
+
+/// A straight stroke of black ink through the page's points `from` and `to`.
+fn black_line(from: (f32, f32), to: (f32, f32)) -> Stroke {
+    Stroke {
+        tool: Tool::Ballpoint,
+        color: Rgba::BLACK,
+        width: 60.0,
+        layer: 0,
+        points: (0..=40u16)
+            .map(|i| {
+                let f = f32::from(i) / 40.0;
+                Point {
+                    x: from.0 + (to.0 - from.0) * f,
+                    y: from.1 + (to.1 - from.1) * f,
+                    pressure: 0.8,
+                    t: u32::from(i) * 5,
+                }
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn ink_falls_on_the_paper_as_in_the_editor_whatever_the_image_s_place() {
+    // Scale 0.1: a page point (x, y) is the pixel (x / 10, y / 10). The picture is the left half
+    // red and the right half blue; the stroke crosses the line between them.
+    let page = PageSize {
+        width: 20_000,
+        height: 10_000,
+    };
+    let picture = Picture::decode(encode_png(&halves(40, 20)).unwrap()).unwrap();
+    struct Case {
+        quarter_turns: u8,
+        rect: ImageRect,
+        stroke: Stroke,
+        /// Pixels of the paper on either side of the stroke, red then blue.
+        red: (u32, u32),
+        blue: (u32, u32),
+    }
+    let cases = [
+        // Upright: the red half on the left of x = 8 000.
+        Case {
+            quarter_turns: 0,
+            rect: ImageRect {
+                x: 4_000.0,
+                y: 2_000.0,
+                width: 8_000.0,
+                height: 4_000.0,
+            },
+            stroke: black_line((8_000.0, 2_500.0), (8_000.0, 5_500.0)),
+            red: (780, 400),
+            blue: (820, 400),
+        },
+        // A quarter turn clockwise: the red half on top, above y = 5 000; it reaches outside the
+        // page on the left, which must not move it.
+        Case {
+            quarter_turns: 1,
+            rect: ImageRect {
+                x: -1_000.0,
+                y: 1_000.0,
+                width: 4_000.0,
+                height: 8_000.0,
+            },
+            stroke: black_line((500.0, 5_000.0), (2_500.0, 5_000.0)),
+            red: (150, 480),
+            blue: (150, 520),
+        },
+    ];
+    for case in cases {
+        let image = BackgroundImage {
+            name: "demi.png".to_owned(),
+            pdf_page: None,
+            rect: case.rect,
+            quarter_turns: case.quarter_turns,
+            opacity: 1.0,
+        };
+        let background = Background::default();
+        // What the live windows and the viewers draw under the strokes.
+        let paper = decode_png(
+            &background_png(page, background, 2_000, Some((image.clone(), &picture))).unwrap(),
+        )
+        .unwrap();
+        assert!(near(rgb(&paper, case.red.0, case.red.1), RED));
+        assert!(near(rgb(&paper, case.blue.0, case.blue.1), BLUE));
+
+        // The same scene as the editor's, ink included.
+        let mut note = blank_note("", "", 0);
+        note.page = page;
+        note.background = background;
+        note.background_image = Some(image);
+        note.strokes = vec![case.stroke.clone()];
+        let editor = render_note(
+            NoteView::new(&note, Some(&picture)),
+            &RenderOptions::fit_width(page, 2_000),
+        )
+        .unwrap();
+        assert_eq!((editor.width, editor.height), (paper.width, paper.height));
+        let (mut left, mut top, mut right, mut bottom) = (u32::MAX, u32::MAX, 0, 0);
+        for y in 0..editor.height {
+            for x in 0..editor.width {
+                if !near(rgb(&editor, x, y), rgb(&paper, x, y)) {
+                    (left, top) = (left.min(x), top.min(y));
+                    (right, bottom) = (right.max(x), bottom.max(y));
+                }
+            }
+        }
+        // Where the two pictures differ is the stroke, at the page's scale, and nowhere else.
+        let points = &case.stroke.points;
+        let (first, last) = (points[0], points[points.len() - 1]);
+        let margin = 5;
+        assert!(
+            left + margin >= (first.x.min(last.x) / 10.0) as u32,
+            "left {left}"
+        );
+        assert!(
+            top + margin >= (first.y.min(last.y) / 10.0) as u32,
+            "top {top}"
+        );
+        assert!(
+            right <= (first.x.max(last.x) / 10.0) as u32 + margin,
+            "right {right}"
+        );
+        assert!(
+            bottom <= (first.y.max(last.y) / 10.0) as u32 + margin,
+            "bottom {bottom}"
+        );
+        let middle = ((first.x + last.x) / 20.0, (first.y + last.y) / 20.0);
+        let ink = rgb(&editor, middle.0 as u32, middle.1 as u32);
+        assert!(near(ink, [0, 0, 0]), "{ink:?}");
+    }
+}
+
+#[test]
+fn the_windows_get_the_image_of_the_resumed_sheet_and_no_other_page_does() {
+    let (_dir, library) = library();
+    let path = classroom_sheet(&library);
+    let hub = Arc::new(LiveHub::new(hub_config()));
+    let _sink = resume_sheet(&hub, &library, &path);
+    let (image, _) = hub.page_image(0).unwrap();
+    assert_eq!(image.rect, IMAGE_RECT);
+    let background = Background {
+        paper: Paper::Slate,
+        ..Background::default()
+    };
+    let url =
+        crate::live::page_background_url(hub.page_image(0), A5, background, PAPER_PX).unwrap();
+    let drawn = decode_png(&png_of(&url)).unwrap();
+    assert_eq!(drawn.width, PAPER_PX);
+    let (x, y) = at(7_000, 4_000);
+    assert!(near(rgb(&drawn, x, y), RED));
+    assert!(paper_shows(&drawn, SLATE));
+
+    // The next page has no image; a page that does not exist neither.
+    hub.command(crate::live::model::LiveCommandKind::NextPage)
+        .unwrap();
+    assert!(hub.page_image(1).is_none());
+    assert!(hub.page_image(7).is_none());
+    let url = crate::live::page_background_url(None, A5, background, 512).unwrap();
+    let plain = decode_png(&png_of(&url)).unwrap();
+    assert!(near(rgb(&plain, 100, 100), SLATE));
 }

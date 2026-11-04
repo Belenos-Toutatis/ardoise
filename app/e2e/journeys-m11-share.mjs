@@ -135,7 +135,7 @@ export function scriptReferences(js) {
 // --- Network helpers ------------------------------------------------------------------------------------
 
 /** An HTTP request to 127.0.0.1:`port`, one connection per request; resolves with `{ status, headers, body }`. */
-function request(port, { method = 'GET', path = '/', headers = {}, body, timeout = 5000 } = {}) {
+export function request(port, { method = 'GET', path = '/', headers = {}, body, timeout = 5000 } = {}) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : Buffer.from(body);
     const req = http.request(
@@ -186,7 +186,7 @@ function rawStatus(port, head, timeout = 5000) {
 }
 
 /** Polls `fn` until it returns something truthy; the message of the timeout says what was awaited. */
-async function until(fn, what, timeout = 10_000) {
+export async function until(fn, what, timeout = 10_000) {
   const deadline = Date.now() + timeout;
   for (;;) {
     const value = await fn();
@@ -197,7 +197,7 @@ async function until(fn, what, timeout = 10_000) {
 }
 
 /** The event stream `/events` as a viewer's browser reads it; every message is kept with its arrival time. */
-class EventStream {
+export class EventStream {
   constructor() {
     this.messages = [];
     this.closed = false;
@@ -302,14 +302,15 @@ export const BROWSER_PROBLEM = /content security policy|\bcsp\b|refused to|webas
 /**
  * Headless Edge on a temporary profile, one page, driven over the DevTools protocol (same calls as the app's
  * window in `run.mjs`). `close()` kills the whole process tree and removes the profile: call it in a `finally`.
+ * `extraArgs`: more command-line arguments of Edge (a journey that keeps a window over the screen asks for the ones that stop Chromium from pausing a page it thinks hidden).
  * `messages`: every console message of level error or warning, log entry and uncaught exception of the page.
  */
-export async function startBrowser(exe) {
+export async function startBrowser(exe, extraArgs = []) {
   const dir = mkdtempSync(join(tmpdir(), 'ardoise-e2e-edge-'));
   const port = await freePort();
   const child = spawn(
     exe,
-    ['--headless=new', '--window-size=1280,480', `--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', 'about:blank'],
+    ['--headless=new', '--window-size=1280,480', `--remote-debugging-port=${port}`, '--remote-allow-origins=*', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', ...extraArgs, 'about:blank'],
     { stdio: 'ignore' },
   );
   let spawnError = null;
@@ -376,6 +377,8 @@ export async function startBrowser(exe) {
       } else if (data.method === 'Log.entryAdded') {
         const { level, source, text, url } = data.params.entry;
         if (level === 'error' || level === 'warning') messages.push(`log ${level} (${source}): ${text}${url ? ` ${url}` : ''}`);
+      } else if (data.method === 'Debugger.paused') {
+        browser.paused = data.params.callFrames.slice(0, 8).map((f) => `${f.functionName || '(anonymous)'} ${f.url.split('/').at(-1)}:${f.location.lineNumber + 1}`);
       } else if (data.method === 'Runtime.exceptionThrown') {
         const details = data.params.exceptionDetails;
         messages.push(`uncaught: ${details.exception?.description ?? details.text}`);
@@ -391,7 +394,16 @@ export async function startBrowser(exe) {
     await send('Log.enable');
     await send('Page.enable');
 
+    browser.send = send;
     browser.navigate = (url) => send('Page.navigate', { url });
+    /** The page's own call stack, taken by interrupting it (for a page that does not answer): the top frames, or null. */
+    browser.where = async () => {
+      browser.paused = null;
+      await send('Debugger.enable');
+      await send('Debugger.pause');
+      for (let k = 0; k < 40 && !browser.paused; k++) await sleep(100);
+      return browser.paused;
+    };
     browser.evaluate = async (expression) => {
       const reply = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
       if (reply.result?.exceptionDetails) throw new Error(`page error: ${reply.result.exceptionDetails.exception?.description ?? 'unknown'}`);
@@ -509,11 +521,11 @@ async function startLive(app, check) {
   });
 }
 
-const PANEL = '.share-panel';
+export const PANEL = '.share-panel';
 const viewersAre = (n) => `document.querySelector('[data-share-viewers]')?.getAttribute('data-share-viewers') === '${n}'`;
 
 /** Opens the share panel with the toolbar button (live window or editor). */
-async function openPanel(app) {
+export async function openPanel(app) {
   if (await app.evaluate(`document.querySelector(${j(PANEL)}) !== null`)) return;
   await app.click('button[data-action="share"]');
   await app.waitFor(`document.querySelector(${j(PANEL)}) !== null`, 'the share panel');
@@ -524,7 +536,7 @@ async function openPanel(app) {
  * the panel, with `data-action="share-close"` or the label `common.close` (Esc only outside live mode, where it
  * would ask whether to end the live session). Never fails: a later click that hits the panel says so.
  */
-async function closePanel(app, closeLabel) {
+export async function closePanel(app, closeLabel) {
   if (!(await app.evaluate(`document.querySelector(${j(PANEL)}) !== null`))) return;
   const selector = await app.evaluate(`(() => {
     const panel = document.querySelector(${j(PANEL)});

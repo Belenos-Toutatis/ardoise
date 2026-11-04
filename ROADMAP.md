@@ -211,19 +211,19 @@ Reste à confirmer à l'usage : Chrome sur Android après le correctif, et une n
 
 Ajouté à la demande de l'utilisateur le 2026-11-04 (SPEC §4.2, `docs/questions.md` Q9). Conception technique et découpage : `docs/design/tablet-live-classroom.md`, « M12 ».
 
-- [ ] Préalable : un trait en cours lors d'un instantané ne doit pas être compté deux fois dans les fenêtres (à confirmer d'abord par un test).
-- [ ] Reprendre une feuille, côté Rust : une session part d'une note existante ; rien de la note n'est perdu à l'enregistrement (fond, original, narration, texte reconnu, champs inconnus) ; son état d'origine reste récupérable ; si elle a changé ailleurs, une nouvelle note est créée dans le même classeur et Ardoise le dit.
-- [ ] Écrire sur une feuille reprise :
+- [x] Préalable : un trait en cours lors d'un instantané ne doit pas être compté deux fois dans les fenêtres (à confirmer d'abord par un test).
+- [x] Reprendre une feuille, côté Rust : une session part d'une note existante ; rien de la note n'est perdu à l'enregistrement (fond, original, narration, texte reconnu, champs inconnus) ; son état d'origine reste récupérable ; si elle a changé ailleurs, une nouvelle note est créée dans le même classeur et Ardoise le dit.
+- [x] Écrire sur une feuille reprise :
   - format différent de la tablette : mise à l'échelle sans déformation ;
   - portrait ou paysage : le direct suit la feuille, qui n'est jamais tournée ;
   - relecture et narration justes malgré le temps écoulé ;
   - écriture sur un calque visible ;
   - le tableau noir ne fait pas perdre le fond de la feuille.
-- [ ] Entrées : « Reprendre en mode direct » dans le menu d'une note et dans l'éditeur (qui enregistre d'abord) ; la page suivante crée une note neuve.
-- [ ] Fond de la feuille reprise (modèle, texture, image, page de PDF) dans la fenêtre de commande, au vidéoprojecteur et sur les écrans du partage.
-- [ ] Retouches, côté Rust : supprimer et recolorer des traits, annuler et rétablir (avec l'effacement de la page), sans jamais gêner l'écriture de la tablette ; évènement vers toutes les fenêtres et le partage, sans rien de personnel.
-- [ ] Retouches, interface : outil Sélection dans la fenêtre de commande (lasso, clic, dos du stylet inchangé), Suppr, couleurs, Ctrl+Z, Échap ; traductions FR et EN. Rien de la sélection au vidéoprojecteur.
-- [ ] Guide FR et EN ; procédure H5 dans `docs/hardware-tests.md`.
+- [x] Entrées : « Reprendre en mode direct » dans le menu d'une note et dans l'éditeur (qui enregistre d'abord) ; la page suivante crée une note neuve.
+- [x] Fond de la feuille reprise (modèle, texture, image, page de PDF) dans la fenêtre de commande, au vidéoprojecteur et sur les écrans du partage.
+- [x] Retouches, côté Rust : supprimer et recolorer des traits, annuler et rétablir (avec l'effacement de la page), sans jamais gêner l'écriture de la tablette ; évènement vers toutes les fenêtres et le partage, sans rien de personnel.
+- [x] Retouches, interface : outil Sélection dans la fenêtre de commande (lasso, clic, dos du stylet inchangé), Suppr, couleurs, Ctrl+Z, Échap ; traductions FR et EN. Rien de la sélection au vidéoprojecteur.
+- [x] Guide FR et EN ; procédure H5 dans `docs/hardware-tests.md`.
 
 **Critères de fin** :
 - `CHECK OK` et `E2E OK` ;
@@ -231,6 +231,12 @@ Ajouté à la demande de l'utilisateur le 2026-11-04 (SPEC §4.2, `docs/question
 - un parcours de bout en bout : la tablette simulée écrit pendant qu'on sélectionne, supprime, recolore et annule, et la fenêtre de commande, la présentation et un écran du partage montrent la même chose ;
 - un test qui modifie la note ailleurs pendant une reprise : rien n'est écrasé ;
 - `cargo xtask perf` : le mode direct reste à 60 images/s, y compris sur une page chargée pendant des retouches.
+
+Vérifié sous Windows le 2026-11-05 : `CHECK OK`, `SELFTEST OK` (exécutable de 22,3 Mo), `E2E OK` (74 parcours, FR et EN, dont 6 sur la reprise et les retouches : la tablette simulée écrit pendant qu'on sélectionne, supprime, recolore et annule, et la fenêtre de commande, la présentation et un écran du partage dans un vrai Edge montrent la même chose), après une relecture indépendante dont les remarques sont corrigées.
+
+Performances (`docs/performance.md`) : une page de 4 000 traits retouchée pendant que la tablette écrit tient 59,1 images/s, avec 4 images en retard sur 591 (24 retouches en 10 s), objectif atteint ; une retouche sur cette page coûte 16,9 ms contre 116,7 ms pour un redessin complet. `PERF MISSED` porte sur autre chose : 1 000 notes affichées en 2,18 s pour un objectif de 2 s. Ce n'est pas dû à M12 : relancée deux fois de suite, la mesure donne 1,94 et 2,17 s avec M12, 1,84 et 2,15 s avec la version d'avant (1,77 s le 2026-10-29).
+
+Restent à essayer à la main (H5) : la vraie tablette, un vrai arrêt de Windows pendant un direct, une vraie narration ajoutée à une feuille reprise, le chargement de l'image de fond à travers le filtre de l'établissement.
 
 ### Point de contrôle H5 [matériel]
 

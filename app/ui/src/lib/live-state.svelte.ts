@@ -5,17 +5,21 @@
  *
  * Two kinds of fields:
  * - reactive ones (`$state`) for the interface: session state, page number, style, view,
- *   presentation, saved notes, pages that failed to save, stroke count;
+ *   presentation, saved notes, pages that failed to save, stroke count, whether the page turns
+ *   with the tablet and the resumed sheets that went on in a new note (M12: the control window
+ *   only; the share's viewers are never sent either, and keep the defaults);
  * - plain ones for the canvases, which are told of every change through `subscribe` and draw
  *   on the next animation frame: the finished strokes of the page (`strokes`, appended in
- *   place; `generation` changes when they are replaced), the stroke in progress (`current`,
+ *   place; `generation` changes when they are replaced or edited), the stroke in progress (`current`,
  *   whose points grow in place), the hovering pen (`hover`), and the points not painted yet
  *   (for the latency), and the marks written over the presentation (`marks`, replaced whole by
  *   each `marks` event; the viewers of the share draw them, the windows draw their own).
  *
  * Assumptions about the Rust side (package B), each handled both ways where it is unclear:
- * - (supposé) A snapshot's `page.strokes` holds the finished strokes only. If its last stroke is
- *   the one in progress here (same start), it is not drawn twice.
+ * - A snapshot's `page.strokes` holds the finished strokes only, and it ends the stroke in
+ *   progress here: Rust follows a snapshot with a `strokeStart` carrying the points sent so far
+ *   when a stroke is in progress (and with nothing when there is none, as after clearing the
+ *   page), so the window never finishes a partial stroke into `strokes`.
  * - (supposé) `points` without a `strokeStart` (subscribed in the middle of a stroke) start a
  *   stroke with the current style and layer.
  * - (supposé) `saved` events may carry every path saved so far or only the new ones: they are
@@ -31,14 +35,17 @@ import type {
   LivePoint,
   LiveSessionState,
   LiveSnapshot,
+  LiveStrokesEdited,
   LiveStyle,
   LiveViewState,
   MonitorInfo,
+  SheetFork,
 } from './live';
+import { applyStrokeEdit, type StrokeEdit } from './live-edits';
 import { marksFromWire, reuseMarks } from './live-marks';
 import { roundView, sameView } from './live-view';
 import type { Orientation } from './orientation';
-import type { Background, Layer, PageSize, Rgba, Stroke } from './note';
+import type { Background, BackgroundImage, Layer, PageSize, Rgba, Stroke } from './note';
 
 /** A page Rust failed to write into the library. */
 export interface SaveError {
@@ -58,6 +65,8 @@ const DEFAULT_BACKGROUND: Background = { paper: 'white', template: 'blank', text
 const MAX_UNPAINTED = 5000;
 /** Local views sent and not yet echoed are forgotten beyond this. */
 const MAX_IN_FLIGHT = 64;
+/** The last edits kept for the canvases: one that has not painted for longer (a hidden window) redraws everything. */
+const MAX_EDIT_LOG = 32;
 /** At most one view sent to Rust per this many ms while dragging; the last one always goes. */
 export const VIEW_SEND_MS = 32;
 
@@ -71,12 +80,6 @@ function sameColor(a: Rgba, b: Rgba): boolean {
 
 export function sameStyle(a: LiveStyle, b: LiveStyle): boolean {
   return a.tool === b.tool && a.width === b.width && sameColor(a.color, b.color);
-}
-
-function sameStart(a: Stroke, b: Stroke): boolean {
-  const p = a.points[0];
-  const q = b.points[0];
-  return a.tool === b.tool && a.layer === b.layer && !!p && !!q && p.x === q.x && p.y === q.y && p.t === q.t;
 }
 
 /** Same strokes, compared cheaply (style, sample count, first and last sample). */
@@ -125,12 +128,34 @@ export class LiveState {
   noteId = $state('');
   pageSize = $state.raw<PageSize>(DEFAULT_PAGE);
   background = $state.raw<Background>(DEFAULT_BACKGROUND);
+  /** The background image of a resumed sheet: where it goes (its pixels are Rust's). Null elsewhere. */
+  pageImage = $state.raw<BackgroundImage | null>(null);
+  /** The share's viewers: the picture of the paper this page wants (`LiveSnapshot.paperKey`). */
+  paperKey = $state<string | null>(null);
   layers = $state.raw<Layer[]>([]);
+  /**
+   * What the indices of `strokes` mean: `api.liveEditStrokes` gives it back, and a selection made
+   * at another revision is to be dropped. Not changed by the tablet's writing: a selection stays
+   * valid while it writes. Stays 0 on the share's viewers, which edit nothing.
+   */
+  revision = $state(0);
+  /** The page has an edit to undo (`api.liveUndoEdit`), or to redo (`api.liveRedoEdit`). */
+  canUndo = $state(false);
+  canRedo = $state(false);
+  /** The current page turns with the tablet; false on a resumed sheet, which is never turned. */
+  canTurnPage = $state(true);
+  /** The sheets that went on in a new note, in the order they were told; each stays until dismissed. */
+  forks = $state.raw<SheetFork[]>([]);
 
   /** Finished strokes of the page, in arrival order (appended in place). */
   strokes: Stroke[] = [];
-  /** Changes whenever `strokes` is replaced rather than appended to. */
+  /** Changes whenever `strokes` is replaced or edited rather than appended to. */
   generation = 0;
+  /**
+   * What the last edits touched, oldest first. A change of `generation` absent from it (the strokes were
+   * replaced) tells a canvas that nothing but a full redraw is right.
+   */
+  edits: StrokeEdit[] = [];
   /** The stroke in progress (its points grow in place). */
   current: Stroke | null = null;
   /** Where the pen hovers (page units), or null. */
@@ -152,6 +177,8 @@ export class LiveState {
   private sendTimer: ReturnType<typeof setTimeout> | undefined;
   private sendQueued = false;
   private styleInFlight: LiveStyle[] = [];
+  /** The forks told so far (`original|path`), dismissed or not: each is shown once. */
+  private forksTold = new Set<string>();
 
   /** Calls `listener` after every change; returns the function that stops it. */
   subscribe(listener: () => void): () => void {
@@ -249,6 +276,12 @@ export class LiveState {
       case 'marks':
         this.marks = reuseMarks(this.marks, marksFromWire(event.marks));
         break;
+      case 'strokesEdited':
+        if (event.pageIndex === this.pageIndex) this.applyEdit(event);
+        break;
+      case 'sheetForked':
+        this.addFork(event);
+        break;
       case 'saved':
         this.mergeSaved(event.paths);
         // A successful save means that everything is written, the failed pages included.
@@ -261,6 +294,45 @@ export class LiveState {
         ].sort((a, b) => a.pageIndex - b.pageIndex);
         break;
     }
+  }
+
+  /**
+   * The list is changed in place, a pass over it: a stroke that is not named keeps its object, and
+   * so its outline in the renderer; a recoloured one too (an outline does not depend on the colour:
+   * `Ink.contours`). The new `generation`, with its entry in `edits`, makes the renderer repaint the area
+   * of the strokes touched.
+   */
+  private applyEdit(edit: LiveStrokesEdited): void {
+    const touched = applyStrokeEdit(this.strokes, edit);
+    this.generation += 1;
+    this.edits.push({ generation: this.generation, touched });
+    if (this.edits.length > MAX_EDIT_LOG) this.edits.shift();
+    this.strokeCount = this.strokes.length + (this.current ? 1 : 0);
+    if (edit.revision !== undefined) this.revision = edit.revision;
+    if (edit.canUndo !== undefined) this.canUndo = edit.canUndo;
+    if (edit.canRedo !== undefined) this.canRedo = edit.canRedo;
+  }
+
+  /** Keeps a fork once, even if it is told twice (and not again after it was dismissed); true when it is new. */
+  private addFork({ pageIndex, reason, original, path }: SheetFork): boolean {
+    const key = `${original}|${path}`;
+    if (this.forksTold.has(key)) return false;
+    this.forksTold.add(key);
+    this.forks = [...this.forks, { pageIndex, reason, original, path }];
+    return true;
+  }
+
+  /**
+   * The forks `live_stop` answers with (the last write may have made one that no event told this
+   * window): returns those this window had not been told yet, which are kept like the others.
+   */
+  adoptForks(forks: readonly SheetFork[]): SheetFork[] {
+    return forks.filter((fork) => this.addFork(fork));
+  }
+
+  /** Forgets the notice of a fork (the user dismissed it). */
+  dismissFork(fork: SheetFork): void {
+    this.forks = this.forks.filter((f) => f !== fork);
   }
 
   private finishStroke(): void {
@@ -288,17 +360,14 @@ export class LiveState {
 
   private applySnapshot(s: LiveSnapshot): void {
     const samePage = this.ready && s.pageIndex === this.pageIndex && s.page.id === this.noteId;
-    let incoming = s.page.strokes;
-    if (!samePage) {
-      this.current = null;
-      this.marks = [];
-    } else if (this.current && incoming.length > 0 && sameStart(incoming[incoming.length - 1], this.current)) {
-      // The stroke in progress is already in the page: it stays the one drawn as in progress.
-      incoming = incoming.slice(0, -1);
-    }
-    if (!samePage || !sameStrokes(this.strokes, incoming)) {
-      this.strokes = [...incoming];
+    // The stroke in progress is not in the page; if there is one, the `strokeStart` that follows
+    // brings it back. Kept here, that event would finish it as a partial stroke of the page.
+    this.current = null;
+    if (!samePage) this.marks = [];
+    if (!samePage || !sameStrokes(this.strokes, s.page.strokes)) {
+      this.strokes = [...s.page.strokes];
       this.generation += 1;
+      this.edits = [];
     }
     this.ready = true;
     this.state = s.state;
@@ -311,13 +380,21 @@ export class LiveState {
       this.pageSize = s.page.page;
     }
     if (JSON.stringify(this.background) !== JSON.stringify(s.page.background)) this.background = s.page.background;
+    const image = s.page.backgroundImage ?? null;
+    if (JSON.stringify(this.pageImage) !== JSON.stringify(image)) this.pageImage = image;
+    this.paperKey = s.paperKey ?? null;
     if (JSON.stringify(this.layers) !== JSON.stringify(s.page.layers)) this.layers = s.page.layers;
     this.incomingStyle(s.style);
     this.incomingView(s.view);
     this.hover = s.hover;
     if (JSON.stringify(this.presentation) !== JSON.stringify(s.presentation)) this.presentation = s.presentation;
     this.mergeSaved(s.saved);
-    this.strokeCount = this.strokes.length + (this.current ? 1 : 0);
+    this.strokeCount = this.strokes.length;
+    this.revision = s.revision ?? 0;
+    this.canUndo = s.canUndo ?? false;
+    this.canRedo = s.canRedo ?? false;
+    // Absent (the share's viewers): the page turns.
+    this.canTurnPage = s.canTurnPage !== false;
   }
 
   // --- Changes made in this window ------------------------------------------------------------
