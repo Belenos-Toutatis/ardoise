@@ -433,8 +433,10 @@
   /** A swatch: recolours the selection if there is one; the pen takes the colour too, as in the editor. */
   function pickColor(color: Rgba) {
     const next = { ...color };
+    // With a selection the colour is for it: what the tablet writes next keeps its colour, so
+    // that a correction made in front of the class does not change the ink under the pen.
     if (selection.any) void recolourSelected(touchUp, next);
-    setStyle({ ...live.style, color: next });
+    else setStyle({ ...live.style, color: next });
   }
 
   function undoEdit(again = false) {

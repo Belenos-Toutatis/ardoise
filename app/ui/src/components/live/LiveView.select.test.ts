@@ -275,7 +275,7 @@ describe('deleting', () => {
 });
 
 describe('recolouring', () => {
-  it('a swatch recolours the selection, which stays, and the pen takes the colour as in the editor', async () => {
+  it('a swatch recolours the selection, which stays, and the pen keeps its colour', async () => {
     const edit = vi.spyOn(api, 'liveEditStrokes');
     const style = vi.spyOn(api, 'liveSetStyle');
     const view = await selected();
@@ -288,7 +288,7 @@ describe('recolouring', () => {
     await vi.waitFor(() => expect(contexts.some((c) => c.ops('fill').some((f) => f.fillStyle === 'rgb(216, 0, 0)'))).toBe(true));
     expect(view.strokes()).toBe(2);
     expect(view.bar()!.textContent).toContain('Traits sélectionnés : 1');
-    expect(style).toHaveBeenCalledOnce();
+    expect(style).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(view.action('undo-edit')!.disabled).toBe(false));
 
     // Another colour on the same selection.
