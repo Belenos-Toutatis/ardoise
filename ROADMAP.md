@@ -206,6 +206,35 @@ Deux problèmes vus le même jour avec des navigateurs et des réseaux réels, c
 
 Reste à confirmer à l'usage : Chrome sur Android après le correctif, et une note ouverte partagée sur le réseau de l'établissement.
 
+## M12 — Reprendre et retoucher pendant le mode direct
+
+Ajouté à la demande de l'utilisateur le 2026-11-04 (SPEC §4.2, `docs/questions.md` Q9). Conception technique et découpage : `docs/design/tablet-live-classroom.md`, « M12 ».
+
+- [ ] Préalable : un trait en cours lors d'un instantané ne doit pas être compté deux fois dans les fenêtres (à confirmer d'abord par un test).
+- [ ] Reprendre une feuille, côté Rust : une session part d'une note existante ; rien de la note n'est perdu à l'enregistrement (fond, original, narration, texte reconnu, champs inconnus) ; son état d'origine reste récupérable ; si elle a changé ailleurs, une nouvelle note est créée dans le même classeur et Ardoise le dit.
+- [ ] Écrire sur une feuille reprise :
+  - format différent de la tablette : mise à l'échelle sans déformation ;
+  - portrait ou paysage : le direct suit la feuille, qui n'est jamais tournée ;
+  - relecture et narration justes malgré le temps écoulé ;
+  - écriture sur un calque visible ;
+  - le tableau noir ne fait pas perdre le fond de la feuille.
+- [ ] Entrées : « Reprendre en mode direct » dans le menu d'une note et dans l'éditeur (qui enregistre d'abord) ; la page suivante crée une note neuve.
+- [ ] Fond de la feuille reprise (modèle, texture, image, page de PDF) dans la fenêtre de commande, au vidéoprojecteur et sur les écrans du partage.
+- [ ] Retouches, côté Rust : supprimer et recolorer des traits, annuler et rétablir (avec l'effacement de la page), sans jamais gêner l'écriture de la tablette ; évènement vers toutes les fenêtres et le partage, sans rien de personnel.
+- [ ] Retouches, interface : outil Sélection dans la fenêtre de commande (lasso, clic, dos du stylet inchangé), Suppr, couleurs, Ctrl+Z, Échap ; traductions FR et EN. Rien de la sélection au vidéoprojecteur.
+- [ ] Guide FR et EN ; procédure H5 dans `docs/hardware-tests.md`.
+
+**Critères de fin** :
+- `CHECK OK` et `E2E OK` ;
+- un parcours de bout en bout, avec la tablette simulée : reprendre une note qui a une image de fond, écrire, puis vérifier que l'image, l'original et la narration sont toujours là ;
+- un parcours de bout en bout : la tablette simulée écrit pendant qu'on sélectionne, supprime, recolore et annule, et la fenêtre de commande, la présentation et un écran du partage montrent la même chose ;
+- un test qui modifie la note ailleurs pendant une reprise : rien n'est écrasé ;
+- `cargo xtask perf` : le mode direct reste à 60 images/s, y compris sur une page chargée pendant des retouches.
+
+### Point de contrôle H5 [matériel]
+
+- [ ] [matériel] Avec la vraie tablette, en classe : interrompre un direct, reprendre la feuille, écrire, puis supprimer et recolorer pendant que le vidéoprojecteur et un autre écran du réseau regardent.
+
 ---
 
 ## Lancer une étape avec `/goal`

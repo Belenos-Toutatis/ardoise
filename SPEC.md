@@ -95,6 +95,8 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
   - zoom et déplacement de la zone projetée ; « tableau noir » (fond ardoise, craie) ;
   - pointeur laser (le stylet en survol montre un point lumineux sans écrire) ;
   - effacement rapide de la page, page suivante / précédente au clavier ou par le bouton de la tablette.
+- **Reprendre le direct sur une feuille** (ajout demandé par l'utilisateur le 2026-11-04, `docs/questions.md` Q9) : depuis le menu d'une note ou l'éditeur, le mode direct repart sur cette note. La nouvelle écriture s'ajoute à la note elle-même, qui garde son fond, ses calques et sa narration, et son état d'origine reste récupérable (« Revenir à l'original »). Si elle a changé ailleurs entre-temps, rien n'est écrasé : une nouvelle note est créée à côté, et Ardoise le dit. La page suivante crée une note neuve.
+- **Retoucher pendant le direct** (même ajout) : dans la fenêtre de commande, un outil Sélection (lasso ou clic) permet de supprimer des traits ou de changer leur couleur, sans passer par l'éditeur et pendant que la tablette continue d'écrire. Le vidéoprojecteur et les écrans du partage montrent aussitôt le résultat, jamais la sélection. Ctrl+Z annule ces actions et l'effacement de la page, pas l'écriture de la tablette.
 
 ### 4.3 Bibliothèque (P1)
 
