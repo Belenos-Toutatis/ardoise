@@ -122,7 +122,8 @@ clock follows the wall clock (recv waits for real), so live mode streams at 200 
 
 Errors are `{ code, message }`. New codes: `tabletNotConnected`, `tabletBusy`, `tabletNotRegistered`,
 `bluetoothOff`, `bluetoothMissing`, `tabletTimeout`, `tabletRefused`, `liveNotRunning`, `noMonitor`,
-`simulationOnly`, `invalidName`, `tablet` (any other device error, `message` = detail).
+`simulationOnly`, `invalidName`, `tablet` (any other device error, `message` = detail), `liveEditStale`,
+`liveEditInvalid` (M12).
 
 Tablet (`tablet.rs`, package A):
 
@@ -148,6 +149,9 @@ Live and classroom (`live.rs`, `presentation.rs`, package B):
 | `live_stop` | – | paths of the notes saved |
 | `live_set_style` | `style: LiveStyle` | – (broadcast as a snapshot) |
 | `live_command` | `command: LiveCommand` | – |
+| `live_restore_cleared` | – | whether the ink of the page's last clearing came back (through its history, M12) |
+| `live_edit_strokes` | `pageIndex`, `revision`, `edit: { kind: 'delete', indices } \| { kind: 'recolour', indices, color }` | the page's revision after the edit; `liveEditStale`, `liveEditInvalid` (M12) |
+| `live_undo_edit` / `live_redo_edit` | `pageIndex` | whether there was a step; `liveEditStale` when that page is not on screen (M12) |
 | `live_set_view` | `view: LiveViewState` | – (broadcast as `view`) |
 | `list_monitors` | – | `MonitorInfo[]` (the saved choice, if still present, has `chosen: true`) |
 | `open_presentation` | `monitor: string \| null` (null = saved or default choice) | `MonitorInfo` used |
@@ -165,8 +169,8 @@ Live and classroom (`live.rs`, `presentation.rs`, package B):
 - Hover (pen near, pressure 0): `hover` events at most once per batch, `hoverEnd` when the pen leaves. With
   `view.laser` on, the interface draws a red dot there and **nothing is written** while hovering.
 - Commands (`LiveCommand`): `nextPage` (to the next page, a new one at the end), `previousPage`, `newPage`,
-  `newLayer` (adds a layer to the current page, new strokes go there), `clearPage` (removes the current page's strokes;
-  undo is not needed), `button` (what the tablet's button does: `newPage` or `newLayer` from the options).
+  `newLayer` (adds a layer to the current page, new strokes go there), `clearPage` (removes what shows of the current page's strokes and the
+  stroke in progress; a step of the page's history since M12), `button` (what the tablet's button does: `newPage` or `newLayer` from the options).
   `LiveInput::Button` runs `button`.
 - View (`LiveViewState`): `zoom` (1 = whole page, up to 8), `x`, `y` (centre of the projected area in page units),
   `board` (blackboard: slate paper, default style chalk white), `laser` (hover shows a dot). Shared by every window.
@@ -182,7 +186,8 @@ LiveCommand = { kind: 'nextPage' | 'previousPage' | 'newPage' | 'newLayer' | 'cl
 LiveSnapshot = { state: 'idle' | 'waiting' | 'live' | 'reconnecting'; page: Note; pageIndex: number; pageCount: number;
                  canTurnPage?: boolean; // M12: false on a resumed sheet; absent on the share's viewers
                  layer: number; style: LiveStyle; view: LiveViewState; hover: { x: number; y: number } | null;
-                 presentation: MonitorInfo | null; saved: string[] }
+                 presentation: MonitorInfo | null; saved: string[];
+                 revision?: number; canUndo?: boolean; canRedo?: boolean } // M12; absent on the share's viewers
 LivePoint = { x: number; y: number; p: number; t: number; recv: number }   // recv: wall-clock ms (fractional) at receipt
 LiveEvent =
   | { type: 'snapshot'; snapshot: LiveSnapshot }               // page change, clear, layer, style, state, presentation
@@ -193,6 +198,9 @@ LiveEvent =
   | { type: 'view'; view: LiveViewState }
   | { type: 'saved'; paths: string[] }
   | { type: 'sheetForked'; pageIndex: number; reason: 'changed' | 'deleted'; original: string; path: string } // M12
+  | { type: 'strokesEdited'; pageIndex: number; revision?: number; removed: number[];                       // M12
+      inserted: { index: number; stroke: Stroke }[]; recoloured: { color: Rgba; indices: number[] }[];
+      canUndo?: boolean; canRedo?: boolean }
 LiveBatch = { events: LiveEvent[]; sentAt: number }            // sentAt: wall-clock ms (fractional) when sent
 MonitorInfo = { key: string; name: string; x: number; y: number; width: number; height: number; scale: number;
                 primary: boolean; chosen: boolean }
@@ -446,15 +454,16 @@ bottom left, button at the bottom right); to be confirmed with the real tablet (
 
 ## M10: review fixes (live mode)
 
-- **Clear the page can be undone.** `LiveSession` keeps the strokes of the last cleared page (`Cleared`: page, orientation, strokes); `restore_cleared` puts them back under what was written since, only while that page is still on screen and held as it was (a quarter turn drops the offer). Hub: `restore_cleared`, command `live_restore_cleared` (returns whether the ink came back). The control window offers it for 8 s and withdraws it on a page change.
+- **Clear the page can be undone.** `LiveSession` keeps the strokes of the last cleared page (`Cleared`: page, orientation, strokes); `restore_cleared` puts them back under what was written since, only while that page is still on screen and held as it was (a quarter turn drops the offer). Hub: `restore_cleared`, command `live_restore_cleared` (returns whether the ink came back). The control window offers it for 8 s and withdraws it on a page change. M12: `Cleared` is gone, the clearing is a step of the page's history (below), and a quarter turn no longer drops it: the ink kept turns with the page.
 - **A note changed from outside no longer duplicates the pages.** Each written page remembers a fingerprint of its ink and layout (`SavedFile::content`: hash of the `strokes.bin` encoding and of the layout JSON, not of title, tags, favourite or modification time). When the write meets a `Conflict`, or a `NotFound` whose note exists elsewhere under the same id (the file was renamed), `merge_outside` reads the file: if its fingerprint is the one last written, only metadata changed; the page is written into it with the outside title, tags and favourite mark kept, and the page adopts them (`Written::outside`) so that its next writes keep them. Any other change (ink edited elsewhere, another note under that id) still gives a new note next to it, as before.
 - `saveFailed` events carry the library error's `code` next to the system's `message`.
 
 ## M12: resume a sheet, touch up during live
 
 Decisions: `docs/questions.md` Q9, SPEC §4.2. "Live" paths are under `app/src-tauri/src/live/`. "Resume" below is built
-and tested (packages 2 and 3, Rust side only). "Paper" and "Touch up" were written from reading the code on 2026-11-04,
-nothing run: check each point against the code.
+and tested (packages 2 and 3, Rust side only). "Touch up, as built" is built and tested too (package 6: Rust, the event, the
+share, `LiveState`). "Paper" and "Touch up, the selection" were written from reading the code on 2026-11-04, nothing run: check
+each point against the code.
 
 **Today.** Live starts only from the tablet panel: `live_start` → `LiveHub::start`, one blank page. Several pages per
 session, one note per page, created at the first stroke's end, in the library root, then rewritten at most every 5 s and
@@ -523,26 +532,78 @@ and the stroke in progress are lost.
   `stage_note_background` exists). Live viewers get no paper picture (viewer-state, feed.rs): reuse what `page.rs` does
   for the editor's note, once per sheet, never in the coalesced live events.
 
-**Touch up.**
+**Touch up, as built** (`edits.rs`, `session.rs`, `hub.rs`, `share/feed.rs`, `lib/live-edits.ts`, `lib/live-state.svelte.ts`;
+tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edits.test.ts`, `mock-live.edits.test.ts`).
+- **Identity.** Strokes have no ids, only their place in the page's list of finished strokes, stable under appends, shifted by
+  a delete. No format change: a revision says what the places mean.
+- **Revision.** Per page, in the snapshot (`revision`) and in every `strokesEdited`. It changes when strokes leave the list or
+  come back: a delete, a clearing that removed something, the undo or redo of either. Not when the tablet appends (a selection
+  stays valid while it writes), not for a change of colour or its undo (a second click on a swatch is not stale), not for a
+  page turn or a new layer (no place moves). Two sessions never share one (`session id << 32`, plus the changes of the page):
+  a command meant for a session that ended is stale, though the page number is the same.
+- **Commands.** `live_edit_strokes(pageIndex, revision, edit)`, `live_undo_edit(pageIndex)`, `live_redo_edit(pageIndex)`; a stopped
+  session refuses them (`liveNotRunning`, as `clearPage`). `liveEditStale`: another page on screen, or another revision; the
+  interface drops its selection. `liveEditInvalid`, refused as a whole: an empty list, more than `MAX_EDIT_STROKES` (2^20), a
+  duplicate, a number that is no index, an index out of range, a stroke of a hidden layer (none is shown, so it was not chosen
+  on purpose), a colour out of 0..=255 or fully transparent. Indices and channels arrive as plain numbers so that a bad one gets
+  this code rather than Tauri's rejection of the arguments. A colour the strokes already have is no step and no event.
+- **Event.** `strokesEdited { pageIndex, revision, removed, inserted, recoloured, canUndo, canRedo }`, applied in that order:
+  `removed` in the list before it, `inserted` (`{ index, stroke }`) and `recoloured` (`{ color, indices }`, one per colour) in the
+  list after it. Never coalesced (the default arm of `enqueue`), in `may_need_save` so that the saver wakes. Not a snapshot: each
+  snapshot clones the page per subscriber under the hub's lock, and a changed snapshot makes `applySnapshot` recompute every
+  outline. `clearPage` stays a snapshot: the page is empty by then, and it also drops the stroke in progress. `canUndo` and
+  `canRedo` are also in the snapshot, so the interface always knows them.
+- **Under the lock.** Sorting and the checks that need no page are done before it (`StrokesEdit::checked`). A delete moves
+  the structs after the first place (`extract_if`), no point is copied, and the strokes go to the history. An undo gives them back
+  through a copy made before the lock is taken (`Prepared`: the hub peeks at the top step, copies, then applies; another command
+  in between just means a copy under the lock), and each window gets the stored strokes behind one `Arc` instead of its own copy.
+- **In progress.** The tablet's stroke in progress is untouched by an edit, undo or redo: it joins at the tail at `end_stroke`. It
+  cannot be named: it is not in the list.
+- **History** (`edits::History`, per page). `MAX_UNDO_STEPS` (100) and `MAX_UNDO_BYTES` (64 MB of kept strokes per page); the oldest
+  goes first, except the last step left, which holds no more than the page held (« Clear » of a very long lesson can be undone).
+  A place in a step is the place the stroke had, never translated: steps come off in reverse order, so what stands before it is what
+  stood there, and the tablet only adds at the tail, which stays after the places given back. The tablet's writing is not a step and
+  does not empty the redo steps; a new edit does.
+- **Clear.** `clearPage` removes what shows and pushes a step; hidden layers keep their ink (nobody can tell it is going; before
+  M12 it went too). `live_restore_cleared` undoes down to and including the page's last clearing: the button keeps working, and
+  edits made after the clearing can still be redone. On another page: `false`, and the clearing stays on its page.
+- **Page turn.** The strokes kept turn with the page (`History::turn`, called from `Page::turn`): they come back where they would
+  be had they stayed. Places and colours do not change, so nothing else does. A page emptied by a delete and never written is not a
+  "blank" page for `hold` while its history is not empty. A resumed sheet is never turned, nor what can come back to it.
+- **Page change.** A page keeps its history when it is left: Ctrl+Z on it again undoes what was done on it. `pageIndex` says which
+  page the key was pressed on. A stop drops every history (`set_state(Idle)`).
+- **Resumed page.** Edits may touch the note's old strokes. Written like any change: `page_file`, so members, `keep_original` and
+  stamps as before; the fingerprint (`strokes.bin`, which holds the colour) sees a delete and a recolour. A sheet whose only change
+  was undone before the saver wrote it is not written (same fingerprint: same bytes, same date, not among the session's notes). The
+  first change of a resumed sheet is written at once (`page_due`: never tried), so more often it was written: it is then rewritten
+  once more, as it was read, with no `original.ardoise` since nothing differs, and it counts among the session's notes.
+- **Viewers.** The event goes through the allow list with `pageIndex`, `removed`, `inserted`, `recoloured` only. Their list has no
+  hidden strokes, so their places differ on a page with a hidden layer: indices are **translated, not replaced by a snapshot** (a
+  snapshot per viewer is what the event avoids, and it would have to be placed in the queue under the lock). The session works out
+  `ViewerIndices` with the edit, a pass over the list only on such a page (`place - hidden strokes before it`); `feed.rs` picks them.
+  An edit never touches a hidden stroke, so none can leave in `inserted`, and whether a stroke is hidden never changes during a
+  session. A paused share has no subscription: its frozen image, then a fresh snapshot on resume.
+- **`LiveState`.** `revision`, `canUndo`, `canRedo` (reactive), `strokes` changed in place (`lib/live-edits.ts`), `generation` + 1.
+  Strokes not named keep their object, hence their outline in the renderer's `WeakMap`; a recoloured one too (a new `color` on the
+  same object: `Ink.contours` depends on the points, tool and width only). On a viewer `revision` stays 0.
+- **Renderer.** Nothing to change: a new `generation` redraws the cache in `drawingOrder`, which skips hidden layers, with each
+  stroke's colour read at that moment and the look of its tool (highlighter multiplied or screened, felt tip 0.9, chalk 0.95);
+  the grains of pencil and chalk are not drawn on screen. Tested on the fake canvas, with outlines counted.
+- **Cost.** Page of 50 000 strokes of 100 points, measured in the unoptimised test build (`cargo test -p ardoise large_page --
+  --nocapture`; the app is much faster): under the lock, delete 1 000 strokes 2.4 ms, undo them 2.8 ms, recolour all 22 ms, clear 13 ms,
+  against 58 ms for the clone of a single snapshot, one per window. In the window (`live-state.edits.test.ts`), 1 to 3 ms per event.
+  What stays costly is the redraw of the cache: one fill per stroke of the page, on the window's thread, as after any change of
+  view, never under the hub's lock, and not measured here (no window: `cargo xtask perf`). Also under the lock, as before: the clone of
+  the page by a save pass (`SaveJob`) every 5 s, which an edit now triggers too.
+
+**Touch up, the selection** (package 7, nothing built yet).
 - **Reusable.** `lib/editor/hit.ts` (`selectInLasso`, `hitStroke`; relax `Note` to a `Pick`), `geometry.ts`,
   `ops.strokesBounds`. The viewer's import graph must stay free of `api` (`viewer/imports.test.ts`). The lasso gesture and
-  overlay of `Canvas.svelte` and `Doc`/history are bound to the editor; Rust owns the live state, so undo belongs there.
-- **Identity.** Strokes have no ids, only indices, stable under appends, shifted by a delete. No format change: use a revision.
-- **Commands.** `live_edit_strokes(pageIndex, revision, delete|recolour, indices)`, `live_undo_edit`, `live_redo_edit`. Rust
-  refuses a stale page or revision.
-- **Event.** A dedicated `StrokesEdited { pageIndex, revision, removed, inserted, recoloured }`, never coalesced (the default
-  arm of `enqueue` keeps order); add it to `may_need_save` or the saver stays asleep; add it to the allow-list of feed.rs and
-  to `live.ts`. Not snapshots: each clones the page per subscriber under the hub's lock, which could delay tablet input, and
-  `applySnapshot` recomputes every outline. Exception: viewers do not get hidden-layer strokes, so their indices differ: on
-  a page with hidden layers, send a snapshot.
-- **Renderer.** `LiveState` bumps `generation` to redraw the cache; a filter keeps objects and outlines. The lasso and the
-  selection are scene fields local to the control window.
-- **In progress.** The tablet's stroke in progress is untouched: it joins at the tail at `end_stroke`.
-- **Undo.** Today only a single-level `restore_cleared`, which prepends strokes and shifts indices: clear and restore join the
-  edit stack. A page turn must turn the stored strokes too, or drop them, as `Cleared` does. Tablet strokes are not undone.
-- **Possible bug to settle first.** After a snapshot taken mid-stroke, `strokeStart` in `live-state.svelte.ts` finishes the
-  current stroke into `strokes` (`if (this.current) this.finishStroke()`), which would leave windows with one stroke too many
-  until a later snapshot, and break indices. Read, not reproduced: start with a failing test.
+  overlay of `Canvas.svelte` and `Doc`/history are bound to the editor; Rust owns the live state, so undo belongs there. Strokes of
+  a hidden layer must not be picked: Rust refuses them.
+- **Selection.** Indices in `LiveState.strokes`, with the `pageIndex` and `revision` they were chosen at; drop it when either
+  changes (a recolour keeps the revision: the selection goes on). The lasso and the selection are scene fields local to the control
+  window.
 - **Pointers.** In the control window's preview: drag moves the area, wheel zooms, finger navigates. A Select toggle: mouse and
   pen lasso, click picks, finger and wheel stay navigation. The preview shows the whole page, so precision is limited: say if
   it proves too small. The presentation window stays as it is (marks).
@@ -558,6 +619,6 @@ and the stroke in progress are lost.
 | 3 | Scale, orientation, time, narration, visible layer, blackboard's paper | session, narration.rs | hard |
 | 4 | Entry points: note menu, editor toolbar | Home, NoteCard, Editor, api, mocks | standard |
 | 5 | Paper in LiveCanvas and for viewers | LiveCanvas, share.rs, feed.rs, viewer-state | hard |
-| 6 | Edits and undo in Rust, event, feed, TS apply | session, hub, model, feed.rs, live.ts, live-state | hard |
+| 6 | Edits and undo in Rust, event, feed, TS apply | edits, session, hub, model, feed.rs, live.ts, live-edits, live-state | hard |
 | 7 | Selection UI in the control window, overlay, keys | new `lib/live-selection`, LiveCanvas, live-render, LiveView, live-keys | standard |
 | 8 | e2e journeys, guide, H5, perf run | app/e2e, docs | standard |

@@ -12,18 +12,24 @@ use ardoise_core::library::FileStamp;
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Timing};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::pages::{oriented_size, turn_point};
-use ardoise_ink::{Point, Stroke};
+use ardoise_ink::{Point, Rgba, Stroke};
 use ardoise_proto::SLATE_MAX_PRESSURE;
 use ardoise_proto::live::LiveRecord;
 use ardoise_proto::stroke::Point as PenPoint;
 
+use super::edits::{
+    CheckedEdit, ColourChange, EditAction, History, LiveEditError, Prepared, RedoStep, UndoStep,
+    grouped, hidden_before, insert_at, remove_at, viewer_places,
+};
 use super::model::{
     ForkReason, HoverPoint, LiveCommandKind, LiveEvent, LiveMark, LivePoint, LiveSessionState,
-    LiveSnapshot, LiveStroke, LiveStyle, LiveViewState, sanitize_marks,
+    LiveSnapshot, LiveStroke, LiveStyle, LiveViewState, PlacedStroke, RecolouredStrokes,
+    ViewerIndices, sanitize_marks,
 };
 use super::resume::{PenMapping, ResumeBase, ResumeSeed, hold_for};
 use crate::library::path_text;
 use crate::presentation::MonitorInfo;
+use crate::share::page::is_drawn;
 
 /// Interval between two records of the tablet (protocol.md §7.2: one record every 5 ms).
 pub const SAMPLE_MS: f64 = 5.0;
@@ -98,10 +104,34 @@ pub struct Page {
     paper_before_board: Option<Paper>,
     /// Seeded from an existing note.
     resumed: Option<Resumed>,
+    /// What the indices of its strokes mean ([`LiveSnapshot::revision`]). Starts from the
+    /// session's [`first_revision`], so that a command meant for a session that has ended cannot
+    /// pass for one of the next. Changes when strokes leave the list or come back: a delete, a
+    /// clearing that removed something, the undo or redo of either. Not when the tablet appends a
+    /// stroke (no index moves), nor for a change of colour, a page turn, a new layer.
+    revision: u64,
+    /// Its edits, to undo and redo: kept when the page is left and when it turns, dropped when
+    /// the session stops.
+    history: History,
+}
+
+/// What one step of an edit did, for the event that tells the windows.
+#[derive(Debug, Default)]
+struct Edited {
+    removed: Vec<u32>,
+    inserted: Arc<Vec<PlacedStroke>>,
+    recoloured: Vec<RecolouredStrokes>,
+    viewers: Option<Box<ViewerIndices>>,
+}
+
+/// The first revision of the pages of session `id`. Sessions never run out of it (2^32 changes per
+/// page) and stay within what a number holds exactly in the interface (2^21 sessions per run).
+fn first_revision(id: u64) -> u64 {
+    id << 32
 }
 
 impl Page {
-    fn new(note: Note, orientation: Orientation) -> Page {
+    fn new(note: Note, orientation: Orientation, revision: u64) -> Page {
         Page {
             note,
             version: 0,
@@ -116,13 +146,21 @@ impl Page {
             last_t: None,
             paper_before_board: None,
             resumed: None,
+            revision,
+            history: History::default(),
         }
     }
 
     /// The page of a note resumed at `now_ms`, for a tablet set to `setting`. A note whose layers
     /// are all hidden gets a visible layer to write on (hidden layers stay hidden: one may hold
     /// the answers); that alone is no change, so it is written only with what is written on it.
-    fn resumed(seed: ResumeSeed, setting: Orientation, french: bool, now_ms: i64) -> Page {
+    fn resumed(
+        seed: ResumeSeed,
+        setting: Orientation,
+        french: bool,
+        now_ms: i64,
+        revision: u64,
+    ) -> Page {
         let ResumeSeed {
             base,
             saved,
@@ -136,7 +174,7 @@ impl Page {
             });
         }
         let orientation = hold_for(note.page, setting);
-        let mut page = Page::new(note, orientation);
+        let mut page = Page::new(note, orientation, revision);
         page.file = Some(saved);
         page.audio = base.file.audio.clone().map(Arc::new);
         page.fresh = false;
@@ -153,6 +191,12 @@ impl Page {
             fork: None,
         });
         page
+    }
+
+    /// What the indices of the page's strokes mean: see the field.
+    #[cfg(test)]
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Seeded from an existing note: never turned, and written through its file.
@@ -197,17 +241,18 @@ impl Page {
 
     /// The wall clock (Unix ms) at note time 0 for what this session adds: `note.created`, the
     /// wall clock of the page's first stroke; on a resumed sheet, the origin shifted so that the
-    /// time since the resume follows what the note holds. `None` while a page of the session has
-    /// no stroke: a narration has nothing to follow there.
+    /// time since the resume follows what the note holds. `None` until a stroke was started on a
+    /// page of the session: a narration has nothing to follow there. Strokes that have left since
+    /// (cleared, deleted: they can come back) change nothing to that.
     pub fn time_origin(&self) -> Option<i64> {
         match &self.resumed {
             Some(resumed) => Some(resumed.origin),
-            None => (!self.note.strokes.is_empty()).then_some(self.note.created),
+            None => (!self.fresh).then_some(self.note.created),
         }
     }
 
     /// Gives the page its narration, as `audio.opus` bytes: it is written again at the next
-    /// pass. Refused (`false`) on a page without any stroke.
+    /// pass. Refused (`false`) on a page where no stroke was ever started.
     pub fn set_audio(&mut self, audio: Vec<u8>) -> bool {
         if self.time_origin().is_none() {
             return false;
@@ -239,6 +284,7 @@ impl Page {
                     (point.x, point.y) = turn_point(point.x, point.y, width, height, turns);
                 }
             }
+            self.history.turn(width, height, turns);
             if turns % 2 == 1 {
                 self.note.page = PageSize {
                     width: self.note.page.height,
@@ -254,6 +300,88 @@ impl Page {
     /// ended on the page, then rewritten whenever it changes.
     pub fn needs_write(&self) -> bool {
         self.version != self.saved_version && (self.file.is_some() || !self.note.strokes.is_empty())
+    }
+
+    /// Takes the strokes at `indices` (ascending, all on the page) off the page.
+    fn take_strokes(&mut self, indices: Vec<u32>) -> (Vec<PlacedStroke>, Edited) {
+        let hidden = hidden_before(&self.note.layers, &self.note.strokes);
+        let strokes = remove_at(&mut self.note.strokes, &indices);
+        self.revision += 1;
+        self.touch();
+        let viewers = hidden.map(|hidden| {
+            Box::new(ViewerIndices {
+                removed: viewer_places(&hidden, indices.iter().copied()),
+                inserted: Vec::new(),
+                recoloured: Vec::new(),
+            })
+        });
+        let edited = Edited {
+            removed: indices,
+            viewers,
+            ..Edited::default()
+        };
+        (strokes, edited)
+    }
+
+    /// Puts `stored` back at their places, through `copy`: the windows get `stored`.
+    fn give_back(&mut self, stored: Arc<Vec<PlacedStroke>>, copy: Vec<Stroke>) -> Edited {
+        let places = stored.iter().map(|placed| placed.index);
+        insert_at(&mut self.note.strokes, places.clone().zip(copy));
+        self.revision += 1;
+        self.touch();
+        let hidden = hidden_before(&self.note.layers, &self.note.strokes);
+        let viewers = hidden.map(|hidden| {
+            Box::new(ViewerIndices {
+                removed: Vec::new(),
+                inserted: viewer_places(&hidden, stored.iter().map(|placed| placed.index)),
+                recoloured: Vec::new(),
+            })
+        });
+        Edited {
+            inserted: stored,
+            viewers,
+            ..Edited::default()
+        }
+    }
+
+    /// Gives strokes their colours (the indices are not checked again: they come from a step, or
+    /// from a list just checked).
+    fn colour_strokes(&mut self, colours: &[(u32, Rgba)]) -> Edited {
+        for (index, color) in colours {
+            if let Some(stroke) = self.note.strokes.get_mut(*index as usize) {
+                stroke.color = *color;
+            }
+        }
+        self.touch();
+        let hidden = hidden_before(&self.note.layers, &self.note.strokes);
+        let viewers = hidden.map(|hidden| {
+            let places = viewer_places(&hidden, colours.iter().map(|(index, _)| *index));
+            let colours = places.into_iter().zip(colours.iter().map(|(_, c)| *c));
+            Box::new(ViewerIndices {
+                removed: Vec::new(),
+                inserted: Vec::new(),
+                recoloured: grouped(colours),
+            })
+        });
+        Edited {
+            recoloured: grouped(colours.iter().copied()),
+            viewers,
+            ..Edited::default()
+        }
+    }
+
+    /// The event saying what a step did to this page, the `index`th.
+    fn event(&self, index: usize, edited: Edited) -> LiveEvent {
+        LiveEvent::StrokesEdited {
+            page_index: index,
+            revision: self.revision,
+            removed: edited.removed,
+            inserted: edited.inserted,
+            recoloured: edited.recoloured,
+            can_undo: self.history.can_undo(),
+            can_redo: self.history.can_redo(),
+            viewers: edited.viewers,
+        }
     }
 }
 
@@ -317,21 +445,10 @@ pub struct LiveSession {
     french: bool,
     /// The screen the presentation window is on (kept here so that every snapshot carries it).
     presentation: Option<MonitorInfo>,
-    /// The ink of the page last cleared, kept so that "Undo the clearing" can give it back.
-    cleared: Option<Cleared>,
     /// The marks written over the presentation, and the page they were written on (as it is
     /// held). Temporary: not part of any page, never written, gone when the page changes.
     marks: Vec<LiveMark>,
     marks_page: Option<(usize, Orientation, PageSize)>,
-}
-
-/// The strokes a page had before « Clear the page », for [`LiveSession::restore_cleared`].
-#[derive(Debug, Clone)]
-struct Cleared {
-    page: usize,
-    /// How the page was held then: strokes written in another orientation do not fit any more.
-    orientation: Orientation,
-    strokes: Vec<Stroke>,
 }
 
 impl LiveSession {
@@ -358,7 +475,6 @@ impl LiveSession {
             drawing: None,
             french,
             presentation: None,
-            cleared: None,
             marks: Vec::new(),
             marks_page: None,
         };
@@ -426,7 +542,8 @@ impl LiveSession {
     /// sheet with slate paper, whatever it was before: it never changes the paper of a sheet by
     /// itself. On slate paper the ink is chalk, as when the blackboard is turned on.
     pub fn resuming(mut self, seed: ResumeSeed, now_ms: i64) -> Self {
-        let page = Page::resumed(seed, self.orientation, self.french, now_ms);
+        let revision = first_revision(self.id);
+        let page = Page::resumed(seed, self.orientation, self.french, now_ms, revision);
         let board = page.note.background.paper == Paper::Slate;
         self.view = LiveViewState {
             board,
@@ -561,7 +678,7 @@ impl LiveSession {
             timing: Timing::Recorded,
             origin: Origin::Live,
         };
-        Page::new(note, self.orientation)
+        Page::new(note, self.orientation, first_revision(self.id))
     }
 
     /// The whole session, for a window that draws it from scratch.
@@ -579,6 +696,9 @@ impl LiveSession {
             hover: self.hover,
             presentation: self.presentation.clone(),
             saved: self.saved(),
+            revision: self.current_page().revision,
+            can_undo: self.current_page().history.can_undo(),
+            can_redo: self.current_page().history.can_redo(),
         }
     }
 
@@ -658,6 +778,12 @@ impl LiveSession {
             self.end_stroke(out);
             self.hover_end(out);
         }
+        // Stopped: its notes are in the library, and no edit comes any more.
+        if state == LiveSessionState::Idle {
+            for page in &mut self.pages {
+                page.history.clear();
+            }
+        }
         self.state = state;
         self.push_snapshot(out);
     }
@@ -700,7 +826,8 @@ impl LiveSession {
     /// - the current page is turned with its ink, by the quarter turns from the orientation it
     ///   was written in (the writing stays upright; the page swaps its width and height for a
     ///   quarter turn); the shared view follows (zoom kept, centre turned);
-    /// - blank pages never written to disk just take the new size;
+    /// - blank pages never written to disk just take the new size (a page whose strokes all went
+    ///   is not blank while they can come back);
     /// - the other pages keep their ink and orientation, until they are shown again
     ///   ([`follow`](Self::follow)): the pen's points are always in the current orientation;
     /// - a resumed sheet stays as it is, whichever of these it is: only the way it is to be held
@@ -732,7 +859,7 @@ impl LiveSession {
         };
         for index in 0..self.pages.len() {
             let page = &mut self.pages[index];
-            if page.note.strokes.is_empty() && page.file.is_none() {
+            if page.note.strokes.is_empty() && page.file.is_none() && page.history.is_empty() {
                 page.note.page = size;
                 page.orientation = orientation;
             } else if index == self.current {
@@ -1049,16 +1176,20 @@ impl LiveSession {
                 // The stroke in progress goes too: the snapshot replaces everything.
                 self.drawing = None;
                 let page = &mut self.pages[self.current];
-                let strokes = std::mem::take(&mut page.note.strokes);
-                let orientation = page.orientation;
+                // What shows: nobody can tell that the ink of a hidden layer is going.
+                let shown: Vec<u32> = page
+                    .note
+                    .strokes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, stroke)| is_drawn(&page.note.layers, stroke))
+                    .map(|(index, _)| index as u32)
+                    .collect();
                 page.touch();
-                // An empty page keeps what an earlier clearing saved (a second press is harmless).
-                if !strokes.is_empty() {
-                    self.cleared = Some(Cleared {
-                        page: self.current,
-                        orientation,
-                        strokes,
-                    });
+                // An empty page is no step (a second press is harmless).
+                if !shown.is_empty() {
+                    let (strokes, _) = page.take_strokes(shown);
+                    page.history.record(UndoStep::removed(strokes, true));
                 }
                 self.push_snapshot(out);
             }
@@ -1072,28 +1203,168 @@ impl LiveSession {
         }
     }
 
-    /// Gives back the ink of the last « Clear the page », under what was written since. Only
-    /// while that page is still the one on screen and held as it was; returns whether anything
-    /// was restored.
-    pub fn restore_cleared(&mut self, out: &mut Vec<LiveEvent>) -> bool {
-        let Some(cleared) = self.cleared.take() else {
+    /// Deletes or recolours strokes of the page on screen (`docs/design/tablet-live-classroom.md`,
+    /// "M12"), for a window that chose them on page `page_index` at `revision`. Refused as a whole
+    /// when anything is wrong. The stroke in progress is not concerned: it is not in the list yet,
+    /// and joins at the tail when it ends. Returns the page's revision: a change of colour keeps
+    /// it, as does an edit that changes nothing (no step, no event).
+    pub fn edit_strokes(
+        &mut self,
+        page_index: usize,
+        revision: u64,
+        edit: CheckedEdit,
+        out: &mut Vec<LiveEvent>,
+    ) -> Result<u64, LiveEditError> {
+        if page_index != self.current {
+            return Err(LiveEditError::Stale);
+        }
+        let page = &mut self.pages[page_index];
+        if revision != page.revision {
+            return Err(LiveEditError::Stale);
+        }
+        let strokes = &page.note.strokes;
+        for &index in &edit.indices {
+            let Some(stroke) = strokes.get(index as usize) else {
+                return Err(LiveEditError::OutOfRange {
+                    index,
+                    strokes: strokes.len(),
+                });
+            };
+            if !is_drawn(&page.note.layers, stroke) {
+                return Err(LiveEditError::Hidden { index });
+            }
+        }
+        let edited = match edit.action {
+            EditAction::Delete => {
+                let (strokes, edited) = page.take_strokes(edit.indices);
+                page.history.record(UndoStep::removed(strokes, false));
+                edited
+            }
+            EditAction::Recolour(after) => {
+                let changes: Vec<ColourChange> = edit
+                    .indices
+                    .iter()
+                    .filter_map(|&index| {
+                        let before = strokes.get(index as usize)?.color;
+                        (before != after).then_some(ColourChange {
+                            index,
+                            before,
+                            after,
+                        })
+                    })
+                    .collect();
+                if changes.is_empty() {
+                    return Ok(page.revision);
+                }
+                let colours: Vec<(u32, Rgba)> = changes.iter().map(|c| (c.index, after)).collect();
+                let edited = page.colour_strokes(&colours);
+                page.history.record(UndoStep::Recoloured(changes));
+                edited
+            }
+        };
+        out.push(page.event(page_index, edited));
+        Ok(page.revision)
+    }
+
+    /// The strokes the next undo on the page on screen gives back, to copy before the lock is taken
+    /// ([`Prepared`]).
+    pub fn next_restored(&self) -> Option<Arc<Vec<PlacedStroke>>> {
+        self.current_page().history.next_restored()
+    }
+
+    /// Undoes the last edit of page `page_index` (the one on screen, or the edit is stale): a stroke
+    /// comes back at its place, whatever the tablet wrote since, which stays after it. Returns
+    /// whether there was anything to undo. `prepared`: see [`next_restored`](Self::next_restored).
+    pub fn undo_edit(
+        &mut self,
+        page_index: usize,
+        prepared: Option<Prepared>,
+        out: &mut Vec<LiveEvent>,
+    ) -> Result<bool, LiveEditError> {
+        if page_index != self.current {
+            return Err(LiveEditError::Stale);
+        }
+        Ok(self.undo_step(prepared, out))
+    }
+
+    fn undo_step(&mut self, prepared: Option<Prepared>, out: &mut Vec<LiveEvent>) -> bool {
+        let index = self.current;
+        let page = &mut self.pages[index];
+        let Some(step) = page.history.pop_undo() else {
             return false;
         };
-        let Some(page) = self.pages.get_mut(cleared.page) else {
-            return false;
+        let edited = match step {
+            UndoStep::Removed {
+                strokes, cleared, ..
+            } => {
+                let copy = Prepared::copy_of(prepared, &strokes);
+                let indices = strokes.iter().map(|placed| placed.index).collect();
+                page.history
+                    .push_redo(RedoStep::Remove { indices, cleared });
+                page.give_back(strokes, copy)
+            }
+            UndoStep::Recoloured(changes) => {
+                let colours: Vec<(u32, Rgba)> =
+                    changes.iter().map(|c| (c.index, c.before)).collect();
+                page.history.push_redo(RedoStep::Recolour(changes));
+                page.colour_strokes(&colours)
+            }
         };
-        // A resumed sheet is never turned: its ink fits however the tablet is held since.
-        if cleared.page != self.current
-            || (page.orientation != cleared.orientation && !page.is_resumed())
-        {
+        out.push(page.event(index, edited));
+        true
+    }
+
+    /// Does again the last edit undone on page `page_index` (the one on screen, or the edit is
+    /// stale). Returns whether there was anything to redo.
+    pub fn redo_edit(
+        &mut self,
+        page_index: usize,
+        out: &mut Vec<LiveEvent>,
+    ) -> Result<bool, LiveEditError> {
+        if page_index != self.current {
+            return Err(LiveEditError::Stale);
+        }
+        let page = &mut self.pages[page_index];
+        let Some(step) = page.history.pop_redo() else {
+            return Ok(false);
+        };
+        let edited = match step {
+            RedoStep::Remove { indices, cleared } => {
+                let (strokes, edited) = page.take_strokes(indices);
+                page.history.push_undo(UndoStep::removed(strokes, cleared));
+                edited
+            }
+            RedoStep::Recolour(changes) => {
+                let colours: Vec<(u32, Rgba)> =
+                    changes.iter().map(|c| (c.index, c.after)).collect();
+                let edited = page.colour_strokes(&colours);
+                page.history.push_undo(UndoStep::Recoloured(changes));
+                edited
+            }
+        };
+        out.push(page.event(page_index, edited));
+        Ok(true)
+    }
+
+    /// « Undo the clearing »: gives back the ink of the last « Clear the page » of the page on
+    /// screen, under what was written since. It takes its place in the page's history: edits made
+    /// after the clearing are undone first (a redo brings them back). Returns whether anything was
+    /// restored: not when that page has no clearing to undo.
+    pub fn restore_cleared_with(
+        &mut self,
+        prepared: Option<Prepared>,
+        out: &mut Vec<LiveEvent>,
+    ) -> bool {
+        if !self.current_page().history.holds_clearing() {
             return false;
         }
-        let mut strokes = cleared.strokes;
-        strokes.append(&mut page.note.strokes);
-        page.note.strokes = strokes;
-        page.touch();
-        self.push_snapshot(out);
-        true
+        let mut prepared = prepared;
+        loop {
+            let last = self.current_page().history.next_is_clearing();
+            if !self.undo_step(prepared.take(), out) || last {
+                return true;
+            }
+        }
     }
 
     /// Ink of the strokes to come (the stroke in progress keeps its own).
@@ -1174,6 +1445,11 @@ mod tests {
         /// `command` with the button on its default and a fixed clock.
         fn command_for_test(&mut self, kind: LiveCommandKind, out: &mut Vec<LiveEvent>) {
             self.command(kind, LiveButton::NewPage, T0 as i64, out);
+        }
+
+        /// `restore_cleared_with`, the copy of the strokes made on the spot.
+        fn restore_cleared(&mut self, out: &mut Vec<LiveEvent>) -> bool {
+            self.restore_cleared_with(None, out)
         }
     }
 
@@ -1401,7 +1677,10 @@ mod tests {
         let version = session.pages()[0].version;
         out.clear();
         assert!(session.restore_cleared(&mut out));
-        assert_eq!(snapshots(&out), 1);
+        // Through the page's history: the strokes that come back, not the whole page again.
+        assert!(
+            matches!(&out[..], [LiveEvent::StrokesEdited { inserted, .. }] if inserted.len() == 1)
+        );
         let strokes = &session.pages()[0].note.strokes;
         assert_eq!(strokes.len(), 2);
         assert_eq!(strokes[0], kept[0]);

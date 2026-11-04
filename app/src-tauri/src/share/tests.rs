@@ -26,9 +26,11 @@ use super::page::{NoteSharer, PAPER_PX, Paper as SharedPaper};
 use super::{ShareContent, ShareRuntime, render_paper};
 use crate::library::tests::library;
 use crate::live::LiveHub;
+use crate::live::StrokesEdit;
 use crate::live::hub::{HubConfig, HubSink, Start, StartOptions};
 use crate::live::model::{
     LiveBatch, LiveEvent, LiveMark, LiveSnapshot, LiveStyle, LiveViewState, MarkPoint,
+    PlacedStroke, RecolouredStrokes, ViewerIndices,
 };
 use crate::presentation::MonitorInfo;
 
@@ -432,6 +434,9 @@ fn snapshot_of(note: Note) -> LiveSnapshot {
             chosen: true,
         }),
         saved: vec!["C:\\Users\\Prof\\Nextcloud\\Notes\\page.ardoise".into()],
+        revision: 7 << 32,
+        can_undo: true,
+        can_redo: true,
     }
 }
 
@@ -1330,6 +1335,350 @@ fn a_viewer_follows_live_mode_then_the_editors_note_and_is_told_when_the_share_s
     runtime.stop();
     // The hub kept no subscription of the share.
     assert!(!hub_has_share_subscribers(&hub));
+}
+
+// --- Touching up during live mode ------------------------------------------------------------------
+
+fn delete_strokes(indices: &[u32]) -> StrokesEdit {
+    serde_json::from_value(json!({ "kind": "delete", "indices": indices })).unwrap()
+}
+
+fn recolour_strokes(indices: &[u32]) -> StrokesEdit {
+    serde_json::from_value(json!({
+        "kind": "recolour",
+        "indices": indices,
+        "color": { "r": 200, "g": 0, "b": 0, "a": 255 },
+    }))
+    .unwrap()
+}
+
+/// The `strokesEdited` events of a message.
+fn edits_in(message: &Value) -> Vec<Value> {
+    live_events(message)
+        .into_iter()
+        .filter(|event| event["type"] == "strokesEdited")
+        .collect()
+}
+
+/// What a viewer's `LiveState` does with the messages it gets: the strokes it draws, each named by
+/// where it starts on the page, with its colour.
+#[derive(Default)]
+struct ViewerList(Vec<(f64, Value)>);
+
+impl ViewerList {
+    fn entry(stroke: &Value) -> (f64, Value) {
+        (
+            stroke["points"][0]["x"].as_f64().unwrap(),
+            stroke["color"].clone(),
+        )
+    }
+
+    fn apply(&mut self, message: &Value) {
+        for event in live_events(message) {
+            match event["type"].as_str() {
+                Some("snapshot") => {
+                    self.0 = event["snapshot"]["page"]["strokes"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(Self::entry)
+                        .collect();
+                }
+                Some("strokesEdited") => {
+                    for index in event["removed"].as_array().unwrap().iter().rev() {
+                        self.0.remove(index.as_u64().unwrap() as usize);
+                    }
+                    for placed in event["inserted"].as_array().unwrap() {
+                        let index = placed["index"].as_u64().unwrap() as usize;
+                        self.0.insert(index, Self::entry(&placed["stroke"]));
+                    }
+                    for group in event["recoloured"].as_array().unwrap() {
+                        for index in group["indices"].as_array().unwrap() {
+                            self.0[index.as_u64().unwrap() as usize].1 = group["color"].clone();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn starts(&self) -> Vec<f64> {
+        self.0.iter().map(|(start, _)| *start).collect()
+    }
+}
+
+/// Reads until a batch holds an edit, keeping `list` up to date.
+fn next_edit(viewer: &mut Viewer, list: &mut ViewerList) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        assert!(Instant::now() < deadline, "timed out waiting for an edit");
+        let (message, _) = viewer.next().expect("the stream");
+        if message["type"] != "live" {
+            continue;
+        }
+        list.apply(&message);
+        if let Some(edit) = edits_in(&message).pop() {
+            return edit;
+        }
+    }
+}
+
+#[test]
+fn a_viewer_gets_an_edit_with_only_what_is_drawn() {
+    let event = LiveEvent::StrokesEdited {
+        page_index: 2,
+        revision: 7 << 32,
+        removed: vec![4],
+        inserted: Arc::new(vec![PlacedStroke {
+            index: 1,
+            stroke: pen_stroke(1000.0, 2),
+        }]),
+        recoloured: vec![RecolouredStrokes {
+            color: Rgba::rgb(200, 0, 0),
+            indices: vec![0],
+        }],
+        can_undo: true,
+        can_redo: false,
+        viewers: None,
+    };
+    let batch = LiveBatch {
+        events: vec![event],
+        sent_at: 1.0,
+    };
+    let value: Value = serde_json::from_str(&batch_json(&batch).unwrap()).unwrap();
+    let edit = &value["events"][0];
+    // An allow list: what the viewer needs to keep its list, nothing of the history or revision.
+    assert_eq!(
+        keys(edit),
+        ["inserted", "pageIndex", "recoloured", "removed", "type"]
+    );
+    assert_eq!(edit["type"], "strokesEdited");
+    assert_eq!(edit["pageIndex"], 2);
+    assert_eq!(edit["removed"], json!([4]));
+    assert_eq!(keys(&edit["inserted"][0]), ["index", "stroke"]);
+    assert_eq!(
+        keys(&edit["inserted"][0]["stroke"]),
+        ["color", "layer", "points", "tool", "width"]
+    );
+    assert_eq!(keys(&edit["recoloured"][0]), ["color", "indices"]);
+}
+
+#[test]
+fn on_a_page_with_a_hidden_layer_an_edit_goes_in_the_numbering_of_the_viewers() {
+    let event = LiveEvent::StrokesEdited {
+        page_index: 0,
+        revision: 1,
+        removed: vec![5],
+        inserted: Arc::new(vec![PlacedStroke {
+            index: 3,
+            stroke: pen_stroke(1000.0, 2),
+        }]),
+        recoloured: vec![RecolouredStrokes {
+            color: Rgba::BLACK,
+            indices: vec![4],
+        }],
+        can_undo: true,
+        can_redo: false,
+        viewers: Some(Box::new(ViewerIndices {
+            removed: vec![2],
+            inserted: vec![1],
+            recoloured: vec![RecolouredStrokes {
+                color: Rgba::BLACK,
+                indices: vec![2],
+            }],
+        })),
+    };
+    let batch = LiveBatch {
+        events: vec![event],
+        sent_at: 1.0,
+    };
+    let value: Value = serde_json::from_str(&batch_json(&batch).unwrap()).unwrap();
+    let edit = &value["events"][0];
+    assert_eq!(edit["removed"], json!([2]));
+    assert_eq!(edit["inserted"][0]["index"], 1);
+    assert_eq!(edit["recoloured"][0]["indices"], json!([2]));
+}
+
+#[test]
+fn a_viewer_follows_the_edits_and_the_paused_share_keeps_its_image() {
+    let (dir, library) = library();
+    let library_name = dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let (runtime, hub) = sharing_runtime();
+    runtime.inner.show(ShareContent::Live);
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
+    let mut sink = start_session(&hub, &library);
+    for i in 0..4 {
+        write_stroke(&mut sink, 1000 + 2000 * i, 3);
+    }
+    let cookie = join(status.port, &status.code.unwrap());
+    let mut viewer = Viewer::open(status.port, &cookie);
+    let mut list = ViewerList::default();
+    let first = viewer.until("the first batch", Duration::from_secs(5), |m| {
+        m["type"] == "live" && m["reset"] == true
+    });
+    list.apply(&first);
+    assert_eq!(list.starts(), [1000.0, 3000.0, 5000.0, 7000.0]);
+    let snapshot = &live_events(&first)[0]["snapshot"];
+    assert!(snapshot.get("revision").is_none() && snapshot.get("canUndo").is_none());
+
+    // Each edit arrives as itself, not as a page sent again; the indices are the page's here.
+    let revision = hub.snapshot().revision;
+    let revision = hub.edit_strokes(0, revision, delete_strokes(&[1])).unwrap();
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(
+        keys(&edit),
+        ["inserted", "pageIndex", "recoloured", "removed", "type"]
+    );
+    assert_eq!(edit["removed"], json!([1]));
+    assert_eq!(list.starts(), [1000.0, 5000.0, 7000.0]);
+    hub.edit_strokes(0, revision, recolour_strokes(&[0]))
+        .unwrap();
+    next_edit(&mut viewer, &mut list);
+    assert_eq!(list.0[0].1, json!({ "r": 200, "g": 0, "b": 0, "a": 255 }));
+    assert!(hub.undo_edit(0).unwrap());
+    next_edit(&mut viewer, &mut list);
+    assert_eq!(list.0[0].1, json!({ "r": 0, "g": 0, "b": 0, "a": 255 }));
+    assert!(hub.undo_edit(0).unwrap());
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(edit["inserted"][0]["index"], 1);
+    assert_eq!(list.starts(), [1000.0, 3000.0, 5000.0, 7000.0]);
+
+    // Paused: its frozen image, then nothing of what happens; on resume, the state as it is.
+    runtime.inner.share().unwrap().set_paused(true);
+    let frozen = viewer.until("the frozen batch", Duration::from_secs(5), |m| {
+        m["type"] == "live" && m["reset"] == true
+    });
+    list.apply(&frozen);
+    assert_eq!(list.starts(), [1000.0, 3000.0, 5000.0, 7000.0]);
+    viewer.until("the pause", Duration::from_secs(5), |m| {
+        m["type"] == "pause"
+    });
+    let revision = hub.snapshot().revision;
+    hub.edit_strokes(0, revision, delete_strokes(&[0, 3]))
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    runtime.inner.share().unwrap().set_paused(false);
+    let mut edits_during_the_pause = 0;
+    let fresh = loop {
+        let (message, _) = viewer.next().expect("the stream");
+        edits_during_the_pause += edits_in(&message).len();
+        if message["type"] == "live" && message["reset"] == true {
+            break message;
+        }
+    };
+    assert_eq!(edits_during_the_pause, 0);
+    list.apply(&fresh);
+    assert_eq!(list.starts(), [3000.0, 5000.0]);
+
+    // Nothing of the library went out with them.
+    for text in &viewer.texts {
+        assert!(!text.contains(&library_name), "{text}");
+    }
+    runtime.stop();
+}
+
+#[test]
+fn over_the_network_a_page_with_a_hidden_layer_keeps_viewers_right_and_its_secret() {
+    let (_dir, library) = library();
+    // The ink hidden on the sheet is at x = 111 and 333: neither may ever be on the wire.
+    let hidden_x = [111.0, 333.0];
+    let at = |x: f32, layer: u32| Stroke {
+        layer,
+        ..pen_stroke(x, 2)
+    };
+    let mut note = note_with(vec![
+        at(hidden_x[0], 1),
+        at(1000.0, 0),
+        at(hidden_x[1], 1),
+        at(2000.0, 0),
+    ]);
+    note.layers.push(Layer {
+        name: "Réponses".into(),
+        visible: false,
+    });
+    note.page = A5;
+    let saved = library
+        .create(
+            std::path::Path::new(""),
+            &ardoise_core::format::NoteFile::new(note),
+        )
+        .unwrap();
+    let (runtime, hub) = sharing_runtime();
+    runtime.inner.show(ShareContent::Live);
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
+    let options = StartOptions {
+        library: library.clone(),
+        french: true,
+        size: A5,
+        orientation: Orientation::Landscape,
+        button: Arc::new(|| LiveButton::NewPage),
+    };
+    let Start::New { mut sink, snapshot } = hub.resume(options, &saved.path).unwrap() else {
+        panic!("a session is already running");
+    };
+    assert_eq!(snapshot.page.strokes.len(), 4);
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    let cookie = join(status.port, &status.code.unwrap());
+    let mut viewer = Viewer::open(status.port, &cookie);
+    let mut list = ViewerList::default();
+    let first = viewer.until("the first batch", Duration::from_secs(5), |m| {
+        m["type"] == "live" && m["reset"] == true
+    });
+    list.apply(&first);
+    assert_eq!(list.starts(), [1000.0, 2000.0]);
+
+    // For the page, stroke 3; for the viewer, its second one.
+    let revision = hub.snapshot().revision;
+    let revision = hub.edit_strokes(0, revision, delete_strokes(&[3])).unwrap();
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(edit["removed"], json!([1]));
+    assert_eq!(list.starts(), [1000.0]);
+    hub.edit_strokes(0, revision, recolour_strokes(&[1]))
+        .unwrap();
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(edit["recoloured"][0]["indices"], json!([0]));
+    assert!(hub.undo_edit(0).unwrap());
+    next_edit(&mut viewer, &mut list);
+    assert!(hub.undo_edit(0).unwrap());
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(edit["inserted"][0]["index"], 1);
+    assert_eq!(list.starts(), [1000.0, 2000.0]);
+
+    // « Clear the page » leaves the hidden ink, and its undo brings back only what shows.
+    hub.command(crate::live::model::LiveCommandKind::ClearPage)
+        .unwrap();
+    let cleared = viewer.until("the clearing", Duration::from_secs(5), |m| {
+        live_events(m).iter().any(|e| e["type"] == "snapshot")
+    });
+    list.apply(&cleared);
+    assert_eq!(list.starts(), Vec::<f64>::new());
+    assert_eq!(hub.snapshot().page.strokes.len(), 2);
+    assert!(hub.restore_cleared().unwrap());
+    next_edit(&mut viewer, &mut list);
+    assert_eq!(list.starts(), [1000.0, 2000.0]);
+
+    for text in &viewer.texts {
+        for x in hidden_x {
+            assert!(!text.contains(&format!("\"x\":{x:.1}")), "{x} in {text}");
+        }
+        assert!(!text.contains("Réponses"), "{text}");
+    }
+    runtime.stop();
+    hub.stop().unwrap();
 }
 
 /// Whether some subscriber of the hub is a viewer of the share.

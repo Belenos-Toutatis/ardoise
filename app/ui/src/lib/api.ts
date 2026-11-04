@@ -7,7 +7,7 @@ import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic'
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
 import type { InkspaceProgress, InkspaceReport, InkspaceSource } from './inkspace';
-import type { LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState, MonitorInfo } from './live';
+import type { LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStrokesEdit, LiveStyle, LiveViewState, MonitorInfo } from './live';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
 import { mockShareSubscribe } from './mock-share';
@@ -334,6 +334,21 @@ export const api = {
   liveCommand: (command: LiveCommand) => call<void>('live_command', { command }),
   /** « Undo the clearing »: gives the current page the ink of the last « Clear the page » back. */
   liveRestoreCleared: () => call<boolean>('live_restore_cleared'),
+  /**
+   * Deletes or recolours strokes chosen on page `pageIndex` at `revision` (`LiveState.revision`):
+   * refused with `liveEditStale` once that page is left or its strokes moved, `liveEditInvalid`
+   * when the list or the colour makes no sense. Returns the page's revision after the edit (a change
+   * of colour keeps it, so that the selection goes on); every window gets a `strokesEdited` event.
+   */
+  liveEditStrokes: (pageIndex: number, revision: number, edit: LiveStrokesEdit) =>
+    call<number>('live_edit_strokes', { pageIndex, revision, edit }),
+  /**
+   * Undoes the last edit of page `pageIndex`, the one on screen, or `liveEditStale` (delete, change
+   * of colour, « Clear the page »; never what the tablet wrote). False when there was none.
+   */
+  liveUndoEdit: (pageIndex: number) => call<boolean>('live_undo_edit', { pageIndex }),
+  /** Does again the last edit undone on page `pageIndex`, likewise. False when there was none. */
+  liveRedoEdit: (pageIndex: number) => call<boolean>('live_redo_edit', { pageIndex }),
   liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
   /**
    * The marks written over the presentation on page `pageIndex`, the whole list: the viewers of

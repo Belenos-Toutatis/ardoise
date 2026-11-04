@@ -667,6 +667,8 @@
     "tabletRefused": "The tablet refused the command ({detail}). If the phone app or Inkspace registered it, register it again in Ardoise.",
     "syncRefused": "the tablet refused the sync ({detail}); if it keeps happening, run \"Test the tablet\"",
     "liveNotRunning": "Live mode is not running.",
+    "liveEditStale": "The page changed in the meantime: select again.",
+    "liveEditInvalid": "This edit is not possible: select again.",
     "noMonitor": "No screen available for the presentation.",
     "simulationOnly": "This command only works with the simulated tablet.",
     "tablet": "Problem with the tablet: {detail}",

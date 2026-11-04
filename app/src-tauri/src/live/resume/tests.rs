@@ -22,7 +22,11 @@ use ardoise_proto::live::LiveRecord;
 use ardoise_render::encode_png;
 use serde_json::json;
 
-use super::super::hub::{HubConfig, HubSink, LiveError, LiveHub, Start, StartOptions};
+use super::super::edits::LiveEditError;
+use super::super::edits::tests::{delete, recolour};
+use super::super::hub::{
+    HubConfig, HubSink, LiveError, LiveHub, Start, StartOptions, file_fingerprint,
+};
 use super::super::model::{
     ForkReason, LiveCommandKind, LiveEvent, LiveSessionState, LiveStyle, LiveViewState,
 };
@@ -1617,4 +1621,249 @@ fn a_draft_left_for_the_note_can_only_become_a_new_note_after_the_resume() {
     assert_eq!(notes_in(&library).len(), 2);
     assert!(Path::new(&copy.path).starts_with(dir.path().join("Classe")));
     assert_eq!(library.read(&path).unwrap().file, after.file);
+}
+
+// --- Touching up a resumed sheet ------------------------------------------------------------------
+
+const RED: Rgba = Rgba::rgb(200, 0, 0);
+
+#[test]
+fn edits_on_the_old_ink_of_a_sheet_keep_all_it_holds_through_a_real_save_and_reload() {
+    let (_dir, library) = library();
+    let path = filed(&library, "Classe", &full_file(A5));
+    let before = library.read(&path).unwrap().file;
+    let hub = LiveHub::new(config());
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let mut sink = resume(&hub, &library, &path, A5);
+    let revision = hub.snapshot().revision;
+
+    // The note's first stroke goes, the second takes a colour; the tablet writes meanwhile.
+    let revision = hub.edit_strokes(0, revision, delete(&[0])).unwrap();
+    stroke(&mut sink, 3000, 5);
+    hub.edit_strokes(0, revision, recolour(&[0], RED)).unwrap();
+    wait_until("the edits in the file", || {
+        let written = library.read(&path).unwrap().file.note.strokes;
+        written.len() == 2 && written[0].color == RED
+    });
+    let saved = hub.stop().unwrap();
+    assert_eq!(saved, [path_text(&path)]);
+    assert_eq!(notes_in(&library), std::slice::from_ref(&path));
+    assert!(forks(&window).is_empty());
+
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(
+        written.note.strokes[0].points,
+        before.note.strokes[1].points
+    );
+    assert_eq!(written.note.strokes[1].points[0].x, 3000.0);
+    assert_keeps_all_but_ink(&written, &before);
+    assert_eq!(written.audio, before.audio);
+    // « Back to the original » gives the sheet as it was before the resume, colours included.
+    let NoteOriginal::FirstVersion { strokes, .. } =
+        original_of(&written, &tablet_context()).unwrap()
+    else {
+        panic!("no first version");
+    };
+    assert_eq!(strokes, before.note.strokes);
+}
+
+#[test]
+fn a_change_of_colour_alone_is_a_change_of_the_sheet() {
+    let (_dir, library) = library();
+    let path = filed(&library, "", &full_file(A5));
+    let before = library.read(&path).unwrap();
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    let revision = hub.snapshot().revision;
+    hub.edit_strokes(0, revision, recolour(&[1], RED)).unwrap();
+    wait_until("the colour in the file", || {
+        library.read(&path).unwrap().file.note.strokes[1].color == RED
+    });
+    let written = library.read(&path).unwrap();
+    assert_ne!(
+        file_fingerprint(&written.file),
+        file_fingerprint(&before.file)
+    );
+    assert_ne!(written.stamp, before.stamp);
+    assert!(written.file.original_note.is_some(), "an original is kept");
+    assert_eq!(hub.snapshot().saved, [path_text(&path)]);
+    hub.stop().unwrap();
+}
+
+#[test]
+fn a_sheet_whose_only_change_was_undone_before_a_write_is_not_written() {
+    let (_dir, library) = library();
+    let path = filed(&library, "", &full_file(A5));
+    let (bytes, stamp) = (std::fs::read(&path).unwrap(), FileStamp::of(&path).unwrap());
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    let revision = hub.snapshot().revision;
+    hub.change_at_once(|session, out| {
+        let first = delete(&[0]).checked().unwrap();
+        let revision = session.edit_strokes(0, revision, first, out).unwrap();
+        let second = recolour(&[0], RED).checked().unwrap();
+        session.edit_strokes(0, revision, second, out).unwrap();
+        assert!(session.undo_edit(0, None, out).unwrap());
+        assert!(session.undo_edit(0, None, out).unwrap());
+    });
+    std::thread::sleep(config().save_interval * 2);
+    assert_eq!(hub.snapshot().saved, Vec::<String>::new());
+    assert_eq!(hub.stop().unwrap(), Vec::<String>::new());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(FileStamp::of(&path).unwrap(), stamp, "same modified date");
+    assert!(hub.overview().unwrap().notes.is_empty());
+}
+
+#[test]
+fn a_sheet_undone_back_after_a_write_is_written_again_as_it_was() {
+    let (_dir, library) = library();
+    let path = filed(&library, "", &full_file(A5));
+    let before = library.read(&path).unwrap().file;
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    let revision = hub.snapshot().revision;
+    hub.edit_strokes(0, revision, delete(&[0])).unwrap();
+    wait_until("the delete in the file", || {
+        stroke_count(&library, &path) == Some(1)
+    });
+    assert!(library.read(&path).unwrap().file.original_note.is_some());
+    assert!(hub.undo_edit(0).unwrap());
+    wait_until("the ink back in the file", || {
+        stroke_count(&library, &path) == Some(2)
+    });
+    let saved = hub.stop().unwrap();
+    assert_eq!(saved, [path_text(&path)], "it was written all the same");
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.strokes, before.note.strokes);
+    assert_keeps_all_but_ink(&written, &before);
+    // Nothing differs from the sheet before the resume: no original to go back to.
+    assert_eq!(written.original_note, None);
+    assert_eq!(file_fingerprint(&written), file_fingerprint(&before));
+}
+
+#[test]
+fn a_note_changed_elsewhere_after_an_edit_is_left_alone_and_the_edit_goes_on_in_a_new_note() {
+    let (_dir, library) = library();
+    let path = filed(&library, "Classe", &full_file(A5));
+    let hub = LiveHub::new(config());
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let _sink = resume(&hub, &library, &path, A5);
+    let revision = hub.snapshot().revision;
+    let revision = hub.edit_strokes(0, revision, delete(&[0])).unwrap();
+    wait_until("the delete in the file", || {
+        stroke_count(&library, &path) == Some(1)
+    });
+    wait_until("the page saved", || !hub.snapshot().saved.is_empty());
+
+    // Only retitled elsewhere: the next edit goes in, and the title stays.
+    let mut retitled = library.read(&path).unwrap();
+    retitled.file.note.title = "Titre donné ailleurs".to_owned();
+    library
+        .save(&path, &retitled.file, &retitled.stamp)
+        .unwrap();
+    hub.edit_strokes(0, revision, recolour(&[0], RED)).unwrap();
+    wait_until("the colour in the file", || {
+        library
+            .read(&path)
+            .is_ok_and(|loaded| loaded.file.note.strokes[0].color == RED)
+    });
+    let same = library.read(&path).unwrap().file;
+    assert_eq!(same.note.title, "Titre donné ailleurs");
+    assert!(forks(&window).is_empty());
+    // Past the write that follows, whose time is the page's own.
+    std::thread::sleep(config().save_interval * 2);
+
+    // Its ink changed elsewhere: left as it is, and the edit does not fight with it.
+    let mut elsewhere = library.read(&path).unwrap();
+    elsewhere.file.note.strokes.clear();
+    library
+        .save(&path, &elsewhere.file, &elsewhere.stamp)
+        .unwrap();
+    let kept = std::fs::read(&path).unwrap();
+    assert!(hub.undo_edit(0).unwrap());
+    wait_until("the notice", || !forks(&window).is_empty());
+    assert_eq!(std::fs::read(&path).unwrap(), kept, "not overwritten");
+    let saved = hub.stop().unwrap();
+    let new_note = library.read(Path::new(&saved[0])).unwrap().file;
+    assert_eq!(new_note.note.strokes.len(), 1);
+    assert_eq!(new_note.note.strokes[0].color, Rgba::BLACK, "with the undo");
+    assert_eq!(std::fs::read(&path).unwrap(), kept);
+}
+
+#[test]
+fn what_a_hidden_layer_holds_stays_in_the_file_through_edits_and_clearing() {
+    let (_dir, library) = library();
+    let mut file = full_file(A5);
+    file.note.layers = vec![layer("Cours", true), layer("Réponses", false)];
+    file.note.strokes = vec![
+        ink(100.0, 100.0, &[0, 5], 1),
+        ink(200.0, 100.0, &[10, 15], 0),
+        ink(300.0, 100.0, &[20, 25], 1),
+        ink(400.0, 100.0, &[30, 35], 0),
+    ];
+    let path = filed(&library, "", &file);
+    let before = library.read(&path).unwrap().file;
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    let revision = hub.snapshot().revision;
+    assert!(matches!(
+        hub.edit_strokes(0, revision, delete(&[0])),
+        Err(LiveError::Edit(LiveEditError::Hidden { index: 0 }))
+    ));
+    let revision = hub.edit_strokes(0, revision, delete(&[1])).unwrap();
+    assert_eq!(hub.snapshot().revision, revision);
+    hub.command(LiveCommandKind::ClearPage).unwrap();
+    wait_until("the clearing in the file", || {
+        stroke_count(&library, &path) == Some(2)
+    });
+    let in_file = library.read(&path).unwrap().file;
+    assert!(in_file.note.strokes.iter().all(|s| s.layer == 1));
+    // All back, in the order it was.
+    assert!(hub.undo_edit(0).unwrap());
+    assert!(hub.undo_edit(0).unwrap());
+    hub.stop().unwrap();
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.strokes, before.note.strokes);
+    assert_eq!(written.note.layers, before.note.layers);
+}
+
+#[test]
+fn the_sheet_is_never_turned_and_what_can_come_back_stays_as_it_is() {
+    let mut session = resumed(sheet(A5), Orientation::Landscape);
+    let before = session.pages()[0].note.strokes.clone();
+    let mut out = Vec::new();
+    let revision = session.snapshot().revision;
+    let edit = delete(&[0, 1]).checked().unwrap();
+    session.edit_strokes(0, revision, edit, &mut out).unwrap();
+    session.reorient(
+        A4_LANDSCAPE.width,
+        A4_LANDSCAPE.height,
+        Orientation::PortraitLeft,
+        &mut out,
+    );
+    assert!(session.undo_edit(0, None, &mut out).unwrap());
+    assert_eq!(session.pages()[0].note.strokes, before);
+}
+
+#[test]
+fn new_ink_goes_on_counting_time_after_the_last_stroke_was_deleted() {
+    let mut session = resumed(sheet(A4_LANDSCAPE), Orientation::Landscape);
+    let mut out = Vec::new();
+    let revision = session.snapshot().revision;
+    let edit = delete(&[1]).checked().unwrap();
+    session.edit_strokes(0, revision, edit, &mut out).unwrap();
+    // Written a minute later: still after what the note held, the deleted stroke included (an undo
+    // brings it back, in the order of the times).
+    let point = write_at(&mut session, 10, 10, RESUMED_AT + 60_000);
+    assert_eq!(point.t, 5000 + RESUME_GAP_MS + 60_000);
+    assert!(session.undo_edit(0, None, &mut out).unwrap());
+    let times: Vec<u32> = session.pages()[0]
+        .note
+        .strokes
+        .iter()
+        .flat_map(|stroke| stroke.points.iter().map(|point| point.t))
+        .collect();
+    assert!(times.is_sorted(), "{times:?}");
 }

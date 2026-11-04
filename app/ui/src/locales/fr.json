@@ -667,6 +667,8 @@
     "tabletRefused": "La tablette refuse la commande ({detail}). Si l'appli du téléphone ou Inkspace l'a enregistrée, enregistrez-la de nouveau dans Ardoise.",
     "syncRefused": "la tablette a refusé la synchronisation ({detail}) ; si cela se répète, lancez « Tester la tablette »",
     "liveNotRunning": "Le mode direct n'est pas lancé.",
+    "liveEditStale": "La page a changé entre-temps : refaites la sélection.",
+    "liveEditInvalid": "Cette retouche n'est pas possible : refaites la sélection.",
     "noMonitor": "Aucun écran disponible pour la présentation.",
     "simulationOnly": "Commande réservée à la tablette simulée.",
     "tablet": "Problème avec la tablette : {detail}",

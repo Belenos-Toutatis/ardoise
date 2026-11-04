@@ -31,6 +31,14 @@ export interface LiveCommand {
   kind: LiveCommandKind;
 }
 
+/**
+ * What `live_edit_strokes` does to strokes chosen in the control window: `indices` are places in
+ * `LiveState.strokes` (the finished strokes of the page, in any order, without duplicates).
+ */
+export type LiveStrokesEdit =
+  | { kind: 'delete'; indices: number[] }
+  | { kind: 'recolour'; indices: number[]; color: Rgba };
+
 export interface MonitorInfo {
   /** `name@x,y`: stable when screens are unplugged. */
   key: string;
@@ -76,6 +84,18 @@ export interface LiveSnapshot {
   presentation: MonitorInfo | null;
   /** Paths of the notes saved so far in this session. */
   saved: string[];
+  /**
+   * What the indices of the page's strokes mean (`live_edit_strokes` gives it back, and is refused
+   * once it changed). It changes when strokes leave or come back: a delete, a clearing that removed
+   * something, the undo or redo of either; not when the tablet appends a stroke (a selection stays
+   * valid while the tablet writes), nor for a change of colour or a page turn. Each session has its
+   * own. Absent on the share's viewers, like the next two.
+   */
+  revision?: number;
+  /** The page has an edit to undo. */
+  canUndo?: boolean;
+  /** The page has an edit to redo. */
+  canRedo?: boolean;
 }
 
 /** A point of the stroke in progress. */
@@ -113,6 +133,41 @@ export interface LiveMark {
 /** A stroke as `strokeStart` sends it: its points carry their receipt time. */
 export type LiveStroke = Omit<Stroke, 'points'> & { points: LivePoint[] };
 
+/** A stroke that comes back, and where it stands once it is back. */
+export interface PlacedStroke {
+  index: number;
+  stroke: Stroke;
+}
+
+/** Strokes that take one colour. */
+export interface RecolouredStrokes {
+  color: Rgba;
+  /** Ascending. */
+  indices: number[];
+}
+
+/**
+ * Finished strokes of a page were deleted, came back or changed colour (an edit, its undo or redo).
+ * Applied in this order: `removed`, `inserted`, `recoloured`; the stroke in progress is not
+ * concerned. Strokes that are not named keep their place and their object, hence their outline.
+ * Never merged with another event. On the share's viewers the indices are those of their own list,
+ * which has no hidden strokes, and `revision`, `canUndo` and `canRedo` are absent.
+ */
+export interface LiveStrokesEdited {
+  type: 'strokesEdited';
+  pageIndex: number;
+  /** The page's revision after this event. */
+  revision?: number;
+  /** Indices in the list before this event, ascending. */
+  removed: number[];
+  /** Each with its index in the list after this event, ascending. */
+  inserted: PlacedStroke[];
+  /** Indices in the list after this event. */
+  recoloured: RecolouredStrokes[];
+  canUndo?: boolean;
+  canRedo?: boolean;
+}
+
 export type LiveEvent =
   | { type: 'snapshot'; snapshot: LiveSnapshot }
   | { type: 'strokeStart'; pageIndex: number; stroke: LiveStroke }
@@ -137,7 +192,8 @@ export type LiveEvent =
    * the page goes on in a new note (`path`) in the same binder; `original` is the note left as it
    * is. Sent once, and to a window that subscribes later; never to the share's viewers.
    */
-  | { type: 'sheetForked'; pageIndex: number; reason: SheetForkReason; original: string; path: string };
+  | { type: 'sheetForked'; pageIndex: number; reason: SheetForkReason; original: string; path: string }
+  | LiveStrokesEdited;
 
 export interface LiveBatch {
   events: LiveEvent[];

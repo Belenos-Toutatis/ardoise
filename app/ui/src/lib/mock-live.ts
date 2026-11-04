@@ -15,6 +15,10 @@
  * changed, forked into a new note of the same binder (`sheetForked`) when the file changed or went
  * away meanwhile, refused with `mockLiveConfig.resumeError`.
  *
+ * Touching up (M12): `live_edit_strokes`, `live_undo_edit`, `live_redo_edit`, with the rules of
+ * `live/edits.rs`: the same checks and codes, a revision per page, a history per page kept when it
+ * is left and turned with it, `strokesEdited` events, « Clear the page » in the history.
+ *
  * Deterministic: the pen follows a seeded script (no `Math.random`), so that a test under
  * `vi.useFakeTimers` sees the same strokes every time.
  */
@@ -28,10 +32,14 @@ import type {
   LivePoint,
   LiveSessionState,
   LiveSnapshot,
+  LiveStrokesEdit,
+  LiveStrokesEdited,
   LiveStyle,
   LiveViewState,
   MonitorInfo,
+  PlacedStroke,
 } from './live';
+import { insertStrokes, recolourStrokes, removeStrokes } from './live-edits';
 import { fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, sameStamp, UNHANDLED } from './mock-data';
 import type { FileStamp, Note, Rgba, Stroke } from './note';
 import { isPortrait, orientPoint, pageSizeFor, turnPoint, turnsFrom, turnStrokes, type Orientation } from './orientation';
@@ -160,8 +168,8 @@ interface Session {
   /** Record at which each page was created (its `created` instant). */
   pageStart: Map<string, number>;
   pen: PenScript;
-  /** The ink of the page last cleared, for « Undo the clearing ». */
-  cleared: { pageIndex: number; strokes: Stroke[] } | null;
+  /** What can be undone on each page, by note id. */
+  histories: Map<string, PageHistory>;
   /** The sheets resumed (M12), by note id. */
   resumed: Map<string, ResumedSheet>;
   /** The `sheetForked` events so far: a window that subscribes later gets them too. */
@@ -184,8 +192,30 @@ interface ResumedSheet {
   timeBase: number;
 }
 
+/** Most strokes one edit may name, steps a page keeps (`live/edits.rs`). */
+const MAX_EDIT_STROKES = 1 << 20;
+const MAX_UNDO_STEPS = 100;
+
+interface ColourChange {
+  index: number;
+  before: Rgba;
+  after: Rgba;
+}
+
+type UndoStep = { kind: 'removed'; strokes: PlacedStroke[]; cleared: boolean } | { kind: 'recoloured'; changes: ColourChange[] };
+type RedoStep = { kind: 'remove'; indices: number[]; cleared: boolean } | { kind: 'recolour'; changes: ColourChange[] };
+
+/** The edits of a page, and what the indices of its strokes mean. */
+interface PageHistory {
+  revision: number;
+  undo: UndoStep[];
+  redo: RedoStep[];
+}
+
 let session: Session | null = null;
 let pageCounter = 0;
+/** Revisions are never used twice: a command for another session or page cannot pass. */
+let lastRevision = 0;
 /** How the (simulated) tablet is held; the real one is `[tablet] orientation`. */
 let heldAs: Orientation = 'landscape';
 /** The orientation each page was written in (by note id): the page on screen follows `heldAs`. */
@@ -237,8 +267,12 @@ function snapshot(): LiveSnapshot {
       hover: null,
       presentation,
       saved: [],
+      revision: 0,
+      canUndo: false,
+      canRedo: false,
     } satisfies LiveSnapshot);
   }
+  const history = historyOf(s, s.pages[s.pageIndex]);
   return copy({
     state: s.state,
     page: s.pages[s.pageIndex],
@@ -252,7 +286,168 @@ function snapshot(): LiveSnapshot {
     hover: s.hover,
     presentation,
     saved: [...s.saved.values()],
+    revision: history.revision,
+    canUndo: history.undo.length > 0,
+    canRedo: history.redo.length > 0,
   } satisfies LiveSnapshot);
+}
+
+function historyOf(s: Session, page: Note): PageHistory {
+  let history = s.histories.get(page.id);
+  if (!history) {
+    history = { revision: (lastRevision += 1), undo: [], redo: [] };
+    s.histories.set(page.id, history);
+  }
+  return history;
+}
+
+/** The viewer's rule: a stroke of a layer that does not exist shows. */
+function isDrawn(page: Note, stroke: Stroke): boolean {
+  return page.layers[stroke.layer]?.visible !== false;
+}
+
+function stale(): { code: string; message: string } {
+  return { code: 'liveEditStale', message: 'the page changed since these strokes were chosen' };
+}
+
+function invalid(message: string): { code: string; message: string } {
+  return { code: 'liveEditInvalid', message };
+}
+
+/** The indices of an edit in ascending order, checked as `StrokesEdit::checked` does. */
+function checkedIndices(indices: readonly number[]): number[] {
+  if (indices.length === 0) throw invalid('no stroke was chosen');
+  if (indices.length > MAX_EDIT_STROKES) throw invalid(`too many strokes were chosen (${indices.length})`);
+  if (indices.some((i) => !Number.isInteger(i) || i < 0)) throw invalid("a stroke's index is not valid");
+  const sorted = [...indices].sort((a, b) => a - b);
+  const twice = sorted.find((value, i) => value === sorted[i + 1]);
+  if (twice !== undefined) throw invalid(`stroke ${twice} was chosen twice`);
+  return sorted;
+}
+
+function checkedColor(color: Rgba): Rgba {
+  const channel = (v: number) => Number.isInteger(v) && v >= 0 && v <= 255;
+  if (![color.r, color.g, color.b, color.a].every(channel) || color.a === 0) throw invalid('this colour is not valid');
+  return { r: color.r, g: color.g, b: color.b, a: color.a };
+}
+
+function pushUndo(history: PageHistory, step: UndoStep): void {
+  history.undo.push(step);
+  if (history.undo.length > MAX_UNDO_STEPS) history.undo.shift();
+}
+
+function takeStrokes(page: Note, indices: readonly number[]): PlacedStroke[] {
+  const taken = indices.map((index) => ({ index, stroke: page.strokes[index] }));
+  removeStrokes(page.strokes, indices);
+  return taken;
+}
+
+/** The event of a step, with what the page's history says now. */
+function edited(s: Session, page: Note, parts: Partial<Pick<LiveStrokesEdited, 'removed' | 'inserted' | 'recoloured'>>): LiveStrokesEdited {
+  const history = historyOf(s, page);
+  return {
+    type: 'strokesEdited',
+    pageIndex: s.pages.indexOf(page),
+    revision: history.revision,
+    removed: parts.removed ?? [],
+    inserted: parts.inserted ?? [],
+    recoloured: parts.recoloured ?? [],
+    canUndo: history.undo.length > 0,
+    canRedo: history.redo.length > 0,
+  };
+}
+
+/** `live_edit_strokes`: a stale page or revision, or anything wrong in the list, changes nothing. */
+function editStrokes(s: Session, pageIndex: number, revision: number, edit: LiveStrokesEdit): number {
+  const page = s.pages[s.pageIndex];
+  const history = historyOf(s, page);
+  const indices = checkedIndices(edit.indices);
+  const color = edit.kind === 'recolour' ? checkedColor(edit.color) : null;
+  if (pageIndex !== s.pageIndex || revision !== history.revision) throw stale();
+  for (const index of indices) {
+    const stroke = page.strokes[index];
+    if (!stroke) throw invalid(`there is no stroke ${index} on a page of ${page.strokes.length} strokes`);
+    if (!isDrawn(page, stroke)) throw invalid(`stroke ${index} is on a hidden layer`);
+  }
+  if (color) {
+    const same = (a: Rgba, b: Rgba) => a.r === b.r && a.g === b.g && a.b === b.b && a.a === b.a;
+    const changes = indices
+      .filter((index) => !same(page.strokes[index].color, color))
+      .map((index) => ({ index, before: page.strokes[index].color, after: color }));
+    if (changes.length === 0) return history.revision;
+    history.redo = [];
+    pushUndo(history, { kind: 'recoloured', changes });
+    recolourStrokes(page.strokes, [{ color, indices: changes.map((c) => c.index) }]);
+    broadcast([edited(s, page, { recoloured: [{ color, indices: changes.map((c) => c.index) }] })]);
+  } else {
+    const strokes = takeStrokes(page, indices);
+    history.redo = [];
+    pushUndo(history, { kind: 'removed', strokes, cleared: false });
+    history.revision = lastRevision += 1;
+    broadcast([edited(s, page, { removed: indices })]);
+  }
+  return history.revision;
+}
+
+function groupedColours(changes: readonly ColourChange[], pick: (change: ColourChange) => Rgba): LiveStrokesEdited['recoloured'] {
+  const groups = new Map<string, { color: Rgba; indices: number[] }>();
+  for (const change of changes) {
+    const color = pick(change);
+    const key = `${color.r},${color.g},${color.b},${color.a}`;
+    const group = groups.get(key) ?? { color, indices: [] };
+    group.indices.push(change.index);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
+/** Undoes the page's last step; false when it has none. */
+function undoStep(s: Session): boolean {
+  const page = s.pages[s.pageIndex];
+  const history = historyOf(s, page);
+  const step = history.undo.pop();
+  if (!step) return false;
+  if (step.kind === 'removed') {
+    insertStrokes(page.strokes, step.strokes);
+    history.redo.push({ kind: 'remove', indices: step.strokes.map((placed) => placed.index), cleared: step.cleared });
+    history.revision = lastRevision += 1;
+    broadcast([edited(s, page, { inserted: step.strokes })]);
+  } else {
+    const recoloured = groupedColours(step.changes, (change) => change.before);
+    recolourStrokes(page.strokes, recoloured);
+    history.redo.push({ kind: 'recolour', changes: step.changes });
+    broadcast([edited(s, page, { recoloured })]);
+  }
+  return true;
+}
+
+function redoStep(s: Session): boolean {
+  const page = s.pages[s.pageIndex];
+  const history = historyOf(s, page);
+  const step = history.redo.pop();
+  if (!step) return false;
+  if (step.kind === 'remove') {
+    pushUndo(history, { kind: 'removed', strokes: takeStrokes(page, step.indices), cleared: step.cleared });
+    history.revision = lastRevision += 1;
+    broadcast([edited(s, page, { removed: step.indices })]);
+  } else {
+    const recoloured = groupedColours(step.changes, (change) => change.after);
+    recolourStrokes(page.strokes, recoloured);
+    pushUndo(history, { kind: 'recoloured', changes: step.changes });
+    broadcast([edited(s, page, { recoloured })]);
+  }
+  return true;
+}
+
+/** « Undo the clearing »: through the history, the edits made after it first. */
+function restoreCleared(s: Session): boolean {
+  const { undo } = historyOf(s, s.pages[s.pageIndex]);
+  const isClearing = (step: UndoStep | undefined) => step?.kind === 'removed' && step.cleared;
+  if (!undo.some(isClearing)) return false;
+  for (;;) {
+    const last = isClearing(undo[undo.length - 1]);
+    if (!undoStep(s) || last) return true;
+  }
 }
 
 /**
@@ -497,8 +692,14 @@ function runCommand(s: Session, command: LiveCommand): void {
     case 'clearPage': {
       s.current = null;
       const page = s.pages[s.pageIndex];
-      if (page.strokes.length > 0) s.cleared = { pageIndex: s.pageIndex, strokes: page.strokes };
-      page.strokes = [];
+      // What shows: nobody can tell that the ink of a hidden layer is going.
+      const shown = page.strokes.flatMap((stroke, index) => (isDrawn(page, stroke) ? [index] : []));
+      if (shown.length > 0) {
+        const history = historyOf(s, page);
+        history.redo = [];
+        pushUndo(history, { kind: 'removed', strokes: takeStrokes(page, shown), cleared: true });
+        history.revision = lastRevision += 1;
+      }
       break;
     }
     default:
@@ -546,7 +747,7 @@ function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSna
     record: 0,
     pageStart: new Map(),
     pen: new PenScript(),
-    cleared: null,
+    histories: new Map(),
     resumed: new Map(),
     forks: [],
   };
@@ -646,15 +847,19 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
     case 'live_command':
       runCommand(running(), args.command as LiveCommand);
       return undefined;
-    case 'live_restore_cleared': {
+    case 'live_restore_cleared':
+      return restoreCleared(running());
+    case 'live_edit_strokes':
+      return editStrokes(running(), args.pageIndex as number, args.revision as number, args.edit as LiveStrokesEdit);
+    case 'live_undo_edit': {
       const s = running();
-      const cleared = s.cleared;
-      s.cleared = null;
-      if (!cleared || cleared.pageIndex !== s.pageIndex) return false;
-      const page = s.pages[s.pageIndex];
-      page.strokes = [...cleared.strokes, ...page.strokes];
-      broadcastSnapshot();
-      return true;
+      if (args.pageIndex !== s.pageIndex) throw stale();
+      return undoStep(s);
+    }
+    case 'live_redo_edit': {
+      const s = running();
+      if (args.pageIndex !== s.pageIndex) throw stale();
+      return redoStep(s);
     }
     case 'live_set_view':
       setView(running(), args.view as LiveViewState);
@@ -707,6 +912,7 @@ export function resetMockLive(): void {
   presentation = null;
   savedMonitor = null;
   pageCounter = 0;
+  lastRevision = 0;
   heldAs = 'landscape';
   pageOrientation.clear();
   Object.assign(mockLiveConfig, { waitMs: 1200, tickMs: 15, pen: true, monitors: 2, saveError: null, resumeError: null });
@@ -746,6 +952,12 @@ function followTablet(page: Note): void {
   if (turns === 0) return;
   const { width, height } = page.page;
   page.strokes = turnStrokes(page.strokes, width, height, turns);
+  // What can come back turns with it, so that it returns where it would be had it stayed.
+  for (const step of (session && session.histories.get(page.id)?.undo) ?? []) {
+    if (step.kind !== 'removed') continue;
+    const turned = turnStrokes(step.strokes.map((placed) => placed.stroke), width, height, turns);
+    step.strokes = step.strokes.map((placed, i) => ({ index: placed.index, stroke: turned[i] }));
+  }
   if (turns % 2 === 1) page.page = { width: height, height: width };
 }
 
@@ -766,7 +978,8 @@ export function setMockLiveOrientation(orientation: Orientation): void {
   if (!s || !before) return;
   s.hover = null;
   s.pages.forEach((page, index) => {
-    if (page.strokes.length === 0 && !s.saved.has(page.id) && !s.resumed.has(page.id)) {
+    const { undo, redo } = historyOf(s, page);
+    if (page.strokes.length === 0 && !s.saved.has(page.id) && !s.resumed.has(page.id) && undo.length === 0 && redo.length === 0) {
       page.page = pageSizeFor(orientation, PAGE.width, PAGE.height);
       pageOrientation.set(page.id, orientation);
     } else if (index === s.pageIndex) {
