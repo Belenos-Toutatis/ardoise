@@ -471,9 +471,19 @@ La tablette est tenue **en paysage** (réglage « Paysage, bouton en bas »).
 1. Reprendre une feuille, écrire, puis **éteindre la tablette** (ou la sortir de la portée) quelques secondes : l'état passe à **Reconnexion…**, puis le tracé reprend sur la même feuille. Noter la durée.
 2. Reprendre une feuille avec une **narration** ancienne, enregistrer une narration pendant le direct, **Terminer**, rouvrir et lancer la **Relecture** : l'ancienne et la nouvelle narration sont audibles, au bon moment du tracé (la nouvelle après l'ancienne).
 
-#### H. Retouches pendant le direct *(à compléter quand elles seront livrées)*
+#### H. Retouches pendant le direct
 
-À remplir avec la livraison des retouches (jalon M12, suite) : sélection dans la fenêtre de commande (lasso, clic), suppression, changement de couleur, annulation avec `Ctrl + Z`, pendant que la tablette écrit et que le vidéoprojecteur et l'autre écran regardent. Rien de la sélection ne doit apparaître au vidéoprojecteur ni sur l'autre écran, seulement le résultat.
+La tablette est tenue comme d'habitude, le **vidéoprojecteur** et le **second ordinateur** (partage, voir H4) montrent la page. Ouvrir « Fiche image » avec **Reprendre en mode direct**, puis écrire sur la tablette quelques mots bien séparés (une dizaine de traits) pour avoir de quoi retoucher.
+
+1. **Choisir** : cliquer sur **Sélection** (ou touche `V`). Avec la souris, **entourer** deux ou trois traits dans l'aperçu : ils sont cernés de bleu et la barre dit « Traits sélectionnés : 2 » (ou 3). **Écrire sur la tablette pendant ce temps** : le nouveau trait apparaît, sans être choisi. **Regarder le vidéoprojecteur et l'autre écran** : on n'y voit **ni contour bleu, ni lasso, ni cadre**, seulement la page. Noter si le halo bleu se voit bien à la distance de la souris, et s'il gêne la lecture de l'aperçu.
+2. **Un clic** sur un autre trait le choisit seul ; `Maj` + clic en ajoute un, `Ctrl` + clic le retire ; `Échap` enlève la sélection. Avec le **stylet de l'ordinateur** (ou le doigt, si l'écran est tactile) : le stylet entoure comme la souris ; un doigt déplace l'aperçu sans choisir. Noter si cliquer pile sur un trait fin est facile.
+3. **Recolorer** : choisir deux traits, cliquer sur une pastille (Rouge). Les deux traits changent de couleur **au vidéoprojecteur et sur l'autre écran** en moins d'une seconde. **La couleur du stylo n'a pas changé** : écrire un mot sur la tablette, il est noir (la pastille noire reste marquée). Noter le délai ressenti sur les deux écrans.
+4. **Supprimer** : choisir deux traits, cliquer sur **Supprimer** ; recommencer avec la touche `Suppr`. Ils disparaissent des **trois écrans**, et la tablette peut écrire à tout moment sans que rien ne se perde. Compter les traits de l'aperçu avec ceux de l'autre écran (ils doivent être les mêmes).
+5. **Annuler** : `Ctrl + Z` rend les traits supprimés **à leur place**, `Ctrl + Y` les enlève de nouveau. **Écrire un mot sur la tablette entre un `Ctrl + Z` et le suivant** : le mot reste, il n'est jamais annulé. Appuyer sur `Ctrl + Z` jusqu'au bout : les boutons **Annuler** se grisent, et les mots écrits sont toujours là.
+6. **Effacer la page** puis `Ctrl + Z` : la page revient avec ce qui a été écrit après l'effacement.
+7. **Sur la feuille reprise**, retoucher un trait **d'avant la reprise** (supprimer l'un, recolorer l'autre), puis **Terminer** : dans l'éditeur, les deux retouches y sont, l'**image de fond** aussi, et **Revenir à l'original** rend la première version de la feuille (sans les retouches).
+8. **Pendant que la tablette écrit vite** (un mot long, sans lever le stylet) : retoucher à la souris au même moment. Noter si l'écriture reste fluide au vidéoprojecteur, sans à-coup ni trait qui saute, et si la latence affichée reste proche de ce qu'elle était.
+9. **Quitter la page puis y revenir** (Page suivante, Page précédente), puis `Ctrl + Z` : la retouche faite sur cette page est annulée (une page garde son historique) ; sur la page suivante, rien à annuler.
 
 ### Ce qui revient par Nextcloud
 
@@ -494,3 +504,7 @@ Ce qui ne revient pas tout seul :
 | Ce que rend **Revenir à l'original** pour une note de la tablette, et pour une note déjà modifiée | E |
 | Le texte de l'avis « modifiée ailleurs » ou « supprimée ailleurs », les deux notes obtenues (titres, noms de fichiers) et si Nextcloud a créé une copie en conflit en plus | F |
 | La reprise après une coupure de la tablette, et la relecture avec deux narrations | G |
+| Si le contour bleu de la sélection **n'apparaît jamais** au vidéoprojecteur ni sur l'autre écran, et le délai d'une recoloration ou d'une suppression sur les deux | H1, H3, H4 |
+| Si l'écriture reste **fluide** pendant qu'on retouche, la latence affichée, et si choisir un trait fin à la souris ou au stylet de l'ordinateur est facile | H2, H8 |
+| Si la couleur du stylo est restée la même après une recoloration, et si les traits écrits entre deux `Ctrl + Z` sont tous restés | H3, H5 |
+| Ce que contient la feuille reprise après **Terminer** (retouches, image, original) | H7 |

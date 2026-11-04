@@ -2,7 +2,7 @@
 // production executable, a portable copy of it in a temporary folder, driven through WebView2's DevTools protocol like
 // the end-to-end journeys (`run.mjs`).
 //
-// Usage: node app/e2e/perf.mjs <path to ardoise.exe> [--only start,library,live] [--notes 1000]
+// Usage: node app/e2e/perf.mjs <path to ardoise.exe> [--only start,library,live,touchup] [--notes 1000]
 //
 // Progress goes to stderr; the last line of stdout is `PERF-JSON {...}`: the raw measures (times in milliseconds, frame
 // intervals one by one). `xtask/src/perf.rs` computes the statistics, judges them against SPEC §8 and prints the table.
@@ -15,6 +15,8 @@
 //   scroll. First open = empty thumbnail cache; second open = the cache filled by the first.
 // - live: the frame intervals while the simulated tablet (`--simulated-tablet`) streams handwriting at 200 samples
 //   per second to the live view.
+// - touchup (M12): the same on a loaded page (a resumed sheet of 4 000 strokes) while touch-ups arrive through the real
+//   interface: a lasso, a colour, Delete, Ctrl+Z, Ctrl+Z, Ctrl+Y, Ctrl+Z, again and again.
 import { execFileSync, spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,7 +26,7 @@ const argv = process.argv.slice(2);
 const exe = argv[0]?.startsWith('--') ? undefined : argv[0];
 const option = (name, fallback) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : fallback);
 if (!exe) {
-  console.error('usage: node app/e2e/perf.mjs <ardoise.exe> [--only start,library,live] [--notes 1000]');
+  console.error('usage: node app/e2e/perf.mjs <ardoise.exe> [--only start,library,live,touchup] [--notes 1000]');
   process.exit(2);
 }
 const only = option('--only', '').split(',').filter(Boolean);
@@ -37,6 +39,14 @@ const SCROLL_MS = 6000;
 /** Live mode: time left to settle, then time measured. */
 const LIVE_WARMUP_MS = 2000;
 const LIVE_MEASURE_MS = 8000;
+/** Touch-up run: the loaded page (strokes in a grid of rows and columns) and the time measured. */
+const LOADED_ROWS = 50;
+const LOADED_COLUMNS = 80;
+const TOUCHUP_MEASURE_MS = 10_000;
+const TOUCHUP_IDLE_MS = 4000;
+/** Strokes of a touch-up's lasso: 5 rows of 20 columns of the grid. */
+const LASSO_ROWS = 5;
+const LASSO_COLUMNS = 20;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (...parts) => console.error(...parts);
@@ -141,6 +151,24 @@ async function startOnce({ appExe, local, args = [] }) {
       for (const [type, buttons] of [['mouseMoved', 0], ['mousePressed', 1], ['mouseReleased', 0]]) {
         await send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: type === 'mouseMoved' ? 'none' : 'left', buttons, clickCount: 1 });
       }
+    },
+    /** A real mouse event (page pixels). */
+    async mouse(type, x, y, { buttons = 0 } = {}) {
+      await send('Input.dispatchMouseEvent', {
+        type,
+        x,
+        y,
+        button: type === 'mouseMoved' && buttons === 0 ? 'none' : 'left',
+        buttons,
+        clickCount: type === 'mouseMoved' ? 0 : 1,
+      });
+    },
+    /** A key press: `key('z', { ctrl: true })`, `key('Delete')`. */
+    async key(key, { ctrl = false } = {}) {
+      const windowsVirtualKeyCode = key.length === 1 ? key.toUpperCase().charCodeAt(0) : { Delete: 46, Escape: 27 }[key];
+      const base = { key, code: key.length === 1 ? `Key${key.toUpperCase()}` : key, modifiers: ctrl ? 2 : 0, windowsVirtualKeyCode };
+      await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, text: key.length === 1 && !ctrl ? key : undefined });
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
     },
     async close() {
       ws.close();
@@ -255,30 +283,34 @@ async function openLibrary({ appExe, local, full }) {
   }
 }
 
+/** Registers the simulated tablet and waits for its three pages to be synced (`cards`: the notes shown once they are). */
+async function registerAndSync(app, cards) {
+  const j = JSON.stringify;
+  const WIZARD = '.register-wizard';
+  const step = (name) => `document.querySelector(${j(`${WIZARD} [data-step="${name}"]`)}) !== null`;
+  await app.waitFor(`document.querySelector('.tablet-status[data-connection="notRegistered"]') !== null`, 'the tablet block');
+  await app.click('.tablet-status');
+  await app.waitFor(`document.querySelector('.tablet-panel button[data-action="register"]') !== null`, 'the register button');
+  await app.click('.tablet-panel button[data-action="register"]');
+  await app.waitFor(step('warning'), 'the warning step');
+  await app.click(`${WIZARD} button[data-action="continue"]`);
+  await app.waitFor(step('done'), 'the end of the registration', 60_000);
+  await app.click(`${WIZARD} button[data-action="finish"]`);
+  await app.waitFor(`document.querySelector(${j(WIZARD)}) === null`, 'the wizard to close');
+  await app.waitFor(`['connected', 'syncing'].includes(document.querySelector('.tablet-status')?.dataset.connection)`, 'the connection', 30_000);
+  // The sync of the three stored pages runs first: live mode starts on a quiet app.
+  await app.waitFor(`document.querySelectorAll('.note-card').length === ${cards}`, 'the synced pages', 40_000);
+  await app.waitFor(`document.querySelector('.tablet-status[data-connection="connected"]') !== null`, 'the end of the sync', 30_000);
+}
+
 async function measureLive(local) {
   const library = makeLibrary('live-library', 0);
   const appExe = portableCopy('live', library);
   const app = await start({ appExe, local, args: ['--simulated-tablet'] });
-  const j = JSON.stringify;
-  const cards = (n) => `document.querySelectorAll('.note-card').length ${n}`;
   const strokes = `Number(document.querySelector('canvas.live-canvas')?.dataset.strokes ?? -1)`;
-  const WIZARD = '.register-wizard';
-  const step = (name) => `document.querySelector(${j(`${WIZARD} [data-step="${name}"]`)}) !== null`;
   try {
-    await app.waitFor(cards('=== 8'), 'the demo notes');
-    await app.waitFor(`document.querySelector('.tablet-status[data-connection="notRegistered"]') !== null`, 'the tablet block');
-    await app.click('.tablet-status');
-    await app.waitFor(`document.querySelector('.tablet-panel button[data-action="register"]') !== null`, 'the register button');
-    await app.click('.tablet-panel button[data-action="register"]');
-    await app.waitFor(step('warning'), 'the warning step');
-    await app.click(`${WIZARD} button[data-action="continue"]`);
-    await app.waitFor(step('done'), 'the end of the registration', 60_000);
-    await app.click(`${WIZARD} button[data-action="finish"]`);
-    await app.waitFor(`document.querySelector(${j(WIZARD)}) === null`, 'the wizard to close');
-    await app.waitFor(`['connected', 'syncing'].includes(document.querySelector('.tablet-status')?.dataset.connection)`, 'the connection', 30_000);
-    // The sync of the three stored pages runs first: live mode starts on a quiet app.
-    await app.waitFor(cards('=== 11'), 'the synced pages', 40_000);
-    await app.waitFor(`document.querySelector('.tablet-status[data-connection="connected"]') !== null`, 'the end of the sync', 30_000);
+    await app.waitFor(`document.querySelectorAll('.note-card').length === 8`, 'the demo notes');
+    await registerAndSync(app, 11);
     await app.click('.tablet-panel button[data-action="live"]');
     await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
     await app.waitFor(`${strokes} > 0`, 'strokes on the live canvas', 15_000);
@@ -287,6 +319,162 @@ async function measureLive(local) {
     const intervals = await app.evaluate(FRAMES(LIVE_MEASURE_MS));
     const after = await app.evaluate(strokes);
     return { intervals, strokesBefore: before, strokesAfter: after, measuredMs: LIVE_MEASURE_MS };
+  } finally {
+    await app.close();
+  }
+}
+
+/**
+ * Live mode on a loaded page while the page is touched up (M12). The sheet is a note of `LOADED_ROWS` rows of
+ * `LOADED_COLUMNS` short strokes, put in the library before the start and resumed from its card's menu; the simulated
+ * tablet writes on it. While the frame intervals are recorded in the page, this script plays a teacher through the real
+ * interface (mouse and keys of the DevTools protocol): Select tool, a lasso around 100 strokes, a colour swatch, Delete,
+ * Ctrl+Z twice (the deletion, the colour), Ctrl+Y and Ctrl+Z again, then the next place on the page.
+ */
+async function measureLiveTouchUp(local) {
+  const { sheet } = await import('./journeys-m12-resume.mjs');
+  const library = makeLibrary('touchup-library', 0);
+  const ink = [];
+  for (let row = 0; row < LOADED_ROWS; row++) {
+    for (let column = 0; column < LOADED_COLUMNS; column++) {
+      const x0 = 1500 + column * 340;
+      const y0 = 800 + row * 400;
+      const start = (row * LOADED_COLUMNS + column) * 400;
+      ink.push({ points: Array.from({ length: 30 }, (_, i) => ({ x: x0 + i * 10, y: y0 + 120 * Math.sin(i / 3), p: 0.6, t: start + i * 10 })) });
+    }
+  }
+  const title = 'Page chargée perf';
+  const file = `${title}.ardoise`;
+  writeFileSync(join(library, file), sheet({ title, index: 9, image: false, ink }).bytes);
+  const appExe = portableCopy('touchup', library);
+  const app = await start({ appExe, local, args: ['--simulated-tablet'] });
+  const j = JSON.stringify;
+  const loaded = LOADED_ROWS * LOADED_COLUMNS;
+  const strokes = `Number(document.querySelector('canvas.live-canvas')?.dataset.strokes ?? -1)`;
+  const barCount = `Number(document.querySelector('[data-slot="select-bar"] .select-count')?.dataset.count ?? 0)`;
+  try {
+    await app.waitFor(`document.querySelectorAll('.note-card').length === 9`, 'the demo notes and the loaded sheet');
+    await registerAndSync(app, 12);
+    // The tablet panel stays open beside the grid and would cover the cards of its last column.
+    await app.evaluate(`[...document.querySelectorAll('.tablet-panel button')].find((b) => b.textContent.trim() === 'Fermer')?.click()`);
+    await app.waitFor(`document.querySelector('.tablet-panel') === null`, 'the tablet panel to close');
+    // « Reprendre en mode direct » in the menu of the sheet's card.
+    const card = `.note-card[data-path*=${j(title)}]`;
+    await app.click(`${card} .card-menu button[aria-haspopup="menu"]`);
+    await app.waitFor(`document.querySelector('[role="menu"] [role="menuitem"]') !== null`, 'the card menu');
+    await app.evaluate(`[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].find((e) => e.textContent.includes('Reprendre en mode direct'))?.scrollIntoView()`);
+    const item = await app.evaluate(`(() => {
+      const e = [...document.querySelectorAll('[role="menu"] [role="menuitem"]')].find((x) => x.textContent.includes('Reprendre en mode direct'));
+      if (!e) return null;
+      const r = e.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`);
+    if (!item) throw new Error('no « Reprendre en mode direct » in the card menu');
+    await app.mouse('mouseMoved', item.x, item.y);
+    await app.mouse('mousePressed', item.x, item.y, { buttons: 1 });
+    await app.mouse('mouseReleased', item.x, item.y);
+    await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode on the loaded sheet', 30_000);
+    await app.waitFor(`${strokes} >= ${loaded}`, 'the strokes of the loaded sheet', 60_000);
+    // The first paint of 4 000 outlines is not what is measured.
+    await sleep(LIVE_WARMUP_MS + 2000);
+    // The same page without a touch-up: what the page costs by itself (the tablet writes on it).
+    const idleIntervals = await app.evaluate(FRAMES(TOUCHUP_IDLE_MS));
+    await app.click('button[data-action="select"]');
+    await app.waitFor(`document.querySelector('canvas.live-canvas.selecting') !== null`, 'the Select tool');
+
+    const geometry = await app.evaluate(`(() => {
+      const c = document.querySelector('canvas.live-canvas');
+      const r = c.getBoundingClientRect();
+      const sw = document.querySelector('.swatches .swatch:nth-child(5)').getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height, swatch: { x: sw.left + sw.width / 2, y: sw.top + sw.height / 2 } };
+    })()`);
+    const page = { width: 29700, height: 21600 };
+    const margin = 12;
+    const scale = Math.min((geometry.width - 2 * margin) / page.width, (geometry.height - 2 * margin) / page.height);
+    const at = (x, y) => ({
+      x: geometry.left + (geometry.width - page.width * scale) / 2 + x * scale,
+      y: geometry.top + (geometry.height - page.height * scale) / 2 + y * scale,
+    });
+    // Four places of the page, each around LASSO_ROWS x LASSO_COLUMNS strokes of the grid.
+    const places = [
+      [0, 0],
+      [LOADED_COLUMNS / 2, 10],
+      [10, LOADED_ROWS / 2],
+      [LOADED_COLUMNS / 2, LOADED_ROWS - LASSO_ROWS - 2],
+    ].map(([column, row]) => ({
+      x0: 1500 + column * 340 - 100,
+      x1: 1500 + (column + LASSO_COLUMNS) * 340 - 100,
+      y0: 800 + row * 400 - 300,
+      y1: 800 + (row + LASSO_ROWS) * 400 - 150,
+    }));
+    const lasso = async (rect) => {
+      const corners = [at(rect.x0, rect.y0), at(rect.x1, rect.y0), at(rect.x1, rect.y1), at(rect.x0, rect.y1), at(rect.x0, rect.y0)];
+      const points = [];
+      for (let k = 1; k < corners.length; k++) {
+        const steps = Math.max(2, Math.ceil(Math.hypot(corners[k].x - corners[k - 1].x, corners[k].y - corners[k - 1].y) / 12));
+        for (let n = 0; n < steps; n++) {
+          const t = n / steps;
+          points.push({ x: corners[k - 1].x + (corners[k].x - corners[k - 1].x) * t, y: corners[k - 1].y + (corners[k].y - corners[k - 1].y) * t });
+        }
+      }
+      await app.mouse('mouseMoved', points[0].x, points[0].y);
+      await app.mouse('mousePressed', points[0].x, points[0].y, { buttons: 1 });
+      for (const q of points.slice(1)) {
+        await app.mouse('mouseMoved', q.x, q.y, { buttons: 1 });
+        await sleep(8);
+      }
+      await app.mouse('mouseReleased', corners[0].x, corners[0].y);
+    };
+
+    const before = await app.evaluate(strokes);
+    let finished = false;
+    const frames = app.evaluate(FRAMES(TOUCHUP_MEASURE_MS)).then((intervals) => {
+      finished = true;
+      return intervals;
+    });
+    const removed = [];
+    let iterations = 0;
+    // A whole iteration is always finished, so that the page ends as it began (apart from what the tablet wrote).
+    while (!finished || iterations === 0) {
+      const rect = places[iterations % places.length];
+      await lasso(rect);
+      await app.waitFor(`${barCount} > 0`, 'the lasso to choose strokes', 10_000);
+      const picked = await app.evaluate(barCount);
+      await sleep(120);
+      await app.mouse('mouseMoved', geometry.swatch.x, geometry.swatch.y);
+      await app.mouse('mousePressed', geometry.swatch.x, geometry.swatch.y, { buttons: 1 });
+      await app.mouse('mouseReleased', geometry.swatch.x, geometry.swatch.y);
+      await sleep(250);
+      const full = await app.evaluate(strokes);
+      await app.key('Delete');
+      // The deletion must show: the count falls by the strokes chosen (the tablet adds one now and then).
+      await app.waitFor(`${strokes} <= ${full} - ${Math.max(1, picked - 5)}`, 'the deletion to reach the canvas', 10_000);
+      removed.push(full - (await app.evaluate(strokes)));
+      await sleep(250);
+      await app.key('z', { ctrl: true });
+      await sleep(250);
+      await app.key('z', { ctrl: true });
+      await sleep(250);
+      await app.key('y', { ctrl: true });
+      await sleep(250);
+      await app.key('z', { ctrl: true });
+      await sleep(250);
+      iterations++;
+    }
+    const intervals = await frames;
+    const after = await app.evaluate(strokes);
+    return {
+      intervals,
+      idleIntervals,
+      strokesBefore: before,
+      strokesAfter: after,
+      measuredMs: TOUCHUP_MEASURE_MS,
+      loaded,
+      iterations,
+      // Six edits per iteration: the colour, the deletion, two undos, a redo and an undo.
+      edits: iterations * 6,
+      removedPerDelete: removed.length ? removed.reduce((a, b) => a + b, 0) / removed.length : 0,
+    };
   } finally {
     await app.close();
   }
@@ -323,6 +511,10 @@ try {
   if (wants('live')) {
     log('live mode');
     result.live = await measureLive(local);
+  }
+  if (wants('touchup')) {
+    log('live mode, loaded page, touch-ups');
+    result.liveTouchUp = await measureLiveTouchUp(local);
   }
 } catch (error) {
   failed = true;

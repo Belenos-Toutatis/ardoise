@@ -335,7 +335,7 @@ does not create a new note.
   and **Yellow**) and **Width**: the next stroke follows them, the previous ones do not change.
 - **Pages**: **Previous page**, **Next page** (the position is shown: "Page 2 / 5"), **New page**. **New layer** adds a
   layer to the current page. **Clear the page** (or `Ctrl + Delete`) clears the current page only; a "Page cleared." message offers **Undo
-  clearing** for 8 seconds, which gives the ink back. If the page has changed meanwhile, Ardoise says the clearing can
+  clearing** for 8 seconds, which gives the ink back (`Ctrl + Z` gives it back too, with no time limit: see **Touching up during live mode**). If the page has changed meanwhile, Ardoise says the clearing can
   no longer be undone.
 - **Blackboard**: slate background and white chalk. **Laser pointer**: the pen hovering, without touching the tablet,
   shows a red dot on screen *without writing anything*; touching the tablet writes again.
@@ -352,6 +352,50 @@ does not create a new note.
 The *tablet's button* does, during live mode, what the **Tablet button in live mode** option says (new page or new
 layer). *What the Bamboo Slate sends when the button is pressed has not yet been checked on the real tablet.* The keys
 for next and previous page work in any case.
+
+### Touching up during live mode
+
+*Needs the tablet.* A mistake to remove, a word to turn red? You do not need to leave live mode or open the editor. You
+touch up in the control window, and **the tablet keeps writing meanwhile**.
+
+**Choosing strokes**
+
+- Click **Select** in the toolbar, or press `V`. Pressing it again leaves the tool.
+- **Lasso**: in the preview, press with the mouse and draw around the strokes, then release. A stroke is chosen when at
+  least half of its points are inside the lasso.
+- **Click**: click a stroke to choose it alone. Click on the ink itself, not next to it.
+- `Shift` + lasso or click adds strokes to the ones already chosen. `Ctrl` + lasso or click removes some.
+- A gesture on empty paper, or `Esc`, clears the selection. While strokes are chosen, `Esc` does nothing else.
+- A finger and the wheel still move and zoom the preview.
+- The chosen strokes are outlined in blue in the preview. A bar says "Selected strokes: 3".
+- You cannot choose the stroke the tablet is writing right now, nor the strokes of a hidden layer. On a resumed sheet,
+  you can choose the sheet's old strokes.
+
+**Deleting**: click **Delete** in the bar, or press `Delete` or `Backspace`.
+
+**Changing the colour**: click a **Colour** swatch. Only the chosen strokes change. They stay chosen, so that you can
+try another colour. **The pen's colour does not change**: what the tablet writes next keeps its colour. With nothing
+chosen, a swatch sets the pen's colour, as before.
+
+**Undo and redo**
+
+- `Ctrl + Z` (or **Undo**) undoes the last touch-up: a deletion, a change of colour, or **Clear the page**. Deleted
+  strokes come back to their place.
+- `Ctrl + Y` or `Ctrl + Shift + Z` (or **Redo**) does again what was just undone. A new touch-up empties what could be
+  redone.
+- **What is never undone**: what the tablet wrote. A stroke written in the meantime stays, whatever order you undo and
+  redo in. Changes of tool, pen colour or width, and page changes, are not touch-ups either.
+- Each page has its own list, which keeps the last 100 touch-ups. If you leave a page and come back to it, `Ctrl + Z`
+  still undoes its touch-ups. The lists are gone when you finish live mode.
+- The **Undo** and **Redo** buttons are greyed out when there is nothing to do.
+
+**The projector and the other screen on the network only see the result.** Never the blue outline or the lasso: a
+deleted stroke disappears, a recoloured stroke changes colour. The annotations drawn over the presentation are not
+strokes of the page: they cannot be chosen.
+
+**In the note.** When you finish, the note holds what was on screen: deleted strokes gone, colours changed. On a resumed
+sheet, the touch-up of an old stroke is written into the note itself; "Back to the original" (chapter 8) always gives
+back the first version.
 
 ### Projecting on a video projector
 
@@ -1094,8 +1138,11 @@ These shortcuts do nothing while you are typing in a text field.
 | `0` (on an AZERTY keyboard, the `à` key) | **Whole page** |
 | `W` | **Width** |
 | `Shift + arrows` | Move the projected area |
-| `Delete` or `Backspace` | Clear the marks written over the presentation |
-| `Esc` | Close the projection if it is shown; otherwise ask whether to end live mode |
+| `Delete` or `Backspace` | Clear the marks written over the presentation; **with strokes chosen** (control window), delete them |
+| `V` | **Select** tool (control window): lasso or click a stroke |
+| `Ctrl + Z` | Undo a deletion, a change of colour or **Clear the page** (control window) |
+| `Ctrl + Y` or `Ctrl + Shift + Z` | Redo (control window) |
+| `Esc` | Clear the selection if there is one; otherwise close the projection if it is shown; otherwise ask whether to end live mode |
 
 ### In windows
 
