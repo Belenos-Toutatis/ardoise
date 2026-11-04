@@ -652,15 +652,35 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
 - **`LiveState`.** `revision`, `canUndo`, `canRedo` (reactive), `strokes` changed in place (`lib/live-edits.ts`), `generation` + 1.
   Strokes not named keep their object, hence their outline in the renderer's `WeakMap`; a recoloured one too (a new `color` on the
   same object: `Ink.contours` depends on the points, tool and width only). On a viewer `revision` stays 0.
-- **Renderer.** Nothing to change: a new `generation` redraws the cache in `drawingOrder`, which skips hidden layers, with each
-  stroke's colour read at that moment and the look of its tool (highlighter multiplied or screened, felt tip 0.9, chalk 0.95);
-  the grains of pencil and chalk are not drawn on screen. Tested on the fake canvas, with outlines counted.
+- **Renderer.** A new `generation` first looked for in `LiveState.edits` (what each of the last 32 edits touched, removed strokes
+  included) repaints the area of those strokes on the cache; a change of `generation` not found there (a snapshot, a window that
+  did not paint for 32 edits) redraws everything, as does a change of the view, the size, the background or the layers. Same order
+  (`drawingOrder`, which skips hidden layers), same looks (highlighter multiplied or screened, felt tip 0.9, chalk 0.95), each
+  stroke's colour read at that moment; the grains of pencil and chalk are not drawn on screen.
+- **Repainting an area** (`LiveRenderer.planRepaint`, `repaintArea`). The area is the box of the *outlines* of the strokes touched
+  (their geometry, so width and tool are in it; no texture on screen), in device pixels, plus 2 pixels for antialiasing, rounded
+  outward to whole pixels and cut to the canvas. Under a clip on that box, what a full redraw does (`drawBackground`: clear,
+  surround, paper, picture) then every stroke whose outline's box comes within 2 pixels of it, in drawing order. A whole-pixel clip
+  replaces each pixel entirely, and no other stroke touches it, so each pixel goes through the same operations as in a full redraw:
+  same value. Outlines stay cached per stroke object, with their box; a recolour computes none. A stroke that came back by an undo
+  is a new object and gets its outline again.
+  - **Strokes finished meanwhile** (not on the cache, `Outline.onCache`, and not touched) stay out of the area and are appended
+    after it, whole. That is right only if they are last in the drawing order: if a stroke on the cache comes after one of them (a
+    higher layer brought back by an undo), everything is redrawn. A stroke finished and touched in the same frame is simply in the area.
+  - **Full redraw instead**: an area over 60 % of the canvas, or over 60 % of the strokes crossing it (more than 16). The
+    union is one box: two strokes in opposite corners are a full redraw. No spatial index: the pass over the strokes is one box test each,
+    well under a millisecond for 4,000 strokes.
+  - **Tested** in pixels on a software canvas (`live-raster-canvas.ts`, `live-render.partial.test.ts`: the listed cases and 600 random
+    frames against a full redraw of the same state; a clip off the pixel grid throws) and on real canvases, in a real WebView2 and a
+    real Edge (`Places.samePixels` in `journeys-m12-touchup.mjs`, with `canvas.repaintNow()` and `canvas.repaintFromScratch()`). On real
+    canvases a few edge pixels of a stroke cut by the clip come out a little differently from the graphics stack (seen: 9 pixels of 5.5
+    million, by up to 18/255), hence the journeys' tolerance: `EDGE_PIXELS` pixels by `EDGE_DELTA` at most. They stay until the next full redraw.
 - **Cost.** Page of 50 000 strokes of 100 points, measured in the unoptimised test build (`cargo test -p ardoise large_page --
   --nocapture`; the app is much faster): under the lock, delete 1 000 strokes 2.4 ms, undo them 2.8 ms, recolour all 22 ms, clear 13 ms,
   against 58 ms for the clone of a single snapshot, once per snapshot whatever the number of windows since `LiveEvent::Snapshot` is an
   `Arc`. In the window (`live-state.edits.test.ts`), 1 to 3 ms per event.
-  What stays costly is the redraw of the cache: one fill per stroke of the page, on the window's thread, as after any change of
-  view, never under the hub's lock, and not measured here (no window: `cargo xtask perf`). Also under the lock, as before: the clone of
+  A full redraw of the cache stays costly (one fill per stroke of the page, on the window's thread, as after any change of view,
+  never under the hub's lock); an edit no longer asks for one (`cargo xtask perf --only touchup` tells both). Also under the lock, as before: the clone of
   the page by a save pass (`SaveJob`) every 5 s, less often when writes are slow (`save_wait`), which an edit now triggers too.
 
 **Touch up, the selection, as built** (package 7; `lib/live-select.svelte.ts`, `lib/live-touch-up.ts`, `lib/live-keys.ts`
@@ -673,11 +693,16 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   `revision`, `noteId`, `pageIndex` they were chosen at. `follow(live)` (an effect of `LiveView`) drops them when the page or the
   revision changes (a delete, an undo, « Clear the page »); the tablet's strokes and a recolour keep them. Turning the tool off clears.
   Nothing of it is sent to Rust, the projector or the share.
-- **Drawing.** `Scene.selection` and `Scene.lasso` (always empty for `presentation`). The renderer draws the highlight (outlines
-  from the same outline cache, a glow, and a dashed box) on a surface of its own, redrawn only when the selection, the strokes'
-  generation, the layers, the view or the size change; a frame copies it. The page cache is never redrawn for a selection
-  (`PaintReport.selectionDrawn`). The lasso being drawn is a polyline per frame. Colours: `SELECTION_COLORS` (a lighter blue on
-  dark paper: slate or blackboard).
+- **Drawing.** `Scene.selection` and `Scene.lasso` (always empty for `presentation`). The renderer draws the highlight on a surface
+  of its own, redrawn only when the selection, the strokes' generation, the layers, the view or the size change; a frame copies it.
+  The page cache is never redrawn for a selection (`PaintReport.selectionDrawn`). The highlight: a faint fill of the box, a blue ring
+  (the stroke's outline made wider by the ink module, 3.5 px on each side where the pen pressed hardest, opaque), a band of paper colour
+  inside it (1.5 px) which keeps blue ink apart from the ring, then all of that taken out (`destination-out`) where the ink is, 0.5 px
+  past its edge, and the dashed box. The page below shows through the hole, so that the strokes keep their real colour (a recolour
+  shows at once, a highlighter its blend); the ink is never drawn twice. Fills, one path per stroke, their outlines kept per stroke and
+  scale: on 100 strokes in a real WebView2, one path holding the whole selection takes 70 to 90 ms of calls and two frames are late, and
+  `stroke()` makes one frame very late (some 90 ms in the graphics process) on strokes it has not seen yet. The lasso being drawn is a polyline per frame. Colours: `SELECTION_COLORS` (a lighter blue on dark paper: slate
+  or blackboard).
 - **Pointers.** `LiveCanvas` `selecting`: mouse and pen draw the lasso instead of dragging the area; finger (pan, pinch, double
   tap) and wheel stay navigation. The check runs once, on release: 24 000 strokes of 30 samples take about 0.4 s the first time (bounds
   are cached per stroke object) and 0.15 s after; a click takes about 10 ms.

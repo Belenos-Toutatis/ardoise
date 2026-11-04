@@ -396,8 +396,8 @@ ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tab
 
 **Supprimer** : cliquez sur **Supprimer** dans la barre, ou appuyez sur `Suppr` ou `Retour arrière`.
 
-**Changer la couleur** : cliquez sur une pastille de **Couleur**. Seuls les traits choisis changent. Ils restent
-choisis, pour essayer une autre couleur. **La couleur du stylo ne change pas** : ce que la tablette écrit ensuite garde
+**Changer la couleur** : cliquez sur une pastille de **Couleur**. Seuls les traits choisis changent, et la nouvelle
+couleur se voit aussitôt à l'intérieur du contour bleu. Ils restent choisis, pour essayer une autre couleur. **La couleur du stylo ne change pas** : ce que la tablette écrit ensuite garde
 sa couleur. Sans sélection, une pastille règle la couleur du stylo, comme avant.
 
 **Annuler et rétablir**

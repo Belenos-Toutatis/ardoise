@@ -12,7 +12,7 @@
    * interface part when the drawing ends, the end-to-end figure at the start of the next frame
    * (`lib/latency.ts`).
    * Attributes for tests: `data-strokes` (strokes of the page, the one in progress included),
-   * `data-page` (`n/N`).
+   * `data-page` (`n/N`), `data-full-redraws` and `data-partial-redraws` (`lib/perf.ts`).
    *
    * Pen and touch (docs/design/tablet-live-classroom.md, "M8: pen and touch"). `preview`: a
    * finger drags the projected area as the mouse does, two fingers pinch it (zoom and move), a
@@ -47,6 +47,7 @@
   import type { LiveState } from '../../lib/live-state.svelte';
   import { MARK_ERASER_PX, eraseMarks, markStyle, newMark } from '../../lib/live-marks';
   import { pickStrokes, type Combine } from '../../lib/live-select.svelte';
+  import { exposeRepaints, noteLiveRedraw } from '../../lib/perf';
   import {
     DEFAULT_ASPECT,
     moveViewTo,
@@ -180,7 +181,8 @@
     const height = Math.max(1, Math.round(size.height * pixelRatio));
     if (el.width !== width) el.width = width;
     if (el.height !== height) el.height = height;
-    renderer.paint(
+    const startedAt = performance.now();
+    const report = renderer.paint(
       context,
       buildScene(live, {
         mode,
@@ -194,6 +196,7 @@
         lasso: lassoDrag?.points ?? null,
       }),
     );
+    noteLiveRedraw(el, report, startedAt);
     const drawEnd = wallClock();
     const painted = live.takeUnpainted();
     // Points drawn without their outline (geometry still loading) or in a hidden window say
@@ -218,6 +221,10 @@
       if (!destroyed && epoch === visibilityEpoch && !document.hidden) then();
     });
   }
+
+  $effect(() => {
+    if (canvas) exposeRepaints(canvas, paint, () => renderer.invalidate());
+  });
 
   // Every change of the session asks for a frame.
   $effect(() => {

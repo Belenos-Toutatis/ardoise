@@ -252,10 +252,10 @@ describe('live preview with the Select tool', () => {
 
   it('paints the selection it is given, over the page', async () => {
     await render({ selection: [1] });
-    // The offscreen surface of the highlight holds the line and the dashed box.
+    // The offscreen surface of the highlight holds the ring and the dashed box.
     await vi.waitFor(() =>
       expect(
-        contexts.some((c) => c.ops('stroke').some((call) => call.strokeStyle === SELECTION_COLORS.light.line) && c.count('strokeRect') === 1),
+        contexts.some((c) => c.ops('fill').some((call) => call.fillStyle === SELECTION_COLORS.light.halo) && c.count('strokeRect') === 1),
       ).toBe(true),
     );
   });

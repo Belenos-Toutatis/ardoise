@@ -41,7 +41,7 @@ import type {
   MonitorInfo,
   SheetFork,
 } from './live';
-import { insertStrokes, recolourStrokes, removeStrokes } from './live-edits';
+import { applyStrokeEdit, type StrokeEdit } from './live-edits';
 import { marksFromWire, reuseMarks } from './live-marks';
 import { roundView, sameView } from './live-view';
 import type { Orientation } from './orientation';
@@ -65,6 +65,8 @@ const DEFAULT_BACKGROUND: Background = { paper: 'white', template: 'blank', text
 const MAX_UNPAINTED = 5000;
 /** Local views sent and not yet echoed are forgotten beyond this. */
 const MAX_IN_FLIGHT = 64;
+/** The last edits kept for the canvases: one that has not painted for longer (a hidden window) redraws everything. */
+const MAX_EDIT_LOG = 32;
 /** At most one view sent to Rust per this many ms while dragging; the last one always goes. */
 export const VIEW_SEND_MS = 32;
 
@@ -149,6 +151,11 @@ export class LiveState {
   strokes: Stroke[] = [];
   /** Changes whenever `strokes` is replaced or edited rather than appended to. */
   generation = 0;
+  /**
+   * What the last edits touched, oldest first. A change of `generation` absent from it (the strokes were
+   * replaced) tells a canvas that nothing but a full redraw is right.
+   */
+  edits: StrokeEdit[] = [];
   /** The stroke in progress (its points grow in place). */
   current: Stroke | null = null;
   /** Where the pen hovers (page units), or null. */
@@ -292,13 +299,14 @@ export class LiveState {
   /**
    * The list is changed in place, a pass over it: a stroke that is not named keeps its object, and
    * so its outline in the renderer; a recoloured one too (an outline does not depend on the colour:
-   * `Ink.contours`). The new `generation` makes the renderer draw its cache again.
+   * `Ink.contours`). The new `generation`, with its entry in `edits`, makes the renderer repaint the area
+   * of the strokes touched.
    */
   private applyEdit(edit: LiveStrokesEdited): void {
-    removeStrokes(this.strokes, edit.removed);
-    insertStrokes(this.strokes, edit.inserted);
-    recolourStrokes(this.strokes, edit.recoloured);
+    const touched = applyStrokeEdit(this.strokes, edit);
     this.generation += 1;
+    this.edits.push({ generation: this.generation, touched });
+    if (this.edits.length > MAX_EDIT_LOG) this.edits.shift();
     this.strokeCount = this.strokes.length + (this.current ? 1 : 0);
     if (edit.revision !== undefined) this.revision = edit.revision;
     if (edit.canUndo !== undefined) this.canUndo = edit.canUndo;
@@ -359,6 +367,7 @@ export class LiveState {
     if (!samePage || !sameStrokes(this.strokes, s.page.strokes)) {
       this.strokes = [...s.page.strokes];
       this.generation += 1;
+      this.edits = [];
     }
     this.ready = true;
     this.state = s.state;

@@ -143,6 +143,8 @@ describe('live state: strokes edited', () => {
     live.receive(batch(edited({ removed: [0, 2] })));
     expect(starts(live.strokes)).toEqual([2, 4]);
     expect(live.strokes[0]).toBe(objects[1]);
+    // What the canvases repaint: the strokes that left.
+    expect(live.edits.at(-1)).toEqual({ generation: live.generation, touched: [objects[0], objects[2]] });
     expect(live.strokes[1]).toBe(objects[3]);
     expect(live.generation).toBe(generation + 1);
     expect(live.strokeCount).toBe(2);

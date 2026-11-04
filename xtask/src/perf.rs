@@ -154,6 +154,23 @@ pub struct TouchUp {
     pub edits: u64,
     /// Strokes a deletion took away from the canvas, on average: the edits must have shown.
     pub removed_per_delete: f64,
+    /// What one edit costs on this page (absent from an older harness).
+    pub edit_cost: Option<EditCost>,
+}
+
+/// The cost of one edit, against a full redraw of the cache on the same page. Not judged: the frames of the measure are.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditCost {
+    /// The longest frame after an edit, ms: median and worst.
+    pub frame_ms: (f64, f64),
+    /// The longest frame after a full redraw of the cache, ms: median and worst.
+    pub full_frame_ms: Option<(f64, f64)>,
+    /// The drawing calls of a repaint and of a full redraw (median, ms), without what the graphics process does with them.
+    pub call_ms: Option<f64>,
+    pub full_call_ms: Option<f64>,
+    /// Edits the cache took by repainting an area, and by a full redraw.
+    pub partial_redraws: u64,
+    pub full_redraws: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -180,6 +197,25 @@ fn numbers(value: &Value) -> Vec<f64> {
         .as_array()
         .map(|list| list.iter().filter_map(Value::as_f64).collect())
         .unwrap_or_default()
+}
+
+/// The median and the largest of `values`.
+fn median_and_worst(values: &[f64]) -> Option<(f64, f64)> {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    Some((*sorted.get(sorted.len() / 2)?, *sorted.last()?))
+}
+
+fn edit_cost(value: &Value) -> Option<EditCost> {
+    Some(EditCost {
+        frame_ms: median_and_worst(&numbers(&value["editFrames"]))?,
+        full_frame_ms: median_and_worst(&numbers(&value["fullRedrawFrames"])),
+        call_ms: median_and_worst(&numbers(&value["editCalls"])).map(|(median, _)| median),
+        full_call_ms: median_and_worst(&numbers(&value["fullRedrawCalls"]))
+            .map(|(median, _)| median),
+        partial_redraws: value["partialRedraws"].as_u64().unwrap_or(0),
+        full_redraws: value["fullRedraws"].as_u64().unwrap_or(0),
+    })
 }
 
 fn opening(value: &Value) -> Option<Opening> {
@@ -228,6 +264,7 @@ pub fn parse_harness(json: &str, into: &mut Measures) -> Result<(), String> {
             loaded: touch_up["loaded"].as_u64().unwrap_or(0),
             edits: touch_up["edits"].as_u64().unwrap_or(0),
             removed_per_delete: touch_up["removedPerDelete"].as_f64().unwrap_or(0.0),
+            edit_cost: edit_cost(touch_up),
         });
     }
     Ok(())
@@ -305,6 +342,45 @@ fn seconds(ms: f64, lang: Lang) -> String {
 
 fn judge(ok: bool) -> Verdict {
     if ok { Verdict::Ok } else { Verdict::Missed }
+}
+
+fn edit_cost_text(cost: &EditCost, lang: Lang) -> String {
+    let (full_redraw, calls, against, repaints, redraws) = match lang {
+        Lang::En => (
+            "full redraw",
+            "calls",
+            "against",
+            "repaints",
+            "full redraws",
+        ),
+        Lang::Fr => (
+            "dessin complet",
+            "appels",
+            "contre",
+            "dessins partiels",
+            "dessins complets",
+        ),
+    };
+    let pair = |(median, worst): (f64, f64)| {
+        format!("{} / {} ms", num(median, 1, lang), num(worst, 1, lang))
+    };
+    let mut text = pair(cost.frame_ms);
+    if let Some(full) = cost.full_frame_ms {
+        let colon = if lang == Lang::En { ":" } else { " :" };
+        text.push_str(&format!("; {full_redraw}{colon} {}", pair(full)));
+    }
+    if let (Some(call), Some(full)) = (cost.call_ms, cost.full_call_ms) {
+        text.push_str(&format!(
+            "; {calls} {} ms {against} {} ms",
+            num(call, 1, lang),
+            num(full, 1, lang)
+        ));
+    }
+    text.push_str(&format!(
+        "; {} {repaints}, {} {redraws}",
+        cost.partial_redraws, cost.full_redraws
+    ));
+    text
 }
 
 fn frames_text(stats: &FrameStats, lang: Lang) -> String {
@@ -518,6 +594,16 @@ fn build_rows(m: &Measures, lang: Lang) -> Vec<Row> {
                     ),
                 ),
                 measured: frames_text(idle, lang),
+                verdict: Verdict::Info,
+            });
+        }
+        if let Some(cost) = &touch.edit_cost {
+            rows.push(Row {
+                target: t(
+                    "One edit on this page, longest frame after it (median / worst)",
+                    "Une retouche sur cette page, plus longue image après elle (médiane / pire)",
+                ),
+                measured: edit_cost_text(cost, lang),
                 verdict: Verdict::Info,
             });
         }
@@ -956,6 +1042,7 @@ mod tests {
                 loaded: 4000,
                 edits: 60,
                 removed_per_delete: 100.0,
+                edit_cost: None,
             }),
             export: Some(Export {
                 frames: 3600,
@@ -969,6 +1056,43 @@ mod tests {
 
     fn verdicts(m: &Measures) -> Vec<Verdict> {
         rows(m, Lang::En).iter().map(|r| r.verdict).collect()
+    }
+
+    #[test]
+    fn the_cost_of_one_edit_is_told_and_not_judged() {
+        let value: Value = serde_json::from_str(
+            r#"{"editFrames":[20,17,50],"fullRedrawFrames":[110,120,100],"editCalls":[1.5,0.5,2.5],
+                "fullRedrawCalls":[30,40,20],"partialRedraws":24,"fullRedraws":1}"#,
+        )
+        .unwrap();
+        let cost = edit_cost(&value).unwrap();
+        assert_eq!(cost.frame_ms, (20.0, 50.0));
+        assert_eq!(cost.full_frame_ms, Some((110.0, 120.0)));
+        assert_eq!(cost.call_ms, Some(1.5));
+        assert_eq!(cost.full_call_ms, Some(30.0));
+        assert_eq!((cost.partial_redraws, cost.full_redraws), (24, 1));
+        // An older harness tells nothing: no row.
+        assert!(edit_cost(&serde_json::json!({})).is_none());
+
+        let mut told = measures();
+        told.touch_up.as_mut().unwrap().edit_cost = Some(cost);
+        let table = rows(&told, Lang::En);
+        let row = table
+            .iter()
+            .find(|r| r.target.starts_with("One edit"))
+            .unwrap();
+        assert_eq!(row.verdict, Verdict::Info);
+        assert!(
+            row.measured
+                .starts_with("20.0 / 50.0 ms; full redraw: 110.0 / 120.0 ms")
+        );
+        assert!(row.measured.ends_with("24 repaints, 1 full redraws"));
+        let french = rows(&told, Lang::Fr);
+        assert!(
+            french
+                .iter()
+                .any(|r| r.measured.contains("dessin complet : 110,0 / 120,0 ms"))
+        );
     }
 
     #[test]

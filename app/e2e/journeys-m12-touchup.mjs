@@ -22,6 +22,10 @@
 //    screen (strokes and colours, in the file and in the editor).
 // 2. The second journey: on a resumed sheet with an image background, delete a stroke of the old note and recolour
 //    another one. After « Terminer » the note keeps its image, its original and every other member, with the edits.
+// 3. The third journey, on real pixels: on a resumed sheet with an image background, a highlighter under ink, overlapping
+//    strokes and a hidden layer, every edit is drawn by repainting an area of the cache: the canvases of the three places
+//    (a real WebView2 and a real Edge) must be, pixel for pixel, what a full redraw of the same state makes
+//    (`Places.samePixels`), on the paper and on the blackboard. The selection's highlight leaves the ink its new colour.
 //
 // Limits: the narration is not recorded (no microphone); the pen's back, the finger and the touch gestures are
 // covered by the interface tests (the lasso here is the mouse's); how the highlight looks is for the eye (H5).
@@ -390,6 +394,91 @@ const inkStats = (selector) => `(() => {
 
 const share = (stats, tint) => (stats && stats.area > 0 ? stats[tint] / stats.area : 0);
 
+/**
+ * Page expression: in one task, the canvas as its frames made it (with the events received since, as a frame would),
+ * then the same state drawn from nothing: where the two differ, what the canvas counted of its redraws. A real canvas
+ * and real antialiasing, unlike `live-render.partial.test.ts`. A few edge pixels of a stroke cut by the area's clip come out
+ * a little differently from the graphics stack (seen: 9 pixels of 5.5 million, by up to 18/255; the software canvas of
+ * the unit test, which has no such thing, has none at all). They are only counted (`edges`), up to `EDGE_PIXELS` of them
+ * by `EDGE_DELTA` at most: a pixel left over from before an edit differs by far more, and there are many of them.
+ */
+const EDGE_DELTA = 32;
+const EDGE_PIXELS = 100;
+const pixelsAgainstFullRedraw = (selector) => `(() => {
+  const c = document.querySelector(${j(selector)});
+  if (!c?.repaintFromScratch) return { missing: true };
+  const context = c.getContext('2d');
+  c.repaintNow();
+  const partial = Number(c.dataset.partialRedraws ?? 0);
+  const before = context.getImageData(0, 0, c.width, c.height).data;
+  c.repaintFromScratch();
+  const after = context.getImageData(0, 0, c.width, c.height).data;
+  let differ = 0, edges = 0, edgeWorst = 0, worst = 0, x0 = c.width, x1 = -1, y0 = c.height, y1 = -1;
+  const samples = [];
+  for (let i = 0; i < before.length; i += 4) {
+    const delta = Math.max(Math.abs(before[i] - after[i]), Math.abs(before[i + 1] - after[i + 1]), Math.abs(before[i + 2] - after[i + 2]), Math.abs(before[i + 3] - after[i + 3]));
+    if (delta === 0) continue;
+    if (delta <= ${EDGE_DELTA}) {
+      edges++;
+      edgeWorst = Math.max(edgeWorst, delta);
+      continue;
+    }
+    differ++;
+    worst = Math.max(worst, delta);
+    const x = (i / 4) % c.width;
+    const y = Math.floor(i / 4 / c.width);
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+    if (samples.length < 6) samples.push([x, y, ...before.slice(i, i + 4), ...after.slice(i, i + 4)].join(' '));
+  }
+  // Differences: the place, as drawn by each way and with the pixels that differ in magenta, to look at.
+  let picture = null;
+  if (differ > 0) {
+    const w = x1 - x0 + 41, h = y1 - y0 + 41, zoom = 3;
+    const out = document.createElement('canvas');
+    out.width = w * zoom;
+    out.height = h * zoom * 3;
+    const o = out.getContext('2d');
+    o.imageSmoothingEnabled = false;
+    const strip = (data, row, mark) => {
+      const part = new ImageData(w, h);
+      for (let py = 0; py < h; py++) {
+        for (let px = 0; px < w; px++) {
+          const i = ((y0 - 20 + py) * c.width + (x0 - 20 + px)) * 4, k = (py * w + px) * 4;
+          if (i < 0 || i >= data.length) continue;
+          const differs = Math.max(Math.abs(before[i] - after[i]), Math.abs(before[i + 1] - after[i + 1]), Math.abs(before[i + 2] - after[i + 2])) > ${EDGE_DELTA};
+          part.data[k] = mark && differs ? 255 : data[i];
+          part.data[k + 1] = mark && differs ? 0 : data[i + 1];
+          part.data[k + 2] = mark && differs ? 255 : data[i + 2];
+          part.data[k + 3] = 255;
+        }
+      }
+      const piece = document.createElement('canvas');
+      piece.width = w;
+      piece.height = h;
+      piece.getContext('2d').putImageData(part, 0, 0);
+      o.drawImage(piece, 0, row * h * zoom, w * zoom, h * zoom);
+    };
+    strip(before, 0, false);
+    strip(after, 1, false);
+    strip(after, 2, true);
+    picture = out.toDataURL('image/png');
+  }
+  if (differ === 0 && edges > ${EDGE_PIXELS}) differ = edges;
+  return { differ, edges, edgeWorst, worst, box: [x0, y0, x1, y1], size: [c.width, c.height], partial, samples, picture };
+})()`;
+
+/** Page expression: pixels of the ink's own colour on a canvas: strongly red, with little of the other channels. */
+const pureRed = (selector) => `(() => {
+  const c = document.querySelector(${j(selector)});
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i] > 170 && d[i + 1] < 70 && d[i + 2] < 70) n++;
+  return n;
+})()`;
+
 /** `promise`, or an error naming the window that did not answer within `ms` (a DevTools call has no timeout of its own). */
 function within(promise, ms, what) {
   let timer;
@@ -401,11 +490,13 @@ function within(promise, ms, what) {
 
 /** The three places side by side: the control window, the presentation window, the page of the real browser, the stream. */
 class Places {
-  constructor({ app, model, presentation, browser }) {
+  /** `hidden`: strokes of a hidden layer, which the windows count and the share is never sent. */
+  constructor({ app, model, presentation, browser, hidden = 0 }) {
     this.app = app;
     this.model = model;
     this.presentation = presentation;
     this.browser = browser;
+    this.hidden = hidden;
   }
 
   async counts() {
@@ -422,7 +513,7 @@ class Places {
       console.log(`    écrans connectés (compteur du partage) : ${this.badge ?? '-'} -> ${badge} ; flux Node ${this.model.health()}`);
       this.badge = badge;
     }
-    return { control, presented, viewed, stream: this.model.count() };
+    return { control: control - this.hidden, presented: presented === null ? null : presented - this.hidden, viewed, stream: this.model.count() };
   }
 
   /** Waits until the places all hold the same number of strokes (the tablet adds one now and then: read it again). */
@@ -459,6 +550,40 @@ class Places {
       }
       await sleep(400);
     }
+  }
+
+  /**
+   * Each canvas against a full redraw of the state it shows: the same pixels, or an error. With `after` (what an earlier
+   * call answered), each canvas must also have repainted an area since: that is what was tested.
+   */
+  async samePixels(what, { after = null } = {}) {
+    at(`comparing the pixels with a full redraw: ${what}`);
+    const read = async (place, selector, name) => {
+      if (!place) return null;
+      const result = await within(place.evaluate(pixelsAgainstFullRedraw(selector)), 20_000, `the ${name}`);
+      if (result.missing) throw new Error(`${what}: the ${name} has no repaint for the tests`);
+      if (result.differ > 0) {
+        const saved = await this.save().catch(() => '');
+        const dir = process.env.ARDOISE_E2E_SHOTS ?? this.app.dir;
+        writeFileSync(join(dir, `difference ${name}.png`), Buffer.from(result.picture.split(',')[1], 'base64'));
+        throw new Error(`${what}: the ${name} differs from a full redraw on ${result.differ} pixels of ${result.size.join(' x ')} (by up to ${result.worst}/255, within ${result.box.join(', ')}; x y, then RGBA before and after: ${result.samples.join(' | ')})${saved}`);
+      }
+      if (result.edges > 0) console.log(`    ${what} : ${result.edges} pixels de bord à ${result.edgeWorst}/255 au plus d’un dessin complet (${name})`);
+      return result;
+    };
+    const counts = {
+      control: await read(this.app, LIVE_CANVAS, 'control window'),
+      presented: await read(this.presentation, LIVE_CANVAS, 'presentation window'),
+      viewed: await read(this.browser, VIEWER_CANVAS, 'browser of the share'),
+    };
+    if (after) {
+      for (const [name, result] of Object.entries(counts)) {
+        if (result && after[name] && !(result.partial > after[name].partial)) {
+          throw new Error(`${what}: the ${name} place did not repaint an area for this edit (${after[name].partial} then ${result.partial})`);
+        }
+      }
+    }
+    return counts;
   }
 
   /** Saves what each canvas shows as a PNG in the run's folder (to look at when a step fails); the names. */
@@ -653,6 +778,54 @@ function limited(check, ms = 150_000) {
       }
     });
 }
+
+/** A short stroke from (x0, y0) to (x1, y1), with a wobble, the time of its first point given. */
+const inked = (x0, y0, x1, y1, start, style = {}) => ({
+  ...style,
+  points: Array.from({ length: 24 }, (_, i) => ({
+    x: x0 + ((x1 - x0) * i) / 23,
+    y: y0 + ((y1 - y0) * i) / 23 + 30 * Math.sin(i / 2),
+    p: 0.6,
+    t: start + i * 10,
+  })),
+});
+
+const HIGHLIGHTER = 5;
+/**
+ * The sheet of the pixel journey: a highlighter under black ink, strokes that cross, a stroke of a hidden layer over the
+ * place, at the foot of the page, below the lines of the simulated pen, and a field of other strokes above.
+ * `cluster`: a rectangle (page units) that takes the group; `marker`: a point where a click takes the highlighter alone.
+ */
+const PIXEL_SHEET = (() => {
+  const yellow = { r: 255, g: 220, b: 0, a: 180 };
+  const blue = { r: 30, g: 60, b: 220, a: 255 };
+  let start = 0;
+  const next = () => (start += 500);
+  const ink = [
+    inked(9000, 21000, 19000, 21000, next(), { tool: HIGHLIGHTER, color: yellow, width: 700 }),
+    inked(9500, 20800, 18500, 21100, next(), { width: 120 }),
+    inked(11000, 20000, 11500, 21300, next(), { width: 200, color: blue }),
+    inked(12000, 21300, 12500, 20000, next(), { width: 200, color: blue }),
+    inked(14000, 20100, 14000, 21200, next(), { width: 300, layer: 1, color: { r: 200, g: 0, b: 200, a: 255 } }),
+  ];
+  for (let row = 0; row < 12; row++) {
+    for (let column = 0; column < 20; column++) {
+      const x = 1000 + column * 1380;
+      const y = 800 + row * 1600;
+      ink.push(inked(x, y, x + 1000, y + 300, next(), { layer: (row + column) % 11 === 0 ? 1 : 0 }));
+    }
+  }
+  return {
+    ink,
+    layers: [
+      { name: 'Layer 1', visible: true },
+      { name: 'Hidden', visible: false },
+    ],
+    shown: ink.filter((s) => s.layer !== 1).length,
+    cluster: { x0: 8600, x1: 19400, y0: 19700, y1: 21500 },
+    marker: { x: 18900, y: 21000 },
+  };
+})();
 
 const BROWSER_ARGS = '--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding';
 
@@ -887,10 +1060,18 @@ export const touchUpJourneys = [
           if (penAfter !== penBefore) throw new Error(`the pen's colour changed: ${j(penBefore)} then ${j(penAfter)}`);
           // The selection stays (a colour does not change the strokes' places)...
           await app.waitFor(selectionIs(plan.hits.length), 'the selection to stay after the recolouring');
-          // ...and its highlight hides the new colour in the control window: deselect to see it.
+          // ...and its highlight leaves the new colour visible in the control window, as it will be once deselected.
+          await places.agree('after the recolouring');
+          const highlighted = await places.until((s) => everywhere(s, 'red', (r) => r > 0.00004), 'red ink in the three places, the highlight still on');
+          const redBefore = await app.evaluate(pureRed(LIVE_CANVAS));
+          await places.samePixels('the recolouring, highlight on');
           await press(app, 'Escape');
           await app.waitFor(selectionIs(0), 'Esc to deselect');
           const stats = await places.until((s) => everywhere(s, 'red', (r) => r > 0.00004), 'red ink in the three places');
+          const redAfter = await app.evaluate(pureRed(LIVE_CANVAS));
+          console.log(`    pixels rouges dans la fenêtre de commande : ${redBefore} avec la surbrillance, ${redAfter} sans ; bleu ${highlighted.control.blue} -> ${stats.control.blue}`);
+          if (redBefore < 0.8 * redAfter) throw new Error(`the highlight hides the new colour: ${redBefore} red pixels with it, ${redAfter} without`);
+          await places.samePixels('the recolouring, highlight off');
           console.log(`    part de rouge : commande ${share(stats.control, 'red').toExponential(2)}, présentation ${share(stats.presented, 'red').toExponential(2)}, navigateur ${stats.viewed ? share(stats.viewed, 'red').toExponential(2) : '-'}`);
           // What the tablet writes next keeps the pen's colour (black), not the swatch.
           const known = model.sync().tablet.length;
@@ -935,6 +1116,7 @@ export const touchUpJourneys = [
           await app.waitFor(selectionIs(0), 'the bar to go with the strokes');
           const counts = await places.agree('after the delete by the button');
           const stats = await places.until((s) => everywhere(s, 'red', (r) => r < 0.0001), 'the red strokes to leave the three places');
+          await places.samePixels('the delete');
           console.log(`    après la suppression : ${j(counts)} ; vert ${j(Object.values(stats).map((s) => s && share(s, 'green').toExponential(1)))}`);
           if (!everywhere(stats, 'green', (r) => r > 0.00004)) throw new Error('the green strokes were lost with the delete');
         });
@@ -980,6 +1162,7 @@ export const touchUpJourneys = [
           if (!sameSet(edit.inserted, edited.b.prints) || edit.removed.length > 0) throw new Error(`the undo inserted ${edit.inserted} (expected ${edited.b.prints})`);
           model.check('after Ctrl+Z');
           await places.agree('after Ctrl+Z');
+          await places.samePixels('the undo');
           // The tablet writes a stroke between the undo and the redo: the redo must leave it alone.
           await until(() => model.sync().tablet.length > kept + 1, 'a stroke written by the tablet after the undo', 20_000);
           const written = model.tablet.slice(kept);
@@ -988,6 +1171,8 @@ export const touchUpJourneys = [
           [edit] = model.editsSince(redoMark);
           if (!sameSet(edit.removed, edited.b.prints)) throw new Error(`the redo removed ${edit.removed} (expected ${edited.b.prints})`);
           model.check('after Ctrl+Y');
+          await places.agree('after Ctrl+Y (pixels)');
+          await places.samePixels('the redo');
           if (written.some((print) => !model.strokes.some((s) => printOf(s) === print))) throw new Error('a stroke written by the tablet was lost by the redo');
           await places.agree('after Ctrl+Y');
         });
@@ -1008,6 +1193,7 @@ export const touchUpJourneys = [
           if (model.strokes.length < before + edited.a.prints.length + edited.b.prints.length) throw new Error('the deleted strokes are not all back');
           const stats = await places.until((s) => everywhere(s, 'red', (r) => r < 0.0001) && everywhere(s, 'green', (r) => r < 0.0001), 'all ink black again in the three places');
           await places.agree('after undoing everything');
+          await places.samePixels('after undoing everything');
           // The Undo button is out of steps, and Ctrl+Z once more does nothing (the tablet's strokes are not steps).
           if (await app.evaluate(undoable('"undo-edit"'))) throw new Error('Undo is still offered after the last step');
           const mark = stream.mark();
@@ -1024,6 +1210,8 @@ export const touchUpJourneys = [
           model.check('after redoing everything');
           if (!sameSet([...model.deleted], [...edited.a.prints, ...edited.b.prints])) throw new Error(`deleted after the redo: ${[...model.deleted]}`);
           await places.until((s) => everywhere(s, 'green', (r) => r > 0.00004) && everywhere(s, 'red', (r) => r < 0.0001), 'the green strokes back and the red ones gone');
+          await places.agree('after redoing everything');
+          await places.samePixels('after redoing everything');
           console.log(`    ${undone} annulations, ${redone} rétablissements ; couleur noire rendue : ${j(Object.values(stats).map((s) => s && share(s, 'red').toExponential(1)))}`);
         });
 
@@ -1048,6 +1236,7 @@ export const touchUpJourneys = [
           if (!sameSet([...model.deleted], [...edited.a.prints, ...edited.b.prints])) throw new Error(`still deleted: ${[...model.deleted]}`);
           await places.agree('after undoing the clearing');
           await places.until((s) => everywhere(s, 'green', (r) => r > 0.00004), 'the green strokes back with the page');
+          await places.samePixels('the page brought back');
         });
 
         await check('les trois endroits à la fin : mêmes traits (compte), même part de vert, aucun rouge', async () => {
@@ -1230,6 +1419,162 @@ export const touchUpJourneys = [
 
       } finally {
         stream?.close();
+      }
+    },
+  },
+
+  {
+    name: 'retouches en direct : mêmes pixels qu’un dessin complet (image de fond, surligneur, calque masqué, tableau noir)',
+    args: ['--simulated-tablet'],
+    settings: (ctx) => `[share]\nport = ${ctx.sharePort}\n`,
+    env: { ARDOISE_SHARE_LOOPBACK: '1' },
+    browserArgs: BROWSER_ARGS,
+    async run(app, rawCheck) {
+      const check = limited(rawCheck);
+      const l = (key) => text(app.language, key);
+      const file = '2026-10-29 Pixels E2E.ardoise';
+      let browser = null;
+      let presentation = null;
+      let stream = null;
+      let model = null;
+      let places = null;
+      let map = null;
+
+      /** A lasso around `rect`, the bar shows what it took (the tablet may have written there too); what it took. */
+      const select = async (rect) => {
+        await drawLasso(app, map, rect);
+        await app.waitFor(`${barCount} > 0`, 'the lasso to take strokes');
+        return app.evaluate(barCount);
+      };
+      /** An edit: it must reach every place, then each canvas must equal a full redraw, by repainting an area. */
+      const edited = async (what, act) => {
+        const before = await places.samePixels(`before ${what}`);
+        const mark = stream.mark();
+        const done = () => model.editsSince(mark).length > 0;
+        await act(done);
+        await until(done, `the event of ${what}`);
+        await places.agree(what);
+        return places.samePixels(what, { after: before });
+      };
+      const pressSwatch = (name) => app.click(`.swatches .swatch[aria-label=${j(l(`editor.colors.${name}`))}]`);
+      const keyed = (name, options, what) => (done) => pressUntil(app, name, options, done, what);
+      /** The control window's canvas as a PNG, in the folder `ARDOISE_E2E_SHOTS` names: how the highlight looks is for the eye. */
+      const shot = async (name) => {
+        if (!process.env.ARDOISE_E2E_SHOTS) return;
+        const url = await app.evaluate(`document.querySelector(${j(LIVE_CANVAS)}).toDataURL('image/png')`);
+        writeFileSync(join(process.env.ARDOISE_E2E_SHOTS, `${name}.png`), Buffer.from(url.split(',')[1], 'base64'));
+      };
+
+      try {
+        await registerTablet(app, check);
+
+        await check('une fiche chargée : image de fond, surligneur sous l’encre, traits croisés, calque masqué', async () => {
+          await dropSheet(app, {
+            binder: 'Reprise',
+            file,
+            title: 'Pixels E2E',
+            index: 7,
+            ink: PIXEL_SHEET.ink,
+            layers: PIXEL_SHEET.layers,
+          });
+        });
+
+        await check('reprendre la fiche, avec la présentation et un vrai navigateur sur le partage', async () => {
+          await resumeFromCard(app, file);
+          await app.waitFor(`Number(${canvasData('strokes')}) >= ${PIXEL_SHEET.shown}`, 'the strokes of the sheet', 20_000);
+          await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'the tablet to stream', 30_000);
+          await app.evaluate(`window.__TAURI_INTERNALS__.invoke('open_presentation', { monitor: null }).then(() => true)`);
+          presentation = await attach(app.port, (t) => t.url.includes('view=presentation'), 'the presentation window');
+          await presentation.waitFor(`Number(${canvasData('strokes')}) >= ${PIXEL_SHEET.shown}`, 'the strokes in the presentation');
+          const code = await startShare(app);
+          const edge = findEdge();
+          if (edge) {
+            browser = await startBrowser(edge, BROWSER_ARGS.split(' '));
+            await browser.navigate(`http://127.0.0.1:${app.sharePort}/`);
+            await browser.waitFor(`document.querySelector('main.viewer')?.dataset.screen === 'code'`, 'the code form', 30_000);
+            await browser.click('#viewer-code');
+            await browser.type(code);
+            await browser.waitFor(`document.querySelector('form button[type="submit"]')?.disabled === false`, 'the join button');
+            await browser.click('form button[type="submit"]');
+            await browser.waitFor(`document.querySelector('main.viewer')?.dataset.screen === 'live'`, 'the live sheet', 20_000);
+            await browser.waitFor(`Number(document.querySelector(${j(VIEWER_CANVAS)})?.dataset.strokes) >= ${PIXEL_SHEET.shown}`, 'strokes on the page', 20_000);
+            await browser.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+            await browser.send('Page.bringToFront');
+          } else {
+            console.log('    skipped: Edge not found, the share is followed by the stream only');
+          }
+          stream = await joinStream(app, code);
+          model = new StreamModel(stream).sync();
+          places = new Places({ app, model, presentation, browser, hidden: PIXEL_SHEET.ink.length - PIXEL_SHEET.shown });
+          await closePanel(app, l('common.close'));
+          // The paper's picture takes a moment: the comparisons begin once it is on the canvases.
+          await sleep(1500);
+          await places.agree('the sheet in the three places');
+          await places.samePixels('the sheet as resumed');
+          await app.click(SELECT_BUTTON);
+          await app.waitFor(`document.querySelector(${j(`${LIVE_CANVAS}.selecting`)}) !== null`, 'the Select tool');
+          map = await previewMap(app, model.page);
+        });
+
+        const rounds = async (where) => {
+          const rect = PIXEL_SHEET.cluster;
+          await check(`${where} : recolorer le groupe sous le lasso, l’encre garde sa couleur sous la surbrillance`, async () => {
+            await select(rect);
+            await edited('the recolouring', () => pressSwatch('red'));
+            await shot(`highlight ${where}`);
+            // In the middle of a chosen stroke, on the sheet's coloured paper: the ink's own colour, nothing of the highlight's.
+            const middle = map.at(PIXEL_SHEET.ink[2].points[12]);
+            const [r, g, b] = await app.evaluate(`(() => {
+              const c = document.querySelector(${j(LIVE_CANVAS)});
+              const box = c.getBoundingClientRect();
+              const k = c.width / box.width;
+              return [...c.getContext('2d').getImageData(Math.round((${middle.x} - box.left) * k), Math.round((${middle.y} - box.top) * k), 1, 1).data];
+            })()`);
+            console.log(`    au milieu d’un trait choisi : ${r}, ${g}, ${b}`);
+            if (!(r > 170 && g < 70 && b < 70)) throw new Error(`the highlight hides the red ink: ${r}, ${g}, ${b} in the middle of a chosen stroke`);
+          });
+          await check(`${where} : supprimer, annuler, rétablir, annuler : chaque fois les mêmes pixels qu’un dessin complet`, async () => {
+            await edited('the delete', keyed('Delete', undefined, 'the delete'));
+            await app.waitFor(selectionIs(0), 'the bar to go');
+            await edited('the undo of the delete', keyed('z', { ctrl: true }, 'the undo of the delete'));
+            await edited('the redo of the delete', keyed('y', { ctrl: true }, 'the redo of the delete'));
+            await edited('the second undo of the delete', keyed('z', { ctrl: true }, 'the second undo of the delete'));
+            await edited('the undo of the colour', keyed('z', { ctrl: true }, 'the undo of the colour'));
+          });
+          await check(`${where} : le surligneur seul, puis un trait noir qui le croise : les mêmes pixels`, async () => {
+            await clickAt(app, map.at(PIXEL_SHEET.marker));
+            await app.waitFor(selectionIs(1), 'the highlighter chosen by the click');
+            await edited('the highlighter recoloured', () => pressSwatch('green'));
+            await edited('the highlighter deleted', keyed('Delete', undefined, 'the highlighter deleted'));
+            await app.waitFor(selectionIs(0), 'the bar to go');
+            await edited('the highlighter back', keyed('z', { ctrl: true }, 'the highlighter back'));
+            await edited('the highlighter in its colour', keyed('z', { ctrl: true }, 'the highlighter in its colour'));
+          });
+        };
+
+        await rounds('sur le papier');
+
+        await check('au tableau noir : le fond change partout (dessin complet), puis les mêmes retouches', async () => {
+          await app.click('button[data-action="board"]');
+          await sleep(1500);
+          await places.agree('the blackboard in the three places');
+          await places.samePixels('the blackboard on');
+        });
+
+        await rounds('au tableau noir');
+
+        await check('le tableau noir coupé : les mêmes pixels, et aucune trace des retouches dans le compte des traits', async () => {
+          await app.click('button[data-action="board"]');
+          await sleep(1500);
+          await places.agree('the paper back');
+          await places.samePixels('the blackboard off');
+          model.check('at the end');
+          if (browser) assertNoBrowserProblem(browser);
+        });
+      } finally {
+        presentation?.close();
+        stream?.close();
+        await browser?.close();
       }
     },
   },

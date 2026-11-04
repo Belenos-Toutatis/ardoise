@@ -16,7 +16,9 @@
 // - live: the frame intervals while the simulated tablet (`--simulated-tablet`) streams handwriting at 200 samples
 //   per second to the live view.
 // - touchup (M12): the same on a loaded page (a resumed sheet of 4 000 strokes) while touch-ups arrive through the real
-//   interface: a lasso, a colour, Delete, Ctrl+Z, Ctrl+Z, Ctrl+Y, Ctrl+Z, again and again.
+//   interface: a lasso, a colour, Delete, Ctrl+Z, Ctrl+Z, Ctrl+Y, Ctrl+Z, again and again. Also the time of one edit: the
+//   longest frame just after each edit (what one edit costs on screen), and, on the same page, after a full redraw of
+//   the cache (`repaintFromScratch` of the canvas: what an edit would cost without the repaint of an area).
 import { execFileSync, spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -47,6 +49,10 @@ const TOUCHUP_IDLE_MS = 4000;
 /** Strokes of a touch-up's lasso: 5 rows of 20 columns of the grid. */
 const LASSO_ROWS = 5;
 const LASSO_COLUMNS = 20;
+/** An edit is followed for this long: its frame comes within it, and the next edit does not (the script waits 250 ms). */
+const EDIT_WINDOW_MS = 230;
+/** Full redraws of the cache timed on the page once the touch-ups are over. */
+const FULL_REDRAWS = 10;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (...parts) => console.error(...parts);
@@ -260,6 +266,72 @@ const FRAMES = (ms) => `new Promise((resolve) => {
   requestAnimationFrame(step);
 })`;
 
+/** In the page: what the canvas counted of the redraws of its cache. */
+const REDRAWS = `(() => {
+  const data = document.querySelector('canvas.live-canvas').dataset;
+  return { full: Number(data.fullRedraws ?? 0), partial: Number(data.partialRedraws ?? 0) };
+})()`;
+
+/** In the page: the same, each interval with the time it ended. */
+const STAMPED_FRAMES = (ms) => `new Promise((resolve) => {
+  const intervals = [];
+  const ends = [];
+  let last = null;
+  let first = null;
+  const step = (now) => {
+    first ??= now;
+    if (last !== null) {
+      intervals.push(now - last);
+      ends.push(now);
+    }
+    last = now;
+    if (now - first < ${ms}) requestAnimationFrame(step);
+    else resolve({ intervals, ends });
+  };
+  requestAnimationFrame(step);
+})`;
+
+/**
+ * In the page: the longest frame after each of `FULL_REDRAWS` full redraws of the cache (a frame apart from the next, and
+ * time left in between), and how long the calls took. Null on an executable without the hook.
+ */
+const FULL_REDRAW_FRAMES = `new Promise((resolve) => {
+  const canvas = document.querySelector('canvas.live-canvas');
+  if (!canvas.repaintFromScratch) {
+    resolve(null);
+    return;
+  }
+  const frames = [];
+  const calls = [];
+  let left = ${FULL_REDRAWS};
+  let wait = 20;
+  let longest = 0;
+  let last = null;
+  let following = false;
+  const step = (now) => {
+    if (last !== null && following) longest = Math.max(longest, now - last);
+    last = now;
+    if (--wait > 0) {
+      requestAnimationFrame(step);
+      return;
+    }
+    if (following) frames.push(longest);
+    if (left === 0) {
+      resolve({ frames, calls });
+      return;
+    }
+    left -= 1;
+    const started = performance.now();
+    canvas.repaintFromScratch();
+    calls.push(performance.now() - started);
+    following = true;
+    longest = 0;
+    wait = 14;
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+})`;
+
 /** One start on `appExe`: the time to the listed library, then (library parts) the thumbnails and the scroll. */
 async function openLibrary({ appExe, local, full }) {
   const app = await start({ appExe, local });
@@ -329,7 +401,8 @@ async function measureLive(local) {
  * `LOADED_COLUMNS` short strokes, put in the library before the start and resumed from its card's menu; the simulated
  * tablet writes on it. While the frame intervals are recorded in the page, this script plays a teacher through the real
  * interface (mouse and keys of the DevTools protocol): Select tool, a lasso around 100 strokes, a colour swatch, Delete,
- * Ctrl+Z twice (the deletion, the colour), Ctrl+Y and Ctrl+Z again, then the next place on the page.
+ * Ctrl+Z twice (the deletion, the colour), Ctrl+Y and Ctrl+Z again, then the next place on the page. The script notes the
+ * page's clock before each edit, to find the frames that follow it.
  */
 async function measureLiveTouchUp(local) {
   const { sheet } = await import('./journeys-m12-resume.mjs');
@@ -427,44 +500,70 @@ async function measureLiveTouchUp(local) {
     };
 
     const before = await app.evaluate(strokes);
+    await app.evaluate(`performance.clearMeasures(); 0`);
+    const redrawsBefore = await app.evaluate(REDRAWS);
     let finished = false;
-    const frames = app.evaluate(FRAMES(TOUCHUP_MEASURE_MS)).then((intervals) => {
+    const frames = app.evaluate(STAMPED_FRAMES(TOUCHUP_MEASURE_MS)).then((measured) => {
       finished = true;
-      return intervals;
+      return measured;
     });
     const removed = [];
     let iterations = 0;
+    /** The page's clock just before each gesture of the script, and what it was (`kind`). */
+    const gestures = [];
+    const note = async (kind) => gestures.push({ kind, at: await app.evaluate(`performance.now()`) });
+    const noteEdit = (kind) => note(`edit ${kind}`);
     // A whole iteration is always finished, so that the page ends as it began (apart from what the tablet wrote).
     while (!finished || iterations === 0) {
       const rect = places[iterations % places.length];
+      await note('lasso');
       await lasso(rect);
+      await note('lasso released');
       await app.waitFor(`${barCount} > 0`, 'the lasso to choose strokes', 10_000);
       const picked = await app.evaluate(barCount);
       await sleep(120);
       await app.mouse('mouseMoved', geometry.swatch.x, geometry.swatch.y);
+      await noteEdit('colour');
       await app.mouse('mousePressed', geometry.swatch.x, geometry.swatch.y, { buttons: 1 });
       await app.mouse('mouseReleased', geometry.swatch.x, geometry.swatch.y);
       await sleep(250);
       const full = await app.evaluate(strokes);
+      await noteEdit('delete');
       await app.key('Delete');
       // The deletion must show: the count falls by the strokes chosen (the tablet adds one now and then).
       await app.waitFor(`${strokes} <= ${full} - ${Math.max(1, picked - 5)}`, 'the deletion to reach the canvas', 10_000);
       removed.push(full - (await app.evaluate(strokes)));
       await sleep(250);
-      await app.key('z', { ctrl: true });
-      await sleep(250);
-      await app.key('z', { ctrl: true });
-      await sleep(250);
-      await app.key('y', { ctrl: true });
-      await sleep(250);
-      await app.key('z', { ctrl: true });
-      await sleep(250);
+      for (const [key, what] of [['z', 'undo delete'], ['z', 'undo colour'], ['y', 'redo colour'], ['z', 'undo colour']]) {
+        await noteEdit(what);
+        await app.key(key, { ctrl: true });
+        await sleep(250);
+      }
       iterations++;
     }
-    const intervals = await frames;
+    const { intervals, ends } = await frames;
     const after = await app.evaluate(strokes);
+    // The longest frame after each edit of the measure; the edits made once it was over have no frames.
+    const editFrames = gestures
+      .filter(({ kind, at }) => kind.startsWith('edit') && at + EDIT_WINDOW_MS <= ends[ends.length - 1])
+      .map(({ at }) => Math.max(0, ...intervals.filter((_, k) => ends[k] > at && ends[k] <= at + EDIT_WINDOW_MS)));
+    // Which gesture each late frame came after: where to look when frames are missed.
+    intervals.forEach((ms, k) => {
+      if (ms <= 25) return;
+      const gesture = gestures.findLast(({ at }) => at < ends[k]);
+      log(`  late frame: ${ms.toFixed(1)} ms, after « ${gesture?.kind ?? 'nothing'} » by ${gesture ? (ends[k] - gesture.at).toFixed(0) : '-'} ms`);
+    });
+    const redrawsAfter = await app.evaluate(REDRAWS);
+    const editCalls = await app.evaluate(`performance.getEntriesByName('ardoise:live-partial-redraw').map((m) => m.duration)`);
+    const fullRedraw = await app.evaluate(FULL_REDRAW_FRAMES);
     return {
       intervals,
+      editFrames,
+      editCalls,
+      fullRedrawFrames: fullRedraw?.frames ?? [],
+      fullRedrawCalls: fullRedraw?.calls ?? [],
+      partialRedraws: redrawsAfter.partial - redrawsBefore.partial,
+      fullRedraws: redrawsAfter.full - redrawsBefore.full,
       idleIntervals,
       strokesBefore: before,
       strokesAfter: after,
