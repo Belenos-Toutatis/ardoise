@@ -231,6 +231,20 @@ function snapshot(): LiveSnapshot {
 
 function broadcast(events: LiveEvent[]): void {
   if (events.length === 0) return;
+  // Like Rust: a snapshot does not hold the stroke in progress, so it is followed by it.
+  const last = events.map((e) => e.type).lastIndexOf('snapshot');
+  const drawing = session?.current;
+  if (last >= 0 && drawing && !events.slice(last).some((e) => e.type === 'strokeStart')) {
+    const { points, ...style } = drawing;
+    events = [
+      ...events,
+      {
+        type: 'strokeStart',
+        pageIndex: session!.pageIndex,
+        stroke: { ...style, points: points.map((p) => ({ x: p.x, y: p.y, p: p.pressure, t: p.t, recv: wallClock() })) },
+      },
+    ];
+  }
   const batch: LiveBatch = { events, sentAt: wallClock() };
   for (const subscriber of [...subscribers]) subscriber(copy(batch));
 }

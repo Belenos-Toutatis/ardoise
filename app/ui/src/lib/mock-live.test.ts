@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LiveBatch, LiveEvent, LiveSnapshot, MonitorInfo } from './live';
+import { LiveState } from './live-state.svelte';
 import { mockLibrary, resetMockLibrary } from './mock-data';
 import {
   mockLiveConfig,
@@ -168,6 +169,31 @@ describe('browser stand-in for live mode', () => {
     invoke('live_set_view', { view: { ...view, board: false } });
     expect(sub.last()?.page.background.paper).toBe('white');
     expect(sub.last()?.style).toEqual(red);
+  });
+
+  it('follows a snapshot with the stroke in progress, so a window never holds a partial stroke', async () => {
+    const live = new LiveState();
+    const sub = await subscribe();
+    const snapshot = invoke('live_start') as LiveSnapshot;
+    live.initial(snapshot);
+    const feed = sub.batches.length;
+    const fed = () => sub.batches.slice(feed).forEach((b) => live.receive(b));
+    vi.advanceTimersByTime(mockLiveConfig.waitMs);
+    // Until the pen is down for a while: a stroke in progress.
+    let guard = 0;
+    while ((live.current?.points.length ?? 0) < 4 && guard++ < 1000) {
+      vi.advanceTimersByTime(15);
+      fed();
+      sub.batches.splice(feed);
+    }
+    expect(live.current).not.toBeNull();
+    const finished = live.strokes.length;
+    const red = { tool: 'feltTip', color: { r: 216, g: 0, b: 0, a: 255 }, width: 120 };
+    invoke('live_set_style', { style: red });
+    fed();
+    expect(live.strokes).toHaveLength(finished);
+    expect(live.current?.points.length ?? 0).toBeGreaterThanOrEqual(4);
+    expect(live.strokeCount).toBe(finished + 1);
   });
 
   it('holds the tablet landscape by default and portrait notes follow the position', async () => {

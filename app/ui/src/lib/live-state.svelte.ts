@@ -14,8 +14,10 @@
  *   each `marks` event; the viewers of the share draw them, the windows draw their own).
  *
  * Assumptions about the Rust side (package B), each handled both ways where it is unclear:
- * - (supposé) A snapshot's `page.strokes` holds the finished strokes only. If its last stroke is
- *   the one in progress here (same start), it is not drawn twice.
+ * - A snapshot's `page.strokes` holds the finished strokes only, and it ends the stroke in
+ *   progress here: Rust follows a snapshot with a `strokeStart` carrying the points sent so far
+ *   when a stroke is in progress (and with nothing when there is none, as after clearing the
+ *   page), so the window never finishes a partial stroke into `strokes`.
  * - (supposé) `points` without a `strokeStart` (subscribed in the middle of a stroke) start a
  *   stroke with the current style and layer.
  * - (supposé) `saved` events may carry every path saved so far or only the new ones: they are
@@ -71,12 +73,6 @@ function sameColor(a: Rgba, b: Rgba): boolean {
 
 export function sameStyle(a: LiveStyle, b: LiveStyle): boolean {
   return a.tool === b.tool && a.width === b.width && sameColor(a.color, b.color);
-}
-
-function sameStart(a: Stroke, b: Stroke): boolean {
-  const p = a.points[0];
-  const q = b.points[0];
-  return a.tool === b.tool && a.layer === b.layer && !!p && !!q && p.x === q.x && p.y === q.y && p.t === q.t;
 }
 
 /** Same strokes, compared cheaply (style, sample count, first and last sample). */
@@ -288,16 +284,12 @@ export class LiveState {
 
   private applySnapshot(s: LiveSnapshot): void {
     const samePage = this.ready && s.pageIndex === this.pageIndex && s.page.id === this.noteId;
-    let incoming = s.page.strokes;
-    if (!samePage) {
-      this.current = null;
-      this.marks = [];
-    } else if (this.current && incoming.length > 0 && sameStart(incoming[incoming.length - 1], this.current)) {
-      // The stroke in progress is already in the page: it stays the one drawn as in progress.
-      incoming = incoming.slice(0, -1);
-    }
-    if (!samePage || !sameStrokes(this.strokes, incoming)) {
-      this.strokes = [...incoming];
+    // The stroke in progress is not in the page; if there is one, the `strokeStart` that follows
+    // brings it back. Kept here, that event would finish it as a partial stroke of the page.
+    this.current = null;
+    if (!samePage) this.marks = [];
+    if (!samePage || !sameStrokes(this.strokes, s.page.strokes)) {
+      this.strokes = [...s.page.strokes];
       this.generation += 1;
     }
     this.ready = true;
@@ -317,7 +309,7 @@ export class LiveState {
     this.hover = s.hover;
     if (JSON.stringify(this.presentation) !== JSON.stringify(s.presentation)) this.presentation = s.presentation;
     this.mergeSaved(s.saved);
-    this.strokeCount = this.strokes.length + (this.current ? 1 : 0);
+    this.strokeCount = this.strokes.length;
   }
 
   // --- Changes made in this window ------------------------------------------------------------
