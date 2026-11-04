@@ -279,6 +279,56 @@ closes the window.
 If a note of the session is renamed or tagged during the lesson (by the assistant, for instance), the following pages
 keep being written to it instead of being duplicated.
 
+### Resuming live mode on a sheet
+
+*Needs the tablet.* Was the lesson interrupted, or do you want to add writing to a sheet you already saved? You can
+resume live mode on that sheet.
+
+- **From the library**: open the **⋯** menu of the note's card and choose **Resume in live mode**.
+- **From the editor**: click **Resume in live mode** in the toolbar. If there are unsaved changes, Ardoise asks:
+  **Save and resume live mode**, **Resume without saving** or **Stay**.
+
+The button is greyed out while the tablet is not registered or is busy (sync under way). Select one note only.
+
+**What happens**
+
+- The control window, the presentation and the other screen on the network show the sheet with its background
+  (template, texture, image or PDF page) and its strokes. What you write is added, on the last visible layer. Hidden
+  layers are never shown in the presentation or on the other screen.
+- **The note itself is written**: same file, same title, no copy. Its background image, its original, its narration,
+  its recognised text and everything else it holds are kept. If you draw nothing, the file is not touched.
+- **The blackboard** does not make you lose the sheet's background: when you leave it, you get the sheet's paper and
+  image back.
+- **The format**: if the sheet is not the size of the tablet, what you write is scaled down or up to fit whole inside
+  the sheet, centred, without distortion. The width of the stroke does not change.
+- **The orientation**: the sheet is never turned. If it is landscape and the tablet is set to portrait (or the other
+  way round), a notice tells you how to hold the tablet: "To write on this sheet, hold the tablet like this: …". The
+  four position buttons are greyed out for this sheet.
+- **The next page** creates a new note, at the root of the library, and follows the position set for the tablet again:
+  the position buttons then work.
+- **The narration**: if you record, the sound is added after the old one without covering it, and the replay stays
+  right despite the time between the two sessions.
+- **Finish** saves the note as usual (counter "N notes saved").
+
+**Back to the original, after a resume.** The note keeps its *first version* (see chapter 8, "Back to the original").
+A resume does not make a new one each time:
+
+- a note that has ink but no original (written live, imported, made in Ardoise) gets the sheet *as it was before the
+  resume*;
+- a note received from the tablet gets the page *as it was synced*;
+- a note that was already edited gets *its first version*, not the state just before the resume;
+- an empty note has no original.
+
+Only the page size, the layers, the strokes and the place of the background image come back; the title, tags,
+favourite, paper and narration stay as they are.
+
+**If the sheet changes elsewhere during live mode** (a copy arrives through Nextcloud, or the note is changed or deleted
+on another PC), Ardoise overwrites nothing. A notice appears: "This sheet was changed elsewhere during live mode: so
+that nothing is overwritten, the writing continues in a new note, next to it." (or "deleted elsewhere" if the file is
+gone). The new note is in the same binder, with the sheet's image, original and narration; the version written elsewhere
+stays as it is. Close the notice with **Dismiss the message**. A mere change of title, tag or favourite made elsewhere
+does not create a new note.
+
 ### The control window
 
 - **Tool** (ballpoint, fountain pen, felt-tip, pencil, brush, highlighter, chalk), **Colour** (including **Chalk white**
@@ -672,7 +722,8 @@ For a note received from the tablet, **Back to the original** (in the **Original
 arrived, without your edits. Ardoise spells out what is lost (strokes added, erased, moved, layers, rotation, format)
 and what stays (title, tags, favourite, paper, narration, background image). The action can be undone (`Ctrl + Z`); then
 save to keep it. For a note that has never been modified there is no original yet: Ardoise keeps the previous version
-the first time you save a change of the ink.
+the first time you save a change of the ink, or the time live mode resumes the sheet and writes on it (see chapter 6).
+The original is always the *first* version of the note, never the state just before the last change.
 
 ## 9. Replay, narration and video
 

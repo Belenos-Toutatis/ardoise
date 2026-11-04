@@ -399,3 +399,98 @@ Ce qui ne revient pas tout seul :
 | Si Windows a redemandé l'autorisation au deuxième lancement, après un changement de port, après une copie ou un renommage de l'exe ; si le nouveau code est bien différent | G2, G4, G5, G7 |
 | Si un partage relancé aussitôt a retrouvé son port | G8 |
 | Le port utilisé s'il a été changé dans `ardoise.toml` | A, G5 |
+
+
+---
+
+## H5 — Reprendre une feuille en mode direct
+
+**Durée** : 40 à 50 minutes. **Matériel** : le PC d'Ardoise avec la vraie tablette (chargée, dongle branché, téléphone Bluetooth **coupé**), le **vidéoprojecteur** de la salle en bureau étendu, un **second ordinateur sur le même réseau** (celui du partage, voir H4) et une **tablette ou un téléphone** pour filmer ou regarder la page partagée. Ce test suppose que H1 à H4 ont réussi.
+
+Ce test vérifie la reprise d'une feuille (SPEC §4.2, `docs/questions.md` Q9) avec la vraie tablette : continuer à écrire dans une note existante après une interruption, ce que la tablette envoie quand la feuille n'a pas son format ni sa position, le fond de la feuille au vidéoprojecteur et sur l'autre écran, la page suivante, l'original, et une feuille qui change ailleurs. Les libellés ci-dessous sont ceux de la fenêtre ; les parties A à H demandent la tablette.
+
+### À la maison, avant
+
+1. Fermer Ardoise sur tous les PC, puis remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version.
+2. Ne **pas** utiliser `--simulated-tablet`.
+3. Préparer **trois notes** dans un classeur « Essai H5 » (**Créer une note**, **Depuis un PDF ou une image**) :
+   - **« Fiche image »** : une note faite à partir d'une **image** (une photo de fiche, un schéma), en paysage, avec quelques traits écrits dans l'éditeur, puis **enregistrée**. Si possible, enregistrer aussi une **narration** de quelques secondes (**Relecture**, **Narration**) et laisser Ardoise reconnaître l'écriture.
+   - **« Fiche portrait »** : une note **en portrait** (A4 portrait, papier ligné), avec quelques traits.
+   - **« Fiche tablette »** : une note venue de la tablette par la synchronisation (n'y toucher ni dans l'éditeur ni ailleurs).
+4. Noter pour chacune le **nombre de traits** (ouvrir la note dans l'éditeur) et copier le fichier `.ardoise` de « Fiche image » ailleurs (hors de la bibliothèque), pour comparer ensuite.
+
+### Au travail
+
+#### A. Interrompre, puis reprendre depuis la bibliothèque
+
+1. Lancer `ardoise.exe`, ouvrir le **Mode direct**, écrire quelques mots, puis **Terminer** : les notes sont enregistrées (le compteur le dit). Noter le nom de la dernière.
+2. Dans la bibliothèque, ouvrir le menu **⋯** de la carte de « Fiche image » et choisir **Reprendre en mode direct**. La fenêtre du mode direct doit s'ouvrir **sur cette feuille** : ses traits et son **image de fond** sont visibles dans l'aperçu, à leur place. Noter si l'état passe à **En direct** tout seul, ou s'il faut appuyer sur le bouton de la tablette.
+3. Écrire sur la tablette un mot et un trait qui **traverse** la page. Noter si le tracé apparaît **au bon endroit** de la feuille (le coin en haut à gauche de la tablette est-il en haut à gauche de la feuille ?), s'il est de la bonne taille et sans déformation, et la latence affichée.
+4. **Terminer**. Dans la bibliothèque, vérifier qu'il n'y a **toujours qu'une** carte « Fiche image » (pas de copie) et qu'elle montre les nouveaux traits. L'ouvrir dans l'éditeur : les traits d'avant sont **inchangés**, l'**image de fond** est là, la **narration** se rejoue, **Revenir à l'original** est proposé. Comparer le fichier avec la copie de l'étape « À la maison » (même nom, même image).
+5. Reprendre « Fiche image » **sans rien écrire** (ne pas toucher la tablette, **Terminer** aussitôt) : le fichier ne doit pas avoir changé (même date de modification dans l'Explorateur).
+
+#### B. Reprendre depuis l'éditeur
+
+1. Ouvrir « Fiche portrait » dans l'éditeur, tracer un trait (sans enregistrer), cliquer sur **Reprendre en mode direct** dans la barre d'outils. Une boîte propose **Enregistrer et reprendre le direct**, **Reprendre sans enregistrer**, **Rester** : choisir la première. La feuille s'ouvre en direct **avec le trait tracé**.
+2. Écrire un mot sur la tablette. **Terminer**, rouvrir la note : le trait tracé dans l'éditeur et le mot de la tablette y sont.
+
+#### C. Format et position de la tablette
+
+La tablette est tenue **en paysage** (réglage « Paysage, bouton en bas »).
+
+1. Reprendre « Fiche portrait » (feuille en portrait). Un **avis** doit dire comment tenir la tablette (par exemple « Pour écrire sur cette feuille, tenez la tablette ainsi : Portrait, bouton à gauche »). Les **quatre boutons de position** de la fenêtre de commande sont **grisés**. Noter le texte exact de l'avis.
+2. Tenir la tablette **comme l'avis le dit** et écrire une ligne de haut en bas puis de gauche à droite : le tracé suit-il le sens de la main ? La feuille reste-t-elle **dans le même sens** (elle n'est pas tournée) ? Noter si l'écriture est de la bonne taille et centrée sur la feuille, avec ses bords (la tablette n'a pas le format de la feuille : une marge peut rester vide).
+3. **Tenir la tablette autrement** que l'avis (l'autre sens) et écrire : noter ce qui apparaît (le tracé est tourné, mais la feuille ne l'est pas ; est-ce clair pour l'utilisateur ?).
+4. Cliquer sur **Page suivante** : une nouvelle page s'ouvre, **les boutons de position fonctionnent de nouveau** et suivent le réglage de la tablette. Écrire un mot, **Terminer** : la nouvelle page est une **note neuve** à la racine de la bibliothèque, « Fiche portrait » n'a pas changé de nom ni d'emplacement.
+5. Recommencer avec « Fiche image » (paysage) et la tablette réglée en **portrait** (panneau **Tablette** > **Position**) : l'avis demande de tenir la tablette en paysage. Remettre ensuite le réglage habituel.
+
+#### D. Le fond au vidéoprojecteur et sur l'autre écran
+
+1. Reprendre « Fiche image ». **Projeter** sur le vidéoprojecteur (section **Projection**) : l'**image de fond** doit être visible à l'écran projeté, **au même endroit** que dans la fenêtre de commande, avec les traits. Noter si elle est nette à la taille du projecteur et si le zoom (molette, **Largeur**) la garde alignée avec l'écriture.
+2. **Partager sur le réseau** (voir H4) et se connecter depuis le second ordinateur : la page montre l'image de fond et les traits. Écrire : les nouveaux traits arrivent sur les deux écrans. Noter le délai perçu.
+3. Activer le **Tableau noir** puis le désactiver : le fond de la feuille doit **revenir** (papier et image). Noter ce qu'on voit pendant le tableau noir.
+4. Si « Fiche image » a un calque masqué : il ne doit apparaître **ni au projecteur ni sur l'autre écran**.
+5. Arrêter le partage et la projection, **Terminer**.
+
+#### E. L'original après la reprise
+
+1. Ouvrir « Fiche tablette » dans l'éditeur, noter ses traits, puis la reprendre en direct, écrire un mot, **Terminer**.
+2. La rouvrir et cliquer sur **Revenir à l'original** : l'encre doit redevenir **la page telle qu'elle a été synchronisée** (sans le mot écrit en direct). Ne pas enregistrer (**Ctrl + Z**).
+3. Faire de même avec une note **écrite dans Ardoise puis déjà modifiée** (par exemple « Fiche image » après A) : **Revenir à l'original** rend la **première version** de la note, pas l'état d'avant la dernière reprise. Noter ce qui revient.
+
+#### F. La feuille change ailleurs pendant le direct
+
+1. Sur le PC d'Ardoise, reprendre « Fiche portrait » ; garder le mode direct ouvert.
+2. Depuis **un second PC**, ouvrir la même note (même bibliothèque Nextcloud), tracer un trait et enregistrer. Attendre que Nextcloud ait synchronisé le fichier sur le PC d'Ardoise.
+3. Écrire quelques traits sur la tablette et attendre une dizaine de secondes. Un **avis** doit apparaître (« Cette feuille a été modifiée ailleurs pendant le direct… »). **Terminer**.
+4. Dans la bibliothèque, il y a **deux notes** dans le même classeur : celle du second PC, **intacte** (avec son trait, pas celui de la tablette), et une nouvelle avec l'image, l'original et l'écriture de la tablette. Noter le titre et le nom du fichier de la nouvelle note.
+5. *Facultatif* : même chose en **supprimant** la note depuis le second PC : l'avis dit qu'elle a été supprimée, l'écriture continue dans une nouvelle note.
+
+#### G. Coupure et reprise
+
+1. Reprendre une feuille, écrire, puis **éteindre la tablette** (ou la sortir de la portée) quelques secondes : l'état passe à **Reconnexion…**, puis le tracé reprend sur la même feuille. Noter la durée.
+2. Reprendre une feuille avec une **narration** ancienne, enregistrer une narration pendant le direct, **Terminer**, rouvrir et lancer la **Relecture** : l'ancienne et la nouvelle narration sont audibles, au bon moment du tracé (la nouvelle après l'ancienne).
+
+#### H. Retouches pendant le direct *(à compléter quand elles seront livrées)*
+
+À remplir avec la livraison des retouches (jalon M12, suite) : sélection dans la fenêtre de commande (lasso, clic), suppression, changement de couleur, annulation avec `Ctrl + Z`, pendant que la tablette écrit et que le vidéoprojecteur et l'autre écran regardent. Rien de la sélection ne doit apparaître au vidéoprojecteur ni sur l'autre écran, seulement le résultat.
+
+### Ce qui revient par Nextcloud
+
+- Les notes de l'essai (« Essai H5 ») et les notes écrites en direct pendant le test.
+- Dans `<bibliothèque>\_ardoise\diagnostics\` : un journal seulement en cas d'erreur de la tablette ou d'une session de mode direct anormale.
+
+### À me signaler
+
+Ce qui ne revient pas tout seul :
+
+| Quoi | Où |
+|---|---|
+| Si le tracé arrive **au bon endroit** de la feuille reprise, à la bonne taille et sans déformation, quand la feuille n'a pas le format de la tablette | A3, C2 |
+| Le **texte exact de l'avis** sur la position de la tablette, si la position conseillée est la bonne pour la main, et ce qui se passe quand on tient la tablette dans l'autre sens | C1, C3, C5 |
+| Si une reprise sans écriture a laissé le fichier intact (date de modification) | A5 |
+| Si les traits d'avant, l'image de fond, la narration, l'original sont intacts après la reprise | A4 |
+| Si l'image de fond est nette et bien alignée avec les traits au vidéoprojecteur et sur l'autre écran, aussi en zoom, et ce que fait le tableau noir | D1 à D3 |
+| Ce que rend **Revenir à l'original** pour une note de la tablette, et pour une note déjà modifiée | E |
+| Le texte de l'avis « modifiée ailleurs » ou « supprimée ailleurs », les deux notes obtenues (titres, noms de fichiers) et si Nextcloud a créé une copie en conflit en plus | F |
+| La reprise après une coupure de la tablette, et la relecture avec deux narrations | G |
