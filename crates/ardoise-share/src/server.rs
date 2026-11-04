@@ -11,7 +11,9 @@
 //! room a connection is closed for the newcomer by fair share: one still waiting for its request
 //! head, else a request of the address that holds the most slots if it holds at least two more
 //! (never an event stream). An address may open an event stream only so often (each one copies
-//! the whole page).
+//! the whole page). The one long answer is the picture of the paper (`GET /paper/<key>`): for those
+//! who joined, it goes as slowly as the client reads, within a time limit, as a request that makes
+//! room like any other.
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
@@ -22,7 +24,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use serde::Deserialize;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::{Notify, watch};
@@ -36,12 +38,15 @@ use crate::journal::Journal;
 use crate::{Assets, Limits, LiveFeed, OnChange, ShareConfig, ShareError, ShareStatus};
 
 /// Time to write an answer: the largest, a script of about 200 KB, takes milliseconds on a
-/// LAN; a client that does not read must not hold its slot long.
+/// LAN; a client that does not read must not hold its slot long. Not the picture of the paper,
+/// which may weigh 10 MB on a shared Wi-Fi: see [`Limits::stall`] and [`Limits::paper_answer`].
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Connections waiting to be accepted (std's value).
 const LISTEN_BACKLOG: u32 = 128;
-/// Time to write one batch of messages to an event stream before the viewer counts as gone.
-const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long answers are cut: each piece must go within [`Limits::stall`].
+const WRITE_PIECE: usize = 64 * 1024;
+/// The start of the address of the paper's picture (`GET /paper/<key>`).
+const PAPER_ROUTE: &str = "/paper/";
 /// After an answer, how long the server waits for the client to close (reading its leftovers,
 /// up to `LINGER_BYTES`) before it closes the socket itself, as most servers do: the side that
 /// closes first keeps the connection's address pair reserved for 2 minutes (TIME_WAIT), better
@@ -581,6 +586,9 @@ impl Server {
         let address = peer.ip();
         match (head.method.as_str(), head.path()) {
             ("GET", "/events") => self.events(stream, &head, address, id, shutdown).await,
+            ("GET", path) if path.starts_with(PAPER_ROUTE) => {
+                self.paper(stream, &head, id, shutdown).await;
+            }
             ("POST", "/join") => {
                 let answer = tokio::select! {
                     answer = timeout_at(deadline, self.join(&mut stream, &head, rest, address)) => answer,
@@ -696,6 +704,76 @@ impl Server {
         Some(answer)
     }
 
+    /// Whether the request carries a session token of this share.
+    fn authorised(&self, head: &Head) -> bool {
+        let access = lock(&self.access);
+        head.session_cookies
+            .iter()
+            .fold(false, |found, token| found | access.token_valid(token))
+    }
+
+    /// `GET /paper/<key>` on the connection `id`: with the cookie, the picture of the paper of what
+    /// is shown if `<key>` is its key, a complete answer with its length; anything else is 404. The
+    /// key is only compared, nothing is looked up from it. The answer ends when the client stops
+    /// reading, after [`Limits::paper_answer`], when this is no longer the picture (it is then
+    /// dropped, not kept for a slow client), or at stop; the client tries again if it still wants it.
+    async fn paper(
+        &self,
+        mut stream: TcpStream,
+        head: &Head,
+        id: u64,
+        shutdown: &mut watch::Receiver<bool>,
+    ) {
+        if !self.authorised(head) {
+            self.answer(id, stream, &http::text(401, &[]), &[], shutdown)
+                .await;
+            return;
+        }
+        let found = head
+            .path()
+            .strip_prefix(PAPER_ROUTE)
+            .and_then(|key| self.content.paper(key));
+        let Some((picture, mut served)) = found else {
+            self.answer(id, stream, &http::text(404, &[]), &[], shutdown)
+                .await;
+            return;
+        };
+        let answer = ResponseHead::new(200)
+            .header("Content-Type", "image/png")
+            .header("Content-Length", &picture.png.len().to_string())
+            // Another picture may come under this address (the file got other pixels), and a
+            // teacher's picture has no reason to stay on a pupil's PC or in a proxy.
+            .header("Cache-Control", http::NO_STORE)
+            .finish();
+        let started = Instant::now();
+        let stall = self.limits.stall;
+        let unfinished = tokio::select! {
+            written = timeout(self.limits.paper_answer, async {
+                write_paced(&mut stream, &answer, stall).await?;
+                write_paced(&mut stream, &picture.png, stall).await
+            }) => match written {
+                Ok(Ok(())) => None,
+                Ok(Err(_)) => Some("the client left or stopped reading"),
+                Err(_) => Some("too slow"),
+            },
+            _ = no_longer_served(&mut served, picture.frame()) => Some("it is no longer shown"),
+            _ = stopping(shutdown) => Some("the share stops"),
+        };
+        let milliseconds = started.elapsed().as_millis();
+        if let Some(why) = unfinished {
+            self.note(format_args!(
+                "#{id} picture not finished after {milliseconds} ms: {why}"
+            ));
+            return;
+        }
+        self.note(format_args!(
+            "#{id} answered 200 in {milliseconds} ms ({} bytes)",
+            picture.png.len()
+        ));
+        drop(picture);
+        linger(stream, shutdown).await;
+    }
+
     /// `GET /events` on the connection `id`: checks the cookie and how often this address
     /// opens streams, then holds the stream open until the viewer leaves, is too slow, or the
     /// share stops.
@@ -707,13 +785,7 @@ impl Server {
         id: u64,
         shutdown: &mut watch::Receiver<bool>,
     ) {
-        let authorised = {
-            let access = lock(&self.access);
-            head.session_cookies
-                .iter()
-                .fold(false, |found, token| found | access.token_valid(token))
-        };
-        if !authorised {
+        if !self.authorised(head) {
             self.answer(id, stream, &http::text(401, &[]), &[], shutdown)
                 .await;
             return;
@@ -755,7 +827,11 @@ impl Server {
             }
         ));
         let started = Instant::now();
-        stream_events(stream, &viewer, self.limits.ping, head.proxied, shutdown).await;
+        let pace = StreamPace {
+            ping: self.limits.ping,
+            stall: self.limits.stall,
+        };
+        stream_events(stream, &viewer, pace, head.proxied, shutdown).await;
         self.note(format_args!(
             "#{id} stream closed after {:.1} s",
             started.elapsed().as_secs_f64()
@@ -780,7 +856,11 @@ fn describe(head: &Head) -> String {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
     });
-    let route = if matches!(path, "/" | "/join" | "/events") || asset {
+    // A key is a digest that the share sent: whatever was typed, only hexadecimal digits are written.
+    let paper = path.strip_prefix(PAPER_ROUTE).is_some_and(|key| {
+        !key.is_empty() && key.len() <= 64 && key.bytes().all(|b| b.is_ascii_hexdigit())
+    });
+    let route = if matches!(path, "/" | "/join" | "/events") || asset || paper {
         path
     } else {
         "(other)"
@@ -814,6 +894,12 @@ impl Drop for Leave<'_> {
 async fn stopping(shutdown: &mut watch::Receiver<bool>) {
     // The guard `wait_for` returns is dropped here: it must not live across an await.
     let _ = shutdown.wait_for(|stop| *stop).await;
+}
+
+/// Wakes when `frame` is no longer the `livePaper` message of the picture served.
+async fn no_longer_served(served: &mut watch::Receiver<Option<Frame>>, frame: &Frame) {
+    // The guard `wait_for` returns is dropped here: it must not live across an await.
+    let _ = served.wait_for(|now| now.as_ref() != Some(frame)).await;
 }
 
 /// Reads a request head: the head and the bytes read after it. The first byte must arrive by
@@ -881,10 +967,13 @@ async fn reply(
         }) => matches!(written, Ok(Ok(()))),
         _ = stopping(shutdown) => false,
     };
-    if !written {
-        return;
+    if written {
+        linger(stream, shutdown).await;
     }
-    // No FIN from here yet: the client closes first (see `LINGER_TIME`).
+}
+
+/// After a whole answer. No FIN from here yet: the client closes first (see `LINGER_TIME`).
+async fn linger(mut stream: TcpStream, shutdown: &mut watch::Receiver<bool>) {
     let drain = async {
         let mut scratch = [0u8; 4096];
         let mut total = 0;
@@ -910,6 +999,31 @@ async fn reply(
     }
 }
 
+/// Writes `bytes` piece by piece, each within `stall`: however much there is, what counts is that
+/// the client keeps reading.
+async fn write_paced<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    bytes: &[u8],
+    stall: Duration,
+) -> std::io::Result<()> {
+    let too_long = |_| std::io::Error::from(std::io::ErrorKind::TimedOut);
+    for piece in bytes.chunks(WRITE_PIECE) {
+        timeout(stall, writer.write_all(piece))
+            .await
+            .map_err(too_long)??;
+    }
+    timeout(stall, writer.flush()).await.map_err(too_long)?
+}
+
+/// The times of an event stream.
+#[derive(Clone, Copy)]
+struct StreamPace {
+    /// Between two comments on an idle stream.
+    ping: Duration,
+    /// See [`Limits::stall`].
+    stall: Duration,
+}
+
 /// See `PROXY_PADDING_LINE`.
 fn proxy_padding() -> Vec<u8> {
     let mut line = vec![b' '; PROXY_PADDING_LINE];
@@ -922,10 +1036,11 @@ fn proxy_padding() -> Vec<u8> {
 async fn stream_events(
     stream: TcpStream,
     viewer: &Viewer,
-    ping_every: Duration,
+    pace: StreamPace,
     padded: bool,
     shutdown: &mut watch::Receiver<bool>,
 ) {
+    let stall = pace.stall;
     let (mut reader, mut writer) = stream.into_split();
     let mut head = ResponseHead::new(200)
         .header("Content-Type", "text/event-stream")
@@ -935,11 +1050,11 @@ async fn stream_events(
     if padded {
         head.extend_from_slice(&proxy_padding());
     }
-    if !write_stream(&mut writer, &head, viewer, shutdown).await {
+    if !write_stream(&mut writer, &head, viewer, stall, shutdown).await {
         return;
     }
     // A zero period would make the timer panic.
-    let ping_every = ping_every.max(Duration::from_millis(1));
+    let ping_every = pace.ping.max(Duration::from_millis(1));
     let mut ping = tokio::time::interval_at(Instant::now() + ping_every, ping_every);
     ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut scratch = [0u8; 64];
@@ -959,7 +1074,7 @@ async fn stream_events(
             return;
         }
         if !pending.frames.is_empty() {
-            if !write_frames(&mut writer, &pending.frames, viewer, shutdown).await {
+            if !write_frames(&mut writer, &pending.frames, viewer, stall, shutdown).await {
                 return;
             }
             viewer.written();
@@ -971,7 +1086,7 @@ async fn stream_events(
             _ = viewer.kicked() => {}
             _ = viewer.queued() => {}
             _ = ping.tick() => {
-                if !write_stream(&mut writer, PING, viewer, shutdown).await {
+                if !write_stream(&mut writer, PING, viewer, stall, shutdown).await {
                     return;
                 }
             }
@@ -988,6 +1103,7 @@ async fn write_frames(
     writer: &mut OwnedWriteHalf,
     frames: &[Frame],
     viewer: &Viewer,
+    stall: Duration,
     shutdown: &mut watch::Receiver<bool>,
 ) -> bool {
     let mut gathered: Vec<u8> = Vec::new();
@@ -996,47 +1112,48 @@ async fn write_frames(
             return true;
         }
         if frame.len() >= COALESCE_BYTES {
-            if !gathered.is_empty() && !write_stream(writer, &gathered, viewer, shutdown).await {
+            if !gathered.is_empty()
+                && !write_stream(writer, &gathered, viewer, stall, shutdown).await
+            {
                 return false;
             }
             gathered.clear();
-            if !write_stream(writer, frame, viewer, shutdown).await {
+            if !write_stream(writer, frame, viewer, stall, shutdown).await {
                 return false;
             }
         } else {
             gathered.extend_from_slice(frame);
             if gathered.len() >= COALESCE_BYTES {
-                if !write_stream(writer, &gathered, viewer, shutdown).await {
+                if !write_stream(writer, &gathered, viewer, stall, shutdown).await {
                     return false;
                 }
                 gathered.clear();
             }
         }
     }
-    gathered.is_empty() || write_stream(writer, &gathered, viewer, shutdown).await
+    gathered.is_empty() || write_stream(writer, &gathered, viewer, stall, shutdown).await
 }
 
-/// Writes and flushes `bytes`; false if the viewer is gone, too slow, or was kicked meanwhile.
-/// If the share stops meanwhile, the write gets [`END_TIMEOUT`] more to finish, so that `end`
+/// Writes and flushes `bytes`; false if the viewer is gone, stopped reading (`stall`), or was
+/// kicked meanwhile. A large message goes as slowly as the viewer reads (a note's paper on a shared
+/// Wi-Fi): what the viewer leaves behind is bounded by its queue. If the share stops meanwhile, the write gets [`END_TIMEOUT`] more to finish, so that `end`
 /// follows a whole message.
 async fn write_stream(
     writer: &mut OwnedWriteHalf,
     bytes: &[u8],
     viewer: &Viewer,
+    stall: Duration,
     shutdown: &mut watch::Receiver<bool>,
 ) -> bool {
-    let write = timeout(STREAM_WRITE_TIMEOUT, async {
-        writer.write_all(bytes).await?;
-        writer.flush().await
-    });
+    let write = write_paced(writer, bytes, stall);
     tokio::pin!(write);
     tokio::select! {
         biased;
-        written = &mut write => return matches!(written, Ok(Ok(()))),
+        written = &mut write => return written.is_ok(),
         _ = viewer.kicked() => return false,
         _ = stopping(shutdown) => {}
     }
-    matches!(timeout(END_TIMEOUT, &mut write).await, Ok(Ok(Ok(()))))
+    matches!(timeout(END_TIMEOUT, &mut write).await, Ok(Ok(())))
 }
 
 #[cfg(test)]

@@ -10,11 +10,12 @@
  *   one page, the whole page in view) in a fresh `LiveState`, so that the strokes are always
  *   drawn again (an eraser changes strokes in the middle, which a snapshot comparison would not
  *   see). `noteStrokes` add finished strokes at the end.
- * - `livePaper`: the picture of the paper of a live page that is not plain (a resumed sheet). It is
- *   kept apart from the sheet, which each `live` with `reset` replaces, and shown only while the
- *   page's snapshot asks for its key: a page change hides or shows it at once, in whatever order
- *   the snapshot and the picture arrive, and coming back to the sheet needs nothing from the PC,
- *   which sends each viewer a picture once.
+ * - `livePaper`: the paper of a live page that is not plain (a resumed sheet) can be fetched
+ *   (`PaperLoader`), apart from the stream: the paper colour shows meanwhile, and the strokes never
+ *   wait for it. The picture is kept apart from the sheet, which each `live` with `reset` replaces,
+ *   and shown only while the page's snapshot asks for its key: a page change hides or shows it at
+ *   once, in whatever order the snapshot and the picture arrive, and coming back to the sheet
+ *   fetches nothing.
  * - `view`: this screen's own view of the sheet (whole page, width, zoom, move; `ViewerView`),
  *   which survives the sheets replaced above and goes when the sheet goes (waiting, ended, code).
  */
@@ -23,6 +24,7 @@ import { DEFAULT_STYLE, LiveState } from './live-state.svelte';
 import type { Note, PageSize, Stroke } from './note';
 import type { ShareMessage, SharedPage } from './share';
 import type { StreamStatus } from './viewer-stream';
+import { PaperLoader, type LoadedPaper, type PaperEnv } from './viewer-paper';
 import { ViewerView } from './viewer-view.svelte';
 
 /** `connecting`: nothing received yet; `code`: the code is needed. */
@@ -79,24 +81,30 @@ export class ViewerState {
   paused = $state(false);
   /** The paper of the note, a PNG data URL; null for plain paper (and in live mode). */
   background = $state<string | null>(null);
-  /** The last picture of the paper of a live page. */
-  private livePaper = $state.raw<{ key: string; picture: string } | null>(null);
+  /** The last picture fetched of the paper of a live page. */
+  private livePaper = $state.raw<LoadedPaper | null>(null);
+  private readonly papers: PaperLoader;
   /** The sheet. Replaced (not reset) by each `note` and each `live` with `reset`: draw the one in hand. */
   live = $state.raw<LiveState>(new LiveState());
   /** How this screen shows the sheet: the PC's view, or its own. */
   readonly view = new ViewerView(() => ({ live: this.live, shown: this.shown }));
+
+  /** `paperEnv`: what the paper's fetches use of the browser (tests). */
+  constructor(paperEnv?: PaperEnv) {
+    this.papers = new PaperLoader((paper) => (this.livePaper = paper), paperEnv);
+  }
 
   /** Which content is on the sheet: `live` or `note`, else null. */
   get shown(): 'live' | 'note' | null {
     return this.screen === 'live' || this.screen === 'note' ? this.screen : null;
   }
 
-  /** The paper to draw under the sheet shown, a PNG data URL; null for the paper colour alone. */
+  /** The paper to draw under the sheet shown, a URL an image can load; null for the paper colour alone. */
   get paper(): string | null {
     if (this.screen === 'note') return this.background;
     if (this.screen !== 'live') return null;
     const paper = this.livePaper;
-    return paper && paper.key === this.live.paperKey ? paper.picture : null;
+    return paper && paper.key === this.live.paperKey ? paper.url : null;
   }
 
   /** The code was accepted: the form goes, the stream comes next (a `401` brings the form back). */
@@ -120,7 +128,7 @@ export class ViewerState {
         this.tooMany = false;
         this.paused = false;
         this.clear();
-        this.livePaper = null;
+        this.papers.forget();
         this.screen = 'code';
         break;
       case 'tooMany':
@@ -148,7 +156,7 @@ export class ViewerState {
         this.liveBatch(message.batch, message.reset);
         break;
       case 'livePaper':
-        this.livePaper = { key: message.key, picture: message.picture };
+        this.papers.want(message.key, message.version);
         break;
       case 'note':
         // Without `background`, the paper is the one already shown (the server sends its
@@ -170,13 +178,14 @@ export class ViewerState {
   /** The page goes away (the viewer leaves): later batches are ignored. */
   close(): void {
     this.live.close();
+    this.papers.forget();
   }
 
   private ended(): void {
     // The stream says "ended" again at every retry.
     if (this.screen === 'ended') return;
     this.clear();
-    this.livePaper = null;
+    this.papers.forget();
     this.paused = false;
     this.reconnecting = false;
     this.screen = 'ended';

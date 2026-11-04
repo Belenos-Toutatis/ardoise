@@ -190,14 +190,17 @@ fn render_paper(paper: &Paper) -> Option<String> {
 
 /// The paper as a PNG data URL, its background image drawn from `picture`.
 fn render_paper_with(paper: &Paper, picture: Option<&Picture>) -> Option<String> {
+    render_paper_png(paper, picture).map(|png| png_data_url(&png))
+}
+
+/// The paper as a PNG file, its background image drawn from `picture`.
+fn render_paper_png(paper: &Paper, picture: Option<&Picture>) -> Option<Vec<u8>> {
     let image = paper
         .image
         .clone()
         .zip(picture)
         .map(|((image, _), picture)| (image, picture));
-    background_png(paper.page, paper.background, paper.width_px(), image)
-        .ok()
-        .map(|png| png_data_url(&png))
+    background_png(paper.page, paper.background, paper.width_px(), image).ok()
 }
 
 impl Inner {
@@ -355,9 +358,9 @@ impl ShareRuntime {
                     .map_err(|error| share_error(&error))?,
             );
             let held = Arc::downgrade(&share);
-            papers.attach(Box::new(move |message| {
+            papers.attach(Box::new(move |paper| {
                 if let Some(share) = held.upgrade() {
-                    share.show_live_paper(message);
+                    share.show_live_paper(paper);
                 }
             }));
             let addresses = addresses_for(bind, share.port());
