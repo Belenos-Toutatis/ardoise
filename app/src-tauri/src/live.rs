@@ -173,6 +173,70 @@ pub fn main_window_closed(app: &AppHandle) {
     }
 }
 
+/// Windows may end the session (`session_end.rs`): what is on the page goes to disk now, in case
+/// the end comes without more warning. The session goes on: the user may yet refuse.
+pub fn session_may_end(app: &AppHandle) {
+    if let Some(runtime) = app.try_state::<LiveRuntime>()
+        && let Err(error) = runtime.hub.write_now()
+    {
+        eprintln!("live mode: cannot write the pages before the end of the session: {error}");
+    }
+}
+
+/// Windows is ending the session (`WM_ENDSESSION`, `session_end.rs`): what [`main_window_closed`]
+/// does, in the order that loses least if the process ends halfway.
+pub fn session_ending(app: &AppHandle) {
+    let Some(runtime) = app.try_state::<LiveRuntime>() else {
+        return;
+    };
+    let hub = &runtime.hub;
+    let remember = || {
+        if let Some(context) = app.try_state::<AppContext>() {
+            crate::app_bridge::remember_live_session(&context, hub);
+        }
+    };
+    let narration = app.try_state::<NarrationRuntime>();
+    close_at_session_end(hub, narration.as_deref(), &backup_dir(), remember);
+    if let Some(tablet) = app.try_state::<TabletRuntime>() {
+        let _ = tablet.with_service(TabletService::stop_live);
+    }
+}
+
+/// The ink first, which takes least and loses most: it ends up on disk within moments. Then the
+/// recording under way: a plain copy of its sound, then its pages, which encoding can make far
+/// longer than Windows waits ([`narration::finish_live_ending`]). The copy goes once the pages
+/// holding the sound are written. `remember` tells the assistant's bridge, after each step.
+pub(crate) fn close_at_session_end(
+    hub: &LiveHub,
+    narration: Option<&NarrationRuntime>,
+    backup: &Path,
+    remember: impl Fn(),
+) {
+    close_session(hub, backup);
+    remember();
+    let Some(ended) = narration.and_then(|narration| narration::finish_live_ending(narration, hub))
+    else {
+        return;
+    };
+    if let Some(copy) = &ended.copy {
+        log_backup(
+            backup,
+            &format!("copy of the recording under way: {}", copy.display()),
+        );
+    }
+    if let Err(error) = &ended.saved {
+        log_narration_failure(error, backup);
+    }
+    let failed = close_session(hub, backup);
+    remember();
+    if ended.saved.is_ok()
+        && failed.is_empty()
+        && let Some(copy) = &ended.copy
+    {
+        let _ = std::fs::remove_file(copy);
+    }
+}
+
 /// Where the pages that could not be written to the library go when the app ends:
 /// `%LOCALAPPDATA%\Ardoise\live-backup` (local to this PC, outside the library); under the
 /// temporary folder when `LOCALAPPDATA` is not set (Linux).

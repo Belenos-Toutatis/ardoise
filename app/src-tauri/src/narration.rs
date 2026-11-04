@@ -35,7 +35,7 @@ use ardoise_media::microphone::{CaptureStatus, Level, Recorder, list_input_devic
 use ardoise_media::replay::{MAX_SPEED, MIN_SPEED, ReplayOptions};
 use ardoise_media::{
     AudioClip, MediaError, NARRATION_SAMPLE_RATE, Narration, NarrationBase, NarrationHeader,
-    encode_narration, narration_header,
+    encode_narration, narration_header, wav_bytes,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -1268,6 +1268,64 @@ pub fn finish_live(
         ..StopRequest::default()
     };
     save_stopped(runtime, stopped, clip, &request, None, hub).transpose()
+}
+
+/// What became of a live recording when Windows ended the session ([`finish_live_ending`]).
+pub struct EndedRecording {
+    /// Whether it went to its pages.
+    pub saved: CommandResult<NarrationSaved>,
+    /// A WAV copy of all of it, if it could be written: the caller removes it once the pages are
+    /// written.
+    pub copy: Option<PathBuf>,
+}
+
+/// [`finish_live`] while Windows ends the session, which may leave no time for it: encoding takes
+/// far longer than the seconds allowed when the recording is long, and the process may end at any
+/// moment. So the sound goes to disk first as it is, a WAV copy in the backup folder (345 MB per
+/// hour, a plain write), and is then given to its pages as usual. `None` when no live recording
+/// runs.
+pub fn finish_live_ending(runtime: &NarrationRuntime, hub: &LiveHub) -> Option<EndedRecording> {
+    let capture = runtime.take(true)?;
+    let (stopped, clip) = capture.stop();
+    let copy = clip
+        .as_ref()
+        .ok()
+        .filter(|clip| !clip.samples.is_empty())
+        .and_then(
+            |clip| match write_recording_copy(&runtime.backup_dir, clip) {
+                Ok(path) => Some(path),
+                Err(error) => {
+                    eprintln!("narration: no copy of the recording could be written: {error}");
+                    None
+                }
+            },
+        );
+    let request = StopRequest {
+        save: true,
+        ..StopRequest::default()
+    };
+    let saved = save_stopped(runtime, stopped, clip, &request, None, hub).transpose()?;
+    Some(EndedRecording { saved, copy })
+}
+
+/// Writes `clip` atomically as a WAV file with a free name in `dir` (created if needed).
+fn write_recording_copy(dir: &Path, clip: &AudioClip) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let time = chrono::Local::now().format("%Y-%m-%d %H%M%S");
+    let bytes = wav_bytes(clip);
+    let mut n = 1;
+    loop {
+        let path = if n == 1 {
+            dir.join(format!("{time} live.wav"))
+        } else {
+            dir.join(format!("{time} live-{n}.wav"))
+        };
+        match fsutil::write_atomic_new(&path, &bytes) {
+            Ok(_) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && n < 1000 => n += 1,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 /// Saves the pending replay narration into the note at `path` (checked like

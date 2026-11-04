@@ -77,6 +77,9 @@ impl BatchSink for Channel<LiveBatch> {
 /// Reads what the tablet's button does (`[tablet] button`), when it is pressed.
 pub type ButtonSetting = Arc<dyn Fn() -> LiveButton + Send + Sync>;
 
+/// Told when live mode starts or stops; called under the hub's lock: it must not wait for anything.
+pub type RunningWatch = Box<dyn Fn(bool) + Send + Sync>;
+
 /// A write of a page takes at most about one part in this many of the time while it changes: a page
 /// whose write takes longer than a tenth of the save interval waits longer than that interval.
 const WRITE_SHARE: u32 = 10;
@@ -259,6 +262,8 @@ struct Shared {
     /// Held while a narration is merged and encoded for a page (outside the state lock), so
     /// that two narrations given to the same page never lose one another.
     narrating: Mutex<()>,
+    /// See [`RunningWatch`].
+    running_watch: OnceLock<RunningWatch>,
     /// Where a sound that cannot go in a note is kept; `narration::backup_dir` unless a test says
     /// otherwise.
     narration_backup: OnceLock<PathBuf>,
@@ -706,7 +711,12 @@ impl Shared {
     /// the session ends here (even one without events), which keeps [`Activity::live`] up to
     /// date.
     fn publish(&self, state: &mut HubState, events: Vec<LiveEvent>) {
-        self.activity.set_live(state.session.is_running());
+        let running = state.session.is_running();
+        if self.activity.set_live(running) != running
+            && let Some(watch) = self.running_watch.get()
+        {
+            watch(running);
+        }
         if events.is_empty() {
             return;
         }
@@ -1079,6 +1089,7 @@ impl LiveHub {
             save_wake: Condvar::new(),
             saving: Mutex::new(()),
             narrating: Mutex::new(()),
+            running_watch: OnceLock::new(),
             narration_backup: OnceLock::new(),
         });
         for (name, work) in [
@@ -1330,6 +1341,18 @@ impl LiveHub {
     /// happens, but the last write happens as the window closes.
     pub fn forked_sheets(&self) -> Vec<ForkedSheet> {
         self.shared.lock().session.forked_sheets()
+    }
+
+    /// Writes every page with changes now, without stopping anything: Windows is about to end the
+    /// session, and may not leave time for more.
+    pub fn write_now(&self) -> Result<(), LiveError> {
+        self.shared.save_pass(true)?;
+        Ok(())
+    }
+
+    /// `watch` is told when live mode starts or stops (one watcher, for the life of the hub).
+    pub fn watch_running(&self, watch: RunningWatch) {
+        let _ = self.shared.running_watch.set(watch);
     }
 
     /// Runs `change` on the session and sends what it emitted; [`LiveError::NotRunning`] before

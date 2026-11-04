@@ -12,9 +12,9 @@ use ardoise_core::note::{Origin, PageSize, Paper};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
 use ardoise_ink::{Rgba, Tool};
-use ardoise_media::microphone::simulated_narration;
+use ardoise_media::microphone::{CaptureStatus, Level, simulated_narration};
 use ardoise_media::replay::ReplayOptions;
-use ardoise_media::{Narration, NarrationBase, decode_narration};
+use ardoise_media::{AudioClip, MediaError, Narration, NarrationBase, decode_narration};
 use ardoise_proto::live::LiveRecord;
 use ardoise_proto::stroke::Point as PenPoint;
 use serde_json::{Value, json};
@@ -33,7 +33,9 @@ use super::session::LiveSession;
 use crate::commands::CommandError;
 use crate::library::tests::{library, sample_note};
 use crate::library::{now_ms, path_text};
-use crate::narration::{PageChange, PageLog, give_to_hub};
+use crate::narration::{
+    NarrationRuntime, NarrationTarget, PageChange, PageLog, Source, give_to_hub, start_in,
+};
 use crate::presentation::MonitorInfo;
 
 pub(super) const A5: PageSize = PageSize {
@@ -1827,6 +1829,138 @@ fn a_fork_at_the_last_write_is_in_what_live_stop_answers() {
         json["narration"],
         serde_json::json!({ "code": "narrationUnreadable", "message": "a.ardoise" })
     );
+}
+
+/// A microphone that has received its whole clip.
+struct FakeMicrophone(AudioClip);
+
+impl Source for FakeMicrophone {
+    fn device_name(&self) -> &str {
+        "Fake microphone"
+    }
+
+    fn level(&self) -> Level {
+        Level::default()
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.0.duration()
+    }
+
+    fn status(&self) -> CaptureStatus {
+        CaptureStatus::Receiving
+    }
+
+    fn stop(self: Box<Self>) -> Result<AudioClip, MediaError> {
+        Ok(self.0)
+    }
+}
+
+/// A runtime recording `seconds` of sound for the session of `hub`, its copies in `backup`.
+fn recording(hub: &LiveHub, seconds: u64, backup: &Path) -> NarrationRuntime {
+    let runtime = NarrationRuntime::new(
+        Box::new(move |_, _| {
+            let clip = simulated_narration(Duration::from_secs(seconds), 1);
+            Ok(Box::new(FakeMicrophone(clip)) as Box<dyn Source>)
+        }),
+        backup.to_path_buf(),
+    );
+    start_in(
+        &runtime,
+        None,
+        NarrationTarget::Live,
+        || Err(CommandError::new("noLibrary", "unused")),
+        hub,
+        Arc::new(|| None),
+    )
+    .unwrap();
+    runtime
+}
+
+#[test]
+fn the_end_of_the_windows_session_writes_the_last_ink_and_the_recording_under_way() {
+    let (dir, library) = library();
+    let hub = patient_hub();
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    let path = notes_in(&library).remove(0);
+    // Not written yet, for an hour; one stroke is still in progress.
+    stroke(&mut sink, 4000, 5);
+    send(&mut sink, &[pen(5000, 1000, 500)]);
+    assert_eq!(stroke_count(&library, &path), Some(1));
+
+    let backup = dir.path().join("backup");
+    let copies = dir.path().join("copies");
+    let runtime = recording(&hub, 1, &copies);
+    let told = std::sync::atomic::AtomicUsize::new(0);
+    super::close_at_session_end(&hub, Some(&runtime), &backup, || {
+        told.fetch_add(1, Ordering::SeqCst);
+    });
+
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.strokes.len(), 3, "the last ink");
+    let narration = decode_narration(written.audio.as_ref().unwrap()).unwrap();
+    let ms = narration.duration().as_millis();
+    assert!((990..=1010).contains(&ms), "{ms}");
+    assert!(!hub.page_position().unwrap().running);
+    assert_eq!(
+        told.load(Ordering::SeqCst),
+        2,
+        "after the ink, and at the end"
+    );
+    assert!(!runtime.is_recording_live());
+    // Everything is in the note: no copy stays, of the sound or of the page.
+    let wavs = |dir: &Path| {
+        std::fs::read_dir(dir).map_or(0, |entries| {
+            entries
+                .flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "wav"))
+                .count()
+        })
+    };
+    assert_eq!(wavs(&copies), 0);
+    assert_eq!(hub.back_up_unsaved(&backup).len(), 0);
+    // Again, for nothing: no harm (Windows may tell two windows).
+    super::close_at_session_end(&hub, Some(&runtime), &backup, || {});
+    assert_eq!(library.read(&path).unwrap().file.note.strokes.len(), 3);
+
+    // Without a recording, or without the narration's state: the ink all the same.
+    let hub = patient_hub();
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 2);
+    stroke(&mut sink, 4000, 5);
+    super::close_at_session_end(&hub, None, &backup, || {});
+    let saved = hub.overview().unwrap().notes[0].2.clone();
+    assert_eq!(stroke_count(&library, &saved), Some(2));
+}
+
+#[test]
+fn at_the_end_of_the_session_a_recording_that_did_not_reach_its_page_stays_as_a_copy() {
+    let (dir, library) = library();
+    let hub = patient_hub();
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 3000, 5);
+    wait_until("the note", || notes_in(&library).len() == 1);
+    assert!(hub.set_page_audio(0, b"OggS damaged".to_vec()));
+    let (backup, copies) = (dir.path().join("backup"), dir.path().join("copies"));
+    let runtime = recording(&hub, 1, &copies);
+    super::close_at_session_end(&hub, Some(&runtime), &backup, || {});
+
+    let copy = std::fs::read_dir(&copies)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|x| x == "wav"))
+        .expect("a copy of the sound");
+    let bytes = std::fs::read(&copy).unwrap();
+    assert_eq!(&bytes[..4], b"RIFF");
+    assert!(bytes.len() >= 44 + 48_000 * 2);
+    // The log next to the page copies names it, a windowed app having no console.
+    let log = std::fs::read_to_string(backup.join("live-backup.log")).unwrap();
+    assert!(log.contains(&copy.display().to_string()), "{log}");
+    assert!(log.contains("narrationUnreadable"), "{log}");
 }
 
 // --- How often a page is written -----------------------------------------------------------------
