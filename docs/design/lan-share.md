@@ -332,7 +332,7 @@ share start, a few hundred KB.
   the subscription (the hub's existing rule). A field added later to `LiveSnapshot` or `Note` therefore never
   reaches a browser until it is added there on purpose. `saved`, `saveFailed` and `sheetForked` events are left out
   (library paths, system messages); in a snapshot `saved` = `[]`, `presentation` = `null`, `origin` =
-  `{"kind":"ardoise"}`, and the page keeps only what is drawn: `id`, `page`, `background`, `layers` (names emptied),
+  `{"kind":"ardoise"}`, and the page keeps only what is drawn: `id` (a digest salted at each run, `viewer_page_id`, not the note's), `page`, `background`, `layers` (names emptied),
   `strokes`; `created` and `modified` are 0 (a resumed note keeps its date on the PC). Strokes of a hidden layer are left out here as in `SharedPage` (a teacher hides an "answers" layer to
   keep it to themselves); the layer list stays whole so that stroke indices stay valid. The background image's
   description (file name, PDF page, place) is not sent either: only `paperKey`, next to the page, when the paper is not

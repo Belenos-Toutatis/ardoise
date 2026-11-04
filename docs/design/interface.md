@@ -325,7 +325,8 @@ is not handled (Windows is told yes), and `WM_ENDSESSION` ends the process at on
   `session-ending` (from another thread, after the procedure returns), on which the editor writes its draft at once,
   and answers FALSE while work is unsaved unless `ENDSESSION_CRITICAL` (Windows then shows "Ardoise is preventing
   shutdown" with the reason; "Shut down anyway" sends `WM_ENDSESSION`, which tao turns into `exit(0)`, the draft
-  being on disk by then). A forced end (`EWX_FORCE`, critical) or a crash keeps the last periodic draft.
+  being on disk by then). A forced end (`EWX_FORCE`, critical) or a crash keeps the last periodic draft. Live mode counts as
+  unsaved work too, and is closed on `WM_ENDSESSION` (M12: `tablet-live-classroom.md`, "Session end").
 
 ## M10: one window per copy (agent `m10-fix-hard`)
 
