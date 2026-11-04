@@ -5,7 +5,9 @@
  *
  * Two kinds of fields:
  * - reactive ones (`$state`) for the interface: session state, page number, style, view,
- *   presentation, saved notes, pages that failed to save, stroke count;
+ *   presentation, saved notes, pages that failed to save, stroke count, whether the page turns
+ *   with the tablet and the resumed sheets that went on in a new note (M12: the control window
+ *   only; the share's viewers are never sent either, and keep the defaults);
  * - plain ones for the canvases, which are told of every change through `subscribe` and draw
  *   on the next animation frame: the finished strokes of the page (`strokes`, appended in
  *   place; `generation` changes when they are replaced or edited), the stroke in progress (`current`,
@@ -37,6 +39,7 @@ import type {
   LiveStyle,
   LiveViewState,
   MonitorInfo,
+  SheetFork,
 } from './live';
 import { insertStrokes, recolourStrokes, removeStrokes } from './live-edits';
 import { marksFromWire, reuseMarks } from './live-marks';
@@ -137,6 +140,10 @@ export class LiveState {
   /** The page has an edit to undo (`api.liveUndoEdit`), or to redo (`api.liveRedoEdit`). */
   canUndo = $state(false);
   canRedo = $state(false);
+  /** The current page turns with the tablet; false on a resumed sheet, which is never turned. */
+  canTurnPage = $state(true);
+  /** The sheets that went on in a new note, in the order they were told; each stays until dismissed. */
+  forks = $state.raw<SheetFork[]>([]);
 
   /** Finished strokes of the page, in arrival order (appended in place). */
   strokes: Stroke[] = [];
@@ -163,6 +170,8 @@ export class LiveState {
   private sendTimer: ReturnType<typeof setTimeout> | undefined;
   private sendQueued = false;
   private styleInFlight: LiveStyle[] = [];
+  /** The forks told so far (`original|path`), dismissed or not: each is shown once. */
+  private forksTold = new Set<string>();
 
   /** Calls `listener` after every change; returns the function that stops it. */
   subscribe(listener: () => void): () => void {
@@ -263,6 +272,9 @@ export class LiveState {
       case 'strokesEdited':
         if (event.pageIndex === this.pageIndex) this.applyEdit(event);
         break;
+      case 'sheetForked':
+        this.addFork(event);
+        break;
       case 'saved':
         this.mergeSaved(event.paths);
         // A successful save means that everything is written, the failed pages included.
@@ -291,6 +303,28 @@ export class LiveState {
     if (edit.revision !== undefined) this.revision = edit.revision;
     if (edit.canUndo !== undefined) this.canUndo = edit.canUndo;
     if (edit.canRedo !== undefined) this.canRedo = edit.canRedo;
+  }
+
+  /** Keeps a fork once, even if it is told twice (and not again after it was dismissed); true when it is new. */
+  private addFork({ pageIndex, reason, original, path }: SheetFork): boolean {
+    const key = `${original}|${path}`;
+    if (this.forksTold.has(key)) return false;
+    this.forksTold.add(key);
+    this.forks = [...this.forks, { pageIndex, reason, original, path }];
+    return true;
+  }
+
+  /**
+   * The forks `live_stop` answers with (the last write may have made one that no event told this
+   * window): returns those this window had not been told yet, which are kept like the others.
+   */
+  adoptForks(forks: readonly SheetFork[]): SheetFork[] {
+    return forks.filter((fork) => this.addFork(fork));
+  }
+
+  /** Forgets the notice of a fork (the user dismissed it). */
+  dismissFork(fork: SheetFork): void {
+    this.forks = this.forks.filter((f) => f !== fork);
   }
 
   private finishStroke(): void {
@@ -350,6 +384,8 @@ export class LiveState {
     this.revision = s.revision ?? 0;
     this.canUndo = s.canUndo ?? false;
     this.canRedo = s.canRedo ?? false;
+    // Absent (the share's viewers): the page turns.
+    this.canTurnPage = s.canTurnPage !== false;
   }
 
   // --- Changes made in this window ------------------------------------------------------------

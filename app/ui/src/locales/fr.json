@@ -1406,6 +1406,10 @@
     "stopHint": "Termine le mode direct : chaque page est enregistrée comme une note de la bibliothèque.",
     "stopFailed": "Le mode direct ne s'est pas arrêté correctement.",
     "closeAnyway": "Fermer quand même",
+    "stopped": {
+      "narration": "La narration n'a pas pu être ajoutée aux pages"
+    },
+    "recordingLost": "La narration en cours d'enregistrement n'a pas pu être conservée : {message}",
     "saved": {
       "none": "Aucune note enregistrée pour l'instant",
       "one": "1 note enregistrée",

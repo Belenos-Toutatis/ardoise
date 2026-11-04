@@ -189,10 +189,12 @@
     liveOpen = true;
   }
 
-  function closeLive() {
+  /** `notice`: what live mode has to say on the way out (a recording that could not be kept). */
+  function closeLive(notice?: unknown) {
     liveOpen = false;
     resumePath = null;
     void lib.refresh();
+    if (typeof notice === 'string') lib.notice = notice;
     void backToLibrary();
   }
 

@@ -1406,6 +1406,10 @@
     "stopHint": "Ends live mode: each page is saved as a note of the library.",
     "stopFailed": "Live mode did not stop properly.",
     "closeAnyway": "Close anyway",
+    "stopped": {
+      "narration": "The narration could not be added to the pages"
+    },
+    "recordingLost": "The narration being recorded could not be kept: {message}",
     "saved": {
       "none": "No note saved yet",
       "one": "1 note saved",
