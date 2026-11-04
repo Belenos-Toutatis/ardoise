@@ -122,24 +122,6 @@ describe('live state: strokes', () => {
     expect(live.strokes).toHaveLength(1);
     expect(live.strokeCount).toBe(2);
   });
-
-  it('does not draw twice a stroke in progress that a snapshot already holds', () => {
-    const live = ready({ page: page('p1', [stroke(100)]) });
-    live.receive(batch({ type: 'strokeStart', pageIndex: 0, stroke: liveStroke(points(2)) }));
-    const inProgress = live.current;
-    const generation = live.generation;
-    // A style change mid-stroke: the snapshot's page holds the finished stroke…
-    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ page: page('p1', [stroke(100)]) }) }));
-    expect(live.current).toBe(inProgress);
-    expect(live.strokes).toHaveLength(1);
-    expect(live.generation).toBe(generation);
-    // …or also the one in progress (with the points it had then).
-    const partial: Stroke = { ...inProgress!, points: inProgress!.points.slice(0, 1) };
-    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ page: page('p1', [stroke(100), partial]) }) }));
-    expect(live.current).toBe(inProgress);
-    expect(live.strokes).toHaveLength(1);
-    expect(live.strokeCount).toBe(2);
-  });
 });
 
 describe('live state: pages, layers, clearing', () => {
@@ -341,5 +323,182 @@ describe('live state: subscription', () => {
     expect(live.current).toBeNull();
     expect(live.view.zoom).toBe(1);
     expect(changes).not.toHaveBeenCalled();
+  });
+});
+
+describe('live state: snapshots in the middle of a stroke', () => {
+  // What the session sends (session.rs `push_snapshot`, hub.rs `subscribe`): a snapshot, whose page
+  // holds the finished strokes only, then `strokeStart` with the points sent so far when a stroke
+  // is in progress. The window must hold exactly the session's strokes after each batch.
+  const strokesOf = (live: LiveState) => ({
+    finished: live.strokes.length,
+    current: live.current?.points.length ?? null,
+    count: live.strokeCount,
+  });
+
+  /** A stroke in progress with `n` points sent, on a page that holds one finished stroke. */
+  function drawing(n = 3): { live: LiveState; sent: LivePoint[] } {
+    const live = ready({ page: page('p1', [stroke(100)]) });
+    const sent = points(n);
+    live.receive(batch({ type: 'strokeStart', pageIndex: 0, stroke: liveStroke(sent) }));
+    return { live, sent };
+  }
+
+  it('does not finish the partial stroke when the replay of the stroke in progress follows', () => {
+    const { live, sent } = drawing();
+    const more = points(2, 1100);
+    live.receive(batch({ type: 'points', pageIndex: 0, points: more }));
+    expect(strokesOf(live)).toEqual({ finished: 1, current: 5, count: 2 });
+    const generation = live.generation;
+    // A style change: the snapshot, then the stroke as sent so far.
+    live.receive(
+      batch(
+        { type: 'snapshot', snapshot: snapshot({ page: page('p1', [stroke(100)]), style: { tool: 'chalk', color: RED, width: 90 } }) },
+        { type: 'strokeStart', pageIndex: 0, stroke: liveStroke([...sent, ...more]) },
+      ),
+    );
+    expect(strokesOf(live)).toEqual({ finished: 1, current: 5, count: 2 });
+    expect(live.current?.tool).toBe('feltTip');
+    expect(live.generation).toBe(generation);
+    live.receive(batch({ type: 'points', pageIndex: 0, points: points(2, 1200) }));
+    expect(strokesOf(live)).toEqual({ finished: 1, current: 7, count: 2 });
+    live.receive(batch({ type: 'strokeEnd', pageIndex: 0 }));
+    expect(strokesOf(live)).toEqual({ finished: 2, current: null, count: 2 });
+    expect(live.strokes[1].points).toHaveLength(7);
+    expect(live.generation).toBe(generation);
+  });
+
+  it('survives several snapshots during one stroke', () => {
+    const { live, sent } = drawing();
+    let all = sent;
+    for (const n of [1, 2, 3]) {
+      const more = points(2, 1000 + 100 * n);
+      live.receive(batch({ type: 'points', pageIndex: 0, points: more }));
+      all = [...all, ...more];
+      live.receive(
+        batch(
+          { type: 'snapshot', snapshot: snapshot({ page: page('p1', [stroke(100)]), layer: n % 2 }) },
+          { type: 'strokeStart', pageIndex: 0, stroke: liveStroke(all) },
+        ),
+      );
+      expect(strokesOf(live)).toEqual({ finished: 1, current: all.length, count: 2 });
+    }
+    live.receive(batch({ type: 'strokeEnd', pageIndex: 0 }));
+    expect(strokesOf(live)).toEqual({ finished: 2, current: null, count: 2 });
+  });
+
+  // Each change the session answers with a snapshot while the pen writes and the stroke goes on.
+  const chalk = { tool: 'chalk', color: { r: 255, g: 255, b: 255, a: 255 }, width: 90 } as const;
+  const slate = { paper: 'slate', template: 'blank', texture: false } as const;
+  const changes: [string, () => Partial<LiveSnapshot>][] = [
+    ['style', () => ({ style: { tool: 'chalk', color: RED, width: 90 } })],
+    ['blackboard', () => ({ view: { ...DEFAULT_VIEW, board: true }, style: chalk, page: page('p1', [stroke(100)], { background: slate }) })],
+    ['saved page', () => ({ saved: ['C:\\a.ardoise'] })],
+    ['state', () => ({ state: 'reconnecting' })],
+  ];
+  it.each(changes)('keeps the stroke across a %s change', (_name, change) => {
+    const { live, sent } = drawing();
+    live.receive(
+      batch(
+        { type: 'snapshot', snapshot: snapshot({ page: page('p1', [stroke(100)]), ...change() }) },
+        { type: 'strokeStart', pageIndex: 0, stroke: liveStroke(sent) },
+      ),
+    );
+    expect(strokesOf(live)).toEqual({ finished: 1, current: 3, count: 2 });
+    live.receive(batch({ type: 'points', pageIndex: 0, points: points(1, 1300) }, { type: 'strokeEnd', pageIndex: 0 }));
+    expect(strokesOf(live)).toEqual({ finished: 2, current: null, count: 2 });
+  });
+
+  it('drops the stroke in progress when a snapshot comes without one (page cleared during a stroke)', () => {
+    const { live } = drawing();
+    // `ClearPage` drops the drawing without a `strokeEnd`, and nothing follows the snapshot.
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ page: page('p1') }) }));
+    expect(strokesOf(live)).toEqual({ finished: 0, current: null, count: 0 });
+    // The next stroke is the only one on the page: the old one does not come back.
+    live.receive(batch({ type: 'strokeStart', pageIndex: 0, stroke: liveStroke(points(2)) }));
+    expect(strokesOf(live)).toEqual({ finished: 0, current: 2, count: 1 });
+    live.receive(batch({ type: 'strokeEnd', pageIndex: 0 }));
+    expect(strokesOf(live)).toEqual({ finished: 1, current: null, count: 1 });
+  });
+
+  it('keeps nothing in progress across a snapshot that comes with no stroke in progress', () => {
+    const live = ready({ page: page('p1', [stroke(100)]) });
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ page: page('p1', [stroke(100)]) }) }));
+    expect(strokesOf(live)).toEqual({ finished: 1, current: null, count: 1 });
+    live.receive(batch({ type: 'strokeStart', pageIndex: 0, stroke: liveStroke(points(2)) }));
+    expect(strokesOf(live)).toEqual({ finished: 1, current: 2, count: 2 });
+  });
+
+  it('shows the other page after a page change mid-stroke, and nothing of the stroke left', () => {
+    const { live } = drawing();
+    // `NextPage`: the stroke ends (it joins its page), then the snapshot of the new page.
+    live.receive(
+      batch({ type: 'strokeEnd', pageIndex: 0 }, { type: 'snapshot', snapshot: snapshot({ page: page('p2'), pageIndex: 1, pageCount: 2 }) }),
+    );
+    expect(strokesOf(live)).toEqual({ finished: 0, current: null, count: 0 });
+    // The pen goes on writing on the new page, and a snapshot of that page comes mid-stroke.
+    live.receive(batch({ type: 'strokeStart', pageIndex: 1, stroke: liveStroke(points(2)) }));
+    expect(strokesOf(live)).toEqual({ finished: 0, current: 2, count: 1 });
+    live.receive(
+      batch(
+        { type: 'snapshot', snapshot: snapshot({ page: page('p2'), pageIndex: 1, pageCount: 2 }) },
+        { type: 'strokeStart', pageIndex: 1, stroke: liveStroke(points(2)) },
+      ),
+    );
+    expect(strokesOf(live)).toEqual({ finished: 0, current: 2, count: 1 });
+    // Back to page 0: the old stroke is gone, and a replay for another page is ignored.
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ page: page('p1', [stroke(100), stroke(200)]), pageIndex: 0, pageCount: 2 }) }));
+    live.receive(batch({ type: 'strokeStart', pageIndex: 1, stroke: liveStroke(points(2)) }));
+    expect(strokesOf(live)).toEqual({ finished: 2, current: null, count: 2 });
+  });
+
+  it('starts a late subscriber from the snapshot and the replay it is given', () => {
+    // hub.rs `subscribe`: snapshot, stroke in progress as sent so far, then the points that follow.
+    // The first batch may arrive before the command's answer: it is applied after it.
+    const live = new LiveState();
+    const page2 = page('p1', [stroke(100), stroke(200)]);
+    live.receive(
+      batch({ type: 'snapshot', snapshot: snapshot({ page: page2 }) }, { type: 'strokeStart', pageIndex: 0, stroke: liveStroke(points(4)) }),
+    );
+    expect(live.ready).toBe(false);
+    live.initial(snapshot({ page: page2 }));
+    expect(strokesOf(live)).toEqual({ finished: 2, current: 4, count: 3 });
+    live.receive(batch({ type: 'points', pageIndex: 0, points: points(2, 1500) }));
+    expect(strokesOf(live)).toEqual({ finished: 2, current: 6, count: 3 });
+    live.receive(batch({ type: 'strokeEnd', pageIndex: 0 }));
+    expect(strokesOf(live)).toEqual({ finished: 3, current: null, count: 3 });
+    expect(live.strokes[2].points).toHaveLength(6);
+  });
+
+  it('gives a late subscriber the same strokes as a window that watched from the start', () => {
+    const watcher = ready({ page: page('p1', [stroke(100)]) });
+    const sent = points(3);
+    const more = points(2, 1100);
+    watcher.receive(batch({ type: 'strokeStart', pageIndex: 0, stroke: liveStroke(sent) }, { type: 'points', pageIndex: 0, points: more }));
+    // A second window subscribes now: the page without the stroke, the stroke as sent so far.
+    const late = new LiveState();
+    late.initial(snapshot({ page: page('p1', [stroke(100)]) }));
+    late.receive(
+      batch(
+        { type: 'snapshot', snapshot: snapshot({ page: page('p1', [stroke(100)]) }) },
+        { type: 'strokeStart', pageIndex: 0, stroke: liveStroke([...sent, ...more]) },
+      ),
+    );
+    for (const live of [watcher, late]) {
+      live.receive(batch({ type: 'points', pageIndex: 0, points: points(1, 1300) }, { type: 'strokeEnd', pageIndex: 0 }));
+    }
+    expect(strokesOf(late)).toEqual(strokesOf(watcher));
+    expect(strokesOf(late)).toEqual({ finished: 2, current: null, count: 2 });
+    expect(late.strokes[1].points).toHaveLength(watcher.strokes[1].points.length);
+  });
+
+  it('starts a late subscriber with no stroke in progress, then announces the first one', () => {
+    // `in_progress` is None while the stroke is not announced yet; the next batch announces it.
+    const live = new LiveState();
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ page: page('p1', [stroke(100)]) }) }));
+    live.initial(snapshot({ page: page('p1', [stroke(100)]) }));
+    expect(strokesOf(live)).toEqual({ finished: 1, current: null, count: 1 });
+    live.receive(batch({ type: 'strokeStart', pageIndex: 0, stroke: liveStroke(points(2)) }));
+    expect(strokesOf(live)).toEqual({ finished: 1, current: 2, count: 2 });
   });
 });
