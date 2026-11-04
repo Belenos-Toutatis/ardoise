@@ -3,7 +3,8 @@
  * delete it, recolour it, and undo or redo the last edit of the page (a delete, a change of colour,
  * « Clear the page »: never what the tablet wrote). Rust does the edit and every window gets a
  * `strokesEdited` event (`LiveState` applies it); this only asks, with the revision the selection was
- * chosen at, and looks after the selection afterwards.
+ * chosen at, and looks after the selection afterwards. One edit at a time: while one is under way, a
+ * second key press (or click) is ignored, because it would be refused as stale and say so in red.
  */
 import type { api as Api } from './api';
 import type { LiveSelection } from './live-select.svelte';
@@ -27,6 +28,20 @@ function codeOf(error: unknown): unknown {
   return (error as { code?: unknown } | null)?.code;
 }
 
+/** The controls with an edit under way. */
+const editing = new WeakSet<TouchUp>();
+
+/** Runs `edit` unless another is under way for `touch`. */
+async function alone(touch: TouchUp, edit: () => Promise<void>): Promise<void> {
+  if (editing.has(touch)) return;
+  editing.add(touch);
+  try {
+    await edit();
+  } finally {
+    editing.delete(touch);
+  }
+}
+
 /** A refused edit: a page or a revision that moved leaves nothing to select any more. */
 function refused(touch: TouchUp, error: unknown): void {
   if (codeOf(error) === 'liveEditStale') touch.selection.clear();
@@ -34,37 +49,43 @@ function refused(touch: TouchUp, error: unknown): void {
 }
 
 /** Deletes the selected strokes; the selection is gone with them. */
-export async function deleteSelected(touch: TouchUp): Promise<void> {
-  const { selection } = touch;
-  if (!selection.any) return;
-  const indices = [...selection.indices];
-  try {
-    await touch.commands.liveEditStrokes(selection.pageIndex, selection.revision, { kind: 'delete', indices });
-    selection.clear();
-  } catch (error) {
-    refused(touch, error);
-  }
+export function deleteSelected(touch: TouchUp): Promise<void> {
+  return alone(touch, async () => {
+    const { selection } = touch;
+    if (!selection.any) return;
+    const indices = [...selection.indices];
+    try {
+      await touch.commands.liveEditStrokes(selection.pageIndex, selection.revision, { kind: 'delete', indices });
+      selection.clear();
+    } catch (error) {
+      refused(touch, error);
+    }
+  });
 }
 
 /** Gives the selected strokes `color`; the selection stays (the revision does not change). */
-export async function recolourSelected(touch: TouchUp, color: Rgba): Promise<void> {
-  const { selection } = touch;
-  if (!selection.any) return;
-  const indices = [...selection.indices];
-  try {
-    await touch.commands.liveEditStrokes(selection.pageIndex, selection.revision, { kind: 'recolour', indices, color });
-  } catch (error) {
-    refused(touch, error);
-  }
+export function recolourSelected(touch: TouchUp, color: Rgba): Promise<void> {
+  return alone(touch, async () => {
+    const { selection } = touch;
+    if (!selection.any) return;
+    const indices = [...selection.indices];
+    try {
+      await touch.commands.liveEditStrokes(selection.pageIndex, selection.revision, { kind: 'recolour', indices, color });
+    } catch (error) {
+      refused(touch, error);
+    }
+  });
 }
 
 /** Undoes (or, with `again`, redoes) the last edit of the page on screen. */
-export async function stepHistory(touch: TouchUp, again = false): Promise<void> {
-  try {
-    const { pageIndex } = touch.live;
-    const done = again ? await touch.commands.liveRedoEdit(pageIndex) : await touch.commands.liveUndoEdit(pageIndex);
-    if (done) touch.onhistory?.();
-  } catch (error) {
-    refused(touch, error);
-  }
+export function stepHistory(touch: TouchUp, again = false): Promise<void> {
+  return alone(touch, async () => {
+    try {
+      const { pageIndex } = touch.live;
+      const done = again ? await touch.commands.liveRedoEdit(pageIndex) : await touch.commands.liveUndoEdit(pageIndex);
+      if (done) touch.onhistory?.();
+    } catch (error) {
+      refused(touch, error);
+    }
+  });
 }

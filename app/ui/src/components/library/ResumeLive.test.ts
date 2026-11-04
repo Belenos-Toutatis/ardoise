@@ -82,6 +82,19 @@ describe('« Reprendre en mode direct » in the note card menu', () => {
     expect(document.activeElement).toBe(home.card('Liste de courses').querySelector('.card-open'));
   });
 
+  it('shows in the library what live mode says on the way out, and nothing otherwise', async () => {
+    const home = await ready();
+    const items = await menuOf(home, 'Liste de courses');
+    await home.click(item(items, 'Reprendre en mode direct'));
+    await home.click(home.q('[data-double-close="live"]'));
+    expect(home.q('.inline-banner.notice')).toBeNull();
+
+    await home.click(home.q('.tablet-status'));
+    await home.click(home.q('.tablet-panel button[data-action="live"]'));
+    await home.click(home.q('[data-double-close="live-notice"]'));
+    expect(home.q('.inline-banner.notice')?.textContent).toContain('Narration lost');
+  });
+
   it('starts a new session, not a resume, from the tablet panel afterwards', async () => {
     const home = await ready();
     const items = await menuOf(home, 'Liste de courses');

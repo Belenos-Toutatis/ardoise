@@ -505,6 +505,55 @@ describe('the blackboard', () => {
   });
 });
 
+describe('the Select tool once the session is over', () => {
+  /** Live mode ends for real while the view stays open (a notice is waiting): the session is idle. */
+  async function overWithSelection() {
+    const view = await selected();
+    const real = api.liveStop;
+    vi.spyOn(api, 'liveStop').mockImplementationOnce(async () => ({
+      ...(await real()),
+      forks: [{ pageIndex: 0, reason: 'changed', original: 'a.ardoise', path: 'a (2).ardoise' }],
+    }));
+    view.action('stop-live')!.click();
+    await vi.waitFor(() => expect(view.root().dataset.state).toBe('idle'));
+    await tick();
+    return view;
+  }
+
+  it('turns the tool off, and the selection with it', async () => {
+    const view = await overWithSelection();
+    expect(view.action('select')!.disabled).toBe(true);
+    expect(view.action('select')!.getAttribute('aria-pressed')).toBe('false');
+    expect(view.canvas().classList.contains('selecting')).toBe(false);
+    expect(view.bar()).toBeNull();
+    expect(view.target.querySelector('[data-slot="select-hint"]')).toBeNull();
+  });
+
+  it('leaves V, Delete and the undo keys alone, as the button is disabled', async () => {
+    const liveEdit = vi.spyOn(api, 'liveEditStrokes');
+    const undo = vi.spyOn(api, 'liveUndoEdit');
+    const view = await overWithSelection();
+    expect(press('v').defaultPrevented).toBe(false);
+    expect(press('z', { ctrlKey: true }).defaultPrevented).toBe(false);
+    await tick();
+    expect(view.action('select')!.getAttribute('aria-pressed')).toBe('false');
+    expect(view.canvas().classList.contains('selecting')).toBe(false);
+    // Nothing is asked of a session that is over: no « live mode is not running » in red.
+    press('Delete');
+    await tick();
+    expect(liveEdit).not.toHaveBeenCalled();
+    expect(undo).not.toHaveBeenCalled();
+    expect(view.target.querySelector('.banner.error')).toBeNull();
+  });
+
+  it('does not turn the tool on before the first snapshot either', () => {
+    const view = render();
+    expect(view.action('select')!.disabled).toBe(true);
+    expect(press('v').defaultPrevented).toBe(false);
+    expect(view.action('select')!.getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
 describe('the presentation window', () => {
   it('has no selection tool and its keys are what they were', async () => {
     const target = document.createElement('div');

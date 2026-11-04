@@ -424,7 +424,8 @@ key, no message, no thread (a test checks it).
 - **Cost for a viewer.** A photo may weigh several MB (synthetic papers at 2 560 × 1 861 through `background_png`, measured
   2026-11-04: 6.0 MB for a smooth scene with the noise of a sensor, 14.0 MB for pure noise, the worst case; no real
   photo was measured), fetched once, on its own connection: the strokes do not wait for it, and neither do the windows or the other viewers. A
-  fork (the sheet changed elsewhere) gives the page a new id, hence a new key: the picture is fetched once more.
+  fork (the sheet changed elsewhere) keeps the id the windows and viewers see (`Page::shown_id`; only the file's real id changes), so the key
+  stays the same and the picture is not fetched again.
 - **A note's paper still travels in the stream** (`note`, `background`), a data URL, for a viewer already there and one that
   joins. The same fix was not trivially shared (a note has its own diff, its own rendering, and `background` absent means
   "keep"). What is shared is the writing: since a stream's limit counts progress (15 s for each 64 KiB) and no longer the whole
