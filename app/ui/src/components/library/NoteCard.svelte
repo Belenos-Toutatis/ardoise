@@ -1,5 +1,5 @@
 <script lang="ts">
-  /** One note of the grid: thumbnail, title, date, favourite star, tags, selection and menu. */
+  /** One note of the grid: thumbnail, title, date, binder, favourite star, tags, selection and menu. */
   import { tick, untrack } from 'svelte';
   import { startDragOut, type DragOutPhase } from '../../lib/drag-out';
   import { currentLocale, t } from '../../lib/i18n.svelte';
@@ -212,6 +212,7 @@
       tabindex={active ? 0 : -1}
       draggable="true"
       aria-label={t('library.card.open', { title })}
+      aria-describedby="card-binder-{index}"
       onclick={activate}
       onkeydown={keydown}
       onkeyup={keyup}
@@ -222,6 +223,19 @@
       {@render thumb()}
       <span class="card-title">{title}</span>
       <span class="card-date">{formatDate(note.created, locale)}</span>
+      <span
+        class="card-binder"
+        class:unsorted={!note.binder}
+        id="card-binder-{index}"
+        title={note.binder ? t('library.card.binder', { binder: note.binder }) : t('library.card.unsortedHint')}
+      >
+        {#if note.binder}
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+            <path d="M1.8 4h4.1l1.5 1.8h6.8v7.2H1.8z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+          </svg>
+        {/if}
+        <span class="card-binder-name">{note.binder || t('library.card.unsorted')}</span>
+      </span>
     </button>
   {/if}
 

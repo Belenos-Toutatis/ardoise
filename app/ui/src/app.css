@@ -981,6 +981,35 @@ select {
   font-size: 0.8125rem;
 }
 
+.card-binder {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.3rem;
+  max-width: 100%;
+  min-height: 1.35rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.card-binder svg {
+  flex-shrink: 0;
+}
+
+.card-binder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A note in no binder stands out in the grid: it is still to be filed. Not an error, so not the danger colour. */
+.card-binder.unsorted {
+  padding: 0 0.5rem;
+  border: 1px dashed var(--accent);
+  border-radius: 999px;
+  color: var(--text);
+}
+
 .rename-input {
   width: 100%;
   padding: 0.3rem 0.5rem;

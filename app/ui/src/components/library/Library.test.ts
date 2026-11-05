@@ -2,7 +2,7 @@
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../../lib/api';
-import { setLocale } from '../../lib/i18n.svelte';
+import { setLocale, t } from '../../lib/i18n.svelte';
 import { fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, resetMockLibrary } from '../../lib/mock-data';
 import { mockProblems } from '../../lib/mock-library';
 import Home from '../Home.svelte';
@@ -115,6 +115,41 @@ describe('library: listing and sidebar', () => {
     await vi.waitFor(() => expect(ui.all('.note-card img').length).toBe(3));
     expect(ui.q('.note-card img')?.getAttribute('src')).toMatch(/^data:image\/svg\+xml/);
     expect(ui.card('Réunion parents').querySelector('.card-date')?.textContent).toMatch(/2026/);
+  });
+
+  it('says on each card which binder the note is in, and marks the notes in none', async () => {
+    const ui = await render();
+    const binderOf = (title: string) => ui.card(title).querySelector<HTMLElement>('.card-binder')!;
+
+    // A binder inside a binder shows its whole path.
+    expect(binderOf('Cours de physique').textContent?.trim()).toBe('Classe/3e B');
+    expect(binderOf('Cours de physique').title).toBe(t('library.card.binder', { binder: 'Classe/3e B' }));
+    expect(binderOf('Cours de physique').classList.contains('unsorted')).toBe(false);
+    expect(binderOf('Réunion parents').textContent?.trim()).toBe('Perso');
+
+    // At the library's root: the card says so, and how to file the note.
+    expect(binderOf('Liste de courses').textContent?.trim()).toBe(t('library.card.unsorted'));
+    expect(binderOf('Liste de courses').title).toBe(t('library.card.unsortedHint'));
+    expect(binderOf('Liste de courses').classList.contains('unsorted')).toBe(true);
+
+    // The card's button names the note; the binder comes as its description, for a screen reader.
+    const open = ui.card('Liste de courses').querySelector('.card-open')!;
+    expect(open.getAttribute('aria-describedby')).toBe(binderOf('Liste de courses').id);
+  });
+
+  it('follows a note filed in a binder, then taken back to the root', async () => {
+    const ui = await render();
+    const binderOf = (title: string) => ui.card(title).querySelector<HTMLElement>('.card-binder')!;
+    const path = ui.card('Liste de courses').dataset.path!;
+
+    const [moved] = await api.moveNotes([path], 'Perso');
+    notifyLibraryChanged();
+    await vi.waitFor(() => expect(binderOf('Liste de courses').textContent?.trim()).toBe('Perso'));
+    expect(binderOf('Liste de courses').classList.contains('unsorted')).toBe(false);
+
+    await api.moveNotes([moved], '');
+    notifyLibraryChanged();
+    await vi.waitFor(() => expect(binderOf('Liste de courses').classList.contains('unsorted')).toBe(true));
   });
 
   it('shows the date for an untitled note', async () => {

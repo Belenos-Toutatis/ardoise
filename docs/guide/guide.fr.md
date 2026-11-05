@@ -574,8 +574,8 @@ boutons **Nouvelle note**, **Depuis un PDF ou une image…** et **Réglages**. �
 **Toutes les notes**, **Favoris**, les **Classeurs**, les **Étiquettes**, la **Corbeille**, l'entrée
 **Importer depuis Inkspace…** (chapitre 11), et en bas le bloc **Tablette** et le bouton **Tester la tablette**.
 
-Une carte montre la miniature, le titre (ou la date si la note n'a pas de titre), la date et les étiquettes. Un clic
-ouvre la note dans l'éditeur. Sur la carte : la case pour *sélectionner*, l'étoile des favoris, le menu
+Une carte montre la miniature, le titre (ou la date si la note n'a pas de titre), la date, le classeur et les
+étiquettes. Un clic ouvre la note dans l'éditeur. Sur la carte : la case pour *sélectionner*, l'étoile des favoris, le menu
 **Actions pour…** (**Renommer**, favoris, **Mettre à la corbeille**) et une poignée, qui apparaît sur la carte, pour
 glisser la note hors d'Ardoise (chapitre 10). Renommer une note renomme aussi son fichier.
 
@@ -591,6 +591,11 @@ Un classeur est un simple *sous-dossier* de la bibliothèque. Cliquez sur l'icô
 **Nouveau sous-classeur dans…** à côté d'un classeur), tapez le **Nom du classeur** et cliquez sur **Créer**. Pour
 ranger des notes, glissez-les sur un classeur de la barre latérale, ou sélectionnez-les puis **Déplacer vers…**
 (**Bibliothèque (racine)** ramène à la racine).
+
+Sous la date, chaque carte indique le classeur de la note, avec son chemin complet s'il est dans un autre classeur
+(par exemple `Classe/3e B`). Une note qui n'est dans aucun classeur, donc à la racine de la bibliothèque, porte la
+mention **Non classée** : vous voyez d'un coup d'œil ce qu'il reste à ranger. Une note étant un fichier, elle est dans un
+seul classeur à la fois.
 
 Pour renommer ou supprimer un classeur, ouvrez le menu **⋯** (« Actions sur le classeur… ») à côté de son nom dans la
 barre latérale :

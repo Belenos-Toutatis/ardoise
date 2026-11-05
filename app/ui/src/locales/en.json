@@ -62,6 +62,9 @@
     "notes": "Notes",
     "card": {
       "open": "Open note {title}",
+      "binder": "Binder: {binder}",
+      "unsorted": "Not in a binder",
+      "unsortedHint": "This note is in no binder. To file it, drag it onto a binder in the sidebar, or select it and use “Move to…”.",
       "select": "Select {title}",
       "favorite": "Add to favourites",
       "unfavorite": "Remove from favourites",

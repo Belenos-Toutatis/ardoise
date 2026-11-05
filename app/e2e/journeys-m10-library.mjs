@@ -173,6 +173,16 @@ export const libraryJourneys = [
       const newName = app.language === 'fr' ? 'Personnel' : 'Personal';
       const notesIn = (folder) => readdirSync(join(app.library, folder)).filter((name) => name.endsWith('.ardoise'));
       await app.waitFor(`${cards} === 8`, 'the 8 demo notes');
+      /** How many cards show this text as their binder. */
+      const cardsIn = (shown) =>
+        `[...document.querySelectorAll('.note-card .card-binder')].filter((el) => el.textContent.trim() === ${JSON.stringify(shown)}).length`;
+
+      await check(`chaque carte dit son classeur, et « ${l('library.card.unsorted')} » sans classeur`, async () => {
+        await app.waitFor(`${cardsIn('Classe/3e B')} === 4`, 'four cards in the sub-binder, with its whole path');
+        await app.waitFor(`${cardsIn('Perso')} === 2`, 'two cards in Perso');
+        await app.waitFor(`${cardsIn(l('library.card.unsorted'))} === 2`, 'two cards in no binder');
+        await app.waitFor(`document.querySelectorAll('.note-card .card-binder.unsorted').length === 2`, 'and only those two marked');
+      });
 
       await check(`« ${l('library.binder.rename')} » : « Perso » devient « ${newName} », le dossier aussi`, async () => {
         await app.click('.sidebar .nav-row:has([data-binder="Perso"]) .menu .icon-button');
@@ -184,6 +194,7 @@ export const libraryJourneys = [
         await app.click('.binder-editor button[type="submit"]');
         await app.waitFor(`document.querySelector('.sidebar [data-binder="${newName}"]') !== null`, 'the renamed binder');
         if (existsSync(join(app.library, 'Perso')) || notesIn(newName).length !== 2) throw new Error('the folder did not follow');
+        await app.waitFor(`${cardsIn(newName)} === 2`, 'the cards name the renamed binder');
       });
 
       await check('le renommer comme « Classe » est refusé, rien ne bouge', async () => {

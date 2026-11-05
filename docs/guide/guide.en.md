@@ -545,8 +545,8 @@ The library is the home page. At the top: the **Search notes** field, the sort (
 **Trash**, the **Import from Inkspace…** entry (chapter 11), and at the bottom the **Tablet** block and the **Test the
 tablet** button.
 
-A card shows the thumbnail, the title (or the date if the note has no title), the date and the tags. A click opens the
-note in the editor. On the card: the box to *select* it, the favourites star, the **Actions for…** menu (**Rename**,
+A card shows the thumbnail, the title (or the date if the note has no title), the date, the binder and the tags. A click
+opens the note in the editor. On the card: the box to *select* it, the favourites star, the **Actions for…** menu (**Rename**,
 favourites, **Move to trash**) and a handle, which appears on the card, to drag the note out of Ardoise (chapter 10).
 Renaming a note also renames its file.
 
@@ -561,6 +561,10 @@ of unsaved changes that can be recovered (chapter 8).
 A binder is simply a *subfolder* of the library. Click the **New binder** icon (or **New sub-binder in…** next to a
 binder), type the **Binder name** and click **Create**. To file notes, drag them onto a binder in the sidebar, or
 select them and use **Move to…** (**Library (root)** takes them back to the root).
+
+Under the date, each card names the note's binder, with its whole path if it sits inside another binder (for example
+`Classe/3e B`). A note in no binder, so at the root of the library, says **Not in a binder**: you see at a glance what is
+left to file. As a note is a file, it is in one binder at a time.
 
 To rename or delete a binder, open the **⋯** menu ("Actions on the binder…") next to its name in the sidebar:
 
