@@ -746,6 +746,15 @@
       "missing": "Elle a peut-être été supprimée ou déplacée sur un autre ordinateur. Enregistrez-la comme une copie pour la garder.",
       "reload": "Recharger"
     },
+    "pages": {
+      "label": "Aller à une autre page",
+      "previous": "Page précédente",
+      "next": "Page suivante",
+      "previousTitle": "Page précédente (Alt+Gauche)",
+      "nextTitle": "Page suivante (Alt+Droite)",
+      "position": "Page {n} sur {count}",
+      "videoBusy": "Un export vidéo est en cours : attendez la fin ou annulez-le avant de changer de page."
+    },
     "undo": "Annuler (Ctrl+Z)",
     "redo": "Rétablir (Ctrl+Y)",
     "toolbar": "Outils d'édition",

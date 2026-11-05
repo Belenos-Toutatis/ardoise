@@ -44,9 +44,11 @@
   /** The editor or live mode shows over the library, which stays mounted (hidden) meanwhile. */
   const away = $derived(liveOpen || openPath !== null);
   /** Where the library stood when a note or live mode took the window, to give it back. */
-  let returnTo: { path: string | null; element: HTMLElement | null; scroll: number } | null = null;
+  let returnTo: { path: string | null; element: HTMLElement | null; scroll: number; moved?: boolean } | null = null;
 
   const inTrash = $derived(lib.view.kind === 'trash');
+  /** The notes as the library shows them now (binder, tag, search, sort): the editor's page buttons walk through them. */
+  const pagePaths = $derived(lib.visible.map((n) => n.path));
 
   // What the share on the network shows is what the main window shows: the library, the settings
   // and the panels are the waiting screen; the editor and live mode say what they show themselves.
@@ -118,6 +120,8 @@
       : null;
     const target = card ?? (back.element?.isConnected ? back.element : null);
     target?.focus({ preventScroll: true });
+    // The editor went on to other notes by its page buttons: the one it shows may be far from where the library was.
+    if (back.moved) card?.scrollIntoView?.({ block: 'nearest' });
   }
 
   function open(note: NoteSummary) {
@@ -249,6 +253,13 @@
       void lib.refresh();
     }}
     onresume={resumeLive}
+    pages={pagePaths}
+    onpage={(path) => {
+      // The editor went on to the next note; `closeEditor` gives the library's focus to this one.
+      if (openPath === null) return;
+      openPath = path;
+      if (returnTo) returnTo.moved = true;
+    }}
   />
 {/if}
 

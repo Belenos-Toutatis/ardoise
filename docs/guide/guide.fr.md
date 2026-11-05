@@ -696,6 +696,15 @@ Cliquez sur une carte pour ouvrir la note. En haut : **Bibliothèque** (retour),
 modifications, Ardoise demande : **Enregistrer et revenir**, **Revenir sans enregistrer** ou **Rester**. Annuler et
 rétablir n'ont pas de limite pendant que la note est ouverte.
 
+Pour passer à une autre note sans revenir à la bibliothèque, utilisez **Page précédente** et **Page suivante** : les
+flèches `‹` et `›` à côté du titre, ou `Alt + ←` et `Alt + →`. Elles suivent la liste que la bibliothèque montre : même
+classeur, mêmes étiquettes, même recherche, même ordre. Entre les deux flèches, Ardoise écrit la place de la note, par
+exemple **3 / 12**. Les flèches sont grisées à la première et à la dernière note, et cachées quand la note n'est pas
+dans la liste ou qu'elle y est seule. Avec des modifications non enregistrées, Ardoise demande : **Enregistrer et
+ouvrir l'autre note**, **Ouvrir sans enregistrer** ou **Rester**. Pendant l'enregistrement d'une narration ou un export
+vidéo, les flèches ne font rien : arrêtez-les d'abord. En revenant à la bibliothèque, vous retrouvez la dernière note
+ouverte. Si la note est montrée sur un autre écran (partage sur le réseau), cet écran suit.
+
 Si la note a été modifiée entre-temps sur un autre PC, Ardoise *refuse d'écraser l'autre version* : vos modifications
 restent à l'écran et **Enregistrer comme copie** les sauve dans une nouvelle note.
 
@@ -1169,6 +1178,7 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte.
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copier, couper, coller des traits |
 | `Suppr` ou `Retour arrière` | Supprimer la sélection |
 | `Échap` | Désélectionner |
+| `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
 | `V`, `P`, `E`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Déplacer la page** |
 | `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton) |
 | `F` | **Redresser les formes** |
