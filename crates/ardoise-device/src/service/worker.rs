@@ -910,8 +910,7 @@ impl Worker {
     /// Hands a live notification to the sink: pen data (oriented), proximity, the button.
     /// What is known and means nothing for live mode (the battery level, which
     /// [`Self::battery_events`] shows; the frames of a real Slate whose meaning is unknown) is
-    /// only in the log's `rx` lines. Anything else is noted and keeps the log, so that the real
-    /// signature of the button shows if `BUTTON_COMMAND` is not it (it is a hypothesis).
+    /// only in the log's `rx` lines. Anything else is noted and keeps the log.
     fn forward(&mut self, notification: LiveNotification) {
         let (width, height) = self.tablet_size();
         let orientation = self.config.options.orientation;

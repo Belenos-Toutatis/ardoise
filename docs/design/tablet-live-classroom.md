@@ -68,10 +68,9 @@ Behaviour:
   `pages::orient` applied by the service), so the hub uses them as page coordinates; `Started.orientation` tells the
   hub the page size (M8). Lost links are reopened (`Manager` logic) and reported
   as `LiveInput::State(Reconnecting)` then `Live`. `stop_live()` leaves live mode (`b1 02`) and stays connected.
-- **Button in live mode**: protocol.md does not say what the Slate sends. Working hypothesis since 2026-11-05, to be
-  confirmed with the real tablet: the unasked command frame `cb 01 00` (`ardoise_proto::live::BUTTON_COMMAND`), the
-  only candidate in our journals; a match becomes `LiveInput::Button`. Until then the code looked for an invented sysevent
-  (`f2 01 01`), so the real button did nothing. **Every other notification received during live mode that is
+- **Button in live mode**: the Slate sends the unasked command frame `cb 01 00` (`ardoise_proto::live::BUTTON_COMMAND`,
+  found in our journals, confirmed on the real tablet on 2026-11-05); a match becomes `LiveInput::Button`. Until then the
+  code looked for a sysevent invented for the simulator (`f2 01 01`), so the real button did nothing. **Every other notification received during live mode that is
   not pen data is written to the diagnostic log with the note `unclassified during live mode`**, so that the H2 log
   shows the real signature, except the frames already known (battery level, and the frames of the real Slate whose
   meaning is unknown: protocol.md §12), which are only in their `rx` lines.
@@ -312,7 +311,7 @@ Tablet service (package A):
 - Simulator: `realtime::RealTimeConnector` (the virtual clock follows the wall clock), `SimFactory`, `SimHooks`
   (1 s delays in the app, none in tests; 10 min of handwriting when live mode starts), `app_tablet()` (3 reference
   pages, battery 87 %), `SimStats::live_buttons`; the button pressed while live mode streams sends `cb 01 00` on
-  the command channel (hypothesis, see "Button in live mode").
+  the command channel, as the real tablet does (see "Button in live mode").
 
 Live session and presentation (package B):
 

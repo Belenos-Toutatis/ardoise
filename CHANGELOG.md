@@ -9,7 +9,7 @@
 
 ### Corrigé (jalon M12)
 
-- Mode direct : le bouton de la vraie tablette ne faisait rien (Ardoise attendait un signal inventé, faute de le connaître). Il crée maintenant une nouvelle page, ou un nouveau calque selon le réglage. Le signal retenu, `cb 01 00`, reste à confirmer avec la vraie tablette.
+- Mode direct : le bouton de la vraie tablette ne faisait rien (Ardoise attendait un signal inventé, faute de le connaître). Il crée maintenant une nouvelle page, ou un nouveau calque selon le réglage (essayé avec la vraie tablette).
 - Mode direct : un trait en cours lors d'un changement de couleur, de tableau noir ou d'un effacement pouvait rester en double dans les fenêtres, ou un trait effacé revenir, jusqu'au changement suivant.
 - Mode direct : un arrêt de Windows pendant un direct perdait les dernières secondes et la narration. Ardoise écrit maintenant les pages, et Windows affiche qu'Ardoise empêche l'arrêt, comme pour une note non enregistrée.
 - Mode direct : changer de couleur ou de page sur une page chargée, avec plusieurs écrans connectés, ne fait plus attendre la tablette (la page n'est plus recopiée pour chaque écran).

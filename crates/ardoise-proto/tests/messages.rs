@@ -440,7 +440,7 @@ fn reply_unknown_opcodes_are_kept() {
 }
 
 #[test]
-fn the_unasked_cb_frame_of_a_real_slate_is_taken_for_its_button() {
+fn the_unasked_cb_frame_of_a_real_slate_is_its_button() {
     // Our capture (Slate A4, 2026-11-02), on the command channel during live mode.
     let frame = Reply::decode(&bytes("cb 01 00")).unwrap();
     assert_eq!(
@@ -448,7 +448,7 @@ fn the_unasked_cb_frame_of_a_real_slate_is_taken_for_its_button() {
         Reply::Unknown(Frame::new(opcode::LIVE_BUTTON, [0x00]))
     );
     assert!(frame.is_live_button());
-    assert_eq!(frame.to_string(), "cb 01 00, live-mode button (hypothesis)");
+    assert_eq!(frame.to_string(), "cb 01 00, live-mode button");
 }
 
 #[test]

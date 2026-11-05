@@ -216,7 +216,7 @@ mod tests {
             ("c8 03 be 70 0d", "DOWNLOAD_START extra=70 0d"),
             ("c8 05 ed 26 39 f4 cb", "DOWNLOAD_END crc=cbf43926"),
             ("f1 02 13 00", "unknown reply f1 02 13 00"),
-            ("cb 01 00", "cb 01 00, live-mode button (hypothesis)"),
+            ("cb 01 00", "cb 01 00, live-mode button"),
             (
                 "c8 01 aa",
                 "malformed DOWNLOAD_START/DOWNLOAD_END reply: \

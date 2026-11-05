@@ -63,9 +63,8 @@ pub mod opcode {
     pub const FILE_INFO_VALUE: u8 = 0xcf;
     /// Reply: download start (`c8 n be ...`) or end (`c8 05 ed <crc32>`).
     pub const DOWNLOAD: u8 = 0xc8;
-    /// Unasked frame seen once from a real Slate A4 during live mode (`cb 01 00`, protocol.md
-    /// §12), taken for its button ([`live::BUTTON_COMMAND`](crate::live::BUTTON_COMMAND)). It
-    /// decodes as [`Reply::Unknown`](super::Reply::Unknown), and
+    /// Unasked frame of a real Slate A4 when its button is pressed during live mode (`cb 01 00`,
+    /// protocol.md §12, [`live::BUTTON_COMMAND`](crate::live::BUTTON_COMMAND)). It decodes as [`Reply::Unknown`](super::Reply::Unknown), and
     /// [`Reply::is_live_button`](super::Reply::is_live_button) tells it apart.
     pub const LIVE_BUTTON: u8 = 0xcb;
 }
@@ -550,7 +549,7 @@ pub enum Reply {
 }
 
 impl Reply {
-    /// Whether this is the unasked frame taken for the tablet's button in live mode
+    /// Whether this is the unasked frame of the tablet's button in live mode
     /// ([`opcode::LIVE_BUTTON`]).
     pub fn is_live_button(&self) -> bool {
         matches!(self, Self::Unknown(frame) if frame.opcode == opcode::LIVE_BUTTON)
@@ -710,7 +709,7 @@ impl fmt::Display for Reply {
             }
             Self::DownloadEnd { crc } => write!(f, "DOWNLOAD_END crc={crc:08x}"),
             Self::Unknown(frame) if frame.opcode == opcode::LIVE_BUTTON => {
-                write!(f, "{frame}, live-mode button (hypothesis)")
+                write!(f, "{frame}, live-mode button")
             }
             Self::Unknown(frame) => write!(f, "unknown reply {frame}"),
         }

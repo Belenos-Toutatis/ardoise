@@ -458,7 +458,7 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
                     Channel::Live,
                     hex("a1 0c c4 09 f4 01 00 04 ff ff ff ff ff ff"),
                 ),
-                // The frame taken for the button (a real Slate A4's unasked one), the battery
+                // The button (the unasked frame of a real Slate A4), the battery
                 // level (ignored), then two unknown notifications.
                 cmd("cb 01 00"),
                 on(Channel::SysEvent, hex("f1 02 2a 00")),

@@ -45,9 +45,8 @@
 //!   (protocol.md §12): right after a connection (issue #212 saw `f1 02 13 00` then) and
 //!   whenever [`SimTablet::set_battery`] changes the level while a host is connected (a real
 //!   Slate A4 sent one per percent lost). **Assumption:** the flag is the charging state.
-//! - **Assumption (to confirm with the real tablet):** a button press while live mode streams sends the
-//!   command frame [`LIVE_BUTTON_COMMAND`] (`cb 01 00`, the only candidate in our journals of a
-//!   real Slate: protocol.md §12) and stores nothing.
+//! - A button press while live mode streams sends the command frame [`LIVE_BUTTON_COMMAND`]
+//!   (`cb 01 00`, as a real Slate A4 does: protocol.md §12) and stores nothing.
 //! - One connection at a time: the tablet does not advertise while connected, and a second
 //!   `connect` times out. A host disconnection, a lost link or a dropped transport frees it.
 //!
@@ -77,7 +76,7 @@ use crate::connector::SimConnector;
 use crate::pen::{self, PenEvent, PenScript, SAMPLE_INTERVAL, TimedPen};
 
 /// Command frame the simulated tablet sends when its button is pressed while live mode streams:
-/// [`ardoise_proto::live::BUTTON_COMMAND`], a hypothesis (see there).
+/// [`ardoise_proto::live::BUTTON_COMMAND`].
 pub const LIVE_BUTTON_COMMAND: [u8; 3] = ardoise_proto::live::BUTTON_COMMAND;
 
 /// Mode of a new connection. **Assumption** (see the module documentation): idle, since a real
@@ -350,7 +349,7 @@ impl SimTablet {
 
     /// Presses the button briefly. During a registration (a host sent `e7`) it confirms it:
     /// the identity is stored and `e4 01 00` sent. In registration mode without `e7` it does
-    /// nothing. While live mode streams it sends [`LIVE_BUTTON_COMMAND`] (assumption).
+    /// nothing. While live mode streams it sends [`LIVE_BUTTON_COMMAND`].
     /// Otherwise it stores the page drawn so far, if any.
     pub fn press_button(&self) {
         let now = self.now();

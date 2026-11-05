@@ -93,6 +93,8 @@ Tout est corrigé (`docs/research/protocol.md` §5.3 et §12). Le test guidé su
 - [ ] [matériel] Au travail : synchro réelle, mode direct, projecteur en bureau étendu (procédure H2).
 - [ ] Corrections issues du retour de l'utilisateur.
 
+Confirmé avec la vraie tablette le 2026-11-05 : le bouton crée une nouvelle page en mode direct. Le signal est `cb 01 00` (`docs/research/protocol.md` §12) ; Ardoise attendait jusque-là un signal inventé pour la tablette simulée.
+
 ## M5 — Découper, assembler, exporter
 
 - [x] Découpe par instant (ligne du temps) et par zone ; assemblage superposé et bout à bout ; tests.

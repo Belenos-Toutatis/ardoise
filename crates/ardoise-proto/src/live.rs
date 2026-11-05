@@ -34,14 +34,10 @@ const STATUS_BUTTONS_OFFSET: usize = 10;
 /// Resolution of the proximity timestamp.
 const TICK_MS: u64 = 5;
 
-/// The command frame taken for a press of the tablet's button during live mode.
-///
-/// **Hypothesis, to confirm with the real tablet:** protocol.md does not say what the Slate sends
-/// (§7.2 only knows the stylus button byte of the `10` report, which Tuhi ignores). In all our
-/// journals of a real Slate A4, the only unasked frame that fits is this one: once, on the command
-/// characteristic, during a live session, with the pen away (protocol.md §12). Every other
-/// notification received during live mode is still logged as "unclassified during live mode", and
-/// keeps the log, so that the real signature shows if this is not it.
+/// The command frame a real Slate A4 sends when its button is pressed during live mode: unasked,
+/// on the command characteristic. Found in our journals and confirmed by pressing the button on the
+/// tablet (2026-11-05, protocol.md §12). Tuhi does not know it. Every other notification received
+/// during live mode is still logged as "unclassified during live mode", and keeps the log.
 pub const BUTTON_COMMAND: [u8; 3] = [0xcb, 0x01, 0x00];
 
 /// Whether a notification of the command characteristic is a press of the tablet's button (see
