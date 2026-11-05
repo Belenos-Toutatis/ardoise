@@ -458,11 +458,10 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
                     Channel::Live,
                     hex("a1 0c c4 09 f4 01 00 04 ff ff ff ff ff ff"),
                 ),
-                // The hypothetical button signature, the battery level and an unasked frame
-                // of a real Slate A4 (ignored), then two unknown notifications.
-                on(Channel::SysEvent, hex("f2 01 01")),
-                on(Channel::SysEvent, hex("f1 02 2a 00")),
+                // The button (the unasked frame of a real Slate A4), the battery
+                // level (ignored), then two unknown notifications.
                 cmd("cb 01 00"),
+                on(Channel::SysEvent, hex("f1 02 2a 00")),
                 on(Channel::SysEvent, hex("f1 02 99 00")),
                 on(Channel::Live, hex("10 02 2a 00")),
             ],
@@ -557,13 +556,10 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
         text.contains("unclassified during live mode: live 10 02 2a 00"),
         "{text}"
     );
-    assert!(
-        text.contains("button pressed (sysevent f2 01 01)"),
-        "{text}"
-    );
-    assert!(!text.contains("unclassified during live mode: sys_event f2 01 01"));
+    assert!(text.contains("button pressed (cb 01 00)"), "{text}");
+    assert!(!text.contains("unclassified during live mode: command cb 01 00"));
     // Known frames are described in their `rx` lines, and not flagged.
-    for known in ["f1 02 2a 00", "a3 06 dd dd dd dd 01 00", "cb 01 00"] {
+    for known in ["f1 02 2a 00", "a3 06 dd dd dd dd 01 00"] {
         assert!(
             !text.contains(&format!("unclassified during live mode: {known}"))
                 && !text.contains(&format!(": sys_event {known}"))

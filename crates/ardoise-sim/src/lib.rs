@@ -31,6 +31,6 @@ pub use pen::{PenScript, PenSegment};
 pub use realtime::{RealTimeConnector, SimFactory, SimHooks};
 pub use replay::{ReplayConnector, ReplayError, ReplayOptions};
 pub use tablet::{
-    CONNECTION_MODE, LIVE_BUTTON_SYSEVENT, SimConfig, SimStats, SimTablet, StoredPage,
+    CONNECTION_MODE, LIVE_BUTTON_COMMAND, SimConfig, SimStats, SimTablet, StoredPage,
 };
 pub use user::SimulatedUser;

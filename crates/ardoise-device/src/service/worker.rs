@@ -14,7 +14,6 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use ardoise_core::library::Library;
 use ardoise_core::note::PageSize;
-use ardoise_proto::Reply;
 use ardoise_proto::live::{self, LivePacket};
 use ardoise_proto::sysevent::{self, SysEvent};
 
@@ -911,8 +910,7 @@ impl Worker {
     /// Hands a live notification to the sink: pen data (oriented), proximity, the button.
     /// What is known and means nothing for live mode (the battery level, which
     /// [`Self::battery_events`] shows; the frames of a real Slate whose meaning is unknown) is
-    /// only in the log's `rx` lines. Anything else is noted and keeps the log, so that the real
-    /// signature of the button can be found at H2 (`BUTTON_SYSEVENTS` is a hypothesis).
+    /// only in the log's `rx` lines. Anything else is noted and keeps the log.
     fn forward(&mut self, notification: LiveNotification) {
         let (width, height) = self.tablet_size();
         let orientation = self.config.options.orientation;
@@ -931,17 +929,12 @@ impl Worker {
                 Ok(LivePacket::Unexplained(_)) => return,
                 Ok(LivePacket::Status { .. } | LivePacket::Unknown(_)) | Err(_) => None,
             },
-            Channel::SysEvent if live::is_button_sysevent(&notification.data) => {
-                Some(LiveInput::Button)
-            }
             Channel::SysEvent => match sysevent::decode(&notification.data) {
                 SysEvent::BatteryLevel { .. } | SysEvent::Unexplained { .. } => return,
                 SysEvent::Unknown(_) => None,
             },
-            Channel::Command
-                if Reply::decode(&notification.data).is_ok_and(|reply| reply.is_unexplained()) =>
-            {
-                return;
+            Channel::Command if live::is_button_command(&notification.data) => {
+                Some(LiveInput::Button)
             }
             Channel::Command | Channel::PageData => None,
         };
@@ -949,7 +942,7 @@ impl Worker {
             Some(input) => {
                 if input == LiveInput::Button {
                     self.note(format!(
-                        "button pressed (sysevent {})",
+                        "button pressed ({})",
                         ardoise_proto::hex::encode(&notification.data)
                     ));
                 }

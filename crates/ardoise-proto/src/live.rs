@@ -34,22 +34,16 @@ const STATUS_BUTTONS_OFFSET: usize = 10;
 /// Resolution of the proximity timestamp.
 const TICK_MS: u64 = 5;
 
-/// Sysevent notifications taken for a press of the tablet's button during live mode.
-///
-/// **Hypothesis, to check at the hardware checkpoint H2:** protocol.md does not say what the
-/// Slate sends when its button is pressed in live mode (§7.2 only knows the stylus button byte
-/// of the `10` report, which Tuhi ignores; §11 lists the sysevent characteristic as unknown).
-/// The working guess is a sysevent. For now the list holds only the simulator's invented
-/// signature `f2 01 01`; the real one goes here once an H2 log shows it (every other
-/// notification received during live mode is logged as "unclassified during live mode" for that
-/// purpose). It must not look like the battery-level sysevent `f1 02 <percent> <flag>` (see
-/// [`crate::sysevent`]), which a real Slate sends whenever its level changes.
-pub const BUTTON_SYSEVENTS: &[&[u8]] = &[&[0xf2, 0x01, 0x01]];
+/// The command frame a real Slate A4 sends when its button is pressed during live mode: unasked,
+/// on the command characteristic. Found in our journals and confirmed by pressing the button on the
+/// tablet (2026-11-05, protocol.md §12). Tuhi does not know it. Every other notification received
+/// during live mode is still logged as "unclassified during live mode", and keeps the log.
+pub const BUTTON_COMMAND: [u8; 3] = [0xcb, 0x01, 0x00];
 
-/// Whether a sysevent notification is a press of the tablet's button (see
-/// [`BUTTON_SYSEVENTS`]).
-pub fn is_button_sysevent(data: &[u8]) -> bool {
-    BUTTON_SYSEVENTS.contains(&data)
+/// Whether a notification of the command characteristic is a press of the tablet's button (see
+/// [`BUTTON_COMMAND`]).
+pub fn is_button_command(data: &[u8]) -> bool {
+    data == BUTTON_COMMAND
 }
 
 /// One record of a pen-samples notification.
@@ -405,23 +399,15 @@ mod tests {
     }
 
     #[test]
-    fn button_sysevents_are_recognised_exactly() {
-        assert!(is_button_sysevent(&bytes("f2 01 01")));
-        // Battery levels (issue #212, our captures) are not the button, charging or not.
-        assert!(!is_button_sysevent(&bytes("f1 02 13 00")));
-        assert!(!is_button_sysevent(&bytes("f1 02 14 01")));
-        assert!(!is_button_sysevent(&bytes("f2 01")));
-        assert!(!is_button_sysevent(&bytes("f2 01 01 00")));
-        assert!(!is_button_sysevent(&[]));
-        for signature in BUTTON_SYSEVENTS {
-            assert!(
-                matches!(
-                    crate::sysevent::decode(signature),
-                    crate::sysevent::SysEvent::Unknown(_)
-                ),
-                "{signature:02x?} looks like a known sysevent"
-            );
-        }
+    fn the_button_command_is_recognised_exactly() {
+        assert!(is_button_command(&bytes("cb 01 00")));
+        assert!(!is_button_command(&bytes("cb 01")));
+        assert!(!is_button_command(&bytes("cb 01 00 00")));
+        assert!(!is_button_command(&bytes("cb 01 01")));
+        // The replies of the session and the registration's own button are not it.
+        assert!(!is_button_command(&bytes("b3 01 00")));
+        assert!(!is_button_command(&bytes("e4 01 00")));
+        assert!(!is_button_command(&[]));
     }
 
     #[test]

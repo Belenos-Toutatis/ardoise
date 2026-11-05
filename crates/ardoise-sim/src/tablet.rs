@@ -45,9 +45,8 @@
 //!   (protocol.md §12): right after a connection (issue #212 saw `f1 02 13 00` then) and
 //!   whenever [`SimTablet::set_battery`] changes the level while a host is connected (a real
 //!   Slate A4 sent one per percent lost). **Assumption:** the flag is the charging state.
-//! - **Assumption (to check at H2):** a button press while live mode streams sends the
-//!   sysevent [`LIVE_BUTTON_SYSEVENT`] (`f2 01 01`, invented: protocol.md does not say what
-//!   the Slate sends) and stores nothing.
+//! - A button press while live mode streams sends the command frame [`LIVE_BUTTON_COMMAND`]
+//!   (`cb 01 00`, as a real Slate A4 does: protocol.md §12) and stores nothing.
 //! - One connection at a time: the tablet does not advertise while connected, and a second
 //!   `connect` times out. A host disconnection, a lost link or a dropped transport frees it.
 //!
@@ -76,11 +75,9 @@ use crate::clock::{VirtualClock, millis, unix_seconds};
 use crate::connector::SimConnector;
 use crate::pen::{self, PenEvent, PenScript, SAMPLE_INTERVAL, TimedPen};
 
-/// Sysevent the simulated tablet sends when its button is pressed while live mode streams.
-/// **Invented** (protocol.md says nothing about it): the device layer recognises it through
-/// `ardoise_proto::live::BUTTON_SYSEVENTS`, until the H2 log shows the real signature. It must
-/// not look like the battery-level sysevent `f1 02 <percent> <flag>`.
-pub const LIVE_BUTTON_SYSEVENT: [u8; 3] = [0xf2, 0x01, 0x01];
+/// Command frame the simulated tablet sends when its button is pressed while live mode streams:
+/// [`ardoise_proto::live::BUTTON_COMMAND`].
+pub const LIVE_BUTTON_COMMAND: [u8; 3] = ardoise_proto::live::BUTTON_COMMAND;
 
 /// Mode of a new connection. **Assumption** (see the module documentation): idle, since a real
 /// Slate accepts `ec` right after connecting but refuses it in paper mode.
@@ -183,7 +180,7 @@ pub struct SimStats {
     pub live_samples: u64,
     /// `a2` notifications streamed.
     pub proximity_in: u32,
-    /// Button presses sent as [`LIVE_BUTTON_SYSEVENT`] while live mode streamed.
+    /// Button presses sent as [`LIVE_BUTTON_COMMAND`] while live mode streamed.
     pub live_buttons: u32,
 }
 
@@ -352,7 +349,7 @@ impl SimTablet {
 
     /// Presses the button briefly. During a registration (a host sent `e7`) it confirms it:
     /// the identity is stored and `e4 01 00` sent. In registration mode without `e7` it does
-    /// nothing. While live mode streams it sends [`LIVE_BUTTON_SYSEVENT`] (assumption).
+    /// nothing. While live mode streams it sends [`LIVE_BUTTON_COMMAND`].
     /// Otherwise it stores the page drawn so far, if any.
     pub fn press_button(&self) {
         let now = self.now();
@@ -383,8 +380,8 @@ impl SimTablet {
         {
             link.queue.push_back(Outgoing {
                 due: now,
-                channel: Channel::SysEvent,
-                data: LIVE_BUTTON_SYSEVENT.to_vec(),
+                channel: Channel::Command,
+                data: LIVE_BUTTON_COMMAND.to_vec(),
             });
             state.stats.live_buttons += 1;
             return;
