@@ -118,6 +118,8 @@
     onsaved,
     onresume,
     onchange,
+    pages,
+    onpage,
     windowClose = defaultWindowClose(),
   }: {
     path: string;
@@ -132,6 +134,18 @@
     onresume?: (path: string) => void;
     /** The app state changed (the microphone chosen here): the screen holding it takes the new one. */
     onchange?: (next: AppState) => void;
+    /**
+     * The notes the library shows, in its order (same binder, tag, search and sort): the editor's
+     * « Page précédente » and « Page suivante » go to the one before or after the open note. The
+     * buttons are hidden when the open note is not in the list, or is alone in it.
+     */
+    pages?: string[];
+    /**
+     * The editor moved on to this note by its own choice (the page buttons or keys), after the
+     * answer to the unsaved-changes question: the screen holding it follows, so that its `path` is
+     * the editor's again.
+     */
+    onpage?: (path: string) => void;
     /** How a window close is held back while there are unsaved changes (tests replace it). */
     windowClose?: WindowClose;
   } = $props();
@@ -175,6 +189,11 @@
   }
 
   let currentPath = $state('');
+  /**
+   * The paths this note had before its renames, newest last: the library's list still holds the old
+   * one until it is read again, and the page position must not disappear in between.
+   */
+  let formerPaths = $state.raw<string[]>([]);
   let loadError = $state<string | null>(null);
   /** The loads of this editor, for the assistant's `open_note` (answered once the note is shown). */
   const loads = new NoteLoads();
@@ -244,6 +263,13 @@
   const resumeHint = $derived.by(() => {
     const block = resumeBlock(tablet.status);
     return block === 'noTablet' ? t('live.resume.noTablet') : block === 'busy' ? t('live.resume.tabletBusy') : null;
+  });
+  /** Where the open note stands among `pages`; null when it is not there or alone (no page buttons). */
+  const place = $derived.by(() => {
+    if (!pages || pages.length < 2) return null;
+    let index = pages.indexOf(currentPath);
+    for (let i = formerPaths.length - 1; index < 0 && i >= 0; i--) index = pages.indexOf(formerPaths[i]);
+    return index < 0 ? null : { index, count: pages.length };
   });
   const range = $derived(doc ? timeRange(doc.note) : null);
   const splitSpec = $derived.by((): SplitSpec | null => {
@@ -431,6 +457,7 @@
     drafts.hold(false);
     generation += 1;
     currentPath = target;
+    formerPaths = [];
     // Replaced by the load of another note if one starts before this one ends.
     const load = loads.begin();
     loadError = null;
@@ -443,6 +470,15 @@
     resetReplay();
     original = null;
     originalError = null;
+    // Nothing of the previous note stays on screen while this one loads: its name, its errors, its notices.
+    title = '';
+    titleDraft = '';
+    targetTitle = '';
+    titleError = null;
+    saveError = null;
+    conflict = null;
+    notice = null;
+    spaceDown = false;
     try {
       // The previous note's background images go; this note's image is kept in memory by Rust
       // (its key goes into the history with the note, `lib/editor/image.ts`).
@@ -585,6 +621,7 @@
       try {
         const result = await api.retitleNote(currentPath, next, stamp);
         if (gen !== generation) return;
+        if (result.path !== currentPath) formerPaths = [...formerPaths, currentPath];
         currentPath = result.path;
         stamp = result.stamp;
         title = next;
@@ -818,6 +855,45 @@
     } else close(goLive);
   }
 
+  /** The note before (-1) or after (1) this one in the library's list; null at the ends or when there is no list. */
+  function neighbour(step: -1 | 1): string | null {
+    return place && pages ? (pages[place.index + step] ?? null) : null;
+  }
+
+  /** This editor shows another note, and the screen holding it follows. */
+  function moveTo(target: string) {
+    // Opening first: the editor's path is the new one by the time the screen's `path` catches up.
+    void open(target);
+    onpage?.(target);
+  }
+
+  /**
+   * « Page précédente » / « Page suivante »: the next note of the library's list, here in the same
+   * view. The rules of leaving the editor apply: nothing while a narration is recorded or a video
+   * is written; unsaved changes (or a title typed and not committed) ask first; writes under way
+   * are waited for, and a rename that failed keeps the note here.
+   */
+  async function goPage(step: -1 | 1) {
+    const target = neighbour(step);
+    if (target === null || leaving) return;
+    if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
+    if (videoRunning) return showNotice(t('editor.pages.videoBusy'), true);
+    const ask = () => {
+      switching = target;
+      closing = false;
+      resuming = false;
+      leaving = true;
+    };
+    if (dirty || titleEdited()) return ask();
+    const gen = generation;
+    const failures = renameFailures;
+    // The title field's blur may have started a rename: it ends before the note goes.
+    await settled();
+    if (!alive || gen !== generation || renameFailures !== failures || leaving) return;
+    if (dirty || titleEdited()) return ask();
+    moveTo(target);
+  }
+
   /** The window is asked to close: true holds it back (unsaved changes, or a write under way). */
   function holdClose(): boolean {
     if (alive && recorder.busy) {
@@ -864,7 +940,7 @@
     resuming = false;
     // Nothing leaves while the save or the rename failed: their error stays in view.
     if (!ok || renameFailures !== failures) return;
-    if (target !== null) void open(target);
+    if (target !== null) moveTo(target);
     else if (fromWindow) await closeWindow();
     else if (resume) close(goLive);
     else close();
@@ -881,7 +957,7 @@
       close(goLive);
     } else if (target !== null) {
       leaving = false;
-      void open(target);
+      moveTo(target);
     } else if (closing) void closeWindow();
     else {
       leaving = false;
@@ -1494,6 +1570,12 @@
       return;
     }
     if (isTyping(e.target)) return;
+    // Alt + ← / →: the previous / next page (not while the pen is down, nor with other modifiers).
+    if (e.altKey && !mod && !e.shiftKey && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+      e.preventDefault();
+      if (!canvas?.dragging()) void goPage(key === 'ArrowLeft' ? -1 : 1);
+      return;
+    }
     // A gesture under way commits on top of the doc it started from: changing the doc meanwhile
     // (undo, redo, delete, paste, select all…) would be overwritten, so those keys wait.
     if (canvas?.dragging() && (mod || ['Delete', 'Backspace', 'Escape'].includes(key))) {
@@ -1602,6 +1684,31 @@
         }}
       />
     </label>
+    {#if place}
+      <div class="page-nav" role="group" aria-label={t('editor.pages.label')} data-slot="page-nav">
+        <button
+          type="button"
+          class="button ghost"
+          data-action="page-previous"
+          disabled={place.index === 0}
+          title={t('editor.pages.previousTitle')}
+          aria-label={t('editor.pages.previous')}
+          onclick={() => void goPage(-1)}><span aria-hidden="true">‹</span></button
+        >
+        <span class="page-position" data-slot="page-position" title={t('editor.pages.position', { n: place.index + 1, count: place.count })}>
+          {place.index + 1} / {place.count}
+        </span>
+        <button
+          type="button"
+          class="button ghost"
+          data-action="page-next"
+          disabled={place.index === place.count - 1}
+          title={t('editor.pages.nextTitle')}
+          aria-label={t('editor.pages.next')}
+          onclick={() => void goPage(1)}><span aria-hidden="true">›</span></button
+        >
+      </div>
+    {/if}
     <span class="status" class:unsaved={dirty} role="status">
       {#if saving}
         {t('editor.saving')}

@@ -1285,6 +1285,29 @@ select {
   white-space: nowrap;
 }
 
+.editor-top .page-nav {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.editor-top .page-nav .button {
+  min-width: 2rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.editor .page-position {
+  min-width: 3.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .editor .status.unsaved {
   color: var(--text);
   font-weight: 600;

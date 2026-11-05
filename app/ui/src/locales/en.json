@@ -746,6 +746,15 @@
       "missing": "It may have been deleted or moved on another computer. Save it as a copy to keep it.",
       "reload": "Reload"
     },
+    "pages": {
+      "label": "Move to another page",
+      "previous": "Previous page",
+      "next": "Next page",
+      "previousTitle": "Previous page (Alt+Left)",
+      "nextTitle": "Next page (Alt+Right)",
+      "position": "Page {n} of {count}",
+      "videoBusy": "A video export is running: wait for it to finish or cancel it before changing page."
+    },
     "undo": "Undo (Ctrl+Z)",
     "redo": "Redo (Ctrl+Y)",
     "toolbar": "Editing tools",

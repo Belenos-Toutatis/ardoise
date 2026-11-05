@@ -656,6 +656,15 @@ Click a card to open the note. At the top: **Library** (back), the **Title of th
 Save*; when you leave with changes, Ardoise asks: **Save and go back**, **Go back without saving** or **Stay**. Undo
 and redo have no limit while the note is open.
 
+To go to another note without going back to the library, use **Previous page** and **Next page**: the arrows `‹` and
+`›` beside the title, or `Alt + ←` and `Alt + →`. They follow the list the library shows: same binder, same tags, same
+search, same order. Between the two arrows, Ardoise writes the place of the note, for example **3 / 12**. The arrows
+are greyed out on the first and the last note, and hidden when the note is not in the list or is alone in it. With
+unsaved changes, Ardoise asks: **Save and open the other note**, **Open without saving** or **Stay**. While a
+narration is being recorded or a video is being exported, the arrows do nothing: stop them first. When you go back to
+the library, you find the last note you opened. If the note is shown on another screen (network share), that screen
+follows.
+
 If the note was changed meanwhile on another PC, Ardoise *refuses to overwrite the other version*: your changes stay on
 screen and **Save as a copy** saves them in a new note.
 
@@ -1108,6 +1117,7 @@ These shortcuts do nothing while you are typing in a text field.
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copy, cut, paste strokes |
 | `Delete` or `Backspace` | Delete the selection |
 | `Esc` | Deselect |
+| `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
 | `V`, `P`, `E`, `H` | Tools **Select**, **Pen**, **Eraser**, **Move the page** |
 | `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button) |
 | `F` | **Straighten shapes** |

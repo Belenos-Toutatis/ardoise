@@ -31,12 +31,13 @@ import { uiJourneys } from './journeys-m10-ui.mjs';
 import { shareJourneys } from './journeys-m11-share.mjs';
 import { resumeJourneys } from './journeys-m12-resume.mjs';
 import { touchUpJourneys } from './journeys-m12-touchup.mjs';
+import { editorNavJourneys } from './journeys-editor-nav.mjs';
 import { mcpJourney } from './mcp.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -234,8 +235,8 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
       await send('Input.insertText', { text });
     },
     /** A key press, e.g. key('z', { ctrl: true }), key('Enter') or key('ArrowRight'). */
-    async key(key, { ctrl = false, shift = false } = {}) {
-      const modifiers = (ctrl ? 2 : 0) | (shift ? 8 : 0);
+    async key(key, { ctrl = false, shift = false, alt = false } = {}) {
+      const modifiers = (alt ? 1 : 0) | (ctrl ? 2 : 0) | (shift ? 8 : 0);
       const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
       const windowsVirtualKeyCode =
         key.length === 1
