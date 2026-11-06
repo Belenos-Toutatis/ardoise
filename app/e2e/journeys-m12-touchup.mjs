@@ -413,8 +413,10 @@ const pixelsAgainstFullRedraw = (selector) => `(() => {
   const partial = Number(c.dataset.partialRedraws ?? 0);
   const repaints = Math.max(1, partial - (c.comparedAtRepaint ?? 0));
   c.comparedAtRepaint = partial;
+  const fullSince = Number(c.dataset.fullRedraws ?? 0) - (c.comparedAtFull ?? 0);
   const before = context.getImageData(0, 0, c.width, c.height).data;
   c.repaintFromScratch();
+  c.comparedAtFull = Number(c.dataset.fullRedraws ?? 0);
   const after = context.getImageData(0, 0, c.width, c.height).data;
   let differ = 0, edges = 0, edgeWorst = 0, worst = 0, x0 = c.width, x1 = -1, y0 = c.height, y1 = -1;
   const samples = [];
@@ -470,7 +472,7 @@ const pixelsAgainstFullRedraw = (selector) => `(() => {
     picture = out.toDataURL('image/png');
   }
   if (differ === 0 && edges > ${EDGE_PIXELS} * repaints) differ = edges;
-  return { differ, edges, edgeWorst, repaints, worst, box: [x0, y0, x1, y1], size: [c.width, c.height], partial, samples, picture };
+  return { differ, edges, edgeWorst, repaints, fullSince, worst, box: [x0, y0, x1, y1], size: [c.width, c.height], partial, samples, picture };
 })()`;
 
 /** Page expression: pixels of the ink's own colour on a canvas: strongly red, with little of the other channels. */
@@ -582,7 +584,7 @@ class Places {
       const end = Date.now() + 5000;
       for (;;) {
         const result = await once(place, selector, name);
-        if (!result || !earlier || result.partial > earlier.partial || Date.now() > end) return result;
+        if (!result || !earlier || result.partial > earlier.partial || result.fullSince > 0 || Date.now() > end) return result;
         await sleep(100);
       }
     };
@@ -594,7 +596,8 @@ class Places {
     if (after) {
       for (const [name, result] of Object.entries(counts)) {
         if (result && after[name] && !(result.partial > after[name].partial)) {
-          throw new Error(`${what}: the ${name} place did not repaint an area for this edit (${after[name].partial} then ${result.partial})`);
+          const strokes = await this.count?.().catch(() => null);
+          throw new Error(`${what}: the ${name} place did not repaint an area for this edit (${after[name].partial} then ${result.partial}, ${result.fullSince} full redraws since the comparison before; ${j(strokes)})`);
         }
       }
     }

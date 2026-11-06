@@ -270,6 +270,10 @@ Vérifié sous Windows le 2026-11-06 : `CHECK OK`, `SELFTEST OK` (exécutable de
 
 Essai réel le 2026-11-06 : un assistant a retouché les quatre notes avec les vrais outils du vrai exécutable, sur des copies hors de la bibliothèque de l'utilisateur (originaux inchangés octet pour octet, `edit_revision` refusé sur les quatre). Il a trouvé un défaut, corrigé : `replace` étalait une forme sur tout l'intervalle de temps des traits remplacés, un tiret durant 95 s à la relecture ; le même ordre la trace maintenant en 2,9 s. Revérifié ensuite : `CHECK OK`, `SELFTEST OK`, `E2E OK` (78 parcours ; le passage d'avant s'était arrêté sur un clic perdu dans « À propos », en anglais, sans lien avec ce changement, à surveiller).
 
+Les quatre copies sont ensuite créées dans la vraie bibliothèque et les fautes validées par l'utilisateur corrigées. Défaut trouvé alors, corrigé : la reconnaissance suivait l'ordre du fichier, où les lettres remises dans un mot sont à la fin, et la recherche ne retrouvait pas les mots corrigés ; elle lit maintenant dans l'ordre d'écriture (sauf si les traits se chevauchent trop dans le temps). Revérifié le 2026-11-06 : `CHECK OK`, `SELFTEST OK`, `E2E OK` (78 parcours) sur le PC redémarré et au repos.
+
+À surveiller dans les parcours : des gestes perdus sur un PC chargé ou utilisé pendant le passage, et une fois sur trois au repos, dans un passage complet, « le navigateur du partage n'a pas retouché de zone » (cause non confirmée, le message donne maintenant le nombre de dessins complets). La mémoire réservée monte d'environ 2 Go à chaque passage complet, sans qu'aucun programme ouvert ne l'explique, et un redémarrage la rend (33 Go puis 11 Go) ; cause non trouvée.
+
 Restent à essayer dans la vraie bibliothèque : **Comparer** et la relecture à l'écran sur ces notes, et une note avec une vraie narration (aucune des quatre n'en a).
 
 ---
