@@ -43,6 +43,9 @@ impl Work<'_> {
         ids: &[usize],
         spec: &TidySpec,
     ) -> Result<Option<LineReport>, ReviseError> {
+        if spec.smooth.is_some() {
+            self.charge_smoothing(ctx, ids)?;
+        }
         let strokes = ids.iter().filter_map(|&number| self.stroke(number));
         let Some(fit) = fit_line(strokes, spec.slope) else {
             return Ok(None);

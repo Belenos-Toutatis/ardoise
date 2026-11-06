@@ -255,7 +255,7 @@ pub enum Order {
         /// The point that stays where it is, `[x, y]`.
         origin: [f32; 2],
     },
-    /// Removes the tremble: a Gaussian along the stroke, whose ends stay where they are.
+    /// Removes the tremble: a Gaussian along the stroke, whose ends stay where they are. A list can smooth at most 5,000,000 samples in all.
     Smooth {
         /// The strokes.
         select: Select,

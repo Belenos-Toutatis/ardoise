@@ -19,6 +19,10 @@ const SHORT_LINE_MM: f32 = 40.0;
 const SHORT_LINE_BINS: usize = 8;
 /// More samples than this are thinned before a fit: the cost grows with the square.
 const MAX_FIT_POINTS: usize = 1000;
+/// A sample is averaged with at most this many neighbours on each side; beyond, it takes them
+/// evenly (each standing for those around it). Writing at the tablet's sampling rate never has so
+/// many within a usual smoothing, so its result does not change; a very dense stroke costs little.
+const SMOOTH_NEIGHBOURS: usize = 64;
 /// Default word gap: this many body heights...
 const WORD_GAP_BODIES: f32 = 1.2;
 /// ...and at least this many millimetres.
@@ -238,6 +242,17 @@ pub(crate) struct Word {
     pub x1: f32,
 }
 
+/// At most [`SMOOTH_NEIGHBOURS`] of these indices, evenly spread over them, each with the number of
+/// indices it stands for.
+fn spread(range: std::ops::Range<usize>) -> impl Iterator<Item = (usize, f64)> {
+    let end = range.end;
+    let group = range.len().div_ceil(SMOOTH_NEIGHBOURS).max(1);
+    range.step_by(group).map(move |start| {
+        let members = group.min(end - start);
+        (start + (members - 1) / 2, members as f64)
+    })
+}
+
 /// Removes the tremble: each sample becomes a Gaussian average of its neighbours along the
 /// stroke, the window shrinking near the ends so that the ends stay where they are. A stroke with a
 /// sample that cannot be drawn is left alone.
@@ -269,23 +284,12 @@ pub(crate) fn smooth_stroke(stroke: &mut Stroke, sigma_mm: f32) {
     for (i, point) in stroke.points.iter_mut().enumerate().take(count - 1).skip(1) {
         let here = along[i];
         let reach = (3.0 * sigma).min(here).min(travelled - here);
-        let (mut sum_x, mut sum_y, mut sum_w) = (0.0, 0.0, 0.0);
-        for j in (0..=i).rev() {
-            let d = here - along[j];
-            if d > reach {
-                break;
-            }
-            let w = weight(d);
-            sum_x += old[j][0] * w;
-            sum_y += old[j][1] * w;
-            sum_w += w;
-        }
-        for j in i + 1..count {
-            let d = along[j] - here;
-            if d > reach {
-                break;
-            }
-            let w = weight(d);
+        // `along` only grows: the neighbours within reach are found without walking through them.
+        let first = along[..i].partition_point(|&there| here - there > reach);
+        let last = i + 1 + along[i + 1..].partition_point(|&there| there - here <= reach);
+        let (mut sum_x, mut sum_y, mut sum_w) = (old[i][0], old[i][1], 1.0);
+        for (j, share) in spread(first..i).chain(spread(i + 1..last)) {
+            let w = weight((along[j] - here).abs()) * share;
             sum_x += old[j][0] * w;
             sum_y += old[j][1] * w;
             sum_w += w;

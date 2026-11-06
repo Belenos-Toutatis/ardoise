@@ -516,3 +516,142 @@ fn the_report_goes_out_in_json() {
     assert!(json["orders"][0].get("new_strokes").is_none());
     assert!(json["orders"][0].get("warnings").is_none());
 }
+
+// ---------------------------------------------------------------------------------------------
+// Smoothing: every neighbour counts on a normal stroke, a dense one stays cheap
+
+/// A wavy stroke of `count` samples over `length` millimetres, with a tremble.
+fn wavy(count: usize, length: f32) -> Stroke {
+    let points = (0..count)
+        .map(|i| {
+            let u = i as f32 / (count - 1) as f32;
+            let x = 10.0 + length * u;
+            let y = 50.0 + 8.0 * (x * 0.2).sin() + 0.3 * (x * 5.0).sin();
+            pt(x, y, i as u32)
+        })
+        .collect();
+    Stroke {
+        tool: Tool::Ballpoint,
+        color: Rgba::BLACK,
+        width: 50.0,
+        layer: 0,
+        points,
+    }
+}
+
+/// The smoothing with no limit on the neighbours: what `smooth` must look like.
+fn smoothed_by_all_neighbours(stroke: &Stroke, sigma_mm: f32) -> Vec<[f64; 2]> {
+    let sigma = f64::from(sigma_mm * 100.0);
+    let old: Vec<[f64; 2]> = stroke
+        .points
+        .iter()
+        .map(|p| [f64::from(p.x), f64::from(p.y)])
+        .collect();
+    let mut along = vec![0.0f64];
+    for pair in old.windows(2) {
+        let last = along[along.len() - 1];
+        along.push(last + (pair[1][0] - pair[0][0]).hypot(pair[1][1] - pair[0][1]));
+    }
+    let total = along[along.len() - 1];
+    (0..old.len())
+        .map(|i| {
+            if i == 0 || i == old.len() - 1 {
+                return old[i];
+            }
+            let reach = (3.0 * sigma).min(along[i]).min(total - along[i]);
+            let (mut x, mut y, mut sum) = (0.0, 0.0, 0.0);
+            for j in 0..old.len() {
+                let d = (along[j] - along[i]).abs();
+                if d <= reach {
+                    let w = (-(d * d) / (2.0 * sigma * sigma)).exp();
+                    x += old[j][0] * w;
+                    y += old[j][1] * w;
+                    sum += w;
+                }
+            }
+            [x / sum, y / sum]
+        })
+        .collect()
+}
+
+/// The largest distance between a smoothed stroke and what it must look like, device units.
+fn furthest(stroke: &Stroke, expected: &[[f64; 2]]) -> f64 {
+    stroke
+        .points
+        .iter()
+        .zip(expected)
+        .map(|(p, e)| (f64::from(p.x) - e[0]).hypot(f64::from(p.y) - e[1]))
+        .fold(0.0, f64::max)
+}
+
+#[test]
+fn smoothing_a_normal_stroke_counts_every_neighbour() {
+    // A pen writing at the tablet's rate: a sample every 0.15 mm or so.
+    let strokes = vec![wavy(2_000, 300.0)];
+    for sigma in [0.2f32, 1.0, 5.0] {
+        let json = format!(r#"[{{"op":"smooth","select":{{}},"sigma":{sigma}}}]"#);
+        let revised = run(&strokes, &json);
+        let expected = smoothed_by_all_neighbours(&strokes[0], sigma);
+        let off = furthest(revised.stroke(0), &expected);
+        assert!(off < 0.01, "sigma {sigma}: {off} device units off");
+    }
+}
+
+#[test]
+fn smoothing_a_dense_stroke_keeps_its_look() {
+    // Ten times denser than a pen, a sample every 0.015 mm or so: hundreds of neighbours each side
+    // at sigma 2, beyond what is averaged.
+    let strokes = vec![wavy(20_000, 300.0)];
+    let revised = run(&strokes, r#"[{"op":"smooth","select":{},"sigma":2}]"#);
+    let expected = smoothed_by_all_neighbours(&strokes[0], 2.0);
+    let off = furthest(revised.stroke(0), &expected);
+    // 1 device unit is 10 µm.
+    assert!(off < 1.0, "{off} device units off");
+}
+
+#[test]
+fn smoothing_a_dense_stroke_is_not_quadratic() {
+    // 104,000 samples took 97 s when every neighbour was visited.
+    let strokes = vec![wavy(104_000, 300.0)];
+    let started = std::time::Instant::now();
+    let revised = run(&strokes, r#"[{"op":"smooth","select":{},"sigma":5}]"#);
+    let taken = started.elapsed();
+    assert!(taken.as_secs() < 30, "{taken:?}");
+    assert_ne!(revised.stroke(0).points[50_000], strokes[0].points[50_000]);
+    assert_eq!(revised.stroke(0).points[0], strokes[0].points[0]);
+    assert_eq!(
+        revised.stroke(0).points[103_999],
+        strokes[0].points[103_999]
+    );
+}
+
+#[test]
+fn a_list_cannot_smooth_more_than_its_budget() {
+    // Refused before the work: this would take minutes.
+    let strokes = vec![wavy(MAX_SMOOTHED_POINTS + 1, 300.0)];
+    let started = std::time::Instant::now();
+    for json in [
+        r#"[{"op":"smooth","select":{},"sigma":5}]"#,
+        r#"[{"op":"tidy_line","select":{},"smooth":5}]"#,
+    ] {
+        let message = refused(&strokes, json, 0);
+        assert!(message.contains("smooth more than"), "{message}");
+    }
+    assert!(started.elapsed().as_secs() < 30);
+    // Over several orders too, each sample counted each time it is smoothed.
+    let half = vec![wavy(MAX_SMOOTHED_POINTS / 2 + 1, 300.0)];
+    let list = format!(
+        r#"[{{"op":"delete","select":{{"ids":[]}}}},{0},{0}]"#,
+        r#"{"op":"smooth","select":{"ids":[]},"sigma":1}"#
+    );
+    assert!(apply(&input(&half), &parse(&list)).is_ok());
+    let message = apply(
+        &input(&half),
+        &parse(
+            r#"[{"op":"smooth","select":{},"sigma":0.0001},{"op":"smooth","select":{},"sigma":0.0001}]"#,
+        ),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(message.contains("order 1"), "{message}");
+}

@@ -10,7 +10,7 @@ use crate::report::{Ctx, OrderReport, Report, ReviseError};
 use crate::shapes::{P, Style, length, paths, sample_count, stroke_along};
 use crate::tidy::TidySpec;
 use crate::validate::{Color, too_many_points};
-use crate::{Input, MAX_COORD_MM, MAX_POINTS, Revised};
+use crate::{Input, MAX_COORD_MM, MAX_POINTS, MAX_SMOOTHED_POINTS, Revised};
 
 /// A replaced stroke's pressure is at least this: a line drawn lightly stays visible once it is a
 /// clean line (the trial's; supposé).
@@ -85,6 +85,8 @@ pub(crate) struct Work<'a> {
     behind: usize,
     /// Points made so far (the note's own do not count).
     made_points: usize,
+    /// Samples smoothed so far, each time it is smoothed.
+    smoothed_points: usize,
     pub(crate) pushed: BTreeSet<usize>,
     pub(crate) pushed_ms: u64,
     pub(crate) faster: BTreeSet<usize>,
@@ -112,6 +114,7 @@ impl<'a> Work<'a> {
             list: (0..input.strokes.len()).collect(),
             behind: 0,
             made_points: 0,
+            smoothed_points: 0,
             pushed: BTreeSet::new(),
             pushed_ms: 0,
             faster: BTreeSet::new(),
@@ -189,6 +192,7 @@ impl<'a> Work<'a> {
             }
             Order::Smooth { select, sigma } => {
                 let ids = self.select(ctx, select, &mut report)?;
+                self.charge_smoothing(ctx, &ids)?;
                 self.each_stroke(&ids, |stroke| smooth_stroke(stroke, *sigma));
             }
             Order::Trim { stroke, from, to } => {
@@ -514,6 +518,22 @@ impl<'a> Work<'a> {
         self.made_points = self.made_points.saturating_add(points);
         if self.made_points > MAX_POINTS {
             return Err(too_many_points(ctx));
+        }
+        Ok(())
+    }
+
+    /// Counts the samples of these strokes as smoothed once more, before the work is done.
+    pub(crate) fn charge_smoothing(&mut self, ctx: Ctx, ids: &[usize]) -> Result<(), ReviseError> {
+        let samples: usize = ids
+            .iter()
+            .filter_map(|&number| self.stroke(number))
+            .map(|stroke| stroke.points.len())
+            .sum();
+        self.smoothed_points = self.smoothed_points.saturating_add(samples);
+        if self.smoothed_points > MAX_SMOOTHED_POINTS {
+            return Err(ctx.err(format!(
+                "the orders would smooth more than {MAX_SMOOTHED_POINTS} samples in total: smooth each stroke once"
+            )));
         }
         Ok(())
     }

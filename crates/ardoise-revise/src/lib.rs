@@ -39,6 +39,9 @@ pub const MAX_SHAPE_MM: f32 = 5_000.0;
 pub const MIN_DASH_MM: f32 = 0.2;
 /// Largest smoothing, millimetres.
 pub const MAX_SIGMA_MM: f32 = 5.0;
+/// Most samples the orders of one list can smooth, counting a sample each time it is smoothed (the
+/// work of a list stays in seconds; several hours of continuous writing hold fewer; supposé).
+pub const MAX_SMOOTHED_POINTS: usize = 5_000_000;
 /// Smallest size change.
 pub const MIN_FACTOR: f32 = 0.05;
 /// Largest size change.
