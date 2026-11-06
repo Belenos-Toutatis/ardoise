@@ -268,7 +268,9 @@ Vérification :
 
 Vérifié sous Windows le 2026-11-06 : `CHECK OK`, `SELFTEST OK` (exécutable de 23,2 Mo), `E2E OK` (78 parcours, FR et EN, dont celui de la copie retouchée sur le vrai exécutable : aperçu, création, **Ouvrir l'original**, **Ce qui a changé**, **Comparer**), après deux relectures indépendantes dont les remarques sont corrigées.
 
-Reste à faire : l'essai réel avec un vrai assistant sur les quatre notes, qui demande la nouvelle version dans `Program` et écrit de nouvelles notes dans la bibliothèque de l'utilisateur.
+Essai réel le 2026-11-06 : un assistant a retouché les quatre notes avec les vrais outils du vrai exécutable, sur des copies hors de la bibliothèque de l'utilisateur (originaux inchangés octet pour octet, `edit_revision` refusé sur les quatre). Il a trouvé un défaut, corrigé : `replace` étalait une forme sur tout l'intervalle de temps des traits remplacés, un tiret durant 95 s à la relecture ; le même ordre la trace maintenant en 2,9 s. Revérifié ensuite : `CHECK OK`, `SELFTEST OK`, `E2E OK` (78 parcours ; le passage d'avant s'était arrêté sur un clic perdu dans « À propos », en anglais, sans lien avec ce changement, à surveiller).
+
+Restent à essayer dans la vraie bibliothèque : **Comparer** et la relecture à l'écran sur ces notes, et une note avec une vraie narration (aucune des quatre n'en a).
 
 ---
 

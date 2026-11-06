@@ -13,7 +13,7 @@ use crate::work::{Work, span_of, start_of};
 /// The pause before each stroke placed, and after the last one, milliseconds.
 pub(crate) const PAUSE_MS: u64 = 40;
 /// With a narration, the strokes end this far before what follows at the least, milliseconds.
-const SQUEEZE_MARGIN_MS: u64 = 2;
+pub(crate) const SQUEEZE_MARGIN_MS: u64 = 2;
 
 impl Work<'_> {
     /// Places the strokes `numbers`, in this order: right after stroke `after`, or at the end of

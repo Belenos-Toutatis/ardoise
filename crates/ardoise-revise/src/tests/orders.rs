@@ -182,11 +182,13 @@ fn replace_takes_the_place_and_the_look_of_what_it_replaces() {
         assert!(made.points.iter().all(|p| (p.pressure - 0.8).abs() < 1e-5));
         assert_monotonic(made);
     }
-    // They share the time span of what they replace, in proportion to their lengths.
+    // They share the time the pen spent on what they replace, in proportion to their lengths.
     assert_eq!(first.points[0].t, 1000);
-    assert_eq!(second.points.last().unwrap().t, 2500);
+    assert_eq!(second.points.last().unwrap().t, 2000);
     assert_eq!(first.points.last().unwrap().t, second.points[0].t);
-    assert_eq!(first.points.last().unwrap().t, 1000 + 1500 / 4);
+    assert_eq!(first.points.last().unwrap().t, 1000 + 1000 / 4);
+    // The report names what the selection found, to check against the picture.
+    assert_eq!(revised.report.orders[0].selected_strokes, [1, 2]);
 }
 
 #[test]
