@@ -327,7 +327,7 @@
   },
   "assistant": {
     "title": "Assistant (MCP)",
-    "intro": "Un assistant comme Claude Code ou Claude Desktop peut lire vos notes, les voir comme des images, les mettre au propre (Markdown, Word, LaTeX), les titrer et les ranger. Copiez le texte ci-dessous dans l'assistant : Ardoise ne modifie jamais sa configuration elle-même.",
+    "intro": "Un assistant comme Claude Code ou Claude Desktop peut lire vos notes, les voir comme des images, les mettre au propre (Markdown, Word, LaTeX), les titrer et les ranger, ou en retoucher une copie (l'original n'est jamais modifié). Copiez le texte ci-dessous dans l'assistant : Ardoise ne modifie jamais sa configuration elle-même.",
     "appTools": "Ouvrir une note ou piloter la présentation du mode direct demande qu'Ardoise soit ouverte.",
     "bridge": {
       "serving": "Liaison avec Ardoise ouverte : active.",
@@ -349,7 +349,7 @@
     "copy": "Copier",
     "copied": "Copié",
     "copyFailed": "Impossible de copier : sélectionnez le texte et copiez-le avec Ctrl+C.",
-    "privacy": "Vie privée : ce que l'assistant lit (le texte et l'image de vos notes, parfois des noms d'élèves) part chez son fournisseur, selon les réglages de votre compte. En général, l'assistant demande votre accord avant de modifier quoi que ce soit, mais cela dépend de ses réglages d'autorisation ; Ardoise lui signale les outils qui modifient ou retirent des notes. Rien n'est jamais supprimé définitivement. Pour qu'il ne puisse que lire, déclarez-le avec « Lecture seule » cochée.",
+    "privacy": "Vie privée : ce que l'assistant lit (le texte et l'image de vos notes, parfois des noms d'élèves) part chez son fournisseur, selon les réglages de votre compte. En général, l'assistant demande votre accord avant de modifier quoi que ce soit, mais cela dépend de ses réglages d'autorisation ; Ardoise lui signale les outils qui modifient ou retirent des notes. Rien n'est jamais supprimé définitivement, et l'encre d'une note ne se modifie que sur une copie. Pour qu'il ne puisse que lire, déclarez-le avec « Lecture seule » cochée.",
     "guide": "Pas à pas : le guide « Assistant », fichier guide\\assistant.fr.html dans le dossier d'Ardoise."
   },
   "about": {

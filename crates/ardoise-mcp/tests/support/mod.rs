@@ -213,6 +213,8 @@ pub struct FakeWrite {
     /// Run just before a note is saved: lets a test change the file under the tool's feet.
     pub before_save: Mutex<Option<BeforeSave>>,
     pub saves: Mutex<usize>,
+    /// The binders `create_revision` was asked to write in.
+    pub creations: Mutex<Vec<PathBuf>>,
 }
 
 fn new_note(title: &str) -> NewNote {
@@ -264,6 +266,7 @@ impl WriteServices for FakeWrite {
         path: &Path,
         note: Note,
         stamp: &FileStamp,
+        account: Option<&str>,
     ) -> Result<FileStamp, ToolError> {
         if let Some(hook) = self.before_save.lock().unwrap().as_ref() {
             hook(path);
@@ -272,7 +275,34 @@ impl WriteServices for FakeWrite {
         let loaded = library.read(path)?;
         let mut file = loaded.file;
         file.note = note;
+        if let Some(account) = account {
+            file.add_revision_entry(DAY0 + 20 * DAY_MS, account);
+        }
         Ok(library.save(path, &file, stamp)?)
+    }
+
+    fn create_revision(
+        &self,
+        library: &Library,
+        binder: &Path,
+        mut file: NoteFile,
+        revised: Note,
+    ) -> Result<SavedNote, ToolError> {
+        self.creations.lock().unwrap().push(binder.to_path_buf());
+        // The editor's rule, in short: the ink the copy starts from is its first version, unless
+        // the file already keeps an original; the thumbnail shows the new ink.
+        if file.original.is_none()
+            && file.original_note.is_none()
+            && !file.note.strokes.is_empty()
+            && file.note.strokes != revised.strokes
+        {
+            file.original_note =
+                Some(ardoise_core::format::to_bytes(&NoteFile::new(file.note.clone())).unwrap());
+        }
+        file.thumbnail =
+            Some(format!("thumbnail of {} strokes", revised.strokes.len()).into_bytes());
+        file.note = revised;
+        Ok(library.create(binder, &file)?)
     }
 
     fn split_note(

@@ -453,7 +453,7 @@ mod tests {
         let mut note = opened.file.note;
         note.strokes = written(1);
         write
-            .save_note(&library, &cat, note, &opened.stamp)
+            .save_note(&library, &cat, note, &opened.stamp, None)
             .unwrap();
         let found = search("foret");
         assert_eq!(found.hits.len(), 1, "{found:?}");

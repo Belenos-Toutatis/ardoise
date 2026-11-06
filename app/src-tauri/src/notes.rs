@@ -112,8 +112,20 @@ pub fn open_in(library: &Library, path: &Path) -> Result<OpenedNote, LibraryErro
 pub fn save_in(
     library: &Library,
     path: &Path,
+    note: Note,
+    stamp: &FileStamp,
+) -> Result<FileStamp, LibraryError> {
+    save_in_with_account(library, path, note, stamp, None)
+}
+
+/// [`save_in`] that also adds `account` (a line, dated now) to the account of the file, a
+/// revision, in the same write (`edit_revision`). A file that is not a revision takes no line.
+pub fn save_in_with_account(
+    library: &Library,
+    path: &Path,
     mut note: Note,
     stamp: &FileStamp,
+    account: Option<&str>,
 ) -> Result<FileStamp, LibraryError> {
     let loaded = library.read(path)?;
     if loaded.stamp != *stamp {
@@ -127,6 +139,9 @@ pub fn save_in(
         path: loaded.path.clone(),
         source,
     })?;
+    if let Some(account) = account {
+        file.add_revision_entry(note.modified, account);
+    }
     file.thumbnail = background::settle(&mut file, &note);
     file.note = note;
     library.save(&loaded.path, &file, stamp)
@@ -221,6 +236,19 @@ pub fn save_with_key(
     stamp: &FileStamp,
     key: Option<&str>,
 ) -> CommandResult<FileStamp> {
+    save_with_key_and_account(library, path, note, stamp, key, None)
+}
+
+/// [`save_with_key`] that also adds `account` to the account of a revision
+/// ([`save_in_with_account`]).
+pub fn save_with_key_and_account(
+    library: &Library,
+    path: &Path,
+    note: Note,
+    stamp: &FileStamp,
+    key: Option<&str>,
+    account: Option<&str>,
+) -> CommandResult<FileStamp> {
     let chosen = background::chosen_for_save(background::staging(), &note, key)?;
     if key.is_none() && note.background_image.is_some() {
         let on_disk = library.read(path).map_err(library_error)?;
@@ -228,7 +256,10 @@ pub fn save_with_key(
             background::check_keyless(&on_disk.file.note, &note)?;
         }
     }
-    background::with_staged(chosen, || save_in(library, path, note, stamp)).map_err(library_error)
+    background::with_staged(chosen, || {
+        save_in_with_account(library, path, note, stamp, account)
+    })
+    .map_err(library_error)
 }
 
 /// The page background as a PNG data URL; with `image`, the background image staged under its
