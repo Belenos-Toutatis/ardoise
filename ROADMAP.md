@@ -248,16 +248,16 @@ Restent à essayer à la main (H5) : la vraie tablette, un vrai arrêt de Window
 
 Ajouté à la demande de l'utilisateur le 2026-11-06 (SPEC §4.9, `docs/questions.md` Q10), après un essai concluant sur quatre de ses notes. Conception technique : `docs/design/revision.md`.
 
-- [ ] Moteur `ardoise-revise` : les ordres (couleur, style, supprimer, déplacer, agrandir, tourner, lisser, couper un trait, remplacer par des formes, ajouter, copier, fabriquer une lettre, ranger une ligne), avec un compte rendu et des limites.
-- [ ] Les heures : une lettre recopiée ou un mot déplacé prend sa place dans le temps ; les traits suivants se décalent, sauf s'il y a une narration. Vérifié avec la vraie relecture.
-- [ ] Repérer les lignes écrites à partir de l'encre.
-- [ ] Format 1.3 : le membre `revision.json` (ce qui fait d'une note une copie retouchée, et son compte rendu).
-- [ ] Outils de lecture : `get_strokes`, `ink_lines`, les numéros de traits sur `render_note`, les lignes du papier dans `get_note`.
-- [ ] Outils d'écriture : `preview_revision`, `create_revision`, `edit_revision` (refusé sur une note qui n'est pas une copie) ; `straighten_shapes` passe par une copie. Rien n'écrit jamais l'encre de l'original.
-- [ ] Invite `ameliorer_note` / `improve_note` : fautes listées puis validées, lettres prises seulement dans la même écriture de la même note, compte rendu.
-- [ ] Dans l'éditeur : une copie retouchée le dit, avec **Ouvrir l'original**, **Ce qui a changé** et **Comparer**.
-- [ ] Guides FR et EN, `CHANGELOG.md`.
-- [ ] Relecture indépendante, remarques corrigées.
+- [x] Moteur `ardoise-revise` : les ordres (couleur, style, supprimer, déplacer, agrandir, tourner, lisser, couper un trait, remplacer par des formes, ajouter, copier, fabriquer une lettre, ranger une ligne), avec un compte rendu et des limites.
+- [x] Les heures : une lettre recopiée ou un mot déplacé prend sa place dans le temps ; les traits suivants se décalent, sauf s'il y a une narration. Vérifié avec la vraie relecture.
+- [x] Repérer les lignes écrites à partir de l'encre.
+- [x] Format 1.3 : le membre `revision.json` (ce qui fait d'une note une copie retouchée, et son compte rendu).
+- [x] Outils de lecture : `get_strokes`, `ink_lines`, les numéros de traits sur `render_note`, les lignes du papier dans `get_note`.
+- [x] Outils d'écriture : `preview_revision`, `create_revision`, `edit_revision` (refusé sur une note qui n'est pas une copie) ; `straighten_shapes` passe par une copie. Rien n'écrit jamais l'encre de l'original.
+- [x] Invite `ameliorer_note` / `improve_note` : fautes listées puis validées, lettres prises seulement dans la même écriture de la même note, compte rendu.
+- [x] Dans l'éditeur : une copie retouchée le dit, avec **Ouvrir l'original**, **Ce qui a changé** et **Comparer**.
+- [x] Guides FR et EN, `CHANGELOG.md`.
+- [x] Relecture indépendante, remarques corrigées.
 
 Vérification :
 
@@ -265,6 +265,10 @@ Vérification :
 - un test qui vérifie, octet pour octet, que l'original n'est jamais modifié, et que `edit_revision` refuse une note ordinaire ;
 - un parcours de bout en bout avec le vrai exécutable : aperçu, création de la copie, puis ouverture dans l'éditeur, **Ouvrir l'original**, **Ce qui a changé** et **Comparer** ;
 - un essai réel avec un vrai assistant, sur les quatre notes de l'essai.
+
+Vérifié sous Windows le 2026-11-06 : `CHECK OK`, `SELFTEST OK` (exécutable de 23,2 Mo), `E2E OK` (78 parcours, FR et EN, dont celui de la copie retouchée sur le vrai exécutable : aperçu, création, **Ouvrir l'original**, **Ce qui a changé**, **Comparer**), après deux relectures indépendantes dont les remarques sont corrigées.
+
+Reste à faire : l'essai réel avec un vrai assistant sur les quatre notes, qui demande la nouvelle version dans `Program` et écrit de nouvelles notes dans la bibliothèque de l'utilisateur.
 
 ---
 
