@@ -9,7 +9,8 @@
 //! background images, the exports, the handwriting cache) comes through [`WriteServices`].
 //! No file is ever overwritten by an export and nothing is deleted for good: a trashed note, and
 //! the version of a revision before it is edited, are in the library's trash. The ink of a note
-//! that is not a revision is never written: it is redrawn on a copy.
+//! that is not a revision is never written: whatever changes it (the orders of `create_revision`,
+//! `straighten_shapes`, `split_note`) makes new notes next to it.
 //!
 //! To add a tool:
 //!
@@ -64,17 +65,6 @@ pub fn unavailable(service: &str) -> ToolError {
         code::WRITE_UNAVAILABLE,
         format!("this server has no {service} service"),
     )
-}
-
-/// Where a note is cut in two.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SplitRequest {
-    /// Everything written from this instant (milliseconds on the strokes' clock) on moves to the
-    /// new note.
-    AtMs(u32),
-    /// The strokes with at least half of their samples inside the polygon move to the new
-    /// note (page units, 10 µm).
-    Polygon(Vec<[f32; 2]>),
 }
 
 /// What the files written by an export were, for the result.
@@ -133,13 +123,13 @@ pub trait WriteServices: Send + Sync {
         Err(unavailable("note saving"))
     }
 
-    /// Creates the new note `file` (a copy of another note, marked as a revision of it, with a
-    /// new id and no thumbnail) in `binder`, with `revised` as its ink in place of the ink
-    /// `file` carries (the source's): as the editor's save would write `revised` over `file`, the
-    /// note's original is kept by the editor's rule (a tablet note keeps the tablet's bytes, any
-    /// other note gets the version before its first edit, here the source's ink) and the
-    /// thumbnail is drawn. The file name takes " (2)"… when taken. Nothing but the new file is
-    /// written.
+    /// Creates the new note `file` (a copy of another note, or a part of one, marked as a revision
+    /// of it, with a new id and no thumbnail) in `binder`, with `revised` as its ink in place of
+    /// the ink `file` carries (the source's): as the editor's save would write `revised` over
+    /// `file`, the note's original is kept by the editor's rule (a tablet note keeps the tablet's
+    /// bytes, any other note gets the version before its first edit, here the source's ink; none when
+    /// `revised` is the ink `file` carries) and the thumbnail is drawn. The file name takes " (2)"…
+    /// when taken. Nothing but the new file is written.
     fn create_revision(
         &self,
         _library: &Library,
@@ -148,19 +138,6 @@ pub trait WriteServices: Send + Sync {
         _revised: Note,
     ) -> Result<SavedNote, ToolError> {
         Err(unavailable("revision"))
-    }
-
-    /// Splits the note at `path` as the editor does (the new note, titled `title`, goes into
-    /// the same binder; the narration and the background go with it). Returns the new note's
-    /// path.
-    fn split_note(
-        &self,
-        _library: &Library,
-        _path: &Path,
-        _split: &SplitRequest,
-        _title: &str,
-    ) -> Result<PathBuf, ToolError> {
-        Err(unavailable("split"))
     }
 
     /// Merges the notes at `paths`, in this order, into a new note titled `title` in the
@@ -302,11 +279,11 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Split a note in two. Give `at_ms` (everything written from that instant on moves to a new note; milliseconds on the clock of the strokes' `start_ms` and `end_ms` in `get_note`) or `polygon` (the strokes mostly inside this polygon of the page, in millimetres, move to a new note). The new note goes into the same binder; the kept part is saved over the note.
+    /// Split a note in two. Give `at_ms` (what is written from that instant on is the second part; milliseconds on the clock of the strokes' `start_ms` and `end_ms` in `get_note`) or `polygon` (the strokes mostly inside this polygon of the page, in millimetres, are the second part). The ink of a note that is not a revision is never changed: its file is not written, and both parts are new notes next to it, each a revision of it (titled "<title> (start)" or "(rest)" for the first, "(continued)" or "(excerpt)" for the second, or `title`); the result names both, `kept` and `created`, and says `original_unchanged`. On a note that already is a revision the first part is saved over it, its version before goes to the library's trash as a note of its own that the user can restore, and the second is a new note, a revision of it.
     #[tool(
         name = "split_note",
         annotations(
-            title = "Split a note",
+            title = "Split a note into new notes",
             read_only_hint = false,
             destructive_hint = true,
             idempotent_hint = false,
@@ -378,7 +355,7 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Try a list of orders that retouch a note's strokes, in memory: nothing is written. Answers the picture of the result and the report (what each order selected and made, the lines tidied with their slope, the time moved, warnings). Look at the picture, read the report, correct the orders, and preview again; every time send the whole list, built from the note as it is. Use `labels` and `region` to see the numbers. Then `create_revision`.
+    /// Try a list of orders that retouch a note's strokes, in memory: nothing is written. Answers the picture of the result, the note's `version` and the report (what each order selected and made, the lines tidied with their slope, the time moved, warnings). Look at the picture, read the report, correct the orders, and preview again; every time send the whole list, built from the note as it is. Use `labels` and `region` to see the numbers. Then `create_revision` with that `version`.
     #[tool(
         name = "preview_revision",
         annotations(
@@ -397,7 +374,7 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Carry out a list of orders on a copy of a note: a new note next to it, a revision, with the retouched strokes and `summary` as the first line of its account, which the editor shows ("Copie retouchée de ...", "What changed", compare, open the original). The original is never written, whatever the orders. Everything else of the note is kept (paper, layers, background image, tags, narration), `favorite` is off, the creation date is the original's. Preview the orders first with `preview_revision`. Letters of a word that has to be corrected only come from the same handwriting in this same note: the orders can only name strokes of the note being retouched.
+    /// Carry out a list of orders on a copy of a note: a new note next to it, a revision, with the retouched strokes and `summary` as the first line of its account, which the editor shows ("Copie retouchée de ...", "What changed", compare, open the original). The original is never written, whatever the orders. Everything else of the note is kept (paper, layers, background image, tags, narration), `favorite` is off, the creation date is the original's. Preview the orders first with `preview_revision`, and give the `version` it answers as `expected_version`: a note changed since is refused with `noteConflict`. Letters of a word that has to be corrected only come from the same handwriting in this same note: never from another note, whose points are not to be retyped either.
     #[tool(
         name = "create_revision",
         annotations(
@@ -416,7 +393,7 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Carry out a list of orders on a note that already is a revision (a copy made by `create_revision` or `straighten_shapes`), in place: the strokes it has now, with what the user changed by hand, are the ones the orders number (`get_note` with `strokes`, `render_note` with `labels`). A note that is not a revision is refused with `notARevision`, and left as it is. The version before goes to the library's trash as a note of its own that the user can restore; `summary` is added, dated, to the copy's account. A note changed meanwhile is not overwritten (`noteConflict`).
+    /// Carry out a list of orders on a note that already is a revision (a copy made by `create_revision` or `straighten_shapes`), in place: the strokes it has now, with what the user changed by hand, are the ones the orders number (`get_note` with `strokes`, `render_note` with `labels`). A note that is not a revision is refused with `notARevision`, and left as it is. The version before goes to the library's trash as a note of its own that the user can restore; `summary` is added, dated, to the copy's account. `expected_version` is the `version` you were shown (`preview_revision`, `get_note`): a note changed since is not touched (`noteConflict`), as its strokes may have other numbers.
     #[tool(
         name = "edit_revision",
         annotations(

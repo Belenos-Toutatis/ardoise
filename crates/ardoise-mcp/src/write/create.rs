@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::update::{MetadataChange, apply_metadata, now_ms, summary_at};
+use super::update::{MetadataChange, apply_metadata, check_title, now_ms, summary_at};
 use crate::error::{ToolError, ToolResult, json_result};
 use crate::host::Host;
 use crate::read::clean_binder;
@@ -156,6 +156,7 @@ pub(super) fn first_layer_name(language: Language) -> &'static str {
 pub fn create_note(host: &Host, args: CreateNoteArgs) -> ToolResult {
     let binder = clean_binder(args.binder.as_deref().unwrap_or_default());
     let title = args.title.as_deref().map(str::trim).unwrap_or_default();
+    check_title(title)?;
     let tags = normalize_tags(args.tags.as_deref().unwrap_or_default());
     let layer = first_layer_name(host.environment.language());
 

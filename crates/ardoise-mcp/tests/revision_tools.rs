@@ -170,8 +170,562 @@ async fn no_tool_writes_the_file_of_the_source() {
         .await;
     assert_eq!(refused["code"], "notARevision", "{refused}");
     assert_eq!(fingerprint(&session, RICH), before);
+
+    // Split, at an instant and by a zone: both parts are new notes.
+    let listed = session.harness.library().list().notes.len();
+    for (index, arguments) in [
+        json!({ "note": RICH, "at_ms": 1500 }),
+        json!({ "note": RICH, "polygon": [[0, 40], [297, 40], [297, 60], [0, 60]] }),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let split = session.ok("split_note", arguments).await;
+        assert_eq!(split["original_unchanged"], true);
+        assert_eq!(fingerprint(&session, RICH), before);
+        assert_eq!(
+            session.harness.library().list().notes.len(),
+            listed + 2 * (index + 1)
+        );
+    }
+
+    // Merge: a new note. A corrected transcription: in the handwriting cache.
+    session
+        .ok(
+            "merge_notes",
+            json!({ "notes": [RICH, OPTIQUE], "layout": "overlay" }),
+        )
+        .await;
+    assert_eq!(fingerprint(&session, RICH), before);
+    session
+        .ok("set_note_text", json!({ "note": RICH, "text": "corrigé" }))
+        .await;
+    assert_eq!(fingerprint(&session, RICH), before);
+
     assert!(session.harness.library().trash_items().unwrap().is_empty());
     assert_eq!(*session.harness.write.saves.lock().unwrap(), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn update_note_rewrites_the_file_without_touching_its_ink() {
+    let session = session().await;
+    add_rich_note(&session);
+    let before = file_of(&session, RICH);
+    let updated = session
+        .ok(
+            "update_note",
+            json!({ "note": RICH, "title": "Autre titre", "add_tags": ["relu"], "favorite": false }),
+        )
+        .await;
+    assert_eq!(updated["changed"], json!(["tags", "favorite", "title"]));
+    let after = file_of(&session, RICH);
+    assert_eq!(after.note.strokes, before.note.strokes);
+    assert_eq!(after.note.layers, before.note.layers);
+    assert_eq!(after.original, before.original);
+    assert_eq!(after.original_note, before.original_note);
+    assert_eq!(after.audio, before.audio);
+}
+
+// ---------------------------------------------------------------------------------------------
+// split_note
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_ordinary_note_is_split_into_two_new_notes_that_are_revisions_of_it() {
+    let session = session().await;
+    add_rich_note(&session);
+    let before = fingerprint(&session, RICH);
+    let source = file_of(&session, RICH);
+    // Three waves in the first 800 ms, a circle from 2000 ms on.
+    let split = session
+        .ok("split_note", json!({ "note": RICH, "at_ms": 1500 }))
+        .await;
+    assert_eq!(split["made_copies"], true);
+    assert_eq!(split["original_unchanged"], true);
+    assert_eq!(split["original"]["id"], RICH);
+    assert_eq!(split["original"]["stroke_count"], 4);
+    let (kept_id, created_id) = (
+        split["kept"]["id"].as_str().unwrap(),
+        split["created"]["id"].as_str().unwrap(),
+    );
+    assert!(kept_id != RICH && created_id != RICH && kept_id != created_id);
+    assert_eq!(split["kept"]["stroke_count"], 3);
+    assert_eq!(split["created"]["stroke_count"], 1);
+    assert_eq!(split["kept"]["title"], "Rapport d'incident (start)");
+    assert_eq!(split["created"]["title"], "Rapport d'incident (continued)");
+    assert_eq!(split["kept"]["binder"], "Physique");
+    assert_eq!(split["created"]["binder"], "Physique");
+    assert_eq!(fingerprint(&session, RICH), before);
+    assert_eq!(*session.harness.write.saves.lock().unwrap(), 0);
+
+    // What stays is the note with less ink: everything else of it, its "original" the source's ink.
+    let kept = file_of(&session, kept_id);
+    assert_eq!(kept.note.strokes, source.note.strokes[..3]);
+    assert_eq!(kept.audio, source.audio);
+    assert_eq!(kept.note.tags, source.note.tags);
+    assert_eq!(kept.note.created, source.note.created);
+    assert_eq!(kept.note.background_image, source.note.background_image);
+    assert_eq!(kept.background, source.background);
+    assert!(!kept.note.favorite);
+    assert!(kept.thumbnail.is_some());
+    let revision = kept.revision.as_ref().unwrap();
+    assert_eq!(revision.of, RICH);
+    assert_eq!(revision.of_title, "Rapport d'incident");
+    assert!(revision.summary[0].text.contains("split"), "{revision:?}");
+    let original =
+        ardoise_core::format::read_from_bytes(kept.original_note.as_ref().unwrap()).unwrap();
+    assert_eq!(original.note.strokes, source.note.strokes);
+
+    // What moves has a clock of its own: its picture goes with it, not the narration.
+    let created = file_of(&session, created_id);
+    assert_eq!(created.note.strokes.len(), 1);
+    assert_eq!(created.note.strokes[0].points[0].t, 0);
+    assert_eq!(created.note.created, source.note.created + 2_000);
+    assert_eq!(created.audio, None);
+    assert_eq!(created.note.background_image, source.note.background_image);
+    assert_eq!(created.background, source.background);
+    assert_eq!(created.note.tags, source.note.tags);
+    assert!(created.thumbnail.is_some());
+    let revision = created.revision.as_ref().unwrap();
+    assert_eq!(revision.of, RICH);
+    assert!(revision.summary[0].text.contains("split"), "{revision:?}");
+    assert_ne!(
+        revision.summary[0].text,
+        kept.revision.as_ref().unwrap().summary[0].text
+    );
+
+    // Splitting a word off and throwing it away takes nothing from the original.
+    session
+        .ok("trash_note", json!({ "note": created_id }))
+        .await;
+    assert_eq!(fingerprint(&session, RICH), before);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_parts_of_a_split_are_named_in_the_apps_language() {
+    for (language, by_time, by_zone) in [
+        (
+            Language::En,
+            ("Chimie des métaux (start)", "Chimie des métaux (continued)"),
+            ("Chimie des métaux (rest)", "Chimie des métaux (excerpt)"),
+        ),
+        (
+            Language::Fr,
+            ("Chimie des métaux (début)", "Chimie des métaux (suite)"),
+            ("Chimie des métaux (reste)", "Chimie des métaux (extrait)"),
+        ),
+    ] {
+        let session = session_with(language, ServerOptions::default()).await;
+        let split = session
+            .ok("split_note", json!({ "note": CHIMIE, "at_ms": 1500 }))
+            .await;
+        assert_eq!(split["kept"]["title"], by_time.0);
+        assert_eq!(split["created"]["title"], by_time.1);
+        let zone = session
+            .ok(
+                "split_note",
+                json!({ "note": CHIMIE, "polygon": [[0, 40], [297, 40], [297, 60], [0, 60]] }),
+            )
+            .await;
+        assert_eq!(zone["kept"]["title"], by_zone.0);
+        assert_eq!(zone["created"]["title"], by_zone.1);
+        // A title given names what moves.
+        let named = session
+            .ok(
+                "split_note",
+                json!({ "note": CHIMIE, "at_ms": 1500, "title": "Le cercle" }),
+            )
+            .await;
+        assert_eq!(named["created"]["title"], "Le cercle");
+        assert_eq!(named["kept"]["title"], by_time.0);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_revision_is_split_in_place_and_its_version_before_is_kept() {
+    let session = session().await;
+    let made = session
+        .ok(
+            "create_revision",
+            json!({ "note": CHIMIE, "orders": [recolor(0)], "summary": "Rouge" }),
+        )
+        .await;
+    let id = made["note"]["id"].as_str().unwrap().to_owned();
+    let before = file_of(&session, &id);
+    let source = fingerprint(&session, CHIMIE);
+
+    let split = session
+        .ok("split_note", json!({ "note": id, "at_ms": 1500 }))
+        .await;
+    assert_eq!(split["made_copies"], false);
+    assert!(split.get("original_unchanged").is_none());
+    assert_eq!(split["kept"]["id"], id.as_str());
+    assert_eq!(split["kept"]["stroke_count"], 3);
+    assert_eq!(split["created"]["stroke_count"], 1);
+    assert_eq!(*session.harness.write.saves.lock().unwrap(), 1);
+
+    // What stays is saved over it, with one more line in its account.
+    let after = file_of(&session, &id);
+    assert_eq!(after.note.strokes, before.note.strokes[..3]);
+    let account = &after.revision.as_ref().unwrap().summary;
+    assert_eq!(account.len(), 2);
+    assert_eq!(account[0].text, "Rouge");
+    assert!(account[1].text.contains("split"));
+
+    // Its version before is in the trash, whole, a note of its own.
+    let library = session.harness.library();
+    let items = library.trash_items().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].title.as_deref(),
+        Some("Chimie des métaux (clean) (before splitting)")
+    );
+    assert_eq!(split["previous_version"]["in_trash"], items[0].id);
+    let restored = library.restore(&items[0].id).unwrap();
+    let kept = library.read(&restored).unwrap().file;
+    assert_eq!(kept.note.strokes, before.note.strokes);
+    assert_ne!(kept.note.id, id);
+
+    // What moved is a revision of this revision. The original of it all was never written.
+    let created = file_of(&session, split["created"]["id"].as_str().unwrap());
+    assert_eq!(created.revision.unwrap().of, id);
+    assert_eq!(fingerprint(&session, CHIMIE), source);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_revision_changed_meanwhile_is_not_split_and_nothing_stays_of_the_attempt() {
+    let session = session().await;
+    let made = session
+        .ok(
+            "create_revision",
+            json!({ "note": CHIMIE, "orders": [recolor(0)], "summary": "Rouge" }),
+        )
+        .await;
+    let id = made["note"]["id"].as_str().unwrap().to_owned();
+    let listed = session.harness.library().list().notes.len();
+    let root = session.harness.root.clone();
+    *session.harness.write.before_save.lock().unwrap() = Some(Box::new(move |note| {
+        ardoise_core::library::Library::open(&root)
+            .unwrap()
+            .set_favorite(note, true, None)
+            .unwrap();
+    }));
+    let error = session
+        .failure("split_note", json!({ "note": id, "at_ms": 1500 }))
+        .await;
+    assert_eq!(error["code"], "noteConflict", "{error}");
+    let kept = file_of(&session, &id);
+    assert!(kept.note.favorite, "the other version stays");
+    assert_eq!(kept.note.strokes.len(), 4);
+    // The part made for it is taken back; the version before was not needed.
+    assert_eq!(session.harness.library().list().notes.len(), listed);
+    let items = session.harness.library().trash_items().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].title.as_deref(),
+        Some("Chimie des métaux (clean) (continued)")
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn nothing_is_made_when_a_split_leaves_a_part_empty() {
+    let session = session().await;
+    let before = fingerprint(&session, CHIMIE);
+    let listed = session.harness.library().list().notes.len();
+    let error = session
+        .failure("split_note", json!({ "note": CHIMIE, "at_ms": 10_000_000 }))
+        .await;
+    assert_eq!(error["code"], "nothingToSplit");
+    assert_eq!(session.harness.library().list().notes.len(), listed);
+    assert!(session.harness.write.creations.lock().unwrap().is_empty());
+    assert_eq!(fingerprint(&session, CHIMIE), before);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn when_the_second_part_cannot_be_written_the_first_is_taken_back() {
+    let session = session().await;
+    let before = fingerprint(&session, CHIMIE);
+    let listed = session.harness.library().list().notes.len();
+    *session.harness.write.creations_left.lock().unwrap() = Some(1);
+    let error = session
+        .failure("split_note", json!({ "note": CHIMIE, "at_ms": 1500 }))
+        .await;
+    assert_eq!(error["code"], "libraryAccess", "{error}");
+    assert_eq!(session.harness.library().list().notes.len(), listed);
+    assert_eq!(fingerprint(&session, CHIMIE), before);
+    let items = session.harness.library().trash_items().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].title.as_deref(), Some("Chimie des métaux (start)"));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Orders are tied to the version seen
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_version_of_a_note_is_given_by_get_note_and_by_the_preview() {
+    let session = session().await;
+    let read = session.ok("get_note", json!({ "note": CHIMIE })).await;
+    let version = read["version"].as_str().unwrap().to_owned();
+    assert!(!version.is_empty());
+    let preview = session
+        .call(
+            "preview_revision",
+            json!({ "note": CHIMIE, "orders": [recolor(0)] }),
+        )
+        .await;
+    assert_eq!(text_of(&preview)["version"], version.as_str());
+    // A change of the file changes it, a look does not.
+    let again = session.ok("get_note", json!({ "note": CHIMIE })).await;
+    assert_eq!(again["version"], version.as_str());
+    session
+        .ok("update_note", json!({ "note": CHIMIE, "favorite": true }))
+        .await;
+    let changed = session.ok("get_note", json!({ "note": CHIMIE })).await;
+    assert_ne!(changed["version"], version.as_str());
+}
+
+/// The note as a user changes it by hand in the editor: stroke 0 removed, so that every other
+/// stroke has another number.
+fn the_user_deletes_the_first_stroke(session: &Session, id: &str) {
+    let path = session.harness.path_of(id);
+    let library = session.harness.library();
+    let loaded = library.read(&path).unwrap();
+    let mut file = loaded.file;
+    file.note.strokes.remove(0);
+    library.save(&path, &file, &loaded.stamp).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn orders_written_for_another_version_are_refused() {
+    let session = session().await;
+    let delete = json!([{ "op": "delete", "select": { "ids": [1] } }]);
+    let made = session
+        .ok(
+            "create_revision",
+            json!({ "note": CHIMIE, "orders": [recolor(0)], "summary": "Rouge" }),
+        )
+        .await;
+    let id = made["note"]["id"].as_str().unwrap().to_owned();
+    // The answer gives the version of the copy: the next edit needs no other look.
+    let version = made["version"].as_str().unwrap().to_owned();
+    assert_eq!(version, session.version(&json!(id)).await);
+
+    // The assistant previews, and waits for the user's answer. Meanwhile the user deletes a stroke:
+    // number 1 is now another stroke.
+    let preview = session
+        .call("preview_revision", json!({ "note": id, "orders": delete }))
+        .await;
+    assert_eq!(text_of(&preview)["version"], version.as_str());
+    the_user_deletes_the_first_stroke(&session, &id);
+    let before = fingerprint(&session, &id);
+
+    let error = session
+        .failure(
+            "edit_revision",
+            json!({ "note": id, "orders": delete, "summary": "x", "expected_version": version }),
+        )
+        .await;
+    assert_eq!(error["code"], "noteConflict", "{error}");
+    let message = error["message"].as_str().unwrap();
+    assert!(message.contains("Look at it again"), "{message}");
+    assert!(message.contains("other numbers"), "{message}");
+    assert_eq!(fingerprint(&session, &id), before);
+    assert!(session.harness.library().trash_items().unwrap().is_empty());
+    assert_eq!(*session.harness.write.saves.lock().unwrap(), 0);
+
+    // Looking again gives the version that is accepted, and the answer the next one.
+    let again = session.version(&json!(id)).await;
+    let edited = session
+        .ok(
+            "edit_revision",
+            json!({ "note": id, "orders": delete, "summary": "x", "expected_version": again }),
+        )
+        .await;
+    assert_eq!(edited["saved"], true);
+    assert_eq!(
+        edited["version"].as_str().unwrap(),
+        session.version(&json!(id)).await
+    );
+
+    // The same goes for a copy of a note that changed: nothing is made.
+    let listed = session.harness.library().list().notes.len();
+    let stale = session.version(&json!(CHIMIE)).await;
+    the_user_deletes_the_first_stroke(&session, CHIMIE);
+    let error = session
+        .failure(
+            "create_revision",
+            json!({ "note": CHIMIE, "orders": delete, "summary": "x", "expected_version": stale }),
+        )
+        .await;
+    assert_eq!(error["code"], "noteConflict", "{error}");
+    assert_eq!(session.harness.library().list().notes.len(), listed);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn orders_without_a_version_are_refused() {
+    let session = session().await;
+    for name in ["create_revision", "edit_revision"] {
+        let result = session
+            .client
+            .call_tool(
+                rmcp::model::CallToolRequestParams::new(name).with_arguments(
+                    json!({ "note": CHIMIE, "orders": [recolor(0)], "summary": "x" })
+                        .as_object()
+                        .cloned()
+                        .unwrap(),
+                ),
+            )
+            .await;
+        match result {
+            Err(_) => {}
+            Ok(result) => assert_eq!(result.is_error, Some(true), "{name}"),
+        }
+    }
+    assert_eq!(session.harness.library().list().notes.len(), 4);
+    assert!(session.harness.write.creations.lock().unwrap().is_empty());
+}
+
+// ---------------------------------------------------------------------------------------------
+// Hidden layers, through the tools
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_tools_tell_the_engine_which_layers_are_hidden() {
+    let session = session().await;
+    // CHIMIE: stroke 2 is on the hidden layer "Corrections".
+    let everything = json!([{ "op": "recolor", "select": {}, "color": "#ff0000" }]);
+    let preview = session
+        .call(
+            "preview_revision",
+            json!({ "note": CHIMIE, "orders": everything }),
+        )
+        .await;
+    let report = &text_of(&preview)["report"]["orders"][0];
+    assert_eq!(report["selected"], 3);
+    assert!(report.get("warnings").is_none(), "{report}");
+
+    let made = session
+        .ok(
+            "create_revision",
+            json!({ "note": CHIMIE, "orders": everything, "summary": "Rouge" }),
+        )
+        .await;
+    let copy = file_of(&session, made["note"]["id"].as_str().unwrap());
+    assert_eq!(copy.note.strokes[0].color, Rgba::rgb(255, 0, 0));
+    assert_eq!(copy.note.strokes[2].color, Rgba::rgb(0, 0, 255));
+
+    // Named: taken, and the report says what the picture does not show.
+    let named = session
+        .call(
+            "preview_revision",
+            json!({ "note": CHIMIE, "orders": [recolor(2)] }),
+        )
+        .await;
+    let report = &text_of(&named)["report"]["orders"][0];
+    assert_eq!(report["selected"], 1);
+    assert!(
+        report["warnings"][0].as_str().unwrap().contains("hidden"),
+        "{report}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// What is written can be read
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_title_or_a_summary_no_list_could_show_is_refused() {
+    let session = session().await;
+    let long_title = "x".repeat(1_001);
+    let long_summary = "y".repeat(20_001);
+    let listed = session.harness.library().list().notes.len();
+    let before = fingerprint(&session, CHIMIE);
+    for (tool, arguments) in [
+        (
+            "create_revision",
+            json!({ "note": CHIMIE, "orders": [recolor(0)], "summary": "x", "title": long_title }),
+        ),
+        (
+            "create_revision",
+            json!({ "note": CHIMIE, "orders": [recolor(0)], "summary": long_summary }),
+        ),
+        (
+            "split_note",
+            json!({ "note": CHIMIE, "at_ms": 1500, "title": long_title }),
+        ),
+        (
+            "merge_notes",
+            json!({ "notes": [CHIMIE, OPTIQUE], "layout": "overlay", "title": long_title }),
+        ),
+        (
+            "update_note",
+            json!({ "note": CHIMIE, "title": long_title }),
+        ),
+        ("create_note", json!({ "title": long_title })),
+    ] {
+        let error = session.failure(tool, arguments).await;
+        assert_eq!(error["code"], "invalidArguments", "{tool}: {error}");
+        assert!(
+            error["message"].as_str().unwrap().contains("at most"),
+            "{tool}: {error}"
+        );
+    }
+    assert_eq!(session.harness.library().list().notes.len(), listed);
+    assert_eq!(fingerprint(&session, CHIMIE), before);
+
+    // On an edit too, and the limits themselves are accepted.
+    let made = session
+        .ok(
+            "create_revision",
+            json!({ "note": CHIMIE, "orders": [recolor(0)], "summary": "y".repeat(20_000), "title": "x".repeat(1_000) }),
+        )
+        .await;
+    let error = session
+        .failure(
+            "edit_revision",
+            json!({ "note": made["note"]["id"], "orders": [recolor(1)], "summary": long_summary }),
+        )
+        .await;
+    assert_eq!(error["code"], "invalidArguments", "{error}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_revision_that_could_no_longer_be_read_is_not_written() {
+    use ardoise_core::format::{MAX_REVISION_JSON_BYTES, RevisionEntry, RevisionInfo};
+    // A revision whose account has nearly reached what the reader takes.
+    let session = session().await;
+    let mut note = make_note(RICH, "Tant de retouches", 3);
+    note.strokes.truncate(1);
+    let mut file = NoteFile::new(note);
+    file.revision = Some(RevisionInfo {
+        of: CHIMIE.to_owned(),
+        of_title: "Chimie".to_owned(),
+        created: DAY0,
+        summary: vec![RevisionEntry {
+            at: DAY0,
+            text: "x".repeat(MAX_REVISION_JSON_BYTES as usize - 1_000),
+        }],
+    });
+    session
+        .harness
+        .library()
+        .create(std::path::Path::new(""), &file)
+        .unwrap();
+    let before = fingerprint(&session, RICH);
+    // Its version from its stamp: `get_note` would send the whole account through the test's pipe.
+    let error = session
+        .failure(
+            "edit_revision",
+            json!({
+                "note": RICH,
+                "orders": [recolor(0)],
+                "summary": "y".repeat(20_000),
+                "expected_version": ardoise_mcp::notes::version_of(&before.1),
+            }),
+        )
+        .await;
+    assert_eq!(error["code"], "noteInvalid", "{error}");
+    assert!(error["message"].as_str().unwrap().contains("revision.json"));
+    assert_eq!(fingerprint(&session, RICH), before);
+    // The copy put in the trash for it is taken back.
+    assert!(session.harness.library().trash_items().unwrap().is_empty());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -970,6 +1524,8 @@ async fn the_new_tools_are_described_and_annotated() {
         ("create_revision", false, false, false),
         ("edit_revision", false, true, false),
         ("straighten_shapes", false, true, false),
+        // It only adds on an ordinary note, and rewrites a revision.
+        ("split_note", false, true, false),
     ] {
         let annotations = tool(name).annotations.as_ref().unwrap();
         assert_eq!(annotations.read_only_hint, Some(read_only), "{name}");
@@ -980,11 +1536,11 @@ async fn the_new_tools_are_described_and_annotated() {
     let schema = |name: &str| Value::Object((*tool(name).input_schema).clone());
     assert_eq!(
         schema("create_revision")["required"],
-        json!(["note", "orders", "summary"])
+        json!(["note", "orders", "expected_version", "summary"])
     );
     assert_eq!(
         schema("edit_revision")["required"],
-        json!(["note", "orders", "summary"])
+        json!(["note", "orders", "expected_version", "summary"])
     );
     assert_eq!(
         schema("preview_revision")["required"],
@@ -1009,6 +1565,59 @@ async fn the_new_tools_are_described_and_annotated() {
     let straighten = tool("straighten_shapes").description.as_deref().unwrap();
     assert!(straighten.contains("copy") && straighten.contains("never changed"));
     assert!(!straighten.contains("(before straightening)"));
+    // So does the split, and what it answers.
+    let split = tool("split_note").description.as_deref().unwrap();
+    assert!(split.contains("never changed") && split.contains("original_unchanged"));
+    // The tools that take orders say how to tie them to what was seen, and what to reuse a piece of
+    // a stroke with.
+    let preview = schema("preview_revision").to_string();
+    assert!(preview.contains("`glyph` with `from` and `to`"));
+    assert!(!preview.contains("Usually on a `copy`"));
+    assert!(
+        schema("edit_revision")["properties"]["expected_version"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("noteConflict")
+    );
+    for name in ["preview_revision", "create_revision", "edit_revision"] {
+        assert!(
+            tool(name)
+                .description
+                .as_deref()
+                .unwrap()
+                .contains("version")
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_read_only_server_describes_no_tool_it_does_not_have() {
+    let full = session().await;
+    let every: Vec<String> = full
+        .client
+        .list_all_tools()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|t| t.name.to_string())
+        .collect();
+    let read_only = session_with(Language::En, ServerOptions { read_only: true }).await;
+    let tools = read_only.client.list_all_tools().await.unwrap();
+    let served: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
+    let mut absent: Vec<String> = every.into_iter().filter(|n| !served.contains(n)).collect();
+    assert!(absent.iter().any(|n| n == "preview_revision"));
+    // Nor the orders those tools take.
+    absent.extend(["`trim`", "`glyph`", "`tidy_line`", "the orders"].map(str::to_owned));
+    for tool in &tools {
+        let text = format!(
+            "{} {}",
+            tool.description.as_deref().unwrap_or_default(),
+            Value::Object((*tool.input_schema).clone())
+        );
+        for name in &absent {
+            assert!(!text.contains(name.as_str()), "{}: {name}", tool.name);
+        }
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

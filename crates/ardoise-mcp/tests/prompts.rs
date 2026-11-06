@@ -450,6 +450,11 @@ async fn improving_a_note_goes_through_the_six_steps_in_order() {
                 "l'original est intact",
                 "`labels: true`",
                 "`background.ruling`",
+                "`expected_version`",
+                "`noteConflict`",
+                "`glyph` avec `from` et `to`",
+                "même en recopiant ses points",
+                "ne montre pas les calques masqués",
             ][..],
         ),
         (
@@ -491,6 +496,11 @@ async fn improving_a_note_goes_through_the_six_steps_in_order() {
                 "the original is intact",
                 "`labels: true`",
                 "`background.ruling`",
+                "`expected_version`",
+                "`noteConflict`",
+                "`glyph` with `from` and `to`",
+                "not even by retyping its points",
+                "does not show hidden layers",
             ][..],
         ),
     ] {

@@ -2,8 +2,9 @@
 //! relative to the library; sizes and positions are millimetres; dates are ISO 8601.
 
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
-use ardoise_core::library::{Library, LoadedNote, NoteEntry};
+use ardoise_core::library::{FileStamp, Library, LoadedNote, NoteEntry};
 use ardoise_core::note::{Note, PageSize};
 use ardoise_hwr::Bounds;
 use ardoise_ink::Rgba;
@@ -210,6 +211,21 @@ pub fn find_note(library: &Library, reference: &str) -> Result<NoteEntry, ToolEr
         })
 }
 
+/// The name of a version of a note's file, from its stamp: two versions never share one. The
+/// assistant reads it (`get_note`, `preview_revision`) and gives it back with its orders.
+pub fn version_of(stamp: &FileStamp) -> String {
+    let (sign, since) = match stamp.modified.duration_since(UNIX_EPOCH) {
+        Ok(since) => ("", since),
+        Err(before) => ("-", before.duration()),
+    };
+    format!(
+        "{sign}{}.{:09}-{}",
+        since.as_secs(),
+        since.subsec_nanos(),
+        stamp.len
+    )
+}
+
 /// Reads the whole note of `entry`.
 pub fn read_note(library: &Library, entry: &NoteEntry) -> Result<LoadedNote, ToolError> {
     Ok(library.read(&entry.path)?)
@@ -286,6 +302,40 @@ mod tests {
         assert_eq!(mm(21_600.0), 216.0);
         assert_eq!(mm(1_234.0), 12.3);
         assert_eq!(mm(-56.0), -0.6);
+    }
+
+    #[test]
+    fn a_version_names_the_stamp_of_the_file() {
+        use std::time::Duration;
+        let stamp = |seconds: u64, nanos: u32, len: u64| FileStamp {
+            modified: UNIX_EPOCH + Duration::new(seconds, nanos),
+            len,
+        };
+        let version = version_of(&stamp(1_792_843_200, 123_456_700, 4096));
+        assert_eq!(version, "1792843200.123456700-4096");
+        assert_eq!(
+            version,
+            version_of(&stamp(1_792_843_200, 123_456_700, 4096))
+        );
+        // A modification time or a length of its own: another version.
+        assert_ne!(
+            version,
+            version_of(&stamp(1_792_843_200, 123_456_800, 4096))
+        );
+        assert_ne!(
+            version,
+            version_of(&stamp(1_792_843_201, 123_456_700, 4096))
+        );
+        assert_ne!(
+            version,
+            version_of(&stamp(1_792_843_200, 123_456_700, 4097))
+        );
+        // A file dated before 1970 still has a name.
+        let old = FileStamp {
+            modified: UNIX_EPOCH - Duration::from_secs(5),
+            len: 1,
+        };
+        assert_eq!(version_of(&old), "-5.000000000-1");
     }
 
     #[test]
