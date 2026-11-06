@@ -1298,3 +1298,167 @@ fn a_revision_without_a_source_is_not_written() {
     file.revision.as_mut().unwrap().of.clear();
     assert!(matches!(to_bytes(&file), Err(FormatError::InvalidNote(_))));
 }
+
+// ---------------------------------------------------------------------------------------
+// What is written can be read
+
+/// A title that makes `note.json` larger than the reader accepts.
+fn oversized_title() -> String {
+    "x".repeat(MAX_NOTE_JSON_BYTES as usize + 1024)
+}
+
+#[test]
+fn a_note_json_the_reader_would_refuse_is_not_written() {
+    let mut file = NoteFile::new(blank_note("id", "Normale"));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("note.ardoise");
+    write_note(&path, &file).unwrap();
+    let before = fs::read(&path).unwrap();
+
+    file.note.title = oversized_title();
+    let error = to_bytes(&file).unwrap_err();
+    assert!(
+        matches!(&error, FormatError::TooLarge { what, limit, .. }
+            if what == NOTE_JSON && *limit == MAX_NOTE_JSON_BYTES),
+        "{error}"
+    );
+    assert_eq!(error.code(), "noteInvalid");
+    // Nothing is touched: the file on disk is as it was, and no other file appeared.
+    assert!(write_note(&path, &file).is_err());
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+
+    // Just under the limit, what is written is read back.
+    let room = MAX_NOTE_JSON_BYTES as usize
+        - note_json(&NoteFile::new(blank_note("id", "")), FormatVersion::CURRENT)
+            .unwrap()
+            .len();
+    file.note.title = "x".repeat(room);
+    let bytes = to_bytes(&file).unwrap();
+    assert_eq!(read_from_bytes(&bytes).unwrap().note.title.len(), room);
+}
+
+#[test]
+fn strokes_the_reader_would_refuse_are_not_written() {
+    // Points far from each other take 14 bytes or more each in `strokes.bin`.
+    let points: Vec<Point> = (0..10_000_000u32)
+        .map(|i| Point {
+            x: if i % 2 == 0 { 9.0e8 } else { -9.0e8 },
+            y: if i % 2 == 0 { -9.0e8 } else { 9.0e8 },
+            pressure: if i % 2 == 0 { 0.0 } else { 1.0 },
+            t: i.wrapping_mul(1 << 20),
+        })
+        .collect();
+    let mut note = blank_note("id", "Trop de points");
+    note.strokes = vec![Stroke {
+        tool: Tool::Ballpoint,
+        color: Rgba::BLACK,
+        width: 50.0,
+        layer: 0,
+        points,
+    }];
+    let error = to_bytes(&NoteFile::new(note)).unwrap_err();
+    assert!(
+        matches!(&error, FormatError::TooLarge { what, .. } if what == STROKES_BIN),
+        "{error}"
+    );
+}
+
+#[test]
+fn the_sizes_of_a_file_are_checked_against_each_limit_and_the_total() {
+    let check = |members: &[(&str, u64, u64)]| check_read_limits(members.iter().copied());
+    assert!(check(&[("a", 10, 10)]).is_ok());
+    assert!(matches!(
+        check(&[("a", 11, 10)]),
+        Err(FormatError::TooLarge { what, size: 11, limit: 10 }) if what == "a"
+    ));
+    // Each within its limit, too much together.
+    let half = MAX_TOTAL_BYTES / 2 + 1;
+    assert!(matches!(
+        check(&[("a", half, half), ("b", half, half)]),
+        Err(FormatError::TooLarge {
+            limit: MAX_TOTAL_BYTES,
+            ..
+        })
+    ));
+    assert!(check(&[("a", half - 1, half), ("b", half - 1, half)]).is_ok());
+}
+
+#[test]
+fn more_members_than_the_reader_accepts_are_not_written() {
+    let mut file = NoteFile::new(blank_note("id", "Beaucoup"));
+    file.unknown_members = (0..MAX_MEMBERS)
+        .map(|i| Member {
+            name: format!("extra-{i}"),
+            bytes: Vec::new(),
+        })
+        .collect();
+    let error = to_bytes(&file).unwrap_err();
+    assert!(matches!(error, FormatError::TooLarge { .. }), "{error}");
+    // As many as the reader takes, with the two required members: read back.
+    file.unknown_members.truncate(MAX_MEMBERS - 2);
+    let bytes = to_bytes(&file).unwrap();
+    assert_eq!(
+        read_from_bytes(&bytes).unwrap().unknown_members.len(),
+        MAX_MEMBERS - 2
+    );
+}
+
+/// A valid `revision.json` of more than `bytes` bytes.
+fn revision_json_of(bytes: usize) -> Vec<u8> {
+    let mut revision = revision_file("source-id", 10).revision.unwrap();
+    revision.summary.push(RevisionEntry {
+        at: 20,
+        text: "x".repeat(bytes),
+    });
+    revision.to_json().unwrap()
+}
+
+#[test]
+fn a_revision_json_over_its_limit_is_read_as_damaged_and_kept_verbatim() {
+    let json = note_json_value(&NoteFile::new(blank_note("id", "Trop de compte rendu")));
+    let note_json = serde_json::to_vec(&json).unwrap();
+    let strokes_bin = strokes::encode(&[]).unwrap();
+
+    // Valid JSON, within the limit: a revision.
+    let within = revision_json_of(MAX_REVISION_JSON_BYTES as usize - 4096);
+    let archive = raw_archive(&[
+        (NOTE_JSON, &note_json),
+        (STROKES_BIN, &strokes_bin),
+        (REVISION_JSON, &within),
+    ]);
+    let read = read_from_bytes(&archive).unwrap();
+    assert!(read.revision.is_some());
+    assert!(read.unknown_members.is_empty());
+
+    // Valid JSON, over the limit: not a revision, the note opens, the member stays as it is.
+    let over = revision_json_of(MAX_REVISION_JSON_BYTES as usize + 1);
+    let archive = raw_archive(&[
+        (NOTE_JSON, &note_json),
+        (STROKES_BIN, &strokes_bin),
+        (REVISION_JSON, &over),
+    ]);
+    let read = read_from_bytes(&archive).unwrap();
+    assert_eq!(read.revision, None);
+    assert_eq!(read.unknown_members.len(), 1);
+    assert_eq!(read.unknown_members[0].name, REVISION_JSON);
+    assert_eq!(read.unknown_members[0].bytes, over);
+    let rewritten = to_bytes(&read).unwrap();
+    assert_eq!(member_bytes(&rewritten, REVISION_JSON).unwrap(), over);
+    assert_eq!(read_from_bytes(&rewritten).unwrap().revision, None);
+}
+
+#[test]
+fn a_revision_the_reader_would_treat_as_damaged_is_not_written() {
+    let mut file = revision_file("source-id", 10);
+    let revision = file.revision.as_mut().unwrap();
+    revision.summary.push(RevisionEntry {
+        at: 20,
+        text: "x".repeat(MAX_REVISION_JSON_BYTES as usize + 1),
+    });
+    let error = to_bytes(&file).unwrap_err();
+    assert!(
+        matches!(&error, FormatError::TooLarge { what, .. } if what == REVISION_JSON),
+        "{error}"
+    );
+}
