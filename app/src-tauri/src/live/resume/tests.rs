@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ardoise_core::format::{BackgroundFile, Member, NoteFile};
+use ardoise_core::format::{BackgroundFile, Member, NoteFile, RevisionEntry, RevisionInfo};
 use ardoise_core::library::{FileStamp, Library, LoadedNote};
 use ardoise_core::note::{
     A4_LANDSCAPE, A4_PORTRAIT, Background, BackgroundImage, ImageFit, ImageRect, Layer, Note,
@@ -115,6 +115,15 @@ fn full_file(page: PageSize) -> NoteFile {
     });
     file.audio = Some(encode_narration(&note_narration(0.5, 0)).unwrap());
     file.text = Some(b"{\"recognised\":\"bonjour\"}".to_vec());
+    file.revision = Some(RevisionInfo {
+        of: "source-note".to_owned(),
+        of_title: "Brouillon".to_owned(),
+        created: CREATED,
+        summary: vec![RevisionEntry {
+            at: CREATED,
+            text: "Écriture rangée".to_owned(),
+        }],
+    });
     file.thumbnail = Some(encode_png(&halves(8, 4)).unwrap());
     file.unknown_fields
         .insert("fromTheFuture".to_owned(), json!({ "a": [1, 2] }));
@@ -722,6 +731,7 @@ fn assert_keeps_all_but_ink(written: &NoteFile, before: &NoteFile) {
         audio: _,
         background,
         text,
+        revision,
         unknown_fields,
         unknown_members,
     } = written;
@@ -739,6 +749,7 @@ fn assert_keeps_all_but_ink(written: &NoteFile, before: &NoteFile) {
     assert_eq!(*original, before.original);
     assert_eq!(*background, before.background);
     assert_eq!(*text, before.text);
+    assert_eq!(*revision, before.revision);
     assert_eq!(*unknown_fields, before.unknown_fields);
     assert_eq!(*unknown_members, before.unknown_members);
 }

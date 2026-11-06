@@ -8,12 +8,16 @@
 //! - `strokes.bin` (required): the strokes, see [`strokes`].
 //! - `original.bin`, `original.ardoise`, `thumb.png`, `audio.opus`, `background.<ext>`,
 //!   `text.json` (optional): opaque bytes.
+//! - `revision.json` (optional, format 1.3): the note is a retouched copy of another, see
+//!   [`RevisionInfo`]. A damaged one is kept verbatim as an unknown member and the note is not a
+//!   revision.
 //! - anything else: kept verbatim when the note is rewritten.
 //!
 //! Versioning: a reader accepts every older version and every minor version of its own major
 //! version; a file whose major version is newer is refused with
 //! [`FormatError::NewerVersion`] and is never rewritten.
 
+pub mod revision;
 pub mod strokes;
 
 use std::collections::HashSet;
@@ -31,6 +35,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::fsutil::write_atomic;
 use crate::note::Note;
 
+pub use revision::{RevisionEntry, RevisionInfo};
 pub use strokes::StrokesError;
 
 /// Required member: format version and note metadata.
@@ -52,6 +57,8 @@ pub const AUDIO_OPUS: &str = "audio.opus";
 /// handwriting recognition keeps its results in a cache on each PC (`app/src-tauri/src/
 /// handwriting.rs`), so that two PCs never rewrite a note through Nextcloud for it. Kept as read.
 pub const TEXT_JSON: &str = "text.json";
+/// Optional member (format 1.3): the note is a revision, a retouched copy of another note.
+pub const REVISION_JSON: &str = "revision.json";
 /// Prefix of the optional background member (`background.png`, `background.pdf`…).
 pub const BACKGROUND_PREFIX: &str = "background.";
 
@@ -79,7 +86,7 @@ pub struct FormatVersion {
 
 impl FormatVersion {
     /// The version this code writes, and the newest it reads.
-    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 2 };
+    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 3 };
 }
 
 impl fmt::Display for FormatVersion {
@@ -126,11 +133,16 @@ pub struct NoteFile {
     pub background: Option<BackgroundFile>,
     /// Reserved for recognised text ([`TEXT_JSON`]): never written by Ardoise, kept as read.
     pub text: Option<Vec<u8>>,
+    /// Present when the note is a revision ([`REVISION_JSON`]): the copy an assistant made of
+    /// another note. Every save keeps it; a merge or a split does not carry it to the notes
+    /// they make.
+    pub revision: Option<RevisionInfo>,
     /// Top-level fields of `note.json` this version does not know, kept verbatim.
     pub unknown_fields: Map<String, Value>,
     /// Members this version does not know, kept verbatim in archive order. When the file is
     /// written, one named like [`background`](Self::background) is dropped: the known
-    /// background wins.
+    /// background wins; so is a `revision.json` when [`revision`](Self::revision) is set. A
+    /// `revision.json` that could not be read stays here.
     pub unknown_members: Vec<Member>,
 }
 
@@ -145,8 +157,28 @@ impl NoteFile {
             audio: None,
             background: None,
             text: None,
+            revision: None,
             unknown_fields: Map::new(),
             unknown_members: Vec::new(),
+        }
+    }
+
+    /// Makes this file a revision of `source`, copied at `at` (Unix milliseconds), with
+    /// `summary` as the first line of the account. What the file already had as a revision is
+    /// replaced: a revision of a revision describes the changes from the copy it was made from.
+    pub fn mark_as_revision_of(&mut self, source: &Note, at: i64, summary: impl Into<String>) {
+        self.revision = Some(RevisionInfo::of_note(source, at, summary));
+    }
+
+    /// Adds a line to the account of a revision, at the end. Returns `false`, and changes
+    /// nothing, when the note is not a revision.
+    pub fn add_revision_entry(&mut self, at: i64, text: impl Into<String>) -> bool {
+        match &mut self.revision {
+            Some(revision) => {
+                revision.push_entry(at, text);
+                true
+            }
+            None => false,
         }
     }
 }
@@ -581,6 +613,13 @@ fn read_archive_within<R: Read + Seek>(reader: R, budget: u64) -> Result<NoteFil
             _ => continue,
         }
         let (name, is_dir, bytes) = budget.read(&mut archive, index, MAX_MEMBER_BYTES)?;
+        if name == REVISION_JSON
+            && !is_dir
+            && let Some(revision) = RevisionInfo::parse(&bytes)
+        {
+            file.revision = Some(revision);
+            continue;
+        }
         let slot = match name.as_str() {
             _ if is_dir => None,
             ORIGINAL_BIN => Some(&mut file.original),
@@ -697,12 +736,15 @@ fn zip_time(unix_ms: i64) -> zip::DateTime {
 
 /// The unknown members written with `file`. One named like the background the file has is
 /// dropped: the known background wins. (A file read with `background.png` and an unknown
-/// `background.pdf` must stay writable once the app gives it a PDF background.)
+/// `background.pdf` must stay writable once the app gives it a PDF background.) The same goes
+/// for a damaged `revision.json` once the note is given a revision.
 fn unknown_members_to_write(file: &NoteFile) -> impl Iterator<Item = &Member> {
     let background = file.background.as_ref().map(BackgroundFile::member_name);
-    file.unknown_members
-        .iter()
-        .filter(move |member| background.as_deref() != Some(member.name.as_str()))
+    let revision = file.revision.is_some();
+    file.unknown_members.iter().filter(move |member| {
+        background.as_deref() != Some(member.name.as_str())
+            && !(revision && member.name == REVISION_JSON)
+    })
 }
 
 fn check_member_names(file: &NoteFile) -> Result<(), FormatError> {
@@ -713,6 +755,11 @@ fn check_member_names(file: &NoteFile) -> Result<(), FormatError> {
             "invalid background extension {:?}",
             background.extension
         )));
+    }
+    if file.revision.as_ref().is_some_and(|r| r.of.is_empty()) {
+        return Err(FormatError::InvalidNote(
+            "a revision must name the note it comes from".to_owned(),
+        ));
     }
     let mut names: HashSet<&str> = [
         NOTE_JSON,
@@ -728,6 +775,9 @@ fn check_member_names(file: &NoteFile) -> Result<(), FormatError> {
     let background_name = file.background.as_ref().map(BackgroundFile::member_name);
     if let Some(name) = &background_name {
         names.insert(name);
+    }
+    if file.revision.is_some() {
+        names.insert(REVISION_JSON);
     }
     for member in unknown_members_to_write(file) {
         if member.name.is_empty() || !names.insert(&member.name) {
@@ -784,6 +834,12 @@ fn to_bytes_as(file: &NoteFile, version: FormatVersion) -> Result<Vec<u8>, Forma
     }
     if let Some(background) = &file.background {
         add_member(&mut zip, &background.member_name(), &background.bytes, time)?;
+    }
+    if let Some(revision) = &file.revision {
+        let json = revision
+            .to_json()
+            .map_err(|e| FormatError::InvalidNote(e.to_string()))?;
+        add_member(&mut zip, REVISION_JSON, &json, time)?;
     }
     for member in unknown_members_to_write(file) {
         if member.name.ends_with('/') && member.bytes.is_empty() {
