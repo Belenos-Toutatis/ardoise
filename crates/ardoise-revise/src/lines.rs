@@ -91,6 +91,9 @@ const MARK_ABOVE: f32 = 1.5;
 const MARK_BELOW: f32 = 1.0;
 /// ...and beyond the ends of the line by this many (a dash that opens the line, a full stop).
 const MARK_BESIDE: f32 = 4.0;
+/// A note that would make more lines than this is no written page (333 pages of 30 lines merged
+/// into one): the work grows with the lines times the strokes, so its lines are not looked for.
+const MAX_LINES: usize = 10_000;
 
 /// A word of an [`InkLine`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -128,7 +131,7 @@ pub struct InkLine {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InkLines {
     pub lines: Vec<InkLine>,
-    /// Strokes left out, by number: drawings (over 3 × the usual height, unless a letter on a line), rules, highlights, marks too far from any line.
+    /// Strokes left out, by number: drawings (over 3 × the usual height, unless a letter on a line), rules, highlights, marks too far from any line. Every stroke, on a note that would make more than 10,000 lines: no written page does, and its lines are not looked for.
     pub apart: Vec<usize>,
 }
 
@@ -299,8 +302,8 @@ struct Track {
 }
 
 /// Follows the strokes, sorted by their left end, into lines: each continues the nearest line
-/// expected near it, or starts one.
-fn follow(items: &[Item], scales: &Scales) -> Vec<Vec<usize>> {
+/// expected near it, or starts one. `None` beyond [`MAX_LINES`].
+fn follow(items: &[Item], scales: &Scales) -> Option<Vec<Vec<usize>>> {
     let mut tracks: Vec<Track> = Vec::new();
     for (index, item) in items.iter().enumerate() {
         let anchor = [item.cx(), item.level];
@@ -326,6 +329,9 @@ fn follow(items: &[Item], scales: &Scales) -> Vec<Vec<usize>> {
                 track.guide = guide;
             }
         } else if let Some(guide) = Guide::through(&[anchor], scales.prior) {
+            if tracks.len() == MAX_LINES {
+                return None;
+            }
             tracks.push(Track {
                 members: vec![index],
                 anchors: vec![anchor],
@@ -334,7 +340,7 @@ fn follow(items: &[Item], scales: &Scales) -> Vec<Vec<usize>> {
             });
         }
     }
-    tracks.into_iter().map(|track| track.members).collect()
+    Some(tracks.into_iter().map(|track| track.members).collect())
 }
 
 fn guides_of(items: &[Item], lines: &[Vec<usize>], prior: f32) -> Vec<Option<Guide>> {
@@ -617,7 +623,15 @@ pub fn ink_lines(strokes: &[Stroke], visible: &[usize]) -> InkLines {
         }),
         line_break: (LINE_BREAK * usual).max(MIN_LINE_BREAK_MM),
     };
-    let mut lines = follow(&mains, &scales);
+    let Some(mut lines) = follow(&mains, &scales) else {
+        let everything = mains.iter().chain(&marks).chain(&tall);
+        apart.extend(everything.map(|item| item.number));
+        apart.sort_unstable();
+        return InkLines {
+            lines: Vec::new(),
+            apart,
+        };
+    };
     for _ in 0..REASSIGN_ROUNDS {
         lines = reassign(&mains, lines, &scales);
     }
