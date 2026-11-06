@@ -313,6 +313,11 @@ object, a missing or empty `of`, a wrong type) does not make the note unreadable
 revision, and the member stays among the unknown members, written back byte for byte, until the note is given a
 revision, which replaces it. A reader of 1.2 or older keeps the member as an unknown one.
 
+A live-mode fork of a resumed revision stays a revision: when the resumed sheet changed or went elsewhere meanwhile, the
+page continues in a new note beside it that is written from the file that was resumed, so it carries the same
+`revision.json` (`live/hub.rs`, `page_file` and `write_beside`); the other notes of the session (new pages) are ordinary
+notes. The member has a read limit of about 16 MiB, decompressed, like `note.json`.
+
 ## 5. Versioning rules
 
 The version is `format.version` (major) and `format.minor` in `note.json`.

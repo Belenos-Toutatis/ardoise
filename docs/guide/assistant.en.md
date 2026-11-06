@@ -108,9 +108,29 @@ You can also simply ask in your own words, without a prompt: the assistant picks
 
 ## Retouching a note on a copy
 
-The assistant can **improve a note without ever touching the original**: it makes a *copy* next to it and works on
-the copy. Ardoise enforces this (it is not only the assistant's promise): the tools that write ink can only change a
-copy of that kind, never an ordinary note.
+The assistant can **improve a note without touching the original's ink**: it makes a *copy* next to it and works on
+the copy. Keep apart what **Ardoise guarantees** (the program enforces it, whatever the assistant is and whatever you
+tell it) and what is **only asked of the assistant** (it may fall short).
+
+**What Ardoise guarantees:**
+
+- **The original's ink is never written by the assistant**: the tools that write ink can only change a copy of that
+  kind, never an ordinary note.
+- **Nothing is written during a trial**, anywhere.
+- **The copy is a new note**, next to the original. When the assistant splits a note, likewise, you get two new notes,
+  marked as copies: the note it started from stays whole.
+- **If the note changed since the assistant looked at it** (you retouched it by hand, say), Ardoise refuses to write
+  the copy or the retouching: the assistant has to look again.
+- **A retouching can only name strokes of the note it retouches**, never those of another note. The strokes of a hidden
+  layer are only touched if the assistant names them expressly.
+- **Nothing is deleted for good**: the version before a retouching goes to the trash (see "Privacy").
+
+**What is only asked of the assistant**, by the prompt `improve_note` (`ameliorer_note` in French), and which Ardoise
+cannot check: list the spelling mistakes first and correct only those you validate; take letters only from the same
+handwriting, in the same note; mark in colour what it cannot write; tell you everything it changed; keep the replay
+right. **Without that prompt, none of this is asked**: you have to say it ("give me the list of mistakes first", "use
+only my handwriting from this note"). In every case, **always look at the copy** (and **Compare**) before you rely on
+it.
 
 **What you can ask**, in your own words:
 
@@ -121,23 +141,26 @@ copy of that kind, never an ordinary note.
 - "Colour the words to remember and put a frame round the result in the lesson note on dilution."
 - "Correct the spelling mistakes in my note, using my own handwriting."
 - "Straighten the shapes of my physics note" (this too is done on a copy now: the original is no longer changed).
-- In Claude Code, the prompt `improve_note` (`ameliorer_note` in French) goes through all this step by step; it is not
-  there in read-only mode.
+- "Split my note in two at this point" (the two parts are new notes, the note it started from stays as it was).
+- In Claude Code, the prompt `improve_note` (`ameliorer_note` in French) goes through all this step by step, with the
+  requests for care above; it is not there in read-only mode.
 
 **What happens**, in order:
 
 1. The assistant looks at the page (the picture, the written lines, the recognised text) and tells you what it plans.
 2. It **tries**: it prepares a list of changes and sees the picture of the result **without writing anything**
    anywhere. It starts again as often as needed, looking at the picture each time.
-3. When the picture is right it **creates the copy** (titled "<title> (clean)", or "<title> (propre)" in French) and
-   tells you everything it changed. That account stays with the copy.
+3. When the picture is right it **creates the copy** (titled "`title` (clean)", or "`title` (propre)" in French) and,
+   as the prompt asks of it, tells you everything it changed. That account, written by the assistant, stays with the
+   copy.
 
-**Spelling mistakes come first, as a list.** The assistant never corrects silently: it gives you the list of the
-mistakes it sees, *you* say which ones to correct, and only those are corrected. It never changes the meaning of what
-you wrote. For a document in which every word matters (a report, an incident record) it stays sober: no colour unless
-you ask for it.
+**Spelling mistakes come first, as a list** (asked by the prompt). The assistant should not correct silently: it gives
+you the list of the mistakes it sees, *you* say which ones to correct, and only those should be corrected. It should
+not change the meaning of what you wrote. For a document in which every word matters (a report, an incident record) it
+should stay sober: no colour unless you ask for it. Ardoise does not check the corrected text: read it over.
 
-**Where the letters of a corrected word come from.** To replace a letter, the assistant takes, in this order:
+**Where the letters of a corrected word come from** (asked by the prompt). To replace a letter, the assistant must
+take, in this order:
 
 1. the same letter *in your handwriting, in this very note* (it compares the letters before choosing: a note can hold
    two hands, yours and a student's or a colleague's);
@@ -145,25 +168,30 @@ you ask for it.
    "W");
 3. otherwise it makes nothing: it **marks the word in colour** and tells you.
 
-**Never a letter taken from another note.** You sometimes lend your notebook to a student: a letter from another note
-might be theirs, or from another day. Ardoise forbids it by construction: the changes of a note can only name strokes
-of that note. A made letter reads well but stays a little tight next to real writing: the account names every one of
-them.
+**No letter taken from another note.** You sometimes lend your notebook to a student: a letter from another note
+might be theirs, or from another day. What Ardoise does: a retouching cannot name a stroke of another note. What it
+cannot prevent: an assistant retyping by hand the points of a stroke it saw elsewhere; only the prompt forbids that. A
+made letter reads well but stays a little tight next to real writing: the assistant must name every one of them in its
+account.
 
-**The replay stays right.** An added letter, or a word moved into its sentence, takes its place in the time of the
-writing (that of the replay and the video); the strokes after it move on if necessary. If the note has a
-*narration*, nothing moves (the voice and the writing would no longer agree): the letter is drawn faster.
+**The replay: what is asked of the assistant.** For each letter it adds, or word it moves into its sentence, it must
+say where it takes its place in the time of the writing (that of the replay and the video); Ardoise then moves the
+strokes after it on if necessary. If the note has a *narration*, nothing moves (the voice and the writing would no
+longer agree): the letter is drawn faster. If the assistant did not do this, the replay may be wrong: watch it.
 
 **In the editor**, open the copy: a line under the top bar says "Retouched copy of "Optics lesson"", with three
 buttons — **Open the original**, **What changed** (the assistant's account, one dated line per retouching) and
-**Compare** (the original and the copy side by side). See chapter 8 of the user guide.
+**Compare** (the original and the copy side by side). The two "original" buttons show the note it was made from *as it
+is now*; if it is no longer in the library, they are greyed. See chapter 8 of the user guide.
 
 **Retouching again.** You can ask for another retouching of the copy ("make the title red too"): the assistant changes
 it *in place*, keeping what you changed by hand, and adds a line to the account. The version before goes to Ardoise's
-trash (see "Privacy"). Asking for a retouching of the *original note* makes a new copy.
+trash (see "Privacy"). If you changed the copy meanwhile, the assistant has to look at it again first: Ardoise refuses
+otherwise. Asking for a retouching of the *original note* makes a new copy.
 
-**What this does not replace.** The assistant can be wrong: look at the copy (and **Compare**) before you rely on it.
-And the reminder of the "Privacy" chapter holds here too: to retouch a note the assistant sees it, so it goes to its
+**What this does not replace.** The assistant can be wrong, and Ardoise does not check what is only "asked" above
+(mistakes validated, letters from the right handwriting, a complete account, colour): always look at the copy (and
+**Compare**) before you rely on it. And the reminder of the "Privacy" chapter holds here too: to retouch a note the assistant sees it, so it goes to its
 provider.
 
 The Ardoise tools behind all this (you do not need to know them, the assistant picks them): **read** (`get_note`
@@ -215,5 +243,5 @@ The assistant must use **the same copy** of Ardoise as the one you open (same fo
   which prompts the assistant to ask. To be sure nothing changes, declare Ardoise **read only** (`--read-only`).
 - **Nothing is ever deleted for good**: a note the assistant deletes goes to Ardoise's trash (kept 30 days), where you
   can restore it. When it retouches a copy that was already made (or straightens its shapes), the version before goes there too, as
-  "<title> (before retouching)" or "<title> (before straightening)". The ink of an ordinary note is never changed: the
-  assistant only retouches it on a copy, next to it. Exports never overwrite an existing file.
+  "`title` (before retouching)" or "`title` (before straightening)". The assistant never writes the ink of an ordinary
+  note: it only retouches a copy, next to it. Exports never overwrite an existing file.
