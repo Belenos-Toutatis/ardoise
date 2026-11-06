@@ -116,7 +116,7 @@ pub struct InkLine {
     pub baseline_left: f32,
     /// y of the baseline at the right end, millimetres.
     pub baseline_right: f32,
-    /// Slope of the line in degrees, positive going down to the right. Level on a short line, where a fit goes wrong.
+    /// Slope of the line in degrees, positive going down to the right. Level on a short line, where a fit goes wrong, and when the fit is steeper than 45 degrees.
     pub slope: f32,
     /// Height of the body of the letters, millimetres.
     pub body: f32,

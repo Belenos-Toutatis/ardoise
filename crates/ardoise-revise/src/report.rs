@@ -47,6 +47,8 @@ pub enum SlopeFrom {
     Fitted,
     /// Taken as level: the line is under 40 mm or of few letters, where a fit goes wrong.
     ShortLine,
+    /// Taken as level: the fit found a line steeper than 45 degrees, which is no written line.
+    TooSteep,
 }
 
 /// What `tidy_line` found and did: the assistant checks it against the picture.

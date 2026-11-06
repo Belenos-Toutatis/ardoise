@@ -6,7 +6,7 @@ use ardoise_ink::{Point, Rgba, Stroke, Tool};
 
 use crate::geom::{Area, UNITS, area_of, median, smooth_stroke};
 use crate::orders::{Flip, Order, Part, Select, Shape};
-use crate::report::{Ctx, OrderReport, Report, ReviseError};
+use crate::report::{Ctx, OrderReport, Report, ReviseError, SlopeFrom};
 use crate::shapes::{P, Style, length, paths, sample_count, stroke_along};
 use crate::tidy::TidySpec;
 use crate::validate::{Color, too_many_points};
@@ -317,6 +317,15 @@ impl<'a> Work<'a> {
                     smooth: *smooth,
                 };
                 report.line = self.tidy(ctx, &ids, &spec)?;
+                if report
+                    .line
+                    .as_ref()
+                    .is_some_and(|line| line.slope_from == SlopeFrom::TooSteep)
+                {
+                    report.warnings.push(
+                        "the fit found a line steeper than 45 degrees, so it was taken as level: check the selection, or give the `slope` you see".to_owned(),
+                    );
+                }
             }
         }
         Ok(report)

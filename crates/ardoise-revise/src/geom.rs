@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use ardoise_ink::{Point, Stroke};
 
+use crate::MAX_SLOPE_DEG;
 use crate::report::SlopeFrom;
 
 /// Device units (10 µm) per millimetre.
@@ -160,7 +161,8 @@ impl LineFit {
 }
 
 /// Fits the baseline of a written line: lower outline (1 mm bins), Theil-Sen through it. `slope`
-/// (degrees) overrides the fit; without it, a short line takes slope 0. `None` without any sample.
+/// (degrees) overrides the fit; without it, a short line takes slope 0, and so does a fit steeper
+/// than [`MAX_SLOPE_DEG`], which no written line is. `None` without any sample.
 pub(crate) fn fit_line<'s>(
     strokes: impl Iterator<Item = &'s Stroke>,
     slope: Option<f32>,
@@ -174,10 +176,12 @@ pub(crate) fn fit_line<'s>(
         None if area.width() < SHORT_LINE_MM || bottoms.len() < SHORT_LINE_BINS => {
             (0.0, SlopeFrom::ShortLine)
         }
-        None => (
-            theil_sen(&bottoms, FIT_MIN_DX_MM).unwrap_or(0.0),
-            SlopeFrom::Fitted,
-        ),
+        None => match theil_sen(&bottoms, FIT_MIN_DX_MM).unwrap_or(0.0) {
+            fitted if fitted.atan().to_degrees().abs() > MAX_SLOPE_DEG => {
+                (0.0, SlopeFrom::TooSteep)
+            }
+            fitted => (fitted, SlopeFrom::Fitted),
+        },
     };
     let mut rest: Vec<f32> = bottoms.iter().map(|p| p[1] - slope * p[0]).collect();
     let intercept = median(&mut rest)?;

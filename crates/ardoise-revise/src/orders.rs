@@ -345,7 +345,7 @@ pub enum Order {
         mode: Option<TidyMode>,
         /// Size change (0.05 to 20), around the start of each word and the baseline. Ruled paper may need 0.9 when the writer's own line pitch was wider than the rules.
         scale: Option<f32>,
-        /// Slope of the written line in degrees (positive goes down to the right, at most 45 either way), when you see it better than the fit. Without it, a line under 40 mm or of few letters is taken as level.
+        /// Slope of the written line in degrees (positive goes down to the right, at most 45 either way), when you see it better than the fit. Without it, a line under 40 mm or of few letters is taken as level, and so is a line the fit finds steeper than 45 degrees (with a warning).
         slope: Option<f32>,
         /// `even` (default) or `keep`.
         gaps: Option<TidyGaps>,

@@ -353,3 +353,31 @@ fn time_and_points_do_not_change() {
         }
     }
 }
+
+#[test]
+fn a_fitted_slope_steeper_than_45_degrees_is_taken_as_level_with_a_warning() {
+    // A long diagonal drawn at about 63 degrees: wide enough for a fit, and no written line.
+    let strokes = vec![line_stroke([10.0, 10.0], [60.0, 110.0], 0, 1000)];
+    let revised = run(&strokes, r#"[{"op":"tidy_line","select":{}}]"#);
+    let order = &revised.report.orders[0];
+    let line = order.line.as_ref().unwrap();
+    assert_eq!(line.slope, 0.0);
+    assert_eq!(line.slope_from, report::SlopeFrom::TooSteep);
+    assert!(
+        order.warnings.iter().any(|w| w.contains("45 degrees")),
+        "{:?}",
+        order.warnings
+    );
+    // Taken as level, its height stays.
+    let [_, y0, _, y1] = box_of(revised.stroke(0));
+    assert_near(y1 - y0, 100.0, 0.01);
+
+    // A slope just under the limit is still a fit, without a warning.
+    let strokes = vec![line_stroke([10.0, 10.0], [110.0, 90.0], 0, 1000)];
+    let revised = run(&strokes, r#"[{"op":"tidy_line","select":{}}]"#);
+    let order = &revised.report.orders[0];
+    let line = order.line.as_ref().unwrap();
+    assert_eq!(line.slope_from, report::SlopeFrom::Fitted);
+    assert!(line.slope > 30.0);
+    assert!(order.warnings.is_empty(), "{:?}", order.warnings);
+}
