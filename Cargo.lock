@@ -265,6 +265,7 @@ dependencies = [
  "ardoise-hwr",
  "ardoise-ink",
  "ardoise-render",
+ "ardoise-revise",
  "base64 0.23.1",
  "chrono",
  "rmcp",

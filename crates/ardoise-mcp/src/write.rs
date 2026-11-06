@@ -1,13 +1,15 @@
 //! The write tools (`create_note`, `update_note`, `move_note`, `trash_note`, `merge_notes`,
-//! `split_note`, `straighten_shapes`, `export_note`, `set_note_text`): SPEC §4.9, design in
-//! `docs/design/mcp.md`. Absent with `--read-only`.
+//! `split_note`, `straighten_shapes`, `export_note`, `set_note_text`, and the three of
+//! `revision.rs`: `preview_revision`, `create_revision`, `edit_revision`): SPEC §4.9, design in
+//! `docs/design/mcp.md` and `docs/design/revision.md`. Absent with `--read-only`.
 //!
 //! Every tool gives exactly what the same action gives in the app: the library operations are
 //! `ardoise-core`'s (`Library::save` with its stamp check, the trash, the " (2)" rule of moves
 //! and creations), and what lives in the app's executable (thumbnails, the note's original,
 //! background images, the exports, the handwriting cache) comes through [`WriteServices`].
 //! No file is ever overwritten by an export and nothing is deleted for good: a trashed note, and
-//! the version of a note before `straighten_shapes`, are in the library's trash.
+//! the version of a revision before it is edited, are in the library's trash. The ink of a note
+//! that is not a revision is never written: it is redrawn on a copy.
 //!
 //! To add a tool:
 //!
@@ -26,12 +28,14 @@
 
 mod create;
 mod export;
+mod revision;
 mod text;
 mod transform;
 mod update;
 
 use std::path::{Path, PathBuf};
 
+use ardoise_core::format::NoteFile;
 use ardoise_core::library::{FileStamp, Library, SavedNote};
 use ardoise_core::note::Note;
 use ardoise_hwr::Language;
@@ -49,6 +53,7 @@ pub use export::{
     VideoTiming, check_replay_plan, free_file,
 };
 pub use export::{ExportNoteArgs, ExportOptions, ExportRequest, ExportTarget};
+pub use revision::{CreateRevisionArgs, EditRevisionArgs, PreviewRevisionArgs};
 pub use text::SetNoteTextArgs;
 pub use transform::{MergeLayout, MergeNotesArgs, SplitNoteArgs, StraightenArgs};
 pub use update::{MoveNoteArgs, TrashNoteArgs, UpdateNoteArgs};
@@ -115,15 +120,34 @@ pub trait WriteServices: Send + Sync {
     /// Saves `note` over the file at `path` as the editor does: refused with `noteConflict`
     /// when the file is no longer the version of `stamp`; every other member of the file is
     /// kept, `modified` is now, the thumbnail is made again and the original of the tablet's
-    /// note is kept the first time the ink changes.
+    /// note is kept the first time the ink changes. With `account`, the file (a revision) gets
+    /// that line, dated now, at the end of its account, in the same write.
     fn save_note(
         &self,
         _library: &Library,
         _path: &Path,
         _note: Note,
         _stamp: &FileStamp,
+        _account: Option<&str>,
     ) -> Result<FileStamp, ToolError> {
         Err(unavailable("note saving"))
+    }
+
+    /// Creates the new note `file` (a copy of another note, marked as a revision of it, with a
+    /// new id and no thumbnail) in `binder`, with `revised` as its ink in place of the ink
+    /// `file` carries (the source's): as the editor's save would write `revised` over `file`, the
+    /// note's original is kept by the editor's rule (a tablet note keeps the tablet's bytes, any
+    /// other note gets the version before its first edit, here the source's ink) and the
+    /// thumbnail is drawn. The file name takes " (2)"… when taken. Nothing but the new file is
+    /// written.
+    fn create_revision(
+        &self,
+        _library: &Library,
+        _binder: &Path,
+        _file: NoteFile,
+        _revised: Note,
+    ) -> Result<SavedNote, ToolError> {
+        Err(unavailable("revision"))
     }
 
     /// Splits the note at `path` as the editor does (the new note, titled `title`, goes into
@@ -297,7 +321,7 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Straighten hand-drawn shapes (lines, circles and ellipses, rectangles, arrows) in a note, as the editor's "Straighten shapes" does on a selection, in one save. By default only the strokes of the drawings found by Windows' ink analysis on the visible layers are tried (without the analysis, `strokes` is required); pass `strokes` (indices from `get_note`, or the `strokes` of the drawings in `get_note_text`'s structure) to choose them. The version before is first put in the library's trash as a note of its own, "<title> (before straightening)", that the user can restore from the app; the result says so.
+    /// Straighten hand-drawn shapes (lines, circles and ellipses, rectangles, arrows), as the editor's "Straighten shapes" does on a selection. The ink of a note that is not a revision is never changed: the shapes are straightened on a copy made next to it (a revision, titled "<title> (clean)"), and the result gives both notes. On a note that already is a revision they are straightened in it, in one save, and its version before goes to the library's trash as a note of its own that the user can restore. By default only the strokes of the drawings found by Windows' ink analysis on the visible layers are tried (without the analysis, `strokes` is required); pass `strokes` (indices from `get_note`, or the `strokes` of the drawings in `get_note_text`'s structure) to choose them.
     #[tool(
         name = "straighten_shapes",
         annotations(
@@ -351,6 +375,63 @@ impl ArdoiseServer {
         Parameters(args): Parameters<SetNoteTextArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         self.blocking(move |host| text::set_note_text(host, args))
+            .await
+    }
+
+    /// Try a list of orders that retouch a note's strokes, in memory: nothing is written. Answers the picture of the result and the report (what each order selected and made, the lines tidied with their slope, the time moved, warnings). Look at the picture, read the report, correct the orders, and preview again; every time send the whole list, built from the note as it is. Use `labels` and `region` to see the numbers. Then `create_revision`.
+    #[tool(
+        name = "preview_revision",
+        annotations(
+            title = "Preview a retouching of a note",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn preview_revision(
+        &self,
+        Parameters(args): Parameters<PreviewRevisionArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.blocking(move |host| revision::preview_revision(host, args))
+            .await
+    }
+
+    /// Carry out a list of orders on a copy of a note: a new note next to it, a revision, with the retouched strokes and `summary` as the first line of its account, which the editor shows ("Copie retouchée de ...", "What changed", compare, open the original). The original is never written, whatever the orders. Everything else of the note is kept (paper, layers, background image, tags, narration), `favorite` is off, the creation date is the original's. Preview the orders first with `preview_revision`. Letters of a word that has to be corrected only come from the same handwriting in this same note: the orders can only name strokes of the note being retouched.
+    #[tool(
+        name = "create_revision",
+        annotations(
+            title = "Retouch a note on a copy",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn create_revision(
+        &self,
+        Parameters(args): Parameters<CreateRevisionArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.blocking(move |host| revision::create_revision(host, args))
+            .await
+    }
+
+    /// Carry out a list of orders on a note that already is a revision (a copy made by `create_revision` or `straighten_shapes`), in place: the strokes it has now, with what the user changed by hand, are the ones the orders number (`get_note` with `strokes`, `render_note` with `labels`). A note that is not a revision is refused with `notARevision`, and left as it is. The version before goes to the library's trash as a note of its own that the user can restore; `summary` is added, dated, to the copy's account. A note changed meanwhile is not overwritten (`noteConflict`).
+    #[tool(
+        name = "edit_revision",
+        annotations(
+            title = "Edit a retouched copy",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn edit_revision(
+        &self,
+        Parameters(args): Parameters<EditRevisionArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.blocking(move |host| revision::edit_revision(host, args))
             .await
     }
 }

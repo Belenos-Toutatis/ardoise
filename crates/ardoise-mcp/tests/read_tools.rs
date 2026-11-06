@@ -350,10 +350,11 @@ fn titles(value: &Value) -> Vec<String> {
 
 // ---------------------------------------------------------------------------------------------
 // Tool list
-
-const READ_TOOLS: [&str; 7] = [
+const READ_TOOLS: [&str; 9] = [
     "get_note",
     "get_note_text",
+    "get_strokes",
+    "ink_lines",
     "list_binders",
     "list_notes",
     "list_tags",

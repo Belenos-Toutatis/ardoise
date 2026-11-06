@@ -12,6 +12,7 @@ ardoise-core = { path = "../ardoise-core" }
 ardoise-hwr = { path = "../ardoise-hwr" }
 ardoise-ink = { path = "../ardoise-ink" }
 ardoise-render = { path = "../ardoise-render" }
+ardoise-revise = { path = "../ardoise-revise" }
 # Images in tool results are base64 text (the version rmcp itself uses).
 base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

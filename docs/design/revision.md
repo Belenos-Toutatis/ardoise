@@ -265,7 +265,61 @@ What differs from the two sections above, or was decided while building them. By
 - **The browser stand-in** (`lib/mock-data.ts`): `addMockRevision({ of?, title?, summary? })` adds a revision to the demo library
   on demand (the library has none by default, so the tests that count its three notes are unchanged); `lib/mock-notes.ts` answers
   `revision_source` and `note_picture` (an SVG).
-- **Not done here**, by the brief: the tools that write revisions, the end-to-end journey, the user guide and the changelog.
+- **Not done here**, by the brief: the tools that write revisions, the end-to-end journey, the user guide and the changelog (done: see the next section).
+
+## As built: the tools, the prompt and the end-to-end journey
+
+What differs from "Tools (`ardoise-mcp`)" above, or was decided while building it.
+
+- **Where the code is.** `crates/ardoise-mcp/src/write/revision.rs` (`preview_revision`, `create_revision`, `edit_revision`, and the
+  two operations `straighten_shapes` shares with them: `make_copy` and `edit_in_place`), `src/read.rs` (`get_strokes`, `ink_lines`,
+  `render_note`'s labels, `get_note`'s ruling), `src/prompts.rs` (`improve_text`), `crates/ardoise-render/src/labels.rs` and
+  `background.rs` (`ruling`). The app's side: `WriteServices::create_revision` and the `account` argument of `save_note`
+  (`app/src-tauri/src/mcp/write.rs`, `notes::save_in_with_account`).
+- **The guarantee is in the shape of the code.** The only functions that write ink are `make_copy` (a new file: `Library::create`, which
+  never replaces one) and `edit_in_place` (which begins with `notARevision` on a file with no `revision`). The source's file is read, never
+  passed to a save. `crates/ardoise-mcp/tests/revision_tools.rs` takes the bytes and the stamp of the source before and after
+  `create_revision`, `preview_revision`, `straighten_shapes` and a refused `edit_revision`, and compares.
+- **`get_note` says what a revision is.** Beyond the design: `revision: { of, of_title, created, account: [{ at, text }] }` on a retouched
+  copy, so that an assistant knows to use `edit_revision` (and the prompt says so when the note it is given is one). Absent on any other note.
+- **`background.ruling`** is given for `lined`, `seyes` and `grid5mm` only (`ardoise_render::ruling`, which reads the constants the template
+  drawing uses): the strong lines of Seyès, the horizontal lines of squared paper (whose first line is centred, so `first_mm` depends on the
+  page height). Millimetric paper, dots and music staves have none: the key is absent.
+- **Labels** (`ardoise_render::draw_labels`): digits made of lines (3 x 5 units, 11 px high at any zoom, 1.4 px thick, red on a pale
+  backing), drawn on the picture after the region is cut out, next to each drawn stroke's box: the first free place among above, below,
+  right, left, inside; a number that falls outside the picture is left out. `render_note` numbers by place (the index of `get_note`);
+  `preview_revision` by `Revised.numbers` (tested: after a `delete` the others keep their numbers). Off by default in both.
+- **`preview_revision`** answers an image and a text, whose JSON is the picture's facts (`dpi`, `region_mm`, `labels`…) plus `preview: true`,
+  `written: false`, `stroke_count` and the engine's `report`. An empty list of orders is allowed (it draws the note); it is refused by
+  `create_revision` and `edit_revision` (`invalidArguments`: nothing to change), as is a blank `summary`.
+- **`create_revision`** keeps everything of the source (the file is cloned: paper, layers, background image and its pixels, tags,
+  narration, text member, unknown members) and changes the id, the title (`"<title> (clean)" / "(propre)"`; an untitled source gives
+  `Untitled note (clean)` / `Note sans titre (propre)`), `favorite` (off), `modified` (now), the thumbnail (drawn by the app) and
+  `revision` (replaced: a revision of a revision starts a new account). **"Back to the original"** follows the editor's rule exactly, because
+  the app's `create_revision` runs `original::keep_original` on the source's file with the new ink, as `save_in` does: a tablet note keeps
+  `original.bin`; a note without an original keeps its ink at the time of the copy as `original.ardoise`; a note already edited keeps the
+  one it has; a source with no stroke has none (`app/src-tauri/src/mcp/write.rs`, three tests). The account's `at` is the time of the copy.
+- **`edit_revision`** and **`straighten_shapes` on a revision** put the version before in the trash (`Library::trash_copy`, titled
+  "<title> (before retouching)" / "(avant retouche)", or "(before straightening)" / "(avant redressement)" for the second) and add a line to
+  the account in the same write (`"Shapes straightened: N"` / `"Formes redressées : N"` for the second): `WriteServices::save_note`
+  takes an `account`, and the app's `save_in_with_account` adds it after the stamp check. A conflict gives `noteConflict` and takes the
+  trash copy back.
+- **`straighten_shapes` on an ordinary note** makes the copy with no trash copy of anything, and answers `made_a_copy: true`, the copy as
+  `note`, the source as `original` and `original_unchanged: true`; nothing recognised makes no copy (`saved: false`) as before.
+- **Annotations**: as the design says; `preview_revision` is in the write group, so `--read-only` does not serve it (nor `create_revision` or
+  `edit_revision`). `--read-only` serves nine read tools.
+- **The prompt** `ameliorer_note` / `improve_note` (`note?`, `goals?`): the six steps, then the lessons of the trial that help an assistant
+  (a selection of the wrong size, the colour of a new stroke, the slope with exponents, a page of diagram, `scale: 0.9` on ruled paper). Without
+  `note` it says to call `last_live_note`; without `goals` it says to ask; a note that is a revision is edited with `edit_revision`. Absent
+  with `--read-only` (the prompts that only read are still served).
+- **Tests**: `tests/revision_tools.rs` (23: the guarantee byte for byte, `notARevision`, the copy keeps paper, layers, image, tags,
+  narration, text, new id, same `created`, favourite off, new thumbnail, titles in both languages, the account, the original, a narration
+  reaching the engine, the stamp, `invalidOrders` carrying the engine's message, the labels' numbers, `get_strokes`, `ink_lines`, the
+  ruling, annotations, `--read-only`, and the four real notes of `testdata/private/revise` when they are there: skipped otherwise,
+  `ARDOISE_SAMPLES_DIR` writes the pictures); `tests/write_tools.rs` (the new `straighten_shapes`); `tests/prompts.rs`; `labels.rs` and
+  `background.rs` in `ardoise-render`; the app's `mcp/write.rs`. End to end: `app/e2e/journeys-m13-revision.mjs` (wired in `run.mjs`; run it
+  alone with `ARDOISE_E2E_ONLY="assistant : copie"`) and the checks added to `mcp.mjs` and `mcp-write.mjs`.
+- **Not done here**: ticking `ROADMAP.md` (after the Windows verification), the independent review, the trial with a real assistant.
 
 ## Lessons of the trial
 

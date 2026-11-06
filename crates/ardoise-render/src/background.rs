@@ -228,14 +228,55 @@ fn centred(size: f32, step: f32) -> f32 {
     (size - (size / step).floor() * step) / 2.0
 }
 
+/// Ruled paper: the first rule's distance from the top and the distance between two rules.
+const LINED_FIRST_MM: f32 = 16.0;
+const LINED_PITCH_MM: f32 = 8.0;
+/// Seyès: its strong horizontal lines start there and are this far apart (the thin ones between
+/// them are a quarter of it).
+const SEYES_TOP_MM: f32 = 16.0;
+const SEYES_PITCH_MM: f32 = 8.0;
+/// Squared paper.
+const GRID_PITCH_MM: f32 = 5.0;
+
+/// The horizontal rules a person writes on: where the first one is, and the distance between two.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Ruling {
+    /// Distance of the first rule from the top of the page, millimetres.
+    pub first_mm: f32,
+    /// Distance between two rules, millimetres.
+    pub pitch_mm: f32,
+}
+
+/// The rules of `template` on a page `page_height_mm` high, `None` for the templates without
+/// horizontal rules to write on (blank, dotted, millimetric, music staves). For Seyès these are the
+/// strong lines (the thin ones between them are a quarter of the pitch); for squared paper, its
+/// horizontal lines. Same numbers as [`draw_template`] draws.
+pub fn ruling(template: Template, page_height_mm: f32) -> Option<Ruling> {
+    match template {
+        Template::Lined => Some(Ruling {
+            first_mm: LINED_FIRST_MM,
+            pitch_mm: LINED_PITCH_MM,
+        }),
+        Template::Seyes => Some(Ruling {
+            first_mm: SEYES_TOP_MM,
+            pitch_mm: SEYES_PITCH_MM,
+        }),
+        Template::Grid5mm => Some(Ruling {
+            first_mm: centred(page_height_mm, GRID_PITCH_MM),
+            pitch_mm: GRID_PITCH_MM,
+        }),
+        Template::Blank | Template::Millimetric | Template::Dotted | Template::Music => None,
+    }
+}
+
 fn draw_template(c: &mut impl TemplateCanvas, template: Template, p: &Palette) {
     let (w, h) = c.size_mm();
     match template {
         Template::Blank => {}
         Template::Lined => {
             // Ruled lines 8 mm apart, below a two-line header.
-            let fade = c.density(8.0);
-            for y in steps(16.0, h - 4.0, 8.0) {
+            let fade = c.density(LINED_PITCH_MM);
+            for y in steps(LINED_FIRST_MM, h - 4.0, LINED_PITCH_MM) {
                 c.hline(y, 0.0, w, p.rule, fade);
             }
         }
@@ -243,15 +284,15 @@ fn draw_template(c: &mut impl TemplateCanvas, template: Template, p: &Palette) {
             // 8 mm squares (strong lines), 3 thin lines between the horizontal ones, vertical
             // lines right of a margin at 32 mm.
             const MARGIN: f32 = 32.0;
-            const TOP: f32 = 16.0;
+            const TOP: f32 = SEYES_TOP_MM;
             let thin_fade = c.density(2.0);
-            let strong_fade = c.density(8.0);
-            for (i, y) in steps(TOP, h, 2.0).enumerate() {
+            let strong_fade = c.density(SEYES_PITCH_MM);
+            for (i, y) in steps(TOP, h, SEYES_PITCH_MM / 4.0).enumerate() {
                 if i % 4 != 0 {
                     c.hline(y, 0.0, w, p.seyes_thin, thin_fade);
                 }
             }
-            for y in steps(TOP, h, 8.0) {
+            for y in steps(TOP, h, SEYES_PITCH_MM) {
                 c.hline(y, 0.0, w, p.seyes_strong, strong_fade);
             }
             for x in steps(MARGIN + 8.0, w, 8.0) {
@@ -260,11 +301,11 @@ fn draw_template(c: &mut impl TemplateCanvas, template: Template, p: &Palette) {
             c.vline(MARGIN, 0.0, h, p.margin, 1.0);
         }
         Template::Grid5mm => {
-            let fade = c.density(5.0);
-            for y in steps(centred(h, 5.0), h, 5.0) {
+            let fade = c.density(GRID_PITCH_MM);
+            for y in steps(centred(h, GRID_PITCH_MM), h, GRID_PITCH_MM) {
                 c.hline(y, 0.0, w, p.grid, fade);
             }
-            for x in steps(centred(w, 5.0), w, 5.0) {
+            for x in steps(centred(w, GRID_PITCH_MM), w, GRID_PITCH_MM) {
                 c.vline(x, 0.0, h, p.grid, fade);
             }
         }
@@ -564,6 +605,43 @@ fn texture_image(paper: Paper, page: PageSize) -> Option<Image> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_rules_to_write_on_are_those_the_template_draws() {
+        let lined = ruling(Template::Lined, 297.0).unwrap();
+        assert_eq!((lined.first_mm, lined.pitch_mm), (16.0, 8.0));
+        let seyes = ruling(Template::Seyes, 297.0).unwrap();
+        assert_eq!((seyes.first_mm, seyes.pitch_mm), (16.0, 8.0));
+        // Squared paper: its grid is centred, like the drawing.
+        let grid = ruling(Template::Grid5mm, 297.0).unwrap();
+        assert_eq!(grid.pitch_mm, 5.0);
+        assert!((grid.first_mm - 1.0).abs() < 1e-4, "{}", grid.first_mm);
+        for template in [
+            Template::Blank,
+            Template::Dotted,
+            Template::Millimetric,
+            Template::Music,
+        ] {
+            assert_eq!(ruling(template, 297.0), None);
+        }
+        // The first rule is really drawn there: a pixel row of the rule is not the paper's.
+        let drawn = |template: Template| {
+            let background = Background {
+                template,
+                ..Background::default()
+            };
+            let mut pixmap = Pixmap::new(210, 297).unwrap();
+            paint(&mut pixmap, &background, 0.01);
+            pixmap
+        };
+        let lined_page = drawn(Template::Lined);
+        let paper_row = |y: u32| lined_page.pixel(100, y).unwrap().red();
+        let darker = |rows: std::ops::RangeInclusive<u32>, plain: u32| {
+            rows.into_iter().any(|y| paper_row(y) < paper_row(plain))
+        };
+        assert!(darker(15..=17, 12), "no rule at 16 mm");
+        assert!(darker(23..=25, 20), "no rule at 24 mm");
+    }
 
     #[test]
     fn custom_paper_is_composited_over_white() {

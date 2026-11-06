@@ -30,6 +30,12 @@ pub mod code {
     pub const BRIDGE_VERSION: &str = "bridgeVersion";
     /// A line received on the bridge that is not a request (unreadable, unknown kind, too long).
     pub const INVALID_REQUEST: &str = "invalidRequest";
+    /// A list of orders of `preview_revision`, `create_revision` or `edit_revision` was refused
+    /// (the message is the engine's, naming the order that is wrong).
+    pub const INVALID_ORDERS: &str = "invalidOrders";
+    /// `edit_revision` was given a note that is not a revision: the ink of an ordinary note is
+    /// only ever changed on a copy.
+    pub const NOT_A_REVISION: &str = "notARevision";
 }
 
 /// A tool failure.
