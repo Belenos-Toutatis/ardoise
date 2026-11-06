@@ -784,6 +784,24 @@ save to keep it. For a note that has never been modified there is no original ye
 the first time you save a change of the ink, or the time live mode resumes the sheet and writes on it (see chapter 6).
 The original is always the *first* version of the note, never the state just before the last change.
 
+### A copy retouched by an assistant
+
+When your assistant (chapter 14) retouches a note, it never touches the original: it makes a **copy** next to it,
+which Ardoise recognises. Open that copy: under the top bar, a line says **Retouched copy of "Title"**, with three
+buttons.
+
+- **Open the original** opens the note it was made from in the editor, like the "Previous page" and "Next page" arrows
+  (with unsaved changes, Ardoise first asks what to do with them). The button is greyed, with "The original no longer
+  exists", when the original note was deleted or taken out of the library.
+- **What changed** opens the assistant's account: one dated line per retouching, with every change and every letter it
+  made. It is a text written by the assistant, which can be wrong: look at the copy.
+- **Compare** shows the original and the copy side by side (one above the other in a narrow window). The copy is shown
+  as it is saved: its unsaved changes are not in it. Greyed as well when the original no longer exists.
+
+A retouched copy is a note like any other: you can edit it by hand, rename it, delete it; **Back to the original**
+puts its starting ink back. What the assistant can be asked, and what it never does, is in the guide
+[The assistant](assistant.en.md).
+
 ## 9. Replay, narration and video
 
 ### Replay
@@ -1025,7 +1043,8 @@ Its last line is `SELF-TEST OK` or `SELF-TEST FAILED`, and the report is also wr
 ## 14. The assistant (Claude Code, Claude Desktop)
 
 Ardoise can be driven by *your own assistant* (Claude Code, Claude Desktop or any software compatible with the MCP
-protocol): it reads your notes, sees them as images, tidies them up, titles them, files them. Ardoise itself contains no
+protocol): it reads your notes, sees them as images, tidies them up, titles them, files them, and can retouch a copy of
+a note (tidier writing, redrawn diagram, corrected spelling) without ever changing the original. Ardoise itself contains no
 AI and stays usable offline; it is the assistant's software that does the work.
 
 **Settings**, **Assistant (MCP)** section, gives the exact text to copy into the assistant, with a **Read only** box so

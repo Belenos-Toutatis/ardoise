@@ -1,6 +1,6 @@
 # Driving Ardoise from an assistant (MCP) — milestone M9
 
-SPEC §4.9. Ardoise contains no AI and stays offline; it exposes its library and its windows to the user's own
+SPEC §4.9 (retouching a note on a copy, M13: `docs/design/revision.md`). Ardoise contains no AI and stays offline; it exposes its library and its windows to the user's own
 assistant (Claude Code, Claude Desktop, any MCP client) through the Model Context Protocol. The assistant brings
 the intelligence: it reads the recognised text with positions *and sees the page as an image*, so it can recognise
 diagrams, formulas and layout far better than the Windows recogniser alone, then write clean documents.
@@ -51,7 +51,9 @@ deleted permanently), `false` on the others, `idempotentHint` where true. Errors
 | `search_notes` | `query`, `limit?` | like the app's search (title, tags, recognised text, accent-insensitive), with the snippet that matched; says how many notes are not read yet |
 | `get_note` | `note`, `strokes?` (`none` default / `summary` / `points`), `max_points?` | metadata, layers, background (paper, template, image name/page), duration; `summary`: per stroke tool, colour, width, bounding box (mm), start/end time; `points`: decimated polylines in mm (Douglas–Peucker, bounded by `max_points`, default 5000 in total) |
 | `get_note_text` | `note`, `language?` (`fr`/`en`, default the app's) | recognised text: lines with their bounding boxes (mm), and the structure when Windows' ink analysis is available (paragraphs, list items, drawings with bounds and stroke indices — `ardoise_hwr::structure`, M8); recognises on demand (and fills the per-PC cache) when the note is not read yet |
-| `render_note` | `note`, `region?` ({x, y, width, height} in mm), `dpi?` (default 100, max 300), `background?` (default true), `layers?` | a PNG image content (MCP `image`), longest side at most 2000 px, the whole page drawn at most 24 Mpx (dpi lowered to fit, the effective dpi and what lowered it returned in a text content next to it) so the assistant can *see* the note |
+| `render_note` | `note`, `region?` ({x, y, width, height} in mm), `dpi?` (default 100, max 300), `background?` (default true), `layers?`, `labels?` (M13: each stroke's number written next to it) | a PNG image content (MCP `image`), longest side at most 2000 px, the whole page drawn at most 24 Mpx (dpi lowered to fit, the effective dpi and what lowered it returned in a text content next to it) so the assistant can *see* the note |
+| `get_strokes` | `note`, `strokes` (numbers), `step?` | M13: the exact samples `[i, x_mm, y_mm, pressure, t_ms]` of the strokes, at most 20,000 a call |
+| `ink_lines` | `note` | M13: the written lines found from the ink (`ardoise-revise`), with their strokes, baseline, slope and words |
 
 ### Write (absent with `--read-only`)
 
@@ -63,7 +65,8 @@ deleted permanently), `false` on the others, `idempotentHint` where true. Errors
 | `trash_note` | `note` | to the library trash, restorable from the app |
 | `merge_notes` | `notes` (≥ 2), `layout` (`overlay`/`endToEnd`), `title?` | the M5 merge, a new note |
 | `split_note` | `note`, `at_ms` or `polygon` (mm) | the M5 split |
-| `straighten_shapes` | `note`, `strokes?` (indices; default the drawings found by Windows' ink analysis on visible layers, required without it) | the M7 straightening, one save; the version before goes to the library's trash as a note of its own |
+| `straighten_shapes` | `note`, `strokes?` (indices; default the drawings found by Windows' ink analysis on visible layers, required without it) | the M7 straightening **on a copy** of a note that is not a revision (M13, `revision.md`: the original is not written), in place on a revision (its version before goes to the library's trash as a note of its own) |
+| `preview_revision`, `create_revision`, `edit_revision` | `note`, `orders`, `summary` (`create_revision` also `title?`; the preview also `region?`, `dpi?`, `labels?`) | M13, see `docs/design/revision.md`: a list of orders retouches the strokes in memory (preview, nothing written), on a new copy next to the note, or in place on a note that already is a revision |
 | `export_note` | `notes`, `format` (`png`/`jpg`/`webp`/`svg`/`pdf`/`txt`/`md`/`docx`/`gif`/`webm`/`mp4`), `path` (absolute file or folder), options of each format (dpi, background, quality, …) | the app's exports; never overwrites (" (2)" added), returns the written paths |
 | `set_note_text` | `note`, `text`, `language?` | stores a corrected transcription in the per-PC handwriting cache, used by the search and the text exports instead of the recogniser's text until the ink changes; never written into the note file |
 
@@ -88,6 +91,9 @@ setting, each naming the tools to use:
   text and the image, apply them with `update_note` after showing the list.
 - `resume_seance` / `lesson_summary` (`date?` or `binder?`): a short summary of the notes of a lesson, for the class
   log (cahier de textes).
+- `ameliorer_note` / `improve_note` (`note?`, `goals?`; M13, `revision.md`): improve a note on a copy, in six steps (look, say what
+  is planned and list the spelling mistakes, letters only from the same handwriting in this note, `after` and `retime`, preview and
+  correct, `create_revision` and an account). It names the write tools, so a `--read-only` server does not serve it.
 
 ## Privacy and safety
 
@@ -451,3 +457,23 @@ setting, each naming the tools to use:
   `lib/assistant-setup.test.ts`, `lib/mock-live.test.ts` (`remember: false`), `components/AssistantSection.test.ts`;
   e2e `app/e2e/journeys-m9-bridge.mjs` (wired in `run.mjs`: `--mcp` of the runner's copy drives the open app) and
   the part `bridgeWithoutApp` of `app/e2e/mcp.mjs`.
+
+## As built — retouching on a copy (M13)
+
+Design and guarantees: `docs/design/revision.md` (its "As built — tools and prompt" section says what the code does).
+What changes in this document's tools:
+
+- `straighten_shapes` no longer writes the note it is given unless that note is a revision. A note that is not one gets a
+  **copy** (a new note next to it, a revision of it, titled "<title> (clean)" / "(propre)", with "Shapes straightened: N"
+  as its account) and is left byte for byte as it was, so **nothing is put in the trash for it** (the paragraph on
+  `straighten_shapes` in "write tools" above describes the earlier behaviour: the version before in the trash). On a
+  revision the shapes are straightened in it, the version before goes to the trash as before (title "(before
+  straightening)" / "(avant redressement)") and a line is added to the account. The result says which
+  (`made_a_copy`).
+- `edit_revision` keeps the version before in the trash too ("(before retouching)" / "(avant retouche)").
+- Annotations: `preview_revision` `readOnlyHint: true`, `idempotentHint: true` (it is in the write group, so `--read-only`
+  does not serve it, because what it prepares is what `create_revision` writes); `create_revision` not destructive (it only
+  adds); `edit_revision` destructive (it changes a note); `get_strokes` and `ink_lines` are read tools.
+- Codes: `invalidOrders` (the engine's message) and `notARevision`.
+- The prompts `ameliorer_note` / `improve_note` are the only ones that need the write tools: a `--read-only` server does not
+  serve them.

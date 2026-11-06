@@ -2,6 +2,15 @@
 
 ## Non publié
 
+### Ajouté (jalon M13 — retoucher une note sur une copie)
+
+- Assistant (MCP) : l'assistant peut améliorer une note **sur une copie**, sans jamais modifier l'originale. `preview_revision` essaie une liste de retouches en mémoire (rien n'est écrit) et rend l'image et un rapport ; `create_revision` écrit le résultat dans une nouvelle note à côté de l'originale, avec le compte rendu de l'assistant ; `edit_revision` retouche une copie déjà faite, sur place, et refuse toute autre note (`notARevision`). Le code interdit à tout outil d'écrire le fichier d'une note qui n'est pas une copie : un test le vérifie octet pour octet. Les lettres d'un mot corrigé ne viennent que de la même écriture dans la même note, jamais d'une autre note ; l'invite `ameliorer_note` / `improve_note` (absente en lecture seule) déroule les six étapes, fautes d'orthographe listées et validées d'abord.
+- Assistant (MCP), outils de lecture : `get_strokes` (points exacts de traits), `ink_lines` (lignes écrites trouvées dans l'encre), `render_note` avec `labels` (le numéro de chaque trait écrit à côté de lui, petits chiffres rouges lisibles en zoom), `get_note` avec les lignes du papier réglé (`background.ruling`) et, pour une copie, le compte rendu de ses retouches. Dans l'éditeur, une copie retouchée le dit (« Copie retouchée de … ») avec **Ouvrir l'original**, **Ce qui a changé** et **Comparer** ; guides « Retoucher une note sur une copie » (assistant) et « Une copie retouchée par un assistant » (utilisation).
+
+### Modifié (jalon M13)
+
+- Assistant (MCP), `straighten_shapes` : sur une note ordinaire, les formes sont redressées sur une copie (titre « … (propre) », compte rendu « Formes redressées : N ») ; l'originale n'est plus modifiée et sa version d'avant n'est plus mise à la corbeille. Sur une copie déjà retouchée, les formes sont redressées en place et la version d'avant va à la corbeille (« … (avant redressement) »), comme pour `edit_revision` (« … (avant retouche) »).
+
 ### Ajouté (jalon M12 — reprendre une feuille et la retoucher en mode direct)
 
 - « Reprendre en mode direct », dans le menu d'une note et dans la barre d'outils de l'éditeur (qui propose d'enregistrer d'abord) : le mode direct continue sur cette feuille, dans le même fichier (image de fond, original, narration, texte reconnu et tout le reste gardés ; rien n'est écrit si l'on n'écrit pas), avec son fond montré dans la fenêtre de commande, au vidéoprojecteur et sur les écrans du partage ; l'écriture est mise à l'échelle sans déformation si la feuille n'a pas le format de la tablette ; la feuille n'est jamais tournée (un avis dit comment tenir la tablette et les boutons de position sont grisés) ; la page suivante crée une note neuve ; si la feuille change ailleurs pendant le direct, l'écriture continue dans une nouvelle note du même classeur et Ardoise le dit, sans rien écraser ; « Revenir à l'original » rend la première version de la note. Guide FR et EN, procédure H5, parcours de bout en bout.
