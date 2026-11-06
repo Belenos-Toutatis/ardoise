@@ -66,6 +66,8 @@ openh264 = { version = "0.9", default-features = false, features = ["libloading"
 ureq = { version = "3.5", default-features = false, features = ["native-tls-no-default"] }
 
 [dev-dependencies]
+# `tests/revise_replay.rs`: the time orders of the revisions against the real replay.
+ardoise-revise = { path = "../ardoise-revise" }
 tempfile = "3"
 
 [lints]
