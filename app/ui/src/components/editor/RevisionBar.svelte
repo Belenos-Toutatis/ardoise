@@ -6,7 +6,7 @@
    * greyed and the reason is written beside them, not only in a tooltip.
    */
   import { t } from '../../lib/i18n.svelte';
-  import type { RevisionOfNote } from '../../lib/note';
+  import { revisionSourceTitle, type RevisionOfNote } from '../../lib/note';
 
   let {
     revision,
@@ -21,7 +21,7 @@
   } = $props();
 
   /** The source's title now; the one it had when the copy was made while it cannot be found. */
-  const sourceTitle = $derived(revision.source?.title ?? revision.ofTitle);
+  const sourceTitle = $derived(revisionSourceTitle(revision, t('editor.untitled')));
   const gone = $derived(revision.source === null);
 </script>
 

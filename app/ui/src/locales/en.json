@@ -349,7 +349,7 @@
     "copy": "Copy",
     "copied": "Copied",
     "copyFailed": "Cannot copy: select the text and copy it with Ctrl+C.",
-    "privacy": "Privacy: what the assistant reads (the text and image of your notes, sometimes students' names) goes to its provider, under your account's settings. Assistants usually ask for your consent before changing anything, but that depends on their permission settings; Ardoise flags the tools that change or remove notes. Nothing is ever deleted for good, and the ink of a note is only ever changed on a copy of it. To let it only read, declare it with \"Read only\" ticked.",
+    "privacy": "Privacy: what the assistant reads (the text and image of your notes, sometimes students' names) goes to its provider, under your account's settings. Assistants usually ask for your consent before changing anything, but that depends on their permission settings; Ardoise flags the tools that change or remove notes. Nothing is ever deleted for good, and the assistant never writes the ink of the original: it retouches a copy (what it is asked to do there is not checked: look at the copy). To let it only read, declare it with \"Read only\" ticked.",
     "guide": "Step by step: the \"Assistant\" guide, file guide\\assistant.en.html in Ardoise's folder."
   },
   "about": {
@@ -762,7 +762,7 @@
       "label": "Retouched copy",
       "line": "Retouched copy of “{title}”",
       "openOriginal": "Open the original",
-      "gone": "The original no longer exists",
+      "gone": "The original is not in the library",
       "changes": "What changed",
       "compare": "Compare",
       "videoBusy": "A video export is running: wait for it to finish or cancel it before opening the original.",
