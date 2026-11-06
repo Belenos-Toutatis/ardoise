@@ -561,7 +561,7 @@ class Places {
    */
   async samePixels(what, { after = null } = {}) {
     at(`comparing the pixels with a full redraw: ${what}`);
-    const read = async (place, selector, name) => {
+    const once = async (place, selector, name) => {
       if (!place) return null;
       const result = await within(place.evaluate(pixelsAgainstFullRedraw(selector)), 20_000, `the ${name}`);
       if (result.missing) throw new Error(`${what}: the ${name} has no repaint for the tests`);
@@ -576,10 +576,20 @@ class Places {
       if (result.edges > 0) console.log(`    ${what} : ${result.edges} pixels de bord à ${result.edgeWorst}/255 au plus d’un dessin complet, pour ${result.repaints} retouches (${name})`);
       return result;
     };
+    // The stream's event says the app sent the edit, not that this canvas has it: another process may still be receiving
+    // it, and a recolouring changes no count to wait for. Compared meanwhile, the pixels hold but nothing is tested.
+    const read = async (place, selector, name, earlier) => {
+      const end = Date.now() + 5000;
+      for (;;) {
+        const result = await once(place, selector, name);
+        if (!result || !earlier || result.partial > earlier.partial || Date.now() > end) return result;
+        await sleep(100);
+      }
+    };
     const counts = {
-      control: await read(this.app, LIVE_CANVAS, 'control window'),
-      presented: await read(this.presentation, LIVE_CANVAS, 'presentation window'),
-      viewed: await read(this.browser, VIEWER_CANVAS, 'browser of the share'),
+      control: await read(this.app, LIVE_CANVAS, 'control window', after?.control),
+      presented: await read(this.presentation, LIVE_CANVAS, 'presentation window', after?.presented),
+      viewed: await read(this.browser, VIEWER_CANVAS, 'browser of the share', after?.viewed),
     };
     if (after) {
       for (const [name, result] of Object.entries(counts)) {
