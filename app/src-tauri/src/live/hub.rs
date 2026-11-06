@@ -414,6 +414,7 @@ pub(super) fn file_fingerprint(file: &NoteFile) -> Option<u64> {
     file.original.hash(&mut hasher);
     file.original_note.hash(&mut hasher);
     file.text.hash(&mut hasher);
+    file.revision.hash(&mut hasher);
     if let Some(background) = &file.background {
         background.extension.hash(&mut hasher);
         background.bytes.hash(&mut hasher);

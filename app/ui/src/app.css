@@ -1382,6 +1382,111 @@ select {
   margin: 0;
 }
 
+/* Revision: a retouched copy made by an assistant (line under the top bar, its dialogs) */
+
+.revision-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  padding: 0.4rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.revision-line {
+  flex: 1 1 14rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.revision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.revision-gone {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+/* In viewport units, not a percentage: the pictures must never decide how wide the dialog is. */
+.modal:has([data-dialog="revision-compare"]) {
+  width: min(1200px, calc(100vw - 2rem));
+}
+
+.revision-account {
+  margin: 0.75rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.revision-account li {
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.revision-account li:first-child {
+  border-top: 0;
+}
+
+/* Plain text from an assistant: its line breaks are kept, long words wrap. */
+.revision-text {
+  margin: 0.15rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.compare-stage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+
+.compare-stage.stacked {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.compare-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.compare-page figcaption {
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.compare-frame {
+  display: grid;
+  place-items: center;
+  min-height: 6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.compare-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: var(--compare-h, 60vh);
+  height: auto;
+  object-fit: contain;
+}
+
 .editor-main {
   display: flex;
   flex: 1;

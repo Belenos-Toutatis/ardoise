@@ -16,6 +16,7 @@ use crate::AppContext;
 use crate::background::{self, PlacedImage};
 use crate::commands::{CommandError, CommandResult};
 use crate::library::{blank_note, library_error, library_of, now_ms};
+use crate::revision::{self, RevisionView};
 use crate::thumbnails::png_data_url;
 
 /// One stroke ready to draw: an SVG path to fill with the non-zero rule.
@@ -85,11 +86,19 @@ pub async fn note_outlines(
 pub struct OpenedNote {
     pub note: Note,
     pub stamp: FileStamp,
+    /// Present when the note is a revision, a retouched copy of another note: its account, and
+    /// where its source is now.
+    pub revision: Option<RevisionView>,
 }
 
 pub fn open_in(library: &Library, path: &Path) -> Result<OpenedNote, LibraryError> {
     let loaded = library.read(path)?;
     Ok(OpenedNote {
+        revision: loaded
+            .file
+            .revision
+            .as_ref()
+            .map(|info| revision::view_of(library, info)),
         note: loaded.file.note,
         stamp: loaded.stamp,
     })
@@ -356,6 +365,7 @@ mod tests {
         file.original = Some(vec![1, 2, 3, 4]);
         file.audio = Some(vec![9; 16]);
         file.text = Some(br#"{"lines":[]}"#.to_vec());
+        file.mark_as_revision_of(&blank_note("Brouillon", "Calque 1", 1), 5, "Rangé");
         file.background = Some(BackgroundFile {
             extension: "png".into(),
             bytes: vec![7; 8],
@@ -393,6 +403,8 @@ mod tests {
         assert_eq!(after.original, file.original);
         assert_eq!(after.audio, file.audio);
         assert_eq!(after.text, file.text);
+        assert_eq!(after.revision, file.revision);
+        assert!(after.revision.is_some());
         assert_eq!(after.background, file.background);
         assert_eq!(after.unknown_fields, file.unknown_fields);
         assert_eq!(after.unknown_members, file.unknown_members);

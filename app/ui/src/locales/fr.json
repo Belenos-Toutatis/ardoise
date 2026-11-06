@@ -758,6 +758,32 @@
       "position": "Page {n} sur {count}",
       "videoBusy": "Un export vidéo est en cours : attendez la fin ou annulez-le avant de changer de page."
     },
+    "revision": {
+      "label": "Copie retouchée",
+      "line": "Copie retouchée de « {title} »",
+      "openOriginal": "Ouvrir l'original",
+      "gone": "L'original n'existe plus",
+      "changes": "Ce qui a changé",
+      "compare": "Comparer",
+      "videoBusy": "Un export vidéo est en cours : attendez la fin ou annulez-le avant d'ouvrir l'original.",
+      "account": {
+        "title": "Ce qui a changé",
+        "intro": "Copie faite le {date} à partir de « {title} ».",
+        "byAssistant": "Ce compte rendu est écrit par l'assistant qui a retouché la note.",
+        "list": "Compte rendu des retouches",
+        "empty": "Aucun compte rendu n'accompagne cette copie."
+      },
+      "comparison": {
+        "title": "Comparer avec l'original",
+        "original": "Original : « {title} »",
+        "copy": "Cette copie",
+        "originalAlt": "La page de l'original",
+        "copyAlt": "La page de cette copie",
+        "loading": "Dessin de la page…",
+        "failed": "Cette page ne peut pas être dessinée : {message}",
+        "unsaved": "Cette copie est montrée telle qu'elle est enregistrée : ses modifications non enregistrées n'y sont pas."
+      }
+    },
     "undo": "Annuler (Ctrl+Z)",
     "redo": "Rétablir (Ctrl+Y)",
     "toolbar": "Outils d'édition",
