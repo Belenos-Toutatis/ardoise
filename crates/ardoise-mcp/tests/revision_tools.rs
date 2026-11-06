@@ -790,6 +790,21 @@ async fn get_strokes_gives_the_exact_samples() {
         .collect();
     assert_eq!(indices, vec![0, 50, 100, 120]);
     assert_eq!(stepped["sample_total"], 4);
+
+    // A stroke asked for twice comes once, at the first place it was asked for.
+    let repeated = session
+        .ok(
+            "get_strokes",
+            json!({ "note": CHIMIE, "strokes": [3, 0, 3, 1, 0], "step": 50 }),
+        )
+        .await;
+    let order: Vec<u64> = repeated["strokes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["index"].as_u64().unwrap())
+        .collect();
+    assert_eq!(order, [3, 0, 1]);
 }
 
 #[tokio::test(flavor = "current_thread")]

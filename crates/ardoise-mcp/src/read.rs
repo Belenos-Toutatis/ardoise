@@ -5,7 +5,7 @@
 //! Each tool is a thin method of [`ArdoiseServer`] (arguments in, `self.blocking` out) over a
 //! plain function `fn(&Host, Args) -> ToolResult` that the tests also call.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ardoise_core::format::BackgroundFile;
 use ardoise_core::library::NoteEntry;
@@ -865,9 +865,10 @@ fn render_dpi(requested: f64, page: (f64, f64), region: &Region) -> (f64, Option
     }
 }
 
-/// The boxes of the strokes of `note` that are drawn (visible layer; a stroke whose layer has no
-/// entry is drawn too), each with its number: `numbers[i]` for `note.strokes[i]`.
-pub fn label_spots(note: &Note, numbers: &[usize]) -> Vec<LabelSpot> {
+/// The strokes of `note` that are drawn (visible layer; a stroke whose layer has no entry is drawn
+/// too), as what a number is written next to, each with its number: `numbers[i]` for
+/// `note.strokes[i]`.
+pub fn label_spots<'n>(note: &'n Note, numbers: &[usize]) -> Vec<LabelSpot<'n>> {
     note.strokes
         .iter()
         .zip(numbers)
@@ -882,7 +883,11 @@ pub fn label_spots(note: &Note, numbers: &[usize]) -> Vec<LabelSpot> {
             let bounds = points.fold([first.x, first.y, first.x, first.y], |b, p| {
                 [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)]
             });
-            Some(LabelSpot { number, bounds })
+            Some(LabelSpot {
+                number,
+                bounds,
+                points: &stroke.points,
+            })
         })
         .collect()
 }
@@ -896,7 +901,7 @@ pub(crate) struct PictureRequest<'a> {
     pub dpi: Option<u32>,
     pub background: bool,
     /// Numbers to write next to the strokes ([`label_spots`]), or `None`.
-    pub labels: Option<Vec<LabelSpot>>,
+    pub labels: Option<Vec<LabelSpot<'a>>>,
 }
 
 /// A page (or a region of it) drawn as a PNG, with the facts about it.
@@ -1083,12 +1088,13 @@ pub fn get_strokes(host: &Host, args: GetStrokesArgs) -> ToolResult {
             "no stroke {bad}: this note has {count} stroke(s), numbered from 0"
         )));
     }
-    let mut wanted: Vec<usize> = Vec::with_capacity(args.strokes.len());
-    for &index in &args.strokes {
-        if !wanted.contains(&index) {
-            wanted.push(index);
-        }
-    }
+    let mut seen: HashSet<usize> = HashSet::with_capacity(args.strokes.len());
+    let wanted: Vec<usize> = args
+        .strokes
+        .iter()
+        .copied()
+        .filter(|&index| seen.insert(index))
+        .collect();
     // The samples kept of a stroke: every `step`-th, and always the last.
     let kept = |points: usize| -> Vec<usize> {
         let mut at: Vec<usize> = (0..points).step_by(step).collect();
