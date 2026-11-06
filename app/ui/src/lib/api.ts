@@ -59,6 +59,7 @@ import type {
   OpenedNote,
   MergeLayout,
   PageSize,
+  RevisionSource,
   SplitResult,
   SplitSpec,
   TabletInfo,
@@ -243,6 +244,17 @@ export const api = {
    * nothing to go back to; rejects with `originalDamaged` when the original cannot be read.
    */
   noteOriginal: (path: string) => call<NoteOriginal>('note_original', { path }),
+  /**
+   * The note of the library with this id (the source of a revision), looked for now: its path and
+   * its title, or null when it is not there (any more).
+   */
+  revisionSource: (id: string) => call<RevisionSource | null>('revision_source', { id }),
+  /**
+   * PNG data URL of the note at `path` as last saved, the whole page, as large as fits in
+   * `maxWidth` x `maxHeight` pixels ("Comparer" a revision with its source).
+   */
+  notePicture: (path: string, maxWidth: number, maxHeight: number) =>
+    call<string>('note_picture', { path, maxWidth, maxHeight }),
 
   // --- Exports, split, merge (milestone M5; Rust side: export.rs, clipboard.rs, operations.rs) ---
 

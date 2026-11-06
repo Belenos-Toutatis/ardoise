@@ -758,6 +758,32 @@
       "position": "Page {n} of {count}",
       "videoBusy": "A video export is running: wait for it to finish or cancel it before changing page."
     },
+    "revision": {
+      "label": "Retouched copy",
+      "line": "Retouched copy of “{title}”",
+      "openOriginal": "Open the original",
+      "gone": "The original no longer exists",
+      "changes": "What changed",
+      "compare": "Compare",
+      "videoBusy": "A video export is running: wait for it to finish or cancel it before opening the original.",
+      "account": {
+        "title": "What changed",
+        "intro": "Copy made on {date} from “{title}”.",
+        "byAssistant": "This account is written by the assistant that retouched the note.",
+        "list": "Account of the changes",
+        "empty": "No account comes with this copy."
+      },
+      "comparison": {
+        "title": "Compare with the original",
+        "original": "Original: “{title}”",
+        "copy": "This copy",
+        "originalAlt": "The page of the original",
+        "copyAlt": "The page of this copy",
+        "loading": "Drawing the page…",
+        "failed": "This page cannot be drawn: {message}",
+        "unsaved": "This copy is shown as it is saved: its unsaved changes are not in it."
+      }
+    },
     "undo": "Undo (Ctrl+Z)",
     "redo": "Redo (Ctrl+Y)",
     "toolbar": "Editing tools",

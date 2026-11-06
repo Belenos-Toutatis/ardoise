@@ -196,6 +196,49 @@ When the open note has `revision`: a line under the top bar, "Copie retouchée d
 
 All through the translations, both languages. The share and live mode are not concerned.
 
+## As built: format 1.3 and the editor
+
+What differs from the two sections above, or was decided while building them. Byte-level description of the member:
+`docs/file-format.md` §4.2.
+
+- **Keys.** `revision.json` is camelCase like `note.json`: `ofTitle`, not `of_title`. In Rust: `ardoise_core::format::{RevisionInfo,
+  RevisionEntry}` (`format/revision.rs`), `NoteFile.revision`, `REVISION_JSON`, and `FormatVersion::CURRENT` is 1.3.
+- **What the MCP tools call.** To make a note a revision: `file.mark_as_revision_of(&source.note, now_ms, summary)` before
+  `Library::create` (it replaces any revision the file had: a revision of a revision starts a new account). To add a line to the
+  account (`edit_revision`): `file.add_revision_entry(now_ms, summary)`, which returns `false` on a note that is not a revision
+  (`notARevision`); a blank text adds nothing and a text is cut at `revision::MAX_ENTRY_CHARS` (20,000 characters). Both
+  need the file to be saved afterwards (`Library::save` with the stamp). `RevisionInfo::of_note` and `push_entry` do the same
+  on the bare struct. A file whose `revision.of` is empty is refused on write (`InvalidNote`).
+- **A member that cannot be read** is not an error: the note is read as not being a revision and the member stays an unknown
+  member, written back byte for byte, until `mark_as_revision_of` replaces it (a note whose `revision.json` was damaged by a
+  sync accident therefore still opens, and nothing is silently destroyed). Tested with six kinds of damage.
+- **Saves.** Every path that rewrites a note starts from the file on disk (`save_in` of the editor, `Library::rewrite` for rename,
+  tags and favourite, live mode's `merge_outside` and its resumed sheets, narration, the MCP's `update_note`), so the member is kept by construction; tests: `notes.rs`,
+  `library/tests.rs`, and the live resume tests, whose `assert_keeps_all_but_ink` now lists `revision` too. The live mode's file
+  fingerprint includes it (a retouching made elsewhere during a live session is a change that a write must not overwrite).
+  `split` keeps it on the half that stays, not on the new note; `merge`, "save as a copy" and the copy made from a recovered
+  draft are not revisions. The trash and its restore keep the bytes.
+- **To the interface.** `open_note` answers `{ note, stamp, revision }`; `revision` is `null`, or the content of `revision.json`
+  plus `source: { path, title } | null`, found by id in the library's listing (`app/src-tauri/src/revision.rs`; a sync client's
+  conflict copy has the id of the note it copies, the original file is preferred). The editor looks again by id with
+  `revision_source(id)` when the user clicks « Ouvrir l'original » (the note may have moved since) and follows the library's change
+  events (`checkDisk`), so « L'original n'existe plus » appears and goes away with the source.
+- **Editor.** `RevisionBar.svelte` (the line and the three buttons), `RevisionAccount.svelte` (« Ce qui a changé »),
+  `RevisionCompare.svelte` (« Comparer »). The line names the source by the title it has now, the one of the time while it is
+  gone. « Comparer » is greyed with « L'original n'existe plus » like « Ouvrir l'original » (it needs the source); « Ce qui a changé »
+  stays available. « Ouvrir l'original » is `goTo`, the move that the page buttons share (`goPage` is now `neighbour` + `goTo`).
+  The page position simply disappears when the library's list does not hold the source.
+- **Comparer.** `note_picture(path, maxWidth, maxHeight)` draws the whole page of a note of the library as last saved, paper and
+  background image included, as large as fits in the box (clamped to 120..2400 px), as a PNG data URL: the box is measured in the dialog
+  (rounded to 50 px, times the screen's pixel ratio up to 2) and asked again, after a pause, when the window is resized. Side
+  by side from 640 px of dialog width, one above the other below. No zoom.
+- **Plain text.** The account is interpolated as text (`white-space: pre-wrap` keeps its line breaks), never `{@html}`; a test
+  puts markup and a script in it.
+- **The browser stand-in** (`lib/mock-data.ts`): `addMockRevision({ of?, title?, summary? })` adds a revision to the demo library
+  on demand (the library has none by default, so the tests that count its three notes are unchanged); `lib/mock-notes.ts` answers
+  `revision_source` and `note_picture` (an SVG).
+- **Not done here**, by the brief: the tools that write revisions, the end-to-end journey, the user guide and the changelog.
+
 ## Lessons of the trial
 
 - The first orders are wrong: a rectangle selected "yon" of a red "rayon" lying just above (hence the colour filter and the

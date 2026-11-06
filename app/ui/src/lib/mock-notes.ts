@@ -2,7 +2,7 @@
  * Browser stand-in for the editor commands (`open_note`, `save_note`, `note_original`,
  * `render_background`), over the demo library of `mock-data.ts`.
  */
-import type { Background, BackgroundImage, FileStamp, Note, OpenedNote, PageSize, Paper, Rgba } from './note';
+import type { Background, BackgroundImage, FileStamp, Note, OpenedNote, PageSize, Paper, Rgba, RevisionSource } from './note';
 import type { NoteOriginal } from './original';
 import {
   UNHANDLED,
@@ -63,12 +63,49 @@ function keepOriginal(entry: StoredNote, next: Note): void {
   });
 }
 
+/** The note of the demo library with this id, as `revision::find_source` finds it. */
+function sourceOf(id: string): RevisionSource | null {
+  for (const [path, entry] of mockLibrary().notes) {
+    if (entry.note.id === id) return { path, title: entry.note.title };
+  }
+  return null;
+}
+
+/**
+ * A stand-in for `note_picture`: the page as an SVG (paper and strokes as plain lines), at the size
+ * of the box. The desktop app draws a PNG with the export renderer.
+ */
+function pictureDataUrl(note: Note, maxWidth: number, maxHeight: number): string {
+  const scale = Math.min(maxWidth / note.page.width, maxHeight / note.page.height);
+  const [w, h] = [Math.round(note.page.width * scale), Math.round(note.page.height * scale)];
+  const background = decodeURIComponent(backgroundDataUrl(note.page, note.background, w).split(',')[1]);
+  const hidden = (layer: number) => note.layers[layer]?.visible === false;
+  const lines = note.strokes
+    .filter((stroke) => !hidden(stroke.layer))
+    .map((stroke) => {
+      const points = stroke.points.map((p) => `${p.x / 100},${p.y / 100}`).join(' ');
+      const { r, g, b, a } = stroke.color;
+      return `<polyline points="${points}" fill="none" stroke="rgb(${r},${g},${b})" stroke-opacity="${a / 255}" stroke-width="${stroke.width / 100}" stroke-linecap="round"/>`;
+    })
+    .join('');
+  const inner = background.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${note.page.width / 100} ${note.page.height / 100}">` +
+    `${inner}${lines}</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 export function mockNotesInvoke(command: string, args: Record<string, unknown>): unknown {
   switch (command) {
     case 'open_note': {
       const entry = stored(args.path as string);
-      return copy({ note: entry.note, stamp: entry.stamp }) satisfies OpenedNote;
+      const revision = entry.revision ? { ...entry.revision, source: sourceOf(entry.revision.of) } : null;
+      return copy({ note: entry.note, stamp: entry.stamp, revision }) satisfies OpenedNote;
     }
+    case 'revision_source':
+      return sourceOf(args.id as string);
+    case 'note_picture':
+      return pictureDataUrl(stored(args.path as string).note, args.maxWidth as number, args.maxHeight as number);
     case 'save_note': {
       const path = args.path as string;
       const entry = stored(path);
