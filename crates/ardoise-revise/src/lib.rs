@@ -33,6 +33,9 @@ pub const MAX_ORDERS: usize = 5_000;
 /// Most points the orders of one list can make. The note's own points do not count: a dense note
 /// can still be retouched.
 pub const MAX_POINTS: usize = 1_000_000;
+/// Most points a polyline or a curve can be given. Its samples are counted before they are made,
+/// and more than this can only be a mistake.
+pub const MAX_SHAPE_VERTICES: usize = 100_000;
 /// Largest shape, millimetres.
 pub const MAX_SHAPE_MM: f32 = 5_000.0;
 /// Shortest dash or gap, millimetres.

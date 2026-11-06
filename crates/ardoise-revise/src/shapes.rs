@@ -65,6 +65,11 @@ fn ellipse(c: P, rx: f32, ry: f32, degrees: f32) -> Vec<P> {
         .collect()
 }
 
+/// How many pieces a curve is cut into between two of its points.
+fn curve_pieces(a: P, b: P) -> usize {
+    (distance(a, b).ceil() as usize).clamp(CURVE_MIN_PIECES, CURVE_MAX_PIECES)
+}
+
 /// Catmull-Rom through the points (end points counted twice).
 fn curve(points: &[P]) -> Vec<P> {
     let mut out = Vec::new();
@@ -77,7 +82,7 @@ fn curve(points: &[P]) -> Vec<P> {
     };
     for i in 0..points.len() as isize - 1 {
         let (p0, p1, p2, p3) = (at(i - 1), at(i), at(i + 1), at(i + 2));
-        let pieces = (distance(p1, p2).ceil() as usize).clamp(CURVE_MIN_PIECES, CURVE_MAX_PIECES);
+        let pieces = curve_pieces(p1, p2);
         for piece in 0..pieces {
             let t = piece as f32 / pieces as f32;
             let blend = |a: f32, b: f32, c: f32, d: f32| {
@@ -160,6 +165,21 @@ pub(crate) fn paths(shape: &Shape) -> Vec<Vec<P>> {
             out
         }
         Shape::Curve { points } => vec![curve(points)],
+    }
+}
+
+/// The fewest samples a checked shape gives, known without building it (each vertex is a sample):
+/// the shapes with an input array are the ones whose vertices can be many, whatever their size.
+pub(crate) fn least_samples(shape: &Shape) -> usize {
+    match shape {
+        Shape::Polyline { points, .. } => points.len(),
+        Shape::Curve { points } => {
+            1 + points
+                .windows(2)
+                .map(|w| curve_pieces(w[0], w[1]))
+                .sum::<usize>()
+        }
+        _ => 0,
     }
 }
 

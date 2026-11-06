@@ -71,7 +71,7 @@ pub enum Shape {
     },
     /// Straight segments through these points.
     Polyline {
-        /// At least 2 points `[x, y]`.
+        /// At least 2 points `[x, y]`, at most 100,000.
         points: Vec<[f32; 2]>,
         /// Comes back to the first point.
         #[serde(default)]
@@ -134,7 +134,7 @@ pub enum Shape {
     },
     /// A smooth curve (Catmull-Rom) through these points.
     Curve {
-        /// At least 2 points `[x, y]`.
+        /// At least 2 points `[x, y]`, at most 100,000.
         points: Vec<[f32; 2]>,
     },
 }

@@ -390,3 +390,47 @@ fn unknown_fields_and_orders_are_refused_when_parsing() {
         assert!(serde_json::from_str::<Order>(json).is_err(), "{json}");
     }
 }
+
+#[test]
+fn a_polyline_or_a_curve_has_a_limited_number_of_points() {
+    for name in ["polyline", "curve"] {
+        let points = vec![[1.0f32, 1.0]; MAX_SHAPE_VERTICES + 1];
+        let shape = match name {
+            "polyline" => Shape::Polyline {
+                points,
+                closed: false,
+            },
+            _ => Shape::Curve { points },
+        };
+        let order = Order::Add {
+            shapes: vec![shape],
+            color: "#000000".to_owned(),
+            width: None,
+            tool: None,
+            layer: None,
+            behind: false,
+            after: None,
+        };
+        let message = apply(&input(&row(1)), &[order]).unwrap_err().to_string();
+        assert!(message.contains("at most 100000"), "{name}: {message}");
+    }
+}
+
+#[test]
+fn a_curve_is_counted_before_it_is_built() {
+    // Within the limit on its points, each stretch long enough for 400 pieces: 16,000,000 vertices.
+    let points: Vec<[f32; 2]> = (0..40_000)
+        .map(|i| [if i % 2 == 0 { 0.0 } else { 500.0 }, 0.0])
+        .collect();
+    let order = Order::Add {
+        shapes: vec![Shape::Curve { points }],
+        color: "#000000".to_owned(),
+        width: None,
+        tool: None,
+        layer: None,
+        behind: false,
+        after: None,
+    };
+    let message = apply(&input(&row(1)), &[order]).unwrap_err().to_string();
+    assert!(message.contains("more than 1000000 points"), "{message}");
+}

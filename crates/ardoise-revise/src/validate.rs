@@ -4,10 +4,10 @@
 
 use crate::orders::{Order, Part, Select, Shape};
 use crate::report::{Ctx, ReviseError};
-use crate::shapes::{P, paths, sample_count};
+use crate::shapes::{P, least_samples, paths, sample_count};
 use crate::{
-    Input, MAX_COORD_MM, MAX_FACTOR, MAX_ORDERS, MAX_POINTS, MAX_SHAPE_MM, MAX_SIGMA_MM,
-    MAX_SLOPE_DEG, MAX_WIDTH_MM, MIN_DASH_MM, MIN_FACTOR,
+    Input, MAX_COORD_MM, MAX_FACTOR, MAX_ORDERS, MAX_POINTS, MAX_SHAPE_MM, MAX_SHAPE_VERTICES,
+    MAX_SIGMA_MM, MAX_SLOPE_DEG, MAX_WIDTH_MM, MIN_DASH_MM, MIN_FACTOR,
 };
 
 /// A colour as an order writes it: `#rrggbb` or `#rrggbbaa`.
@@ -167,6 +167,12 @@ fn shape(ctx: Ctx, shape: &Shape) -> Result<(), ReviseError> {
             if points.len() < 2 {
                 return Err(ctx.err("a polyline or a curve needs at least 2 points"));
             }
+            if points.len() > MAX_SHAPE_VERTICES {
+                return Err(ctx.err(format!(
+                    "a polyline or a curve of {} points: at most {MAX_SHAPE_VERTICES} are accepted",
+                    points.len()
+                )));
+            }
             vertices.extend(points);
         }
         Shape::Rect { x, y, w, h } => {
@@ -245,6 +251,10 @@ fn shapes(ctx: Ctx, list: &[Shape], made: &mut usize) -> Result<(), ReviseError>
     }
     for item in list {
         shape(ctx, item)?;
+        // Before it is built: a curve's vertices are many more than its points.
+        if made.saturating_add(least_samples(item)) > MAX_POINTS {
+            return Err(too_many_points(ctx));
+        }
         for path in paths(item) {
             *made = made.saturating_add(sample_count(&path));
         }
