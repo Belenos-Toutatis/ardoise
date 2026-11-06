@@ -5,14 +5,21 @@
 //! with a pale halo so that they read over ink and over rules. Their size is the same whatever the
 //! scale of the picture: zoomed on a region, the strokes grow and the numbers stay legible. Each
 //! number is put next to its stroke, on the first free place around the stroke's box (above,
-//! below, right, left, inside), so that numbers rarely cover each other.
+//! below, right, left, inside), so that numbers rarely cover each other. A long stroke that crosses
+//! a zoomed picture has no such place on the picture: its number goes next to its ink, there.
 
+use ardoise_ink::Point;
 use tiny_skia::{
     Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform,
 };
 
 use crate::Image;
 
+/// Side of the cells of the grid of what numbers cover, pixels: a place counts as taken when it
+/// meets a cell a number touches, so numbers stay up to this much further apart than they must.
+const TAKEN_CELL_PX: f32 = 4.0;
+/// How many points of a stroke are tried for its number, when it goes next to the ink.
+const INK_PLACES: usize = 32;
 /// Height of a digit, pixels.
 pub const LABEL_HEIGHT_PX: f32 = 11.0;
 /// Thickness of a digit's lines, pixels.
@@ -85,12 +92,15 @@ fn glyph(digit: u8) -> &'static [&'static [(f32, f32)]] {
     }
 }
 
-/// A stroke to number: its box on the page, in device units (10 µm).
+/// A stroke to number: its box on the page and its samples, in device units (10 µm).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LabelSpot {
+pub struct LabelSpot<'a> {
     pub number: usize,
     /// `[x0, y0, x1, y1]`.
     pub bounds: [f32; 4],
+    /// Its samples: its number goes next to one of them when no place around the box is on the
+    /// picture.
+    pub points: &'a [Point],
 }
 
 /// A rectangle of the picture, pixels.
@@ -112,12 +122,54 @@ impl Area {
         }
     }
 
-    fn meets(self, other: Area) -> bool {
-        self.x0 < other.x1 && other.x0 < self.x1 && self.y0 < other.y1 && other.y0 < self.y1
-    }
-
     fn inside(self, width: f32, height: f32) -> bool {
         self.x0 >= 0.0 && self.y0 >= 0.0 && self.x1 <= width && self.y1 <= height
+    }
+}
+
+/// What the numbers written so far cover: a grid over the picture, so that looking for a free place
+/// costs the same however many numbers a huge note has.
+struct Taken {
+    columns: usize,
+    rows: usize,
+    cells: Vec<bool>,
+}
+
+impl Taken {
+    fn new(width: f32, height: f32) -> Taken {
+        let cells_along = |side: f32| (side / TAKEN_CELL_PX).ceil() as usize;
+        let (columns, rows) = (cells_along(width), cells_along(height));
+        Taken {
+            columns,
+            rows,
+            cells: vec![false; columns * rows],
+        }
+    }
+
+    /// The cells `area` touches, among those of the picture.
+    fn cells_of(&self, area: Area) -> impl Iterator<Item = usize> + use<> {
+        let along = |low: f32, high: f32, count: usize| {
+            let first = (low / TAKEN_CELL_PX).floor().max(0.0) as usize;
+            let end = (high / TAKEN_CELL_PX).ceil().max(0.0) as usize;
+            first.min(count)..end.min(count)
+        };
+        let columns = self.columns;
+        let across = along(area.x0, area.x1, columns);
+        along(area.y0, area.y1, self.rows)
+            .flat_map(move |row| across.clone().map(move |column| row * columns + column))
+    }
+
+    fn meets(&self, area: Area) -> bool {
+        self.cells_of(area)
+            .any(|cell| self.cells.get(cell).copied().unwrap_or(false))
+    }
+
+    fn mark(&mut self, area: Area) {
+        for cell in self.cells_of(area) {
+            if let Some(slot) = self.cells.get_mut(cell) {
+                *slot = true;
+            }
+        }
     }
 }
 
@@ -135,10 +187,50 @@ fn label_width(digits: usize) -> f32 {
     ((digits.saturating_sub(1)) as f32 * ADVANCE_UNITS + GLYPH_UNITS_WIDE) * unit
 }
 
+/// A place for a number of `width` next to the first of `ink` (points in pixels) on the picture
+/// where it is free, else the first where it fits on the picture. `None` without ink on the picture.
+fn place_on_ink(
+    ink: impl Iterator<Item = (f32, f32)>,
+    width: f32,
+    taken: &Taken,
+    picture: (f32, f32),
+) -> Option<Area> {
+    let h = LABEL_HEIGHT_PX;
+    let on_picture: Vec<(f32, f32)> = ink
+        .filter(|&(x, y)| (0.0..=picture.0).contains(&x) && (0.0..=picture.1).contains(&y))
+        .collect();
+    let mut first = None;
+    for &(x, y) in on_picture
+        .iter()
+        .step_by(on_picture.len().div_ceil(INK_PLACES).max(1))
+    {
+        let left = (x - width / 2.0).clamp(0.0, (picture.0 - width).max(0.0));
+        let top = (y - h - GAP_PX).clamp(0.0, (picture.1 - h).max(0.0));
+        let area = Area {
+            x0: left,
+            y0: top,
+            x1: left + width,
+            y1: top + h,
+        };
+        if !taken.meets(area.grown(GAP_PX / 2.0)) {
+            return Some(area);
+        }
+        first.get_or_insert(area);
+    }
+    first
+}
+
 /// The place of a number of `width` next to `stroke` (its box in pixels): the first of the
 /// places around it that is on the picture and free, else the first that is on the picture, else
-/// the first.
-fn place(stroke: Area, width: f32, taken: &[Area], picture: (f32, f32)) -> Area {
+/// (a long stroke crossing a zoomed picture) next to its `ink` (points in pixels). `None` when
+/// none of it is on the picture.
+fn place(
+    stroke: Area,
+    ink: impl Iterator<Item = (f32, f32)>,
+    width: f32,
+    taken: &Taken,
+    picture: (f32, f32),
+) -> Option<Area> {
     let h = LABEL_HEIGHT_PX;
     let (cx, cy) = ((stroke.x0 + stroke.x1) / 2.0, (stroke.y0 + stroke.y1) / 2.0);
     let at = |x: f32, y: f32| Area {
@@ -156,12 +248,10 @@ fn place(stroke: Area, width: f32, taken: &[Area], picture: (f32, f32)) -> Area 
     ];
     candidates
         .iter()
-        .find(|c| {
-            c.inside(picture.0, picture.1) && !taken.iter().any(|t| t.meets(c.grown(GAP_PX / 2.0)))
-        })
+        .find(|c| c.inside(picture.0, picture.1) && !taken.meets(c.grown(GAP_PX / 2.0)))
         .or_else(|| candidates.iter().find(|c| c.inside(picture.0, picture.1)))
         .copied()
-        .unwrap_or(candidates[0])
+        .or_else(|| place_on_ink(ink, width, taken, picture))
 }
 
 fn paint(red: bool, alpha: f32) -> Paint<'static> {
@@ -231,7 +321,7 @@ pub fn draw_labels(image: &mut Image, spots: &[LabelSpot], scale: f32, origin: (
     let mut spots: Vec<LabelSpot> = spots.to_vec();
     spots.sort_by_key(|spot| spot.number);
     let margin = LABEL_HEIGHT_PX + GAP_PX;
-    let mut taken: Vec<Area> = Vec::new();
+    let mut taken = Taken::new(width, height);
     for spot in spots {
         let [x0, y0, x1, y1] = spot.bounds;
         if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
@@ -251,9 +341,15 @@ pub fn draw_labels(image: &mut Image, spots: &[LabelSpot], scale: f32, origin: (
             continue;
         }
         let digits = digits_of(spot.number).len();
-        let area = place(stroke, label_width(digits), &taken, (width, height));
+        let ink = spot
+            .points
+            .iter()
+            .map(|p| (p.x * scale - origin.0 as f32, p.y * scale - origin.1 as f32));
+        let Some(area) = place(stroke, ink, label_width(digits), &taken, (width, height)) else {
+            continue;
+        };
         draw_number(&mut pixmap, spot.number, area);
-        taken.push(area);
+        taken.mark(area);
     }
     image.pixels = pixmap.take();
 }
@@ -283,8 +379,161 @@ mod tests {
         count
     }
 
-    fn spot(number: usize, bounds: [f32; 4]) -> LabelSpot {
-        LabelSpot { number, bounds }
+    fn spot(number: usize, bounds: [f32; 4]) -> LabelSpot<'static> {
+        LabelSpot {
+            number,
+            bounds,
+            points: &[],
+        }
+    }
+
+    /// A stroke from `from` to `to`, with a sample every 5 device units or so, and its box.
+    fn straight(from: (f32, f32), to: (f32, f32)) -> (Vec<Point>, [f32; 4]) {
+        let length = (to.0 - from.0).hypot(to.1 - from.1);
+        let count = (length / 5.0) as usize + 2;
+        let points = (0..count)
+            .map(|i| {
+                let u = i as f32 / (count - 1) as f32;
+                Point {
+                    x: from.0 + (to.0 - from.0) * u,
+                    y: from.1 + (to.1 - from.1) * u,
+                    pressure: 0.5,
+                    t: i as u32,
+                }
+            })
+            .collect();
+        let bounds = [
+            from.0.min(to.0),
+            from.1.min(to.1),
+            from.0.max(to.0),
+            from.1.max(to.1),
+        ];
+        (points, bounds)
+    }
+
+    #[test]
+    fn a_long_stroke_crossing_the_picture_gets_its_number_next_to_its_ink() {
+        // A diagonal whose box goes far beyond the picture on every side: no place around the box
+        // is on the picture.
+        let (points, bounds) = straight((-3000.0, -1000.0), (3200.0, 1100.0));
+        let mut image = white(200, 100);
+        draw_labels(
+            &mut image,
+            &[LabelSpot {
+                number: 47,
+                bounds,
+                points: &points,
+            }],
+            1.0,
+            (0, 0),
+        );
+        assert!(red_pixels(&image, (0, 0, 200, 100)) > 10);
+        // A cut-out of a larger picture: the same, where the ink is on the cut-out.
+        let mut cut = white(200, 100);
+        draw_labels(
+            &mut cut,
+            &[LabelSpot {
+                number: 47,
+                bounds,
+                points: &points,
+            }],
+            1.0,
+            (400, 100),
+        );
+        assert!(red_pixels(&cut, (0, 0, 200, 100)) > 10);
+    }
+
+    #[test]
+    fn two_long_strokes_crossing_the_picture_do_not_share_a_place() {
+        let (one, one_box) = straight((-3000.0, 40.0), (3200.0, 42.0));
+        let (two, two_box) = straight((-3100.0, 44.0), (3100.0, 46.0));
+        let spots = [
+            LabelSpot {
+                number: 1000,
+                bounds: [one_box[0], -2000.0, one_box[2], 2000.0],
+                points: &one,
+            },
+            LabelSpot {
+                number: 2000,
+                bounds: [two_box[0], -2000.0, two_box[2], 2000.0],
+                points: &two,
+            },
+        ];
+        let red_of = |list: &[LabelSpot]| {
+            let mut image = white(200, 100);
+            draw_labels(&mut image, list, 1.0, (0, 0));
+            red_pixels(&image, (0, 0, 200, 100))
+        };
+        let together = red_of(&spots);
+        let apart = red_of(&spots[..1]) + red_of(&spots[1..]);
+        assert!(apart > 0, "no number is written");
+        assert!(together >= apart * 9 / 10, "{together} < {apart}");
+    }
+
+    #[test]
+    fn a_stroke_whose_box_crosses_the_picture_without_its_ink_gets_no_number() {
+        // An L around the picture: its box holds the picture, none of its ink is on it.
+        let (mut points, _) = straight((-1000.0, -50.0), (1000.0, -50.0));
+        points.extend(straight((1000.0, -50.0), (1000.0, 500.0)).0);
+        let mut image = white(200, 100);
+        let before = image.clone();
+        draw_labels(
+            &mut image,
+            &[LabelSpot {
+                number: 5,
+                bounds: [-1000.0, -50.0, 1000.0, 500.0],
+                points: &points,
+            }],
+            1.0,
+            (0, 0),
+        );
+        assert_eq!(image, before);
+    }
+
+    #[test]
+    fn the_grid_of_what_is_taken_knows_what_numbers_cover() {
+        let area = |x0: f32, y0: f32, x1: f32, y1: f32| Area { x0, y0, x1, y1 };
+        let mut taken = Taken::new(100.0, 50.0);
+        assert!(!taken.meets(area(0.0, 0.0, 100.0, 50.0)));
+        taken.mark(area(40.0, 20.0, 60.0, 30.0));
+        assert!(taken.meets(area(50.0, 25.0, 52.0, 27.0)), "inside");
+        assert!(taken.meets(area(30.0, 10.0, 70.0, 40.0)), "around");
+        assert!(taken.meets(area(58.0, 28.0, 80.0, 40.0)), "across a corner");
+        assert!(!taken.meets(area(70.0, 20.0, 90.0, 30.0)), "beside");
+        assert!(!taken.meets(area(40.0, 40.0, 60.0, 50.0)), "below");
+        // What lies off the picture covers nothing and meets nothing.
+        taken.mark(area(-40.0, -20.0, -10.0, -5.0));
+        taken.mark(area(120.0, 60.0, 150.0, 80.0));
+        assert!(!taken.meets(area(-40.0, -20.0, -10.0, -5.0)));
+        assert!(!taken.meets(area(120.0, 60.0, 150.0, 80.0)));
+        assert!(!taken.meets(area(0.0, 0.0, 30.0, 10.0)));
+    }
+
+    #[test]
+    fn looking_for_a_place_does_not_depend_on_the_numbers_written() {
+        // A list of the places taken, looked through for each place, would be 10^11 comparisons.
+        let (width, height) = (2000.0, 2000.0);
+        let mut taken = Taken::new(width, height);
+        let started = std::time::Instant::now();
+        for i in 0..200_000u32 {
+            let (x, y) = ((i % 317) as f32 * 6.0, (i % 331) as f32 * 6.0);
+            let stroke = Area {
+                x0: x,
+                y0: y,
+                x1: x + 20.0,
+                y1: y + 20.0,
+            };
+            if let Some(area) = place(
+                stroke,
+                std::iter::empty(),
+                label_width(6),
+                &taken,
+                (width, height),
+            ) {
+                taken.mark(area);
+            }
+        }
+        assert!(started.elapsed().as_secs() < 30, "{:?}", started.elapsed());
     }
 
     #[test]

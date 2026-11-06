@@ -91,6 +91,7 @@ fn revise(source: &Note, narration: bool, orders: &[Order]) -> (Note, Revised) {
         strokes: &source.strokes,
         page_mm: [297.0, 216.0],
         layers: 1,
+        visible_layers: &[],
         narration,
     };
     let revised = apply(&input, orders).unwrap();
@@ -321,4 +322,151 @@ fn a_redrawn_stroke_takes_the_same_time_in_the_replay() {
     let redrawn = index_of(&revised, 4);
     assert_eq!(line.samples_shown(redrawn, 599.0), 0);
     assert!(line.is_complete(redrawn, 1100.0));
+}
+
+// -------------------------------------------------------------------------------------------------
+// A letter taken out of a word written in one stroke
+
+/// Strokes 0, 1 and 2 of a sentence, with `gap` ms between 0 and 1, and a word written in one stroke
+/// long after (stroke 3): 2 s, a sample every 100 ms.
+fn sentence_and_a_word(gap: u32) -> Note {
+    let next = 500 + gap;
+    note(vec![
+        stroke(1000.0, 0, 500),
+        stroke(2000.0, next, next + 500),
+        stroke(3000.0, next + 1000, next + 1500),
+        stroke(4000.0, next + 5000, next + 7000),
+    ])
+}
+
+/// Samples 5 and 6 of the word, 100 ms, as a letter right after stroke 0.
+fn letter_of_the_word() -> Order {
+    Order::Glyph {
+        parts: vec![ardoise_revise::Part {
+            stroke: 3,
+            from: Some(5),
+            to: Some(6),
+            flip: None,
+            sx: None,
+            sy: None,
+            x: 16.0,
+            y: 20.0,
+        }],
+        color: None,
+        after: Some(0),
+    }
+}
+
+#[test]
+fn a_letter_out_of_a_word_pushes_what_follows_by_what_it_needs_only() {
+    // 40 + 100 + 40 ms are needed, 100 are there. Placed for the whole word, it would be 2 s.
+    let source = sentence_and_a_word(100);
+    let (out, revised) = revise(&source, false, &[letter_of_the_word()]);
+    assert_written_in_order(&out, &revised, &[0, 4, 1, 2, 3]);
+    assert_eq!(revised.report.pushed_ms, 80);
+    assert_eq!(
+        timeline(&out).duration(),
+        timeline(&source).duration() + Duration::from_millis(80)
+    );
+    // No hole: it starts a pause after the stroke before it, and takes its own time.
+    let letter = &out.strokes[index_of(&revised, 4)];
+    assert_eq!(letter.points.len(), 2);
+    assert_eq!(letter.points[0].t, 540);
+    assert_eq!(letter.points[1].t, 640);
+    assert_replay_is_sound(&out);
+}
+
+#[test]
+fn with_a_narration_a_letter_out_of_a_word_is_drawn_at_its_own_pace() {
+    // 88 ms are there for the 180 it needs. Placed for the whole word, it would get about 4 ms.
+    let source = sentence_and_a_word(90);
+    let (out, revised) = revise(&source, true, &[letter_of_the_word()]);
+    assert_written_in_order(&out, &revised, &[0, 4, 1, 2, 3]);
+    assert_eq!(timeline(&out).duration(), timeline(&source).duration());
+    assert_eq!(revised.report.pushed_ms, 0);
+    assert_eq!(revised.report.strokes_faster, 1);
+    let letter = &out.strokes[index_of(&revised, 4)];
+    let taken = letter.points[1].t - letter.points[0].t;
+    assert!((40..100).contains(&taken), "{taken} ms");
+    // It starts right after a pause at that pace, and everything else is where it was.
+    assert!(letter.points[0].t - 500 < 40);
+    for number in 0..4 {
+        assert_eq!(
+            out.strokes[index_of(&revised, number)],
+            source.strokes[number]
+        );
+    }
+    assert_replay_is_sound(&out);
+}
+
+#[test]
+fn a_copy_placed_in_time_cannot_be_trimmed_afterwards() {
+    let source = sentence_and_a_word(100);
+    for narration in [false, true] {
+        let input = Input {
+            strokes: &source.strokes,
+            page_mm: [297.0, 216.0],
+            layers: 1,
+            visible_layers: &[],
+            narration,
+        };
+        let orders = [
+            copy_of(3, 0),
+            Order::Trim {
+                stroke: 4,
+                from: 5,
+                to: Some(6),
+            },
+        ];
+        let message = apply(&input, &orders).unwrap_err().to_string();
+        assert!(message.contains("`glyph`"), "{message}");
+    }
+}
+
+#[test]
+fn a_stroke_cut_before_it_is_placed_takes_its_own_time() {
+    let source = sentence_and_a_word(100);
+    let orders = [
+        Order::Trim {
+            stroke: 3,
+            from: 5,
+            to: Some(6),
+        },
+        Order::Retime {
+            select: ids(&[3]),
+            after: 0,
+        },
+    ];
+    let (out, revised) = revise(&source, false, &orders);
+    assert_written_in_order(&out, &revised, &[0, 3, 1, 2]);
+    assert_eq!(revised.report.pushed_ms, 80);
+    let cut = &out.strokes[index_of(&revised, 3)];
+    assert_eq!((cut.points[0].t, cut.points[1].t), (540, 640));
+    assert_replay_is_sound(&out);
+
+    // With a narration, nothing else moves.
+    let (out, revised) = revise(&source, true, &orders);
+    assert_written_in_order(&out, &revised, &[0, 3, 1, 2]);
+    assert_eq!(revised.report.pushed_ms, 0);
+    assert_replay_is_sound(&out);
+}
+
+#[test]
+fn a_stroke_cut_where_it_is_stays_in_its_own_time() {
+    let source = sentence(100);
+    let order = Order::Trim {
+        stroke: 1,
+        from: 5,
+        to: Some(15),
+    };
+    let (out, revised) = revise(&source, true, &[order]);
+    assert_written_in_order(&out, &revised, &[0, 1, 2, 3]);
+    assert_eq!(timeline(&out).duration(), timeline(&source).duration());
+    for number in [0, 2, 3] {
+        assert_eq!(
+            out.strokes[index_of(&revised, number)],
+            source.strokes[number]
+        );
+    }
+    assert_replay_is_sound(&out);
 }

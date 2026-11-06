@@ -8,17 +8,17 @@ use ardoise_ink::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-/// Which strokes an order acts on. It is read on the note as it was given (a stroke made by an earlier order: as it was when made), whatever earlier orders did to it since, so reason on the picture you saw. `ids` and `rect` add up; with neither, every stroke is a candidate; the other fields then narrow. Check `selected` in the report: a selection of the wrong size is the usual mistake.
+/// Which strokes an order acts on. It is read on the note as it was given (a stroke made by an earlier order: as it was when made), whatever earlier orders did to it since, so reason on the picture you saw. `ids` and `rect` add up; with neither, every stroke is a candidate; the other fields then narrow. The picture does not show the strokes of hidden layers: `rect`, or no place at all, only takes drawn strokes, unless `layer` names a layer; `ids` takes what it names. The report warns when a hidden stroke is touched. Check `selected` in the report: a selection of the wrong size is the usual mistake.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Select {
     /// Stroke numbers: a stroke's index in the note, or the number the report gave a stroke made by an earlier order in this list. An unknown number is refused.
     pub ids: Option<Vec<usize>>,
-    /// `[x, y, w, h]`: the strokes whose centre (the centre of their box) is inside this rectangle.
+    /// `[x, y, w, h]`: the drawn strokes whose centre (the centre of their box) is inside this rectangle.
     pub rect: Option<[f32; 4]>,
     /// Keeps the strokes of this colour, `#rrggbb` (any opacity) or `#rrggbbaa` (exactly), as `get_note` writes it. Useful when two colours overlap in a rectangle.
     pub color: Option<String>,
-    /// Keeps the strokes of this layer (index in the note's layers).
+    /// Keeps the strokes of this layer (index in the note's layers), hidden or not.
     pub layer: Option<u32>,
     /// Keeps the strokes whose box has a larger side of at least this many millimetres.
     pub min_size: Option<f32>,
@@ -71,7 +71,7 @@ pub enum Shape {
     },
     /// Straight segments through these points.
     Polyline {
-        /// At least 2 points `[x, y]`.
+        /// At least 2 points `[x, y]`, at most 100,000.
         points: Vec<[f32; 2]>,
         /// Comes back to the first point.
         #[serde(default)]
@@ -134,7 +134,7 @@ pub enum Shape {
     },
     /// A smooth curve (Catmull-Rom) through these points.
     Curve {
-        /// At least 2 points `[x, y]`.
+        /// At least 2 points `[x, y]`, at most 100,000.
         points: Vec<[f32; 2]>,
     },
 }
@@ -151,11 +151,11 @@ pub enum Flip {
     Rot,
 }
 
-/// A piece of a `glyph`: a stroke as it is at this point of the list, or some of its points, mirrored or turned, resized, then placed. A piece's duration in the replay is the one it was written in.
+/// A piece of a `glyph`: a stroke as it is at this point of the list, or some of its points, mirrored or turned, resized, then placed. A piece's duration in the replay is the one this piece was written in, not its whole stroke's: this is the way to reuse a letter of a word written in one stroke.
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Part {
-    /// The stroke's number. A letter only comes from the note being revised: only its strokes can be named.
+    /// The stroke's number. A letter only comes from the note being revised: only its strokes can be named here, and the points of another note are never to be retyped in a shape.
     pub stroke: usize,
     /// First point kept (index from `get_strokes`; default the first).
     pub from: Option<usize>,
@@ -255,14 +255,14 @@ pub enum Order {
         /// The point that stays where it is, `[x, y]`.
         origin: [f32; 2],
     },
-    /// Removes the tremble: a Gaussian along the stroke, whose ends stay where they are.
+    /// Removes the tremble: a Gaussian along the stroke, whose ends stay where they are. A list can smooth at most 5,000,000 samples in all.
     Smooth {
         /// The strokes.
         select: Select,
         /// Millimetres along the stroke; 0.2 is light, at most 5.
         sigma: f32,
     },
-    /// Keeps only these points of a stroke: cuts a letter off a word written in one line. Usually on a `copy` of it. Points are numbered as in `get_strokes`, and from 0 again after an earlier `trim` of the same stroke.
+    /// Keeps only these points of a stroke, which stays where it is in time. To reuse a letter of a word written in one stroke, use `glyph` with `from` and `to`: it times the piece only. A stroke an earlier order placed in time (`copy`, `glyph`, `add`, `retime`) is refused: its place was made for the whole stroke. Points are numbered as in `get_strokes`, and from 0 again after an earlier `trim` of the same stroke.
     Trim {
         /// The stroke's number.
         stroke: usize,
@@ -271,7 +271,7 @@ pub enum Order {
         /// Last point kept, included (default the last).
         to: Option<usize>,
     },
-    /// Redraws: the shapes take the place of the selected strokes (at the place of the first of them in the drawing order, on its layer) with its tool, colour and width, the strokes' median pressure and their time span. The selection must not be empty.
+    /// Redraws: the shapes take the place of the selected strokes (at the place of the first of them in the drawing order, on its layer; the first on a visible layer when there is one) with its tool, colour and width, the strokes' median pressure and their time span. The selection must not be empty.
     Replace {
         /// The strokes replaced.
         select: Select,
@@ -292,7 +292,7 @@ pub enum Order {
         width: Option<f32>,
         /// Tool (default: the one of the note's writing). `highlighter` to mark something, usually with `behind`.
         tool: Option<PenTool>,
-        /// Layer (default: the layer of the note's writing).
+        /// Layer (default: the layer of the note's writing that the picture shows).
         layer: Option<u32>,
         /// Under the other strokes of the layer: a highlight.
         #[serde(default)]
@@ -300,7 +300,7 @@ pub enum Order {
         /// The stroke they come right after in the replay (default: at the end of the note).
         after: Option<usize>,
     },
-    /// A copy of the selected strokes as they are at this point of the list, each keeping its tool, width and layer: moves a letter of the same handwriting where one is missing. Give `after`, so that the replay writes it in its place.
+    /// A copy of the selected strokes as they are at this point of the list, each keeping its tool, width and layer: moves a letter of the same handwriting where one is missing, when it is a stroke of its own. Give `after`, so that the replay writes it in its place. For part of a stroke, use `glyph` with `from` and `to`.
     Copy {
         /// The strokes copied: chosen on the note as given, copied as they are by now.
         select: Select,
@@ -317,7 +317,7 @@ pub enum Order {
         /// The stroke it comes right after in the replay (default: at the end of the note).
         after: Option<usize>,
     },
-    /// A letter made of pieces of other strokes, each a new stroke (q + tail of j = g, bigger w = W, u turned = n). Say in the account that it was made.
+    /// A letter made of pieces of other strokes, each a new stroke (q + tail of j = g, bigger w = W, u turned = n), or one letter taken out of a word written in one stroke (`from`, `to`). Say in the account that it was made.
     Glyph {
         /// The pieces, at least one, in the order they are written.
         parts: Vec<Part>,
@@ -345,7 +345,7 @@ pub enum Order {
         mode: Option<TidyMode>,
         /// Size change (0.05 to 20), around the start of each word and the baseline. Ruled paper may need 0.9 when the writer's own line pitch was wider than the rules.
         scale: Option<f32>,
-        /// Slope of the written line in degrees (positive goes down to the right, at most 45 either way), when you see it better than the fit. Without it, a line under 40 mm or of few letters is taken as level.
+        /// Slope of the written line in degrees (positive goes down to the right, at most 45 either way), when you see it better than the fit. Without it, a line under 40 mm or of few letters is taken as level, and so is a line the fit finds steeper than 45 degrees (with a warning).
         slope: Option<f32>,
         /// `even` (default) or `keep`.
         gaps: Option<TidyGaps>,

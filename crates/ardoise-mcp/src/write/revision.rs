@@ -7,11 +7,18 @@
 //!   refuses any other with `notARevision`). There is no other way in this module to write ink.
 //! - `preview_revision` works in memory and writes nothing.
 //! - Every write is atomic and checks the stamp of what it read, like the editor's save.
+//! - **Orders are tied to the version seen.** A stroke's number is its place in the note: the same
+//!   number in another version is another stroke. So `create_revision` and `edit_revision` take the
+//!   `version` the assistant was shown, and refuse with `noteConflict` when the note is no longer
+//!   that one.
 //!
-//! The same two operations (a copy of a note with other strokes, and the edit of a revision with
-//! other strokes) serve `straighten_shapes`, which is why they are functions of their own.
+//! The same operations (new notes from a note, and the edit of a revision with other strokes) serve
+//! `straighten_shapes` and `split_note`, which is why they are functions of their own.
 
+use ardoise_core::format::NoteFile;
+use ardoise_core::format::revision::MAX_ENTRY_CHARS;
 use ardoise_core::library::{Library, LoadedNote, NoteEntry, TrashItem};
+use ardoise_core::note::Note;
 use ardoise_ink::Stroke;
 use ardoise_revise::{Input, Order, Revised, apply};
 use base64::Engine as _;
@@ -23,10 +30,10 @@ use serde_json::json;
 
 use super::create::uuid_v4;
 use super::transform::{Words, keep_previous, words};
-use super::update::{now_ms, summary_at, summary_of};
+use super::update::{check_title, now_ms, summary_at, summary_of};
 use crate::error::{ToolError, ToolResult, code, content_result, json_result};
 use crate::host::Host;
-use crate::notes::{find_note, read_note};
+use crate::notes::{find_note, read_note, version_of};
 use crate::read::{PictureRequest, Region, draw_picture, label_spots};
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -50,6 +57,8 @@ pub struct CreateRevisionArgs {
     pub note: String,
     /// The orders to carry out on the note as it is now (the same list as in `preview_revision`; preview it first).
     pub orders: Vec<Order>,
+    /// The `version` of the note your orders were written for, from `preview_revision` or `get_note`. If the note changed since (the user, another computer), nothing is written and the answer is `noteConflict`: look at it again, its strokes may have other numbers.
+    pub expected_version: String,
     /// The account of what changed, in the user's language: every change, and every letter you made, what is uncertain. It stays with the copy and the user reads it in the editor ("What changed").
     pub summary: String,
     /// Title of the copy (default: the note's title with " (clean)", in the app's language).
@@ -62,28 +71,43 @@ pub struct EditRevisionArgs {
     pub note: String,
     /// The orders to carry out on the revision's current strokes, numbered as `get_note` with `strokes` and `render_note` with `labels` give them now: this keeps what the user changed by hand in the copy.
     pub orders: Vec<Order>,
+    /// The `version` of the note your orders were written for, from `preview_revision` or `get_note`. If the note changed since (the user, another computer), nothing is written and the answer is `noteConflict`: look at it again, its strokes may have other numbers.
+    pub expected_version: String,
     /// What this retouching changed, in the user's language: it is added, dated, to the copy's account.
     pub summary: String,
 }
 
-/// The engine's `Input` for the note just read.
-fn input_of(loaded: &LoadedNote) -> Input<'_> {
+/// Carries out `orders` on a copy of the strokes of the note just read: nothing is written. The
+/// engine's message goes back as `invalidOrders`.
+pub(super) fn revise(loaded: &LoadedNote, orders: &[Order]) -> Result<Revised, ToolError> {
     let note = &loaded.file.note;
-    Input {
+    let visible_layers: Vec<bool> = note.layers.iter().map(|layer| layer.visible).collect();
+    let input = Input {
         strokes: &note.strokes,
         page_mm: [
             note.page.width as f32 * 0.01,
             note.page.height as f32 * 0.01,
         ],
         layers: note.layers.len() as u32,
+        visible_layers: &visible_layers,
         narration: loaded.file.audio.is_some(),
-    }
+    };
+    apply(&input, orders).map_err(|error| ToolError::new(code::INVALID_ORDERS, error))
 }
 
-/// Carries out `orders` on a copy of the strokes of the note just read: nothing is written. The
-/// engine's message goes back as `invalidOrders`.
-pub(super) fn revise(loaded: &LoadedNote, orders: &[Order]) -> Result<Revised, ToolError> {
-    apply(&input_of(loaded), orders).map_err(|error| ToolError::new(code::INVALID_ORDERS, error))
+/// Refuses orders written for another version of the note just read: a stroke's number would
+/// name another stroke, silently.
+fn check_version(loaded: &LoadedNote, expected: &str) -> Result<(), ToolError> {
+    let version = version_of(&loaded.stamp);
+    if version == expected.trim() {
+        return Ok(());
+    }
+    Err(ToolError::new(
+        "noteConflict",
+        format!(
+            "this note changed since you looked at it (it is at version `{version}`, your orders are for `{expected}`): nothing was written. Look at it again (`get_note`, `preview_revision`) and write your orders for what it is now: its strokes may have other numbers"
+        ),
+    ))
 }
 
 fn required_summary(summary: &str) -> Result<&str, ToolError> {
@@ -91,6 +115,10 @@ fn required_summary(summary: &str) -> Result<&str, ToolError> {
         "" => Err(ToolError::invalid(
             "`summary` is required: say, in the user's language, what changed (every change, each letter you made, what is uncertain); it stays with the copy",
         )),
+        text if text.chars().count() > MAX_ENTRY_CHARS => Err(ToolError::invalid(format!(
+            "`summary` has {} characters: at most {MAX_ENTRY_CHARS} are accepted",
+            text.chars().count()
+        ))),
         text => Ok(text),
     }
 }
@@ -144,6 +172,30 @@ pub(super) fn make_copy(
     file.mark_as_revision_of(source_note, now, account);
     let mut revised = file.note.clone();
     revised.strokes = strokes;
+    let saved = host
+        .write
+        .create_revision(library, &entry.binder, file, revised)?;
+    Ok(library.read(&saved.path)?)
+}
+
+/// A new note next to `entry`'s note holding `part`, what a split took out of `source`: a note of
+/// its own clock and date (`ardoise_core::ops`), so it has neither the narration nor the original of
+/// `source`; the page's picture goes with it. It is a revision of `source`, with the account
+/// `account`. The source's file is only read. Returns the part as written.
+pub(super) fn make_part(
+    host: &Host,
+    library: &Library,
+    entry: &NoteEntry,
+    source: &LoadedNote,
+    part: Note,
+    account: &str,
+) -> Result<LoadedNote, ToolError> {
+    let mut file = NoteFile::new(part);
+    if file.note.background_image.is_some() {
+        file.background.clone_from(&source.file.background);
+    }
+    file.mark_as_revision_of(&source.file.note, now_ms(), account);
+    let revised = file.note.clone();
     let saved = host
         .write
         .create_revision(library, &entry.binder, file, revised)?;
@@ -226,6 +278,7 @@ pub fn preview_revision(host: &Host, args: PreviewRevisionArgs) -> ToolResult {
     info["written"] = false.into();
     info["note"] = serde_json::to_value(crate::notes::NoteSummary::of_entry(&library, &entry))
         .map_err(|e| ToolError::new("unexpected", e))?;
+    info["version"] = version_of(&loaded.stamp).into();
     info["stroke_count"] = revised.strokes.len().into();
     info["report"] =
         serde_json::to_value(&revised.report).map_err(|e| ToolError::new("unexpected", e))?;
@@ -238,9 +291,11 @@ pub fn preview_revision(host: &Host, args: PreviewRevisionArgs) -> ToolResult {
 pub fn create_revision(host: &Host, args: CreateRevisionArgs) -> ToolResult {
     let account = required_summary(&args.summary)?;
     some_orders(&args.orders)?;
+    args.title.as_deref().map_or(Ok(()), check_title)?;
     let library = host.library()?;
     let entry = find_note(&library, &args.note)?;
     let source = read_note(&library, &entry)?;
+    check_version(&source, &args.expected_version)?;
     let revised = revise(&source, &args.orders)?;
     let stroke_count = revised.strokes.len();
     let copy = make_copy(
@@ -255,6 +310,7 @@ pub fn create_revision(host: &Host, args: CreateRevisionArgs) -> ToolResult {
     json_result(json!({
         "created": true,
         "note": summary_of(&library, &copy),
+        "version": version_of(&copy.stamp),
         "original": summary_at(&library, &entry.path)?,
         "original_unchanged": true,
         "stroke_count": stroke_count,
@@ -271,6 +327,7 @@ pub fn edit_revision(host: &Host, args: EditRevisionArgs) -> ToolResult {
     if loaded.file.revision.is_none() {
         return Err(not_a_revision());
     }
+    check_version(&loaded, &args.expected_version)?;
     let revised = revise(&loaded, &args.orders)?;
     let stroke_count = revised.strokes.len();
     let words = words(host.environment.language());
@@ -286,6 +343,7 @@ pub fn edit_revision(host: &Host, args: EditRevisionArgs) -> ToolResult {
     json_result(json!({
         "saved": true,
         "note": summary_of(&library, &saved),
+        "version": version_of(&saved.stamp),
         "stroke_count": stroke_count,
         "report": revised.report,
         "previous_version": previous_version(&kept),

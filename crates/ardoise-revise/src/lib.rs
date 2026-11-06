@@ -33,12 +33,18 @@ pub const MAX_ORDERS: usize = 5_000;
 /// Most points the orders of one list can make. The note's own points do not count: a dense note
 /// can still be retouched.
 pub const MAX_POINTS: usize = 1_000_000;
+/// Most points a polyline or a curve can be given. Its samples are counted before they are made,
+/// and more than this can only be a mistake.
+pub const MAX_SHAPE_VERTICES: usize = 100_000;
 /// Largest shape, millimetres.
 pub const MAX_SHAPE_MM: f32 = 5_000.0;
 /// Shortest dash or gap, millimetres.
 pub const MIN_DASH_MM: f32 = 0.2;
 /// Largest smoothing, millimetres.
 pub const MAX_SIGMA_MM: f32 = 5.0;
+/// Most samples the orders of one list can smooth, counting a sample each time it is smoothed (the
+/// work of a list stays in seconds; several hours of continuous writing hold fewer; supposé).
+pub const MAX_SMOOTHED_POINTS: usize = 5_000_000;
 /// Smallest size change.
 pub const MIN_FACTOR: f32 = 0.05;
 /// Largest size change.
@@ -59,8 +65,22 @@ pub struct Input<'a> {
     pub page_mm: [f32; 2],
     /// How many layers the note has.
     pub layers: u32,
+    /// For each layer, whether the note shows it. A layer the list does not reach is shown, as the
+    /// app draws a stroke whose layer has no entry. What a picture of the note does not show is not
+    /// taken by a selection that does not ask for it, and new strokes do not go there by default.
+    pub visible_layers: &'a [bool],
     /// A narration exists: nothing may move in time.
     pub narration: bool,
+}
+
+impl Input<'_> {
+    /// Whether the note shows this layer.
+    pub(crate) fn shows(&self, layer: u32) -> bool {
+        self.visible_layers
+            .get(layer as usize)
+            .copied()
+            .unwrap_or(true)
+    }
 }
 
 /// What came out of a list of orders.

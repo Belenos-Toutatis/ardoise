@@ -420,3 +420,21 @@ fn tidying_line_by_line_levels_the_page() {
         assert_near(line.slope, 0.0, 0.3);
     }
 }
+
+#[test]
+fn a_note_of_more_lines_than_any_written_page_is_not_followed() {
+    // Separate strokes, each far from the others: each would be a line of its own, and the work
+    // grows with their square.
+    let side = 110;
+    let mut strokes = Vec::new();
+    for a in 0..side {
+        for b in 0..side {
+            let (x, y) = (a as f32 * 100.0, b as f32 * 50.0);
+            strokes.push(line_stroke([x, y], [x + 3.0, y + 3.0], 0, 100));
+        }
+    }
+    let visible: Vec<usize> = (0..strokes.len()).collect();
+    let found = ink_lines(&strokes, &visible);
+    assert!(found.lines.is_empty());
+    assert_eq!(found.apart, visible);
+}

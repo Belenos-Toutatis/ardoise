@@ -33,8 +33,8 @@ corrected transcription for the search: nothing is overwritten or deleted for go
 note stays restorable from the app's trash; an export that would overwrite a file gets (2) \
 added to its name). The ink of a note is never changed in the note itself: `preview_revision` \
 tries a list of orders in memory, `create_revision` writes them on a copy next to the note \
-(straightening shapes does the same), and only a copy made that way can be edited again, with \
-`edit_revision` (its version before goes to the trash). Prompts (clean up a note, title and tag \
+(straightening and splitting do the same), and only a copy made that way can be edited again, \
+with `edit_revision` (its version before goes to the trash). Prompts (clean up a note, title and tag \
 untitled notes, summarise a lesson, improve a note on a copy) say which tools to call and in \
 which order.";
 

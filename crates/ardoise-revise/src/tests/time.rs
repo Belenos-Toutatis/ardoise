@@ -339,3 +339,66 @@ fn a_stroke_overlapping_in_time_is_left_alone() {
     // What starts after: 180 ms are needed, 100 are there.
     assert_eq!(times(revised.stroke(2)), (680, 980));
 }
+
+// ---------------------------------------------------------------------------------------------
+// A piece of a stroke in time. The check against the replay is in `revise_replay.rs`.
+
+#[test]
+fn a_stroke_placed_in_time_cannot_be_trimmed() {
+    let strokes = with_letter(two_and_a_later(1500));
+    for (place, number) in [
+        (
+            r#"{"op":"copy","select":{"ids":[3]},"to_x":17,"after":0}"#,
+            4,
+        ),
+        (r#"{"op":"copy","select":{"ids":[3]},"to_x":17}"#, 4),
+        (
+            r#"{"op":"glyph","parts":[{"stroke":3,"x":17,"y":20}],"after":0}"#,
+            4,
+        ),
+        (r#"{"op":"retime","select":{"ids":[3]},"after":0}"#, 3),
+    ] {
+        let json = format!(r#"[{place},{{"op":"trim","stroke":{number},"from":2,"to":4}}]"#);
+        let message = refused(&strokes, &json, 1);
+        assert!(
+            message.contains("order 0") && message.contains("`glyph`"),
+            "{place}: {message}"
+        );
+    }
+    // Moved by another stroke's placing is not placed: it stays in its own time.
+    run(
+        &strokes,
+        r#"[{"op":"copy","select":{"ids":[3]},"to_x":17,"after":0},{"op":"trim","stroke":1,"from":2}]"#,
+    );
+}
+
+#[test]
+fn a_piece_of_a_stroke_takes_its_own_time_only() {
+    // Stroke 3 lasts 100 ms: 10 ms for each of its 10 steps. A piece of 2 steps needs 40 + 20 + 40.
+    let strokes = with_letter(two_and_a_later(600));
+    let glyph =
+        r#"[{"op":"glyph","parts":[{"stroke":3,"from":2,"to":4,"x":17,"y":20}],"after":0}]"#;
+    let revised = run(&strokes, glyph);
+    assert_eq!(times(revised.stroke(4)), (540, 560));
+    // It fits (100 ms are there, 100 are needed): nothing else moves.
+    assert_eq!(revised.report.strokes_pushed, 0);
+    assert_eq!(times(revised.stroke(1)), (600, 1100));
+
+    // Trimmed before it is placed, the same.
+    let revised = run(
+        &strokes,
+        r#"[{"op":"trim","stroke":3,"from":2,"to":4},{"op":"retime","select":{"ids":[3]},"after":0}]"#,
+    );
+    assert_eq!(times(revised.stroke(3)), (540, 560));
+    assert_eq!(revised.report.strokes_pushed, 0);
+}
+
+#[test]
+fn a_stroke_not_placed_stays_in_its_own_time_when_it_is_trimmed() {
+    let strokes = two_and_a_later(600);
+    let revised = run(&strokes, r#"[{"op":"trim","stroke":0,"from":2,"to":4}]"#);
+    assert_eq!(times(revised.stroke(0)), (100, 200));
+    for (number, stroke) in strokes.iter().enumerate().skip(1) {
+        assert_eq!(revised.stroke(number), stroke);
+    }
+}

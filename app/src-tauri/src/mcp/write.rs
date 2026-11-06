@@ -24,7 +24,7 @@ use ardoise_hwr::docx::to_docx;
 use ardoise_mcp::ToolError;
 use ardoise_mcp::write::{
     ExportFormat, ExportKind, ExportOutcome, ExportRequest, ExportTarget, MergeLayout, PdfPage,
-    SplitRequest, VideoResolution, VideoTiming, WriteServices, check_replay_plan,
+    VideoResolution, VideoTiming, WriteServices, check_replay_plan,
 };
 use ardoise_media::OpenH264Codec;
 use ardoise_render::{NoteView, PdfOptions, notes_to_pdf};
@@ -39,7 +39,7 @@ use crate::export::{self, ExportSource, LoadedSource, load_sources, write_new_fi
 use crate::handwriting::{CacheDir, NoteText, hwr_error, reading_of, text_document};
 use crate::library::path_text;
 use crate::notes::save_with_key_and_account;
-use crate::operations::{self, SplitSpec, merge_in, split_in};
+use crate::operations::{self, merge_in};
 use crate::textdoc::{document_of, structure_for, write_markdown_new};
 use crate::thumbnails::thumbnail_png;
 use crate::video::{self, VideoExportOptions, export_video_in};
@@ -458,33 +458,6 @@ impl WriteServices for AppWrite {
         Ok(library.create(binder, &file)?)
     }
 
-    fn split_note(
-        &self,
-        library: &Library,
-        path: &Path,
-        split: &SplitRequest,
-        title: &str,
-    ) -> Result<PathBuf, ToolError> {
-        let loaded = library.read(path)?;
-        let spec = match split {
-            SplitRequest::AtMs(at) => SplitSpec::Time { at: *at },
-            SplitRequest::Polygon(polygon) => SplitSpec::Zone {
-                polygon: polygon.clone(),
-            },
-        };
-        let result = split_in(
-            library,
-            path,
-            loaded.file.note.clone(),
-            &loaded.stamp,
-            &spec,
-            title,
-            None,
-        )
-        .map_err(tool_error)?;
-        Ok(PathBuf::from(result.created.path))
-    }
-
     fn merge_notes(
         &self,
         library: &Library,
@@ -746,28 +719,51 @@ mod tests {
             .unwrap();
         assert!(library.read(&saved.path).unwrap().file.revision.is_none());
     }
+
+    /// What `split_note` hands the app for a part it took out of a note: a note of its own, whose
+    /// ink is the one it asks to write.
     #[test]
-    fn splitting_and_merging_are_the_apps_operations() {
+    fn a_part_of_a_split_note_gets_its_thumbnail_and_no_original() {
         let (services, _dir) = services();
         let (_library_dir, library) = library();
         let saved = write_sample(&library, "Classe", "Cours");
-        // Samples are at 0, 8, 16... 232 ms.
-        let created = services
-            .split_note(&library, &saved.path, &SplitRequest::AtMs(120), "Suite")
-            .unwrap();
-        assert_eq!(created.parent(), saved.path.parent());
-        let new = read_note(&created).unwrap();
-        assert_eq!(new.note.title, "Suite");
-        assert!(new.thumbnail.is_some());
-        assert_eq!(
-            read_note(&saved.path).unwrap().note.strokes[0].points.len(),
-            15
-        );
-        let nothing = services
-            .split_note(&library, &saved.path, &SplitRequest::AtMs(5_000_000), "X")
-            .unwrap_err();
-        assert_eq!(nothing.code, "nothingToSplit");
+        let source = library.read(&saved.path).unwrap().file;
+        let parts = ardoise_core::ops::split_at_time(
+            &source.note,
+            120,
+            ardoise_core::ops::NewNote {
+                id: "99999999-9999-4999-8999-999999999999".to_owned(),
+                title: "Cours (suite)".to_owned(),
+                now: 1_792_900_000_000,
+            },
+        )
+        .unwrap();
+        let mut file = NoteFile::new(parts.extracted);
+        file.mark_as_revision_of(&source.note, 1_792_900_000_000, "Note découpée");
+        let revised = file.note.clone();
 
+        let created = services
+            .create_revision(&library, Path::new("Classe"), file, revised)
+            .unwrap();
+        assert_eq!(created.path.parent(), saved.path.parent());
+        let part = library.read(&created.path).unwrap().file;
+        assert_eq!(part.note.title, "Cours (suite)");
+        assert!(part.thumbnail.is_some());
+        assert_eq!(part.original, None);
+        assert_eq!(part.original_note, None);
+        assert_eq!(part.revision.unwrap().of, source.note.id);
+        // Samples are at 0, 8, 16... 232 ms: 15 stay, 15 moved, on a clock of their own.
+        assert_eq!(part.note.strokes[0].points.len(), 15);
+        assert_eq!(part.note.strokes[0].points[0].t, 0);
+        assert_eq!(library.read(&saved.path).unwrap().file, source);
+    }
+
+    #[test]
+    fn merging_is_the_apps_operation() {
+        let (services, _dir) = services();
+        let (_library_dir, library) = library();
+        let saved = write_sample(&library, "Classe", "Cours");
+        let created = write_sample(&library, "Classe", "Suite").path;
         let merged = services
             .merge_notes(
                 &library,

@@ -48,7 +48,8 @@ const IDEMPOTENT: [&str; 4] = [
 ];
 
 /// Tools that change or remove what is there (`destructiveHint`: the MCP specification keeps
-/// `false` for the tools that only add), even when the app can restore it.
+/// `false` for the tools that only add), even when the app can restore it. `split_note` and
+/// `straighten_shapes` only add on an ordinary note, and rewrite a revision.
 const DESTRUCTIVE: [&str; 6] = [
     "edit_revision",
     "move_note",
@@ -618,6 +619,7 @@ async fn merging_gives_a_new_note_in_the_first_notes_binder() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_note_is_split_at_an_instant_or_by_a_zone() {
     let session = session().await;
+    let source = fs::read(session.harness.path_of(CHIMIE)).unwrap();
     // CHIMIE: three waves written in the first 800 ms, a circle between 2000 and 2600 ms.
     let split = session
         .ok("split_note", json!({ "note": CHIMIE, "at_ms": 1500 }))
@@ -626,8 +628,14 @@ async fn a_note_is_split_at_an_instant_or_by_a_zone() {
     assert_eq!(split["created"]["stroke_count"], 1);
     assert_eq!(split["created"]["binder"], "Physique");
     assert_eq!(split["created"]["title"], "Chimie des métaux (continued)");
-    assert_eq!(split["kept"]["id"], CHIMIE);
+    assert_eq!(split["kept"]["title"], "Chimie des métaux (start)");
+    // Two new notes; the note itself keeps all its strokes, its file is not written.
+    assert_ne!(split["kept"]["id"], CHIMIE);
     assert_ne!(split["created"]["id"], CHIMIE);
+    assert_eq!(split["original"]["id"], CHIMIE);
+    assert_eq!(split["original"]["stroke_count"], 4);
+    assert_eq!(split["original_unchanged"], true);
+    assert_eq!(fs::read(session.harness.path_of(CHIMIE)).unwrap(), source);
 
     // By zone: the polygon (millimetres) takes the first wave of the optics note only.
     let zone = session
@@ -643,6 +651,7 @@ async fn a_note_is_split_at_an_instant_or_by_a_zone() {
     assert_eq!(zone["created"]["title"], "Extrait");
     assert_eq!(zone["created"]["stroke_count"], 1);
     assert_eq!(zone["kept"]["stroke_count"], 2);
+    assert_eq!(zone["kept"]["title"], "Cours d'optique (rest)");
 
     // Bad requests: both or none of the two, a polygon without area, nothing to split.
     for arguments in [

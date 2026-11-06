@@ -202,15 +202,28 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
       if (!ids.includes(merged.id)) throw new Error(`la nouvelle note n’est pas cherchée : ${JSON.stringify(text)}`);
       if (text.unread_notes !== 0) throw new Error(`notes non lues : ${JSON.stringify(text)}`);
     });
-    await check('split_note : à un instant, deux notes qui se partagent les traits', async () => {
+    await check('split_note : à un instant, deux notes neuves qui se partagent les traits, l’original intact', async () => {
       const read = (await session.call('get_note', { note: optique.id, strokes: 'summary' })).structuredContent;
       const starts = read.strokes.map((s) => s.start_ms).sort((a, b) => a - b);
       const at = starts[Math.floor(starts.length / 2)];
+      const sourceFile = join(app.library, ...optique.path.split('/'));
+      const sourceBytes = readFileSync(sourceFile);
       const result = await session.call('split_note', { note: optique.id, at_ms: at });
       if (result.isError) throw new Error(textOf(result));
-      const { kept, created: part } = result.structuredContent;
-      if (kept.id !== optique.id || kept.stroke_count + part.stroke_count !== optique.stroke_count) throw new Error(JSON.stringify(result.structuredContent));
+      const { kept, created: part, original, original_unchanged: unchanged } = result.structuredContent;
+      if (kept.id === optique.id || part.id === optique.id || kept.id === part.id) throw new Error(JSON.stringify(result.structuredContent));
+      if (kept.stroke_count + part.stroke_count !== optique.stroke_count) throw new Error(JSON.stringify(result.structuredContent));
       if (!kept.stroke_count || !part.stroke_count) throw new Error('une moitié est vide');
+      // The original is the same bytes; each part is a note next to it, a revision of it.
+      if (unchanged !== true || original?.id !== optique.id) throw new Error(JSON.stringify(result.structuredContent).slice(0, 300));
+      if (!readFileSync(sourceFile).equals(sourceBytes)) throw new Error('le fichier de l’original a changé');
+      for (const made of [kept, part]) {
+        if (made.binder !== optique.binder) throw new Error(`classeur : ${JSON.stringify(made)}`);
+        const note = (await session.call('get_note', { note: made.id })).structuredContent;
+        if (note.revision?.of !== optique.id || note.revision.account.length !== 1) throw new Error(`pas une retouche : ${JSON.stringify(note.revision)}`);
+      }
+      const [start, continued] = language === 'fr' ? ['(début)', '(suite)'] : ['(start)', '(continued)'];
+      if (!kept.title.endsWith(start) || !part.title.endsWith(continued)) throw new Error(`titres : ${kept.title}, ${part.title}`);
       await expectError('split_note', { note: optique.id }, 'invalidArguments');
     });
     await check('straighten_shapes : les dessins que trouve l’analyse de l’encre, redressés sur une copie, l’original intact', async () => {
@@ -249,11 +262,14 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
       const copy = straightenedCopy;
       const trashed = () => readdirSync(join(app.library, '_ardoise', 'trash')).filter((name) => name.endsWith('.ardoise'));
       const trashBefore = trashed();
-      const edited = await session.call('edit_revision', {
-        note: copy.id,
-        orders: [{ op: 'recolor', select: { ids: [0] }, color: '#cc0000' }],
-        summary: language === 'fr' ? 'Premier trait en rouge.' : 'First stroke in red.',
-      });
+      const orders = [{ op: 'recolor', select: { ids: [0] }, color: '#cc0000' }];
+      const summary = language === 'fr' ? 'Premier trait en rouge.' : 'First stroke in red.';
+      // Orders are for the version the assistant saw: for another one, nothing is written.
+      await expectError('edit_revision', { note: copy.id, orders, summary, expected_version: 'une autre' }, 'noteConflict');
+      if (trashed().length !== trashBefore.length) throw new Error('la corbeille a changé');
+      const { version } = (await session.call('get_note', { note: copy.id })).structuredContent;
+      if (!version) throw new Error('get_note ne donne pas de version');
+      const edited = await session.call('edit_revision', { note: copy.id, orders, summary, expected_version: version });
       if (edited.isError) throw new Error(textOf(edited));
       const { previous_version: kept, saved, account_entries: entries, note } = edited.structuredContent;
       const suffix = language === 'fr' ? '(avant retouche)' : '(before retouching)';

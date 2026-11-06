@@ -80,6 +80,21 @@ pub(super) fn summary_at(library: &Library, path: &Path) -> Result<NoteSummary, 
     Ok(summary_of(library, &library.read(path)?))
 }
 
+/// Longest title the tools accept, characters: a title is a line of a list and a file name, not a
+/// document (supposé; the app's own title field has no limit, the file format's is 16 MiB).
+const MAX_TITLE_CHARS: usize = 1_000;
+
+/// Refuses a title no list could show: `invalidArguments`, before anything is done.
+pub(super) fn check_title(title: &str) -> Result<(), ToolError> {
+    let count = title.chars().count();
+    if count > MAX_TITLE_CHARS {
+        return Err(ToolError::invalid(format!(
+            "`title` has {count} characters: at most {MAX_TITLE_CHARS} are accepted"
+        )));
+    }
+    Ok(())
+}
+
 /// Current time in Unix milliseconds.
 pub(super) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -169,6 +184,7 @@ pub fn update_note(host: &Host, args: UpdateNoteArgs) -> ToolResult {
             "nothing to change: give `title`, `tags`, `add_tags`, `remove_tags` or `favorite`",
         ));
     }
+    change.title.map_or(Ok(()), check_title)?;
     let library = host.library()?;
     let entry = find_note(&library, &args.note)?;
     let (path, changed) = apply_metadata(&library, &entry.path, &change)?;

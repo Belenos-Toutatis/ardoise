@@ -211,3 +211,219 @@ fn a_selection_is_refused_with_bad_values() {
         assert!(message.contains(expected), "{select}: {message}");
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Hidden layers: the picture does not show them
+
+/// Layer 0 shown, layer 1 hidden.
+fn layer_1_hidden(strokes: &[Stroke]) -> Input<'_> {
+    Input {
+        visible_layers: &[true, false],
+        ..input(strokes)
+    }
+}
+
+/// Strokes 0, 1 and 3 on layer 0, stroke 2 on layer 1.
+fn one_hidden() -> Vec<Stroke> {
+    let mut strokes = row(4);
+    strokes[2].layer = 1;
+    strokes
+}
+
+/// What a `recolor` selects, and its warnings.
+fn recolored(input: &Input, select: &str) -> (Vec<usize>, Vec<String>) {
+    let json = format!(r##"[{{"op":"recolor","select":{select},"color":"#123456"}}]"##);
+    let revised = run_on(input, &json);
+    let found = revised
+        .numbers
+        .iter()
+        .copied()
+        .filter(|&n| revised.stroke(n).color.r == 0x12)
+        .collect();
+    (found, revised.report.orders[0].warnings.clone())
+}
+
+#[test]
+fn a_selection_without_a_place_or_by_a_rectangle_takes_drawn_strokes_only() {
+    let strokes = one_hidden();
+    let input = layer_1_hidden(&strokes);
+    let (found, warnings) = recolored(&input, "{}");
+    assert_eq!(found, [0, 1, 3]);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let (found, warnings) = recolored(&input, r#"{"rect":[0,0,300,200]}"#);
+    assert_eq!(found, [0, 1, 3]);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    // A filter does not bring them back.
+    let (found, _) = recolored(&input, r##"{"color":"#000000"}"##);
+    assert_eq!(found, [0, 1, 3]);
+}
+
+#[test]
+fn naming_a_layer_or_strokes_takes_hidden_strokes_and_the_report_says_so() {
+    let strokes = one_hidden();
+    let input = layer_1_hidden(&strokes);
+    for select in [r#"{"layer":1}"#, r#"{"ids":[2]}"#] {
+        let (found, warnings) = recolored(&input, select);
+        assert_eq!(found, [2], "{select}");
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("[2]") && w.contains("hidden")),
+            "{select}: {warnings:?}"
+        );
+    }
+    let (found, _) = recolored(&input, r#"{"rect":[0,0,300,200],"layer":1}"#);
+    assert_eq!(found, [2]);
+    // `ids` add up with a rectangle: the rectangle still only takes what is drawn.
+    let (found, warnings) = recolored(&input, r#"{"ids":[2],"rect":[15,10,10,20]}"#);
+    assert_eq!(found, [1, 2]);
+    assert!(warnings.iter().any(|w| w.contains("[2]")), "{warnings:?}");
+}
+
+#[test]
+fn a_selection_that_finds_only_hidden_strokes_says_why_it_is_empty() {
+    let strokes = one_hidden();
+    let input = layer_1_hidden(&strokes);
+    // The rectangle holds stroke 2 only.
+    let (found, warnings) = recolored(&input, r#"{"rect":[29,10,5,20]}"#);
+    assert!(found.is_empty());
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("nothing selected") && w.contains("`layer`")),
+        "{warnings:?}"
+    );
+    // An empty selection with nothing hidden says nothing of layers.
+    let (_, warnings) = recolored(&input, r#"{"rect":[200,10,5,20]}"#);
+    assert!(!warnings[0].contains("`layer`"), "{warnings:?}");
+}
+
+#[test]
+fn a_long_list_of_hidden_strokes_stays_a_sentence() {
+    let mut strokes = row(100);
+    for stroke in &mut strokes {
+        stroke.layer = 1;
+    }
+    let input = layer_1_hidden(&strokes);
+    let (found, warnings) = recolored(&input, r#"{"layer":1}"#);
+    assert_eq!(found.len(), 100);
+    assert!(warnings[0].len() < 200, "{}", warnings[0]);
+    assert!(warnings[0].contains("and 80 more"), "{}", warnings[0]);
+}
+
+#[test]
+fn replace_goes_on_a_visible_layer_when_it_can() {
+    // Layer 0 is the hidden one: the drawing order alone would choose it.
+    let mut strokes = row(2);
+    strokes[1].layer = 1;
+    strokes[1].color = Rgba::rgb(1, 2, 3);
+    let input = Input {
+        visible_layers: &[false, true],
+        ..input(&strokes)
+    };
+    let revised = run_on(
+        &input,
+        r#"[{"op":"replace","select":{"ids":[0,1]},"with":[{"line":{"from":[1,1],"to":[9,1]}}]}]"#,
+    );
+    let made = revised.stroke(2);
+    assert_eq!(made.layer, 1);
+    assert_eq!(
+        made.color,
+        Rgba::rgb(1, 2, 3),
+        "it looks like the drawn one"
+    );
+    assert!(
+        revised.report.orders[0].warnings[0].contains("[0]"),
+        "{:?}",
+        revised.report.orders[0].warnings
+    );
+
+    // Only hidden strokes are named: what replaces them stays with them.
+    let revised = run_on(
+        &input,
+        r#"[{"op":"replace","select":{"ids":[0]},"with":[{"line":{"from":[1,1],"to":[9,1]}}]}]"#,
+    );
+    assert_eq!(revised.stroke(2).layer, 0);
+    assert!(revised.report.orders[0].warnings[0].contains("hidden"));
+}
+
+const ADD_LINE: &str =
+    r##"[{"op":"add","shapes":[{"line":{"from":[1,1],"to":[9,1]}}],"color":"#000000"}]"##;
+
+#[test]
+fn add_goes_on_a_visible_layer_by_default() {
+    // The first writing of the note is on a hidden layer: it gives neither its layer nor its pen.
+    let mut strokes = row(2);
+    strokes[0].tool = Tool::FeltTip;
+    strokes[1].layer = 1;
+    let input_ = Input {
+        visible_layers: &[false, true],
+        ..input(&strokes)
+    };
+    let revised = run_on(&input_, ADD_LINE);
+    let made = revised.stroke(2);
+    assert_eq!(made.layer, 1);
+    assert_eq!(made.tool, Tool::Ballpoint);
+    assert!(revised.report.orders[0].warnings.is_empty());
+
+    // No writing on what is shown: the first layer shown, with the pen of the note's writing.
+    let mut hidden_only = row(1);
+    hidden_only[0].tool = Tool::FeltTip;
+    let input_ = Input {
+        visible_layers: &[false, true],
+        ..input(&hidden_only)
+    };
+    let revised = run_on(&input_, ADD_LINE);
+    assert_eq!(revised.stroke(1).layer, 1);
+    assert_eq!(revised.stroke(1).tool, Tool::FeltTip);
+
+    // Every layer hidden: the report says the new strokes will not show.
+    let input_ = Input {
+        visible_layers: &[false, false],
+        ..input(&hidden_only)
+    };
+    let revised = run_on(&input_, ADD_LINE);
+    assert_eq!(revised.stroke(1).layer, 0);
+    assert!(revised.report.orders[0].warnings[0].contains("hidden"));
+}
+
+#[test]
+fn add_on_a_hidden_layer_it_names_is_warned() {
+    let strokes = row(1);
+    let input = layer_1_hidden(&strokes);
+    let revised = run_on(
+        &input,
+        r##"[{"op":"add","shapes":[{"line":{"from":[1,1],"to":[9,1]}}],"color":"#000000","layer":1}]"##,
+    );
+    assert_eq!(revised.stroke(1).layer, 1);
+    assert!(revised.report.orders[0].warnings[0].contains("layer 1"));
+}
+
+#[test]
+fn trim_and_glyph_warn_about_hidden_strokes() {
+    let strokes = one_hidden();
+    let input = layer_1_hidden(&strokes);
+    let revised = run_on(&input, r#"[{"op":"trim","stroke":2,"from":1}]"#);
+    assert!(revised.report.orders[0].warnings[0].contains("[2]"));
+    let revised = run_on(&input, r#"[{"op":"trim","stroke":0,"from":1}]"#);
+    assert!(revised.report.orders[0].warnings.is_empty());
+    // A piece of a hidden stroke is on its layer: it would not show.
+    let revised = run_on(
+        &input,
+        r#"[{"op":"glyph","parts":[{"stroke":2,"x":50,"y":50}]}]"#,
+    );
+    assert_eq!(revised.stroke(4).layer, 1);
+    assert!(revised.report.orders[0].warnings[0].contains("[4]"));
+    let revised = run_on(
+        &input,
+        r#"[{"op":"glyph","parts":[{"stroke":0,"x":50,"y":50}]}]"#,
+    );
+    assert!(revised.report.orders[0].warnings.is_empty());
+}
+
+#[test]
+fn a_layer_the_list_does_not_reach_is_shown() {
+    let strokes = one_hidden();
+    let (found, _) = recolored(&input(&strokes), "{}");
+    assert_eq!(found, [0, 1, 2, 3]);
+}

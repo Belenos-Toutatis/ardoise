@@ -5,7 +5,7 @@
 //! Each tool is a thin method of [`ArdoiseServer`] (arguments in, `self.blocking` out) over a
 //! plain function `fn(&Host, Args) -> ToolResult` that the tests also call.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ardoise_core::format::BackgroundFile;
 use ardoise_core::library::NoteEntry;
@@ -31,7 +31,7 @@ use crate::error::{ToolError, ToolResult, content_result, json_result};
 use crate::host::Host;
 use crate::notes::{
     NoteSummary, PageMm, RectMm, binder_text, find_note, hex, iso, mm, parse_date, read_note,
-    relative_path,
+    relative_path, version_of,
 };
 use crate::server::ArdoiseServer;
 use crate::strokes::{DEFAULT_MAX_POINTS, MAX_POINTS, StrokeInfo, polylines};
@@ -173,7 +173,7 @@ pub struct RenderNoteArgs {
     pub background: Option<bool>,
     /// Layers to draw, by index or name, even if hidden in the note (default: the layers visible in the note).
     pub layers: Option<Vec<LayerRef>>,
-    /// Write each stroke's number (its index in `get_note`, the one the orders of `preview_revision` name) in small red digits next to it (default `false`). Meant for a `region`: zoom on the part you will change, at a higher dpi, and read the numbers there. A dense page has too many to read at once.
+    /// Write each stroke's number (its index in `get_note`) in small red digits next to it (default `false`). Meant for a `region`: zoom on the part you are interested in, at a higher dpi, and read the numbers there. A dense page has too many to read at once.
     pub labels: Option<bool>,
 }
 
@@ -265,7 +265,7 @@ impl ArdoiseServer {
         self.blocking(move |host| search_notes(host, args)).await
     }
 
-    /// Read a note's data: metadata, page, layers, `revision` (only on a retouched copy: whose copy it is and its account of changes), paper and template (`background.ruling` gives the first rule's distance from the top and the distance between two rules, in mm, for the templates with horizontal rules to write on), background image, duration and, on request, its strokes (a summary of each, or simplified polylines in millimetres). Use `render_note` to see it and `get_note_text` to read its handwriting.
+    /// Read a note's data: metadata, `version` (changes whenever the note's file changes), page, layers, `revision` (only on a retouched copy: whose copy it is and its account of changes), paper and template (`background.ruling` gives the first rule's distance from the top and the distance between two rules, in mm, for the templates with horizontal rules to write on), background image, duration and, on request, its strokes (a summary of each, or simplified polylines in millimetres). Use `render_note` to see it and `get_note_text` to read its handwriting.
     #[tool(
         name = "get_note",
         annotations(
@@ -283,7 +283,7 @@ impl ArdoiseServer {
         self.blocking(move |host| get_note(host, args)).await
     }
 
-    /// The handwriting of a note as text: the recognised lines with their bounding boxes in millimetres, and its structure (paragraphs, list items, drawings with their bounds and stroke indices) when it can be found. Reads the note now if it was not read yet, which can take a few seconds. The recognition makes mistakes, especially on formulas and diagrams: compare with `render_note`. If a corrected transcription was stored with `set_note_text` for the ink as it is now, `text` is that one, `is_correction` is true and `recognised_text` is the recogniser's.
+    /// The handwriting of a note as text: the recognised lines with their bounding boxes in millimetres, and its structure (paragraphs, list items, drawings with their bounds and stroke indices) when it can be found. Reads the note now if it was not read yet, which can take a few seconds. The recognition makes mistakes, especially on formulas and diagrams: compare with `render_note`. If a corrected transcription is stored for the ink as it is now, `text` is that one, `is_correction` is true and `recognised_text` is the recogniser's.
     #[tool(
         name = "get_note_text",
         annotations(
@@ -301,7 +301,7 @@ impl ArdoiseServer {
         self.blocking(move |host| get_note_text(host, args)).await
     }
 
-    /// Render a note (or a region of its page) as a PNG image so that you can see it: handwriting, drawings, diagrams, layout, paper and background image. With `labels`, each stroke's number is written next to it, which links what you see to the numbers of the orders. The image's longest side is at most 2000 pixels, and a very large page (an A0 PDF) cannot be seen closer than about 120 dpi; the dpi actually used, and what lowered it, are returned in the text next to it.
+    /// Render a note (or a region of its page) as a PNG image so that you can see it: handwriting, drawings, diagrams, layout, paper and background image. With `labels`, each stroke's number is written next to it, which links what you see to the strokes of `get_note`. The image's longest side is at most 2000 pixels, and a very large page (an A0 PDF) cannot be seen closer than about 120 dpi; the dpi actually used, and what lowered it, are returned in the text next to it.
     #[tool(
         name = "render_note",
         annotations(
@@ -320,7 +320,7 @@ impl ArdoiseServer {
             .await
     }
 
-    /// The exact samples of some strokes, to cut a stroke (`trim` takes sample numbers) or to copy a letter with `glyph`: `columns` says what each sample holds, `[i, x_mm, y_mm, pressure, t_ms]`, with `i` the sample's number in its stroke. At most 20,000 samples a call: ask for few strokes, or raise `step`. `get_note` with `points` is simplified and has no sample numbers, so it cannot serve for this.
+    /// The exact samples of some strokes, to say which part of a stroke you mean: `columns` says what each sample holds, `[i, x_mm, y_mm, pressure, t_ms]`, with `i` the sample's number in its stroke. At most 20,000 samples a call: ask for few strokes, or raise `step`. `get_note` with `points` is simplified and has no sample numbers, so it cannot serve for this.
     #[tool(
         name = "get_strokes",
         annotations(
@@ -338,7 +338,7 @@ impl ArdoiseServer {
         self.blocking(move |host| get_strokes(host, args)).await
     }
 
-    /// The written lines of a note found from the ink itself (the handwriting recogniser merges lines): per line its strokes, its left and right ends, the baseline at both ends, its slope in degrees, the height of its letters and its words (strokes and ends), from top to bottom, and `apart`, the strokes in no line (drawings, rules, highlights, marks). Give the `strokes` of a line to the `tidy_line` order: it finds the same slope and words. Only the strokes on visible layers are looked at.
+    /// The written lines of a note found from the ink itself (the handwriting recogniser merges lines): per line its strokes, its left and right ends, the baseline at both ends, its slope in degrees, the height of its letters and its words (strokes and ends), from top to bottom, and `apart`, the strokes in no line (drawings, rules, highlights, marks). Only the strokes on visible layers are looked at.
     #[tool(
         name = "ink_lines",
         annotations(
@@ -656,6 +656,7 @@ pub fn get_note(host: &Host, args: GetNoteArgs) -> ToolResult {
         .unwrap_or(0);
     let mut result = json!({
         "note": summary,
+        "version": version_of(&loaded.stamp),
         "origin": serde_json::to_value(&note.origin).unwrap_or_default(),
         "timing": serde_json::to_value(note.timing).unwrap_or_default(),
         "layers": layers,
@@ -865,9 +866,10 @@ fn render_dpi(requested: f64, page: (f64, f64), region: &Region) -> (f64, Option
     }
 }
 
-/// The boxes of the strokes of `note` that are drawn (visible layer; a stroke whose layer has no
-/// entry is drawn too), each with its number: `numbers[i]` for `note.strokes[i]`.
-pub fn label_spots(note: &Note, numbers: &[usize]) -> Vec<LabelSpot> {
+/// The strokes of `note` that are drawn (visible layer; a stroke whose layer has no entry is drawn
+/// too), as what a number is written next to, each with its number: `numbers[i]` for
+/// `note.strokes[i]`.
+pub fn label_spots<'n>(note: &'n Note, numbers: &[usize]) -> Vec<LabelSpot<'n>> {
     note.strokes
         .iter()
         .zip(numbers)
@@ -882,7 +884,11 @@ pub fn label_spots(note: &Note, numbers: &[usize]) -> Vec<LabelSpot> {
             let bounds = points.fold([first.x, first.y, first.x, first.y], |b, p| {
                 [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)]
             });
-            Some(LabelSpot { number, bounds })
+            Some(LabelSpot {
+                number,
+                bounds,
+                points: &stroke.points,
+            })
         })
         .collect()
 }
@@ -896,7 +902,7 @@ pub(crate) struct PictureRequest<'a> {
     pub dpi: Option<u32>,
     pub background: bool,
     /// Numbers to write next to the strokes ([`label_spots`]), or `None`.
-    pub labels: Option<Vec<LabelSpot>>,
+    pub labels: Option<Vec<LabelSpot<'a>>>,
 }
 
 /// A page (or a region of it) drawn as a PNG, with the facts about it.
@@ -1083,12 +1089,13 @@ pub fn get_strokes(host: &Host, args: GetStrokesArgs) -> ToolResult {
             "no stroke {bad}: this note has {count} stroke(s), numbered from 0"
         )));
     }
-    let mut wanted: Vec<usize> = Vec::with_capacity(args.strokes.len());
-    for &index in &args.strokes {
-        if !wanted.contains(&index) {
-            wanted.push(index);
-        }
-    }
+    let mut seen: HashSet<usize> = HashSet::with_capacity(args.strokes.len());
+    let wanted: Vec<usize> = args
+        .strokes
+        .iter()
+        .copied()
+        .filter(|&index| seen.insert(index))
+        .collect();
     // The samples kept of a stroke: every `step`-th, and always the last.
     let kept = |points: usize| -> Vec<usize> {
         let mut at: Vec<usize> = (0..points).step_by(step).collect();

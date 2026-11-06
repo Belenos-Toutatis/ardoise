@@ -9,13 +9,16 @@
 //! - `original.bin`, `original.ardoise`, `thumb.png`, `audio.opus`, `background.<ext>`,
 //!   `text.json` (optional): opaque bytes.
 //! - `revision.json` (optional, format 1.3): the note is a retouched copy of another, see
-//!   [`RevisionInfo`]. A damaged one is kept verbatim as an unknown member and the note is not a
-//!   revision.
+//!   [`RevisionInfo`]. A damaged one (or one over [`MAX_REVISION_JSON_BYTES`]) is kept verbatim as
+//!   an unknown member and the note is not a revision.
 //! - anything else: kept verbatim when the note is rewritten.
 //!
 //! Versioning: a reader accepts every older version and every minor version of its own major
 //! version; a file whose major version is newer is refused with
 //! [`FormatError::NewerVersion`] and is never rewritten.
+//!
+//! What is written can be read: the writer refuses, with [`FormatError::TooLarge`], a file over
+//! the limits of the reader, before anything is written.
 
 pub mod revision;
 pub mod strokes;
@@ -66,6 +69,10 @@ pub const BACKGROUND_PREFIX: &str = "background.";
 pub const MAX_NOTE_JSON_BYTES: u64 = 16 << 20;
 /// Largest `strokes.bin` accepted (several hours of continuous writing take a few MB).
 pub const MAX_STROKES_BYTES: u64 = 128 << 20;
+/// Largest `revision.json` read as a revision (an account is a few paragraphs per retouching;
+/// supposé: the same as `note.json`). Beyond it the member is treated as damaged: kept as an
+/// unknown member, and the note is not a revision.
+pub const MAX_REVISION_JSON_BYTES: u64 = 16 << 20;
 /// Largest optional or unknown member accepted.
 pub const MAX_MEMBER_BYTES: u64 = 1 << 30;
 /// Largest total of all the members of one archive, decompressed (1.5 GiB).
@@ -243,6 +250,17 @@ pub enum FormatError {
     /// The note breaks an invariant of the model (no layer, stroke on a missing layer…).
     #[error("invalid note: {0}")]
     InvalidNote(String),
+    /// The note is over a limit of the reader: a file that could not be read again is not
+    /// written. Nothing was written.
+    #[error("this note is too large to be saved: {what} is {size}, at most {limit}")]
+    TooLarge {
+        /// What is too large: a member's name, or the archive as a whole.
+        what: String,
+        /// Bytes, or members for their number.
+        size: u64,
+        /// The reader's limit, in the same unit.
+        limit: u64,
+    },
 }
 
 impl FormatError {
@@ -251,7 +269,7 @@ impl FormatError {
         match self {
             FormatError::Io { .. } => "noteAccess",
             FormatError::NewerVersion { .. } => "noteNewerVersion",
-            FormatError::InvalidNote(_) => "noteInvalid",
+            FormatError::InvalidNote(_) | FormatError::TooLarge { .. } => "noteInvalid",
             FormatError::Strokes(
                 StrokesError::InvalidPoint { .. } | StrokesError::InvalidStroke { .. },
             ) => "noteInvalid",
@@ -615,6 +633,7 @@ fn read_archive_within<R: Read + Seek>(reader: R, budget: u64) -> Result<NoteFil
         let (name, is_dir, bytes) = budget.read(&mut archive, index, MAX_MEMBER_BYTES)?;
         if name == REVISION_JSON
             && !is_dir
+            && bytes.len() as u64 <= MAX_REVISION_JSON_BYTES
             && let Some(revision) = RevisionInfo::parse(&bytes)
         {
             file.revision = Some(revision);
@@ -805,7 +824,41 @@ fn add_member<W: Write + Seek>(
         .map_err(|e| FormatError::Archive(e.to_string()))
 }
 
+/// Refuses what the reader would refuse: each member against its limit, the whole against
+/// [`MAX_TOTAL_BYTES`] and [`MAX_MEMBERS`]. `members` gives, for each member to write, its name,
+/// its size and its limit.
+fn check_read_limits<'a>(
+    members: impl Iterator<Item = (&'a str, u64, u64)>,
+) -> Result<(), FormatError> {
+    let too_large = |what: &str, size: u64, limit: u64| FormatError::TooLarge {
+        what: what.to_owned(),
+        size,
+        limit,
+    };
+    let mut total = 0u64;
+    let mut count = 0u64;
+    for (name, size, limit) in members {
+        if size > limit {
+            return Err(too_large(name, size, limit));
+        }
+        total = total.saturating_add(size);
+        count += 1;
+    }
+    if total > MAX_TOTAL_BYTES {
+        return Err(too_large("the whole file", total, MAX_TOTAL_BYTES));
+    }
+    if count > MAX_MEMBERS as u64 {
+        return Err(too_large(
+            "its number of members",
+            count,
+            MAX_MEMBERS as u64,
+        ));
+    }
+    Ok(())
+}
+
 /// Encodes a note into the bytes of a `.ardoise` file (format [`FormatVersion::CURRENT`]).
+/// A note the reader would refuse is refused here ([`FormatError::TooLarge`]).
 pub fn to_bytes(file: &NoteFile) -> Result<Vec<u8>, FormatError> {
     to_bytes_as(file, FormatVersion::CURRENT)
 }
@@ -815,11 +868,12 @@ fn to_bytes_as(file: &NoteFile, version: FormatVersion) -> Result<Vec<u8>, Forma
     check_member_names(file)?;
     let strokes = strokes::encode(&file.note.strokes)?;
     let json = note_json(file, version)?;
-    let time = zip_time(file.note.modified);
-
-    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
-    add_member(&mut zip, NOTE_JSON, &json, time)?;
-    add_member(&mut zip, STROKES_BIN, &strokes, time)?;
+    let revision = file
+        .revision
+        .as_ref()
+        .map(RevisionInfo::to_json)
+        .transpose()
+        .map_err(|e| FormatError::InvalidNote(e.to_string()))?;
     let optional = [
         (ORIGINAL_BIN, &file.original),
         (ORIGINAL_NOTE, &file.original_note),
@@ -827,19 +881,51 @@ fn to_bytes_as(file: &NoteFile, version: FormatVersion) -> Result<Vec<u8>, Forma
         (AUDIO_OPUS, &file.audio),
         (TEXT_JSON, &file.text),
     ];
+    let background = file
+        .background
+        .as_ref()
+        .map(|background| (background.member_name(), background));
+    let size = |bytes: &[u8]| bytes.len() as u64;
+    let members = [
+        (NOTE_JSON, size(&json), MAX_NOTE_JSON_BYTES),
+        (STROKES_BIN, size(&strokes), MAX_STROKES_BYTES),
+    ]
+    .into_iter()
+    .chain(
+        revision
+            .iter()
+            .map(|json| (REVISION_JSON, size(json), MAX_REVISION_JSON_BYTES)),
+    )
+    .chain(optional.iter().filter_map(|(name, bytes)| {
+        bytes
+            .as_ref()
+            .map(|bytes| (*name, size(bytes), MAX_MEMBER_BYTES))
+    }))
+    .chain(
+        background
+            .iter()
+            .map(|(name, member)| (name.as_str(), size(&member.bytes), MAX_MEMBER_BYTES)),
+    )
+    .chain(
+        unknown_members_to_write(file)
+            .map(|member| (member.name.as_str(), size(&member.bytes), MAX_MEMBER_BYTES)),
+    );
+    check_read_limits(members)?;
+    let time = zip_time(file.note.modified);
+
+    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+    add_member(&mut zip, NOTE_JSON, &json, time)?;
+    add_member(&mut zip, STROKES_BIN, &strokes, time)?;
     for (name, bytes) in optional {
         if let Some(bytes) = bytes {
             add_member(&mut zip, name, bytes, time)?;
         }
     }
-    if let Some(background) = &file.background {
-        add_member(&mut zip, &background.member_name(), &background.bytes, time)?;
+    if let Some((name, background)) = &background {
+        add_member(&mut zip, name, &background.bytes, time)?;
     }
-    if let Some(revision) = &file.revision {
-        let json = revision
-            .to_json()
-            .map_err(|e| FormatError::InvalidNote(e.to_string()))?;
-        add_member(&mut zip, REVISION_JSON, &json, time)?;
+    if let Some(json) = &revision {
+        add_member(&mut zip, REVISION_JSON, json, time)?;
     }
     for member in unknown_members_to_write(file) {
         if member.name.ends_with('/') && member.bytes.is_empty() {
