@@ -54,20 +54,29 @@ async function refused(session, tool, args = {}) {
   return result.structuredContent;
 }
 
-/** Every file of the library outside its `_ardoise` folder, with a hash of its bytes. */
+/**
+ * What the app writes in `_ardoise` by itself, whatever is asked of it: its diagnostic journals.
+ * Everything else there (the trash above all: a trial must not trash a thing) is part of a snapshot.
+ */
+const LEGITIMATE_IN_META = ['_ardoise/diagnostics'];
+
+/** Every file and folder of the library, `_ardoise` included, with a hash of each file's bytes. */
 function snapshot(library) {
   const files = new Map();
-  const walk = (dir) => {
+  const walk = (dir, relative) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
+      const here = `${relative}${entry.name}`;
+      if (LEGITIMATE_IN_META.includes(here.toLowerCase())) continue;
       if (entry.isDirectory()) {
-        if (entry.name !== '_ardoise') walk(path);
+        files.set(path, 'folder');
+        walk(path, `${here}/`);
       } else {
         files.set(path, createHash('sha256').update(readFileSync(path)).digest('hex'));
       }
     }
   };
-  walk(library);
+  walk(library, '');
   return files;
 }
 
@@ -138,6 +147,12 @@ export const revisionJourneys = [
           if (result.isError) throw new Error(resultText(result));
           const png = pngOf(result);
           if (png.width < 500) throw new Error(`picture ${png.width} x ${png.height}`);
+          // The picture shows the orders carried out: without the labels, at the same size, it is
+          // not the picture `render_note` gives of the note as it is (the first stroke is red now).
+          const trial = pngOf(await session.call('preview_revision', { note: source.id, orders: [recolor], labels: false, dpi: 100 }));
+          const plain = pngOf(await session.call('render_note', { note: source.id, dpi: 100 }));
+          if (trial.width !== plain.width || trial.height !== plain.height) throw new Error(`sizes ${trial.width} x ${trial.height} and ${plain.width} x ${plain.height}`);
+          if (trial.bytes.equals(plain.bytes)) throw new Error('the preview shows the note as it is: the orders changed nothing');
           const info = JSON.parse(resultText(result));
           if (info.preview !== true || info.written !== false || info.labels !== true) throw new Error(JSON.stringify(info).slice(0, 300));
           if (info.report?.orders?.[0]?.op !== 'recolor' || !(info.report.orders[0].selected >= 1)) throw new Error(JSON.stringify(info.report).slice(0, 300));
@@ -205,6 +220,11 @@ export const revisionJourneys = [
           const [a, b] = await app.evaluate(`['original', 'copy'].map((slot) => document.querySelector('[data-slot="revision-compare-' + slot + '"] img').src)`);
           if (!a.startsWith('data:image/png') || !b.startsWith('data:image/png')) throw new Error('not PNG pictures');
           if (a === b) throw new Error('the two pictures are the same');
+          // Side by side at this window's width, not one above the other.
+          const stacked = await app.evaluate(`document.querySelector('[data-slot="revision-compare-stage"]').classList.contains('stacked')`);
+          if (stacked) throw new Error('the pages are one above the other: not side by side');
+          const [left, right] = await app.evaluate(`['original', 'copy'].map((slot) => { const r = document.querySelector('[data-slot="revision-compare-' + slot + '"]').getBoundingClientRect(); return [r.left, r.right, r.top]; })`);
+          if (!(left[1] <= right[0] + 1 && Math.abs(left[2] - right[2]) < 2)) throw new Error(`not side by side: ${JSON.stringify([left, right])}`);
           const caption = await app.evaluate(`document.querySelector('[data-slot="revision-compare-original"] figcaption').textContent`);
           if (caption !== l('editor.revision.comparison.original', { title: NOTE })) throw new Error(`caption « ${caption} »`);
           await app.click('[data-action="revision-close"]');
