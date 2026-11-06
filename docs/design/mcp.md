@@ -36,9 +36,9 @@ the assistant are **millimetres** from the top-left of the page (device units / 
 
 Every tool has a short description (English, the protocol's lingua franca; the assistant answers in the user's
 language anyway), a JSON schema, and MCP annotations: `readOnlyHint` for the read tools, `destructiveHint: true` on
-the tools that change or remove what is there (`update_note`, `move_note`, `trash_note`, `split_note`,
-`straighten_shapes`: the MCP specification keeps `false` for tools that only add, even though nothing is ever
-deleted permanently), `false` on the others, `idempotentHint` where true. Errors are tool results with
+the tools that change or remove what is there (`update_note`, `move_note`, `trash_note`, and `split_note` and
+`straighten_shapes`, which only add on an ordinary note but rewrite a revision: the MCP specification keeps `false` for
+tools that only add, even though nothing is ever deleted permanently), `false` on the others, `idempotentHint` where true. Errors are tool results with
 `isError: true` and the same `{ code, message }` codes as the interface (`errorCodes.*`), message in English.
 
 ### Read
@@ -49,7 +49,7 @@ deleted permanently), `false` on the others, `idempotentHint` where true. Errors
 | `list_binders` | — | binders with note counts |
 | `list_tags` | — | tags with counts |
 | `search_notes` | `query`, `limit?` | like the app's search (title, tags, recognised text, accent-insensitive), with the snippet that matched; says how many notes are not read yet |
-| `get_note` | `note`, `strokes?` (`none` default / `summary` / `points`), `max_points?` | metadata, layers, background (paper, template, image name/page), duration; `summary`: per stroke tool, colour, width, bounding box (mm), start/end time; `points`: decimated polylines in mm (Douglas–Peucker, bounded by `max_points`, default 5000 in total) |
+| `get_note` | `note`, `strokes?` (`none` default / `summary` / `points`), `max_points?` | metadata, `version` (M13: the name of this version of the file), layers, background (paper, template, image name/page), duration; `summary`: per stroke tool, colour, width, bounding box (mm), start/end time; `points`: decimated polylines in mm (Douglas–Peucker, bounded by `max_points`, default 5000 in total) |
 | `get_note_text` | `note`, `language?` (`fr`/`en`, default the app's) | recognised text: lines with their bounding boxes (mm), and the structure when Windows' ink analysis is available (paragraphs, list items, drawings with bounds and stroke indices — `ardoise_hwr::structure`, M8); recognises on demand (and fills the per-PC cache) when the note is not read yet |
 | `render_note` | `note`, `region?` ({x, y, width, height} in mm), `dpi?` (default 100, max 300), `background?` (default true), `layers?`, `labels?` (M13: each stroke's number written next to it) | a PNG image content (MCP `image`), longest side at most 2000 px, the whole page drawn at most 24 Mpx (dpi lowered to fit, the effective dpi and what lowered it returned in a text content next to it) so the assistant can *see* the note |
 | `get_strokes` | `note`, `strokes` (numbers), `step?` | M13: the exact samples `[i, x_mm, y_mm, pressure, t_ms]` of the strokes, at most 20,000 a call |
@@ -64,9 +64,9 @@ deleted permanently), `false` on the others, `idempotentHint` where true. Errors
 | `move_note` | `note`, `binder` (created if missing) | moves the file, never overwrites (" (2)" rule) |
 | `trash_note` | `note` | to the library trash, restorable from the app |
 | `merge_notes` | `notes` (≥ 2), `layout` (`overlay`/`endToEnd`), `title?` | the M5 merge, a new note |
-| `split_note` | `note`, `at_ms` or `polygon` (mm) | the M5 split |
+| `split_note` | `note`, `at_ms` or `polygon` (mm), `title?` | the M5 split **on copies** (M13, `revision.md`): the file of a note that is not a revision is not written, both parts are new notes next to it, revisions of it; on a revision what stays is saved over it, its version before going to the library's trash, and what moves is a new note |
 | `straighten_shapes` | `note`, `strokes?` (indices; default the drawings found by Windows' ink analysis on visible layers, required without it) | the M7 straightening **on a copy** of a note that is not a revision (M13, `revision.md`: the original is not written), in place on a revision (its version before goes to the library's trash as a note of its own) |
-| `preview_revision`, `create_revision`, `edit_revision` | `note`, `orders`, `summary` (`create_revision` also `title?`; the preview also `region?`, `dpi?`, `labels?`) | M13, see `docs/design/revision.md`: a list of orders retouches the strokes in memory (preview, nothing written), on a new copy next to the note, or in place on a note that already is a revision |
+| `preview_revision`, `create_revision`, `edit_revision` | `note`, `orders`, `expected_version`, `summary` (`create_revision` also `title?`; the preview has neither of the two, it also has `region?`, `dpi?`, `labels?` and answers `version`) | M13, see `docs/design/revision.md`: a list of orders retouches the strokes in memory (preview, nothing written), on a new copy next to the note, or in place on a note that already is a revision |
 | `export_note` | `notes`, `format` (`png`/`jpg`/`webp`/`svg`/`pdf`/`txt`/`md`/`docx`/`gif`/`webm`/`mp4`), `path` (absolute file or folder), options of each format (dpi, background, quality, …) | the app's exports; never overwrites (" (2)" added), returns the written paths |
 | `set_note_text` | `note`, `text`, `language?` | stores a corrected transcription in the per-PC handwriting cache, used by the search and the text exports instead of the recogniser's text until the ink changes; never written into the note file |
 
@@ -207,10 +207,12 @@ setting, each naming the tools to use:
   - `merge_notes`: `operations::merge_in` (a new note in the binder of the first one; its background image or PDF
     page is kept, the others' are not). The notes are merged **in the order given** (the library dialog sorts
     oldest first). Default title: the first note's title, or its date, with " (assemblage)" / " (assembled)".
-  - `split_note`: `operations::split_in` with the file's own content and stamp (narration and background go with
-    the new note). `at_ms` is on the clock of the strokes' `start_ms`/`end_ms`; `polygon` is `[[x, y], ...]` in mm.
-    Default title for the new note: "<title> (suite)" / "(extrait)", "(continued)" / "(excerpt)", as the editor
-    proposes.
+  - `split_note`: no longer the app's `operations::split_in`, which saves the kept part over the note: the parts come
+    from `ardoise_core::ops` (the code `split_in` uses) and are written through copies (M13, `revision.md`, "As built:
+    after the independent review", where the two cases are described). `at_ms` is on the clock of the strokes'
+    `start_ms`/`end_ms`; `polygon` is `[[x, y], ...]` in mm. Default title for what moves: "<title> (suite)" / "(extrait)",
+    "(continued)" / "(excerpt)", as the editor proposes; for what stays, as a new note: "(début)" / "(reste)", "(start)" /
+    "(rest)". What moves has the page's picture but not the narration, as in the editor.
   - `straighten_shapes`: `ardoise_ink::shapes::straighten` on the strokes the editor would let the user select as
     drawings, the new strokes taking the place of the first stroke they replace exactly as `straightenSelection`
     does in the editor. Default strokes (after review): those of the drawings Windows' ink analysis finds on the
@@ -227,9 +229,9 @@ setting, each naming the tools to use:
     `noteConflict`, is left alone, and the copy is taken back (`Library::purge`). The result gives
     `previous_version` (`in_trash`, `title`, `id`, a sentence for the user), `strokes_tried` and `chosen_by`
     (`ink_analysis` / `given`). Nothing recognised: no save, no copy (`saved: false`).
-  - `split_note` changes the source too, but the app's own split keeps no previous version either (the kept part
-    is saved over the note with `save_in`; the other part is in the new note, so no ink is lost): mirrored,
-    `destructiveHint: true` only.
+  - `split_note` used to change the source too, as the app's own split does; an assistant refused by `edit_revision` could
+    split a word off and throw it away. It does not any more (above). On a revision it keeps the version before, like
+    `edit_revision`: `destructiveHint: true`, as it still rewrites a revision.
   - `export_note`: the crate resolves `path`: absolute only (`invalidArguments` otherwise); a folder (existing, or
     ending with a separator, or without extension: created if missing) gets `<note file name>.<ext>`; a file name
     must end with the format's extension (`.jpeg` is accepted for jpg); several notes in an image format need a
@@ -280,7 +282,11 @@ setting, each naming the tools to use:
   the file's stamp change and shows the "changed elsewhere" banner (reload offered when there are no unsaved
   changes); if it has unsaved changes its save is refused with `noteConflict` instead of overwriting the tool's
   write (`Library::save` checks the stamp), and a moved or trashed note gives the "missing" banner. The tools
-  themselves refuse to overwrite a version they did not read (`straighten_shapes`, `update_note`: stamp check).
+  themselves refuse to overwrite a version they did not read (`straighten_shapes`, `update_note`, `split_note` on a
+  revision: stamp check), and orders are refused when the note is no longer the version the assistant was shown
+  (`create_revision`, `edit_revision`: `expected_version`, M13).
+- **Limits on text**: `title` at most 1,000 characters on every tool that takes one, `summary` at most 20,000
+  (`invalidArguments`), and a file the reader would refuse is not written (`noteInvalid`): M13, `revision.md`.
 - **Codes**: the interface's `errorCodes.*` (`noteNotFound`, `noteConflict`, `invalidName`, `nothingToMerge`,
   `nothingToSplit`, `exportFailed`, `invalidVideoSettings`, `codecUnavailable`, `backgroundUnsupported`,
   `pdfEncrypted`…) and `invalidArguments`; the new `writeUnavailable` (a host without the app's service: only for
