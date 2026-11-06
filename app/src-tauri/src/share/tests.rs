@@ -1861,6 +1861,34 @@ impl Viewer {
             .unwrap()["snapshot"]
             .clone()
     }
+
+    /// Reads up to both the snapshot of page `index` and the message of its paper. They travel
+    /// apart, and a picture already made can overtake the snapshot; the viewer takes either order
+    /// (it shows a picture only when its key is the one the snapshot asks for).
+    fn snapshot_and_paper(&mut self, index: usize) -> (Value, Value) {
+        let (mut snapshot, mut paper) = (None, None);
+        let deadline = Instant::now() + SOON;
+        loop {
+            if let (Some(snapshot), Some(paper)) = (&snapshot, &paper) {
+                return (Value::clone(snapshot), Value::clone(paper));
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for the snapshot and the paper"
+            );
+            let (message, _) = self
+                .next()
+                .expect("no message in time, or stream ended, before the snapshot and the paper");
+            if message["type"] == "livePaper" {
+                paper = Some(message);
+            } else if let Some(event) = live_events(&message)
+                .iter()
+                .find(|e| e["type"] == "snapshot" && e["snapshot"]["pageIndex"] == index)
+            {
+                snapshot = Some(event["snapshot"].clone());
+            }
+        }
+    }
 }
 
 /// A request of a browser that joined, on a connection of its own: the status and the head of the
@@ -2056,10 +2084,8 @@ fn a_resumed_sheet_lets_each_viewer_fetch_its_paper() {
     hub.command(crate::live::model::LiveCommandKind::PreviousPage)
         .unwrap();
     for viewer in [&mut a, &mut b, &mut c] {
-        assert_eq!(viewer.snapshot_of_page(0)["paperKey"], key.as_str());
-    }
-    for viewer in [&mut a, &mut b, &mut c] {
-        let told = viewer.until("the paper", SOON, |m| m["type"] == "livePaper");
+        let (snapshot, told) = viewer.snapshot_and_paper(0);
+        assert_eq!(snapshot["paperKey"], key.as_str());
         assert_eq!(told, paper, "the same key and the same version");
     }
     assert_eq!(fetch_paper(port, &cookie, &paper), png);
