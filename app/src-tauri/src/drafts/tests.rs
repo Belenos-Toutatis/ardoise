@@ -316,6 +316,37 @@ fn restoring_as_a_copy_makes_a_new_note_beside_the_old_one() {
 }
 
 #[test]
+fn restoring_the_draft_of_a_revision_as_a_copy_makes_an_ordinary_note() {
+    let (dir, library) = library();
+    let mut file = NoteFile::new(sample_note("Copie"));
+    file.mark_as_revision_of(
+        &sample_note("Source"),
+        1_793_948_883_407,
+        "Lignes redressées",
+    );
+    let revision = library.create(Path::new(""), &file).unwrap();
+    let before = fs::read(&revision.path).unwrap();
+    let mut draft = record(&path_text(dir.path()), "n1", 1000, "s1");
+    draft.path = path_text(&revision.path);
+
+    let copy = restore_copy_in(&library, &draft, None, "Récupérée").unwrap();
+
+    // The new note is nobody's retouched copy: no member, so no line under the top bar.
+    let loaded = library.read(Path::new(&copy.path)).unwrap();
+    assert_eq!(loaded.file.revision, None);
+    // The revision it came from is untouched, account included.
+    assert_eq!(fs::read(&revision.path).unwrap(), before);
+    assert!(
+        library
+            .read(&revision.path)
+            .unwrap()
+            .file
+            .revision
+            .is_some()
+    );
+}
+
+#[test]
 fn a_copy_keeps_the_image_kept_with_the_draft_and_drops_one_without_pixels() {
     let (dir, library) = library();
     let root = path_text(dir.path());

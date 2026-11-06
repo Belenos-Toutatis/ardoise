@@ -588,6 +588,86 @@ mod tests {
         }
     }
 
+    /// Writes a revision (a retouched copy an assistant made of a note) of `sample_note`, with
+    /// two lines in its account.
+    fn write_revision(library: &Library, binder: &str, title: &str) -> SavedNote {
+        let mut file = NoteFile::new(sample_note(title));
+        file.mark_as_revision_of(
+            &sample_note("Source"),
+            1_793_948_883_407,
+            "Lignes redressées",
+        );
+        assert!(file.add_revision_entry(1_793_948_900_000, "Titre en rouge"));
+        library.create(&binder_path(binder), &file).unwrap()
+    }
+
+    #[test]
+    fn splitting_a_revision_keeps_the_member_on_the_half_that_stays_and_gives_none_to_the_new_one()
+    {
+        let (_dir, library) = library();
+        let saved = write_revision(&library, "Classe", "Copie");
+        let before = library.read(&saved.path).unwrap();
+        let account = before.file.revision.clone();
+        assert!(account.is_some());
+
+        let result = split_in(
+            &library,
+            &saved.path,
+            before.file.note.clone(),
+            &before.stamp,
+            &SplitSpec::Time { at: 120 },
+            "Suite",
+            None,
+        )
+        .unwrap();
+
+        // The half that stays is still a copy, with its account untouched.
+        let kept = read_note(Path::new(&saved.path)).unwrap();
+        assert_eq!(kept.revision, account);
+        // The half that goes is an ordinary note: nothing says it is a copy of anything.
+        let created = read_note(Path::new(&result.created.path)).unwrap();
+        assert_eq!(created.revision, None);
+    }
+
+    #[test]
+    fn splitting_an_ordinary_note_makes_two_ordinary_notes() {
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "Classe", "Cours");
+        let opened = library.read(&saved.path).unwrap();
+        let result = split_in(
+            &library,
+            &saved.path,
+            opened.file.note.clone(),
+            &opened.stamp,
+            &SplitSpec::Time { at: 120 },
+            "Suite",
+            None,
+        )
+        .unwrap();
+        assert_eq!(read_note(Path::new(&saved.path)).unwrap().revision, None);
+        assert_eq!(
+            read_note(Path::new(&result.created.path)).unwrap().revision,
+            None
+        );
+    }
+
+    #[test]
+    fn a_merge_of_revisions_is_an_ordinary_note_and_leaves_their_accounts_alone() {
+        let (_dir, library) = library();
+        let first = write_revision(&library, "Classe", "Copie 1");
+        let second = write_revision(&library, "Classe", "Copie 2");
+        let paths = vec![text(&first.path), text(&second.path)];
+        let before: Vec<Vec<u8>> = paths.iter().map(|p| fs::read(p).unwrap()).collect();
+
+        let summary = merge_in(&library, &paths, MergeLayout::Overlay, "Les deux").unwrap();
+        let merged = read_note(Path::new(&summary.path)).unwrap();
+        assert_eq!(merged.revision, None);
+        for (path, bytes) in paths.iter().zip(&before) {
+            assert_eq!(&fs::read(path).unwrap(), bytes);
+            assert!(read_note(Path::new(path)).unwrap().revision.is_some());
+        }
+    }
+
     fn three_notes(library: &Library) -> Vec<String> {
         let mut a = sample_note("Un");
         a.tags = vec!["maths".into()];
