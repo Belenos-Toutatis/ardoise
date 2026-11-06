@@ -244,6 +244,28 @@ Restent à essayer à la main (H5) : la vraie tablette, un vrai arrêt de Window
 
 - [ ] [matériel] Avec la vraie tablette, en classe : interrompre un direct, reprendre la feuille, écrire, puis supprimer et recolorer pendant que le vidéoprojecteur et un autre écran du réseau regardent.
 
+## M13 — L'assistant retouche une copie d'une note
+
+Ajouté à la demande de l'utilisateur le 2026-11-06 (SPEC §4.9, `docs/questions.md` Q10), après un essai concluant sur quatre de ses notes. Conception technique : `docs/design/revision.md`.
+
+- [ ] Moteur `ardoise-revise` : les ordres (couleur, style, supprimer, déplacer, agrandir, tourner, lisser, couper un trait, remplacer par des formes, ajouter, copier, fabriquer une lettre, ranger une ligne), avec un compte rendu et des limites.
+- [ ] Les heures : une lettre recopiée ou un mot déplacé prend sa place dans le temps ; les traits suivants se décalent, sauf s'il y a une narration. Vérifié avec la vraie relecture.
+- [ ] Repérer les lignes écrites à partir de l'encre.
+- [ ] Format 1.3 : le membre `revision.json` (ce qui fait d'une note une copie retouchée, et son compte rendu).
+- [ ] Outils de lecture : `get_strokes`, `ink_lines`, les numéros de traits sur `render_note`, les lignes du papier dans `get_note`.
+- [ ] Outils d'écriture : `preview_revision`, `create_revision`, `edit_revision` (refusé sur une note qui n'est pas une copie) ; `straighten_shapes` passe par une copie. Rien n'écrit jamais l'encre de l'original.
+- [ ] Invite `ameliorer_note` / `improve_note` : fautes listées puis validées, lettres prises seulement dans la même écriture de la même note, compte rendu.
+- [ ] Dans l'éditeur : une copie retouchée le dit, avec **Ouvrir l'original**, **Ce qui a changé** et **Comparer**.
+- [ ] Guides FR et EN, `CHANGELOG.md`.
+- [ ] Relecture indépendante, remarques corrigées.
+
+Vérification :
+
+- des tests de chaque ordre, des limites, des heures (avec et sans narration, sur la vraie relecture) ;
+- un test qui vérifie, octet pour octet, que l'original n'est jamais modifié, et que `edit_revision` refuse une note ordinaire ;
+- un parcours de bout en bout avec le vrai exécutable : aperçu, création de la copie, puis ouverture dans l'éditeur, **Ouvrir l'original**, **Ce qui a changé** et **Comparer** ;
+- un essai réel avec un vrai assistant, sur les quatre notes de l'essai.
+
 ---
 
 ## Lancer une étape avec `/goal`

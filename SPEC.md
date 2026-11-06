@@ -164,7 +164,15 @@ Ajouté à la demande de l'utilisateur le 2026-10-28. Ardoise peut être command
 - `ardoise.exe --mcp` : serveur MCP local (entrée et sortie standard, aucun port réseau), déclaré une fois dans l'assistant. Il lit et écrit la bibliothèque avec le même code que l'application (écritures atomiques, contrôle des modifications concurrentes), même quand l'application est fermée.
 - **Outils de lecture** : lister et chercher les notes (titre, étiquettes, classeur, dates, texte reconnu) ; lire une note (informations, traits) ; son texte reconnu avec la position des lignes ; son rendu en image, page entière ou zone, pour que l'assistant voie les schémas.
 - **Outils d'écriture** : créer une note, renommer, étiqueter, ranger, assembler, découper, redresser les formes, exporter dans tous les formats, enregistrer un texte corrigé qui améliore la recherche d'Ardoise. Aucune suppression définitive : une note supprimée va à la corbeille.
-- **Invites prêtes à l'emploi** : mettre une note au propre (Markdown, Word ou LaTeX), titrer et étiqueter les notes sans titre, résumer une séance pour le cahier de textes.
+- **Retoucher une note sur une copie** (ajouté à la demande de l'utilisateur le 2026-11-06, après un essai concluant sur quatre vraies notes ; `docs/questions.md` Q10) : l'assistant améliore une note sans jamais toucher à l'encre de l'original. Il crée une **copie** à côté de l'original, et le code lui interdit de modifier les traits d'une note qui n'est pas une telle copie.
+  - **Ce qu'il peut faire** : redessiner les tracés (lignes, cercles, ellipses, rectangles, flèches, pointillés, courbes), en tenant compte du sens du schéma (forces égales, axes alignés) ; mettre des parties en couleur, encadrer, surligner ; déplacer, agrandir, supprimer ; ranger l'écriture (lignes droites, taille et espacement réguliers, tremblements lissés, écriture posée sur les lignes du papier), tout en gardant l'écriture de la note ; corriger une faute d'orthographe dans l'encre.
+  - **Aperçu d'abord** : l'assistant envoie une liste d'ordres et reçoit l'image du résultat, sans que rien ne soit écrit. Il recommence autant qu'il faut, toujours à partir de la note telle qu'elle est, et ne crée la copie qu'à la fin. C'est lui qui décide, Ardoise qui exécute : il ne recopie jamais tous les points d'une page.
+  - **Fautes d'orthographe** : l'assistant en donne d'abord la liste, l'utilisateur valide, et seules les fautes validées sont corrigées. Ordre des solutions : recopier la lettre depuis **la même écriture dans la même note** ; sinon la fabriquer avec des morceaux de cette écriture (un « g » avec le rond d'un « q » et la queue d'un « j », un « W » avec un « w » agrandi) ; sinon marquer le mot en couleur et le signaler. **Jamais de lettre prise dans une autre note**, car l'utilisateur confie parfois son calepin à un élève. Une même note pouvant contenir deux écritures, l'assistant compare les lettres avant d'en recopier une.
+  - **Relecture** : une lettre recopiée, ou un mot déplacé dans sa phrase, prend sa place dans le temps ; les traits suivants se décalent si nécessaire. Si la note a une narration, rien ne se décale (l'écriture et la voix resteraient désynchronisées) : la lettre est tracée plus vite, dans le temps disponible.
+  - **Compte rendu** : l'assistant dit tout ce qu'il a changé, dont chaque lettre fabriquée. Ce compte rendu reste avec la copie.
+  - **Dans l'éditeur**, une copie retouchée le dit, avec **Ouvrir l'original**, **Ce qui a changé** et **Comparer** (l'original et la copie côte à côte).
+  - **Redresser les formes** passe aussi par une copie : l'original n'est plus modifié.
+- **Invites prêtes à l'emploi** : mettre une note au propre (Markdown, Word ou LaTeX), titrer et étiqueter les notes sans titre, résumer une séance pour le cahier de textes, améliorer une note sur une copie.
 - **Passerelle vers l'application ouverte** : ouvrir une note, lancer la présentation, changer de page, proposer une version propre à la fin du mode direct.
 - **Vie privée** : ce que l'assistant lit part chez son fournisseur, selon les réglages du compte de l'utilisateur ; le guide le rappelle (noms d'élèves). Les outils d'écriture sont séparés des outils de lecture, pour qu'on puisse limiter l'assistant à la lecture.
 
@@ -217,6 +225,8 @@ crates/
   ardoise-mcp       serveur MCP : outils et invites pour un assistant (§4.9)
   ardoise-share     partage de la feuille sur le réseau local : petit serveur HTTP en lecture seule
                     (code, flux d'évènements) (§4.10)
+  ardoise-revise    ordres de retouche appliqués aux traits d'une note, sans aucune entrée/sortie ;
+                    repérage des lignes écrites (§4.9)
 app/
   src-tauri/        ardoise.exe : commandes, fenêtres, options en ligne de commande
                     (--self-test, --diagnostic, --import-inkspace, --mcp…)

@@ -100,3 +100,23 @@ L'utilisateur demande de pouvoir reprendre le mode direct sur une feuille exista
 - Une note reprise qui n'a pas encore d'original garde son état d'avant la reprise, même vierge.
 
 SPEC §4.2 est mis à jour et le jalon M12 est ajouté à ROADMAP.md. Conception : `docs/design/tablet-live-classroom.md`, « M12 ».
+
+## Q10 — L'assistant retouche une copie d'une note (jalon M13, 2026-11-06) — **tranchée**
+
+L'utilisateur demande que l'IA puisse récupérer les documents et les améliorer sur une copie, sans perdre l'original : améliorer les tracés, mettre des parties en couleur, améliorer l'écriture, corriger les fautes. Le pilotage du mode direct ne l'intéresse pas davantage. Un essai sur quatre de ses notes (`p.95 n°21`, `p.99 n°32`, `p.114 n°14`, `fiche incident`) l'a convaincu.
+
+**Décisions de l'utilisateur :**
+- Écriture : niveau 1 (l'écriture de la note, mieux rangée). Pas de police de remplacement, pas d'écriture recomposée.
+- Une lettre recopiée prend sa place dans le temps, ou les traits suivants se décalent.
+- S'il n'y a pas de lettre à recopier, la fabriquer à partir de formes semblables dans les lettres existantes.
+- Jamais de lettre prise dans une autre note : il confie parfois son calepin à un élève.
+
+**Choix par défaut, à contester si besoin :**
+- Avec une narration, rien ne se décale dans le temps (l'écriture et la voix se décaleraient) : la lettre est tracée plus vite.
+- Les fautes sont listées et validées avant d'être corrigées ; ce qui ne peut pas être corrigé proprement est marqué en couleur.
+- La copie s'appelle « Titre (propre) », dans le même classeur, avec la même date de création : elle se range à côté de l'original.
+- Un aperçu ne demande aucune écriture ; `preview_revision` n'est pourtant proposé qu'avec les outils d'écriture (absent en `--read-only`).
+- `straighten_shapes` crée désormais une copie au lieu de modifier la note et d'en mettre l'ancienne version à la corbeille.
+- La copie garde la narration de l'original.
+
+SPEC §4.9 et §6.1 sont mis à jour et le jalon M13 est ajouté à ROADMAP.md. Conception : `docs/design/revision.md`.
