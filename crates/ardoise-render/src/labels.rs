@@ -466,6 +466,7 @@ mod tests {
         };
         let together = red_of(&spots);
         let apart = red_of(&spots[..1]) + red_of(&spots[1..]);
+        assert!(apart > 0, "no number is written");
         assert!(together >= apart * 9 / 10, "{together} < {apart}");
     }
 
