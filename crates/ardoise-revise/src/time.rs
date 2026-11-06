@@ -35,6 +35,11 @@ impl Work<'_> {
             return Ok(None);
         }
         let placed: HashSet<usize> = durations.iter().map(|d| d.0).collect();
+        for &number in &placed {
+            if let Some(slot) = self.slots.get_mut(number) {
+                slot.placed_by = Some(ctx.index);
+            }
+        }
 
         let mut pace = 1.0f64;
         let mut pushed_ms = 0u64;

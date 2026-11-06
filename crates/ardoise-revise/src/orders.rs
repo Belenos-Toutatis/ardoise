@@ -151,11 +151,11 @@ pub enum Flip {
     Rot,
 }
 
-/// A piece of a `glyph`: a stroke as it is at this point of the list, or some of its points, mirrored or turned, resized, then placed. A piece's duration in the replay is the one it was written in.
+/// A piece of a `glyph`: a stroke as it is at this point of the list, or some of its points, mirrored or turned, resized, then placed. A piece's duration in the replay is the one this piece was written in, not its whole stroke's: this is the way to reuse a letter of a word written in one stroke.
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Part {
-    /// The stroke's number. A letter only comes from the note being revised: only its strokes can be named.
+    /// The stroke's number. A letter only comes from the note being revised: only its strokes can be named here, and the points of another note are never to be retyped in a shape.
     pub stroke: usize,
     /// First point kept (index from `get_strokes`; default the first).
     pub from: Option<usize>,
@@ -262,7 +262,7 @@ pub enum Order {
         /// Millimetres along the stroke; 0.2 is light, at most 5.
         sigma: f32,
     },
-    /// Keeps only these points of a stroke: cuts a letter off a word written in one line. Usually on a `copy` of it. Points are numbered as in `get_strokes`, and from 0 again after an earlier `trim` of the same stroke.
+    /// Keeps only these points of a stroke, which stays where it is in time. To reuse a letter of a word written in one stroke, use `glyph` with `from` and `to`: it times the piece only. A stroke an earlier order placed in time (`copy`, `glyph`, `add`, `retime`) is refused: its place was made for the whole stroke. Points are numbered as in `get_strokes`, and from 0 again after an earlier `trim` of the same stroke.
     Trim {
         /// The stroke's number.
         stroke: usize,
@@ -300,7 +300,7 @@ pub enum Order {
         /// The stroke they come right after in the replay (default: at the end of the note).
         after: Option<usize>,
     },
-    /// A copy of the selected strokes as they are at this point of the list, each keeping its tool, width and layer: moves a letter of the same handwriting where one is missing. Give `after`, so that the replay writes it in its place.
+    /// A copy of the selected strokes as they are at this point of the list, each keeping its tool, width and layer: moves a letter of the same handwriting where one is missing, when it is a stroke of its own. Give `after`, so that the replay writes it in its place. For part of a stroke, use `glyph` with `from` and `to`.
     Copy {
         /// The strokes copied: chosen on the note as given, copied as they are by now.
         select: Select,
@@ -317,7 +317,7 @@ pub enum Order {
         /// The stroke it comes right after in the replay (default: at the end of the note).
         after: Option<usize>,
     },
-    /// A letter made of pieces of other strokes, each a new stroke (q + tail of j = g, bigger w = W, u turned = n). Say in the account that it was made.
+    /// A letter made of pieces of other strokes, each a new stroke (q + tail of j = g, bigger w = W, u turned = n), or one letter taken out of a word written in one stroke (`from`, `to`). Say in the account that it was made.
     Glyph {
         /// The pieces, at least one, in the order they are written.
         parts: Vec<Part>,

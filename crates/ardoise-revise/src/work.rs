@@ -59,6 +59,8 @@ pub(crate) struct Slot {
     pub(crate) stroke: Option<Stroke>,
     /// The order that took it away.
     removed_by: Option<usize>,
+    /// The last order that gave it a place in time.
+    pub(crate) placed_by: Option<usize>,
 }
 
 impl Slot {
@@ -67,6 +69,7 @@ impl Slot {
             given: Facts::of(&stroke),
             stroke: Some(stroke),
             removed_by: None,
+            placed_by: None,
         }
     }
 }
@@ -539,6 +542,13 @@ impl<'a> Work<'a> {
         to: Option<usize>,
     ) -> Result<(), ReviseError> {
         let count = self.alive(ctx, number)?.points.len();
+        // Its place in time was made for the whole stroke: what follows moved for it (or it was
+        // drawn faster, with a narration), and a piece would leave a hole. `glyph` times a piece.
+        if let Some(order) = self.slots.get(number).and_then(|slot| slot.placed_by) {
+            return Err(ctx.err(format!(
+                "stroke {number} was given its place in time by order {order}, for its whole length: use `glyph` with `from` and `to` instead, which times the piece only (or `trim` a stroke before placing it)"
+            )));
+        }
         let to = to.unwrap_or(count - 1);
         if to >= count || from > to {
             return Err(ctx.err(format!(
