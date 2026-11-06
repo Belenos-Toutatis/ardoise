@@ -8,12 +8,19 @@
 //! - `strokes.bin` (required): the strokes, see [`strokes`].
 //! - `original.bin`, `original.ardoise`, `thumb.png`, `audio.opus`, `background.<ext>`,
 //!   `text.json` (optional): opaque bytes.
+//! - `revision.json` (optional, format 1.3): the note is a retouched copy of another, see
+//!   [`RevisionInfo`]. A damaged one (or one over [`MAX_REVISION_JSON_BYTES`]) is kept verbatim as
+//!   an unknown member and the note is not a revision.
 //! - anything else: kept verbatim when the note is rewritten.
 //!
 //! Versioning: a reader accepts every older version and every minor version of its own major
 //! version; a file whose major version is newer is refused with
 //! [`FormatError::NewerVersion`] and is never rewritten.
+//!
+//! What is written can be read: the writer refuses, with [`FormatError::TooLarge`], a file over
+//! the limits of the reader, before anything is written.
 
+pub mod revision;
 pub mod strokes;
 
 use std::collections::HashSet;
@@ -31,6 +38,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::fsutil::write_atomic;
 use crate::note::Note;
 
+pub use revision::{RevisionEntry, RevisionInfo};
 pub use strokes::StrokesError;
 
 /// Required member: format version and note metadata.
@@ -52,6 +60,8 @@ pub const AUDIO_OPUS: &str = "audio.opus";
 /// handwriting recognition keeps its results in a cache on each PC (`app/src-tauri/src/
 /// handwriting.rs`), so that two PCs never rewrite a note through Nextcloud for it. Kept as read.
 pub const TEXT_JSON: &str = "text.json";
+/// Optional member (format 1.3): the note is a revision, a retouched copy of another note.
+pub const REVISION_JSON: &str = "revision.json";
 /// Prefix of the optional background member (`background.png`, `background.pdf`…).
 pub const BACKGROUND_PREFIX: &str = "background.";
 
@@ -59,6 +69,10 @@ pub const BACKGROUND_PREFIX: &str = "background.";
 pub const MAX_NOTE_JSON_BYTES: u64 = 16 << 20;
 /// Largest `strokes.bin` accepted (several hours of continuous writing take a few MB).
 pub const MAX_STROKES_BYTES: u64 = 128 << 20;
+/// Largest `revision.json` read as a revision (an account is a few paragraphs per retouching;
+/// supposé: the same as `note.json`). Beyond it the member is treated as damaged: kept as an
+/// unknown member, and the note is not a revision.
+pub const MAX_REVISION_JSON_BYTES: u64 = 16 << 20;
 /// Largest optional or unknown member accepted.
 pub const MAX_MEMBER_BYTES: u64 = 1 << 30;
 /// Largest total of all the members of one archive, decompressed (1.5 GiB).
@@ -79,7 +93,7 @@ pub struct FormatVersion {
 
 impl FormatVersion {
     /// The version this code writes, and the newest it reads.
-    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 2 };
+    pub const CURRENT: FormatVersion = FormatVersion { major: 1, minor: 3 };
 }
 
 impl fmt::Display for FormatVersion {
@@ -126,11 +140,16 @@ pub struct NoteFile {
     pub background: Option<BackgroundFile>,
     /// Reserved for recognised text ([`TEXT_JSON`]): never written by Ardoise, kept as read.
     pub text: Option<Vec<u8>>,
+    /// Present when the note is a revision ([`REVISION_JSON`]): the copy an assistant made of
+    /// another note. Every save keeps it; a merge or a split does not carry it to the notes
+    /// they make.
+    pub revision: Option<RevisionInfo>,
     /// Top-level fields of `note.json` this version does not know, kept verbatim.
     pub unknown_fields: Map<String, Value>,
     /// Members this version does not know, kept verbatim in archive order. When the file is
     /// written, one named like [`background`](Self::background) is dropped: the known
-    /// background wins.
+    /// background wins; so is a `revision.json` when [`revision`](Self::revision) is set. A
+    /// `revision.json` that could not be read stays here.
     pub unknown_members: Vec<Member>,
 }
 
@@ -145,8 +164,28 @@ impl NoteFile {
             audio: None,
             background: None,
             text: None,
+            revision: None,
             unknown_fields: Map::new(),
             unknown_members: Vec::new(),
+        }
+    }
+
+    /// Makes this file a revision of `source`, copied at `at` (Unix milliseconds), with
+    /// `summary` as the first line of the account. What the file already had as a revision is
+    /// replaced: a revision of a revision describes the changes from the copy it was made from.
+    pub fn mark_as_revision_of(&mut self, source: &Note, at: i64, summary: impl Into<String>) {
+        self.revision = Some(RevisionInfo::of_note(source, at, summary));
+    }
+
+    /// Adds a line to the account of a revision, at the end. Returns `false`, and changes
+    /// nothing, when the note is not a revision.
+    pub fn add_revision_entry(&mut self, at: i64, text: impl Into<String>) -> bool {
+        match &mut self.revision {
+            Some(revision) => {
+                revision.push_entry(at, text);
+                true
+            }
+            None => false,
         }
     }
 }
@@ -211,6 +250,17 @@ pub enum FormatError {
     /// The note breaks an invariant of the model (no layer, stroke on a missing layer…).
     #[error("invalid note: {0}")]
     InvalidNote(String),
+    /// The note is over a limit of the reader: a file that could not be read again is not
+    /// written. Nothing was written.
+    #[error("this note is too large to be saved: {what} is {size}, at most {limit}")]
+    TooLarge {
+        /// What is too large: a member's name, or the archive as a whole.
+        what: String,
+        /// Bytes, or members for their number.
+        size: u64,
+        /// The reader's limit, in the same unit.
+        limit: u64,
+    },
 }
 
 impl FormatError {
@@ -219,7 +269,7 @@ impl FormatError {
         match self {
             FormatError::Io { .. } => "noteAccess",
             FormatError::NewerVersion { .. } => "noteNewerVersion",
-            FormatError::InvalidNote(_) => "noteInvalid",
+            FormatError::InvalidNote(_) | FormatError::TooLarge { .. } => "noteInvalid",
             FormatError::Strokes(
                 StrokesError::InvalidPoint { .. } | StrokesError::InvalidStroke { .. },
             ) => "noteInvalid",
@@ -581,6 +631,14 @@ fn read_archive_within<R: Read + Seek>(reader: R, budget: u64) -> Result<NoteFil
             _ => continue,
         }
         let (name, is_dir, bytes) = budget.read(&mut archive, index, MAX_MEMBER_BYTES)?;
+        if name == REVISION_JSON
+            && !is_dir
+            && bytes.len() as u64 <= MAX_REVISION_JSON_BYTES
+            && let Some(revision) = RevisionInfo::parse(&bytes)
+        {
+            file.revision = Some(revision);
+            continue;
+        }
         let slot = match name.as_str() {
             _ if is_dir => None,
             ORIGINAL_BIN => Some(&mut file.original),
@@ -697,12 +755,15 @@ fn zip_time(unix_ms: i64) -> zip::DateTime {
 
 /// The unknown members written with `file`. One named like the background the file has is
 /// dropped: the known background wins. (A file read with `background.png` and an unknown
-/// `background.pdf` must stay writable once the app gives it a PDF background.)
+/// `background.pdf` must stay writable once the app gives it a PDF background.) The same goes
+/// for a damaged `revision.json` once the note is given a revision.
 fn unknown_members_to_write(file: &NoteFile) -> impl Iterator<Item = &Member> {
     let background = file.background.as_ref().map(BackgroundFile::member_name);
-    file.unknown_members
-        .iter()
-        .filter(move |member| background.as_deref() != Some(member.name.as_str()))
+    let revision = file.revision.is_some();
+    file.unknown_members.iter().filter(move |member| {
+        background.as_deref() != Some(member.name.as_str())
+            && !(revision && member.name == REVISION_JSON)
+    })
 }
 
 fn check_member_names(file: &NoteFile) -> Result<(), FormatError> {
@@ -713,6 +774,11 @@ fn check_member_names(file: &NoteFile) -> Result<(), FormatError> {
             "invalid background extension {:?}",
             background.extension
         )));
+    }
+    if file.revision.as_ref().is_some_and(|r| r.of.is_empty()) {
+        return Err(FormatError::InvalidNote(
+            "a revision must name the note it comes from".to_owned(),
+        ));
     }
     let mut names: HashSet<&str> = [
         NOTE_JSON,
@@ -728,6 +794,9 @@ fn check_member_names(file: &NoteFile) -> Result<(), FormatError> {
     let background_name = file.background.as_ref().map(BackgroundFile::member_name);
     if let Some(name) = &background_name {
         names.insert(name);
+    }
+    if file.revision.is_some() {
+        names.insert(REVISION_JSON);
     }
     for member in unknown_members_to_write(file) {
         if member.name.is_empty() || !names.insert(&member.name) {
@@ -755,7 +824,41 @@ fn add_member<W: Write + Seek>(
         .map_err(|e| FormatError::Archive(e.to_string()))
 }
 
+/// Refuses what the reader would refuse: each member against its limit, the whole against
+/// [`MAX_TOTAL_BYTES`] and [`MAX_MEMBERS`]. `members` gives, for each member to write, its name,
+/// its size and its limit.
+fn check_read_limits<'a>(
+    members: impl Iterator<Item = (&'a str, u64, u64)>,
+) -> Result<(), FormatError> {
+    let too_large = |what: &str, size: u64, limit: u64| FormatError::TooLarge {
+        what: what.to_owned(),
+        size,
+        limit,
+    };
+    let mut total = 0u64;
+    let mut count = 0u64;
+    for (name, size, limit) in members {
+        if size > limit {
+            return Err(too_large(name, size, limit));
+        }
+        total = total.saturating_add(size);
+        count += 1;
+    }
+    if total > MAX_TOTAL_BYTES {
+        return Err(too_large("the whole file", total, MAX_TOTAL_BYTES));
+    }
+    if count > MAX_MEMBERS as u64 {
+        return Err(too_large(
+            "its number of members",
+            count,
+            MAX_MEMBERS as u64,
+        ));
+    }
+    Ok(())
+}
+
 /// Encodes a note into the bytes of a `.ardoise` file (format [`FormatVersion::CURRENT`]).
+/// A note the reader would refuse is refused here ([`FormatError::TooLarge`]).
 pub fn to_bytes(file: &NoteFile) -> Result<Vec<u8>, FormatError> {
     to_bytes_as(file, FormatVersion::CURRENT)
 }
@@ -765,11 +868,12 @@ fn to_bytes_as(file: &NoteFile, version: FormatVersion) -> Result<Vec<u8>, Forma
     check_member_names(file)?;
     let strokes = strokes::encode(&file.note.strokes)?;
     let json = note_json(file, version)?;
-    let time = zip_time(file.note.modified);
-
-    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
-    add_member(&mut zip, NOTE_JSON, &json, time)?;
-    add_member(&mut zip, STROKES_BIN, &strokes, time)?;
+    let revision = file
+        .revision
+        .as_ref()
+        .map(RevisionInfo::to_json)
+        .transpose()
+        .map_err(|e| FormatError::InvalidNote(e.to_string()))?;
     let optional = [
         (ORIGINAL_BIN, &file.original),
         (ORIGINAL_NOTE, &file.original_note),
@@ -777,13 +881,51 @@ fn to_bytes_as(file: &NoteFile, version: FormatVersion) -> Result<Vec<u8>, Forma
         (AUDIO_OPUS, &file.audio),
         (TEXT_JSON, &file.text),
     ];
+    let background = file
+        .background
+        .as_ref()
+        .map(|background| (background.member_name(), background));
+    let size = |bytes: &[u8]| bytes.len() as u64;
+    let members = [
+        (NOTE_JSON, size(&json), MAX_NOTE_JSON_BYTES),
+        (STROKES_BIN, size(&strokes), MAX_STROKES_BYTES),
+    ]
+    .into_iter()
+    .chain(
+        revision
+            .iter()
+            .map(|json| (REVISION_JSON, size(json), MAX_REVISION_JSON_BYTES)),
+    )
+    .chain(optional.iter().filter_map(|(name, bytes)| {
+        bytes
+            .as_ref()
+            .map(|bytes| (*name, size(bytes), MAX_MEMBER_BYTES))
+    }))
+    .chain(
+        background
+            .iter()
+            .map(|(name, member)| (name.as_str(), size(&member.bytes), MAX_MEMBER_BYTES)),
+    )
+    .chain(
+        unknown_members_to_write(file)
+            .map(|member| (member.name.as_str(), size(&member.bytes), MAX_MEMBER_BYTES)),
+    );
+    check_read_limits(members)?;
+    let time = zip_time(file.note.modified);
+
+    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+    add_member(&mut zip, NOTE_JSON, &json, time)?;
+    add_member(&mut zip, STROKES_BIN, &strokes, time)?;
     for (name, bytes) in optional {
         if let Some(bytes) = bytes {
             add_member(&mut zip, name, bytes, time)?;
         }
     }
-    if let Some(background) = &file.background {
-        add_member(&mut zip, &background.member_name(), &background.bytes, time)?;
+    if let Some((name, background)) = &background {
+        add_member(&mut zip, name, &background.bytes, time)?;
+    }
+    if let Some(json) = &revision {
+        add_member(&mut zip, REVISION_JSON, json, time)?;
     }
     for member in unknown_members_to_write(file) {
         if member.name.ends_with('/') && member.bytes.is_empty() {

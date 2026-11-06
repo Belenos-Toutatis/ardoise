@@ -265,6 +265,7 @@ dependencies = [
  "ardoise-hwr",
  "ardoise-ink",
  "ardoise-render",
+ "ardoise-revise",
  "base64 0.23.1",
  "chrono",
  "rmcp",
@@ -285,6 +286,7 @@ dependencies = [
  "ardoise-core",
  "ardoise-ink",
  "ardoise-render",
+ "ardoise-revise",
  "bzip2-rs",
  "color_quant",
  "cpal",
@@ -330,6 +332,19 @@ dependencies = [
  "roxmltree",
  "thiserror 2.0.21",
  "tiny-skia 0.11.4",
+]
+
+[[package]]
+name = "ardoise-revise"
+version = "0.1.0"
+dependencies = [
+ "ardoise-core",
+ "ardoise-ink",
+ "ardoise-render",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

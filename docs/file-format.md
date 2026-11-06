@@ -1,8 +1,8 @@
 # The `.ardoise` file format
 
 > Developer document, written in English (the planning documents are in French). It describes format
-> **version 1.2** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
-> `backgroundImage` field and `original.ardoise` member). Requirements: SPEC §3.3 and §3.4. Code: `crates/ardoise-core/src/format.rs`
+> **version 1.3** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
+> `backgroundImage` field and `original.ardoise` member; 1.3 = 1.2 plus the optional `revision.json` member). Requirements: SPEC §3.3 and §3.4. Code: `crates/ardoise-core/src/format.rs`
 > (container, `note.json`) and `crates/ardoise-core/src/format/strokes.rs` (`strokes.bin`). Model: `note.rs`
 > (`ardoise-core`) and `model.rs` (`ardoise-ink`). Committed sample files: `testdata/format/v1/`.
 
@@ -18,6 +18,7 @@ unzip tool:
 | `thumb.png` | no | thumbnail, PNG | stored |
 | `audio.opus` | no | narration, Ogg Opus (§4.1) | stored |
 | `background.<ext>` | no | background image (pixels of `backgroundImage`); `<ext>` = 1–10 lowercase ASCII letters or digits; Ardoise writes `png` or `jpg` | by extension (see below) |
+| `revision.json` | no (1.3) | the note is a **revision**, a retouched copy of another note made by an assistant: whose copy, and the account of what changed (§4.2) | deflate |
 | `text.json` | no | reserved for recognised handwriting (not written: the recognition keeps a cache on each PC; opaque to the format) | deflate |
 | anything else | no | members of newer versions: kept byte for byte when the note is rewritten | by extension (see below) |
 
@@ -31,7 +32,7 @@ Members whose name ends in `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.opus`, `.
   no archive comment, no spanning. Writers use only **stored** (method 0) and **deflate** (method 8); readers refuse
   other methods (the member cannot be decoded: "damaged file").
 - Member order written: `note.json`, `strokes.bin`, then `original.bin`, `original.ardoise`, `thumb.png`, `audio.opus`, `text.json`,
-  `background.<ext>`, then unknown members in the order they were read. **Readers must not depend on the order**;
+  `background.<ext>`, `revision.json`, then unknown members in the order they were read. **Readers must not depend on the order**;
   they find members by name through the central directory. Names are case-sensitive, `/`-separated, UTF-8 (the
   "language encoding" flag, bit 11, is set when a name is not ASCII).
 - Every member's DOS date and time is the note's `modified` time in UTC (1980-01-01 00:00 when out of the DOS range),
@@ -57,7 +58,7 @@ A member that crosses a limit, its own or what is left of the total, makes the f
 
 ## 2. `note.json`
 
-A UTF-8 JSON object. Version 1.2 writes it indented with two spaces, `format` first and the other keys in
+A UTF-8 JSON object. Version 1.2 and 1.3 write it indented with two spaces, `format` first and the other keys in
 alphabetical order; **key order and whitespace are not significant**.
 
 ```json
@@ -250,6 +251,8 @@ length and thousands of random corruptions).
   write it: the handwriting recognition (M7) keeps its results in a cache on each PC (`%LOCALAPPDATA%\Ardoise\handwriting`),
   so that two PCs never rewrite the same note through Nextcloud for it. A member found in a file is kept as it is.
 
+- `revision.json` (1.3): see §4.2.
+
 ### 4.1 `audio.opus`
 
 The narration is an ordinary **Ogg Opus** stream (RFC 3533 container, RFC 7845 mapping), so any player (VLC, a
@@ -278,6 +281,44 @@ rewrite a note: specifying its content changes neither the major nor the minor v
 the narration is written atomically with the whole file and with the usual check that the file has not changed since
 it was read (§6).
 
+### 4.2 `revision.json`
+
+Written only on a revision (SPEC §4.9, `docs/design/revision.md`); a note without it is an ordinary note. A UTF-8 JSON
+object, indented with two spaces:
+
+```json
+{
+  "of": "1d1e7c9a-…",
+  "ofTitle": "Cours d'optique",
+  "created": 1793948883407,
+  "summary": [
+    { "at": 1793948883407, "text": "Lignes redressées." },
+    { "at": 1793949000000, "text": "Le « g » de « longueur » est refait." }
+  ]
+}
+```
+
+| Key | Type | Meaning |
+|---|---|---|
+| `of` | string | `id` (`note.json`) of the note this one is a copy of. Required, never empty. |
+| `ofTitle` | string | that note's title when the copy was made, to say whose copy this is when the source is gone. |
+| `created` | integer | when the copy was made, Unix milliseconds. |
+| `summary` | array | the account of the changes, oldest first: one `{ "at", "text" }` per retouching (`at` in Unix milliseconds, `text` plain text written by the assistant, in the user's language). Absent = empty. |
+
+The source is found by id in the library (titles and folders change, ids do not); it can be gone. Every save of the note
+keeps the member (the editor, the library's rename, tags and favourite, live mode on a resumed sheet, restoring from the
+trash); a merge or the editor's split does not carry it to the notes they make, nor does "save as a copy" (an assistant's
+split of an ordinary note makes two new notes, both marked as copies of it: `docs/design/revision.md`). Keys this version does
+not know inside the object are ignored (and not written back). **A member that cannot be read** (not JSON, not an
+object, a missing or empty `of`, a wrong type) does not make the note unreadable: the note is read as not being a
+revision, and the member stays among the unknown members, written back byte for byte, until the note is given a
+revision, which replaces it. A reader of 1.2 or older keeps the member as an unknown one.
+
+A live-mode fork of a resumed revision stays a revision: when the resumed sheet changed or went elsewhere meanwhile, the
+page continues in a new note beside it that is written from the file that was resumed, so it carries the same
+`revision.json` (`live/hub.rs`, `page_file` and `write_beside`); the other notes of the session (new pages) are ordinary
+notes. The member has a read limit of about 16 MiB, decompressed, like `note.json`.
+
 ## 5. Versioning rules
 
 The version is `format.version` (major) and `format.minor` in `note.json`.
@@ -305,8 +346,9 @@ Sample files of version 1 (regenerate only when adding one:
 |---|---|
 | `testdata/format/v1/minimal.ardoise` | empty note, one layer |
 | `testdata/format/v1/full.ardoise` | every tool, two layers, custom paper, tags, Inkspace origin, every optional member |
-| `testdata/format/v1/future-minor.ardoise` | format 1.3 with an unknown top-level key and unknown members |
+| `testdata/format/v1/future-minor.ardoise` | an unknown top-level key and unknown members (it was written when "1.3" stood for a later version, hence its number; it is only read, never rewritten) |
 | `testdata/format/v1/full-1.2.ardoise` | format 1.2: a turned, translucent background image from a PDF page, and `original.ardoise` |
+| `testdata/format/v1/revision-1.3.ardoise` | format 1.3: a revision with an account of two entries |
 
 ## 6. Library conventions (not part of the file)
 

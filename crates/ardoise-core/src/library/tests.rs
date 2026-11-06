@@ -1335,3 +1335,53 @@ fn a_note_that_just_arrived_in_the_trash_is_kept_whatever_its_record_says() {
         1
     );
 }
+
+#[test]
+fn a_revision_stays_a_revision_through_every_change_of_the_library() {
+    let (_dir, library) = new_library();
+    let mut file = note_file("copy", "Propre");
+    file.mark_as_revision_of(&blank_note("source", "Brouillon"), NOON, "Écriture rangée");
+    let expected = file.revision.clone();
+    let saved = library.create(Path::new("Classe"), &file).unwrap();
+    let revision_of = |path: &Path| library.read(path).unwrap().file.revision;
+    assert_eq!(revision_of(&saved.path), expected);
+
+    // Tags, favourite, retitle (which renames the file), move.
+    let stamp = library
+        .set_tags(&saved.path, &["maths".to_owned()], Some(&saved.stamp))
+        .unwrap();
+    library
+        .set_favorite(&saved.path, true, Some(&stamp))
+        .unwrap();
+    assert_eq!(revision_of(&saved.path), expected);
+    let renamed = library.retitle(&saved.path, "Autre titre", None).unwrap();
+    assert_eq!(revision_of(&renamed.path), expected);
+    let moved = library.move_to(&renamed.path, Path::new("Autre")).unwrap();
+    assert_eq!(revision_of(&moved), expected);
+
+    // A save that adds a line to the account keeps the rest.
+    let mut loaded = library.read(&moved).unwrap();
+    assert!(loaded.file.add_revision_entry(NOON + 1, "Un mot recopié"));
+    library.save(&moved, &loaded.file, &loaded.stamp).unwrap();
+    let account = revision_of(&moved).unwrap().summary;
+    assert_eq!(account.len(), 2);
+    assert_eq!(account[1].text, "Un mot recopié");
+
+    // The trash keeps the bytes; so does the restored note.
+    let item = library.trash(&moved).unwrap();
+    let in_trash = crate::format::read_note(&item.path).unwrap();
+    assert_eq!(in_trash.revision.as_ref().unwrap().of, "source");
+    let restored = library.restore(&item.id).unwrap();
+    assert_eq!(revision_of(&restored).unwrap().summary.len(), 2);
+
+    // The version kept in the trash before a change is a revision too.
+    let kept = library
+        .trash_copy(&library.read(&restored).unwrap().file, &restored)
+        .unwrap();
+    assert!(
+        crate::format::read_note(&kept.path)
+            .unwrap()
+            .revision
+            .is_some()
+    );
+}

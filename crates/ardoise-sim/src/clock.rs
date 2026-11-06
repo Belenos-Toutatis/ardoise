@@ -100,12 +100,17 @@ impl VirtualClock {
     pub fn advance(&self, by: Duration) {
         let by = nanos(by);
         let real = self.real.map(|start| nanos(start.elapsed()));
-        // The closure always returns `Some`, so the update cannot fail.
-        let _ = self
-            .nanos
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |now| {
-                Some(now.max(real.unwrap_or(0)).saturating_add(by))
-            });
+        let mut now = self.nanos.load(Ordering::SeqCst);
+        loop {
+            let next = now.max(real.unwrap_or(0)).saturating_add(by);
+            match self
+                .nanos
+                .compare_exchange_weak(now, next, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => return,
+                Err(actual) => now = actual,
+            }
+        }
     }
 
     /// Moves the clock to `time` if it is later than now; the clock never goes back.

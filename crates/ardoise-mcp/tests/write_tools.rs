@@ -20,11 +20,14 @@ use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
 use support::*;
 
-const WRITE_TOOLS: [&str; 9] = [
+const WRITE_TOOLS: [&str; 12] = [
     "create_note",
+    "create_revision",
+    "edit_revision",
     "export_note",
     "merge_notes",
     "move_note",
+    "preview_revision",
     "set_note_text",
     "split_note",
     "straighten_shapes",
@@ -32,12 +35,23 @@ const WRITE_TOOLS: [&str; 9] = [
     "update_note",
 ];
 
+/// The write group's tool that writes nothing (it is in the group because it prepares what
+/// `create_revision` writes): `readOnlyHint`.
+const READ_ONLY_HINT: [&str; 1] = ["preview_revision"];
+
 /// Tools that give the same result when called twice.
-const IDEMPOTENT: [&str; 3] = ["move_note", "set_note_text", "update_note"];
+const IDEMPOTENT: [&str; 4] = [
+    "move_note",
+    "preview_revision",
+    "set_note_text",
+    "update_note",
+];
 
 /// Tools that change or remove what is there (`destructiveHint`: the MCP specification keeps
-/// `false` for the tools that only add), even when the app can restore it.
-const DESTRUCTIVE: [&str; 5] = [
+/// `false` for the tools that only add), even when the app can restore it. `split_note` and
+/// `straighten_shapes` only add on an ordinary note, and rewrite a revision.
+const DESTRUCTIVE: [&str; 6] = [
+    "edit_revision",
     "move_note",
     "split_note",
     "straighten_shapes",
@@ -90,7 +104,11 @@ async fn every_write_tool_is_listed_with_a_schema_and_annotations() {
         );
         assert_eq!(tool.input_schema.get("type").unwrap(), "object", "{name}");
         let annotations = tool.annotations.as_ref().expect("annotations");
-        assert_eq!(annotations.read_only_hint, Some(false), "{name}");
+        assert_eq!(
+            annotations.read_only_hint,
+            Some(READ_ONLY_HINT.contains(&name)),
+            "{name}"
+        );
         assert_eq!(
             annotations.destructive_hint,
             Some(DESTRUCTIVE.contains(&name)),
@@ -143,7 +161,7 @@ async fn a_read_only_server_lists_no_write_tool_and_refuses_each_call() {
         assert!(!read_only.iter().any(|n| n == name), "{name} in read-only");
         assert!(full.iter().any(|n| n == name), "{name} missing");
     }
-    assert_eq!(read_only.len(), 7);
+    assert_eq!(read_only.len(), 9);
 
     // Through the protocol: not listed, and a call fails without touching the library.
     let session = session_with(Language::En, ServerOptions { read_only: true }).await;
@@ -164,6 +182,15 @@ async fn a_read_only_server_lists_no_write_tool_and_refuses_each_call() {
         ),
         ("split_note", json!({ "note": id, "at_ms": 100 })),
         ("straighten_shapes", json!({ "note": id })),
+        ("preview_revision", json!({ "note": id, "orders": [] })),
+        (
+            "create_revision",
+            json!({ "note": id, "orders": [{ "op": "delete", "select": { "ids": [0] } }], "summary": "x" }),
+        ),
+        (
+            "edit_revision",
+            json!({ "note": id, "orders": [{ "op": "delete", "select": { "ids": [0] } }], "summary": "x" }),
+        ),
         (
             "export_note",
             json!({ "notes": [id], "format": "png", "path": "C:\\x" }),
@@ -592,6 +619,7 @@ async fn merging_gives_a_new_note_in_the_first_notes_binder() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_note_is_split_at_an_instant_or_by_a_zone() {
     let session = session().await;
+    let source = fs::read(session.harness.path_of(CHIMIE)).unwrap();
     // CHIMIE: three waves written in the first 800 ms, a circle between 2000 and 2600 ms.
     let split = session
         .ok("split_note", json!({ "note": CHIMIE, "at_ms": 1500 }))
@@ -600,8 +628,14 @@ async fn a_note_is_split_at_an_instant_or_by_a_zone() {
     assert_eq!(split["created"]["stroke_count"], 1);
     assert_eq!(split["created"]["binder"], "Physique");
     assert_eq!(split["created"]["title"], "Chimie des métaux (continued)");
-    assert_eq!(split["kept"]["id"], CHIMIE);
+    assert_eq!(split["kept"]["title"], "Chimie des métaux (start)");
+    // Two new notes; the note itself keeps all its strokes, its file is not written.
+    assert_ne!(split["kept"]["id"], CHIMIE);
     assert_ne!(split["created"]["id"], CHIMIE);
+    assert_eq!(split["original"]["id"], CHIMIE);
+    assert_eq!(split["original"]["stroke_count"], 4);
+    assert_eq!(split["original_unchanged"], true);
+    assert_eq!(fs::read(session.harness.path_of(CHIMIE)).unwrap(), source);
 
     // By zone: the polygon (millimetres) takes the first wave of the optics note only.
     let zone = session
@@ -617,6 +651,7 @@ async fn a_note_is_split_at_an_instant_or_by_a_zone() {
     assert_eq!(zone["created"]["title"], "Extrait");
     assert_eq!(zone["created"]["stroke_count"], 1);
     assert_eq!(zone["kept"]["stroke_count"], 2);
+    assert_eq!(zone["kept"]["title"], "Cours d'optique (rest)");
 
     // Bad requests: both or none of the two, a polygon without area, nothing to split.
     for arguments in [
@@ -643,13 +678,25 @@ fn note_of(session: &Session, id: &str) -> ardoise_core::note::Note {
     session.harness.library().read(&path).unwrap().file.note
 }
 
+/// The bytes and the stamp of a note's file: what "not written" means.
+fn fingerprint(session: &Session, id: &str) -> (Vec<u8>, ardoise_core::library::FileStamp) {
+    let path = session.harness.path_of(id);
+    let stamp = session.harness.library().read(&path).unwrap().stamp;
+    (fs::read(path).unwrap(), stamp)
+}
+
+/// The note `id`'s file in the whole.
+fn file_of(session: &Session, id: &str) -> ardoise_core::format::NoteFile {
+    let path = session.harness.path_of(id);
+    session.harness.library().read(&path).unwrap().file
+}
+
 #[tokio::test(flavor = "current_thread")]
-async fn drawn_shapes_are_straightened_in_one_save_and_the_version_before_is_kept() {
+async fn drawn_shapes_are_straightened_on_a_copy_and_the_original_is_never_written() {
     let session = session().await;
-    let path = session.harness.path_of(CHIMIE);
     let library = session.harness.library();
-    let loaded = library.read(&path).unwrap();
-    let before = loaded.file.note.strokes.clone();
+    let before_file = fingerprint(&session, CHIMIE);
+    let before = note_of(&session, CHIMIE).strokes;
     assert_eq!(before.len(), 4);
     // The ink analysis finds the circle (3) as a drawing; the waves are handwriting, and one of
     // them (2) is on a hidden layer: neither is tried by default.
@@ -668,73 +715,151 @@ async fn drawn_shapes_are_straightened_in_one_save_and_the_version_before_is_kep
     assert_eq!(result["strokes_tried"], json!([3]), "{result}");
     assert_eq!(result["straightened"], 1, "{result}");
     assert_eq!(result["saved"], true);
-    assert_eq!(*session.harness.write.saves.lock().unwrap(), 1);
+    assert_eq!(result["made_a_copy"], true);
+    assert_eq!(result["original_unchanged"], true);
     let shapes = result["shapes"].as_array().unwrap();
     assert!(
         shapes
             .iter()
             .any(|s| s["shape"] == "ellipse" && s["strokes"] == json!([3]))
     );
-    // The circle was replaced; the order of the other strokes is kept.
-    let after = library.read(&path).unwrap().file.note.strokes;
+
+    // The original: the same bytes and the same stamp, and nothing in the trash.
+    assert_eq!(fingerprint(&session, CHIMIE), before_file);
+    assert_eq!(*session.harness.write.saves.lock().unwrap(), 0);
+    assert!(library.trash_items().unwrap().is_empty());
+    assert_eq!(result["original"]["id"], CHIMIE);
+
+    // The copy: a new note next to it, a revision of it, with the circle redrawn.
+    let copy_id = result["note"]["id"].as_str().unwrap().to_owned();
+    assert_ne!(copy_id, CHIMIE);
+    assert_eq!(result["note"]["title"], "Chimie des métaux (clean)");
+    assert_eq!(result["note"]["binder"], "Physique");
+    let copy = file_of(&session, &copy_id);
+    let after = &copy.note.strokes;
     assert_eq!(after[..3], before[..3]);
     assert_ne!(after[3], before[3]);
     assert_eq!(after[3].layer, before[3].layer);
     assert_eq!(after[3].tool, before[3].tool);
+    let revision = copy.revision.as_ref().expect("the copy is a revision");
+    assert_eq!(revision.of, CHIMIE);
+    assert_eq!(revision.of_title, "Chimie des métaux");
+    assert_eq!(revision.summary.len(), 1);
+    assert_eq!(revision.summary[0].text, "Shapes straightened: 1");
     assert!(strays(&session.harness.root).is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_copy_of_straightening_is_named_in_the_apps_language() {
+    let session = session_with(Language::Fr, ServerOptions::default()).await;
+    let result = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [3] }),
+        )
+        .await;
+    assert_eq!(result["note"]["title"], "Chimie des métaux (propre)");
+    let copy = file_of(&session, result["note"]["id"].as_str().unwrap());
+    assert_eq!(
+        copy.revision.unwrap().summary[0].text,
+        "Formes redressées : 1"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_revision_is_straightened_in_place_and_its_version_before_is_kept() {
+    let session = session().await;
+    let library = session.harness.library();
+    // A copy of the chemistry note, with its circle as it was drawn.
+    let made = session
+        .ok(
+            "create_revision",
+            json!({
+                "note": CHIMIE,
+                "orders": [{ "op": "recolor", "select": { "ids": [0] }, "color": "#ff0000" }],
+                "summary": "Premier trait en rouge",
+            }),
+        )
+        .await;
+    let copy_id = made["note"]["id"].as_str().unwrap().to_owned();
+    let original = fingerprint(&session, CHIMIE);
+    let path = session.harness.path_of(&copy_id);
+    let before = library.read(&path).unwrap();
+    assert!(library.trash_items().unwrap().is_empty());
+
+    let result = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": copy_id, "strokes": [3] }),
+        )
+        .await;
+    assert_eq!(result["straightened"], 1, "{result}");
+    assert_eq!(result["made_a_copy"], false);
+    assert_eq!(*session.harness.write.saves.lock().unwrap(), 1);
+    // Still the same note, its circle redrawn, one more line in its account.
+    let after = library.read(&path).unwrap();
+    assert_eq!(after.file.note.id, copy_id);
+    assert_ne!(after.file.note.strokes[3], before.file.note.strokes[3]);
+    let account = &after.file.revision.as_ref().unwrap().summary;
+    assert_eq!(account.len(), 2);
+    assert_eq!(account[0].text, "Premier trait en rouge");
+    assert_eq!(account[1].text, "Shapes straightened: 1");
+    // The original is still untouched.
+    assert_eq!(fingerprint(&session, CHIMIE), original);
 
     // The version before is in the trash, as a note of its own that the app restores next to
-    // the note.
+    // the copy.
     let kept = &result["previous_version"];
     let items = library.trash_items().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].id, kept["in_trash"].as_str().unwrap());
     assert_eq!(
         items[0].title.as_deref(),
-        Some("Chimie des métaux (before straightening)")
+        Some("Chimie des métaux (clean) (before straightening)")
     );
-    assert_eq!(kept["title"], "Chimie des métaux (before straightening)");
     assert!(kept["restore"].as_str().unwrap().contains("30 days"));
-    let copy_id = kept["id"].as_str().unwrap();
-    assert_ne!(copy_id, CHIMIE, "a new id: it never stands for the note");
-    assert_eq!(items[0].note_id.as_deref(), Some(copy_id));
+    let kept_id = kept["id"].as_str().unwrap();
+    assert_ne!(kept_id, copy_id, "a new id: it never stands for the note");
+    assert_eq!(items[0].note_id.as_deref(), Some(kept_id));
     let restored = library.restore(&items[0].id).unwrap();
     assert_eq!(restored.parent(), path.parent());
     let file = library.read(&restored).unwrap().file;
-    assert_eq!(file.note.strokes, before);
-    assert_eq!(file.note.id, copy_id);
-    assert_eq!(file.note.tags, loaded.file.note.tags);
-    assert_eq!(
-        session.harness.path_of(CHIMIE),
-        path,
-        "the note itself stays"
-    );
+    assert_eq!(file.note.strokes, before.file.note.strokes);
+    assert_eq!(file.note.id, kept_id);
+    assert_eq!(session.harness.path_of(&copy_id), path, "the copy stays");
+    assert!(strays(&session.harness.root).is_empty());
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn the_version_before_straightening_is_named_in_the_apps_language() {
+async fn a_revision_straightened_in_place_names_its_previous_version_in_the_apps_language() {
     let session = session_with(Language::Fr, ServerOptions::default()).await;
-    session
-        .harness
-        .fake
-        .drawings
-        .lock()
-        .unwrap()
-        .insert(CHIMIE.into(), vec![3]);
+    let made = session
+        .ok(
+            "create_revision",
+            json!({
+                "note": CHIMIE,
+                "orders": [{ "op": "recolor", "select": { "ids": [0] }, "color": "#ff0000" }],
+                "summary": "Premier trait en rouge",
+            }),
+        )
+        .await;
     let result = session
-        .ok("straighten_shapes", json!({ "note": CHIMIE }))
+        .ok(
+            "straighten_shapes",
+            json!({ "note": made["note"]["id"], "strokes": [3] }),
+        )
         .await;
     assert_eq!(
         result["previous_version"]["title"],
-        "Chimie des métaux (avant redressement)"
+        "Chimie des métaux (propre) (avant redressement)"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn without_the_ink_analysis_the_strokes_must_be_given() {
     let session = session().await;
-    let path = session.harness.path_of(CHIMIE);
-    let before = fs::read(&path).unwrap();
+    let before = fingerprint(&session, CHIMIE);
+    let notes = session.harness.library().list().notes.len();
     // No analysis (the fake's heuristics): the default is refused, nothing is written.
     let error = session
         .failure("straighten_shapes", json!({ "note": CHIMIE }))
@@ -745,8 +870,8 @@ async fn without_the_ink_analysis_the_strokes_must_be_given() {
         message.contains("ink analysis") && message.contains("`strokes`"),
         "{message}"
     );
-    assert_eq!(fs::read(&path).unwrap(), before);
-    assert!(session.harness.library().trash_items().unwrap().is_empty());
+    assert_eq!(fingerprint(&session, CHIMIE), before);
+    assert_eq!(session.harness.library().list().notes.len(), notes);
 
     // Given, they are tried whatever the analysis.
     let result = session
@@ -757,14 +882,15 @@ async fn without_the_ink_analysis_the_strokes_must_be_given() {
         .await;
     assert_eq!(result["chosen_by"], "given");
     assert_eq!(result["straightened"], 1);
-    assert_eq!(session.harness.library().trash_items().unwrap().len(), 1);
+    assert_eq!(session.harness.library().list().notes.len(), notes + 1);
+    assert_eq!(fingerprint(&session, CHIMIE), before);
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn straightening_only_the_chosen_strokes_and_leaving_the_rest_alone() {
+async fn nothing_straightened_makes_no_copy_and_saves_nothing() {
     let session = session().await;
-    let path = session.harness.path_of(CHIMIE);
-    let before = fs::read(&path).unwrap();
+    let before = fingerprint(&session, CHIMIE);
+    let notes = session.harness.library().list().notes.len();
 
     // The waves are no shape: nothing changes, nothing is saved, nothing is kept.
     let none = session
@@ -775,8 +901,9 @@ async fn straightening_only_the_chosen_strokes_and_leaving_the_rest_alone() {
         .await;
     assert_eq!(none["straightened"], 0);
     assert_eq!(none["saved"], false);
-    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(fingerprint(&session, CHIMIE), before);
     assert_eq!(*session.harness.write.saves.lock().unwrap(), 0);
+    assert!(session.harness.write.creations.lock().unwrap().is_empty());
     assert!(session.harness.library().trash_items().unwrap().is_empty());
     // A note whose analysis finds no drawing: the same.
     session
@@ -799,14 +926,25 @@ async fn straightening_only_the_chosen_strokes_and_leaving_the_rest_alone() {
         )
         .await;
     assert_eq!(error["code"], "invalidArguments");
-    assert_eq!(fs::read(&path).unwrap(), before);
-    assert_eq!(note_of(&session, CHIMIE).strokes.len(), 4);
+    assert_eq!(fingerprint(&session, CHIMIE), before);
+    assert_eq!(session.harness.library().list().notes.len(), notes);
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_note_changed_meanwhile_is_not_overwritten() {
+async fn a_revision_changed_meanwhile_is_not_overwritten() {
     let session = session().await;
-    let path = session.harness.path_of(CHIMIE);
+    let made = session
+        .ok(
+            "create_revision",
+            json!({
+                "note": CHIMIE,
+                "orders": [{ "op": "recolor", "select": { "ids": [0] }, "color": "#ff0000" }],
+                "summary": "Premier trait en rouge",
+            }),
+        )
+        .await;
+    let copy_id = made["note"]["id"].as_str().unwrap().to_owned();
+    let path = session.harness.path_of(&copy_id);
     let before = session
         .harness
         .library()
@@ -815,7 +953,7 @@ async fn a_note_changed_meanwhile_is_not_overwritten() {
         .file
         .note
         .strokes;
-    // Another PC saves the note between the tool's read and its write.
+    // Another PC saves the copy between the tool's read and its write.
     let root = session.harness.root.clone();
     *session.harness.write.before_save.lock().unwrap() = Some(Box::new(move |note| {
         Library::open(&root)
@@ -826,14 +964,15 @@ async fn a_note_changed_meanwhile_is_not_overwritten() {
     let error = session
         .failure(
             "straighten_shapes",
-            json!({ "note": CHIMIE, "strokes": [3] }),
+            json!({ "note": copy_id, "strokes": [3] }),
         )
         .await;
     assert_eq!(error["code"], "noteConflict", "{error}");
     // The other version is still there, untouched by the tool.
-    let kept = session.harness.library().read(&path).unwrap().file.note;
-    assert!(kept.favorite);
-    assert_eq!(kept.strokes, before, "the circle was not replaced");
+    let kept = session.harness.library().read(&path).unwrap().file;
+    assert!(kept.note.favorite);
+    assert_eq!(kept.note.strokes, before, "the circle was not replaced");
+    assert_eq!(kept.revision.unwrap().summary.len(), 1);
     assert!(strays(&session.harness.root).is_empty());
     // The copy made before the save is taken back: nothing was replaced.
     assert!(session.harness.library().trash_items().unwrap().is_empty());

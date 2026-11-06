@@ -938,7 +938,33 @@ fn fixture_full_1_2() -> NoteFile {
     file
 }
 
-fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 4] {
+/// Format 1.3: a revision, a retouched copy of another note, with its account.
+fn fixture_revision_1_3() -> NoteFile {
+    let mut file = NoteFile::new(blank_note(
+        "00000000-0000-4000-8000-000000000005",
+        "Cours « propre »",
+    ));
+    file.revision = Some(RevisionInfo {
+        of: "00000000-0000-4000-8000-000000000004".to_owned(),
+        of_title: "Cours".to_owned(),
+        created: 1_793_948_883_407,
+        summary: vec![
+            RevisionEntry {
+                at: 1_793_948_883_407,
+                text: "Lignes redressées.
+Le « g » de « longueur » est refait."
+                    .to_owned(),
+            },
+            RevisionEntry {
+                at: 1_793_949_000_000,
+                text: "Un mot déplacé.".to_owned(),
+            },
+        ],
+    });
+    file
+}
+
+fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 5] {
     [
         (
             "minimal.ardoise",
@@ -959,6 +985,11 @@ fn fixtures() -> [(&'static str, NoteFile, FormatVersion); 4] {
             "full-1.2.ardoise",
             fixture_full_1_2(),
             FormatVersion { major: 1, minor: 2 },
+        ),
+        (
+            "revision-1.3.ardoise",
+            fixture_revision_1_3(),
+            FormatVersion { major: 1, minor: 3 },
         ),
     ]
 }
@@ -1034,6 +1065,14 @@ fn v1_fixtures_are_read() {
     assert_eq!(original.note.title, "Avant retouche");
     assert_eq!(original.note.strokes[0].points[1].x, 900.0);
 
+    let revised = read_note(&dir.join("revision-1.3.ardoise")).unwrap();
+    let revision = revised.revision.as_ref().unwrap();
+    assert_eq!(revision.of, "00000000-0000-4000-8000-000000000004");
+    assert_eq!(revision.of_title, "Cours");
+    assert_eq!(revision.summary.len(), 2);
+    assert_eq!(revision.summary[1].text, "Un mot déplacé.");
+    assert!(revised.unknown_members.is_empty());
+
     let future = read_note(&dir.join("future-minor.ardoise")).unwrap();
     assert_eq!(future.unknown_fields["stickers"][0]["kind"], "star");
     assert_eq!(future.unknown_members[1].bytes, [0xde, 0xad, 0xbe, 0xef]);
@@ -1089,4 +1128,337 @@ fn background_image_and_original_note_are_written_only_when_set() {
     )
     .unwrap();
     assert!(old.note.background_image.is_none() && old.original_note.is_none());
+}
+
+/// A revision of `source`, made at `at`.
+fn revision_file(source: &str, at: i64) -> NoteFile {
+    let mut file = NoteFile::new(blank_note("copy-id", "Propre"));
+    let mut original = blank_note(source, "Cours « brouillon »");
+    original.created = at;
+    file.mark_as_revision_of(&original, at, "Lignes redressées");
+    file
+}
+
+fn member_bytes(bytes: &[u8], name: &str) -> Option<Vec<u8>> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+    let mut member = archive.by_name(name).ok()?;
+    let mut out = Vec::new();
+    member.read_to_end(&mut out).unwrap();
+    Some(out)
+}
+
+#[test]
+fn revision_is_written_only_when_set_and_round_trips() {
+    let plain = NoteFile::new(blank_note("plain", "Ordinaire"));
+    let bytes = to_bytes(&plain).unwrap();
+    assert!(!member_names(&bytes).contains(&REVISION_JSON.to_owned()));
+    assert_eq!(read_from_bytes(&bytes).unwrap().revision, None);
+
+    let mut file = revision_file("source-id", 1_793_948_883_407);
+    file.add_revision_entry(1_793_948_999_000, "  Un mot recopié  ");
+    let bytes = to_bytes(&file).unwrap();
+    let json: Value =
+        serde_json::from_slice(&member_bytes(&bytes, REVISION_JSON).unwrap()).unwrap();
+    assert_eq!(json["of"], "source-id");
+    assert_eq!(json["ofTitle"], "Cours « brouillon »");
+    assert_eq!(json["created"], 1_793_948_883_407_i64);
+    assert_eq!(json["summary"][0]["text"], "Lignes redressées");
+    assert_eq!(json["summary"][1]["at"], 1_793_948_999_000_i64);
+    assert_eq!(json["summary"][1]["text"], "Un mot recopié");
+    // It is not in note.json, and the version is 1.3.
+    assert!(note_json_value(&file).get("revision").is_none());
+    assert_eq!(note_json_value(&file)["format"]["minor"], 3);
+    assert_eq!(FormatVersion::CURRENT.minor, 3);
+
+    let reread = read_from_bytes(&bytes).unwrap();
+    assert_eq!(reread, file);
+    assert!(reread.unknown_members.is_empty());
+    assert_eq!(to_bytes(&reread).unwrap(), bytes, "deterministic");
+    // The listing reads the header only and does not choke on the member.
+    assert_eq!(read_header_from_bytes(&bytes).unwrap().note.id, "copy-id");
+}
+
+#[test]
+fn the_account_helpers() {
+    let mut plain = NoteFile::new(blank_note("plain", "Ordinaire"));
+    assert!(!plain.add_revision_entry(1, "nothing to add to"));
+    assert_eq!(plain.revision, None);
+
+    let mut file = revision_file("source-id", 10);
+    assert!(
+        file.add_revision_entry(20, "   "),
+        "a blank line adds nothing"
+    );
+    assert!(file.add_revision_entry(30, "x".repeat(revision::MAX_ENTRY_CHARS + 5)));
+    let revision = file.revision.as_ref().unwrap();
+    assert_eq!(revision.summary.len(), 2);
+    assert_eq!(
+        revision.summary[1].text.chars().count(),
+        revision::MAX_ENTRY_CHARS
+    );
+
+    // A revision of a revision starts a new account, from the copy it is made from.
+    let mut again = NoteFile::new(blank_note("third", "Troisième"));
+    again.mark_as_revision_of(&file.note, 40, "Deuxième passe");
+    let info = again.revision.unwrap();
+    assert_eq!(
+        (info.of.as_str(), info.of_title.as_str()),
+        ("copy-id", "Propre")
+    );
+    assert_eq!(info.summary.len(), 1);
+}
+
+#[test]
+fn an_older_version_keeps_the_revision_and_this_one_keeps_what_it_does_not_know() {
+    let file = revision_file("source-id", 10);
+    // Read by a 1.2 reader, which knows no `revision.json`: an unknown member, written back.
+    let bytes = to_bytes_with_version(&file, FormatVersion { major: 1, minor: 2 }).unwrap();
+    assert!(member_names(&bytes).contains(&REVISION_JSON.to_owned()));
+    let old_view = {
+        let mut as_old = read_from_bytes(&bytes).unwrap();
+        let revision = as_old.revision.take().unwrap();
+        as_old.unknown_members.push(Member {
+            name: REVISION_JSON.to_owned(),
+            bytes: revision.to_json().unwrap(),
+        });
+        as_old
+    };
+    let rewritten = to_bytes(&old_view).unwrap();
+    assert_eq!(read_from_bytes(&rewritten).unwrap().revision, file.revision);
+
+    // Fields a later version adds to the member are not lost for reading (they are not kept).
+    let mut value: Value =
+        serde_json::from_slice(&member_bytes(&bytes, REVISION_JSON).unwrap()).unwrap();
+    value["later"] = json!(true);
+    let mut json = note_json_value(&file);
+    json["format"]["minor"] = json!(9);
+    let archive = raw_archive(&[
+        (NOTE_JSON, &serde_json::to_vec(&json).unwrap()),
+        (STROKES_BIN, &strokes::encode(&[]).unwrap()),
+        (REVISION_JSON, &serde_json::to_vec(&value).unwrap()),
+    ]);
+    assert_eq!(read_from_bytes(&archive).unwrap().revision, file.revision);
+}
+
+#[test]
+fn a_damaged_revision_member_leaves_the_note_readable_and_is_kept_verbatim() {
+    let json = note_json_value(&NoteFile::new(blank_note("id", "Abîmée")));
+    let note_json = serde_json::to_vec(&json).unwrap();
+    let strokes_bin = strokes::encode(&[]).unwrap();
+    for damaged in [
+        &b"{ not json"[..],
+        b"[1, 2]",
+        br#"{"of": 5}"#,
+        br#"{"of": "", "ofTitle": "x", "created": 1}"#,
+        br#"{"ofTitle": "no source", "created": 1}"#,
+        b"",
+    ] {
+        let archive = raw_archive(&[
+            (NOTE_JSON, &note_json),
+            (STROKES_BIN, &strokes_bin),
+            (REVISION_JSON, damaged),
+        ]);
+        let file = read_from_bytes(&archive).unwrap_or_else(|e| panic!("{damaged:?}: {e}"));
+        assert_eq!(file.revision, None, "{damaged:?}");
+        assert_eq!(
+            file.unknown_members,
+            [Member {
+                name: REVISION_JSON.to_owned(),
+                bytes: damaged.to_vec()
+            }]
+        );
+        // A save of the note, whatever else changes, writes it back as it was.
+        let mut edited = file.clone();
+        edited.note.title = "Modifiée".to_owned();
+        let bytes = to_bytes(&edited).unwrap();
+        assert_eq!(
+            member_bytes(&bytes, REVISION_JSON).as_deref(),
+            Some(damaged)
+        );
+        assert_eq!(read_from_bytes(&bytes).unwrap().revision, None);
+
+        // Once an assistant makes the note a revision, the new member wins, once.
+        let mut revised = edited;
+        revised.mark_as_revision_of(&blank_note("src", "Source"), 5, "Fait");
+        let bytes = to_bytes(&revised).unwrap();
+        assert_eq!(
+            member_names(&bytes)
+                .iter()
+                .filter(|n| *n == REVISION_JSON)
+                .count(),
+            1
+        );
+        assert_eq!(read_from_bytes(&bytes).unwrap().revision, revised.revision);
+    }
+}
+
+#[test]
+fn a_revision_without_a_source_is_not_written() {
+    let mut file = revision_file("source-id", 10);
+    file.revision.as_mut().unwrap().of.clear();
+    assert!(matches!(to_bytes(&file), Err(FormatError::InvalidNote(_))));
+}
+
+// ---------------------------------------------------------------------------------------
+// What is written can be read
+
+/// A title that makes `note.json` larger than the reader accepts.
+fn oversized_title() -> String {
+    "x".repeat(MAX_NOTE_JSON_BYTES as usize + 1024)
+}
+
+#[test]
+fn a_note_json_the_reader_would_refuse_is_not_written() {
+    let mut file = NoteFile::new(blank_note("id", "Normale"));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("note.ardoise");
+    write_note(&path, &file).unwrap();
+    let before = fs::read(&path).unwrap();
+
+    file.note.title = oversized_title();
+    let error = to_bytes(&file).unwrap_err();
+    assert!(
+        matches!(&error, FormatError::TooLarge { what, limit, .. }
+            if what == NOTE_JSON && *limit == MAX_NOTE_JSON_BYTES),
+        "{error}"
+    );
+    assert_eq!(error.code(), "noteInvalid");
+    // Nothing is touched: the file on disk is as it was, and no other file appeared.
+    assert!(write_note(&path, &file).is_err());
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+
+    // Just under the limit, what is written is read back.
+    let room = MAX_NOTE_JSON_BYTES as usize
+        - note_json(&NoteFile::new(blank_note("id", "")), FormatVersion::CURRENT)
+            .unwrap()
+            .len();
+    file.note.title = "x".repeat(room);
+    let bytes = to_bytes(&file).unwrap();
+    assert_eq!(read_from_bytes(&bytes).unwrap().note.title.len(), room);
+}
+
+#[test]
+fn strokes_the_reader_would_refuse_are_not_written() {
+    // Points far from each other take 14 bytes or more each in `strokes.bin`.
+    let points: Vec<Point> = (0..10_000_000u32)
+        .map(|i| Point {
+            x: if i % 2 == 0 { 9.0e8 } else { -9.0e8 },
+            y: if i % 2 == 0 { -9.0e8 } else { 9.0e8 },
+            pressure: if i % 2 == 0 { 0.0 } else { 1.0 },
+            t: i.wrapping_mul(1 << 20),
+        })
+        .collect();
+    let mut note = blank_note("id", "Trop de points");
+    note.strokes = vec![Stroke {
+        tool: Tool::Ballpoint,
+        color: Rgba::BLACK,
+        width: 50.0,
+        layer: 0,
+        points,
+    }];
+    let error = to_bytes(&NoteFile::new(note)).unwrap_err();
+    assert!(
+        matches!(&error, FormatError::TooLarge { what, .. } if what == STROKES_BIN),
+        "{error}"
+    );
+}
+
+#[test]
+fn the_sizes_of_a_file_are_checked_against_each_limit_and_the_total() {
+    let check = |members: &[(&str, u64, u64)]| check_read_limits(members.iter().copied());
+    assert!(check(&[("a", 10, 10)]).is_ok());
+    assert!(matches!(
+        check(&[("a", 11, 10)]),
+        Err(FormatError::TooLarge { what, size: 11, limit: 10 }) if what == "a"
+    ));
+    // Each within its limit, too much together.
+    let half = MAX_TOTAL_BYTES / 2 + 1;
+    assert!(matches!(
+        check(&[("a", half, half), ("b", half, half)]),
+        Err(FormatError::TooLarge {
+            limit: MAX_TOTAL_BYTES,
+            ..
+        })
+    ));
+    assert!(check(&[("a", half - 1, half), ("b", half - 1, half)]).is_ok());
+}
+
+#[test]
+fn more_members_than_the_reader_accepts_are_not_written() {
+    let mut file = NoteFile::new(blank_note("id", "Beaucoup"));
+    file.unknown_members = (0..MAX_MEMBERS)
+        .map(|i| Member {
+            name: format!("extra-{i}"),
+            bytes: Vec::new(),
+        })
+        .collect();
+    let error = to_bytes(&file).unwrap_err();
+    assert!(matches!(error, FormatError::TooLarge { .. }), "{error}");
+    // As many as the reader takes, with the two required members: read back.
+    file.unknown_members.truncate(MAX_MEMBERS - 2);
+    let bytes = to_bytes(&file).unwrap();
+    assert_eq!(
+        read_from_bytes(&bytes).unwrap().unknown_members.len(),
+        MAX_MEMBERS - 2
+    );
+}
+
+/// A valid `revision.json` of more than `bytes` bytes.
+fn revision_json_of(bytes: usize) -> Vec<u8> {
+    let mut revision = revision_file("source-id", 10).revision.unwrap();
+    revision.summary.push(RevisionEntry {
+        at: 20,
+        text: "x".repeat(bytes),
+    });
+    revision.to_json().unwrap()
+}
+
+#[test]
+fn a_revision_json_over_its_limit_is_read_as_damaged_and_kept_verbatim() {
+    let json = note_json_value(&NoteFile::new(blank_note("id", "Trop de compte rendu")));
+    let note_json = serde_json::to_vec(&json).unwrap();
+    let strokes_bin = strokes::encode(&[]).unwrap();
+
+    // Valid JSON, within the limit: a revision.
+    let within = revision_json_of(MAX_REVISION_JSON_BYTES as usize - 4096);
+    let archive = raw_archive(&[
+        (NOTE_JSON, &note_json),
+        (STROKES_BIN, &strokes_bin),
+        (REVISION_JSON, &within),
+    ]);
+    let read = read_from_bytes(&archive).unwrap();
+    assert!(read.revision.is_some());
+    assert!(read.unknown_members.is_empty());
+
+    // Valid JSON, over the limit: not a revision, the note opens, the member stays as it is.
+    let over = revision_json_of(MAX_REVISION_JSON_BYTES as usize + 1);
+    let archive = raw_archive(&[
+        (NOTE_JSON, &note_json),
+        (STROKES_BIN, &strokes_bin),
+        (REVISION_JSON, &over),
+    ]);
+    let read = read_from_bytes(&archive).unwrap();
+    assert_eq!(read.revision, None);
+    assert_eq!(read.unknown_members.len(), 1);
+    assert_eq!(read.unknown_members[0].name, REVISION_JSON);
+    assert_eq!(read.unknown_members[0].bytes, over);
+    let rewritten = to_bytes(&read).unwrap();
+    assert_eq!(member_bytes(&rewritten, REVISION_JSON).unwrap(), over);
+    assert_eq!(read_from_bytes(&rewritten).unwrap().revision, None);
+}
+
+#[test]
+fn a_revision_the_reader_would_treat_as_damaged_is_not_written() {
+    let mut file = revision_file("source-id", 10);
+    let revision = file.revision.as_mut().unwrap();
+    revision.summary.push(RevisionEntry {
+        at: 20,
+        text: "x".repeat(MAX_REVISION_JSON_BYTES as usize + 1),
+    });
+    let error = to_bytes(&file).unwrap_err();
+    assert!(
+        matches!(&error, FormatError::TooLarge { what, .. } if what == REVISION_JSON),
+        "{error}"
+    );
 }

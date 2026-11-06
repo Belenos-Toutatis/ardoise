@@ -15,9 +15,7 @@ use ardoise_core::ops::{self, NewNote};
 use ardoise_hwr::structure::{DrawingArea, Item, Structure, from_recognition, ink_boxes};
 use ardoise_hwr::{Bounds, HwrError, Language, Line, Recognition, Word};
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
-use ardoise_mcp::write::{
-    ExportOutcome, ExportRequest, ExportTarget, MergeLayout, SplitRequest, WriteServices,
-};
+use ardoise_mcp::write::{ExportOutcome, ExportRequest, ExportTarget, MergeLayout, WriteServices};
 use ardoise_mcp::{
     Correction, Environment, Handwriting, Host, ServerOptions, TextHit, TextSearch, TextStatus,
     ToolError, serve,
@@ -213,6 +211,10 @@ pub struct FakeWrite {
     /// Run just before a note is saved: lets a test change the file under the tool's feet.
     pub before_save: Mutex<Option<BeforeSave>>,
     pub saves: Mutex<usize>,
+    /// The binders `create_revision` was asked to write in.
+    pub creations: Mutex<Vec<PathBuf>>,
+    /// How many more notes `create_revision` writes before it fails; `None`: no limit.
+    pub creations_left: Mutex<Option<usize>>,
 }
 
 fn new_note(title: &str) -> NewNote {
@@ -264,6 +266,7 @@ impl WriteServices for FakeWrite {
         path: &Path,
         note: Note,
         stamp: &FileStamp,
+        account: Option<&str>,
     ) -> Result<FileStamp, ToolError> {
         if let Some(hook) = self.before_save.lock().unwrap().as_ref() {
             hook(path);
@@ -272,34 +275,40 @@ impl WriteServices for FakeWrite {
         let loaded = library.read(path)?;
         let mut file = loaded.file;
         file.note = note;
+        if let Some(account) = account {
+            file.add_revision_entry(DAY0 + 20 * DAY_MS, account);
+        }
         Ok(library.save(path, &file, stamp)?)
     }
 
-    fn split_note(
+    fn create_revision(
         &self,
         library: &Library,
-        path: &Path,
-        split: &SplitRequest,
-        title: &str,
-    ) -> Result<PathBuf, ToolError> {
-        let loaded = library.read(path)?;
-        let binder = path
-            .parent()
-            .unwrap()
-            .strip_prefix(library.root())
-            .unwrap()
-            .to_path_buf();
-        let note = loaded.file.note.clone();
-        let parts = match split {
-            SplitRequest::AtMs(at) => ops::split_at_time(&note, *at, new_note(title)),
-            SplitRequest::Polygon(polygon) => ops::split_by_zone(&note, polygon, new_note(title)),
+        binder: &Path,
+        mut file: NoteFile,
+        revised: Note,
+    ) -> Result<SavedNote, ToolError> {
+        if let Some(left) = self.creations_left.lock().unwrap().as_mut() {
+            if *left == 0 {
+                return Err(ToolError::new("libraryAccess", "the disk is full"));
+            }
+            *left -= 1;
         }
-        .map_err(|error| ToolError::new("nothingToSplit", error))?;
-        let created = library.create(&binder, &NoteFile::new(parts.extracted))?;
-        let mut file = loaded.file;
-        file.note = parts.kept;
-        library.save(path, &file, &loaded.stamp)?;
-        Ok(created.path)
+        self.creations.lock().unwrap().push(binder.to_path_buf());
+        // The editor's rule, in short: the ink the copy starts from is its first version, unless
+        // the file already keeps an original; the thumbnail shows the new ink.
+        if file.original.is_none()
+            && file.original_note.is_none()
+            && !file.note.strokes.is_empty()
+            && file.note.strokes != revised.strokes
+        {
+            file.original_note =
+                Some(ardoise_core::format::to_bytes(&NoteFile::new(file.note.clone())).unwrap());
+        }
+        file.thumbnail =
+            Some(format!("thumbnail of {} strokes", revised.strokes.len()).into_bytes());
+        file.note = revised;
+        Ok(library.create(binder, &file)?)
     }
 
     fn merge_notes(
@@ -576,8 +585,32 @@ pub async fn session() -> Session {
 }
 
 impl Session {
+    /// The `version` `get_note` gives for this note, `"unread"` when it fails.
+    pub async fn version(&self, note: &Value) -> String {
+        let arguments = json!({ "note": note }).as_object().cloned().unwrap();
+        let result = self
+            .client
+            .call_tool(CallToolRequestParams::new("get_note").with_arguments(arguments))
+            .await;
+        result
+            .ok()
+            .and_then(|result| result.structured_content)
+            .and_then(|value| value["version"].as_str().map(str::to_owned))
+            .unwrap_or_else(|| "unread".to_owned())
+    }
+
+    /// Calls a tool. Most tests are not about versions: `create_revision` and `edit_revision`,
+    /// when not given `expected_version`, are called like an assistant that has just looked at
+    /// the note.
     pub async fn call(&self, tool: &'static str, arguments: Value) -> CallToolResult {
-        let arguments = arguments.as_object().cloned().unwrap_or_default();
+        let mut arguments = arguments.as_object().cloned().unwrap_or_default();
+        if matches!(tool, "create_revision" | "edit_revision")
+            && !arguments.contains_key("expected_version")
+            && let Some(note) = arguments.get("note").cloned()
+        {
+            let version = self.version(&note).await;
+            arguments.insert("expected_version".to_owned(), version.into());
+        }
         self.client
             .call_tool(CallToolRequestParams::new(tool).with_arguments(arguments))
             .await

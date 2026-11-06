@@ -39,6 +39,7 @@
   import { loadCustomColors, rememberCustomColor } from '../../lib/editor/colors';
   import { binderOf, diskChange, type DiskChange } from '../../lib/editor/disk';
   import { DraftKeeper, findOffer, type Offer } from '../../lib/editor/drafts';
+  import { withSourceIn } from '../../lib/editor/revision';
   import { decodeStrokes, encodeStrokes } from '../../lib/editor/clipboard';
   import type { PixelsRef } from '../../lib/background';
   import { pixelsOf, removeBackgroundImage, setBackgroundImage, setImageFit, setImageOpacity } from '../../lib/editor/image';
@@ -89,7 +90,7 @@
   import { resumeBlock } from '../../lib/live-resume.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
-  import type { BackgroundImage, ExportSource, FileStamp, Note, Rgba, SplitSpec, Stroke } from '../../lib/note';
+  import type { BackgroundImage, ExportSource, FileStamp, Note, Rgba, RevisionOfNote, SplitSpec, Stroke } from '../../lib/note';
   import type { NoteOriginal } from '../../lib/original';
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
@@ -108,6 +109,9 @@
   import { narrationType } from './narration-playback';
   import ReplayBar from './ReplayBar.svelte';
   import { ReplayPlayer } from './replay-player.svelte';
+  import RevisionAccount from './RevisionAccount.svelte';
+  import RevisionBar from './RevisionBar.svelte';
+  import RevisionCompare from './RevisionCompare.svelte';
   import SplitPanel from './SplitPanel.svelte';
   import Toolbar from './Toolbar.svelte';
 
@@ -221,6 +225,12 @@
   let leaving = $state(false);
   /** Another note was asked for while this one has changes: the path to open once answered. */
   let switching = $state<string | null>(null);
+  /** Set when the open note is a revision (a retouched copy made by an assistant): its account and its source. */
+  let revision = $state.raw<RevisionOfNote | null>(null);
+  /** The dialog of the revision that is open, if any. */
+  let revisionDialog = $state<'account' | 'compare' | null>(null);
+  /** « Ouvrir l'original » is looking for the source: a second click waits. */
+  let openingOriginal = false;
   /** Renames that failed so far: leaving waits for the answer of the queued ones. */
   let renameFailures = 0;
   /** The leave dialog was opened by a window close (not by the Back button). */
@@ -377,6 +387,11 @@
     });
   });
 
+  // The source went (trashed, deleted) while "Comparer" was open: the dialog goes with it.
+  $effect(() => {
+    if (revisionDialog === 'compare' && !revision?.source) revisionDialog = null;
+  });
+
   // The assistant's bridge sees the note open and whether the editor may be left now
   // (`lib/app-bridge.svelte.ts`); the reasons are for the assistant, in English.
   $effect(() =>
@@ -391,15 +406,17 @@
               ? 'a video is being exported from the editor'
               : exporting || printing || video
                 ? 'a dialog (export, print or video) is open in the editor: the teacher must close it first'
-                : split
-                  ? 'the split panel is open in the editor: the teacher must finish or cancel it first'
-                  : leaving
-                    ? 'the editor is asking whether to save its changes: the teacher must answer first'
-                    : dirty || titleEdited()
-                      ? 'the note open in the editor has unsaved changes: the teacher must save or close it first'
-                      : pendingWrites > 0
-                        ? 'the note open in the editor is being saved'
-                        : null,
+                : revisionDialog
+                  ? 'a dialog of the revision (what changed, compare) is open in the editor: the teacher must close it first'
+                  : split
+                    ? 'the split panel is open in the editor: the teacher must finish or cancel it first'
+                    : leaving
+                      ? 'the editor is asking whether to save its changes: the teacher must answer first'
+                      : dirty || titleEdited()
+                        ? 'the note open in the editor has unsaved changes: the teacher must save or close it first'
+                        : pendingWrites > 0
+                          ? 'the note open in the editor is being saved'
+                          : null,
         loaded: () => loads.loaded(),
       }),
     ),
@@ -470,6 +487,8 @@
     resetReplay();
     original = null;
     originalError = null;
+    revision = null;
+    revisionDialog = null;
     // Nothing of the previous note stays on screen while this one loads: its name, its errors, its notices.
     title = '';
     titleDraft = '';
@@ -503,6 +522,7 @@
       history = createHistory(start);
       savedNote = start.note;
       stamp = opened.stamp;
+      revision = opened.revision ?? null;
       title = opened.note.title;
       titleDraft = opened.note.title;
       targetTitle = opened.note.title;
@@ -670,8 +690,10 @@
         conflict = null;
         disk = null;
         notifySaved(created.path);
-        // The copy has no original until its own first edit.
+        // The copy has no original until its own first edit, and is not a revision of anything.
         void refreshOriginal(true);
+        revision = null;
+        revisionDialog = null;
         // The copy has no narration.
         if (replaying) void loadNarration();
         return true;
@@ -717,6 +739,8 @@
           continue;
         }
         disk = diskChange(listing.notes, target, known);
+        // The source may have moved, been renamed or gone since the note was opened.
+        if (revision) revision = withSourceIn(revision, listing.notes);
       } while (recheck);
     } finally {
       checking = false;
@@ -869,15 +893,46 @@
 
   /**
    * « Page précédente » / « Page suivante »: the next note of the library's list, here in the same
-   * view. The rules of leaving the editor apply: nothing while a narration is recorded or a video
-   * is written; unsaved changes (or a title typed and not committed) ask first; writes under way
-   * are waited for, and a rename that failed keeps the note here.
+   * view, by the rules of `goTo`.
    */
   async function goPage(step: -1 | 1) {
     const target = neighbour(step);
-    if (target === null || leaving) return;
+    if (target !== null) await goTo(target, 'editor.pages.videoBusy');
+  }
+
+  /**
+   * « Ouvrir l'original »: the source of this revision, here in the same editor, by the rules of
+   * `goTo`. It is looked for again by its id first: it may have been moved or renamed, or be gone,
+   * since this note was opened.
+   */
+  async function openOriginal() {
+    const known = revision?.source;
+    if (!revision || !known || leaving || openingOriginal) return;
+    const [id, gen] = [revision.of, generation];
+    openingOriginal = true;
+    try {
+      const found = await api.revisionSource(id).catch(() => known);
+      if (!alive || gen !== generation || !revision) return;
+      if (found === null) {
+        revision = { ...revision, source: null };
+        return showNotice(t('editor.revision.gone'), true);
+      }
+      await goTo(found.path, 'editor.revision.videoBusy');
+    } finally {
+      openingOriginal = false;
+    }
+  }
+
+  /**
+   * This editor moves on to the note at `target`. The rules of leaving the editor apply: nothing
+   * while a narration is recorded or a video is written (`busy` is the notice for the video);
+   * unsaved changes (or a title typed and not committed) ask first; writes under way are waited
+   * for, and a rename that failed keeps the note here.
+   */
+  async function goTo(target: string, busy: 'editor.pages.videoBusy' | 'editor.revision.videoBusy') {
+    if (leaving) return;
     if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
-    if (videoRunning) return showNotice(t('editor.pages.videoBusy'), true);
+    if (videoRunning) return showNotice(t(busy), true);
     const ask = () => {
       switching = target;
       closing = false;
@@ -1561,7 +1616,7 @@
       return;
     }
     // A dialog or the split panel is open: the editing keys wait; Escape closes the panel.
-    if (exporting || printing || video || share.panelOpen) return;
+    if (exporting || printing || video || share.panelOpen || revisionDialog) return;
     if (split) {
       if (key === 'Escape') {
         e.preventDefault();
@@ -1738,6 +1793,15 @@
       </button>
     </div>
   </header>
+
+  {#if revision}
+    <RevisionBar
+      {revision}
+      onopen={() => void openOriginal()}
+      onchanges={() => (revisionDialog = 'account')}
+      oncompare={() => (revisionDialog = 'compare')}
+    />
+  {/if}
 
   {#if conflict}
     <div class="banner error editor-banner" role="alert">
@@ -2028,6 +2092,12 @@
         <button type="button" class="button" onclick={stay}>{t('editor.leave.cancel')}</button>
       </div>
     </Modal>
+  {/if}
+
+  {#if revision && revisionDialog === 'account'}
+    <RevisionAccount {revision} onclose={() => (revisionDialog = null)} />
+  {:else if revision && revisionDialog === 'compare' && revision.source}
+    <RevisionCompare {revision} path={currentPath} {dirty} onclose={() => (revisionDialog = null)} />
   {/if}
 
   {#if offer}

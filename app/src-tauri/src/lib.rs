@@ -37,6 +37,7 @@ mod presentation;
 mod print;
 #[cfg(windows)]
 mod print_windows;
+mod revision;
 mod selftest;
 mod session_end;
 mod share;
@@ -287,6 +288,8 @@ pub fn run() {
             notes::save_note,
             notes::render_background,
             original::note_original,
+            revision::revision_source,
+            revision::note_picture,
             tablet::tablet_info,
             tablet::forget_tablet,
             tablet::tablet_status,

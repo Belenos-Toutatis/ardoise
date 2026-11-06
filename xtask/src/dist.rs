@@ -119,7 +119,14 @@ fn rewrite_link(dest: &str, pages: &BTreeSet<String>) -> (String, bool) {
 /// Markdown pages (for the links); the second result lists the links that point outside them.
 fn render_page(markdown: &str, file_name: &str, pages: &BTreeSet<String>) -> (String, Vec<String>) {
     let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
-    let mut events: Vec<Event> = Parser::new_ext(markdown, options).collect();
+    // The guides are text, not markup: a `<title>` or a `<b>` written in a page is shown as what
+    // was typed. Raw HTML would otherwise reach the page and, for a `<title>`, swallow the rest.
+    let mut events: Vec<Event> = Parser::new_ext(markdown, options)
+        .map(|event| match event {
+            Event::Html(text) | Event::InlineHtml(text) => Event::Text(text),
+            other => other,
+        })
+        .collect();
     let mut used = BTreeSet::new();
     let mut title = None;
     let mut dangling = Vec::new();
@@ -568,6 +575,98 @@ mod tests {
                 .any(|e| e.path.ends_with("guide/guide.en.html")
                     && String::from_utf8_lossy(&e.bytes).contains("<html lang=\"en\">"))
         );
+    }
+
+    #[test]
+    fn raw_html_in_a_guide_is_shown_as_text_and_cannot_swallow_the_page() {
+        let markdown = "# Guide
+
+A title like <title> (clean) and <b>bold</b>.
+
+<div>block</div>
+
+## Privacy
+
+Last words.
+";
+        let (html, _) = render_page(markdown, "x.en.md", &BTreeSet::new());
+        assert_eq!(html.matches("<title>").count(), 1);
+        assert_eq!(html.matches("</title>").count(), 1);
+        assert!(html.contains("&lt;title&gt; (clean)") && html.contains("&lt;b&gt;bold&lt;/b&gt;"));
+        assert!(html.contains("&lt;div&gt;block&lt;/div&gt;") && !html.contains("<div>"));
+        assert!(html.contains("<h2 id=\"privacy\">") && html.contains("Last words."));
+    }
+
+    /// The headings of a Markdown page with the anchors the page gives them, in order.
+    fn headings(markdown: &str) -> Vec<(u8, String, String)> {
+        let mut used = BTreeSet::new();
+        let mut found = Vec::new();
+        let mut current: Option<(u8, String)> = None;
+        for event in Parser::new_ext(
+            markdown,
+            Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
+        ) {
+            match event {
+                Event::Start(Tag::Heading { level, .. }) => {
+                    current = Some((level as u8, String::new()))
+                }
+                Event::Text(t) | Event::Code(t) | Event::Html(t) | Event::InlineHtml(t) => {
+                    if let Some((_, text)) = &mut current {
+                        text.push_str(&t);
+                    }
+                }
+                Event::End(TagEnd::Heading(_)) => {
+                    if let Some((level, text)) = current.take() {
+                        let id = slug(&text, &mut used);
+                        found.push((level, text, id));
+                    }
+                }
+                _ => {}
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn every_real_guide_page_renders_whole_with_one_title_and_its_last_and_privacy_headings() {
+        let guide = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/guide");
+        let mut names: Vec<String> = fs::read_dir(&guide)
+            .unwrap()
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| n.ends_with(".md"))
+            .collect();
+        names.sort();
+        assert!(names.len() >= 4, "{names:?}");
+        let pages: BTreeSet<String> = names.iter().cloned().collect();
+        for name in &names {
+            let markdown = fs::read_to_string(guide.join(name)).unwrap();
+            let (html, _) = render_page(&markdown, name, &pages);
+            assert_eq!(html.matches("<title>").count(), 1, "{name}: <title>");
+            assert_eq!(html.matches("</title>").count(), 1, "{name}: </title>");
+            let found = headings(&markdown);
+            let (level, _, last) = found.last().expect("a page without headings");
+            assert!(
+                html.contains(&format!("<h{level} id=\"{last}\">")),
+                "{name}: the last heading is missing"
+            );
+            for (level, text, id) in &found {
+                assert!(
+                    html.contains(&format!("<h{level} id=\"{id}\">")),
+                    "{name}: the heading {text:?} is missing"
+                );
+            }
+            // The assistant's guides end with the privacy chapter: it must reach the page.
+            if name.starts_with("assistant.") {
+                let privacy = found
+                    .iter()
+                    .find(|(_, text, _)| text.contains("Vie privée") || text.contains("Privacy"))
+                    .unwrap_or_else(|| panic!("{name}: no privacy heading"));
+                assert!(
+                    html.contains(&format!("id=\"{}\"", privacy.2)),
+                    "{name}: privacy"
+                );
+            }
+        }
     }
 
     #[test]

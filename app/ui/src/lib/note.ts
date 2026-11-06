@@ -138,10 +138,53 @@ export interface TrashEntry {
   noteId: string | null;
 }
 
+/** One line of the account of a revision. */
+export interface RevisionEntry {
+  /** Unix milliseconds. */
+  at: number;
+  /** What changed. Written by an assistant: shown as plain text, never as HTML. */
+  text: string;
+}
+
+/** Where the source of a revision is in the library now. */
+export interface RevisionSource {
+  path: string;
+  /** Its title now (it may have been renamed since the copy). */
+  title: string;
+}
+
+/**
+ * What makes a note a revision, a retouched copy of another note made by an assistant (SPEC §4.9):
+ * the content of its `revision.json`, and its source found by id in the library.
+ */
+export interface RevisionOfNote {
+  /** Id of the source. */
+  of: string;
+  /** Its title when the copy was made. */
+  ofTitle: string;
+  /** When the copy was made (Unix milliseconds). */
+  created: number;
+  /** The account, oldest first. */
+  summary: RevisionEntry[];
+  /** The source; null when it is gone (trashed, deleted, not synchronised here yet). */
+  source: RevisionSource | null;
+}
+
+/**
+ * The title to show for the source of a revision: the one it has now, else the one it had when the
+ * copy was made, else `untitled` (the title of an untitled note is an empty string, which `??`
+ * would let through and the line would read « »).
+ */
+export function revisionSourceTitle(revision: Pick<RevisionOfNote, 'source' | 'ofTitle'>, untitled: string): string {
+  return (revision.source?.title ?? revision.ofTitle).trim() || untitled;
+}
+
 /** A note opened for editing. */
 export interface OpenedNote {
   note: Note;
   stamp: FileStamp;
+  /** Set when the note is a revision. */
+  revision?: RevisionOfNote | null;
 }
 
 /** The registered tablet (`_ardoise/device.json`), shared by every PC. */

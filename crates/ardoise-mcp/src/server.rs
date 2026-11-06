@@ -30,9 +30,13 @@ library. Coordinates are millimetres from the top-left corner of the page. What 
 sent to your provider: the notes may hold names of people. Unless the server is read-only, \
 other tools create, rename, tag, move, merge, split, straighten and export notes and store a \
 corrected transcription for the search: nothing is overwritten or deleted for good (a trashed \
-note, and a note's version before its shapes are straightened, stay restorable from the app's \
-trash; an export that would overwrite a file gets (2) added to its name). Prompts (clean up a note, title and tag untitled notes, summarise a lesson) say which \
-tools to call and in which order.";
+note stays restorable from the app's trash; an export that would overwrite a file gets (2) \
+added to its name). The ink of a note is never changed in the note itself: `preview_revision` \
+tries a list of orders in memory, `create_revision` writes them on a copy next to the note \
+(straightening and splitting do the same), and only a copy made that way can be edited again, \
+with `edit_revision` (its version before goes to the trash). Prompts (clean up a note, title and tag \
+untitled notes, summarise a lesson, improve a note on a copy) say which tools to call and in \
+which order.";
 
 /// The tools of the groups a server with `options` has.
 pub fn build_tool_router(options: ServerOptions) -> ToolRouter<ArdoiseServer> {
@@ -60,7 +64,7 @@ impl ArdoiseServer {
             host: Arc::new(host),
             options,
             tool_router: build_tool_router(options),
-            prompt_router: Self::prompt_router(language),
+            prompt_router: Self::prompt_router(language, options.read_only),
         }
     }
 

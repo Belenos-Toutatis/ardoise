@@ -5,14 +5,19 @@
 //! Each tool is a thin method of [`ArdoiseServer`] (arguments in, `self.blocking` out) over a
 //! plain function `fn(&Host, Args) -> ToolResult` that the tests also call.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use ardoise_core::format::BackgroundFile;
 use ardoise_core::library::NoteEntry;
 use ardoise_core::note::Note;
 use ardoise_hwr::Language;
 use ardoise_hwr::structure::Item;
 use ardoise_hwr::text::fold;
-use ardoise_render::{Image, NoteView, Picture, RenderOptions, encode_png_at, render_note};
+use ardoise_render::{
+    Image, LabelSpot, NoteView, Picture, RenderOptions, draw_labels, encode_png_at, render_note,
+    ruling,
+};
+use ardoise_revise::ink_lines;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use rmcp::handler::server::wrapper::Parameters;
@@ -25,8 +30,8 @@ use serde_json::json;
 use crate::error::{ToolError, ToolResult, content_result, json_result};
 use crate::host::Host;
 use crate::notes::{
-    NoteSummary, PageMm, RectMm, binder_text, find_note, iso, mm, parse_date, read_note,
-    relative_path,
+    NoteSummary, PageMm, RectMm, binder_text, find_note, hex, iso, mm, parse_date, read_note,
+    relative_path, version_of,
 };
 use crate::server::ArdoiseServer;
 use crate::strokes::{DEFAULT_MAX_POINTS, MAX_POINTS, StrokeInfo, polylines};
@@ -168,6 +173,25 @@ pub struct RenderNoteArgs {
     pub background: Option<bool>,
     /// Layers to draw, by index or name, even if hidden in the note (default: the layers visible in the note).
     pub layers: Option<Vec<LayerRef>>,
+    /// Write each stroke's number (its index in `get_note`) in small red digits next to it (default `false`). Meant for a `region`: zoom on the part you are interested in, at a higher dpi, and read the numbers there. A dense page has too many to read at once.
+    pub labels: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct GetStrokesArgs {
+    /// The note's `id`, or its path relative to the library.
+    pub note: String,
+    /// Numbers of the strokes to read, from `get_note` with `strokes` or the labels of `render_note`.
+    pub strokes: Vec<usize>,
+    /// Return every `step`-th sample (default 1: all of them); the last sample of a stroke is always returned.
+    #[schemars(range(min = 1))]
+    pub step: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct InkLinesArgs {
+    /// The note's `id`, or its path relative to the library.
+    pub note: String,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -241,7 +265,7 @@ impl ArdoiseServer {
         self.blocking(move |host| search_notes(host, args)).await
     }
 
-    /// Read a note's data: metadata, page, layers, paper and template, background image, duration and, on request, its strokes (a summary of each, or simplified polylines in millimetres). Use `render_note` to see it and `get_note_text` to read its handwriting.
+    /// Read a note's data: metadata, `version` (changes whenever the note's file changes), page, layers, `revision` (only on a retouched copy: whose copy it is and its account of changes), paper and template (`background.ruling` gives the first rule's distance from the top and the distance between two rules, in mm, for the templates with horizontal rules to write on), background image, duration and, on request, its strokes (a summary of each, or simplified polylines in millimetres). Use `render_note` to see it and `get_note_text` to read its handwriting.
     #[tool(
         name = "get_note",
         annotations(
@@ -259,7 +283,7 @@ impl ArdoiseServer {
         self.blocking(move |host| get_note(host, args)).await
     }
 
-    /// The handwriting of a note as text: the recognised lines with their bounding boxes in millimetres, and its structure (paragraphs, list items, drawings with their bounds and stroke indices) when it can be found. Reads the note now if it was not read yet, which can take a few seconds. The recognition makes mistakes, especially on formulas and diagrams: compare with `render_note`. If a corrected transcription was stored with `set_note_text` for the ink as it is now, `text` is that one, `is_correction` is true and `recognised_text` is the recogniser's.
+    /// The handwriting of a note as text: the recognised lines with their bounding boxes in millimetres, and its structure (paragraphs, list items, drawings with their bounds and stroke indices) when it can be found. Reads the note now if it was not read yet, which can take a few seconds. The recognition makes mistakes, especially on formulas and diagrams: compare with `render_note`. If a corrected transcription is stored for the ink as it is now, `text` is that one, `is_correction` is true and `recognised_text` is the recogniser's.
     #[tool(
         name = "get_note_text",
         annotations(
@@ -277,7 +301,7 @@ impl ArdoiseServer {
         self.blocking(move |host| get_note_text(host, args)).await
     }
 
-    /// Render a note (or a region of its page) as a PNG image so that you can see it: handwriting, drawings, diagrams, layout, paper and background image. The image's longest side is at most 2000 pixels, and a very large page (an A0 PDF) cannot be seen closer than about 120 dpi; the dpi actually used, and what lowered it, are returned in the text next to it.
+    /// Render a note (or a region of its page) as a PNG image so that you can see it: handwriting, drawings, diagrams, layout, paper and background image. With `labels`, each stroke's number is written next to it, which links what you see to the strokes of `get_note`. The image's longest side is at most 2000 pixels, and a very large page (an A0 PDF) cannot be seen closer than about 120 dpi; the dpi actually used, and what lowered it, are returned in the text next to it.
     #[tool(
         name = "render_note",
         annotations(
@@ -294,6 +318,42 @@ impl ArdoiseServer {
     ) -> Result<CallToolResult, ErrorData> {
         self.blocking(move |host| render_note_tool(host, args))
             .await
+    }
+
+    /// The exact samples of some strokes, to say which part of a stroke you mean: `columns` says what each sample holds, `[i, x_mm, y_mm, pressure, t_ms]`, with `i` the sample's number in its stroke. At most 20,000 samples a call: ask for few strokes, or raise `step`. `get_note` with `points` is simplified and has no sample numbers, so it cannot serve for this.
+    #[tool(
+        name = "get_strokes",
+        annotations(
+            title = "Get the samples of strokes",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn get_strokes(
+        &self,
+        Parameters(args): Parameters<GetStrokesArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.blocking(move |host| get_strokes(host, args)).await
+    }
+
+    /// The written lines of a note found from the ink itself (the handwriting recogniser merges lines): per line its strokes, its left and right ends, the baseline at both ends, its slope in degrees, the height of its letters and its words (strokes and ends), from top to bottom, and `apart`, the strokes in no line (drawings, rules, highlights, marks). Only the strokes on visible layers are looked at.
+    #[tool(
+        name = "ink_lines",
+        annotations(
+            title = "Find the written lines",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn ink_lines(
+        &self,
+        Parameters(args): Parameters<InkLinesArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.blocking(move |host| ink_lines_tool(host, args)).await
     }
 }
 
@@ -596,6 +656,7 @@ pub fn get_note(host: &Host, args: GetNoteArgs) -> ToolResult {
         .unwrap_or(0);
     let mut result = json!({
         "note": summary,
+        "version": version_of(&loaded.stamp),
         "origin": serde_json::to_value(&note.origin).unwrap_or_default(),
         "timing": serde_json::to_value(note.timing).unwrap_or_default(),
         "layers": layers,
@@ -608,6 +669,27 @@ pub fn get_note(host: &Host, args: GetNoteArgs) -> ToolResult {
         "duration_ms": duration_ms,
         "has_narration": file.audio.is_some(),
     });
+    // A retouched copy says whose copy it is and what was changed: it is the only kind of note
+    // `edit_revision` accepts.
+    if let Some(revision) = &file.revision {
+        result["revision"] = json!({
+            "of": revision.of,
+            "of_title": revision.of_title,
+            "created": iso(revision.created),
+            "account": revision
+                .summary
+                .iter()
+                .map(|entry| json!({ "at": iso(entry.at), "text": entry.text }))
+                .collect::<Vec<_>>(),
+        });
+    }
+    // The rules of a ruled template, to put writing on them: absent for the others.
+    if let Some(rules) = ruling(note.background.template, note.page.height as f32 * 0.01) {
+        result["background"]["ruling"] = json!({
+            "first_mm": mm(rules.first_mm * 100.0),
+            "pitch_mm": mm(rules.pitch_mm * 100.0),
+        });
+    }
     if detail != StrokeDetail::None {
         let mut infos: Vec<StrokeInfo> = note
             .strokes
@@ -730,8 +812,9 @@ fn choose_layers(note: &mut Note, wanted: Option<&[LayerRef]>) -> Result<(), Too
     Ok(())
 }
 
-/// The part of `image` that shows `region` of a page `page` millimetres wide and high.
-fn crop(image: &Image, page: (f64, f64), region: Region) -> Image {
+/// The part of `image` that shows `region` of a page `page` millimetres wide and high, and the
+/// pixel of the page's picture where that part starts.
+fn crop(image: &Image, page: (f64, f64), region: Region) -> (Image, (u32, u32)) {
     let to_x = |mm: f64| {
         ((mm / page.0) * f64::from(image.width))
             .round()
@@ -753,11 +836,14 @@ fn crop(image: &Image, page: (f64, f64), region: Region) -> Image {
         let start = (y as usize * image.width as usize + x0 as usize) * 4;
         pixels.extend_from_slice(&image.pixels[start..start + width as usize * 4]);
     }
-    Image {
-        width,
-        height,
-        pixels,
-    }
+    (
+        Image {
+            width,
+            height,
+            pixels,
+        },
+        (x0, y0),
+    )
 }
 
 /// The resolution a region of `page` (millimetres) is drawn at: `requested`, lowered so that
@@ -780,20 +866,67 @@ fn render_dpi(requested: f64, page: (f64, f64), region: &Region) -> (f64, Option
     }
 }
 
-pub fn render_note_tool(host: &Host, args: RenderNoteArgs) -> ToolResult {
-    let library = host.library()?;
-    let entry = find_note(&library, &args.note)?;
-    let loaded = read_note(&library, &entry)?;
-    let mut note = loaded.file.note;
-    let background = args.background.unwrap_or(true);
-    choose_layers(&mut note, args.layers.as_deref())?;
+/// The strokes of `note` that are drawn (visible layer; a stroke whose layer has no entry is drawn
+/// too), as what a number is written next to, each with its number: `numbers[i]` for
+/// `note.strokes[i]`.
+pub fn label_spots<'n>(note: &'n Note, numbers: &[usize]) -> Vec<LabelSpot<'n>> {
+    note.strokes
+        .iter()
+        .zip(numbers)
+        .filter(|(stroke, _)| {
+            note.layers
+                .get(stroke.layer as usize)
+                .is_none_or(|layer| layer.visible)
+        })
+        .filter_map(|(stroke, &number)| {
+            let mut points = stroke.points.iter();
+            let first = points.next()?;
+            let bounds = points.fold([first.x, first.y, first.x, first.y], |b, p| {
+                [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)]
+            });
+            Some(LabelSpot {
+                number,
+                bounds,
+                points: &stroke.points,
+            })
+        })
+        .collect()
+}
 
+/// What to draw of a note.
+pub(crate) struct PictureRequest<'a> {
+    pub note: &'a Note,
+    /// The pixels of the note's background image, when it has one.
+    pub background_file: Option<&'a BackgroundFile>,
+    pub region: Option<Region>,
+    pub dpi: Option<u32>,
+    pub background: bool,
+    /// Numbers to write next to the strokes ([`label_spots`]), or `None`.
+    pub labels: Option<Vec<LabelSpot<'a>>>,
+}
+
+/// A page (or a region of it) drawn as a PNG, with the facts about it.
+pub(crate) struct Drawn {
+    pub png: Vec<u8>,
+    pub info: serde_json::Value,
+}
+
+/// Draws `request` (the part that `render_note` and `preview_revision` share).
+pub(crate) fn draw_picture(request: PictureRequest<'_>) -> Result<Drawn, ToolError> {
+    let PictureRequest {
+        note,
+        background_file,
+        region,
+        dpi,
+        background,
+        labels,
+    } = request;
     let page_mm = PageMm::from(note.page);
     let page = (
         f64::from(note.page.width) * 0.01,
         f64::from(note.page.height) * 0.01,
     );
-    let region = match args.region {
+    let area = match region {
         None => Region {
             x: 0.0,
             y: 0.0,
@@ -827,28 +960,31 @@ pub fn render_note_tool(host: &Host, args: RenderNoteArgs) -> ToolResult {
         }
     };
 
-    let requested = args.dpi.unwrap_or(DEFAULT_DPI).clamp(MIN_DPI, MAX_DPI);
-    let (dpi, limited_by) = render_dpi(f64::from(requested), page, &region);
+    let requested = dpi.unwrap_or(DEFAULT_DPI).clamp(MIN_DPI, MAX_DPI);
+    let (dpi, limited_by) = render_dpi(f64::from(requested), page, &area);
 
     let picture = if background && note.background_image.is_some() {
-        loaded
-            .file
-            .background
-            .as_ref()
-            .and_then(|file| Picture::decode(file.bytes.clone()).ok())
+        background_file.and_then(|file| Picture::decode(file.bytes.clone()).ok())
     } else {
         None
     };
-    let options = RenderOptions {
-        scale: (dpi / 2540.0) as f32,
-        background,
-    };
-    let page_image = render_note(NoteView::new(&note, picture.as_ref()), &options)?;
-    let image = if args.region.is_some() {
-        crop(&page_image, page, region)
+    let scale = (dpi / 2540.0) as f32;
+    let options = RenderOptions { scale, background };
+    let page_image = render_note(NoteView::new(note, picture.as_ref()), &options)?;
+    let (mut image, origin) = if region.is_some() {
+        crop(&page_image, page, area)
     } else {
-        page_image
+        (page_image, (0, 0))
     };
+    let labelled = labels.is_some();
+    if let Some(spots) = &labels {
+        draw_labels(
+            &mut image,
+            spots,
+            scale,
+            (i64::from(origin.0), i64::from(origin.1)),
+        );
+    }
     let png = encode_png_at(&image, Some(dpi.round() as u32))?;
 
     let drawn: Vec<&str> = note
@@ -858,7 +994,6 @@ pub fn render_note_tool(host: &Host, args: RenderNoteArgs) -> ToolResult {
         .map(|l| l.name.as_str())
         .collect();
     let info = json!({
-        "note": NoteSummary::of_entry(&library, &entry),
         "width_px": image.width,
         "height_px": image.height,
         "dpi": (dpi * 10.0).round() / 10.0,
@@ -866,18 +1001,165 @@ pub fn render_note_tool(host: &Host, args: RenderNoteArgs) -> ToolResult {
         "dpi_lowered": limited_by.is_some(),
         "dpi_limited_by": limited_by,
         "region_mm": {
-            "x": (region.x * 10.0).round() / 10.0,
-            "y": (region.y * 10.0).round() / 10.0,
-            "width": (region.width * 10.0).round() / 10.0,
-            "height": (region.height * 10.0).round() / 10.0,
+            "x": (area.x * 10.0).round() / 10.0,
+            "y": (area.y * 10.0).round() / 10.0,
+            "width": (area.width * 10.0).round() / 10.0,
+            "height": (area.height * 10.0).round() / 10.0,
         },
         "page": page_mm,
         "background": background,
         "layers_drawn": drawn,
+        "labels": labelled,
         "created": iso(note.created),
     });
+    Ok(Drawn { png, info })
+}
+
+pub fn render_note_tool(host: &Host, args: RenderNoteArgs) -> ToolResult {
+    let library = host.library()?;
+    let entry = find_note(&library, &args.note)?;
+    let loaded = read_note(&library, &entry)?;
+    let mut note = loaded.file.note.clone();
+    choose_layers(&mut note, args.layers.as_deref())?;
+    let numbers: Vec<usize> = (0..note.strokes.len()).collect();
+    let labels = args
+        .labels
+        .unwrap_or(false)
+        .then(|| label_spots(&note, &numbers));
+    let drawn = draw_picture(PictureRequest {
+        labels,
+        note: &note,
+        background_file: loaded.file.background.as_ref(),
+        region: args.region,
+        dpi: args.dpi,
+        background: args.background.unwrap_or(true),
+    })?;
+    let mut info = drawn.info;
+    info["note"] = serde_json::to_value(NoteSummary::of_entry(&library, &entry))
+        .map_err(|e| ToolError::new("unexpected", e))?;
     content_result(vec![
-        ContentBlock::image(BASE64.encode(&png), "image/png"),
+        ContentBlock::image(BASE64.encode(&drawn.png), "image/png"),
         ContentBlock::text(info.to_string()),
     ])
+}
+
+// ---------------------------------------------------------------------------------------------
+// get_strokes, ink_lines
+
+/// The strokes of `note` that are drawn, by number: those on a visible layer (a stroke whose
+/// layer has no entry is drawn, so it counts).
+pub(crate) fn visible_strokes(note: &Note) -> Vec<usize> {
+    note.strokes
+        .iter()
+        .enumerate()
+        .filter(|(_, stroke)| {
+            note.layers
+                .get(stroke.layer as usize)
+                .is_none_or(|layer| layer.visible)
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// Most samples `get_strokes` returns in one call.
+pub const MAX_STROKE_POINTS: usize = 20_000;
+
+/// Device units (10 µm) as millimetres, to 0.01 mm.
+fn mm2(units: f32) -> f64 {
+    f64::from(units).round() / 100.0
+}
+
+pub fn get_strokes(host: &Host, args: GetStrokesArgs) -> ToolResult {
+    let step = args.step.unwrap_or(1);
+    if step == 0 {
+        return Err(ToolError::invalid("`step` is at least 1"));
+    }
+    if args.strokes.is_empty() {
+        return Err(ToolError::invalid(
+            "`strokes` is empty: give the numbers of the strokes to read (from `get_note` with `strokes`)",
+        ));
+    }
+    let library = host.library()?;
+    let entry = find_note(&library, &args.note)?;
+    let loaded = read_note(&library, &entry)?;
+    let note = &loaded.file.note;
+    let count = note.strokes.len();
+    if let Some(bad) = args.strokes.iter().find(|&&i| i >= count) {
+        return Err(ToolError::invalid(format!(
+            "no stroke {bad}: this note has {count} stroke(s), numbered from 0"
+        )));
+    }
+    let mut seen: HashSet<usize> = HashSet::with_capacity(args.strokes.len());
+    let wanted: Vec<usize> = args
+        .strokes
+        .iter()
+        .copied()
+        .filter(|&index| seen.insert(index))
+        .collect();
+    // The samples kept of a stroke: every `step`-th, and always the last.
+    let kept = |points: usize| -> Vec<usize> {
+        let mut at: Vec<usize> = (0..points).step_by(step).collect();
+        if points > 0 && at.last() != Some(&(points - 1)) {
+            at.push(points - 1);
+        }
+        at
+    };
+    let total: usize = wanted
+        .iter()
+        .map(|&i| kept(note.strokes[i].points.len()).len())
+        .sum();
+    if total > MAX_STROKE_POINTS {
+        return Err(ToolError::invalid(format!(
+            "these strokes hold {total} samples at `step` {step}, more than the {MAX_STROKE_POINTS} a call returns: ask for fewer strokes, or raise `step`"
+        )));
+    }
+    let strokes: Vec<_> = wanted
+        .iter()
+        .map(|&index| {
+            let stroke = &note.strokes[index];
+            let samples: Vec<_> = kept(stroke.points.len())
+                .into_iter()
+                .map(|i| {
+                    let p = &stroke.points[i];
+                    json!([
+                        i,
+                        mm2(p.x),
+                        mm2(p.y),
+                        (f64::from(p.pressure) * 1000.0).round() / 1000.0,
+                        p.t
+                    ])
+                })
+                .collect();
+            json!({
+                "index": index,
+                "layer": stroke.layer,
+                "tool": serde_json::to_value(stroke.tool).unwrap_or_default(),
+                "color": hex(stroke.color),
+                "width_mm": mm(stroke.width),
+                "point_count": stroke.points.len(),
+                "samples": samples,
+            })
+        })
+        .collect();
+    json_result(json!({
+        "note": NoteSummary::of_entry(&library, &entry),
+        "columns": ["i", "x_mm", "y_mm", "pressure", "t_ms"],
+        "step": step,
+        "sample_total": total,
+        "strokes": strokes,
+    }))
+}
+
+pub fn ink_lines_tool(host: &Host, args: InkLinesArgs) -> ToolResult {
+    let library = host.library()?;
+    let entry = find_note(&library, &args.note)?;
+    let loaded = read_note(&library, &entry)?;
+    let note = &loaded.file.note;
+    let found = ink_lines(&note.strokes, &visible_strokes(note));
+    json_result(json!({
+        "note": NoteSummary::of_entry(&library, &entry),
+        "line_count": found.lines.len(),
+        "lines": found.lines,
+        "apart": found.apart,
+    }))
 }

@@ -4,7 +4,7 @@
  * (opening and saving notes).
  */
 import type { InkPoint, Tool } from './ink';
-import type { AutoExportSettings, FileStamp, Note, Rgba, Stroke, TrashEntry } from './note';
+import type { AutoExportSettings, FileStamp, Note, Rgba, RevisionEntry, Stroke, TrashEntry } from './note';
 import type { NoteOriginal } from './original';
 
 /** Returned by a mock module for a command it does not handle. */
@@ -17,6 +17,8 @@ export interface StoredNote {
   binder: string;
   /** The ink before the first edit ("Revenir à l'original"), kept by the first save that changes it. */
   original?: NoteOriginal;
+  /** Set on a revision, a retouched copy of another note (`revision.json`). */
+  revision?: { of: string; ofTitle: string; created: number; summary: RevisionEntry[] };
 }
 
 export interface MockLibrary {
@@ -185,6 +187,30 @@ let library: MockLibrary | null = null;
 export function mockLibrary(root = 'C:\\demo\\Ardoise'): MockLibrary {
   library ??= seed(root);
   return library;
+}
+
+/**
+ * Adds a revision of the note `of` (an id; the first demo note by default) to the demo library, as
+ * the assistant's `create_revision` would, and returns its path. The library has none until this
+ * is called (tests and the browser preview ask for one when they need it).
+ */
+export function addMockRevision(
+  options: { of?: string; title?: string; summary?: string[]; withSource?: boolean } = {},
+): string {
+  const lib = mockLibrary();
+  const source = [...lib.notes.values()].find((entry) => entry.note.id === (options.of ?? 'b1f0c6c2-0000-4000-8000-000000000001'));
+  const base = source?.note ?? [...lib.notes.values()][0].note;
+  const created = Date.UTC(2026, 10, 6, 9, 0);
+  const note: Note = JSON.parse(JSON.stringify({ ...base, id: `revision-${lib.notes.size}`, title: options.title ?? `${base.title} (propre)`, created, modified: created, origin: { kind: 'ardoise' } }));
+  const path = notePath(lib.root, source?.binder ?? '', fileName(note));
+  const summary = (options.summary ?? ['Les lignes sont redressées.']).map((text, i) => ({ at: created + i * 60_000, text }));
+  lib.notes.set(path, {
+    note,
+    stamp: freshStamp(),
+    binder: source?.binder ?? '',
+    revision: { of: options.of ?? base.id, ofTitle: base.title, created, summary },
+  });
+  return path;
 }
 
 /** Forgets every change (tests). */

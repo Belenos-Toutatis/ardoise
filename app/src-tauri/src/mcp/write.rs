@@ -24,7 +24,7 @@ use ardoise_hwr::docx::to_docx;
 use ardoise_mcp::ToolError;
 use ardoise_mcp::write::{
     ExportFormat, ExportKind, ExportOutcome, ExportRequest, ExportTarget, MergeLayout, PdfPage,
-    SplitRequest, VideoResolution, VideoTiming, WriteServices, check_replay_plan,
+    VideoResolution, VideoTiming, WriteServices, check_replay_plan,
 };
 use ardoise_media::OpenH264Codec;
 use ardoise_render::{NoteView, PdfOptions, notes_to_pdf};
@@ -38,8 +38,8 @@ use crate::commands::CommandError;
 use crate::export::{self, ExportSource, LoadedSource, load_sources, write_new_file};
 use crate::handwriting::{CacheDir, NoteText, hwr_error, reading_of, text_document};
 use crate::library::path_text;
-use crate::notes::save_with_key;
-use crate::operations::{self, SplitSpec, merge_in, split_in};
+use crate::notes::save_with_key_and_account;
+use crate::operations::{self, merge_in};
 use crate::textdoc::{document_of, structure_for, write_markdown_new};
 use crate::thumbnails::thumbnail_png;
 use crate::video::{self, VideoExportOptions, export_video_in};
@@ -436,36 +436,26 @@ impl WriteServices for AppWrite {
         path: &Path,
         note: Note,
         stamp: &FileStamp,
+        account: Option<&str>,
     ) -> Result<FileStamp, ToolError> {
         // The editor's own save, with the file's background image kept as it is.
-        save_with_key(library, path, note, stamp, None).map_err(tool_error)
+        save_with_key_and_account(library, path, note, stamp, None, account).map_err(tool_error)
     }
 
-    fn split_note(
+    fn create_revision(
         &self,
         library: &Library,
-        path: &Path,
-        split: &SplitRequest,
-        title: &str,
-    ) -> Result<PathBuf, ToolError> {
-        let loaded = library.read(path)?;
-        let spec = match split {
-            SplitRequest::AtMs(at) => SplitSpec::Time { at: *at },
-            SplitRequest::Polygon(polygon) => SplitSpec::Zone {
-                polygon: polygon.clone(),
-            },
-        };
-        let result = split_in(
-            library,
-            path,
-            loaded.file.note.clone(),
-            &loaded.stamp,
-            &spec,
-            title,
-            None,
-        )
-        .map_err(tool_error)?;
-        Ok(PathBuf::from(result.created.path))
+        binder: &Path,
+        mut file: NoteFile,
+        revised: Note,
+    ) -> Result<SavedNote, ToolError> {
+        // As the editor's save of `revised` over `file` (the source's ink): the original of a
+        // tablet note stays its bytes, any other note keeps the ink it has now as its first
+        // version, and the thumbnail shows the new ink.
+        crate::original::keep_original(&mut file, &revised)?;
+        file.thumbnail = background::settle(&mut file, &revised);
+        file.note = revised;
+        Ok(library.create(binder, &file)?)
     }
 
     fn merge_notes(
@@ -582,7 +572,7 @@ mod tests {
         edited.strokes.clear();
 
         let stamp = services
-            .save_note(&library, &saved.path, edited.clone(), &opened.stamp)
+            .save_note(&library, &saved.path, edited.clone(), &opened.stamp, None)
             .unwrap();
         let after = library.read(&saved.path).unwrap();
         assert_eq!(after.stamp, stamp);
@@ -597,34 +587,183 @@ mod tests {
         // The stamp of the version that was read before is refused, the file is left alone.
         let bytes = fs::read(&saved.path).unwrap();
         let error = services
-            .save_note(&library, &saved.path, edited, &opened.stamp)
+            .save_note(&library, &saved.path, edited, &opened.stamp, None)
             .unwrap_err();
         assert_eq!(error.code, "noteConflict");
         assert_eq!(fs::read(&saved.path).unwrap(), bytes);
     }
 
+    /// What the tool hands the app to create a revision: the source's file made a copy (a new id
+    /// and title, marked as a revision), and the note to write, which has `strokes` as its ink.
+    fn copy_of(source: &NoteFile, strokes: Vec<ardoise_ink::Stroke>) -> (NoteFile, Note) {
+        let mut file = source.clone();
+        file.note.id = "99999999-9999-4999-8999-999999999999".to_owned();
+        file.note.title = format!("{} (propre)", source.note.title);
+        file.note.favorite = false;
+        file.thumbnail = None;
+        file.mark_as_revision_of(&source.note, 1_792_900_000_000, "Trait supprimé");
+        let mut revised = file.note.clone();
+        revised.strokes = strokes;
+        (file, revised)
+    }
+
     #[test]
-    fn splitting_and_merging_are_the_apps_operations() {
+    fn a_copy_keeps_the_sources_ink_as_its_original_and_gets_a_new_thumbnail() {
         let (services, _dir) = services();
         let (_library_dir, library) = library();
         let saved = write_sample(&library, "Classe", "Cours");
-        // Samples are at 0, 8, 16... 232 ms.
-        let created = services
-            .split_note(&library, &saved.path, &SplitRequest::AtMs(120), "Suite")
-            .unwrap();
-        assert_eq!(created.parent(), saved.path.parent());
-        let new = read_note(&created).unwrap();
-        assert_eq!(new.note.title, "Suite");
-        assert!(new.thumbnail.is_some());
-        assert_eq!(
-            read_note(&saved.path).unwrap().note.strokes[0].points.len(),
-            15
-        );
-        let nothing = services
-            .split_note(&library, &saved.path, &SplitRequest::AtMs(5_000_000), "X")
-            .unwrap_err();
-        assert_eq!(nothing.code, "nothingToSplit");
+        let source = library.read(&saved.path).unwrap().file;
+        let (file, revised) = copy_of(&source, Vec::new());
 
+        let created = services
+            .create_revision(&library, Path::new("Classe"), file, revised)
+            .unwrap();
+        // Next to the source, the source's file untouched.
+        assert_eq!(created.path.parent(), saved.path.parent());
+        let copy = library.read(&created.path).unwrap().file;
+        assert!(copy.note.strokes.is_empty());
+        assert_eq!(copy.note.id, "99999999-9999-4999-8999-999999999999");
+        assert_eq!(copy.note.created, source.note.created);
+        assert_eq!(copy.revision.as_ref().unwrap().of, source.note.id);
+        // "Back to the original" is the source's ink, by the editor's rule.
+        let original = ardoise_core::format::read_from_bytes(copy.original_note.as_ref().unwrap())
+            .unwrap()
+            .note;
+        assert_eq!(original.strokes, source.note.strokes);
+        assert_ne!(copy.thumbnail, source.thumbnail);
+        assert!(copy.thumbnail.is_some());
+        assert_eq!(library.read(&saved.path).unwrap().file, source);
+    }
+
+    #[test]
+    fn a_copy_of_a_tablet_note_keeps_the_tablets_bytes_and_one_of_an_edited_note_its_first_version()
+    {
+        let (services, _dir) = services();
+        let (_library_dir, library) = library();
+
+        // A tablet note: `original.bin` is the original, nothing else is kept.
+        let mut tablet = NoteFile::new(sample_note("Tablette"));
+        tablet.original = Some(vec![1, 2, 3]);
+        let (file, revised) = copy_of(&tablet, Vec::new());
+        let created = services
+            .create_revision(&library, Path::new(""), file, revised)
+            .unwrap();
+        let copy = library.read(&created.path).unwrap().file;
+        assert_eq!(copy.original, Some(vec![1, 2, 3]));
+        assert_eq!(copy.original_note, None);
+
+        // A note already edited once keeps the original it has: the copy does not replace it.
+        let mut edited = NoteFile::new(sample_note("Déjà retouchée"));
+        edited.original_note = Some(b"first version".to_vec());
+        let (file, revised) = copy_of(&edited, Vec::new());
+        let created = services
+            .create_revision(&library, Path::new(""), file, revised)
+            .unwrap();
+        let copy = library.read(&created.path).unwrap().file;
+        assert_eq!(copy.original_note, Some(b"first version".to_vec()));
+
+        // A blank source has nothing to go back to.
+        let mut blank_note = sample_note("Vide");
+        blank_note.strokes.clear();
+        let blank = NoteFile::new(blank_note);
+        let (file, revised) = copy_of(&blank, sample_note("x").strokes);
+        let created = services
+            .create_revision(&library, Path::new(""), file, revised)
+            .unwrap();
+        let copy = library.read(&created.path).unwrap().file;
+        assert_eq!(copy.original_note, None);
+        assert_eq!(copy.note.strokes.len(), 1);
+    }
+
+    #[test]
+    fn a_revision_saved_with_an_account_gets_one_more_line_and_keeps_its_original() {
+        let (services, _dir) = services();
+        let (_library_dir, library) = library();
+        let saved = write_sample(&library, "Classe", "Cours");
+        let source = library.read(&saved.path).unwrap().file;
+        let (file, revised) = copy_of(&source, Vec::new());
+        let created = services
+            .create_revision(&library, Path::new("Classe"), file, revised)
+            .unwrap();
+        let opened = library.read(&created.path).unwrap();
+        let original = opened.file.original_note.clone();
+        let mut edited = opened.file.note.clone();
+        edited.strokes = source.note.strokes.clone();
+
+        let stamp = services
+            .save_note(
+                &library,
+                &created.path,
+                edited,
+                &opened.stamp,
+                Some("Trait remis"),
+            )
+            .unwrap();
+        let after = library.read(&created.path).unwrap();
+        assert_eq!(after.stamp, stamp);
+        let account = &after.file.revision.as_ref().unwrap().summary;
+        assert_eq!(account.len(), 2);
+        assert_eq!(account[0].text, "Trait supprimé");
+        assert_eq!(account[1].text, "Trait remis");
+        assert_eq!(account[1].at, after.file.note.modified);
+        assert_eq!(
+            after.file.original_note, original,
+            "the first version stays"
+        );
+        // A note that is not a revision takes no line.
+        let plain = library.read(&saved.path).unwrap();
+        let mut note = plain.file.note.clone();
+        note.favorite = true;
+        services
+            .save_note(&library, &saved.path, note, &plain.stamp, Some("Une ligne"))
+            .unwrap();
+        assert!(library.read(&saved.path).unwrap().file.revision.is_none());
+    }
+
+    /// What `split_note` hands the app for a part it took out of a note: a note of its own, whose
+    /// ink is the one it asks to write.
+    #[test]
+    fn a_part_of_a_split_note_gets_its_thumbnail_and_no_original() {
+        let (services, _dir) = services();
+        let (_library_dir, library) = library();
+        let saved = write_sample(&library, "Classe", "Cours");
+        let source = library.read(&saved.path).unwrap().file;
+        let parts = ardoise_core::ops::split_at_time(
+            &source.note,
+            120,
+            ardoise_core::ops::NewNote {
+                id: "99999999-9999-4999-8999-999999999999".to_owned(),
+                title: "Cours (suite)".to_owned(),
+                now: 1_792_900_000_000,
+            },
+        )
+        .unwrap();
+        let mut file = NoteFile::new(parts.extracted);
+        file.mark_as_revision_of(&source.note, 1_792_900_000_000, "Note découpée");
+        let revised = file.note.clone();
+
+        let created = services
+            .create_revision(&library, Path::new("Classe"), file, revised)
+            .unwrap();
+        assert_eq!(created.path.parent(), saved.path.parent());
+        let part = library.read(&created.path).unwrap().file;
+        assert_eq!(part.note.title, "Cours (suite)");
+        assert!(part.thumbnail.is_some());
+        assert_eq!(part.original, None);
+        assert_eq!(part.original_note, None);
+        assert_eq!(part.revision.unwrap().of, source.note.id);
+        // Samples are at 0, 8, 16... 232 ms: 15 stay, 15 moved, on a clock of their own.
+        assert_eq!(part.note.strokes[0].points.len(), 15);
+        assert_eq!(part.note.strokes[0].points[0].t, 0);
+        assert_eq!(library.read(&saved.path).unwrap().file, source);
+    }
+
+    #[test]
+    fn merging_is_the_apps_operation() {
+        let (services, _dir) = services();
+        let (_library_dir, library) = library();
+        let saved = write_sample(&library, "Classe", "Cours");
+        let created = write_sample(&library, "Classe", "Suite").path;
         let merged = services
             .merge_notes(
                 &library,

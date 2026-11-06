@@ -1,4 +1,5 @@
 //! The prompts (`mettre_au_propre` / `clean_up`, `titrer_et_etiqueter` / `title_and_tag`,
+//! `ameliorer_note` / `improve_note` (the one that writes: absent with `--read-only`),
 //! `resume_seance` / `lesson_summary`): they become slash commands in the assistant. Each is a
 //! message that tells the assistant which tools to call, and in which order, for a French
 //! teacher's notes.
@@ -63,6 +64,14 @@ pub struct LessonSummaryArgs {
     pub binder: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct ImproveArgs {
+    /// Note to improve: its id or its path in the library. Omitted: the note of the last live session.
+    pub note: Option<String>,
+    /// What the user wants improved, in their words (tidy the writing, redraw the diagram, correct the spelling...). Omitted: the assistant asks.
+    pub goals: Option<String>,
+}
+
 // ---------------------------------------------------------------------------------------------
 // What a prompt knows of the library
 
@@ -71,6 +80,8 @@ struct NoteRef {
     id: String,
     path: String,
     title: String,
+    /// The note is a retouched copy (`edit_revision` applies to it).
+    revision: bool,
 }
 
 /// How a note is named in a list: its title, or its date when it has none.
@@ -227,6 +238,101 @@ fn clean_up_text(
     }
 }
 
+/// The message of `ameliorer_note` / `improve_note`: retouching a note on a copy, in the six
+/// steps of `docs/design/revision.md`, with what the trial on four real notes taught. Only a
+/// server that can write has this prompt, so it names the write tools freely.
+fn improve_text(
+    language: Language,
+    note: Option<&NoteRef>,
+    asked: bool,
+    goals: Option<&str>,
+) -> String {
+    match language {
+        Language::Fr => {
+            let which = match (note, asked) {
+                (Some(note), _) => format!(
+                    "La note à améliorer : « {} » (id `{}`, chemin `{}`).{}",
+                    if note.title.trim().is_empty() { "sans titre" } else { note.title.trim() },
+                    note.id,
+                    note.path,
+                    if note.revision {
+                        " C'est déjà une copie retouchée : modifie-la en place avec `edit_revision` (ses traits sont numérotés comme `get_note` les donne maintenant, avec ce que l'utilisateur a pu changer à la main) au lieu de `create_revision`, qui fait une nouvelle copie."
+                    } else {
+                        ""
+                    }
+                ),
+                (None, true) => "La note demandée n'existe pas dans la bibliothèque : retrouve-la avec `search_notes` ou `list_notes`, ou demande à l'utilisateur laquelle il veut, avant de continuer.".to_owned(),
+                (None, false) => "Aucune note n'est désignée : appelle l'outil `last_live_note` pour trouver la note de la dernière séance en direct. S'il n'y en a pas (ou si Ardoise n'est pas ouverte), demande à l'utilisateur laquelle améliorer (`search_notes` et `list_notes` aident à la retrouver) avant de continuer.".to_owned(),
+            };
+            let goals = match goals {
+                Some(goals) => format!("Ce que l'utilisateur demande : {goals}"),
+                None => "L'utilisateur n'a pas dit ce qu'il veut améliorer : demande-le-lui (ranger l'écriture, redresser ou redessiner un schéma, corriger des fautes, mettre en couleur...) avant de préparer quoi que ce soit.".to_owned(),
+            };
+            format!(
+                "Tu aides un enseignant de physique-chimie (collège) à améliorer une note manuscrite d'Ardoise, sur une copie. {which}\n{goals}\n\n\
+                 Le principe. Ardoise ne contient aucune IA : tu regardes la page et tu décides, Ardoise exécute une liste d'ordres sur les traits (tu n'envoies jamais les points d'une page). L'original n'est jamais modifié : `preview_revision` essaie les ordres en mémoire (rien n'est écrit), `create_revision` écrit le résultat dans une copie à côté de l'original, que l'éditeur présente comme une copie retouchée, avec ce qui a changé. Les ordres ne peuvent désigner que des traits de cette note.\n\n\
+                 Procède dans cet ordre.\n\
+                 1. Regarde. `get_note` (avec `strokes: \"summary\"`) : la page, les calques, les traits, et `background.ruling` si le papier est réglé (première ligne et écart entre deux lignes, en millimètres, pour poser l'écriture dessus). `render_note` pour la page entière (dpi 100 à 150), puis zoome avec `region` et `labels: true` (dpi 150 à 250) sur ce qui va changer : les numéros écrits en rouge à côté des traits sont ceux des ordres. `ink_lines` donne les lignes écrites trouvées dans l'encre même (la reconnaissance en fusionne), `get_note_text` le texte reconnu, `get_strokes` les points exacts d'un trait (les `from` et `to` de `glyph`, pour prendre une lettre dans un mot écrit d'un seul trait).\n\
+                 2. Dis ce que tu prévois, et donne à part la liste des fautes d'orthographe que tu vois. Ne corrige que celles que l'utilisateur valide, et attends sa réponse avant de fabriquer une lettre. Ne change jamais le sens ; rien n'est corrigé ni déplacé en silence. Un document dont les mots comptent (compte rendu, fiche d'incident, dossier) reste sobre : aucune couleur, sauf si l'utilisateur en demande.\n\
+                 3. Pour une lettre à fabriquer ou à remplacer : d'abord, recopie-la depuis la même écriture dans cette note (`copy` pour une lettre écrite d'un trait à part, `glyph` avec `from` et `to` pour une lettre prise dans un mot écrit d'un seul trait : elle ne prend que le temps de ce morceau) ; compare les lettres avant de choisir, car une note peut contenir deux écritures, et préfère une lettre proche, de la même couleur. Sinon, fabrique-la avec des morceaux de cette écriture (`glyph` : le rond d'un « q » et la queue d'un « j » font un « g », un « w » agrandi un « W », un « u » retourné un « n »). Sinon, marque le mot en couleur (`add` avec le surligneur) et dis-le. Jamais de lettre prise dans une autre note, même en recopiant ses points dans une forme : l'utilisateur confie parfois son calepin à un élève.\n\
+                 4. Donne `after` à chaque lettre recopiée ou fabriquée, pour qu'elle prenne sa place dans le temps de l'écriture (le rejeu), et `retime` à un mot déplacé dans sa phrase. Si la note a une narration, rien ne se décale : la lettre est tracée plus vite, dans le temps disponible.\n\
+                 5. `preview_revision` avec la liste d'ordres. Regarde l'image (zoome avec `region` et `labels`), lis le rapport (ce que chaque ordre a sélectionné : une sélection de la mauvaise taille est l'erreur la plus courante ; pour une ligne rangée, la pente et d'où elle vient ; les avertissements), corrige, recommence. Envoie toujours la liste entière, construite à partir de la note telle qu'elle est, pas les changements depuis le dernier essai. L'aperçu donne aussi `version`, le nom de la note telle qu'il l'a vue.\n\
+                 6. Quand l'image est bonne, appelle `create_revision` (ou `edit_revision`) avec la liste, `expected_version` (la `version` du dernier aperçu), un `summary` (le compte rendu, dans la langue de l'utilisateur) et, si besoin, un `title`. Si la réponse est `noteConflict`, la note a changé depuis (l'utilisateur, un autre ordinateur) : ses traits peuvent avoir d'autres numéros, alors regarde-la de nouveau et refais la liste. Puis dis à l'utilisateur tout ce qui a changé, chaque lettre fabriquée (une lettre fabriquée se lit bien mais reste un peu serrée à côté de la vraie écriture) et ce qui reste incertain. Rappelle que l'original est intact, et que l'éditeur propose « Ouvrir l'original », « Ce qui a changé » et « Comparer ».\n\n\
+                 Ce que l'essai sur de vraies notes a appris.\n\
+                 - Une sélection de la mauvaise taille est l'erreur habituelle : un rectangle prend un trait voisin (le « on » d'un « rayon » rouge posé juste au-dessus). Ajoute un filtre `color`, `layer`, `min_size` ou `max_size`, et lis les nombres du rapport.\n\
+                 - Un trait nouveau ne garde pas la couleur d'avant : donne `color`.\n\
+                 - Sur une ligne avec des exposants ou des indices, la pente ajustée est fausse : donne la `slope` que tu vois, et `mode: \"rigid\"` pour une formule dont un exposant doit rester au-dessus. Une ligne courte prend une pente nulle.\n\
+                 - Une page entière de schéma ne se range pas ligne par ligne : sélectionne le texte (`ink_lines` met les dessins à part).\n\
+                 - Sur du papier réglé, `scale: 0.9` peut être nécessaire : l'écriture était plus espacée que les lignes et les descendantes se touchaient.\n\
+                 - `tidy_line` change peu une écriture déjà régulière, beaucoup une page désordonnée.\n\
+                 - Plusieurs calques : les traits nouveaux vont sur le calque de ceux qu'ils remplacent. L'image ne montre pas les calques masqués : un rectangle ou une sélection sans lieu ne prend pas leurs traits (nomme `layer` ou `ids` pour les toucher, le rapport le signale).\n\n\
+                 Les notes peuvent contenir des noms d'élèves : ne les répète que dans ta réponse à l'utilisateur."
+            )
+        }
+        Language::En => {
+            let which = match (note, asked) {
+                (Some(note), _) => format!(
+                    "The note to improve: \"{}\" (id `{}`, path `{}`).{}",
+                    if note.title.trim().is_empty() { "untitled" } else { note.title.trim() },
+                    note.id,
+                    note.path,
+                    if note.revision {
+                        " It already is a retouched copy: change it in place with `edit_revision` (its strokes are numbered as `get_note` gives them now, with what the user may have changed by hand) instead of `create_revision`, which makes a new copy."
+                    } else {
+                        ""
+                    }
+                ),
+                (None, true) => "The note asked for is not in the library: find it with `search_notes` or `list_notes`, or ask the user which one they mean, before going on.".to_owned(),
+                (None, false) => "No note is named: call the tool `last_live_note` to find the note of the last live session. If there is none (or Ardoise is not open), ask the user which note to improve (`search_notes` and `list_notes` help to find it) before going on.".to_owned(),
+            };
+            let goals = match goals {
+                Some(goals) => format!("What the user asks for: {goals}"),
+                None => "The user has not said what to improve: ask them (tidy the writing, straighten or redraw a diagram, correct mistakes, add colour...) before preparing anything.".to_owned(),
+            };
+            format!(
+                "You are helping a physics and chemistry teacher (lower secondary school) improve a handwritten Ardoise note, on a copy. {which}\n{goals}\n\n\
+                 The principle. Ardoise contains no AI: you look at the page and decide, Ardoise carries out a list of orders on the strokes (you never send the points of a page). The original is never changed: `preview_revision` tries the orders in memory (nothing is written), `create_revision` writes the result to a copy next to the original, which the editor presents as a retouched copy, with what changed. The orders can only name strokes of this note.\n\n\
+                 Proceed in this order.\n\
+                 1. Look. `get_note` (with `strokes: \"summary\"`): the page, the layers, the strokes, and `background.ruling` if the paper is ruled (the first rule and the distance between two rules, in millimetres, to put the writing on them). `render_note` for the whole page (100 to 150 dpi), then zoom with `region` and `labels: true` (150 to 250 dpi) on what will change: the red numbers written next to the strokes are the ones of the orders. `ink_lines` gives the written lines found in the ink itself (the recogniser merges lines), `get_note_text` the recognised text, `get_strokes` the exact points of a stroke (the `from` and `to` of `glyph`, to take a letter out of a word written in one stroke).\n\
+                 2. Say what you plan, and give the spelling mistakes you see as a separate list. Correct only those the user validates, and wait for their answer before making a letter. Never change the meaning; nothing is corrected or moved silently. A document whose words matter (a report, an incident record, a file) stays sober: no colour, unless the user asks for it.\n\
+                 3. For a letter to make or to replace: first copy it from the same handwriting in this note (`copy` for a letter that is a stroke of its own, `glyph` with `from` and `to` for a letter taken out of a word written in one stroke: it only takes the time of that piece); compare the letters before choosing, since a note can hold two hands, and prefer a close one, of the same colour. Otherwise make it from pieces of that handwriting (`glyph`: the bowl of a \"q\" and the tail of a \"j\" make a \"g\", a bigger \"w\" a \"W\", a turned \"u\" an \"n\"). Otherwise mark the word in colour (`add` with the highlighter) and say so. Never a letter taken from another note, not even by retyping its points in a shape: the user sometimes lends the notebook to a pupil.\n\
+                 4. Give `after` to every letter you copy or make, so that it takes its place in the time of the writing (the replay), and `retime` to a word moved into its sentence. If the note has a narration nothing moves in time: the letter is drawn faster, in the time available.\n\
+                 5. `preview_revision` with the list of orders. Look at the picture (zoom with `region` and `labels`), read the report (what each order selected: a selection of the wrong size is the usual mistake; for a tidied line, the slope and where it comes from; the warnings), correct, and again. Always send the whole list, built from the note as it is, not the changes since the last try. The preview also gives `version`, the name of the note as it saw it.\n\
+                 6. When the picture is right, call `create_revision` (or `edit_revision`) with the list, `expected_version` (the `version` of the last preview), a `summary` (the account, in the user's language) and a `title` if needed. If the answer is `noteConflict`, the note changed since (the user, another computer): its strokes may have other numbers, so look at it again and redo the list. Then tell the user everything that changed, each letter you made (a made letter reads well but stays a little tight next to real writing) and what is uncertain. Remind them that the original is intact, and that the editor offers \"Open the original\", \"What changed\" and \"Compare\".\n\n\
+                 What the trial on real notes taught.\n\
+                 - A selection of the wrong size is the usual mistake: a rectangle takes a neighbouring stroke (the \"on\" of a red \"rayon\" lying just above). Add a filter `color`, `layer`, `min_size` or `max_size`, and read the counts of the report.\n\
+                 - A new stroke does not keep the colour of before: give `color`.\n\
+                 - On a line with exponents or subscripts the fitted slope is wrong: give the `slope` you see, and `mode: \"rigid\"` for a formula whose exponent must stay above. A short line takes slope 0.\n\
+                 - A whole page of diagram is not tidied line by line: select the text (`ink_lines` sets the drawings apart).\n\
+                 - On ruled paper `scale: 0.9` may be needed: the writer's own line spacing was wider than the rules and descenders touched.\n\
+                 - `tidy_line` shows little on writing that is already regular, and much on a messy page.\n\
+                 - With several layers, new strokes go on the layer of the ones they replace. The picture does not show hidden layers: a rectangle or a selection with no place does not take their strokes (name `layer` or `ids` to touch them, the report says so).\n\n\
+                 Notes may contain students' names: repeat them only in your answer to the user."
+            )
+        }
+    }
+}
+
 fn list_text(language: Language, lines: &[String], total: usize) -> String {
     if total == 0 {
         return match language {
@@ -374,21 +480,30 @@ fn result(description: &str, text: String) -> GetPromptResult {
         .with_description(description)
 }
 
+/// The note named `reference`, if the library has it; `with_revision` reads the file to tell
+/// whether it is a retouched copy.
+fn note_ref(host: &Host, reference: &str, with_revision: bool) -> Option<NoteRef> {
+    let library = host.library().ok()?;
+    let entry = find_note(&library, reference).ok()?;
+    let revision = with_revision
+        && library
+            .read(&entry.path)
+            .is_ok_and(|n| n.file.revision.is_some());
+    Some(NoteRef {
+        path: crate::notes::relative_path(&library, &entry.path),
+        id: entry.id,
+        title: entry.title,
+        revision,
+    })
+}
+
 fn clean_up(host: &Host, language: Language, read_only: bool, args: &CleanUpArgs) -> String {
     let asked = args.note.as_deref().is_some_and(|n| !n.trim().is_empty());
     let note = args
         .note
         .as_deref()
         .filter(|_| asked)
-        .and_then(|reference| {
-            let library = host.library().ok()?;
-            let entry = find_note(&library, reference).ok()?;
-            Some(NoteRef {
-                path: crate::notes::relative_path(&library, &entry.path),
-                id: entry.id,
-                title: entry.title,
-            })
-        });
+        .and_then(|reference| note_ref(host, reference, false));
     clean_up_text(
         language,
         note.as_ref(),
@@ -396,6 +511,21 @@ fn clean_up(host: &Host, language: Language, read_only: bool, args: &CleanUpArgs
         args.format.unwrap_or_default(),
         read_only,
     )
+}
+
+fn improve(host: &Host, language: Language, args: &ImproveArgs) -> String {
+    let asked = args.note.as_deref().is_some_and(|n| !n.trim().is_empty());
+    let note = args
+        .note
+        .as_deref()
+        .filter(|_| asked)
+        .and_then(|reference| note_ref(host, reference, true));
+    let goals = args
+        .goals
+        .as_deref()
+        .map(str::trim)
+        .filter(|g| !g.is_empty());
+    improve_text(language, note.as_ref(), asked, goals)
 }
 
 /// The untitled notes of the library (or of `binder`), newest first.
@@ -511,6 +641,9 @@ impl ArdoiseServer {
 }
 
 const FR_NAMES: [&str; 3] = ["mettre_au_propre", "titrer_et_etiqueter", "resume_seance"];
+/// The prompt that writes (it names the tools of the write group): absent with `--read-only`.
+const FR_WRITING: &str = "ameliorer_note";
+const EN_WRITING: &str = "improve_note";
 const EN_NAMES: [&str; 3] = ["clean_up", "title_and_tag", "lesson_summary"];
 
 #[prompt_router(router = "prompts", vis = "pub(crate)")]
@@ -603,19 +736,55 @@ impl ArdoiseServer {
             .await??;
         Ok(result("Lesson summary", text))
     }
+
+    /// Améliore une note manuscrite sur une copie : l'original n'est jamais modifié.
+    #[prompt(
+        name = "ameliorer_note",
+        description = "Améliore une note manuscrite sur une copie (écriture rangée, schéma redressé, fautes corrigées avec la propre écriture de la note) : l'original n'est jamais modifié. Absente en lecture seule."
+    )]
+    async fn ameliorer_note(
+        &self,
+        Parameters(args): Parameters<ImproveArgs>,
+    ) -> Result<GetPromptResult, ErrorData> {
+        let text = self
+            .prompt_on_host(move |host| improve(host, Language::Fr, &args))
+            .await?;
+        Ok(result("Améliorer une note sur une copie", text))
+    }
+
+    #[prompt(
+        name = "improve_note",
+        description = "Improve a handwritten note on a copy (tidier writing, straightened diagrams, spelling corrected with the note's own handwriting): the original is never changed. Absent when read-only."
+    )]
+    async fn improve_note(
+        &self,
+        Parameters(args): Parameters<ImproveArgs>,
+    ) -> Result<GetPromptResult, ErrorData> {
+        let text = self
+            .prompt_on_host(move |host| improve(host, Language::En, &args))
+            .await?;
+        Ok(result("Improve a note on a copy", text))
+    }
 }
 
 impl ArdoiseServer {
     /// The prompts of the language of the app: the French names for a French app, else the
-    /// English ones.
-    pub(crate) fn prompt_router(language: Language) -> PromptRouter<ArdoiseServer> {
+    /// English ones. A read-only server leaves out the prompt that writes.
+    pub(crate) fn prompt_router(
+        language: Language,
+        read_only: bool,
+    ) -> PromptRouter<ArdoiseServer> {
         let mut router = Self::prompts();
-        let other = match language {
-            Language::Fr => EN_NAMES,
-            Language::En => FR_NAMES,
+        let (other, other_writing, writing) = match language {
+            Language::Fr => (EN_NAMES, EN_WRITING, FR_WRITING),
+            Language::En => (FR_NAMES, FR_WRITING, EN_WRITING),
         };
         for name in other {
             router.remove_route(name);
+        }
+        router.remove_route(other_writing);
+        if read_only {
+            router.remove_route(writing);
         }
         router
     }

@@ -1,16 +1,15 @@
 //! `merge_notes`, `split_note`, `straighten_shapes`: the operations that make notes out of
-//! notes, and the one that redraws ink. Merging and splitting are the app's own code (they
-//! carry the narration and the background image along); straightening is
-//! `ardoise_ink::shapes::straighten`, applied the way the editor applies it and saved once,
-//! after the version on disk was put in the library's trash as a note of its own.
+//! notes, and the one that redraws ink. Merging is the app's own code; splitting is
+//! `ardoise_core::ops`, what the editor's split uses, and straightening is
+//! `ardoise_ink::shapes::straighten`, applied the way the editor applies it. Both, like every change
+//! of ink, go through copies (`revision.rs`): the original is never written.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use ardoise_core::library::{
-    Library, LoadedNote, NOTE_EXTENSION, TRASH_RETENTION, TrashItem, note_file_stem,
-};
+use ardoise_core::library::{Library, LoadedNote, NOTE_EXTENSION, TrashItem, note_file_stem};
 use ardoise_core::note::Note;
+use ardoise_core::ops::{self, NewNote};
 use ardoise_hwr::structure::Item;
 use ardoise_hwr::{Language, Recognition};
 use ardoise_ink::{Shape, Straightened, Stroke, straighten};
@@ -19,9 +18,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::SplitRequest;
 use super::create::uuid_v4;
-use super::update::summary_at;
+use super::revision::{edit_in_place, make_copy, make_part, previous_version};
+use super::update::{check_title, now_ms, summary_at, summary_of};
 use crate::error::{ToolError, ToolResult, json_result};
 use crate::host::Host;
 use crate::notes::{find_note, iso};
@@ -50,11 +49,11 @@ pub struct MergeNotesArgs {
 pub struct SplitNoteArgs {
     /// The note's `id`, or its path relative to the library.
     pub note: String,
-    /// Everything written from this instant on goes to the new note: milliseconds on the clock of the strokes (`start_ms` and `end_ms` in `get_note` with `strokes`). Give this or `polygon`.
+    /// Everything written from this instant on goes to the second part: milliseconds on the clock of the strokes (`start_ms` and `end_ms` in `get_note` with `strokes`). Give this or `polygon`.
     pub at_ms: Option<u32>,
-    /// A polygon of the page in millimetres from its top-left corner, `[[x, y], ...]` (at least 3 points): the strokes with at least half of their samples inside go to the new note. Give this or `at_ms`.
+    /// A polygon of the page in millimetres from its top-left corner, `[[x, y], ...]` (at least 3 points): the strokes with at least half of their samples inside go to the second part. Give this or `at_ms`.
     pub polygon: Option<Vec<[f64; 2]>>,
-    /// Title of the new note (default: the note's title with " (continued)" or " (excerpt)").
+    /// Title of the second part (default: the note's title with " (continued)" or " (excerpt)").
     pub title: Option<String>,
 }
 
@@ -67,32 +66,71 @@ pub struct StraightenArgs {
 }
 
 /// The words the app adds to a title (`library.assemble.defaultTitle`, `editor.split.titleTime`,
-/// `editor.split.titleZone`, `editor.untitled`), in the language of the app.
-struct Words {
-    assembled: &'static str,
-    continued: &'static str,
-    excerpt: &'static str,
-    untitled: &'static str,
+/// `editor.split.titleZone`, `editor.untitled`), in the language of the app, and the few the MCP
+/// server alone writes (the copies of `ardoise-revise`'s tools, the version kept before a change).
+pub(super) struct Words {
+    pub assembled: &'static str,
+    pub continued: &'static str,
+    pub excerpt: &'static str,
+    pub untitled: &'static str,
+    /// What stays of a note split at an instant, as a new note (no key of the interface: the
+    /// editor's split saves it over the note). The MCP server alone makes it...
+    pub split_start: &'static str,
+    /// ... and of a note split by a zone.
+    pub split_rest: &'static str,
+    /// The account of the four parts `split_note` can make.
+    pub split_account_start: &'static str,
+    pub split_account_continued: &'static str,
+    pub split_account_rest: &'static str,
+    pub split_account_excerpt: &'static str,
+    /// The title of a retouched copy: "<title> (clean)".
+    pub clean: &'static str,
     /// The title of the version kept before straightening (no key of the interface: the MCP
     /// server alone makes it).
-    before_straightening: &'static str,
+    pub before_straightening: &'static str,
+    /// ... before `edit_revision`...
+    pub before_retouching: &'static str,
+    /// ... and before `split_note` on a revision.
+    pub before_splitting: &'static str,
+    /// The account entry of `straighten_shapes`, followed by the number of shapes (colon included).
+    pub straightened: &'static str,
 }
 
-fn words(language: Language) -> Words {
+pub(super) fn words(language: Language) -> Words {
     match language {
         Language::Fr => Words {
             assembled: "assemblage",
             continued: "suite",
             excerpt: "extrait",
             untitled: "Note sans titre",
+            split_start: "début",
+            split_rest: "reste",
+            split_account_start: "Note découpée : ce qui a été écrit avant l'instant choisi.",
+            split_account_continued: "Note découpée : ce qui a été écrit à partir de l'instant choisi.",
+            split_account_rest: "Note découpée : ce qui est hors de la zone choisie.",
+            split_account_excerpt: "Note découpée : ce qui est dans la zone choisie.",
+            clean: "propre",
             before_straightening: "avant redressement",
+            before_retouching: "avant retouche",
+            before_splitting: "avant découpe",
+            straightened: "Formes redressées :",
         },
         Language::En => Words {
             assembled: "assembled",
             continued: "continued",
             excerpt: "excerpt",
             untitled: "Untitled note",
+            split_start: "start",
+            split_rest: "rest",
+            split_account_start: "Note split: what was written before the chosen instant.",
+            split_account_continued: "Note split: what was written from the chosen instant on.",
+            split_account_rest: "Note split: what lies outside the chosen zone.",
+            split_account_excerpt: "Note split: what lies inside the chosen zone.",
+            clean: "clean",
             before_straightening: "before straightening",
+            before_retouching: "before retouching",
+            before_splitting: "before splitting",
+            straightened: "Shapes straightened:",
         },
     }
 }
@@ -112,6 +150,7 @@ pub fn merge_notes(host: &Host, args: MergeNotesArgs) -> ToolResult {
             "at least two notes are needed to merge them",
         ));
     }
+    args.title.as_deref().map_or(Ok(()), check_title)?;
     let library = host.library()?;
     let entries = args
         .notes
@@ -139,9 +178,23 @@ pub fn merge_notes(host: &Host, args: MergeNotesArgs) -> ToolResult {
     }))
 }
 
+/// Where a note is cut in two.
+enum Cut {
+    /// Everything written from this instant (milliseconds on the strokes' clock) on goes to the
+    /// second part.
+    At(u32),
+    /// The strokes with at least half of their samples inside the polygon go to the second part
+    /// (page units, 10 µm).
+    Zone(Vec<[f32; 2]>),
+}
+
+/// `split_note`. The ink of a note that is not a revision is never changed, so a part cannot be
+/// cut off it and thrown away: its file is only read, and both parts are new notes next to it,
+/// revisions of it. On a revision what stays is saved over it (its version before goes to the trash),
+/// and what moves is a new note, a revision of it.
 pub fn split_note(host: &Host, args: SplitNoteArgs) -> ToolResult {
-    let request = match (args.at_ms, &args.polygon) {
-        (Some(at), None) => SplitRequest::AtMs(at),
+    let cut = match (args.at_ms, &args.polygon) {
+        (Some(at), None) => Cut::At(at),
         (None, Some(polygon)) => {
             if polygon.len() < 3 || polygon.iter().flatten().any(|v| !v.is_finite()) {
                 return Err(ToolError::invalid(
@@ -149,7 +202,7 @@ pub fn split_note(host: &Host, args: SplitNoteArgs) -> ToolResult {
                 ));
             }
             // Millimetres to device units (10 µm).
-            SplitRequest::Polygon(
+            Cut::Zone(
                 polygon
                     .iter()
                     .map(|[x, y]| [(x * 100.0) as f32, (y * 100.0) as f32])
@@ -162,29 +215,108 @@ pub fn split_note(host: &Host, args: SplitNoteArgs) -> ToolResult {
             ));
         }
     };
+    args.title.as_deref().map_or(Ok(()), check_title)?;
     let library = host.library()?;
     let entry = find_note(&library, &args.note)?;
+    let source = library.read(&entry.path)?;
+
+    let words = words(host.environment.language());
+    let base = match entry.title.trim() {
+        "" => words.untitled,
+        title => title,
+    };
+    let (stays, moves, stays_account, moves_account) = match cut {
+        Cut::At(_) => (
+            words.split_start,
+            words.continued,
+            words.split_account_start,
+            words.split_account_continued,
+        ),
+        Cut::Zone(_) => (
+            words.split_rest,
+            words.excerpt,
+            words.split_account_rest,
+            words.split_account_excerpt,
+        ),
+    };
     let title = match args.title.as_deref().map(str::trim) {
         Some(title) => title.to_owned(),
-        None => {
-            let words = words(host.environment.language());
-            let base = match entry.title.trim() {
-                "" => words.untitled,
-                title => title,
-            };
-            let suffix = match request {
-                SplitRequest::AtMs(_) => words.continued,
-                SplitRequest::Polygon(_) => words.excerpt,
-            };
-            format!("{base} ({suffix})")
+        None => format!("{base} ({moves})"),
+    };
+    let new = NewNote {
+        id: uuid_v4(),
+        title,
+        now: now_ms(),
+    };
+    let parts = match &cut {
+        Cut::At(at) => ops::split_at_time(&source.file.note, *at, new),
+        Cut::Zone(polygon) => ops::split_by_zone(&source.file.note, polygon, new),
+    }
+    .map_err(|error| ToolError::new("nothingToSplit", error))?;
+
+    if source.file.revision.is_some() {
+        // The new note comes first, and is taken back when what stays cannot be saved: nothing is
+        // lost whichever step fails.
+        let moved = make_part(
+            host,
+            &library,
+            &entry,
+            &source,
+            parts.extracted,
+            moves_account,
+        )?;
+        let saved = edit_in_place(
+            host,
+            &library,
+            &entry,
+            &source,
+            parts.kept.strokes,
+            stays_account,
+            words.before_splitting,
+        );
+        let (kept, previous) = match saved {
+            Ok(saved) => saved,
+            Err(error) => {
+                let _ = library.trash(&moved.path);
+                return Err(error);
+            }
+        };
+        return json_result(json!({
+            "made_copies": false,
+            "kept": summary_of(&library, &kept),
+            "created": summary_of(&library, &moved),
+            "previous_version": previous_version(&previous),
+        }));
+    }
+    let kept = make_copy(
+        host,
+        &library,
+        &entry,
+        &source,
+        parts.kept.strokes,
+        stays_account,
+        Some(&format!("{base} ({stays})")),
+    )?;
+    let moved = match make_part(
+        host,
+        &library,
+        &entry,
+        &source,
+        parts.extracted,
+        moves_account,
+    ) {
+        Ok(moved) => moved,
+        Err(error) => {
+            let _ = library.trash(&kept.path);
+            return Err(error);
         }
     };
-    let created = host
-        .write
-        .split_note(&library, &entry.path, &request, &title)?;
     json_result(json!({
-        "kept": summary_at(&library, &entry.path)?,
-        "created": summary_at(&library, &created)?,
+        "made_copies": true,
+        "kept": summary_of(&library, &kept),
+        "created": summary_of(&library, &moved),
+        "original": summary_at(&library, &entry.path)?,
+        "original_unchanged": true,
     }))
 }
 
@@ -271,12 +403,13 @@ fn drawing_strokes(host: &Host, note: &Note) -> Result<Vec<usize>, ToolError> {
 
 /// Puts the version of the note read in `loaded` into the library's trash as a note of its
 /// own: a new id (it must never stand for the note itself once restored), its title followed by
-/// "(before straightening)", named as if it had been next to the note. The user restores it from
-/// the trash view of the app.
-fn keep_previous(
+/// `before` in brackets ("before straightening"), named as if it had been next to the note. The
+/// user restores it from the trash view of the app.
+pub(super) fn keep_previous(
     host: &Host,
     library: &Library,
     loaded: &LoadedNote,
+    before: &str,
 ) -> Result<TrashItem, ToolError> {
     let words = words(host.environment.language());
     let mut copy = loaded.file.clone();
@@ -285,7 +418,7 @@ fn keep_previous(
         "" => words.untitled.to_owned(),
         title => title.to_owned(),
     };
-    copy.note.title = format!("{base} ({})", words.before_straightening);
+    copy.note.title = format!("{base} ({before})");
     let name = format!(
         "{}.{NOTE_EXTENSION}",
         note_file_stem(copy.note.created, &copy.note.title)
@@ -297,15 +430,18 @@ fn keep_previous(
     Ok(library.trash_copy(&copy, &beside)?)
 }
 
+/// `straighten_shapes`: the shapes are redrawn on a copy of the note, which the original never
+/// stops being; on a note that is already a revision they are redrawn in it (its version before
+/// goes to the trash, like `edit_revision`'s).
 pub fn straighten_shapes(host: &Host, args: StraightenArgs) -> ToolResult {
     let library = host.library()?;
     let entry = find_note(&library, &args.note)?;
     let loaded = library.read(&entry.path)?;
-    let mut note = loaded.file.note.clone();
+    let note = &loaded.file.note;
     let count = note.strokes.len();
 
     let (selected, chosen_by): (Vec<usize>, &str) = match &args.strokes {
-        None => (drawing_strokes(host, &note)?, "ink_analysis"),
+        None => (drawing_strokes(host, note)?, "ink_analysis"),
         Some(indices) => {
             if let Some(bad) = indices.iter().find(|&&i| i >= count) {
                 return Err(ToolError::invalid(format!(
@@ -321,7 +457,7 @@ pub fn straighten_shapes(host: &Host, args: StraightenArgs) -> ToolResult {
     let given: Vec<Stroke> = selected.iter().map(|&i| note.strokes[i].clone()).collect();
     let groups = straighten(&given);
     if groups.is_empty() {
-        // Nothing is a clear shape: the note is left as it is, not even saved.
+        // Nothing is a clear shape: nothing is saved, no copy is made.
         return json_result(json!({
             "straightened": 0,
             "saved": false,
@@ -343,41 +479,45 @@ pub fn straighten_shapes(host: &Host, args: StraightenArgs) -> ToolResult {
             })
         })
         .collect();
-    note.strokes = replace_straightened(&note.strokes, &selected, &groups);
-    let new_count = note.strokes.len();
-    // The version on disk first, so that nothing is lost whatever happens next.
-    let kept = keep_previous(host, &library, &loaded)?;
-    // One save, with the stamp of the version that was read: a note changed meanwhile (another
-    // PC, the app) is refused with `noteConflict` and left alone, and the copy of a version
-    // that was not replaced is taken back.
-    if let Err(error) = host
-        .write
-        .save_note(&library, &entry.path, note, &loaded.stamp)
-    {
-        let _ = library.purge(&kept.id);
-        return Err(error);
-    }
-    let saved = library.read(&entry.path)?;
-    let days = TRASH_RETENTION.as_secs() / 86_400;
-    let title = kept.title.clone().unwrap_or_default();
-    json_result(json!({
+    let strokes = replace_straightened(&note.strokes, &selected, &groups);
+    let new_count = strokes.len();
+    let word = words(host.environment.language());
+    let account = format!("{} {}", word.straightened, groups.len());
+    let mut result = json!({
         "straightened": groups.len(),
         "saved": true,
         "shapes": shapes,
         "strokes_tried": selected,
         "chosen_by": chosen_by,
         "stroke_count": new_count,
-        "modified": iso(saved.file.note.modified),
-        "note": super::update::summary_of(&library, &saved),
-        "previous_version": {
-            "in_trash": kept.id,
-            "title": title,
-            "id": kept.note_id,
-            "restore": format!(
-                "the version before straightening is in the library's trash as the note \"{title}\": the user restores it from the trash view of the app (kept {days} days)"
-            ),
-        },
-    }))
+    });
+    if loaded.file.revision.is_some() {
+        let (saved, kept) = edit_in_place(
+            host,
+            &library,
+            &entry,
+            &loaded,
+            strokes,
+            &account,
+            word.before_straightening,
+        )?;
+        result["made_a_copy"] = false.into();
+        result["modified"] = iso(saved.file.note.modified).into();
+        result["note"] = serde_json::to_value(summary_of(&library, &saved))
+            .map_err(|e| ToolError::new("unexpected", e))?;
+        result["previous_version"] = previous_version(&kept);
+    } else {
+        // The original is only read; the copy is a new note next to it.
+        let copy = make_copy(host, &library, &entry, &loaded, strokes, &account, None)?;
+        result["made_a_copy"] = true.into();
+        result["modified"] = iso(copy.file.note.modified).into();
+        result["note"] = serde_json::to_value(summary_of(&library, &copy))
+            .map_err(|e| ToolError::new("unexpected", e))?;
+        result["original"] = serde_json::to_value(summary_at(&library, &entry.path)?)
+            .map_err(|e| ToolError::new("unexpected", e))?;
+        result["original_unchanged"] = true.into();
+    }
+    json_result(result)
 }
 
 #[cfg(test)]
