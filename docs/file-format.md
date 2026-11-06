@@ -307,7 +307,8 @@ object, indented with two spaces:
 
 The source is found by id in the library (titles and folders change, ids do not); it can be gone. Every save of the note
 keeps the member (the editor, the library's rename, tags and favourite, live mode on a resumed sheet, restoring from the
-trash); a merge or a split does not carry it to the notes they make, nor does "save as a copy". Keys this version does
+trash); a merge or the editor's split does not carry it to the notes they make, nor does "save as a copy" (an assistant's
+split of an ordinary note makes two new notes, both marked as copies of it: `docs/design/revision.md`). Keys this version does
 not know inside the object are ignored (and not written back). **A member that cannot be read** (not JSON, not an
 object, a missing or empty `of`, a wrong type) does not make the note unreadable: the note is read as not being a
 revision, and the member stays among the unknown members, written back byte for byte, until the note is given a

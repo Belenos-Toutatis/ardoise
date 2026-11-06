@@ -242,6 +242,6 @@ The assistant must use **the same copy** of Ardoise as the one you open (same fo
   remove notes (move to the trash, change the title or tags, split, retouch or straighten a copy, move) as **destructive**,
   which prompts the assistant to ask. To be sure nothing changes, declare Ardoise **read only** (`--read-only`).
 - **Nothing is ever deleted for good**: a note the assistant deletes goes to Ardoise's trash (kept 30 days), where you
-  can restore it. When it retouches a copy that was already made (or straightens its shapes), the version before goes there too, as
-  "`title` (before retouching)" or "`title` (before straightening)". The assistant never writes the ink of an ordinary
+  can restore it. When it retouches a copy that was already made (or straightens its shapes, or splits it), the version before
+  goes there too, as "`title` (before retouching)", "`title` (before straightening)" or "`title` (before splitting)". The assistant never writes the ink of an ordinary
   note: it only retouches a copy, next to it. Exports never overwrite an existing file.

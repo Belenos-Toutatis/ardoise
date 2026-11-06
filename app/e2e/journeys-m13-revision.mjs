@@ -163,7 +163,8 @@ export const revisionJourneys = [
         });
 
         await check('create_revision : une copie à côté, la note d’origine garde exactement les mêmes octets', async () => {
-          const made = await ok(session, 'create_revision', { note: source.id, orders: [recolor], summary: account });
+          const seen = (await ok(session, 'get_note', { note: source.id })).version;
+          const made = await ok(session, 'create_revision', { note: source.id, expected_version: seen, orders: [recolor], summary: account });
           copy = made.note;
           if (made.created !== true || copy.id === source.id || copy.title !== copyTitle) throw new Error(JSON.stringify(made).slice(0, 400));
           if (!readFileSync(join(app.library, ...source.path.split('/'))).equals(sourceBytes)) throw new Error('the source file changed');
@@ -174,11 +175,13 @@ export const revisionJourneys = [
         });
 
         await check('edit_revision refuse la note d’origine (notARevision), qui reste intacte ; la copie, elle, se modifie', async () => {
-          const error = await refused(session, 'edit_revision', { note: source.id, orders: [recolor], summary: 'essai' });
+          const seen = (await ok(session, 'get_note', { note: source.id })).version;
+          const error = await refused(session, 'edit_revision', { note: source.id, expected_version: seen, orders: [recolor], summary: 'essai' });
           if (error.code !== 'notARevision') throw new Error(JSON.stringify(error));
           if (!readFileSync(join(app.library, ...source.path.split('/'))).equals(sourceBytes)) throw new Error('the source file changed');
           const edited = await ok(session, 'edit_revision', {
             note: copy.id,
+            expected_version: (await ok(session, 'get_note', { note: copy.id })).version,
             orders: [{ op: 'recolor', select: { ids: [1] }, color: '#0000ff' }],
             summary: `${account}\n+ ${app.language === 'fr' ? 'deuxième trait en bleu' : 'second stroke in blue'}`,
           });

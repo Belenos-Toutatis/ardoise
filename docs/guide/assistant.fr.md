@@ -254,7 +254,8 @@ L'assistant doit utiliser **la même copie** d'Ardoise que celle que vous ouvrez
   modifier le titre ou les étiquettes, découper, retoucher une copie ou la redresser, déplacer) comme **destructifs**, ce qui
   l'incite à demander. Pour être sûr que rien ne change, déclarez Ardoise en **lecture seule** (`--read-only`).
 - **Rien n'est jamais supprimé définitivement** : une note que l'assistant supprime va dans la corbeille d'Ardoise
-  (gardée 30 jours), d'où vous pouvez la restaurer. Quand il retouche une copie déjà faite (ou y redresse les formes), la
-  version d'avant y est mise aussi, sous le nom « `titre` (avant retouche) » ou « `titre` (avant redressement) ».
+  (gardée 30 jours), d'où vous pouvez la restaurer. Quand il retouche une copie déjà faite (ou y redresse les formes, ou
+  la découpe), la version d'avant y est mise aussi, sous le nom « `titre` (avant retouche) », « `titre` (avant
+  redressement) » ou « `titre` (avant découpe) ».
   L'assistant n'écrit jamais l'encre d'une note ordinaire : il ne retouche qu'une copie, à côté. Les exports
   n'écrasent jamais un fichier existant.

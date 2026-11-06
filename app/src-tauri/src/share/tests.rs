@@ -1093,6 +1093,8 @@ struct Viewer {
     reader: BufReader<TcpStream>,
     /// Every message's text, to look for what must never be sent.
     texts: Vec<String>,
+    /// How long `next` waits for a message.
+    patience: Duration,
 }
 
 impl Viewer {
@@ -1120,12 +1122,19 @@ impl Viewer {
         Viewer {
             reader,
             texts: Vec::new(),
+            patience: Duration::from_secs(10),
         }
     }
 
-    /// The next message (comments and `retry` skipped); `None` when the stream ended.
+    /// The next message (comments and `retry` skipped); `None` when the stream ended, or when no
+    /// message came in time: the server's pings keep the socket busy, so the read timeout alone
+    /// would wait for ever for a message that never comes.
     fn next(&mut self) -> Option<(Value, Instant)> {
+        let deadline = Instant::now() + self.patience;
         loop {
+            if Instant::now() >= deadline {
+                return None;
+            }
             let mut line = String::new();
             if self.reader.read_line(&mut line).ok()? == 0 {
                 return None;
@@ -1146,7 +1155,7 @@ impl Viewer {
             assert!(Instant::now() < deadline, "timed out waiting for {what}");
             let (message, _) = self
                 .next()
-                .unwrap_or_else(|| panic!("stream ended before {what}"));
+                .unwrap_or_else(|| panic!("no message in time, or stream ended, before {what}"));
             if wanted(&message) {
                 return message;
             }
@@ -1815,11 +1824,12 @@ const SOON: Duration = Duration::from_secs(10);
 
 impl Viewer {
     /// Waits as long as a picture takes to render.
-    fn patient(self) -> Viewer {
+    fn patient(mut self) -> Viewer {
         self.reader
             .get_ref()
             .set_read_timeout(Some(RENDERING))
             .unwrap();
+        self.patience = RENDERING;
         self
     }
 
