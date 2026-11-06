@@ -247,7 +247,8 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
     });
     await check('edit_revision et straighten_shapes sur la copie : modifiée sur place, la version d’avant dans la corbeille', async () => {
       const copy = straightenedCopy;
-      const trashBefore = readdirSync(join(app.library, '_ardoise', 'trash'));
+      const trashed = () => readdirSync(join(app.library, '_ardoise', 'trash')).filter((name) => name.endsWith('.ardoise'));
+      const trashBefore = trashed();
       const edited = await session.call('edit_revision', {
         note: copy.id,
         orders: [{ op: 'recolor', select: { ids: [0] }, color: '#cc0000' }],
@@ -258,7 +259,7 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
       const suffix = language === 'fr' ? '(avant retouche)' : '(before retouching)';
       if (!saved || entries !== 2 || note.id !== copy.id) throw new Error(JSON.stringify(edited.structuredContent).slice(0, 300));
       if (!kept?.title?.endsWith(suffix) || !kept.in_trash || kept.id === copy.id) throw new Error(`version d’avant : ${JSON.stringify(kept)}`);
-      const trash = readdirSync(join(app.library, '_ardoise', 'trash'));
+      const trash = trashed();
       if (!trash.includes(kept.in_trash) || trash.length !== trashBefore.length + 1) throw new Error(`pas dans la corbeille : ${trash.join(', ')}`);
       // The shapes of a copy are straightened in it, and its version before goes to the trash too.
       const again = await session.call('straighten_shapes', { note: copy.id, strokes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] });
