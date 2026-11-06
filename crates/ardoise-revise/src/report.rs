@@ -83,7 +83,7 @@ impl LineReport {
 /// Where in time an order put its strokes.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TimeReport {
-    /// The stroke they come after; absent when they went to the end of the note.
+    /// The stroke they come after; absent when they went to the end of the note, or took the time of what they replace.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<usize>,
     /// When the first of them starts, milliseconds on the clock of the note.
@@ -94,7 +94,7 @@ pub struct TimeReport {
     pub pushed_ms: u32,
     /// How many strokes were pushed.
     pub pushed_strokes: usize,
-    /// 1: drawn in their own time. Below 1: drawn in this fraction of it, because the note has a narration and nothing else may move.
+    /// 1: drawn in their own time. Below 1: drawn in this fraction of it, because nothing else may move (the note has a narration, or `replace` stops before the next stroke).
     pub pace: f32,
 }
 
@@ -105,13 +105,16 @@ pub struct OrderReport {
     pub op: &'static str,
     /// How many strokes its selection found.
     pub selected: usize,
+    /// Their numbers (the first 100), to check against the labelled picture.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub selected_strokes: Vec<usize>,
     /// The numbers of the strokes it made, for later orders.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub new_strokes: Vec<usize>,
     /// What looks wrong, such as an empty selection.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
-    /// Where in time its strokes went (`copy`, `glyph`, `add`, `retime`).
+    /// Where in time its strokes went (`copy`, `glyph`, `add`, `retime`, `replace`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time: Option<TimeReport>,
     /// What it found (`tidy_line`).
@@ -124,6 +127,7 @@ impl OrderReport {
         Self {
             op,
             selected: 0,
+            selected_strokes: Vec::new(),
             new_strokes: Vec::new(),
             warnings: Vec::new(),
             time: None,

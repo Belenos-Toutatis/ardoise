@@ -271,7 +271,7 @@ pub enum Order {
         /// Last point kept, included (default the last).
         to: Option<usize>,
     },
-    /// Redraws: the shapes take the place of the selected strokes (at the place of the first of them in the drawing order, on its layer; the first on a visible layer when there is one) with its tool, colour and width, the strokes' median pressure and their time span. The selection must not be empty.
+    /// Redraws: the shapes take the place of the selected strokes (at the place of the first of them in the drawing order, on its layer; the first on a visible layer when there is one) with its tool, colour and width and the strokes' median pressure. In time they start when the first of the strokes began and last what the pen spent on them all, stopping before the next stroke; nothing else moves, and the report says when the strokes were written apart. The selection must not be empty.
     Replace {
         /// The strokes replaced.
         select: Select,

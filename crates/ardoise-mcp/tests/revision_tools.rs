@@ -584,6 +584,46 @@ async fn orders_without_a_version_are_refused() {
     assert!(session.harness.write.creations.lock().unwrap().is_empty());
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn a_badly_written_order_is_named() {
+    let session = session().await;
+    let result = session
+        .client
+        .call_tool(
+            rmcp::model::CallToolRequestParams::new("preview_revision").with_arguments(
+                json!({
+                    "note": CHIMIE,
+                    "orders": [recolor(0), { "op": "recolor", "select": { "ids": [1] } }],
+                })
+                .as_object()
+                .cloned()
+                .unwrap(),
+            ),
+        )
+        .await;
+    let message = match result {
+        Err(error) => error.to_string(),
+        Ok(result) => {
+            assert_eq!(result.is_error, Some(true), "{result:?}");
+            result.content[0].as_text().unwrap().text.clone()
+        }
+    };
+    assert!(message.contains("order 1 (recolor)"), "{message}");
+    assert!(message.contains("color"), "{message}");
+
+    // The list is still described order by order to the assistant.
+    let tools = session.client.list_all_tools().await.unwrap();
+    let preview = tools
+        .iter()
+        .find(|tool| tool.name == "preview_revision")
+        .unwrap();
+    let schema = Value::Object((*preview.input_schema).clone()).to_string();
+    assert!(
+        schema.contains("\"replace\"") && schema.contains("tidy_line"),
+        "{schema}"
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // Hidden layers, through the tools
 

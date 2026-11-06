@@ -338,7 +338,7 @@ impl ArdoiseServer {
         self.blocking(move |host| get_strokes(host, args)).await
     }
 
-    /// The written lines of a note found from the ink itself (the handwriting recogniser merges lines): per line its strokes, its left and right ends, the baseline at both ends, its slope in degrees, the height of its letters and its words (strokes and ends), from top to bottom, and `apart`, the strokes in no line (drawings, rules, highlights, marks). Only the strokes on visible layers are looked at.
+    /// The written lines of a note found from the ink itself (the handwriting recogniser merges lines): per line its strokes, its left and right ends, the baseline at both ends, its slope in degrees, the height of its letters and its words (strokes and ends), from top to bottom, and `apart`, the strokes in no line (drawings, rules, highlights, marks). Only the strokes on visible layers are looked at. It is reliable on written text; on a page of formulas it can join two of them or give a wild slope, so check it against the picture and name the strokes of a formula yourself.
     #[tool(
         name = "ink_lines",
         annotations(

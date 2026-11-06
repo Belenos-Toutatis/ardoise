@@ -85,7 +85,7 @@ wrong selection must show.
 | `rotate` | `select`, `degrees`, `origin` | turns (a tilted block) |
 | `smooth` | `select`, `sigma` (mm, 0.2 is light) | removes the tremble: Gaussian along the arc length, the ends stay |
 | `trim` | `stroke`, `from`, `to?` (included) | keeps only these points of a stroke (from `get_strokes`; numbered from 0 again after an earlier `trim` of it), which stays where it is in time. Refused on a stroke an earlier order placed in time (see "Time"). To reuse a letter of a word written in one stroke: `glyph` with `from` and `to` |
-| `replace` | `select`, `with: [Shape]`, `color?`, `width?` | the shapes take the place, tool, colour, width, layer, median pressure and time span of the strokes they replace, at the place of the first in the drawing order |
+| `replace` | `select`, `with: [Shape]`, `color?`, `width?` | the shapes take the place, tool, colour, width, layer and median pressure of the strokes they replace, at the place of the first in the drawing order; for their time, see "Time" |
 | `add` | `shapes`, `color`, `width?`, `tool?` (`highlighter`…), `layer?`, `behind?`, `after?` | new strokes; `behind` under the others (a highlight) |
 | `copy` | `select`, `to_x?` or `dx?`, `dy?` (default 0), `factor?`, `color?`, `after?` | a copy of strokes as they are now |
 | `glyph` | `parts: [Part]`, `color?`, `after?` | a letter made of pieces |
@@ -132,7 +132,14 @@ parts. A new shape lasts its length at 150 mm/s, at least 60 ms (supposé).
 - it does not fit, narration: **nothing moves**, they are drawn faster to fit.
 
 `Report` totals what moved. A `retime` leaves its old slot as a pause (the replay can cut pauses). Without `after`, a
-new stroke comes at the end of the note. `replace` keeps the time span of what it replaces.
+new stroke comes at the end of the note.
+
+`replace` starts when the first of its strokes began and lasts what the pen spent on them all, stopping before the next stroke
+of the note: nothing else moves, so a narration stays right. It used to take the whole span, from the first start to the last
+end, and the real trial showed why that is wrong: an arrow whose head was written ten minutes after its tail became a stroke
+drawn over ten minutes, on top of everything written in between (one dash of 95 s on a real note), and the report said nothing.
+Now its `time` says when the shapes are drawn, a warning says when other strokes were written between the replaced ones, and
+the replay leaves a pause at the later moments (`retime` the shapes to draw them elsewhere).
 
 **A piece of a stroke.** A letter taken out of a word written in one stroke is a `glyph` with `from` and `to`: only that piece is
 timed, so what follows moves by what it needs and, with a narration, it is drawn at the pace it needs. `copy` then `trim` used to

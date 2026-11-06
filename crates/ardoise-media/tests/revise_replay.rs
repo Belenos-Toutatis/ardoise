@@ -9,7 +9,7 @@ use std::time::Duration;
 use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Note, Origin, Paper, Template, Timing};
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_media::replay::{ReplayOptions, Timeline};
-use ardoise_revise::{Input, Order, Revised, Select, apply};
+use ardoise_revise::{Input, Order, Revised, Select, Shape, apply};
 
 /// A stroke in device units from `x` to `x + 500`, from `t0` to `t1` ms.
 fn stroke(x: f32, t0: u32, t1: u32) -> Stroke {
@@ -449,6 +449,39 @@ fn a_stroke_cut_before_it_is_placed_takes_its_own_time() {
     assert_written_in_order(&out, &revised, &[0, 3, 1, 2]);
     assert_eq!(revised.report.pushed_ms, 0);
     assert_replay_is_sound(&out);
+}
+
+#[test]
+fn a_shape_is_written_at_its_first_stroke_not_across_what_came_between() {
+    // Stroke 3 is written 5 s after the sentence: replacing 0 and 3 together must not make a
+    // stroke that takes the whole sentence to appear.
+    let source = sentence(100);
+    let order = Order::Replace {
+        select: ids(&[0, 3]),
+        with: vec![Shape::Line {
+            from: [10.0, 20.0],
+            to: [40.0, 20.0],
+        }],
+        color: None,
+        width: None,
+    };
+    for narration in [false, true] {
+        let (out, revised) = revise(&source, narration, std::slice::from_ref(&order));
+        assert_eq!(revised.report.strokes_pushed, 0);
+        // Written before stroke 1 begins, in the 600 ms the pen spent on the two it replaces, cut
+        // to what there is before it.
+        assert_written_in_order(&out, &revised, &[4, 1, 2]);
+        let shape = &out.strokes[index_of(&revised, 4)];
+        assert_eq!(shape.points[0].t, 0);
+        assert_eq!(shape.points[shape.points.len() - 1].t, 598);
+        for number in [1, 2] {
+            assert_eq!(
+                out.strokes[index_of(&revised, number)],
+                source.strokes[number]
+            );
+        }
+        assert_replay_is_sound(&out);
+    }
 }
 
 #[test]

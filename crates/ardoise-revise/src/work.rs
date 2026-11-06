@@ -6,9 +6,10 @@ use ardoise_ink::{Point, Rgba, Stroke, Tool};
 
 use crate::geom::{Area, UNITS, area_of, median, smooth_stroke};
 use crate::orders::{Flip, Order, Part, Select, Shape};
-use crate::report::{Ctx, OrderReport, Report, ReviseError, SlopeFrom};
+use crate::report::{Ctx, OrderReport, Report, ReviseError, SlopeFrom, TimeReport};
 use crate::shapes::{P, Style, length, paths, sample_count, stroke_along};
 use crate::tidy::TidySpec;
+use crate::time::SQUEEZE_MARGIN_MS;
 use crate::validate::{Color, too_many_points};
 use crate::{Input, MAX_COORD_MM, MAX_POINTS, MAX_SMOOTHED_POINTS, Revised};
 
@@ -26,6 +27,8 @@ const SHAPE_MIN_MS: u32 = 60;
 const OFF_PAGE_SLACK_MM: f32 = 0.5;
 /// How many stroke numbers a warning writes out: on a large note it stays a sentence.
 const LISTED_NUMBERS: usize = 20;
+/// How many of the numbers it selected the report gives for one order.
+const REPORTED_NUMBERS: usize = 100;
 
 /// The numbers, or the first of them and how many others.
 fn listed(numbers: &[usize]) -> String {
@@ -211,7 +214,7 @@ impl<'a> Work<'a> {
                     return Err(ctx.err("nothing selected: there is nothing to replace"));
                 }
                 let color = color.as_deref().map(|text| parse(ctx, text)).transpose()?;
-                report.new_strokes = self.replace(ctx, &ids, with, color, *width)?;
+                self.replace(ctx, &ids, with, color, *width, &mut report)?;
             }
             Order::Add {
                 shapes,
@@ -440,6 +443,7 @@ impl<'a> Work<'a> {
                 .is_some_and(|stroke| !stroke.points.is_empty())
         });
         report.selected = chosen.len();
+        report.selected_strokes = chosen.iter().take(REPORTED_NUMBERS).copied().collect();
         if chosen.is_empty() {
             report.warnings.push(if hidden_left_out > 0 {
                 format!(
@@ -593,7 +597,10 @@ impl<'a> Work<'a> {
 
     /// The shapes take the place of `ids` (see [`Order::Replace`]): the first in the drawing order
     /// (among those the note shows, when it shows any) gives its place, layer, tool, colour and
-    /// width; they share the time span of all.
+    /// width. In time they start when the first of all began and last what the pen spent on them
+    /// all, stopping before the next stroke of the note: strokes written apart, such as an arrow
+    /// finished ten minutes later, must not stretch a shape over everything written in between.
+    /// Nothing else moves, so a narration stays right.
     fn replace(
         &mut self,
         ctx: Ctx,
@@ -601,7 +608,8 @@ impl<'a> Work<'a> {
         with: &[Shape],
         color: Option<Color>,
         width: Option<f32>,
-    ) -> Result<Vec<usize>, ReviseError> {
+        report: &mut OrderReport,
+    ) -> Result<(), ReviseError> {
         // In the drawing order: by layer, then along the list (the first of equal layers wins).
         let first = self
             .list
@@ -637,7 +645,42 @@ impl<'a> Work<'a> {
             .filter_map(span_of)
             .collect();
         let start = spans.iter().map(|span| span.0).min().unwrap_or(0);
-        let end = spans.iter().map(|span| span.1).max().unwrap_or(start);
+        let last_start = spans.iter().map(|span| span.0).max().unwrap_or(start);
+        let drawn: u64 = spans
+            .iter()
+            .map(|span| u64::from(span.1.saturating_sub(span.0)))
+            .sum();
+        let next = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter(|(number, _)| ids.binary_search(number).is_err())
+            .filter_map(|(_, slot)| start_of(slot.stroke.as_ref()?))
+            .filter(|&other| other > start)
+            .min();
+        let end = u32::try_from(u64::from(start) + drawn)
+            .unwrap_or(u32::MAX)
+            .min(next.map_or(u32::MAX, |next| {
+                next.saturating_sub(SQUEEZE_MARGIN_MS as u32).max(start)
+            }));
+        if next.is_some_and(|next| next < last_start) {
+            report.warnings.push(
+                "the strokes it replaces were written at different moments, with others in between: the shapes are drawn at the first moment and the replay leaves a pause at the others (`retime` the shapes to draw them at another moment)"
+                    .to_owned(),
+            );
+        }
+        report.time = Some(TimeReport {
+            after: None,
+            start_ms: start,
+            end_ms: end,
+            pushed_ms: 0,
+            pushed_strokes: 0,
+            pace: if drawn == 0 {
+                1.0
+            } else {
+                (f64::from(end - start) / drawn as f64) as f32
+            },
+        });
 
         let all: Vec<Vec<P>> = with.iter().flat_map(paths).collect();
         let total: f64 = all.iter().map(|path| f64::from(length(path))).sum();
@@ -666,7 +709,8 @@ impl<'a> Work<'a> {
             self.behind += numbers.len();
         }
         self.remove(ctx, ids);
-        Ok(numbers)
+        report.new_strokes = numbers;
+        Ok(())
     }
 
     /// The stroke new shapes look like when the order does not say: the note's writing that it

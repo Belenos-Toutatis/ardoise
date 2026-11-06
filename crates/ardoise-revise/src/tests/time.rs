@@ -200,6 +200,71 @@ fn replace_keeps_the_time_span_and_moves_nothing() {
     assert_eq!(times(revised.stroke(3)), (600, 1100));
     assert_eq!(times(revised.stroke(2)), (1600, 2100));
     assert_eq!(revised.report.strokes_pushed, 0);
+    let time = revised.report.orders[0].time.as_ref().unwrap();
+    assert_eq!((time.start_ms, time.end_ms, time.pushed_ms), (600, 1100, 0));
+    assert!(revised.report.orders[0].warnings.is_empty());
+}
+
+#[test]
+fn a_shape_does_not_stretch_over_what_was_written_between_the_strokes_it_replaces() {
+    // An arrow begun at 0 and finished ten minutes later, with a stroke in between.
+    let strokes = vec![
+        line_stroke([10.0, 20.0], [15.0, 20.0], 0, 500),
+        line_stroke([20.0, 20.0], [25.0, 20.0], 2000, 2500),
+        line_stroke([30.0, 20.0], [35.0, 20.0], 600_000, 600_300),
+    ];
+    let revised = run(
+        &strokes,
+        r#"[{"op":"replace","select":{"ids":[0,2]},"with":[{"line":{"from":[0,0],"to":[30,0]}}]}]"#,
+    );
+    // At the first moment, in the 800 ms the pen spent on them, not over ten minutes.
+    assert_eq!(times(revised.stroke(3)), (0, 800));
+    assert_eq!(times(revised.stroke(1)), (2000, 2500));
+    assert_eq!(revised.report.strokes_pushed, 0);
+    let order = &revised.report.orders[0];
+    let time = order.time.as_ref().unwrap();
+    assert_eq!((time.start_ms, time.end_ms), (0, 800));
+    assert!((time.pace - 1.0).abs() < 1e-6);
+    assert!(
+        order.warnings[0].contains("different moments"),
+        "{:?}",
+        order.warnings
+    );
+}
+
+#[test]
+fn a_shape_stops_before_the_next_stroke_when_there_is_no_room() {
+    // 800 ms of pen, and only 600 ms before the stroke in between.
+    let strokes = vec![
+        line_stroke([10.0, 20.0], [15.0, 20.0], 0, 500),
+        line_stroke([20.0, 20.0], [25.0, 20.0], 600, 1100),
+        line_stroke([30.0, 20.0], [35.0, 20.0], 600_000, 600_300),
+    ];
+    let revised = run(
+        &strokes,
+        r#"[{"op":"replace","select":{"ids":[0,2]},"with":[{"line":{"from":[0,0],"to":[30,0]}}]}]"#,
+    );
+    assert_eq!(times(revised.stroke(3)), (0, 598));
+    assert_eq!(times(revised.stroke(1)), (600, 1100));
+    let time = revised.report.orders[0].time.as_ref().unwrap();
+    assert!((time.pace - 598.0 / 800.0).abs() < 1e-6);
+}
+
+#[test]
+fn strokes_written_together_replaced_give_no_warning_and_lose_their_pauses() {
+    // Two strokes with a long pause and nothing written in it: the shape does not crawl through it.
+    let strokes = vec![
+        line_stroke([10.0, 20.0], [15.0, 20.0], 0, 500),
+        line_stroke([20.0, 20.0], [25.0, 20.0], 60_000, 60_500),
+        line_stroke([30.0, 20.0], [35.0, 20.0], 61_000, 61_500),
+    ];
+    let revised = run(
+        &strokes,
+        r#"[{"op":"replace","select":{"ids":[0,1]},"with":[{"line":{"from":[0,0],"to":[30,0]}}]}]"#,
+    );
+    assert_eq!(times(revised.stroke(3)), (0, 1000));
+    assert_eq!(times(revised.stroke(2)), (61_000, 61_500));
+    assert!(revised.report.orders[0].warnings.is_empty());
 }
 
 #[test]
