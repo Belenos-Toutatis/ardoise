@@ -616,9 +616,17 @@ mod imp {
     #[cfg(test)]
     impl Faults {
         fn next_fails(&self) -> bool {
-            self.0
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-                .is_ok()
+            let mut now = self.0.load(Ordering::SeqCst);
+            while let Some(next) = now.checked_sub(1) {
+                match self
+                    .0
+                    .compare_exchange_weak(now, next, Ordering::SeqCst, Ordering::SeqCst)
+                {
+                    Ok(_) => return true,
+                    Err(actual) => now = actual,
+                }
+            }
+            false
         }
     }
 
