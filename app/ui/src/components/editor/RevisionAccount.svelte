@@ -5,7 +5,7 @@
    * as markup.
    */
   import { currentLocale, t } from '../../lib/i18n.svelte';
-  import type { RevisionOfNote } from '../../lib/note';
+  import { revisionSourceTitle, type RevisionOfNote } from '../../lib/note';
   import Modal from '../Modal.svelte';
 
   let { revision, onclose }: { revision: RevisionOfNote; onclose: () => void } = $props();
@@ -15,7 +15,7 @@
   const valid = (ms: number) => Number.isFinite(ms) && Math.abs(ms) <= 8.64e15;
   const when = (ms: number) => (valid(ms) ? format.format(new Date(ms)) : '');
   /** The title the source has now when it is known. */
-  const sourceTitle = $derived(revision.source?.title ?? revision.ofTitle);
+  const sourceTitle = $derived(revisionSourceTitle(revision, t('editor.untitled')));
 </script>
 
 <Modal title={t('editor.revision.account.title')} {onclose}>

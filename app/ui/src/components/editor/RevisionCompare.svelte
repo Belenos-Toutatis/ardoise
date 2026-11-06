@@ -8,7 +8,7 @@
   import { onDestroy, untrack } from 'svelte';
   import { api, errorMessage } from '../../lib/api';
   import { t } from '../../lib/i18n.svelte';
-  import type { RevisionOfNote } from '../../lib/note';
+  import { revisionSourceTitle, type RevisionOfNote } from '../../lib/note';
   import Modal from '../Modal.svelte';
 
   let {
@@ -89,8 +89,16 @@
     copy = b;
   }
 
+  /**
+   * The rounded box as a string: `box` is a new object at each recompute, so an effect that read it
+   * would run (discarding the answer in flight, drawing both pages again) at every 1 px resize;
+   * a string compares by value and only a change of the rounded size runs the effect.
+   */
+  const boxKey = $derived(`${box.w}x${box.h}`);
+
   $effect(() => {
-    const target = box;
+    const [w, h] = boxKey.split('x').map(Number);
+    const target = { w, h };
     const ids = ++request;
     clearTimeout(timer);
     // The first drawing starts at once; a resize waits until the window stops moving.
@@ -116,7 +124,7 @@
       <p class="muted small" data-slot="revision-compare-unsaved">{t('editor.revision.comparison.unsaved')}</p>
     {/if}
     <div class="compare-stage" class:stacked bind:this={stage} data-slot="revision-compare-stage">
-      {#each [{ slot: 'original', page: original, caption: t('editor.revision.comparison.original', { title: source?.title ?? revision.ofTitle }), alt: t('editor.revision.comparison.originalAlt') }, { slot: 'copy', page: copy, caption: t('editor.revision.comparison.copy'), alt: t('editor.revision.comparison.copyAlt') }] as side (side.slot)}
+      {#each [{ slot: 'original', page: original, caption: t('editor.revision.comparison.original', { title: revisionSourceTitle(revision, t('editor.untitled')) }), alt: t('editor.revision.comparison.originalAlt') }, { slot: 'copy', page: copy, caption: t('editor.revision.comparison.copy'), alt: t('editor.revision.comparison.copyAlt') }] as side (side.slot)}
         <figure class="compare-page" data-slot={`revision-compare-${side.slot}`} style:--compare-h={`${box.h}px`}>
           <figcaption>{side.caption}</figcaption>
           <div class="compare-frame">

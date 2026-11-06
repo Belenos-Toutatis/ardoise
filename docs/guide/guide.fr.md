@@ -836,22 +836,30 @@ version de la note, jamais l'état juste avant la dernière modification.
 
 ### Une copie retouchée par un assistant
 
-Quand votre assistant (chapitre 14) retouche une note, il ne touche jamais à l'originale : il en fait une **copie**, à
-côté, qu'Ardoise reconnaît. Ouvrez cette copie : sous la barre du haut, une ligne dit **Copie retouchée de « Titre »**,
-avec trois boutons.
+Quand votre assistant (chapitre 14) retouche une note, il n'écrit jamais l'encre de l'originale : il en fait une
+**copie**, à côté, qu'Ardoise reconnaît. Ouvrez cette copie : sous la barre du haut, une ligne dit **Copie retouchée de
+« Titre »** (« Note sans titre » si l'originale n'a pas de titre), avec trois boutons.
 
 - **Ouvrir l'original** ouvre la note d'origine dans l'éditeur, comme les flèches « Page précédente » et « Page suivante »
   (avec des modifications non enregistrées, Ardoise demande d'abord ce qu'il faut en faire). Le bouton est grisé, avec
-  « L'original n'existe plus », si la note d'origine a été supprimée ou sortie de la bibliothèque.
+  « L'original n'est pas dans la bibliothèque », si Ardoise ne la trouve pas : elle est peut-être à la corbeille
+  (**restaurez-la depuis la corbeille**), pas encore synchronisée sur ce PC, ou illisible ici.
 - **Ce qui a changé** ouvre le compte rendu de l'assistant : une ligne datée par retouche, avec chaque changement et
   chaque lettre fabriquée. C'est un texte écrit par l'assistant, qui peut se tromper : regardez la copie.
 - **Comparer** montre l'original et la copie côte à côte (l'un au-dessus de l'autre dans une fenêtre étroite). La copie
   y est montrée telle qu'elle est enregistrée : ses modifications non enregistrées n'y sont pas. Grisé, lui aussi,
-  quand l'original n'existe plus.
+  quand l'original n'est pas dans la bibliothèque.
 
-Une copie retouchée est une note comme les autres : vous pouvez la modifier à la main, la renommer, la supprimer ;
-**Revenir à l'original** y rétablit l'encre de départ. Ce que l'assistant peut demander, et ce qu'il ne fait jamais,
-est dans le guide [L'assistant](assistant.fr.md).
+**Deux sens du mot « original ».** **Ouvrir l'original** et **Comparer** montrent la note d'origine *telle qu'elle est
+maintenant* : si vous l'avez modifiée après la copie, **Comparer** montre aussi ces modifications. **Revenir à l'original**,
+sur la copie, rétablit autre chose : la *première* encre de cette note (pour une note venue de la tablette, la page
+telle que la tablette l'a envoyée), qui n'est peut-être ni la note d'origine d'aujourd'hui ni la copie retouchée.
+
+Une copie retouchée est une note comme les autres : vous pouvez la modifier à la main, la renommer, l'exporter, l'imprimer,
+la reprendre en mode direct (pour la projeter) ou la supprimer, ce qui veut dire **Mettre à la corbeille** (d'où vous
+la restaurez). Mettre l'*original* à la corbeille ne touche pas la copie : elle reste, et ses deux boutons « original »
+sont grisés. Ce qu'on peut demander à l'assistant, ce qu'Ardoise garantit et ce qui n'est que demandé, tout cela est
+dans le guide [L'assistant](assistant.fr.md).
 
 ## 9. Relecture, narration et vidéo
 

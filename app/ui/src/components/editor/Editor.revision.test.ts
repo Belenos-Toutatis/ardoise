@@ -9,7 +9,7 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
-import { addMockRevision, mockLibrary, notifyLibraryChanged, resetMockLibrary } from '../../lib/mock-data';
+import { addMockRevision, freshStamp, mockLibrary, notifyLibraryChanged, resetMockLibrary } from '../../lib/mock-data';
 import { resetMockNarration } from '../../lib/mock-narration';
 import { resetMockShare } from '../../lib/mock-share';
 import { share } from '../../lib/share-state.svelte';
@@ -176,12 +176,47 @@ describe('the line of a revision', () => {
     await vi.waitFor(() => expect(view.line()).toBe('Copie retouchée de « Optique »'));
   });
 
+  it('names an untitled source « Note sans titre », not an empty pair of quotes', async () => {
+    const copy = addMockRevision();
+    mockLibrary().notes.get(demoPath(PHYSICS))!.note.title = '  ';
+    const view = await render(copy);
+    await vi.waitFor(() => expect(view.line()).toBe('Copie retouchée de « Note sans titre »'));
+    // The source is gone, and the title of the time was empty too: same answer.
+    cleanup?.();
+    const lost = addMockRevision({ title: 'Copie' });
+    mockLibrary().notes.get(lost)!.revision!.ofTitle = '';
+    mockLibrary().notes.delete(demoPath(PHYSICS));
+    const again = await render(lost);
+    await vi.waitFor(() => expect(again.line()).toBe('Copie retouchée de « Note sans titre »'));
+  });
+
   it('shows a title written by an assistant as text, markup and all', async () => {
     const copy = addMockRevision();
     mockLibrary().notes.get(demoPath(PHYSICS))!.note.title = '<b>gras</b> & <img src=x onerror=alert(1)>';
     const view = await render(copy);
     await vi.waitFor(() => expect(view.line()).toContain('<b>gras</b>'));
     expect(view.bar()?.querySelector('b, img')).toBeNull();
+  });
+
+  it('goes away after « Enregistrer comme copie »: the new note is not a retouched copy', async () => {
+    const path = addMockRevision();
+    const view = await render(path);
+    await vi.waitFor(() => expect(view.bar()).toBeTruthy());
+    await view.modify();
+    // The file changed under the editor: saving is a conflict, and the copy is offered.
+    mockLibrary().notes.get(path)!.stamp = freshStamp();
+    await view.key('s', { ctrlKey: true });
+    await vi.waitFor(() => expect(view.target.querySelector('[role="alert"]')).toBeTruthy());
+    view.named('Enregistrer comme copie')!.click();
+    await vi.waitFor(() => expect(view.onsaved).toHaveBeenCalled());
+    const copyPath = view.onsaved.mock.calls[0][0] as string;
+    expect(copyPath).not.toBe(path);
+    await vi.waitFor(() => expect(view.editorPath()).toBe(copyPath));
+    expect(view.bar()).toBeNull();
+    expect(view.target.querySelector('[data-action="revision-open"]')).toBeNull();
+    // Nothing of the account went to the file of the copy; the revision it came from kept its own.
+    expect(mockLibrary().notes.get(copyPath)?.revision).toBeUndefined();
+    expect(mockLibrary().notes.get(path)?.revision?.of).toBe(PHYSICS_ID);
   });
 
   it('goes away with the revision: a note opened after it has no line', async () => {
@@ -248,7 +283,7 @@ describe('« Ouvrir l\'original »', () => {
     expect(outside.onclose).not.toHaveBeenCalled();
   });
 
-  it('is greyed with the reason written beside it when the original no longer exists', async () => {
+  it('is greyed with the reason written beside it when the original is not in the library', async () => {
     const copy = addMockRevision();
     mockLibrary().notes.delete(demoPath(PHYSICS));
     const view = await render(copy);
@@ -256,7 +291,7 @@ describe('« Ouvrir l\'original »', () => {
     const open = view.action('revision-open')!;
     expect(open.disabled).toBe(true);
     const reason = view.bar()!.querySelector('[data-slot="revision-gone"]')!;
-    expect(reason.textContent?.trim()).toBe("L'original n'existe plus");
+    expect(reason.textContent?.trim()).toBe("L'original n'est pas dans la bibliothèque");
     expect(open.getAttribute('aria-describedby')).toBe(reason.id);
     // The line still says whose copy it is, with the title of that time.
     expect(view.line()).toBe('Copie retouchée de « Cours de physique »');
@@ -292,7 +327,7 @@ describe('« Ouvrir l\'original »', () => {
     vi.spyOn(api, 'revisionSource').mockResolvedValue(null);
     view.action('revision-open')!.click();
     await vi.waitFor(() => expect(view.target.querySelector('.editor-notice')).toBeTruthy());
-    expect(view.target.querySelector('.editor-notice')?.textContent).toContain("L'original n'existe plus");
+    expect(view.target.querySelector('.editor-notice')?.textContent).toContain("L'original n'est pas dans la bibliothèque");
     expect(view.onpage).not.toHaveBeenCalled();
     expect(view.action('revision-open')?.disabled).toBe(true);
   });
@@ -495,6 +530,41 @@ describe('« Comparer »', () => {
     await view.key('Escape');
     expect(view.dialog()).toBeNull();
     expect(document.activeElement).toBe(button);
+  });
+
+  it('does not draw again for a resize that leaves the rounded box as it was, and does for a real one', async () => {
+    const asked = pictures();
+    const sizes = { w: window.innerWidth, h: window.innerHeight };
+    const resize = async (w: number, h: number) => {
+      Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
+      Object.defineProperty(window, 'innerHeight', { value: h, configurable: true, writable: true });
+      window.dispatchEvent(new Event('resize'));
+      await tick();
+      // Longer than the delay before a new drawing starts.
+      await new Promise((done) => setTimeout(done, 450));
+    };
+    try {
+      await resize(1024, 768);
+      const view = await render(addMockRevision());
+      await vi.waitFor(() => expect(view.bar()).toBeTruthy());
+      view.action('revision-compare')!.click();
+      await tick();
+      await vi.waitFor(() => expect(view.dialog()?.querySelectorAll('img')).toHaveLength(2));
+      expect(asked).toHaveLength(2);
+
+      // One pixel more each way: the boxes round to the same size, so nothing is asked again.
+      await resize(1025, 769);
+      expect(asked).toHaveLength(2);
+      expect(view.dialog()?.querySelectorAll('img')).toHaveLength(2);
+
+      // A clearly smaller window draws both pages again, once.
+      await resize(700, 500);
+      expect(asked).toHaveLength(4);
+      expect(view.dialog()?.querySelectorAll('img')).toHaveLength(2);
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { value: sizes.w, configurable: true, writable: true });
+      Object.defineProperty(window, 'innerHeight', { value: sizes.h, configurable: true, writable: true });
+    }
   });
 
   it('keeps the focus inside the dialog with Tab and Shift+Tab', async () => {

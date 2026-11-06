@@ -786,21 +786,28 @@ The original is always the *first* version of the note, never the state just bef
 
 ### A copy retouched by an assistant
 
-When your assistant (chapter 14) retouches a note, it never touches the original: it makes a **copy** next to it,
-which Ardoise recognises. Open that copy: under the top bar, a line says **Retouched copy of "Title"**, with three
-buttons.
+When your assistant (chapter 14) retouches a note, it never writes the original's ink: it makes a **copy** next to it,
+which Ardoise recognises. Open that copy: under the top bar, a line says **Retouched copy of "Title"** ("Untitled
+note" if the original has no title), with three buttons.
 
 - **Open the original** opens the note it was made from in the editor, like the "Previous page" and "Next page" arrows
-  (with unsaved changes, Ardoise first asks what to do with them). The button is greyed, with "The original no longer
-  exists", when the original note was deleted or taken out of the library.
+  (with unsaved changes, Ardoise first asks what to do with them). The button is greyed, with "The original is not in
+  the library", when Ardoise cannot find it: it may be in the trash (**restore it from the trash**), not synchronised
+  to this PC yet, or unreadable here.
 - **What changed** opens the assistant's account: one dated line per retouching, with every change and every letter it
   made. It is a text written by the assistant, which can be wrong: look at the copy.
 - **Compare** shows the original and the copy side by side (one above the other in a narrow window). The copy is shown
-  as it is saved: its unsaved changes are not in it. Greyed as well when the original no longer exists.
+  as it is saved: its unsaved changes are not in it. Greyed as well when the original is not in the library.
 
-A retouched copy is a note like any other: you can edit it by hand, rename it, delete it; **Back to the original**
-puts its starting ink back. What the assistant can be asked, and what it never does, is in the guide
-[The assistant](assistant.en.md).
+**Two senses of "original".** **Open the original** and **Compare** show the note it was made from *as it is now*: if
+you edited it after the copy was made, **Compare** shows those edits too. **Back to the original**, on the copy,
+restores something else: the *first* ink of that note (for a note from the tablet, the page as the tablet sent it),
+which may be neither today's original note nor the retouched copy.
+
+A retouched copy is a note like any other: you can edit it by hand, rename it, export it, print it, resume it in live
+mode (to project it) or delete it, which means **Move to trash** (from where you can restore it). Putting the
+*original* in the trash does not touch the copy: it stays, and its two "original" buttons are greyed. What you can ask
+the assistant, what Ardoise guarantees and what is only asked, is all in the guide [The assistant](assistant.en.md).
 
 ## 9. Replay, narration and video
 

@@ -170,6 +170,15 @@ export interface RevisionOfNote {
   source: RevisionSource | null;
 }
 
+/**
+ * The title to show for the source of a revision: the one it has now, else the one it had when the
+ * copy was made, else `untitled` (the title of an untitled note is an empty string, which `??`
+ * would let through and the line would read « »).
+ */
+export function revisionSourceTitle(revision: Pick<RevisionOfNote, 'source' | 'ofTitle'>, untitled: string): string {
+  return (revision.source?.title ?? revision.ofTitle).trim() || untitled;
+}
+
 /** A note opened for editing. */
 export interface OpenedNote {
   note: Note;

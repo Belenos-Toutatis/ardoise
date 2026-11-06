@@ -113,9 +113,29 @@ Vous pouvez aussi simplement demander en français, sans invite : l'assistant ch
 
 ## Retoucher une note sur une copie
 
-L'assistant peut **améliorer une note sans jamais toucher à l'originale** : il en fait une *copie*, à côté, et c'est
-sur la copie qu'il travaille. Ardoise l'y oblige (ce n'est pas seulement une promesse de l'assistant) : les outils
-qui écrivent de l'encre ne savent modifier qu'une copie de ce genre, jamais une note ordinaire.
+L'assistant peut **améliorer une note sans toucher à l'encre de l'originale** : il en fait une *copie*, à côté, et
+c'est sur la copie qu'il travaille. Il faut bien distinguer ce qu'**Ardoise garantit** (le programme l'impose, quel
+que soit l'assistant et ce que vous lui dites) de ce qui est **seulement demandé à l'assistant** (il peut y manquer).
+
+**Ce qu'Ardoise garantit :**
+
+- **L'encre de l'original n'est jamais écrite par l'assistant** : les outils qui écrivent de l'encre ne savent modifier
+  qu'une copie de ce genre, jamais une note ordinaire.
+- **Pendant un essai, rien n'est écrit** nulle part.
+- **La copie est une nouvelle note**, à côté de l'originale. Découper une note, quand c'est l'assistant qui le fait,
+  donne de même deux notes neuves, marquées comme des copies : la note de départ reste entière.
+- **Si la note a changé depuis que l'assistant l'a regardée** (vous l'avez retouchée à la main, par exemple), Ardoise
+  refuse d'écrire la copie ou la retouche : l'assistant doit regarder de nouveau.
+- **Une retouche ne peut désigner que des traits de la note qu'elle retouche**, jamais ceux d'une autre note. Les
+  traits d'un calque masqué ne sont touchés que si l'assistant les désigne expressément.
+- **Rien n'est supprimé définitivement** : la version d'avant une retouche va à la corbeille (voir « Vie privée »).
+
+**Ce qui est seulement demandé à l'assistant**, par l'invite `ameliorer_note` (`improve_note` en anglais), et
+qu'Ardoise ne peut pas vérifier : lister d'abord les fautes d'orthographe et ne corriger que celles que vous
+validez ; ne prendre les lettres que dans la même écriture, dans la même note ; marquer en couleur ce qu'il ne sait pas
+écrire ; vous dire tout ce qu'il a changé ; garder la relecture juste. **Sans cette invite, rien de cela n'est
+demandé** : c'est à vous de le dire (« donne-moi d'abord la liste des fautes », « n'utilise que mon écriture de cette
+note »). Dans tous les cas, **regardez toujours la copie** (et **Comparer**) avant de vous en servir.
 
 **Ce qu'on peut lui demander**, avec vos mots :
 
@@ -127,23 +147,27 @@ qui écrivent de l'encre ne savent modifier qu'une copie de ce genre, jamais une
 - « Corrige les fautes d'orthographe de ma note avec ma propre écriture. »
 - « Redresse les formes de ma note de physique » (cela aussi se fait maintenant sur une copie : l'originale n'est plus
   modifiée).
-- Dans Claude Code, l'invite `ameliorer_note` (ou `improve_note` en anglais) déroule tout cela pas à pas ; elle n'existe
-  pas en lecture seule.
+- « Découpe ma note en deux à cet endroit » (les deux morceaux sont des notes neuves, la note de départ reste telle
+  quelle).
+- Dans Claude Code, l'invite `ameliorer_note` (ou `improve_note` en anglais) déroule tout cela pas à pas, avec les
+  demandes de prudence ci-dessus ; elle n'existe pas en lecture seule.
 
 **Ce qui se passe**, dans l'ordre :
 
 1. L'assistant regarde la page (l'image, les lignes écrites, le texte reconnu) et vous dit ce qu'il compte faire.
 2. Il **essaie** : il prépare une liste de retouches et voit l'image du résultat **sans rien écrire** nulle part. Il
    recommence autant qu'il faut, en regardant l'image à chaque fois.
-3. Quand l'image est bonne, il **crée la copie** (titre : « <titre> (propre) », ou « <titre> (clean) » en anglais) et
-   vous dit tout ce qu'il a changé. Ce compte rendu reste avec la copie.
+3. Quand l'image est bonne, il **crée la copie** (titre : « `titre` (propre) », ou « `titre` (clean) » en anglais) et,
+   comme l'invite le lui demande, vous dit tout ce qu'il a changé. Ce compte rendu, écrit par lui, reste avec la copie.
 
-**Les fautes d'orthographe d'abord en liste.** L'assistant ne corrige jamais en silence : il vous donne la liste des
-fautes qu'il voit, *vous* dites lesquelles corriger, et seules celles-là sont corrigées. Il ne change jamais le sens
-de ce que vous avez écrit. Pour un document dont chaque mot compte (un compte rendu, une fiche d'incident), il reste
-sobre : pas de couleur, sauf si vous en demandez.
+**Les fautes d'orthographe d'abord en liste** (demandé par l'invite). L'assistant ne doit pas corriger en silence : il
+vous donne la liste des fautes qu'il voit, *vous* dites lesquelles corriger, et seules celles-là doivent l'être. Il ne
+doit pas changer le sens de ce que vous avez écrit. Pour un document dont chaque mot compte (un compte rendu, une
+fiche d'incident), il doit rester sobre : pas de couleur, sauf si vous en demandez. Ardoise ne contrôle pas le texte
+corrigé : relisez.
 
-**D'où viennent les lettres d'un mot corrigé.** Pour remplacer une lettre, l'assistant prend, dans l'ordre :
+**D'où viennent les lettres d'un mot corrigé** (demandé par l'invite). Pour remplacer une lettre, l'assistant doit
+prendre, dans l'ordre :
 
 1. la même lettre *dans votre écriture, dans cette même note* (il compare les lettres avant de choisir : une note peut
    contenir deux écritures, la vôtre et celle d'un élève ou d'un collègue) ;
@@ -151,26 +175,32 @@ sobre : pas de couleur, sauf si vous en demandez.
    un « W ») ;
 3. sinon il ne fabrique rien : il **marque le mot en couleur** et vous le signale.
 
-**Jamais une lettre prise dans une autre note.** Vous confiez parfois votre calepin à un élève : une lettre venue
-d'une autre note pourrait être la sienne, ou celle d'un autre jour. Ardoise l'interdit par construction : les
-retouches d'une note ne peuvent désigner que des traits de cette note. Une lettre fabriquée se lit bien, mais reste un
-peu serrée à côté de la vraie écriture : le compte rendu les nomme toutes.
+**Pas de lettre prise dans une autre note.** Vous confiez parfois votre calepin à un élève : une lettre venue d'une
+autre note pourrait être la sienne, ou celle d'un autre jour. Ardoise fait ceci : une retouche ne peut pas désigner un
+trait d'une autre note. Elle ne peut pas empêcher cela : un assistant qui recopierait à la main les points d'un trait
+vu ailleurs ; seule l'invite le lui interdit. Une lettre fabriquée se lit bien, mais reste un peu serrée à côté de la
+vraie écriture : l'assistant doit les nommer toutes dans son compte rendu.
 
-**La relecture reste juste.** Une lettre ajoutée, ou un mot déplacé dans sa phrase, prend sa place dans le temps de
-l'écriture (celle du rejeu et de la vidéo) ; les traits suivants se décalent si nécessaire. Si la note a une
-*narration*, rien ne se décale (la voix et l'écriture ne seraient plus d'accord) : la lettre est tracée plus vite.
+**La relecture : ce qu'on demande à l'assistant.** Pour chaque lettre ajoutée, ou mot déplacé dans sa phrase, il doit
+dire où elle prend place dans le temps de l'écriture (celle du rejeu et de la vidéo) ; Ardoise décale alors les traits
+suivants si nécessaire. Si la note a une *narration*, rien ne se décale (la voix et l'écriture ne seraient plus
+d'accord) : la lettre est tracée plus vite. Si l'assistant ne l'a pas fait, le rejeu peut être faux : regardez-le.
 
 **Dans l'éditeur**, ouvrez la copie : une ligne sous la barre du haut dit « Copie retouchée de « Cours d'optique » »,
 avec trois boutons — **Ouvrir l'original**, **Ce qui a changé** (le compte rendu de l'assistant, une ligne datée par
-retouche) et **Comparer** (l'original et la copie côte à côte). Voir le chapitre 8 du guide d'utilisation.
+retouche) et **Comparer** (l'original et la copie côte à côte). Les deux boutons « original » montrent la note
+d'origine *telle qu'elle est maintenant* ; si elle n'est plus dans la bibliothèque, ils sont grisés. Voir le
+chapitre 8 du guide d'utilisation.
 
 **Retoucher encore.** Vous pouvez demander une nouvelle retouche de la copie (« mets aussi le titre en rouge ») :
 l'assistant la modifie *sur place*, en gardant ce que vous avez changé à la main, et ajoute une ligne au compte rendu.
-La version d'avant est mise à la corbeille d'Ardoise (voir « Vie privée »). Demander une retouche de la *note
-originale* fait une nouvelle copie.
+La version d'avant est mise à la corbeille d'Ardoise (voir « Vie privée »). Si vous avez modifié la copie entre-temps,
+l'assistant doit d'abord la regarder de nouveau : Ardoise refuse sinon. Demander une retouche de la *note originale*
+fait une nouvelle copie.
 
-**Ce que ça ne remplace pas.** L'assistant peut se tromper : regardez la copie (et **Comparer**) avant de vous en servir.
-Et le rappel du chapitre « Vie privée » vaut aussi ici : pour retoucher une note, l'assistant la voit, donc elle part
+**Ce que ça ne remplace pas.** L'assistant peut se tromper, et Ardoise ne vérifie pas ce qui est seulement « demandé »
+plus haut (fautes validées, lettres de la bonne écriture, compte rendu complet, couleur) : regardez toujours la copie
+(et **Comparer**) avant de vous en servir. Et le rappel du chapitre « Vie privée » vaut aussi ici : pour retoucher une note, l'assistant la voit, donc elle part
 chez son fournisseur.
 
 Les outils d'Ardoise derrière tout cela (vous n'avez pas à les connaître, l'assistant les choisit) : **lire** (`get_note`
@@ -225,6 +255,6 @@ L'assistant doit utiliser **la même copie** d'Ardoise que celle que vous ouvrez
   l'incite à demander. Pour être sûr que rien ne change, déclarez Ardoise en **lecture seule** (`--read-only`).
 - **Rien n'est jamais supprimé définitivement** : une note que l'assistant supprime va dans la corbeille d'Ardoise
   (gardée 30 jours), d'où vous pouvez la restaurer. Quand il retouche une copie déjà faite (ou y redresse les formes), la
-  version d'avant y est mise aussi, sous le nom « <titre> (avant retouche) » ou « <titre> (avant redressement) ».
-  L'encre d'une note ordinaire n'est jamais modifiée : l'assistant ne la retouche que sur une copie, à côté. Les exports
+  version d'avant y est mise aussi, sous le nom « `titre` (avant retouche) » ou « `titre` (avant redressement) ».
+  L'assistant n'écrit jamais l'encre d'une note ordinaire : il ne retouche qu'une copie, à côté. Les exports
   n'écrasent jamais un fichier existant.

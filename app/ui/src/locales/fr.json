@@ -349,7 +349,7 @@
     "copy": "Copier",
     "copied": "Copié",
     "copyFailed": "Impossible de copier : sélectionnez le texte et copiez-le avec Ctrl+C.",
-    "privacy": "Vie privée : ce que l'assistant lit (le texte et l'image de vos notes, parfois des noms d'élèves) part chez son fournisseur, selon les réglages de votre compte. En général, l'assistant demande votre accord avant de modifier quoi que ce soit, mais cela dépend de ses réglages d'autorisation ; Ardoise lui signale les outils qui modifient ou retirent des notes. Rien n'est jamais supprimé définitivement, et l'encre d'une note ne se modifie que sur une copie. Pour qu'il ne puisse que lire, déclarez-le avec « Lecture seule » cochée.",
+    "privacy": "Vie privée : ce que l'assistant lit (le texte et l'image de vos notes, parfois des noms d'élèves) part chez son fournisseur, selon les réglages de votre compte. En général, l'assistant demande votre accord avant de modifier quoi que ce soit, mais cela dépend de ses réglages d'autorisation ; Ardoise lui signale les outils qui modifient ou retirent des notes. Rien n'est jamais supprimé définitivement, et l'assistant n'écrit jamais l'encre de l'originale : il retouche une copie (ce qu'on lui demande d'y faire n'est pas vérifié : regardez la copie). Pour qu'il ne puisse que lire, déclarez-le avec « Lecture seule » cochée.",
     "guide": "Pas à pas : le guide « Assistant », fichier guide\\assistant.fr.html dans le dossier d'Ardoise."
   },
   "about": {
@@ -762,7 +762,7 @@
       "label": "Copie retouchée",
       "line": "Copie retouchée de « {title} »",
       "openOriginal": "Ouvrir l'original",
-      "gone": "L'original n'existe plus",
+      "gone": "L'original n'est pas dans la bibliothèque",
       "changes": "Ce qui a changé",
       "compare": "Comparer",
       "videoBusy": "Un export vidéo est en cours : attendez la fin ou annulez-le avant d'ouvrir l'original.",
