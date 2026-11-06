@@ -8,17 +8,17 @@ use ardoise_ink::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-/// Which strokes an order acts on. It is read on the note as it was given (a stroke made by an earlier order: as it was when made), whatever earlier orders did to it since, so reason on the picture you saw. `ids` and `rect` add up; with neither, every stroke is a candidate; the other fields then narrow. Check `selected` in the report: a selection of the wrong size is the usual mistake.
+/// Which strokes an order acts on. It is read on the note as it was given (a stroke made by an earlier order: as it was when made), whatever earlier orders did to it since, so reason on the picture you saw. `ids` and `rect` add up; with neither, every stroke is a candidate; the other fields then narrow. The picture does not show the strokes of hidden layers: `rect`, or no place at all, only takes drawn strokes, unless `layer` names a layer; `ids` takes what it names. The report warns when a hidden stroke is touched. Check `selected` in the report: a selection of the wrong size is the usual mistake.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Select {
     /// Stroke numbers: a stroke's index in the note, or the number the report gave a stroke made by an earlier order in this list. An unknown number is refused.
     pub ids: Option<Vec<usize>>,
-    /// `[x, y, w, h]`: the strokes whose centre (the centre of their box) is inside this rectangle.
+    /// `[x, y, w, h]`: the drawn strokes whose centre (the centre of their box) is inside this rectangle.
     pub rect: Option<[f32; 4]>,
     /// Keeps the strokes of this colour, `#rrggbb` (any opacity) or `#rrggbbaa` (exactly), as `get_note` writes it. Useful when two colours overlap in a rectangle.
     pub color: Option<String>,
-    /// Keeps the strokes of this layer (index in the note's layers).
+    /// Keeps the strokes of this layer (index in the note's layers), hidden or not.
     pub layer: Option<u32>,
     /// Keeps the strokes whose box has a larger side of at least this many millimetres.
     pub min_size: Option<f32>,
@@ -271,7 +271,7 @@ pub enum Order {
         /// Last point kept, included (default the last).
         to: Option<usize>,
     },
-    /// Redraws: the shapes take the place of the selected strokes (at the place of the first of them in the drawing order, on its layer) with its tool, colour and width, the strokes' median pressure and their time span. The selection must not be empty.
+    /// Redraws: the shapes take the place of the selected strokes (at the place of the first of them in the drawing order, on its layer; the first on a visible layer when there is one) with its tool, colour and width, the strokes' median pressure and their time span. The selection must not be empty.
     Replace {
         /// The strokes replaced.
         select: Select,
@@ -292,7 +292,7 @@ pub enum Order {
         width: Option<f32>,
         /// Tool (default: the one of the note's writing). `highlighter` to mark something, usually with `behind`.
         tool: Option<PenTool>,
-        /// Layer (default: the layer of the note's writing).
+        /// Layer (default: the layer of the note's writing that the picture shows).
         layer: Option<u32>,
         /// Under the other strokes of the layer: a highlight.
         #[serde(default)]

@@ -66,24 +66,22 @@ pub struct EditRevisionArgs {
     pub summary: String,
 }
 
-/// The engine's `Input` for the note just read.
-fn input_of(loaded: &LoadedNote) -> Input<'_> {
+/// Carries out `orders` on a copy of the strokes of the note just read: nothing is written. The
+/// engine's message goes back as `invalidOrders`.
+pub(super) fn revise(loaded: &LoadedNote, orders: &[Order]) -> Result<Revised, ToolError> {
     let note = &loaded.file.note;
-    Input {
+    let visible_layers: Vec<bool> = note.layers.iter().map(|layer| layer.visible).collect();
+    let input = Input {
         strokes: &note.strokes,
         page_mm: [
             note.page.width as f32 * 0.01,
             note.page.height as f32 * 0.01,
         ],
         layers: note.layers.len() as u32,
+        visible_layers: &visible_layers,
         narration: loaded.file.audio.is_some(),
-    }
-}
-
-/// Carries out `orders` on a copy of the strokes of the note just read: nothing is written. The
-/// engine's message goes back as `invalidOrders`.
-pub(super) fn revise(loaded: &LoadedNote, orders: &[Order]) -> Result<Revised, ToolError> {
-    apply(&input_of(loaded), orders).map_err(|error| ToolError::new(code::INVALID_ORDERS, error))
+    };
+    apply(&input, orders).map_err(|error| ToolError::new(code::INVALID_ORDERS, error))
 }
 
 fn required_summary(summary: &str) -> Result<&str, ToolError> {

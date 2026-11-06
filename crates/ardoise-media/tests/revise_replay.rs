@@ -91,6 +91,7 @@ fn revise(source: &Note, narration: bool, orders: &[Order]) -> (Note, Revised) {
         strokes: &source.strokes,
         page_mm: [297.0, 216.0],
         layers: 1,
+        visible_layers: &[],
         narration,
     };
     let revised = apply(&input, orders).unwrap();

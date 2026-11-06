@@ -63,6 +63,7 @@ fn visible(note: &Note) -> Vec<usize> {
 
 fn input(note: &Note) -> Input<'_> {
     Input {
+        visible_layers: &[],
         strokes: &note.strokes,
         page_mm: [
             note.page.width as f32 / 100.0,

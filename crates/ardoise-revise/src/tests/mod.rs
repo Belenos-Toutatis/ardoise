@@ -63,6 +63,7 @@ pub(super) fn input(strokes: &[Stroke]) -> Input<'_> {
         strokes,
         page_mm: PAGE,
         layers: 2,
+        visible_layers: &[],
         narration: false,
     }
 }

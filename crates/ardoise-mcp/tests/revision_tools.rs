@@ -393,6 +393,7 @@ async fn the_message_of_invalid_orders_is_the_engines() {
                 note.page.height as f32 * 0.01,
             ],
             layers: note.layers.len() as u32,
+            visible_layers: &[true, false],
             narration: false,
         },
         &serde_json::from_value::<Vec<ardoise_revise::Order>>(orders).unwrap(),
@@ -682,6 +683,7 @@ async fn the_labels_of_a_preview_are_the_numbers_of_the_orders() {
             strokes: &note.strokes,
             page_mm: [297.0, 216.0],
             layers: 2,
+            visible_layers: &[true, false],
             narration: false,
         },
         &serde_json::from_value::<Vec<ardoise_revise::Order>>(json!([

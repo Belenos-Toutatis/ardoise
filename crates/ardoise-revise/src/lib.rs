@@ -59,8 +59,22 @@ pub struct Input<'a> {
     pub page_mm: [f32; 2],
     /// How many layers the note has.
     pub layers: u32,
+    /// For each layer, whether the note shows it. A layer the list does not reach is shown, as the
+    /// app draws a stroke whose layer has no entry. What a picture of the note does not show is not
+    /// taken by a selection that does not ask for it, and new strokes do not go there by default.
+    pub visible_layers: &'a [bool],
     /// A narration exists: nothing may move in time.
     pub narration: bool,
+}
+
+impl Input<'_> {
+    /// Whether the note shows this layer.
+    pub(crate) fn shows(&self, layer: u32) -> bool {
+        self.visible_layers
+            .get(layer as usize)
+            .copied()
+            .unwrap_or(true)
+    }
 }
 
 /// What came out of a list of orders.

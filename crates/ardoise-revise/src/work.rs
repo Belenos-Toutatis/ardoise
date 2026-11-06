@@ -24,6 +24,16 @@ const SHAPE_MIN_MS: u32 = 60;
 /// A stroke further than this beyond the page counts as off the page, millimetres: a pen can
 /// touch the very edge.
 const OFF_PAGE_SLACK_MM: f32 = 0.5;
+/// How many stroke numbers a warning writes out: on a large note it stays a sentence.
+const LISTED_NUMBERS: usize = 20;
+
+/// The numbers, or the first of them and how many others.
+fn listed(numbers: &[usize]) -> String {
+    match numbers.len().checked_sub(LISTED_NUMBERS) {
+        Some(more) if more > 0 => format!("{:?} and {more} more", &numbers[..LISTED_NUMBERS]),
+        _ => format!("{numbers:?}"),
+    }
+}
 
 /// What a selection reads: a stroke as given, or as made.
 #[derive(Debug, Clone, Copy)]
@@ -181,6 +191,7 @@ impl<'a> Work<'a> {
             Order::Trim { stroke, from, to } => {
                 report.selected = 1;
                 self.trim(ctx, *stroke, *from, *to)?;
+                self.warn_hidden(&[*stroke], &mut report);
             }
             Order::Replace {
                 select,
@@ -209,6 +220,12 @@ impl<'a> Work<'a> {
                     self.alive(ctx, *after)?;
                 }
                 let style = self.add_style(color, *width, tool.map(Tool::from), *layer);
+                if !self.input.shows(style.layer) {
+                    report.warnings.push(format!(
+                        "the new strokes are on layer {}, which is hidden: the picture does not show them",
+                        style.layer
+                    ));
+                }
                 let numbers = self.add(ctx, shapes, &style, *behind)?;
                 report.time = self.place(ctx, &numbers, *after)?;
                 report.new_strokes = numbers;
@@ -251,6 +268,7 @@ impl<'a> Work<'a> {
                 }
                 report.selected = parts.len();
                 let numbers = self.glyph(ctx, parts, color)?;
+                self.warn_hidden(&numbers, &mut report);
                 report.time = self.place(ctx, &numbers, *after)?;
                 report.new_strokes = numbers;
             }
@@ -297,8 +315,27 @@ impl<'a> Work<'a> {
         Ok(report)
     }
 
+    /// A warning when strokes of these numbers are on hidden layers.
+    fn warn_hidden(&self, numbers: &[usize], report: &mut OrderReport) {
+        let hidden: Vec<usize> = numbers
+            .iter()
+            .copied()
+            .filter(|&number| {
+                self.stroke(number)
+                    .is_some_and(|stroke| !self.input.shows(stroke.layer))
+            })
+            .collect();
+        if !hidden.is_empty() {
+            report.warnings.push(format!(
+                "stroke(s) {} are on a hidden layer: the picture does not show them",
+                listed(&hidden)
+            ));
+        }
+    }
+
     /// The numbers a selection finds, sorted. An unknown number is an error; finding nothing is a
-    /// warning here (the orders for which it is an error say so).
+    /// warning here (the orders for which it is an error say so). What the note does not show is
+    /// only taken when the selection asks for it: by `ids`, or by naming a `layer`.
     fn select(
         &self,
         ctx: Ctx,
@@ -316,7 +353,16 @@ impl<'a> Work<'a> {
                 return Err(self.unknown(ctx, number));
             }
         }
+        let drawn_only = select.layer.is_none();
+        let mut hidden_left_out = 0usize;
         let mut chosen: Vec<usize> = select.ids.clone().unwrap_or_default();
+        let mut candidate = |number: usize, slot: &Slot| {
+            if drawn_only && !self.input.shows(slot.given.layer) {
+                hidden_left_out += 1;
+            } else {
+                chosen.push(number);
+            }
+        };
         if let Some([x, y, w, h]) = select.rect {
             for (number, slot) in self.slots.iter().enumerate() {
                 let Some(area) = slot.given.area else {
@@ -324,12 +370,14 @@ impl<'a> Work<'a> {
                 };
                 let [cx, cy] = area.centre();
                 if cx >= x && cx <= x + w && cy >= y && cy <= y + h {
-                    chosen.push(number);
+                    candidate(number, slot);
                 }
             }
         }
         if select.ids.is_none() && select.rect.is_none() {
-            chosen = (0..count).collect();
+            for (number, slot) in self.slots.iter().enumerate() {
+                candidate(number, slot);
+            }
         }
         chosen.sort_unstable();
         chosen.dedup();
@@ -377,10 +425,15 @@ impl<'a> Work<'a> {
         });
         report.selected = chosen.len();
         if chosen.is_empty() {
-            report
-                .warnings
-                .push("nothing selected: this order did nothing".to_owned());
+            report.warnings.push(if hidden_left_out > 0 {
+                format!(
+                    "nothing selected: this order did nothing ({hidden_left_out} stroke(s) on hidden layers were left out: name their `layer` or their `ids` to touch them)"
+                )
+            } else {
+                "nothing selected: this order did nothing".to_owned()
+            });
         }
+        self.warn_hidden(&chosen, report);
         Ok(chosen)
     }
 
@@ -500,7 +553,8 @@ impl<'a> Work<'a> {
     }
 
     /// The shapes take the place of `ids` (see [`Order::Replace`]): the first in the drawing order
-    /// gives its place, layer, tool, colour and width; they share the time span of all.
+    /// (among those the note shows, when it shows any) gives its place, layer, tool, colour and
+    /// width; they share the time span of all.
     fn replace(
         &mut self,
         ctx: Ctx,
@@ -515,7 +569,10 @@ impl<'a> Work<'a> {
             .iter()
             .copied()
             .filter(|number| ids.binary_search(number).is_ok())
-            .min_by_key(|&number| self.stroke(number).map(|stroke| stroke.layer));
+            .min_by_key(|&number| {
+                self.stroke(number)
+                    .map(|stroke| (!self.input.shows(stroke.layer), stroke.layer))
+            });
         let like = first.and_then(|number| self.stroke(number));
         let (Some(first), Some(like)) = (first, like) else {
             return Err(ctx.err("nothing selected: there is nothing to replace"));
@@ -573,8 +630,9 @@ impl<'a> Work<'a> {
         Ok(numbers)
     }
 
-    /// The stroke new shapes look like when the order does not say: the note's writing, not a
-    /// highlight.
+    /// The stroke new shapes look like when the order does not say: the note's writing that it
+    /// shows (any of its writing when it shows none), not a highlight. They go on its layer, or on
+    /// the first layer the note shows.
     fn add_style(
         &self,
         color: Color,
@@ -582,11 +640,21 @@ impl<'a> Work<'a> {
         tool: Option<Tool>,
         layer: Option<u32>,
     ) -> Style {
-        let like = self.slots.iter().find_map(|slot| {
-            slot.stroke
-                .as_ref()
-                .filter(|stroke| stroke.tool != Tool::Highlighter && !stroke.points.is_empty())
-        });
+        let writing = |shown_only: bool| {
+            self.slots.iter().find_map(|slot| {
+                slot.stroke.as_ref().filter(|stroke| {
+                    stroke.tool != Tool::Highlighter
+                        && !stroke.points.is_empty()
+                        && (!shown_only || self.input.shows(stroke.layer))
+                })
+            })
+        };
+        let shown = writing(true);
+        let like = shown.or_else(|| writing(false));
+        let default_layer = shown
+            .map(|stroke| stroke.layer)
+            .or_else(|| (0..self.input.layers).find(|&layer| self.input.shows(layer)))
+            .unwrap_or(0);
         let like_tool = like.map_or(Tool::Ballpoint, |stroke| stroke.tool);
         let like_width = like.map_or(Tool::Ballpoint.default_width(), |stroke| stroke.width);
         let chosen_tool = tool.unwrap_or(like_tool);
@@ -599,7 +667,7 @@ impl<'a> Work<'a> {
             tool: chosen_tool,
             color: color_of(color, Rgba::BLACK),
             width: width.map_or(usual_width, |width| width * UNITS),
-            layer: layer.or(like.map(|stroke| stroke.layer)).unwrap_or(0),
+            layer: layer.unwrap_or(default_layer),
             pressure: ADD_PRESSURE,
         }
     }
