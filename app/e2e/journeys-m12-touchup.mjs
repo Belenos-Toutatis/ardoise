@@ -398,9 +398,10 @@ const share = (stats, tint) => (stats && stats.area > 0 ? stats[tint] / stats.ar
  * Page expression: in one task, the canvas as its frames made it (with the events received since, as a frame would),
  * then the same state drawn from nothing: where the two differ, what the canvas counted of its redraws. A real canvas
  * and real antialiasing, unlike `live-render.partial.test.ts`. A few edge pixels of a stroke cut by the area's clip come out
- * a little differently from the graphics stack (seen: 9 pixels of 5.5 million, by up to 18/255; the software canvas of
- * the unit test, which has no such thing, has none at all). They are only counted (`edges`), up to `EDGE_PIXELS` of them
- * by `EDGE_DELTA` at most: a pixel left over from before an edit differs by far more, and there are many of them.
+ * a little differently from the graphics stack (seen: up to 72 pixels of 5.5 million for one edit, by up to 18/255; the
+ * software canvas of the unit test, which has no such thing, has none at all). They are only counted (`edges`), by
+ * `EDGE_DELTA` at most and up to `EDGE_PIXELS` for each repaint since the last full redraw (a comparison ends with one;
+ * every edit cuts strokes of its own): a pixel left over from before an edit differs by far more, and there are many.
  */
 const EDGE_DELTA = 32;
 const EDGE_PIXELS = 100;
@@ -410,6 +411,8 @@ const pixelsAgainstFullRedraw = (selector) => `(() => {
   const context = c.getContext('2d');
   c.repaintNow();
   const partial = Number(c.dataset.partialRedraws ?? 0);
+  const repaints = Math.max(1, partial - (c.comparedAtRepaint ?? 0));
+  c.comparedAtRepaint = partial;
   const before = context.getImageData(0, 0, c.width, c.height).data;
   c.repaintFromScratch();
   const after = context.getImageData(0, 0, c.width, c.height).data;
@@ -466,8 +469,8 @@ const pixelsAgainstFullRedraw = (selector) => `(() => {
     strip(after, 2, true);
     picture = out.toDataURL('image/png');
   }
-  if (differ === 0 && edges > ${EDGE_PIXELS}) differ = edges;
-  return { differ, edges, edgeWorst, worst, box: [x0, y0, x1, y1], size: [c.width, c.height], partial, samples, picture };
+  if (differ === 0 && edges > ${EDGE_PIXELS} * repaints) differ = edges;
+  return { differ, edges, edgeWorst, repaints, worst, box: [x0, y0, x1, y1], size: [c.width, c.height], partial, samples, picture };
 })()`;
 
 /** Page expression: pixels of the ink's own colour on a canvas: strongly red, with little of the other channels. */
@@ -565,10 +568,12 @@ class Places {
       if (result.differ > 0) {
         const saved = await this.save().catch(() => '');
         const dir = process.env.ARDOISE_E2E_SHOTS ?? this.app.dir;
+        // No picture when only the count of faint edge pixels is over its limit: none is far enough off to mark.
+        if (!result.picture) throw new Error(`${what}: the ${name} has ${result.edges} faint edge pixels for ${result.repaints} repaints since its last full redraw (by up to ${result.edgeWorst}/255)${saved}`);
         writeFileSync(join(dir, `difference ${name}.png`), Buffer.from(result.picture.split(',')[1], 'base64'));
         throw new Error(`${what}: the ${name} differs from a full redraw on ${result.differ} pixels of ${result.size.join(' x ')} (by up to ${result.worst}/255, within ${result.box.join(', ')}; x y, then RGBA before and after: ${result.samples.join(' | ')})${saved}`);
       }
-      if (result.edges > 0) console.log(`    ${what} : ${result.edges} pixels de bord à ${result.edgeWorst}/255 au plus d’un dessin complet (${name})`);
+      if (result.edges > 0) console.log(`    ${what} : ${result.edges} pixels de bord à ${result.edgeWorst}/255 au plus d’un dessin complet, pour ${result.repaints} retouches (${name})`);
       return result;
     };
     const counts = {
