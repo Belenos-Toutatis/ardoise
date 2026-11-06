@@ -36,6 +36,11 @@ pub const PIPELINE: u32 = 1;
 /// Version of the files of the cache.
 const FORMAT: u32 = 1;
 
+/// Version of `files.json`. 2: the recognised strokes come in the order they were written, so the
+/// hashes recorded before are worked out again. A note written in order keeps its hash and its
+/// entry; only the others are recognised again.
+const FILES_FORMAT: u32 = 2;
+
 /// Name of the record of the files seen.
 pub const FILES_JSON: &str = "files.json";
 
@@ -240,7 +245,7 @@ impl HandwritingCache {
             return None;
         }
         let bytes = serde_json::to_vec(&FilesJson {
-            format: FORMAT,
+            format: FILES_FORMAT,
             files: self.files.clone(),
         })
         .ok()?;
@@ -292,7 +297,7 @@ impl CacheDir {
         fs::read(self.dir.join(FILES_JSON))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<FilesJson>(&bytes).ok())
-            .filter(|json| json.format == FORMAT)
+            .filter(|json| json.format == FILES_FORMAT)
             .map(|json| json.files)
             .unwrap_or_default()
     }
@@ -614,6 +619,24 @@ mod tests {
         assert!(cache.loaded(&current).is_some());
         assert!(cache.loaded(&old).is_none(), "an older version goes");
         assert!(cache.loaded(&other).is_some(), "other notes stay");
+    }
+
+    #[test]
+    fn a_record_from_before_strokes_were_read_in_writing_order_is_worked_out_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let disk = CacheDir::new(dir.path().join("cache"));
+        // What such a file holds: `format` 1. Trusting it would keep a retouched copy's old
+        // reading for as long as its file does not change.
+        let old = serde_json::json!({
+            "format": 1,
+            "files": { "C:\\Note.ardoise": {
+                "stamp": stamp(10),
+                "id": "n",
+                "strokes": "0123456789abcdef",
+            } },
+        });
+        assert!(disk.write_files(&serde_json::to_vec(&old).unwrap()));
+        assert!(disk.read_files().is_empty());
     }
 
     #[test]

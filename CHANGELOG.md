@@ -12,6 +12,10 @@
 - Assistant (MCP), `straighten_shapes` : sur une note ordinaire, les formes sont redressées sur une copie (titre « … (propre) », compte rendu « Formes redressées : N ») ; l'originale n'est plus modifiée et sa version d'avant n'est plus mise à la corbeille. Sur une copie déjà retouchée, les formes sont redressées en place et la version d'avant va à la corbeille (« … (avant redressement) »), comme pour `edit_revision` (« … (avant retouche) »).
 - Assistant (MCP), `split_note` : quand c'est l'assistant qui découpe une note, les deux morceaux sont de nouvelles notes marquées comme des copies et la note de départ reste entière ; la découpe faite par l'utilisateur dans l'éditeur ne change pas.
 
+### Corrigé (jalon M13)
+
+- Recherche dans l'écriture : les traits sont lus dans l'ordre où ils ont été écrits, et non dans celui du fichier. Une copie retouchée se lit comme elle se voit : les lettres remises dans un mot n'arrivent plus en fin de texte. Les notes concernées sont relues une fois, sans que rien ne soit écrit dans les notes.
+
 ### Ajouté (jalon M12 — reprendre une feuille et la retoucher en mode direct)
 
 - « Reprendre en mode direct », dans le menu d'une note et dans la barre d'outils de l'éditeur (qui propose d'enregistrer d'abord) : le mode direct continue sur cette feuille, dans le même fichier (image de fond, original, narration, texte reconnu et tout le reste gardés ; rien n'est écrit si l'on n'écrit pas), avec son fond montré dans la fenêtre de commande, au vidéoprojecteur et sur les écrans du partage ; l'écriture est mise à l'échelle sans déformation si la feuille n'a pas le format de la tablette ; la feuille n'est jamais tournée (un avis dit comment tenir la tablette et les boutons de position sont grisés) ; la page suivante crée une note neuve ; si la feuille change ailleurs pendant le direct, l'écriture continue dans une nouvelle note du même classeur et Ardoise le dit, sans rien écraser ; « Revenir à l'original » rend la première version de la note. Guide FR et EN, procédure H5, parcours de bout en bout.
