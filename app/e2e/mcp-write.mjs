@@ -13,13 +13,20 @@ import { deflateSync } from 'node:zlib';
 
 export const WRITE_ONLY_TOOLS = [
   'create_note', 'update_note', 'move_note', 'trash_note', 'merge_notes', 'split_note',
-  'straighten_shapes', 'export_note', 'set_note_text',
+  'straighten_shapes', 'export_note', 'set_note_text', 'preview_revision', 'create_revision', 'edit_revision',
 ];
 /** The write tools that change or remove what is there (`destructiveHint: true`). */
-const DESTRUCTIVE = ['update_note', 'move_note', 'trash_note', 'split_note', 'straighten_shapes'];
+const DESTRUCTIVE = ['update_note', 'move_note', 'trash_note', 'split_note', 'straighten_shapes', 'edit_revision'];
+/** The tool of the write group that writes nothing (it prepares what `create_revision` writes). */
+const READ_ONLY_HINT = ['preview_revision'];
 const PROMPTS = {
   fr: ['mettre_au_propre', 'resume_seance', 'titrer_et_etiqueter'],
   en: ['clean_up', 'lesson_summary', 'title_and_tag'],
+};
+/** The prompt that writes: only a server that is not read-only has it. */
+const WRITING_PROMPT = {
+  fr: 'ameliorer_note',
+  en: 'improve_note',
 };
 
 const PNG_SIGNATURE = '89504e470d0a1a0a';
@@ -88,12 +95,13 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
   try {
     await session.initialize();
 
-    await check('tools/list : les neuf outils d’écriture, destructeurs ceux qui changent ou retirent', async () => {
+    await check('tools/list : les douze outils d’écriture, destructeurs ceux qui changent ou retirent', async () => {
       const tools = await session.tools();
       for (const name of WRITE_ONLY_TOOLS) {
         const tool = tools.find((t) => t.name === name);
         if (!tool) throw new Error(`${name} absent`);
-        if (tool.annotations?.readOnlyHint !== false) throw new Error(`${name} : readOnlyHint doit être false`);
+        const readOnly = READ_ONLY_HINT.includes(name);
+        if (tool.annotations?.readOnlyHint !== readOnly) throw new Error(`${name} : readOnlyHint doit être ${readOnly}`);
         const destructive = DESTRUCTIVE.includes(name);
         if (tool.annotations?.destructiveHint !== destructive) throw new Error(`${name} : destructiveHint doit être ${destructive}`);
         if (tool.inputSchema?.type !== 'object' || !tool.description) throw new Error(`${name} : schéma ou description absents`);
@@ -102,6 +110,7 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
 
     // --- create_note, update_note, move_note, trash_note ------------------------------------
     let created;
+    let straightenedCopy;
     await check('create_note : une note vierge dans un classeur créé, avec titre, étiquettes et papier', async () => {
       const result = await session.call('create_note', {
         title: 'Note de test',
@@ -204,8 +213,11 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
       if (!kept.stroke_count || !part.stroke_count) throw new Error('une moitié est vide');
       await expectError('split_note', { note: optique.id }, 'invalidArguments');
     });
-    await check('straighten_shapes : les dessins que trouve l’analyse de l’encre, une sauvegarde, la version d’avant dans la corbeille', async () => {
+    await check('straighten_shapes : les dessins que trouve l’analyse de l’encre, redressés sur une copie, l’original intact', async () => {
       const before = (await session.call('get_note', { note: chimie.id, strokes: 'summary' })).structuredContent;
+      const sourceFile = join(app.library, ...chimie.path.split('/'));
+      const sourceBytes = readFileSync(sourceFile);
+      const trashBefore = readdirSync(join(app.library, '_ardoise', 'trash')).length;
       const auto = await session.call('straighten_shapes', { note: chimie.id });
       if (auto.isError) throw new Error(`${textOf(auto)} (il faut l’analyse de l’encre de Windows)`);
       let result = auto.structuredContent;
@@ -217,15 +229,46 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
         if (given.isError) throw new Error(textOf(given));
         result = given.structuredContent;
       }
-      const { straightened, saved, shapes, previous_version: kept } = result;
+      const { straightened, saved, shapes, note: copy } = result;
       if (!(straightened >= 1) || !saved || !shapes.length) throw new Error(JSON.stringify(result).slice(0, 300));
-      const suffix = language === 'fr' ? '(avant redressement)' : '(before straightening)';
-      if (!kept?.title?.endsWith(suffix) || !kept.in_trash || kept.id === chimie.id) throw new Error(`version d’avant : ${JSON.stringify(kept)}`);
-      const trash = readdirSync(join(app.library, '_ardoise', 'trash'));
-      if (!trash.includes(kept.in_trash)) throw new Error(`pas dans la corbeille : ${trash.join(', ')}`);
+      // The original is the same bytes, and no copy of it went to the trash.
+      if (!result.made_a_copy || result.original_unchanged !== true) throw new Error(JSON.stringify(result).slice(0, 300));
+      if (!readFileSync(sourceFile).equals(sourceBytes)) throw new Error('le fichier de l’original a changé');
       const after = (await session.call('get_note', { note: chimie.id })).structuredContent;
-      if (after.note.modified === before.note.modified && after.note.stroke_count === before.note.stroke_count) throw new Error('la note n’a pas changé');
+      if (after.note.modified !== before.note.modified || after.note.stroke_count !== before.note.stroke_count) throw new Error('l’original a changé');
+      if (readdirSync(join(app.library, '_ardoise', 'trash')).length !== trashBefore) throw new Error('la corbeille a changé');
+      // The copy is a note next to it, a revision of it.
+      const suffix = language === 'fr' ? '(propre)' : '(clean)';
+      if (copy.id === chimie.id || !copy.title.endsWith(suffix) || copy.binder !== chimie.binder) throw new Error(`copie : ${JSON.stringify(copy)}`);
+      const made = (await session.call('get_note', { note: copy.id })).structuredContent;
+      if (made.revision?.of !== chimie.id || made.revision.account.length !== 1) throw new Error(`copie : ${JSON.stringify(made.revision)}`);
       await expectError('straighten_shapes', { note: chimie.id, strokes: [100000] }, 'invalidArguments');
+      straightenedCopy = copy;
+    });
+    await check('edit_revision et straighten_shapes sur la copie : modifiée sur place, la version d’avant dans la corbeille', async () => {
+      const copy = straightenedCopy;
+      const trashBefore = readdirSync(join(app.library, '_ardoise', 'trash'));
+      const edited = await session.call('edit_revision', {
+        note: copy.id,
+        orders: [{ op: 'recolor', select: { ids: [0] }, color: '#cc0000' }],
+        summary: language === 'fr' ? 'Premier trait en rouge.' : 'First stroke in red.',
+      });
+      if (edited.isError) throw new Error(textOf(edited));
+      const { previous_version: kept, saved, account_entries: entries, note } = edited.structuredContent;
+      const suffix = language === 'fr' ? '(avant retouche)' : '(before retouching)';
+      if (!saved || entries !== 2 || note.id !== copy.id) throw new Error(JSON.stringify(edited.structuredContent).slice(0, 300));
+      if (!kept?.title?.endsWith(suffix) || !kept.in_trash || kept.id === copy.id) throw new Error(`version d’avant : ${JSON.stringify(kept)}`);
+      const trash = readdirSync(join(app.library, '_ardoise', 'trash'));
+      if (!trash.includes(kept.in_trash) || trash.length !== trashBefore.length + 1) throw new Error(`pas dans la corbeille : ${trash.join(', ')}`);
+      // The shapes of a copy are straightened in it, and its version before goes to the trash too.
+      const again = await session.call('straighten_shapes', { note: copy.id, strokes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] });
+      if (again.isError) throw new Error(textOf(again));
+      if (again.structuredContent.saved) {
+        const earlier = again.structuredContent.previous_version;
+        const word = language === 'fr' ? '(avant redressement)' : '(before straightening)';
+        if (again.structuredContent.made_a_copy !== false || !earlier?.title?.endsWith(word)) throw new Error(JSON.stringify(again.structuredContent).slice(0, 300));
+        if (!readdirSync(join(app.library, '_ardoise', 'trash')).includes(earlier.in_trash)) throw new Error('pas dans la corbeille');
+      }
     });
 
     // --- export_note -------------------------------------------------------------------------
@@ -300,11 +343,12 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
     });
 
     // --- prompts -----------------------------------------------------------------------------
-    await check('prompts/list : les trois prompts dans la langue de l’application', async () => {
+    await check('prompts/list : les quatre prompts dans la langue de l’application', async () => {
       const answer = await session.request('prompts/list', {});
       if (answer.error) throw new Error(JSON.stringify(answer.error));
       const names = answer.result.prompts.map((p) => p.name).sort();
-      if (names.join() !== PROMPTS[language].join()) throw new Error(`prompts : ${names}`);
+      const expected = [...PROMPTS[language], WRITING_PROMPT[language]].sort();
+      if (names.join() !== expected.join()) throw new Error(`prompts : ${names}`);
       for (const prompt of answer.result.prompts) if (!prompt.description) throw new Error(`${prompt.name} sans description`);
     });
     await check('prompts/get : chaque message nomme ses outils, dans l’ordre', async () => {
@@ -338,11 +382,16 @@ export async function mcpWriteTools({ makeApp, startServer, check, textOf, fold,
       if (!summary.includes(ohm.id)) throw new Error(`${lesson} : la note du jour n’est pas listée`);
       const bad = await session.request('prompts/get', { name: lesson, arguments: { date: 'demain' } });
       if (!bad.error) throw new Error(`${lesson} : une date fausse doit être refusée`);
+      const improve = await get(WRITING_PROMPT[language], { note: ohm.id, goals: 'ranger l’écriture' });
+      inOrder(improve, ['get_note', 'render_note', 'ink_lines', 'preview_revision', 'create_revision'], WRITING_PROMPT[language]);
+      if (!improve.includes(ohm.id) || !improve.includes('ranger l’écriture')) throw new Error(`${WRITING_PROMPT[language]} : note ou demande absentes`);
     });
     await check('prompts d’un serveur --read-only : aucun outil absent n’y est nommé', async () => {
       const readOnly = startServer(app, ['--read-only']);
       try {
         await readOnly.initialize();
+        const listed = (await readOnly.request('prompts/list', {})).result.prompts.map((p) => p.name).sort();
+        if (listed.join() !== PROMPTS[language].slice().sort().join()) throw new Error(`prompts en lecture seule : ${listed}`);
         const present = (await readOnly.tools()).map((t) => t.name);
         const absent = (await session.tools()).map((t) => t.name).filter((n) => !present.includes(n));
         const [clean, lesson, title] = PROMPTS[language];
