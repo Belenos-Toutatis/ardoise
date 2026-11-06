@@ -413,8 +413,10 @@ const pixelsAgainstFullRedraw = (selector) => `(() => {
   const partial = Number(c.dataset.partialRedraws ?? 0);
   const repaints = Math.max(1, partial - (c.comparedAtRepaint ?? 0));
   c.comparedAtRepaint = partial;
+  const fullSince = Number(c.dataset.fullRedraws ?? 0) - (c.comparedAtFull ?? 0);
   const before = context.getImageData(0, 0, c.width, c.height).data;
   c.repaintFromScratch();
+  c.comparedAtFull = Number(c.dataset.fullRedraws ?? 0);
   const after = context.getImageData(0, 0, c.width, c.height).data;
   let differ = 0, edges = 0, edgeWorst = 0, worst = 0, x0 = c.width, x1 = -1, y0 = c.height, y1 = -1;
   const samples = [];
@@ -470,7 +472,7 @@ const pixelsAgainstFullRedraw = (selector) => `(() => {
     picture = out.toDataURL('image/png');
   }
   if (differ === 0 && edges > ${EDGE_PIXELS} * repaints) differ = edges;
-  return { differ, edges, edgeWorst, repaints, worst, box: [x0, y0, x1, y1], size: [c.width, c.height], partial, samples, picture };
+  return { differ, edges, edgeWorst, repaints, fullSince, worst, box: [x0, y0, x1, y1], size: [c.width, c.height], partial, samples, picture };
 })()`;
 
 /** Page expression: pixels of the ink's own colour on a canvas: strongly red, with little of the other channels. */
@@ -561,7 +563,7 @@ class Places {
    */
   async samePixels(what, { after = null } = {}) {
     at(`comparing the pixels with a full redraw: ${what}`);
-    const read = async (place, selector, name) => {
+    const once = async (place, selector, name) => {
       if (!place) return null;
       const result = await within(place.evaluate(pixelsAgainstFullRedraw(selector)), 20_000, `the ${name}`);
       if (result.missing) throw new Error(`${what}: the ${name} has no repaint for the tests`);
@@ -576,15 +578,26 @@ class Places {
       if (result.edges > 0) console.log(`    ${what} : ${result.edges} pixels de bord à ${result.edgeWorst}/255 au plus d’un dessin complet, pour ${result.repaints} retouches (${name})`);
       return result;
     };
+    // The stream's event says the app sent the edit, not that this canvas has it: another process may still be receiving
+    // it, and a recolouring changes no count to wait for. Compared meanwhile, the pixels hold but nothing is tested.
+    const read = async (place, selector, name, earlier) => {
+      const end = Date.now() + 5000;
+      for (;;) {
+        const result = await once(place, selector, name);
+        if (!result || !earlier || result.partial > earlier.partial || result.fullSince > 0 || Date.now() > end) return result;
+        await sleep(100);
+      }
+    };
     const counts = {
-      control: await read(this.app, LIVE_CANVAS, 'control window'),
-      presented: await read(this.presentation, LIVE_CANVAS, 'presentation window'),
-      viewed: await read(this.browser, VIEWER_CANVAS, 'browser of the share'),
+      control: await read(this.app, LIVE_CANVAS, 'control window', after?.control),
+      presented: await read(this.presentation, LIVE_CANVAS, 'presentation window', after?.presented),
+      viewed: await read(this.browser, VIEWER_CANVAS, 'browser of the share', after?.viewed),
     };
     if (after) {
       for (const [name, result] of Object.entries(counts)) {
         if (result && after[name] && !(result.partial > after[name].partial)) {
-          throw new Error(`${what}: the ${name} place did not repaint an area for this edit (${after[name].partial} then ${result.partial})`);
+          const strokes = await this.count?.().catch(() => null);
+          throw new Error(`${what}: the ${name} place did not repaint an area for this edit (${after[name].partial} then ${result.partial}, ${result.fullSince} full redraws since the comparison before; ${j(strokes)})`);
         }
       }
     }

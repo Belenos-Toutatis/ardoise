@@ -50,6 +50,15 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   keyed by note id and a hash of the strokes (+ language), so a note edited on another PC is recognised again and
   two PCs never compete to rewrite the same file through Nextcloud (conflict copies). The `text.json` member stays
   unused (reserved).
+- **Strokes reach the engine in the order they were written**, not the file's (`recognizable_indices`): the engine reads them
+  in the order it is given them, and a retouched copy keeps a letter put back in its word at the end of the file, with the
+  right time. Read in the file's order, a corrected copy lost words and had "dé deva des ré" at the end. A note whose strokes
+  overlap too much in time (more than 1 in 20: one pen writes one stroke at a time, so these times are no order of writing,
+  such as lines with a clock each) stays in the file's order: sorted, the engine reads nothing. Real notes have 2.4 % at most.
+  A note already in order keeps its hash and its entry, the others are recognised again once (`files.json`, format 2, is
+  worked out anew). A
+  transcription corrected with `set_note_text` on a note out of order is keyed by the old hash, so it is dropped once; there
+  were none when this changed on the development PC, and the ink it was written for can be read again.
 - Indexing: in the background, notes whose cache entry is missing or stale; paused while live mode or the
   presentation runs (their latency budget is 30 ms); progress visible; cancellable; never blocks the library.
 - **Threads and locks** (review fix I1 of M7: a priority inversion between the indexer and live mode):
