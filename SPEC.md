@@ -171,7 +171,7 @@ Ajouté à la demande de l'utilisateur le 2026-10-28. Ardoise peut être command
   - **Relecture** : une lettre recopiée, ou un mot déplacé dans sa phrase, prend sa place dans le temps ; les traits suivants se décalent si nécessaire. Si la note a une narration, rien ne se décale (l'écriture et la voix resteraient désynchronisées) : la lettre est tracée plus vite, dans le temps disponible.
   - **Compte rendu** : l'assistant dit tout ce qu'il a changé, dont chaque lettre fabriquée. Ce compte rendu reste avec la copie.
   - **Dans l'éditeur**, une copie retouchée le dit, avec **Ouvrir l'original**, **Ce qui a changé** et **Comparer** (l'original et la copie côte à côte).
-  - **Redresser les formes** passe aussi par une copie : l'original n'est plus modifié.
+  - **Redresser les formes** et **découper** passent aussi par des copies : l'original n'est plus modifié par l'assistant. (Dans l'éditeur, découper une note reste une action de l'utilisateur et ne change pas.)
 - **Invites prêtes à l'emploi** : mettre une note au propre (Markdown, Word ou LaTeX), titrer et étiqueter les notes sans titre, résumer une séance pour le cahier de textes, améliorer une note sur une copie.
 - **Passerelle vers l'application ouverte** : ouvrir une note, lancer la présentation, changer de page, proposer une version propre à la fin du mode direct.
 - **Vie privée** : ce que l'assistant lit part chez son fournisseur, selon les réglages du compte de l'utilisateur ; le guide le rappelle (noms d'élèves). Les outils d'écriture sont séparés des outils de lecture, pour qu'on puisse limiter l'assistant à la lecture.

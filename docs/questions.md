@@ -118,5 +118,7 @@ L'utilisateur demande que l'IA puisse récupérer les documents et les améliore
 - Un aperçu ne demande aucune écriture ; `preview_revision` n'est pourtant proposé qu'avec les outils d'écriture (absent en `--read-only`).
 - `straighten_shapes` crée désormais une copie au lieu de modifier la note et d'en mettre l'ancienne version à la corbeille.
 - La copie garde la narration de l'original.
+- `split_note` ne réécrit plus la note d'origine : découper une note ordinaire donne deux notes neuves, et l'original reste entier. Sinon, une IA pouvait retirer un mot de l'original en le découpant, puis en jetant le morceau. Découper dans l'éditeur, à la main, ne change pas.
+- Les ordres de retouche portent la version de la note qu'ils visent : si la note a changé depuis l'aperçu, ils sont refusés.
 
 SPEC §4.9 et §6.1 sont mis à jour et le jalon M13 est ajouté à ROADMAP.md. Conception : `docs/design/revision.md`.
