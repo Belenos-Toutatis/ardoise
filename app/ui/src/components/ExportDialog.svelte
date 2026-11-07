@@ -10,6 +10,7 @@
   import { DPI_CHOICES, FORMATS, dpiFits, exportStem, isRaster, loadChoice, saveChoice } from '../lib/export-options';
   import { t } from '../lib/i18n.svelte';
   import type { ExportFormat, ExportOptions, ExportSource, PageSize } from '../lib/note';
+  import { beginWork } from '../lib/work';
   import Modal from './Modal.svelte';
   import TextExportSection from './TextExportSection.svelte';
 
@@ -46,6 +47,9 @@
   const many = $derived(sources.length > 1);
   const intoFolder = $derived(many && format !== 'pdf');
   const running = $derived(phase === 'running');
+  $effect(() => {
+    if (running) return beginWork();
+  });
   const raster = $derived(isRaster(format));
   const fits = $derived(DPI_CHOICES.map((dpi) => !pages || dpiFits(pages, dpi, format)));
   const someTooLarge = $derived(fits.includes(false));

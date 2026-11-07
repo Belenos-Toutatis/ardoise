@@ -9,6 +9,7 @@
   import { formatDate, oldestFirst } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
   import type { MergeLayout, NoteSummary } from '../../lib/note';
+  import { beginWork } from '../../lib/work';
   import Modal from '../Modal.svelte';
 
   let { lib, notes, onclose }: { lib: LibraryState; notes: NoteSummary[]; onclose: () => void } = $props();
@@ -34,6 +35,9 @@
   let layout = $state<MergeLayout>('overlay');
   let title = $state(untrack(defaultTitle));
   let running = $state(false);
+  $effect(() => {
+    if (running) return beginWork();
+  });
   let error = $state<string | null>(null);
 
   async function run() {

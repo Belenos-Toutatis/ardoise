@@ -88,6 +88,18 @@ describe('settings: about', () => {
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
+  it('closes with Ctrl + W and Ctrl + F4, like every dialog', async () => {
+    await render();
+    for (const key of ['w', 'F4']) {
+      if (!document.body.querySelector('[role="dialog"]')) click(document.body, '[data-action="open-about"]');
+      await settle();
+      expect(dialog()).not.toBeNull();
+      dialog().dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true }));
+      await settle();
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    }
+  });
+
   it('says what the licence is, in plain words, in both languages', async () => {
     await render('fr');
     expect(slot('version')).toContain('version 0.0.0-browser');

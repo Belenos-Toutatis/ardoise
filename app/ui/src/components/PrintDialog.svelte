@@ -9,6 +9,7 @@
   import { t, tn } from '../lib/i18n.svelte';
   import type { ExportSource, PrintOptions } from '../lib/note';
   import { loadPrintChoice, savePrintChoice } from '../lib/print-options';
+  import { beginWork } from '../lib/work';
   import Modal from './Modal.svelte';
 
   let {
@@ -28,6 +29,9 @@
   let error = $state<string | null>(null);
 
   const running = $derived(phase === 'running');
+  $effect(() => {
+    if (running) return beginWork();
+  });
 
   async function run() {
     error = null;

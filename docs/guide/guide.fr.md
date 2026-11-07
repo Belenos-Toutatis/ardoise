@@ -1182,7 +1182,15 @@ permet de comprendre ce qui s'est passé.
 
 ## 17. Raccourcis clavier
 
-Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte.
+Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte, sauf ceux de **Fermer et quitter**.
+
+### Fermer et quitter
+
+| Touches | Action |
+|---|---|
+| `Ctrl + W`, `Ctrl + F4` | Fermer ce qui est ouvert : une boîte de dialogue, le panneau **Réglages**, **Tablette** ou **Diagnostic**, la découpe, la relecture, l'éditeur (retour à la bibliothèque, avec la question habituelle si la note n'est pas enregistrée), la projection. En mode direct, Ardoise demande s'il faut terminer. Dans la bibliothèque seule, ces touches ne font rien, pour ne pas quitter par accident |
+| `Ctrl + Q` | Quitter Ardoise, avec les mêmes questions que la croix de la fenêtre. En mode direct, Ardoise demande d'abord confirmation et enregistre toutes les pages. Dans la fenêtre de présentation, la touche ferme seulement la projection |
+| `Alt + F4` | Fermer la fenêtre, comme sa croix. Dans la bibliothèque, Ardoise demande d'abord confirmation si une tâche est en cours : export, impression, import, assemblage, synchronisation, opération sur plusieurs notes, test de la tablette |
 
 ### Bibliothèque
 
@@ -1255,3 +1263,4 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte.
 | Touches | Action |
 |---|---|
 | `Échap` | Fermer la fenêtre ouverte (export, impression, assemblage, import d'Inkspace…), où que soit le focus ; pas pendant une opération en cours, qu'il faut d'abord arrêter ou laisser finir |
+| `Échap` | Fermer le panneau **Réglages**, **Tablette** ou **Diagnostic** ; pas pendant un test de la tablette, qui s'arrête par son bouton |

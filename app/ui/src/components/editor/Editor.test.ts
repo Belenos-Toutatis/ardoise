@@ -493,6 +493,37 @@ describe('note editor', () => {
     expect(onclose).toHaveBeenCalledTimes(2);
   });
 
+  it('Ctrl + W and Ctrl + F4 leave by the rules of the back button, and answer « Rester » to its question', async () => {
+    const { target, drag, key, onclose } = await render('Liste de courses');
+    await key('w', { ctrlKey: true });
+    expect(onclose).toHaveBeenCalledTimes(1);
+    await key('F4', { ctrlKey: true });
+    expect(onclose).toHaveBeenCalledTimes(2);
+    // W alone is not a close.
+    await key('w');
+    expect(onclose).toHaveBeenCalledTimes(2);
+
+    await drag(line(5000, 15000, 15000));
+    await key('w', { ctrlKey: true });
+    expect(target.querySelector('[role="alertdialog"]')).toBeTruthy();
+    expect(onclose).toHaveBeenCalledTimes(2);
+    await key('F4', { ctrlKey: true });
+    expect(target.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(onclose).toHaveBeenCalledTimes(2);
+  });
+
+  it('Ctrl + W works from the title field too, where W is a letter only without Ctrl', async () => {
+    const { target, onclose } = await render('Liste de courses');
+    const title = target.querySelector<HTMLInputElement>('input[type="text"]')!;
+    title.focus();
+    title.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', bubbles: true, cancelable: true }));
+    await tick();
+    expect(onclose).not.toHaveBeenCalled();
+    title.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true, cancelable: true }));
+    await tick();
+    expect(onclose).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the focus inside the confirmation, and gives it back to the button when answered « Rester »', async () => {
     const { target, button, drag } = await render('Liste de courses');
     await drag(line(5000, 15000, 15000));
@@ -1232,6 +1263,14 @@ describe('note editor: split, copy image and export', () => {
     expect(panelOf(target)).toBeNull();
     expect(moved(target)).toHaveLength(0);
     expect(kept(target)).toHaveLength(0);
+
+    // Ctrl + W closes the split, not the editor.
+    button('Découper').click();
+    await tick();
+    expect(panelOf(target)).not.toBeNull();
+    await key('w', { ctrlKey: true });
+    expect(panelOf(target)).toBeNull();
+    expect(target.querySelector('.editor')).not.toBeNull();
 
     button('Découper').click();
     await tick();

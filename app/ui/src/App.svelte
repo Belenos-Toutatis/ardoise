@@ -4,6 +4,8 @@
   import Wizard from './components/Wizard.svelte';
   import { api, errorMessage, genericError, onBridgeRequest, type AppState } from './lib/api';
   import { bridgeScreens, startAppBridge } from './lib/app-bridge.svelte';
+  import { closeKey } from './lib/close-keys';
+  import { quit } from './lib/editor/window-close';
   import { resolveLocale } from './lib/i18n-core';
   import { catalogs, currentLocale, setLocale, t } from './lib/i18n.svelte';
   import { uiSelfTest } from './lib/selftest';
@@ -36,7 +38,16 @@
       await api.selfTestReport(uiSelfTest(document.getElementById('app'), catalogs, currentLocale()));
     }
   });
+
+  /** Ctrl + Q, whatever is on display. */
+  function onkeydown(event: KeyboardEvent) {
+    if (closeKey(event) !== 'quit') return;
+    event.preventDefault();
+    quit();
+  }
 </script>
+
+<svelte:window {onkeydown} />
 
 {#if loadError}
   <p class="banner error" role="alert">{genericError(loadError)}</p>

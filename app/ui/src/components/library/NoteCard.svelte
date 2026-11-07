@@ -107,6 +107,8 @@
       event.preventDefault();
       lib.selectAll();
     } else if (key === 'Escape') {
+      // A selection takes the key: the side panel, if one is open, closes at the next press.
+      if (lib.selected.length > 0) event.preventDefault();
       lib.clearSelection();
     } else if (key === 'Delete') {
       event.preventDefault();

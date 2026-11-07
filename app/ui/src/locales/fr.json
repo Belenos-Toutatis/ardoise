@@ -30,6 +30,12 @@
     "emptyHint": "Les pages de votre tablette apparaîtront ici après la première synchronisation."
   },
   "library": {
+    "quitBusy": {
+      "title": "Une tâche est en cours",
+      "message": "Si vous quittez Ardoise maintenant, elle s'arrête avant la fin.",
+      "wait": "Attendre",
+      "quit": "Quitter quand même"
+    },
     "sidebarLabel": "Navigation de la bibliothèque",
     "all": "Toutes les notes",
     "favorites": "Favoris",
@@ -1576,6 +1582,14 @@
           "keys": "Échap",
           "action": "Désélectionner d'abord s'il y a une sélection ; puis fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
         },
+        "close": {
+          "keys": "Ctrl + W, Ctrl + F4",
+          "action": "Fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
+        },
+        "quit": {
+          "keys": "Ctrl + Q",
+          "action": "Quitter Ardoise (après confirmation) ; dans la présentation, fermer la projection"
+        },
         "marks": {
           "keys": "Suppr, Retour arrière",
           "action": "Effacer les annotations tracées sur la présentation (fenêtre projetée)"
@@ -1611,6 +1625,11 @@
       "message": "Chaque page écrite est enregistrée comme une note de la bibliothèque. Pour arrêter seulement la projection, utilisez « Arrêter la projection » : Échap la ferme aussi quand elle est affichée.",
       "continue": "Continuer",
       "confirm": "Terminer"
+    },
+    "quit": {
+      "title": "Quitter Ardoise ?",
+      "message": "Le mode direct s'arrête et chaque page écrite est enregistrée comme une note de la bibliothèque.",
+      "confirm": "Quitter Ardoise"
     }
   },
   "presentation": {

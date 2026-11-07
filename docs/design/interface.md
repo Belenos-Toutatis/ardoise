@@ -374,3 +374,15 @@ checked: a real shutdown or logoff (Windows' own "apps preventing shutdown" scre
   characters at most).
 - Unreadable files: each problem carries its error `code` (`errorCodes.*`, like the library errors) and shows in a
   banner above the grid.
+
+## Closing and quitting
+
+`Ctrl + W` and `Ctrl + F4` close what is open, `Ctrl + Q` quits (`lib/close-keys.ts`). They work from a text field too.
+
+- **A modal** closes as with Esc, if it may (`dismissible`), so a screen under it leaves those keys alone (`modalOpen()`).
+- **The library**: Esc and those keys close the side panel, except a tablet test under way, which only stops by its button. With nothing open they do nothing: closing the app by a key meant for a dialog is the accident to avoid.
+- **The editor**: they cancel a split, leave the replay, then go back to the library by the back button's rules. Esc stays what it was (deselect), as it is often pressed for that.
+- **Live mode**: they act as Esc does, without deselecting first (`liveKeyAction`); in the presentation window, `Ctrl + Q` closes the window, since the question about quitting belongs to the control window.
+- **`Ctrl + Q`** is handled once, in `App.svelte`, so that it also works on the first-run wizard. It goes through the same guards as `Alt + F4`, except that live mode asks first (`askBeforeQuitting`): `Alt + F4` there still ends without a question, and loses nothing.
+
+**The guards** (`lib/editor/window-close.ts`) share one listener of `onCloseRequested`. Tauri destroys the window after each listener that does not prevent the close, so with one each, a screen with nothing to protect would close the window under a screen that was asking. The library's guard holds only with the library on display: dialogs say they are running with `beginWork()` (`lib/work.ts`), and the batch operations and the tablet's sync and registration are read from their states.

@@ -2,6 +2,13 @@
 
 ## Non publié
 
+### Ajouté (raccourcis pour fermer et quitter)
+
+- `Ctrl + W` et `Ctrl + F4` ferment ce qui est ouvert : une boîte de dialogue, un panneau, la découpe, la relecture, l'éditeur (avec la question habituelle si la note n'est pas enregistrée), la projection ; en mode direct, Ardoise demande s'il faut terminer. Dans la bibliothèque seule, ces touches ne font rien.
+- `Ctrl + Q` quitte Ardoise, avec les mêmes questions que la croix de la fenêtre ; en mode direct, Ardoise demande d'abord confirmation et enregistre toutes les pages. Dans la fenêtre de présentation, la touche ferme seulement la projection.
+- `Échap` ferme aussi les panneaux Réglages, Tablette et Diagnostic (pas un test de la tablette en cours, qui s'arrête par son bouton).
+- Dans la bibliothèque, fermer la fenêtre pendant une tâche en cours (export, impression, import, assemblage, synchronisation, opération sur plusieurs notes, test de la tablette) demande d'abord confirmation.
+
 ### Ajouté (jalon M13 — retoucher une note sur une copie)
 
 - Assistant (MCP) : l'assistant peut améliorer une note **sur une copie**, sans jamais modifier l'originale. `preview_revision` essaie une liste de retouches en mémoire (rien n'est écrit) et rend l'image et un rapport ; `create_revision` écrit le résultat dans une nouvelle note à côté de l'originale, avec le compte rendu de l'assistant ; `edit_revision` retouche une copie déjà faite, sur place, et refuse toute autre note (`notARevision`). Ce qu'Ardoise garantit : aucun outil n'écrit l'encre d'une note qui n'est pas une copie (un test le vérifie octet pour octet), rien n'est écrit pendant un essai, une note qui a changé depuis que l'assistant l'a regardée est refusée, une retouche ne peut désigner que des traits de sa propre note, rien n'est supprimé définitivement. Ce qui est seulement demandé à l'assistant, par l'invite `ameliorer_note` / `improve_note` (absente en lecture seule) et non contrôlé : fautes d'orthographe listées et validées d'abord, lettres prises seulement dans la même écriture de la même note, couleur pour ce qu'il ne sait pas écrire, compte rendu de chaque changement, relecture juste ; sans l'invite, c'est à l'utilisateur de le demander, et il doit toujours regarder la copie.

@@ -276,6 +276,8 @@ Premier usage réel par un assistant (2026-11-07) : les applications clientes su
 
 À surveiller dans les parcours : des gestes perdus dans 3 passages sur 4 avant le redémarrage et aucun sur les 3 faits ensuite au repos (charge du PC ou souris utilisée soupçonnées, non prouvées), et deux fois sur trois au repos, dans un passage complet, « le navigateur du partage n'a pas retouché de zone » (cause non confirmée, le message donne maintenant le nombre de dessins complets). La mémoire réservée monte de 1 à 2,5 Go à chaque passage complet, ce que les programmes ouverts n'expliquent qu'en partie, et un redémarrage la rend (33 Go puis 11 Go) ; cause non trouvée.
 
+Raccourcis pour fermer et quitter (2026-11-07, demandés par l’utilisateur) : Ctrl + W et Ctrl + F4 ferment ce qui est ouvert, Ctrl + Q quitte par le même chemin qu’Alt + F4, Échap ferme aussi les panneaux, et fermer la bibliothèque pendant une tâche demande d’abord. `CHECK OK` et `E2E OK` (90 parcours, FR et EN). Ces parcours passent par le port de débogage de WebView2 : les vraies touches du clavier restent à essayer à la main.
+
 Restent à essayer dans la vraie bibliothèque : **Comparer** et la relecture à l'écran sur ces notes, et une note avec une vraie narration (aucune des quatre n'en a).
 
 ---

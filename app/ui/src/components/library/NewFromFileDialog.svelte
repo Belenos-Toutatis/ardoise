@@ -12,6 +12,7 @@
   import { pickBackgroundFile } from '../../lib/dialogs';
   import { t, tn } from '../../lib/i18n.svelte';
   import type { NoteSummary } from '../../lib/note';
+  import { beginWork } from '../../lib/work';
   import Modal from '../Modal.svelte';
 
   let {
@@ -31,6 +32,9 @@
   let which = $state<'all' | 'some'>('all');
   let pageList = $state('');
   let running = $state(false);
+  $effect(() => {
+    if (running) return beginWork();
+  });
   /** The notes are being made (as opposed to the file being read): this can be cancelled. */
   let creating = $state(false);
   /** « Cancel » was pressed: waiting for the page being rendered to finish. */

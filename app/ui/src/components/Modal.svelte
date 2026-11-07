@@ -2,17 +2,23 @@
   let counter = 0;
   /** The modals open, the last one on top: only that one answers Escape. */
   const stack: number[] = [];
+
+  /** A modal is open: Escape, Ctrl + W and Ctrl + F4 are its own, not those of the screen under it. */
+  export function modalOpen(): boolean {
+    return stack.length > 0;
+  }
 </script>
 
 <script lang="ts">
   /**
-   * A modal dialog: title, content, Escape to close, Tab kept inside, focus moved in on opening
-   * and given back on closing. `dismissible` false (an operation is running) ignores Escape.
-   * Escape works wherever the focus is (a button that became disabled, the native file picker
-   * that just closed: the focus is then on the page), for the topmost modal only; the focus
-   * comes back to the card when the control that had it is disabled.
+   * A modal dialog: title, content, Escape (or Ctrl + W, Ctrl + F4) to close, Tab kept inside, focus
+   * moved in on opening and given back on closing. `dismissible` false (an operation is running)
+   * ignores those keys. They work wherever the focus is (a button that became disabled, the native
+   * file picker that just closed: the focus is then on the page), for the topmost modal only; the
+   * focus comes back to the card when the control that had it is disabled.
    */
   import { onMount, type Snippet } from 'svelte';
+  import { closeKey } from '../lib/close-keys';
 
   let {
     title,
@@ -62,9 +68,10 @@
     };
   });
 
-  /** Escape, wherever the focus is. */
+  /** Escape, Ctrl + W and Ctrl + F4, wherever the focus is. */
   function windowKey(event: KeyboardEvent) {
-    if (event.key !== 'Escape' || event.defaultPrevented || stack[stack.length - 1] !== id) return;
+    if (event.key !== 'Escape' && closeKey(event) !== 'close') return;
+    if (event.defaultPrevented || stack[stack.length - 1] !== id) return;
     event.preventDefault();
     event.stopPropagation();
     if (dismissible) onclose();
