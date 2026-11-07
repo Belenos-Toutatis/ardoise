@@ -2,11 +2,15 @@
   import { onMount, tick } from 'svelte';
   import { genericError, type AppState } from '../lib/api';
   import { bridgeScreens } from '../lib/app-bridge.svelte';
+  import { closeKey } from '../lib/close-keys';
+  import { defaultWindowClose, type WindowClose } from '../lib/editor/window-close';
   import { currentLocale, t } from '../lib/i18n.svelte';
   import { inkspaceOffer } from '../lib/inkspace-offer.svelte';
   import { SORT_ORDERS, displayTitle, type SortOrder } from '../lib/library-logic';
   import { LibraryState } from '../lib/library-state.svelte';
   import { share } from '../lib/share-state.svelte';
+  import { isBusy, tablet } from '../lib/tablet-state.svelte';
+  import { workInProgress } from '../lib/work';
   import type { NoteSummary } from '../lib/note';
   import Diagnostic from './Diagnostic.svelte';
   import LiveView from './live/LiveView.svelte';
@@ -23,13 +27,20 @@
   import Sidebar from './library/Sidebar.svelte';
   import TrashView from './library/TrashView.svelte';
   import Logo from './Logo.svelte';
+  import Modal, { modalOpen } from './Modal.svelte';
   import ShareIndicator from './share/ShareIndicator.svelte';
   import SharePanel from './share/SharePanel.svelte';
   import Settings from './Settings.svelte';
 
-  let { app, onchange }: { app: AppState; onchange: (next: AppState) => void } = $props();
+  let {
+    app,
+    onchange,
+    windowClose = defaultWindowClose(),
+  }: { app: AppState; onchange: (next: AppState) => void; windowClose?: WindowClose } = $props();
 
   const lib = new LibraryState();
+  /** The window was asked to close while work is under way in the library. */
+  let quitAsked = $state(false);
 
   // One side panel at a time.
   let panel = $state<'settings' | 'diagnostic' | 'tablet' | null>(null);
@@ -66,6 +77,17 @@
       inkspaceOpen = true;
     }
     const stopLibrary = lib.start();
+    let stopGuard: (() => void) | null = null;
+    let gone = false;
+    windowClose.subscribe(holdClose).then(
+      (stop) => {
+        if (gone) stop();
+        else stopGuard = stop;
+      },
+      () => {
+        // No close guard (e.g. not allowed): closing then works as before.
+      },
+    );
     // The assistant's bridge opens notes as a click on a card does (`lib/app-bridge.svelte.ts`).
     const unregister = bridgeScreens.register('home', {
       busy: () =>
@@ -86,10 +108,24 @@
       },
     });
     return () => {
+      gone = true;
+      stopGuard?.();
       unregister();
       stopLibrary();
     };
   });
+
+  /**
+   * The window is asked to close with the library on display and work under way: true holds it back,
+   * and the user is asked. The editor and live mode have their own rules.
+   */
+  function holdClose(): boolean {
+    if (away) return false;
+    const connection = tablet.status?.connection;
+    if (!workInProgress() && !lib.activity.busy && !(connection && isBusy(connection))) return false;
+    if (windowClose.destroy) quitAsked = true;
+    return true;
+  }
 
   function toggle(name: 'settings' | 'diagnostic' | 'tablet') {
     panel = panel === name ? null : name;
@@ -209,7 +245,19 @@
     void backToLibrary();
   }
 
+  /** Escape, Ctrl + W and Ctrl + F4 close the side panel; a tablet test under way only stops by its button. */
+  function closesPanel(event: KeyboardEvent): boolean {
+    if (!panel || away || event.defaultPrevented || modalOpen()) return false;
+    if (event.key !== 'Escape' && closeKey(event) !== 'close') return false;
+    return !(panel === 'diagnostic' && workInProgress());
+  }
+
   function shortcuts(event: KeyboardEvent) {
+    if (closesPanel(event)) {
+      event.preventDefault();
+      panel = null;
+      return;
+    }
     // Not under the editor, live mode or a dialog of the library (« Depuis un PDF » would be unmounted).
     if (away || lib.dialog || fromFile || share.panelOpen || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
     const key = event.key.toLowerCase();
@@ -368,6 +416,27 @@
   />
 {:else if lib.dialog?.kind === 'assemble'}
   <AssembleDialog {lib} notes={lib.dialog.notes} onclose={() => lib.closeDialog()} />
+{/if}
+{#if quitAsked}
+  <Modal title={t('library.quitBusy.title')} role="alertdialog" onclose={() => (quitAsked = false)}>
+    <p>{t('library.quitBusy.message')}</p>
+    <div class="actions">
+      <button type="button" class="button primary" data-autofocus data-action="quit-wait" onclick={() => (quitAsked = false)}>
+        {t('library.quitBusy.wait')}
+      </button>
+      <button
+        type="button"
+        class="button danger"
+        data-action="quit-anyway"
+        onclick={() => {
+          quitAsked = false;
+          void windowClose.destroy?.();
+        }}
+      >
+        {t('library.quitBusy.quit')}
+      </button>
+    </div>
+  </Modal>
 {/if}
 {#if fromFile}
   <NewFromFileDialog binder={lib.currentBinder} onclose={() => (fromFile = false)} oncreated={createdFromFile} />

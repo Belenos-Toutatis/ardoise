@@ -48,6 +48,7 @@
   import { share } from '../../lib/share-state.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
   import type { NarrationSaved } from '../../lib/video';
+  import { askBeforeQuitting, requestWindowClose } from '../../lib/editor/window-close';
   import Modal from '../Modal.svelte';
   import RecordPanel from '../narration/RecordPanel.svelte';
   import ShareButton from '../share/ShareButton.svelte';
@@ -107,6 +108,8 @@
     'pan',
     'marks',
     'leave',
+    'close',
+    'quit',
   ] as const;
 
   const live = new LiveState();
@@ -138,6 +141,14 @@
   let narrationOpen = $state(false);
   /** Esc asked to end live mode: waiting for the answer. */
   let confirmLeave = $state(false);
+  /** Ctrl + Q asked to quit Ardoise: waiting for the answer. */
+  let confirmQuit = $state(false);
+  onMount(() =>
+    askBeforeQuitting(() => {
+      if (stopping || stopped) void requestWindowClose();
+      else confirmQuit = true;
+    }),
+  );
   /** « Undo the clearing » is offered. */
   let undoClear = $state(false);
   let undoTimer: ReturnType<typeof setTimeout> | undefined;
@@ -590,7 +601,7 @@
 
   function onkeydown(e: KeyboardEvent) {
     // The question about ending live mode has its own keys.
-    if (e.defaultPrevented || confirmLeave || share.panelOpen) return;
+    if (e.defaultPrevented || confirmLeave || confirmQuit || share.panelOpen) return;
     // Touching up first: V, undo and redo, and Delete and Esc while something is selected. Only while
     // a session runs, like the Select button (the edits are refused once it is over).
     const edit = live.ready && sessionState !== 'idle' ? liveEditKeyAction(e, selection.any) : null;
@@ -607,7 +618,7 @@
 
   /** Space is "next page" already on key down: a focused button must not also be pressed on key up. */
   function onkeyup(e: KeyboardEvent) {
-    if (isSpaceKey(e.key) && !confirmLeave && !share.panelOpen && !isTypingTarget(e.target)) e.preventDefault();
+    if (isSpaceKey(e.key) && !confirmLeave && !confirmQuit && !share.panelOpen && !isTypingTarget(e.target)) e.preventDefault();
   }
 
   const mm = (units: number) => (units / 100).toFixed(units < 100 ? 2 : 1);
@@ -1058,6 +1069,28 @@
           }}
         >
           {t('live.leave.confirm')}
+        </button>
+      </div>
+    </Modal>
+  {/if}
+
+  {#if confirmQuit}
+    <Modal title={t('live.quit.title')} onclose={() => (confirmQuit = false)}>
+      <p>{t('live.quit.message')}</p>
+      <div class="actions">
+        <button type="button" class="button primary" data-autofocus data-action="quit-cancel" onclick={() => (confirmQuit = false)}>
+          {t('live.leave.continue')}
+        </button>
+        <button
+          type="button"
+          class="button danger"
+          data-action="quit-confirm"
+          onclick={() => {
+            confirmQuit = false;
+            void requestWindowClose();
+          }}
+        >
+          {t('live.quit.confirm')}
         </button>
       </div>
     </Modal>

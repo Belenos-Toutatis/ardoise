@@ -19,6 +19,7 @@
   import { loadInk, type Ink } from '../../lib/ink';
   import { LatencyRecorder, exposeLatency } from '../../lib/latency';
   import { runKeyAction, type LiveActions } from '../../lib/live-actions';
+  import { closeKey } from '../../lib/close-keys';
   import { liveKeyAction } from '../../lib/live-keys';
   import { MarksSender } from '../../lib/live-marks-sender';
   import { changeView } from '../../lib/live-actions';
@@ -94,6 +95,12 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
+    // Ctrl + Q in this window closes this window: the control window has the question about quitting.
+    if (closeKey(e) === 'quit') {
+      e.preventDefault();
+      close();
+      return;
+    }
     const action = liveKeyAction(e);
     if (!action) return;
     e.preventDefault();

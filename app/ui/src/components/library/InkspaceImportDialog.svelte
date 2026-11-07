@@ -11,6 +11,7 @@
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { DEFAULT_BINDER, type InkspaceProgress, type InkspaceReport, type InkspaceSource } from '../../lib/inkspace';
   import { formatDate } from '../../lib/library-logic';
+  import { beginWork } from '../../lib/work';
   import Modal from '../Modal.svelte';
 
   let {
@@ -41,6 +42,9 @@
   let importError = $state<string | null>(null);
   let binder = $state(DEFAULT_BINDER);
   let running = $state(false);
+  $effect(() => {
+    if (running) return beginWork();
+  });
   let stopping = $state(false);
   let progress = $state.raw<InkspaceProgress | null>(null);
   let report = $state.raw<InkspaceReport | null>(null);

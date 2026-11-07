@@ -9,6 +9,7 @@ import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import { mockLiveConfig, mockLiveTick, resetMockLive } from '../../lib/mock-live';
 import { mockNarration, resetMockNarration } from '../../lib/mock-narration';
 import { resetMockTablet } from '../../lib/mock-tablet';
+import { quit } from '../../lib/editor/window-close';
 import LiveView from './LiveView.svelte';
 
 // The real stroke geometry, instantiated from the module's bytes (jsdom cannot fetch it).
@@ -417,6 +418,39 @@ describe('live view (control window)', () => {
   const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]');
   const dialogButton = (label: string) =>
     [...(dialog()?.querySelectorAll('button') ?? [])].find((b) => b.textContent?.trim() === label)!;
+
+  it('Ctrl + W and Ctrl + F4 do what Esc does', async () => {
+    const view = render();
+    await live(view);
+    view.action('project').click();
+    await vi.waitFor(() => expect(view.action('stop-projecting')).toBeTruthy());
+    press('w', { ctrlKey: true });
+    await vi.waitFor(() => expect(view.action('project')).toBeTruthy());
+    expect(dialog()).toBeNull();
+
+    press('F4', { ctrlKey: true });
+    await vi.waitFor(() => expect(dialog()).not.toBeNull());
+    expect(dialog()!.textContent).toContain('Terminer le mode direct ?');
+    // Under the question they answer « Continuer », as Esc does.
+    press('w', { ctrlKey: true });
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    expect(view.onclose).not.toHaveBeenCalled();
+  });
+
+  it('Ctrl + Q asks before quitting, and keys do not reach the view behind the question', async () => {
+    const view = render();
+    await live(view);
+    quit();
+    await vi.waitFor(() => expect(dialog()).not.toBeNull());
+    expect(dialog()!.textContent).toContain('Quitter Ardoise ?');
+    expect(document.activeElement).toBe(dialogButton('Continuer'));
+    press(' ');
+    await tick();
+    expect(view.canvas().dataset.page).toBe('1/1');
+    dialogButton('Continuer').click();
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    expect(view.onclose).not.toHaveBeenCalled();
+  });
 
   it('Esc closes the projection when it is open, and otherwise asks before ending live mode', async () => {
     const view = render();

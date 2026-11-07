@@ -15,6 +15,7 @@
     type StepStatus,
   } from '../lib/diagnostic';
   import { t } from '../lib/i18n.svelte';
+  import { beginWork } from '../lib/work';
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -45,6 +46,9 @@
   let destroyed = false;
 
   const running = $derived(phase === 'running');
+  $effect(() => {
+    if (running) return beginWork();
+  });
   const summary = $derived(report ? countSteps(report) : null);
 
   // A new prompt takes the keyboard focus so that Enter answers it.

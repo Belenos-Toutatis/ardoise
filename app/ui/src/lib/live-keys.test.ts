@@ -64,6 +64,16 @@ describe('live mode keyboard', () => {
     expect(key('ArrowDown')).toBeNull();
   });
 
+  it('leaves with Ctrl + W and Ctrl + F4 as with Esc, from a field too; Ctrl + Q is for the window to answer', () => {
+    expect(key('w', { ctrlKey: true })).toEqual({ kind: 'leave' });
+    expect(key('F4', { ctrlKey: true })).toEqual({ kind: 'leave' });
+    expect(key('w', { ctrlKey: true, target: { tagName: 'INPUT', type: 'text' } as unknown as EventTarget })).toEqual({ kind: 'leave' });
+    expect(key('w', { ctrlKey: true, repeat: true })).toBeNull();
+    expect(key('q', { ctrlKey: true })).toBeNull();
+    // W alone stays « page width ».
+    expect(key('w')).toEqual({ kind: 'fitWidth' });
+  });
+
   it('leaves with Esc, once per press', () => {
     expect(key('Escape')).toEqual({ kind: 'leave' });
     expect(key('Escape', { repeat: true })).toBeNull();
@@ -97,7 +107,6 @@ describe('page width and marks (M8)', () => {
   it('shows the page width with W', () => {
     expect(key('w')).toEqual({ kind: 'fitWidth' });
     expect(key('W', { shiftKey: true })).toEqual({ kind: 'fitWidth' });
-    expect(key('w', { ctrlKey: true })).toBeNull();
     expect(key('w', { repeat: true })).toBeNull();
   });
 

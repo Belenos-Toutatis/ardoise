@@ -15,15 +15,18 @@
  * | Delete, Backspace                      | clear the marks written |
  * |                                        | over the presentation   |
  * | Shift + arrows                         | move the projected area |
- * | Esc                                    | leave                   |
+ * | Esc, Ctrl + W, Ctrl + F4               | leave                   |
  *
- * The control window also has the keys of touching up (`liveEditKeyAction`, at the end).
+ * The control window also has the keys of touching up (`liveEditKeyAction`, at the end). Ctrl + Q is
+ * for each window to answer (`closeKey`).
  *
  * Presentation remotes send Page Up / Page Down. Keys typed in a field are left alone. Space
  * always means "next page", even with a button focused (the button of a tool just used would
  * otherwise be pressed again: « Clear the page » by Space wiped the new page). Esc closes the
  * projection when it is open and otherwise asks before ending live mode: the window decides.
  */
+
+import { closeKey } from './close-keys';
 
 export type LiveKeyAction =
   | { kind: 'command'; command: 'nextPage' | 'previousPage' | 'clearPage' }
@@ -74,6 +77,7 @@ export function isTypingTarget(target: EventTarget | null | undefined): boolean 
 
 /** The action of a key press in live mode, or null when live mode does not use it. */
 export function liveKeyAction(e: KeyInput): LiveKeyAction | null {
+  if (closeKey(e) === 'close') return { kind: 'leave' };
   if (isTypingTarget(e.target)) return null;
   const key = e.key;
   const ctrl = !!(e.ctrlKey || e.metaKey);

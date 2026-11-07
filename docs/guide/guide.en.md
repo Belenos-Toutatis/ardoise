@@ -1120,6 +1120,14 @@ possible to understand what happened.
 
 These shortcuts do nothing while you are typing in a text field.
 
+### Closing and quitting
+
+| Keys | Action |
+|---|---|
+| `Ctrl + W`, `Ctrl + F4` | Close what is open: a dialog, the **Settings**, **Tablet** or **Diagnostic** panel, the split, the replay, the editor (back to the library, with the usual question if the note is not saved), the projection. In live mode, Ardoise asks whether to end it. With only the library on display, these keys do nothing, so as not to quit by accident |
+| `Ctrl + Q` | Quit Ardoise, with the same questions as the window's close button. In live mode, Ardoise asks for confirmation first and saves every page. In the presentation window, the key only closes the projection |
+| `Alt + F4` | Close the window, like its close button. In the library, Ardoise asks for confirmation first if a task is under way: export, printing, import, assembly, sync, an operation on several notes, the tablet test |
+
 ### Library
 
 | Keys | Action |
@@ -1191,3 +1199,4 @@ These shortcuts do nothing while you are typing in a text field.
 | Keys | Action |
 |---|---|
 | `Esc` | Close the open window (export, print, assemble, Inkspace import…), wherever the focus is; not during an operation in progress, which you must stop or let finish first |
+| `Esc` | Close the **Settings**, **Tablet** or **Diagnostic** panel; not during a tablet test, which stops by its button |

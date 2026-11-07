@@ -86,6 +86,7 @@
   import { defaultWindowClose, type WindowClose } from '../../lib/editor/window-close';
   import { largestFittingDpi } from '../../lib/export-options';
   import { currentLocale, t } from '../../lib/i18n.svelte';
+  import { closeKey } from '../../lib/close-keys';
   import { share } from '../../lib/share-state.svelte';
   import { resumeBlock } from '../../lib/live-resume.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
@@ -94,7 +95,7 @@
   import type { NoteOriginal } from '../../lib/original';
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
-  import Modal from '../Modal.svelte';
+  import Modal, { modalOpen } from '../Modal.svelte';
   import PrintDialog from '../PrintDialog.svelte';
   import VideoExportDialog from '../VideoExportDialog.svelte';
   import { clock } from '../narration/format';
@@ -1603,7 +1604,15 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if (!doc) return;
+    // Ctrl + W and Ctrl + F4 close what is open here; a dialog's are its own (`Modal`).
+    const closes = closeKey(e) === 'close' && !modalOpen();
+    if (!doc) {
+      if (closes) {
+        e.preventDefault();
+        back();
+      }
+      return;
+    }
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (mod && key === 's') {
@@ -1618,10 +1627,18 @@
     // A dialog or the split panel is open: the editing keys wait; Escape closes the panel.
     if (exporting || printing || video || share.panelOpen || revisionDialog) return;
     if (split) {
-      if (key === 'Escape') {
+      if (key === 'Escape' || closes) {
         e.preventDefault();
         cancelSplit();
       }
+      return;
+    }
+    if (closes) {
+      e.preventDefault();
+      // A gesture under way commits first; replay is left before the note.
+      if (canvas?.dragging()) return;
+      if (replaying) leaveReplay();
+      else back();
       return;
     }
     if (isTyping(e.target)) return;

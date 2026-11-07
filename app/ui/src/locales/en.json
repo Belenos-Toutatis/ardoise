@@ -30,6 +30,12 @@
     "emptyHint": "Pages from your tablet will appear here after the first sync."
   },
   "library": {
+    "quitBusy": {
+      "title": "A task is under way",
+      "message": "If you quit Ardoise now, it stops before the end.",
+      "wait": "Wait",
+      "quit": "Quit anyway"
+    },
     "sidebarLabel": "Library navigation",
     "all": "All notes",
     "favorites": "Favourites",
@@ -1576,6 +1582,14 @@
           "keys": "Esc",
           "action": "Deselect first if something is selected; then close the projection if it is shown, otherwise end live mode (after confirmation)"
         },
+        "close": {
+          "keys": "Ctrl + W, Ctrl + F4",
+          "action": "Close the projection if it is shown, otherwise end live mode (after confirmation)"
+        },
+        "quit": {
+          "keys": "Ctrl + Q",
+          "action": "Quit Ardoise (after confirmation); in the presentation, close the projection"
+        },
         "marks": {
           "keys": "Delete, Backspace",
           "action": "Clear the annotations drawn over the presentation (projected window)"
@@ -1611,6 +1625,11 @@
       "message": "Every page you wrote is saved as a note in the library. To stop only the projection, use \"Stop projecting\": Esc also closes it while it is shown.",
       "continue": "Continue",
       "confirm": "End live mode"
+    },
+    "quit": {
+      "title": "Quit Ardoise?",
+      "message": "Live mode stops and every page you wrote is saved as a note in the library.",
+      "confirm": "Quit Ardoise"
     }
   },
   "presentation": {

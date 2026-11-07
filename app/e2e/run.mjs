@@ -33,12 +33,13 @@ import { resumeJourneys } from './journeys-m12-resume.mjs';
 import { touchUpJourneys } from './journeys-m12-touchup.mjs';
 import { revisionJourneys } from './journeys-m13-revision.mjs';
 import { editorNavJourneys } from './journeys-editor-nav.mjs';
+import { closeKeyJourneys } from './journeys-close-keys.mjs';
 import { mcpJourney } from './mcp.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...revisionJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -254,6 +255,7 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
               ArrowUp: 38,
               ArrowRight: 39,
               ArrowDown: 40,
+              F4: 115,
             }[key];
       const base = { key, code, modifiers, windowsVirtualKeyCode };
       await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, text: key.length === 1 && !ctrl ? key : undefined });
@@ -266,11 +268,15 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
       writeFileSync(path, Buffer.from(reply.result.data, 'base64'));
       return path;
     },
+    /** The process has ended on its own (Ctrl + Q): nothing in the page answers any more. */
+    exited: () => child.exitCode !== null,
     async close() {
       ws.close();
-      const exited = new Promise((resolve) => child.once("exit", resolve));
-      child.kill();
-      await Promise.race([exited, sleep(5000)]);
+      if (child.exitCode === null) {
+        const exited = new Promise((resolve) => child.once("exit", resolve));
+        child.kill();
+        await Promise.race([exited, sleep(5000)]);
+      }
       await sleep(300);
     },
   };

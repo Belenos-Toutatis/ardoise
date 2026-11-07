@@ -120,6 +120,21 @@ describe('presentation window', () => {
     await vi.waitFor(async () => expect((await api.liveSubscribe(() => {})).presentation).toBeNull());
   });
 
+  it('closes with Ctrl + W, Ctrl + F4 and Ctrl + Q: the question about quitting belongs to the control window', async () => {
+    const view = render();
+    await startLive();
+    await api.openPresentation(null);
+    await vi.waitFor(() => expect(view.main().dataset.state).toBe('live'));
+    const close = vi.spyOn(api, 'closePresentation');
+    press('w', { ctrlKey: true });
+    press('F4', { ctrlKey: true });
+    press('q', { ctrlKey: true });
+    expect(close).toHaveBeenCalledTimes(3);
+    // W alone stays « page width ».
+    press('w');
+    expect(close).toHaveBeenCalledTimes(3);
+  });
+
   it('hides the mouse cursor after 2 s without moving', async () => {
     vi.useFakeTimers();
     const view = render();
