@@ -46,7 +46,8 @@ pub struct InkLines { pub lines: Vec<InkLine>, pub apart: Vec<usize> }
 assistant. `Revised.numbers` gives each stroke of the result its number in the orders: the labels of a preview must show
 these (once saved, strokes are numbered by their place again). `visible` of `ink_lines` is the numbers of the strokes on
 visible layers. `Report` and `InkLines` are `Serialize`; `Order` is `Deserialize + JsonSchema`, its doc comments are the
-schema the assistant reads.
+schema the assistant reads, through the tool `revision_orders`: not in the schemas of the tools, where clients drop it
+(`docs/design/mcp.md`). Those only name the `op`s, and a badly written order is told its fields, with their types.
 
 ### Stroke numbers
 

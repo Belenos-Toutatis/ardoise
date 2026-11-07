@@ -67,6 +67,7 @@ tools that only add, even though nothing is ever deleted permanently), `false` o
 | `split_note` | `note`, `at_ms` or `polygon` (mm), `title?` | the M5 split **on copies** (M13, `revision.md`): the file of a note that is not a revision is not written, both parts are new notes next to it, revisions of it; on a revision what stays is saved over it, its version before going to the library's trash, and what moves is a new note |
 | `straighten_shapes` | `note`, `strokes?` (indices; default the drawings found by Windows' ink analysis on visible layers, required without it) | the M7 straightening **on a copy** of a note that is not a revision (M13, `revision.md`: the original is not written), in place on a revision (its version before goes to the library's trash as a note of its own) |
 | `preview_revision`, `create_revision`, `edit_revision` | `note`, `orders`, `expected_version`, `summary` (`create_revision` also `title?`; the preview has neither of the two, it also has `region?`, `dpi?`, `labels?` and answers `version`) | M13, see `docs/design/revision.md`: a list of orders retouches the strokes in memory (preview, nothing written), on a new copy next to the note, or in place on a note that already is a revision |
+| `revision_orders` | none | M13: the JSON schema of one order, from the doc comments of `ardoise_revise::Order`. In the write group, as nothing else uses it; it reads nothing |
 | `export_note` | `notes`, `format` (`png`/`jpg`/`webp`/`svg`/`pdf`/`txt`/`md`/`docx`/`gif`/`webm`/`mp4`), `path` (absolute file or folder), options of each format (dpi, background, quality, …) | the app's exports; never overwrites (" (2)" added), returns the written paths |
 | `set_note_text` | `note`, `text`, `language?` | stores a corrected transcription in the per-PC handwriting cache, used by the search and the text exports instead of the recogniser's text until the ink changes; never written into the note file |
 
@@ -118,7 +119,10 @@ setting, each naming the tools to use:
 
 - **SDK**: `rmcp` 3.8 (`server`, `macros`, `transport-io`; `client` only in the tests). Tools are written with
   `#[tool_router]` / `#[tool]`, so each tool's JSON schema comes from the doc-commented argument struct
-  (`schemars`); an argument that does not fit the schema is refused by rmcp as a failed tool result
+  (`schemars`), written out by `build_tool_router` (`schema.rs`): no `$defs`, no `$ref`, an optional field with its own
+  type. Real clients drop the rest (first real use, 2026-11-07: the Claude chat received a `$ref` that led nowhere,
+  Claude Code an empty `items`, and neither the type of an optional field). A client over stdio does not show this:
+  only a real one does. An argument that does not fit the schema is refused by rmcp as a failed tool result
   (`isError: true`, text "failed to deserialize parameters: …"), the others by our code with
   `{ code: "invalidArguments", message }`. Results are JSON objects sent both as text and as
   `structuredContent`; keys are `snake_case` like the arguments; `render_note` answers an `image` content

@@ -8,7 +8,8 @@
 //!   cache, and the write and bridge services of later groups);
 //! - [`read`], [`write`], [`bridge`], [`prompts`]: one file per group of tools or prompts;
 //! - [`notes`], [`strokes`]: naming notes (id or path), millimetres, dates, stroke summaries;
-//! - [`error`]: tool failures, `{ code, message }` with the interface's `errorCodes.*`.
+//! - [`error`]: tool failures, `{ code, message }` with the interface's `errorCodes.*`;
+//! - `schema`: tool schemas written out, because clients drop `$defs`.
 //!
 //! The transport is standard input/output (JSON-RPC, one message per line): nothing but protocol
 //! may be written to stdout.
@@ -19,6 +20,7 @@ pub mod host;
 pub mod notes;
 pub mod prompts;
 pub mod read;
+mod schema;
 pub mod server;
 pub mod strokes;
 pub mod write;

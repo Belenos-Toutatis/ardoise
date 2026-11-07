@@ -20,7 +20,7 @@ use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
 use support::*;
 
-const WRITE_TOOLS: [&str; 12] = [
+const WRITE_TOOLS: [&str; 13] = [
     "create_note",
     "create_revision",
     "edit_revision",
@@ -28,6 +28,7 @@ const WRITE_TOOLS: [&str; 12] = [
     "merge_notes",
     "move_note",
     "preview_revision",
+    "revision_orders",
     "set_note_text",
     "split_note",
     "straighten_shapes",
@@ -35,14 +36,15 @@ const WRITE_TOOLS: [&str; 12] = [
     "update_note",
 ];
 
-/// The write group's tool that writes nothing (it is in the group because it prepares what
+/// The write group's tools that write nothing (they are in the group because they prepare what
 /// `create_revision` writes): `readOnlyHint`.
-const READ_ONLY_HINT: [&str; 1] = ["preview_revision"];
+const READ_ONLY_HINT: [&str; 2] = ["preview_revision", "revision_orders"];
 
 /// Tools that give the same result when called twice.
-const IDEMPOTENT: [&str; 4] = [
+const IDEMPOTENT: [&str; 5] = [
     "move_note",
     "preview_revision",
+    "revision_orders",
     "set_note_text",
     "update_note",
 ];
@@ -134,7 +136,7 @@ async fn every_write_tool_is_listed_with_a_schema_and_annotations() {
     assert!(schema("split_note")["properties"]["polygon"].is_object());
     // The 11 formats, as the plain `enum` of the ones without a comment and one entry for each
     // of the others.
-    let formats = &schema("export_note")["$defs"]["ExportFormat"]["oneOf"];
+    let formats = &schema("export_note")["properties"]["format"]["oneOf"];
     let count: usize = formats
         .as_array()
         .unwrap()
@@ -142,6 +144,89 @@ async fn every_write_tool_is_listed_with_a_schema_and_annotations() {
         .map(|entry| entry["enum"].as_array().map_or(1, Vec::len))
         .sum();
     assert_eq!(count, 11);
+}
+
+/// Where a schema still depends on what clients drop: a `$ref`, `$defs`, a `null` alternative.
+fn not_plain(value: &Value, path: &str, out: &mut Vec<String>) {
+    match value {
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                not_plain(item, &format!("{path}[{index}]"), out);
+            }
+        }
+        Value::Object(object) => {
+            for key in ["$ref", "$defs"] {
+                if object.contains_key(key) {
+                    out.push(format!("{path}: {key}"));
+                }
+            }
+            let null_type = match object.get("type") {
+                Some(Value::String(name)) => name == "null",
+                Some(Value::Array(names)) => names.iter().any(|name| name == "null"),
+                _ => false,
+            };
+            if null_type {
+                out.push(format!("{path}: null"));
+            }
+            for (key, child) in object {
+                not_plain(child, &format!("{path}.{key}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn every_schema_stands_alone_as_clients_keep_only_that() {
+    // The Claude chat received a `$ref` to orders it was never given, Claude Code an empty `items`,
+    // and both the type of no optional field.
+    let tools = build_tool_router(ServerOptions::default()).list_all();
+    let mut found = Vec::new();
+    for tool in &tools {
+        not_plain(
+            &Value::Object((*tool.input_schema).clone()),
+            &tool.name,
+            &mut found,
+        );
+    }
+    assert_eq!(found, Vec::<String>::new());
+
+    let schema = |name: &str| {
+        let tool = tools.iter().find(|t| t.name == name).unwrap();
+        Value::Object((*tool.input_schema).clone())
+    };
+    // An optional field has its type, and a type written elsewhere its fields and its description.
+    let render = schema("render_note");
+    assert_eq!(render["properties"]["labels"]["type"], "boolean");
+    assert_eq!(render["properties"]["dpi"]["type"], "integer");
+    let region = &render["properties"]["region"];
+    assert_eq!(region["type"], "object");
+    assert_eq!(region["properties"]["width"]["type"], "number");
+    assert!(
+        region["description"]
+            .as_str()
+            .is_some_and(|d| !d.is_empty())
+    );
+    // The list of orders names them: the tool `revision_orders` says the rest.
+    for name in ["preview_revision", "create_revision", "edit_revision"] {
+        let orders = &schema(name)["properties"]["orders"];
+        assert_eq!(orders["type"], "array", "{name}");
+        assert_eq!(
+            orders["items"]["properties"]["op"]["enum"]
+                .as_array()
+                .unwrap()
+                .len(),
+            14,
+            "{name}"
+        );
+        assert!(
+            orders["description"]
+                .as_str()
+                .unwrap()
+                .contains("`revision_orders`"),
+            "{name}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

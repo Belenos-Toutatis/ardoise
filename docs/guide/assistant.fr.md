@@ -205,8 +205,9 @@ chez son fournisseur.
 
 Les outils d'Ardoise derrière tout cela (vous n'avez pas à les connaître, l'assistant les choisit) : **lire** (`get_note`
 avec ses lignes de papier, `get_strokes` pour les points d'un trait, `ink_lines` pour les lignes écrites,
-`render_note` avec les numéros des traits écrits à côté d'eux) ; **écrire** (`preview_revision` pour essayer,
-`create_revision` pour créer la copie, `edit_revision` pour retoucher une copie, `straighten_shapes`).
+`render_note` avec les numéros des traits écrits à côté d'eux) ; **écrire** (`revision_orders` pour connaître les
+ordres, `preview_revision` pour essayer, `create_revision` pour créer la copie, `edit_revision` pour retoucher une
+copie, `straighten_shapes`).
 
 ## Piloter Ardoise ouverte
 
