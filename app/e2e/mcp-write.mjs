@@ -14,11 +14,12 @@ import { deflateSync } from 'node:zlib';
 export const WRITE_ONLY_TOOLS = [
   'create_note', 'update_note', 'move_note', 'trash_note', 'merge_notes', 'split_note',
   'straighten_shapes', 'export_note', 'set_note_text', 'preview_revision', 'create_revision', 'edit_revision',
+  'revision_orders',
 ];
 /** The write tools that change or remove what is there (`destructiveHint: true`). */
 const DESTRUCTIVE = ['update_note', 'move_note', 'trash_note', 'split_note', 'straighten_shapes', 'edit_revision'];
-/** The tool of the write group that writes nothing (it prepares what `create_revision` writes). */
-const READ_ONLY_HINT = ['preview_revision'];
+/** The tools of the write group that write nothing (they prepare what `create_revision` writes). */
+const READ_ONLY_HINT = ['preview_revision', 'revision_orders'];
 const PROMPTS = {
   fr: ['mettre_au_propre', 'resume_seance', 'titrer_et_etiqueter'],
   en: ['clean_up', 'lesson_summary', 'title_and_tag'],

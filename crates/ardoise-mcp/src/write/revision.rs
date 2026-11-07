@@ -29,6 +29,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::create::uuid_v4;
+use super::orders::{order_list, orders_one_by_one};
 use super::transform::{Words, keep_previous, words};
 use super::update::{check_title, now_ms, summary_at, summary_of};
 use crate::error::{ToolError, ToolResult, code, content_result, json_result};
@@ -40,8 +41,9 @@ use crate::read::{PictureRequest, Region, draw_picture, label_spots};
 pub struct PreviewRevisionArgs {
     /// The note's `id`, or its path relative to the library. It is only read.
     pub note: String,
-    /// The orders to carry out, one after the other, on the note as it is now (the schema of each `op` is in the type of this list). Send the whole list each time, built from the note as it is, not the changes since the last preview.
+    /// The orders to carry out, one after the other, on the note as it is now: `revision_orders` gives every `op` and its fields. Send the whole list each time, built from the note as it is, not the changes since the last preview.
     #[serde(deserialize_with = "orders_one_by_one")]
+    #[schemars(schema_with = "order_list")]
     pub orders: Vec<Order>,
     /// Part of the page to draw (default: the whole page); look closer at what changes.
     pub region: Option<Region>,
@@ -56,8 +58,9 @@ pub struct PreviewRevisionArgs {
 pub struct CreateRevisionArgs {
     /// The note's `id`, or its path relative to the library. Its file is never written.
     pub note: String,
-    /// The orders to carry out on the note as it is now (the same list as in `preview_revision`; preview it first).
+    /// The orders to carry out on the note as it is now (the same list as in `preview_revision`; preview it first). `revision_orders` gives every `op` and its fields.
     #[serde(deserialize_with = "orders_one_by_one")]
+    #[schemars(schema_with = "order_list")]
     pub orders: Vec<Order>,
     /// The `version` of the note your orders were written for, from `preview_revision` or `get_note`. If the note changed since (the user, another computer), nothing is written and the answer is `noteConflict`: look at it again, its strokes may have other numbers.
     pub expected_version: String,
@@ -71,34 +74,14 @@ pub struct CreateRevisionArgs {
 pub struct EditRevisionArgs {
     /// The id or path of a note that is a revision (a copy made by `create_revision` or `straighten_shapes`). Any other note is refused with `notARevision`.
     pub note: String,
-    /// The orders to carry out on the revision's current strokes, numbered as `get_note` with `strokes` and `render_note` with `labels` give them now: this keeps what the user changed by hand in the copy.
+    /// The orders to carry out on the revision's current strokes, numbered as `get_note` with `strokes` and `render_note` with `labels` give them now: this keeps what the user changed by hand in the copy. `revision_orders` gives every `op` and its fields.
     #[serde(deserialize_with = "orders_one_by_one")]
+    #[schemars(schema_with = "order_list")]
     pub orders: Vec<Order>,
     /// The `version` of the note your orders were written for, from `preview_revision` or `get_note`. If the note changed since (the user, another computer), nothing is written and the answer is `noteConflict`: look at it again, its strokes may have other numbers.
     pub expected_version: String,
     /// What this retouching changed, in the user's language: it is added, dated, to the copy's account.
     pub summary: String,
-}
-
-/// Reads a list of orders one by one, so that a badly written one is named as the engine names
-/// its own: in a long list, "missing field `color`" alone says nothing an assistant can act on.
-fn orders_one_by_one<'de, D>(deserializer: D) -> Result<Vec<Order>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Vec::<serde_json::Value>::deserialize(deserializer)?
-        .into_iter()
-        .enumerate()
-        .map(|(index, value)| {
-            let op = value
-                .get("op")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("no op")
-                .to_owned();
-            serde_json::from_value(value)
-                .map_err(|error| serde::de::Error::custom(format!("order {index} ({op}): {error}")))
-        })
-        .collect()
 }
 
 /// Carries out `orders` on a copy of the strokes of the note just read: nothing is written. The

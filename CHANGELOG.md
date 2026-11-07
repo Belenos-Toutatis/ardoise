@@ -14,6 +14,7 @@
 
 ### Corrigé (jalon M13)
 
+- Retouche par l'assistant : les applications clientes n'affichaient pas à l'assistant le détail des ordres, qu'il devait retrouver par essais et erreurs. Le nouvel outil `revision_orders` donne tous les ordres et le sens de leurs champs, un ordre mal écrit reçoit la liste de ses champs, et les schémas des outils s'écrivent désormais en entier, type des champs facultatifs compris.
 - Recherche dans l'écriture : les traits sont lus dans l'ordre où ils ont été écrits, et non dans celui du fichier. Une copie retouchée se lit comme elle se voit : les lettres remises dans un mot n'arrivent plus en fin de texte. Les notes concernées sont relues une fois, sans que rien ne soit écrit dans les notes.
 
 ### Ajouté (jalon M12 — reprendre une feuille et la retoucher en mode direct)

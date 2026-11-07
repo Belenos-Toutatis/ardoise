@@ -1,7 +1,8 @@
 //! The write tools (`create_note`, `update_note`, `move_note`, `trash_note`, `merge_notes`,
-//! `split_note`, `straighten_shapes`, `export_note`, `set_note_text`, and the three of
-//! `revision.rs`: `preview_revision`, `create_revision`, `edit_revision`): SPEC §4.9, design in
-//! `docs/design/mcp.md` and `docs/design/revision.md`. Absent with `--read-only`.
+//! `split_note`, `straighten_shapes`, `export_note`, `set_note_text`, the three of `revision.rs`:
+//! `preview_revision`, `create_revision`, `edit_revision`, and `revision_orders`, which describes
+//! their orders): SPEC §4.9, design in `docs/design/mcp.md` and `docs/design/revision.md`. Absent
+//! with `--read-only`.
 //!
 //! Every tool gives exactly what the same action gives in the app: the library operations are
 //! `ardoise-core`'s (`Library::save` with its stamp check, the trash, the " (2)" rule of moves
@@ -29,6 +30,7 @@
 
 mod create;
 mod export;
+mod orders;
 mod revision;
 mod text;
 mod transform;
@@ -355,7 +357,22 @@ impl ArdoiseServer {
             .await
     }
 
-    /// Try a list of orders that retouch a note's strokes, in memory: nothing is written. Answers the picture of the result, the note's `version` and the report (what each order selected and made, the lines tidied with their slope, the time moved, warnings). Look at the picture, read the report, correct the orders, and preview again; every time send the whole list, built from the note as it is. Use `labels` and `region` to see the numbers. Then `create_revision` with that `version`.
+    /// Every order of `preview_revision`, `create_revision` and `edit_revision`, with what it does and its fields (their types, which are required, what they mean). Call it once before writing orders: the schemas of those tools only name them. It reads nothing of the library.
+    #[tool(
+        name = "revision_orders",
+        annotations(
+            title = "The orders that retouch a note",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn revision_orders(&self) -> Result<CallToolResult, ErrorData> {
+        self.blocking(|_| orders::revision_orders()).await
+    }
+
+    /// Try a list of orders that retouch a note's strokes, in memory: nothing is written. `revision_orders` gives every order and its fields: call it once first. Answers the picture of the result, the note's `version` and the report (what each order selected and made, the lines tidied with their slope, the time moved, warnings). Look at the picture, read the report, correct the orders, and preview again; every time send the whole list, built from the note as it is. Use `labels` and `region` to see the numbers. Then `create_revision` with that `version`.
     #[tool(
         name = "preview_revision",
         annotations(

@@ -609,9 +609,13 @@ async fn a_badly_written_order_is_named() {
         }
     };
     assert!(message.contains("order 1 (recolor)"), "{message}");
-    assert!(message.contains("color"), "{message}");
+    assert!(message.contains("missing field `color`"), "{message}");
+    // All its fields at once, not the next missing one at the next try, and where to read the rest.
+    assert!(message.contains("`color` (string)"), "{message}");
+    assert!(message.contains("`select` (Select: "), "{message}");
+    assert!(message.contains("`revision_orders`"), "{message}");
 
-    // The list is still described order by order to the assistant.
+    // The list still names the orders to the assistant.
     let tools = session.client.list_all_tools().await.unwrap();
     let preview = tools
         .iter()
@@ -622,6 +626,53 @@ async fn a_badly_written_order_is_named() {
         schema.contains("\"replace\"") && schema.contains("tidy_line"),
         "{schema}"
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn revision_orders_tells_every_order_and_what_its_fields_mean() {
+    let session = session().await;
+    let answer = text_of(&session.call("revision_orders", json!({})).await);
+    let order = &answer["order"];
+    let ops: Vec<&str> = order["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|variant| variant["properties"]["op"]["const"].as_str().unwrap())
+        .collect();
+    for op in [
+        "recolor",
+        "restyle",
+        "delete",
+        "move",
+        "scale",
+        "rotate",
+        "smooth",
+        "trim",
+        "replace",
+        "add",
+        "copy",
+        "glyph",
+        "retime",
+        "tidy_line",
+    ] {
+        assert!(ops.contains(&op), "{op} is not told: {ops:?}");
+    }
+    // The types it names are given with it, and so is what the fields mean: a trial on the real
+    // app had to find these by trial and error.
+    assert!(order["$defs"]["Select"]["properties"]["ids"].is_object());
+    assert!(order["$defs"]["Shape"].is_object());
+    let text = answer.to_string();
+    for meaning in [
+        "Where the left side of this piece's box goes",
+        "Where the bottom of this piece's box goes",
+        "Keeps only these points",
+        "Where the left side of the copied strokes' box goes",
+        "`glyph` with `from` and `to`",
+        "new_strokes",
+    ] {
+        assert!(text.contains(meaning), "{meaning} is not told");
+    }
+    assert!(!text.contains("Usually on a `copy`"));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1590,11 +1641,18 @@ async fn the_new_tools_are_described_and_annotated() {
         schema("get_strokes")["required"],
         json!(["note", "strokes"])
     );
-    // The orders are described to the assistant: the schema holds the order type and its docs.
+    // The schema names the orders, and the tools send the assistant to what describes them.
     let preview = schema("preview_revision").to_string();
     for needle in ["tidy_line", "glyph", "retime", "recolor", "new_strokes"] {
         assert!(preview.contains(needle), "{needle} is not in the schema");
     }
+    assert!(
+        tool("preview_revision")
+            .description
+            .as_deref()
+            .unwrap()
+            .contains("`revision_orders`")
+    );
     assert!(
         schema("render_note")["properties"]["labels"]["description"]
             .as_str()
@@ -1608,11 +1666,7 @@ async fn the_new_tools_are_described_and_annotated() {
     // So does the split, and what it answers.
     let split = tool("split_note").description.as_deref().unwrap();
     assert!(split.contains("never changed") && split.contains("original_unchanged"));
-    // The tools that take orders say how to tie them to what was seen, and what to reuse a piece of
-    // a stroke with.
-    let preview = schema("preview_revision").to_string();
-    assert!(preview.contains("`glyph` with `from` and `to`"));
-    assert!(!preview.contains("Usually on a `copy`"));
+    // The tools that take orders say how to tie them to what was seen.
     assert!(
         schema("edit_revision")["properties"]["expected_version"]["description"]
             .as_str()

@@ -13,6 +13,7 @@ use rmcp::{ServerHandler, prompt_handler, tool_handler};
 
 use crate::error::{ToolError, ToolResult};
 use crate::host::Host;
+use crate::schema::stand_alone;
 
 /// How the server runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -32,19 +33,23 @@ other tools create, rename, tag, move, merge, split, straighten and export notes
 corrected transcription for the search: nothing is overwritten or deleted for good (a trashed \
 note stays restorable from the app's trash; an export that would overwrite a file gets (2) \
 added to its name). The ink of a note is never changed in the note itself: `preview_revision` \
-tries a list of orders in memory, `create_revision` writes them on a copy next to the note \
-(straightening and splitting do the same), and only a copy made that way can be edited again, \
-with `edit_revision` (its version before goes to the trash). Prompts (clean up a note, title and tag \
+tries a list of orders in memory (`revision_orders` gives every order and its fields), \
+`create_revision` writes them on a copy next to the note (straightening and splitting do the \
+same), and only a copy made that way can be edited again, with `edit_revision` (its version \
+before goes to the trash). Prompts (clean up a note, title and tag \
 untitled notes, summarise a lesson, improve a note on a copy) say which tools to call and in \
 which order.";
 
-/// The tools of the groups a server with `options` has.
+/// The tools of the groups a server with `options` has, with schemas every client can read.
 pub fn build_tool_router(options: ServerOptions) -> ToolRouter<ArdoiseServer> {
-    let router = ArdoiseServer::read_router();
-    if options.read_only {
-        return router;
+    let mut router = ArdoiseServer::read_router();
+    if !options.read_only {
+        router = router + ArdoiseServer::write_router() + ArdoiseServer::bridge_router();
     }
-    router + ArdoiseServer::write_router() + ArdoiseServer::bridge_router()
+    for route in router.map.values_mut() {
+        route.attr.input_schema = Arc::new(stand_alone(&route.attr.input_schema));
+    }
+    router
 }
 
 /// The server: the host's services, the options and the routers.

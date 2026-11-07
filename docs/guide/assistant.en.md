@@ -196,8 +196,8 @@ provider.
 
 The Ardoise tools behind all this (you do not need to know them, the assistant picks them): **read** (`get_note`
 with the rules of the paper, `get_strokes` for the points of a stroke, `ink_lines` for the written lines, `render_note`
-with the strokes' numbers written next to them); **write** (`preview_revision` to try, `create_revision` to make the
-copy, `edit_revision` to retouch a copy, `straighten_shapes`).
+with the strokes' numbers written next to them); **write** (`revision_orders` to learn the orders, `preview_revision`
+to try, `create_revision` to make the copy, `edit_revision` to retouch a copy, `straighten_shapes`).
 
 ## Driving Ardoise while it is open
 

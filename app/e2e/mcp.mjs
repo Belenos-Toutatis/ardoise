@@ -25,7 +25,7 @@ export const READ_TOOLS = [
 export const WRITE_TOOLS = [
   'create_note', 'update_note', 'move_note', 'trash_note', 'merge_notes', 'split_note',
   'straighten_shapes', 'export_note', 'set_note_text', 'preview_revision', 'create_revision', 'edit_revision',
-  'app_state', 'open_note', 'presentation', 'last_live_note',
+  'revision_orders', 'app_state', 'open_note', 'presentation', 'last_live_note',
 ];
 /** The checks of the later parts of the server (write tools and prompts, bridge), each given the
  *  helpers of the journey and run after the read tools. */

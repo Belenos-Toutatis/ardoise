@@ -1,7 +1,8 @@
 //! The orders, as an assistant writes them in JSON.
 //!
 //! The doc comments of these types become the JSON schema the assistant reads
-//! (`schemars::JsonSchema`, through the tools of `ardoise-mcp`): they are written for that reader.
+//! (`schemars::JsonSchema`, through the tool `revision_orders` of `ardoise-mcp`, and the fields a
+//! badly written order is told): they are written for that reader.
 //! Everything is in millimetres from the top left of the page, y pointing down.
 
 use ardoise_ink::Tool;
