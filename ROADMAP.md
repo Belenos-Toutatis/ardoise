@@ -242,7 +242,7 @@ Restent à essayer à la main (H5) : la vraie tablette, un vrai arrêt de Window
 
 ### Point de contrôle H5 [matériel]
 
-- [ ] [matériel] Avec la vraie tablette, en classe : interrompre un direct, reprendre la feuille, écrire, puis supprimer et recolorer pendant que le vidéoprojecteur et un autre écran du réseau regardent.
+- [x] [matériel] Avec la vraie tablette, en classe : interrompre un direct, reprendre la feuille, écrire, puis supprimer et recolorer pendant que le vidéoprojecteur et un autre écran du réseau regardent. Fait et signalé par l'utilisateur le 2026-11-07, sans remarque.
 
 ## M13 — L'assistant retouche une copie d'une note
 
