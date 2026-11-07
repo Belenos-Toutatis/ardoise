@@ -135,8 +135,15 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
     pending.get(data.id)?.(data);
     pending.delete(data.id);
   });
+  // The window can go while a call is on its way (Ctrl + Q): whoever waits gets an empty reply, or node would end the run
+  // without a word, as nothing would keep it alive for a reply that will never come.
+  ws.addEventListener('close', () => {
+    for (const resolve of pending.values()) resolve({ closed: true });
+    pending.clear();
+  });
   const send = (method, params = {}) =>
     new Promise((resolve) => {
+      if (ws.readyState !== WebSocket.OPEN) return resolve({ closed: true });
       const n = ++id;
       pending.set(n, resolve);
       ws.send(JSON.stringify({ id: n, method, params }));

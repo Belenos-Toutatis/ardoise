@@ -7,7 +7,6 @@
 // 3. Live mode, on a resumed note with the simulated tablet: Ctrl + W asks about ending live mode, Ctrl + Q about
 //    quitting; « Quitter Ardoise » ends the app, and what the tablet wrote is in the note's file.
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { LIVE_CANVAS, canvasData, libraryBack, registerTablet, text } from './journeys-m12-resume.mjs';
 
 const j = JSON.stringify;
@@ -122,8 +121,7 @@ export const closeKeyJourneys = [
 
       await check('reprendre une note en mode direct : la tablette simulée y écrit', async () => {
         await app.waitFor(`document.querySelectorAll('.note-card').length >= 8`, 'the demo notes');
-        const path = await app.evaluate(`document.querySelector(${j(CARD)}).dataset.path`);
-        file = join(app.library, path);
+        file = await app.evaluate(`document.querySelector(${j(CARD)}).dataset.path`);
         before = readFileSync(file);
         await app.click(`${CARD} .card-menu button[aria-haspopup="menu"]`);
         await app.waitFor(`document.querySelector('[role="menu"] [role="menuitem"]') !== null`, 'the card menu');
