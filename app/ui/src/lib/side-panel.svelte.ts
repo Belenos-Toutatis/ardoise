@@ -108,11 +108,15 @@ export class SidePanelState {
     this.save();
   }
 
-  /** Opens the pane, on `tab` when given (a selection: none; the replay: 'sound'). */
-  open(tab?: SideTabId): void {
+  /**
+   * Opens the pane, on `tab` when given (a selection: none; the replay: 'sound'). `persist: false` shows the view
+   * without remembering it: the replay forces Son open and gives the view back when it ends, and a window closed
+   * meanwhile must find the user's own view, not the replay's.
+   */
+  open(tab?: SideTabId, options: { persist?: boolean } = {}): void {
     if (tab !== undefined) this.tab = tab;
     this.collapsed = false;
-    this.save();
+    if (options.persist !== false) this.save();
   }
 
   collapse(): void {

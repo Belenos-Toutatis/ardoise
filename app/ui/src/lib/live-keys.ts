@@ -28,7 +28,9 @@
  *
  * Presentation remotes send Page Up / Page Down. Keys typed in a field are left alone. Space
  * always means "next page", even with a button focused (the button of a tool just used would
- * otherwise be pressed again: « Clear the page » by Space wiped the new page). Esc closes the
+ * otherwise be pressed again: « Clear the page » by Space wiped the new page) or a checkbox or a
+ * radio, such as the switches of the side panel (clicked, they keep the focus and the keys of live
+ * mode must not stop). Esc closes the
  * projection when it is open and otherwise asks before ending live mode: the window decides.
  */
 
@@ -64,14 +66,16 @@ interface ElementLike {
   type?: unknown;
 }
 
-const BUTTON_INPUTS = new Set(['button', 'submit', 'reset']);
+// Inputs that are pressed, not typed in: like a button, they keep the keys of live mode (a switch of the side panel
+// just clicked must not swallow the next Page Down), and Space turns the page instead of toggling them.
+const BUTTON_INPUTS = new Set(['button', 'submit', 'reset', 'checkbox', 'radio']);
 
 /** Space, whatever the browser calls it. */
 export function isSpaceKey(key: string): boolean {
   return key === ' ' || key === 'Spacebar';
 }
 
-/** A field the user types in (text, number, range, select…): its keys are its own. */
+/** A field the user types in (text, number, range, select…): its keys are its own. Buttons, checkboxes and radios are not. */
 export function isTypingTarget(target: EventTarget | null | undefined): boolean {
   const el = target as ElementLike | null | undefined;
   if (!el || typeof el.tagName !== 'string') return false;

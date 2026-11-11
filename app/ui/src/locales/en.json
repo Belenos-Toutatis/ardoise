@@ -796,7 +796,6 @@
     "redo": "Redo (Ctrl+Y)",
     "toolbar": "Editing tools",
     "canvas": "Note page",
-    "sidePanel": "Page, layers and selection",
     "modes": {
       "label": "Tool",
       "select": "Select",
@@ -921,7 +920,6 @@
       }
     },
     "page": {
-      "label": "Page",
       "paper": "Paper colour",
       "template": "Template",
       "texture": "Paper texture",
@@ -949,7 +947,6 @@
       "scaleInkOff": "The writing keeps its size and place. If it goes beyond the sheet, it is moved back inside when it fits; otherwise the part outside is kept but not shown.",
       "inkOutsideOne": "One stroke goes beyond the sheet: it is kept but not shown.",
       "inkOutsideMany": "{count} strokes go beyond the sheet: they are kept but not shown.",
-      "rotateLabel": "Turn the sheet with the writing",
       "rotateHint": "The sheet, the writing and the background image turn together by a quarter turn.",
       "paperTitle": "Paper",
       "turnCropTitle": "Turn and crop"
@@ -1120,7 +1117,6 @@
     },
     "openTitle": "{tab} (click to collapse)",
     "collapse": "Collapse the panel",
-    "collapsed": "collapsed",
     "badge": {
       "layers": {
         "one": "{count} layer",
@@ -1692,7 +1688,6 @@
       "area": "Projected area"
     },
     "projection": {
-      "title": "Projection",
       "monitor": "Projection screen",
       "screen": "Screen {n}",
       "option": "{name} — {width} × {height}",
@@ -1714,74 +1709,56 @@
       "hint": "Time from the computer receiving a point to the start of the next frame after it was drawn; the screen's own scan-out is not included (target: under 30 ms)."
     },
     "keys": {
-      "title": "Keyboard",
       "list": {
         "next": {
-          "keys": "→, Page Down, Space",
           "action": "Next page"
         },
         "previous": {
-          "keys": "←, Page Up",
           "action": "Previous page"
         },
         "clear": {
-          "keys": "Ctrl + Delete",
           "action": "Clear the page"
         },
         "board": {
-          "keys": "B",
           "action": "Blackboard"
         },
         "laser": {
-          "keys": "L",
           "action": "Laser pointer"
         },
         "zoom": {
-          "keys": "+ / −",
           "action": "Zoom the projected area in / out"
         },
         "whole": {
-          "keys": "0",
           "action": "Whole page"
         },
         "width": {
-          "keys": "W",
           "action": "Page width"
         },
         "pan": {
-          "keys": "Shift + arrows",
           "action": "Move the projected area"
         },
         "leave": {
-          "keys": "Esc",
           "action": "Drop the pen gesture under way, close the “Computer's ink” panel, deselect; otherwise close the projection when it is shown, otherwise end live mode (after confirmation)"
         },
         "close": {
-          "keys": "Ctrl + W, Ctrl + F4",
           "action": "Close the projection if it is shown, otherwise end live mode (after confirmation)"
         },
         "quit": {
-          "keys": "Ctrl + Q",
-          "action": "Quit Ardoise (after confirmation); in the presentation, close the projection"
+          "action": "Quit Ardoise (after confirmation)"
         },
         "marks": {
-          "keys": "Delete, Backspace",
           "action": "Clear the annotations drawn over the presentation"
         },
         "pen": {
-          "keys": "P",
           "action": "Pen tool: write with the computer's pen or mouse"
         },
         "select": {
-          "keys": "V",
           "action": "Select tool (lasso or click on a stroke)"
         },
         "delete": {
-          "keys": "Delete, Backspace",
           "action": "Delete the selection"
         },
         "undo": {
-          "keys": "Ctrl + Z, Ctrl + Y",
           "action": "Undo, redo a stroke or an erasing of the computer, a delete, a change of colour or the clearing of the page"
         }
       }

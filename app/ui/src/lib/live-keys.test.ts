@@ -93,6 +93,12 @@ describe('live mode keyboard', () => {
     expect(key(' ', { target: element('INPUT', { type: 'text' }) })).toBeNull();
     expect(key('ArrowRight', { target: element('BUTTON') })).toEqual({ kind: 'command', command: 'nextPage' });
     expect(key(' ', { target: element('CANVAS') })).toEqual({ kind: 'command', command: 'nextPage' });
+    // A checkbox or a radio (the side panel's switches) is pressed, not typed in: it keeps no key of its own.
+    expect(key(' ', { target: element('INPUT', { type: 'checkbox' }) })).toEqual({ kind: 'command', command: 'nextPage' });
+    expect(key('PageDown', { target: element('INPUT', { type: 'checkbox' }) })).toEqual({ kind: 'command', command: 'nextPage' });
+    expect(key('b', { target: element('INPUT', { type: 'radio' }) })).toEqual({ kind: 'board' });
+    expect(isTypingTarget(element('INPUT', { type: 'checkbox' }))).toBe(false);
+    expect(isTypingTarget(element('INPUT', { type: 'radio' }))).toBe(false);
     expect(isTypingTarget(element('INPUT', { type: 'submit' }))).toBe(false);
     expect(isTypingTarget(element('input'))).toBe(true);
     expect(isTypingTarget(null)).toBe(false);

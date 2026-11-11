@@ -217,8 +217,12 @@ export const sidePanelEditorJourneys = [
 
       await check('Relecture (R) : l’onglet Son s’ouvre, même replié ; R encore rend l’onglet et l’état d’avant', async () => {
         await collapsePanel(app);
+        const before = await stored(app);
         await app.key('r');
         await inState(app, 'sound', false, 'the replay showing the Sound tab');
+        // The view the replay forces is not remembered: closing the editor now would keep the user's own.
+        const during = await stored(app);
+        if (!same(during, before)) throw new Error(`the replay changed the stored view from ${j(before)} to ${j(during)}`);
         await app.waitFor(`document.querySelector('button[data-action="replay-toggle"]')?.getAttribute('aria-pressed') === 'true'`, 'the replay');
         // M16-D: check against B1 (the narration block of a replay holds RecordPanel's open button, §7).
         await app.waitFor(onScreen(`${tabPanel('sound')} [data-section="narration"] [data-action="narration-open"]`), 'the narration panel in the Sound tab');

@@ -182,6 +182,36 @@ export const sidePanelLiveJourneys = [
         }
       });
 
+      await check('un interrupteur cliqué garde le focus : Page suivante et Espace tournent la page, l’interrupteur ne bascule pas, B le rebascule', async () => {
+        await openTab(app, 'projection');
+        for (const name of ['board', 'laser']) {
+          const toggle = `${tabPanel('projection')} input[data-field="${name}"]`;
+          // The page number alone: turning past the last page adds one, and the total grows.
+          const number = `${canvasData('page')}?.split('/')[0]`;
+          const page = () => app.evaluate(number);
+          await app.click(toggle);
+          await app.waitFor(`document.querySelector(${j(toggle)}).checked === true`, `the ${name} switch on`);
+          await app.waitFor(`document.activeElement === document.querySelector(${j(toggle)})`, `the focus on the ${name} switch`);
+          const first = await page();
+          // The real key path: a key event with the focus on the switch, which is not a field to type in.
+          await app.key('PageDown');
+          await app.waitFor(`${number} !== ${j(first)}`, `Page Down to turn the page with the ${name} switch focused`);
+          const second = await page();
+          await app.key('ArrowLeft');
+          await app.waitFor(`${number} === ${j(first)}`, `the left arrow to turn the page back with the ${name} switch focused`);
+          // Space turns the page too, and does not toggle the switch.
+          await app.key(' ');
+          await app.waitFor(`${number} === ${j(second)}`, `Space to turn the page with the ${name} switch focused`);
+          await sleep(100);
+          if ((await app.evaluate(`document.querySelector(${j(toggle)}).checked`)) !== true) throw new Error(`Space toggled the ${name} switch`);
+          await app.key('ArrowLeft');
+          await app.waitFor(`${number} === ${j(first)}`, 'the first page again');
+          // The key of the switch's own state still works.
+          await app.key(name === 'board' ? 'b' : 'l');
+          await app.waitFor(`document.querySelector(${j(toggle)}).checked === false`, `the ${name} key to switch it off`);
+        }
+      });
+
       await check('Projection, replié, « Terminer », le direct rouvert : Projection et replié, le choix est dans le stockage', async () => {
         await openTab(app, 'projection');
         await app.click(tabButton('projection'));
@@ -277,6 +307,9 @@ export const sidePanelLiveJourneys = [
         })()`);
         if (!(place.above < place.tab)) throw new Error(`the selection bar is not above the tab: ${j(place)}`);
         if (!(place.aboveBottom <= place.tab + 1)) throw new Error(`the selection bar overlaps the tab: ${j(place)}`);
+        // Padded like the editor's blocks, not flush against the edge of the pane.
+        const padding = await app.evaluate(`parseFloat(getComputedStyle(document.querySelector(${j(`${SIDE} [data-slot="side-above"] > .pane-block`)})).paddingLeft)`);
+        if (!(padding >= 8)) throw new Error(`the block above the tab has a left padding of ${padding}px`);
         if ((await app.evaluate(onScreen(`${SIDE} [data-slot="side-above"] ${BAR} button[data-action="delete-selection"]`))) !== true) throw new Error('the bar has no Delete button on screen');
         if ((await app.evaluate(onScreen(`${SIDE} [data-slot="side-above"] [data-slot="select-hint"]`))) !== true) throw new Error('the Select tool’s hint is not above the tab');
         // The bar no longer floats over the preview.

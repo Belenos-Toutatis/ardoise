@@ -137,6 +137,26 @@ describe('SidePanelState', () => {
     expect(storage.data.get(key)).toBe('{"tab":"layers","collapsed":true}');
   });
 
+  it('shows a view without remembering it with persist: false, and a later change is remembered as usual', () => {
+    const storage = memory();
+    const state = new SidePanelState('editor', storage);
+    const key = sideStorageKey('editor');
+    state.collapse();
+    const stored = storage.data.get(key);
+    state.open('sound', { persist: false });
+    expect(state.snapshot()).toEqual({ tab: 'sound', collapsed: false });
+    expect(storage.data.get(key)).toBe(stored);
+    // Without the option, `open` still saves; and a click on a tab saves.
+    state.open('help', { persist: true });
+    expect(storage.data.get(key)).toBe('{"tab":"help","collapsed":false}');
+    state.collapse();
+    state.open(undefined, { persist: false });
+    expect(state.collapsed).toBe(false);
+    expect(storage.data.get(key)).toBe('{"tab":"help","collapsed":true}');
+    state.toggle('page', ALL);
+    expect(storage.data.get(key)).toBe('{"tab":"page","collapsed":false}');
+  });
+
   it('survives a blocked storage for the session', () => {
     const state = new SidePanelState('editor', {
       getItem: () => { throw new Error('blocked'); },

@@ -1166,26 +1166,28 @@
   </div>
 
   {#snippet aboveBlock()}
-    {#if selection.any}
-      <div class="select-bar" role="toolbar" aria-label={t('live.select.bar')} data-slot="select-bar">
-        <span class="select-count" role="status" data-count={selection.count}>{t('live.select.count', { count: selection.count })}</span>
-        <div class="pane-actions">
-          <button type="button" class="button small-button danger" data-action="delete-selection" onclick={() => void deleteSelected(touchUp)}>
-            {t('live.select.delete')}
-          </button>
-          <button type="button" class="button small-button" data-action="deselect" onclick={() => selection.clear()}>
-            {t('live.select.clear')}
-          </button>
+    <div class="pane-block">
+      {#if selection.any}
+        <div class="select-bar" role="toolbar" aria-label={t('live.select.bar')} data-slot="select-bar">
+          <span class="select-count" role="status" data-count={selection.count}>{t('live.select.count', { count: selection.count })}</span>
+          <div class="pane-actions">
+            <button type="button" class="button small-button danger" data-action="delete-selection" onclick={() => void deleteSelected(touchUp)}>
+              {t('live.select.delete')}
+            </button>
+            <button type="button" class="button small-button" data-action="deselect" onclick={() => selection.clear()}>
+              {t('live.select.clear')}
+            </button>
+          </div>
+          <p class="pane-help">{t('live.select.colors')}</p>
         </div>
-        <p class="pane-help">{t('live.select.colors')}</p>
-      </div>
-    {/if}
-    {#if selection.active}
-      <p class="pane-help" data-slot="select-hint">{t('live.select.help')}</p>
-    {/if}
-    {#if penOn}
-      <p class="pane-help" data-slot="pen-hint">{t('live.pen.help')}</p>
-    {/if}
+      {/if}
+      {#if selection.active}
+        <p class="pane-help" data-slot="select-hint">{t('live.select.help')}</p>
+      {/if}
+      {#if penOn}
+        <p class="pane-help" data-slot="pen-hint">{t('live.pen.help')}</p>
+      {/if}
+    </div>
   {/snippet}
 
   {#if confirmLeave}

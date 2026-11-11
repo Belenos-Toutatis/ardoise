@@ -796,7 +796,6 @@
     "redo": "Rétablir (Ctrl+Y)",
     "toolbar": "Outils d'édition",
     "canvas": "Page de la note",
-    "sidePanel": "Page, calques et sélection",
     "modes": {
       "label": "Outil",
       "select": "Sélection",
@@ -921,7 +920,6 @@
       }
     },
     "page": {
-      "label": "Page",
       "paper": "Couleur du papier",
       "template": "Modèle",
       "texture": "Texture du papier",
@@ -949,7 +947,6 @@
       "scaleInkOff": "L'écriture garde sa taille et sa place. Si elle dépasse, elle est replacée dans la feuille quand elle y tient ; sinon la partie hors cadre est conservée mais pas affichée.",
       "inkOutsideOne": "Un trait dépasse de la feuille : il est conservé mais n'est pas affiché.",
       "inkOutsideMany": "{count} traits dépassent de la feuille : ils sont conservés mais ne sont pas affichés.",
-      "rotateLabel": "Tourner la feuille avec l'écriture",
       "rotateHint": "La feuille, l'écriture et l'image de fond tournent ensemble d'un quart de tour.",
       "paperTitle": "Papier",
       "turnCropTitle": "Tourner et recadrer"
@@ -1120,7 +1117,6 @@
     },
     "openTitle": "{tab} (cliquer pour replier)",
     "collapse": "Replier le panneau",
-    "collapsed": "replié",
     "badge": {
       "layers": {
         "one": "{count} calque",
@@ -1692,7 +1688,6 @@
       "area": "Zone projetée"
     },
     "projection": {
-      "title": "Projection",
       "monitor": "Écran de projection",
       "screen": "Écran {n}",
       "option": "{name} — {width} × {height}",
@@ -1714,74 +1709,56 @@
       "hint": "Temps entre la réception du point par l'ordinateur et le début de l'image suivante, après son dessin ; l'affichage de l'écran lui-même n'est pas compris (objectif : moins de 30 ms)."
     },
     "keys": {
-      "title": "Clavier",
       "list": {
         "next": {
-          "keys": "→, Pg suiv, Espace",
           "action": "Page suivante"
         },
         "previous": {
-          "keys": "←, Pg préc",
           "action": "Page précédente"
         },
         "clear": {
-          "keys": "Ctrl + Suppr",
           "action": "Effacer la page"
         },
         "board": {
-          "keys": "B",
           "action": "Tableau noir"
         },
         "laser": {
-          "keys": "L",
           "action": "Pointeur laser"
         },
         "zoom": {
-          "keys": "+ / −",
           "action": "Agrandir / réduire la zone projetée"
         },
         "whole": {
-          "keys": "0",
           "action": "Page entière"
         },
         "width": {
-          "keys": "W",
           "action": "Largeur de la page"
         },
         "pan": {
-          "keys": "Maj + flèches",
           "action": "Déplacer la zone projetée"
         },
         "leave": {
-          "keys": "Échap",
           "action": "Abandonner le geste du stylet en cours, fermer le panneau « Encre de l'ordinateur », enlever la sélection ; sinon fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
         },
         "close": {
-          "keys": "Ctrl + W, Ctrl + F4",
           "action": "Fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
         },
         "quit": {
-          "keys": "Ctrl + Q",
-          "action": "Quitter Ardoise (après confirmation) ; dans la présentation, fermer la projection"
+          "action": "Quitter Ardoise (après confirmation)"
         },
         "marks": {
-          "keys": "Suppr, Retour arrière",
           "action": "Effacer les annotations tracées sur la présentation"
         },
         "pen": {
-          "keys": "P",
           "action": "Outil Stylo : écrire avec le stylet ou la souris de l'ordinateur"
         },
         "select": {
-          "keys": "V",
           "action": "Outil Sélection (lasso ou clic sur un trait)"
         },
         "delete": {
-          "keys": "Suppr, Retour arrière",
           "action": "Supprimer la sélection"
         },
         "undo": {
-          "keys": "Ctrl + Z, Ctrl + Y",
           "action": "Annuler, rétablir un trait ou un coup de gomme de l'ordinateur, une suppression, un changement de couleur ou l'effacement de la page"
         }
       }
