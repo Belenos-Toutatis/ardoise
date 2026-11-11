@@ -11,6 +11,7 @@ import {
   LiveComputer,
   MAX_PEN_SAMPLES,
   STALE_RETRIES,
+  STALE_WAIT_MS,
   nextGroup,
   type EraserSource,
 } from './live-computer';
@@ -501,5 +502,218 @@ describe('LiveComputer', () => {
     expect(onchange).toHaveBeenCalled();
     expect(computer.cancel()).toBe(false);
     computer.dispose();
+  });
+});
+
+// --- Review fixes (M14) -------------------------------------------------------------------------------------------
+
+describe('ComputerPen: what the review found', () => {
+  it('queues every chunk still pending and the end when the pen is lifted, before a Ctrl+Z asked for after', async () => {
+    const t = pen();
+    t.pen.down(place, sample(0));
+    await settle();
+    t.calls[0].answer.resolve(true);
+    t.pen.move([sample(1)]);
+    await settle();
+    // `points` is in flight (an IPC call that takes long); the samples pile up meanwhile.
+    expect(t.calls.map((call) => call.input.kind)).toEqual(['begin', 'points']);
+    t.pen.move(Array.from({ length: MAX_PEN_SAMPLES + 10 }, (_, i) => sample(i + 2)));
+    t.pen.up();
+    const order: string[] = [];
+    const undo = t.queue.run(async () => {
+      order.push(`undo after ${t.calls.length} calls`);
+      return true;
+    });
+    t.calls[1].answer.resolve(true);
+    await settle();
+    t.calls[2].answer.resolve(true);
+    await settle();
+    expect(t.calls.map((call) => call.input.kind)).toEqual(['begin', 'points', 'points', 'end']);
+    const sizes = t.calls.map((call) => ('samples' in call.input ? call.input.samples.length : 0));
+    expect(sizes).toEqual([1, 1, MAX_PEN_SAMPLES, 10]);
+    t.calls[3].answer.resolve(true);
+    await undo;
+    expect(order).toEqual(['undo after 4 calls']);
+  });
+
+  it('says a lifted stroke is ending until the session recorded it, or dropped it', async () => {
+    const t = pen();
+    const view = { pageIndex: 0, noteId: 'p1', lastComputerDone: 0 };
+    expect(t.pen.ending(view)).toBe(false);
+    t.pen.down(place, sample(1));
+    expect(t.pen.ending(view)).toBe(false);
+    t.pen.up();
+    expect(t.pen.ending(view)).toBe(true);
+    expect(t.pen.ending({ ...view, lastComputerDone: 1 })).toBe(false);
+    // A refused begin: no step will come.
+    await settle();
+    t.calls[0].answer.reject({ code: 'liveLayerHidden', message: 'hidden' });
+    await settle();
+    expect(t.pen.ending(view)).toBe(false);
+  });
+
+  it('cancels a gesture under way when the window goes; a lifted stroke still ends', async () => {
+    const t = pen();
+    t.pen.down(place, sample(1));
+    await settle();
+    t.calls[0].answer.resolve(true);
+    t.pen.move([sample(2)]);
+    t.pen.dispose();
+    await settle();
+    expect(t.calls.map((call) => call.input)).toEqual([expect.objectContaining({ kind: 'begin' }), { kind: 'cancel', stroke: 1 }]);
+    t.calls[1].answer.resolve(true);
+    await t.queue.idle();
+
+    // Lifted, then the window goes: its `end` leaves, no cancel.
+    const u = pen();
+    u.pen.down(place, sample(1));
+    u.pen.up();
+    u.pen.dispose();
+    await settle();
+    u.calls[0].answer.resolve(true);
+    await settle();
+    expect(u.calls.map((call) => call.input.kind)).toEqual(['begin', 'end']);
+    u.calls[1].answer.resolve(true);
+    await u.queue.idle();
+
+    // Gone before its begin left: nothing at all.
+    const v = pen();
+    const blocker = deferred<void>();
+    void v.queue.run(() => blocker.promise);
+    v.pen.down(place, sample(1));
+    v.pen.dispose();
+    blocker.resolve();
+    await v.queue.idle();
+    expect(v.calls).toEqual([]);
+  });
+});
+
+describe('ComputerEraser: what the review found', () => {
+  it("makes the gesture's next delete at the revision the session answered, on the list less what it deleted", async () => {
+    const t = eraser();
+    const [a, , c] = t.live.strokes;
+    t.eraser.down({ x: 1500, y: 2000 }, 100);
+    t.eraser.move({ x: 5500, y: 2000 });
+    await settle();
+    expect(t.edits[0]).toMatchObject({ revision: 10, edit: { indices: [1] } });
+    // The session went to 11; the window's list has not caught up (its strokesEdited is on its way).
+    t.edits[0].answer.resolve(11);
+    await settle();
+    expect(t.edits[1]).toMatchObject({ revision: 11, edit: { indices: [1], group: 101 } });
+    t.edits[1].answer.resolve(12);
+    await settle();
+    // The window catches up with the first delete only: still the session's revision, without the second stroke.
+    t.live.strokes = [a, c];
+    t.live.revision = 11;
+    t.eraser.down({ x: 1500, y: 2000 }, 100);
+    expect(t.edits).toHaveLength(2);
+    t.live.strokes.push(line(9000, 1));
+    t.eraser.move({ x: 9500, y: 2000 });
+    await settle();
+    expect(t.edits[2]).toMatchObject({ revision: 12, edit: { indices: [1], group: 102 } });
+    t.edits[2].answer.resolve(13);
+    await settle();
+    // Something else moved the revision (an undo): the window's own revision and list again.
+    t.live.revision = 40;
+    t.live.strokes.push(line(13_000, 1));
+    t.eraser.move({ x: 13_500, y: 2000 });
+    await settle();
+    expect(t.edits[3]).toMatchObject({ revision: 40, edit: { indices: [3] } });
+    expect(t.onerror).not.toHaveBeenCalled();
+  });
+
+  it('retries at once when the window already caught up before the stale answer came', async () => {
+    const t = eraser();
+    t.eraser.down({ x: 1500, y: 2000 }, 100);
+    await settle();
+    // The window learns of a change meanwhile, then the answer comes: stale.
+    t.live.revision = 12;
+    t.edits[0].answer.reject({ code: 'liveEditStale', message: 'stale' });
+    await settle();
+    // No change notification is needed: it leaves again at once, at the new revision.
+    expect(t.edits).toHaveLength(2);
+    expect(t.edits[1]).toMatchObject({ revision: 12, edit: { indices: [1], group: 101 } });
+  });
+
+  it('counts its retries as work under way, drops them when an undo is queued, and gives up when nothing changes', async () => {
+    const c = commands();
+    const live = new Source();
+    const computer = new LiveComputer({ live, commands: c.api, style: () => STYLE, onerror: () => {}, group: () => 7 });
+    computer.eraser.down({ x: 1500, y: 2000 }, 100);
+    computer.eraser.up();
+    await settle();
+    c.edits[0].answer.reject({ code: 'liveEditStale', message: 'stale' });
+    await settle();
+    // Lifted, but a retry waits for the window's list: Ctrl+Z must wait too.
+    expect(computer.busy).toBe(true);
+    // An undo is queued (the gesture's group given back): the retry would delete the stroke again after it.
+    computer.historyQueued();
+    expect(computer.busy).toBe(false);
+    live.revision = 11;
+    live.change();
+    await computer.queue.idle();
+    await settle();
+    expect(c.edits).toHaveLength(1);
+
+    // A retry already queued when the undo is asked for is dropped as well.
+    computer.eraser.down({ x: 5500, y: 2000 }, 100);
+    computer.eraser.up();
+    await settle();
+    const blocker = deferred<void>();
+    void computer.queue.run(() => blocker.promise);
+    c.edits[1].answer.reject({ code: 'liveEditStale', message: 'stale' });
+    await settle();
+    live.revision = 12;
+    live.change();
+    await settle();
+    computer.historyQueued();
+    blocker.resolve();
+    await computer.queue.idle();
+    expect(c.edits).toHaveLength(2);
+
+    // Nothing changes at all: after STALE_WAIT_MS the retry gives up, and Ctrl+Z is free again.
+    vi.useFakeTimers();
+    computer.eraser.down({ x: 1500, y: 2000 }, 100);
+    computer.eraser.up();
+    await settle();
+    c.edits[2].answer.reject({ code: 'liveEditStale', message: 'stale' });
+    await settle();
+    expect(computer.busy).toBe(true);
+    vi.advanceTimersByTime(STALE_WAIT_MS + 1);
+    await settle();
+    expect(computer.busy).toBe(false);
+    expect(c.edits).toHaveLength(3);
+  });
+});
+
+describe('LiveComputer: the stroke just written', () => {
+  it('says a stroke is ending once lifted, until lastComputerDone reaches it', () => {
+    const c = commands();
+    const live = new Source();
+    const computer = new LiveComputer({ live, commands: c.api, style: () => STYLE, onerror: () => {} });
+    computer.pen.down(place, sample(1));
+    expect(computer.strokeEnding).toBe(false);
+    computer.pen.up();
+    expect(computer.strokeEnding).toBe(true);
+    live.lastComputerDone = 1;
+    expect(computer.strokeEnding).toBe(false);
+  });
+
+  it('says from which hand a refusal comes', async () => {
+    const c = commands();
+    const live = new Source();
+    const onerror = vi.fn();
+    const computer = new LiveComputer({ live, commands: c.api, style: () => STYLE, onerror });
+    computer.pen.down(place, sample(1));
+    await settle();
+    c.calls[0].answer.reject({ code: 'liveEditInvalid', message: 'x' });
+    computer.eraser.down({ x: 1500, y: 2000 }, 100);
+    await settle();
+    c.edits[0].answer.reject({ code: 'liveEditInvalid', message: 'y' });
+    await settle();
+    expect(onerror.mock.calls).toEqual([
+      [{ code: 'liveEditInvalid', message: 'x' }, 'pen'],
+      [{ code: 'liveEditInvalid', message: 'y' }, 'eraser'],
+    ]);
   });
 });
