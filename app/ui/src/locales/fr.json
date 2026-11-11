@@ -943,15 +943,7 @@
       "music": "Portées"
     },
     "layers": {
-      "label": "Calques",
-      "add": "Ajouter un calque",
       "defaultName": "Calque {n}",
-      "active": "Dessiner sur « {name} »",
-      "visible": "Afficher « {name} »",
-      "name": "Nom du calque {n}",
-      "up": "Monter « {name} »",
-      "down": "Descendre « {name} »",
-      "merge": "Fusionner « {name} » avec le calque du dessous",
       "hiddenActive": "Le calque choisi est masqué : affichez-le ou choisissez-en un autre pour dessiner."
     },
     "zoom": {
@@ -1510,7 +1502,6 @@
     },
     "dismiss": "Fermer le message",
     "toolbar": "Outils du mode direct",
-    "style": "Style d'écriture",
     "tabletStyle": "Tablette",
     "tool": "Outil",
     "color": "Couleur",
@@ -1526,10 +1517,6 @@
       "position": "Page {n} / {count}",
       "new": "Nouvelle page"
     },
-    "layer": {
-      "new": "Nouveau calque",
-      "current": "Calque {n} / {count}"
-    },
     "clear": "Effacer la page",
     "board": "Tableau noir",
     "laser": "Pointeur laser",
@@ -1544,7 +1531,6 @@
       "styleHint": "Choisir l'outil, la couleur et l'épaisseur de l'ordinateur"
     },
     "select": {
-      "label": "Retouche",
       "toggle": "Sélection",
       "hint": "Sélectionner des traits au lasso ou d'un clic pour les supprimer ou changer leur couleur (V)",
       "help": "Lasso : sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner. Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris.",

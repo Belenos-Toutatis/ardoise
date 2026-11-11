@@ -943,15 +943,7 @@
       "music": "Music staves"
     },
     "layers": {
-      "label": "Layers",
-      "add": "Add a layer",
       "defaultName": "Layer {n}",
-      "active": "Draw on “{name}”",
-      "visible": "Show “{name}”",
-      "name": "Name of layer {n}",
-      "up": "Move “{name}” up",
-      "down": "Move “{name}” down",
-      "merge": "Merge “{name}” into the layer below",
       "hiddenActive": "The chosen layer is hidden: show it or choose another one to draw."
     },
     "zoom": {
@@ -1510,7 +1502,6 @@
     },
     "dismiss": "Dismiss the message",
     "toolbar": "Live mode tools",
-    "style": "Writing style",
     "tabletStyle": "Tablet",
     "tool": "Tool",
     "color": "Colour",
@@ -1526,10 +1517,6 @@
       "position": "Page {n} / {count}",
       "new": "New page"
     },
-    "layer": {
-      "new": "New layer",
-      "current": "Layer {n} / {count}"
-    },
     "clear": "Clear the page",
     "board": "Blackboard",
     "laser": "Laser pointer",
@@ -1544,7 +1531,6 @@
       "styleHint": "Choose the computer's tool, colour and width"
     },
     "select": {
-      "label": "Touch up",
       "toggle": "Select",
       "hint": "Pick strokes with a lasso or a click to delete them or change their colour (V)",
       "help": "Lasso: select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect. The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked.",
