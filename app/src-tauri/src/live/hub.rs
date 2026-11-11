@@ -1453,10 +1453,11 @@ impl LiveHub {
     }
 
     /// « Undo the clearing »: gives the current page the ink of the last « Clear the page »
-    /// back, through its history. Returns whether anything was restored (the page was left
-    /// meanwhile).
+    /// back, under what was written since, which stays (see [`LiveSession::restore_cleared_with`]);
+    /// the copy of the strokes is made before the lock. Returns whether anything was restored (no
+    /// clearing left on the page: the page was left meanwhile, or a merge dropped its history).
     pub fn restore_cleared(&self) -> Result<bool, LiveError> {
-        let prepared = self.prepared(LiveSession::next_restored);
+        let prepared = self.prepared(LiveSession::cleared_strokes);
         let mut restored = false;
         self.change(
             |_| true,

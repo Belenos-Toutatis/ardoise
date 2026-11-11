@@ -995,7 +995,8 @@ the redo steps (`History::record`), the tablet's writing does not (M12).
 - Groups: `StrokesEdit::Delete` gets `group?: number` (`#[serde(default)]`; `CheckedEdit.group: Option<u32>`); a step
   keeps its group; `undo_edit`/`redo_edit` take the top step and every next step of the same group, one `strokesEdited`
   per step, in one publish. `MAX_UNDO_STEPS` and `MAX_UNDO_BYTES` count groups and drop whole groups, oldest first.
-  `restore_cleared_with` (« Undo the clearing ») goes through the same `undo_step`.
+  `restore_cleared_with` (« Undo the clearing ») goes through the same `undo_step` (as built: no longer, see "As built
+  (B)", « Annuler l'effacement »).
 - `canUndo`/`canRedo` reach the windows through `strokesEdited` and the snapshot (as today) and through `history` after a
   computer stroke is recorded.
 - Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z (M12) are ignored while a computer gesture (pen or eraser) is under way, as the editor's
@@ -1293,6 +1294,22 @@ pub const MAX_LAYERS: usize = 100;  pub const MAX_LAYER_NAME: usize = 200;
   restarts its counter (reloaded mid-session) could join a gesture to the previous window's last one if nothing came
   between. For package C: number the gestures' groups from a value drawn at each load of the window, not from 1
   (supposé enough).
+- **« Annuler l'effacement » (`live_restore_cleared`), fixed after the review.** Going through `undo_step` down to the
+  clearing, as written above and in M12, undid the computer's strokes written since (a correction made within the
+  8 s offer vanished, went to the redo stack under the clearing, and was lost from the file at the next write). Now
+  `History::unclear` undoes the clearing **out of order**: its strokes come back under what was written since,
+  whichever pen wrote it, at the places they had among the strokes it left (those of hidden layers, kept first in the
+  list); everything done since stays done. **The history after a restore**: the clearing is no longer in it (Ctrl+Y
+  does not clear again); every step done since stays where it was, each place it names moved for the strokes back
+  (a computer stroke or a delete of ink written since: by the number of strokes back; a stroke the clearing left:
+  by those that stood before it), so Ctrl+Z undoes the teacher's last stroke, then the other steps since, then those
+  from before the clearing, as if the clearing had never been done; the redo steps are dropped, as for any new action.
+  The tablet's ink is never a step and stays. The places are followed step by step, so they stay right when ink the
+  clearing left (a layer hidden at the clearing, shown since) was taken out in between (`Unclearing`, `edits.rs`).
+  Each `Removed` step keeps `left`, the strokes left in the list just after it. One `strokesEdited` (viewer
+  numbering per stroke, as any). After a merge (history dropped) there is no clearing to undo: `false`, as when the
+  page has none, and the window says `live.clearUndoFailed`. The copy of the cleared strokes is made before the lock
+  (`LiveSession::cleared_strokes`). The browser stand-in (`mock-live.ts` `restoreCleared`) does the same.
 
 TypeScript (`lib/live.ts`, `lib/api.ts`; package 0 writes them):
 
