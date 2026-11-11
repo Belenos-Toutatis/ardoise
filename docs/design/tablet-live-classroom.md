@@ -938,7 +938,12 @@ under it, at most 4096 samples appended and their events pushed (the points are 
 waits for a window or the disk. The window keeps one call in flight. Measured by a hub test: the tablet's input on one
 thread while another sends computer strokes (one call every 4 ms, 8 samples each); it prints the median and p99 of the
 tablet's Rust part (`sentAt − recv`) and asserts the p99 under 20 ms in the test build (supposé: a loose bound, to set
-from the first run).
+from the first run). As built (`live/tests.rs` `the_tablet_is_never_slowed_by_the_computer_s_pen`, 2026-11-11, test
+build, other builds running): p99 4.5 to 4.9 ms, max 5.3 ms, median 2.0 to 2.2 ms (about 580 calls, 4 600 computer
+points, 500 tablet points), against a median of 0.06 ms for the tablet alone (`hub_latency`). The difference is the
+batching (at most one batch every 4 ms, which the computer's calls keep busy), not the lock: no point waits more than
+about one flush interval. Bound set to 10 ms (`NEVER_SLOWED_P99_MS`). Share (`share/tests.rs`, computer points, hub
+call → the viewer's socket): median 2.5 to 2.9 ms.
 
 ### The window's queue, pen and eraser (C)
 
@@ -1236,6 +1241,30 @@ pub const MAX_LAYERS: usize = 100;  pub const MAX_LAYER_NAME: usize = 200;
 #[tauri::command] pub async fn live_computer_pen(runtime: State<'_, LiveRuntime>, input: ComputerPenInput) -> CommandResult<bool>
 #[tauri::command] pub async fn live_layers(runtime: State<'_, LiveRuntime>, page_index: usize, op: LayerOp) -> CommandResult<()>
 ```
+
+**As built (B, 2026-11-11).** The shapes above are unchanged. Where the code goes further or differs:
+- `LiveEditError` also has `BadGroup` (a `group` that is no whole `u32`), `NoSample` (a `begin` without a finite sample)
+  and `TooManySamples { count }` (more than `MAX_PEN_SAMPLES` in any call): all `liveEditInvalid`, no new code.
+- `MAX_COMPUTER_POINTS` reached: the stroke **ends** there, kept (`strokeEnd`, `history`), and that call answers
+  `false`; the window's local stroke goes on `lastComputerDone` as for any end.
+- `points`, `end`, `cancel` for another number than the stroke in progress (or none), or on a stopped session: `false`,
+  never an error; `begin` on a stopped session: `liveNotRunning`; before the first start every call is `liveNotRunning`.
+  A refused `begin` (stale, hidden layer) leaves the stroke in progress as it is.
+- `strokeCancel` is sent for the computer only. « Clear the page »: `strokeCancel` of the computer's gesture, then the
+  snapshot; the tablet's stroke is still dropped by the snapshot alone, as before.
+- `hub::enqueue` merges points only into the last event of the same page, pen, `id` and `hidden`.
+- A `strokesEdited` that names nothing a viewer has (only strokes of a layer hidden since went or came back) is not sent
+  to the viewers at all (`share/feed.rs` `shared_edit`).
+- A merge always raises the revision and drops the page's history, even when the merged layer is empty.
+- A redo that gives back a computer stroke copies it before the lock (`LiveSession::next_redone`, `Prepared::of_all`),
+  as an undo does; a group's copies are made together.
+- Times: `t` never goes back within a stroke; `recv` follows the design's bounds in order (at least the previous
+  sample's, at most the call's wall time), so it may when the system clock itself goes back.
+- `newLayer` (the tablet's button) on a page of `MAX_LAYERS` layers does nothing at all.
+- Groups: steps next to each other naming the same group are one, whatever came before them. A control window that
+  restarts its counter (reloaded mid-session) could join a gesture to the previous window's last one if nothing came
+  between. For package C: number the gestures' groups from a value drawn at each load of the window, not from 1
+  (supposé enough).
 
 TypeScript (`lib/live.ts`, `lib/api.ts`; package 0 writes them):
 

@@ -19,13 +19,17 @@ use ardoise_proto::stroke::Point as PenPoint;
 
 use super::edits::{
     CheckedEdit, ColourChange, EditAction, History, LiveEditError, Prepared, RedoStep, UndoStep,
-    grouped, hidden_before, insert_at, remove_at, viewer_places,
+    grouped, hidden_before, insert_at, layer_hidden, remove_at, viewer_place,
+};
+use super::layers::{
+    CheckedLayerOp, MAX_LAYERS, existing, follow_merge, follow_move, merge_layer, move_layer,
 };
 use super::model::{
-    ForkReason, ForkedSheet, HoverPoint, LiveCommandKind, LiveEvent, LiveMark, LivePoint,
+    ForkReason, ForkedSheet, HoverPoint, LiveCommandKind, LiveEvent, LiveMark, LivePen, LivePoint,
     LiveSessionState, LiveSnapshot, LiveStroke, LiveStyle, LiveViewState, PlacedStroke,
     RecolouredStrokes, ViewerIndices, sanitize_marks,
 };
+use super::pen::{CheckedPen, MAX_COMPUTER_POINTS, PenAction, PenSample, note_time, sample_wall};
 use super::resume::{PenMapping, ResumeBase, ResumeSeed, hold_for};
 use crate::library::path_text;
 use crate::presentation::MonitorInfo;
@@ -70,6 +74,11 @@ struct Resumed {
     /// on, white chalk being invisible on most paper. Until then the blackboard is a matter of
     /// display, which the file does not hear of (`hub::written_sheet`).
     ink_on_board: bool,
+    /// A deliberate change of the layers in the live window (add, rename, show or hide, move,
+    /// merge; not where a pen acts): from then on the sheet's layers are written as they are, new
+    /// ink or not, as in the editor (`hub::written_sheet`). The layer the session adds by itself
+    /// (every layer hidden, the tablet's button) stays out of the file until ink goes on it.
+    layers_edited: bool,
 }
 
 /// One page of the session: a note, and where it stands on disk.
@@ -122,9 +131,14 @@ pub struct Page {
     /// clearing that removed something, the undo or redo of either. Not when the tablet appends a
     /// stroke (no index moves), nor for a change of colour, a page turn, a new layer.
     revision: u64,
-    /// Its edits, to undo and redo: kept when the page is left and when it turns, dropped when
-    /// the session stops.
+    /// Its edits and the computer's strokes, to undo and redo: kept when the page is left and when
+    /// it turns, dropped when the session stops and by a merge of layers.
     history: History,
+    /// The tablet's layer: where its ink goes (an index of `note.layers`; it may be hidden).
+    tablet_layer: u32,
+    /// The computer's layer: where its pen, its eraser end and the selection act (an index of
+    /// `note.layers`). Both stay with the page when it is left.
+    computer_layer: u32,
 }
 
 /// What one step of an edit did, for the event that tells the windows.
@@ -162,6 +176,8 @@ impl Page {
             resumed: None,
             revision,
             history: History::default(),
+            tablet_layer: 0,
+            computer_layer: 0,
         }
     }
 
@@ -187,8 +203,17 @@ impl Page {
                 visible: true,
             });
         }
+        // The tablet writes on the last visible layer, and the computer starts there too.
+        let layer = note
+            .layers
+            .iter()
+            .rposition(|layer| layer.visible)
+            .and_then(|layer| u32::try_from(layer).ok())
+            .unwrap_or(0);
         let orientation = hold_for(note.page, setting);
         let mut page = Page::new(note, orientation, revision);
+        page.tablet_layer = layer;
+        page.computer_layer = layer;
         page.file = Some(saved);
         page.audio = base.file.audio.clone().map(Arc::new);
         page.fresh = false;
@@ -204,8 +229,30 @@ impl Page {
             rewritten: false,
             fork: None,
             ink_on_board: false,
+            layers_edited: false,
         });
         page
+    }
+
+    /// The tablet's layer and the computer's.
+    #[cfg(test)]
+    pub fn pen_layers(&self) -> (u32, u32) {
+        (self.tablet_layer, self.computer_layer)
+    }
+
+    /// The resumed sheet's layers were changed on purpose: see the field of `Resumed`.
+    pub fn layers_edited(&self) -> bool {
+        self.resumed
+            .as_ref()
+            .is_some_and(|resumed| resumed.layers_edited)
+    }
+
+    /// A deliberate change of the page's layers.
+    fn layers_changed(&mut self) {
+        if let Some(resumed) = &mut self.resumed {
+            resumed.layers_edited = true;
+        }
+        self.touch();
     }
 
     /// What the indices of the page's strokes mean: see the field.
@@ -324,19 +371,23 @@ impl Page {
         self.version != self.saved_version && (self.file.is_some() || !self.note.strokes.is_empty())
     }
 
-    /// Takes the strokes at `indices` (ascending, all on the page) off the page.
+    /// Takes the strokes at `indices` (ascending, all on the page) off the page. A viewer is told of
+    /// the visible ones only: it never had the others.
     fn take_strokes(&mut self, indices: Vec<u32>) -> (Vec<PlacedStroke>, Edited) {
-        let hidden = hidden_before(&self.note.layers, &self.note.strokes);
-        let strokes = remove_at(&mut self.note.strokes, &indices);
-        self.revision += 1;
-        self.touch();
-        let viewers = hidden.map(|hidden| {
+        let (layers, list) = (&self.note.layers, &self.note.strokes);
+        let viewers = hidden_before(layers, list).map(|hidden| {
             Box::new(ViewerIndices {
-                removed: viewer_places(&hidden, indices.iter().copied()),
+                removed: indices
+                    .iter()
+                    .filter_map(|&place| viewer_place(&hidden, layers, list, place))
+                    .collect(),
                 inserted: Vec::new(),
                 recoloured: Vec::new(),
             })
         });
+        let strokes = remove_at(&mut self.note.strokes, &indices);
+        self.revision += 1;
+        self.touch();
         let edited = Edited {
             removed: indices,
             viewers,
@@ -345,17 +396,20 @@ impl Page {
         (strokes, edited)
     }
 
-    /// Puts `stored` back at their places, through `copy`: the windows get `stored`.
+    /// Puts `stored` back at their places, through `copy`: the windows get `stored`, a viewer the
+    /// visible ones only.
     fn give_back(&mut self, stored: Arc<Vec<PlacedStroke>>, copy: Vec<Stroke>) -> Edited {
         let places = stored.iter().map(|placed| placed.index);
         insert_at(&mut self.note.strokes, places.clone().zip(copy));
         self.revision += 1;
         self.touch();
-        let hidden = hidden_before(&self.note.layers, &self.note.strokes);
-        let viewers = hidden.map(|hidden| {
+        let (layers, list) = (&self.note.layers, &self.note.strokes);
+        let viewers = hidden_before(layers, list).map(|hidden| {
             Box::new(ViewerIndices {
                 removed: Vec::new(),
-                inserted: viewer_places(&hidden, stored.iter().map(|placed| placed.index)),
+                inserted: places
+                    .map(|place| viewer_place(&hidden, layers, list, place))
+                    .collect(),
                 recoloured: Vec::new(),
             })
         });
@@ -367,7 +421,7 @@ impl Page {
     }
 
     /// Gives strokes their colours (the indices are not checked again: they come from a step, or
-    /// from a list just checked).
+    /// from a list just checked). A viewer is told of the visible ones only.
     fn colour_strokes(&mut self, colours: &[(u32, Rgba)]) -> Edited {
         for (index, color) in colours {
             if let Some(stroke) = self.note.strokes.get_mut(*index as usize) {
@@ -375,10 +429,11 @@ impl Page {
             }
         }
         self.touch();
-        let hidden = hidden_before(&self.note.layers, &self.note.strokes);
-        let viewers = hidden.map(|hidden| {
-            let places = viewer_places(&hidden, colours.iter().map(|(index, _)| *index));
-            let colours = places.into_iter().zip(colours.iter().map(|(_, c)| *c));
+        let (layers, list) = (&self.note.layers, &self.note.strokes);
+        let viewers = hidden_before(layers, list).map(|hidden| {
+            let colours = colours.iter().filter_map(|&(place, color)| {
+                Some((viewer_place(&hidden, layers, list, place)?, color))
+            });
             Box::new(ViewerIndices {
                 removed: Vec::new(),
                 inserted: Vec::new(),
@@ -390,6 +445,45 @@ impl Page {
             viewers,
             ..Edited::default()
         }
+    }
+
+    /// Time of a sample of the computer's pen taken at `wall` (Unix ms), ms since the note's
+    /// `created`, from the origin the tablet's samples use ([`LiveSession::point_time`]): a fresh
+    /// page takes it as its `created`; a resumed sheet counts from its shifted origin. Never below
+    /// the stroke's `previous` time, and never through the tablet's spacing (`last_t`): neither
+    /// pen pushes the other's times.
+    fn computer_time(&mut self, wall: f64, previous: Option<u32>) -> u32 {
+        if self.fresh {
+            self.fresh = false;
+            self.note.created = wall.floor() as i64;
+            self.note.modified = self.note.created;
+        }
+        let origin = self
+            .resumed
+            .as_ref()
+            .map_or(self.note.created, |resumed| resumed.origin);
+        note_time(wall, origin, previous)
+    }
+
+    /// A stroke in progress ends on this page, whichever pen drew it: it joins the tail of the
+    /// list (no place moves, the revision stays). Returns its place.
+    fn finish(&mut self, drawing: &Drawing) -> u32 {
+        let place = u32::try_from(self.note.strokes.len()).unwrap_or(u32::MAX);
+        self.note.strokes.push(drawing.stroke());
+        self.touch();
+        // A page's first stroke creates its note, whichever pen.
+        if self.file.is_none() {
+            self.urgent = true;
+        }
+        // White chalk needs the slate it was written on, also on a sheet that was not on the
+        // blackboard when it was turned on (windows draw slate either way).
+        if drawing.on_board
+            && let Some(resumed) = &mut self.resumed
+        {
+            resumed.ink_on_board = true;
+            self.note.background.paper = Paper::Slate;
+        }
+        place
     }
 
     /// The event saying what a step did to this page, the `index`th.
@@ -423,6 +517,18 @@ struct Drawing {
 }
 
 impl Drawing {
+    fn new(page: usize, style: LiveStyle, layer: u32, on_board: bool) -> Drawing {
+        Drawing {
+            page,
+            style,
+            layer,
+            on_board,
+            points: Vec::new(),
+            announced: false,
+            unsent: 0,
+        }
+    }
+
     fn live_stroke(&self, points: &[LivePoint]) -> LiveStroke {
         LiveStroke {
             tool: self.style.tool,
@@ -432,6 +538,88 @@ impl Drawing {
             points: points.to_vec(),
         }
     }
+
+    /// The points drawn since the last call, as `pen` (`id`) sends them: `strokeStart` for a new
+    /// stroke, else `points`; `None` when there is nothing new. `hidden`: the stroke's layer is
+    /// hidden now.
+    fn flush(&mut self, pen: LivePen, id: Option<u32>, hidden: bool) -> Option<LiveEvent> {
+        if !self.announced {
+            self.announced = true;
+            self.unsent = 0;
+            return Some(LiveEvent::StrokeStart {
+                page_index: self.page,
+                stroke: self.live_stroke(&self.points),
+                pen,
+                id,
+                hidden,
+            });
+        }
+        if self.unsent == 0 {
+            return None;
+        }
+        let from = self.points.len() - self.unsent;
+        self.unsent = 0;
+        Some(LiveEvent::Points {
+            page_index: self.page,
+            points: self.points[from..].to_vec(),
+            pen,
+            id,
+            hidden,
+        })
+    }
+
+    /// The stroke so far, as already sent, to follow a snapshot (`None` before it was announced).
+    fn so_far(&self, pen: LivePen, id: Option<u32>, hidden: bool) -> Option<LiveEvent> {
+        if !self.announced {
+            return None;
+        }
+        let sent = self.points.len() - self.unsent;
+        Some(LiveEvent::StrokeStart {
+            page_index: self.page,
+            stroke: self.live_stroke(&self.points[..sent]),
+            pen,
+            id,
+            hidden,
+        })
+    }
+
+    /// The finished stroke, as its page keeps it.
+    fn stroke(&self) -> Stroke {
+        Stroke {
+            tool: self.style.tool,
+            color: self.style.color,
+            width: self.style.width,
+            layer: self.layer,
+            points: self
+                .points
+                .iter()
+                .map(|p| Point {
+                    x: p.x,
+                    y: p.y,
+                    pressure: p.p,
+                    t: p.t,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The computer's stroke being drawn (M14): what the tablet's has, plus the control window's number
+/// for the gesture and the wall time of its last sample.
+#[derive(Debug, Clone)]
+struct ComputerDrawing {
+    drawing: Drawing,
+    /// The window's number for the gesture: a call naming another is not for this stroke.
+    id: u32,
+    /// Wall clock (Unix ms) of the last sample: the next is never before it.
+    last_wall: Option<f64>,
+}
+
+/// Whether the stroke of `drawing` is on a hidden layer of its page.
+fn drawn_hidden(pages: &[Page], drawing: &Drawing) -> bool {
+    pages
+        .get(drawing.page)
+        .is_some_and(|page| layer_hidden(&page.note.layers, drawing.layer))
 }
 
 /// Name of the `n`th layer (1-based) in the interface language, as the editor names them.
@@ -467,7 +655,10 @@ pub struct LiveSession {
     view: LiveViewState,
     state: LiveSessionState,
     hover: Option<HoverPoint>,
+    /// The tablet's stroke being drawn.
     drawing: Option<Drawing>,
+    /// The computer's stroke being drawn, beside the tablet's (M14).
+    computer: Option<ComputerDrawing>,
     /// Layer names in French.
     french: bool,
     /// The screen the presentation window is on (kept here so that every snapshot carries it).
@@ -501,6 +692,7 @@ impl LiveSession {
             state: LiveSessionState::Idle,
             hover: None,
             drawing: None,
+            computer: None,
             french,
             presentation: None,
             marks: Vec::new(),
@@ -701,17 +893,6 @@ impl LiveSession {
         &self.pages[self.current]
     }
 
-    /// The layer new ink goes on: the last visible one, never a hidden one (a page always has a
-    /// visible layer: see [`Page::resumed`]).
-    fn current_layer(&self) -> u32 {
-        let layers = &self.current_page().note.layers;
-        let layer = layers
-            .iter()
-            .rposition(|layer| layer.visible)
-            .unwrap_or_else(|| layers.len().saturating_sub(1));
-        u32::try_from(layer).unwrap_or(0)
-    }
-
     fn new_page(&self, now_ms: i64) -> Page {
         let paper = if self.view.board {
             Paper::Slate
@@ -753,7 +934,8 @@ impl LiveSession {
             page_count: self.pages.len(),
             orientation: self.current_page().orientation,
             can_turn_page: !self.current_page().is_resumed(),
-            layer: self.current_layer(),
+            layer: self.current_page().tablet_layer,
+            computer_layer: self.current_page().computer_layer,
             style: self.style,
             view: self.view,
             hover: self.hover,
@@ -765,8 +947,9 @@ impl LiveSession {
         }
     }
 
-    /// A snapshot, then the stroke in progress (it is not in the snapshot's page). If the page
-    /// is no longer the one the marks were written on, they go (an empty list follows).
+    /// A snapshot, then the strokes in progress (they are not in the snapshot's page), each told
+    /// again whether its layer is hidden. If the page is no longer the one the marks were written
+    /// on, they go (an empty list follows).
     fn push_snapshot(&mut self, out: &mut Vec<LiveEvent>) {
         out.push(LiveEvent::Snapshot {
             snapshot: Arc::new(self.snapshot()),
@@ -822,17 +1005,24 @@ impl LiveSession {
         }
     }
 
-    /// The stroke in progress as already sent, to follow a snapshot.
-    pub fn in_progress(&self) -> Option<LiveEvent> {
-        let drawing = self.drawing.as_ref().filter(|d| d.announced)?;
-        let sent = drawing.points.len() - drawing.unsent;
-        Some(LiveEvent::StrokeStart {
-            page_index: drawing.page,
-            stroke: drawing.live_stroke(&drawing.points[..sent]),
-        })
+    /// The strokes in progress as already sent, to follow a snapshot: none, one or two, the
+    /// tablet's first.
+    pub fn in_progress(&self) -> Vec<LiveEvent> {
+        let tablet = self.drawing.as_ref().and_then(|drawing| {
+            let hidden = drawn_hidden(&self.pages, drawing);
+            drawing.so_far(LivePen::Tablet, None, hidden)
+        });
+        let computer = self.computer.as_ref().and_then(|computer| {
+            let hidden = drawn_hidden(&self.pages, &computer.drawing);
+            computer
+                .drawing
+                .so_far(LivePen::Computer, Some(computer.id), hidden)
+        });
+        tablet.into_iter().chain(computer).collect()
     }
 
-    /// State reported by the tablet service, or set by the hub (start, stop).
+    /// State reported by the tablet service, or set by the hub (start, stop). A lost link ends
+    /// the tablet's stroke; the computer's goes on while the session runs, and ends at the stop.
     pub fn set_state(&mut self, state: LiveSessionState, out: &mut Vec<LiveEvent>) {
         if state == self.state {
             return;
@@ -843,6 +1033,7 @@ impl LiveSession {
         }
         // Stopped: its notes are in the library, and no edit comes any more.
         if state == LiveSessionState::Idle {
+            self.end_computer(out);
             for page in &mut self.pages {
                 page.history.clear();
             }
@@ -909,7 +1100,9 @@ impl LiveSession {
         if width == 0 || height == 0 || (size == self.size && orientation == self.orientation) {
             return false;
         }
+        // Both strokes end before the page turns, so that they turn with its ink.
         self.end_stroke(out);
+        self.end_computer(out);
         self.hover_end(out);
         self.size = size;
         self.orientation = orientation;
@@ -1022,15 +1215,12 @@ impl LiveSession {
     ) {
         if self.drawing.is_none() {
             self.hover_end(out);
-            self.drawing = Some(Drawing {
-                page: self.current,
-                style: self.style,
-                layer: self.current_layer(),
-                on_board: self.view.board,
-                points: Vec::new(),
-                announced: false,
-                unsent: 0,
-            });
+            self.drawing = Some(Drawing::new(
+                self.current,
+                self.style,
+                self.current_page().tablet_layer,
+                self.view.board,
+            ));
         }
         let t = self.point_time(at);
         if let Some(drawing) = &mut self.drawing {
@@ -1090,30 +1280,17 @@ impl LiveSession {
         }
     }
 
-    /// Sends the points drawn since the last call: `strokeStart` for a new stroke, else
+    /// Sends the tablet's points drawn since the last call: `strokeStart` for a new stroke, else
     /// `points`.
     fn flush_points(&mut self, out: &mut Vec<LiveEvent>) {
         let Some(drawing) = &mut self.drawing else {
             return;
         };
-        if !drawing.announced {
-            drawing.announced = true;
-            drawing.unsent = 0;
-            out.push(LiveEvent::StrokeStart {
-                page_index: drawing.page,
-                stroke: drawing.live_stroke(&drawing.points),
-            });
-        } else if drawing.unsent > 0 {
-            let from = drawing.points.len() - drawing.unsent;
-            drawing.unsent = 0;
-            out.push(LiveEvent::Points {
-                page_index: drawing.page,
-                points: drawing.points[from..].to_vec(),
-            });
-        }
+        let hidden = drawn_hidden(&self.pages, drawing);
+        out.extend(drawing.flush(LivePen::Tablet, None, hidden));
     }
 
-    /// Ends the stroke in progress: it joins its page.
+    /// Ends the tablet's stroke in progress: it joins its page.
     pub fn end_stroke(&mut self, out: &mut Vec<LiveEvent>) {
         self.flush_points(out);
         let Some(drawing) = self.drawing.take() else {
@@ -1122,37 +1299,284 @@ impl LiveSession {
         let Some(page) = self.pages.get_mut(drawing.page) else {
             return;
         };
-        page.note.strokes.push(Stroke {
-            tool: drawing.style.tool,
-            color: drawing.style.color,
-            width: drawing.style.width,
-            layer: drawing.layer,
-            points: drawing
-                .points
-                .iter()
-                .map(|p| Point {
-                    x: p.x,
-                    y: p.y,
-                    pressure: p.p,
-                    t: p.t,
-                })
-                .collect(),
-        });
-        page.touch();
-        if page.file.is_none() {
-            page.urgent = true;
-        }
-        // White chalk needs the slate it was written on, also on a sheet that was not on the
-        // blackboard when it was turned on (windows draw slate either way).
-        if drawing.on_board
-            && let Some(resumed) = &mut page.resumed
-        {
-            resumed.ink_on_board = true;
-            page.note.background.paper = Paper::Slate;
-        }
+        page.finish(&drawing);
         out.push(LiveEvent::StrokeEnd {
             page_index: drawing.page,
+            pen: LivePen::Tablet,
+            id: None,
+            hidden: layer_hidden(&page.note.layers, drawing.layer),
         });
+    }
+
+    /// Ends both strokes in progress (a page change): they join their page.
+    fn end_strokes(&mut self, out: &mut Vec<LiveEvent>) {
+        self.end_stroke(out);
+        self.end_computer(out);
+    }
+
+    // --- The computer's pen (M14) ---------------------------------------------------------------
+
+    /// A call of the computer's pen from the control window (docs/design/tablet-live-classroom.md,
+    /// "The computer's strokes"), received at `wall_now` (Unix ms). `begin`: `Ok(true)`, or refused
+    /// as stale (another page on screen) or on a hidden layer, nothing changed; a stroke in
+    /// progress ends first (kept). `points`, `end`: whether the stroke went on (`false` once the
+    /// session ended or dropped it, or for a number that is not the stroke in progress). `cancel`:
+    /// whether there was a stroke to drop. A stopped session takes nothing (the hub refuses the
+    /// `begin` before).
+    pub fn computer_pen(
+        &mut self,
+        pen: CheckedPen,
+        wall_now: f64,
+        out: &mut Vec<LiveEvent>,
+    ) -> Result<bool, LiveEditError> {
+        let CheckedPen {
+            stroke,
+            action,
+            samples,
+        } = pen;
+        if !self.is_running() {
+            return Ok(false);
+        }
+        let ours = self.computer.as_ref().is_some_and(|c| c.id == stroke);
+        match action {
+            PenAction::Begin { page_index, style } => {
+                if page_index != self.current {
+                    return Err(LiveEditError::Stale);
+                }
+                let page = self.current_page();
+                let layer = page.computer_layer;
+                if layer_hidden(&page.note.layers, layer) {
+                    return Err(LiveEditError::LayerHidden);
+                }
+                self.end_computer(out);
+                self.computer = Some(ComputerDrawing {
+                    drawing: Drawing::new(self.current, style, layer, self.view.board),
+                    id: stroke,
+                    last_wall: None,
+                });
+                self.computer_samples(&samples, wall_now, out);
+                Ok(true)
+            }
+            _ if !ours => Ok(false),
+            PenAction::Points => Ok(self.computer_samples(&samples, wall_now, out)),
+            PenAction::End => {
+                self.computer_samples(&samples, wall_now, out);
+                self.end_computer(out);
+                Ok(true)
+            }
+            PenAction::Cancel => {
+                self.cancel_computer(out);
+                Ok(true)
+            }
+        }
+    }
+
+    /// Appends `samples` to the computer's stroke and sends them at once (`strokeStart` with the
+    /// first ones, then `points`). The stroke ends there (kept) once it holds
+    /// [`MAX_COMPUTER_POINTS`]: then `false`, and the window stops sending for that gesture.
+    fn computer_samples(
+        &mut self,
+        samples: &[PenSample],
+        wall_now: f64,
+        out: &mut Vec<LiveEvent>,
+    ) -> bool {
+        let Some(computer) = &mut self.computer else {
+            return false;
+        };
+        let Some(page) = self.pages.get_mut(computer.drawing.page) else {
+            return false;
+        };
+        let (width, height) = (page.note.page.width as f32, page.note.page.height as f32);
+        let room = MAX_COMPUTER_POINTS.saturating_sub(computer.drawing.points.len());
+        for sample in samples.iter().take(room) {
+            let wall = sample_wall(wall_now, sample.age, computer.last_wall);
+            computer.last_wall = Some(wall);
+            let previous = computer.drawing.points.last().map(|point| point.t);
+            let t = page.computer_time(wall, previous);
+            let (x, y) = sample.within(width, height);
+            computer.drawing.points.push(LivePoint {
+                x,
+                y,
+                p: sample.p,
+                t,
+                recv: wall,
+            });
+            computer.drawing.unsent += 1;
+        }
+        let hidden = layer_hidden(&page.note.layers, computer.drawing.layer);
+        out.extend(
+            computer
+                .drawing
+                .flush(LivePen::Computer, Some(computer.id), hidden),
+        );
+        if computer.drawing.points.len() >= MAX_COMPUTER_POINTS {
+            self.end_computer(out);
+            return false;
+        }
+        true
+    }
+
+    /// Ends the computer's stroke in progress: it joins the tail of its page's list, as a step of
+    /// the page's history (`strokeEnd`, then `history`).
+    fn end_computer(&mut self, out: &mut Vec<LiveEvent>) {
+        let Some(ComputerDrawing {
+            mut drawing, id, ..
+        }) = self.computer.take()
+        else {
+            return;
+        };
+        let Some(page) = self.pages.get_mut(drawing.page) else {
+            return;
+        };
+        let hidden = layer_hidden(&page.note.layers, drawing.layer);
+        out.extend(drawing.flush(LivePen::Computer, Some(id), hidden));
+        let place = page.finish(&drawing);
+        page.history.record(
+            UndoStep::Added {
+                indices: vec![place],
+            },
+            None,
+        );
+        out.push(LiveEvent::StrokeEnd {
+            page_index: drawing.page,
+            pen: LivePen::Computer,
+            id: Some(id),
+            hidden,
+        });
+        out.push(LiveEvent::History {
+            page_index: drawing.page,
+            can_undo: page.history.can_undo(),
+            can_redo: page.history.can_redo(),
+        });
+    }
+
+    /// Drops the computer's stroke in progress: nothing of it joins the page (`strokeCancel`).
+    fn cancel_computer(&mut self, out: &mut Vec<LiveEvent>) {
+        let Some(ComputerDrawing { drawing, id, .. }) = self.computer.take() else {
+            return;
+        };
+        out.push(LiveEvent::StrokeCancel {
+            page_index: drawing.page,
+            pen: LivePen::Computer,
+            id: Some(id),
+            hidden: drawn_hidden(&self.pages, &drawing),
+        });
+    }
+
+    // --- Layers (M14) ---------------------------------------------------------------------------
+
+    /// A layer operation of the live window on page `page_index` (the one on screen, or it is
+    /// stale), refused as a whole when it makes no sense there (docs/design/tablet-live-classroom.md,
+    /// "Layer operations during live"). One snapshot when something changed; no stroke in progress
+    /// ends.
+    pub fn layers(
+        &mut self,
+        page_index: usize,
+        op: CheckedLayerOp,
+        out: &mut Vec<LiveEvent>,
+    ) -> Result<(), LiveEditError> {
+        if page_index != self.current {
+            return Err(LiveEditError::Stale);
+        }
+        let french = self.french;
+        let page = &mut self.pages[page_index];
+        let layers = &page.note.layers;
+        let changed = match op {
+            CheckedLayerOp::Add => {
+                if layers.len() >= MAX_LAYERS {
+                    return Err(LiveEditError::TooManyLayers);
+                }
+                let n = layers.len() + 1;
+                page.note.layers.push(Layer {
+                    name: layer_name(french, n),
+                    visible: true,
+                });
+                page.computer_layer = u32::try_from(n - 1).unwrap_or(0);
+                page.layers_changed();
+                true
+            }
+            CheckedLayerOp::Rename { layer, name } => {
+                let layer = existing(layers, layer)?;
+                let same = page.note.layers[layer].name == name;
+                if !same {
+                    page.note.layers[layer].name = name;
+                    page.layers_changed();
+                }
+                !same
+            }
+            CheckedLayerOp::Visible { layer, visible } => {
+                let layer = existing(layers, layer)?;
+                let same = page.note.layers[layer].visible == visible;
+                if !same {
+                    page.note.layers[layer].visible = visible;
+                    page.layers_changed();
+                }
+                !same
+            }
+            CheckedLayerOp::Move { from, to } => {
+                existing(layers, from)?;
+                existing(layers, to)?;
+                if from == to {
+                    return Err(LiveEditError::BadLayer);
+                }
+                let count = layers.len();
+                let follow = |layer: u32| {
+                    if (layer as usize) < count {
+                        follow_move(layer, from, to)
+                    } else {
+                        layer
+                    }
+                };
+                move_layer(&mut page.note, from, to);
+                page.history.remap_layers(follow);
+                page.tablet_layer = follow(page.tablet_layer);
+                page.computer_layer = follow(page.computer_layer);
+                page.layers_changed();
+                self.follow_drawings(page_index, follow);
+                true
+            }
+            CheckedLayerOp::Merge { layer } => {
+                existing(layers, layer)?;
+                if layer == 0 {
+                    return Err(LiveEditError::BadLayer);
+                }
+                merge_layer(&mut page.note, layer);
+                // Places moved: their steps would name other strokes.
+                page.history.clear();
+                page.revision += 1;
+                page.tablet_layer = follow_merge(page.tablet_layer, layer);
+                page.computer_layer = follow_merge(page.computer_layer, layer);
+                page.layers_changed();
+                self.follow_drawings(page_index, |index| follow_merge(index, layer));
+                true
+            }
+            CheckedLayerOp::Computer { layer } => {
+                let layer = existing(layers, layer)? as u32;
+                let same = page.computer_layer == layer;
+                page.computer_layer = layer;
+                !same
+            }
+            CheckedLayerOp::Tablet { layer } => {
+                let layer = existing(layers, layer)? as u32;
+                let same = page.tablet_layer == layer;
+                page.tablet_layer = layer;
+                !same
+            }
+        };
+        if changed {
+            self.push_snapshot(out);
+        }
+        Ok(())
+    }
+
+    /// The layers of page `page_index` were renumbered: the strokes in progress on it follow.
+    fn follow_drawings(&mut self, page_index: usize, follow: impl Fn(u32) -> u32) {
+        let computer = self.computer.as_mut().map(|computer| &mut computer.drawing);
+        for drawing in self.drawing.iter_mut().chain(computer) {
+            if drawing.page == page_index {
+                drawing.layer = follow(drawing.layer);
+            }
+        }
     }
 
     /// Leaves page `index`: its changes are written now.
@@ -1208,7 +1632,7 @@ impl LiveSession {
     ) {
         match kind {
             LiveCommandKind::NextPage => {
-                self.end_stroke(out);
+                self.end_strokes(out);
                 let left = self.current;
                 let before = self.current_page().note.page;
                 if self.current + 1 < self.pages.len() {
@@ -1228,7 +1652,7 @@ impl LiveSession {
                 if self.current == 0 {
                     return;
                 }
-                self.end_stroke(out);
+                self.end_strokes(out);
                 let left = self.current;
                 let before = self.current_page().note.page;
                 self.current -= 1;
@@ -1239,7 +1663,7 @@ impl LiveSession {
                 self.push_snapshot(out);
             }
             LiveCommandKind::NewPage => {
-                self.end_stroke(out);
+                self.end_strokes(out);
                 let left = self.current;
                 let before = self.current_page().note.page;
                 let page = self.new_page(now_ms);
@@ -1250,20 +1674,28 @@ impl LiveSession {
                 self.push_snapshot(out);
             }
             LiveCommandKind::NewLayer => {
-                self.end_stroke(out);
+                // The tablet's button (or `newLayer`): the tablet goes to a new layer on top; the
+                // computer stays where it acts. Nothing beyond the most layers a page may get.
                 let french = self.french;
+                if self.current_page().note.layers.len() >= MAX_LAYERS {
+                    return;
+                }
+                self.end_stroke(out);
                 let page = &mut self.pages[self.current];
                 let n = page.note.layers.len() + 1;
                 page.note.layers.push(Layer {
                     name: layer_name(french, n),
                     visible: true,
                 });
+                page.tablet_layer = u32::try_from(n - 1).unwrap_or(0);
                 page.touch();
                 self.push_snapshot(out);
             }
             LiveCommandKind::ClearPage => {
-                // The stroke in progress goes too: the snapshot replaces everything.
+                // The strokes in progress go too: the snapshot replaces everything. The computer's
+                // window is told which of its gestures went.
                 self.drawing = None;
+                self.cancel_computer(out);
                 let page = &mut self.pages[self.current];
                 // What shows: nobody can tell that the ink of a hidden layer is going.
                 let shown: Vec<u32> = page
@@ -1278,7 +1710,7 @@ impl LiveSession {
                 // An empty page is no step (a second press is harmless).
                 if !shown.is_empty() {
                     let (strokes, _) = page.take_strokes(shown);
-                    page.history.record(UndoStep::removed(strokes, true));
+                    page.history.record(UndoStep::removed(strokes, true), None);
                 }
                 self.push_snapshot(out);
             }
@@ -1326,7 +1758,8 @@ impl LiveSession {
         let edited = match edit.action {
             EditAction::Delete => {
                 let (strokes, edited) = page.take_strokes(edit.indices);
-                page.history.record(UndoStep::removed(strokes, false));
+                page.history
+                    .record(UndoStep::removed(strokes, false), edit.group);
                 edited
             }
             EditAction::Recolour(after) => {
@@ -1347,7 +1780,7 @@ impl LiveSession {
                 }
                 let colours: Vec<(u32, Rgba)> = changes.iter().map(|c| (c.index, after)).collect();
                 let edited = page.colour_strokes(&colours);
-                page.history.record(UndoStep::Recoloured(changes));
+                page.history.record(UndoStep::Recoloured(changes), None);
                 edited
             }
         };
@@ -1355,15 +1788,21 @@ impl LiveSession {
         Ok(page.revision)
     }
 
-    /// The strokes the next undo on the page on screen gives back, to copy before the lock is taken
-    /// ([`Prepared`]).
-    pub fn next_restored(&self) -> Option<Arc<Vec<PlacedStroke>>> {
+    /// The strokes the next undo on the page on screen gives back (every step of its group), to
+    /// copy before the lock is taken ([`Prepared`]).
+    pub fn next_restored(&self) -> Vec<Arc<Vec<PlacedStroke>>> {
         self.current_page().history.next_restored()
     }
 
-    /// Undoes the last edit of page `page_index` (the one on screen, or the edit is stale): a stroke
-    /// comes back at its place, whatever the tablet wrote since, which stays after it. Returns
-    /// whether there was anything to undo. `prepared`: see [`next_restored`](Self::next_restored).
+    /// The computer's strokes the next redo on the page on screen gives back, likewise.
+    pub fn next_redone(&self) -> Vec<Arc<Vec<PlacedStroke>>> {
+        self.current_page().history.next_redone()
+    }
+
+    /// Undoes the last step of page `page_index` (the one on screen, or the call is stale), with
+    /// every step of its group: a stroke comes back at its place, whatever the pens wrote since,
+    /// which stays after it; a computer stroke goes. Returns whether there was anything to undo.
+    /// `prepared`: see [`next_restored`](Self::next_restored).
     pub fn undo_edit(
         &mut self,
         page_index: usize,
@@ -1376,63 +1815,101 @@ impl LiveSession {
         Ok(self.undo_step(prepared, out))
     }
 
+    /// Undoes the group on top of the current page's history, top down: one `strokesEdited` per
+    /// step.
     fn undo_step(&mut self, prepared: Option<Prepared>, out: &mut Vec<LiveEvent>) -> bool {
         let index = self.current;
         let page = &mut self.pages[index];
-        let Some(step) = page.history.pop_undo() else {
+        let mut prepared = prepared;
+        let Some(mut next) = page.history.pop_undo() else {
             return false;
         };
-        let edited = match step {
-            UndoStep::Removed {
-                strokes, cleared, ..
-            } => {
-                let copy = Prepared::copy_of(prepared, &strokes);
-                let indices = strokes.iter().map(|placed| placed.index).collect();
-                page.history
-                    .push_redo(RedoStep::Remove { indices, cleared });
-                page.give_back(strokes, copy)
+        loop {
+            let (step, group) = next;
+            let edited = match step {
+                UndoStep::Removed {
+                    strokes, cleared, ..
+                } => {
+                    let copy = Prepared::copy_of(&mut prepared, &strokes);
+                    let indices = strokes.iter().map(|placed| placed.index).collect();
+                    page.history
+                        .push_redo(RedoStep::Remove { indices, cleared }, group);
+                    page.give_back(strokes, copy)
+                }
+                UndoStep::Recoloured(changes) => {
+                    let colours: Vec<(u32, Rgba)> =
+                        changes.iter().map(|c| (c.index, c.before)).collect();
+                    page.history.push_redo(RedoStep::Recolour(changes), group);
+                    page.colour_strokes(&colours)
+                }
+                UndoStep::Added { indices } => {
+                    let (strokes, edited) = page.take_strokes(indices);
+                    let strokes = Arc::new(strokes);
+                    page.history.push_redo(RedoStep::Add { strokes }, group);
+                    edited
+                }
+            };
+            out.push(page.event(index, edited));
+            if !page.history.undo_joins(group) {
+                return true;
             }
-            UndoStep::Recoloured(changes) => {
-                let colours: Vec<(u32, Rgba)> =
-                    changes.iter().map(|c| (c.index, c.before)).collect();
-                page.history.push_redo(RedoStep::Recolour(changes));
-                page.colour_strokes(&colours)
-            }
-        };
-        out.push(page.event(index, edited));
-        true
+            let Some(step) = page.history.pop_undo() else {
+                return true;
+            };
+            next = step;
+        }
     }
 
-    /// Does again the last edit undone on page `page_index` (the one on screen, or the edit is
-    /// stale). Returns whether there was anything to redo.
+    /// Does again the last group undone on page `page_index` (the one on screen, or the call is
+    /// stale), in the order it was done. Returns whether there was anything to redo. `prepared`:
+    /// a copy of the computer's strokes it gives back ([`next_redone`](Self::next_redone)).
     pub fn redo_edit(
         &mut self,
         page_index: usize,
+        prepared: Option<Prepared>,
         out: &mut Vec<LiveEvent>,
     ) -> Result<bool, LiveEditError> {
         if page_index != self.current {
             return Err(LiveEditError::Stale);
         }
         let page = &mut self.pages[page_index];
-        let Some(step) = page.history.pop_redo() else {
+        let mut prepared = prepared;
+        let Some(mut next) = page.history.pop_redo() else {
             return Ok(false);
         };
-        let edited = match step {
-            RedoStep::Remove { indices, cleared } => {
-                let (strokes, edited) = page.take_strokes(indices);
-                page.history.push_undo(UndoStep::removed(strokes, cleared));
-                edited
+        loop {
+            let (step, group) = next;
+            let edited = match step {
+                RedoStep::Remove { indices, cleared } => {
+                    let (strokes, edited) = page.take_strokes(indices);
+                    page.history
+                        .push_undo(UndoStep::removed(strokes, cleared), group);
+                    edited
+                }
+                RedoStep::Recolour(changes) => {
+                    let colours: Vec<(u32, Rgba)> =
+                        changes.iter().map(|c| (c.index, c.after)).collect();
+                    let edited = page.colour_strokes(&colours);
+                    page.history.push_undo(UndoStep::Recoloured(changes), group);
+                    edited
+                }
+                RedoStep::Add { strokes } => {
+                    let copy = Prepared::copy_of(&mut prepared, &strokes);
+                    let indices = strokes.iter().map(|placed| placed.index).collect();
+                    let edited = page.give_back(strokes, copy);
+                    page.history.push_undo(UndoStep::Added { indices }, group);
+                    edited
+                }
+            };
+            out.push(page.event(page_index, edited));
+            if !page.history.redo_joins(group) {
+                return Ok(true);
             }
-            RedoStep::Recolour(changes) => {
-                let colours: Vec<(u32, Rgba)> =
-                    changes.iter().map(|c| (c.index, c.after)).collect();
-                let edited = page.colour_strokes(&colours);
-                page.history.push_undo(UndoStep::Recoloured(changes));
-                edited
-            }
-        };
-        out.push(page.event(page_index, edited));
-        Ok(true)
+            let Some(step) = page.history.pop_redo() else {
+                return Ok(true);
+            };
+            next = step;
+        }
     }
 
     /// « Undo the clearing »: gives back the ink of the last « Clear the page » of the page on
@@ -1549,6 +2026,16 @@ mod tests {
         matches!(event, LiveEvent::Snapshot { .. })
     }
 
+    /// The end of a tablet's stroke on a visible layer of page `page_index`.
+    fn tablet_end(page_index: usize) -> LiveEvent {
+        LiveEvent::StrokeEnd {
+            page_index,
+            pen: LivePen::Tablet,
+            id: None,
+            hidden: false,
+        }
+    }
+
     /// The events other than snapshots.
     fn events(out: &[LiveEvent]) -> Vec<&LiveEvent> {
         out.iter().filter(|e| !is_snapshot(e)).collect()
@@ -1570,7 +2057,10 @@ mod tests {
         let sent = events(&out);
         assert!(matches!(sent[0], LiveEvent::Hover { x, y } if *x == 100.0 && *y == 200.0));
         assert_eq!(*sent[1], LiveEvent::HoverEnd);
-        let LiveEvent::StrokeStart { page_index, stroke } = sent[2] else {
+        let LiveEvent::StrokeStart {
+            page_index, stroke, ..
+        } = sent[2]
+        else {
             panic!("{sent:?}");
         };
         assert_eq!(*page_index, 0);
@@ -1597,7 +2087,7 @@ mod tests {
         };
         assert_eq!(points.len(), 1);
         assert_eq!(points[0].t, 15);
-        assert_eq!(*sent[1], LiveEvent::StrokeEnd { page_index: 0 });
+        assert_eq!(*sent[1], tablet_end(0));
         assert!(matches!(sent[2], LiveEvent::Hover { .. }));
         let page = &session.pages()[0];
         assert_eq!(page.note.strokes.len(), 1);
@@ -1620,7 +2110,7 @@ mod tests {
         let sent = events(&out);
         assert!(matches!(sent[0], LiveEvent::HoverEnd));
         assert!(matches!(sent[1], LiveEvent::StrokeStart { .. }));
-        assert_eq!(*sent[2], LiveEvent::StrokeEnd { page_index: 0 });
+        assert_eq!(*sent[2], tablet_end(0));
         assert_eq!(session.pages()[0].note.strokes.len(), 2);
         assert_eq!(session.pages()[0].note.strokes[1].points[0].t, 500);
     }
@@ -1685,7 +2175,7 @@ mod tests {
         out.clear();
         // Next page while drawing: the stroke ends on page 1, page 2 is created.
         session.command(LiveCommandKind::NextPage, LiveButton::NewPage, 7, &mut out);
-        assert_eq!(*events(&out)[0], LiveEvent::StrokeEnd { page_index: 0 });
+        assert_eq!(*events(&out)[0], tablet_end(0));
         assert_eq!(snapshots(&out), 1);
         assert_eq!((session.current(), session.pages().len()), (1, 2));
         assert_eq!(session.pages()[0].note.strokes.len(), 1);
@@ -1745,7 +2235,7 @@ mod tests {
         session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
         assert_eq!((out.len(), snapshots(&out)), (1, 1));
         assert!(session.pages()[0].note.strokes.is_empty());
-        assert!(session.in_progress().is_none());
+        assert!(session.in_progress().is_empty());
         assert!(session.pages()[0].version > before);
         // Still pressing: a new stroke starts.
         out.clear();
@@ -1880,7 +2370,7 @@ mod tests {
         let mut session = running();
         let mut out = Vec::new();
         session.records(&[pen(1, 1, 50), pen(2, 2, 60)], T0, &mut out);
-        let Some(LiveEvent::StrokeStart { stroke, .. }) = session.in_progress() else {
+        let [LiveEvent::StrokeStart { stroke, .. }] = &session.in_progress()[..] else {
             panic!("no stroke in progress");
         };
         assert_eq!(stroke.points.len(), 2);
@@ -2097,7 +2587,7 @@ mod tests {
         session.records(&[pen(1, 1, 50)], T0, &mut out);
         out.clear();
         session.set_state(LiveSessionState::Reconnecting, &mut out);
-        assert_eq!(*events(&out)[0], LiveEvent::StrokeEnd { page_index: 0 });
+        assert_eq!(*events(&out)[0], tablet_end(0));
         assert_eq!(snapshots(&out), 1);
         // Records after the link came back: live again.
         out.clear();

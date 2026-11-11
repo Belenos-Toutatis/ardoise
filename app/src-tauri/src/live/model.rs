@@ -236,6 +236,24 @@ pub struct HoverPoint {
     pub y: f32,
 }
 
+/// Which pen wrote a stroke in progress (docs/design/tablet-live-classroom.md, "M14"): the tablet,
+/// or the computer's pen or mouse in the control window. Written in the events only for the
+/// computer: the tablet's events stay as they were, byte for byte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LivePen {
+    #[default]
+    Tablet,
+    Computer,
+}
+
+impl LivePen {
+    /// For `skip_serializing_if`: the tablet is the pen an event names by saying nothing.
+    pub fn is_tablet(&self) -> bool {
+        *self == LivePen::Tablet
+    }
+}
+
 /// Everything a window needs to draw the session from scratch.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -253,8 +271,11 @@ pub struct LiveSnapshot {
     /// Whether the current page turns with the tablet. A resumed sheet never does: the interface
     /// disables the quick switch on it.
     pub can_turn_page: bool,
-    /// Layer receiving new strokes (the current page's last visible one).
+    /// The tablet's layer of the current page: where its ink goes (M14: it may be hidden).
     pub layer: u32,
+    /// The computer's layer of the current page: where the computer's pen, its eraser end and the
+    /// selection act. Not given to the share's viewers.
+    pub computer_layer: u32,
     pub style: LiveStyle,
     pub view: LiveViewState,
     pub hover: Option<HoverPoint>,
@@ -313,12 +334,14 @@ pub struct RecolouredStrokes {
 
 /// A `strokesEdited` in the numbering of the share's viewers, for a page with hidden layers: they
 /// have no hidden strokes, so their list is shorter than the page's. Worked out with the edit
-/// (`feed.rs` knows nothing of the page), the same fields in the same order; `inserted` follows the
-/// order of the event's `inserted`.
+/// (`feed.rs` knows nothing of the page). Per stroke (M14: an undo may give back, a redo take, a
+/// stroke of a layer hidden since): `removed` and `recoloured` hold the visible strokes only;
+/// `inserted` follows the order of the event's `inserted`, `None` for a hidden stroke, which the
+/// viewers never get.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewerIndices {
     pub removed: Vec<u32>,
-    pub inserted: Vec<u32>,
+    pub inserted: Vec<Option<u32>>,
     pub recoloured: Vec<RecolouredStrokes>,
 }
 
@@ -378,18 +401,58 @@ pub enum LiveEvent {
         #[serde(serialize_with = "shared_snapshot")]
         snapshot: Arc<LiveSnapshot>,
     },
-    /// A stroke with its first point(s).
+    /// A stroke with its first point(s). Two strokes may be in progress at once, one per pen.
     StrokeStart {
         page_index: usize,
         stroke: LiveStroke,
+        /// Written only for the computer.
+        #[serde(skip_serializing_if = "LivePen::is_tablet")]
+        pen: LivePen,
+        /// The control window's number for the computer's gesture; `None` for the tablet.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<u32>,
+        /// The stroke's layer was hidden when the event was made: the share leaves it out.
+        #[serde(skip)]
+        hidden: bool,
     },
-    /// Appended to the stroke in progress.
+    /// Appended to the stroke in progress of that pen.
     Points {
         page_index: usize,
         points: Vec<LivePoint>,
+        #[serde(skip_serializing_if = "LivePen::is_tablet")]
+        pen: LivePen,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<u32>,
+        #[serde(skip)]
+        hidden: bool,
     },
+    /// The stroke in progress of that pen joined its page, at the tail of its list.
     StrokeEnd {
         page_index: usize,
+        #[serde(skip_serializing_if = "LivePen::is_tablet")]
+        pen: LivePen,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<u32>,
+        #[serde(skip)]
+        hidden: bool,
+    },
+    /// The stroke in progress of that pen was dropped: nothing of it joins the page (the window
+    /// cancelled it, or « Clear the page »).
+    StrokeCancel {
+        page_index: usize,
+        #[serde(skip_serializing_if = "LivePen::is_tablet")]
+        pen: LivePen,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<u32>,
+        #[serde(skip)]
+        hidden: bool,
+    },
+    /// What page `page_index` can undo and redo, after a step that came with no other event
+    /// telling it (a computer stroke recorded). Not for the share's viewers.
+    History {
+        page_index: usize,
+        can_undo: bool,
+        can_redo: bool,
     },
     /// The pen hovers here (at most one per batch: the latest position).
     Hover {

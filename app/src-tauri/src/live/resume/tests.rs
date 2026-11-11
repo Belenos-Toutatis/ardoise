@@ -2485,3 +2485,168 @@ fn new_ink_goes_on_counting_time_after_the_last_stroke_was_deleted() {
         .collect();
     assert!(times.is_sorted(), "{times:?}");
 }
+
+// --- Correcting a resumed sheet on one's own layer (M14) -----------------------------------------
+
+fn layer_op(value: serde_json::Value) -> crate::live::LayerOp {
+    serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn on_a_resumed_sheet_both_pens_start_on_the_last_visible_layer() {
+    let mut note = sheet(A4_LANDSCAPE);
+    note.layers = vec![
+        layer("Cours", true),
+        layer("Dessin", true),
+        layer("Réponses", false),
+    ];
+    let session = resumed(note, Orientation::Landscape);
+    let snapshot = session.snapshot();
+    assert_eq!((snapshot.layer, snapshot.computer_layer), (1, 1));
+    // Every layer hidden: the visible layer the resume adds, for both.
+    let mut note = sheet(A4_LANDSCAPE);
+    note.layers = vec![layer("Cours", false), layer("Réponses", false)];
+    let session = resumed(note, Orientation::Landscape);
+    let snapshot = session.snapshot();
+    assert_eq!((snapshot.layer, snapshot.computer_layer), (2, 2));
+}
+
+#[test]
+fn the_computer_writes_on_a_resumed_sheet_after_what_it_holds_and_keeps_the_slate_it_needs() {
+    use crate::live::pen::tests::{at_once, begin, end};
+    // The note's last point is at 5 000 ms: the time since the resume counts from 6 000.
+    let mut session = resumed(sheet(A4_LANDSCAPE), Orientation::Landscape);
+    let mut out = Vec::new();
+    let at = RESUMED_AT as f64 + 1_000.0;
+    session
+        .computer_call(begin(1, 0, at_once(&[10.0])), at, &mut out)
+        .unwrap();
+    session
+        .computer_call(end(1, at_once(&[20.0])), at + 40.0, &mut out)
+        .unwrap();
+    let stroke = session.pages()[0].note.strokes.last().unwrap();
+    let times: Vec<u32> = stroke.points.iter().map(|p| p.t).collect();
+    assert_eq!(
+        times,
+        [5000 + RESUME_GAP_MS + 1_000, 5000 + RESUME_GAP_MS + 1_040]
+    );
+    assert_eq!(
+        session.pages()[0].note.created,
+        CREATED,
+        "the note's date stays"
+    );
+    // The tablet's next sample is not pushed by the computer's.
+    let point = write_at(&mut session, 1, 1, RESUMED_AT + 1_010);
+    assert_eq!(point.t, 5000 + RESUME_GAP_MS + 1_010);
+
+    // Under the blackboard, the computer's ink keeps the slate like the tablet's does.
+    let mut note = sheet(A4_LANDSCAPE);
+    note.background.paper = Paper::Kraft;
+    let mut session = resumed(note, Orientation::Landscape);
+    set_board(&mut session, true);
+    assert!(!session.pages()[0].ink_on_board());
+    session
+        .computer_call(begin(1, 0, at_once(&[10.0])), at, &mut out)
+        .unwrap();
+    session
+        .computer_call(end(1, Vec::new()), at, &mut out)
+        .unwrap();
+    assert!(session.pages()[0].ink_on_board());
+    assert_eq!(session.pages()[0].note.background.paper, Paper::Slate);
+}
+
+#[test]
+fn the_computer_s_ink_on_a_resumed_sheet_keeps_all_its_file_holds() {
+    use crate::live::pen::tests::{at_once, begin, end};
+    let (_dir, library) = library();
+    let path = filed(&library, "Classe", &full_file(A5));
+    let before = library.read(&path).unwrap().file;
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    assert!(
+        hub.computer_pen(begin(1, 0, at_once(&[300.0, 400.0])))
+            .unwrap()
+    );
+    assert!(hub.computer_pen(end(1, Vec::new())).unwrap());
+    let saved = hub.stop().unwrap();
+    assert_eq!(saved, [path_text(&path)]);
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.strokes.len(), 3);
+    assert_eq!(written.note.strokes[2].tool, Tool::FeltTip);
+    assert_keeps_all_but_ink(&written, &before);
+    assert!(
+        written.original_note.is_some(),
+        "the sheet before it, for « back to the original »"
+    );
+}
+
+#[test]
+fn a_deliberate_change_of_its_layers_is_a_change_of_the_sheet() {
+    // Choosing where the pens act writes nothing.
+    let (_dir, library) = library();
+    let mut file = full_file(A5);
+    file.note.layers = vec![layer("Cours", true), layer("Réponses", true)];
+    let path = filed(&library, "", &file);
+    let (bytes, stamp) = (std::fs::read(&path).unwrap(), FileStamp::of(&path).unwrap());
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    hub.layers(0, layer_op(json!({ "kind": "computer", "layer": 0 })))
+        .unwrap();
+    hub.layers(0, layer_op(json!({ "kind": "tablet", "layer": 0 })))
+        .unwrap();
+    std::thread::sleep(config().save_interval * 2);
+    assert_untouched(&hub, &path, &bytes, &stamp);
+
+    // A layer renamed, without any ink: written, as in the editor.
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    hub.layers(
+        0,
+        layer_op(json!({ "kind": "rename", "layer": 1, "name": "Correction" })),
+    )
+    .unwrap();
+    wait_until("the name in the file", || {
+        library
+            .read(&path)
+            .is_ok_and(|loaded| loaded.file.note.layers[1].name == "Correction")
+    });
+    assert_eq!(hub.snapshot().saved, [path_text(&path)]);
+    hub.stop().unwrap();
+
+    // On a sheet whose layers are all hidden, the layer the resume added is written with the one
+    // added on purpose: the layers as they are.
+    let mut file = full_file(A5);
+    file.note.layers = vec![layer("Réponses", false)];
+    let path = filed(&library, "", &file);
+    let before = library.read(&path).unwrap().file.note;
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    hub.layers(0, layer_op(json!({ "kind": "add" }))).unwrap();
+    let saved = hub.stop().unwrap();
+    assert_eq!(saved, [path_text(&path)]);
+    let written = library.read(&path).unwrap().file.note;
+    assert_eq!(
+        written.layers,
+        [
+            layer("Réponses", false),
+            layer("Calque 2", true),
+            layer("Calque 3", true)
+        ]
+    );
+    assert_eq!(written.strokes, before.strokes, "its ink as it was");
+
+    // A merge moves the strokes: a change of the sheet like any other.
+    let mut file = full_file(A5);
+    file.note.layers = vec![layer("Cours", true), layer("Réponses", false)];
+    file.note.strokes[0].layer = 1;
+    let path = filed(&library, "", &file);
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    hub.layers(0, layer_op(json!({ "kind": "merge", "layer": 1 })))
+        .unwrap();
+    hub.stop().unwrap();
+    let written = library.read(&path).unwrap().file.note;
+    assert_eq!(written.layers, [layer("Cours", true)]);
+    let starts: Vec<f32> = written.strokes.iter().map(|s| s.points[0].x).collect();
+    assert_eq!(starts, [200.0, 100.0], "the merged ink above");
+}
