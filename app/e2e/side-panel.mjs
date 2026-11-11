@@ -48,8 +48,16 @@ export async function collapsePanel(app) {
  * checks the dot and the tab's hidden text, then cancels (nothing is kept). The journeys have no microphone, so a PC
  * without one cannot record: a log line says so and the function returns false (vitest checks the dot with
  * `mock-narration`). `l`: the journey's catalog lookup.
+ *
+ * The journeys run on the user's own PC, which has a microphone: a test must not switch it on behind their back. So
+ * nothing is recorded unless `ARDOISE_E2E_MICROPHONE=1` asks for it; otherwise a log line says the check was left to
+ * vitest.
  */
 export async function checkRecordingDot(app, l) {
+  if (process.env.ARDOISE_E2E_MICROPHONE !== '1') {
+    console.log('    skipped: pas d’enregistrement réel sans ARDOISE_E2E_MICROPHONE=1 (le micro de ce PC reste éteint) ; pastille rouge vérifiée par vitest (O12)');
+    return false;
+  }
   await openTab(app, 'sound');
   const panel = tabPanel('sound');
   const visible = (selector) => `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; })()`;
