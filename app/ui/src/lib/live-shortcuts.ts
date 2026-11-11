@@ -11,6 +11,9 @@
  * Entries in the order of the help; a key with `shown: false` is a variant the mapping takes too (Shift + a letter,
  * `=` for +, the keypad…). The `presentation` group holds the keys of the projected window, which do nothing in the
  * control window (`clearMarks`), so that the help does not promise what its window does not do.
+ *
+ * `LiveView` gives this table to `ShortcutsHelp` (its Aide tab). `LiveView.shortcuts.test.ts` runs a probe per entry:
+ * the shown chord must act in the mounted window.
  */
 import type { Chord, LiveKeyContext, Shortcut, ShortcutKey } from './shortcuts';
 

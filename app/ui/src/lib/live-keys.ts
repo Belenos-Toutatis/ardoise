@@ -14,11 +14,17 @@
  * | W                                      | page width              |
  * | Delete, Backspace                      | clear the marks written |
  * |                                        | over the presentation   |
+ * |                                        | (projected window only) |
  * | Shift + arrows                         | move the projected area |
  * | Esc, Ctrl + W, Ctrl + F4               | leave                   |
  *
  * The control window also has the keys of touching up (`liveEditKeyAction`, at the end). Ctrl + Q is
  * for each window to answer (`closeKey`).
+ *
+ * The same keys, as data, are `lib/live-shortcuts.ts` (`LIVE_SHORTCUTS`): what the control window's Aide tab shows
+ * and what its tests confront with this mapping, both ways (`live-shortcuts.test.ts`). A key added or changed here
+ * is a row to add or change there, or the sweep fails. Delete and Backspace without a selection are the
+ * presentation window's alone: the control window does nothing with `clearMarks`, so its help lists them apart.
  *
  * Presentation remotes send Page Up / Page Down. Keys typed in a field are left alone. Space
  * always means "next page", even with a button focused (the button of a tool just used would
@@ -157,7 +163,8 @@ export type LiveEditKeyAction =
  * | P                                  | the Pen tool on or off (M14, the editor's key)  |
  * | Ctrl + Z                           | undo a delete, a change of colour, a clearing   |
  * | Ctrl + Y, Ctrl + Shift + Z         | redo                                            |
- * | Delete, Backspace (with selection) | delete the selection (otherwise: the marks)     |
+ * | Delete, Backspace (with selection) | delete the selection (otherwise: the marks,     |
+ * |                                    | which only the projected window acts on)        |
  * | Esc (with selection)               | deselect (otherwise: what Esc does)             |
  */
 export function liveEditKeyAction(e: KeyInput, hasSelection: boolean): LiveEditKeyAction | null {

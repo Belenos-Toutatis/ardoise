@@ -2,7 +2,8 @@
 /// <reference types="node" />
 /**
  * The live control window and the share on the network (M11): the live view says « live » while
- * it is open, its toolbar has « Partager sur le réseau », and its keys leave the share panel alone.
+ * it is open, its Projection tab has « Partager sur le réseau » (the toolbar has none since M16), and its keys leave
+ * the share panel alone.
  */
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,6 +52,7 @@ beforeEach(() => {
   resetMockShare();
   share.reset();
   setLocale('fr');
+  localStorage.clear();
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => new FakeContext() as unknown as RenderingContext);
   mockLiveConfig.pen = false;
   mockLiveConfig.waitMs = 30;
@@ -99,13 +101,17 @@ describe('live view and the share on the network', () => {
     await vi.waitFor(() => expect(mockShareShown).toEqual([{ kind: 'live' }]));
   });
 
-  it('has the button « Partager sur le réseau » in its toolbar, which opens the panel and starts the share', async () => {
+  it('has the button « Partager sur le réseau » in its Projection tab, which opens the panel and starts the share', async () => {
     const view = render();
     const button = view.action('share')!;
-    expect(button.closest('[role="toolbar"]')).not.toBeNull();
+    // Not in the toolbar any more: in the share block of the Projection tab.
+    expect(view.target.querySelector('.live-toolbar [data-action="share"]')).toBeNull();
+    expect(button.closest('[data-tab-panel]')?.getAttribute('data-tab-panel')).toBe('projection');
+    expect(button.closest('[data-section="share"]')).not.toBeNull();
     expect(button.textContent).toContain('Partager sur le réseau');
     expect(button.classList.contains('active')).toBe(false);
     expect(view.target.querySelector('.share-indicator')).toBeNull();
+    expect(view.target.querySelector('[data-slot="share-status"]')?.textContent).toContain('Un autre ordinateur du réseau');
 
     button.click();
     await tick();
@@ -114,11 +120,14 @@ describe('live view and the share on the network', () => {
     await tick();
     expect(button.classList.contains('active')).toBe(true);
     expect(view.target.querySelector('.share-indicator')?.textContent).toBe('0');
+    // A share that runs is the Projection tab's blue dot, visible while the pane is collapsed too.
+    expect(view.target.querySelector('[role="tab"][data-tab="projection"]')?.getAttribute('data-dot')).toBe('live');
 
     mockShareSetViewers(2);
     await tick();
     expect(view.target.querySelector('.share-indicator')?.textContent).toBe('2');
     expect(button.getAttribute('aria-label')).toContain('2 écrans connectés');
+    expect(view.target.querySelector('[data-slot="share-status"]')?.textContent).toContain('2 écrans connectés');
   });
 
   it('is in English too', async () => {
