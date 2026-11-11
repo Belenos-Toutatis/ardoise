@@ -678,6 +678,8 @@
     "liveNotRunning": "Live mode is not running.",
     "liveEditStale": "The page changed in the meantime: select again.",
     "liveEditInvalid": "This edit is not possible: select again.",
+    "liveLayerHidden": "The chosen layer is hidden: show it to write on it.",
+    "liveLayerInvalid": "This layer operation is not possible.",
     "noMonitor": "No screen available for the presentation.",
     "simulationOnly": "This command only works with the simulated tablet.",
     "tablet": "Problem with the tablet: {detail}",
@@ -950,7 +952,7 @@
       "up": "Move “{name}” up",
       "down": "Move “{name}” down",
       "merge": "Merge “{name}” into the layer below",
-      "hiddenActive": "The active layer is hidden: show it or pick another layer to draw."
+      "hiddenActive": "The chosen layer is hidden: show it or choose another one to draw."
     },
     "zoom": {
       "label": "Zoom",
@@ -1031,6 +1033,34 @@
       "hint": "Export the replay as a video (MP4, WebM) or an animated image (GIF, WebP)…"
     },
     "backgroundLoadFailed": "This note's background image could not be loaded ({message}). The note opens without it; the image stays in the file unless you remove it."
+  },
+  "layers": {
+    "title": "Layers",
+    "list": "Layers of the page",
+    "add": "Add a layer",
+    "choose": "Act on “{name}”",
+    "chosen": {
+      "editor": "The pen, the eraser and the selection act on “{name}”",
+      "live": "The computer acts on “{name}”"
+    },
+    "show": "Show “{name}”",
+    "hide": "Hide “{name}”",
+    "rename": "Rename “{name}”",
+    "nameField": "Name of layer {n}",
+    "up": "Move “{name}” up",
+    "down": "Move “{name}” down",
+    "merge": "Merge “{name}” into the layer below",
+    "mergeNoUndo": "Ctrl+Z does not undo it.",
+    "tabletHere": "The tablet writes on “{name}”",
+    "tabletSend": "Make the tablet write on “{name}”",
+    "warn": {
+      "tabletHidden": "The tablet writes on “{name}”, which is hidden: what the pupil writes is neither projected nor shared.",
+      "chosenHidden": "The chosen layer, “{name}”, is hidden: show it to write on it."
+    },
+    "help": {
+      "editor": "The pen, the eraser and the selection act on the chosen layer (framed).",
+      "live": "The computer's pen, its eraser and the selection act on the chosen layer (framed). The tablet writes on the one marked with the tablet icon."
+    }
   },
   "replay": {
     "bar": "Replay controls",
@@ -1213,6 +1243,18 @@
       "webp": "Unchecked: the background is transparent, only the ink is exported.",
       "svg": "Unchecked: only the ink is exported, without paper.",
       "pdf": "Unchecked: only the ink is exported, without paper."
+    },
+    "layers": {
+      "legend": "Layers",
+      "separate": "Separate",
+      "merged": "Merged",
+      "separateHint": {
+        "svg": "One Inkscape layer per layer of the note, to show or hide in Inkscape.",
+        "pdf": "PDF layers, to show or hide in Acrobat Reader or Firefox. Some readers show them all, with no choice."
+      },
+      "mergedHint": "One drawing, as on screen.",
+      "flat": "An image has no layers: they are always merged.",
+      "hiddenNever": "Layers hidden in Ardoise are never exported: a hidden layer may hold the answers."
     },
     "destinationFile": "You'll choose the file to create next.",
     "destinationFolder": "Each note becomes one file, in the folder you'll choose. Existing files are never overwritten.",
@@ -1469,6 +1511,7 @@
     "dismiss": "Dismiss the message",
     "toolbar": "Live mode tools",
     "style": "Writing style",
+    "tabletStyle": "Tablet",
     "tool": "Tool",
     "color": "Colour",
     "width": "Width",
@@ -1490,11 +1533,21 @@
     "clear": "Clear the page",
     "board": "Blackboard",
     "laser": "Laser pointer",
+    "computer": {
+      "label": "Computer"
+    },
+    "pen": {
+      "toggle": "Pen",
+      "hint": "Write with the computer's pen or mouse on the chosen layer (P)",
+      "help": "Pen or mouse: write · eraser end of the pen: erase whole strokes of the chosen layer · finger: move and zoom the projected area.",
+      "style": "Computer's ink",
+      "styleHint": "Choose the computer's tool, colour and width"
+    },
     "select": {
       "label": "Touch up",
       "toggle": "Select",
       "hint": "Pick strokes with a lasso or a click to delete them or change their colour (V)",
-      "help": "Lasso: select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect. The colour swatches change the colour of the selection. What the tablet writes is never part of the selection.",
+      "help": "Lasso: select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect. The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked.",
       "bar": "Touch up the selection",
       "count": "Selected strokes: {count}",
       "delete": "Delete",
@@ -1503,7 +1556,7 @@
     },
     "undo": "Undo",
     "redo": "Redo",
-    "undoHint": "Undo the last touch-up or the last clearing of the page (Ctrl+Z); what the tablet wrote is not undone",
+    "undoHint": "Undo the computer's last action: a stroke, an erasing, a touch-up or the clearing of the page (Ctrl+Z); what the tablet wrote is not undone",
     "redoHint": "Redo what was just undone (Ctrl+Y)",
     "preview": {
       "label": "Preview of page {page}; the blue rectangle shows the projected area",
@@ -1594,6 +1647,10 @@
           "keys": "Delete, Backspace",
           "action": "Clear the annotations drawn over the presentation (projected window)"
         },
+        "pen": {
+          "keys": "P",
+          "action": "Pen tool: write with the computer's pen or mouse"
+        },
         "select": {
           "keys": "V",
           "action": "Select tool (lasso or click on a stroke)"
@@ -1604,7 +1661,7 @@
         },
         "undo": {
           "keys": "Ctrl + Z, Ctrl + Y",
-          "action": "Undo, redo a delete, a change of colour or the clearing of the page"
+          "action": "Undo, redo a stroke or an erasing of the computer, a delete, a change of colour or the clearing of the page"
         }
       }
     },

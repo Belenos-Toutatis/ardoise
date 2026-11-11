@@ -7,7 +7,19 @@ import type { Decision, DiagnosticEvent, DiagnosticOptions } from './diagnostic'
 import type { LanguagePreference } from './i18n-core';
 import { t } from './i18n.svelte';
 import type { InkspaceProgress, InkspaceReport, InkspaceSource } from './inkspace';
-import type { LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStopped, LiveStrokesEdit, LiveStyle, LiveViewState, MonitorInfo } from './live';
+import type {
+  LiveBatch,
+  LiveCommand,
+  LiveComputerPenInput,
+  LiveLayerOp,
+  LiveMark,
+  LiveSnapshot,
+  LiveStopped,
+  LiveStrokesEdit,
+  LiveStyle,
+  LiveViewState,
+  MonitorInfo,
+} from './live';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
 import { mockShareSubscribe } from './mock-share';
@@ -367,6 +379,22 @@ export const api = {
   liveUndoEdit: (pageIndex: number) => call<boolean>('live_undo_edit', { pageIndex }),
   /** Does again the last edit undone on page `pageIndex`, likewise. False when there was none. */
   liveRedoEdit: (pageIndex: number) => call<boolean>('live_redo_edit', { pageIndex }),
+  /**
+   * One call of the computer pen's stroke (M14: the control window's pen or mouse): `begin`, `points`,
+   * `end` or `cancel`, always through the window's queue so that they reach Rust in order. `begin` is
+   * refused with `liveNotRunning`, `liveEditStale` (not the page on screen), `liveLayerHidden` (the computer's
+   * layer is hidden) or `liveEditInvalid`. Returns whether the stroke goes on: false once the session ended
+   * it or dropped it (page change, quarter turn, « Clear the page », stop, a newer stroke, the limit of
+   * points), after which the window stops sending for that gesture; for `cancel`, whether there was one.
+   */
+  liveComputerPen: (input: LiveComputerPenInput) => call<boolean>('live_computer_pen', { input }),
+  /**
+   * Operates on the layers of page `pageIndex`, the one on screen (M14): add, rename, show or hide, move,
+   * merge down, choose the layer of the computer or of the tablet. Refused as a whole with
+   * `liveEditStale` (another page), `liveLayerInvalid` or `liveNotRunning` (every op but `tablet` and
+   * `computer`, which change no note). Every window gets a snapshot; Ctrl+Z does not undo it.
+   */
+  liveLayers: (pageIndex: number, op: LiveLayerOp) => call<void>('live_layers', { pageIndex, op }),
   liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
   /**
    * The marks written over the presentation on page `pageIndex`, the whole list: the viewers of

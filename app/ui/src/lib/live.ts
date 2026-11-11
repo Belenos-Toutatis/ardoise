@@ -34,9 +34,11 @@ export interface LiveCommand {
 /**
  * What `live_edit_strokes` does to strokes chosen in the control window: `indices` are places in
  * `LiveState.strokes` (the finished strokes of the page, in any order, without duplicates).
+ * `group`: the number of an eraser gesture (any number the window picks, one per gesture); the
+ * steps of one group are undone and redone together, in one command.
  */
 export type LiveStrokesEdit =
-  | { kind: 'delete'; indices: number[] }
+  | { kind: 'delete'; indices: number[]; group?: number }
   | { kind: 'recolour'; indices: number[]; color: Rgba };
 
 export interface MonitorInfo {
@@ -53,6 +55,51 @@ export interface MonitorInfo {
   /** The saved choice. */
   chosen: boolean;
 }
+
+/** Which pen wrote a stroke: the tablet's, or the computer's (M14: its pen or the mouse of the control window). */
+export type LivePen = 'tablet' | 'computer';
+
+/**
+ * One sample of a computer pen stroke, as the control window sends it (`live_computer_pen`): `x`, `y`
+ * in page units of the page shown, `p` the pressure 0..1 (0.5 for a pressed mouse), `ms` the event's
+ * `timeStamp`. Rust turns `ms`, against `now` of the same call, into a wall-clock time.
+ */
+export interface ComputerSample {
+  x: number;
+  y: number;
+  p: number;
+  ms: number;
+}
+
+/**
+ * What `live_computer_pen` takes. `stroke` is the window's number for the gesture (a counter from 1): Rust
+ * ignores a call for another number than the stroke in progress, and a `begin` while one is in progress ends
+ * that one first (kept). `now` is `performance.now()` when the call is made, the clock of `ms`. The stroke
+ * goes on the page's computer layer, with `style` (`LiveStyle`, sanitized by Rust). At most 4096 samples a
+ * call. Samples without finite coordinates are dropped, `p` is clamped.
+ */
+export type LiveComputerPenInput =
+  | { kind: 'begin'; stroke: number; pageIndex: number; style: LiveStyle; samples: ComputerSample[]; now: number }
+  | { kind: 'points'; stroke: number; samples: ComputerSample[]; now: number }
+  | { kind: 'end'; stroke: number; samples: ComputerSample[]; now: number }
+  | { kind: 'cancel'; stroke: number };
+
+/**
+ * What `live_layers` does to the layers of page `pageIndex` (the one on screen). Layers are indices in
+ * `Note.layers`, bottom first, sent as plain numbers; a bad one is refused as a whole with
+ * `liveLayerInvalid`. `add`: a layer on top, which the computer then acts on. `merge`: `layer` into the one
+ * below (the lower one stays, with its name); it moves places, so the page's undo and redo are dropped.
+ * `computer`, `tablet`: the layer the computer's pen (and eraser and selection), or the tablet, writes on;
+ * they change no note. No op ends a stroke in progress, and none is undone by Ctrl+Z.
+ */
+export type LiveLayerOp =
+  | { kind: 'add' }
+  | { kind: 'rename'; layer: number; name: string }
+  | { kind: 'visible'; layer: number; visible: boolean }
+  | { kind: 'move'; from: number; to: number }
+  | { kind: 'merge'; layer: number }
+  | { kind: 'computer'; layer: number }
+  | { kind: 'tablet'; layer: number };
 
 export type LiveSessionState = 'idle' | 'waiting' | 'live' | 'reconnecting';
 
@@ -80,8 +127,16 @@ export interface LiveSnapshot {
    * (the quick switch is disabled there). Absent on the share's viewers, which do not need it.
    */
   canTurnPage?: boolean;
-  /** Layer receiving new strokes: the current page's last visible one. */
+  /**
+   * The layer the tablet writes on, an index in `page.layers` (M14: it may be a hidden one, which the
+   * presentation and the share then do not show).
+   */
   layer: number;
+  /**
+   * The layer the computer's pen, eraser and selection act on. Absent on the share's viewers, which
+   * do not need it (read it as `layer`).
+   */
+  computerLayer?: number;
   style: LiveStyle;
   view: LiveViewState;
   hover: { x: number; y: number } | null;
@@ -175,9 +230,24 @@ export interface LiveStrokesEdited {
 
 export type LiveEvent =
   | { type: 'snapshot'; snapshot: LiveSnapshot }
-  | { type: 'strokeStart'; pageIndex: number; stroke: LiveStroke }
-  | { type: 'points'; pageIndex: number; points: LivePoint[] }
-  | { type: 'strokeEnd'; pageIndex: number }
+  /**
+   * The strokes in progress, one per pen (`pen` is written only for the computer's, `id` is the window's
+   * number of its gesture: `LiveComputerPenInput.stroke`). The two may interleave: events of the
+   * two pens are never merged, and a stroke of one pen never ends the other's.
+   */
+  | { type: 'strokeStart'; pageIndex: number; stroke: LiveStroke; pen?: 'computer'; id?: number }
+  | { type: 'points'; pageIndex: number; points: LivePoint[]; pen?: 'computer'; id?: number }
+  | { type: 'strokeEnd'; pageIndex: number; pen?: 'computer'; id?: number }
+  /**
+   * The stroke in progress of that pen is dropped, not kept (the computer's `cancel`, or « Clear the
+   * page », which drops both pens' strokes).
+   */
+  | { type: 'strokeCancel'; pageIndex: number; pen?: 'computer'; id?: number }
+  /**
+   * What the page can undo or redo changed without strokes leaving or coming back (a computer stroke
+   * was recorded as a step). Never sent to the share's viewers.
+   */
+  | { type: 'history'; pageIndex: number; canUndo: boolean; canRedo: boolean }
   | { type: 'hover'; x: number; y: number }
   | { type: 'hoverEnd' }
   | { type: 'view'; view: LiveViewState }

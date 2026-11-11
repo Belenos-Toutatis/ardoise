@@ -1000,7 +1000,7 @@ describe('note editor', () => {
     await tick();
     await drag(line(5000, 15000, 18000));
     expect(paths()).toHaveLength(0);
-    expect(target.textContent).toContain('Le calque actif est masqué');
+    expect(target.textContent).toContain('Le calque choisi est masqué');
     input('Afficher « Calque 1 »').click();
     await tick();
     expect(paths()).toHaveLength(3);
