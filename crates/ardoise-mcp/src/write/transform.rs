@@ -1,7 +1,8 @@
 //! `merge_notes`, `split_note`, `straighten_shapes`: the operations that make notes out of
 //! notes, and the one that redraws ink. Merging is the app's own code; splitting is
 //! `ardoise_core::ops`, what the editor's split uses, and straightening is
-//! `ardoise_ink::shapes::straighten`, applied the way the editor applies it. Both, like every change
+//! `ardoise_ink::straighten_with`, applied the way the editor applies it with the user's setting
+//! next to its button (M15). Both, like every change
 //! of ink, go through copies (`revision.rs`): the original is never written.
 
 use std::collections::{HashMap, HashSet};
@@ -12,7 +13,7 @@ use ardoise_core::note::Note;
 use ardoise_core::ops::{self, NewNote};
 use ardoise_hwr::structure::Item;
 use ardoise_hwr::{Language, Recognition};
-use ardoise_ink::{Shape, Straightened, Stroke, straighten};
+use ardoise_ink::{Shape, ShapeTuning, Straightened, Stroke, straighten_with};
 use chrono::{DateTime, Local};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -63,6 +64,14 @@ pub struct StraightenArgs {
     pub note: String,
     /// Indices of the strokes to try (from `get_note` with `strokes`, or the `strokes` of the drawings in `get_note_text`'s structure). Default: the strokes of the drawings that Windows' ink analysis finds on the visible layers (an error tells when the analysis is not available on this PC: then give them).
     pub strokes: Option<Vec<usize>>,
+    /// How far a stroke may stray from its ideal shape for this call only: 1 (strict) to 5 (lenient), 3 being the app's original. A number, rounded to a whole step. Default: the user's setting next to the editor's button (`[shapes]` of `ardoise.toml`). Out of range values are brought within the limits.
+    pub tolerance: Option<f64>,
+    /// Smallest line or arrow, in millimetres, for this call only: 5 to 25 (a closed shape needs 3 mm more). Default: the user's setting. Below 10 mm, letters may be straightened.
+    pub min_size_mm: Option<f64>,
+    /// Make a line, arrow, rectangle or ellipse axis within this many degrees of horizontal or vertical exactly so, for this call only: 1 to 10, `0` for never. Default: the user's setting.
+    pub snap_angle_deg: Option<f64>,
+    /// Make a circle or a square of an ellipse or rectangle within this percentage of round or square, for this call only: 2 to 20, `0` for never. Default: the user's setting.
+    pub snap_round_percent: Option<f64>,
 }
 
 /// The words the app adds to a title (`library.assemble.defaultTitle`, `editor.split.titleTime`,
@@ -94,6 +103,15 @@ pub(super) struct Words {
     pub before_splitting: &'static str,
     /// The account entry of `straighten_shapes`, followed by the number of shapes (colon included).
     pub straightened: &'static str,
+    /// The values used when they are not the app's original ones, after the account entry:
+    /// "(tolerance 4, ...)".
+    pub tolerance: &'static str,
+    pub min_size: &'static str,
+    pub snap_angle: &'static str,
+    pub snap_round: &'static str,
+    pub off: &'static str,
+    /// The decimal mark of the language ("7,5 mm" in French, "7.5 mm" in English).
+    pub decimal: char,
 }
 
 pub(super) fn words(language: Language) -> Words {
@@ -114,6 +132,12 @@ pub(super) fn words(language: Language) -> Words {
             before_retouching: "avant retouche",
             before_splitting: "avant découpe",
             straightened: "Formes redressées :",
+            tolerance: "tolérance",
+            min_size: "taille minimale",
+            snap_angle: "alignement horizontal/vertical",
+            snap_round: "alignement cercle/carré",
+            off: "désactivé",
+            decimal: ',',
         },
         Language::En => Words {
             assembled: "assembled",
@@ -131,6 +155,12 @@ pub(super) fn words(language: Language) -> Words {
             before_retouching: "before retouching",
             before_splitting: "before splitting",
             straightened: "Shapes straightened:",
+            tolerance: "tolerance",
+            min_size: "minimum size",
+            snap_angle: "horizontal/vertical snapping",
+            snap_round: "circle/square snapping",
+            off: "off",
+            decimal: '.',
         },
     }
 }
@@ -430,10 +460,131 @@ pub(super) fn keep_previous(
     Ok(library.trash_copy(&copy, &beside)?)
 }
 
+/// The values `straighten_shapes` used: the user's setting, with what the call gave instead.
+#[derive(Debug, Clone, PartialEq)]
+struct UsedTuning {
+    tuning: ShapeTuning,
+    /// Whether the call changed at least one value, and whether it gave them all.
+    source: &'static str,
+    /// The arguments that were out of range and were brought within the limits.
+    clamped: Vec<&'static str>,
+}
+
+impl UsedTuning {
+    /// `settings` brought within the limits, then each value the call gives instead (brought
+    /// within the limits too; `0` turns an alignment off).
+    fn of(settings: ShapeTuning, args: &StraightenArgs) -> UsedTuning {
+        let mut tuning = settings.clamped();
+        let mut clamped = Vec::new();
+        let mut given = 0;
+        if let Some(tolerance) = args.tolerance {
+            given += 1;
+            // The steps are whole: 4.0 is 4, 3.6 is 4 (a rounding is not a clamping).
+            let step = tolerance.round();
+            let within = step.clamp(
+                f64::from(ShapeTuning::TOLERANCE_MIN),
+                f64::from(ShapeTuning::TOLERANCE_MAX),
+            );
+            if within != step {
+                clamped.push("tolerance");
+            }
+            tuning.tolerance = within as u8;
+        }
+        if let Some(size) = args.min_size_mm {
+            given += 1;
+            let within = size.clamp(ShapeTuning::MIN_SIZE_MM_MIN, ShapeTuning::MIN_SIZE_MM_MAX);
+            if within != size {
+                clamped.push("min_size_mm");
+            }
+            tuning.min_size_mm = within;
+        }
+        // `0` is off; anything else is a value within its limits.
+        let mut alignment = |name: &'static str, value: Option<f64>, min: f64, max: f64| {
+            let value = value?;
+            given += 1;
+            if value == 0.0 {
+                return Some(None);
+            }
+            let within = value.clamp(min, max);
+            if within != value {
+                clamped.push(name);
+            }
+            Some(Some(within))
+        };
+        if let Some(angle) = alignment(
+            "snap_angle_deg",
+            args.snap_angle_deg,
+            ShapeTuning::SNAP_ANGLE_DEG_MIN,
+            ShapeTuning::SNAP_ANGLE_DEG_MAX,
+        ) {
+            tuning.snap_angle_deg = angle;
+        }
+        if let Some(round) = alignment(
+            "snap_round_percent",
+            args.snap_round_percent,
+            ShapeTuning::SNAP_ROUND_PERCENT_MIN,
+            ShapeTuning::SNAP_ROUND_PERCENT_MAX,
+        ) {
+            tuning.snap_round_percent = round;
+        }
+        let source = match given {
+            0 => "settings",
+            4 => "arguments",
+            _ => "settings_and_arguments",
+        };
+        UsedTuning {
+            tuning,
+            source,
+            clamped,
+        }
+    }
+
+    /// What the answer says: the values (`0` for an alignment that is off), where they come from
+    /// and which arguments were brought within their limits.
+    fn to_json(&self) -> serde_json::Value {
+        json!({
+            "tolerance": self.tuning.tolerance,
+            "min_size_mm": self.tuning.min_size_mm,
+            "snap_angle_deg": self.tuning.snap_angle_deg.unwrap_or(0.0),
+            "snap_round_percent": self.tuning.snap_round_percent.unwrap_or(0.0),
+            "source": self.source,
+            "clamped": self.clamped,
+        })
+    }
+
+    /// The text the account entry adds: nothing for the app's original values.
+    fn account_suffix(&self, word: &Words) -> String {
+        let tuning = &self.tuning;
+        if *tuning == ShapeTuning::default() {
+            return String::new();
+        }
+        // Numbers in the language of the app: a decimal comma in French.
+        let number = |value: f64| value.to_string().replace('.', &word.decimal.to_string());
+        let degrees = |value: Option<f64>, unit: &str| {
+            value.map_or_else(
+                || word.off.to_owned(),
+                |value| format!("{}{unit}", number(value)),
+            )
+        };
+        format!(
+            " ({} {}, {} {} mm, {} {}, {} {})",
+            word.tolerance,
+            tuning.tolerance,
+            word.min_size,
+            number(tuning.min_size_mm),
+            word.snap_angle,
+            degrees(tuning.snap_angle_deg, "°"),
+            word.snap_round,
+            degrees(tuning.snap_round_percent, " %"),
+        )
+    }
+}
+
 /// `straighten_shapes`: the shapes are redrawn on a copy of the note, which the original never
 /// stops being; on a note that is already a revision they are redrawn in it (its version before
 /// goes to the trash, like `edit_revision`'s).
 pub fn straighten_shapes(host: &Host, args: StraightenArgs) -> ToolResult {
+    let used = UsedTuning::of(host.environment.shape_tuning(), &args);
     let library = host.library()?;
     let entry = find_note(&library, &args.note)?;
     let loaded = library.read(&entry.path)?;
@@ -455,7 +606,7 @@ pub fn straighten_shapes(host: &Host, args: StraightenArgs) -> ToolResult {
         }
     };
     let given: Vec<Stroke> = selected.iter().map(|&i| note.strokes[i].clone()).collect();
-    let groups = straighten(&given);
+    let groups = straighten_with(&given, &used.tuning);
     if groups.is_empty() {
         // Nothing is a clear shape: nothing is saved, no copy is made.
         return json_result(json!({
@@ -463,6 +614,7 @@ pub fn straighten_shapes(host: &Host, args: StraightenArgs) -> ToolResult {
             "saved": false,
             "strokes_tried": selected,
             "chosen_by": chosen_by,
+            "tuning": used.to_json(),
             "note": summary_at(&library, &entry.path)?,
         }));
     }
@@ -482,7 +634,12 @@ pub fn straighten_shapes(host: &Host, args: StraightenArgs) -> ToolResult {
     let strokes = replace_straightened(&note.strokes, &selected, &groups);
     let new_count = strokes.len();
     let word = words(host.environment.language());
-    let account = format!("{} {}", word.straightened, groups.len());
+    let account = format!(
+        "{} {}{}",
+        word.straightened,
+        groups.len(),
+        used.account_suffix(&word)
+    );
     let mut result = json!({
         "straightened": groups.len(),
         "saved": true,
@@ -490,6 +647,7 @@ pub fn straighten_shapes(host: &Host, args: StraightenArgs) -> ToolResult {
         "strokes_tried": selected,
         "chosen_by": chosen_by,
         "stroke_count": new_count,
+        "tuning": used.to_json(),
     });
     if loaded.file.revision.is_some() {
         let (saved, kept) = edit_in_place(

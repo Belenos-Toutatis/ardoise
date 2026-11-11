@@ -32,8 +32,14 @@
    * (`lib/editor/shapes.ts`, the WebAssembly geometry); "Revenir à l'original" puts back the ink
    * the note had when it came from the tablet or before its first edit (`note_original`,
    * `lib/editor/original.ts`). Both are one undoable step, saved like any edit.
+   *
+   * Milestone M15: "Redresser les formes" follows a setting (`AppState.shapes`, kept through
+   * `api.setShapes` a moment after each change and when its panel closes). While the panel next to
+   * the button is open, the canvas previews what the selection would give (`straightenPreview`,
+   * recomputed at most once per frame) and the panel counts the shapes; nothing changes in the
+   * note until the button, the F key or the panel's « Redresser » straightens.
    */
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, onSessionEnding, type AppState } from '../../lib/api';
   import { NoteLoads, bridgeScreens } from '../../lib/app-bridge.svelte';
   import { loadCustomColors, rememberCustomColor } from '../../lib/editor/colors';
@@ -46,7 +52,16 @@
   import { strokesOutsidePage } from '../../lib/editor/ops';
   import type { Orientation } from '../../lib/editor/page-size';
   import { revertToOriginal } from '../../lib/editor/original';
-  import { straightenSelection } from '../../lib/editor/shapes';
+  import { nextFrame, previewStraightening, straightenSelection, type StraightenPreview } from '../../lib/editor/shapes';
+  import {
+    DEFAULT_SHAPE_SETTINGS,
+    ShapesSaver,
+    clampShapeSettings,
+    closedMinMm,
+    formatShapeNumber,
+    sameShapeSettings,
+    toShapeTuning,
+  } from '../../lib/shape-settings';
   import { canRedo, canUndo, commit, createHistory, redo, replacePresent, undo, type History } from '../../lib/editor/history';
   import {
     DEFAULT_TOOLS,
@@ -91,7 +106,7 @@
   import { resumeBlock } from '../../lib/live-resume.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
-  import type { BackgroundImage, ExportSource, FileStamp, Note, Rgba, RevisionOfNote, SplitSpec, Stroke } from '../../lib/note';
+  import type { BackgroundImage, ExportSource, FileStamp, Note, Rgba, RevisionOfNote, ShapeSettings, SplitSpec, Stroke } from '../../lib/note';
   import type { NoteOriginal } from '../../lib/original';
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
@@ -240,6 +255,7 @@
   let resuming = $state(false);
   let spaceDown = $state(false);
   let canvas = $state<ReturnType<typeof Canvas>>();
+  let toolbar = $state<ReturnType<typeof Toolbar>>();
   /** What the video export dialog exports; null while it is closed. */
   let video = $state.raw<ExportSource | null>(null);
   /** The video export dialog is exporting: the window must not close under it. */
@@ -297,6 +313,27 @@
   /** The pan tool: a drag moves the page and never draws. */
   const replayTools = $derived<ToolSettings>({ ...tools, mode: 'pan' });
   const microphone = $derived(chosenMicrophone === undefined ? app.microphone : chosenMicrophone);
+
+  // "Redresser les formes" (M15): the setting, its panel and the preview the panel asks for.
+  /** The setting changed here, until the app state (which keeps it) says so. */
+  let chosenShapes = $state.raw<ShapeSettings | undefined>(undefined);
+  const shapes = $derived(chosenShapes ?? clampShapeSettings(app.shapes));
+  let shapesOpen = $state(false);
+  /** What straightening would do with the setting now, while the panel is open (null: no preview). */
+  let straightenPreview = $state.raw<StraightenPreview | null>(null);
+  /** The panel and its preview exist only with the selection tool, on a page that can be edited. */
+  const shapesPanel = $derived(shapesOpen && tools.mode === 'select' && split === null && !replaying);
+  // The values are kept a moment after the last change, and when the panel closes. A late answer
+  // still tells the screen holding the app state (the panel may have gone with the editor).
+  const shapesSaver = new ShapesSaver(
+    async (values) => {
+      const next = await api.setShapes(values);
+      onchange?.(next);
+    },
+    (error) => {
+      if (alive) showNotice(t('editor.straighten.settings.saveFailed', { message: errorMessage(error) }), true);
+    },
+  );
   const numberFormat = $derived(new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 2 }));
   /** The replay options a recording would use, as a sentence. */
   const recordInfo = $derived(
@@ -388,6 +425,37 @@
     });
   });
 
+  // The setting's panel goes when its button does (another tool, the split panel, replay).
+  $effect(() => {
+    if (!shapesPanel && shapesOpen) closeShapes(false);
+  });
+
+  // The preview of the panel: at once when it opens, then at most once per frame while a value or
+  // the selection changes (a frame already booked is kept: it reads the values when it runs).
+  let previewFrame: (() => void) | null = null;
+  function cancelPreviewFrame() {
+    previewFrame?.();
+    previewFrame = null;
+  }
+  $effect(() => {
+    if (!shapesPanel || !doc || !ink) {
+      cancelPreviewFrame();
+      straightenPreview = null;
+      return;
+    }
+    const [current, engine, tuning] = [doc, ink, toShapeTuning(shapes)];
+    if (untrack(() => straightenPreview) === null) {
+      cancelPreviewFrame();
+      straightenPreview = previewStraightening(current, engine, tuning);
+      return;
+    }
+    if (previewFrame) return;
+    previewFrame = nextFrame(() => {
+      previewFrame = null;
+      if (shapesPanel && doc && ink) straightenPreview = previewStraightening(doc, ink, toShapeTuning(shapes));
+    });
+  });
+
   // The source went (trashed, deleted) while "Comparer" was open: the dialog goes with it.
   $effect(() => {
     if (revisionDialog === 'compare' && !revision?.source) revisionDialog = null;
@@ -441,13 +509,19 @@
     onLibraryChanged(() => void checkDisk()).then(keep, () => {
       // Not watched: saving still detects conflicts.
     });
-    onSessionEnding(() => void drafts.flush()).then(keep, () => {
+    onSessionEnding(() => {
+      void drafts.flush();
+      // The setting being moved is kept too, before Windows ends the session.
+      void shapesSaver.flush();
+    }).then(keep, () => {
       // Not told: the drafts written after each change are there.
     });
     return () => {
       stopped = true;
       alive = false;
       clearTimeout(noticeTimer);
+      cancelPreviewFrame();
+      void shapesSaver.flush();
       for (const stop of stops) stop();
       player.dispose();
       recorder.dispose();
@@ -962,7 +1036,18 @@
       showNotice(t('videoExport.closeBusy'), true);
       return true;
     }
-    if (!alive || (!dirty && !titleEdited() && pendingWrites === 0)) return false;
+    if (!alive) return false;
+    if (!dirty && !titleEdited() && pendingWrites === 0) {
+      if (!shapesSaver.busy) return false;
+      // The setting of "Redresser les formes" is still being kept (the debounce, or a write under
+      // way): in the app the window waits for it, then closes; a browser tab cannot wait.
+      if (!windowClose.destroy) {
+        void shapesSaver.flush();
+        return false;
+      }
+      void closeWindow();
+      return true;
+    }
     if (windowClose.destroy) {
       if (dirty || titleEdited()) {
         closing = true;
@@ -979,6 +1064,8 @@
     closing = false;
     leaving = false;
     await settled();
+    // The setting is kept before the window goes (a failed write is reported, and the window closes anyway).
+    await shapesSaver.flush();
     alive = false;
     await windowClose.destroy?.();
   }
@@ -1207,14 +1294,41 @@
     changeFormat(next);
   }
 
-  /** "Redresser les formes": one undoable step, or a notice saying why nothing changed. */
+  /** The panel's values change (live): the preview follows, and they are kept soon. */
+  function setShapes(next: ShapeSettings) {
+    const values = clampShapeSettings(next);
+    if (sameShapeSettings(values, shapes)) return;
+    chosenShapes = values;
+    shapesSaver.update(values);
+  }
+
+  /** The panel opens or closes; closing keeps the values at once. */
+  function openShapes(open: boolean) {
+    if (open) shapesOpen = true;
+    else closeShapes(false);
+  }
+
+  /** Closes the panel without straightening; `refocus`: the focus goes back to its small button. */
+  function closeShapes(refocus: boolean) {
+    const wasOpen = shapesOpen;
+    shapesOpen = false;
+    void shapesSaver.flush();
+    if (wasOpen && refocus) void tick().then(() => toolbar?.focusShapesButton());
+  }
+
+  /** "Redresser les formes" with the setting: one undoable step, or a notice saying why nothing changed. */
   function straighten() {
     if (!doc || !ink || split || replaying) return;
     if (!hasSelection) return showNotice(t('editor.straighten.disabledHint'));
-    const { doc: next, shapes } = straightenSelection(doc, ink);
-    if (shapes === 0) return showNotice(t('editor.straighten.none'));
+    // The panel did its job: it goes (the focus back to its button when it was in the panel).
+    if (shapesOpen) closeShapes(!!document.activeElement?.closest('[data-panel="straighten"]'));
+    const { doc: next, shapes: count } = straightenSelection(doc, ink, toShapeTuning(shapes));
+    if (count === 0) {
+      const [line, closed] = [shapes.minSizeMm, closedMinMm(shapes.minSizeMm)].map((mm) => formatShapeNumber(mm, currentLocale()));
+      return showNotice(t('editor.straighten.none', { line, closed }));
+    }
     change(next);
-    showNotice(shapes === 1 ? t('editor.straighten.doneOne') : t('editor.straighten.doneMany', { count: shapes }));
+    showNotice(count === 1 ? t('editor.straighten.doneOne') : t('editor.straighten.doneMany', { count }));
   }
 
   /** "Revenir à l'original", confirmed: the original's ink, as one undoable step. */
@@ -1633,6 +1747,12 @@
       }
       return;
     }
+    // The setting's panel is open: Escape closes it (the values stay), without straightening.
+    if (shapesPanel && key === 'Escape' && !mod) {
+      e.preventDefault();
+      closeShapes(true);
+      return;
+    }
     if (closes) {
       e.preventDefault();
       // A gesture under way commits first; replay is left before the note.
@@ -1862,6 +1982,7 @@
     <p class="loading">{t('editor.loading')}</p>
   {:else}
     <Toolbar
+      bind:this={toolbar}
       {tools}
       {customColors}
       {hasSelection}
@@ -1887,6 +2008,13 @@
       onreplay={toggleReplay}
       onvideo={openVideo}
       onstraighten={straighten}
+      {shapes}
+      shapesOpen={shapesPanel}
+      shapesSelected={straightenPreview?.selected ?? doc.selection.length}
+      shapesFound={straightenPreview?.groups.length ?? 0}
+      onshapesopen={openShapes}
+      onshapes={setShapes}
+      onshapesdefaults={() => setShapes({ ...DEFAULT_SHAPE_SETTINGS })}
     />
     {#if replaying}
       <ReplayBar
@@ -1911,6 +2039,7 @@
         onselect={reselect}
         oncropped={() => setMode('select')}
         onblocked={hiddenLayerNotice}
+        straighten={straightenPreview}
         split={split ? { preview, tracing: split.mode === 'zone' && !split.busy, zone: split.mode === 'zone' ? split.zone : null } : null}
         onzone={(polygon) => {
           if (split && split.mode === 'zone') {

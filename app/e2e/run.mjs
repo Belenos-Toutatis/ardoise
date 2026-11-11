@@ -28,12 +28,13 @@ import { hardFixJourneys } from './journeys-m10-fix-hard.mjs';
 import { inkspaceJourneys } from './journeys-m10-inkspace.mjs';
 import { libraryJourneys } from './journeys-m10-library.mjs';
 import { uiJourneys } from './journeys-m10-ui.mjs';
-import { shareJourneys } from './journeys-m11-share.mjs';
+import { shareJourneys, sweepBrowsers } from './journeys-m11-share.mjs';
 import { resumeJourneys } from './journeys-m12-resume.mjs';
 import { touchUpJourneys } from './journeys-m12-touchup.mjs';
 import { revisionJourneys } from './journeys-m13-revision.mjs';
 import { editorLayersJourneys } from './journeys-m14-editor.mjs';
 import { liveComputerJourneys } from './journeys-m14-live.mjs';
+import { straightenSettingJourneys } from './journeys-m15-straighten.mjs';
 import { exportLayersJourneys } from './journeys-m14-export.mjs';
 import { editorNavJourneys } from './journeys-editor-nav.mjs';
 import { closeKeyJourneys } from './journeys-close-keys.mjs';
@@ -42,7 +43,7 @@ import { mcpJourney } from './mcp.mjs';
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys, ...editorLayersJourneys, ...liveComputerJourneys, ...exportLayersJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys, ...editorLayersJourneys, ...liveComputerJourneys, ...exportLayersJourneys, ...straightenSettingJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -366,5 +367,8 @@ if (!only || only.some((part) => 'serveur MCP'.includes(part))) {
     if (failed) failures++;
   }
 }
+// Nothing of the headless Edges must outlive the run: what `close()` missed is killed here, and said.
+const leftEdges = await sweepBrowsers();
+if (leftEdges > 0) console.log(`\nAttention : ${leftEdges} processus Edge sans fenêtre restaient ouverts après leurs parcours ; arrêtés.`);
 console.log(failures === 0 ? '\nTous les parcours ont réussi.' : `\n${failures} parcours en échec.`);
 process.exit(failures === 0 ? 0 : 1);

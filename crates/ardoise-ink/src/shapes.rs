@@ -1,7 +1,7 @@
 //! Straightening hand-drawn shapes ("Redresser les formes", SPEC §4.4).
 //!
-//! [`straighten`] looks at strokes (the editor's selection) and replaces the ones that are a
-//! clear shape by a clean version of it:
+//! [`straighten`] (or [`straighten_with`] and the user's [`ShapeTuning`]) looks at strokes (the
+//! editor's selection) and replaces the ones that are a clear shape by a clean version of it:
 //!
 //! - a **straight line**;
 //! - a **circle or ellipse**, possibly turned;
@@ -17,6 +17,32 @@
 //! need exactly one long shaft and two barbs pointing back along it on both sides, which letters
 //! such as V, Y, K, N, T, A or 4 never give.
 //!
+//! # The user's tuning (M15)
+//!
+//! [`ShapeTuning`] is set next to the editor's button (SPEC §4.4, `docs/questions.md` Q12); its
+//! default is the fixed thresholds of before, with exactly the same results
+//! (`Params::DEFAULT` is those constants). It moves, and only moves:
+//!
+//! - **tolerance** (5 steps): the thresholds that say how cleanly a shape must be drawn, ×
+//!   0.6, 0.8, 1, 1.15 or 1.3 (`TOLERANCE_FACTORS`): `CLOSE_GAP`, `FIT_MEAN`, `FIT_MAX`,
+//!   `LINE_MAX_DEV`, `LINE_RMS_DEV`, `SEG_EPS`, `MERGE_DEV`, `BARB_REACH`, and the shortfall of
+//!   `RECT_COHERENCE` from 1. Measured on shapes drawn more and more unsteadily (the
+//!   `measure_tolerance_*` tests): each step recognises at least as much as the one before; the
+//!   lenient end stops at 1.3 because beyond it handwriting starts to change: a capital D
+//!   written 3 cm high becomes an ellipse in 1 % of the hands at 1.3, 12 % at 1.4, and from 1.5
+//!   a D of 9 to 18 mm becomes a rectangle;
+//! - **minimum size**: [`MIN_SIZE`] (`min_size_mm`), [`MIN_CLOSED_SIZE`] (3 mm more,
+//!   [`CLOSED_EXTRA_MM`]), and the shortest barb (`BARB_MIN`, 2.5 mm, lowered in proportion
+//!   below 10 mm);
+//! - **alignment**: `SNAP_ANGLE` (`snap_angle_deg`) and `SNAP_RATIO` (1 − `snap_round_percent`
+//!   / 100), each of which can be turned off.
+//!
+//! Everything else is fixed, in particular the protections of handwriting (`letter_like`,
+//! [`LETTER_MAX_AXIS`], `LETTER_MAX_RATIO`): at the default minimum size the lenient step changes
+//! no more letters than the default (the `measure_tuned_letters` test). Below 10 mm the minimum
+//! size itself lets single straight strokes of letters and round loops (o) become lines and
+//! circles, which the editor warns about.
+//!
 //! # Handwritten loops (o, O, 0, Q, D)
 //!
 //! A closed letter is a closed stroke like a circle, and the editor straightens whatever the user
@@ -27,9 +53,9 @@
 //!   drawn 15 mm wide still counts), above the 4-9 mm of handwriting on an A4 Slate and the
 //!   10-12 mm of a big capital;
 //! - an ellipse that stands up (long axis within 40° of the vertical), is clearly not round
-//!   (short ÷ long axis below `SNAP_RATIO`) and whose long axis is shorter than
-//!   [`LETTER_MAX_AXIS`] (25 mm) looks like an O or a 0 and is left alone (`letter_like`). Wide
-//!   ellipses, circles and anything larger are drawings;
+//!   (short ÷ long axis below `LETTER_MAX_RATIO`, 0.9, whatever the tuning) and whose long axis
+//!   is shorter than [`LETTER_MAX_AXIS`] (25 mm) looks like an O or a 0 and is left alone
+//!   (`letter_like`). Wide ellipses, circles and anything larger are drawings;
 //! - accepted: a round loop of 13 mm or more (a lower-case o written 15 mm high, about half of
 //!   them; a capital O rounder than 0.9) is a circle, because nothing tells it from one; a Q written above 20 mm has
 //!   its straight tail of 1 cm straightened like any straight stroke of 1 cm (I, l, 1 too); a
@@ -54,23 +80,28 @@
 //!
 //! # Thresholds
 //!
-//! Sizes are in device units (10 µm); relative tolerances are fractions of the shape's size.
+//! Sizes are in device units (10 µm); relative tolerances are fractions of the shape's size. The
+//! values are those of the default [`ShapeTuning`]; the last column says what moves them
+//! (tolerance: × the step's factor, 0.6 to 1.3).
 //!
-//! | What | Value | Meaning |
-//! |---|---|---|
-//! | [`MIN_SIZE`] | 1000 (10 mm) | smallest line or arrow shaft |
-//! | [`MIN_CLOSED_SIZE`] | 1300 (13 mm) | smallest closed shape (largest side of its bounding box) |
-//! | [`LETTER_MAX_AXIS`] | 2500 (25 mm) | an upright oval with a shorter long axis is an O or a 0, not a drawing |
-//! | `CLOSE_GAP` | 0.2 | largest gap between the ends of a closed shape, × its bounding-box diagonal (a circle open by about 30° still counts) |
-//! | `MIN_ASPECT` | 0.1 | thinnest closed shape (short side ÷ long side) |
-//! | `FIT_MEAN` / `FIT_MAX` | 0.06 / 0.2 | mean and largest distance of the stroke (overshoot included) to the ideal ellipse or rectangle, × its mean radius (√(a·b), √(w·h)/2) |
-//! | `RECT_COHERENCE` | 0.55 | how consistently the edges of a rectangle run along two perpendicular directions (1 = perfectly, 0 for a circle) |
-//! | `SNAP_RATIO` | 0.9 | an ellipse or rectangle this close to round or square becomes a circle or a square |
-//! | `SNAP_ANGLE` | 4° | a line, shaft, rectangle or ellipse axis this close to horizontal or vertical becomes exactly so |
-//! | `LINE_MAX_DEV` / `LINE_RMS_DEV` | 0.05 / 0.018 | largest and root-mean-square distance to the straight line, × its length |
-//! | `SEG_EPS` | 0.02 (≥ 25) | tolerance of the split of a stroke into straight pieces, × its bounding-box diagonal |
-//! | `HOOK_SHARE` / `HOOK_MAX` | 0.08 / 200 | a piece at an end shorter than both (× the longest piece / units) is a pen hook, ignored |
-//! | barbs | 0.04–0.55 × shaft, ≥ 250 | length of an arrow's barbs; at 12°–70° from the shaft, on both sides, starting within 0.35 × their length (≥ 120) of the tip |
+//! | What | Value | Meaning | Tuning |
+//! |---|---|---|---|
+//! | [`MIN_SIZE`] | 1000 (10 mm) | smallest line or arrow shaft | minimum size (5 to 25 mm) |
+//! | [`MIN_CLOSED_SIZE`] | 1300 (13 mm) | smallest closed shape (largest side of its bounding box) | minimum size + 3 mm |
+//! | [`LETTER_MAX_AXIS`] | 2500 (25 mm) | an upright oval with a shorter long axis is an O or a 0, not a drawing | fixed |
+//! | `LETTER_MAX_RATIO` | 0.9 | and is not round (short ÷ long axis below this) | fixed |
+//! | `CLOSE_GAP` | 0.2 | largest gap between the ends of a closed shape, × its bounding-box diagonal (a circle open by about 30° still counts) | tolerance |
+//! | `MIN_ASPECT` | 0.1 | thinnest closed shape (short side ÷ long side) | fixed |
+//! | `FIT_MEAN` / `FIT_MAX` | 0.06 / 0.2 | mean and largest distance of the stroke (overshoot included) to the ideal ellipse or rectangle, × its mean radius (√(a·b), √(w·h)/2) | tolerance |
+//! | `RECT_COHERENCE` | 0.55 | how consistently the edges of a rectangle run along two perpendicular directions (1 = perfectly, 0 for a circle) | tolerance (its shortfall from 1) |
+//! | `SNAP_RATIO` | 0.9 | an ellipse or rectangle this close to round or square becomes a circle or a square | circle or square (2 to 20 %, or off) |
+//! | `SNAP_ANGLE` | 4° | a line, shaft, rectangle or ellipse axis this close to horizontal or vertical becomes exactly so | horizontal or vertical (1 to 10°, or off) |
+//! | `LINE_MAX_DEV` / `LINE_RMS_DEV` | 0.05 / 0.018 | largest and root-mean-square distance to the straight line, × its length | tolerance |
+//! | `LINE_MAX_PATH` | 1.3 | longest path along a line, × its length | fixed |
+//! | `SEG_EPS` | 0.02 (≥ 25) | tolerance of the split of a stroke into straight pieces, × its bounding-box diagonal (what most limits a wobbly line) | tolerance (not the 25 units) |
+//! | `MERGE_DEV` | 0.05 | two pieces turning by less than 25° are one when the joined piece stays this close to its chord, × its length | tolerance |
+//! | `HOOK_SHARE` / `HOOK_MAX` | 0.08 / 200 | a piece at an end shorter than both (× the longest piece / units) is a pen hook, ignored | fixed |
+//! | barbs | 0.04–0.55 × shaft, ≥ 250 | length of an arrow's barbs; at 12°–70° from the shaft, on both sides, starting within 0.35 × their length (≥ 120) of the tip | the 250 units: minimum size below 10 mm (× size ÷ 10 mm); the 0.35: tolerance |
 //!
 //! Everything is plain `f64` arithmetic: the result is deterministic.
 
@@ -90,9 +121,10 @@ pub const MIN_CLOSED_SIZE: f64 = 1300.0;
 /// A tall oval (see `letter_like`) this small is a letter O or a 0 and is left alone, in device
 /// units (25 mm): the length of its long axis.
 pub const LETTER_MAX_AXIS: f64 = 2500.0;
-/// Largest short ÷ long axis of a letter-like oval: a rounder one is a circle (it would snap to
-/// one).
-const LETTER_MAX_RATIO: f64 = SNAP_RATIO;
+/// Largest short ÷ long axis of a letter-like oval: a rounder one is a circle (it snaps to one
+/// with the default [`ShapeTuning`]). Fixed: the protection of handwriting does not follow the
+/// user's "circle or square" setting.
+const LETTER_MAX_RATIO: f64 = 0.9;
 /// Largest angle between the long axis of a letter-like oval and the vertical (40°).
 const LETTER_MAX_LEAN: f64 = 40.0 * PI / 180.0;
 /// Largest distance between two points of a straightened stroke, in device units (0.5 mm).
@@ -165,6 +197,97 @@ const PARTNER_REACH_MIN: f64 = 300.0;
 const PARTNER_SPAN: f64 = 0.7;
 const PARTNER_CANDIDATES: usize = 4;
 
+/// Device units per millimetre.
+const UNITS_PER_MM: f64 = 100.0;
+/// What each step of [`ShapeTuning::tolerance`] (1 to 5) multiplies the tolerances of the fit
+/// by (see `Params`); step 3 keeps them as they are. Chosen from the `measure_tolerance_*`
+/// tests (`docs/design/extras.md`, "M15: tuning the straightening").
+const TOLERANCE_FACTORS: [f64; 5] = [0.6, 0.8, 1.0, 1.15, 1.3];
+
+/// The thresholds of one call of [`straighten_with`], resolved from its [`ShapeTuning`]: the
+/// constants above for the default tuning (`Params::new(&ShapeTuning::default())` holds them
+/// exactly, so the results are those of before M15).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Params {
+    /// [`MIN_SIZE`] and [`MIN_CLOSED_SIZE`]: `min_size_mm` and `min_size_mm` + [`CLOSED_EXTRA_MM`].
+    min_size: f64,
+    min_closed_size: f64,
+    /// `SNAP_ANGLE` in radians and `SNAP_RATIO`, `None` when the user turned them off.
+    snap_angle: Option<f64>,
+    snap_ratio: Option<f64>,
+    /// How cleanly a shape must be drawn, × the tolerance step's factor: `CLOSE_GAP`,
+    /// `FIT_MEAN`, `FIT_MAX`, `LINE_MAX_DEV`, `LINE_RMS_DEV`, `MERGE_DEV`, `SEG_EPS`,
+    /// `BARB_REACH`; and
+    /// `RECT_COHERENCE`, whose shortfall from 1 is scaled.
+    close_gap: f64,
+    fit_mean: f64,
+    fit_max: f64,
+    rect_coherence: f64,
+    line_max_dev: f64,
+    line_rms_dev: f64,
+    merge_dev: f64,
+    seg_eps: f64,
+    barb_reach: f64,
+    /// `BARB_MIN`, lowered in proportion below the default minimum size (an arrow of 5 mm has
+    /// barbs shorter than 2.5 mm).
+    barb_min: f64,
+}
+
+impl Params {
+    /// The thresholds of before M15: those of the default tuning.
+    const DEFAULT: Params = Params {
+        min_size: MIN_SIZE,
+        min_closed_size: MIN_CLOSED_SIZE,
+        snap_angle: Some(SNAP_ANGLE),
+        snap_ratio: Some(SNAP_RATIO),
+        close_gap: CLOSE_GAP,
+        fit_mean: FIT_MEAN,
+        fit_max: FIT_MAX,
+        rect_coherence: RECT_COHERENCE,
+        line_max_dev: LINE_MAX_DEV,
+        line_rms_dev: LINE_RMS_DEV,
+        merge_dev: MERGE_DEV,
+        seg_eps: SEG_EPS,
+        barb_reach: BARB_REACH,
+        barb_min: BARB_MIN,
+    };
+
+    fn new(tuning: &ShapeTuning) -> Params {
+        let tuning = tuning.clamped();
+        if tuning == ShapeTuning::default() {
+            // The constants themselves (`with_factor` gives exactly them too: tested).
+            return Params::DEFAULT;
+        }
+        let step = usize::from(tuning.tolerance.saturating_sub(ShapeTuning::TOLERANCE_MIN));
+        let factor = TOLERANCE_FACTORS.get(step).copied().unwrap_or(1.0);
+        Params::with_factor(&tuning, factor)
+    }
+
+    /// The thresholds for `tuning` (already within its limits) with the tolerances of the fit
+    /// scaled by `factor`.
+    fn with_factor(tuning: &ShapeTuning, factor: f64) -> Params {
+        let min_size = tuning.min_size_mm * UNITS_PER_MM;
+        Params {
+            min_size,
+            min_closed_size: (tuning.min_size_mm + CLOSED_EXTRA_MM) * UNITS_PER_MM,
+            snap_angle: tuning.snap_angle_deg.map(|deg| deg * PI / 180.0),
+            snap_ratio: tuning
+                .snap_round_percent
+                .map(|percent| (100.0 - percent) / 100.0),
+            close_gap: CLOSE_GAP * factor,
+            fit_mean: FIT_MEAN * factor,
+            fit_max: FIT_MAX * factor,
+            rect_coherence: 1.0 - (1.0 - RECT_COHERENCE) * factor,
+            line_max_dev: LINE_MAX_DEV * factor,
+            line_rms_dev: LINE_RMS_DEV * factor,
+            merge_dev: MERGE_DEV * factor,
+            seg_eps: SEG_EPS * factor,
+            barb_reach: BARB_REACH * factor,
+            barb_min: BARB_MIN.min(BARB_MIN * min_size / MIN_SIZE),
+        }
+    }
+}
+
 /// What a group of strokes was recognised as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Shape {
@@ -190,17 +313,111 @@ pub struct Straightened {
     pub strokes: Vec<Stroke>,
 }
 
-/// Recognises the shapes among `strokes` and returns their straightened versions, ordered by
-/// their first source. Strokes that are no clear shape appear in no result. Arrows may combine
-/// several strokes of the same layer; every other shape is one stroke.
+/// How [`straighten_with`] recognises shapes: the user's setting next to the editor's button
+/// (SPEC §4.4, `docs/questions.md` Q12, milestone M15). [`ShapeTuning::default`] is the fixed
+/// thresholds of before M15 and gives exactly the same results. The protections of handwriting
+/// (`letter_like`, [`LETTER_MAX_AXIS`]) do not depend on it. The module documentation says
+/// which thresholds each value moves.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShapeTuning {
+    /// How far a stroke may stray from its ideal shape: 1 (strict) to 5 (lenient), 3 being the
+    /// thresholds of before (`FIT_*`, `LINE_*`…).
+    pub tolerance: u8,
+    /// Smallest line or arrow shaft, in millimetres (5 to 25; 10 by default, [`MIN_SIZE`]); a
+    /// closed shape needs [`CLOSED_EXTRA_MM`] more (13 mm by default, [`MIN_CLOSED_SIZE`]).
+    pub min_size_mm: f64,
+    /// A line, shaft, rectangle or ellipse axis within this many degrees of horizontal or vertical
+    /// becomes exactly so (1 to 10; 4 by default, `SNAP_ANGLE`). `None`: never.
+    pub snap_angle_deg: Option<f64>,
+    /// An ellipse or rectangle whose short ÷ long side is within this percentage of 1 becomes a
+    /// circle or a square (2 to 20; 10 by default, `SNAP_RATIO`). `None`: never.
+    pub snap_round_percent: Option<f64>,
+}
+
+/// How much longer than [`ShapeTuning::min_size_mm`] a closed shape must be, in millimetres.
+pub const CLOSED_EXTRA_MM: f64 = 3.0;
+
+impl ShapeTuning {
+    pub const TOLERANCE_MIN: u8 = 1;
+    pub const TOLERANCE_MAX: u8 = 5;
+    pub const MIN_SIZE_MM_MIN: f64 = 5.0;
+    pub const MIN_SIZE_MM_MAX: f64 = 25.0;
+    pub const SNAP_ANGLE_DEG_MIN: f64 = 1.0;
+    pub const SNAP_ANGLE_DEG_MAX: f64 = 10.0;
+    pub const SNAP_ROUND_PERCENT_MIN: f64 = 2.0;
+    pub const SNAP_ROUND_PERCENT_MAX: f64 = 20.0;
+
+    /// The same tuning with every value brought within its limits (a value that is not a
+    /// number takes its default).
+    pub fn clamped(self) -> ShapeTuning {
+        let default = ShapeTuning::default();
+        let within = |value: f64, min: f64, max: f64, fallback: f64| {
+            if value.is_finite() {
+                value.clamp(min, max)
+            } else {
+                fallback
+            }
+        };
+        ShapeTuning {
+            tolerance: self
+                .tolerance
+                .clamp(Self::TOLERANCE_MIN, Self::TOLERANCE_MAX),
+            min_size_mm: within(
+                self.min_size_mm,
+                Self::MIN_SIZE_MM_MIN,
+                Self::MIN_SIZE_MM_MAX,
+                default.min_size_mm,
+            ),
+            snap_angle_deg: self
+                .snap_angle_deg
+                .map(|deg| within(deg, Self::SNAP_ANGLE_DEG_MIN, Self::SNAP_ANGLE_DEG_MAX, 4.0)),
+            snap_round_percent: self.snap_round_percent.map(|percent| {
+                within(
+                    percent,
+                    Self::SNAP_ROUND_PERCENT_MIN,
+                    Self::SNAP_ROUND_PERCENT_MAX,
+                    10.0,
+                )
+            }),
+        }
+    }
+}
+
+impl Default for ShapeTuning {
+    fn default() -> Self {
+        ShapeTuning {
+            tolerance: 3,
+            min_size_mm: 10.0,
+            snap_angle_deg: Some(4.0),
+            snap_round_percent: Some(10.0),
+        }
+    }
+}
+
+/// Recognises the shapes among `strokes` with the default [`ShapeTuning`] and returns their
+/// straightened versions, ordered by their first source. Strokes that are no clear shape appear
+/// in no result. Arrows may combine several strokes of the same layer; every other shape is one
+/// stroke.
 pub fn straighten(strokes: &[Stroke]) -> Vec<Straightened> {
+    straighten_with(strokes, &ShapeTuning::default())
+}
+
+/// [`straighten`] with the user's `tuning` (brought within its limits first): the tolerance
+/// step scales how closely a stroke must follow its ideal shape, `min_size_mm` sets the smallest
+/// shape, and the alignment settings what is made horizontal, vertical, round or square. The
+/// protections of handwriting (`letter_like`) stay as they are.
+pub fn straighten_with(strokes: &[Stroke], tuning: &ShapeTuning) -> Vec<Straightened> {
+    recognise(strokes, &Params::new(tuning))
+}
+
+fn recognise(strokes: &[Stroke], p: &Params) -> Vec<Straightened> {
     let paths: Vec<Vec<V>> = strokes.iter().map(clean).collect();
     let mut used = vec![false; strokes.len()];
     let mut out = Vec::new();
 
     // Closed shapes first: they are a single stroke and never part of an arrow.
     for (i, path) in paths.iter().enumerate() {
-        if let Some(closed) = closed_shape(path) {
+        if let Some(closed) = closed_shape(path, p) {
             used[i] = true;
             let (shape, ideal) = match closed.fit {
                 ClosedFit::Ellipse(e) => (Shape::Ellipse, ellipse_points(&e, &closed)),
@@ -218,22 +435,26 @@ pub fn straighten(strokes: &[Stroke]) -> Vec<Straightened> {
     let pieces: Vec<Option<Vec<Piece>>> = paths
         .iter()
         .enumerate()
-        .map(|(i, path)| if used[i] { None } else { split(path) })
+        .map(|(i, path)| if used[i] { None } else { split(path, p) })
         .collect();
     let longest = |i: usize| -> f64 {
         pieces[i]
             .as_ref()
-            .map_or(0.0, |p| p.iter().map(Piece::len).fold(0.0, f64::max))
+            .map_or(0.0, |list| list.iter().map(Piece::len).fold(0.0, f64::max))
     };
+    let boxes: Vec<Option<(V, V)>> = pieces
+        .iter()
+        .map(|list| list.as_deref().map(ends_box))
+        .collect();
     let mut order: Vec<usize> = (0..strokes.len())
-        .filter(|&i| longest(i) >= MIN_SIZE)
+        .filter(|&i| longest(i) >= p.min_size)
         .collect();
     order.sort_by(|&a, &b| longest(b).total_cmp(&longest(a)).then(a.cmp(&b)));
     for &s in &order {
         if used[s] {
             continue;
         }
-        if let Some(group) = find_arrow(s, strokes, &paths, &pieces, &used) {
+        if let Some(group) = find_arrow(s, strokes, &paths, &pieces, &boxes, &used, p) {
             for &i in &group.sources {
                 used[i] = true;
             }
@@ -247,7 +468,7 @@ pub fn straighten(strokes: &[Stroke]) -> Vec<Straightened> {
         let Some([piece]) = piece.as_deref() else {
             continue;
         };
-        if let Some((a, b)) = straight_line(&paths[i][piece.from..=piece.to], piece) {
+        if let Some((a, b)) = straight_line(&paths[i][piece.from..=piece.to], piece, p) {
             out.push(Straightened {
                 sources: vec![i],
                 shape: Shape::Line,
@@ -411,11 +632,15 @@ fn fit_line(points: &[V]) -> Option<(V, V)> {
     Some((c, V::new(angle.cos(), angle.sin())))
 }
 
-/// `direction` turned to exactly horizontal or vertical when it is within [`SNAP_ANGLE`].
-fn snap_direction(direction: V) -> V {
+/// `direction` turned to exactly horizontal or vertical when it is within `snap_angle` radians
+/// of it (`SNAP_ANGLE` by default; `None`: never).
+fn snap_direction(direction: V, snap_angle: Option<f64>) -> V {
+    let Some(snap_angle) = snap_angle else {
+        return direction;
+    };
     let angle = direction.y.atan2(direction.x);
     let quarter = (angle / (PI / 2.0)).round();
-    if (angle - quarter * PI / 2.0).abs() <= SNAP_ANGLE {
+    if (angle - quarter * PI / 2.0).abs() <= snap_angle {
         let snapped = quarter * PI / 2.0;
         V::new(snapped.cos().round(), snapped.sin().round())
     } else {
@@ -458,12 +683,12 @@ struct Closed {
 }
 
 /// The ellipse or rectangle `points` draws, if it is clearly one.
-fn closed_shape(points: &[V]) -> Option<Closed> {
+fn closed_shape(points: &[V], p: &Params) -> Option<Closed> {
     if points.len() < 8 {
         return None;
     }
     let (w, h) = extent(points);
-    if w.max(h) < MIN_CLOSED_SIZE {
+    if w.max(h) < p.min_closed_size {
         return None;
     }
     let diag = w.hypot(h);
@@ -484,12 +709,12 @@ fn closed_shape(points: &[V]) -> Option<Closed> {
         }
     }
     let (end, gap) = close?;
-    if gap > CLOSE_GAP * diag {
+    if gap > p.close_gap * diag {
         return None;
     }
     let trimmed = &points[..=end];
     let (tw, th) = extent(trimmed);
-    if tw.max(th) < MIN_CLOSED_SIZE || tw.min(th) < MIN_ASPECT * tw.max(th) {
+    if tw.max(th) < p.min_closed_size || tw.min(th) < MIN_ASPECT * tw.max(th) {
         return None;
     }
 
@@ -497,21 +722,22 @@ fn closed_shape(points: &[V]) -> Option<Closed> {
     let dir = winding(&fit)?;
     let check = resample(points, CHECK_SAMPLES);
 
+    let fits = |(mean, max): (f64, f64)| mean <= p.fit_mean && max <= p.fit_max;
     let ellipse = fit_ellipse(&fit).filter(|e| !letter_like(e)).and_then(|e| {
-        [snap_ellipse(e), e]
+        [snap_ellipse(e, p), e]
             .into_iter()
             .map(|e| {
                 (
                     e,
-                    closed_error(&check, |p| ellipse_distance(&e, p), e.a * e.b),
+                    closed_error(&check, |q| ellipse_distance(&e, q), e.a * e.b),
                 )
             })
-            .find(|(_, (mean, max))| *mean <= FIT_MEAN && *max <= FIT_MAX)
+            .find(|&(_, error)| fits(error))
     });
     let rect = [true, false].into_iter().find_map(|snap| {
-        let r = fit_rect(&fit, snap)?;
-        let error = closed_error(&check, |p| rect_distance(&r, p), r.hw * r.hh);
-        (error.0 <= FIT_MEAN && error.1 <= FIT_MAX).then_some((r, error))
+        let r = fit_rect(&fit, snap, p)?;
+        let error = closed_error(&check, |q| rect_distance(&r, q), r.hw * r.hh);
+        fits(error).then_some((r, error))
     });
     let best = match (ellipse, rect) {
         (Some((e, (em, _))), Some((r, (rm, _)))) => {
@@ -615,15 +841,16 @@ fn letter_like(e: &Ellipse) -> bool {
     2.0 * e.a < LETTER_MAX_AXIS && e.b < LETTER_MAX_RATIO * e.a && from_vertical <= LETTER_MAX_LEAN
 }
 
-/// Nearly round becomes a circle, a nearly horizontal or vertical axis becomes exactly so.
-fn snap_ellipse(mut e: Ellipse) -> Ellipse {
-    if e.b >= SNAP_RATIO * e.a {
+/// Nearly round becomes a circle, a nearly horizontal or vertical axis becomes exactly so (as
+/// far as the tuning snaps them).
+fn snap_ellipse(mut e: Ellipse, p: &Params) -> Ellipse {
+    if p.snap_ratio.is_some_and(|ratio| e.b >= ratio * e.a) {
         let r = (e.a * e.b).sqrt();
         e.a = r;
         e.b = r;
         e.theta = 0.0;
-    } else {
-        let axis = snap_direction(V::new(e.theta.cos(), e.theta.sin()));
+    } else if p.snap_angle.is_some() {
+        let axis = snap_direction(V::new(e.theta.cos(), e.theta.sin()), p.snap_angle);
         e.theta = axis.y.atan2(axis.x);
     }
     e
@@ -642,8 +869,9 @@ fn ellipse_distance(e: &Ellipse, p: V) -> f64 {
 }
 
 /// The rectangle the closed polygon draws: its edges' common direction (the mean of 4 × their
-/// angles), then each side at the median of the points nearest to it.
-fn fit_rect(poly: &[V], snap: bool) -> Option<Rect> {
+/// angles), then each side at the median of the points nearest to it; with `snap`, nearly
+/// axis-aligned or square as far as the tuning snaps them.
+fn fit_rect(poly: &[V], snap: bool, p: &Params) -> Option<Rect> {
     let n = poly.len();
     let (mut mx, mut my, mut total) = (0.0, 0.0, 0.0);
     for i in 0..n {
@@ -654,11 +882,11 @@ fn fit_rect(poly: &[V], snap: bool) -> Option<Rect> {
         my += len * angle.sin();
         total += len;
     }
-    if total <= 0.0 || mx.hypot(my) / total < RECT_COHERENCE {
+    if total <= 0.0 || mx.hypot(my) / total < p.rect_coherence {
         return None;
     }
     let mut theta = my.atan2(mx) / 4.0;
-    if snap && theta.abs() <= SNAP_ANGLE {
+    if snap && p.snap_angle.is_some_and(|angle| theta.abs() <= angle) {
         theta = 0.0;
     }
     let o = poly.iter().fold(V::new(0.0, 0.0), |s, &p| s + p) * (1.0 / n as f64);
@@ -712,7 +940,10 @@ fn fit_rect(poly: &[V], snap: bool) -> Option<Rect> {
         hh: h / 2.0,
         theta,
     };
-    if snap && rect.hw.min(rect.hh) >= SNAP_RATIO * rect.hw.max(rect.hh) {
+    if snap
+        && p.snap_ratio
+            .is_some_and(|ratio| rect.hw.min(rect.hh) >= ratio * rect.hw.max(rect.hh))
+    {
         let half = (rect.hw * rect.hh).sqrt();
         rect.hw = half;
         rect.hh = half;
@@ -846,12 +1077,12 @@ fn douglas_peucker(points: &[V], eps: f64) -> Vec<usize> {
 
 /// The stroke as straight pieces (pen hooks at its ends dropped), or `None` when it needs more
 /// than [`MAX_PIECES`] (a word, a curve, a scribble).
-fn split(points: &[V]) -> Option<Vec<Piece>> {
+fn split(points: &[V], p: &Params) -> Option<Vec<Piece>> {
     if points.len() < 2 {
         return None;
     }
     let (w, h) = extent(points);
-    let eps = (SEG_EPS * w.hypot(h)).max(SEG_EPS_MIN);
+    let eps = (p.seg_eps * w.hypot(h)).max(SEG_EPS_MIN);
     let mut idx = douglas_peucker(points, eps);
     if idx.len() > 4 * MAX_PIECES {
         return None;
@@ -861,7 +1092,7 @@ fn split(points: &[V]) -> Option<Vec<Piece>> {
         let joined = (1..idx.len().saturating_sub(1)).find(|&j| {
             let (i0, i1, i2) = (idx[j - 1], idx[j], idx[j + 1]);
             let turn = angle_between(points[i1] - points[i0], points[i2] - points[i1]);
-            let tolerance = (MERGE_DEV * points[i0].dist(points[i2])).max(1.5 * eps);
+            let tolerance = (p.merge_dev * points[i0].dist(points[i2])).max(1.5 * eps);
             turn < MERGE_TURN && chord_deviation(&points[i0..=i2]) <= tolerance
         });
         match joined {
@@ -933,30 +1164,31 @@ fn fit_piece(points: &[V], from: usize, to: usize) -> Option<Piece> {
 }
 
 /// The ends of the straight line drawn by `points` (one piece of a stroke), if it is one.
-fn straight_line(points: &[V], piece: &Piece) -> Option<(V, V)> {
+fn straight_line(points: &[V], piece: &Piece, p: &Params) -> Option<(V, V)> {
     let len = piece.len();
-    if len < MIN_SIZE {
+    if len < p.min_size {
         return None;
     }
     let (c, u) = fit_line(points)?;
-    let deviations: Vec<f64> = points.iter().map(|&p| (p - c).cross(u).abs()).collect();
+    let deviations: Vec<f64> = points.iter().map(|&q| (q - c).cross(u).abs()).collect();
     let max = deviations.iter().copied().fold(0.0, f64::max);
     let rms = (deviations.iter().map(|d| d * d).sum::<f64>() / deviations.len() as f64).sqrt();
-    if max > LINE_MAX_DEV * len || rms > LINE_RMS_DEV * len {
+    if max > p.line_max_dev * len || rms > p.line_rms_dev * len {
         return None;
     }
     if path_length(points) > LINE_MAX_PATH * len {
         return None;
     }
-    Some(snap_segment(piece.a, piece.b))
+    Some(snap_segment(piece.a, piece.b, p.snap_angle))
 }
 
-/// The segment turned about its middle to exactly horizontal or vertical when it is nearly so.
-fn snap_segment(a: V, b: V) -> (V, V) {
-    let Some(u) = (b - a).unit() else {
+/// The segment turned about its middle to exactly horizontal or vertical when it is nearly so
+/// (within `snap_angle`).
+fn snap_segment(a: V, b: V, snap_angle: Option<f64>) -> (V, V) {
+    let (Some(u), Some(_)) = ((b - a).unit(), snap_angle) else {
         return (a, b);
     };
-    let snapped = snap_direction(u);
+    let snapped = snap_direction(u, snap_angle);
     let middle = (a + b) * 0.5;
     let half = a.dist(b) / 2.0;
     (middle - snapped * half, middle + snapped * half)
@@ -988,37 +1220,53 @@ fn find_arrow(
     strokes: &[Stroke],
     paths: &[Vec<V>],
     pieces: &[Option<Vec<Piece>>],
+    boxes: &[Option<(V, V)>],
     used: &[bool],
+    p: &Params,
 ) -> Option<Straightened> {
     let own = pieces[s].as_ref()?;
-    if let Some(found) = arrow_of(&[s], strokes, pieces) {
+    if let Some(found) = arrow_of(&[s], strokes, pieces, p) {
         return Some(found);
     }
     let shaft = own.iter().max_by(|a, b| a.len().total_cmp(&b.len()))?;
     let length = shaft.len();
+    let (max_reach, max_span) = (
+        (PARTNER_REACH * length).max(PARTNER_REACH_MIN),
+        PARTNER_SPAN * length,
+    );
     for end in [shaft.b, shaft.a] {
         let mut near: Vec<(f64, usize)> = (0..strokes.len())
             .filter(|&j| j != s && !used[j] && strokes[j].layer == strokes[s].layer)
             .filter_map(|j| {
                 let other = pieces[j].as_ref()?;
+                // A stroke whose pieces all end far from `end` is skipped without measuring
+                // (the margin makes sure that the distances below would have said the same).
+                let (lo, hi) = boxes[j]?;
+                let gap = (lo.x - end.x)
+                    .max(end.x - hi.x)
+                    .max(lo.y - end.y)
+                    .max(end.y - hi.y);
+                if gap > max_reach * (1.0 + 1e-9) {
+                    return None;
+                }
                 let reach = other
                     .iter()
-                    .flat_map(|p| [p.a.dist(end), p.b.dist(end)])
+                    .flat_map(|piece| [piece.a.dist(end), piece.b.dist(end)])
                     .fold(f64::INFINITY, f64::min);
-                let span = paths[j].iter().map(|p| p.dist(end)).fold(0.0, f64::max);
-                (reach <= (PARTNER_REACH * length).max(PARTNER_REACH_MIN)
-                    && span <= PARTNER_SPAN * length)
+                // The span goes over every point: only for the strokes that reach the end (with
+                // a small minimum size, nearly every stroke of a page is a shaft to try).
+                (reach <= max_reach && paths[j].iter().all(|q| q.dist(end) <= max_span))
                     .then_some((reach, j))
             })
             .collect();
         near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         near.truncate(PARTNER_CANDIDATES);
         for (k, &(_, j)) in near.iter().enumerate() {
-            if let Some(found) = arrow_of(&[s, j], strokes, pieces) {
+            if let Some(found) = arrow_of(&[s, j], strokes, pieces, p) {
                 return Some(found);
             }
             for &(_, l) in &near[k + 1..] {
-                if let Some(found) = arrow_of(&[s, j, l], strokes, pieces) {
+                if let Some(found) = arrow_of(&[s, j, l], strokes, pieces, p) {
                     return Some(found);
                 }
             }
@@ -1027,11 +1275,28 @@ fn find_arrow(
     None
 }
 
+/// The smallest box holding the ends of `pieces`: lowest and highest corner.
+fn ends_box(pieces: &[Piece]) -> (V, V) {
+    pieces.iter().flat_map(|piece| [piece.a, piece.b]).fold(
+        (
+            V::new(f64::INFINITY, f64::INFINITY),
+            V::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
+        ),
+        |(lo, hi), q| {
+            (
+                V::new(lo.x.min(q.x), lo.y.min(q.y)),
+                V::new(hi.x.max(q.x), hi.y.max(q.y)),
+            )
+        },
+    )
+}
+
 /// The arrow drawn by the pieces of `group` (stroke indices), if they make exactly one.
 fn arrow_of(
     group: &[usize],
     strokes: &[Stroke],
     pieces: &[Option<Vec<Piece>>],
+    p: &Params,
 ) -> Option<Straightened> {
     // Each stroke's pieces, with the returns over a barb marked.
     let mut chains: Vec<(usize, Vec<(Piece, bool)>)> = Vec::new();
@@ -1068,13 +1333,13 @@ fn arrow_of(
         .iter()
         .max_by(|&&a, &&b| piece(a).len().total_cmp(&piece(b).len()))?;
     let shaft = piece(shaft_at);
-    if shaft.len() < MIN_SIZE {
+    if shaft.len() < p.min_size {
         return None;
     }
     let barb_at: Vec<(usize, usize)> = main.iter().copied().filter(|&m| m != shaft_at).collect();
     let fit = [(shaft.b, shaft.a), (shaft.a, shaft.b)]
         .into_iter()
-        .find_map(|(tip, tail)| arrow_fit(tip, tail, [piece(barb_at[0]), piece(barb_at[1])]))?;
+        .find_map(|(tip, tail)| arrow_fit(tip, tail, [piece(barb_at[0]), piece(barb_at[1])], p))?;
 
     // Each stroke becomes its ideal pieces, in its own drawing order.
     let mut result = Straightened {
@@ -1085,7 +1350,7 @@ fn arrow_of(
     for (c, (s, chain)) in chains.iter().enumerate() {
         let mut lines: Vec<Vec<V>> = Vec::new();
         let mut previous: Option<(V, V)> = None;
-        for (k, (p, retrace)) in chain.iter().enumerate() {
+        for (k, (piece, retrace)) in chain.iter().enumerate() {
             let role = if *retrace {
                 Role::Retrace
             } else if (c, k) == shaft_at {
@@ -1095,7 +1360,7 @@ fn arrow_of(
             } else {
                 Role::Barb(1)
             };
-            let towards_tip = p.a.dist(fit.raw_tip) > p.b.dist(fit.raw_tip);
+            let towards_tip = piece.a.dist(fit.raw_tip) > piece.b.dist(fit.raw_tip);
             let (from, to) = match role {
                 Role::Retrace => match previous {
                     Some((from, to)) => (to, from),
@@ -1126,7 +1391,7 @@ fn arrow_of(
 
 /// The ideal arrow with its tip at `tip`, if the two `barbs` start near it, point back along
 /// the shaft on both sides and have a barb's length.
-fn arrow_fit(tip: V, tail: V, barbs: [Piece; 2]) -> Option<ArrowFit> {
+fn arrow_fit(tip: V, tail: V, barbs: [Piece; 2], p: &Params) -> Option<ArrowFit> {
     let shaft = tail - tip;
     let length = shaft.len();
     let back = shaft.unit()?;
@@ -1140,10 +1405,10 @@ fn arrow_fit(tip: V, tail: V, barbs: [Piece; 2]) -> Option<ArrowFit> {
             (barb.b, barb.a)
         };
         let len = barb.len();
-        if len < (BARB_MIN_SHARE * length).max(BARB_MIN) || len > BARB_MAX_SHARE * length {
+        if len < (BARB_MIN_SHARE * length).max(p.barb_min) || len > BARB_MAX_SHARE * length {
             return None;
         }
-        if near.dist(tip) > (BARB_REACH * len).max(BARB_REACH_MIN) {
+        if near.dist(tip) > (p.barb_reach * len).max(BARB_REACH_MIN) {
             return None;
         }
         let angle = angle_between(back, far - near);
@@ -1158,7 +1423,7 @@ fn arrow_fit(tip: V, tail: V, barbs: [Piece; 2]) -> Option<ArrowFit> {
         return None;
     }
     // A clean, symmetric head on a shaft that snaps to the axes.
-    let (snapped_tail, snapped_tip) = snap_segment(tail, tip);
+    let (snapped_tail, snapped_tip) = snap_segment(tail, tip, p.snap_angle);
     let back = (snapped_tail - snapped_tip).unit()?;
     let len = (lengths[0] + lengths[1]) / 2.0;
     let angle = (angles[0] + angles[1]) / 2.0;

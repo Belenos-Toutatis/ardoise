@@ -72,6 +72,7 @@ import type {
   MergeLayout,
   PageSize,
   RevisionSource,
+  ShapeSettings,
   SplitResult,
   SplitSpec,
   TabletInfo,
@@ -96,6 +97,8 @@ export interface AppState {
   autoExport: AutoExportSettings;
   /** Microphone chosen on this PC for the narration (null: the system's default). */
   microphone: string | null;
+  /** "Redresser les formes" as the user set it (`[shapes]`, shared by every PC; M15). */
+  shapes: ShapeSettings;
 }
 
 export interface LibraryInspection {
@@ -308,6 +311,8 @@ export const api = {
     call<NoteSummary>('merge_notes', { paths, layout, title }),
   /** Sets the automatic export after a sync (`invalidFolder` if the folder is not acceptable). */
   setAutoExport: (autoExport: AutoExportSettings) => call<AppState>('set_auto_export', { autoExport }),
+  /** Keeps the setting of "Redresser les formes" (`[shapes]` of ardoise.toml; values brought within their limits). */
+  setShapes: (shapes: ShapeSettings) => call<AppState>('set_shapes', { shapes }),
 
   // --- Settings: tablet ---------------------------------------------------------------------
 

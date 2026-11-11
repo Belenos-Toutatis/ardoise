@@ -13,6 +13,7 @@ use std::fs::{self, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use ardoise_ink::ShapeTuning;
 use serde::{Deserialize, Serialize};
 
 use crate::fsutil::write_atomic;
@@ -487,6 +488,161 @@ impl From<ShareSettings> for RawShareSettings {
     }
 }
 
+/// "Redresser les formes" as the user sets it next to the editor's button (SPEC §4.4,
+/// `docs/questions.md` Q12), the same for every note and every computer using this copy. The
+/// defaults are the fixed thresholds of before M15 ([`ShapeTuning::default`]). Every value is
+/// kept within the limits of [`ShapeTuning`] when read and when set, and a value of a ticked-off
+/// box is kept (`snap_angle = false` keeps `snap_angle_deg`) so that ticking it again brings it
+/// back. A missing, mistyped or out of range value loads as its default or limit (and is written
+/// back as such), so that a typing error in the file does not make the whole file unreadable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "RawShapeSettings", into = "RawShapeSettings")]
+pub struct ShapeSettings {
+    /// How far a stroke may stray from its ideal shape: 1 (strict) to 5 (lenient).
+    pub tolerance: u8,
+    /// Smallest line or arrow, in millimetres (5 to 25).
+    pub min_size_mm: f64,
+    /// Make what is nearly horizontal or vertical exactly so.
+    pub snap_angle: bool,
+    /// Up to how many degrees (1 to 10).
+    pub snap_angle_deg: f64,
+    /// Make a circle or a square of what is nearly round or square.
+    pub snap_round: bool,
+    /// Within how many percent of round or square (2 to 20).
+    pub snap_round_percent: f64,
+    /// Keys this version does not know about, kept verbatim.
+    pub extra: toml::Table,
+}
+
+impl Default for ShapeSettings {
+    fn default() -> Self {
+        Self::from_tuning(&ShapeTuning::default())
+    }
+}
+
+impl ShapeSettings {
+    /// The settings that give exactly `tuning` (an alignment that is `None` is ticked off and
+    /// keeps its default value).
+    pub fn from_tuning(tuning: &ShapeTuning) -> Self {
+        let default = ShapeTuning::default();
+        Self {
+            tolerance: tuning.tolerance,
+            min_size_mm: tuning.min_size_mm,
+            snap_angle: tuning.snap_angle_deg.is_some(),
+            snap_angle_deg: tuning
+                .snap_angle_deg
+                .or(default.snap_angle_deg)
+                .unwrap_or(4.0),
+            snap_round: tuning.snap_round_percent.is_some(),
+            snap_round_percent: tuning
+                .snap_round_percent
+                .or(default.snap_round_percent)
+                .unwrap_or(10.0),
+            extra: toml::Table::new(),
+        }
+    }
+
+    /// The same settings with every value brought within its limits (a value that is not a
+    /// number takes its default).
+    pub fn clamped(self) -> Self {
+        let tuning = ShapeTuning {
+            tolerance: self.tolerance,
+            min_size_mm: self.min_size_mm,
+            snap_angle_deg: Some(self.snap_angle_deg),
+            snap_round_percent: Some(self.snap_round_percent),
+        }
+        .clamped();
+        Self {
+            tolerance: tuning.tolerance,
+            min_size_mm: tuning.min_size_mm,
+            snap_angle_deg: tuning.snap_angle_deg.unwrap_or(self.snap_angle_deg),
+            snap_round_percent: tuning.snap_round_percent.unwrap_or(self.snap_round_percent),
+            ..self
+        }
+    }
+
+    /// What [`ardoise_ink::straighten_with`] takes: an alignment whose box is ticked off is
+    /// `None`. The values are brought within their limits.
+    pub fn tuning(&self) -> ShapeTuning {
+        ShapeTuning {
+            tolerance: self.tolerance,
+            min_size_mm: self.min_size_mm,
+            snap_angle_deg: self.snap_angle.then_some(self.snap_angle_deg),
+            snap_round_percent: self.snap_round.then_some(self.snap_round_percent),
+        }
+        .clamped()
+    }
+}
+
+/// The shapes table as stored: any value under each key, so that a typing error in the file
+/// does not make the whole file unreadable.
+#[derive(Serialize, Deserialize)]
+struct RawShapeSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tolerance: Option<toml::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    min_size_mm: Option<toml::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    snap_angle: Option<toml::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    snap_angle_deg: Option<toml::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    snap_round: Option<toml::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    snap_round_percent: Option<toml::Value>,
+    #[serde(flatten)]
+    extra: toml::Table,
+}
+
+/// A finite number stored as an integer or a float; anything else is `None`.
+fn finite_number(value: &Option<toml::Value>) -> Option<f64> {
+    let number = match value.as_ref()? {
+        toml::Value::Integer(i) => *i as f64,
+        toml::Value::Float(f) => *f,
+        _ => return None,
+    };
+    number.is_finite().then_some(number)
+}
+
+impl From<RawShapeSettings> for ShapeSettings {
+    fn from(raw: RawShapeSettings) -> Self {
+        let default = ShapeSettings::default();
+        let flag = |value: &Option<toml::Value>, fallback: bool| {
+            value
+                .as_ref()
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(fallback)
+        };
+        ShapeSettings {
+            tolerance: finite_number(&raw.tolerance)
+                .map_or(default.tolerance, |n| n.round().clamp(0.0, 255.0) as u8),
+            min_size_mm: finite_number(&raw.min_size_mm).unwrap_or(default.min_size_mm),
+            snap_angle: flag(&raw.snap_angle, default.snap_angle),
+            snap_angle_deg: finite_number(&raw.snap_angle_deg).unwrap_or(default.snap_angle_deg),
+            snap_round: flag(&raw.snap_round, default.snap_round),
+            snap_round_percent: finite_number(&raw.snap_round_percent)
+                .unwrap_or(default.snap_round_percent),
+            extra: raw.extra,
+        }
+        .clamped()
+    }
+}
+
+impl From<ShapeSettings> for RawShapeSettings {
+    fn from(settings: ShapeSettings) -> Self {
+        let settings = settings.clamped();
+        Self {
+            tolerance: Some(toml::Value::Integer(i64::from(settings.tolerance))),
+            min_size_mm: Some(toml::Value::Float(settings.min_size_mm)),
+            snap_angle: Some(toml::Value::Boolean(settings.snap_angle)),
+            snap_angle_deg: Some(toml::Value::Float(settings.snap_angle_deg)),
+            snap_round: Some(toml::Value::Boolean(settings.snap_round)),
+            snap_round_percent: Some(toml::Value::Float(settings.snap_round_percent)),
+            extra: settings.extra,
+        }
+    }
+}
+
 /// Settings that only make sense on one computer.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MachineSettings {
@@ -556,6 +712,9 @@ pub struct Settings {
     /// Sharing the sheet on the local network.
     #[serde(default)]
     pub share: ShareSettings,
+    /// "Redresser les formes".
+    #[serde(default)]
+    pub shapes: ShapeSettings,
     /// Per-computer settings, keyed by machine name.
     #[serde(default)]
     pub machines: BTreeMap<String, MachineSettings>,
@@ -1312,6 +1471,167 @@ monitor = 2
         let text = fs::read_to_string(store.path()).unwrap();
         assert!(!text.contains("share_port = 8766"), "{text}");
         assert!(text.contains("share_port = 9000"), "{text}");
+    }
+
+    #[test]
+    fn the_shape_settings_default_to_the_thresholds_of_before_m15() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        for text in [None, Some("theme = \"light\"\n"), Some("[shapes]\n")] {
+            if let Some(text) = text {
+                fs::write(store.path(), text).unwrap();
+            }
+            let shapes = store.load().unwrap().shapes;
+            assert_eq!(shapes, ShapeSettings::default());
+            assert_eq!(shapes.tolerance, 3);
+            assert_eq!(shapes.min_size_mm, 10.0);
+            assert!(shapes.snap_angle && shapes.snap_round);
+            assert_eq!(shapes.snap_angle_deg, 4.0);
+            assert_eq!(shapes.snap_round_percent, 10.0);
+            assert_eq!(shapes.tuning(), ShapeTuning::default());
+        }
+    }
+
+    #[test]
+    fn the_shape_settings_are_shared_and_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        let chosen = ShapeSettings {
+            tolerance: 5,
+            min_size_mm: 7.5,
+            snap_angle: false,
+            snap_angle_deg: 2.0,
+            snap_round: true,
+            snap_round_percent: 15.0,
+            extra: toml::Table::new(),
+        };
+        let saved = store.update(|s| s.shapes = chosen.clone()).unwrap();
+        assert_eq!(saved.shapes, chosen);
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("[shapes]"), "{text}");
+        assert!(text.contains("tolerance = 5"), "{text}");
+        assert!(text.contains("min_size_mm = 7.5"), "{text}");
+        assert!(text.contains("snap_angle = false"), "{text}");
+        assert!(text.contains("snap_angle_deg = 2.0"), "{text}");
+        assert!(text.contains("snap_round = true"), "{text}");
+        assert!(text.contains("snap_round_percent = 15.0"), "{text}");
+        // Another PC (another machine name) reads the same values: they are not in a machine
+        // section.
+        let other = SettingsStore::locate(dir.path(), dir.path(), "PC-B");
+        assert_eq!(other.load().unwrap().shapes, chosen);
+        assert!(!text.contains("[machines.PC-A]"), "{text}");
+        // A box that is off gives `None`, and keeps its value for when it is ticked again.
+        let tuning = chosen.tuning();
+        assert_eq!(tuning.snap_angle_deg, None);
+        assert_eq!(tuning.snap_round_percent, Some(15.0));
+        assert_eq!(store.load().unwrap().shapes.snap_angle_deg, 2.0);
+    }
+
+    #[test]
+    fn shape_settings_are_brought_within_their_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        fs::write(
+            store.path(),
+            "[shapes]\ntolerance = 9\nmin_size_mm = 2\nsnap_angle_deg = 45.5\nsnap_round_percent = 0.5\n",
+        )
+        .unwrap();
+        let shapes = store.load().unwrap().shapes;
+        assert_eq!(shapes.tolerance, 5);
+        assert_eq!(shapes.min_size_mm, 5.0);
+        assert_eq!(shapes.snap_angle_deg, 10.0);
+        assert_eq!(shapes.snap_round_percent, 2.0);
+        fs::write(
+            store.path(),
+            "[shapes]\ntolerance = -3\nmin_size_mm = 100\nsnap_angle_deg = 0\nsnap_round_percent = 99\n",
+        )
+        .unwrap();
+        let shapes = store.load().unwrap().shapes;
+        assert_eq!(shapes.tolerance, 1);
+        assert_eq!(shapes.min_size_mm, 25.0);
+        assert_eq!(shapes.snap_angle_deg, 1.0);
+        assert_eq!(shapes.snap_round_percent, 20.0);
+        // Setting an out of range value stores the value within the limits.
+        let updated = store
+            .update(|s| {
+                s.shapes.tolerance = 0;
+                s.shapes.min_size_mm = f64::NAN;
+                s.shapes.snap_round_percent = 500.0;
+            })
+            .unwrap();
+        let text = fs::read_to_string(store.path()).unwrap();
+        assert!(text.contains("tolerance = 1"), "{text}");
+        assert!(text.contains("min_size_mm = 10.0"), "{text}");
+        assert!(text.contains("snap_round_percent = 20.0"), "{text}");
+        assert_eq!(store.load().unwrap().shapes.tolerance, 1);
+        // The value in memory is as given; what is used and stored is within the limits.
+        assert_eq!(updated.shapes.snap_round_percent, 500.0);
+        assert_eq!(updated.shapes.tuning().snap_round_percent, Some(20.0));
+        assert_eq!(updated.shapes.clone().clamped().snap_round_percent, 20.0);
+    }
+
+    #[test]
+    fn a_wrong_shape_value_takes_its_default_without_spoiling_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        for wrong in ["\"x\"", "true", "[1]", "{ a = 1 }", "nan", "inf"] {
+            fs::write(
+                store.path(),
+                format!(
+                    "theme = \"dark\"\n\n[shapes]\ntolerance = {wrong}\nmin_size_mm = {wrong}\nsnap_angle = {wrong}\nsnap_angle_deg = {wrong}\nsnap_round = {wrong}\nsnap_round_percent = 12\n"
+                ),
+            )
+            .unwrap();
+            let loaded = store.load().unwrap();
+            assert_eq!(loaded.theme, Theme::Dark, "{wrong}");
+            let shapes = loaded.shapes;
+            assert_eq!(shapes.tolerance, 3, "{wrong}");
+            assert_eq!(shapes.min_size_mm, 10.0, "{wrong}");
+            // A boolean is a boolean; anything else is the default (on).
+            assert!(shapes.snap_angle && shapes.snap_round, "{wrong}");
+            assert_eq!(shapes.snap_angle_deg, 4.0, "{wrong}");
+            assert_eq!(shapes.snap_round_percent, 12.0, "{wrong}");
+        }
+        fs::write(
+            store.path(),
+            "[shapes]\nsnap_angle = false\nsnap_round = \"no\"\n",
+        )
+        .unwrap();
+        let shapes = store.load().unwrap().shapes;
+        assert!(!shapes.snap_angle && shapes.snap_round);
+        // A whole number is fine for a float, a float for the integer (rounded).
+        fs::write(
+            store.path(),
+            "[shapes]\ntolerance = 2.6\nmin_size_mm = 12\n",
+        )
+        .unwrap();
+        let shapes = store.load().unwrap().shapes;
+        assert_eq!((shapes.tolerance, shapes.min_size_mm), (3, 12.0));
+    }
+
+    #[test]
+    fn the_shape_settings_keep_unknown_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_in(dir.path());
+        fs::write(
+            store.path(),
+            "future_flag = true\n\n[shapes]\ntolerance = 2\nstraight_arrows = \"yes\"\n\n[shapes.future]\nanswer = 42\n",
+        )
+        .unwrap();
+        let updated = store.update(|s| s.shapes.min_size_mm = 20.0).unwrap();
+        assert_eq!(updated.shapes.tolerance, 2);
+        assert_eq!(updated.shapes.min_size_mm, 20.0);
+        let reloaded = store.load().unwrap();
+        assert_eq!(reloaded.shapes, updated.shapes);
+        assert_eq!(
+            reloaded.shapes.extra["straight_arrows"].as_str(),
+            Some("yes")
+        );
+        assert_eq!(
+            reloaded.shapes.extra["future"]["answer"].as_integer(),
+            Some(42)
+        );
+        assert_eq!(reloaded.extra["future_flag"].as_bool(), Some(true));
     }
 
     #[test]

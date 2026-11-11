@@ -863,9 +863,32 @@ et **Gomme** : pas besoin de repasser par l'outil **Sélection**. Hors du cadre,
 Sélectionnez des traits, puis **Redresser les formes** (ou la touche `F`) : les droites, cercles, ellipses, rectangles
 (même tournés) et flèches tracés à main levée deviennent des formes nettes, avec le même outil, la même couleur et la
 même épaisseur. L'écriture et tout ce qui n'est pas une forme nette ne changent pas. Ardoise redresse les droites et
-flèches d'au moins 1 cm, les cercles, ellipses et rectangles d'environ 1,5 cm ou plus ; un petit ovale debout (moins de
+flèches d'au moins 1 cm, les cercles, ellipses et rectangles d'au moins 1,3 cm ; un petit ovale debout (moins de
 2,5 cm) ressemble à un « O » ou à un « 0 » et reste tel quel. Sélectionnez plutôt les dessins que le texte. Une seule
 action annule tout (`Ctrl + Z`).
+
+**Régler le redressement.** Le petit bouton à droite du bouton **Redresser les formes** (**Réglage du redressement**, une icône de réglage) ouvre un panneau avec
+trois réglages :
+
+- **Tolérance** : de **stricte** à **souple**, en cinq crans. Souple redresse aussi les formes tracées moins
+  nettement ; stricte, seulement les plus nettes. Le cran du milieu, **normale**, est le réglage d'avant.
+- **Taille minimale** : de 5 à 25 mm (10 mm au départ). Une droite ou une flèche doit avoir au moins cette taille, un
+  cercle, une ellipse ou un rectangle 3 mm de plus. Sous 1 cm, des lettres peuvent être redressées : sélectionnez alors
+  seulement les dessins.
+- **Alignement automatique** : deux cases, chacune avec son curseur. La première rend horizontal ou vertical un trait
+  qui l'est presque (jusqu'à 4° au départ, de 1° à 10°) ; la seconde fait un cercle ou un carré d'une forme presque
+  ronde ou carrée (à moins de 10 % au départ, de 2 % à 20 %). Décochée, la case laisse la forme comme vous l'avez tracée.
+
+Tant que le panneau est ouvert et que des traits sont sélectionnés, la page montre en **pointillés bleus** ce qui serait
+redressé (les traits d'origine pâlissent), et le panneau dit combien de formes sont reconnues : bougez les curseurs
+pour les voir apparaître ou disparaître. Rien ne change dans la note tant que vous n'avez pas cliqué sur **Redresser**
+(ou sur le bouton **Redresser les formes**, ou appuyé sur `F`) ; `Ctrl + Z` annule comme d'habitude. `Échap` ou un clic
+ailleurs ferme le panneau sans rien redresser, et les valeurs choisies restent. **Valeurs par défaut** remet celles
+d'avant le réglage.
+
+Les valeurs sont retenues pour toutes les notes (et par l'assistant, qui redresse avec les mêmes). Le panneau ne
+dépasse jamais le bas de la fenêtre : si elle est basse, il défile à la molette ou au doigt, et ses boutons restent
+visibles en bas. Un petit ovale debout (un « O », un « 0 ») n'est jamais redressé, quel que soit le réglage.
 
 ### Copier et coller
 

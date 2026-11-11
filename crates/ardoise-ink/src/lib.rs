@@ -13,4 +13,4 @@ pub mod shapes;
 
 pub use geometry::{Bounds, MAX_COORD, Outline, outline};
 pub use model::{Point, Rgba, Stroke, Tool};
-pub use shapes::{Shape, Straightened, straighten};
+pub use shapes::{Shape, ShapeTuning, Straightened, straighten, straighten_with};

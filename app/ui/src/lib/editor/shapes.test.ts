@@ -1,9 +1,9 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import { instantiateInk, type Straightened } from '../ink';
+import { describe, expect, it, vi } from 'vitest';
+import { instantiateInk, type ShapeTuning, type Straightened } from '../ink';
 import type { Stroke } from '../note';
-import { straightenSelection } from './shapes';
+import { applyStraightened, nextFrame, previewStraightening, straightenSelection } from './shapes';
 import { docFromNote, select } from './state';
 import { hline, line, note } from './test-fixtures';
 
@@ -64,5 +64,68 @@ describe('straighten the selection', () => {
     expect(straightenSelection(doc, ink)).toEqual({ doc, shapes: 0 });
     const wavy = select(docFromNote(note([line([[0, 0], [3000, 3000], [6000, 0], [9000, 3000]])])), [0]);
     expect(straightenSelection(wavy, ink).doc).toBe(wavy);
+  });
+});
+
+describe('straighten with a setting', () => {
+  const strokes = [hline(0, 100, 0), hline(0, 800, 100), hline(0, 3000, 200)];
+  /** Recognises a flat stroke at least `minSizeMm` long, as the real recognition does with its setting. */
+  const fake = (calls: (ShapeTuning | undefined)[] = []) => ({
+    straighten: (given: readonly Stroke[], tuning?: ShapeTuning): Straightened[] => {
+      calls.push(tuning);
+      return given.flatMap((stroke, i) => {
+        const length = stroke.points[stroke.points.length - 1].x - stroke.points[0].x;
+        return length / 100 >= (tuning?.minSizeMm ?? 10) ? [{ sources: [i], shape: 'line' as const, strokes: [hline(0, length, 5000)] }] : [];
+      });
+    },
+  });
+  const five: ShapeTuning = { tolerance: 3, minSizeMm: 5, snapAngleDeg: 4, snapRoundPercent: 10 };
+
+  it('gives the setting to the recognition', () => {
+    const calls: (ShapeTuning | undefined)[] = [];
+    const doc = select(docFromNote(note(strokes)), [0, 1, 2]);
+    const tuning: ShapeTuning = { tolerance: 5, minSizeMm: 5, snapAngleDeg: null, snapRoundPercent: 12 };
+    straightenSelection(doc, fake(calls), tuning);
+    previewStraightening(doc, fake(calls), tuning);
+    straightenSelection(doc, fake(calls));
+    expect(calls).toEqual([tuning, tuning, undefined]);
+  });
+
+  it('shows what would change without changing anything', () => {
+    const doc = select(docFromNote(note(strokes)), [1, 2]);
+    // The selected strokes are 7 and 30 mm long: both are shapes at 5 mm (the stroke 0 is not selected).
+    const wide = previewStraightening(doc, fake(), five);
+    expect(wide.selected).toBe(2);
+    expect(wide.sources).toEqual([1, 2]);
+    expect(wide.groups).toHaveLength(2);
+    expect(wide.strokes).toHaveLength(2);
+    const narrow = previewStraightening(doc, fake(), { ...five, minSizeMm: 10 });
+    expect(narrow.sources).toEqual([2]);
+    expect(previewStraightening(docFromNote(note(strokes)), fake()).selected).toBe(0);
+    expect(doc.note.strokes).toEqual(strokes);
+  });
+
+  it('applies exactly the groups that the preview showed', () => {
+    const doc = select(docFromNote(note(strokes)), [0, 1, 2]);
+    const { groups } = previewStraightening(doc, fake(), five);
+    const applied = applyStraightened(doc, groups);
+    expect(applied.shapes).toBe(2);
+    expect(applied.doc.note.strokes).toEqual([strokes[0], groups[0].strokes[0], groups[1].strokes[0]]);
+    expect(applied.doc.selection).toEqual([0, 1, 2]);
+    // Same result as straightening in one go.
+    expect(straightenSelection(doc, fake(), five)).toEqual(applied);
+    expect(applyStraightened(doc, [])).toEqual({ doc, shapes: 0 });
+  });
+});
+
+describe('nextFrame', () => {
+  it('runs once on the next frame, unless cancelled', async () => {
+    const run = vi.fn();
+    const cancelled = vi.fn();
+    nextFrame(run);
+    nextFrame(cancelled)();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(cancelled).not.toHaveBeenCalled();
   });
 });

@@ -58,10 +58,34 @@ export interface Ink {
   pressureForWidth(tool: Tool, width: number, diameter: number): number;
   /**
    * The clear shapes (line, ellipse, rectangle, arrow) among `strokes`, straightened
-   * (`ardoise_ink::shapes`). Strokes that are no clear shape are in no result.
+   * (`ardoise_ink::shapes`) with `tuning` (the defaults, the thresholds of before M15, when
+   * absent). Strokes that are no clear shape are in no result.
    */
-  straighten(strokes: readonly ShapeStroke[]): Straightened[];
+  straighten(strokes: readonly ShapeStroke[], tuning?: ShapeTuning): Straightened[];
 }
+
+/**
+ * How `straighten` recognises shapes (`ardoise_ink::ShapeTuning`; built from the user's
+ * `ShapeSettings` by `toShapeTuning` in `lib/shape-settings.ts`).
+ */
+export interface ShapeTuning {
+  /** 1 (strict) to 5 (lenient); 3: the thresholds of before M15. */
+  tolerance: number;
+  /** Smallest line or arrow, in mm; a closed shape needs 3 mm more. */
+  minSizeMm: number;
+  /** Nearly horizontal or vertical within this many degrees becomes exactly so; `null`: never. */
+  snapAngleDeg: number | null;
+  /** Nearly round or square within this percentage becomes a circle or a square; `null`: never. */
+  snapRoundPercent: number | null;
+}
+
+/** The tuning `straighten` uses when given none: the thresholds of before M15 (`ShapeTuning::default()`). */
+export const DEFAULT_SHAPE_TUNING: Readonly<ShapeTuning> = Object.freeze({
+  tolerance: 3,
+  minSizeMm: 10,
+  snapAngleDeg: 4,
+  snapRoundPercent: 10,
+});
 
 interface Exports {
   memory: WebAssembly.Memory;
@@ -71,7 +95,15 @@ interface Exports {
   ink_result(): number;
   ink_width_at(tool: number, width: number, pressure: number): number;
   ink_pressure_for_width(tool: number, width: number, diameter: number): number;
-  ink_straighten(ptr: number, words: number): number;
+  /** The tuning as numbers: a negative angle or percentage turns that alignment off; Rust brings the values within their limits. */
+  ink_straighten_tuned(
+    ptr: number,
+    words: number,
+    tolerance: number,
+    minSizeMm: number,
+    snapAngleDeg: number,
+    snapRoundPercent: number,
+  ): number;
   ink_straighten_result(): number;
 }
 
@@ -116,7 +148,7 @@ export async function instantiateInk(bytes: BufferSource): Promise<Ink> {
     }
   }
 
-  function straighten(strokes: readonly ShapeStroke[]): Straightened[] {
+  function straighten(strokes: readonly ShapeStroke[], tuning: ShapeTuning = DEFAULT_SHAPE_TUNING): Straightened[] {
     const words = 1 + strokes.reduce((sum, s) => sum + 5 + 4 * s.points.length, 0);
     const ptr = wasm.ink_alloc(words);
     try {
@@ -138,7 +170,14 @@ export async function instantiateInk(bytes: BufferSource): Promise<Ink> {
           ints[at++] = Math.max(0, Math.min(0xffffffff, Math.round(p.t)));
         }
       }
-      const len = wasm.ink_straighten(ptr, words);
+      const len = wasm.ink_straighten_tuned(
+        ptr,
+        words,
+        tuning.tolerance,
+        tuning.minSizeMm,
+        tuning.snapAngleDeg ?? -1,
+        tuning.snapRoundPercent ?? -1,
+      );
       // Copied out: the next call replaces the result.
       const result = new Uint32Array(wasm.memory.buffer, wasm.ink_straighten_result(), len).slice();
       const asFloat = new Float32Array(result.buffer);

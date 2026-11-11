@@ -806,8 +806,29 @@ Outside the frame, the pen draws as usual, and `Esc` deselects.
 Select strokes, then **Straighten shapes** (or the `F` key): lines, circles, ellipses, rectangles (even rotated) and
 arrows drawn freehand become clean shapes, with the same tool, colour and width. The writing and anything that is not
 a clear shape do not change. Ardoise straightens lines and arrows at least 1 cm long, and circles, ellipses and
-rectangles about 1.5 cm across or more; a small upright oval (under 2.5 cm) looks like an "O" or a "0" and stays as it
+rectangles at least 1.3 cm across; a small upright oval (under 2.5 cm) looks like an "O" or a "0" and stays as it
 is. Select the drawings rather than the text. A single undo cancels it all (`Ctrl + Z`).
+
+**Setting the straightening.** The small button to the right (**Straightening settings**) opens a panel with three
+settings:
+
+- **Tolerance**: from **strict** to **lenient**, in five steps. Lenient also straightens shapes drawn less clearly;
+  strict, only the clearest ones. The middle step, **normal**, is how it worked before.
+- **Minimum size**: from 5 to 25 mm (10 mm to begin with). A line or an arrow must be at least that long, a circle, an
+  ellipse or a rectangle 3 mm more. Below 1 cm, letters may be straightened: select only the drawings then.
+- **Automatic alignment**: two boxes, each with its slider. The first makes a stroke that is nearly horizontal or
+  vertical exactly so (up to 4° to begin with, from 1° to 10°); the second makes a circle or a square of a nearly round
+  or square shape (within 10% to begin with, from 2% to 20%). With a box unticked, the shape stays as you drew it.
+
+While the panel is open and strokes are selected, the page shows in **dashed blue** what would be straightened (the
+original strokes fade), and the panel tells how many shapes are recognised: move the sliders to see shapes appear or
+disappear. Nothing changes in the note until you click **Straighten** (or the **Straighten shapes** button, or press
+`F`); `Ctrl + Z` undoes it as usual. `Esc` or a click elsewhere closes the panel without straightening anything, and
+the values you chose stay. **Default values** puts back the ones from before the setting existed.
+
+The values are kept for every note (and the assistant straightens with the same ones). The panel never goes past the
+bottom of the window: in a low window it scrolls with the wheel or a finger, and its buttons stay in sight at the
+bottom. A small upright oval (an "O", a "0") is never straightened, whatever the setting.
 
 ### Copy and paste
 

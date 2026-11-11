@@ -868,7 +868,57 @@
       "disabledHint": "Select strokes with the lasso first, then straighten them.",
       "doneOne": "1 shape straightened (Ctrl+Z to undo).",
       "doneMany": "{count} shapes straightened (Ctrl+Z to undo).",
-      "none": "No shape recognised in the selection. Ardoise straightens lines and arrows at least 1 cm long, and circles, ellipses and rectangles about 1.5 cm across or more, drawn clearly enough. Select the drawings rather than the text: a small upright oval (under 2.5 cm) looks like an O or a 0 and stays as it is, like everything else that is not a clear shape."
+      "none": "No shape recognised in the selection. Ardoise straightens lines and arrows at least {line} mm long, and circles, ellipses and rectangles at least {closed} mm across, drawn clearly enough (setting: the small button to the right of the button). Select the drawings rather than the text: a small upright oval (under 2.5 cm) looks like an O or a 0 and stays as it is, like everything else that is not a clear shape.",
+      "settings": {
+        "button": "Straightening settings",
+        "title": "Straighten shapes",
+        "count": {
+          "noSelection": "Select strokes with the lasso to see what would be straightened.",
+          "none": "With these values, no shape is recognised in the selection.",
+          "some": "With these values: {shapes} out of {strokes}.",
+          "shapes": {
+            "one": "{count} shape",
+            "other": "{count} shapes"
+          },
+          "strokes": {
+            "one": "{count} selected stroke",
+            "other": "{count} selected strokes"
+          }
+        },
+        "tolerance": {
+          "label": "Tolerance",
+          "levels": {
+            "1": "strict",
+            "2": "fairly strict",
+            "3": "normal",
+            "4": "fairly lenient",
+            "5": "lenient"
+          },
+          "strict": "Strict",
+          "normal": "Normal",
+          "lenient": "Lenient",
+          "help": "Lenient also straightens shapes drawn less clearly; strict, only the clearest ones."
+        },
+        "size": {
+          "label": "Minimum size",
+          "value": "{mm} mm",
+          "help": "Lines and arrows at least {line} mm long; circles, ellipses and rectangles at least {closed} mm across.",
+          "warning": "Below 1 cm, letters may be straightened: select only the drawings."
+        },
+        "snap": {
+          "label": "Automatic alignment",
+          "angle": "Make nearly horizontal or vertical strokes exactly so",
+          "angleLimit": "up to",
+          "angleValue": "{degrees}°",
+          "round": "Make a circle or a square of nearly round or square shapes",
+          "roundLimit": "within",
+          "roundValue": "{percent}%"
+        },
+        "defaults": "Default values",
+        "apply": "Straighten",
+        "applyNone": "No shape to straighten with these values.",
+        "saveFailed": "The setting could not be saved: {message}"
+      }
     },
     "page": {
       "label": "Page",

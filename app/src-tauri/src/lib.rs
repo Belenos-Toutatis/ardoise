@@ -321,6 +321,7 @@ pub fn run() {
             presentation::open_presentation,
             presentation::close_presentation,
             commands::set_auto_export,
+            commands::set_shapes,
             export::export_notes,
             export::cancel_export,
             clipboard::copy_note_image,

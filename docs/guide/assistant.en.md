@@ -140,7 +140,11 @@ it.
   axes."
 - "Colour the words to remember and put a frame round the result in the lesson note on dilution."
 - "Correct the spelling mistakes in my note, using my own handwriting."
-- "Straighten the shapes of my physics note" (this too is done on a copy now: the original is no longer changed).
+- "Straighten the shapes of my physics note" (this too is done on a copy now: the original is no longer changed). The
+  assistant straightens with **the same values as the setting** next to the editor's "Straighten shapes" button
+  (tolerance, minimum size, automatic alignment) and tells you which it used, in the copy's account too when they are
+  not the original values. You can ask for others for one time ("with a stricter tolerance", "even the 6 mm strokes")
+  without touching your setting; below 10 mm, letters may be straightened.
 - "Split my note in two at this point" (the two parts are new notes, the note it started from stays as it was).
 - In Claude Code, the prompt `improve_note` (`ameliorer_note` in French) goes through all this step by step, with the
   requests for care above; it is not there in read-only mode.

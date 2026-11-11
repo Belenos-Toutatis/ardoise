@@ -146,3 +146,24 @@ En classe, l'utilisateur confie la tablette à un élève qui écrit son exercic
 - Export : le dernier choix est retenu. Les calques PDF de même nom ne font qu'un seul interrupteur pour toutes les pages d'un export de plusieurs notes. Un calque masqué n'est jamais exporté, même en séparé : il peut contenir les réponses. L'export par l'assistant (`export_note`) ne change pas.
 
 SPEC §4.2, §4.4 et §4.6 sont mis à jour et le jalon M14 est ajouté à ROADMAP.md.
+
+## Q12 — Régler « Redresser les formes » (jalon M15, 2026-11-11) — **tranchée**
+
+L'utilisateur demande un réglage de la sensibilité de la détection des formes. Aujourd'hui les seuils sont fixes (`crates/ardoise-ink/src/shapes.rs`) : une droite ou une flèche d'au moins 1 cm, une forme fermée d'au moins 1,3 cm, un écart limité à la forme idéale, et un alignement automatique à 4° de l'horizontale ou de la verticale, et à 10 % d'un cercle ou d'un carré.
+
+**Décisions de l'utilisateur (2026-11-11)**, à partir d'une maquette qu'il a validée (`target/maquettes/maquette-redresser.html`, hors de git) :
+- Trois réglages : la tolérance, la taille minimale et l'alignement automatique.
+- Le réglage est à côté du bouton « Redresser les formes » : un petit bouton à droite du bouton (icône de réglage) ouvre un panneau.
+- Le panneau doit pouvoir se voir en entier : s'il manque de place, il défile à la molette ou au doigt.
+
+**Choix par défaut, proposés avec le texte du SPEC et acceptés** (« Oui, lance-le ») :
+- Tolérance sur cinq crans, de « stricte » à « souple » ; le cran du milieu, « normale », est le réglage d'aujourd'hui. Taille minimale de 5 à 25 mm (10 mm aujourd'hui) pour une droite ou une flèche, une forme fermée demandant 3 mm de plus ; un avertissement sous 10 mm, car des lettres peuvent alors être redressées. Alignement : une case pour rendre horizontal ou vertical ce qui l'est presque, jusqu'à 1 à 10° (4°), une case pour faire un cercle ou un carré de ce qui est presque rond ou carré, à moins de 2 à 20 % (10 %).
+- « Valeurs par défaut » remet exactement les réglages d'aujourd'hui, et le redressement donne alors les mêmes résultats qu'avant.
+- Pendant que le panneau est ouvert et qu'il y a une sélection, la page montre en pointillés ce qui serait redressé, et le panneau dit combien de formes sont reconnues. « Redresser » applique ; Ctrl+Z annule comme aujourd'hui. Échap ferme le panneau sans redresser ; les valeurs choisies restent.
+- Le panneau ne dépasse jamais le bas de la fenêtre : s'il manque de place, il défile, et ses boutons restent visibles en bas.
+- Les valeurs sont retenues dans les réglages d'Ardoise (`ardoise.toml`, section `[shapes]`) : les mêmes pour toutes les notes, et sur chaque PC qui utilise cette copie. Une valeur hors des limites est ramenée dans les limites.
+- Le bouton « Redresser les formes » du bloc Sélection et la touche F redressent avec les mêmes valeurs.
+- L'assistant (`straighten_shapes`) redresse avec les mêmes valeurs ; on peut lui en donner d'autres pour un appel, et sa réponse dit les valeurs utilisées.
+- Les protections de l'écriture restent, quel que soit le réglage : un petit ovale debout (un O, un 0) de moins de 2,5 cm n'est jamais redressé.
+
+SPEC §4.4 est mis à jour et le jalon M15 est ajouté à ROADMAP.md.
