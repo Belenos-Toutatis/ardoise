@@ -4,8 +4,9 @@
    * rendered from its table (`lib/editor/shortcuts.ts`, `lib/live-shortcuts.ts`), which the tests confront with the
    * keys the window really handles. The entries without a group first, then one `h4` and list per group present.
    * Each entry is a `dt[data-shortcut]` with the chords it shows (one per display, duplicates merged, separated by
-   * « , »; each chord as `<kbd>Ctrl</kbd> + <kbd>Z</kbd>`) or the text of its `keysLabel`, and a `dd` with what it does.
-   * Package 0's skeleton: the content and the hooks, no style (package A).
+   * « , »; each chord as `<kbd>Ctrl</kbd> + <kbd>Z</kbd>` in a `span.chord`) or the text of its `keysLabel`, and a `dd`
+   * with what it does. The look of the block, of `dl.keys` and of `kbd` is the pane's (`SidePanel.svelte`); only what
+   * is specific to the help is scoped here.
    */
   import { t } from '../../lib/i18n.svelte';
   import { chordParts, type Shortcut } from '../../lib/shortcuts';
@@ -45,9 +46,11 @@
         {:else}
           {#each chordsOf(entry) as parts, i (i)}
             {#if i > 0}{', '}{/if}
-            {#each parts as part, j (j)}
-              {#if j > 0}{' + '}{/if}<kbd>{part}</kbd>
-            {/each}
+            <span class="chord">
+              {#each parts as part, j (j)}
+                {#if j > 0}{' + '}{/if}<kbd>{part}</kbd>
+              {/each}
+            </span>
           {/each}
         {/if}
       </dt>
@@ -65,3 +68,18 @@
   {/each}
   <p class="pane-help">{t(where === 'editor' ? 'side.help.typingEditor' : 'side.help.typingLive')}</p>
 </section>
+
+<style>
+  /* A chord is not broken across lines; two chords of one entry may wrap between them. */
+  .chord {
+    white-space: nowrap;
+  }
+
+  /* The heading of a group (« Pendant une relecture »): below a block title in rank, set off from the list before it. */
+  h4 {
+    margin: 0.35rem 0 0;
+    color: var(--text);
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+</style>
