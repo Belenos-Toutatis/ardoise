@@ -51,16 +51,16 @@
   const nothing = $derived((mode === 'time' || hasZone) && !canSplit(preview));
 </script>
 
-<section class="side-section split-panel" aria-labelledby="editor-split-heading">
-  <h3 id="editor-split-heading">{t('editor.split.title')}</h3>
+<section class="pane-block split-panel" aria-labelledby="editor-split-heading">
+  <h3 class="pane-title" id="editor-split-heading">{t('editor.split.title')}</h3>
 
   {#if !range}
     <p class="muted small">{t('editor.split.empty')}</p>
-    <div class="buttons">
+    <div class="pane-actions">
       <button type="button" class="button small-button" onclick={oncancel}>{t('editor.split.close')}</button>
     </div>
   {:else}
-    <div class="buttons" role="radiogroup" aria-label={t('editor.split.mode')}>
+    <div class="pane-actions" role="radiogroup" aria-label={t('editor.split.mode')}>
       <label class="choice">
         <input type="radio" name="split-mode" checked={mode === 'time'} disabled={busy} onchange={() => onmode('time')} />
         {t('editor.split.modeTime')}
@@ -92,7 +92,7 @@
     {:else}
       <p class="muted small">{hasZone ? t('editor.split.zoneTraced') : t('editor.split.zoneHint')}</p>
       {#if hasZone}
-        <div class="buttons">
+        <div class="pane-actions">
           <button type="button" class="button small-button" disabled={busy} onclick={onclearzone}>{t('editor.split.retrace')}</button>
         </div>
       {/if}
@@ -103,7 +103,7 @@
       <p class="small error" role="status">{t('editor.split.nothing')}</p>
     {/if}
 
-    <label class="row split-title">
+    <label class="pane-row split-title">
       <span>{t('editor.split.newTitle')}</span>
       <input type="text" bind:value={title} disabled={busy} oninput={onedittitle} />
     </label>
@@ -114,7 +114,7 @@
       <p class="banner error inline" role="alert">{t('editor.split.error', { message: error })}</p>
     {/if}
 
-    <div class="buttons">
+    <div class="pane-actions">
       <button type="button" class="button small-button primary" disabled={!ready || busy} onclick={onconfirm}>
         {busy ? t('editor.split.running') : t('editor.split.confirm')}
       </button>

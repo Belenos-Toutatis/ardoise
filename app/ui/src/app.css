@@ -1502,45 +1502,11 @@ select {
   min-height: 0;
 }
 
+/* The side panel's rail and pane carry their own width, border and scroll (components/side/SidePanel.svelte). */
 .editor-side {
-  width: 270px;
+  display: flex;
   flex: none;
-  overflow: auto;
-  border-left: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.side-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.85rem 1rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.side-section h3 {
-  margin: 0;
-  font-size: 0.95rem;
-}
-
-.side-section p {
-  margin: 0;
-}
-
-.side-section .row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.875rem;
-}
-
-.side-section .row select {
-  width: 9.5rem;
-}
-
-.side-section .check {
-  font-size: 0.875rem;
+  min-height: 0;
 }
 
 .editor-dialog-backdrop {
@@ -1564,12 +1530,6 @@ select {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-
-@media (max-width: 900px) {
-  .editor-side {
-    width: 220px;
-  }
 }
 
 /* Dialogs: export, assemble */

@@ -38,6 +38,11 @@
    * the button is open, the canvas previews what the selection would give (`straightenPreview`,
    * recomputed at most once per frame) and the panel counts the shapes; nothing changes in the
    * note until the button, the F key or the panel's « Redresser » straightens.
+   *
+   * Milestone M16: the side panel is the shared tabbed rail (`SidePanel`, docs/design/side-panel.md): Calques,
+   * Page, Fond, Son, Projection and Aide, the selection and the split panel above the open tab. A replay shows
+   * Son and gives back the tab it found when it ends; a selection appearing or a split starting reopens a collapsed
+   * pane. A replay is read-only: the tabs that edit the note are disabled meanwhile.
    */
   import { tick, untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, onSessionEnding, type AppState } from '../../lib/api';
@@ -103,6 +108,9 @@
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { closeKey } from '../../lib/close-keys';
   import { share } from '../../lib/share-state.svelte';
+  import { layerWarnings } from '../../lib/layers-zone';
+  import { SidePanelState, type SideBadges, type SideView } from '../../lib/side-panel.svelte';
+  import { EDITOR_SHORTCUTS } from '../../lib/editor/shortcuts';
   import { resumeBlock } from '../../lib/live-resume.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
@@ -115,10 +123,13 @@
   import VideoExportDialog from '../VideoExportDialog.svelte';
   import LayersZone from '../layers/LayersZone.svelte';
   import { clock } from '../narration/format';
-  import RecordPanel from '../narration/RecordPanel.svelte';
   import { NarrationRecorder } from '../narration/recorder.svelte';
+  import ShareBlock from '../share/ShareBlock.svelte';
+  import ShortcutsHelp from '../side/ShortcutsHelp.svelte';
+  import SidePanel from '../side/SidePanel.svelte';
   import BackgroundImageSection from './BackgroundImageSection.svelte';
   import Canvas from './Canvas.svelte';
+  import EditorSound from './EditorSound.svelte';
   import OriginalPanel from './OriginalPanel.svelte';
   import PagePanel from './PagePanel.svelte';
   import RecoveryDialog from './RecoveryDialog.svelte';
@@ -283,9 +294,35 @@
   /** `Date.now()` when the recording's replay was at instant 0 and playing; places the sound in the replay. */
   let replayStartedAt: number | null = null;
 
+  // The side panel (M16): one state for the editor's life (Alt + ←/→ keeps the component), remembered per PC.
+  const side = new SidePanelState('editor');
+  /** The tab and collapsed state the replay found: given back when it ends (it shows Son meanwhile). */
+  let sideBeforeReplay: SideView | null = null;
+
   const doc = $derived(history?.present ?? null);
   const dirty = $derived(!!doc && doc.note !== savedNote);
   const hasSelection = $derived((doc?.selection.length ?? 0) > 0);
+  /** The split panel is open or a replay runs: the tabs that edit the note are disabled. */
+  const locked = $derived(split !== null || replaying);
+  /** The rail's badges (docs/design/side-panel.md, §4): layers, a layer in use hidden, recording, a share running. */
+  const badges = $derived.by((): SideBadges => {
+    const layers = doc?.note.layers ?? [];
+    return {
+      layers: {
+        count: doc ? layers.length : undefined,
+        dot: doc && layerWarnings(layers, doc.activeLayer).length > 0 ? 'warn' : undefined,
+      },
+      sound: { dot: recorder.phase === 'recording' ? 'rec' : undefined },
+      projection: { dot: share.status.active ? 'live' : undefined },
+    };
+  });
+  // A selection appearing reopens a collapsed pane (not at each change of the selection).
+  let hadSelection = false;
+  $effect(() => {
+    const has = hasSelection;
+    if (has && !hadSelection) untrack(() => side.open());
+    hadSelection = has;
+  });
   /** Live mode cannot resume this note now (no tablet, or it is busy): the toolbar button says why. */
   const resumeHint = $derived.by(() => {
     const block = resumeBlock(tablet.status);
@@ -1402,6 +1439,7 @@
       busy: false,
       error: null,
     };
+    side.open();
   }
 
   function cancelSplit() {
@@ -1472,6 +1510,9 @@
 
   function enterReplay() {
     if (!doc || split || replaying || canvas?.dragging()) return;
+    // The replay shows Son (the narration) and gives the tab back when it ends.
+    sideBeforeReplay = side.snapshot();
+    side.open('sound');
     player.load(doc.note);
     narration = null;
     narrationError = null;
@@ -1500,6 +1541,10 @@
     recordOpen = false;
     confirmDelete = false;
     dropNarrationSound();
+    if (sideBeforeReplay) {
+      side.restore(sideBeforeReplay);
+      sideBeforeReplay = null;
+    }
   }
 
   /**
@@ -2048,157 +2093,151 @@
           }
         }}
       />
-      <aside class="editor-side" aria-label={t('editor.sidePanel')}>
-        {#if replaying}
-          <section class="side-section" aria-labelledby="editor-narration-heading" data-section="narration">
-            <h3 id="editor-narration-heading">{t('narration.title')}</h3>
-            {#if narration}
-              <p class="small" data-slot="narration-stored">
-                {t('narration.stored.info', { duration: clock(narration.durationMs) })}
-              </p>
-            {:else}
-              <p class="small muted">{t('narration.stored.none')}</p>
-            {/if}
-            <RecordPanel
-              bind:open={recordOpen}
-              {recorder}
-              device={microphone}
-              ondevice={chooseMicrophone}
-              onstart={startRecording}
-              onstop={() => void stopRecording(true)}
-              oncancel={() => void stopRecording(false)}
-              onretry={() => void retryRecording()}
-              openLabel={t('narration.record.open')}
-              openHint={t('narration.record.openHint')}
-              replaces={narration !== null}
-              info={recordInfo}
-              saveNote={t('narration.record.saveNote')}
-              warning={dirty ? t('narration.record.unsavedWarning') : null}
-              duringInfo={player.playing ? null : t('narration.record.afterEnd')}
+      <aside class="editor-side" aria-label={t('side.label')}>
+        <SidePanel where="editor" panel={side} {badges} above={(split || (hasSelection && !replaying)) ? aboveBlock : undefined}>
+          {#snippet layers()}
+            <LayersZone
+              where="editor"
+              layers={doc.note.layers}
+              chosen={doc.activeLayer}
+              disabled={locked}
+              onchoose={(i) => reselect(setActiveLayer(doc!, i))}
+              onvisible={(i, visible) => change(setLayerVisible(doc!, i, visible))}
+              onrename={(i, name) => change(renameLayer(doc!, i, name))}
+              onmove={(from, to) => change(moveLayer(doc!, from, to))}
+              onmerge={(i) => change(mergeDown(doc!, i))}
+              onadd={() => change(addLayer(doc!, t('editor.layers.defaultName', { n: doc!.note.layers.length + 1 })))}
             />
-            {#if narration && !recorder.busy}
-              {#if confirmDelete}
-                <div class="confirm-delete" role="alert">
-                  <p class="small">{t('narration.stored.deleteConfirm')}</p>
-                  <div class="buttons">
-                    <button type="button" class="button small-button danger" data-action="narration-delete-yes" onclick={deleteNarration}>
-                      {t('narration.stored.deleteYes')}
-                    </button>
-                    <button type="button" class="button small-button" onclick={() => (confirmDelete = false)}>
-                      {t('narration.stored.deleteNo')}
-                    </button>
-                  </div>
-                </div>
-              {:else}
-                <button type="button" class="button small-button danger" data-action="narration-delete" onclick={() => (confirmDelete = true)}>
-                  {t('narration.stored.delete')}
-                </button>
-              {/if}
-            {/if}
-          </section>
-        {:else}
-          {#if split}
-            <SplitPanel
-              mode={split.mode}
-              {range}
-              at={split.at}
-              hasZone={split.zone !== null}
-              {preview}
-              bind:title={split.title}
-              dirty={dirty}
-              busy={split.busy}
-              error={split.error}
-              onmode={setSplitMode}
-              onat={(value) => {
-                if (split) split.at = value;
-              }}
-              onedittitle={() => {
-                if (split) split.titleEdited = true;
-              }}
-              onclearzone={() => {
-                if (split) split.zone = null;
-              }}
-              onconfirm={confirmSplit}
-              oncancel={cancelSplit}
+          {/snippet}
+          {#snippet page()}
+            <PagePanel
+              background={doc.note.background}
+              page={doc.note.page}
+              cropping={tools.mode === 'crop'}
+              disabled={locked}
+              onbackground={(b) => change(setBackground(doc!, b))}
+              onorientation={(orientation, scaleInk) => changeFormat(setOrientation(doc!, orientation, scaleInk))}
+              onresize={(size, scaleInk) => changeFormat(resizePage(doc!, size, scaleInk))}
+              onrotate={(direction) => change(rotate(doc!, direction))}
+              onautocrop={() => change(autoCrop(doc!))}
+              onmanualcrop={() => setMode(tools.mode === 'crop' ? 'select' : 'crop')}
             />
-          {/if}
-          {#if hasSelection}
-            <section class="side-section" aria-labelledby="editor-selection-heading">
-              <h3 id="editor-selection-heading">{t('editor.selection.label')}</h3>
-              <p class="small muted">{t('editor.selection.count', { count: doc.selection.length })}</p>
-              <div class="buttons">
-                <button type="button" class="button small-button" data-action="copy-selection" onclick={() => void copyToClipboard(false)}>
-                  {t('editor.selection.copy')}
-                </button>
-                <button type="button" class="button small-button" data-action="cut-selection" onclick={() => void copyToClipboard(true)}>
-                  {t('editor.selection.cut')}
-                </button>
-                <button type="button" class="button small-button" data-action="paste-selection" onclick={() => void pasteFromClipboard()}>
-                  {t('editor.selection.paste')}
-                </button>
-                <button type="button" class="button small-button" onclick={duplicate}>
-                  {t('editor.selection.duplicate')}
-                </button>
-                <button
-                  type="button"
-                  class="button small-button"
-                  data-action="straighten-selection"
-                  title={t('editor.straighten.hint')}
-                  onclick={straighten}
-                >
-                  {t('editor.straighten.button')}
-                </button>
-                <button type="button" class="button small-button danger" onclick={() => change(deleteSelection(doc!))}>
-                  {t('editor.selection.delete')}
-                </button>
-                <button type="button" class="button small-button" onclick={() => reselect(clearSelection(doc!))}>
-                  {t('editor.selection.clear')}
-                </button>
-              </div>
-            </section>
-          {/if}
-          <PagePanel
-            background={doc.note.background}
-            page={doc.note.page}
-            cropping={tools.mode === 'crop'}
-            disabled={split !== null}
-            onbackground={(b) => change(setBackground(doc!, b))}
-            onorientation={(orientation, scaleInk) => changeFormat(setOrientation(doc!, orientation, scaleInk))}
-            onresize={(size, scaleInk) => changeFormat(resizePage(doc!, size, scaleInk))}
-            onrotate={(direction) => change(rotate(doc!, direction))}
-            onautocrop={() => change(autoCrop(doc!))}
-            onmanualcrop={() => setMode(tools.mode === 'crop' ? 'select' : 'crop')}
-          >
+            {#key currentPath}
+              <OriginalPanel {original} error={originalError} disabled={locked} onrevert={revertOriginal} />
+            {/key}
+          {/snippet}
+          {#snippet background()}
             <BackgroundImageSection
               page={doc.note.page}
               image={doc.note.backgroundImage}
               pixels={doc.backgroundPixels}
-              disabled={split !== null}
+              disabled={locked}
               onset={(image, pixels, orientation) => setImage(image, pixels, orientation)}
               onturn={(direction) => change(rotateBackgroundImage(doc!, direction))}
               onfit={(fit) => change(setImageFit(doc!, fit))}
               onopacity={(opacity) => change(setImageOpacity(doc!, opacity))}
               onremove={() => change(removeBackgroundImage(doc!))}
             />
-          </PagePanel>
-          {#key currentPath}
-            <OriginalPanel {original} error={originalError} disabled={split !== null} onrevert={revertOriginal} />
-          {/key}
-          <LayersZone
-            where="editor"
-            layers={doc.note.layers}
-            chosen={doc.activeLayer}
-            disabled={split !== null}
-            onchoose={(i) => reselect(setActiveLayer(doc!, i))}
-            onvisible={(i, visible) => change(setLayerVisible(doc!, i, visible))}
-            onrename={(i, name) => change(renameLayer(doc!, i, name))}
-            onmove={(from, to) => change(moveLayer(doc!, from, to))}
-            onmerge={(i) => change(mergeDown(doc!, i))}
-            onadd={() => change(addLayer(doc!, t('editor.layers.defaultName', { n: doc!.note.layers.length + 1 })))}
-          />
-        {/if}
+          {/snippet}
+          {#snippet sound()}
+            <EditorSound
+              {replaying}
+              {narration}
+              {recorder}
+              bind:open={recordOpen}
+              bind:confirmDelete
+              device={microphone}
+              ondevice={chooseMicrophone}
+              onstart={startRecording}
+              onstop={() => void stopRecording(true)}
+              oncancel={() => void stopRecording(false)}
+              onretry={() => void retryRecording()}
+              ondelete={deleteNarration}
+              onreplay={enterReplay}
+              replayDisabled={split !== null || recorder.busy}
+              {recordInfo}
+              unsavedWarning={dirty}
+              replayPlaying={player.playing}
+            />
+          {/snippet}
+          {#snippet projection()}
+            <ShareBlock />
+          {/snippet}
+          {#snippet help()}
+            <ShortcutsHelp where="editor" shortcuts={EDITOR_SHORTCUTS} />
+          {/snippet}
+        </SidePanel>
       </aside>
     </div>
+    {#snippet aboveBlock()}
+      {#if split}
+        <SplitPanel
+          mode={split.mode}
+          {range}
+          at={split.at}
+          hasZone={split.zone !== null}
+          {preview}
+          bind:title={split.title}
+          dirty={dirty}
+          busy={split.busy}
+          error={split.error}
+          onmode={setSplitMode}
+          onat={(value) => {
+            if (split) split.at = value;
+          }}
+          onedittitle={() => {
+            if (split) split.titleEdited = true;
+          }}
+          onclearzone={() => {
+            if (split) split.zone = null;
+          }}
+          onconfirm={confirmSplit}
+          oncancel={cancelSplit}
+        />
+      {/if}
+      {#if hasSelection && !replaying}
+        <section class="pane-block" aria-labelledby="editor-selection-heading" data-section="selection">
+          <h3 class="pane-title" id="editor-selection-heading">{t('editor.selection.label')}</h3>
+          <div class="selection-count">
+            <p class="pane-help">{t('editor.selection.count', { count: doc?.selection.length ?? 0 })}</p>
+            <button
+              type="button"
+              class="button ghost selection-clear"
+              data-action="clear-selection"
+              aria-label={t('editor.selection.clear')}
+              title={t('editor.selection.clear')}
+              onclick={() => reselect(clearSelection(doc!))}><span aria-hidden="true">✕</span></button
+            >
+          </div>
+          <div class="pane-actions">
+            <button type="button" class="button small-button" data-action="copy-selection" onclick={() => void copyToClipboard(false)}>
+              {t('editor.selection.copy')}
+            </button>
+            <button type="button" class="button small-button" data-action="cut-selection" onclick={() => void copyToClipboard(true)}>
+              {t('editor.selection.cut')}
+            </button>
+            <button type="button" class="button small-button" data-action="paste-selection" onclick={() => void pasteFromClipboard()}>
+              {t('editor.selection.paste')}
+            </button>
+            <button type="button" class="button small-button" data-action="duplicate-selection" onclick={duplicate}>
+              {t('editor.selection.duplicate')}
+            </button>
+            <button
+              type="button"
+              class="button small-button"
+              data-action="straighten-selection"
+              title={t('editor.straighten.hint')}
+              onclick={straighten}
+            >
+              {t('editor.straighten.button')}
+            </button>
+            <button type="button" class="button small-button danger" data-action="delete-selection" onclick={() => change(deleteSelection(doc!))}>
+              {t('editor.selection.delete')}
+            </button>
+          </div>
+        </section>
+      {/if}
+    {/snippet}
   {/if}
 
   {#if exporting}
@@ -2259,3 +2298,21 @@
     />
   {/if}
 </section>
+
+<style>
+  /* The selection block's count, with its « ✕ » beside it. */
+  .selection-count {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .selection-count p {
+    margin: 0;
+  }
+
+  .selection-clear {
+    padding: 0.1rem 0.45rem;
+  }
+</style>
