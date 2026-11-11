@@ -18,8 +18,9 @@ use super::page::is_drawn;
 use crate::live::LiveHub;
 use crate::live::hub::BatchSink;
 use crate::live::model::{
-    HoverPoint, LiveBatch, LiveEvent, LiveMark, LivePoint, LiveSessionState, LiveSnapshot,
-    LiveStroke, LiveStyle, LiveViewState, RecolouredStrokes, wall_now_ms,
+    HoverPoint, LiveBatch, LiveEvent, LiveMark, LivePen, LivePoint, LiveSessionState, LiveSnapshot,
+    LiveStroke, LiveStyle, LiveViewState, PlacedStroke, RecolouredStrokes, ViewerIndices,
+    wall_now_ms,
 };
 
 /// The hub's subscription label of viewer `id` (never a window's label).
@@ -159,7 +160,10 @@ struct SharedBatch<'a> {
 }
 
 /// The events a viewer gets. Left out: `saved` and `sheetForked` (paths of notes) and `saveFailed`
-/// (the system's message), which are about the library.
+/// (the system's message), which are about the library; `history` (the control window's undo);
+/// every event of a stroke in progress on a hidden layer (M14: the tablet's or the computer's), so
+/// that a viewer's list never holds a hidden stroke. The pen of a stroke in progress is told (two
+/// may be in progress at once), not the control window's number for the gesture.
 #[derive(Serialize)]
 #[serde(
     tag = "type",
@@ -173,13 +177,24 @@ enum SharedEvent<'a> {
     StrokeStart {
         page_index: usize,
         stroke: &'a LiveStroke,
+        #[serde(skip_serializing_if = "LivePen::is_tablet")]
+        pen: LivePen,
     },
     Points {
         page_index: usize,
         points: &'a [LivePoint],
+        #[serde(skip_serializing_if = "LivePen::is_tablet")]
+        pen: LivePen,
     },
     StrokeEnd {
         page_index: usize,
+        #[serde(skip_serializing_if = "LivePen::is_tablet")]
+        pen: LivePen,
+    },
+    StrokeCancel {
+        page_index: usize,
+        #[serde(skip_serializing_if = "LivePen::is_tablet")]
+        pen: LivePen,
     },
     Hover {
         x: f32,
@@ -194,7 +209,7 @@ enum SharedEvent<'a> {
         marks: Vec<SharedMark>,
     },
     /// Strokes deleted, back or recoloured, numbered as in the viewer's list, which has no hidden
-    /// strokes (`ViewerIndices`); the edits never touch one.
+    /// strokes (`ViewerIndices`): a hidden one is never named, nor sent.
     StrokesEdited {
         page_index: usize,
         removed: &'a [u32],
@@ -216,16 +231,45 @@ impl<'a> SharedEvent<'a> {
             LiveEvent::Snapshot { snapshot } => SharedEvent::Snapshot {
                 snapshot: SharedSnapshot::of(snapshot),
             },
-            LiveEvent::StrokeStart { page_index, stroke } => SharedEvent::StrokeStart {
+            LiveEvent::StrokeStart {
+                page_index,
+                stroke,
+                pen,
+                hidden: false,
+                ..
+            } => SharedEvent::StrokeStart {
                 page_index: *page_index,
                 stroke,
+                pen: *pen,
             },
-            LiveEvent::Points { page_index, points } => SharedEvent::Points {
+            LiveEvent::Points {
+                page_index,
+                points,
+                pen,
+                hidden: false,
+                ..
+            } => SharedEvent::Points {
                 page_index: *page_index,
                 points,
+                pen: *pen,
             },
-            LiveEvent::StrokeEnd { page_index } => SharedEvent::StrokeEnd {
+            LiveEvent::StrokeEnd {
+                page_index,
+                pen,
+                hidden: false,
+                ..
+            } => SharedEvent::StrokeEnd {
                 page_index: *page_index,
+                pen: *pen,
+            },
+            LiveEvent::StrokeCancel {
+                page_index,
+                pen,
+                hidden: false,
+                ..
+            } => SharedEvent::StrokeCancel {
+                page_index: *page_index,
+                pen: *pen,
             },
             LiveEvent::Hover { x, y } => SharedEvent::Hover { x: *x, y: *y },
             LiveEvent::HoverEnd => SharedEvent::HoverEnd,
@@ -240,31 +284,68 @@ impl<'a> SharedEvent<'a> {
                 recoloured,
                 viewers,
                 ..
-            } => SharedEvent::StrokesEdited {
-                page_index: *page_index,
-                removed: viewers
-                    .as_deref()
-                    .map_or(removed, |viewers| &viewers.removed),
-                inserted: inserted
-                    .iter()
-                    .enumerate()
-                    .map(|(i, placed)| SharedPlaced {
-                        index: viewers
-                            .as_deref()
-                            .and_then(|viewers| viewers.inserted.get(i).copied())
-                            .unwrap_or(placed.index),
-                        stroke: &placed.stroke,
-                    })
-                    .collect(),
-                recoloured: viewers
-                    .as_deref()
-                    .map_or(recoloured, |viewers| &viewers.recoloured),
-            },
-            LiveEvent::Saved { .. }
+            } => {
+                return shared_edit(
+                    *page_index,
+                    removed,
+                    inserted,
+                    recoloured,
+                    viewers.as_deref(),
+                );
+            }
+            // What is left of a stroke in progress is on a hidden layer, whichever pen.
+            LiveEvent::StrokeStart { .. }
+            | LiveEvent::Points { .. }
+            | LiveEvent::StrokeEnd { .. }
+            | LiveEvent::StrokeCancel { .. }
+            | LiveEvent::History { .. }
+            | LiveEvent::Saved { .. }
             | LiveEvent::SaveFailed { .. }
             | LiveEvent::SheetForked { .. } => return None,
         })
     }
+}
+
+/// A `strokesEdited` in the viewers' numbering (`viewers`: `None` on a page without a hidden
+/// layer, numbered alike), without the strokes they never had; `None` when nothing of it concerns
+/// them (only a stroke of a layer hidden since went or came back): not even that something
+/// happened there goes out.
+fn shared_edit<'a>(
+    page_index: usize,
+    removed: &'a [u32],
+    inserted: &'a [PlacedStroke],
+    recoloured: &'a [RecolouredStrokes],
+    viewers: Option<&'a ViewerIndices>,
+) -> Option<SharedEvent<'a>> {
+    let inserted: Vec<SharedPlaced<'a>> = inserted
+        .iter()
+        .enumerate()
+        .filter_map(|(i, placed)| {
+            let index = match viewers {
+                // A hidden stroke, or one the list does not name: never sent.
+                Some(viewers) => viewers.inserted.get(i).copied().flatten()?,
+                None => placed.index,
+            };
+            Some(SharedPlaced {
+                index,
+                stroke: &placed.stroke,
+            })
+        })
+        .collect();
+    let (removed, recoloured) = match viewers {
+        Some(viewers) => (viewers.removed.as_slice(), viewers.recoloured.as_slice()),
+        None => (removed, recoloured),
+    };
+    let recolours = recoloured.iter().any(|group| !group.indices.is_empty());
+    if removed.is_empty() && inserted.is_empty() && !recolours {
+        return None;
+    }
+    Some(SharedEvent::StrokesEdited {
+        page_index,
+        removed,
+        inserted,
+        recoloured,
+    })
 }
 
 /// A mark as the viewer draws it: the ink and the points, nothing else.

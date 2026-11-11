@@ -330,3 +330,38 @@ PDF "merged" already, and a hidden layer is in neither: its strokes are not in t
   dialog on a note of two layers (made in the editor first), SVG shows « Séparés » chosen, PDF « Fusionnés »; choose
   « Séparés », export the PDF to a temporary file, which holds `/OCProperties` and two OCGs; open the dialog again: PDF
   still says « Séparés », SVG still « Séparés »; PNG shows the image sentence.
+
+### As built (package D, 2026-11-11)
+
+Built as designed; the points where the code says more or something else than the text above:
+
+- **Byte-identical files.** `tests/export_formats.rs` keeps the length and an FNV-1a 64 of the reference note's SVG
+  (separate) and of its two-page PDF (merged, actual size and A4), taken on the code before the change; the PDF
+  is built with `LayerMode::Merged` spelled out and the defaults are asserted. The catalog is written first in merged mode and last in
+  separate mode (pdf-writer takes the objects in any order; its reference is the one bumped first).
+- **No group at all, no optional content.** A separate PDF whose pages have no group (every layer hidden, or only strokes
+  of layers without an entry) is written like a merged one: no `/OCProperties`, no `/PageMode /UseOC`, no
+  `/Properties`. A group exists only for a layer with fills.
+- **Blank layer names.** A layer named with blanks only gets its number as its group's name (`"3"` for the third layer),
+  as an Inkscape label already does for a layer without entry. The SVG separate output is untouched (it keeps the blank label it always had).
+- **SVG merged with nothing to draw** writes no ink layer (as separate writes none): the only Inkscape layer is the
+  background's. The label joins the names of the layers that hold fills, bottom first, with « + » (a name twice stays
+  twice).
+- **Struct literals outside the list.** `SvgOptions` and `PdfOptions` gained a field, so the literal
+  `SvgOptions { background: false }` of `crates/ardoise-render/tests/background_image.rs` no longer compiled: it got
+  `..SvgOptions::default()`. One line in a file package D does not own.
+- **App.** `ExportLayers` (`Separate`, `Merged`) is in `export.rs` with `From<ExportLayers> for LayerMode`; `None` reads
+  `Separate` for SVG and `Merged` for PDF. `autoexport.rs`, `mcp/write.rs` (its own `PdfOptions` and `image_options`) and
+  the struct literals of `drag.rs`, `background.rs` and the `export.rs` tests say `None` / `LayerMode::Merged`; the
+  assistant's PDF test checks there is no `/OCProperties`.
+- **Dialog.** "A layer holding ink" is a stroke with at least one point; a stroke whose layer has no entry counts as a
+  visible layer (the renderer draws it). The notes read for the page sizes (`notes`, `pages` derived from them) give
+  the layers too. The request carries `layers` for SVG and PDF whether or not the block is shown (a remembered
+  « Séparés » therefore also applies to a one-layer note exported to PDF: one group, harmless); the sentence about hidden
+  layers is shown for any format when a hidden layer holds ink, and does not depend on the block. The choices are
+  disabled while an export runs, like the other options. Styles are scoped in the component (`app.css` is not package
+  D's).
+- **Journey.** `journeys-m14-export.mjs` writes its two-layer sheet (plus a hidden layer named `Hidden answers`, ASCII so
+  that a search of the bytes means something) into the library with `dropSheet` of `journeys-m12-resume.mjs`, instead of
+  drawing it in the editor: the editor's layers zone is package A's and was not there to select. It also exports an SVG
+  « Fusionnés » and checks the per-format memory both ways.

@@ -11,15 +11,19 @@ use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use serde_json::{Value, json};
 
 use super::{
-    LiveEditError, MAX_EDIT_STROKES, MAX_UNDO_BYTES, MAX_UNDO_STEPS, Prepared, StrokesEdit,
-    grouped, insert_at, remove_at,
+    History, LiveEditError, MAX_EDIT_STROKES, MAX_UNDO_BYTES, MAX_UNDO_STEPS, Prepared,
+    StrokesEdit, UndoStep, grouped, insert_at, remove_at,
 };
 use crate::library::tests::library;
 use crate::live::hub::{BatchSink, HubConfig, LiveError, LiveHub};
+use crate::live::layers::CheckedLayerOp;
+use crate::live::model::PlacedStroke;
 use crate::live::model::{
-    LiveBatch, LiveCommandKind, LiveEvent, LiveSessionState, LiveStyle, LiveViewState,
+    LiveBatch, LiveCommandKind, LiveEvent, LivePen, LiveSessionState, LiveStyle, LiveViewState,
     ViewerIndices,
 };
+use crate::live::pen::ComputerPenInput;
+use crate::live::pen::tests::{at_once, begin, end};
 use crate::live::session::LiveSession;
 use crate::live::tests::{
     A5, Window, config, fixed, notes_in, options, pen, send, start, stream_simulated_live, stroke,
@@ -106,18 +110,20 @@ impl LiveSession {
     }
 
     fn redo(&mut self, out: &mut Vec<LiveEvent>) -> bool {
-        self.redo_edit(self.current(), out).unwrap()
+        self.redo_edit(self.current(), None, out).unwrap()
     }
 }
 
 /// What a window keeps, updated from the events as `LiveState` does: the finished strokes and the
-/// stroke in progress. `viewer`: reads the viewer's numbering, as a viewer's `LiveState` does.
+/// strokes in progress, one per pen. `viewer`: reads the viewer's numbering and gets no hidden
+/// stroke, as a viewer's `LiveState` does behind the share's allow list.
 #[derive(Default)]
-struct Follower {
+pub(crate) struct Follower {
     page: usize,
-    strokes: Vec<Stroke>,
+    pub(crate) strokes: Vec<Stroke>,
     current: Option<Stroke>,
-    viewer: bool,
+    computer: Option<Stroke>,
+    pub(crate) viewer: bool,
 }
 
 impl Follower {
@@ -132,9 +138,15 @@ impl Follower {
                         .retain(|stroke| crate::share::page::is_drawn(layers, stroke));
                 }
                 self.current = None;
+                self.computer = None;
             }
-            LiveEvent::StrokeStart { stroke, .. } => {
-                self.current = Some(Stroke {
+            LiveEvent::StrokeStart { hidden: true, .. }
+            | LiveEvent::Points { hidden: true, .. }
+            | LiveEvent::StrokeEnd { hidden: true, .. }
+            | LiveEvent::StrokeCancel { hidden: true, .. }
+                if self.viewer => {}
+            LiveEvent::StrokeStart { stroke, pen, .. } => {
+                *self.in_progress(*pen) = Some(Stroke {
                     tool: stroke.tool,
                     color: stroke.color,
                     width: stroke.width,
@@ -142,13 +154,25 @@ impl Follower {
                     points: stroke.points.iter().map(point_of).collect(),
                 });
             }
-            LiveEvent::Points { points, .. } => {
-                let current = self.current.as_mut().expect("points without a stroke");
+            LiveEvent::Points { points, pen, .. } => {
+                let current = self
+                    .in_progress(*pen)
+                    .as_mut()
+                    .expect("points without a stroke");
                 current.points.extend(points.iter().map(point_of));
             }
-            LiveEvent::StrokeEnd { .. } => {
-                self.strokes
-                    .push(self.current.take().expect("an end without a stroke"));
+            LiveEvent::StrokeEnd { pen, .. } => {
+                let ended = self
+                    .in_progress(*pen)
+                    .take()
+                    .expect("an end without a stroke");
+                self.strokes.push(ended);
+            }
+            LiveEvent::StrokeCancel { pen, .. } => {
+                assert!(
+                    self.in_progress(*pen).take().is_some(),
+                    "a cancel without a stroke"
+                );
             }
             LiveEvent::StrokesEdited {
                 page_index,
@@ -165,7 +189,12 @@ impl Follower {
                     self.strokes.remove(index as usize);
                 }
                 for (i, placed) in inserted.iter().enumerate() {
-                    let index = shared.map_or(placed.index, |viewers| viewers.inserted[i]);
+                    // A viewer never gets a hidden stroke back.
+                    let Some(index) =
+                        shared.map_or(Some(placed.index), |viewers| viewers.inserted[i])
+                    else {
+                        continue;
+                    };
                     self.strokes.insert(index as usize, placed.stroke.clone());
                 }
                 let recoloured = shared.map_or(recoloured, |viewers| &viewers.recoloured);
@@ -179,9 +208,16 @@ impl Follower {
         }
     }
 
-    fn follow(&mut self, events: &[LiveEvent]) {
+    pub(crate) fn follow(&mut self, events: &[LiveEvent]) {
         for event in events {
             self.apply(event);
+        }
+    }
+
+    fn in_progress(&mut self, pen: LivePen) -> &mut Option<Stroke> {
+        match pen {
+            LivePen::Tablet => &mut self.current,
+            LivePen::Computer => &mut self.computer,
         }
     }
 }
@@ -397,7 +433,7 @@ fn a_stale_page_or_revision_is_refused_and_changes_nothing() {
         LiveEditError::Stale
     );
     assert_eq!(
-        session.redo_edit(0, &mut out).unwrap_err(),
+        session.redo_edit(0, None, &mut out).unwrap_err(),
         LiveEditError::Stale
     );
 }
@@ -589,7 +625,7 @@ fn the_stroke_in_progress_is_untouched_and_joins_at_the_tail() {
         out.iter().all(|e| !matches!(e, LiveEvent::Snapshot { .. })),
         "an edit is no snapshot"
     );
-    assert!(session.in_progress().is_some(), "still in progress");
+    assert!(session.in_progress().len() == 1, "still in progress");
     out.clear();
     session.records(&[pen(5010, 100, 500)], T0 + 55.0, &mut out);
     assert!(matches!(&out[0], LiveEvent::Points { points, .. } if points.len() == 1));
@@ -618,7 +654,7 @@ fn clearing_the_page_and_its_restoration_are_steps_of_the_history() {
     assert!(snapshot.page.strokes.is_empty());
     assert!(snapshot.can_undo);
     assert_ne!(snapshot.revision, before);
-    assert!(session.in_progress().is_none());
+    assert!(session.in_progress().is_empty());
 
     // Clearing a page that is empty: no step, the same revision.
     let cleared = revision(&session);
@@ -1050,17 +1086,17 @@ fn the_copy_prepared_is_used_only_for_the_strokes_it_was_made_from() {
     let mut session = with_strokes(3);
     let mut out = Vec::new();
     session.edit(delete(&[1]), &mut out).unwrap();
-    let prepared = Prepared::of(session.next_restored().unwrap());
-    assert_eq!(prepared.copy.len(), 1);
+    let prepared = Prepared::of_all(session.next_restored());
+    assert_eq!(prepared.copied().len(), 1);
     // Made from them: moved in.
-    let source = prepared.copy[0].points.as_ptr();
+    let source = prepared.copied()[0].points.as_ptr();
     assert_eq!(session.undo_edit(0, Some(prepared), &mut out), Ok(true));
     assert_eq!(session.pages()[0].note.strokes[1].points.as_ptr(), source);
     assert_eq!(starts(&session), [1000.0, 2000.0, 3000.0]);
 
     // Another command got in between: the strokes that come back are the right ones all the same.
     session.edit(delete(&[0]), &mut out).unwrap();
-    let old = Prepared::of(session.next_restored().unwrap());
+    let old = Prepared::of_all(session.next_restored());
     session.edit(delete(&[0]), &mut out).unwrap();
     assert_eq!(session.undo_edit(0, Some(old), &mut out), Ok(true));
     assert_eq!(starts(&session), [2000.0, 3000.0]);
@@ -1495,7 +1531,7 @@ fn an_edit_on_a_large_page_costs_a_pass_over_its_list() {
             .unwrap();
     });
     // Undo the way the hub does it: the copy is made before the lock is taken.
-    let mut prepared = Some(Prepared::of(session.next_restored().unwrap()));
+    let mut prepared = Some(Prepared::of_all(session.next_restored()));
     let undo_time = timed("undo them, the copy already made", &mut || {
         session.undo_edit(0, prepared.take(), &mut out).unwrap();
     });
@@ -1617,4 +1653,427 @@ impl LiveSession {
     fn revision_for_test(&self) -> u64 {
         self.pages()[self.current()].revision()
     }
+}
+
+// --- The computer's ink in the history (M14) -------------------------------------------------------
+
+/// A delete of `indices` in the eraser's gesture `group`.
+pub(crate) fn erase(indices: &[u32], group: u32) -> StrokesEdit {
+    edit_json(json!({ "kind": "delete", "indices": indices, "group": group }))
+}
+
+/// The `strokesEdited` events of `out`.
+fn edits_of(out: &[LiveEvent]) -> usize {
+    out.iter()
+        .filter(|e| matches!(e, LiveEvent::StrokesEdited { .. }))
+        .count()
+}
+
+#[test]
+fn a_computer_stroke_is_undone_and_redone_at_its_place_while_the_tablet_writes() {
+    let mut session = with_strokes(2);
+    let mut window = Follower::default();
+    window.follow(&[LiveEvent::Snapshot {
+        snapshot: Arc::new(session.snapshot()),
+    }]);
+    let mut out = Vec::new();
+    session.computer_stroke(1, 5000.0, &mut out);
+    write_to(&mut session, 7000, &mut out);
+    assert_eq!(starts(&session), [1000.0, 2000.0, 5000.0, 7000.0]);
+    let written = revision(&session);
+
+    // Ctrl+Z: the computer's stroke goes, the tablet's stay, the one written after it included.
+    window.follow(&out);
+    out.clear();
+    assert!(session.undo(&mut out));
+    let [
+        LiveEvent::StrokesEdited {
+            removed,
+            inserted,
+            can_undo,
+            can_redo,
+            ..
+        },
+    ] = &out[..]
+    else {
+        panic!("{out:?}");
+    };
+    assert_eq!(removed, &[2]);
+    assert!(inserted.is_empty() && !*can_undo && *can_redo);
+    assert_eq!(starts(&session), [1000.0, 2000.0, 7000.0]);
+    assert_ne!(revision(&session), written, "a stroke left the list");
+
+    // The tablet writes meanwhile: the redo stays. Ctrl+Y gives the stroke back at its place,
+    // under what the tablet wrote since.
+    write_to(&mut session, 8000, &mut out);
+    assert!(session.snapshot().can_redo);
+    assert!(session.redo(&mut out));
+    assert_eq!(starts(&session), [1000.0, 2000.0, 5000.0, 7000.0, 8000.0]);
+    let stroke = &session.pages()[0].note.strokes[2];
+    assert_eq!((stroke.tool, stroke.points.len()), (Tool::FeltTip, 2));
+    // The tablet's ink is never a step: undoing everything takes the computer's stroke only.
+    while session.undo(&mut out) {}
+    assert_eq!(starts(&session), [1000.0, 2000.0, 7000.0, 8000.0]);
+    window.follow(&out);
+    assert_eq!(window.strokes, session.pages()[0].note.strokes);
+}
+
+#[test]
+fn a_computer_stroke_empties_the_redo_steps_the_tablet_does_not() {
+    let mut session = with_strokes(3);
+    let mut out = Vec::new();
+    session.edit(delete(&[0]), &mut out).unwrap();
+    session.undo(&mut out);
+    write(&mut session, 7000);
+    assert!(session.snapshot().can_redo);
+    session.computer_stroke(1, 5000.0, &mut out);
+    let Some(LiveEvent::History {
+        can_undo, can_redo, ..
+    }) = out.last()
+    else {
+        panic!("{out:?}");
+    };
+    assert!(*can_undo && !*can_redo);
+    assert!(!session.snapshot().can_redo);
+    assert!(!session.redo(&mut out));
+    // A cancelled one is no step.
+    session
+        .computer_call(begin(2, 0, at_once(&[1.0])), T0, &mut out)
+        .unwrap();
+    session
+        .computer_call(ComputerPenInput::Cancel { stroke: 2 }, T0, &mut out)
+        .unwrap();
+    assert!(session.undo(&mut out));
+    assert_eq!(starts(&session), [1000.0, 2000.0, 3000.0, 7000.0]);
+}
+
+#[test]
+fn a_gesture_of_the_eraser_is_undone_and_redone_as_one() {
+    let mut session = with_strokes(6);
+    let mut out = Vec::new();
+    // One gesture (group 7): three deletes as the eraser touches the strokes; then another
+    // gesture (8), then a delete of the selection (no group).
+    session.edit(erase(&[1], 7), &mut out).unwrap();
+    session.edit(erase(&[2], 7), &mut out).unwrap();
+    session.edit(erase(&[0, 1], 7), &mut out).unwrap();
+    assert_eq!(starts(&session), [5000.0, 6000.0]);
+    session.edit(erase(&[0], 8), &mut out).unwrap();
+    session.edit(delete(&[0]), &mut out).unwrap();
+    assert!(starts(&session).is_empty());
+    let mut window = Follower::default();
+    window.follow(&[LiveEvent::Snapshot {
+        snapshot: Arc::new(session.snapshot()),
+    }]);
+
+    // Each undo takes one group, top down, one event per step.
+    out.clear();
+    assert!(session.undo(&mut out));
+    assert_eq!((edits_of(&out), starts(&session)), (1, vec![6000.0]));
+    window.follow(&out);
+    out.clear();
+    assert!(session.undo(&mut out));
+    assert_eq!(
+        (edits_of(&out), starts(&session)),
+        (1, vec![5000.0, 6000.0])
+    );
+    window.follow(&out);
+    out.clear();
+    assert!(session.undo(&mut out));
+    assert_eq!(edits_of(&out), 3);
+    assert_eq!(
+        starts(&session),
+        [1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0]
+    );
+    let Some(LiveEvent::StrokesEdited {
+        can_undo, can_redo, ..
+    }) = out.last()
+    else {
+        panic!("{out:?}");
+    };
+    assert!(!*can_undo && *can_redo);
+    window.follow(&out);
+    out.clear();
+    assert!(!session.undo(&mut out));
+
+    // The redo does the whole gesture again, in its order.
+    assert!(session.redo(&mut out));
+    assert_eq!(edits_of(&out), 3);
+    assert_eq!(starts(&session), [5000.0, 6000.0]);
+    assert!(session.redo(&mut out));
+    assert!(session.redo(&mut out));
+    assert!(!session.redo(&mut out));
+    assert!(starts(&session).is_empty());
+    window.follow(&out);
+    assert_eq!(window.strokes, session.pages()[0].note.strokes);
+
+    // A group that is no whole number is refused before anything changes.
+    let refused = edit_json(json!({ "kind": "delete", "indices": [0], "group": 1.5 }))
+        .checked()
+        .unwrap_err();
+    assert_eq!(
+        (refused.clone(), refused.code()),
+        (LiveEditError::BadGroup, "liveEditInvalid")
+    );
+    assert_eq!(erase(&[3, 1], 9).checked().unwrap().group, Some(9));
+    assert_eq!(delete(&[3]).checked().unwrap().group, None);
+}
+
+#[test]
+fn the_limits_count_groups_and_drop_whole_ones() {
+    // One group more than kept, each of two deletes: the oldest goes whole.
+    let groups = MAX_UNDO_STEPS as u32 + 1;
+    let mut session = with_strokes(0);
+    let mut out = Vec::new();
+    {
+        let page = session.page_mut(0).unwrap();
+        page.note.strokes = (1..=2 * groups)
+            .map(|i| Stroke {
+                tool: Tool::Ballpoint,
+                color: Rgba::BLACK,
+                width: 60.0,
+                layer: 0,
+                points: vec![Point {
+                    x: 1000.0 * i as f32,
+                    y: 100.0,
+                    pressure: 0.5,
+                    t: i,
+                }],
+            })
+            .collect();
+    }
+    for group in 0..groups {
+        session.edit(erase(&[0], group), &mut out).unwrap();
+        session.edit(erase(&[0], group), &mut out).unwrap();
+    }
+    assert!(starts(&session).is_empty());
+    let mut undone = 0;
+    while session.undo(&mut out) {
+        undone += 1;
+    }
+    assert_eq!(undone, MAX_UNDO_STEPS);
+    // The two strokes of the first gesture stay gone: never half a gesture back.
+    assert_eq!(starts(&session).len(), 2 * MAX_UNDO_STEPS);
+    assert_eq!(starts(&session)[0], 3000.0);
+
+    // Memory: whole groups go, the last one stays whatever its size.
+    let heavy = |n: usize| PlacedStroke {
+        index: 0,
+        stroke: Stroke {
+            tool: Tool::Ballpoint,
+            color: Rgba::BLACK,
+            width: 60.0,
+            layer: 0,
+            points: vec![
+                Point {
+                    x: 1.0,
+                    y: 2.0,
+                    pressure: 0.5,
+                    t: 0,
+                };
+                n
+            ],
+        },
+    };
+    let third = MAX_UNDO_BYTES / 3 / size_of::<Point>();
+    let mut history = History::default();
+    for group in 0..3 {
+        history.record(UndoStep::removed(vec![heavy(third)], false), Some(group));
+        history.push_undo(UndoStep::removed(vec![heavy(third)], false), Some(group));
+        assert_eq!(history.undo_groups(), 1, "group {group}");
+        assert!(history.stored_bytes() > MAX_UNDO_BYTES / 2);
+    }
+    let mut left = Vec::new();
+    while let Some((_, group)) = history.pop_undo() {
+        left.push(group);
+    }
+    assert_eq!(left, [Some(2), Some(2)]);
+    assert_eq!((history.undo_groups(), history.stored_bytes()), (0, 0));
+    // Alone, a group larger than the limit stays.
+    for _ in 0..4 {
+        history.push_undo(UndoStep::removed(vec![heavy(third)], false), Some(5));
+    }
+    assert!(history.stored_bytes() > MAX_UNDO_BYTES);
+    assert_eq!(history.undo_groups(), 1);
+    // Steps without a group are each their own; the same number apart is two groups.
+    history.clear();
+    history.record(UndoStep::Added { indices: vec![0] }, None);
+    history.record(UndoStep::Added { indices: vec![1] }, None);
+    history.record(UndoStep::removed(Vec::new(), false), Some(3));
+    history.record(UndoStep::Added { indices: vec![2] }, None);
+    history.record(UndoStep::removed(Vec::new(), false), Some(3));
+    assert_eq!(history.undo_groups(), 5);
+}
+
+#[test]
+fn undoing_the_clearing_takes_the_groups_after_it_whole() {
+    let mut session = with_strokes(3);
+    let mut out = Vec::new();
+    session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
+    write(&mut session, 7000);
+    write(&mut session, 7500);
+    session.computer_stroke(1, 8000.0, &mut out);
+    session.edit(erase(&[0], 4), &mut out).unwrap();
+    session.edit(erase(&[0], 4), &mut out).unwrap();
+    assert_eq!(starts(&session), [8000.0]);
+    // As the hub does it: the copy of the group on top prepared before the lock.
+    let prepared = Prepared::of_all(session.next_restored());
+    assert_eq!(prepared.copied().len(), 2);
+    out.clear();
+    assert!(session.restore_cleared_with(Some(prepared), &mut out));
+    // The gesture (two steps), the computer's stroke, then the clearing: four events.
+    assert_eq!(edits_of(&out), 4);
+    assert_eq!(starts(&session), [1000.0, 2000.0, 3000.0, 7000.0, 7500.0]);
+    assert!(!session.snapshot().can_undo);
+    // All of it can be redone, in its order.
+    while session.redo(&mut out) {}
+    assert_eq!(starts(&session), [8000.0]);
+}
+
+#[test]
+fn a_redo_of_a_computer_stroke_uses_the_copy_made_before_the_lock() {
+    let mut session = with_strokes(1);
+    let mut out = Vec::new();
+    session.computer_stroke(1, 5000.0, &mut out);
+    assert!(session.undo(&mut out));
+    // The undo of a stroke gives nothing back: nothing to copy.
+    assert!(session.next_restored().is_empty());
+    let prepared = Prepared::of_all(session.next_redone());
+    let source = prepared.copied()[0].points.as_ptr();
+    assert!(session.redo_edit(0, Some(prepared), &mut out).unwrap());
+    assert_eq!(session.pages()[0].note.strokes[1].points.as_ptr(), source);
+    assert_eq!(starts(&session), [1000.0, 5000.0]);
+    assert!(session.next_redone().is_empty());
+}
+
+/// A page with two layers: the tablet's ink on layer 0, the computer's on layer 1.
+fn two_layer_page() -> LiveSession {
+    let mut session = with_strokes(2);
+    let mut out = Vec::new();
+    session.layer_op(CheckedLayerOp::Add, &mut out).unwrap();
+    session.computer_stroke(1, 5000.0, &mut out);
+    write(&mut session, 7000);
+    session
+}
+
+#[test]
+fn an_undo_may_give_back_or_take_a_stroke_of_a_layer_hidden_since_unseen_by_the_viewers() {
+    let drawn = |session: &LiveSession| -> Vec<Stroke> {
+        let page = &session.pages()[0];
+        let drawn = |s: &&Stroke| crate::share::page::is_drawn(&page.note.layers, s);
+        page.note.strokes.iter().filter(drawn).cloned().collect()
+    };
+    let hide = |session: &mut LiveSession, out: &mut Vec<LiveEvent>, visible: bool| {
+        session
+            .layer_op(CheckedLayerOp::Visible { layer: 1, visible }, out)
+            .unwrap();
+    };
+
+    // The computer's stroke deleted, its layer hidden, then Ctrl+Z: it comes back hidden.
+    let mut session = two_layer_page();
+    let mut window = Follower::default();
+    let mut viewer = Follower {
+        viewer: true,
+        ..Follower::default()
+    };
+    let mut out = vec![LiveEvent::Snapshot {
+        snapshot: Arc::new(session.snapshot()),
+    }];
+    session.edit(delete(&[2]), &mut out).unwrap();
+    hide(&mut session, &mut out, false);
+    let at = out.len();
+    assert!(session.undo(&mut out));
+    let LiveEvent::StrokesEdited {
+        inserted, viewers, ..
+    } = &out[at]
+    else {
+        panic!("{out:?}");
+    };
+    assert_eq!(inserted[0].index, 2);
+    assert_eq!(
+        viewers.as_deref().map(|v| v.inserted.clone()),
+        Some(vec![None]),
+        "a viewer never gets it"
+    );
+    // Ctrl+Y takes it again: the viewers are told nothing of it.
+    assert!(session.redo(&mut out));
+    let LiveEvent::StrokesEdited {
+        removed, viewers, ..
+    } = &out[at + 1]
+    else {
+        panic!("{out:?}");
+    };
+    assert_eq!(removed, &[2]);
+    assert_eq!(viewers.as_deref().map(|v| v.removed.len()), Some(0));
+    window.follow(&out);
+    viewer.follow(&out);
+    assert_eq!(window.strokes, session.pages()[0].note.strokes);
+    assert_eq!(viewer.strokes, drawn(&session));
+
+    // The computer's stroke written, its layer hidden, then Ctrl+Z: it goes unseen; shown again,
+    // the snapshot gives the viewers what shows.
+    let mut session = two_layer_page();
+    let mut viewer = Follower {
+        viewer: true,
+        ..Follower::default()
+    };
+    let mut out = vec![LiveEvent::Snapshot {
+        snapshot: Arc::new(session.snapshot()),
+    }];
+    hide(&mut session, &mut out, false);
+    // A recolour of the tablet's ink while it is hidden, then undone: numbered for the viewers.
+    session.edit(recolour(&[0, 3], RED), &mut out).unwrap();
+    assert!(session.undo(&mut out));
+    assert!(session.undo(&mut out));
+    assert_eq!(starts(&session), [1000.0, 2000.0, 7000.0]);
+    viewer.follow(&out);
+    assert_eq!(viewer.strokes, drawn(&session));
+    assert!(session.redo(&mut out));
+    hide(&mut session, &mut out, true);
+    viewer.follow(&out);
+    assert_eq!(viewer.strokes, drawn(&session));
+    assert_eq!(viewer.strokes.len(), 4);
+}
+
+#[test]
+fn the_computer_s_ink_is_undone_through_the_hub_and_written() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    stroke(&mut sink, 1000, 3);
+    assert!(
+        hub.computer_pen(begin(1, 0, at_once(&[5000.0, 5100.0])))
+            .unwrap()
+    );
+    stroke(&mut sink, 2000, 3);
+    assert!(hub.computer_pen(end(1, at_once(&[5200.0]))).unwrap());
+    wait_until("the computer's stroke in the file", || {
+        notes_in(&library)
+            .first()
+            .and_then(|path| crate::live::tests::stroke_count(&library, path))
+            == Some(3)
+    });
+    // Begun before the tablet's second stroke, ended after it: it joins the list when it ends.
+    assert_eq!(stroke_starts(&hub), [1000.0, 2000.0, 5000.0]);
+    assert!(hub.snapshot().can_undo);
+    assert!(hub.undo_edit(0).unwrap());
+    assert_eq!(stroke_starts(&hub), [1000.0, 2000.0]);
+    assert!(hub.redo_edit(0).unwrap());
+    assert_eq!(stroke_starts(&hub), [1000.0, 2000.0, 5000.0]);
+    let saved = hub.stop().unwrap();
+    let written = library
+        .read(std::path::Path::new(&saved[0]))
+        .unwrap()
+        .file
+        .note;
+    assert_eq!(written.strokes.len(), 3);
+    assert_eq!(written.strokes[2].tool, Tool::FeltTip);
+    wait_until("the events", || {
+        window.has(|e| matches!(e, LiveEvent::History { .. }))
+    });
+    // A window that follows the events has the list of the page.
+    let mut follower = Follower::default();
+    follower.follow(&window.events());
+    assert_eq!(follower.strokes, hub.snapshot().page.strokes);
 }

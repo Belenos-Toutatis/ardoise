@@ -1408,6 +1408,7 @@ pub(crate) mod tests {
             background: true,
             quality: 90,
             pdf_page: crate::export::PdfPageSize::Actual,
+            layers: None,
         };
         let bytes = crate::export::image_bytes(
             loaded[0].view(),

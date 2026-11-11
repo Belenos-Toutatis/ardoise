@@ -88,6 +88,10 @@ function checkOptions(options: ExportOptions, format: ExportFormat): void {
   if (format === 'jpg' && !(options.quality >= 1 && options.quality <= 100)) {
     failure('exportFailed', `quality ${options.quality}`);
   }
+  // Rust's serde takes `separate`, `merged` or nothing; anything else never reaches the command.
+  if (options.layers !== undefined && options.layers !== 'separate' && options.layers !== 'merged') {
+    failure('exportFailed', `layers ${String(options.layers)}`);
+  }
 }
 
 /** The files an export writes: the destination itself, or one file per note inside a folder. */

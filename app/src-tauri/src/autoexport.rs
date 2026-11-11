@@ -17,8 +17,8 @@ use ardoise_core::library::{Library, SavedNote};
 use ardoise_core::note::Note;
 use ardoise_core::settings::{AutoExport, AutoExportFormat};
 use ardoise_render::{
-    NoteView, PdfOptions, PdfPage, RenderError, RenderOptions, encode_png_at, notes_to_pdf,
-    render_note,
+    LayerMode, NoteView, PdfOptions, PdfPage, RenderError, RenderOptions, encode_png_at,
+    notes_to_pdf, render_note,
 };
 
 /// Resolution of the automatic PNG exports: sharp on a phone, about 1 MB per page.
@@ -109,6 +109,7 @@ pub fn export_bytes<'a>(
             let options = PdfOptions {
                 page: PdfPage::Actual,
                 background: true,
+                layers: LayerMode::Merged,
             };
             let bytes = notes_to_pdf(&[note], &options)?;
             Ok(Some(ExportedBytes { bytes, dpi: None }))

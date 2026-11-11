@@ -18,7 +18,7 @@ use ardoise_core::note::{
 };
 use ardoise_ink::{Point, Rgba, Stroke, Tool, outline};
 use ardoise_render::{
-    PdfOptions, PdfPage, RenderOptions, SvgOptions, clipboard_image_at, encode_jpeg_at,
+    LayerMode, PdfOptions, PdfPage, RenderOptions, SvgOptions, clipboard_image_at, encode_jpeg_at,
     encode_png_at, encode_webp, note_to_svg, notes_to_pdf, render_note, render_note_transparent,
     scale_for_dpi,
 };
@@ -470,6 +470,7 @@ fn a_reference_note_exports_to_every_format() {
         let options = PdfOptions {
             page,
             background: true,
+            ..PdfOptions::default()
         };
         let pdf = notes_to_pdf(&[&note, &second], &options).unwrap();
         let file = dir.join(name);
@@ -563,7 +564,13 @@ fn a_reference_note_exports_to_every_format() {
 #[test]
 fn the_svg_without_background_is_transparent_and_hidden_strokes_never_appear() {
     let mut note = reference_note();
-    let svg = note_to_svg(&note, &SvgOptions { background: false });
+    let svg = note_to_svg(
+        &note,
+        &SvgOptions {
+            background: false,
+            ..SvgOptions::default()
+        },
+    );
     let document = roxmltree::Document::parse(&svg).unwrap();
     let elements: Vec<&str> = document
         .root_element()
@@ -579,7 +586,13 @@ fn the_svg_without_background_is_transparent_and_hidden_strokes_never_appear() {
 
     // Showing the hidden layer adds exactly its three strokes.
     note.layers[1].visible = true;
-    let svg = note_to_svg(&note, &SvgOptions { background: false });
+    let svg = note_to_svg(
+        &note,
+        &SvgOptions {
+            background: false,
+            ..SvgOptions::default()
+        },
+    );
     assert_eq!(svg.matches("<path ").count(), expected_fills(&note));
     assert_eq!(expected_fills(&note), 14);
 }
@@ -636,7 +649,13 @@ fn the_svg_draws_what_the_raster_draws() {
     let dpi = 100;
     for background in [false, true] {
         let raster = render_note(&note, &RenderOptions::at_dpi(dpi, background)).unwrap();
-        let svg = note_to_svg(&note, &SvgOptions { background });
+        let svg = note_to_svg(
+            &note,
+            &SvgOptions {
+                background,
+                ..SvgOptions::default()
+            },
+        );
         let drawn = draw_svg(&svg, note.page.width, dpi, raster.width, raster.height);
         let (mean, gross) = difference(&raster, &drawn);
         println!(
@@ -662,7 +681,13 @@ fn the_svg_draws_what_the_raster_draws() {
     let mut fewer = note.clone();
     fewer.strokes.retain(|s| s.tool != Tool::FeltTip);
     let drawn = draw_svg(
-        &note_to_svg(&fewer, &SvgOptions { background: false }),
+        &note_to_svg(
+            &fewer,
+            &SvgOptions {
+                background: false,
+                ..SvgOptions::default()
+            },
+        ),
         note.page.width,
         dpi,
         raster.width,
@@ -670,4 +695,385 @@ fn the_svg_draws_what_the_raster_draws() {
     );
     let (_, gross) = difference(&raster, &drawn);
     assert!(gross > 0.000_5, "{gross}");
+}
+
+// --- Layers at export (M14, SPEC §4.6, docs/design/exports-and-operations.md) -------------
+
+/// FNV-1a 64 of `bytes`, with their length: a short fingerprint of a file.
+fn fingerprint(bytes: &[u8]) -> (usize, u64) {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for &b in bytes {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    (bytes.len(), hash)
+}
+
+/// The exports of the reference note in the default modes (SVG separate, PDF merged) are the
+/// files written before the layers option existed: fingerprints taken then, on the same notes.
+#[test]
+fn the_default_modes_write_todays_files_byte_for_byte() {
+    let note = reference_note();
+    let second = second_note();
+    assert_eq!(
+        fingerprint(note_to_svg(&note, &SvgOptions::default()).as_bytes()),
+        (142_826, 15_857_894_918_227_345_026)
+    );
+    for (page, expected) in [
+        (PdfPage::Actual, (172_161, 7_469_838_746_515_188_696)),
+        (PdfPage::A4, (172_166, 12_133_712_646_582_357_706)),
+    ] {
+        let options = PdfOptions {
+            page,
+            background: true,
+            layers: LayerMode::Merged,
+        };
+        let pdf = notes_to_pdf(&[&note, &second], &options).unwrap();
+        assert_eq!(fingerprint(&pdf), expected, "{page:?}");
+    }
+    assert_eq!(SvgOptions::default().layers, LayerMode::Separate);
+    assert_eq!(PdfOptions::default().layers, LayerMode::Merged);
+}
+
+/// A white dotted page with one ballpoint stroke per entry of `rows` (the layer it is on).
+fn layered_note(title: &str, layers: &[(&str, bool)], rows: &[u32]) -> Note {
+    Note {
+        title: title.into(),
+        background: Background {
+            paper: Paper::White,
+            template: Template::Dotted,
+            texture: false,
+        },
+        layers: layers
+            .iter()
+            .map(|&(name, visible)| Layer {
+                name: name.into(),
+                visible,
+            })
+            .collect(),
+        strokes: rows
+            .iter()
+            .enumerate()
+            .map(|(i, &layer)| {
+                stroke(
+                    Tool::Ballpoint,
+                    Rgba::BLACK,
+                    layer,
+                    wave(3_000.0, 20_000.0, 3_000.0 + i as f32 * 2_000.0, 300.0, 0),
+                )
+            })
+            .collect(),
+        ..reference_note()
+    }
+}
+
+/// Two layers shown, one hidden, and a stroke on a layer the note has no entry for.
+fn first_layered() -> Note {
+    layered_note(
+        "Un",
+        &[
+            ("Calque 1", true),
+            ("Correction", true),
+            ("Reponses", false),
+        ],
+        &[0, 0, 1, 2, 2, 5],
+    )
+}
+
+/// Shares « Calque 1 » with the first.
+fn second_layered() -> Note {
+    layered_note("Deux", &[("Calque 1", true), ("Notes", true)], &[0, 1, 1])
+}
+
+/// A note whose only layer is hidden.
+fn all_hidden() -> Note {
+    layered_note("Trois", &[("Cachee", false)], &[0, 0])
+}
+
+/// The SVG of `note` and its layers of ink (not the background's): label and path count.
+fn svg_layers(note: &Note, layers: LayerMode) -> (String, Vec<(String, usize)>) {
+    let svg = note_to_svg(
+        note,
+        &SvgOptions {
+            background: true,
+            layers,
+        },
+    );
+    let document = roxmltree::Document::parse(&svg).expect("well-formed XML");
+    let inkscape = "http://www.inkscape.org/namespaces/inkscape";
+    let found = document
+        .root_element()
+        .children()
+        .filter(|n| n.is_element() && n.attribute((inkscape, "groupmode")) == Some("layer"))
+        .filter(|n| n.attribute("id") != Some("background"))
+        .map(|n| {
+            (
+                n.attribute((inkscape, "label")).unwrap_or("").to_owned(),
+                n.descendants().filter(|d| d.has_tag_name("path")).count(),
+            )
+        })
+        .collect();
+    (svg, found)
+}
+
+#[test]
+fn svg_layers_are_separate_or_merged_and_a_hidden_one_is_never_written() {
+    let note = first_layered();
+    let (separate, layers) = svg_layers(&note, LayerMode::Separate);
+    assert_eq!(
+        layers,
+        [
+            ("Calque 1".into(), 2),
+            ("Correction".into(), 1),
+            ("6".into(), 1)
+        ]
+    );
+    let (merged, layers) = svg_layers(&note, LayerMode::Merged);
+    assert_eq!(layers, [("Calque 1 + Correction + 6".into(), 4)]);
+    assert_eq!(
+        separate.matches("<path ").count(),
+        merged.matches("<path ").count()
+    );
+    for svg in [&separate, &merged] {
+        assert!(!svg.contains("Reponses"));
+    }
+    // The reference note's hidden layer, in either mode.
+    let reference = reference_note();
+    for mode in [LayerMode::Separate, LayerMode::Merged] {
+        let (svg, layers) = svg_layers(&reference, mode);
+        assert!(!svg.contains("Brouillon"));
+        let paths: usize = layers.iter().map(|(_, paths)| paths).sum();
+        assert_eq!(paths, expected_fills(&reference));
+    }
+    // A note with nothing visible has no layer of ink.
+    for mode in [LayerMode::Separate, LayerMode::Merged] {
+        let (svg, layers) = svg_layers(&all_hidden(), mode);
+        assert!(layers.is_empty() && !svg.contains("Cachee"));
+    }
+}
+
+/// What the tests read back of a PDF made with separate layers.
+#[derive(Debug, Default)]
+struct PdfLayers {
+    /// `/OCProperties /OCGs`, as names.
+    groups: Vec<String>,
+    /// `/OCProperties /D /Order`, as names.
+    order: Vec<String>,
+    /// Per page, the `/Properties` resource: tag, group name, group object.
+    properties: Vec<Vec<(String, String, lopdf::ObjectId)>>,
+    /// Per page, the marked-content sequences in painting order: group name, fills inside.
+    sequences: Vec<Vec<(String, usize)>>,
+    /// Per page, every `f` of the content stream.
+    fills: Vec<usize>,
+    /// Per page, the `BDC` and `EMC` operators.
+    marks: Vec<(usize, usize)>,
+}
+
+fn group_name(document: &lopdf::Document, object: &lopdf::Object) -> String {
+    let (_, object) = document.dereference(object).unwrap();
+    let group = object.as_dict().unwrap();
+    assert_eq!(group.get(b"Type").unwrap().as_name().unwrap(), b"OCG");
+    String::from_utf8(group.get(b"Name").unwrap().as_str().unwrap().to_vec()).unwrap()
+}
+
+fn read_layers(pdf: &[u8]) -> (lopdf::Document, PdfLayers) {
+    let document = lopdf::Document::load_mem(pdf).expect("PDF parses");
+    let mut read = PdfLayers::default();
+    if let Ok(properties) = document.catalog().unwrap().get(b"OCProperties") {
+        let properties = document.dereference(properties).unwrap().1;
+        let properties = properties.as_dict().unwrap();
+        let names = |object: &lopdf::Object| -> Vec<String> {
+            object
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|o| group_name(&document, o))
+                .collect()
+        };
+        read.groups = names(properties.get(b"OCGs").unwrap());
+        let config = properties.get(b"D").unwrap().as_dict().unwrap();
+        assert_eq!(config.get(b"BaseState").unwrap().as_name().unwrap(), b"ON");
+        read.order = names(config.get(b"Order").unwrap());
+    }
+    for &id in document.get_pages().values() {
+        let (resources, _) = document.get_page_resources(id).unwrap();
+        let tags: Vec<(String, String, lopdf::ObjectId)> = resources
+            .and_then(|r| r.get(b"Properties").ok())
+            .map(|p| {
+                let p = document.dereference(p).unwrap().1;
+                p.as_dict()
+                    .unwrap()
+                    .iter()
+                    .map(|(tag, group)| {
+                        (
+                            String::from_utf8(tag.clone()).unwrap(),
+                            group_name(&document, group),
+                            group.as_reference().unwrap(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let content = document.get_page_content_with_limit(id, 256 << 20).unwrap();
+        let operations = lopdf::content::Content::decode(&content)
+            .unwrap()
+            .operations;
+        let (mut begins, mut ends, mut fills) = (0, 0, 0);
+        let mut sequences = Vec::new();
+        let mut open: Option<(String, usize)> = None;
+        for op in &operations {
+            match op.operator.as_str() {
+                "BDC" => {
+                    begins += 1;
+                    assert_eq!(op.operands[0].as_name().unwrap(), b"OC");
+                    let tag =
+                        String::from_utf8(op.operands[1].as_name().unwrap().to_vec()).unwrap();
+                    let group = tags
+                        .iter()
+                        .find(|(t, _, _)| *t == tag)
+                        .expect("the tag is in /Properties");
+                    assert!(open.replace((group.1.clone(), 0)).is_none(), "nested BDC");
+                }
+                "EMC" => {
+                    ends += 1;
+                    sequences.push(open.take().expect("EMC closes a BDC"));
+                }
+                "f" => {
+                    fills += 1;
+                    if let Some((_, count)) = open.as_mut() {
+                        *count += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(open.is_none(), "unclosed BDC");
+        read.properties.push(tags);
+        read.sequences.push(sequences);
+        read.fills.push(fills);
+        read.marks.push((begins, ends));
+    }
+    (document, read)
+}
+
+fn pdf_of(notes: &[&Note], layers: LayerMode) -> Vec<u8> {
+    let options = PdfOptions {
+        layers,
+        ..PdfOptions::default()
+    };
+    notes_to_pdf(notes, &options).unwrap()
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+#[test]
+fn a_pdf_with_separate_layers_has_one_group_per_layer_name_over_all_its_pages() {
+    let (first, second) = (first_layered(), second_layered());
+    let pdf = pdf_of(&[&first, &second], LayerMode::Separate);
+    let (document, read) = read_layers(&pdf);
+
+    // Two layers on each page, one name in common: 3 groups, not 4, the top layer of the
+    // first page first.
+    let expected = ["Correction", "Calque 1", "Notes"];
+    assert_eq!(read.groups, expected);
+    assert_eq!(read.order, expected);
+    let catalog = document.catalog().unwrap();
+    assert_eq!(
+        catalog.get(b"PageMode").unwrap().as_name().unwrap(),
+        b"UseOC"
+    );
+    // Each page names its own groups; « Calque 1 » is the same object on both.
+    let names = |page: usize| {
+        let mut names: Vec<&str> = read.properties[page]
+            .iter()
+            .map(|(_, name, _)| name.as_str())
+            .collect();
+        names.sort_unstable();
+        names
+    };
+    assert_eq!(names(0), ["Calque 1", "Correction"]);
+    assert_eq!(names(1), ["Calque 1", "Notes"]);
+    let shared = |page: usize| {
+        read.properties[page]
+            .iter()
+            .find(|(_, name, _)| name == "Calque 1")
+            .unwrap()
+            .2
+    };
+    assert_eq!(shared(0), shared(1));
+
+    // One sequence per layer of the page, bottom first, around that layer's fills; the stroke
+    // of a layer the note has no entry for stays outside the groups.
+    assert_eq!(
+        read.sequences[0],
+        [("Calque 1".to_owned(), 2), ("Correction".to_owned(), 1)]
+    );
+    assert_eq!(
+        read.sequences[1],
+        [("Calque 1".to_owned(), 1), ("Notes".to_owned(), 2)]
+    );
+    assert_eq!(read.marks, [(2, 2), (2, 2)]);
+
+    // The drawing is the same as merged: as many fills, the hidden layer's not among them.
+    let (_, merged) = read_layers(&pdf_of(&[&first, &second], LayerMode::Merged));
+    assert_eq!(read.fills, merged.fills);
+    // Two strokes of the first layer, one of the second, the one without a layer entry.
+    assert_eq!(expected_fills(&first), 4);
+
+    // A hidden layer's name is in no object, and not in the page streams either.
+    assert!(!contains(&pdf, b"Reponses"));
+    for &id in document.get_pages().values() {
+        let content = document.get_page_content_with_limit(id, 256 << 20).unwrap();
+        assert!(!contains(&content, b"Reponses"));
+    }
+}
+
+#[test]
+fn a_merged_pdf_has_no_optional_content_and_a_hidden_layer_is_in_no_pdf() {
+    let (first, second) = (first_layered(), second_layered());
+    let pdf = pdf_of(&[&first, &second], LayerMode::Merged);
+    let (_, read) = read_layers(&pdf);
+    assert!(read.groups.is_empty() && read.properties.iter().all(Vec::is_empty));
+    assert_eq!(read.marks, [(0, 0), (0, 0)]);
+    for word in [
+        &b"OCProperties"[..],
+        b"/OCG",
+        b"/OC ",
+        b"UseOC",
+        b"Reponses",
+    ] {
+        assert!(!contains(&pdf, word), "{}", String::from_utf8_lossy(word));
+    }
+    // The reference note's hidden layer, in both modes, one note or two.
+    let (note, other) = (reference_note(), second_note());
+    for mode in [LayerMode::Merged, LayerMode::Separate] {
+        for notes in [vec![&note], vec![&note, &other]] {
+            let pdf = pdf_of(&notes, mode);
+            assert!(!contains(&pdf, b"Brouillon"), "{mode:?}");
+            let (_, read) = read_layers(&pdf);
+            if mode == LayerMode::Separate {
+                assert_eq!(read.groups, ["Calque 1"]);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_page_whose_layers_are_all_hidden_has_no_group() {
+    let (first, hidden) = (first_layered(), all_hidden());
+    // Alone: no optional content at all, as for a merged PDF.
+    let alone = pdf_of(&[&hidden], LayerMode::Separate);
+    let (document, read) = read_layers(&alone);
+    assert!(read.groups.is_empty() && read.properties == [Vec::new()]);
+    assert_eq!(read.marks, [(0, 0)]);
+    assert!(document.catalog().unwrap().get(b"PageMode").is_err());
+    assert!(!contains(&alone, b"Cachee") && !contains(&alone, b"OCProperties"));
+    // After a note with layers: that page has none, the document's groups are the first's.
+    let pdf = pdf_of(&[&first, &hidden], LayerMode::Separate);
+    let (_, read) = read_layers(&pdf);
+    assert_eq!(read.groups, ["Correction", "Calque 1"]);
+    assert!(read.properties[1].is_empty() && read.sequences[1].is_empty());
+    assert!(!contains(&pdf, b"Cachee"));
 }

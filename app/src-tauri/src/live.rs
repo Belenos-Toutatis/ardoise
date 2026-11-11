@@ -7,6 +7,8 @@
 //! - [`model`]: the shapes the interface receives and sends (`app/ui/src/lib/live.ts`);
 //! - [`session`]: the session itself, pure (strokes, hover, pages, layers, view);
 //! - [`edits`]: touching up a page while the tablet writes (what is checked, undo and redo);
+//! - [`pen`]: the computer's pen in the control window (M14: what it sends, its times);
+//! - [`layers`]: the layers zone of the live window (M14: what it asks, a move or a merge);
 //! - [`hub`]: the session shared between threads, the batches sent to the windows, the pages
 //!   written to the library;
 //! - [`resume`]: a session that starts from an existing note (the sheet's file, the pen on a
@@ -17,7 +19,9 @@
 pub mod activity;
 pub mod edits;
 pub mod hub;
+pub mod layers;
 pub mod model;
+pub mod pen;
 pub mod resume;
 pub mod session;
 
@@ -46,10 +50,12 @@ pub use edits::StrokesEdit;
 pub use hub::{
     ButtonSetting, HubConfig, LiveError, LiveHub, LiveOverview, PagePosition, Start, StartOptions,
 };
+pub use layers::LayerOp;
 pub use model::{
     ForkedSheet, LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState,
     SnapshotReply,
 };
+pub use pen::ComputerPenInput;
 
 use self::resume::ResumeBase;
 use crate::narration::{self, NarrationRuntime};
@@ -535,9 +541,9 @@ pub async fn live_edit_strokes(
         .map_err(LiveError::command_error)
 }
 
-/// Undoes the last edit of page `page_index` (delete, change of colour, « Clear the page »; never
-/// what the tablet wrote): true when there was one. Refused as `liveEditStale` when another page
-/// is on screen.
+/// Undoes the last edit of page `page_index` (delete, change of colour, « Clear the page », a stroke
+/// of the computer, a gesture of its eraser as a whole; never what the tablet wrote): true when
+/// there was one. Refused as `liveEditStale` when another page is on screen.
 #[tauri::command]
 pub async fn live_undo_edit(
     runtime: State<'_, LiveRuntime>,
@@ -559,6 +565,39 @@ pub async fn live_redo_edit(
     runtime
         .hub
         .redo_edit(page_index)
+        .map_err(LiveError::command_error)
+}
+
+/// A call of the computer's pen or mouse in the control window (M14; `ComputerPenInput`, always
+/// sent one at a time through the window's queue): `begin` answers `true` or is refused
+/// (`liveNotRunning`, `liveEditStale` for another page, `liveLayerHidden` when the computer's layer
+/// is hidden, `liveEditInvalid` for samples that make no sense); `points` and `end` answer whether
+/// the stroke goes on (`false`: the window stops sending for that gesture); `cancel` whether there
+/// was a stroke to drop.
+#[tauri::command]
+pub async fn live_computer_pen(
+    runtime: State<'_, LiveRuntime>,
+    input: ComputerPenInput,
+) -> CommandResult<bool> {
+    runtime
+        .hub
+        .computer_pen(input)
+        .map_err(LiveError::command_error)
+}
+
+/// A layer operation of the live window on page `page_index` (M14; `LayerOp`): refused as a whole
+/// as `liveEditStale` once that page is left, `liveLayerInvalid` when it makes no sense there,
+/// `liveNotRunning` once the session is stopped (except choosing where a pen acts). Every window
+/// hears of it through a snapshot. Not undone by Ctrl+Z.
+#[tauri::command]
+pub async fn live_layers(
+    runtime: State<'_, LiveRuntime>,
+    page_index: usize,
+    op: LayerOp,
+) -> CommandResult<()> {
+    runtime
+        .hub
+        .layers(page_index, op)
         .map_err(LiveError::command_error)
 }
 

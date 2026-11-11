@@ -33,10 +33,12 @@ use tauri::ipc::Channel;
 
 use super::activity::Activity;
 use super::edits::{LiveEditError, Prepared, StrokesEdit};
+use super::layers::LayerOp;
 use super::model::{
-    ForkReason, ForkedSheet, LiveBatch, LiveCommandKind, LiveEvent, LiveMark, LiveSessionState,
-    LiveSnapshot, LiveStyle, LiveViewState, wall_ms, wall_now_ms,
+    ForkReason, ForkedSheet, LiveBatch, LiveCommandKind, LiveEvent, LiveMark, LivePen,
+    LiveSessionState, LiveSnapshot, LiveStyle, LiveViewState, PlacedStroke, wall_ms, wall_now_ms,
 };
+use super::pen::ComputerPenInput;
 use super::resume::{ResumeBase, ResumeSeed, merged_keeping_both, placed_for_merge};
 use super::session::{LiveSession, Page, SavedFile, SheetFork};
 use crate::library::{now_ms, path_text};
@@ -177,8 +179,26 @@ struct SaveJob {
     file: Option<SavedFile>,
     /// A resumed sheet: the file it came from.
     base: Option<Arc<ResumeBase>>,
-    /// A resumed sheet: ink was added under the blackboard ([`written_sheet`]).
+    /// A resumed sheet: what of the session's changes its file hears of ([`written_sheet`]).
+    sheet: SheetChanges,
+}
+
+/// What a resumed sheet's file hears of, beyond its ink ([`written_sheet`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct SheetChanges {
+    /// Ink was added under the blackboard.
     on_board: bool,
+    /// Its layers were changed on purpose in the live window (M14).
+    layers_edited: bool,
+}
+
+impl SheetChanges {
+    fn of(page: &Page) -> SheetChanges {
+        SheetChanges {
+            on_board: page.ink_on_board(),
+            layers_edited: page.layers_edited(),
+        }
+    }
 }
 
 /// Where live mode stands, for the narration's page watcher.
@@ -309,20 +329,49 @@ fn page_size_of(options: &StartOptions) -> PageSize {
 }
 
 /// Adds `event` to a window's queue, merging what does not need to be sent twice: points join
-/// the stroke they continue, only the latest hover position, view and list of marks are kept.
-fn enqueue(queue: &mut Vec<LiveEvent>, event: LiveEvent) {
+/// the stroke they continue (the last event queued, of the same page and pen, and as hidden or
+/// shown: two strokes may be in progress at once), only the latest hover position, view and list
+/// of marks are kept. `strokeCancel` and `history` are never merged.
+pub(super) fn enqueue(queue: &mut Vec<LiveEvent>, event: LiveEvent) {
     match event {
-        LiveEvent::Points { page_index, points } => match queue.last_mut() {
-            Some(LiveEvent::Points {
-                page_index: pending_page,
-                points: pending,
-            }) if *pending_page == page_index => pending.extend(points),
-            Some(LiveEvent::StrokeStart {
-                page_index: pending_page,
-                stroke,
-            }) if *pending_page == page_index => stroke.points.extend(points),
-            _ => queue.push(LiveEvent::Points { page_index, points }),
-        },
+        LiveEvent::Points {
+            page_index,
+            points,
+            pen,
+            id,
+            hidden,
+        } => {
+            let same = |page: &usize, other_pen: &LivePen, other_id: &Option<u32>, other: &bool| {
+                *page == page_index && *other_pen == pen && *other_id == id && *other == hidden
+            };
+            match queue.last_mut() {
+                Some(LiveEvent::Points {
+                    page_index: pending_page,
+                    points: pending,
+                    pen: pending_pen,
+                    id: pending_id,
+                    hidden: pending_hidden,
+                }) if same(pending_page, pending_pen, pending_id, pending_hidden) => {
+                    pending.extend(points);
+                }
+                Some(LiveEvent::StrokeStart {
+                    page_index: pending_page,
+                    stroke,
+                    pen: pending_pen,
+                    id: pending_id,
+                    hidden: pending_hidden,
+                }) if same(pending_page, pending_pen, pending_id, pending_hidden) => {
+                    stroke.points.extend(points);
+                }
+                _ => queue.push(LiveEvent::Points {
+                    page_index,
+                    points,
+                    pen,
+                    id,
+                    hidden,
+                }),
+            }
+        }
         LiveEvent::Hover { .. } | LiveEvent::HoverEnd => {
             queue.retain(|e| !matches!(e, LiveEvent::Hover { .. }));
             queue.push(event);
@@ -435,16 +484,18 @@ pub(super) fn file_fingerprint(file: &NoteFile) -> Option<u64> {
 
 /// The note a resumed sheet writes, from the page's `note` and the sheet as it was read. A sheet
 /// that received no ink is the sheet it was: what the session did around it stays out of the file
-/// (the blackboard turned on in front of it, a layer added to write on, an edit undone). Slate
-/// paper reaches the file only with ink written under the blackboard (`on_board`), which white
-/// chalk needs, and only as long as that ink makes a difference.
-fn written_sheet(note: &Note, before: &Note, on_board: bool) -> Note {
+/// (the blackboard turned on in front of it, a layer added to write on, an edit undone), except a
+/// deliberate change of its layers in the live window (`layers_edited`, M14: then they are written
+/// as they are, new ink or not, as in the editor). Slate paper reaches the file only with ink
+/// written under the blackboard (`on_board`), which white chalk needs, and only as long as that
+/// ink makes a difference.
+fn written_sheet(note: &Note, before: &Note, sheet: SheetChanges) -> Note {
     let mut written = note.clone();
     let same_ink = note.strokes == before.strokes;
-    if same_ink {
+    if same_ink && !sheet.layers_edited {
         written.layers.clone_from(&before.layers);
     }
-    if same_ink || !on_board {
+    if same_ink || !sheet.on_board {
         written.background.paper = before.background.paper;
     }
     written
@@ -461,11 +512,11 @@ fn page_file(
     note: &Note,
     audio: Option<&Arc<Vec<u8>>>,
     base: Option<&ResumeBase>,
-    on_board: bool,
+    sheet: SheetChanges,
 ) -> Result<NoteFile, FormatError> {
     let mut file = match base {
         Some(base) => {
-            let written = written_sheet(note, &base.file.note, on_board);
+            let written = written_sheet(note, &base.file.note, sheet);
             let mut file = base.file.clone();
             keep_resumed_original(&mut file, &written)?;
             file.note = written;
@@ -500,16 +551,15 @@ fn page_thumbnail(file: &mut NoteFile, base: Option<&ResumeBase>) {
 /// holds what its file holds (the blackboard pressed, nothing written) is not written at all.
 fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError> {
     let base = job.base.as_deref();
-    let mut file =
-        page_file(&job.note, job.audio.as_ref(), base, job.on_board).map_err(|source| {
-            LibraryError::Format {
-                path: job
-                    .file
-                    .as_ref()
-                    .map_or_else(|| library.root().to_path_buf(), |file| file.path.clone()),
-                source,
-            }
-        })?;
+    let mut file = page_file(&job.note, job.audio.as_ref(), base, job.sheet).map_err(|source| {
+        LibraryError::Format {
+            path: job
+                .file
+                .as_ref()
+                .map_or_else(|| library.root().to_path_buf(), |file| file.path.clone()),
+            source,
+        }
+    })?;
     let content = file_fingerprint(&file);
     if let (Some(_), Some(previous)) = (base, &job.file)
         && content.is_some()
@@ -917,7 +967,7 @@ impl Shared {
                     audio: page.audio.clone(),
                     file: page.file.clone(),
                     base: page.base().cloned(),
-                    on_board: page.ink_on_board(),
+                    sheet: SheetChanges::of(page),
                 });
             }
             (library, jobs)
@@ -1020,11 +1070,11 @@ fn write_sound_apart(
     note: &Note,
     base: Option<&ResumeBase>,
     from: Option<&Path>,
-    on_board: bool,
+    sheet: SheetChanges,
     audio: &Arc<Vec<u8>>,
 ) -> Result<PathBuf, LibraryError> {
     let mut file =
-        page_file(note, Some(audio), base, on_board).map_err(|source| LibraryError::Format {
+        page_file(note, Some(audio), base, sheet).map_err(|source| LibraryError::Format {
             path: from.map_or_else(|| library.root().to_path_buf(), Path::to_path_buf),
             source,
         })?;
@@ -1406,7 +1456,7 @@ impl LiveHub {
     /// back, through its history. Returns whether anything was restored (the page was left
     /// meanwhile).
     pub fn restore_cleared(&self) -> Result<bool, LiveError> {
-        let prepared = self.prepared_undo();
+        let prepared = self.prepared(LiveSession::next_restored);
         let mut restored = false;
         self.change(
             |_| true,
@@ -1433,10 +1483,11 @@ impl LiveHub {
         Ok(outcome?)
     }
 
-    /// Undoes the last edit of page `page_index` (the one on screen). Returns whether there was
+    /// Undoes the last step of page `page_index` (the one on screen), with every step of its group
+    /// (an edit, a computer stroke, a gesture of the computer's eraser). Returns whether there was
     /// anything to undo.
     pub fn undo_edit(&self, page_index: usize) -> Result<bool, LiveError> {
-        let prepared = self.prepared_undo();
+        let prepared = self.prepared(LiveSession::next_restored);
         let mut outcome = Ok(false);
         self.change(
             |_| true,
@@ -1445,22 +1496,59 @@ impl LiveHub {
         Ok(outcome?)
     }
 
-    /// Does again the last edit undone on page `page_index` (the one on screen): the strokes move
-    /// from the page to its history, nothing is copied. Returns whether there was anything to redo.
+    /// Does again the last group undone on page `page_index` (the one on screen): the strokes an
+    /// edit takes move from the page to its history, nothing is copied; a computer stroke given back
+    /// is copied before the lock. Returns whether there was anything to redo.
     pub fn redo_edit(&self, page_index: usize) -> Result<bool, LiveError> {
+        let prepared = self.prepared(LiveSession::next_redone);
         let mut outcome = Ok(false);
         self.change(
             |_| true,
-            |session, out| outcome = session.redo_edit(page_index, out),
+            |session, out| outcome = session.redo_edit(page_index, prepared, out),
         )?;
         Ok(outcome?)
     }
 
-    /// A copy of the strokes the next undo gives back, made without holding the lock: those points
-    /// can be many, and the tablet's input waits for that lock.
-    fn prepared_undo(&self) -> Option<Prepared> {
-        let stored = self.shared.lock().session.next_restored()?;
-        Some(Prepared::of(stored))
+    /// A copy of the strokes the next undo or redo (`next`) gives back, made without holding the
+    /// lock: those points can be many, and the tablet's input waits for that lock.
+    fn prepared(
+        &self,
+        next: impl FnOnce(&LiveSession) -> Vec<Arc<Vec<PlacedStroke>>>,
+    ) -> Option<Prepared> {
+        let stored = next(&self.shared.lock().session);
+        (!stored.is_empty()).then(|| Prepared::of_all(stored))
+    }
+
+    /// A call of the computer's pen from the control window (docs/design/tablet-live-classroom.md,
+    /// "The computer's strokes"): see [`LiveSession::computer_pen`]. The samples are checked and
+    /// their wall time anchored before the lock is taken; under it, at most
+    /// [`MAX_PEN_SAMPLES`](super::pen::MAX_PEN_SAMPLES) points are appended and sent, so the tablet's
+    /// input never waits long. A `begin` is refused once the session is stopped (`liveNotRunning`);
+    /// the other calls then answer `false`.
+    pub fn computer_pen(&self, input: ComputerPenInput) -> Result<bool, LiveError> {
+        let begins = input.begins();
+        let pen = input.checked()?;
+        let wall_now = wall_now_ms();
+        let mut outcome = Ok(false);
+        self.change(
+            |_| begins,
+            |session, out| outcome = session.computer_pen(pen, wall_now, out),
+        )?;
+        Ok(outcome?)
+    }
+
+    /// A layer operation of the live window on page `page_index` (the one on screen): see
+    /// [`LiveSession::layers`]. Once the session is stopped only `computer` and `tablet` are allowed:
+    /// they change no note.
+    pub fn layers(&self, page_index: usize, op: LayerOp) -> Result<(), LiveError> {
+        let rewrites = op.changes_note();
+        let op = op.checked()?;
+        let mut outcome = Ok(());
+        self.change(
+            |_| rewrites,
+            |session, out| outcome = session.layers(page_index, op, out),
+        )?;
+        Ok(outcome?)
     }
 
     pub fn set_style(&self, style: LiveStyle) -> Result<(), LiveError> {
@@ -1494,7 +1582,7 @@ impl LiveHub {
             Note,
             Option<Arc<Vec<u8>>>,
             Option<Arc<ResumeBase>>,
-            bool,
+            SheetChanges,
         );
         let pages: Vec<Unsaved> = {
             let state = self.shared.lock();
@@ -1510,15 +1598,15 @@ impl LiveHub {
                         page.note.clone(),
                         page.audio.clone(),
                         page.base().cloned(),
-                        page.ink_on_board(),
+                        SheetChanges::of(page),
                     )
                 })
                 .collect()
         };
         pages
             .into_iter()
-            .map(|(index, note, audio, base, on_board)| {
-                let copy = page_file(&note, audio.as_ref(), base.as_deref(), on_board)
+            .map(|(index, note, audio, base, sheet)| {
+                let copy = page_file(&note, audio.as_ref(), base.as_deref(), sheet)
                     .and_then(|mut file| {
                         file.note.id = uuid::Uuid::new_v4().to_string();
                         page_thumbnail(&mut file, base.as_deref());
@@ -1705,19 +1793,19 @@ impl LiveHub {
                         page.note.clone(),
                         page.base().cloned(),
                         page.file.as_ref().map(|file| file.path.clone()),
-                        page.ink_on_board(),
+                        SheetChanges::of(page),
                     )
                 });
             (state.library.clone(), source)
         };
         let from = source.as_ref().and_then(|(_, _, from, _)| from.clone());
-        if let (Some(library), Some((note, base, from, on_board))) = (&library, &source) {
+        if let (Some(library), Some((note, base, from, sheet))) = (&library, &source) {
             match write_sound_apart(
                 library,
                 note,
                 base.as_deref(),
                 from.as_deref(),
-                *on_board,
+                *sheet,
                 &audio,
             ) {
                 Ok(kept) => return LiveError::NarrationKeptApart { why, kept },

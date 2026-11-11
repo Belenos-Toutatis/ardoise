@@ -20,9 +20,9 @@ use ardoise_core::fsutil;
 use ardoise_core::library::{Library, LibraryError, note_file_stem};
 use ardoise_core::note::Note;
 use ardoise_render::{
-    MAX_DPI, MIN_DPI, NoteView, PdfOptions, PdfPage, Picture, RenderError, RenderOptions,
-    SvgOptions, encode_jpeg_at, encode_png_at, encode_webp, note_to_svg, notes_to_pdf, render_note,
-    render_note_transparent, scale_for_dpi,
+    LayerMode, MAX_DPI, MIN_DPI, NoteView, PdfOptions, PdfPage, Picture, RenderError,
+    RenderOptions, SvgOptions, encode_jpeg_at, encode_png_at, encode_webp, note_to_svg,
+    notes_to_pdf, render_note, render_note_transparent, scale_for_dpi,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -84,6 +84,25 @@ impl From<PdfPageSize> for PdfPage {
     }
 }
 
+/// Layers of an SVG or PDF export: `ExportOptions.layers` in `note.ts`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExportLayers {
+    /// One layer of the file per layer of the note (Inkscape layers, PDF optional content).
+    Separate,
+    /// One drawing.
+    Merged,
+}
+
+impl From<ExportLayers> for LayerMode {
+    fn from(layers: ExportLayers) -> Self {
+        match layers {
+            ExportLayers::Separate => LayerMode::Separate,
+            ExportLayers::Merged => LayerMode::Merged,
+        }
+    }
+}
+
 /// `ExportOptions` in `note.ts`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +114,10 @@ pub struct ExportOptions {
     /// JPG quality, 1..=100.
     pub quality: u8,
     pub pdf_page: PdfPageSize,
+    /// SVG and PDF: separate or merged layers; `None` is the format's default (SVG separate, PDF
+    /// merged, the files written before the choice existed). Ignored by the images.
+    #[serde(default)]
+    pub layers: Option<ExportLayers>,
 }
 
 /// A note to export: the note at `path`, or the editor's current `note` (unsaved changes
@@ -288,6 +311,7 @@ pub fn image_bytes<'a>(
             view,
             &SvgOptions {
                 background: options.background,
+                layers: options.layers.map_or(LayerMode::Separate, LayerMode::from),
             },
         )
         .into_bytes()),
@@ -299,6 +323,7 @@ fn pdf_options(options: &ExportOptions) -> PdfOptions {
     PdfOptions {
         page: options.pdf_page.into(),
         background: options.background,
+        layers: options.layers.map_or(LayerMode::Merged, LayerMode::from),
     }
 }
 
@@ -459,6 +484,7 @@ mod tests {
             background,
             quality: 85,
             pdf_page: PdfPageSize::Actual,
+            layers: None,
         }
     }
 
@@ -718,6 +744,142 @@ mod tests {
         // A4 landscape, then A4 portrait.
         assert!((boxes[0][2] - 841.89).abs() < 0.01 && (boxes[0][3] - 595.28).abs() < 0.01);
         assert!((boxes[1][2] - 595.28).abs() < 0.01 && (boxes[1][3] - 841.89).abs() < 0.01);
+    }
+
+    /// The sample note with a second layer holding a stroke of its own, and a hidden one.
+    fn layered(title: &str, second: &str) -> Note {
+        let mut note = sample_note(title);
+        for (name, visible) in [(second, true), ("Reponses", false)] {
+            let mut stroke = note.strokes[0].clone();
+            stroke.layer = note.layers.len() as u32;
+            stroke.points.iter_mut().for_each(|p| p.y += 500.0);
+            note.layers.push(ardoise_core::note::Layer {
+                name: name.into(),
+                visible,
+            });
+            note.strokes.push(stroke);
+        }
+        note
+    }
+
+    fn in_memory(note: Note) -> ExportSource {
+        ExportSource {
+            path: String::new(),
+            note: Some(note),
+            image_key: None,
+        }
+    }
+
+    /// The names of the PDF's optional content groups; empty without `/OCProperties`.
+    fn pdf_groups(bytes: &[u8]) -> Vec<String> {
+        let document = lopdf::Document::load_mem(bytes).unwrap();
+        let Ok(properties) = document.catalog().unwrap().get(b"OCProperties") else {
+            return Vec::new();
+        };
+        let properties = document
+            .dereference(properties)
+            .unwrap()
+            .1
+            .as_dict()
+            .unwrap();
+        properties
+            .get(b"OCGs")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|group| {
+                let group = document.dereference(group).unwrap().1.as_dict().unwrap();
+                String::from_utf8(group.get(b"Name").unwrap().as_str().unwrap().to_vec()).unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_layers_option_is_optional_and_reads_the_interface_words() {
+        let read = |layers: Option<&str>| -> Result<ExportOptions, serde_json::Error> {
+            let mut value = serde_json::json!({
+                "dpi": 150, "background": true, "quality": 90, "pdfPage": "actual"
+            });
+            if let Some(layers) = layers {
+                value["layers"] = layers.into();
+            }
+            serde_json::from_value(value)
+        };
+        assert_eq!(read(None).unwrap().layers, None);
+        assert_eq!(
+            read(Some("separate")).unwrap().layers,
+            Some(ExportLayers::Separate)
+        );
+        assert_eq!(
+            read(Some("merged")).unwrap().layers,
+            Some(ExportLayers::Merged)
+        );
+        assert!(read(Some("both")).is_err());
+    }
+
+    #[test]
+    fn an_svg_has_separate_layers_by_default_and_one_ink_layer_when_merged() {
+        let note = layered("Essai", "Correction");
+        let layers = |choice: Option<ExportLayers>| {
+            let options = ExportOptions {
+                layers: choice,
+                ..options(150, true)
+            };
+            let bytes = image_bytes(&note, ExportFormat::Svg, &options).unwrap();
+            String::from_utf8(bytes).unwrap()
+        };
+        // The background layer, then one per visible layer of the note.
+        for svg in [layers(None), layers(Some(ExportLayers::Separate))] {
+            assert_eq!(svg.matches("inkscape:groupmode=\"layer\"").count(), 3);
+            assert!(svg.contains("inkscape:label=\"Correction\""));
+        }
+        let merged = layers(Some(ExportLayers::Merged));
+        assert_eq!(merged.matches("inkscape:groupmode=\"layer\"").count(), 2);
+        assert!(merged.contains("<g id=\"ink\""));
+        assert_eq!(merged.matches("<path ").count(), 2);
+        // A hidden layer, in every mode.
+        assert!(!merged.contains("Reponses") && !layers(None).contains("Reponses"));
+        // An image has no layers: the choice changes nothing.
+        let png = |choice| {
+            let options = ExportOptions {
+                layers: choice,
+                ..options(72, true)
+            };
+            image_bytes(&note, ExportFormat::Png, &options).unwrap()
+        };
+        assert_eq!(png(None), png(Some(ExportLayers::Separate)));
+    }
+
+    #[test]
+    fn a_pdf_has_merged_layers_by_default_and_one_group_per_layer_name_when_separate() {
+        let out = tempfile::tempdir().unwrap();
+        let pdf = |choice: Option<ExportLayers>| {
+            let destination = out.path().join(format!("{choice:?}.pdf"));
+            let options = ExportOptions {
+                layers: choice,
+                ..options(150, true)
+            };
+            export_sources(
+                None,
+                vec![
+                    in_memory(layered("Un", "Correction")),
+                    in_memory(layered("Deux", "Correction")),
+                ],
+                ExportFormat::Pdf,
+                &options,
+                &destination,
+                &NOT_CANCELLED,
+            )
+            .unwrap();
+            fs::read(&destination).unwrap()
+        };
+        assert!(pdf_groups(&pdf(None)).is_empty());
+        assert!(pdf_groups(&pdf(Some(ExportLayers::Merged))).is_empty());
+        // « Calque 1 » and « Correction » on each page, shared: two groups, not four.
+        let separate = pdf(Some(ExportLayers::Separate));
+        assert_eq!(pdf_groups(&separate), ["Correction", "Calque 1"]);
+        assert!(!separate.windows(8).any(|w| w == b"Reponses"));
     }
 
     #[test]

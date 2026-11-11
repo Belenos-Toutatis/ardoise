@@ -433,7 +433,13 @@ fn the_svg_places_the_image_where_the_raster_draws_it() {
         );
         assert!(mean < 2.0 && gross < 0.005, "{mean} {gross}");
         // Without the background, no image.
-        let bare = note_to_svg(view, &SvgOptions { background: false });
+        let bare = note_to_svg(
+            view,
+            &SvgOptions {
+                background: false,
+                ..SvgOptions::default()
+            },
+        );
         assert!(!bare.contains("<image"));
     }
     assert!((scale_for_dpi(100) - 100.0 / 2540.0).abs() < 1e-6);
