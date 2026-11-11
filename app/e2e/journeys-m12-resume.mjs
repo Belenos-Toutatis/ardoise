@@ -803,8 +803,12 @@ export const resumeJourneys = [
           if (!other.members.get(name)?.equals(changed.members.get(name))) throw new Error(`the new note lacks ${name}`);
         }
         if (!(strokeCountOf(other.members) >= 4)) throw new Error(`${strokeCountOf(other.members)} strokes in the new note`);
-        const cards = await app.evaluate(`[...document.querySelectorAll('.note-card')].filter((c) => c.dataset.path.includes(${j(changedTitle)})).length`);
-        if (cards !== 2) throw new Error(`${cards} cards for the two notes`);
+        // The last write lands as live mode stops: the library shows it after the watcher's quiet period and a new listing.
+        await app.waitFor(
+          `[...document.querySelectorAll('.note-card')].filter((c) => c.dataset.path.includes(${j(changedTitle)})).length === 2`,
+          'a card for each of the two notes',
+          15_000,
+        );
       });
     },
   },
