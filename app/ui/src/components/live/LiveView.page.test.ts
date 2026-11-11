@@ -280,7 +280,7 @@ describe('the class\'s remote in the Page and Fond tabs', () => {
     select.focus();
     for (const key of ['ArrowDown', 'b', 'l', 'w', ' ']) expect(press(select, key).defaultPrevented, key).toBe(false);
     expect(view.canvas().dataset.page).toBe('1/1');
-    expect(view.q('input[data-field="board"]')!.checked).toBe(false);
+    expect(view.board().checked).toBe(false);
   });
 
   it('turns the page from the Fond tab\'s select and slider', async () => {
