@@ -2,7 +2,7 @@
 /// <reference types="node" />
 /**
  * The editor and the share on the network (M11): the note being edited, unsaved changes
- * included, is what the share shows; its toolbar has « Partager sur le réseau ».
+ * included, is what the share shows; its Projection tab has « Partager sur le réseau ».
  */
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -148,9 +148,12 @@ describe('editor and the share on the network', () => {
     await vi.waitFor(() => expect(notes()).toHaveLength(1));
   });
 
-  it('has the button « Partager sur le réseau » in its toolbar, which opens the panel and starts the share', async () => {
+  it('has the button « Partager sur le réseau » in its Projection tab, not in its toolbar, which opens the panel and starts the share', async () => {
     const view = await render();
-    const button = view.target.querySelector<HTMLButtonElement>('.toolbar button[data-action="share"]')!;
+    expect(view.target.querySelector('.toolbar [data-action="share"]')).toBeNull();
+    const tab = view.target.querySelector<HTMLElement>('[role="tab"][data-tab="projection"]')!;
+    expect(tab.hasAttribute('data-dot')).toBe(false);
+    const button = view.target.querySelector<HTMLButtonElement>('[data-tab-panel="projection"] button[data-action="share"]')!;
     expect(button).not.toBeNull();
     expect(button.textContent).toContain('Partager sur le réseau');
     button.click();
@@ -160,6 +163,8 @@ describe('editor and the share on the network', () => {
     await tick();
     expect(button.classList.contains('active')).toBe(true);
     expect(view.target.querySelector('.share-indicator')?.textContent).toBe('0');
+    // The blue dot says a share runs, even with the pane collapsed.
+    expect(tab.getAttribute('data-dot')).toBe('live');
   });
 
   it('leaves the editing keys alone while the share panel is open', async () => {

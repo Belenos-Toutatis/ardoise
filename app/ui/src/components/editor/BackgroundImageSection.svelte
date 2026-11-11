@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
-   * « Image ou PDF de fond » (SPEC §4.4, P2), in the page panel: puts an image or a page of a PDF
-   * under the writing (to annotate a worksheet, a document, a photo), places it, sets its opacity,
+   * « Image ou PDF de fond » (SPEC §4.4, P2), the editor's Fond tab (a block of its own since M16): puts an
+   * image or a page of a PDF under the writing (to annotate a worksheet, a document, a photo), places it, sets its opacity,
    * removes it, turns it a quarter turn (the page and the writing stay). The file is imported by
    * Rust (`stage_background_image`), which keeps the pixels in memory until the note is saved; each
    * change is one undoable step of the editor. When the image's orientation differs from the
@@ -113,9 +113,9 @@
   }
 </script>
 
-<div class="background-image" data-section="background-image">
-  <h4 id="editor-background-image-heading">{t('background.editor.title')}</h4>
-  <p class="muted small">{t('background.editor.hint')}</p>
+<section class="pane-block" data-section="background-image" aria-labelledby="editor-background-image-heading">
+  <h3 class="pane-title" id="editor-background-image-heading">{t('background.editor.title')}</h3>
+  <p class="pane-help">{t('background.editor.hint')}</p>
 
   {#if offer}
     {@const current = orientationOf(page)}
@@ -125,7 +125,7 @@
         note: t(`editor.page.${current}Lower`),
       })}
     </p>
-    <div class="buttons">
+    <div class="pane-actions">
       <button type="button" class="button small-button primary" data-action="background-switch-orientation" onclick={() => answer(true)}>
         {t('background.editor.switchOrientation', { orientation: t(`editor.page.${offer.orientation}Lower`) })}
       </button>
@@ -139,7 +139,7 @@
     <p class="small" data-slot="background-pdf">
       {t('background.editor.pdfPages', { name: chosen.source.name, count: chosen.source.pages.length })}
     </p>
-    <label class="row">
+    <label class="pane-row">
       <span>{t('background.editor.page')}</span>
       <select bind:value={chosen.page} disabled={busy}>
         {#each chosen.source.pages as _, i (i)}
@@ -147,7 +147,7 @@
         {/each}
       </select>
     </label>
-    <div class="buttons">
+    <div class="pane-actions">
       <button type="button" class="button small-button primary" disabled={busy} onclick={() => void place(chosen.path, chosen.page)}>
         {t('background.editor.place')}
       </button>
@@ -162,7 +162,7 @@
     {#if !pixels}
       <p class="small error" role="alert">{t('background.editor.unreadable')}</p>
     {/if}
-    <label class="row">
+    <label class="pane-row">
       <span>{t('background.editor.fit')}</span>
       <select
         value={fit ?? 'custom'}
@@ -182,7 +182,7 @@
     </label>
     <div class="turn">
       <span>{t('background.editor.turn')}</span>
-      <div class="buttons">
+      <div class="pane-actions">
         <button
           type="button"
           class="button small-button"
@@ -207,7 +207,7 @@
         </button>
       </div>
     </div>
-    <label class="row opacity">
+    <label class="pane-row opacity">
       <span>{t('background.editor.opacity')}</span>
       <input
         type="range"
@@ -220,9 +220,9 @@
         oninput={(e) => (draft = Number(e.currentTarget.value))}
         onchange={(e) => commitOpacity(Number(e.currentTarget.value))}
       />
-      <span class="value">{percent} %</span>
+      <span class="pane-value">{percent} %</span>
     </label>
-    <div class="buttons">
+    <div class="pane-actions">
       <button type="button" class="button small-button" disabled={disabled || busy} onclick={() => void choose()}>
         {t('background.editor.replace')}
       </button>
@@ -231,7 +231,7 @@
       </button>
     </div>
   {:else}
-    <div class="buttons">
+    <div class="pane-actions">
       <button type="button" class="button small-button" data-action="background-choose" disabled={disabled || busy} onclick={() => void choose()}>
         {t('background.editor.choose')}
       </button>
@@ -244,23 +244,9 @@
   {#if error}
     <p class="small error" role="alert">{t('background.editor.failed', { message: error })}</p>
   {/if}
-</div>
+</section>
 
 <style>
-  .background-image {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-top: 0.35rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid var(--border);
-  }
-
-  h4 {
-    margin: 0;
-    font-size: 0.9rem;
-  }
-
   .turn {
     display: flex;
     flex-direction: column;
@@ -273,7 +259,7 @@
     min-width: 0;
   }
 
-  .opacity .value {
+  .opacity .pane-value {
     width: 3.2rem;
     text-align: right;
   }

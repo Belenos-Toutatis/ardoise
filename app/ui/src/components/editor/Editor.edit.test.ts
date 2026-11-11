@@ -7,6 +7,7 @@ import type { AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import type { Stroke } from '../../lib/note';
+import { openSideTab } from '../side/side-test-helpers';
 import Editor from './Editor.svelte';
 
 vi.mock('../VideoExportDialog.svelte', async () => ({
@@ -43,6 +44,11 @@ let cleanup: (() => void) | null = null;
 beforeEach(() => {
   resetMockLibrary();
   setLocale('fr');
+  try {
+    localStorage.clear();
+  } catch {
+    // No storage: nothing to clear.
+  }
 });
 
 afterEach(() => {
@@ -245,7 +251,9 @@ describe('back to the original', () => {
 
   it('goes back to the first version after a confirmation, in one undoable step', async () => {
     fromLiveMode('Liste de courses');
-    const { paths, drag, key, notice, stored, save, originalSection } = await render('Liste de courses');
+    const { target, paths, drag, key, notice, stored, save, originalSection } = await render('Liste de courses');
+    // The original is in the Page tab: the focus only goes to a button the user can reach.
+    await openSideTab(target, 'page');
     const first = stored().note;
     const firstPaths = pathData(paths());
 

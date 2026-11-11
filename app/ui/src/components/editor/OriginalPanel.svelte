@@ -55,9 +55,9 @@
   );
 </script>
 
-<section class="side-section" aria-labelledby="editor-original-heading" data-section="original">
-  <h3 id="editor-original-heading">{t('editor.original.label')}</h3>
-  <p class="small muted" data-slot="original-help">{help}</p>
+<section class="pane-block" aria-labelledby="editor-original-heading" data-section="original">
+  <h3 class="pane-title" id="editor-original-heading">{t('editor.original.label')}</h3>
+  <p class="pane-help" data-slot="original-help">{help}</p>
   {#if error}
     <p class="small original-error" role="alert">{error}</p>
   {/if}
@@ -67,7 +67,7 @@
       <p class="small" id="editor-original-lost">{t('editor.original.confirmLost')}</p>
       <p class="small">{t('editor.original.confirmKept')}</p>
       <p class="small muted">{t('editor.original.confirmUndo')}</p>
-      <div class="buttons">
+      <div class="pane-actions">
         <button
           type="button"
           class="button small-button danger"
@@ -88,7 +88,7 @@
       </div>
     </div>
   {:else}
-    <div class="buttons">
+    <div class="pane-actions">
       <button
         type="button"
         class="button small-button"
