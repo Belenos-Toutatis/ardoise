@@ -1,4 +1,5 @@
 // Milestone M12: the keys of touching up in the control window (V, undo, redo, Delete and Esc with a selection).
+// M14: P, the computer's Pen tool.
 import { describe, expect, it } from 'vitest';
 import { liveEditKeyAction, liveKeyAction, type KeyInput } from './live-keys';
 
@@ -13,6 +14,19 @@ describe('keys of touching up', () => {
     }
     expect(liveEditKeyAction(key('v', { repeat: true }), false)).toBeNull();
     expect(liveEditKeyAction(key('v', { altKey: true }), false)).toBeNull();
+  });
+
+  it('P turns the Pen tool on or off (M14), not with Ctrl, Alt or a held key, nor in a field', () => {
+    for (const has of [false, true]) {
+      expect(liveEditKeyAction(key('p'), has)).toEqual({ kind: 'pen' });
+      expect(liveEditKeyAction(key('P'), has)).toEqual({ kind: 'pen' });
+    }
+    expect(liveEditKeyAction(key('p', { repeat: true }), false)).toBeNull();
+    expect(liveEditKeyAction(key('p', { altKey: true }), false)).toBeNull();
+    expect(liveEditKeyAction(key('p', { ctrlKey: true }), false)).toBeNull();
+    expect(liveEditKeyAction(key('p', { target: field('INPUT', 'text') }), false)).toBeNull();
+    // The presentation window has no Pen tool.
+    expect(liveKeyAction(key('p'))).toBeNull();
   });
 
   it('Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo (Cmd as well), whatever the selection', () => {

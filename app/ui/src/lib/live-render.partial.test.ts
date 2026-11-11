@@ -342,7 +342,7 @@ describe('repainting the area of an edit', () => {
     const report = expectPartial(rig, 'edit and two new strokes in a frame');
     expect(report.appended).toBe(2);
     // And the frames that follow add nothing more.
-    expect(rig.paint()).toEqual({ full: false, appended: 0, currentPoints: 0 });
+    expect(rig.paint()).toEqual({ full: false, appended: 0, currentPoints: 0, computerPoints: 0 });
     expect(differences(rig.cache(), rig.fullRedraw()).pixels).toBe(0);
     rig.write(line(5600, 4800));
     expect(rig.paint().appended).toBe(1);

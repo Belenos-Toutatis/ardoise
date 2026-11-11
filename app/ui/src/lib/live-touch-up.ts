@@ -3,10 +3,13 @@
  * delete it, recolour it, and undo or redo the last edit of the page (a delete, a change of colour,
  * « Clear the page »: never what the tablet wrote). Rust does the edit and every window gets a
  * `strokesEdited` event (`LiveState` applies it); this only asks, with the revision the selection was
- * chosen at, and looks after the selection afterwards. One edit at a time: while one is under way, a
+ * chosen at, and looks after the selection afterwards. M14: the calls go through the window's queue
+ * (`ComputerQueue`), after the computer's pen and eraser calls asked for before them: a Ctrl+Z pressed just
+ * after the pen is lifted undoes that stroke. One edit at a time: while one is under way, a
  * second key press (or click) is ignored, because it would be refused as stale and say so in red.
  */
 import type { api as Api } from './api';
+import type { ComputerQueue } from './live-computer';
 import type { LiveSelection } from './live-select.svelte';
 import type { LiveState } from './live-state.svelte';
 import type { Rgba } from './note';
@@ -18,6 +21,8 @@ export interface TouchUp {
   live: Pick<LiveState, 'pageIndex'>;
   selection: LiveSelection;
   commands: TouchUpCommands;
+  /** The window's queue of computer commands (M14); absent: each call leaves at once. */
+  queue?: ComputerQueue;
   /** An edit was refused (the error is translated by `errorMessage`). */
   onerror: (error: unknown) => void;
   /** An undo or a redo went through: the offer to undo the clearing is no longer true. */
@@ -42,6 +47,11 @@ async function alone(touch: TouchUp, edit: () => Promise<void>): Promise<void> {
   }
 }
 
+/** Runs `call` after the queue's earlier commands, if there is a queue. */
+function queued<T>(touch: TouchUp, call: () => Promise<T>): Promise<T> {
+  return touch.queue ? touch.queue.run(call) : call();
+}
+
 /** A refused edit: a page or a revision that moved leaves nothing to select any more. */
 function refused(touch: TouchUp, error: unknown): void {
   if (codeOf(error) === 'liveEditStale') touch.selection.clear();
@@ -55,7 +65,7 @@ export function deleteSelected(touch: TouchUp): Promise<void> {
     if (!selection.any) return;
     const indices = [...selection.indices];
     try {
-      await touch.commands.liveEditStrokes(selection.pageIndex, selection.revision, { kind: 'delete', indices });
+      await queued(touch, () => touch.commands.liveEditStrokes(selection.pageIndex, selection.revision, { kind: 'delete', indices }));
       selection.clear();
     } catch (error) {
       refused(touch, error);
@@ -70,7 +80,7 @@ export function recolourSelected(touch: TouchUp, color: Rgba): Promise<void> {
     if (!selection.any) return;
     const indices = [...selection.indices];
     try {
-      await touch.commands.liveEditStrokes(selection.pageIndex, selection.revision, { kind: 'recolour', indices, color });
+      await queued(touch, () => touch.commands.liveEditStrokes(selection.pageIndex, selection.revision, { kind: 'recolour', indices, color }));
     } catch (error) {
       refused(touch, error);
     }
@@ -82,7 +92,7 @@ export function stepHistory(touch: TouchUp, again = false): Promise<void> {
   return alone(touch, async () => {
     try {
       const { pageIndex } = touch.live;
-      const done = again ? await touch.commands.liveRedoEdit(pageIndex) : await touch.commands.liveUndoEdit(pageIndex);
+      const done = await queued(touch, () => (again ? touch.commands.liveRedoEdit(pageIndex) : touch.commands.liveUndoEdit(pageIndex)));
       if (done) touch.onhistory?.();
     } catch (error) {
       refused(touch, error);

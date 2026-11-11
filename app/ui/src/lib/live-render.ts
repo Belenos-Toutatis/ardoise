@@ -10,9 +10,12 @@
  * - An edit (a delete, a colour, an undo: `LiveState.edits`) repaints only the area of the strokes it
  *   touched: the device pixels around them are cleared and drawn again by the same code as a full
  *   redraw, restricted to the strokes crossing them, so that they end up the same (`planRepaint`).
- * - Each frame copies the cache, then draws the stroke in progress (its outline recomputed by
+ * - Each frame copies the cache, then draws the strokes in progress (its outline recomputed by
  *   `ink.ts`, the geometry of the exports), the laser dot and, on the control window's preview,
- *   the projected area.
+ *   the projected area. M14: two pens may write at once, the tablet's (`current`) and the computer's
+ *   (`computerCurrent`); they are drawn in their layers' order (the lower first; on one layer, the
+ *   tablet's first), each only while its layer shows. The control window draws its own computer
+ *   strokes instead of Rust's copy (`SceneOptions.localComputer`), and the ring of the pen's eraser end.
  *
  * - The control window's selection (M12, `Scene.selection`, `Scene.lasso`) is drawn apart from that
  *   cache: the highlight of the chosen strokes (their outlines, found in the same cache of outlines,
@@ -86,6 +89,11 @@ const OUTSIDE_DIM = 'rgba(0, 0, 0, 0.28)';
 const LASER = '#ff1f1f';
 const LASER_GLOW = 'rgba(255, 31, 31, 0.28)';
 const PEN_RING = 'rgba(47, 111, 223, 0.9)';
+/** The ring of the pen's eraser end on the preview: its radius in CSS pixels is the eraser's (`MARK_ERASER_PX`). */
+export const ERASER_RING_PX = 18;
+const ERASER_RING = 'rgba(47, 111, 223, 0.85)';
+const ERASER_RING_DARK = 'rgba(143, 184, 255, 0.9)';
+const NO_STROKES: readonly Stroke[] = [];
 
 /** The selection's colours on light paper and on dark paper (the editor's accent, then a lighter blue). */
 export const SELECTION_COLORS = {
@@ -177,13 +185,18 @@ export interface Scene {
   generation: number;
   /** What the last edits touched: a change of `generation` found here repaints only that area. */
   edits: readonly StrokeEdit[];
+  /** The tablet's stroke in progress. */
   current: Stroke | null;
+  /** The computer's strokes in progress: Rust's copy, or the control window's own strokes. */
+  computer: readonly Stroke[];
   /** Temporary marks written over the presentation (not part of the note), and the one in progress. */
   marks: readonly Stroke[];
   markCurrent: Stroke | null;
   /** The control window's selection: indices into `strokes` (a new array when it changes), and the lasso being drawn (page units). */
   selection: readonly number[];
   lasso: readonly Vec[] | null;
+  /** The control window: where the pen's eraser end is (page units), drawn as a ring of its size; never projected. */
+  eraser: Vec | null;
   hover: Vec | null;
   laser: boolean;
   /** The pen's position as a ring when the laser is off (control window). */
@@ -209,6 +222,8 @@ export interface LiveSource {
   generation: number;
   edits?: readonly StrokeEdit[];
   current: Stroke | null;
+  /** The computer's stroke in progress (M14); absent: none. */
+  computerCurrent?: Stroke | null;
   hover: Vec | null;
   view: LiveViewState;
 }
@@ -227,6 +242,13 @@ export interface SceneOptions {
   /** Preview: the selection (indices into the finished strokes) and the lasso being drawn. */
   selection?: readonly number[];
   lasso?: readonly Vec[] | null;
+  /**
+   * Control window: its own computer strokes in progress (drawn from its pointer events, no round trip),
+   * drawn instead of `LiveSource.computerCurrent` when given; an empty list draws none of them.
+   */
+  localComputer?: readonly Stroke[];
+  /** Preview: where the pen's eraser end is (page units), or null. */
+  eraser?: Vec | null;
 }
 
 export function sceneTransform(live: Pick<LiveSource, 'pageSize' | 'view'>, options: Pick<SceneOptions, 'mode' | 'viewport'>): Transform {
@@ -248,10 +270,12 @@ export function buildScene(live: LiveSource, options: SceneOptions): Scene {
     generation: live.generation,
     edits: live.edits ?? [],
     current: live.current,
+    computer: options.localComputer ?? (live.computerCurrent ? [live.computerCurrent] : NO_STROKES),
     marks: options.marks ?? [],
     markCurrent: options.markCurrent ?? null,
     selection: preview ? (options.selection ?? NO_SELECTION) : NO_SELECTION,
     lasso: preview ? (options.lasso ?? null) : null,
+    eraser: preview ? (options.eraser ?? null) : null,
     hover: live.hover,
     laser: live.view.laser,
     penRing: preview,
@@ -277,8 +301,10 @@ export interface PaintReport {
   repainted?: number;
   /** Finished strokes added to the cache. */
   appended: number;
-  /** Samples of the stroke in progress drawn. */
+  /** Samples of the tablet's stroke in progress drawn. */
   currentPoints: number;
+  /** Samples of the computer's strokes in progress drawn. */
+  computerPoints: number;
   /** Set when the selection's highlight was drawn again (it is copied from its own surface otherwise). */
   selectionDrawn?: true;
 }
@@ -581,7 +607,7 @@ export class LiveRenderer {
       JSON.stringify(scene.layers),
       scene.surround,
     ].join('|');
-    const report: PaintReport = { full: false, appended: 0, currentPoints: 0 };
+    const report: PaintReport = { full: false, appended: 0, currentPoints: 0, computerPoints: 0 };
     const dark = isDarkPaper(scene.background.paper);
 
     if (!this.cache) this.cache = this.createSurface();
@@ -630,13 +656,7 @@ export class LiveRenderer {
       target.drawImage(cache.image, 0, 0);
     }
     this.paintSelection(target, scene, `${key}|${scene.generation}`, report);
-    const current = scene.current;
-    if (current && current.points.length > 0 && this.ink && this.visible(current, scene.layers)) {
-      this.pageTransform(target, scene);
-      // Recomputed each frame: the stroke grows (the cache keeps only finished strokes).
-      this.drawStroke(target, current, this.ink.contours(current), dark);
-      report.currentPoints = current.points.length;
-    }
+    this.paintInProgress(target, scene, dark, report);
     if (scene.marks.length > 0 || scene.markCurrent) {
       this.pageTransform(target, scene);
       for (const mark of scene.marks) this.drawStroke(target, mark, this.contours(mark), dark);
@@ -647,6 +667,30 @@ export class LiveRenderer {
     }
     this.overlay(target, scene);
     return report;
+  }
+
+  /**
+   * The strokes in progress over the cache, their outlines recomputed each frame (they grow; the cache keeps
+   * only finished strokes): the tablet's and the computer's in their layers' order, the lower first, the
+   * tablet's first on one layer (stable sort), each only while its layer shows.
+   */
+  private paintInProgress(target: Ctx2D, scene: Scene, dark: boolean, report: PaintReport): void {
+    const ink = this.ink;
+    if (!ink) return;
+    const drawn: { stroke: Stroke; computer: boolean }[] = [];
+    const add = (stroke: Stroke | null, computer: boolean) => {
+      if (stroke && stroke.points.length > 0 && this.visible(stroke, scene.layers)) drawn.push({ stroke, computer });
+    };
+    add(scene.current, false);
+    for (const stroke of scene.computer) add(stroke, true);
+    if (drawn.length === 0) return;
+    drawn.sort((a, b) => this.rank(a.stroke, scene.layers) - this.rank(b.stroke, scene.layers));
+    this.pageTransform(target, scene);
+    for (const { stroke, computer } of drawn) {
+      this.drawStroke(target, stroke, ink.contours(stroke), dark);
+      if (computer) report.computerPoints += stroke.points.length;
+      else report.currentPoints = stroke.points.length;
+    }
   }
 
   /**
@@ -789,6 +833,14 @@ export class LiveRenderer {
       ctx.strokeStyle = PROJECTED_BORDER;
       ctx.lineWidth = 2;
       ctx.strokeRect(a.x, a.y, aw, ah);
+    }
+    if (scene.eraser) {
+      const at = pageToScreen(scene.transform, scene.eraser);
+      ctx.strokeStyle = isDarkPaper(scene.background.paper) ? ERASER_RING_DARK : ERASER_RING;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, ERASER_RING_PX, 0, Math.PI * 2);
+      ctx.stroke();
     }
     if (!scene.hover) return;
     const at = pageToScreen(scene.transform, scene.hover);
