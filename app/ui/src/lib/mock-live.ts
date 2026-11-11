@@ -27,6 +27,14 @@
  * redone together; `live_layers` adds, renames, shows or hides, moves, merges, and chooses the layers of
  * the computer and of the tablet, one snapshot when something changed.
  *
+ * Paper and image of the current page (M17, docs/design/paper-projection-narration.md §1): `live_page_paper` and
+ * `live_page_image` (`set` of a staged image, `place`, `remove`) with the same refusals (`liveEditStale`,
+ * `liveEditInvalid`, `backgroundMissing`); the snapshot has the page's own paper (`pagePaper`: what it has without the
+ * blackboard, which the board's slate hides) and the key and size of the image's pixels (`imagePixels`). A new page
+ * keeps the paper, the template and the texture of the page it is made from, not its image; a new session starts white;
+ * a page with an image is written even without ink; one with an image and ink is held like a resumed sheet (the
+ * tablet follows it), one with an image and no ink takes the tablet's new size with its image placed again.
+ *
  * Deterministic: the pen follows a seeded script (no `Math.random`), so that a test under
  * `vi.useFakeTimers` sees the same strokes every time.
  */
@@ -34,12 +42,14 @@ import type { InkPoint } from './ink';
 import { wallClock } from './latency';
 import type {
   ComputerSample,
+  ImagePixels,
   LiveBatch,
   LiveCommand,
   LiveComputerPenInput,
   LiveEvent,
   LiveLayerOp,
   LiveMark,
+  LivePageImageOp,
   LivePoint,
   LiveSessionState,
   LiveSnapshot,
@@ -52,10 +62,11 @@ import type {
   MonitorInfo,
   PlacedStroke,
 } from './live';
+import { currentFit, refit } from './background';
 import { insertStrokes, recolourStrokes, removeStrokes } from './live-edits';
 import { fileName, freshStamp, mockLibrary, notePath, notifyLibraryChanged, sameStamp, UNHANDLED } from './mock-data';
 import { backgroundDataUrl } from './mock-notes';
-import type { Background, FileStamp, Note, PageSize, Rgba, Stroke } from './note';
+import type { Background, BackgroundImage, FileStamp, Note, PageSize, Paper, Rgba, Stroke } from './note';
 import { isPortrait, orientPoint, pageSizeFor, turnPoint, turnsFrom, turnStrokes, type Orientation } from './orientation';
 
 /** Pace of the stand-in; tests change it (and `resetMockLive` restores it). */
@@ -189,6 +200,10 @@ interface Session {
   histories: Map<string, PageHistory>;
   /** The sheets resumed (M12), by note id. */
   resumed: Map<string, ResumedSheet>;
+  /** M17: each page's own paper (by note id), what it has without the blackboard; kept while the board hides it. */
+  own: Map<string, Paper>;
+  /** M17: the pixels of each page's image (by note id). */
+  images: Map<string, ImagePixels>;
   /** The `sheetForked` events so far: a window that subscribes later gets them too. */
   forks: LiveEvent[];
   wait?: ReturnType<typeof setTimeout>;
@@ -230,6 +245,9 @@ interface ResumedSheet {
   origin: number;
   /** A deliberate act on the layers (`live_layers`): its layers are written as they are, new ink or not. */
   layersEdited: boolean;
+  /** M17: the paper or the image was changed on purpose (`live_page_paper`, `live_page_image`): written as they are. */
+  paperEdited: boolean;
+  imageEdited: boolean;
 }
 
 /** Most strokes one edit may name, steps (groups) a page keeps (`live/edits.rs`). */
@@ -287,7 +305,8 @@ function copy<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function blankPage(board: boolean): Note {
+/** A new page: blank, slate under the blackboard; `from` gives the paper, template and texture of the page it follows. */
+function blankPage(board: boolean, from?: { paper: Paper; template: Background['template']; texture: boolean }): Note {
   pageCounter += 1;
   const created = Date.now();
   const id = `00000000-0000-4000-8000-${pageCounter.toString(16).padStart(12, '0')}`;
@@ -298,7 +317,7 @@ function blankPage(board: boolean): Note {
     created,
     modified: created,
     page: pageSizeFor(heldAs, PAGE.width, PAGE.height),
-    background: { paper: board ? 'slate' : 'white', template: 'blank', texture: false },
+    background: { paper: board ? 'slate' : (from?.paper ?? 'white'), template: from?.template ?? 'blank', texture: from?.texture ?? false },
     tags: [],
     layers: [{ name: 'Calque 1', visible: true }],
     strokes: [],
@@ -329,6 +348,8 @@ function snapshot(): LiveSnapshot {
       revision: 0,
       canUndo: false,
       canRedo: false,
+      pagePaper: 'white',
+      imagePixels: null,
     } satisfies LiveSnapshot);
   }
   const history = historyOf(s, s.pages[s.pageIndex]);
@@ -339,7 +360,7 @@ function snapshot(): LiveSnapshot {
     pageIndex: s.pageIndex,
     pageCount: s.pages.length,
     orientation: holdFor(s.pages[s.pageIndex], s),
-    canTurnPage: !s.resumed.has(s.pages[s.pageIndex].id),
+    canTurnPage: !heldFixed(s, s.pages[s.pageIndex]),
     layer: layers.tablet,
     computerLayer: layers.computer,
     style: s.style,
@@ -350,7 +371,20 @@ function snapshot(): LiveSnapshot {
     revision: history.revision,
     canUndo: history.undo.length > 0,
     canRedo: history.redo.length > 0,
+    pagePaper: ownPaper(s, s.pages[s.pageIndex]),
+    imagePixels: s.images.get(s.pages[s.pageIndex].id) ?? null,
   } satisfies LiveSnapshot);
+}
+
+/** The page's own paper: what it has without the blackboard (`Page::own_paper`). */
+function ownPaper(s: Session, page: Note): Paper {
+  if (!s.view.board) return page.background.paper;
+  return s.own.get(page.id) ?? s.resumed.get(page.id)?.before.background.paper ?? 'white';
+}
+
+/** A page the tablet cannot turn: a resumed sheet, or a page with an image and ink (`Page::held_fixed`). */
+function heldFixed(s: Session, page: Note): boolean {
+  return s.resumed.has(page.id) || (page.backgroundImage !== undefined && page.strokes.length > 0);
 }
 
 /** The layers the pens write on, on `page` (a new page: its first layer for both). */
@@ -656,7 +690,7 @@ function restoreCleared(s: Session): boolean {
  * way round (a quarter turn on the same side: the button stays away from the writing hand).
  */
 function holdFor(page: Note, s: Session): Orientation {
-  if (!s.resumed.has(page.id)) return heldAs;
+  if (!heldFixed(s, page)) return heldAs;
   const { width, height } = page.page;
   if (width === height || isPortrait(heldAs) === height > width) return heldAs;
   const other: Record<Orientation, Orientation> = {
@@ -747,12 +781,13 @@ function writePage(s: Session, page: Note): LiveEvent[] {
   // Like `hub::written_sheet`: a sheet without new ink is the sheet it was, and the blackboard's
   // slate is written only with ink under it.
   const same = sheet && JSON.stringify(page.strokes) === JSON.stringify(sheet.before.strokes);
+  // The paper: slate when ink was added under the board, else the own paper once it was changed on purpose, else the one read.
   const written: Note =
     sheet && (same || !sheet.inkOnBoard)
       ? {
           ...page,
           layers: same && !sheet.layersEdited ? sheet.before.layers : page.layers,
-          background: { ...page.background, paper: sheet.before.background.paper },
+          background: { ...page.background, paper: sheet.paperEdited ? ownPaper(s, page) : sheet.before.background.paper },
         }
       : page;
   library.notes.set(path, {
@@ -788,7 +823,11 @@ function writePage(s: Session, page: Note): LiveEvent[] {
 function savePage(s: Session, page: Note): LiveEvent[] {
   const sheet = s.resumed.get(page.id);
   // A resumed sheet that looks as it was read is left as it is, as is a blank page.
-  if (!s.saved.has(page.id) && (sheet ? looksLike(page) === sheet.seed : page.strokes.length === 0)) return [];
+  // A page with an image is kept even without ink (a worksheet shown in class); paper alone is nothing.
+  const untouched = sheet
+    ? looksLike(page) === sheet.seed && !sheet.paperEdited && !sheet.imageEdited
+    : page.strokes.length === 0 && page.backgroundImage === undefined;
+  if (!s.saved.has(page.id) && untouched) return [];
   const failure = mockLiveConfig.saveError;
   if (failure !== null) {
     if (s.failed.has(page.id)) return [];
@@ -1089,6 +1128,90 @@ function layerOp(s: Session, pageIndex: number, op: LiveLayerOp): void {
   if (changed) broadcastSnapshot();
 }
 
+/** The size of a staged image: the browser's stand-in (`mock-background.ts`) makes a PDF page 2480 x 3508 pixels, a photo 1600 x 1200. */
+function pixelsOfImage(image: BackgroundImage, key: string): ImagePixels {
+  return image.pdfPage === undefined ? { key, width: 1600, height: 1200 } : { key, width: 2480, height: 3508 };
+}
+
+/** The most pages away an image's rectangle may reach (`live/paper.rs`). */
+const MAX_IMAGE_REACH = 16;
+const MAX_IMAGE_NAME = 255;
+
+/** An image's description as `live_page_image` accepts it: opacity clamped, quarter turns taken modulo 4. */
+function checkedImage(page: PageSize, image: BackgroundImage): BackgroundImage {
+  if (typeof image?.name !== 'string' || image.name === '' || [...image.name].length > MAX_IMAGE_NAME) {
+    throw invalid('the image has no valid name');
+  }
+  if (image.pdfPage !== undefined && (!Number.isInteger(image.pdfPage) || image.pdfPage < 1)) throw invalid('the PDF page is not valid');
+  const { x, y, width, height } = image.rect ?? ({} as Partial<BackgroundImage['rect']>);
+  if (![x, y, width, height].every((value) => typeof value === 'number' && Number.isFinite(value))) {
+    throw invalid('the image rectangle is not valid');
+  }
+  const [rx, ry, rw, rh] = [x as number, y as number, width as number, height as number];
+  if (rw <= 0 || rh <= 0) throw invalid('the image rectangle is not valid');
+  const far = (value: number, size: number) => Math.abs(value) > MAX_IMAGE_REACH * size;
+  if (far(rx, page.width) || far(ry, page.height) || far(rx + rw, page.width) || far(ry + rh, page.height)) {
+    throw invalid('the image is too far from the page');
+  }
+  const opacity = image.opacity ?? 1;
+  if (typeof opacity !== 'number' || !Number.isFinite(opacity)) throw invalid('the opacity is not a number');
+  const turns = (((image.quarterTurns ?? 0) % 4) + 4) % 4;
+  return { ...image, rect: { x: rx, y: ry, width: rw, height: rh }, quarterTurns: turns, opacity: Math.min(1, Math.max(0, opacity)) };
+}
+
+/** `live_page_paper`: the paper of the page on screen. The blackboard keeps the page slate: only the template and the texture show. */
+function pagePaper(s: Session, pageIndex: number, background: Background): void {
+  if (pageIndex !== s.pageIndex) throw stale();
+  const page = s.pages[pageIndex];
+  const before = JSON.stringify([page.background, ownPaper(s, page)]);
+  if (s.view.board) {
+    s.own.set(page.id, background.paper);
+    page.background = { ...copy(background), paper: page.background.paper };
+  } else {
+    page.background = copy(background);
+    s.own.set(page.id, background.paper);
+  }
+  if (JSON.stringify([page.background, ownPaper(s, page)]) === before) return;
+  const sheet = s.resumed.get(page.id);
+  if (sheet) sheet.paperEdited = true;
+  broadcastSnapshot();
+}
+
+/** `live_page_image`: the image of the page on screen. Not undone by Ctrl+Z, no history step. */
+function pageImage(s: Session, pageIndex: number, op: LivePageImageOp): void {
+  if (pageIndex !== s.pageIndex) throw stale();
+  const page = s.pages[pageIndex];
+  const current = page.backgroundImage;
+  switch (op.kind) {
+    case 'set': {
+      // Only what `stage_background_image` staged is known (its keys are `mock-...`).
+      if (typeof op.key !== 'string' || !op.key.startsWith('mock-')) throw { code: 'backgroundMissing', message: String(op.key) };
+      const image = checkedImage(page.page, op.image);
+      page.backgroundImage = image;
+      s.images.set(page.id, pixelsOfImage(image, op.key));
+      break;
+    }
+    case 'place': {
+      if (!current) throw invalid('the page has no image');
+      const image = checkedImage(page.page, op.image);
+      if (image.name !== current.name || image.pdfPage !== current.pdfPage) throw invalid("this is not the page's image");
+      if (JSON.stringify(image) === JSON.stringify(current)) return;
+      page.backgroundImage = image;
+      break;
+    }
+    case 'remove':
+      if (!current) return;
+      delete page.backgroundImage;
+      s.images.delete(page.id);
+      break;
+    default:
+      throw invalid(String((op as { kind: unknown }).kind));
+  }
+  const sheet = s.resumed.get(page.id);
+  if (sheet) sheet.imageEdited = true;
+  broadcastSnapshot();
+}
+
 /** Three records of the pen: one batch. */
 function tick(s: Session): void {
   if (s.state !== 'live') return;
@@ -1157,7 +1280,11 @@ function stopTimers(s: Session): void {
 }
 
 function addPage(s: Session): void {
-  const page = blankPage(s.view.board);
+  // The paper of the page on screen goes on (its own paper, not the slate of the board; no image).
+  const from = s.pages[s.pageIndex];
+  const own = from ? ownPaper(s, from) : undefined;
+  const page = blankPage(s.view.board, from && own ? { paper: own, template: from.background.template, texture: from.background.texture } : undefined);
+  if (own) s.own.set(page.id, own);
   s.pages.push(page);
   s.pageStart.set(page.id, s.record);
 }
@@ -1230,8 +1357,11 @@ function setView(s: Session, requested: LiveViewState): void {
   }
   // Blackboard: slate paper and white chalk; switched off, the paper and style come back.
   const page = s.pages[s.pageIndex];
-  const own = s.resumed.get(page.id)?.before.background.paper ?? 'white';
-  page.background = { ...page.background, paper: view.board ? 'slate' : own };
+  if (view.board) s.own.set(page.id, page.background.paper);
+  page.background = {
+    ...page.background,
+    paper: view.board ? 'slate' : (s.own.get(page.id) ?? s.resumed.get(page.id)?.before.background.paper ?? 'white'),
+  };
   if (view.board) {
     s.styleBeforeBoard = s.style;
     s.style = CHALK_STYLE;
@@ -1262,6 +1392,8 @@ function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSna
     pen: new PenScript(),
     histories: new Map(),
     resumed: new Map(),
+    own: new Map(),
+    images: new Map(),
     forks: [],
   };
   if (first) {
@@ -1269,6 +1401,7 @@ function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSna
     s.pages.push(page);
     s.pageStart.set(page.id, s.record);
     s.resumed.set(page.id, sheet);
+    if (page.backgroundImage) s.images.set(page.id, pixelsOfImage(page.backgroundImage, `resume-${page.id}`));
     // The blackboard is on only for a slate sheet; new ink goes on the last visible layer.
     s.view = { ...s.view, x: page.page.width / 2, y: page.page.height / 2, board: page.background.paper === 'slate' };
     if (s.view.board) s.style = CHALK_STYLE;
@@ -1316,6 +1449,8 @@ function resumeSession(path: string): LiveSnapshot {
     inkOnBoard: false,
     origin: wallClock() - (last + 1000),
     layersEdited: false,
+    paperEdited: false,
+    imageEdited: false,
   };
   stoppedOnce = false;
   return openSession({ page, sheet });
@@ -1392,6 +1527,12 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
       return computerPen(args.input as LiveComputerPenInput);
     case 'live_layers':
       layerOp(running(), args.pageIndex as number, args.op as LiveLayerOp);
+      return undefined;
+    case 'live_page_paper':
+      pagePaper(running(), args.pageIndex as number, args.background as Background);
+      return undefined;
+    case 'live_page_image':
+      pageImage(running(), args.pageIndex as number, args.op as LivePageImageOp);
       return undefined;
     case 'live_page_background':
       return backgroundDataUrl(
@@ -1484,8 +1625,8 @@ export function mockLiveTick(count = 1): void {
 
 /** Turns `page` with its ink to the way the tablet is held. */
 function followTablet(page: Note): void {
-  // A resumed sheet is never turned: the session follows it instead (`holdFor`).
-  if (session?.resumed.has(page.id)) return;
+  // A resumed sheet, or a page with an image and ink, is never turned: the session follows it instead (`holdFor`).
+  if (session && heldFixed(session, page)) return;
   const from = pageOrientation.get(page.id) ?? 'landscape';
   const turns = turnsFrom(heldAs, from);
   pageOrientation.set(page.id, heldAs);
@@ -1512,7 +1653,7 @@ export function setMockLiveOrientation(orientation: Orientation): void {
   if (orientation === heldAs) return;
   const s = session;
   const before = s ? { ...s.pages[s.pageIndex].page } : null;
-  const turns = s && !s.resumed.has(s.pages[s.pageIndex].id) ? turnsFrom(orientation, pageOrientation.get(s.pages[s.pageIndex].id) ?? 'landscape') : 0;
+  const turns = s && !heldFixed(s, s.pages[s.pageIndex]) ? turnsFrom(orientation, pageOrientation.get(s.pages[s.pageIndex].id) ?? 'landscape') : 0;
   // Both strokes in progress end (kept) before the page turns, so that it turns with their ink.
   const events = s ? [...endStroke(s), ...endComputer(s)] : [];
   heldAs = orientation;
@@ -1520,9 +1661,20 @@ export function setMockLiveOrientation(orientation: Orientation): void {
   s.hover = null;
   s.pages.forEach((page, index) => {
     const { undo, redo } = historyOf(s, page);
-    if (page.strokes.length === 0 && !s.saved.has(page.id) && !s.resumed.has(page.id) && undo.length === 0 && redo.length === 0) {
+    // A page without ink takes the new size: a blank one not written yet, or one with an image (written, M17), whose
+    // image is placed again with the fit it had.
+    const blank = page.strokes.length === 0 && !s.resumed.has(page.id) && undo.length === 0 && redo.length === 0;
+    if (blank && (page.backgroundImage !== undefined || !s.saved.has(page.id))) {
+      const old = page.page;
       page.page = pageSizeFor(orientation, PAGE.width, PAGE.height);
       pageOrientation.set(page.id, orientation);
+      const image = page.backgroundImage;
+      const pixels = s.images.get(page.id);
+      if (image && pixels) {
+        const fit = currentFit(image, old, pixels) ?? 'contain';
+        page.backgroundImage = refit({ ...image, quarterTurns: 0 }, page.page, pixels, fit);
+      }
+      if (s.saved.has(page.id)) events.push(...savePage(s, page));
     } else if (index === s.pageIndex) {
       followTablet(page);
       if (s.saved.has(page.id)) events.push(...savePage(s, page));

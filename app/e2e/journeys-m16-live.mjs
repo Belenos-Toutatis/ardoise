@@ -1,6 +1,6 @@
-// M16 journey, the live control window's side panel (docs/design/side-panel.md, §10 "End-to-end journeys"): four tabs (no
-// Page, no Fond), each with its content, collapse and reopening, the view remembered when live mode is closed and
-// opened again (and a remembered tab this window lacks), the badges (the hidden layer, the projection, the sharing), the
+// M16 journey, the live control window's side panel (docs/design/side-panel.md, §10 "End-to-end journeys"): the tabs
+// (six since M17: Calques, Page, Fond, Son, Projection, Aide), each with its content, collapse and reopening, the view
+// remembered when live mode is closed and opened again (a Page remembered before the window had one included), the badges (the hidden layer, the projection, the sharing), the
 // switches of the blackboard and the laser, the selection above the open tab, and Space on a focused tab (it turns the
 // page, it does not toggle the tab).
 //
@@ -23,14 +23,16 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** The presentation window covers the control window: without these flags the control window would stop painting. */
 const BROWSER_ARGS = '--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding';
 
-/** The rail's tabs in the live window in M16, in order: no Page and no Fond until M17 (docs/design/side-panel.md §1). */
-const TABS = ['layers', 'sound', 'projection', 'help'];
+/** The rail's tabs in the live window, in order: Page and Fond came with M17 (docs/design/paper-projection-narration.md §1.6). */
+const TABS = ['layers', 'page', 'background', 'sound', 'projection', 'help'];
 const STORAGE_KEY = 'ardoise.sidePanel.live';
 const ZONE = 'section.layers-zone[data-where="live"]';
 const ZONE_BLOCK = '[data-section="zone"]';
 /** What each tab shows, one control or block that must be on screen once the tab is open (§8). */
 const CONTENT = {
   layers: ZONE,
+  page: '[data-section="live-paper"] button[data-paper="white"]',
+  background: '[data-section="background-image"] button[data-action="background-choose"]',
   sound: '[data-section="narration"]',
   projection: 'button[data-action="project"]',
   help: '[data-section="shortcuts"] dl.keys',
@@ -107,7 +109,7 @@ export const sidePanelLiveJourneys = [
 
       await registerTablet(app, check);
 
-      await check('ouvrir le mode direct (tablette simulée) : quatre onglets (ni Page ni Fond), Calques ouvert', async () => {
+      await check('ouvrir le mode direct (tablette simulée) : six onglets (Page et Fond compris), Calques ouvert', async () => {
         await openLive(app);
         const rail = await app.evaluate(`[...document.querySelectorAll(${j(`${SIDE} .side-rail [role="tab"]`)})].map((b) => b.dataset.tab)`);
         if (!same(rail, TABS)) throw new Error(`the rail has the tabs ${j(rail)}, expected ${j(TABS)}`);
@@ -226,16 +228,16 @@ export const sidePanelLiveJourneys = [
         if (!same(again, { tab: 'projection', collapsed: true })) throw new Error(`the storage now holds ${j(again)}`);
       });
 
-      await check('un onglet retenu que cette fenêtre n’a pas (Page) : Calques s’affiche, le stockage garde Page', async () => {
+      await check('un onglet retenu avant que la fenêtre ait Page : Page s’affiche d’emblée, le stockage le garde', async () => {
         await app.evaluate(`(() => { localStorage.setItem(${j(STORAGE_KEY)}, ${j('{"tab":"page"}')}); return true; })()`);
         await stopLive(app);
         await openLive(app);
-        // M16-D: check against package A (a remembered tab the window lacks: `shown()` gives the default, the storage is left).
         const state = await sideState(app);
-        if (!same(state, { where: 'live', tab: 'layers', collapsed: false })) throw new Error(`the panel shows ${j(state)} with a stored Page`);
+        if (!same(state, { where: 'live', tab: 'page', collapsed: false })) throw new Error(`the panel shows ${j(state)} with a stored Page`);
         const kept = await stored(app);
         if (kept?.tab !== 'page') throw new Error(`the storage now holds ${j(kept)}, it should still say page`);
-        if ((await app.evaluate(onScreen(`${tabPanel('layers')} ${CONTENT.layers}`))) !== true) throw new Error('the Calques tab shows nothing');
+        if ((await app.evaluate(onScreen(`${tabPanel('page')} ${CONTENT.page}`))) !== true) throw new Error('the Page tab shows nothing');
+        await openTab(app, 'layers');
       });
 
       await check('pastilles : le nombre de calques, un point orange quand le calque de la tablette est masqué (même replié), rien une fois affiché', async () => {

@@ -30,7 +30,9 @@
  * always means "next page", even with a button focused (the button of a tool just used would
  * otherwise be pressed again: « Clear the page » by Space wiped the new page) or a checkbox or a
  * radio, such as the switches of the side panel (clicked, they keep the focus and the keys of live
- * mode must not stop). Esc closes the
+ * mode must not stop). Page Up and Page Down, the class remote's keys, always turn the page (M17: the Page and Fond
+ * tabs hold selects and a slider, which would otherwise take the remote and change the paper in front of the class),
+ * with a select or a range input focused as well; text fields keep them. Esc closes the
  * projection when it is open and otherwise asks before ending live mode: the window decides.
  */
 
@@ -85,10 +87,21 @@ export function isTypingTarget(target: EventTarget | null | undefined): boolean 
   return tag === 'INPUT' && !BUTTON_INPUTS.has(String(el.type ?? 'text').toLowerCase());
 }
 
+/**
+ * The control is a select or a slider: it takes the arrows and the letters, not the remote's Page Up and Page Down
+ * (the keys a presentation remote sends), which always turn the page. A text field, a number field and the like keep them.
+ */
+function yieldsToRemote(target: EventTarget | null | undefined): boolean {
+  const el = target as ElementLike | null | undefined;
+  if (!el || typeof el.tagName !== 'string') return false;
+  const tag = el.tagName.toUpperCase();
+  return tag === 'SELECT' || (tag === 'INPUT' && String(el.type ?? '').toLowerCase() === 'range');
+}
+
 /** The action of a key press in live mode, or null when live mode does not use it. */
 export function liveKeyAction(e: KeyInput): LiveKeyAction | null {
   if (closeKey(e) === 'close') return { kind: 'leave' };
-  if (isTypingTarget(e.target)) return null;
+  if (isTypingTarget(e.target) && !((e.key === 'PageDown' || e.key === 'PageUp') && yieldsToRemote(e.target))) return null;
   const key = e.key;
   const ctrl = !!(e.ctrlKey || e.metaKey);
 

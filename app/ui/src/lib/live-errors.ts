@@ -19,3 +19,17 @@ export function computerErrorText(error: unknown, act: ComputerAct): string {
   }
   return errorMessage(error);
 }
+
+/** What was refused on the current page (M17): its paper (the Page tab), its background image (the Fond tab). */
+export type PageAct = 'paper' | 'image';
+
+/**
+ * The sentence for a paper or an image the session refused: the page that changed meanwhile asks to choose again, any
+ * other refusal says what failed and why (`liveNotRunning`, `backgroundMissing`, `liveEditInvalid`… have their own
+ * sentences).
+ */
+export function pageErrorText(error: unknown, act: PageAct): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === 'liveEditStale') return t('live.failed.pageStale');
+  return `${t(act === 'paper' ? 'live.failed.paper' : 'live.failed.image')} ${errorMessage(error)}`;
+}
