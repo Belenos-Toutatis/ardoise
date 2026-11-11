@@ -20,3 +20,10 @@
   </p>
   <ShareButton />
 </section>
+
+<style>
+  /* The button keeps its own size (it stays as the toolbars showed it) instead of stretching across the block. */
+  .pane-block > :global(.share-button) {
+    align-self: flex-start;
+  }
+</style>

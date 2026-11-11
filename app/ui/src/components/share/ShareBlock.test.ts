@@ -66,3 +66,38 @@ describe('ShareBlock', () => {
     expect(status().textContent!.trim()).toBe('Shared: 2 screens connected.');
   });
 });
+
+describe('ShareBlock: the block of the Projection tab', () => {
+  it('says « paused » only while a share runs, and keeps the status line a help text', () => {
+    const { status } = render();
+    share.status = { ...INACTIVE_SHARE, active: false, paused: true };
+    flushSync();
+    expect(status().textContent!.trim()).toBe('Un autre ordinateur du réseau affiche la page dans un navigateur.');
+    expect(status().classList.contains('pane-help')).toBe(true);
+  });
+
+  it('puts the title, the status and the button in that order, the title labelling the block', () => {
+    const { target } = render();
+    const block = target.querySelector('section.pane-block')!;
+    expect([...block.children].map((el) => el.tagName.toLowerCase() + (el.getAttribute('data-slot') ? `[${el.getAttribute('data-slot')}]` : ''))).toEqual([
+      'h3',
+      'p[share-status]',
+      'button',
+    ]);
+    expect(block.querySelector('h3')!.id).toBe('side-share-title');
+    expect(block.getAttribute('aria-labelledby')).toBe('side-share-title');
+    expect(block.querySelector('button')!.classList.contains('share-button')).toBe(true);
+  });
+
+  it('keeps the button the toolbars had: its name and hint, and the indicator while a share runs', () => {
+    const { target } = render();
+    const button = target.querySelector<HTMLButtonElement>('button[data-action="share"]')!;
+    expect(button.textContent).toContain('Partager sur le réseau');
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(button.classList.contains('active')).toBe(false);
+    share.status = { ...INACTIVE_SHARE, active: true, viewers: 2 };
+    flushSync();
+    expect(button.classList.contains('active')).toBe(true);
+    expect(button.getAttribute('aria-label')).not.toBeNull();
+  });
+});

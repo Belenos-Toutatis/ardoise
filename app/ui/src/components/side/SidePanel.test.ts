@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { createRawSnippet, mount, tick, unmount } from 'svelte';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { createRawSnippet, flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setLocale } from '../../lib/i18n.svelte';
 import { SidePanelState, type SideBadges, type SideTabId } from '../../lib/side-panel.svelte';
@@ -32,6 +34,7 @@ function render(options: { badges?: SideBadges; above?: boolean; tabs?: SideTabI
   for (const tab of tabs) props[tab] = snippet(`<p data-test="${tab}">block ${tab}</p>`);
   if (options.above) props.above = snippet('<p data-test="above">above</p>');
   const component = mount(SidePanel, { target, props: props as never });
+  flushSync();
   cleanup = () => {
     unmount(component);
     target.remove();
@@ -179,5 +182,179 @@ describe('SidePanel: the DOM contract', () => {
   it('lists the six tabs when every snippet is given', () => {
     const { qa } = render({ tabs: ['layers', 'page', 'background', 'sound', 'projection', 'help'] });
     expect(qa('[role="tab"]').map((tab) => tab.dataset.tab)).toEqual(['layers', 'page', 'background', 'sound', 'projection', 'help']);
+  });
+});
+
+/** A key press on `el`, as the browser dispatches it (bubbling, cancelable); returns the event. */
+function press(el: Element, key: string, mods: { shiftKey?: boolean; ctrlKey?: boolean; altKey?: boolean } = {}): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...mods });
+  el.dispatchEvent(event);
+  return event;
+}
+
+describe('SidePanel: the keyboard on the rail', () => {
+  const ALL: SideTabId[] = ['layers', 'page', 'background', 'sound', 'projection', 'help'];
+
+  it('moves the focus with ArrowDown and ArrowUp, wrapping, without activating anything', () => {
+    const { tab, target, panel } = render({ tabs: ALL });
+    tab('layers').focus();
+    expect(press(document.activeElement!, 'ArrowDown').defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(tab('page'));
+    press(document.activeElement!, 'ArrowDown');
+    expect(document.activeElement).toBe(tab('background'));
+    press(document.activeElement!, 'ArrowUp');
+    press(document.activeElement!, 'ArrowUp');
+    expect(document.activeElement).toBe(tab('layers'));
+    // Wraps at both ends.
+    press(tab('layers'), 'ArrowUp');
+    expect(document.activeElement).toBe(tab('help'));
+    press(tab('help'), 'ArrowDown');
+    expect(document.activeElement).toBe(tab('layers'));
+    // Manual activation: nothing was opened, the roving tabindex stays on the tab shown.
+    expect(sideOf(target)).toEqual({ tab: 'layers', collapsed: false });
+    expect(panel.tab).toBe('layers');
+    expect(tab('layers').tabIndex).toBe(0);
+    expect(tab('help').tabIndex).toBe(-1);
+    expect(localStorage.getItem('ardoise.sidePanel.live')).toBeNull();
+  });
+
+  it('goes to the first and last tab with Home and End', () => {
+    const { tab } = render({ tabs: ALL });
+    tab('sound').focus();
+    expect(press(tab('sound'), 'End').defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(tab('help'));
+    expect(press(tab('help'), 'Home').defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(tab('layers'));
+  });
+
+  it('does not reopen a collapsed pane by moving the focus', async () => {
+    const { tab, target, panel } = render({ tabs: ALL });
+    panel.collapse();
+    await tick();
+    tab('layers').focus();
+    press(tab('layers'), 'ArrowDown');
+    await tick();
+    expect(document.activeElement).toBe(tab('page'));
+    expect(sideOf(target)).toEqual({ tab: 'layers', collapsed: true });
+    // Enter is the native button's click: it opens the tab the focus is on.
+    tab('page').click();
+    await tick();
+    expect(sideOf(target)).toEqual({ tab: 'page', collapsed: false });
+  });
+
+  it('works with the tabs a window has, and with a single tab', () => {
+    const live = render();
+    live.tab('help').focus();
+    press(live.tab('help'), 'ArrowDown');
+    expect(document.activeElement).toBe(live.tab('layers'));
+    press(live.tab('layers'), 'ArrowDown');
+    expect(document.activeElement).toBe(live.tab('sound'));
+    cleanup?.();
+    const one = render({ tabs: ['layers'] });
+    one.tab('layers').focus();
+    press(one.tab('layers'), 'ArrowDown');
+    press(one.tab('layers'), 'ArrowUp');
+    expect(document.activeElement).toBe(one.tab('layers'));
+  });
+
+  it('leaves to the window every key it does not use, and the arrows with a modifier', () => {
+    const { tab } = render({ tabs: ALL });
+    tab('layers').focus();
+    // Space is the next page in live mode, ArrowLeft / Right turn pages, Shift + arrows pan, Alt + arrows go through notes.
+    expect(press(tab('layers'), ' ').defaultPrevented).toBe(false);
+    expect(press(tab('layers'), 'ArrowLeft').defaultPrevented).toBe(false);
+    expect(press(tab('layers'), 'ArrowRight').defaultPrevented).toBe(false);
+    expect(press(tab('layers'), 'Enter').defaultPrevented).toBe(false);
+    expect(press(tab('layers'), 'ArrowDown', { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(press(tab('layers'), 'ArrowUp', { ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(press(tab('layers'), 'End', { altKey: true }).defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(tab('layers'));
+  });
+
+  it('lets the event reach the window, its default already cancelled', () => {
+    const { tab } = render({ tabs: ALL });
+    const seen: boolean[] = [];
+    const onKey = (e: KeyboardEvent) => seen.push(e.defaultPrevented);
+    window.addEventListener('keydown', onKey);
+    try {
+      tab('layers').focus();
+      press(tab('layers'), 'ArrowDown');
+      // The live window returns on a defaultPrevented key: the rail's keys never run as a page action.
+      expect(seen).toEqual([true]);
+    } finally {
+      window.removeEventListener('keydown', onKey);
+    }
+  });
+});
+
+describe('SidePanel: the focus when the pane folds', () => {
+  it('passes the focus from the collapse button to the tab shown', async () => {
+    const { q, tab, target } = render();
+    tab('sound').click();
+    await tick();
+    const fold = q<HTMLButtonElement>('[data-action="side-collapse"]')!;
+    fold.focus();
+    expect(document.activeElement).toBe(fold);
+    fold.click();
+    // The component refocuses after its own tick: let that continuation run.
+    await tick();
+    await tick();
+    expect(sideOf(target)).toEqual({ tab: 'sound', collapsed: true });
+    expect(document.activeElement).toBe(tab('sound'));
+  });
+
+  it('puts it on the default tab when the tab remembered is one the window lacks', async () => {
+    rememberSide('live', { tab: 'page', collapsed: false });
+    const { q, tab } = render();
+    q<HTMLButtonElement>('[data-action="side-collapse"]')!.click();
+    await tick();
+    await tick();
+    expect(document.activeElement).toBe(tab('layers'));
+  });
+
+  it('moves no focus when a window opens the pane (a selection, a replay)', async () => {
+    const { q, panel, tab } = render();
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    try {
+      panel.collapse();
+      await tick();
+      outside.focus();
+      panel.open();
+      await tick();
+      expect(document.activeElement).toBe(outside);
+      panel.open('sound');
+      await tick();
+      expect(document.activeElement).toBe(outside);
+      expect(tab('sound').getAttribute('aria-selected')).toBe('true');
+      expect(q('.side-pane')!.hidden).toBe(false);
+    } finally {
+      outside.remove();
+    }
+  });
+});
+
+describe('SidePanel: the stylesheet', () => {
+  // jsdom applies no component stylesheet (M15's `.panel` strip went unseen for that reason): read the rules from the
+  // source for the two that only a real window would show.
+  const source = readFileSync(resolve(process.cwd(), 'ui/src/components/side/SidePanel.svelte'), 'utf8');
+  const style = source.slice(source.indexOf('<style>'));
+  const rules = [...style.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    selector: m[1].replace(/\/\*[\s\S]*?\*\//g, '').trim(),
+    body: m[2],
+  }));
+
+  it('gives no display to the pane except while it is not hidden (an author display beats the hidden attribute)', () => {
+    const paneRules = rules.filter(({ selector }) => /(^|[\s,])\.side-pane(?![-\w])/.test(selector) && !selector.startsWith(':where'));
+    expect(paneRules.length).toBeGreaterThan(0);
+    for (const { selector, body } of paneRules) {
+      if (/(^|;|\s)display\s*:/.test(body)) expect(selector, 'a display on the pane').toContain(':not([hidden])');
+    }
+  });
+
+  it('keeps every block look inside the pane, so that nothing leaks to the rest of the app', () => {
+    const blockRules = rules.filter(({ selector }) => selector.includes('.pane-') || selector.includes('kbd') || selector.includes('dl.keys'));
+    expect(blockRules.length).toBeGreaterThan(10);
+    for (const { selector } of blockRules) expect(selector, 'a block rule outside the pane').toMatch(/\.side-(pane|above)/);
   });
 });

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EDITOR_SHORTCUTS } from '../../lib/editor/shortcuts';
 import { setLocale, t } from '../../lib/i18n.svelte';
 import { LIVE_SHORTCUTS } from '../../lib/live-shortcuts';
-import type { Shortcut } from '../../lib/shortcuts';
+import { chordParts, type Shortcut } from '../../lib/shortcuts';
 import type { SideWhere } from '../../lib/side-panel.svelte';
 import ShortcutsHelp from './ShortcutsHelp.svelte';
 
@@ -94,5 +94,63 @@ describe('ShortcutsHelp: live mode', () => {
     const { dt } = render('live', LIVE_SHORTCUTS);
     for (const entry of LIVE_SHORTCUTS) expect(dt(entry.id).nextElementSibling!.textContent, entry.id).toBe(t(entry.label));
     expect(dt('delete').nextElementSibling!.textContent).toBe('Supprimer la sélection');
+  });
+});
+
+describe('ShortcutsHelp: every entry of both tables', () => {
+  const TABLES = [
+    ['editor', EDITOR_SHORTCUTS],
+    ['live', LIVE_SHORTCUTS],
+  ] as const;
+
+  /** What an entry shows, from its table: one display per shown chord (duplicates merged), or its keysLabel. */
+  function expected(entry: Shortcut<object>): string {
+    if (entry.keysLabel) return t(entry.keysLabel);
+    const displays: string[] = [];
+    for (const key of entry.keys) {
+      if (key.shown === false) continue;
+      const display = chordParts(key.chord).join(' + ');
+      if (!displays.includes(display)) displays.push(display);
+    }
+    return displays.join(', ');
+  }
+
+  for (const locale of ['fr', 'en'] as const) {
+    for (const [where, table] of TABLES) {
+      it(`renders each ${where} entry with its shown chords and its label (${locale})`, () => {
+        setLocale(locale);
+        const { target, chords } = render(where, table);
+        expect(target.querySelectorAll('dt')).toHaveLength(table.length);
+        expect(target.querySelectorAll('dd')).toHaveLength(table.length);
+        for (const entry of table) {
+          expect(chords(entry.id), entry.id).toBe(expected(entry));
+          expect(chords(entry.id), entry.id).not.toBe('');
+        }
+      });
+    }
+  }
+
+  it('leaves the variants the mapping takes but the help does not show out of the list', () => {
+    const { chords, dt } = render('editor', EDITOR_SHORTCUTS);
+    // Shift + V, Ctrl + Shift + Y, the French Ctrl + à (code Digit0): handled, not shown.
+    expect(chords('select')).not.toContain('Maj');
+    expect(chords('redo')).not.toContain('Maj + Y');
+    expect(chords('fit')).not.toContain('à');
+    expect(dt('fit').querySelectorAll('kbd')).toHaveLength(2);
+  });
+
+  it('puts every chord in its own nowrap span, and a keysLabel without any', () => {
+    const live = render('live', LIVE_SHORTCUTS);
+    expect(live.dt('next').querySelectorAll('span.chord')).toHaveLength(3);
+    expect(live.dt('pan').querySelector('span.chord')).toBeNull();
+    for (const kbd of live.target.querySelectorAll('kbd')) expect(kbd.closest('dt')).not.toBeNull();
+  });
+
+  it('shows the group headings only for the groups the table has', () => {
+    const only: Shortcut<object>[] = [{ id: 'a', label: 'editor.keys.list.undo', keys: [{ chord: { key: 'z', ctrl: true }, does: 'undo' }] }];
+    const { target } = render('editor', only);
+    expect(target.querySelectorAll('h4')).toHaveLength(0);
+    expect(target.querySelectorAll('dl.keys')).toHaveLength(1);
+    expect(target.querySelector('dt')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('Ctrl + Z');
   });
 });

@@ -68,3 +68,36 @@ describe('sweepShortcuts', () => {
     expect(SWEEP_MODIFIERS.some((m) => 'ctrl' in m && 'alt' in m)).toBe(false);
   });
 });
+
+describe('sweepShortcuts: the shapes of a chord', () => {
+  it('checks both Shift states of a shift: any chord, and tells which one fails', () => {
+    // A mapping that zooms with + only without Shift.
+    const zoom = (e: KeyInput): string | null => (e.key === '+' && !e.ctrlKey && !e.altKey && !e.shiftKey ? 'zoomIn' : null);
+    const entry: Shortcut<Context> = { id: 'zoom', label: 'x', keys: [{ chord: { key: '+', shift: 'any' }, does: 'zoomIn' }] };
+    const problems = sweepShortcuts([entry], [{ armed: false }], zoom);
+    expect(problems).toEqual(['"zoom": Shift + + gives nothing in {"armed":false}, the table says "zoomIn"']);
+  });
+
+  it('reads an entry only in the contexts it is listed for', () => {
+    // Ctrl + Z is undone only when armed: an entry listed for armed alone is right, not asserted when it is not armed.
+    expect(sweepShortcuts([tool, undo, pan], CONTEXTS, does)).toEqual([]);
+    const both: Shortcut<Context> = { ...undo, keys: [{ chord: { key: 'z', ctrl: true }, does: 'undo' }] };
+    expect(sweepShortcuts([tool, both, pan], CONTEXTS, does)).toEqual([
+      '"undo": Ctrl + z gives nothing in {"armed":false}, the table says "undo"',
+    ]);
+  });
+
+  it('reports a hidden variant that the mapping does not take', () => {
+    const other: Shortcut<Context> = {
+      id: 'tool',
+      label: 'x',
+      keys: [
+        { chord: { key: 'v' }, does: 'tool' },
+       
+        { chord: { key: 'v', shift: true }, does: 'pen', shown: false },
+      ],
+    };
+    const problems = sweepShortcuts([other, undo, pan], CONTEXTS, does);
+    expect(problems.some((p) => p.includes('Shift + V gives nothing'))).toBe(true);
+  });
+});
