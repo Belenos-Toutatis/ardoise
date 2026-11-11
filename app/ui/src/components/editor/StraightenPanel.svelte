@@ -82,6 +82,9 @@
   onMount(() => {
     fit();
     window.addEventListener('resize', fit);
+    // An emulated or zoomed viewport may change size without a `resize` on the window.
+    const viewport = window.visualViewport;
+    viewport?.addEventListener('resize', fit);
     // The toolbar wraps and grows: the panel moves with its button.
     const toolbar = panel?.closest('.toolbar');
     const watcher = typeof ResizeObserver === 'undefined' || !toolbar ? null : new ResizeObserver(fit);
@@ -89,12 +92,13 @@
     tolerance?.focus({ preventScroll: true });
     return () => {
       window.removeEventListener('resize', fit);
+      viewport?.removeEventListener('resize', fit);
       watcher?.disconnect();
     };
   });
 </script>
 
-<div {id} bind:this={panel} class="panel" role="dialog" aria-label={t('editor.straighten.settings.button')} data-panel="straighten">
+<div {id} bind:this={panel} class="shapes-panel" role="dialog" aria-label={t('editor.straighten.settings.button')} data-panel="straighten">
   <h2>{t('editor.straighten.settings.title')}</h2>
   <p class="count" data-slot="straighten-count" aria-live="polite">{countText}</p>
 
@@ -213,7 +217,7 @@
 <style>
   /* Never taller than the room left down to the bottom of the window: it scrolls (wheel, finger)
      and its buttons stay in sight. `fit()` sets --room and --shift. */
-  .panel {
+  .shapes-panel {
     position: absolute;
     top: calc(100% + 6px);
     left: var(--shift, 0px);

@@ -733,10 +733,10 @@ describe('fitting in the window', () => {
     const { resolve } = await import('node:path');
     const source = readFileSync(resolve(process.cwd(), 'ui/src/components/editor/StraightenPanel.svelte'), 'utf8');
     const rule = (selector: string) => source.match(new RegExp(`\\n  ${selector.replace('.', '\\.')} \\{([^}]*)\\}`))?.[1] ?? '';
-    expect(rule('.panel')).toMatch(/max-height: var\(--room/);
-    expect(rule('.panel')).toMatch(/overflow-y: auto/);
-    expect(rule('.panel')).toMatch(/overscroll-behavior: contain/);
-    expect(rule('.panel')).toMatch(/width: min\(360px, calc\(100vw - 24px\)\)/);
+    expect(rule('.shapes-panel')).toMatch(/max-height: var\(--room/);
+    expect(rule('.shapes-panel')).toMatch(/overflow-y: auto/);
+    expect(rule('.shapes-panel')).toMatch(/overscroll-behavior: contain/);
+    expect(rule('.shapes-panel')).toMatch(/width: min\(360px, calc\(100vw - 24px\)\)/);
     expect(rule('.actions')).toMatch(/position: sticky/);
     expect(rule('.actions')).toMatch(/bottom: 0/);
     expect(rule('.actions')).toMatch(/background: var\(--surface\)/);
