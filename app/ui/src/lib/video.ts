@@ -97,7 +97,9 @@ export type NarrationTarget =
       maxPauseMs: number | null;
       startMs: number;
     }
-  | { kind: 'live' };
+  | { kind: 'live' }
+  /** M17: recorded while writing in the editor, in note time, for the note at `path`. */
+  | { kind: 'writing'; path: string };
 
 /**
  * `silent`: only exact digital silence for a second or more: Windows blocks desktop apps from the
@@ -129,6 +131,11 @@ export interface NarrationSaved {
   durationMs: number;
   /** Live target: pages that got narration. */
   pages: number;
+  /**
+   * Writing target (M17): the key of the sound kept in memory until the note is saved (`saveNote`'s `narrationKey`,
+   * `narrationDropStaged`); absent otherwise.
+   */
+  staged?: string;
 }
 
 export interface NarrationInfo {

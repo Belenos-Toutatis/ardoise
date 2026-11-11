@@ -40,12 +40,15 @@ import { editorNavJourneys } from './journeys-editor-nav.mjs';
 import { closeKeyJourneys } from './journeys-close-keys.mjs';
 import { sidePanelEditorJourneys } from './journeys-m16-editor.mjs';
 import { sidePanelLiveJourneys } from './journeys-m16-live.mjs';
+import { livePaperJourneys } from './journeys-m17-live.mjs';
+import { editorProjectionJourneys } from './journeys-m17-projection.mjs';
+import { writingSoundJourneys } from './journeys-m17-sound.mjs';
 import { mcpJourney } from './mcp.mjs';
 
 // Milestone M7 journeys live in files of their own. `ARDOISE_E2E_ONLY=text` runs only the journeys whose
 // name contains one of its `|`-separated parts (while working on them; `cargo xtask e2e` runs everything).
 const only = process.env.ARDOISE_E2E_ONLY?.split('|').filter(Boolean);
-const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys, ...editorLayersJourneys, ...liveComputerJourneys, ...exportLayersJourneys, ...straightenSettingJourneys, ...sidePanelEditorJourneys, ...sidePanelLiveJourneys].filter(
+const journeys = [...mainJourneys, ...editJourneys, ...handwritingJourneys, ...backgroundJourneys, ...dragJourneys, ...pageJourneys, ...inputJourneys, ...orientationJourneys, ...exportJourneys, ...bridgeJourneys, ...aboutJourneys, ...uiJourneys, ...libraryJourneys, ...inkspaceJourneys, ...hardFixJourneys, ...shareJourneys, ...resumeJourneys, ...touchUpJourneys, ...editorNavJourneys, ...closeKeyJourneys, ...revisionJourneys, ...editorLayersJourneys, ...liveComputerJourneys, ...exportLayersJourneys, ...straightenSettingJourneys, ...sidePanelEditorJourneys, ...sidePanelLiveJourneys, ...livePaperJourneys, ...editorProjectionJourneys, ...writingSoundJourneys].filter(
   (journey) => !only || only.some((part) => journey.name.includes(part)),
 );
 
@@ -120,8 +123,8 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
     await sleep(250);
     try {
       const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-      // The main window: not the projector's presentation window, which may open later.
-      target = list.find((t) => t.type === 'page' && !t.url.includes('view=presentation'));
+      // The main window: not the projector's presentation or projection window, which may open later.
+      target = list.find((t) => t.type === 'page' && !t.url.includes('view=presentation') && !t.url.includes('view=projection'));
     } catch {
       // Not listening yet.
     }

@@ -99,6 +99,9 @@ pub enum NarrationTarget {
     },
     /// The pages of live mode.
     Live,
+    /// Narration recorded while writing in the editor, in note time (M17): the note at `path`.
+    /// Refused as `unexpected` until package F builds it.
+    Writing { path: String },
 }
 
 /// `NarrationStatus.state` in `video.ts`.
@@ -166,6 +169,10 @@ pub struct NarrationSaved {
     pub duration_ms: u64,
     /// Notes or pages that got the narration.
     pub pages: usize,
+    /// Writing target (M17): the key of the sound kept in memory until the note is saved
+    /// (`save_note`'s `narration_key`); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staged: Option<String>,
 }
 
 /// `NarrationInfo.base` in `video.ts`.
@@ -665,11 +672,19 @@ pub struct NarrationRuntime {
 
 impl Default for NarrationRuntime {
     fn default() -> Self {
-        Self::new(Box::new(open_microphone), backup_dir())
+        Self::with_simulated_microphone(false)
     }
 }
 
 impl NarrationRuntime {
+    /// The runtime of the app: with `simulated` (`--simulated-microphone`, for the journeys) it
+    /// never opens the PC's microphone. Package 0: the same runtime either way; package F gives
+    /// the simulated one its fake device (`narration/simulated.rs`).
+    pub fn with_simulated_microphone(simulated: bool) -> Self {
+        let _ = simulated;
+        Self::new(Box::new(open_microphone), backup_dir())
+    }
+
     /// A runtime opening its microphones with `open` and backing up pending narrations in
     /// `backup_dir`.
     pub fn new(open: Box<Opener>, backup_dir: PathBuf) -> Self {
@@ -928,6 +943,10 @@ pub fn start_in(
                 ));
             }
         },
+        // Package F's (M17).
+        NarrationTarget::Writing { .. } => {
+            return Err(CommandError::new("unexpected", "not built yet"));
+        }
     };
     *slot = None;
     let recorder = Arc::new((runtime.open)(device_of(device), true)?);
@@ -1177,6 +1196,7 @@ fn save_replay(
             stamp: Some(stamp),
             duration_ms: duration,
             pages: 1,
+            staged: None,
         }),
         Err(error) => {
             runtime.keep_pending(&note, audio, duration);
@@ -1223,6 +1243,7 @@ fn save_stopped(
                 stamp: None,
                 duration_ms: duration,
                 pages,
+                staged: None,
             }))
         }
     }
@@ -1357,6 +1378,7 @@ pub fn retry_in(
                 stamp: Some(stamp),
                 duration_ms: pending.duration_ms,
                 pages: 1,
+                staged: None,
             })
         }
         Err(error) => {
@@ -1511,6 +1533,19 @@ pub async fn narration_audio(
     let library = library_of(&context)?;
     let opus = crate::notes::blocking(move || narration_opus(&library, Path::new(&path))).await?;
     Ok(tauri::ipc::Response::new(opus))
+}
+
+/// Drops the writing narration kept in memory under `key` (the user chose « Ne pas enregistrer » or
+/// reloaded the note), with its backup copy (M17).
+///
+/// Package 0: a stub, nothing calls it yet; package F implements it.
+#[tauri::command]
+pub async fn narration_drop_staged(
+    _runtime: State<'_, NarrationRuntime>,
+    key: String,
+) -> CommandResult<()> {
+    let _ = key;
+    Ok(())
 }
 
 #[tauri::command]

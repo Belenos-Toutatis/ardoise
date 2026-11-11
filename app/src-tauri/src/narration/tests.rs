@@ -164,6 +164,14 @@ fn shapes_are_those_of_video_ts() {
     ));
     let live: NarrationTarget = serde_json::from_value(json!({ "kind": "live" })).unwrap();
     assert_eq!(live, NarrationTarget::Live);
+    let writing: NarrationTarget =
+        serde_json::from_value(json!({ "kind": "writing", "path": "a.ardoise" })).unwrap();
+    assert_eq!(
+        writing,
+        NarrationTarget::Writing {
+            path: "a.ardoise".into()
+        }
+    );
 
     assert_eq!(
         serde_json::to_value(NarrationStatus::idle()).unwrap(),
@@ -197,10 +205,21 @@ fn shapes_are_those_of_video_ts() {
         stamp: None,
         duration_ms: 3000,
         pages: 2,
+        staged: None,
     };
     assert_eq!(
         serde_json::to_value(saved).unwrap(),
         json!({ "stamp": null, "durationMs": 3000, "pages": 2 })
+    );
+    let staged = NarrationSaved {
+        stamp: None,
+        duration_ms: 3000,
+        pages: 1,
+        staged: Some("abc".into()),
+    };
+    assert_eq!(
+        serde_json::to_value(staged).unwrap()["staged"],
+        json!("abc")
     );
     let info = NarrationInfo::of(&NarrationHeader {
         channels: 1,

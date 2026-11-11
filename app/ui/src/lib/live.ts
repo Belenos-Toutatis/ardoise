@@ -3,7 +3,7 @@
  * Contract: docs/design/tablet-live-classroom.md.
  */
 import type { Tool } from './ink';
-import type { Note, Rgba, Stroke } from './note';
+import type { BackgroundImage, Note, Paper, Rgba, Stroke } from './note';
 import type { Orientation } from './orientation';
 
 export interface LiveStyle {
@@ -101,6 +101,24 @@ export type LiveLayerOp =
   | { kind: 'computer'; layer: number }
   | { kind: 'tablet'; layer: number };
 
+/**
+ * What the Fond tab asks of the page on screen (M17; `live_page_image`): `set` an image staged under `key`
+ * (`stageBackgroundImage`), placed as `image` says; `place` the same pixels otherwise (fit, quarter turn,
+ * opacity); `remove` it. Refused as a whole with `liveEditStale` (another page), `liveNotRunning`,
+ * `liveEditInvalid` or `backgroundMissing` (a `set` whose key is not staged). Not undone by Ctrl+Z.
+ */
+export type LivePageImageOp =
+  | { kind: 'set'; key: string; image: BackgroundImage }
+  | { kind: 'place'; image: BackgroundImage }
+  | { kind: 'remove' };
+
+/** The key and size of the pixels of a page's background image (`LiveSnapshot.imagePixels`). */
+export interface ImagePixels {
+  key: string;
+  width: number;
+  height: number;
+}
+
 export type LiveSessionState = 'idle' | 'waiting' | 'live' | 'reconnecting';
 
 /** Why a resumed sheet became a new note: it changed elsewhere, or no longer exists. */
@@ -156,6 +174,16 @@ export interface LiveSnapshot {
   canUndo?: boolean;
   /** The page has an edit to redo. */
   canRedo?: boolean;
+  /**
+   * The current page's own paper, what it has without the blackboard (M17: the live window's Page tab shows it).
+   * Absent on the share's viewers: read it as `page.background.paper`.
+   */
+  pagePaper?: Paper;
+  /**
+   * The key and size of the pixels of the page's background image, null without one (M17: the windows key their
+   * paper on it, the Fond tab places the image with it). Absent on the share's viewers.
+   */
+  imagePixels?: ImagePixels | null;
 }
 
 /** A point of the stroke in progress. */

@@ -73,7 +73,7 @@
     zoomView,
     type Size,
   } from '../../lib/live-view';
-  import type { Stroke } from '../../lib/note';
+  import type { Background, PageSize, Stroke } from '../../lib/note';
 
   let {
     live,
@@ -91,6 +91,8 @@
     computer,
     onblocked,
     computerLatency = null,
+    interactive = true,
+    paper,
   }: {
     live: LiveState;
     ink: Ink | null;
@@ -122,6 +124,18 @@
     computer?: LiveComputer;
     /** Preview: the pen came down while the chosen layer is hidden (nothing is written). */
     onblocked?: () => void;
+    /**
+     * Presentation (M17, the editor's projection window): false shows the page and nothing else: no marks,
+     * no pinch, no wheel, the pointer only wakes the cursor. Default true. Declared by package 0, implemented
+     * by package B (until then every window is interactive as before).
+     */
+    interactive?: boolean;
+    /**
+     * Renders the paper (PNG data URL) of `page` with `background`, `widthPx` wide. Default: `live_page_background`
+     * for a page with an image, else `render_background`. The editor's projection window passes
+     * `api.renderBackground` with the editor's staged pixels. Declared by package 0, implemented by package B.
+     */
+    paper?: (page: PageSize, background: Background, widthPx: number) => Promise<string>;
   } = $props();
 
   /** jsdom (tests) has no layout: a nominal size. */

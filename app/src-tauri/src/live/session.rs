@@ -944,6 +944,9 @@ impl LiveSession {
             revision: self.current_page().revision,
             can_undo: self.current_page().history.can_undo(),
             can_redo: self.current_page().history.can_redo(),
+            // M17, package 0: the page's paper as it is, and no image pixels (package A).
+            page_paper: self.current_page().note.background.paper,
+            image_pixels: None,
         }
     }
 

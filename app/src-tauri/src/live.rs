@@ -9,6 +9,7 @@
 //! - [`edits`]: touching up a page while the tablet writes (what is checked, undo and redo);
 //! - [`pen`]: the computer's pen in the control window (M14: what it sends, its times);
 //! - [`layers`]: the layers zone of the live window (M14: what it asks, a move or a merge);
+//! - [`paper`]: the paper and the image of the current page (M17: the Page and Fond tabs);
 //! - [`hub`]: the session shared between threads, the batches sent to the windows, the pages
 //!   written to the library;
 //! - [`resume`]: a session that starts from an existing note (the sheet's file, the pen on a
@@ -21,6 +22,7 @@ pub mod edits;
 pub mod hub;
 pub mod layers;
 pub mod model;
+pub mod paper;
 pub mod pen;
 pub mod resume;
 pub mod session;
@@ -55,6 +57,7 @@ pub use model::{
     ForkedSheet, LiveBatch, LiveCommand, LiveMark, LiveSnapshot, LiveStyle, LiveViewState,
     SnapshotReply,
 };
+pub use paper::LivePageImageOp;
 pub use pen::ComputerPenInput;
 
 use self::resume::ResumeBase;
@@ -599,6 +602,37 @@ pub async fn live_layers(
         .hub
         .layers(page_index, op)
         .map_err(LiveError::command_error)
+}
+
+/// Changes the paper (colour, template, texture) of page `page_index` of the session, the one on
+/// screen (M17; docs/design/paper-projection-narration.md §1.3): refused as `liveEditStale` once
+/// that page is left, `liveNotRunning` once the session is stopped. Every window hears of it through
+/// a snapshot. Not undone by Ctrl+Z.
+///
+/// Package 0: a stub, nothing calls it yet.
+#[tauri::command]
+pub async fn live_page_paper(
+    _runtime: State<'_, LiveRuntime>,
+    page_index: usize,
+    background: Background,
+) -> CommandResult<()> {
+    let _ = (page_index, background);
+    Err(CommandError::new("unexpected", "not built yet"))
+}
+
+/// Sets, places again or removes the background image of page `page_index`, the one on screen (M17;
+/// `LivePageImageOp`): refused as `liveEditStale`, `liveNotRunning`, `liveEditInvalid` or
+/// `backgroundMissing` (a `set` whose key is not staged). Not undone by Ctrl+Z.
+///
+/// Package 0: a stub, nothing calls it yet.
+#[tauri::command]
+pub async fn live_page_image(
+    _runtime: State<'_, LiveRuntime>,
+    page_index: usize,
+    op: LivePageImageOp,
+) -> CommandResult<()> {
+    let _ = (page_index, op);
+    Err(CommandError::new("unexpected", "not built yet"))
 }
 
 #[tauri::command]

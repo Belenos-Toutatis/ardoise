@@ -450,6 +450,8 @@ fn snapshot_of(note: Note) -> LiveSnapshot {
         revision: 7 << 32,
         can_undo: true,
         can_redo: true,
+        page_paper: ardoise_core::note::Paper::White,
+        image_pixels: None,
     }
 }
 

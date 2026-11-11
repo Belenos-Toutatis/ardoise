@@ -16,6 +16,7 @@ use crate::AppContext;
 use crate::background::{self, PlacedImage};
 use crate::commands::{CommandError, CommandResult};
 use crate::library::{blank_note, library_error, library_of, now_ms};
+use crate::narration::{NarrationInfo, NarrationRuntime};
 use crate::revision::{self, RevisionView};
 use crate::thumbnails::png_data_url;
 
@@ -89,6 +90,9 @@ pub struct OpenedNote {
     /// Present when the note is a revision, a retouched copy of another note: its account, and
     /// where its source is now.
     pub revision: Option<RevisionView>,
+    /// The narration the note holds, read from the header of its audio member (M17); `None` without
+    /// one, or when it is damaged. Package 0: always `None`; package F fills it.
+    pub narration: Option<NarrationInfo>,
 }
 
 pub fn open_in(library: &Library, path: &Path) -> Result<OpenedNote, LibraryError> {
@@ -101,6 +105,7 @@ pub fn open_in(library: &Library, path: &Path) -> Result<OpenedNote, LibraryErro
             .map(|info| revision::view_of(library, info)),
         note: loaded.file.note,
         stamp: loaded.stamp,
+        narration: None,
     })
 }
 
@@ -206,15 +211,20 @@ pub async fn open_note(context: State<'_, AppContext>, path: String) -> CommandR
 
 /// Saves the editor's note. `image_key` names the staged pixels of its background image
 /// (`background::Staging`); without it the file's own image member is kept, which must show
-/// the image the note describes (`background::check_keyless`).
+/// the image the note describes (`background::check_keyless`). `narration_key` names the sound of
+/// a recording made while writing, kept in memory until now (`NarrationSaved::staged`): it is
+/// written in the same save as the note (M17; ignored until package F).
 #[tauri::command]
 pub async fn save_note(
     context: State<'_, AppContext>,
+    _narration: State<'_, NarrationRuntime>,
     path: String,
     note: Note,
     stamp: FileStamp,
     image_key: Option<String>,
+    narration_key: Option<String>,
 ) -> CommandResult<FileStamp> {
+    let _ = narration_key;
     let library = library_of(&context)?;
     blocking(move || {
         save_with_key(

@@ -1020,6 +1020,45 @@ narration is longer (O13).
 `cargo xtask check` passes after package 0 (nothing calls the stubs; the new keys are unused but present in both
 catalogs, which the catalog tests accept: supposé, the lead checks).
 
+#### Package 0, as built
+
+What the commit holds, and where it differs from the list above (every name, signature and key not mentioned is as
+written):
+
+- **`LiveSnapshot` has its two new fields already** (`page_paper: Paper`, `image_pixels: Option<ImagePixels>`,
+  `live/model.rs`; `ImagePixels { key, width, height }` is in `live/model.rs`, not re-exported from `live.rs`: use
+  `crate::live::model::ImagePixels`). Package C builds `LiveSnapshot`s and cannot wait for A. `Session::snapshot` fills
+  them with the page's `background.paper` and `None`; A makes them real (the own paper under the board, the image's
+  key). The share's allow list is untouched.
+- **Rust stubs.** `live_page_paper` and `live_page_image` answer `unexpected` / « not built yet »; `PageImage` and
+  `LivePageImageOp` are in `live/paper.rs`. In `projection.rs` `projection_open` and `projection_subscribe` answer the
+  same error, `projection_close` and `projection_update` answer `Ok(())`, `projection_watch` answers `{ open: None }`.
+  `ProjectionRuntime` is `Mutex<Projection>` with an `open` field C replaces. The items nothing reads yet carry
+  `#[allow(dead_code)]` (C and A remove it); `ProjectionUpdate` also allows `clippy::large_enum_variant` (`Page` holds a
+  whole note: not boxed, so the contract keeps `note: Note`).
+- **`narration.rs`**: `NarrationTarget::Writing { path }` is refused by `start_in` as `unexpected`;
+  `NarrationSaved.staged` is skipped when `None`; `with_simulated_microphone(bool)` builds the real runtime whatever the
+  flag until F; `narration_drop_staged(key)` answers `Ok(())`. **`notes.rs`**: `save_note` takes
+  `State<NarrationRuntime>` (named `_narration`) and `narration_key` (ignored); `OpenedNote.narration` is `None`.
+- **`capabilities/presentation.json`** lists both windows. `lib.rs` has `--simulated-microphone` (parse test) and the
+  eight commands. `contract_tests.rs` (new, `#[cfg(test)]`) guards the wire format of the new Rust types.
+- **TypeScript.** The types and wrappers are as listed (`LivePageImageOp` and `ImagePixels` in `lib/live.ts`). The
+  skeletons carry their final API and do nothing: `lib/projection-feed.ts` (`SentPage` is the interface of §2.4's
+  « SentPage »), `lib/editor/projection.svelte.ts`, `EditorProjectionTab.svelte` (the blocks are wired without
+  `ProjectorBlock`'s `help` nor `ZoneBlock`'s `widthTitle`: D adds those two props and passes the keys),
+  `EditorPresentation.svelte` (a black page that does not close itself yet), `main.ts`. `LiveCanvas.svelte` declares
+  `interactive` and `paper`, unused until B. `lib/mock-projection.ts` exports `mockProjectionInvoke` (chained in
+  `mock.ts`), `mockProjectionWatch` and `mockProjectionSubscribe` (which `api.ts` uses outside the desktop app).
+- **Package G is not done (§11): skipped here** `ReplayOptions.lead`, `narrationReplay`, `narrationSoundStart` in
+  `lib/replay.ts`, and the key `editor.sound.leadTrimmed`. No package A to F needs them.
+- **Catalogs**: every key of §5 except `editor.sound.leadTrimmed`, both languages, appended at the end of its group.
+- **e2e**: `m17-helpers.mjs` as §7 (`penStroke`, `BROWSER_ARGS` are exported by their files and re-exported;
+  `noteOnDisk` also gives `strokes` and `audio`; `opusTags` reads the OpusTags comments properly, names without the
+  `ARDOISE_` prefix, e.g. `opusTags(bytes).START_MS`; `canvasFacts` gives numbers and booleans). The three journey
+  files export `livePaperJourneys`, `editorProjectionJourneys` and `writingSoundJourneys` (empty). `checkRecordingDot`
+  has its `{ simulated }` option; the M16 journeys are not changed (B and E). `run.mjs` also ignores a `view=projection`
+  page when it looks for the main window.
+
 ## 11. Open points and risks
 
 Open points: the user's call. Each has a recommendation, which this document follows by default; none changes what
