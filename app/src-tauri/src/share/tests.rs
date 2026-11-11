@@ -39,7 +39,7 @@ use crate::live::LiveHub;
 use crate::live::StrokesEdit;
 use crate::live::hub::{HubConfig, HubSink, Start, StartOptions};
 use crate::live::model::{
-    LiveBatch, LiveEvent, LiveMark, LiveSnapshot, LiveStyle, LiveViewState, MarkPoint,
+    LiveBatch, LiveEvent, LiveMark, LivePen, LiveSnapshot, LiveStyle, LiveViewState, MarkPoint,
     PlacedStroke, RecolouredStrokes, ViewerIndices,
 };
 use crate::notes::background_png;
@@ -431,6 +431,7 @@ fn snapshot_of(note: Note) -> LiveSnapshot {
         orientation: Orientation::Landscape,
         can_turn_page: true,
         layer: 0,
+        computer_layer: 0,
         style: LiveStyle::default(),
         view: LiveViewState::whole(A4_LANDSCAPE),
         hover: None,
@@ -468,7 +469,12 @@ fn a_viewer_never_gets_library_paths_titles_tags_nor_the_screen() {
                 message: "C:\\Users\\Prof\\Nextcloud\\Notes: access denied".into(),
             },
             LiveEvent::HoverEnd,
-            LiveEvent::StrokeEnd { page_index: 0 },
+            LiveEvent::StrokeEnd {
+                page_index: 0,
+                pen: LivePen::Tablet,
+                id: None,
+                hidden: false,
+            },
         ],
         sent_at: 1.0,
     };
@@ -1533,7 +1539,7 @@ fn on_a_page_with_a_hidden_layer_an_edit_goes_in_the_numbering_of_the_viewers() 
         can_redo: false,
         viewers: Some(Box::new(ViewerIndices {
             removed: vec![2],
-            inserted: vec![1],
+            inserted: vec![Some(1)],
             recoloured: vec![RecolouredStrokes {
                 color: Rgba::BLACK,
                 indices: vec![2],

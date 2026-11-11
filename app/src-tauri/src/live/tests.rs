@@ -1238,6 +1238,7 @@ fn the_json_has_the_shapes_of_live_ts() {
             "canRedo",
             "canTurnPage",
             "canUndo",
+            "computerLayer",
             "hover",
             "layer",
             "orientation",
@@ -1258,6 +1259,7 @@ fn the_json_has_the_shapes_of_live_ts() {
         (json!(0), json!(1))
     );
     assert_eq!(snapshot["layer"], 0);
+    assert_eq!(snapshot["computerLayer"], 0);
     assert_eq!(snapshot["canTurnPage"], true);
     assert_eq!(snapshot["hover"], Value::Null);
     assert_eq!(snapshot["presentation"], Value::Null);
