@@ -260,6 +260,9 @@ describe('the live window side panel: the block above the open tab', () => {
     press('v');
     await tick();
     expect(view.above()!.querySelector('[data-slot="select-hint"]')!.textContent).toContain('Lasso');
+    // Padded like the editor's blocks: everything above the tab sits in a `pane-block`.
+    expect([...view.above()!.children].map((c) => c.classList.contains('pane-block'))).toEqual([true]);
+    expect(view.above()!.querySelector('.pane-block [data-slot="select-hint"]')).not.toBeNull();
     expect(sideOf(view.target)).toEqual({ tab: 'projection', collapsed: true });
     press('p');
     await tick();
@@ -283,6 +286,7 @@ describe('the live window side panel: the block above the open tab', () => {
     expect(sideOf(view.target)).toEqual({ tab: 'help', collapsed: false });
     expect(stored()).toEqual({ tab: 'help', collapsed: false });
     const bar = view.above()!.querySelector<HTMLElement>('[data-slot="select-bar"]')!;
+    expect(bar.parentElement!.classList.contains('pane-block')).toBe(true);
     expect(bar.getAttribute('role')).toBe('toolbar');
     expect(bar.querySelector<HTMLElement>('.select-count')!.dataset.count).toBe('1');
     expect(bar.querySelector('button[data-action="delete-selection"]')).not.toBeNull();
@@ -410,5 +414,66 @@ describe('the live window side panel: the switches of the projected area', () =>
     zone.querySelector<HTMLButtonElement>('button[data-action="whole-page"]')!.click();
     await vi.waitFor(() => expect(level()).toBe(1));
     expect(zone.querySelector('input[type="range"]')).toBeNull();
+  });
+
+  // A switch clicked keeps the focus: the keys of live mode must go on working, with the focus on it.
+  const keyOn = (target: HTMLElement, key: string) => {
+    const down = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    target.dispatchEvent(down);
+    const up = new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true });
+    target.dispatchEvent(up);
+    return { down, up };
+  };
+
+  for (const name of ['board', 'laser'] as const) {
+    it(`leave the live keys alone once the ${name} switch has the focus, and Space turns the page instead of toggling it`, async () => {
+      const view = render();
+      await live(view);
+      await openSideTab(view.target, 'projection');
+      const sw = view.field(name);
+      sw.click();
+      await vi.waitFor(() => expect(view.action(name)!.getAttribute('aria-pressed')).toBe('true'));
+      sw.focus();
+      expect(document.activeElement).toBe(sw);
+      // Space: the page turns on key down, and the key up is cancelled, which is what keeps a focused control from being pressed.
+      const space = keyOn(sw, ' ');
+      expect(space.down.defaultPrevented).toBe(true);
+      expect(space.up.defaultPrevented).toBe(true);
+      await vi.waitFor(() => expect(view.canvas().dataset.page).toBe('2/2'));
+      expect(sw.checked).toBe(true);
+      // Page Down and the left arrow turn the page too.
+      expect(keyOn(sw, 'PageDown').down.defaultPrevented).toBe(true);
+      await vi.waitFor(() => expect(view.canvas().dataset.page).toBe('3/3'));
+      keyOn(sw, 'ArrowLeft');
+      await vi.waitFor(() => expect(view.canvas().dataset.page).toBe('2/3'));
+      // The other switch's key goes through as well: B or L flips the state, and the switch follows.
+      const other = name === 'board' ? 'laser' : 'board';
+      keyOn(sw, name === 'board' ? 'l' : 'b');
+      await vi.waitFor(() => expect(view.field(other).checked).toBe(true));
+      keyOn(sw, name === 'board' ? 'b' : 'l');
+      await vi.waitFor(() => expect(sw.checked).toBe(false));
+    });
+  }
+
+  it('leave the touching-up keys V and P to the window with a switch focused', async () => {
+    const view = render(sheetPath());
+    await live(view);
+    await openSideTab(view.target, 'projection');
+    const sw = view.field('board');
+    sw.focus();
+    keyOn(sw, 'v');
+    await tick();
+    expect(view.above()!.querySelector('[data-slot="select-hint"]')).not.toBeNull();
+    keyOn(sw, 'p');
+    await tick();
+    expect(view.above()!.querySelector('[data-slot="pen-hint"]')).not.toBeNull();
+    expect(view.above()!.querySelector('[data-slot="select-hint"]')).toBeNull();
+    keyOn(sw, 'p');
+    await tick();
+    expect(view.above()).toBeNull();
+    // A field typed in still keeps its keys: the screen list is a select.
+    const select = view.q<HTMLSelectElement>('aside.live-side select')!;
+    expect(keyOn(select, ' ').down.defaultPrevented).toBe(false);
+    expect(keyOn(select, 'v').down.defaultPrevented).toBe(false);
   });
 });
