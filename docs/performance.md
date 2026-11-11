@@ -30,22 +30,30 @@ Le WebM (AV1) est plus lent par nature : la durée estimée est affichée avant 
 ## Dernière mesure
 
 <!-- perf:start -->
-Dernière mesure : 2026-11-04, sur 12th Gen Intel(R) Core(TM) i5-1235U, 10 cœurs / 12 threads, 16 Go de RAM, GPU : Intel(R) Iris(R) Xe Graphics, Windows 10.0.26300.0.
+Dernière mesure : 2026-11-11, sur 12th Gen Intel(R) Core(TM) i5-1235U, 10 cœurs / 12 threads, 16 Go de RAM, GPU : Intel(R) Iris(R) Xe Graphics, Windows 10.0.26300.0.
 
 | Objectif | Mesuré | Résultat |
 |---|---|---|
-| Démarrage à chaud (< 2 s) | 1,04 s (médiane de 3 ; à froid : 1,51 s) | OK |
-| 1000 notes affichées (< 2 s) | en cache : 2,18 s ; hors cache : 3,13 s | NON ATTEINT |
-| 1000 notes, miniatures visibles dessinées (< 3 s) | en cache : 2,22 s ; hors cache : 3,53 s (12 cartes) | OK |
-| 1000 notes, défilement, miniatures en cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 60,0 fps, p95 16,8 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (360 images) | OK |
-| 1000 notes, défilement, miniatures hors cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 60,0 fps, p95 16,8 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (360 images) | à titre indicatif |
-| Mode direct (>= 60 images/s, <= 1 % d'images en retard) | 60,0 fps, p95 16,9 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (481 images) | OK |
-| Mode direct, page de 4000 traits retouchée (>= 60 images/s, <= 1 % d'images en retard) | 59,1 fps, p95 16,9 ms, 4 en retard (> 25 ms), 2 au-delà de 50 ms (591 images) ; 24 retouches | OK |
-| Même page, la tablette écrit, sans retouche (4000 traits) | 60,0 fps, p95 16,9 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (241 images) | à titre indicatif |
-| Une retouche sur cette page, plus longue image après elle (médiane / pire) | 16,9 / 17,3 ms ; dessin complet : 116,7 / 616,9 ms ; appels 5,2 ms contre 69,4 ms ; 24 dessins partiels, 0 dessins complets | à titre indicatif |
-| MP4 1080p d'une relecture de 2 min (< 2 min) | 15,2 s (3599 images, 120 s de relecture ; Media Foundation: Intel® Quick Sync Video H.264 Encoder MFT (hardware)) | OK |
-| Taille de l'exécutable (< 30 Mo) | 22,3 Mo | OK |
+| Démarrage à chaud (< 2 s) | 0,99 s (médiane de 3 ; à froid : 1,92 s) | OK |
+| 1000 notes affichées (< 2 s) | en cache : 2,98 s ; hors cache : 3,02 s | NON ATTEINT |
+| 1000 notes, miniatures visibles dessinées (< 3 s) | en cache : 3,07 s ; hors cache : 3,07 s (12 cartes) | NON ATTEINT |
+| 1000 notes, défilement, miniatures en cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 60,0 fps, p95 16,8 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (361 images) | OK |
+| 1000 notes, défilement, miniatures hors cache (p95 <= 33 ms, <= 1 % au-delà de 50 ms) | 59,2 fps, p95 16,8 ms, 1 en retard (> 25 ms), 1 au-delà de 50 ms (356 images) | à titre indicatif |
+| Mode direct (>= 60 images/s, <= 1 % d'images en retard) | 60,0 fps, p95 17,0 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (481 images) | OK |
+| Mode direct, page de 4000 traits retouchée (>= 60 images/s, <= 1 % d'images en retard) | 59,7 fps, p95 16,9 ms, 2 en retard (> 25 ms), 0 au-delà de 50 ms (597 images) ; 24 retouches | OK |
+| Même page, la tablette écrit, sans retouche (4000 traits) | 60,0 fps, p95 16,8 ms, 0 en retard (> 25 ms), 0 au-delà de 50 ms (241 images) | à titre indicatif |
+| Une retouche sur cette page, plus longue image après elle (médiane / pire) | 16,9 / 32,9 ms ; dessin complet : 116,9 / 733,5 ms ; appels 6,8 ms contre 75,6 ms ; 24 dessins partiels, 0 dessins complets | à titre indicatif |
+| Mode direct, la tablette et le stylet de l'ordinateur ensemble, fenêtre de commande (>= 60 images/s, <= 1 % d'images en retard) | 59,5 fps, p95 16,8 ms, 2 en retard (> 25 ms), 1 au-delà de 50 ms (476 images) ; 3 traits du stylet | OK |
+| Mode direct, la tablette et le stylet de l'ordinateur ensemble, vidéoprojecteur (>= 60 images/s, <= 1 % d'images en retard) | 59,4 fps, p95 16,8 ms, 2 en retard (> 25 ms), 1 au-delà de 50 ms (476 images) ; 3 traits du stylet | OK |
+| Latence du stylet de l'ordinateur au vidéoprojecteur (médiane < 30 ms) | 40,1 ms (p95 44,0 ms, 567 points) | NON ATTEINT |
+| MP4 1080p d'une relecture de 2 min (< 2 min) | 16,8 s (3599 images, 120 s de relecture ; Media Foundation: Intel® Quick Sync Video H.264 Encoder MFT (hardware)) | OK |
+| Taille de l'exécutable (< 30 Mo) | 23,4 Mo | OK |
 <!-- perf:end -->
+
+### Notes sur la mesure du 2026-11-11 (M14)
+
+- **Latence du stylet de l'ordinateur au vidéoprojecteur** : elle part du moment où le stylet touche l'écran, attente dans la fenêtre de commande comprise ; celle de la tablette (27 ms dans les parcours de bout en bout) ne part que de la réception Bluetooth. Depuis sa réception par Rust, un point de l'ordinateur arrive au partage en 14 ms. L'écran de l'enseignant dessine son trait sans aller-retour. Détails : `docs/design/tablet-live-classroom.md`, M14, « Latency targets ».
+- **Bibliothèque de 1 000 notes** : mesurée juste après 40 minutes de parcours de bout en bout. Des mesures alternées avec l'exécutable d'avant M14, par le même script, ne montrent aucune différence (en cache : 3,77 puis 3,08 s avant, 3,11 puis 3,09 s avec M14) ; d'une mesure à l'autre, ce PC varie de ±0,7 s.
 
 ## Mesure de référence avant les corrections de la bibliothèque (M10)
 

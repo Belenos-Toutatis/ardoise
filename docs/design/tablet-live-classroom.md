@@ -932,6 +932,14 @@ frame (SPEC §4.2's figure, measured by `__ardoiseLatency.computer`, `cargo xtas
 to the other screen, stroke in progress included (SPEC §4.10); the e2e journey asserts a median under 50 ms from `recv`
 to the SSE message read by Node, as M11 does.
 
+As measured (2026-11-11, `cargo xtask perf`, AC power, after a full e2e run): projector median 40.1 ms (p95 44.0 ms,
+567 points), so the 30 ms target is missed; in the e2e journeys 40.0 and 40.5 ms, against 27.1 and 26.4 ms for the
+tablet's points and 14.3 ms from Rust's reception to the share. The figures do not start at the same place: a
+computer point's `recv` is its sample's time in the window (`sample_wall`: `wall_now − age`), so the window's own
+delay is in it (pointer events delivered once a frame, then waiting for the call in flight), where the tablet's
+starts at the notification out of the Bluetooth transport, its radio delay left out. Not tried: `pointerrawupdate`
+events, a call that does not wait for the previous one. Left to H6, in class, to tell whether anyone sees it.
+
 **The tablet is never slowed** (hub.rs, module documentation: nothing slow under the lock). Checks outside the lock;
 under it, at most 4096 samples appended and their events pushed (the points are copied into that one event, as
 `flush_points` does); a layer op is one snapshot, like a page change; `merge` moves strokes, no point is copied; nothing
