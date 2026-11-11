@@ -39,8 +39,8 @@ use crate::live::LiveHub;
 use crate::live::StrokesEdit;
 use crate::live::hub::{HubConfig, HubSink, Start, StartOptions};
 use crate::live::model::{
-    LiveBatch, LiveEvent, LiveMark, LivePen, LiveSnapshot, LiveStyle, LiveViewState, MarkPoint,
-    PlacedStroke, RecolouredStrokes, ViewerIndices,
+    LiveBatch, LiveEvent, LiveMark, LivePen, LivePoint, LiveSnapshot, LiveStroke, LiveStyle,
+    LiveViewState, MarkPoint, PlacedStroke, RecolouredStrokes, ViewerIndices,
 };
 use crate::notes::background_png;
 use crate::presentation::MonitorInfo;
@@ -1418,9 +1418,10 @@ fn edits_in(message: &Value) -> Vec<Value> {
 }
 
 /// What a viewer's `LiveState` does with the messages it gets: the strokes it draws, each named by
-/// where it starts on the page, with its colour.
+/// where it starts on the page, with its colour; and the strokes in progress, one per pen (M14),
+/// which join the list when they end.
 #[derive(Default)]
-struct ViewerList(Vec<(f64, Value)>);
+struct ViewerList(Vec<(f64, Value)>, HashMap<String, (f64, Value)>);
 
 impl ViewerList {
     fn entry(stroke: &Value) -> (f64, Value) {
@@ -1440,6 +1441,18 @@ impl ViewerList {
                         .iter()
                         .map(Self::entry)
                         .collect();
+                    self.1.clear();
+                }
+                Some("strokeStart") => {
+                    self.1
+                        .insert(event["pen"].to_string(), Self::entry(&event["stroke"]));
+                }
+                Some("strokeEnd") => {
+                    let ended = self.1.remove(&event["pen"].to_string());
+                    self.0.push(ended.expect("an end without a stroke"));
+                }
+                Some("strokeCancel") => {
+                    self.1.remove(&event["pen"].to_string());
                 }
                 Some("strokesEdited") => {
                     for index in event["removed"].as_array().unwrap().iter().rev() {
@@ -2562,4 +2575,321 @@ fn the_windows_get_the_image_of_the_resumed_sheet_and_no_other_page_does() {
     let url = crate::live::page_background_url(None, A5, background, 512).unwrap();
     let plain = decode_png(&png_of(&url)).unwrap();
     assert!(near(rgb(&plain, 100, 100), SLATE));
+}
+
+// --- The computer's pen and hidden layers (M14) ----------------------------------------------------
+
+fn live_point(x: f32) -> LivePoint {
+    LivePoint {
+        x,
+        y: 100.0,
+        p: 0.5,
+        t: 0,
+        recv: 1.0,
+    }
+}
+
+fn live_stroke(x: f32) -> LiveStroke {
+    LiveStroke {
+        tool: Tool::FeltTip,
+        color: Rgba::rgb(216, 0, 0),
+        width: 120.0,
+        layer: 1,
+        points: vec![live_point(x)],
+    }
+}
+
+/// The events of a batch as a viewer gets them (`None`: the batch is not even sent).
+fn shared(events: Vec<LiveEvent>) -> Option<Vec<Value>> {
+    let text = batch_json(&LiveBatch {
+        events,
+        sent_at: 1.0,
+    })?;
+    let value: Value = serde_json::from_str(&text).unwrap();
+    Some(value["events"].as_array().unwrap().clone())
+}
+
+#[test]
+fn a_viewer_gets_the_computer_s_strokes_with_their_pen_and_never_a_hidden_one() {
+    let computer = LivePen::Computer;
+    let events = |hidden: bool, pen: LivePen| {
+        let id = (pen == computer).then_some(3);
+        vec![
+            LiveEvent::StrokeStart {
+                page_index: 0,
+                stroke: live_stroke(10.0),
+                pen,
+                id,
+                hidden,
+            },
+            LiveEvent::Points {
+                page_index: 0,
+                points: vec![live_point(20.0)],
+                pen,
+                id,
+                hidden,
+            },
+            LiveEvent::StrokeEnd {
+                page_index: 0,
+                pen,
+                id,
+                hidden,
+            },
+            LiveEvent::StrokeCancel {
+                page_index: 0,
+                pen,
+                id,
+                hidden,
+            },
+        ]
+    };
+    // The computer's: with `pen`, never the window's number.
+    let sent = shared(events(false, computer)).unwrap();
+    let types: Vec<&str> = sent.iter().map(|e| e["type"].as_str().unwrap()).collect();
+    assert_eq!(
+        types,
+        ["strokeStart", "points", "strokeEnd", "strokeCancel"]
+    );
+    assert_eq!(keys(&sent[0]), ["pageIndex", "pen", "stroke", "type"]);
+    assert_eq!(keys(&sent[1]), ["pageIndex", "pen", "points", "type"]);
+    assert_eq!(
+        sent[2],
+        json!({ "type": "strokeEnd", "pageIndex": 0, "pen": "computer" })
+    );
+    assert_eq!(
+        sent[3],
+        json!({ "type": "strokeCancel", "pageIndex": 0, "pen": "computer" })
+    );
+    assert_eq!(
+        keys(&sent[0]["stroke"]),
+        ["color", "layer", "points", "tool", "width"]
+    );
+    // The tablet's: as they always were.
+    let sent = shared(events(false, LivePen::Tablet)).unwrap();
+    assert_eq!(keys(&sent[0]), ["pageIndex", "stroke", "type"]);
+    assert_eq!(sent[2], json!({ "type": "strokeEnd", "pageIndex": 0 }));
+    // On a hidden layer, whichever pen: nothing, not even the batch.
+    for pen in [computer, LivePen::Tablet] {
+        assert_eq!(shared(events(true, pen)), None);
+    }
+    // The control window's undo is its own.
+    let history = LiveEvent::History {
+        page_index: 0,
+        can_undo: true,
+        can_redo: false,
+    };
+    assert_eq!(shared(vec![history.clone()]), None);
+    let mut mixed = events(true, LivePen::Tablet);
+    mixed.push(history);
+    mixed.extend(events(false, computer));
+    let sent = shared(mixed).unwrap();
+    assert_eq!(sent.len(), 4);
+    assert!(
+        sent.iter()
+            .all(|e| e["pen"] == "computer" && e.get("id").is_none())
+    );
+}
+
+#[test]
+fn an_edit_of_a_stroke_hidden_since_goes_out_only_for_what_shows() {
+    let edit = |inserted: Vec<Option<u32>>, removed: Vec<u32>| LiveEvent::StrokesEdited {
+        page_index: 0,
+        revision: 1,
+        removed: vec![4],
+        inserted: Arc::new(
+            (0..inserted.len())
+                .map(|i| PlacedStroke {
+                    index: 2 + i as u32,
+                    stroke: pen_stroke(1000.0 * (i + 1) as f32, 2),
+                })
+                .collect(),
+        ),
+        recoloured: Vec::new(),
+        can_undo: true,
+        can_redo: false,
+        viewers: Some(Box::new(ViewerIndices {
+            removed,
+            inserted,
+            recoloured: Vec::new(),
+        })),
+    };
+    // A stroke of a layer hidden since comes back: the viewers get the one that shows only.
+    let sent = shared(vec![edit(vec![None, Some(1)], Vec::new())]).unwrap();
+    let inserted = sent[0]["inserted"].as_array().unwrap();
+    assert_eq!(inserted.len(), 1);
+    assert_eq!(inserted[0]["index"], 1);
+    assert_eq!(inserted[0]["stroke"]["points"][0]["x"], 2000.0);
+    assert_eq!(sent[0]["removed"], json!([]));
+    // Only hidden strokes went or came back: nothing goes out.
+    assert_eq!(shared(vec![edit(vec![None], Vec::new())]), None);
+    assert_eq!(shared(vec![edit(Vec::new(), Vec::new())]), None);
+    let sent = shared(vec![edit(Vec::new(), vec![3])]).unwrap();
+    assert_eq!(sent[0]["removed"], json!([3]));
+}
+
+#[test]
+fn over_the_network_the_computer_s_ink_arrives_as_it_is_drawn_and_no_hidden_stroke_does() {
+    use crate::live::pen::{ComputerPenInput, ComputerSample};
+    let (_dir, library) = library();
+    let (runtime, hub) = sharing_runtime();
+    runtime.inner.show(ShareContent::Live);
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
+    let mut sink = start_session(&hub, &library);
+    write_stroke(&mut sink, 1000, 5);
+    // A layer for the computer, the tablet's hidden: what the pupil writes is not shared.
+    let op = |value: Value| serde_json::from_value::<crate::live::LayerOp>(value).unwrap();
+    hub.layers(0, op(json!({ "kind": "add" }))).unwrap();
+    hub.layers(
+        0,
+        op(json!({ "kind": "visible", "layer": 0, "visible": false })),
+    )
+    .unwrap();
+    let cookie = join(status.port, &status.code.unwrap());
+    let mut viewer = Viewer::open(status.port, &cookie);
+    let mut list = ViewerList::default();
+    let first = viewer.until("the first batch", SOON, |m| {
+        m["type"] == "live" && m["reset"] == true
+    });
+    list.apply(&first);
+    assert!(list.starts().is_empty(), "the tablet's ink is hidden");
+
+    // The tablet writes on its hidden layer while the computer writes three strokes.
+    const STROKES: u32 = 3;
+    let tablet = std::thread::spawn(move || {
+        for i in 0..20 {
+            write_stroke(&mut sink, 3000 + 500 * i, 30);
+        }
+        sink
+    });
+    let computer = {
+        let hub = hub.clone();
+        std::thread::spawn(move || {
+            let clock = Instant::now();
+            let ms = || clock.elapsed().as_secs_f64() * 1000.0;
+            for stroke in 1..=STROKES {
+                let x = 5000.0 * f64::from(stroke);
+                let samples = |n: u32| -> Vec<ComputerSample> {
+                    let now = ms();
+                    (0..2)
+                        .map(|i| ComputerSample {
+                            x: x + f64::from(n * 2 + i),
+                            y: 7000.0,
+                            p: 0.5,
+                            ms: now - 2.0 + f64::from(i),
+                        })
+                        .collect()
+                };
+                let begin = ComputerPenInput::Begin {
+                    stroke,
+                    page_index: 0,
+                    style: LiveStyle {
+                        tool: Tool::FeltTip,
+                        color: Rgba::rgb(216, 0, 0),
+                        width: 120.0,
+                    },
+                    samples: samples(0),
+                    now: ms(),
+                };
+                assert!(hub.computer_pen(begin).unwrap());
+                for n in 1..100 {
+                    std::thread::sleep(Duration::from_millis(4));
+                    let points = ComputerPenInput::Points {
+                        stroke,
+                        samples: samples(n),
+                        now: ms(),
+                    };
+                    assert!(hub.computer_pen(points).unwrap());
+                }
+                let end = ComputerPenInput::End {
+                    stroke,
+                    samples: Vec::new(),
+                    now: ms(),
+                };
+                assert!(hub.computer_pen(end).unwrap());
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        })
+    };
+
+    let mut delays = Vec::new();
+    let mut ended = 0;
+    let mut seen_in_progress = 0;
+    let mut started = false;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while ended < STROKES {
+        assert!(Instant::now() < deadline, "the strokes did not arrive");
+        let (message, _) = viewer.next().expect("the stream");
+        let arrival = crate::live::model::wall_now_ms();
+        if message["type"] != "live" {
+            continue;
+        }
+        list.apply(&message);
+        for event in live_events(&message) {
+            let kind = event["type"].as_str().unwrap_or_default();
+            if ["strokeStart", "points", "strokeEnd", "strokeCancel"].contains(&kind) {
+                // Never the tablet's (hidden), never the window's number.
+                assert_eq!(event["pen"], "computer", "{event}");
+                assert!(event.get("id").is_none(), "{event}");
+            }
+            assert_ne!(kind, "history");
+            let points = match kind {
+                "strokeStart" => {
+                    started = true;
+                    event["stroke"]["points"].clone()
+                }
+                "points" => {
+                    if started {
+                        seen_in_progress += 1;
+                    }
+                    event["points"].clone()
+                }
+                "strokeEnd" => {
+                    started = false;
+                    ended += 1;
+                    continue;
+                }
+                _ => continue,
+            };
+            for point in points.as_array().unwrap() {
+                delays.push(arrival - point["recv"].as_f64().unwrap());
+            }
+        }
+    }
+    computer.join().unwrap();
+    let _sink = tablet.join().unwrap();
+    delays.sort_by(f64::total_cmp);
+    let median = delays[delays.len() / 2];
+    println!(
+        "share latency of the computer's pen, hub call to the viewer's socket: median {median:.2} \
+         ms over {} points",
+        delays.len()
+    );
+    // Strokes in progress, not only once finished.
+    assert!(
+        seen_in_progress > 10,
+        "{seen_in_progress} batches of points"
+    );
+    assert!(delays.len() >= 3 * 2 * 100 - 6, "{} points", delays.len());
+    assert!(median < 50.0, "median {median} ms");
+    assert_eq!(list.starts(), [5000.0, 10_000.0, 15_000.0]);
+
+    // Ctrl+Z: the computer's last stroke leaves the viewer too; showing the tablet's layer gives
+    // its ink back through a snapshot.
+    assert!(hub.undo_edit(0).unwrap());
+    next_edit(&mut viewer, &mut list);
+    assert_eq!(list.starts(), [5000.0, 10_000.0]);
+    hub.layers(
+        0,
+        op(json!({ "kind": "visible", "layer": 0, "visible": true })),
+    )
+    .unwrap();
+    let shown = viewer.until("the tablet's layer shown", SOON, |m| {
+        live_events(m).iter().any(|e| e["type"] == "snapshot")
+    });
+    list.apply(&shown);
+    assert_eq!(list.starts().len(), 2 + 21);
+    runtime.stop();
+    hub.stop().unwrap();
 }

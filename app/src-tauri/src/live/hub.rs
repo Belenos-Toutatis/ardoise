@@ -332,7 +332,7 @@ fn page_size_of(options: &StartOptions) -> PageSize {
 /// the stroke they continue (the last event queued, of the same page and pen, and as hidden or
 /// shown: two strokes may be in progress at once), only the latest hover position, view and list
 /// of marks are kept. `strokeCancel` and `history` are never merged.
-fn enqueue(queue: &mut Vec<LiveEvent>, event: LiveEvent) {
+pub(super) fn enqueue(queue: &mut Vec<LiveEvent>, event: LiveEvent) {
     match event {
         LiveEvent::Points {
             page_index,
