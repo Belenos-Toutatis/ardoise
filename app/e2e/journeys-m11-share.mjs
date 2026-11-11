@@ -961,6 +961,26 @@ export const shareJourneys = [
           }
         });
 
+        await check('dans l’éditeur, « Partager sur le réseau » enclenché se lit : texte de l’accent sur fond de l’accent', async () => {
+          // The editor's light background for its own toggles once won over the share button's, leaving white on light grey.
+          const look = await app.evaluate(`(() => {
+            const button = document.querySelector('button[data-action="share"]');
+            const probe = document.createElement('span');
+            probe.style.color = 'var(--accent)';
+            probe.style.backgroundColor = 'var(--accent-text)';
+            button.parentElement.append(probe);
+            const got = getComputedStyle(button);
+            const want = getComputedStyle(probe);
+            const look = { active: button.classList.contains('active'), background: got.backgroundColor, color: got.color, accent: want.color, accentText: want.backgroundColor };
+            probe.remove();
+            return look;
+          })()`);
+          if (!look.active) throw new Error('the share button is not shown as on while the share runs');
+          if (look.background !== look.accent || look.color !== look.accentText) {
+            throw new Error(`the button is ${look.color} on ${look.background}, expected ${look.accentText} on ${look.accent}`);
+          }
+        });
+
         await check('tracer un trait dans l’éditeur : un message « noteStrokes » avec un trait de plus, en moins de 3 s', async () => {
           const mark = stream.mark();
           const box = await app.evaluate(`(() => { const r = document.querySelector('.editor svg.canvas').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
