@@ -1033,3 +1033,48 @@ The rail with the pen, a finger and the mouse on the Surface (38 px tabs, the ti
 Narrator reading the tabs, their badges and the collapsed state (supposé); the 800 × 560 window; the dark theme; the
 focus ring on the tabs; the share button's look inside Projection (`journeys-m11-share.mjs`); Space with a tab focused
 in live mode.
+
+## As built
+
+What differs from the design above, package by package, as merged on `m16` and then corrected by the fixes of the
+independent review (branch `m16-fix`).
+
+**Package A (the rail).** The block look is the `pane-*` classes of `SidePanel.svelte`, all under `:where(.side-pane)`
+(specificity 0 for the defaults, so a block's scoped rule wins). A paper swatch draws its disc from the custom property
+`--swatch` set by the block (`style:--swatch`, `.pane-swatch::before`): the block gives a colour, the rail draws. Fix:
+`.pane-block p` has no margin (the block's gap spaces its paragraphs; the old `.side-section p` rule had gone with the
+sections), at specificity (0,1,1) so a block can still scope its own.
+
+**Package B1 (the editor).** `PagePanel` has three blocks with their own hooks: `data-section="paper"`,
+`"page-format"` and `"turn-crop"`; each paper swatch carries `data-paper="white|cream|kraft|slate|custom"`. The selection
+block above the tab is `section.pane-block[data-section="selection"]`, and « Désélectionner » is now a « ✕ » beside the
+count (`data-action="clear-selection"`, its name and title still `editor.selection.clear`). The count and the « ✕ » sit
+in `div.selection-head` (the fix renamed it from `selection-count`, a class `app.css` already styles for the library's
+bar). `EditorSound.svelte` holds the Son tab. The replay forces Son with `side.open('sound', { persist: false })`: the
+view is shown, not remembered, so closing the editor during a replay keeps the user's own view in the storage (fix;
+`resetReplay()` still gives the kept view back when the replay ends).
+
+**Package B2 (the editor's keys).** As designed.
+
+**Package C (live).** `ProjectorBlock` and `ZoneBlock` are in `components/projection/` with the props of §8
+(`data-section="projector"` and `"zone"`). The blackboard and laser switches are
+`input[data-field="board"|"laser"]` in the zone block's children, next to the toolbar's buttons (which keep
+`[data-action="board"|"laser"]`). The selection bar and the Select and Pen hints above the tab are wrapped in one
+`div.pane-block`, so they are padded like the editor's (fix). Fix in `lib/live-keys.ts`: `checkbox` and `radio` inputs
+are no longer typing targets (like buttons), so once a switch has the focus the live keys go on: Page Down, the arrows,
+B, L, V, P, Ctrl + Z and Esc act, and Space turns the page on key down with its key up cancelled, so the switch is not
+toggled. Consequence: with a checkbox or a radio focused, Space no longer toggles it (a click does); the live window has
+no other checkbox than these two switches.
+
+**Translations.** The keys the design announced as unused are removed (fix): `editor.sidePanel`, `editor.page.label`,
+`editor.page.rotateLabel`, `side.collapsed`, `live.projection.title`, `live.keys.title` and every
+`live.keys.list.<id>.keys` (the help builds the chords from `LIVE_SHORTCUTS`; only the `.action` texts and
+`live.zoom.label` remain). O10: `live.keys.list.quit.action` says only « Quitter Ardoise (après confirmation) »; what
+Ctrl + Q does in the projected window is not listed (the group « Dans la fenêtre projetée » holds only the marks, as
+`LIVE_SHORTCUTS` and its tests say).
+
+**Package D (journeys).** `app/e2e/side-panel.mjs` holds the helpers (`openTab`, `sideState`, `collapsePanel`,
+`checkRecordingDot`); the recording dot is checked in a real window only with `ARDOISE_E2E_MICROPHONE=1`, so that a
+journey never switches the user's microphone on (otherwise a log line says vitest checked it). Fixes: a live check
+clicks a switch, then presses Page Down, the arrow and Space with the focus on it; the editor's replay check reads the
+stored view while the replay runs; the live check measures the padding of the block above the tab.
