@@ -338,18 +338,24 @@ Reste à essayer sur de vraies notes : les crans de tolérance viennent de mains
 
 Ajouté à la demande de l'utilisateur le 2026-11-11 (SPEC §5, `docs/questions.md` Q13), à partir d'une maquette qu'il a validée. M16 range dans le rail ce qui existe déjà ; M17 ajoute les fonctions nouvelles.
 
-- [ ] Un composant commun : le rail d'icônes (Calques, Page, Fond, Son, Projection, Aide) et son panneau ; un clic sur l'onglet ouvert ou sur › replie le panneau, un clic sur une icône le rouvre ; l'onglet ouvert et l'état replié retenus pour chaque fenêtre ; des pastilles (nombre de calques, point orange quand le calque choisi ou celui de la tablette est masqué, point rouge pendant un enregistrement, point bleu pendant une projection ou un partage) ; au clavier ; traductions FR et EN.
-- [ ] Éditeur : le panneau de côté passe dans le rail — Calques ; Page (papier, format de la feuille, tourner et recadrer, original) ; Fond (image ou PDF) ; Son (narration pendant une relecture) ; Projection (partage sur le réseau, qui quitte la barre d'outils) ; Aide. La sélection s'affiche au-dessus de l'onglet ouvert et rouvre le panneau replié.
-- [ ] Fenêtre de commande du direct : le même rail — Calques, ouvert d'office ; Son ; Projection (vidéoprojecteur, zone projetée, tableau noir, pointeur laser, partage) ; Aide. Page et Fond n'y apparaissent qu'avec M17.
-- [ ] Aide : une seule liste des raccourcis de chaque fenêtre, qui sert à l'aide et aux touches elles-mêmes (ou que les tests confrontent aux touches traitées).
-- [ ] Le rafraîchissement de la maquette : titres de blocs discrets, pastilles pour la couleur du papier, interrupteurs pour les options, curseurs avec leur valeur, boutons à icônes ; thème sombre ; fenêtre étroite.
-- [ ] Guides FR et EN, `CHANGELOG.md`.
-- [ ] Relecture indépendante, remarques corrigées.
+- [x] Un composant commun : le rail d'icônes (Calques, Page, Fond, Son, Projection, Aide) et son panneau ; un clic sur l'onglet ouvert ou sur › replie le panneau, un clic sur une icône le rouvre ; l'onglet ouvert et l'état replié retenus pour chaque fenêtre ; des pastilles (nombre de calques, point orange quand le calque choisi ou celui de la tablette est masqué, point rouge pendant un enregistrement, point bleu pendant une projection ou un partage) ; au clavier ; traductions FR et EN.
+- [x] Éditeur : le panneau de côté passe dans le rail — Calques ; Page (papier, format de la feuille, tourner et recadrer, original) ; Fond (image ou PDF) ; Son (narration pendant une relecture) ; Projection (partage sur le réseau, qui quitte la barre d'outils) ; Aide. La sélection s'affiche au-dessus de l'onglet ouvert et rouvre le panneau replié.
+- [x] Fenêtre de commande du direct : le même rail — Calques, ouvert d'office ; Son ; Projection (vidéoprojecteur, zone projetée, tableau noir, pointeur laser, partage) ; Aide. Page et Fond n'y apparaissent qu'avec M17.
+- [x] Aide : une seule liste des raccourcis de chaque fenêtre, qui sert à l'aide et aux touches elles-mêmes (ou que les tests confrontent aux touches traitées).
+- [x] Le rafraîchissement de la maquette : titres de blocs discrets, pastilles pour la couleur du papier, interrupteurs pour les options, curseurs avec leur valeur, boutons à icônes ; thème sombre ; fenêtre étroite.
+- [x] Guides FR et EN, `CHANGELOG.md`.
+- [x] Relecture indépendante, remarques corrigées.
 
 **Critères de fin** :
 - `CHECK OK` et `E2E OK`, les parcours existants passant par les onglets là où leur contenu a déménagé ;
 - un parcours de bout en bout dans chaque fenêtre : chaque onglet montre son contenu, replier puis rouvrir, l'onglet et l'état replié retrouvés à la réouverture, les pastilles (calque masqué, enregistrement, partage), la sélection au-dessus de l'onglet ouvert, le partage lancé depuis l'onglet Projection ;
 - des tests de l'aide : chaque raccourci affiché agit vraiment dans sa fenêtre.
+
+Vérifié sous Windows le 2026-11-11 : `CHECK OK`, `E2E OK` (96 parcours, FR et EN, dont les deux de M16 — éditeur et fenêtre de commande : chaque onglet, repli et réouverture, onglet et état retrouvés, pastilles d'un calque masqué, d'une projection et d'un partage, sélection au-dessus de l'onglet, partage lancé depuis Projection, touches quand un interrupteur a le focus — et les parcours existants passés par les onglets), après une relecture indépendante dont les remarques sont corrigées. Les raccourcis de l'aide viennent d'une seule liste par fenêtre, confrontée dans les deux sens aux touches réellement traitées ; dans l'éditeur, les touches sont passées par une fonction pure sans changer leur comportement.
+
+Trouvé par la relecture et corrigé : dans le direct, un clic sur l'interrupteur « Tableau noir » ou « Pointeur laser » lui laissait le focus, et la télécommande ne tournait plus les pages. Les parcours n'allument jamais le micro du PC (la pastille rouge d'enregistrement est vérifiée par les tests de l'interface ; un vrai enregistrement demande `ARDOISE_E2E_MICROPHONE=1`).
+
+Choix faits en suivant les recommandations de la conception (`docs/design/side-panel.md`, §13), à confirmer à l'usage : le direct s'ouvre sur Calques puis retient le dernier onglet ; le tableau noir et le pointeur laser restent aussi dans la barre d'outils ; une relecture ouvre l'onglet Son et rend l'onglet d'avant à la fin.
 
 ## M17 — Papier et fond en direct, projection de l'éditeur, son pendant qu'on écrit
 
