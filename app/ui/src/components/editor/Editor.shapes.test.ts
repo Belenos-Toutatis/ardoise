@@ -6,6 +6,7 @@
 import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { api, type AppState } from '../../lib/api';
+import type { WindowClose } from '../../lib/editor/window-close';
 import { hline, line } from '../../lib/editor/test-fixtures';
 import { setLocale } from '../../lib/i18n.svelte';
 import type { ShapeStroke, ShapeTuning, Straightened } from '../../lib/ink';
@@ -18,7 +19,22 @@ vi.mock('../VideoExportDialog.svelte', async () => ({
   default: (await import('./VideoExportDialogDouble.svelte')).default,
 }));
 
-const seen = vi.hoisted(() => ({ tunings: [] as (ShapeTuning | undefined)[], results: [] as Straightened[][] }));
+const seen = vi.hoisted(() => ({
+  tunings: [] as (ShapeTuning | undefined)[],
+  results: [] as Straightened[][],
+  /** What the editor gave `onSessionEnding` (Windows ending the session). */
+  sessionEnding: null as (() => void) | null,
+}));
+
+vi.mock('../../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/api')>()),
+  onSessionEnding: async (handler: () => void) => {
+    seen.sessionEnding = handler;
+    return () => {
+      if (seen.sessionEnding === handler) seen.sessionEnding = null;
+    };
+  },
+}));
 
 // The real stroke geometry (the outlines), and a recognition that takes a flat stroke for a line
 // when it is at least `minSizeMm` long (the real one is tested in Rust and in `ink.test.ts`).
@@ -66,6 +82,7 @@ beforeEach(() => {
   setLocale('fr');
   seen.tunings.length = 0;
   seen.results.length = 0;
+  seen.sessionEnding = null;
   saved = vi.spyOn(api, 'setShapes').mockImplementation(async (shapes) => ({ ...app, shapes }));
 });
 
@@ -86,7 +103,21 @@ const wavy = line([
   [4000, 6400],
 ]);
 
-async function render(shapes: Partial<ShapeSettings> = {}, strokes: Stroke[] = [seven, thirty, wavy]) {
+/** A stand-in for the desktop window: `request()` is the user asking to close it. */
+function fakeWindow() {
+  let guard: (() => boolean) | null = null;
+  const destroy = vi.fn(async () => {});
+  const closer: WindowClose = {
+    subscribe: async (g) => {
+      guard = g;
+      return () => {};
+    },
+    destroy,
+  };
+  return { closer, request: () => guard?.() ?? false, destroy };
+}
+
+async function render(shapes: Partial<ShapeSettings> = {}, strokes: Stroke[] = [seven, thirty, wavy], windowClose?: WindowClose) {
   const path = [...mockLibrary().notes.keys()].find((p) => p.includes('Liste de courses'))!;
   const entry = mockLibrary().notes.get(path)!;
   entry.note = { ...entry.note, strokes };
@@ -96,7 +127,7 @@ async function render(shapes: Partial<ShapeSettings> = {}, strokes: Stroke[] = [
   const onchange = vi.fn();
   const component = mount(Editor, {
     target,
-    props: { path, app: { ...app, shapes: { ...DEFAULT_SHAPE_SETTINGS, ...shapes } }, onclose: vi.fn(), onsaved, onchange },
+    props: { path, app: { ...app, shapes: { ...DEFAULT_SHAPE_SETTINGS, ...shapes } }, onclose: vi.fn(), onsaved, onchange, windowClose },
   });
   cleanup = () => {
     unmount(component);
@@ -306,6 +337,40 @@ describe('the count and the preview', () => {
     expect(seen.tunings[seen.tunings.length - 1]).toMatchObject({ minSizeMm: 5 });
   });
 
+  it('books one frame for the changes in between and keeps it, whatever comes meanwhile', async () => {
+    const { selectAll, openPanel, slide, count } = await render();
+    await selectAll();
+    await openPanel();
+    const queue = new Map<number, FrameRequestCallback>();
+    let next = 1;
+    const booked = vi.fn((run: FrameRequestCallback) => {
+      queue.set(next, run);
+      return next++;
+    });
+    vi.stubGlobal('requestAnimationFrame', booked);
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => queue.delete(id));
+    try {
+      const before = seen.tunings.length;
+      for (const value of [9, 8, 7, 6, 5]) await slide('size', value);
+      // A trailing debounce would have booked five frames; a frame booked is kept.
+      expect(booked.mock.calls.length).toBe(1);
+      expect(seen.tunings.length).toBe(before);
+      for (const [id, run] of [...queue]) {
+        queue.delete(id);
+        run(0);
+      }
+      await tick();
+      expect(seen.tunings.length).toBe(before + 1);
+      expect(seen.tunings[seen.tunings.length - 1]).toMatchObject({ minSizeMm: 5 });
+      expect(count()).toBe('Avec ces valeurs : 2 formes sur 3 traits sélectionnés.');
+      // The next change books the next frame.
+      await slide('size', 6);
+      expect(booked.mock.calls.length).toBe(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('gives the recognition the tuning of the panel, an unticked box meaning no alignment', async () => {
     const { selectAll, openPanel, slide, check, count } = await render();
     await selectAll();
@@ -446,6 +511,33 @@ describe('straightening with the values', () => {
   });
 });
 
+describe('numbers in the language of the interface', () => {
+  it('writes a hand-edited decimal minimum size with the decimal comma in French, the point in English', async () => {
+    const { selectAll, openPanel, q, key, notice } = await render({ minSizeMm: 12.5 }, [seven, wavy]);
+    await selectAll();
+    await openPanel();
+    expect(q('[data-slot="size-value"]')?.textContent?.trim()).toBe('12,5 mm');
+    expect(q('[data-slot="size-help"]')?.textContent?.trim()).toBe("Droites et flèches d'au moins 12,5 mm ; cercles, ellipses et rectangles d'au moins 15,5 mm.");
+    await key('Escape');
+    await key('f');
+    expect(notice()).toContain("d'au moins 12,5 mm");
+    expect(notice()).toContain("d'au moins 15,5 mm");
+    expect(notice()).not.toContain('12.5');
+  });
+
+  it('uses the point in English', async () => {
+    setLocale('en');
+    const { selectAll, openPanel, q, key, notice } = await render({ minSizeMm: 12.5 }, [seven, wavy]);
+    await selectAll();
+    await openPanel();
+    expect(q('[data-slot="size-value"]')?.textContent?.trim()).toBe('12.5 mm');
+    await key('Escape');
+    await key('f');
+    expect(notice()).toContain('at least 12.5 mm');
+    expect(notice()).toContain('at least 15.5 mm');
+  });
+});
+
 describe('keeping the values', () => {
   it('keeps them through api.setShapes a moment after the last change, once', async () => {
     const { selectAll, openPanel, slide } = await render();
@@ -480,6 +572,68 @@ describe('keeping the values', () => {
     cleanup?.();
     cleanup = null;
     await vi.waitFor(() => expect(saved).toHaveBeenCalledWith({ ...DEFAULT_SHAPE_SETTINGS, minSizeMm: 12 }));
+  });
+
+  it('holds the window close back while they wait, keeps them, then closes the window', async () => {
+    const win = fakeWindow();
+    const { selectAll, openPanel, slide } = await render({}, undefined, win.closer);
+    // Nothing waits: the window closes at once, as before.
+    expect(win.request()).toBe(false);
+    await selectAll();
+    await openPanel();
+    await slide('size', 6);
+    expect(saved).not.toHaveBeenCalled();
+    // A native close (title-bar X, Alt+F4, Ctrl+Q) inside the delay: it waits for the write.
+    expect(win.request()).toBe(true);
+    expect(win.destroy).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(win.destroy).toHaveBeenCalledTimes(1));
+    expect(saved).toHaveBeenCalledTimes(1);
+    expect(saved).toHaveBeenCalledWith({ ...DEFAULT_SHAPE_SETTINGS, minSizeMm: 6 });
+    // Written before the window went, not after.
+    expect(saved.mock.invocationCallOrder[0]).toBeLessThan(win.destroy.mock.invocationCallOrder[0]);
+  });
+
+  it('holds the window close back while a write is under way, then closes it', async () => {
+    const win = fakeWindow();
+    let finish: () => void = () => {};
+    saved.mockImplementation(async (shapes) => {
+      await new Promise<void>((resolve) => (finish = resolve));
+      return { ...app, shapes };
+    });
+    const { selectAll, openPanel, slide, key } = await render({}, undefined, win.closer);
+    await selectAll();
+    await openPanel();
+    await slide('size', 6);
+    await key('Escape');
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+    expect(win.request()).toBe(true);
+    await tick();
+    expect(win.destroy).not.toHaveBeenCalled();
+    finish();
+    await vi.waitFor(() => expect(win.destroy).toHaveBeenCalledTimes(1));
+  });
+
+  it('closes the window even when the write failed (one try, no loop)', async () => {
+    const win = fakeWindow();
+    saved.mockRejectedValue(new Error('disk full'));
+    const { selectAll, openPanel, slide } = await render({}, undefined, win.closer);
+    await selectAll();
+    await openPanel();
+    await slide('size', 6);
+    expect(win.request()).toBe(true);
+    await vi.waitFor(() => expect(win.destroy).toHaveBeenCalledTimes(1));
+    expect(saved).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps them when Windows ends the session', async () => {
+    const { selectAll, openPanel, slide } = await render();
+    await vi.waitFor(() => expect(seen.sessionEnding).not.toBeNull());
+    await selectAll();
+    await openPanel();
+    await slide('size', 14);
+    expect(saved).not.toHaveBeenCalled();
+    seen.sessionEnding?.();
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledWith({ ...DEFAULT_SHAPE_SETTINGS, minSizeMm: 14 }));
   });
 
   it('finds them again in the next editor, from the app state they were kept in', async () => {

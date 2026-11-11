@@ -867,7 +867,7 @@ flèches d'au moins 1 cm, les cercles, ellipses et rectangles d'au moins 1,3 cm 
 2,5 cm) ressemble à un « O » ou à un « 0 » et reste tel quel. Sélectionnez plutôt les dessins que le texte. Une seule
 action annule tout (`Ctrl + Z`).
 
-**Régler le redressement.** La petite flèche à droite du bouton (**Réglage du redressement**) ouvre un panneau avec
+**Régler le redressement.** Le petit bouton à droite du bouton **Redresser les formes** (**Réglage du redressement**, une icône de réglage) ouvre un panneau avec
 trois réglages :
 
 - **Tolérance** : de **stricte** à **souple**, en cinq crans. Souple redresse aussi les formes tracées moins

@@ -153,7 +153,7 @@ L'utilisateur demande un réglage de la sensibilité de la détection des formes
 
 **Décisions de l'utilisateur (2026-11-11)**, à partir d'une maquette qu'il a validée (`target/maquettes/maquette-redresser.html`, hors de git) :
 - Trois réglages : la tolérance, la taille minimale et l'alignement automatique.
-- Le réglage est à côté du bouton « Redresser les formes » : une flèche à droite du bouton ouvre un panneau.
+- Le réglage est à côté du bouton « Redresser les formes » : un petit bouton à droite du bouton (icône de réglage) ouvre un panneau.
 - Le panneau doit pouvoir se voir en entier : s'il manque de place, il défile à la molette ou au doigt.
 
 **Choix par défaut, proposés avec le texte du SPEC et acceptés** (« Oui, lance-le ») :

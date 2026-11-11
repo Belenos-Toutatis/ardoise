@@ -46,6 +46,19 @@ const selectedCount = (l) => {
   return `(() => { const m = (document.querySelector('.editor-side')?.textContent ?? '').match(new RegExp(${JSON.stringify(source)})); return m ? Number(m[1]) : 0; })()`;
 };
 
+/** The number under `key` in the `[shapes]` table of an `ardoise.toml` text (`5` and `5.0` are the same), or null. */
+function shapesValue(toml, key) {
+  const lines = toml.split(/\r?\n/);
+  const start = lines.findIndex((row) => row.trim() === '[shapes]');
+  if (start < 0) return null;
+  for (const row of lines.slice(start + 1)) {
+    if (row.trim().startsWith('[')) break;
+    const found = row.match(new RegExp(String.raw`^\s*${key}\s*=\s*(-?\d+(?:\.\d+)?)\s*$`));
+    if (found) return Number(found[1]);
+  }
+  return null;
+}
+
 /** A straight line of mouse positions. */
 const line = (x0, y0, x1, y1, n = 30) =>
   Array.from({ length: n + 1 }, (_, i) => ({ x: x0 + ((x1 - x0) * i) / n, y: y0 + ((y1 - y0) * i) / n }));
@@ -250,12 +263,13 @@ export const straightenSettingJourneys = [
         await app.waitFor(`${paths} === ${JSON.stringify(hand)}`, 'the hand-drawn strokes back');
       });
 
-      await check('les valeurs sont écrites dans les réglages d’Ardoise (section [shapes])', async () => {
+      await check('les valeurs sont écrites dans les réglages d’Ardoise (section [shapes], taille minimale 5 mm)', async () => {
         const toml = join(app.dir, 'ardoise.toml');
         const deadline = Date.now() + 5000;
         for (;;) {
-          if (readFileSync(toml, 'utf8').includes('[shapes]')) break;
-          if (Date.now() > deadline) throw new Error('no [shapes] section in ardoise.toml');
+          // The header alone is no proof (it is written with any value): the value the sliders left is.
+          if (shapesValue(readFileSync(toml, 'utf8'), 'min_size_mm') === 5) break;
+          if (Date.now() > deadline) throw new Error(`no min_size_mm = 5 in [shapes] of ardoise.toml:\n${readFileSync(toml, 'utf8')}`);
           await sleep(100);
         }
       });
@@ -273,6 +287,42 @@ export const straightenSettingJourneys = [
         if ((await app.evaluate(value('size'))) !== '5') throw new Error(`the minimum is ${await app.evaluate(value('size'))} mm, not 5`);
         await app.key('Escape');
         await app.waitFor(`document.querySelector(${JSON.stringify(PANEL)}) === null`, 'the closed panel');
+      });
+    },
+  },
+  {
+    name: 'redresser : les valeurs de ardoise.toml sont lues au démarrage',
+    // What an earlier run of the app (or a hand edit) left in the settings file.
+    settings: '[shapes]\nmin_size_mm = 7\ntolerance = 4\nsnap_angle = false\n',
+    async run(app, check) {
+      const l = (key) => text(app.language, key);
+
+      await check('ouvrir une note, puis le panneau de réglage', async () => {
+        await app.waitFor(`document.querySelectorAll('.note-card').length > 0`, 'the demo notes');
+        await app.click('.note-card .card-open');
+        await app.waitFor(`document.querySelector('.editor svg.canvas rect.sheet') !== null`, 'the editor');
+        await app.click(`.toolbar button[title="${l('editor.modes.select')}"]`);
+        await app.click(MORE);
+        await app.waitFor(`document.querySelector(${JSON.stringify(PANEL)}) !== null`, 'the panel');
+      });
+
+      await check('la taille minimale est 7 mm, la tolérance 4 : les valeurs du fichier, pas celles d’origine', async () => {
+        if ((await app.evaluate(value('size'))) !== '7') throw new Error(`the minimum is ${await app.evaluate(value('size'))}, not 7`);
+        const shown = await app.evaluate(`document.querySelector('[data-slot="size-value"]').textContent.trim()`);
+        const expected = l('editor.straighten.settings.size.value').replace('{mm}', '7');
+        if (shown !== expected) throw new Error(`the size reads "${shown}", not "${expected}"`);
+        if ((await app.evaluate(value('tolerance'))) !== '4') throw new Error(`the tolerance is ${await app.evaluate(value('tolerance'))}, not 4`);
+      });
+
+      await check('la case de l’alignement horizontal/vertical est décochée et son curseur grisé, l’autre reste active', async () => {
+        const state = await app.evaluate(`(() => ({
+          angleChecked: document.querySelector('input[data-field="snap-angle"]').checked,
+          angleDisabled: document.querySelector(${JSON.stringify(field('angle'))}).disabled,
+          roundChecked: document.querySelector('input[data-field="snap-round"]').checked,
+          roundDisabled: document.querySelector(${JSON.stringify(field('round'))}).disabled,
+        }))()`);
+        if (state.angleChecked || !state.angleDisabled) throw new Error(`the angle box is ${state.angleChecked ? 'ticked' : 'unticked'}, its slider ${state.angleDisabled ? 'disabled' : 'enabled'}`);
+        if (!state.roundChecked || state.roundDisabled) throw new Error('the round box should stay ticked');
       });
     },
   },

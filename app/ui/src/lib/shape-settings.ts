@@ -75,6 +75,11 @@ export function sameShapeSettings(a: ShapeSettings, b: ShapeSettings): boolean {
 /** How long the panel waits after the last change before it keeps the values, in ms. */
 export const SHAPES_SAVE_DELAY_MS = 300;
 
+/** A value as `locale` writes it, up to two decimals (7,5 in French, 7.5 in English). */
+export function formatShapeNumber(value: number, locale: string): string {
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value);
+}
+
 /** The smallest closed shape (circle, ellipse, rectangle) for a minimum size, in mm. */
 export function closedMinMm(minSizeMm: number): number {
   return minSizeMm + CLOSED_EXTRA_MM;
@@ -87,12 +92,17 @@ export function lettersAtRisk(minSizeMm: number): boolean {
 
 /**
  * Keeps the settings through `save` a moment after the last change (a slider moves through many
- * values), and at once on `flush` (the panel closes, the editor goes away). Only the last values
- * are written; a write that fails is reported to `onerror` and the values stay pending until the
- * next change or flush.
+ * values), and at once on `flush` (the panel closes, the editor goes away, the window closes).
+ * Only the last values are written; a write that fails is reported to `onerror` and its values
+ * stay pending (unless newer ones came meanwhile), so that the next change or flush writes them
+ * again. There is no retry loop beyond that.
  */
 export class ShapesSaver {
   #pending: ShapeSettings | null = null;
+  /** Number of the last `update`: a failed write is put back only while it is still the newest. */
+  #latest = 0;
+  /** Writes started and not finished. */
+  #writing = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #running: Promise<void> = Promise.resolve();
 
@@ -105,6 +115,7 @@ export class ShapesSaver {
   /** Values to keep after the delay (each call restarts it). */
   update(settings: ShapeSettings) {
     this.#pending = settings;
+    this.#latest += 1;
     clearTimeout(this.#timer);
     this.#timer = setTimeout(() => void this.flush(), this.delayMs);
   }
@@ -114,17 +125,28 @@ export class ShapesSaver {
     return this.#pending !== null;
   }
 
+  /** Whether values wait to be written or a write is under way: closing the window then waits for `flush`. */
+  get busy(): boolean {
+    return this.#pending !== null || this.#writing > 0;
+  }
+
   /** Writes the pending values now; resolves once they (and the writes before) are done. */
   flush(): Promise<void> {
     clearTimeout(this.#timer);
     const settings = this.#pending;
     if (settings === null) return this.#running;
+    const number = this.#latest;
     this.#pending = null;
+    this.#writing += 1;
     this.#running = this.#running.then(async () => {
       try {
         await this.save(settings);
       } catch (error) {
+        // Still the newest values and nothing newer waiting: they stay pending for the next flush.
+        if (this.#pending === null && number === this.#latest) this.#pending = settings;
         this.onerror(error);
+      } finally {
+        this.#writing -= 1;
       }
     });
     return this.#running;

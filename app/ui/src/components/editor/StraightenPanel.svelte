@@ -9,9 +9,9 @@
    * the button, it scrolls (wheel, finger) and its buttons stay at its bottom (CSS `sticky`).
    */
   import { onMount } from 'svelte';
-  import { t, tn } from '../../lib/i18n.svelte';
+  import { currentLocale, t, tn } from '../../lib/i18n.svelte';
   import type { ShapeSettings } from '../../lib/note';
-  import { SHAPE_LIMITS, closedMinMm, lettersAtRisk } from '../../lib/shape-settings';
+  import { SHAPE_LIMITS, closedMinMm, formatShapeNumber, lettersAtRisk } from '../../lib/shape-settings';
 
   let {
     id,
@@ -55,6 +55,9 @@
             strokes: tn('editor.straighten.settings.count.strokes', selected),
           }),
   );
+
+  /** A number as the interface language writes it (7,5 in French): a hand-edited file may hold decimals. */
+  const num = (value: number) => formatShapeNumber(value, currentLocale());
 
   const set = (change: Partial<ShapeSettings>) => onchange({ ...settings, ...change });
   const fromInput = (e: Event) => Number((e.currentTarget as HTMLInputElement).value);
@@ -122,7 +125,7 @@
   <div class="field">
     <div class="field-head">
       <label for="{id}-size">{t('editor.straighten.settings.size.label')}</label>
-      <output for="{id}-size" data-slot="size-value">{t('editor.straighten.settings.size.value', { mm: settings.minSizeMm })}</output>
+      <output for="{id}-size" data-slot="size-value">{t('editor.straighten.settings.size.value', { mm: num(settings.minSizeMm) })}</output>
     </div>
     <input
       id="{id}-size"
@@ -131,15 +134,15 @@
       max={SHAPE_LIMITS.minSizeMm[1]}
       step="1"
       value={settings.minSizeMm}
-      aria-valuetext={t('editor.straighten.settings.size.value', { mm: settings.minSizeMm })}
+      aria-valuetext={t('editor.straighten.settings.size.value', { mm: num(settings.minSizeMm) })}
       oninput={(e) => set({ minSizeMm: fromInput(e) })}
     />
     <div class="ends" aria-hidden="true">
-      <span>{t('editor.straighten.settings.size.value', { mm: SHAPE_LIMITS.minSizeMm[0] })}</span>
-      <span>{t('editor.straighten.settings.size.value', { mm: SHAPE_LIMITS.minSizeMm[1] })}</span>
+      <span>{t('editor.straighten.settings.size.value', { mm: num(SHAPE_LIMITS.minSizeMm[0]) })}</span>
+      <span>{t('editor.straighten.settings.size.value', { mm: num(SHAPE_LIMITS.minSizeMm[1]) })}</span>
     </div>
     <p class="help" data-slot="size-help">
-      {t('editor.straighten.settings.size.help', { line: settings.minSizeMm, closed: closedMinMm(settings.minSizeMm) })}
+      {t('editor.straighten.settings.size.help', { line: num(settings.minSizeMm), closed: num(closedMinMm(settings.minSizeMm)) })}
     </p>
     {#if lettersAtRisk(settings.minSizeMm)}
       <p class="warn" role="note" data-slot="size-warning">{t('editor.straighten.settings.size.warning')}</p>
@@ -155,7 +158,7 @@
     <div class="sub">
       <div class="field-head">
         <label for="{id}-angle" class="muted">{t('editor.straighten.settings.snap.angleLimit')}</label>
-        <output for="{id}-angle">{t('editor.straighten.settings.snap.angleValue', { degrees: settings.snapAngleDeg })}</output>
+        <output for="{id}-angle">{t('editor.straighten.settings.snap.angleValue', { degrees: num(settings.snapAngleDeg) })}</output>
       </div>
       <input
         id="{id}-angle"
@@ -165,7 +168,7 @@
         step="1"
         value={settings.snapAngleDeg}
         disabled={!settings.snapAngle}
-        aria-valuetext={t('editor.straighten.settings.snap.angleValue', { degrees: settings.snapAngleDeg })}
+        aria-valuetext={t('editor.straighten.settings.snap.angleValue', { degrees: num(settings.snapAngleDeg) })}
         oninput={(e) => set({ snapAngleDeg: fromInput(e) })}
       />
     </div>
@@ -176,7 +179,7 @@
     <div class="sub">
       <div class="field-head">
         <label for="{id}-round" class="muted">{t('editor.straighten.settings.snap.roundLimit')}</label>
-        <output for="{id}-round">{t('editor.straighten.settings.snap.roundValue', { percent: settings.snapRoundPercent })}</output>
+        <output for="{id}-round">{t('editor.straighten.settings.snap.roundValue', { percent: num(settings.snapRoundPercent) })}</output>
       </div>
       <input
         id="{id}-round"
@@ -186,7 +189,7 @@
         step="1"
         value={settings.snapRoundPercent}
         disabled={!settings.snapRound}
-        aria-valuetext={t('editor.straighten.settings.snap.roundValue', { percent: settings.snapRoundPercent })}
+        aria-valuetext={t('editor.straighten.settings.snap.roundValue', { percent: num(settings.snapRoundPercent) })}
         oninput={(e) => set({ snapRoundPercent: fromInput(e) })}
       />
     </div>

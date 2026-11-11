@@ -868,7 +868,7 @@
       "disabledHint": "Sélectionnez d'abord des traits avec le lasso, puis redressez-les.",
       "doneOne": "1 forme redressée (Ctrl+Z pour annuler).",
       "doneMany": "{count} formes redressées (Ctrl+Z pour annuler).",
-      "none": "Aucune forme reconnue dans la sélection. Ardoise redresse les droites et les flèches d'au moins {line} mm, les cercles, ellipses et rectangles d'au moins {closed} mm, tracés assez nettement (réglage : la flèche à droite du bouton). Sélectionnez les dessins plutôt que le texte : un petit ovale debout (moins de 2,5 cm) ressemble à un O ou à un 0 et ne change pas, comme tout ce qui n'est pas une forme nette.",
+      "none": "Aucune forme reconnue dans la sélection. Ardoise redresse les droites et les flèches d'au moins {line} mm, les cercles, ellipses et rectangles d'au moins {closed} mm, tracés assez nettement (réglage : le petit bouton à droite du bouton). Sélectionnez les dessins plutôt que le texte : un petit ovale debout (moins de 2,5 cm) ressemble à un O ou à un 0 et ne change pas, comme tout ce qui n'est pas une forme nette.",
       "settings": {
         "button": "Réglage du redressement",
         "title": "Redresser les formes",
