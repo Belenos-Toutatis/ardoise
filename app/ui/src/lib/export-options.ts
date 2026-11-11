@@ -1,5 +1,5 @@
 /** The export dialog's choices, remembered on this computer between two exports. */
-import type { ExportFormat, ExportOptions, PageSize } from './note';
+import type { ExportFormat, ExportOptions, Note, PageSize } from './note';
 
 export const DPI_CHOICES = [96, 150, 300] as const;
 export const FORMATS: readonly ExportFormat[] = ['png', 'jpg', 'webp', 'svg', 'pdf'];
@@ -36,20 +36,33 @@ export function largestFittingDpi(
   return candidates.find((dpi) => dpiFits(pages, dpi, format)) ?? null;
 }
 
+/** What SVG and PDF do with the note's layers (`ExportOptions.layers`). */
+export type LayerChoice = 'separate' | 'merged';
+
+/** The formats that can keep the layers apart: SVG (Inkscape layers) and PDF (optional content). */
+export type LayeredFormat = 'svg' | 'pdf';
+
+export function hasLayers(format: ExportFormat): format is LayeredFormat {
+  return format === 'svg' || format === 'pdf';
+}
+
 export interface ExportChoice {
   format: ExportFormat;
   options: ExportOptions;
+  /** One remembered choice per format: their defaults differ (SVG separate, PDF merged, as before the choice existed). */
+  layers: Record<LayeredFormat, LayerChoice>;
 }
 
 export const DEFAULT_CHOICE: ExportChoice = {
   format: 'png',
   options: { dpi: 150, background: true, quality: 90, pdfPage: 'actual' },
+  layers: { svg: 'separate', pdf: 'merged' },
 };
 
 const KEY = 'ardoise.export';
 
 function defaults(): ExportChoice {
-  return { format: DEFAULT_CHOICE.format, options: { ...DEFAULT_CHOICE.options } };
+  return { format: DEFAULT_CHOICE.format, options: { ...DEFAULT_CHOICE.options }, layers: { ...DEFAULT_CHOICE.layers } };
 }
 
 /** The remembered choice, or the default when nothing valid is stored (or storage is blocked). */
@@ -59,6 +72,11 @@ export function loadChoice(): ExportChoice {
     const o = stored?.options;
     if (!stored || !o || !FORMATS.includes(stored.format as ExportFormat)) return defaults();
     const fallback = DEFAULT_CHOICE.options;
+    // A choice stored before the layers existed has none; any word but the two reads the default.
+    const word = (format: LayeredFormat): LayerChoice => {
+      const value = (stored.layers as Partial<Record<LayeredFormat, unknown>> | undefined)?.[format];
+      return value === 'separate' || value === 'merged' ? value : DEFAULT_CHOICE.layers[format];
+    };
     return {
       format: stored.format as ExportFormat,
       options: {
@@ -67,6 +85,7 @@ export function loadChoice(): ExportChoice {
         quality: Number.isInteger(o.quality) && o.quality >= 1 && o.quality <= 100 ? o.quality : fallback.quality,
         pdfPage: o.pdfPage === 'a4' ? 'a4' : 'actual',
       },
+      layers: { svg: word('svg'), pdf: word('pdf') },
     };
   } catch {
     return defaults();
@@ -79,6 +98,22 @@ export function saveChoice(choice: ExportChoice): void {
   } catch {
     // Nothing to remember it with: the next export starts from the defaults.
   }
+}
+
+/**
+ * What the layers of `note` mean for an export: how many visible layers hold ink (a stroke whose layer has no
+ * entry counts as visible, as in the renderer) and whether a hidden layer holds ink.
+ */
+export function layerInk(note: Note): { visible: number; hidden: boolean } {
+  const visible = new Set<number>();
+  let hidden = false;
+  for (const stroke of note.strokes) {
+    if (stroke.points.length === 0) continue;
+    const layer = note.layers[stroke.layer];
+    if (!layer || layer.visible) visible.add(stroke.layer);
+    else hidden = true;
+  }
+  return { visible: visible.size, hidden };
 }
 
 /** File name of a note's export: the note file's name without `.ardoise`. */

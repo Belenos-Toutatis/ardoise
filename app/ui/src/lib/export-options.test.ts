@@ -1,5 +1,20 @@
-import { describe, expect, it } from 'vitest';
-import { FORMATS, MAX_IMAGE_SIDE, MAX_WEBP_SIDE, dpiFits, imageSide, isRaster, largestFittingDpi } from './export-options';
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  DEFAULT_CHOICE,
+  FORMATS,
+  MAX_IMAGE_SIDE,
+  MAX_WEBP_SIDE,
+  dpiFits,
+  hasLayers,
+  imageSide,
+  isRaster,
+  largestFittingDpi,
+  layerInk,
+  loadChoice,
+  saveChoice,
+} from './export-options';
+import type { Note, Stroke } from './note';
 
 const A4 = { width: 29700, height: 21600 };
 /** 3 m wide: 17 717 px at 150 dpi, 11 339 px at 96 dpi, 8 504 px at 72 dpi. */
@@ -47,5 +62,100 @@ describe('raster size limit', () => {
     expect(largestFittingDpi([WIDE], candidates)).toBe(96);
     expect(largestFittingDpi([HUGE], candidates)).toBe(72);
     expect(largestFittingDpi([GIANT], candidates)).toBeNull();
+  });
+});
+
+describe('remembered choice', () => {
+  const KEY = 'ardoise.export';
+  beforeEach(() => localStorage.clear());
+  const stored = (layers?: unknown) => ({
+    format: 'pdf',
+    options: { dpi: 300, background: false, quality: 70, pdfPage: 'a4' },
+    ...(layers === undefined ? {} : { layers }),
+  });
+
+  it('starts from the defaults: SVG separate, PDF merged, as the files were before the choice', () => {
+    expect(DEFAULT_CHOICE.layers).toEqual({ svg: 'separate', pdf: 'merged' });
+    expect(loadChoice()).toEqual(DEFAULT_CHOICE);
+    // Each load gives its own object.
+    loadChoice().layers.svg = 'merged';
+    expect(loadChoice().layers.svg).toBe('separate');
+    expect(DEFAULT_CHOICE.layers.svg).toBe('separate');
+  });
+
+  it('keeps one choice per format', () => {
+    saveChoice({ ...DEFAULT_CHOICE, format: 'svg', layers: { svg: 'merged', pdf: 'separate' } });
+    const choice = loadChoice();
+    expect(choice.format).toBe('svg');
+    expect(choice.layers).toEqual({ svg: 'merged', pdf: 'separate' });
+  });
+
+  it('reads the defaults for a choice stored before the layers existed, or with another word', () => {
+    localStorage.setItem(KEY, JSON.stringify(stored()));
+    const old = loadChoice();
+    expect(old.options).toEqual({ dpi: 300, background: false, quality: 70, pdfPage: 'a4' });
+    expect(old.layers).toEqual({ svg: 'separate', pdf: 'merged' });
+
+    localStorage.setItem(KEY, JSON.stringify(stored({ svg: 'both', pdf: 'separate' })));
+    expect(loadChoice().layers).toEqual({ svg: 'separate', pdf: 'separate' });
+    localStorage.setItem(KEY, JSON.stringify(stored({ svg: 3, pdf: null })));
+    expect(loadChoice().layers).toEqual({ svg: 'separate', pdf: 'merged' });
+    for (const garbage of ['x', 7, [], true]) {
+      localStorage.setItem(KEY, JSON.stringify(stored(garbage)));
+      expect(loadChoice().layers).toEqual({ svg: 'separate', pdf: 'merged' });
+    }
+  });
+
+  it('knows which formats can keep layers apart', () => {
+    expect(FORMATS.filter(hasLayers)).toEqual(['svg', 'pdf']);
+  });
+});
+
+describe('layers of a note at export', () => {
+  const stroke = (layer: number, points = 3): Stroke => ({
+    tool: 'ballpoint',
+    color: { r: 0, g: 0, b: 0, a: 255 },
+    width: 60,
+    layer,
+    points: Array.from({ length: points }, (_, i) => ({ x: i, y: i, pressure: 1, t: i })),
+  });
+  const note = (layers: [string, boolean][], strokes: Stroke[]) =>
+    ({ layers: layers.map(([name, visible]) => ({ name, visible })), strokes }) as unknown as Note;
+
+  it('counts the visible layers that hold ink, and tells when a hidden one does', () => {
+    expect(layerInk(note([['A', true]], [stroke(0)]))).toEqual({ visible: 1, hidden: false });
+    expect(
+      layerInk(
+        note(
+          [
+            ['A', true],
+            ['B', true],
+          ],
+          [stroke(0), stroke(0), stroke(1)],
+        ),
+      ),
+    ).toEqual({ visible: 2, hidden: false });
+    expect(
+      layerInk(
+        note(
+          [
+            ['A', true],
+            ['B', false],
+          ],
+          [stroke(0), stroke(1)],
+        ),
+      ),
+    ).toEqual({ visible: 1, hidden: true });
+  });
+
+  it('ignores a layer without ink, and counts a stroke whose layer has no entry as visible', () => {
+    const two: [string, boolean][] = [
+      ['A', true],
+      ['B', true],
+    ];
+    expect(layerInk(note(two, [stroke(0)])).visible).toBe(1);
+    expect(layerInk(note([['A', true], ['B', false]], [stroke(0), stroke(1, 0)]))).toEqual({ visible: 1, hidden: false });
+    expect(layerInk(note([['A', true]], [stroke(0), stroke(4)])).visible).toBe(2);
+    expect(layerInk(note([], []))).toEqual({ visible: 0, hidden: false });
   });
 });
