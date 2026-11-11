@@ -71,3 +71,62 @@ export function sameShapeSettings(a: ShapeSettings, b: ShapeSettings): boolean {
     a.snapRoundPercent === b.snapRoundPercent
   );
 }
+
+/** How long the panel waits after the last change before it keeps the values, in ms. */
+export const SHAPES_SAVE_DELAY_MS = 300;
+
+/** The smallest closed shape (circle, ellipse, rectangle) for a minimum size, in mm. */
+export function closedMinMm(minSizeMm: number): number {
+  return minSizeMm + CLOSED_EXTRA_MM;
+}
+
+/** Whether a minimum size is small enough for handwriting to be straightened too. */
+export function lettersAtRisk(minSizeMm: number): boolean {
+  return minSizeMm < LETTERS_AT_RISK_BELOW_MM;
+}
+
+/**
+ * Keeps the settings through `save` a moment after the last change (a slider moves through many
+ * values), and at once on `flush` (the panel closes, the editor goes away). Only the last values
+ * are written; a write that fails is reported to `onerror` and the values stay pending until the
+ * next change or flush.
+ */
+export class ShapesSaver {
+  #pending: ShapeSettings | null = null;
+  #timer: ReturnType<typeof setTimeout> | undefined;
+  #running: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly save: (settings: ShapeSettings) => Promise<unknown>,
+    private readonly onerror: (error: unknown) => void = () => {},
+    private readonly delayMs = SHAPES_SAVE_DELAY_MS,
+  ) {}
+
+  /** Values to keep after the delay (each call restarts it). */
+  update(settings: ShapeSettings) {
+    this.#pending = settings;
+    clearTimeout(this.#timer);
+    this.#timer = setTimeout(() => void this.flush(), this.delayMs);
+  }
+
+  /** Whether values wait to be written. */
+  get pending(): boolean {
+    return this.#pending !== null;
+  }
+
+  /** Writes the pending values now; resolves once they (and the writes before) are done. */
+  flush(): Promise<void> {
+    clearTimeout(this.#timer);
+    const settings = this.#pending;
+    if (settings === null) return this.#running;
+    this.#pending = null;
+    this.#running = this.#running.then(async () => {
+      try {
+        await this.save(settings);
+      } catch (error) {
+        this.onerror(error);
+      }
+    });
+    return this.#running;
+  }
+}

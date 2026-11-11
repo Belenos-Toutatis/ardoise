@@ -4,8 +4,9 @@
   import type { EraserMode, Mode, ToolSettings } from '../../lib/editor/state';
   import { t } from '../../lib/i18n.svelte';
   import { TOOLS, type Tool } from '../../lib/ink';
-  import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
+  import { INKSPACE_COLORS, cssColor, type Rgba, type ShapeSettings } from '../../lib/note';
   import ShareButton from '../share/ShareButton.svelte';
+  import StraightenPanel from './StraightenPanel.svelte';
 
   let {
     tools,
@@ -33,6 +34,13 @@
     onvideo,
     onresume,
     onstraighten,
+    shapes,
+    shapesOpen = false,
+    shapesSelected = 0,
+    shapesFound = 0,
+    onshapesopen,
+    onshapes,
+    onshapesdefaults,
   }: {
     tools: ToolSettings;
     customColors: Rgba[];
@@ -69,7 +77,36 @@
     resumeHint?: string | null;
     /** "Redresser les formes" on the selection. */
     onstraighten?: () => void;
+    /** The setting of "Redresser les formes" (M15); the panel next to its button changes it. */
+    shapes: ShapeSettings;
+    /** The setting's panel is open. */
+    shapesOpen?: boolean;
+    /** How many strokes are selected, and how many shapes they give with `shapes` (the panel says it). */
+    shapesSelected?: number;
+    shapesFound?: number;
+    /** The panel opens or closes (the small button, or a click outside it). */
+    onshapesopen?: (open: boolean) => void;
+    onshapes?: (next: ShapeSettings) => void;
+    onshapesdefaults?: () => void;
   } = $props();
+
+  let split = $state<HTMLDivElement>();
+  let shapesButton = $state<HTMLButtonElement>();
+
+  /** Puts the focus back on the small button (the panel closed with Escape). */
+  export function focusShapesButton() {
+    shapesButton?.focus();
+  }
+
+  // A press anywhere outside the button and its panel closes the panel.
+  $effect(() => {
+    if (!shapesOpen) return;
+    const away = (e: Event) => {
+      if (split && e.target instanceof Node && !split.contains(e.target)) onshapesopen?.(false);
+    };
+    window.addEventListener('pointerdown', away, true);
+    return () => window.removeEventListener('pointerdown', away, true);
+  });
 
   const MODES: { mode: Mode; icon: string }[] = [
     { mode: 'select', icon: '⬚' },
@@ -200,17 +237,50 @@
     </div>
     {#if tools.mode === 'select'}
       <div class="group">
-        <button
-          type="button"
-          class="button small-button"
-          data-action="straighten"
-          disabled={locked || !hasSelection}
-          title={hasSelection ? t('editor.straighten.hint') : t('editor.straighten.disabledHint')}
-          onclick={() => onstraighten?.()}
-        >
-          <span aria-hidden="true">△</span>
-          {t('editor.straighten.button')}
-        </button>
+        <!-- The split button: straighten on the left, its setting on the right (M15). -->
+        <div class="split" bind:this={split}>
+          <button
+            type="button"
+            class="button small-button"
+            data-action="straighten"
+            disabled={locked || !hasSelection}
+            title={hasSelection ? t('editor.straighten.hint') : t('editor.straighten.disabledHint')}
+            onclick={() => onstraighten?.()}
+          >
+            <span aria-hidden="true">△</span>
+            {t('editor.straighten.button')}
+          </button>
+          <button
+            bind:this={shapesButton}
+            type="button"
+            class="button small-button more"
+            data-action="straighten-settings"
+            aria-expanded={shapesOpen}
+            aria-controls="straighten-panel"
+            aria-haspopup="dialog"
+            disabled={locked}
+            title={t('editor.straighten.settings.button')}
+            aria-label={t('editor.straighten.settings.button')}
+            onclick={() => onshapesopen?.(!shapesOpen)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+              <circle cx="16" cy="7" r="2" />
+              <circle cx="10" cy="17" r="2" />
+            </svg>
+          </button>
+          {#if shapesOpen && onshapes}
+            <StraightenPanel
+              id="straighten-panel"
+              settings={shapes}
+              selected={shapesSelected}
+              found={shapesFound}
+              onchange={onshapes}
+              ondefaults={() => onshapesdefaults?.()}
+              onapply={() => onstraighten?.()}
+            />
+          {/if}
+        </div>
       </div>
       <p class="group label select-help">{t('editor.selectHelp')}</p>
     {/if}
@@ -269,6 +339,9 @@
 
 <style>
   .toolbar {
+    /* Above the page: the setting's panel hangs under the toolbar. */
+    position: relative;
+    z-index: 3;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -369,6 +442,33 @@
 
   .share {
     margin-left: auto;
+  }
+
+  .split {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .split > .button:first-child {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .split .more {
+    padding: 0.25rem 0.45rem;
+    border-left: 0;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+
+  .split .more[aria-expanded='true'] {
+    background: var(--surface-2);
+    color: var(--accent);
+  }
+
+  .split .more svg {
+    width: 1rem;
+    height: 1rem;
   }
 
   .visually-hidden {
