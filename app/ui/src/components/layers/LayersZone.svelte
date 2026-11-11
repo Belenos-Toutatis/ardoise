@@ -111,8 +111,9 @@
   }
 </script>
 
-<section bind:this={zone} class="layers-zone" data-section="layers" data-where={where} aria-labelledby={titleId}>
-  <h3 id={titleId}>{t('layers.title')}</h3>
+<section bind:this={zone} class="layers-zone pane-block" data-section="layers" data-where={where} aria-labelledby={titleId}>
+  <!-- The pane's title already says « Calques »: the heading stays for the section's name, out of sight. -->
+  <h3 id={titleId} class="visually-hidden">{t('layers.title')}</h3>
   <ul class="layers" aria-label={t('layers.list')}>
     {#each rows as { index, layer } (index)}
       {@const isChosen = index === chosen}
@@ -268,11 +269,9 @@
   .layers-zone {
     --zone-warn: #b54708;
     --zone-warn-bg: #fef0c7;
+    /* The block's padding, gap and rule are the pane's (`.pane-block`, SidePanel.svelte). */
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.85rem 1rem;
-    border-bottom: 1px solid var(--border);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -285,11 +284,6 @@
   :global(:root[data-theme='dark']) .layers-zone {
     --zone-warn: #fdb022;
     --zone-warn-bg: #3b2a0b;
-  }
-
-  h3 {
-    margin: 0;
-    font-size: 0.95rem;
   }
 
   .layers {
