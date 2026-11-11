@@ -164,7 +164,8 @@ export const exportLayersJourneys = [
         if ((await checked(app, 'merged')) !== true) throw new Error('the SVG choice was not remembered');
         await chooseFormat(app, 'pdf');
         if ((await checked(app, 'separate')) !== true) throw new Error('the PDF choice was lost');
-        await app.click('[role="dialog"] .actions button', l('common.close'));
+        // Nothing was exported since the dialog opened: its button says « Annuler » (« Fermer » only after an export).
+        await app.click('[role="dialog"] .actions button', l('library.cancel'));
         await app.waitFor(`document.querySelector('[role="dialog"]') === null`, 'the export dialog closed');
       });
     },
