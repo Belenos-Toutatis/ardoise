@@ -90,3 +90,51 @@ describe('chordParts', () => {
     expect(chordParts({ key: 'F4', ctrl: true })).toEqual(['Ctrl', 'F4']);
   });
 });
+
+describe('chordParts: the help in both languages', () => {
+  beforeEach(() => setLocale('fr'));
+
+  it('writes the arrows, the paging keys and the editing keys the same way in a chord and alone', () => {
+    expect(chordParts({ key: 'ArrowRight', alt: true })).toEqual(['Alt', '→']);
+    expect(chordParts({ key: 'ArrowUp', shift: true })).toEqual(['Maj', '↑']);
+    expect(chordParts({ key: 'ArrowDown' })).toEqual(['↓']);
+    expect(chordParts({ key: 'PageUp' })).toEqual(['Pg préc']);
+    expect(chordParts({ key: 'Backspace', ctrl: true })).toEqual(['Ctrl', 'Retour arrière']);
+    expect(chordParts({ key: 'Spacebar' })).toEqual(['Espace']);
+    setLocale('en');
+    expect(chordParts({ key: 'PageUp' })).toEqual(['Page Up']);
+    expect(chordParts({ key: 'Delete', ctrl: true })).toEqual(['Ctrl', 'Delete']);
+    expect(chordParts({ key: 'Backspace' })).toEqual(['Backspace']);
+    expect(chordParts({ key: 'ArrowLeft', alt: true })).toEqual(['Alt', '←']);
+  });
+
+  it('lists Ctrl, Alt, Shift in that order, and shows a key that has a code the way its character reads', () => {
+    expect(chordParts({ key: 'à', code: 'Digit0', ctrl: true, alt: true, shift: true })).toEqual(['Ctrl', 'Alt', 'Maj', 'À']);
+    expect(chordParts({ key: '0', code: 'Numpad0', ctrl: true })).toEqual(['Ctrl', '0']);
+  });
+});
+
+describe('chordMatches and chordEvents agree', () => {
+  it('matches every press chordEvents builds for the chord, and no press with another modifier', () => {
+    const chords = [
+      { key: 'z', ctrl: true },
+      { key: 'z', ctrl: true, shift: true },
+      { key: '+', shift: 'any' as const },
+      { key: ' ' },
+      { key: 'à', code: 'Digit0', ctrl: true, shift: 'any' as const },
+      { key: 'ArrowLeft', alt: true },
+    ];
+    for (const chord of chords) {
+      for (const press of chordEvents(chord)) expect(chordMatches(chord, press), JSON.stringify(chord)).toBe(true);
+    }
+    const plain = chordEvents({ key: 'z' })[0];
+    expect(chordMatches({ key: 'z', ctrl: true }, plain)).toBe(false);
+    expect(chordMatches({ key: 'z', ctrl: true }, { ...plain, ctrlKey: true, altKey: true })).toBe(false);
+  });
+
+  it('builds a Ctrl press on a letter as a lower-case key, and a Shift one upper-case', () => {
+    expect(chordEvents({ key: 'Z', ctrl: true })[0].key).toBe('z');
+    expect(chordEvents({ key: 'z', ctrl: true, shift: true })[0].key).toBe('Z');
+    expect(chordEvents({ key: 'Escape' })[0]).toMatchObject({ key: 'Escape', code: 'Escape', shiftKey: false });
+  });
+});
