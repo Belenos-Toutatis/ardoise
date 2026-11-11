@@ -97,10 +97,20 @@ export class LiveSelection {
   /**
    * Drops the selection when the page or its revision is not the one it was chosen at (the page
    * turned, an edit or an undo moved the indices). A change of colour and the tablet's writing do
-   * not change the revision.
+   * not change the revision. Strokes of a layer hidden since leave the selection (M14, as in the
+   * editor): the session refuses to edit a hidden stroke, and nothing would show what is chosen.
    */
   follow(source: SelectionSource): void {
-    if (this.indices.length > 0 && !this.stillValid(source)) this.clear();
+    if (this.indices.length === 0) return;
+    if (!this.stillValid(source)) {
+      this.clear();
+      return;
+    }
+    const shown = this.indices.filter((index) => {
+      const stroke = source.strokes[index];
+      return stroke === undefined || source.layers[stroke.layer]?.visible !== false;
+    });
+    if (shown.length !== this.indices.length) this.indices = shown;
   }
 
   private stillValid(source: SelectionSource): boolean {

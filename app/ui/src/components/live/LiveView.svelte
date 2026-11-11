@@ -26,7 +26,9 @@
    * the tool (`LiveComputer`: one queue for every command acting on the page, so that they reach Rust in
    * order). The side panel opens on the layers zone (`LayersZone`, `live_layers`): a click chooses the layer
    * the computer acts on, the tablet icon the one the tablet writes on. Choosing another layer drops the
-   * selection; Ctrl+Z waits for a gesture under way to end; Esc drops it first.
+   * selection, hiding a layer drops its strokes from it; Ctrl+Z waits for a gesture under way to end (and goes
+   * once the stroke just written is recorded); Esc drops it first. A merge, which Ctrl+Z cannot undo, is asked
+   * first. « Undo the clearing » goes through the same queue, after the strokes and erasings asked for before.
    */
   import { onMount, untrack } from 'svelte';
   import { api, errorMessage, type AppState } from '../../lib/api';
@@ -38,6 +40,7 @@
   import type { LiveCommandKind, LiveLayerOp, LiveStopped, LiveStyle, LiveViewState, MonitorInfo, SheetFork } from '../../lib/live';
   import { LiveComputer } from '../../lib/live-computer';
   import { loadComputerStyle, saveComputerStyle } from '../../lib/live-computer-style';
+  import { computerErrorText } from '../../lib/live-errors';
   import {
     changeView,
     runKeyAction,
@@ -144,8 +147,10 @@
     live,
     commands: api,
     style: () => computerStyle,
-    onerror: (error) => (notice = errorMessage(error)),
+    onerror: (error, from) => (notice = computerErrorText(error, from)),
   });
+  /** A merge of the layers zone waiting for its answer (Ctrl+Z cannot undo it). */
+  let mergeAsk = $state.raw<{ layer: number; upper: string; lower: string; reveals: boolean } | null>(null);
 
   let ink = $state.raw<Ink | null>(null);
   let starting = $state(true);
@@ -273,6 +278,11 @@
   $effect(() => {
     void live.pageIndex;
     dropUndo();
+  });
+
+  // Nothing left to undo (a merge dropped the page's history): the clearing cannot come back either.
+  $effect(() => {
+    if (!live.canUndo) untrack(dropUndo);
   });
 
   onMount(() => {
@@ -510,10 +520,12 @@
     undoClear = false;
   }
 
+  /** « Undo the clearing »: through the queue, after the strokes and erasings asked for before it. */
   async function undoClearing() {
     dropUndo();
+    computer.historyQueued();
     try {
-      if (!(await api.liveRestoreCleared())) notice = t('live.clearUndoFailed');
+      if (!(await computer.queue.run(() => api.liveRestoreCleared()))) notice = t('live.clearUndoFailed');
     } catch (error) {
       notice = errorMessage(error);
     }
@@ -562,7 +574,9 @@
   function undoEdit(again = false) {
     // A gesture under way commits after the step it would undo: Ctrl+Z waits for it to end.
     if (computer.busy) return;
-    if (again ? !live.canRedo : !live.canUndo) return;
+    // The stroke just written is a step once its `end` is recorded: the undo goes after it in the queue.
+    if (again ? !live.canRedo : !live.canUndo && !computer.strokeEnding) return;
+    computer.historyQueued();
     void stepHistory(touchUp, again);
   }
 
@@ -593,7 +607,24 @@
   function layerOp(op: LiveLayerOp) {
     notice = null;
     const pageIndex = live.pageIndex;
-    computer.queue.run(() => api.liveLayers(pageIndex, op)).catch((error: unknown) => (notice = errorMessage(error)));
+    computer.queue.run(() => api.liveLayers(pageIndex, op)).catch((error: unknown) => (notice = computerErrorText(error, 'layers')));
+  }
+
+  /**
+   * « ⤓ »: asks first. Ctrl+Z cannot undo a merge during live (it drops the page's history), and merging a shown
+   * layer into a hidden one shows the hidden ink at once, on the projector and on the share.
+   */
+  function askMerge(layer: number) {
+    const upper = live.layers[layer];
+    const lower = live.layers[layer - 1];
+    if (!upper || !lower) return;
+    mergeAsk = { layer, upper: upper.name, lower: lower.name, reveals: !lower.visible && upper.visible };
+  }
+
+  function confirmMerge() {
+    const ask = mergeAsk;
+    mergeAsk = null;
+    if (ask) layerOp({ kind: 'merge', layer: ask.layer });
   }
 
   /** The pen came down on a hidden layer: nothing is written, and the window says why. */
@@ -687,7 +718,7 @@
 
   function onkeydown(e: KeyboardEvent) {
     // The question about ending live mode has its own keys.
-    if (e.defaultPrevented || confirmLeave || confirmQuit || share.panelOpen) return;
+    if (e.defaultPrevented || confirmLeave || confirmQuit || mergeAsk || share.panelOpen) return;
     if (e.key === 'Escape') {
       // Esc drops a gesture of the computer's pen or eraser under way before anything else, then closes
       // the computer's ink panel.
@@ -717,7 +748,7 @@
 
   /** Space is "next page" already on key down: a focused button must not also be pressed on key up. */
   function onkeyup(e: KeyboardEvent) {
-    if (isSpaceKey(e.key) && !confirmLeave && !confirmQuit && !share.panelOpen && !isTypingTarget(e.target)) e.preventDefault();
+    if (isSpaceKey(e.key) && !confirmLeave && !confirmQuit && !mergeAsk && !share.panelOpen && !isTypingTarget(e.target)) e.preventDefault();
   }
 
   const mm = (units: number) => (units / 100).toFixed(units < 100 ? 2 : 1);
@@ -1060,7 +1091,7 @@
         onvisible={(layer, visible) => layerOp({ kind: 'visible', layer, visible })}
         onrename={(layer, name) => layerOp({ kind: 'rename', layer, name })}
         onmove={(from, to) => layerOp({ kind: 'move', from, to })}
-        onmerge={(layer) => layerOp({ kind: 'merge', layer })}
+        onmerge={askMerge}
         onadd={() => layerOp({ kind: 'add' })}
       />
 
@@ -1201,6 +1232,25 @@
           }}
         >
           {t('live.leave.confirm')}
+        </button>
+      </div>
+    </Modal>
+  {/if}
+
+  {#if mergeAsk}
+    <Modal title={t('live.merge.title', { upper: mergeAsk.upper, lower: mergeAsk.lower })} role="alertdialog" onclose={() => (mergeAsk = null)}>
+      <div data-slot="merge-question">
+        <p>{t('live.merge.noUndo')}</p>
+        {#if mergeAsk.reveals}
+          <p data-slot="merge-reveals">{t('live.merge.hidden', { lower: mergeAsk.lower })}</p>
+        {/if}
+      </div>
+      <div class="actions">
+        <button type="button" class="button primary" data-autofocus data-action="merge-cancel" onclick={() => (mergeAsk = null)}>
+          {t('live.merge.cancel')}
+        </button>
+        <button type="button" class="button danger" data-action="merge-confirm" onclick={confirmMerge}>
+          {t('live.merge.confirm')}
         </button>
       </div>
     </Modal>

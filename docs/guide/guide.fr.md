@@ -396,7 +396,8 @@ ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tab
 - Un doigt et la molette continuent de déplacer et de zoomer l'aperçu.
 - Les traits choisis sont entourés de bleu dans l'aperçu. Une barre dit « Traits sélectionnés : 3 ».
 - **Seuls les traits du calque choisi sont pris** (zone **Calques**, voir plus bas) ; choisir un autre calque enlève la
-  sélection. On ne peut pas choisir le trait que la tablette est en train d'écrire, ni les traits d'un calque masqué.
+  sélection. On ne peut pas choisir le trait que la tablette est en train d'écrire, ni les traits d'un calque masqué ;
+  masquer un calque enlève ses traits de la sélection.
   Sur une feuille reprise, on peut choisir les anciens traits de la feuille, en choisissant leur calque.
 
 **Supprimer** : cliquez sur **Supprimer** dans la barre, ou appuyez sur `Suppr` ou `Retour arrière`.
@@ -491,7 +492,10 @@ tablette ; l'ordinateur reste où il est.
 - Le *crayon* renomme : `Entrée` garde le nouveau nom, `Échap` rend l'ancien.
 - Sur la ligne choisie seulement, **↑** et **↓** montent et descendent le calque, et **⤓** le fusionne avec le calque
   du dessous. **Fusionner pendant le direct ne s'annule pas** : `Ctrl + Z` ne le défait pas, et la liste des
-  annulations de la page est vidée (celles des autres pages ne sont pas touchées).
+  annulations de la page est vidée (celles des autres pages ne sont pas touchées ; **Annuler l'effacement** disparaît
+  aussi). Ardoise demande donc d'abord : « Fusionner « … » avec « … » ? Ctrl+Z ne pourra pas l'annuler. », avec
+  **Fusionner** et **Annuler** (`Échap` répond **Annuler**). Si le calque du dessous est masqué, la question le dit
+  aussi : une fois fusionné, son contenu sera projeté et partagé (le calque fusionné est affiché).
 - **Ajouter un calque** en crée un nouveau, en haut.
 - Les boutons de la zone sont grisés quand le mode direct n'est pas en cours.
 

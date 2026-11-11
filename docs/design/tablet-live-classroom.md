@@ -1110,15 +1110,31 @@ DOM, relied upon by the tests and journeys of every package:
   session ended the first, and both are drawn until `lastComputerDone` reaches them. Given, it replaces Rust's copy;
   an empty list hides it (a cancelled gesture, until its `strokeCancel` comes). `Scene.computer` holds what is drawn;
   `SceneOptions.eraser` / `Scene.eraser` is the ring (`ERASER_RING_PX`, 18, the marks' eraser), preview only.
-- `ComputerPen` keeps one call of the gesture in flight and at most one waiting in the queue; the waiting call takes the
-  samples (at most `MAX_PEN_SAMPLES`) and `now` when it leaves. So `end` is queued as soon as the pen is lifted, before
-  a Ctrl+Z pressed after it. A gesture cancelled before its `begin` left sends nothing. A `false` answer, a refusal or a
-  page or note change drops the local stroke at once (Rust's copy, if any, then shows until its `strokeEnd`).
+- `ComputerPen` keeps one call of the gesture in flight while the pen moves, and one queued that takes the samples (at
+  most `MAX_PEN_SAMPLES`) and `now` when it leaves. When the pen is lifted, every call still needed (the chunks of what
+  is pending, then `end`) is queued at once, so that a Ctrl+Z pressed after it comes after the `end` even after an IPC
+  stall (review, finding 5). A gesture cancelled before its `begin` left sends nothing. A `false` answer, a refusal or a
+  page or note change drops the local stroke at once (Rust's copy, if any, then shows until its `strokeEnd`). The window
+  going away (`dispose`) **cancels** a gesture under way, as a lost pointer capture does: the pen was not lifted, and an
+  interrupted stroke is no ink the teacher meant; a lifted stroke's `end` still leaves (finding 7).
 - `ComputerEraser` skips, when its call leaves, the strokes gone meanwhile and those of a layer hidden since (Rust would
-  refuse the whole delete); a stale call is tried again after the next notification of the `LiveState`, at most
-  `STALE_RETRIES` (3) times, silently. Groups come from `nextGroup()`, from a random value in 1..2^31 drawn at load.
-- `LiveComputer.busy` (a pen or eraser gesture under way) makes Ctrl+Z, Ctrl+Y and the Undo / Redo buttons wait. The
-  layer ops read `pageIndex` at the click and go through the queue; every refusal shows in the window's notice.
+  refuse the whole delete). Each delete's answer (the page's new revision) is kept: until the window's list has caught
+  up, the next delete of the eraser is made at that revision, on the window's list less the strokes it deleted (no stale
+  answer between two deletes of a fast gesture). A stale call is tried again at once when the window's revision moved
+  meanwhile, else after the next notification of the `LiveState` (at most `STALE_WAIT_MS`, 2 s), at most
+  `STALE_RETRIES` (3) times, silently (finding 2). Groups come from `nextGroup()`, from a random value in 1..2^31 drawn
+  at load.
+- `LiveComputer.busy` (a pen or eraser gesture under way, or an eraser retry not sent yet) makes Ctrl+Z, Ctrl+Y and the
+  Undo / Redo buttons wait; `historyQueued()`, called before an undo, a redo or « Undo the clearing » is queued, drops
+  the retries not sent. `strokeEnding` (a lifted stroke whose `end` the session has not recorded) lets Ctrl+Z through
+  though `canUndo` is still false: the undo goes after the `end` (finding 4). « Undo the clearing » goes through the
+  queue (finding 1), and its offer goes when `canUndo` turns false (a merge dropped the history). The layer ops read
+  `pageIndex` at the click and go through the queue. Refusals of the pen, the eraser and the layer ops are told in their
+  own words (`lib/live-errors.ts`, `live.failed.*`), not in the selection's (finding 9).
+- The live window asks before a merge (`live.merge.*`, `Modal` `role="alertdialog"`, Esc and Ctrl+W answer « Annuler »):
+  Ctrl+Z cannot undo it, and when a shown layer goes into a hidden one, the hidden ink shows at once on the projector and
+  the share; the question says so then (finding 6). The editor's merge stays immediate (undoable there).
+- `LiveSelection.follow` also drops the strokes of a layer hidden since (finding 3), as the editor's `setLayerVisible`.
 - `loadComputerStyle` falls back field by field (a bad tool keeps a good colour). The panel's tool change takes that
   tool's last width in the session, else `DEFAULT_WIDTHS`, as the tablet's does.
 - `LiveState`: computer `points` without a `strokeStart` (supposé: subscribed mid-stroke) start a stroke in the

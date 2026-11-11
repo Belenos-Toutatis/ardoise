@@ -130,8 +130,10 @@
     cancelling = false;
     destination = chosen;
     try {
-      // An image has no layers: the request says nothing of them.
-      const request: ExportOptions = layerFormat ? { ...options, layers: layers[layerFormat] } : { ...options };
+      // The request names the layers only when the dialog offered the choice (an SVG or a PDF of notes with two
+      // shown layers holding ink): an image has none, and a one-layer note must not get a layer of its own in the
+      // PDF (an optional content group, the reader's layers panel opened) because « Separate » was remembered.
+      const request: ExportOptions = layerFormat && several ? { ...options, layers: layers[layerFormat] } : { ...options };
       written = await api.exportNotes(
         sources.map((source) => ({ ...source })),
         format,

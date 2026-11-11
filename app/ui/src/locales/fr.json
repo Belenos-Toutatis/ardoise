@@ -1663,6 +1663,18 @@
     "clearDone": "Page effacée.",
     "clearUndo": "Annuler l'effacement",
     "clearUndoFailed": "L'effacement ne peut plus être annulé : la page a changé entre-temps.",
+    "merge": {
+      "title": "Fusionner « {upper} » avec « {lower} » ?",
+      "noUndo": "Ctrl+Z ne pourra pas l'annuler.",
+      "hidden": "« {lower} » est masqué : une fois fusionné, son contenu sera projeté et partagé.",
+      "confirm": "Fusionner",
+      "cancel": "Annuler"
+    },
+    "failed": {
+      "layersStale": "La page a changé entre-temps : refaites l'opération sur les calques.",
+      "pen": "Ce trait n'a pas pu être écrit.",
+      "eraser": "Ce coup de gomme n'a pas pu être fait."
+    },
     "leave": {
       "title": "Terminer le mode direct ?",
       "message": "Chaque page écrite est enregistrée comme une note de la bibliothèque. Pour arrêter seulement la projection, utilisez « Arrêter la projection » : Échap la ferme aussi quand elle est affichée.",

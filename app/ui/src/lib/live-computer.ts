@@ -11,16 +11,19 @@
  *   the session says.
  * - `ComputerPen`: one gesture of the Pen tool. `begin` leaves at once, then one call of the gesture at a time:
  *   the samples that come meanwhile go in the next call (at most `MAX_PEN_SAMPLES` a call), `end` with the
- *   last ones. The window draws its own stroke (`locals`: no round trip), and Rust's copy is not drawn
- *   meanwhile; the local stroke goes when the session says it is done (`LiveState.lastComputerDone`, the
+ *   last ones, every call still needed being queued when the pen is lifted (a Ctrl+Z comes after the `end`).
+ *   The window going away mid-stroke cancels the gesture. The window draws its own stroke (`locals`: no round
+ *   trip), and Rust's copy is not drawn meanwhile; the local stroke goes when the session says it is done (`LiveState.lastComputerDone`, the
  *   finished stroke being then in `strokes`), when the page or the note changes, or `LOCAL_GRACE_MS` after
  *   `end` or `cancel` left (an answer lost). A `false` answer or a refusal stops the gesture and drops the local
  *   stroke; `liveEditStale` is silent (the page changed under the pen), other refusals go to `onerror`.
  * - `ComputerEraser`: the pen's eraser end, whole strokes of the chosen layer, whatever the tool. A gesture has a
  *   `group`: each move that touches new strokes sends a delete of that group, so that one Ctrl+Z gives the
  *   whole gesture back. The strokes are kept as objects and their indices read when the call leaves the queue,
- *   with the revision of that moment (a delete moves indices). A stale call is tried again after the next change
- *   of the session, at most `STALE_RETRIES` times.
+ *   with the revision of that moment (a delete moves indices); until the window's list has caught up with the
+ *   eraser's own deletes, the next one is made at the revision the session answered, on the list less those
+ *   strokes. A stale call is tried again once the window's list moved (at once if it already has), at most
+ *   `STALE_RETRIES` times; those retries count as work under way, and an undo or a redo queued drops them.
  *
  * Free of the DOM and of the desktop runtime (`api` is passed in), so that it runs in the tests.
  */
@@ -37,6 +40,8 @@ export const MAX_PEN_SAMPLES = 4096;
 export const LOCAL_GRACE_MS = 2000;
 /** How often a stale delete of the eraser is tried again (after a change of the session each time). */
 export const STALE_RETRIES = 3;
+/** How long a stale delete waits for the window's list to catch up before it gives up. */
+export const STALE_WAIT_MS = 2000;
 
 /** The commands used (the real `api`, or a stand-in in tests). */
 export type ComputerCommands = Pick<typeof Api, 'liveComputerPen' | 'liveEditStrokes'>;
@@ -110,14 +115,16 @@ interface PenGesture {
   pending: ComputerSample[];
   /** `begin` left. */
   begun: boolean;
-  /** A call of the gesture is queued and has not left yet: it takes what is pending when it leaves. */
-  waiting: boolean;
+  /** Calls of the gesture queued and not left yet: each takes what is pending when it leaves. */
+  queued: number;
   /** The pen was lifted: `end` goes with the last samples. */
   ending: boolean;
   /** Esc, a lost capture, a second finger: `cancel` goes instead of what is pending. */
   cancelling: boolean;
   /** Nothing more is sent: the session ended it, dropped it, refused it, or `end` or `cancel` left. */
   stopped: boolean;
+  /** Refused, answered `false`, or gone with another page: the session will record no step for it. */
+  dropped: boolean;
   /** When `end` or `cancel` left (`now()`), for `LOCAL_GRACE_MS`. */
   finishedAt: number | null;
   /** The first sample's `ms`: the local stroke's times count from it. */
@@ -174,10 +181,11 @@ export class ComputerPen {
       local: { tool: style.tool, color: { ...style.color }, width: style.width, layer: place.layer, points: [inkPoint(sample, sample.ms)] },
       pending: [sample],
       begun: false,
-      waiting: false,
+      queued: 0,
       ending: false,
       cancelling: false,
       stopped: false,
+      dropped: false,
       finishedAt: null,
       t0: sample.ms,
     };
@@ -197,7 +205,11 @@ export class ComputerPen {
     this.pump(gesture);
   }
 
-  /** The pen was lifted: `end` leaves with the last samples. */
+  /**
+   * The pen was lifted: `end` leaves with the last samples. Every call still needed (the chunks of what is pending,
+   * then `end`) is queued now, so that a command asked for after the pen was lifted (a Ctrl+Z) comes after the `end`,
+   * even when more than `MAX_PEN_SAMPLES` samples wait (an IPC call that took long).
+   */
   up(samples: readonly ComputerSample[] = []): void {
     const gesture = this.current;
     if (!gesture) return;
@@ -205,7 +217,15 @@ export class ComputerPen {
     this.current = null;
     if (gesture.stopped) return;
     gesture.ending = true;
-    this.pump(gesture);
+    // `begin` (if it has not left) takes a first chunk; the rest goes in chunks, the last one with `end`.
+    const left = gesture.begun ? gesture.pending.length : Math.max(0, gesture.pending.length - MAX_PEN_SAMPLES);
+    const needed = (gesture.begun ? 0 : 1) + Math.max(1, Math.ceil(left / MAX_PEN_SAMPLES));
+    for (let n = gesture.queued; n < needed; n++) this.enqueue(gesture);
+  }
+
+  /** The stroke of a lifted pen whose `end` the session has not recorded yet (Ctrl+Z then undoes it once it has). */
+  ending(view: LocalView): boolean {
+    return this.drawn.some((gesture) => gesture.ending && !gesture.dropped && view.lastComputerDone < gesture.id);
   }
 
   /** Drops the gesture under way (Esc, `pointercancel`, a lost capture, a second finger, a page change); true if there was one. */
@@ -248,8 +268,14 @@ export class ComputerPen {
     return this.drawn.flatMap((gesture) => (gesture.local ? [gesture.local] : []));
   }
 
-  /** Forgets every gesture (the window goes). */
+  /**
+   * The window goes. A gesture still under way is cancelled, not ended: the pen was not lifted, and the window going
+   * away mid-stroke is an interruption like a lost pointer capture, which cancels too; without it the projector and
+   * the share would show the half stroke until the next one or a page change. The calls already asked for (the `end`
+   * of a lifted pen) still leave. Then every gesture is forgotten.
+   */
   dispose(): void {
+    if (this.current) this.cancel();
     clearTimeout(this.timer);
     this.current = null;
     this.drawn = [];
@@ -257,15 +283,20 @@ export class ComputerPen {
 
   private drop(gesture: PenGesture): void {
     gesture.stopped = true;
+    gesture.dropped = true;
     gesture.local = null;
     this.drawn = this.drawn.filter((g) => g !== gesture);
     this.options.onchange?.();
   }
 
-  /** Asks for the gesture's next call, unless one is already waiting in the queue (it will take what is pending). */
+  /** Asks for the gesture's next call, unless one is already queued (it will take what is pending when it leaves). */
   private pump(gesture: PenGesture): void {
-    if (gesture.stopped || gesture.waiting) return;
-    gesture.waiting = true;
+    if (gesture.stopped || gesture.queued > 0) return;
+    this.enqueue(gesture);
+  }
+
+  private enqueue(gesture: PenGesture): void {
+    gesture.queued += 1;
     void this.options.queue.run(() => this.call(gesture));
   }
 
@@ -293,7 +324,7 @@ export class ComputerPen {
   }
 
   private async call(gesture: PenGesture): Promise<void> {
-    gesture.waiting = false;
+    gesture.queued -= 1;
     const input = this.input(gesture);
     if (!input) {
       // Cancelled before `begin` left: the session never heard of it.
@@ -372,10 +403,21 @@ export interface EraserOptions {
   group?: () => number;
 }
 
+/** The deletes of the eraser the session went through, as far as the window's list has not caught up with them. */
+interface EraserChain {
+  pageIndex: number;
+  noteId: string;
+  steps: { before: number; after: number; removed: readonly Stroke[] }[];
+}
+
 /** The pen's eraser end on the preview: deletes whole strokes of the chosen layer that it touches. */
 export class ComputerEraser {
   private readonly options: EraserOptions;
   private current: EraserGesture | null = null;
+  private chain: EraserChain | null = null;
+  private retries = 0;
+  /** Bumped when an undo or a redo is queued: the retries asked for before it are dropped. */
+  private epoch = 0;
   /** Where the eraser end is (page units), for its ring on the preview; null when it is away. */
   ring: Vec | null = null;
 
@@ -445,40 +487,119 @@ export class ComputerEraser {
     if (strokes.length > 0) void this.send(gesture, strokes, 0);
   }
 
-  /** Deletes `strokes` through the queue: their indices and the revision are read when the call leaves it. */
-  private send(gesture: EraserGesture, strokes: readonly Stroke[], tries: number): Promise<void> {
+  /** Retries of stale deletes not sent yet (waiting for the session's change, or queued): Ctrl+Z waits for them. */
+  get retrying(): number {
+    return this.retries;
+  }
+
+  /**
+   * An undo or a redo is about to be queued: the retries not sent yet are dropped. Sent after it, a retry would delete
+   * a stroke the undo just gave back, record a new step and empty the redo steps.
+   */
+  dropRetries(): void {
+    this.epoch += 1;
+    this.retries = 0;
+  }
+
+  /**
+   * The revision to send and the strokes to leave out of the window's list. The session answers each delete with its
+   * new revision; until the window's list has caught up (its `strokesEdited`), the next delete of the gesture is made
+   * at that revision, on the window's list less the strokes the eraser deleted. Anything else moved the revision (an
+   * undo, a clearing, another page): the window's own revision and list, as they are.
+   */
+  private base(): { revision: number; without: ReadonlySet<Stroke> } {
+    const { live } = this.options;
+    const chain = this.chain;
+    const plain = { revision: live.revision, without: new Set<Stroke>() };
+    if (!chain || chain.steps.length === 0 || chain.pageIndex !== live.pageIndex || chain.noteId !== live.noteId) {
+      this.chain = null;
+      return plain;
+    }
+    const last = chain.steps[chain.steps.length - 1].after;
+    const known = chain.steps.some((step) => step.before === live.revision || step.after === live.revision);
+    if (live.revision === last || !known) {
+      this.chain = null;
+      return plain;
+    }
+    return { revision: last, without: new Set(chain.steps.flatMap((step) => step.removed)) };
+  }
+
+  /** A delete went through at `before`: the session is now at `after`, without `removed`. */
+  private advance(before: number, after: number, removed: readonly Stroke[]): void {
+    const { live } = this.options;
+    const chain = this.chain;
+    const follows = chain && chain.pageIndex === live.pageIndex && chain.noteId === live.noteId && chain.steps.at(-1)?.after === before;
+    if (follows) chain.steps.push({ before, after, removed });
+    else this.chain = { pageIndex: live.pageIndex, noteId: live.noteId, steps: [{ before, after, removed }] };
+  }
+
+  /**
+   * Deletes `strokes` through the queue: their indices and the revision are read when the call leaves it (`base`).
+   * `retry`: the epoch of a retry (it is dropped once an undo or a redo was queued since).
+   */
+  private send(gesture: EraserGesture, strokes: readonly Stroke[], tries: number, retry?: number): Promise<void> {
     const { live, queue, commands } = this.options;
     return queue.run(async () => {
+      if (retry !== undefined) {
+        if (retry !== this.epoch) return;
+        this.retries -= 1;
+      }
       if (live.pageIndex !== gesture.pageIndex || live.noteId !== gesture.noteId) return;
+      const { revision, without } = this.base();
       const places = new Map<Stroke, number>();
-      live.strokes.forEach((stroke, index) => places.set(stroke, index));
+      let place = 0;
+      for (const stroke of live.strokes) if (!without.has(stroke)) places.set(stroke, place++);
       const indices: number[] = [];
+      const removed: Stroke[] = [];
       for (const stroke of strokes) {
         const index = places.get(stroke);
         // Gone meanwhile (a clearing, an undo), or on a layer hidden since: Rust would refuse the whole delete.
-        if (index !== undefined && live.layers[stroke.layer]?.visible !== false) indices.push(index);
+        if (index !== undefined && live.layers[stroke.layer]?.visible !== false) {
+          indices.push(index);
+          removed.push(stroke);
+        }
       }
       if (indices.length === 0) return;
       indices.sort((a, b) => a - b);
+      const seen = live.revision;
       try {
-        await commands.liveEditStrokes(live.pageIndex, live.revision, { kind: 'delete', indices, group: gesture.group });
+        const after = await commands.liveEditStrokes(live.pageIndex, revision, { kind: 'delete', indices, group: gesture.group });
+        this.advance(revision, after, removed);
       } catch (error) {
         if (!isStale(error)) {
           this.options.onerror(error);
           return;
         }
-        // The window's list is behind the session's revision: once it catches up, the same strokes again.
+        this.chain = null;
         if (tries >= STALE_RETRIES) return;
-        void this.afterChange().then(() => this.send(gesture, strokes, tries + 1));
+        // The window's list was behind the session's: the same strokes again once it caught up, at once if it
+        // already did meanwhile (the change that would wake the retry may have come already).
+        this.retries += 1;
+        const epoch = this.epoch;
+        const caughtUp = live.revision !== seen ? Promise.resolve(true) : this.afterChange();
+        void caughtUp.then((changed) => {
+          if (epoch !== this.epoch) return;
+          if (!changed) {
+            this.retries -= 1;
+            return;
+          }
+          void this.send(gesture, strokes, tries + 1, epoch);
+        });
       }
     });
   }
 
-  private afterChange(): Promise<void> {
+  /** True after the next change of the session, false if none came within `STALE_WAIT_MS`. */
+  private afterChange(): Promise<boolean> {
     return new Promise((resolve) => {
-      const stop = this.options.live.subscribe(() => {
+      const timer = setTimeout(() => {
         stop();
-        resolve();
+        resolve(false);
+      }, STALE_WAIT_MS);
+      const stop = this.options.live.subscribe(() => {
+        clearTimeout(timer);
+        stop();
+        resolve(true);
       });
     });
   }
@@ -489,7 +610,8 @@ export interface ComputerOptions {
   commands: ComputerCommands;
   /** The computer's ink. */
   style: () => LiveStyle;
-  onerror: (error: unknown) => void;
+  /** A refusal other than `liveEditStale`, from the pen or from the eraser (each says it in its own words). */
+  onerror: (error: unknown, from: 'pen' | 'eraser') => void;
   /** Something the canvas draws changed (a local stroke went, the eraser's ring moved). */
   onchange?: () => void;
   now?: () => number;
@@ -513,7 +635,7 @@ export class LiveComputer {
       queue: this.queue,
       commands: options.commands,
       style: options.style,
-      onerror: options.onerror,
+      onerror: (error) => options.onerror(error, 'pen'),
       onchange: changed,
       now: options.now,
     });
@@ -521,14 +643,27 @@ export class LiveComputer {
       queue: this.queue,
       commands: options.commands,
       live: options.live,
-      onerror: options.onerror,
+      onerror: (error) => options.onerror(error, 'eraser'),
       group: options.group,
     });
   }
 
-  /** A gesture of the pen or of the eraser is under way: Ctrl+Z and Ctrl+Y wait for it to end. */
+  /**
+   * A gesture of the pen or of the eraser is under way, or a stale delete of the eraser waits to be sent again: Ctrl+Z
+   * and Ctrl+Y wait for them (a step committed after the undo would be undone by none).
+   */
   get busy(): boolean {
-    return this.pen.active || this.eraser.active;
+    return this.pen.active || this.eraser.active || this.eraser.retrying > 0;
+  }
+
+  /** A lifted pen's `end` is on its way: its stroke will be a step to undo, though `canUndo` does not say so yet. */
+  get strokeEnding(): boolean {
+    return this.pen.ending(this.live);
+  }
+
+  /** An undo, a redo or « Undo the clearing » is about to be queued: the eraser's retries not sent yet are dropped. */
+  historyQueued(): void {
+    this.eraser.dropRetries();
   }
 
   /** The strokes the preview draws instead of Rust's computer stroke in progress (`ComputerPen.locals`). */

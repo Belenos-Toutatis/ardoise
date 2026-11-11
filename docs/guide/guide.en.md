@@ -375,8 +375,9 @@ touch up in the control window, and **the tablet keeps writing meanwhile**.
 - A finger and the wheel still move and zoom the preview.
 - The chosen strokes are outlined in blue in the preview. A bar says "Selected strokes: 3".
 - **Only the strokes of the chosen layer are picked** (the **Layers** zone, see below); choosing another layer clears
-  the selection. You cannot choose the stroke the tablet is writing right now, nor the strokes of a hidden layer. On a
-  resumed sheet, you can choose the sheet's old strokes, by choosing their layer.
+  the selection. You cannot choose the stroke the tablet is writing right now, nor the strokes of a hidden layer;
+  hiding a layer takes its strokes out of the selection. On a resumed sheet, you can choose the sheet's old strokes, by
+  choosing their layer.
 
 **Deleting**: click **Delete** in the bar, or press `Delete` or `Backspace`.
 
@@ -462,7 +463,9 @@ creates a layer on top and sends the tablet there; the computer stays where it i
 - The *pencil* renames: `Enter` keeps the new name, `Esc` gives the old one back.
 - On the chosen row only, **↑** and **↓** move the layer up and down, and **⤓** merges it into the layer below.
   **Merging during live mode cannot be undone**: `Ctrl + Z` does not undo it, and the page's undo list is emptied (the
-  other pages' lists are not touched).
+  other pages' lists are not touched; **Undo clearing** goes too). So Ardoise asks first: "Merge “…” into “…”? Ctrl+Z
+  will not be able to undo it.", with **Merge** and **Cancel** (`Esc` answers **Cancel**). When the layer below is
+  hidden, the question says so too: once merged, its content will be projected and shared (the merged layer shows).
 - **Add a layer** creates a new one, on top.
 - The zone's buttons are greyed out when live mode is not running.
 

@@ -287,7 +287,7 @@ describe('export dialog: exporting', () => {
     expect(ui.target.querySelector('.export-result')?.textContent).toContain('Fichiers créés : 2');
   });
 
-  it('puts several notes in one PDF, one page each in the order given, in A4', async () => {
+  it('puts several notes in one PDF, one page each in the order given, in A4, naming no layers they do not have', async () => {
     const spy = vi.spyOn(api, 'exportNotes');
     const titles = ['Réunion parents', 'Liste de courses', 'Cours de physique'];
     const ui = await render(titles);
@@ -299,9 +299,11 @@ describe('export dialog: exporting', () => {
     expect(spy).toHaveBeenCalledWith(
       titles.map((title) => ({ path: pathOf(title) })),
       'pdf',
-      { ...DEFAULTS, pdfPage: 'a4', layers: 'merged' },
+      { ...DEFAULTS, pdfPage: 'a4' },
       'C:\\Users\\demo\\Exports\\Notes.pdf',
     );
+    // Notes of one layer each: the dialog offered no choice, the request names none.
+    expect('layers' in spy.mock.calls[0][2]).toBe(false);
     expect(ui.target.querySelector('.export-result code')?.textContent).toBe('C:\\Users\\demo\\Exports\\Notes.pdf');
   });
 
@@ -604,6 +606,31 @@ describe('export dialog: layers', () => {
     ui.button('Exporter de nouveau…').click();
     await settle();
     expect(spy.mock.calls[2][2]).toEqual({ ...DEFAULTS, layers: 'merged' });
+  });
+
+  it('names no layers for a one-layer note, even with « Séparés » remembered for the PDF', async () => {
+    addLayer('Liste de courses', 'Correction');
+    const spy = vi.spyOn(api, 'exportNotes');
+    const first = await render(['Liste de courses']);
+    await first.choose('PDF');
+    layerRadio(first, 'separate').click();
+    await settle();
+    first.button('Exporter…').click();
+    await settle();
+    expect(spy.mock.calls[0][2]).toEqual({ ...DEFAULTS, layers: 'separate' });
+    cleanup?.();
+    cleanup = null;
+
+    // The PDF and « Séparés » are remembered; this note has one layer: no block, and the request names no layers
+    // (a PDF layer of its own would open the reader's layers panel for nothing).
+    const ui = await render(['Réunion parents']);
+    expect(ui.radio('PDF').checked).toBe(true);
+    expect(block(ui)).toBeNull();
+    ui.button('Exporter…').click();
+    await settle();
+    expect(spy.mock.calls[1][1]).toBe('pdf');
+    expect(spy.mock.calls[1][2]).toEqual(DEFAULTS);
+    expect('layers' in spy.mock.calls[1][2]).toBe(false);
   });
 
   it('remembers the choice per format, after an export that succeeded', async () => {
