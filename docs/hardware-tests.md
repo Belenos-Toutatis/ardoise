@@ -508,3 +508,108 @@ Ce qui ne revient pas tout seul :
 | Si l'écriture reste **fluide** pendant qu'on retouche, la latence affichée, et si choisir un trait fin à la souris ou au stylet de l'ordinateur est facile | H2, H8 |
 | Si la couleur du stylo est restée la même après une recoloration, et si les traits écrits entre deux `Ctrl + Z` sont tous restés | H3, H5 |
 | Ce que contient la feuille reprise après **Terminer** (retouches, image, original) | H7 |
+
+---
+
+## H6 — Corriger pendant le direct, sur son propre calque
+
+**Durée** : 50 à 60 minutes. **Matériel** : le PC d'Ardoise, **la Surface avec son stylet** (c'est elle qui sert à corriger), la vraie tablette (chargée, dongle branché, téléphone Bluetooth **coupé**), le **vidéoprojecteur** de la salle en bureau étendu, le **PC du vidéoprojecteur sur le même réseau** (celui du partage, voir H4), **un élève ou un collègue** qui écrit sur la tablette pendant que vous corrigez, et un **lecteur PDF à calques** (Acrobat Reader ou Firefox, voire les deux) sur un PC. Ce test suppose que H1 à H5 ont réussi.
+
+Ce test vérifie la correction en classe (SPEC §4.2 « Corriger pendant le direct », §4.4 « Calques », §4.6 « Calques à l'export », `docs/questions.md` Q11) avec la vraie tablette et le vrai stylet : écrire en rouge sur un calque à soi pendant que l'élève écrit, gommer, annuler, envoyer la tablette sur un autre calque, les avertissements d'un calque masqué, puis l'export PDF à calques séparés. Les libellés ci-dessous sont ceux de la fenêtre ; les parties A à F demandent la tablette.
+
+### À la maison, avant
+
+1. Fermer Ardoise sur tous les PC, puis remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version.
+2. Ne **pas** utiliser `--simulated-tablet`.
+3. Préparer le matériel : le stylet de la Surface chargé (ou avec une pile neuve), le PC du vidéoprojecteur prêt à recevoir le partage (H4).
+4. Noter la version d'Ardoise et celle de Windows. Dans le panneau **Tablette**, noter le réglage de **Bouton de la tablette en mode direct** (il sert en partie D).
+
+### Au travail
+
+#### A. Installer la correction
+
+La tablette est tenue comme d'habitude, l'élève (ou le collègue) a une consigne à écrire (un schéma de circuit, trois lignes d'exercice). **Projeter** sur le vidéoprojecteur et **Partager sur le réseau** vers le PC du vidéoprojecteur (voir H4).
+
+1. Ouvrir le **Mode direct**. L'élève écrit les premières lignes. Dans la zone **Calques** (en haut du panneau de côté), vérifier qu'il n'y a qu'**un calque**, **encadré** (choisi), avec l'**icône de tablette** : l'ordinateur et la tablette sont sur le même.
+2. Cliquer sur **Ajouter un calque** : un calque apparaît **en haut** et il est **encadré** ; l'icône de tablette reste sur le calque de l'élève. L'élève continue d'écrire : son écriture n'a pas changé de calque.
+3. Cliquer sur le **crayon** à côté du nouveau calque, taper « Correction », `Entrée`. Essayer aussi `Échap` dans le champ, sur un autre renommage : l'ancien nom revient.
+4. Cliquer sur **Stylo** (groupe **Ordinateur**) ou appuyer sur `P`. Le bouton de l'encre de l'ordinateur doit montrer une **pastille rouge** et « Feutre ». L'ouvrir (**Encre de l'ordinateur**) : **Outil**, **Couleur** et **Épaisseur** sont réglables ; `Échap` le ferme. L'encre de la tablette (groupe **Tablette**) n'a pas bougé.
+
+#### B. Écrire en rouge pendant que l'élève écrit
+
+1. Avec le **stylet de la Surface**, écrire sur l'aperçu un mot et souligner une erreur de l'élève **pendant que l'élève écrit** sur la tablette. Noter :
+   - si le trait rouge apparaît **sous la pointe** du stylet, sans retard ressenti, et la **latence** affichée ;
+   - si l'écriture de l'élève **continue sans à-coup** au vidéoprojecteur pendant que l'on écrit (à regarder : un mot long de l'élève, sans lever la tablette, pendant que l'on écrit un mot) ;
+   - si les deux écritures s'affichent **ensemble**, sans que l'une efface l'autre, au vidéoprojecteur et sur l'écran du partage, et le délai ressenti sur les deux (filmer l'écran du partage au ralenti si besoin).
+2. Poser la **paume** sur l'écran en écrivant au stylet, comme on le fait vraiment : noter si elle laisse des traces ou fait bouger l'aperçu. Noter aussi si **Windows Ink** montre quelque chose par-dessus la page (un tracé de stylet, un cercle d'appui long, une barre, un menu du stylet) : prendre une capture ou une photo.
+3. Avec la **souris** (l'outil **Stylo** toujours actif) : écrire un mot, il apparaît en rouge aussi. Avec un **doigt** : l'aperçu se déplace, sans encre.
+4. Changer l'encre de l'ordinateur (une autre couleur, plus épais) : le trait suivant en tient compte, pas les précédents ; le style de la tablette ne bouge pas. Remettre le rouge.
+
+#### C. Gommer et annuler
+
+1. Avec le **bout gomme du stylet**, passer sur un mot rouge de « Correction » : le **trait entier** disparaît, et un **petit cercle** suit la gomme dans l'aperçu (il n'est pas projeté). Noter si le bout gomme est reconnu du premier coup, et si le cercle a la bonne taille.
+2. Passer le bout gomme sur un mot de l'**élève** : **rien** ne doit disparaître (il est sur un autre calque).
+3. `Ctrl + Z` : le trait gommé revient. `Ctrl + Z` encore : le trait de l'ordinateur précédent disparaît. `Ctrl + Y` le rend. **L'élève écrit entre deux `Ctrl + Z`** : son écriture reste, elle n'est jamais annulée. Noter si le trait de l'élève et ceux de la correction restent à leur place après chaque appui.
+4. Écrire un trait pendant que l'élève écrit, puis `Ctrl + Z` **au moment même** où l'on lève le stylet : le trait doit disparaître en entier (pas de demi-trait).
+5. **Effacer la page** puis `Ctrl + Z` : tout revient (les deux écritures).
+
+#### D. Choisir un autre calque, envoyer la tablette ailleurs
+
+1. Cliquer sur la ligne du calque de l'**élève** : le cadre y passe. Avec le **bout gomme**, gommer un de ses traits : seuls les traits de ce calque partent (ceux de « Correction » restent). `Ctrl + Z` le rend.
+2. Cliquer sur **Sélection** (ou `V`) et entourer des traits de l'élève et des traits rouges : **seuls les traits du calque choisi** sont pris. Choisir un autre calque : la sélection s'en va. **Stylo** et **Sélection** s'excluent.
+3. **Envoyer la tablette sur un autre calque** : amener le stylet (puis la souris) sur la ligne de « Correction » **sans cliquer** : une **icône de tablette pâle** doit apparaître. Noter si elle apparaît **au survol du stylet** (le stylet de la Surface survole-t-il ?) ou seulement à la souris, et si elle est toujours visible au doigt. Cliquer dessus : l'icône de tablette passe sur cette ligne. L'élève écrit un mot : il se retrouve **sur ce calque** (le vérifier en masquant puis en affichant le calque).
+4. Remettre la tablette sur le calque de l'élève de la même manière.
+5. Si le **bouton de la tablette** est réglé sur **Nouveau calque** (panneau **Tablette**, **Bouton de la tablette en mode direct**) : appuyer dessus. Un calque apparaît **en haut**, l'icône de tablette s'y place, et **l'ordinateur reste où il est** (le cadre n'a pas bougé). Noter ce que la Bamboo Slate envoie, et si l'élève écrit bien sur le nouveau calque. Remettre ensuite le réglage de départ.
+
+#### E. Masquer, avertissements, fusion
+
+1. Cliquer sur l'**œil** du calque de l'**élève** : il devient **barré**, le nom passe en gris italique, et l'écriture de l'élève **disparaît du vidéoprojecteur et de l'écran du partage**. Comme la tablette y écrit encore, l'avertissement « La tablette écrit sur « … », qui est masqué : ce que l'élève écrit n'est ni projeté ni partagé. » doit s'afficher sous la liste. L'élève écrit un mot : personne ne le voit. Réafficher le calque : tout revient, **mot compris**.
+2. Choisir un calque **masqué** (œil barré) puis, avec **Stylo**, essayer d'écrire : rien n'est écrit, et le message « Le calque choisi, « … », est masqué : affichez-le pour y écrire. » s'affiche (sous la liste et dans la fenêtre). Réafficher le calque.
+3. Monter puis descendre « Correction » (**↑**, **↓**) : l'ordre change au vidéoprojecteur. Ces boutons ne sont que sur la ligne **choisie**.
+4. **Fusionner** : ajouter deux calques d'essai (pas « Correction », pour ne pas la perdre), écrire quelques traits sur chacun, puis **⤓** sur le plus haut. Noter le texte de l'info-bulle (« Ctrl+Z ne l'annule pas. »), puis appuyer sur `Ctrl + Z` : **rien** ne revient. Les traits sont tous là, sur le calque du dessous.
+5. Ajouter un calque **pendant que l'élève écrit un mot long** : l'écriture n'est pas coupée en deux traits.
+
+#### F. L'élève écrit sur plusieurs pages
+
+1. **Page suivante** : la page neuve a **un calque**, l'ordinateur et la tablette dessus. Revenir à la page précédente : ses deux calques (celui de la tablette et celui de l'ordinateur) sont **là où on les avait laissés**.
+2. Sur la page neuve, écrire en rouge sur un calque de correction, puis `Ctrl + Z` : seule la page courante est concernée.
+
+#### G. Après le direct : la note, la relecture, l'export
+
+1. **Terminer**. Ouvrir la note dans l'éditeur : la zone **Calques** (en bas du panneau de droite) liste les calques créés (« Correction »…), dans l'ordre ; **cliquer sur une ligne** la choisit (cadre). Avec le **lasso** et `Ctrl + A`, **seuls les traits du calque choisi** sont pris ; la **gomme** n'efface que sur lui. Masquer le calque choisi : un avertissement s'affiche, et le calque reste choisi.
+2. Lancer la **Relecture** : les traits rouges de la correction apparaissent **à l'heure où ils ont été écrits**, mêlés à ceux de l'élève. Noter si l'ordre est juste.
+3. **Exporter…** en **PDF** : le choix **Calques** (**Séparés** / **Fusionnés**) est proposé, **Fusionnés** coché au départ. Choisir **Séparés** et enregistrer. Faire de même en **SVG** (**Séparés** doit être coché au départ). Rouvrir la fenêtre : le choix est **retenu**, pour chaque format. Pour **PNG**, la phrase « Une image n'a pas de calques : ils sont toujours fusionnés. » apparaît ; avec un calque masqué qui porte de l'encre, la phrase sur les calques masqués apparaît aussi.
+4. Ouvrir le **PDF séparé** dans **Acrobat Reader** (panneau **Calques**) puis dans **Firefox** (le panneau des calques de la visionneuse) : on doit pouvoir **afficher et masquer** « Correction » et le calque de l'élève, un interrupteur par nom. Noter pour chaque lecteur : si le panneau s'ouvre tout seul, si les calques sont dans l'ordre (le plus haut en premier), si la page se redessine bien, et ce que montre un autre lecteur (Edge, Aperçu de l'Explorateur, un lecteur de téléphone) : tout, sans choix ?
+5. Faire un **PDF de deux notes** qui ont chacune un calque « Correction » : le panneau ne doit montrer **qu'un** « Correction » (un interrupteur pour les deux pages). Le **PDF fusionné** n'a aucun panneau de calques.
+6. Si **Inkscape** est installé : ouvrir le **SVG séparé** (les calques dans le panneau **Calques**) et le **SVG fusionné** (un seul calque d'encre).
+7. **Un calque masqué n'est jamais exporté** : masquer le calque de l'élève dans l'éditeur, exporter le PDF **séparé** puis **fusionné** : ni son encre ni son nom (à chercher dans le panneau des calques du lecteur) n'y sont.
+8. Quitter Ardoise et le relancer : l'encre de l'ordinateur (couleur, outil, épaisseur choisis en B4) est **retenue** au prochain direct.
+
+### Ce qui revient par Nextcloud
+
+- Les notes écrites pendant le test, et les exports que l'on a faits dans la bibliothèque.
+- Dans `<bibliothèque>\_ardoise\diagnostics\` : un journal seulement en cas d'erreur de la tablette ou d'une session de mode direct anormale.
+- Les captures ou photos de Windows Ink et de l'icône de tablette sont à déposer à la main avec le compte rendu.
+
+### À me signaler
+
+Ce qui ne revient pas tout seul :
+
+| Quoi | Où |
+|---|---|
+| Si le trait rouge du stylet apparaît sous la pointe sans retard, la latence affichée, et si l'écriture de l'élève reste **fluide** au vidéoprojecteur pendant que l'on écrit | B1 |
+| Si les deux écritures s'affichent ensemble au vidéoprojecteur et sur l'écran du partage, et le délai ressenti | B1 |
+| Le comportement du **stylet** : bout gomme reconnu du premier coup, taille du cercle de la gomme, boutons du stylet qui font quelque chose d'inattendu | B, C1 |
+| Si la **paume** laisse des traces ou fait bouger l'aperçu | B2 |
+| Si **Windows Ink** montre quelque chose par-dessus la page (tracé, cercle d'appui long, barre, menu) | B2 |
+| Si l'**icône de tablette** pâle apparaît au survol du stylet, ou seulement à la souris, et si elle est visible au doigt | D3 |
+| Ce que la **Bamboo Slate** envoie quand son bouton est réglé sur **Nouveau calque**, et si l'élève écrit bien sur le nouveau calque | D5 |
+| Si `Ctrl + Z` n'a **jamais** annulé l'écriture de l'élève ni coupé un trait en deux | C3, C4 |
+| Si l'écriture masquée de l'élève revient entière à l'affichage, et le texte exact des deux avertissements | E1, E2 |
+| Si fusionner ou ajouter un calque pendant le direct a gêné l'élève (écriture coupée, retard) | E4, E5 |
+| Si les calques des pages sont retrouvés là où on les avait laissés | F |
+| Si les traits de la correction sont à leur heure à la relecture | G2 |
+| Si le PDF séparé s'ouvre avec des calques à afficher et masquer dans **Acrobat Reader** et **Firefox** (panneau ouvert tout seul, ordre, un interrupteur par nom), et ce que montrent les autres lecteurs | G4, G5 |
+| Si le SVG séparé et le SVG fusionné s'ouvrent comme prévu dans **Inkscape** | G6 |
+| Si un calque masqué est bien absent des fichiers exportés | G7 |
+| Si l'encre de l'ordinateur est retenue d'une séance à l'autre | G8 |

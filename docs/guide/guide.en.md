@@ -333,10 +333,12 @@ does not create a new note.
 
 ### The control window
 
-- **Tool** (ballpoint, fountain pen, felt-tip, pencil, brush, highlighter, chalk), **Colour** (including **Chalk white**
-  and **Yellow**) and **Width**: the next stroke follows them, the previous ones do not change.
-- **Pages**: **Previous page**, **Next page** (the position is shown: "Page 2 / 5"), **New page**. **New layer** adds a
-  layer to the current page. **Clear the page** (or `Ctrl + Delete`) clears the current page only; a "Page cleared." message offers **Undo
+- **Tablet**: **Tool** (ballpoint, fountain pen, felt-tip, pencil, brush, highlighter, chalk), **Colour** (including
+  **Chalk white** and **Yellow**) and **Width** are the tablet's style: the next stroke follows them, the previous ones
+  do not change. The **Computer** group (**Select**, **Pen**, the computer's ink, **Undo**, **Redo**) is for touching up
+  and correcting: see below.
+- **Pages**: **Previous page**, **Next page** (the position is shown: "Page 2 / 5"), **New page**. The page's layers
+  are managed in the **Layers** zone, at the top of the side panel (see **Correcting during live mode**). **Clear the page** (or `Ctrl + Delete`) clears the current page only; a "Page cleared." message offers **Undo
   clearing** for 8 seconds, which gives the ink back (`Ctrl + Z` gives it back too, with no time limit: see **Touching up during live mode**). If the page has changed meanwhile, Ardoise says the clearing can
   no longer be undone.
 - **Blackboard**: slate background and white chalk. **Laser pointer**: the pen hovering, without touching the tablet,
@@ -352,8 +354,9 @@ does not create a new note.
   note's replay plays it (chapter 9).
 
 The *tablet's button* does, during live mode, what the **Tablet button in live mode** option says (new page or new
-layer). *What the Bamboo Slate sends when the button is pressed has not yet been checked on the real tablet.* The keys
-for next and previous page work in any case.
+layer). A new layer is created on top and receives the tablet's writing at once; the computer stays on its own layer.
+*What the Bamboo Slate sends when the button is pressed has not yet been checked on the real tablet.* The keys for next
+and previous page work in any case.
 
 ### Touching up during live mode
 
@@ -362,7 +365,8 @@ touch up in the control window, and **the tablet keeps writing meanwhile**.
 
 **Choosing strokes**
 
-- Click **Select** in the toolbar, or press `V`. Pressing it again leaves the tool.
+- Click **Select** (the **Computer** group) in the toolbar, or press `V`. Pressing it again leaves the tool. **Select**
+  and **Pen** (see **Correcting during live mode**) exclude each other: choosing one leaves the other.
 - **Lasso**: in the preview, press with the mouse and draw around the strokes, then release. A stroke is chosen when at
   least half of its points are inside the lasso.
 - **Click**: click a stroke to choose it alone. Click on the ink itself, not next to it.
@@ -370,8 +374,9 @@ touch up in the control window, and **the tablet keeps writing meanwhile**.
 - A gesture on empty paper, or `Esc`, clears the selection. While strokes are chosen, `Esc` does nothing else.
 - A finger and the wheel still move and zoom the preview.
 - The chosen strokes are outlined in blue in the preview. A bar says "Selected strokes: 3".
-- You cannot choose the stroke the tablet is writing right now, nor the strokes of a hidden layer. On a resumed sheet,
-  you can choose the sheet's old strokes.
+- **Only the strokes of the chosen layer are picked** (the **Layers** zone, see below); choosing another layer clears
+  the selection. You cannot choose the stroke the tablet is writing right now, nor the strokes of a hidden layer. On a
+  resumed sheet, you can choose the sheet's old strokes, by choosing their layer.
 
 **Deleting**: click **Delete** in the bar, or press `Delete` or `Backspace`.
 
@@ -381,12 +386,12 @@ chosen, a swatch sets the pen's colour, as before.
 
 **Undo and redo**
 
-- `Ctrl + Z` (or **Undo**) undoes the last touch-up: a deletion, a change of colour, or **Clear the page**. Deleted
-  strokes come back to their place.
+- `Ctrl + Z` (or **Undo**) undoes the computer's last action: a stroke or an erasing (see **Correcting during live
+  mode**), a deletion, a change of colour, or **Clear the page**. Deleted strokes come back to their place.
 - `Ctrl + Y` or `Ctrl + Shift + Z` (or **Redo**) does again what was just undone. A new touch-up empties what could be
   redone.
 - **What is never undone**: what the tablet wrote. A stroke written in the meantime stays, whatever order you undo and
-  redo in. Changes of tool, pen colour or width, and page changes, are not touch-ups either.
+  redo in. Changes of tool, pen colour or width, page changes and layer operations are not touch-ups either.
 - Each page has its own list, which keeps the last 100 touch-ups. If you leave a page and come back to it, `Ctrl + Z`
   still undoes its touch-ups. The lists are gone when you finish live mode.
 - The **Undo** and **Redo** buttons are greyed out when there is nothing to do.
@@ -398,6 +403,81 @@ strokes of the page: they cannot be chosen.
 **In the note.** When you finish, the note holds what was on screen: deleted strokes gone, colours changed. On a resumed
 sheet, the touch-up of an old stroke is written into the note itself; "Back to the original" (chapter 8) always gives
 back the first version.
+
+### Correcting during live mode
+
+*Needs the tablet.* In class, a pupil writes on the tablet, projected live, and you correct at the same time with your
+computer's pen (a Surface, for example), in another colour and **on a layer of your own**: what you write is saved in
+the note, without mixing with the pupil's writing. The tablet keeps writing meanwhile, and is never held up.
+
+**Two layers, two marks.** The **Layers** zone, at the top of the control window's side panel, lists the page's layers,
+the highest first.
+
+- The *frame* surrounds the **chosen layer**: that is where the computer acts (pen, eraser end of the pen, selection).
+  A click on a row chooses its layer.
+- The *tablet icon* marks the layer the **tablet writes on**. It stays on its layer until you send it elsewhere.
+
+When live mode starts, the computer is on the same layer as the tablet: you add your layer when you need one.
+
+**The Pen tool.** Click **Pen** (the **Computer** group) or press `P`; pressing it again leaves the tool. In the
+preview:
+
+- the *pen* and the *mouse* write on the chosen layer;
+- the *eraser end of the pen* erases whole strokes of the chosen layer, whatever the tool (a small circle follows the
+  eraser); the strokes of other layers are never touched;
+- a *finger* never makes ink: it moves and zooms the projected area, as before.
+
+**The computer's ink.** It is separate from the tablet's: **red** by default, in felt-tip. The button after **Pen** (a
+colour dot and the tool's name) opens **Computer's ink**: **Tool**, **Colour** and **Width**. These settings touch
+neither the tablet's style (the **Tablet** group) nor a selection; Ardoise remembers them from one session to the next,
+on this PC. `Esc` or a click elsewhere closes the panel.
+
+**An example in class.** The pupil writes their exercise on the tablet; you want to correct it in red, without mixing
+anything into their writing.
+
+1. In the **Layers** zone, click **Add a layer**. The new layer goes on top and becomes the chosen layer; the tablet
+   stays on the pupil's layer.
+2. Click the pencil next to its name, type "Correction", then `Enter`.
+3. Click **Pen** (or `P`). The ink is already red.
+4. Write on the preview with the computer's pen *while the pupil writes*. Your stroke appears at once on the projector
+   and on the network screen, like the tablet's.
+5. A mistake of yours: pass the eraser end of the pen over it, or press `Ctrl + Z`.
+6. To touch up what the pupil wrote, click their layer in the zone, then use the pen's eraser or **Select**.
+
+**What the projector and the share show.** Both layers, mixed, as on screen, except hidden layers, which they never
+show. Neither the frame, nor the lasso, nor the eraser's circle is projected.
+
+**Undoing with `Ctrl + Z`.** It undoes the *computer's* actions: a stroke, an erasing, a touch-up, **Clear the page**
+(see **Touching up during live mode**). Never what the tablet wrote. Layer operations (adding, hiding, renaming,
+moving, merging) are not undone by `Ctrl + Z`: to undo a hiding or a move, click the same thing again.
+
+**Sending the tablet to another layer.** Hover over another layer's row: a pale tablet icon appears; click it. (On a
+touch screen, these icons are always visible.) What the pupil writes next goes on that layer; what they already wrote
+does not move. If the tablet's button is set to **New layer** (**Tablet button in live mode**, chapter 5), one press
+creates a layer on top and sends the tablet there; the computer stays where it is.
+
+**The other gestures of the Layers zone**
+
+- The *eye* hides or shows a layer; it is *crossed* when the layer is hidden, and the name turns grey italic.
+- The *pencil* renames: `Enter` keeps the new name, `Esc` gives the old one back.
+- On the chosen row only, **↑** and **↓** move the layer up and down, and **⤓** merges it into the layer below.
+  **Merging during live mode cannot be undone**: `Ctrl + Z` does not undo it, and the page's undo list is emptied (the
+  other pages' lists are not touched).
+- **Add a layer** creates a new one, on top.
+- The zone's buttons are greyed out when live mode is not running.
+
+**The warnings.** They appear under the list.
+
+- *"The tablet writes on "…", which is hidden: what the pupil writes is neither projected nor shared."* The pupil's
+  writing is saved in the note all the same, but nobody sees it: show the layer again, or send the tablet to another
+  one.
+- *"The chosen layer, "…", is hidden: show it to write on it."* The pen does not write while the chosen layer is hidden
+  (the same message appears if you try), and the eraser and the selection find nothing there.
+
+**In the note and in replay.** The layers, their names and their state (shown or hidden) are saved in the note, with
+each of the computer's strokes next to the pupil's. In replay (chapter 9), the computer's strokes appear at the time you
+wrote them, mixed with the pupil's. The annotations drawn over the presentation (see below) do not change: they are
+never saved.
 
 ### Projecting on a video projector
 
@@ -702,8 +782,8 @@ The toolbar offers four tools (**Tool**):
   **Highlighter**, **Chalk**), the **Colour** (**Black**, **Blue**, **Green**, **Purple**, **Red**, **Orange**, **Grey**,
   or **Choose another colour**; custom colours are remembered) and the **Width**. The stroke's width follows the pen's
   pressure. **Apply to the whole note:** **Colour**, **Ink** or **Width** changes all the strokes at once.
-- **Eraser**: **Whole strokes** or **Partial**, with its **Size**.
-- **Select** (the lasso): draw around strokes to select them; `Shift` + lasso adds, `Ctrl` + lasso removes. The
+- **Eraser**: **Whole strokes** or **Partial**, with its **Size**. It erases only on the chosen layer (see **Layers**).
+- **Select** (the lasso): draw around strokes of the chosen layer to select them; `Shift` + lasso adds, `Ctrl` + lasso removes. The
   **Selection** panel offers **Copy**, **Cut**, **Paste**, **Duplicate**, **Straighten shapes**, **Delete**. Changes of
   colour, ink and width then apply to the selection; you move it (by grabbing it inside its frame) and resize it (by the
   frame's handles) with the mouse, or with the pen (see below and chapter 12).
@@ -760,9 +840,25 @@ thumbnails, exports and videos. PDFs are rendered by Windows.
 
 ### Layers
 
-The **Layers** panel lists the layers. **Add a layer** creates one; you can choose the one to draw on, show or hide
-it, rename it, move it up or down, and merge it with the one below. A hidden layer does not accept writing: show it
-first.
+The **Layers** zone, at the bottom of the right-hand panel, lists the page's layers, the highest first. A layer is a
+transparent sheet laid over the others: a tablet's writing, your annotations, a correction.
+
+- **Choosing a layer**: click its row, which gets a frame. **The pen, the eraser and the selection act only on the
+  chosen layer**: the lasso, the click, `Ctrl + A` (**Select everything**) and the eraser take only its strokes, and what
+  you draw, paste or duplicate goes onto it. To touch the ink of another layer, choose it first. Choosing another layer
+  clears the selection. When a note opens, the chosen layer is the highest of the shown layers.
+- **Showing or hiding**: the *eye* at the start of the row; it is *crossed* when the layer is hidden, and its name turns
+  grey italic. A hidden layer is neither drawn on screen nor exported (chapter 10).
+- **Renaming**: the *pencil* after the name. Type the name, `Enter` keeps it, `Esc` gives the old one back (clicking
+  elsewhere keeps it too); an empty name changes nothing.
+- **Move up**, **move down**, **merge into the layer below**: the **↑**, **↓** and **⤓** buttons, on the chosen row only.
+- **Add a layer** (under the list) creates a layer at the very top and chooses it.
+- **A warning** appears when the chosen layer is hidden: "The chosen layer, "…", is hidden: show it to write on it."
+  While it is, the pen does not write, and the eraser and the selection find nothing there: show it, or choose another
+  layer.
+
+Adding, hiding, renaming, moving and merging are undone with `Ctrl + Z`. For layers during live mode, see **Correcting
+during live mode** (chapter 6).
 
 ### Splitting a note
 
@@ -889,8 +985,29 @@ Settings: **Resolution** (**96 dpi (screen)**, **150 dpi (usual)**, **300 dpi (p
 (**The page's actual size** or **A4 (note fitted and centred)**), **Include the background** (unticked, only the stroke
 is exported). Ardoise then asks for the file to create (or the folder, for a one-file-per-note export: no existing
 file is overwritten). Resolutions that would give an image more than 16,384 pixels on a side are not offered; use the
-PDF or the SVG then. The SVG keeps the stroke's width according to pressure; the layers appear as layers in Inkscape.
-All formats draw the strokes exactly as the screen does.
+PDF or the SVG then. The SVG keeps the stroke's width according to pressure.
+All formats draw the strokes exactly as the screen does. For the note's layers, see just below.
+
+### Layers in exports
+
+When a note has at least two shown layers that hold ink, the **Export** window shows, for the **SVG** and the **PDF**, the
+**Layers** choice:
+
+- **Separate**: one layer of the file per layer of the note. In an SVG they are Inkscape layers, to show or hide in
+  Inkscape. In a PDF they are PDF layers, to show or hide in Acrobat Reader or Firefox (their layers panel); some readers
+  show them all, with no choice, and a reader that does not handle PDF layers draws everything. In a PDF of several notes,
+  layers of the same name make a single switch for all the pages.
+- **Merged**: one drawing, as on screen.
+
+To begin with, the SVG is on **Separate** and the PDF on **Merged**. Ardoise remembers the last choice, for each of the
+two formats.
+
+- **An image** (PNG, JPG, WebP) has no layers: they are always merged. The window says so when a note has several
+  layers.
+- **A hidden layer is never exported**, even in **Separate**: it may hold the answers. The window reminds you when a
+  note has a hidden layer that holds ink.
+- The automatic export for the phone, **Print…** and **Copy image** have no such choice: their layers are merged, as
+  before.
 
 ### The text of the handwriting
 
@@ -990,6 +1107,9 @@ presentation can be used with the pen or a finger.
   selection instead of drawing: put down inside the frame, it moves it; put down on a handle, it resizes it (with the
   **Pen** and **Eraser** tools). Outside the frame, it draws as usual.
 - A *palm* resting on the screen is ignored while the pen is in use or near the screen.
+- In the *live mode* preview, the **Pen** tool (`P` key) writes with the pen on the chosen layer, and the back of the pen
+  erases whole strokes of that layer: see **Correcting during live mode** (chapter 6). A finger there only moves the
+  projected area.
 
 *The finger*
 
@@ -1151,7 +1271,7 @@ These shortcuts do nothing while you are typing in a text field.
 | `Ctrl + S` | Save |
 | `Ctrl + Z` | Undo |
 | `Ctrl + Y`, `Ctrl + Shift + Z` | Redo |
-| `Ctrl + A` | Select everything |
+| `Ctrl + A` | Select everything (the chosen layer's strokes) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copy, cut, paste strokes |
 | `Delete` or `Backspace` | Delete the selection |
 | `Esc` | Deselect |
@@ -1189,10 +1309,11 @@ These shortcuts do nothing while you are typing in a text field.
 | `W` | **Width** |
 | `Shift + arrows` | Move the projected area |
 | `Delete` or `Backspace` | Clear the marks written over the presentation; **with strokes chosen** (control window), delete them |
-| `V` | **Select** tool (control window): lasso or click a stroke |
-| `Ctrl + Z` | Undo a deletion, a change of colour or **Clear the page** (control window) |
+| `V` | **Select** tool (control window): lasso or click a stroke of the chosen layer |
+| `P` | **Pen** tool (control window): write with the computer's pen or mouse on the chosen layer |
+| `Ctrl + Z` | Undo a stroke or an erasing of the computer, a deletion, a change of colour or **Clear the page** (control window) |
 | `Ctrl + Y` or `Ctrl + Shift + Z` | Redo (control window) |
-| `Esc` | Clear the selection if there is one; otherwise close the projection if it is shown; otherwise ask whether to end live mode |
+| `Esc` | Drop the pen gesture under way; close the **Computer's ink** panel if it is open; clear the selection if there is one; otherwise close the projection if it is shown; otherwise ask whether to end live mode |
 
 ### In windows
 
