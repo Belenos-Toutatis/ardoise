@@ -132,10 +132,9 @@ En classe, l'utilisateur confie la tablette à un élève qui écrit son exercic
 - L'ordinateur agit sur le **calque choisi** : écrire, modifier, gommer, sélectionner. La tablette écrit toujours sur **son** calque. Pour modifier ce qu'a fait l'élève, on choisit son calque.
 - Zone Calques : un clic sur la ligne choisit le calque (plus de bouton rond) ; un œil, barré quand le calque est masqué, remplace la case « Afficher » ; une icône crayon après le nom le renomme ; une icône de tablette marque le calque où écrit la tablette.
 - Export : pour les formats qui le permettent, choisir entre calques séparés et fusionnés.
+- Confirmé ensuite (2026-11-11), sur trois propositions : la sélection ne prend que le calque choisi, dans l'éditeur aussi, pour que la règle soit la même partout ; au début du mode direct, l'ordinateur est sur le calque de la tablette, et l'enseignant ajoute son calque quand il en a besoin ; à l'export, le SVG garde les calques séparés par défaut et le PDF fusionnés, comme aujourd'hui.
 
 **Choix par défaut, à contester si besoin** (proposés avec la maquette, sans objection) :
-- La sélection ne prend que le calque choisi, dans l'éditeur aussi, pour que la règle soit la même partout.
-- Au début du mode direct, l'ordinateur est sur le calque de la tablette ; l'enseignant ajoute son calque quand il en a besoin.
 - « Ajouter un calque » crée un calque en haut et le choisit pour l'ordinateur ; la tablette reste sur le sien. On envoie la tablette sur un autre calque avec l'icône de tablette pâle qui apparaît au survol de sa ligne. Le bouton de la tablette, réglé sur « nouveau calque », crée un calque et y envoie la tablette, l'ordinateur restant où il est. Le bouton « Nouveau calque » de la barre d'outils du direct est remplacé par la zone.
 - Monter, descendre et fusionner avec le calque du dessous restent, sur la ligne choisie seulement.
 - Un avertissement apparaît si la tablette écrit sur un calque masqué (rien ne serait projeté ni partagé), ou si le calque choisi est masqué.
@@ -144,6 +143,6 @@ En classe, l'utilisateur confie la tablette à un élève qui écrit son exercic
 - Avec l'outil Stylo, le stylet et la souris écrivent, le doigt déplace et zoome la zone projetée, comme aujourd'hui.
 - À la relecture, les traits de l'ordinateur apparaissent à l'heure où ils ont été écrits, mêlés à ceux de l'élève.
 - Les annotations temporaires de la fenêtre de présentation ne changent pas.
-- Export : le SVG garde les calques séparés par défaut et le PDF fusionnés, comme aujourd'hui ; le dernier choix est retenu. Les calques PDF de même nom ne font qu'un seul interrupteur pour toutes les pages d'un export de plusieurs notes. Un calque masqué n'est jamais exporté, même en séparé : il peut contenir les réponses. L'export par l'assistant (`export_note`) ne change pas.
+- Export : le dernier choix est retenu. Les calques PDF de même nom ne font qu'un seul interrupteur pour toutes les pages d'un export de plusieurs notes. Un calque masqué n'est jamais exporté, même en séparé : il peut contenir les réponses. L'export par l'assistant (`export_note`) ne change pas.
 
 SPEC §4.2, §4.4 et §4.6 sont mis à jour et le jalon M14 est ajouté à ROADMAP.md.
