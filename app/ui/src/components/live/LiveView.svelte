@@ -29,6 +29,12 @@
    * selection, hiding a layer drops its strokes from it; Ctrl+Z waits for a gesture under way to end (and goes
    * once the stroke just written is recorded); Esc drops it first. A merge, which Ctrl+Z cannot undo, is asked
    * first. « Undo the clearing » goes through the same queue, after the strokes and erasings asked for before.
+   *
+   * The side panel (M16; docs/design/side-panel.md, §8) is the shared tabbed rail (`SidePanel`): Calques (the layers
+   * zone, open by default), Son (the narration), Projection (the projector, the projected area with the blackboard and
+   * the laser pointer, the share on the network) and Aide (the keys, from `LIVE_SHORTCUTS`); no Page or Fond until M17.
+   * Above the open tab, whatever it is: the selection's bar (a selection reopens the pane) and the hints of the Select
+   * and Pen tools. Its badges follow the layers (count, a hidden layer in use), the recording and the projection or share.
    */
   import { onMount, untrack } from 'svelte';
   import { api, errorMessage, type AppState } from '../../lib/api';
@@ -38,6 +44,7 @@
   import { TOOLS, loadInk, type Ink, type Tool } from '../../lib/ink';
   import { LatencyRecorder, exposeLatency } from '../../lib/latency';
   import type { LiveCommandKind, LiveLayerOp, LiveStopped, LiveStyle, LiveViewState, MonitorInfo, SheetFork } from '../../lib/live';
+  import { layerWarnings } from '../../lib/layers-zone';
   import { LiveComputer } from '../../lib/live-computer';
   import { loadComputerStyle, saveComputerStyle } from '../../lib/live-computer-style';
   import { computerErrorText } from '../../lib/live-errors';
@@ -54,18 +61,24 @@
   } from '../../lib/live-actions';
   import { isSpaceKey, isTypingTarget, liveEditKeyAction, liveKeyAction, type LiveEditKeyAction } from '../../lib/live-keys';
   import { LiveSelection } from '../../lib/live-select.svelte';
+  import { LIVE_SHORTCUTS } from '../../lib/live-shortcuts';
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
   import { deleteSelected, recolourSelected, stepHistory, type TouchUp } from '../../lib/live-touch-up';
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
   import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
   import { ORIENTATIONS, type Orientation } from '../../lib/orientation';
   import { share } from '../../lib/share-state.svelte';
+  import { SidePanelState, type SideBadges } from '../../lib/side-panel.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
   import type { NarrationSaved } from '../../lib/video';
   import { askBeforeQuitting, requestWindowClose } from '../../lib/editor/window-close';
   import Modal from '../Modal.svelte';
   import RecordPanel from '../narration/RecordPanel.svelte';
-  import ShareButton from '../share/ShareButton.svelte';
+  import ProjectorBlock from '../projection/ProjectorBlock.svelte';
+  import ZoneBlock from '../projection/ZoneBlock.svelte';
+  import ShareBlock from '../share/ShareBlock.svelte';
+  import ShortcutsHelp from '../side/ShortcutsHelp.svelte';
+  import SidePanel from '../side/SidePanel.svelte';
   import OrientationIcon from '../tablet/OrientationIcon.svelte';
   import { NarrationRecorder } from '../narration/recorder.svelte';
   import LayersZone from '../layers/LayersZone.svelte';
@@ -109,30 +122,13 @@
   const UNDO_CLEAR_MS = 8000;
   /** How often the latency shown is refreshed. */
   const LATENCY_REFRESH_MS = 500;
-  const KEYS = [
-    'next',
-    'previous',
-    'clear',
-    'board',
-    'laser',
-    'select',
-    'pen',
-    'delete',
-    'undo',
-    'zoom',
-    'whole',
-    'width',
-    'pan',
-    'marks',
-    'leave',
-    'close',
-    'quit',
-  ] as const;
 
   const live = new LiveState();
   const selection = new LiveSelection();
   const latency = new LatencyRecorder();
   const recorder = new NarrationRecorder();
+  /** The side panel's tab and fold, remembered on this PC (`ardoise.sidePanel.live`). */
+  const side = new SidePanelState('live');
   /** The computer's ink (M14): this PC's, remembered in the browser's storage. */
   let computerStyle = $state.raw<LiveStyle>(loadComputerStyle());
   /** The computer's ink panel shows. */
@@ -211,6 +207,19 @@
           ? t('live.narration.savedOne')
           : t('live.narration.savedMany', { count: narrated.pages }),
   );
+  /**
+   * The rail's badges: the layers' count and an orange dot when the tablet's or the chosen layer is hidden (what the
+   * zone's own notice says), red while recording, blue while the projector is on or a share runs. They read the layers,
+   * the recorder and the projection, never the strokes: the panel does not redraw the preview.
+   */
+  const badges = $derived<SideBadges>({
+    layers: {
+      ...(live.layers.length > 0 ? { count: live.layers.length } : {}),
+      ...(layerWarnings(live.layers, live.computerLayer, live.layer).length > 0 ? { dot: 'warn' as const } : {}),
+    },
+    sound: recorder.phase === 'recording' ? { dot: 'rec' } : {},
+    projection: live.presentation !== null || share.status.active ? { dot: 'live' } : {},
+  });
   /** The sheet is resumed and cannot be turned: the quick position buttons wait for the next page. */
   const locked = $derived(!live.canTurnPage);
   /** How to hold the tablet for the resumed sheet, when that is not how the setting says. */
@@ -266,6 +275,14 @@
         penOn = false;
       });
     }
+  });
+
+  // A selection that appears reopens the side panel, on the tab shown, where its bar is (not at every change of it).
+  let hadSelection = false;
+  $effect(() => {
+    const any = selection.any;
+    if (any && !hadSelection) untrack(() => side.open());
+    hadSelection = any;
   });
 
   // The selection belongs to the chosen layer: choosing another one drops it (M14).
@@ -709,13 +726,6 @@
     await closeProjection().catch(() => {});
   }
 
-  /** `\\.\DISPLAY2` → "Screen 2"; other names as they are. */
-  function monitorName(m: MonitorInfo): string {
-    const match = /DISPLAY(\d+)$/i.exec(m.name);
-    const name = match ? t('live.projection.screen', { n: match[1] }) : m.name || m.key;
-    return m.primary ? t('live.projection.primary', { name }) : name;
-  }
-
   function onkeydown(e: KeyboardEvent) {
     // The question about ending live mode has its own keys.
     if (e.defaultPrevented || confirmLeave || confirmQuit || mergeAsk || share.panelOpen) return;
@@ -1033,10 +1043,6 @@
         </button>
       {/each}
     </div>
-
-    <div class="group" role="group" data-slot="share">
-      <ShareButton />
-    </div>
   </div>
 
   <div class="live-main">
@@ -1056,18 +1062,6 @@
         {computer}
         onblocked={penBlocked}
       />
-      {#if selection.any}
-        <div class="select-bar" role="toolbar" aria-label={t('live.select.bar')} data-slot="select-bar">
-          <span class="select-count" role="status" data-count={selection.count}>{t('live.select.count', { count: selection.count })}</span>
-          <button type="button" class="button small-button danger" data-action="delete-selection" onclick={() => void deleteSelected(touchUp)}>
-            {t('live.select.delete')}
-          </button>
-          <button type="button" class="button small-button" data-action="deselect" onclick={() => selection.clear()}>
-            {t('live.select.clear')}
-          </button>
-          <span class="muted small">{t('live.select.colors')}</span>
-        </div>
-      {/if}
       {#if sessionState === 'waiting'}
         <div class="live-overlay" role="status">
           <span class="pulse" aria-hidden="true"></span>
@@ -1079,141 +1073,122 @@
       {/if}
     </div>
 
-    <aside class="live-side">
-      <LayersZone
-        where="live"
-        layers={live.layers}
-        chosen={live.computerLayer}
-        tablet={live.layer}
-        disabled={sessionState === 'idle'}
-        onchoose={(layer) => layerOp({ kind: 'computer', layer })}
-        ontablet={(layer) => layerOp({ kind: 'tablet', layer })}
-        onvisible={(layer, visible) => layerOp({ kind: 'visible', layer, visible })}
-        onrename={(layer, name) => layerOp({ kind: 'rename', layer, name })}
-        onmove={(from, to) => layerOp({ kind: 'move', from, to })}
-        onmerge={askMerge}
-        onadd={() => layerOp({ kind: 'add' })}
-      />
-
-      <section class="side-block" aria-labelledby="live-projection-title">
-        <h3 id="live-projection-title">{t('live.projection.title')}</h3>
-        {#if monitorsLoaded && monitors.length === 0}
-          <p class="muted small">{t('live.projection.none')}</p>
-        {:else}
-          <label class="field-row">
-            <span class="label">{t('live.projection.monitor')}</span>
-            <select bind:value={monitorKey} disabled={monitors.length === 0}>
-              {#each monitors as monitor (monitor.key)}
-                <option value={monitor.key}>
-                  {t('live.projection.option', { name: monitorName(monitor), width: monitor.width, height: monitor.height })}
-                </option>
-              {/each}
-            </select>
-          </label>
-        {/if}
-        <div class="row">
-          {#if live.presentation}
-            <button type="button" class="button small-button" data-action="stop-projecting" onclick={stopProjecting}>
-              {t('live.projection.stop')}
-            </button>
-          {:else}
-            <button
-              type="button"
-              class="button small-button primary"
-              data-action="project"
-              disabled={projecting || monitors.length === 0}
-              onclick={project}
-            >
-              {t('live.projection.project')}
-            </button>
-          {/if}
-          <button
-            type="button"
-            class="button small-button ghost"
-            aria-label={t('live.projection.refresh')}
-            title={t('live.projection.refresh')}
-            onclick={refreshMonitors}><span aria-hidden="true">↻</span></button
+    <aside class="live-side" aria-label={t('side.label')}>
+      <SidePanel where="live" panel={side} {badges} above={selection.any || selection.active || penOn ? aboveBlock : undefined}>
+        {#snippet layers()}
+          <LayersZone
+            where="live"
+            layers={live.layers}
+            chosen={live.computerLayer}
+            tablet={live.layer}
+            disabled={sessionState === 'idle'}
+            onchoose={(layer) => layerOp({ kind: 'computer', layer })}
+            ontablet={(layer) => layerOp({ kind: 'tablet', layer })}
+            onvisible={(layer, visible) => layerOp({ kind: 'visible', layer, visible })}
+            onrename={(layer, name) => layerOp({ kind: 'rename', layer, name })}
+            onmove={(from, to) => layerOp({ kind: 'move', from, to })}
+            onmerge={askMerge}
+            onadd={() => layerOp({ kind: 'add' })}
+          />
+        {/snippet}
+        {#snippet sound()}
+          <section class="pane-block" aria-labelledby="live-narration-title" data-section="narration">
+            <h3 class="pane-title" id="live-narration-title">{t('live.narration.title')}</h3>
+            <RecordPanel
+              bind:open={narrationOpen}
+              {recorder}
+              device={microphone}
+              ondevice={chooseMicrophone}
+              onstart={startNarration}
+              onstop={() => void stopNarration(true)}
+              oncancel={() => void stopNarration(false)}
+              openLabel={t('live.narration.open')}
+              openHint={t('live.narration.openHint')}
+              info={t('live.narration.hint')}
+            />
+            {#if narratedText}
+              <p class="pane-help" role="status" data-slot="narration-saved" data-pages={narrated?.pages ?? 0}>{narratedText}</p>
+            {/if}
+          </section>
+        {/snippet}
+        {#snippet projection()}
+          <ProjectorBlock
+            {monitors}
+            bind:monitorKey
+            loaded={monitorsLoaded}
+            presentation={live.presentation}
+            busy={projecting}
+            error={projectionError}
+            onproject={project}
+            onstop={stopProjecting}
+            onrefresh={refreshMonitors}
+          />
+          <ZoneBlock
+            zoom={live.view.zoom}
+            min={MIN_ZOOM}
+            max={MAX_ZOOM}
+            onzoom={(direction) => zoomStep(actions, direction)}
+            onwhole={() => showWholePage(actions)}
+            onwidth={() => showPageWidth(actions)}
+            hint={t('live.preview.hint')}
           >
-        </div>
-        <p class="muted small" data-presentation={live.presentation?.key ?? ''}>
-          {live.presentation ? t('live.projection.on', { name: monitorName(live.presentation) }) : t('live.projection.off')}
-        </p>
-        {#if monitors.length === 1 && !live.presentation}
-          <p class="muted small">{t('live.projection.single')}</p>
-        {/if}
-        {#if projectionError}
-          <p class="error small" role="alert">{projectionError}</p>
-        {/if}
-      </section>
-
-      <section class="side-block" aria-labelledby="live-narration-title" data-section="narration">
-        <h3 id="live-narration-title">{t('live.narration.title')}</h3>
-        <RecordPanel
-          bind:open={narrationOpen}
-          {recorder}
-          device={microphone}
-          ondevice={chooseMicrophone}
-          onstart={startNarration}
-          onstop={() => void stopNarration(true)}
-          oncancel={() => void stopNarration(false)}
-          openLabel={t('live.narration.open')}
-          openHint={t('live.narration.openHint')}
-          info={t('live.narration.hint')}
-        />
-        {#if narratedText}
-          <p class="small" role="status" data-slot="narration-saved" data-pages={narrated?.pages ?? 0}>{narratedText}</p>
-        {/if}
-      </section>
-
-      <section class="side-block" aria-labelledby="live-zoom-title">
-        <h3 id="live-zoom-title">{t('live.zoom.label')}</h3>
-        <div class="row">
-          <button
-            type="button"
-            class="button small-button"
-            aria-label={t('live.zoom.out')}
-            title={t('live.zoom.out')}
-            disabled={live.view.zoom <= MIN_ZOOM + 1e-3}
-            onclick={() => zoomStep(actions, -1)}>−</button
-          >
-          <span class="zoom-level" aria-live="polite" data-zoom={live.view.zoom}>
-            {t('live.zoom.level', { zoom: decimal.format(live.view.zoom) })}
-          </span>
-          <button
-            type="button"
-            class="button small-button"
-            aria-label={t('live.zoom.in')}
-            title={t('live.zoom.in')}
-            disabled={live.view.zoom >= MAX_ZOOM - 1e-3}
-            onclick={() => zoomStep(actions, 1)}>+</button
-          >
-          <button type="button" class="button small-button" data-action="whole-page" onclick={() => showWholePage(actions)}>
-            {t('live.zoom.fit')}
-          </button>
-          <button type="button" class="button small-button" data-action="page-width" title={t('live.zoom.fitWidthTitle')} onclick={() => showPageWidth(actions)}>
-            {t('live.zoom.fitWidth')}
-          </button>
-        </div>
-        <p class="muted small">{t('live.preview.hint')}</p>
-        {#if selection.active}
-          <p class="muted small" data-slot="select-hint">{t('live.select.help')}</p>
-        {/if}
-        {#if penOn}
-          <p class="muted small" data-slot="pen-hint">{t('live.pen.help')}</p>
-        {/if}
-      </section>
-
-      <section class="side-block" aria-labelledby="live-keys-title">
-        <h3 id="live-keys-title">{t('live.keys.title')}</h3>
-        <dl class="keys">
-          {#each KEYS as key (key)}
-            <dt><kbd>{t(`live.keys.list.${key}.keys`)}</kbd></dt>
-            <dd>{t(`live.keys.list.${key}.action`)}</dd>
-          {/each}
-        </dl>
-      </section>
+            <!-- The same states as the toolbar's buttons, which stay beside the pages (O2). -->
+            <label class="pane-row">
+              <span>{t('live.board')}</span>
+              <input
+                type="checkbox"
+                role="switch"
+                class="pane-switch"
+                data-field="board"
+                checked={live.view.board}
+                onchange={() => toggleBoard(actions)}
+              />
+            </label>
+            <label class="pane-row">
+              <span>{t('live.laser')}</span>
+              <input
+                type="checkbox"
+                role="switch"
+                class="pane-switch"
+                data-field="laser"
+                checked={live.view.laser}
+                onchange={() => toggleLaser(actions)}
+              />
+            </label>
+          </ZoneBlock>
+          <ShareBlock />
+        {/snippet}
+        {#snippet help()}
+          <ShortcutsHelp where="live" shortcuts={LIVE_SHORTCUTS} />
+        {/snippet}
+      </SidePanel>
     </aside>
   </div>
+
+  {#snippet aboveBlock()}
+    <div class="pane-block">
+      {#if selection.any}
+        <div class="select-bar" role="toolbar" aria-label={t('live.select.bar')} data-slot="select-bar">
+          <span class="select-count" role="status" data-count={selection.count}>{t('live.select.count', { count: selection.count })}</span>
+          <div class="pane-actions">
+            <button type="button" class="button small-button danger" data-action="delete-selection" onclick={() => void deleteSelected(touchUp)}>
+              {t('live.select.delete')}
+            </button>
+            <button type="button" class="button small-button" data-action="deselect" onclick={() => selection.clear()}>
+              {t('live.select.clear')}
+            </button>
+          </div>
+          <p class="pane-help">{t('live.select.colors')}</p>
+        </div>
+      {/if}
+      {#if selection.active}
+        <p class="pane-help" data-slot="select-hint">{t('live.select.help')}</p>
+      {/if}
+      {#if penOn}
+        <p class="pane-help" data-slot="pen-hint">{t('live.pen.help')}</p>
+      {/if}
+    </div>
+  {/snippet}
 
   {#if confirmLeave}
     <Modal title={t('live.leave.title')} onclose={() => (confirmLeave = false)}>
@@ -1439,8 +1414,7 @@
   }
 
   .value,
-  .page-position,
-  .zoom-level {
+  .page-position {
     min-width: 4.5rem;
     color: var(--muted);
     font-size: 0.875rem;
@@ -1467,21 +1441,11 @@
     background: var(--surface-2);
   }
 
+  /* In the side panel's above block: the rail's `side-above` gives the look, this lays out the count and the buttons. */
   .select-bar {
-    position: absolute;
-    bottom: 0.5rem;
-    left: 50%;
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem 0.6rem;
-    max-width: 94%;
-    padding: 0.35rem 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    box-shadow: var(--shadow);
-    transform: translateX(-50%);
+    flex-direction: column;
+    gap: 0.4rem;
   }
 
   .select-count {
@@ -1550,71 +1514,10 @@
     transform: translateX(-50%);
   }
 
+  /* The rail and the pane (`SidePanel`) bring their own width, border and scrolling. */
   .live-side {
-    width: 290px;
+    display: flex;
     flex: none;
-    overflow: auto;
-    border-left: 1px solid var(--border);
-    background: var(--surface);
-  }
-
-  .side-block {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.85rem 1rem;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .side-block h3 {
-    margin: 0;
-    font-size: 0.95rem;
-  }
-
-  .side-block p {
-    margin: 0;
-  }
-
-  .field-row {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .field-row select {
-    width: 100%;
-  }
-
-  .row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem;
-  }
-
-  .keys {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.3rem 0.75rem;
-    margin: 0;
-    font-size: 0.85rem;
-  }
-
-  .keys dt {
-    white-space: nowrap;
-  }
-
-  .keys dd {
-    margin: 0;
-    color: var(--muted);
-  }
-
-  kbd {
-    padding: 0.05rem 0.35rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface-2);
-    font-family: inherit;
-    font-size: 0.8rem;
+    min-height: 0;
   }
 </style>

@@ -156,7 +156,8 @@ describe('page orientation and paper size', () => {
     const { target, page, action } = await render('Liste de courses');
     const text = target.textContent ?? '';
     expect(text).toContain('Format de la feuille');
-    expect(text).toContain("Tourner la feuille avec l'écriture");
+    expect(text).toContain('Tourner et recadrer');
+    expect(text).toContain("La feuille, l'écriture et l'image de fond tournent ensemble");
     action('rotate-cw').click();
     await tick();
     expect(page()).toEqual([21600, 29700]);

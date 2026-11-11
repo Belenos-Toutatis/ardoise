@@ -31,6 +31,7 @@
 // covered by the interface tests (the lasso here is the mouse's); how the highlight looks is for the eye (H5).
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { openTab } from './side-panel.mjs';
 import { assertNoBrowserProblem, closePanel, EventStream, findEdge, request, startBrowser, until } from './journeys-m11-share.mjs';
 import {
   attach,
@@ -712,8 +713,9 @@ async function joinStream(app, code) {
   return stream;
 }
 
-/** Starts the share from the toolbar; returns its access code (spaces out). */
+/** Starts the share from the Projection tab of the side panel (M16); returns its access code (spaces out). */
 async function startShare(app) {
+  await openTab(app, 'projection');
   await app.click('button[data-action="share"]');
   await app.waitFor(`document.querySelector('[data-share-code]') !== null`, 'the access code', 15_000);
   return app.evaluate(`document.querySelector('[data-share-code]').textContent.replace(/[\\s\\u00a0\\u202f]+/g, '')`);

@@ -26,6 +26,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crc32, deflateRawSync, deflateSync, inflateRawSync } from 'node:zlib';
 import { assertNoBrowserProblem, findEdge, startBrowser } from './journeys-m11-share.mjs';
+import { openTab } from './side-panel.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -557,6 +558,8 @@ export const resumeJourneys = [
             console.log('    skipped: Edge not found (C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe)');
             return;
           }
+          // The share button is in the Projection tab of the side panel (M16).
+          await openTab(app, 'projection');
           await app.click('button[data-action="share"]');
           await app.waitFor(`document.querySelector('[data-share-code]') !== null`, 'the access code', 15_000);
           const code = await app.evaluate(`document.querySelector('[data-share-code]').textContent.replace(/[\\s\\u00a0\\u202f]+/g, '')`);
@@ -613,6 +616,8 @@ export const resumeJourneys = [
           const facts = await editorFacts(app);
           if (facts.image !== IMAGE_NAME) throw new Error(`background image: ${j(facts.image)}`);
           if (!facts.original) throw new Error(`« ${l('editor.original.button')} » is not available any more`);
+          // « Revenir à l'original » is in the Page tab of the side panel (M16).
+          await openTab(app, 'page');
           await app.click('[data-section="original"] button[data-action="original"]');
           await app.click('[data-action="original-confirm"]');
           await app.waitFor(`document.querySelectorAll(${j(EDITOR_STROKES)}).length === 1`, 'the first version (one stroke)');

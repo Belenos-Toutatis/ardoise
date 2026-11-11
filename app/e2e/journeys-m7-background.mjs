@@ -11,6 +11,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
+import { openTab } from './side-panel.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -136,6 +137,8 @@ export const backgroundJourneys = [
       });
 
       await check(`tourner la page d’un quart de tour (« ${l('editor.page.rotateCwShort')} »)`, async () => {
+        // The page's rotate buttons are in the Page tab of the side panel (M16).
+        await openTab(app, 'page');
         await app.click(`button[title=${j(l('editor.page.rotateCw'))}]`);
         await app.waitFor(`document.querySelector('.editor').dataset.dirty === 'yes'`, 'the unsaved mark');
       });

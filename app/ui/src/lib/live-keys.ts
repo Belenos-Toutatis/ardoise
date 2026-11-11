@@ -14,15 +14,23 @@
  * | W                                      | page width              |
  * | Delete, Backspace                      | clear the marks written |
  * |                                        | over the presentation   |
+ * |                                        | (projected window only) |
  * | Shift + arrows                         | move the projected area |
  * | Esc, Ctrl + W, Ctrl + F4               | leave                   |
  *
  * The control window also has the keys of touching up (`liveEditKeyAction`, at the end). Ctrl + Q is
  * for each window to answer (`closeKey`).
  *
+ * The same keys, as data, are `lib/live-shortcuts.ts` (`LIVE_SHORTCUTS`): what the control window's Aide tab shows
+ * and what its tests confront with this mapping, both ways (`live-shortcuts.test.ts`). A key added or changed here
+ * is a row to add or change there, or the sweep fails. Delete and Backspace without a selection are the
+ * presentation window's alone: the control window does nothing with `clearMarks`, so its help lists them apart.
+ *
  * Presentation remotes send Page Up / Page Down. Keys typed in a field are left alone. Space
  * always means "next page", even with a button focused (the button of a tool just used would
- * otherwise be pressed again: « Clear the page » by Space wiped the new page). Esc closes the
+ * otherwise be pressed again: « Clear the page » by Space wiped the new page) or a checkbox or a
+ * radio, such as the switches of the side panel (clicked, they keep the focus and the keys of live
+ * mode must not stop). Esc closes the
  * projection when it is open and otherwise asks before ending live mode: the window decides.
  */
 
@@ -58,14 +66,16 @@ interface ElementLike {
   type?: unknown;
 }
 
-const BUTTON_INPUTS = new Set(['button', 'submit', 'reset']);
+// Inputs that are pressed, not typed in: like a button, they keep the keys of live mode (a switch of the side panel
+// just clicked must not swallow the next Page Down), and Space turns the page instead of toggling them.
+const BUTTON_INPUTS = new Set(['button', 'submit', 'reset', 'checkbox', 'radio']);
 
 /** Space, whatever the browser calls it. */
 export function isSpaceKey(key: string): boolean {
   return key === ' ' || key === 'Spacebar';
 }
 
-/** A field the user types in (text, number, range, select…): its keys are its own. */
+/** A field the user types in (text, number, range, select…): its keys are its own. Buttons, checkboxes and radios are not. */
 export function isTypingTarget(target: EventTarget | null | undefined): boolean {
   const el = target as ElementLike | null | undefined;
   if (!el || typeof el.tagName !== 'string') return false;
@@ -157,7 +167,8 @@ export type LiveEditKeyAction =
  * | P                                  | the Pen tool on or off (M14, the editor's key)  |
  * | Ctrl + Z                           | undo a delete, a change of colour, a clearing   |
  * | Ctrl + Y, Ctrl + Shift + Z         | redo                                            |
- * | Delete, Backspace (with selection) | delete the selection (otherwise: the marks)     |
+ * | Delete, Backspace (with selection) | delete the selection (otherwise: the marks,     |
+ * |                                    | which only the projected window acts on)        |
  * | Esc (with selection)               | deselect (otherwise: what Esc does)             |
  */
 export function liveEditKeyAction(e: KeyInput, hasSelection: boolean): LiveEditKeyAction | null {

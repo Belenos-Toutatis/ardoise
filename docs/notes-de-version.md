@@ -47,6 +47,7 @@ version fait et surtout **ce qui n'a pas encore été essayé**. Le détail tech
   par instant ou par zone, retour à l'original, copier-coller entre notes, annuler et rétablir sans limite.
 - Stylet et écran tactile (dos du stylet qui gomme, bouton du stylet qui fait un lasso puis pointe qui déplace ou
   redimensionne la sélection, doigts, rejet de la paume).
+- **Panneau de côté à onglets**, dans l'éditeur et dans la fenêtre de commande du direct : une colonne d'icônes (Calques, Page, Fond, Son, Projection, Aide) et le panneau de l'onglet ouvert, qu'un clic sur l'onglet ou sur **›** replie pour donner toute la largeur à la page ; l'onglet et l'état replié sont retenus pour chaque fenêtre. Des pastilles sur le rail (nombre de calques, calque masqué, enregistrement, projection ou partage), la sélection au-dessus de l'onglet ouvert, le partage sur le réseau dans **Projection**, l'**Aide** avec la liste des raccourcis de la fenêtre (une seule liste, que les tests confrontent aux touches traitées). Vérifié par des parcours automatiques dans chaque fenêtre ; *l'aspect avec le stylet et le doigt sur la Surface, le thème sombre et la fenêtre étroite ne sont pas encore regardés sur le PC*.
 - Copie de secours automatique des modifications non enregistrées, sur le PC seulement : après un plantage ou un
   redémarrage forcé, Ardoise propose de les récupérer (sur la note si elle n'a pas changé, sinon dans une copie).
   À une fermeture de session ou un arrêt de Windows avec un travail non enregistré, Windows affiche qu'Ardoise
@@ -98,6 +99,7 @@ tablette simulée uniquement**. Les essais suivants sont encore à faire par l'u
 
 D'autres essais à la main restent à faire, car les tests automatiques ne peuvent pas les remplacer :
 
+- le panneau de côté sur la Surface : le rail et ses icônes de 38 px au stylet, au doigt et à la souris (info-bulle au survol), le panneau replié puis rouvert, le thème sombre, la fenêtre de 800 × 560, le focus visible sur les icônes, la lecture des onglets et de leurs pastilles par le Narrateur, `Espace` sur une icône en mode direct (il tourne la page) ; la pastille rouge pendant un vrai enregistrement (les parcours n'ont pas de micro) ;
 - la reconnaissance d'écriture **en anglais** (le module d'écriture anglais de Windows n'est pas installé sur le PC de
   développement) et la pause de la lecture de l'écriture pendant la présentation ;
 - un vrai dépôt d'une note glissée dans l'Explorateur, Word ou OneNote ;
@@ -191,6 +193,7 @@ explained in the [guide](guide/guide.en.md).
   zone, back to the original, copy and paste between notes, unlimited undo and redo.
 - Pen and touch screen (pen eraser end, pen button as a lasso and then the tip moving or resizing the selection,
   fingers, palm rejection).
+- **Tabbed side panel**, in the editor and in the live control window: a column of icons (Layers, Page, Background, Sound, Projection, Help) and the panel of the open tab, which a click on the tab or on **›** collapses to give the page the whole width; the tab and the collapsed state are remembered for each window. Badges on the rail (number of layers, hidden layer, recording, projection or share), the selection above the open tab, network sharing in **Projection**, and **Help** with the window's list of shortcuts (a single list, which the tests compare with the keys handled). Checked by automated journeys in each window; *how it looks with the pen and a finger on the Surface, in the dark theme and in a narrow window has not been looked at on the PC yet*.
 - Automatic backup copy of unsaved changes, on the PC only: after a crash or a forced restart, Ardoise offers to
   recover them (onto the note if it has not changed, otherwise into a copy). At a Windows logoff or shutdown with
   unsaved work, Windows shows that Ardoise is preventing the shutdown, with the reason.
@@ -240,6 +243,7 @@ simulated tablet only**. The following trials are still to be made by the user, 
 
 Other hands-on checks remain, because automated tests cannot replace them:
 
+- the side panel on the Surface: the rail and its 38 px icons with the pen, a finger and the mouse (tooltip on hover), the panel collapsed then opened again, the dark theme, the 800 × 560 window, the visible focus on the icons, Narrator reading the tabs and their badges, `Space` on an icon in live mode (it turns the page); the red dot during a real recording (the journeys have no microphone);
 - handwriting recognition **in English** (the English handwriting module of Windows is not installed on the development
   PC) and the pause of handwriting reading during the presentation;
 - a real drop of a note dragged into Explorer, Word or OneNote;

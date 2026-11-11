@@ -1,7 +1,8 @@
 <script lang="ts">
   /**
-   * « Partager sur le réseau »: the button of the live control window's toolbar and of the
-   * editor's. It opens the share panel, which starts the share if none runs. While a share
+   * « Partager sur le réseau »: the button of the « Partage sur le réseau » block (`ShareBlock.svelte`) in the
+   * Projection tab of the editor's and of the live control window's side panel (milestone M16; before that, of their
+   * toolbars). It opens the share panel, which starts the share if none runs. While a share
    * runs the button is highlighted and carries the number of screens connected
    * (`.share-indicator`), so that the teacher always sees that the port is open.
    */

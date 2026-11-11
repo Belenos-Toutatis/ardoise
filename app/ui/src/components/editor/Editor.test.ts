@@ -1392,9 +1392,13 @@ describe('note editor: split, copy image and export', () => {
 
   it('locks the page panel, the layers panel and the style controls while the split panel is open', async () => {
     const { target, button } = await render('Cours de physique');
-    const section = (selector: string) =>
-      target.querySelector<HTMLElement>(selector.startsWith('.') ? selector : `section[aria-labelledby="${selector}"]`)!;
+    const section = (selector: string) => target.querySelector<HTMLElement>(selector)!;
     const controls = (root: ParentNode) => [...root.querySelectorAll<HTMLElement>('button, input, select')];
+    // The page's blocks (paper, format, turn and crop) and the background image, which is in the Fond tab.
+    const pageControls = () =>
+      ['[data-section="paper"]', '[data-section="page-format"]', '[data-section="turn-crop"]', '[data-section="background-image"]'].flatMap(
+        (selector) => controls(section(selector)),
+      );
     const toolbarControls = () =>
       controls(target.querySelector('.toolbar')!).filter((c) => !c.closest('.share'));
     const locked = (items: HTMLElement[]) =>
@@ -1405,7 +1409,7 @@ describe('note editor: split, copy image and export', () => {
     // Before: everything works (the layer buttons that cannot apply to the top layer excepted).
     expect(toolbarControls().length).toBeGreaterThan(10);
     expect(free(toolbarControls())).toBe(true);
-    expect(free(controls(section('editor-page-heading')))).toBe(true);
+    expect(free(pageControls())).toBe(true);
     expect(controls(section('.layers-zone')).some((c) => (c as HTMLInputElement).disabled)).toBe(true);
     expect(button('+ Ajouter un calque').disabled).toBe(false);
 
@@ -1415,10 +1419,10 @@ describe('note editor: split, copy image and export', () => {
     // Mode, tool, colours, width, "apply to all": all locked.
     expect(toolbarControls().length).toBeGreaterThan(10);
     expect(locked(toolbarControls())).toBe(true);
-    expect(locked(controls(section('editor-page-heading')))).toBe(true);
-    // Paper, template, texture, two orientations, paper size, two sides and Apply, the scale option,
-    // two turns, two crops, and the background image's button.
-    expect(controls(section('editor-page-heading')).length).toBe(15);
+    expect(locked(pageControls())).toBe(true);
+    // Four paper swatches, the template, the texture, two orientations, paper size, two sides and Apply, the
+    // scale option, two turns, two crops, and the background image's button.
+    expect(pageControls().length).toBe(18);
     expect(locked(controls(section('.layers-zone')))).toBe(true);
     // The split's own buttons, copy and export stay available.
     expect(button('Découper').disabled).toBe(false);
@@ -1430,7 +1434,7 @@ describe('note editor: split, copy image and export', () => {
     await tick();
     expect(panelOf(target)).toBeNull();
     expect(free(toolbarControls())).toBe(true);
-    expect(free(controls(section('editor-page-heading')))).toBe(true);
+    expect(free(pageControls())).toBe(true);
     expect(button('+ Ajouter un calque').disabled).toBe(false);
   });
 

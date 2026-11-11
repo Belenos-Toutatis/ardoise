@@ -119,8 +119,10 @@ describe('the layers zone of the live window', () => {
   it('opens the side panel, one row chosen with the tablet on it; the « Nouveau calque » button is gone', async () => {
     const view = render();
     await live(view);
-    const side = view.q('aside.live-side')!;
-    expect(side.firstElementChild).toBe(view.zone());
+    // Calques is the tab the side panel opens on: the zone is what it shows, and nothing else comes before it.
+    const layers = view.q('aside.live-side [data-tab-panel="layers"]')!;
+    expect(layers.hidden).toBe(false);
+    expect(layers.firstElementChild).toBe(view.zone());
     expect(view.rows()).toHaveLength(1);
     expect([view.chosen(), view.tabletRow()]).toEqual([0, 0]);
     expect(view.action('new-layer')).toBeNull();

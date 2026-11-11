@@ -796,7 +796,6 @@
     "redo": "Rétablir (Ctrl+Y)",
     "toolbar": "Outils d'édition",
     "canvas": "Page de la note",
-    "sidePanel": "Page, calques et sélection",
     "modes": {
       "label": "Outil",
       "select": "Sélection",
@@ -921,7 +920,6 @@
       }
     },
     "page": {
-      "label": "Page",
       "paper": "Couleur du papier",
       "template": "Modèle",
       "texture": "Texture du papier",
@@ -949,8 +947,9 @@
       "scaleInkOff": "L'écriture garde sa taille et sa place. Si elle dépasse, elle est replacée dans la feuille quand elle y tient ; sinon la partie hors cadre est conservée mais pas affichée.",
       "inkOutsideOne": "Un trait dépasse de la feuille : il est conservé mais n'est pas affiché.",
       "inkOutsideMany": "{count} traits dépassent de la feuille : ils sont conservés mais ne sont pas affichés.",
-      "rotateLabel": "Tourner la feuille avec l'écriture",
-      "rotateHint": "La feuille, l'écriture et l'image de fond tournent ensemble d'un quart de tour."
+      "rotateHint": "La feuille, l'écriture et l'image de fond tournent ensemble d'un quart de tour.",
+      "paperTitle": "Papier",
+      "turnCropTitle": "Tourner et recadrer"
     },
     "original": {
       "label": "Original",
@@ -1074,7 +1073,87 @@
       "button": "Vidéo",
       "hint": "Exporter la relecture en vidéo (MP4, WebM) ou en image animée (GIF, WebP)…"
     },
-    "backgroundLoadFailed": "L'image de fond de cette note n'a pas pu être chargée ({message}). La note s'ouvre sans elle ; l'image reste dans le fichier tant que vous ne la retirez pas."
+    "backgroundLoadFailed": "L'image de fond de cette note n'a pas pu être chargée ({message}). La note s'ouvre sans elle ; l'image reste dans le fichier tant que vous ne la retirez pas.",
+    "keys": {
+      "list": {
+        "select": "Outil Sélection",
+        "pen": "Outil Stylo",
+        "eraser": "Outil Gomme",
+        "pan": "Outil Déplacer la page",
+        "panHold": "Déplacer la page tant que la touche est enfoncée (sauf si un bouton a le focus)",
+        "straighten": "Redresser les formes de la sélection",
+        "replay": "Relecture",
+        "undo": "Annuler",
+        "redo": "Rétablir",
+        "selectAll": "Tout sélectionner (les traits du calque choisi)",
+        "clipboard": "Copier, couper, coller des traits",
+        "delete": "Supprimer la sélection",
+        "deselect": "Désélectionner (ferme d'abord la découpe ou le réglage de « Redresser les formes » s'ils sont ouverts)",
+        "fit": "Ajuster : la page entière",
+        "fitWidth": "Largeur : la page sur toute la largeur",
+        "pages": "Page précédente, page suivante (la note d'avant, celle d'après)",
+        "save": "Enregistrer",
+        "close": "Revenir à la bibliothèque (ferme d'abord la découpe ou la relecture)",
+        "quit": "Quitter Ardoise",
+        "leaveReplay": "Quitter la relecture",
+        "playPause": "Lecture / pause"
+      }
+    },
+    "sound": {
+      "replayFirst": "La narration s'écoute et s'enregistre pendant une relecture.",
+      "startReplay": "Lancer la relecture"
+    }
+  },
+  "side": {
+    "label": "Panneau de côté",
+    "tablist": "Onglets du panneau",
+    "tabs": {
+      "layers": "Calques",
+      "page": "Page",
+      "background": "Fond",
+      "sound": "Son",
+      "projection": "Projection",
+      "help": "Aide"
+    },
+    "openTitle": "{tab} (cliquer pour replier)",
+    "collapse": "Replier le panneau",
+    "badge": {
+      "layers": {
+        "one": "{count} calque",
+        "other": "{count} calques"
+      }
+    },
+    "dot": {
+      "warn": "un calque utilisé est masqué",
+      "rec": "enregistrement en cours",
+      "live": "projection ou partage en cours"
+    },
+    "help": {
+      "editor": "Raccourcis de l'éditeur",
+      "live": "Raccourcis du mode direct",
+      "replay": "Pendant une relecture",
+      "presentation": "Dans la fenêtre projetée",
+      "typingEditor": "Ils n'agissent pas pendant que vous tapez dans un champ de texte, sauf Ctrl + S, Ctrl + W, Ctrl + F4 et Ctrl + Q.",
+      "typingLive": "Ils n'agissent pas pendant que vous tapez dans un champ de texte, sauf Ctrl + W, Ctrl + F4 et Ctrl + Q. Espace tourne la page même quand un bouton a le focus."
+    }
+  },
+  "shortcuts": {
+    "keys": {
+      "arrowLeft": "←",
+      "arrowRight": "→",
+      "arrowUp": "↑",
+      "arrowDown": "↓",
+      "pageUp": "Pg préc",
+      "pageDown": "Pg suiv",
+      "space": "Espace",
+      "delete": "Suppr",
+      "backspace": "Retour arrière",
+      "escape": "Échap",
+      "ctrl": "Ctrl",
+      "shift": "Maj",
+      "alt": "Alt",
+      "shiftArrows": "Maj + flèches"
+    }
   },
   "layers": {
     "title": "Calques",
@@ -1605,10 +1684,10 @@
       "fit": "Page entière",
       "fitWidth": "Largeur",
       "fitWidthTitle": "Afficher la page sur toute la largeur de la zone projetée (W)",
-      "level": "× {zoom}"
+      "level": "× {zoom}",
+      "area": "Zone projetée"
     },
     "projection": {
-      "title": "Projection",
       "monitor": "Écran de projection",
       "screen": "Écran {n}",
       "option": "{name} — {width} × {height}",
@@ -1619,7 +1698,8 @@
       "on": "Projeté sur {name}.",
       "off": "Rien n'est projeté.",
       "none": "Aucun écran n'est détecté.",
-      "single": "Un seul écran est détecté : la présentation couvrira cette fenêtre. Appuyez sur Échap pour la fermer."
+      "single": "Un seul écran est détecté : la présentation couvrira cette fenêtre. Appuyez sur Échap pour la fermer.",
+      "projector": "Vidéoprojecteur"
     },
     "latency": {
       "label": "Latence",
@@ -1629,74 +1709,56 @@
       "hint": "Temps entre la réception du point par l'ordinateur et le début de l'image suivante, après son dessin ; l'affichage de l'écran lui-même n'est pas compris (objectif : moins de 30 ms)."
     },
     "keys": {
-      "title": "Clavier",
       "list": {
         "next": {
-          "keys": "→, Pg suiv, Espace",
           "action": "Page suivante"
         },
         "previous": {
-          "keys": "←, Pg préc",
           "action": "Page précédente"
         },
         "clear": {
-          "keys": "Ctrl + Suppr",
           "action": "Effacer la page"
         },
         "board": {
-          "keys": "B",
           "action": "Tableau noir"
         },
         "laser": {
-          "keys": "L",
           "action": "Pointeur laser"
         },
         "zoom": {
-          "keys": "+ / −",
           "action": "Agrandir / réduire la zone projetée"
         },
         "whole": {
-          "keys": "0",
           "action": "Page entière"
         },
         "width": {
-          "keys": "W",
           "action": "Largeur de la page"
         },
         "pan": {
-          "keys": "Maj + flèches",
           "action": "Déplacer la zone projetée"
         },
         "leave": {
-          "keys": "Échap",
-          "action": "Désélectionner d'abord s'il y a une sélection ; puis fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
+          "action": "Abandonner le geste du stylet en cours, fermer le panneau « Encre de l'ordinateur », enlever la sélection ; sinon fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
         },
         "close": {
-          "keys": "Ctrl + W, Ctrl + F4",
           "action": "Fermer la projection si elle est affichée, sinon terminer le mode direct (après confirmation)"
         },
         "quit": {
-          "keys": "Ctrl + Q",
-          "action": "Quitter Ardoise (après confirmation) ; dans la présentation, fermer la projection"
+          "action": "Quitter Ardoise (après confirmation)"
         },
         "marks": {
-          "keys": "Suppr, Retour arrière",
-          "action": "Effacer les annotations tracées sur la présentation (fenêtre projetée)"
+          "action": "Effacer les annotations tracées sur la présentation"
         },
         "pen": {
-          "keys": "P",
           "action": "Outil Stylo : écrire avec le stylet ou la souris de l'ordinateur"
         },
         "select": {
-          "keys": "V",
           "action": "Outil Sélection (lasso ou clic sur un trait)"
         },
         "delete": {
-          "keys": "Suppr, Retour arrière",
-          "action": "Avec une sélection : la supprimer (sans sélection : effacer les annotations)"
+          "action": "Supprimer la sélection"
         },
         "undo": {
-          "keys": "Ctrl + Z, Ctrl + Y",
           "action": "Annuler, rétablir un trait ou un coup de gomme de l'ordinateur, une suppression, un changement de couleur ou l'effacement de la page"
         }
       }
@@ -1789,7 +1851,15 @@
     "stop": "Arrêter le partage",
     "helpTitle": "À savoir",
     "helpFirewall": "La première fois, Windows demande l'autorisation du pare-feu : acceptez pour les réseaux privés (« réseau privé »).",
-    "helpEnd": "Le partage s'arrête quand vous le décidez ou quand vous fermez Ardoise. Seul l'ordinateur d'Ardoise envoie : les autres écrans ne font que regarder."
+    "helpEnd": "Le partage s'arrête quand vous le décidez ou quand vous fermez Ardoise. Seul l'ordinateur d'Ardoise envoie : les autres écrans ne font que regarder.",
+    "block": {
+      "title": "Partage sur le réseau",
+      "idle": "Un autre ordinateur du réseau affiche la page dans un navigateur.",
+      "active": {
+        "one": "Partagé : {count} écran connecté.",
+        "other": "Partagé : {count} écrans connectés."
+      }
+    }
   },
   "handwriting": {
     "languages": {
