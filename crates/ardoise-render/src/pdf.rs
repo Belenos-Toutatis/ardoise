@@ -7,18 +7,22 @@
 //! Page sizes: `Actual` is the note's own size (1 device unit = 72 / 2540 pt); `A4` is
 //! 210 × 297 mm in the note's orientation, the note scaled to fit and centred (the margins
 //! stay white). Pages larger than PDF's 14 400 units a side get a `/UserUnit`.
+//!
+//! Layers: merged (the default) paints every fill in one stream; separate puts each note
+//! layer's fills in marked content tied to an optional content group (PDF 1.5), one group per
+//! layer name over the whole document, so that a viewer can show or hide it.
 
 use std::collections::HashMap;
 
-use pdf_writer::types::BlendMode;
+use pdf_writer::types::{BlendMode, PageMode};
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, TextStr};
 
-use crate::RenderError;
 use crate::background::{Shape, VectorBackground};
 use crate::look::{Blend, UNITS_PER_INCH};
 use crate::picture::{DctColor, NoteView, PlacedPicture};
 use crate::svg::TEXTURE_QUALITY;
-use crate::vector::Scene;
+use crate::vector::{LayerFills, Scene};
+use crate::{LayerMode, RenderError};
 
 /// Points per device unit.
 const PT_PER_UNIT: f32 = 72.0 / UNITS_PER_INCH;
@@ -47,6 +51,8 @@ pub struct PdfOptions {
     pub page: PdfPage,
     /// Draw the paper colour, template and texture; otherwise the page stays white.
     pub background: bool,
+    /// One optional content group per note layer, or one drawing.
+    pub layers: LayerMode,
 }
 
 impl Default for PdfOptions {
@@ -54,6 +60,7 @@ impl Default for PdfOptions {
         Self {
             page: PdfPage::Actual,
             background: true,
+            layers: LayerMode::Merged,
         }
     }
 }
@@ -75,10 +82,46 @@ where
     let tree = next.bump();
     let info = next.bump();
     let pages: Vec<Ref> = notes.iter().map(|_| next.bump()).collect();
-    pdf.catalog(catalog).pages(tree);
+    let separate = options.layers == LayerMode::Separate;
+    if !separate {
+        pdf.catalog(catalog).pages(tree);
+    }
     pdf.pages(tree).kids(pages.iter().copied()).count(count);
+    let mut groups = Groups::default();
     for (&view, &page) in notes.iter().zip(&pages) {
-        write_page(&mut pdf, &mut next, tree, page, view.into(), options)?;
+        let groups = separate.then_some(&mut groups);
+        write_page(
+            &mut pdf,
+            &mut next,
+            tree,
+            page,
+            view.into(),
+            options,
+            groups,
+        )?;
+    }
+    if separate {
+        // The groups are known once every page is written, so the catalog comes last.
+        write_groups(&mut pdf, &groups);
+        let mut root = pdf.catalog(catalog);
+        root.pages(tree);
+        if !groups.ids.is_empty() {
+            root.page_mode(PageMode::UseOC);
+            let mut properties = root.insert(Name(b"OCProperties")).dict();
+            properties
+                .insert(Name(b"OCGs"))
+                .array()
+                .items(groups.ids.iter().copied());
+            let mut config = properties.insert(Name(b"D")).dict();
+            config.pair(Name(b"BaseState"), Name(b"ON"));
+            config
+                .insert(Name(b"Order"))
+                .array()
+                .items(groups.ids.iter().copied());
+            config.finish();
+            properties.finish();
+        }
+        root.finish();
     }
     let mut document = pdf.document_info(info);
     document.producer(TextStr("Ardoise"));
@@ -91,6 +134,46 @@ where
     }
     document.finish();
     Ok(pdf.finish())
+}
+
+/// The optional content groups of a document: one per distinct layer name, over all its pages,
+/// in order of first appearance.
+#[derive(Default)]
+struct Groups {
+    names: Vec<String>,
+    ids: Vec<Ref>,
+}
+
+impl Groups {
+    /// The number of the group named `name`, made when there is none yet.
+    fn number(&mut self, name: &str, next: &mut Ref) -> usize {
+        if let Some(k) = self.names.iter().position(|n| n == name) {
+            return k;
+        }
+        self.names.push(name.to_owned());
+        self.ids.push(next.bump());
+        self.names.len() - 1
+    }
+}
+
+/// The name a layer's group shows in a viewer's layers panel: the layer's name (its number when
+/// the name is blank). `None` for strokes whose layer has no entry: they stay outside the groups.
+fn group_name(layer: &LayerFills) -> Option<String> {
+    let name = layer.name.as_deref()?;
+    Some(if name.trim().is_empty() {
+        (layer.index + 1).to_string()
+    } else {
+        name.to_owned()
+    })
+}
+
+fn write_groups(pdf: &mut Pdf, groups: &Groups) {
+    for (name, &id) in groups.names.iter().zip(&groups.ids) {
+        let mut group = pdf.indirect(id).dict();
+        group.pair(Name(b"Type"), Name(b"OCG"));
+        group.pair(Name(b"Name"), TextStr(name));
+        group.finish();
+    }
 }
 
 /// Where the note goes on its page.
@@ -288,6 +371,7 @@ fn write_page(
     page_id: Ref,
     view: NoteView<'_>,
     options: &PdfOptions,
+    mut groups: Option<&mut Groups>,
 ) -> Result<(), RenderError> {
     let (width, height) = (view.note.page.width, view.note.page.height);
     if width == 0 || height == 0 {
@@ -316,20 +400,41 @@ fn write_page(
     if let Some(placed) = &scene.picture {
         painter.picture(placed);
     }
-    for fill in scene.fills() {
-        painter.style(fill.rgb, fill.flat_opacity(), fill.blend);
-        for contour in &fill.outline.contours {
-            let mut points = contour.iter();
-            let Some(&[x, y]) = points.next() else {
-                continue;
-            };
-            painter.content.move_to(round(x), round(y));
-            for &[x, y] in points {
-                painter.content.line_to(round(x), round(y));
-            }
-            painter.content.close_path();
+    // The group of each layer of the page (separate layers). Numbered top layer first, the order
+    // a viewer lists them in; the fills are still painted bottom first.
+    let mut layer_groups: Vec<Option<usize>> = vec![None; scene.layers.len()];
+    if let Some(groups) = groups.as_deref_mut() {
+        for (layer, slot) in scene.layers.iter().zip(&mut layer_groups).rev() {
+            *slot = group_name(layer).map(|name| groups.number(&name, next));
         }
-        painter.content.fill_nonzero();
+    }
+    for (layer, group) in scene.layers.iter().zip(&layer_groups) {
+        // Marked content is not a saved state: what the painter tracks stays true.
+        let tag = group.map(|k| format!("L{k}"));
+        if let Some(tag) = &tag {
+            painter
+                .content
+                .begin_marked_content_with_properties(Name(b"OC"))
+                .properties_named(Name(tag.as_bytes()));
+        }
+        for fill in &layer.fills {
+            painter.style(fill.rgb, fill.flat_opacity(), fill.blend);
+            for contour in &fill.outline.contours {
+                let mut points = contour.iter();
+                let Some(&[x, y]) = points.next() else {
+                    continue;
+                };
+                painter.content.move_to(round(x), round(y));
+                for &[x, y] in points {
+                    painter.content.line_to(round(x), round(y));
+                }
+                painter.content.close_path();
+            }
+            painter.content.fill_nonzero();
+        }
+        if tag.is_some() {
+            painter.content.end_marked_content();
+        }
     }
     painter.content.restore_state();
 
@@ -407,6 +512,18 @@ fn write_page(
             objects.pair(Name(b"Im1"), id);
         }
         objects.finish();
+    }
+    if let Some(groups) = groups {
+        let mut used: Vec<usize> = layer_groups.iter().flatten().copied().collect();
+        used.sort_unstable();
+        used.dedup();
+        if !used.is_empty() {
+            let mut properties = resources.insert(Name(b"Properties")).dict();
+            for k in used {
+                properties.pair(Name(format!("L{k}").as_bytes()), groups.ids[k]);
+            }
+            properties.finish();
+        }
     }
     resources.finish();
     page.finish();
@@ -517,5 +634,31 @@ mod tests {
             notes_to_pdf::<NoteView<'_>>(&[], &PdfOptions::default()),
             Err(RenderError::Encode(_))
         ));
+    }
+
+    #[test]
+    fn groups_are_numbered_by_name_in_order_of_first_appearance() {
+        let mut next = Ref::new(10);
+        let mut groups = Groups::default();
+        assert_eq!(groups.number("B", &mut next), 0);
+        assert_eq!(groups.number("A", &mut next), 1);
+        assert_eq!(groups.number("B", &mut next), 0);
+        assert_eq!(groups.ids, [Ref::new(10), Ref::new(11)]);
+        assert_eq!(next, Ref::new(12));
+    }
+
+    #[test]
+    fn a_group_takes_the_layer_name_or_its_number_and_a_layer_without_entry_has_none() {
+        let layer = |index, name: Option<&str>| LayerFills {
+            index,
+            name: name.map(str::to_owned),
+            fills: vec![],
+        };
+        assert_eq!(
+            group_name(&layer(0, Some("Calque 1"))).as_deref(),
+            Some("Calque 1")
+        );
+        assert_eq!(group_name(&layer(2, Some(" "))).as_deref(), Some("3"));
+        assert_eq!(group_name(&layer(9, None)), None);
     }
 }
