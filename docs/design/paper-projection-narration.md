@@ -1025,6 +1025,10 @@ catalogs, which the catalog tests accept: supposé, the lead checks).
 Open points: the user's call. Each has a recommendation, which this document follows by default; none changes what
 the user asked (Q13).
 
+**Decided by the lead (2026-11-11): every recommendation below is taken, except O13: package G is NOT done in M17**
+(it would also shorten the replays of notes written before, which the user did not ask for; it can come later if the
+dead time before a narration recorded while writing proves a nuisance). The user is told in the M17 report.
+
 - **O1. Paper colour under the blackboard** (live). Recommendation: the swatches are disabled and a sentence says the
   colour comes back with the board off; template and texture apply. Alternative: a swatch turns the board off and
   applies the colour (one click, but the tablet's chalk goes back to its ink at the same time).
