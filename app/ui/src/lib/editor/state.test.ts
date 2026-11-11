@@ -161,29 +161,101 @@ describe('doc operations', () => {
     expect(doc.note.layers).toHaveLength(2);
   });
 
-  it('never puts new ink on a hidden layer', () => {
+  it('never puts new ink on a hidden layer, and keeps the hidden layer chosen', () => {
     const hiddenTop = setLayerVisible(docFromNote(note([], 3)), 2, false).note;
-    // Opening: the top visible layer is active.
+    // Opening: the top visible layer is chosen.
     let doc = docFromNote(hiddenTop);
     expect(doc.activeLayer).toBe(1);
-    // Hiding the active layer moves to the nearest visible one.
+    // Hiding the chosen layer does not move the choice: the zone warns, the pen refuses.
     doc = setLayerVisible(doc, 1, false);
-    expect(doc.activeLayer).toBe(0);
-    doc = setLayerVisible(doc, 2, true);
-    doc = setActiveLayer(doc, 2);
-    doc = setLayerVisible(doc, 2, false);
-    expect(doc.activeLayer).toBe(0);
-    expect(addStroke(doc, pen(100)).note.strokes[0].layer).toBe(0);
-    // Hiding another layer leaves the active one alone.
-    doc = setLayerVisible(setLayerVisible(doc, 1, true), 1, false);
-    expect(doc.activeLayer).toBe(0);
-    // Nothing visible: the active layer stays, and drawing or pasting does nothing.
-    doc = setLayerVisible(doc, 0, false);
-    expect(doc.activeLayer).toBe(0);
+    expect(doc.activeLayer).toBe(1);
     expect(canDraw(doc)).toBe(false);
     expect(addStroke(doc, pen(100))).toBe(doc);
     expect(paste(doc, [hline(0, 1000, 100)])).toBe(doc);
+    // Showing it again gives the same state back.
+    doc = setLayerVisible(doc, 1, true);
+    expect(doc.activeLayer).toBe(1);
+    expect(addStroke(doc, pen(100)).note.strokes[0].layer).toBe(1);
+    // Hiding another layer leaves the chosen one alone.
+    doc = setLayerVisible(doc, 0, false);
+    expect(doc.activeLayer).toBe(1);
+    expect(canDraw(doc)).toBe(true);
+    // Nothing visible: the choice stays, and drawing or pasting does nothing.
+    doc = setLayerVisible(doc, 1, false);
+    expect(doc.activeLayer).toBe(1);
+    expect(canDraw(doc)).toBe(false);
+    expect(addStroke(doc, pen(100))).toBe(doc);
     expect(docFromNote(doc.note).activeLayer).toBe(2);
+  });
+
+  describe('the chosen layer', () => {
+    // Layer 0 has two strokes, layer 1 has two crossing them.
+    const crossing = () =>
+      docFromNote(
+        note(
+          [hline(0, 1000, 100, 100, 0), hline(0, 1000, 500, 100, 0), hline(0, 1000, 100, 100, 1), hline(0, 1000, 500, 100, 1)],
+          2,
+        ),
+      );
+
+    it('is the top layer when a note opens, and a new layer becomes the chosen one', () => {
+      const doc = crossing();
+      expect(doc.activeLayer).toBe(1);
+      const added = addLayer(setActiveLayer(select(doc, [0]), 0), 'L3');
+      expect(added.activeLayer).toBe(2);
+      expect(added.selection).toEqual([]);
+    });
+
+    it('selects all the chosen layer’s strokes only (Ctrl+A)', () => {
+      const doc = crossing();
+      expect(selectAll(doc).selection).toEqual([2, 3]);
+      expect(selectAll(setActiveLayer(doc, 0)).selection).toEqual([0, 1]);
+    });
+
+    it('selects nothing in a hidden chosen layer', () => {
+      const doc = setLayerVisible(crossing(), 1, false);
+      expect(doc.activeLayer).toBe(1);
+      expect(selectAll(doc).selection).toEqual([]);
+    });
+
+    it('clears the selection when another layer is chosen', () => {
+      const doc = select(crossing(), [2]);
+      const other = setActiveLayer(doc, 0);
+      expect(other.activeLayer).toBe(0);
+      expect(other.selection).toEqual([]);
+      // The same layer again changes nothing, the selection included.
+      expect(setActiveLayer(doc, 1)).toBe(doc);
+    });
+
+    it('lets the eraser touch the chosen layer only, whole or partial', () => {
+      const doc = crossing();
+      const at = [{ x: 500, y: 100 }];
+      const whole = erase(doc, at, 50, 'whole');
+      expect(whole.note.strokes.map((s) => [s.layer, s.points[0].y])).toEqual([
+        [0, 100],
+        [0, 500],
+        [1, 500],
+      ]);
+      const partial = erase(setActiveLayer(doc, 0), at, 150, 'partial');
+      expect(partial.note.strokes.filter((s) => s.layer === 1)).toHaveLength(2);
+      expect(partial.note.strokes.filter((s) => s.layer === 0).length).toBeGreaterThan(2);
+      // Another layer's stroke is under the eraser, but nothing of the chosen layer is: nothing happens.
+      expect(erase(doc, [{ x: 500, y: 900 }], 50, 'whole')).toBe(doc);
+    });
+
+    it('lets the eraser touch nothing while the chosen layer is hidden', () => {
+      const doc = setLayerVisible(crossing(), 1, false);
+      expect(erase(doc, [{ x: 500, y: 100 }], 50, 'whole')).toBe(doc);
+      expect(erase(doc, [{ x: 500, y: 100 }], 150, 'partial')).toBe(doc);
+    });
+
+    it('follows its layer when layers move, and a merge takes it down', () => {
+      let doc = crossing();
+      doc = moveLayer(doc, 1, 0);
+      expect(doc.activeLayer).toBe(0);
+      doc = mergeDown(addLayer(doc, 'L3'), 2);
+      expect(doc.activeLayer).toBe(1);
+    });
   });
 
   it('rotates and crops the page', () => {

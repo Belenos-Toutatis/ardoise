@@ -22,7 +22,7 @@ import {
   type Rect,
   type Vec,
 } from './geometry';
-import { layerVisible, strokesTouched } from './hit';
+import { layerVisible, onLayer, strokesTouched } from './hit';
 import { orientationOf, type Orientation } from './page-size';
 
 export interface StrokeStyle {
@@ -50,18 +50,19 @@ export function removeStrokes(note: Note, indices: Iterable<number>): Note {
   return strokes.length === note.strokes.length ? note : withStrokes(note, strokes);
 }
 
-/** Removes every visible stroke the eraser path touches. */
-export function eraseWhole(note: Note, path: readonly Vec[], radius: number): Note {
-  return removeStrokes(note, strokesTouched(note, path, radius));
+/** Removes every visible stroke the eraser path touches (those of `layer` alone when it is given). */
+export function eraseWhole(note: Note, path: readonly Vec[], radius: number, layer?: number): Note {
+  return removeStrokes(note, strokesTouched(layer === undefined ? note : onLayer(note, layer), path, radius));
 }
 
 /**
  * Removes the parts of visible strokes within `radius` of the eraser path: samples closer than
  * that go (long segments are first subdivided so that the eraser cuts them too), and what is
  * left of a stroke becomes one stroke per remaining run of at least two samples, in place of
- * the original (same drawing order).
+ * the original (same drawing order). With `layer`, the strokes of that layer alone are touched.
  */
-export function erasePartial(note: Note, path: readonly Vec[], radius: number): Note {
+export function erasePartial(note: Note, path: readonly Vec[], radius: number, layer?: number): Note {
+  const hittable = layer === undefined ? note : onLayer(note, layer);
   const area = boundsOfPoints(path);
   if (!area || radius <= 0) return note;
   const reach = inflate(area, radius);
@@ -70,7 +71,7 @@ export function erasePartial(note: Note, path: readonly Vec[], radius: number): 
   const strokes: Stroke[] = [];
   for (const stroke of note.strokes) {
     const bounds = strokeCentreBounds(stroke);
-    if (!bounds || !layerVisible(note, stroke.layer) || !overlaps(bounds, reach)) {
+    if (!bounds || !layerVisible(hittable, stroke.layer) || !overlaps(bounds, reach)) {
       strokes.push(stroke);
       continue;
     }
