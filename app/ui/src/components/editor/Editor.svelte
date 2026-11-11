@@ -106,10 +106,10 @@
   import { defaultWindowClose, type WindowClose } from '../../lib/editor/window-close';
   import { largestFittingDpi } from '../../lib/export-options';
   import { currentLocale, t } from '../../lib/i18n.svelte';
-  import { closeKey } from '../../lib/close-keys';
   import { share } from '../../lib/share-state.svelte';
   import { layerWarnings } from '../../lib/layers-zone';
   import { SidePanelState, type SideBadges, type SideView } from '../../lib/side-panel.svelte';
+  import { editorKeyAction, type EditorKeyAction } from '../../lib/editor/keys';
   import { EDITOR_SHORTCUTS } from '../../lib/editor/shortcuts';
   import { resumeBlock } from '../../lib/live-resume.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
@@ -1723,48 +1723,92 @@
     return !spaceActivates(target);
   }
 
-  /** Ctrl + 2 (the page as wide as the editor), whatever the layout. */
-  function isFitWidthKey(e: KeyboardEvent): boolean {
-    return e.key === '2' || e.code === 'Digit2' || e.code === 'Numpad2';
-  }
-
-  /** Ctrl + 0 (the whole page), whatever the layout: 0 is typed with Shift on a French keyboard. */
-  function isFitKey(e: KeyboardEvent): boolean {
-    return e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0';
-  }
-
-  /** The keys of replay mode: R and Escape leave it, Space plays or pauses; nothing edits the note. */
-  function replayKey(e: KeyboardEvent, key: string, mod: boolean) {
-    if (mod) {
-      if (isFitKey(e)) {
-        e.preventDefault();
-        canvas?.fit();
-      } else if (isFitWidthKey(e)) {
-        e.preventDefault();
-        canvas?.fitWidth();
-      }
-      return;
-    }
-    if (e.altKey) return;
-    switch (key) {
-      case 'r':
-      case 'Escape':
+  /**
+   * What `action` (the key mapping, `lib/editor/keys.ts`) does here once the gates of `onkeydown` let it through.
+   * `close`, `save`, `previousPage` and `nextPage` are handled before (or, with a modal open, belong to the modal).
+   */
+  function runEditorKey(e: KeyboardEvent, action: EditorKeyAction) {
+    if (!doc) return;
+    switch (action.kind) {
+      case 'leaveReplay':
         e.preventDefault();
         leaveReplay();
         break;
-      case ' ':
+      case 'playPause':
         if (spacePlays(e.target)) {
           e.preventDefault();
           // The replay of a recording runs on its own.
           if (!recorder.busy) player.toggle();
         }
         break;
+      case 'fit':
+        e.preventDefault();
+        canvas?.fit();
+        break;
+      case 'fitWidth':
+        e.preventDefault();
+        canvas?.fitWidth();
+        break;
+      // Copy, cut and paste: the browser's clipboard events do the work (see `onpaste`).
+      case 'copy':
+      case 'cut':
+      case 'paste':
+        expectClipboardEvent(action.kind);
+        break;
+      case 'undo':
+        e.preventDefault();
+        doUndo();
+        break;
+      case 'redo':
+        e.preventDefault();
+        doRedo();
+        break;
+      case 'selectAll':
+        e.preventDefault();
+        reselect(selectAll(doc));
+        break;
+      case 'delete':
+        if (hasSelection) {
+          e.preventDefault();
+          change(deleteSelection(doc));
+        }
+        break;
+      case 'deselect':
+        reselect(clearSelection(doc));
+        break;
+      case 'panHold':
+        // Space on a focused control (button, checkbox, radio…) works it; elsewhere it pans while held.
+        if (!spaceActivates(e.target)) {
+          e.preventDefault();
+          spaceDown = true;
+        }
+        break;
+      case 'select':
+      case 'pen':
+      case 'eraser':
+      case 'pan':
+        setMode(action.kind);
+        break;
+      case 'replay':
+        enterReplay();
+        break;
+      case 'straighten':
+        straighten();
+        break;
+      case 'close':
+      case 'save':
+      case 'previousPage':
+      case 'nextPage':
+        break;
+      default:
+        action.kind satisfies never;
     }
   }
 
   function onkeydown(e: KeyboardEvent) {
+    const action = editorKeyAction(e, { replaying });
     // Ctrl + W and Ctrl + F4 close what is open here; a dialog's are its own (`Modal`).
-    const closes = closeKey(e) === 'close' && !modalOpen();
+    const closes = action?.kind === 'close' && !modalOpen();
     if (!doc) {
       if (closes) {
         e.preventDefault();
@@ -1772,28 +1816,26 @@
       }
       return;
     }
-    const mod = e.ctrlKey || e.metaKey;
-    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    if (mod && key === 's') {
+    if (action?.kind === 'save') {
       e.preventDefault();
       if (dirty) void save();
       return;
     }
     if (leaving) {
-      if (key === 'Escape') stay();
+      if (e.key === 'Escape') stay();
       return;
     }
     // A dialog or the split panel is open: the editing keys wait; Escape closes the panel.
     if (exporting || printing || video || share.panelOpen || revisionDialog) return;
     if (split) {
-      if (key === 'Escape' || closes) {
+      if (e.key === 'Escape' || closes) {
         e.preventDefault();
         cancelSplit();
       }
       return;
     }
     // The setting's panel is open: Escape closes it (the values stay), without straightening.
-    if (shapesPanel && key === 'Escape' && !mod) {
+    if (shapesPanel && e.key === 'Escape' && !(e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       closeShapes(true);
       return;
@@ -1808,81 +1850,18 @@
     }
     if (isTyping(e.target)) return;
     // Alt + ← / →: the previous / next page (not while the pen is down, nor with other modifiers).
-    if (e.altKey && !mod && !e.shiftKey && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+    if (action?.kind === 'previousPage' || action?.kind === 'nextPage') {
       e.preventDefault();
-      if (!canvas?.dragging()) void goPage(key === 'ArrowLeft' ? -1 : 1);
+      if (!canvas?.dragging()) void goPage(action.kind === 'previousPage' ? -1 : 1);
       return;
     }
     // A gesture under way commits on top of the doc it started from: changing the doc meanwhile
     // (undo, redo, delete, paste, select all…) would be overwritten, so those keys wait.
-    if (canvas?.dragging() && (mod || ['Delete', 'Backspace', 'Escape'].includes(key))) {
+    if (canvas?.dragging() && (e.ctrlKey || e.metaKey || ['Delete', 'Backspace', 'Escape'].includes(e.key))) {
       e.preventDefault();
       return;
     }
-    if (replaying) {
-      replayKey(e, key, mod);
-      return;
-    }
-    // Copy, cut and paste: the browser's clipboard events do the work (see `onpaste`).
-    if (mod && !e.shiftKey && !e.altKey && (key === 'c' || key === 'x' || key === 'v')) {
-      expectClipboardEvent(key === 'c' ? 'copy' : key === 'x' ? 'cut' : 'paste');
-      return;
-    }
-    if (mod) {
-      const action: Record<string, (() => void) | undefined> = {
-        z: e.shiftKey ? doRedo : doUndo,
-        y: doRedo,
-        a: () => reselect(selectAll(doc!)),
-        '0': () => canvas?.fit(),
-        '2': () => canvas?.fitWidth(),
-      };
-      // Ctrl + 0 and Ctrl + 2 are typed with Shift on some layouts (French): the key code says it too.
-      const run = action[isFitKey(e) ? '0' : isFitWidthKey(e) ? '2' : key];
-      if (run) {
-        e.preventDefault();
-        run();
-      }
-      return;
-    }
-    if (e.altKey) return;
-    switch (key) {
-      case 'Delete':
-      case 'Backspace':
-        if (hasSelection) {
-          e.preventDefault();
-          change(deleteSelection(doc));
-        }
-        break;
-      case 'Escape':
-        reselect(clearSelection(doc));
-        break;
-      case ' ':
-        // Space on a focused control (button, checkbox, radio…) works it; elsewhere it pans
-        // while held.
-        if (!spaceActivates(e.target)) {
-          e.preventDefault();
-          spaceDown = true;
-        }
-        break;
-      case 'v':
-        setMode('select');
-        break;
-      case 'p':
-        setMode('pen');
-        break;
-      case 'e':
-        setMode('eraser');
-        break;
-      case 'h':
-        setMode('pan');
-        break;
-      case 'r':
-        enterReplay();
-        break;
-      case 'f':
-        straighten();
-        break;
-    }
+    if (action) runEditorKey(e, action);
   }
 
   function onkeyup(e: KeyboardEvent) {
