@@ -64,8 +64,8 @@ pub struct StraightenArgs {
     pub note: String,
     /// Indices of the strokes to try (from `get_note` with `strokes`, or the `strokes` of the drawings in `get_note_text`'s structure). Default: the strokes of the drawings that Windows' ink analysis finds on the visible layers (an error tells when the analysis is not available on this PC: then give them).
     pub strokes: Option<Vec<usize>>,
-    /// How far a stroke may stray from its ideal shape for this call only: 1 (strict) to 5 (lenient), 3 being the app's original. Default: the user's setting next to the editor's button (`[shapes]` of `ardoise.toml`). Out of range values are brought within the limits.
-    pub tolerance: Option<i64>,
+    /// How far a stroke may stray from its ideal shape for this call only: 1 (strict) to 5 (lenient), 3 being the app's original. A number, rounded to a whole step. Default: the user's setting next to the editor's button (`[shapes]` of `ardoise.toml`). Out of range values are brought within the limits.
+    pub tolerance: Option<f64>,
     /// Smallest line or arrow, in millimetres, for this call only: 5 to 25 (a closed shape needs 3 mm more). Default: the user's setting. Below 10 mm, letters may be straightened.
     pub min_size_mm: Option<f64>,
     /// Make a line, arrow, rectangle or ellipse axis within this many degrees of horizontal or vertical exactly so, for this call only: 1 to 10, `0` for never. Default: the user's setting.
@@ -110,6 +110,8 @@ pub(super) struct Words {
     pub snap_angle: &'static str,
     pub snap_round: &'static str,
     pub off: &'static str,
+    /// The decimal mark of the language ("7,5 mm" in French, "7.5 mm" in English).
+    pub decimal: char,
 }
 
 pub(super) fn words(language: Language) -> Words {
@@ -135,6 +137,7 @@ pub(super) fn words(language: Language) -> Words {
             snap_angle: "alignement horizontal/vertical",
             snap_round: "alignement cercle/carré",
             off: "désactivé",
+            decimal: ',',
         },
         Language::En => Words {
             assembled: "assembled",
@@ -157,6 +160,7 @@ pub(super) fn words(language: Language) -> Words {
             snap_angle: "horizontal/vertical snapping",
             snap_round: "circle/square snapping",
             off: "off",
+            decimal: '.',
         },
     }
 }
@@ -475,11 +479,13 @@ impl UsedTuning {
         let mut given = 0;
         if let Some(tolerance) = args.tolerance {
             given += 1;
-            let within = tolerance.clamp(
-                i64::from(ShapeTuning::TOLERANCE_MIN),
-                i64::from(ShapeTuning::TOLERANCE_MAX),
+            // The steps are whole: 4.0 is 4, 3.6 is 4 (a rounding is not a clamping).
+            let step = tolerance.round();
+            let within = step.clamp(
+                f64::from(ShapeTuning::TOLERANCE_MIN),
+                f64::from(ShapeTuning::TOLERANCE_MAX),
             );
-            if within != tolerance {
+            if within != step {
                 clamped.push("tolerance");
             }
             tuning.tolerance = within as u8;
@@ -552,15 +558,20 @@ impl UsedTuning {
         if *tuning == ShapeTuning::default() {
             return String::new();
         }
+        // Numbers in the language of the app: a decimal comma in French.
+        let number = |value: f64| value.to_string().replace('.', &word.decimal.to_string());
         let degrees = |value: Option<f64>, unit: &str| {
-            value.map_or_else(|| word.off.to_owned(), |value| format!("{value}{unit}"))
+            value.map_or_else(
+                || word.off.to_owned(),
+                |value| format!("{}{unit}", number(value)),
+            )
         };
         format!(
             " ({} {}, {} {} mm, {} {}, {} {})",
             word.tolerance,
             tuning.tolerance,
             word.min_size,
-            tuning.min_size_mm,
+            number(tuning.min_size_mm),
             word.snap_angle,
             degrees(tuning.snap_angle_deg, "°"),
             word.snap_round,

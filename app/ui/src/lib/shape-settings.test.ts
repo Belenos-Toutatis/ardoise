@@ -129,4 +129,65 @@ describe('ShapesSaver', () => {
     expect(done).toEqual([9]);
     expect(errors).toHaveLength(1);
   });
+
+  it('keeps the values of a failed write pending, and writes them again on the next flush', async () => {
+    let failing = true;
+    const done: number[] = [];
+    const errors: unknown[] = [];
+    const save = vi.fn(async (s: ShapeSettings) => {
+      if (failing) throw new Error('disk full');
+      done.push(s.minSizeMm);
+    });
+    const saver = new ShapesSaver(save, (error) => errors.push(error));
+    saver.update(values(6));
+    await saver.flush();
+    expect(errors).toHaveLength(1);
+    expect(saver.pending).toBe(true);
+    // No retry loop: the timer of the failed flush is not armed again.
+    await vi.advanceTimersByTimeAsync(SHAPES_SAVE_DELAY_MS * 5);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    failing = false;
+    await saver.flush();
+    expect(done).toEqual([6]);
+    expect(saver.pending).toBe(false);
+    expect(errors).toHaveLength(1);
+  });
+
+  it('does not put back a failed write that newer values have replaced', async () => {
+    const done: number[] = [];
+    const save = vi.fn(async (s: ShapeSettings) => {
+      if (s.minSizeMm === 6) throw new Error('disk full');
+      done.push(s.minSizeMm);
+    });
+    const saver = new ShapesSaver(save);
+    saver.update(values(6));
+    const first = saver.flush();
+    // Newer values are queued behind the failing write, then others are waiting.
+    saver.update(values(9));
+    const second = saver.flush();
+    saver.update(values(11));
+    await Promise.all([first, second]);
+    expect(saver.pending).toBe(true);
+    await saver.flush();
+    expect(done).toEqual([9, 11]);
+    expect(saver.pending).toBe(false);
+  });
+
+  it('is busy while values wait and while a write is under way', async () => {
+    let finish: () => void = () => {};
+    const save = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    const saver = new ShapesSaver(save);
+    expect(saver.busy).toBe(false);
+    saver.update(values(6));
+    expect(saver.busy).toBe(true);
+    const flushing = saver.flush();
+    await vi.advanceTimersByTimeAsync(0);
+    // Nothing pending any more, but the write is not finished.
+    expect(saver.pending).toBe(false);
+    expect(saver.busy).toBe(true);
+    finish();
+    await flushing;
+    expect(saver.busy).toBe(false);
+  });
 });

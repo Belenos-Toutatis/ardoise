@@ -1094,6 +1094,77 @@ async fn straightening_says_the_values_of_the_users_setting() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn the_account_entry_writes_decimals_in_the_language_of_the_app() {
+    let user = ShapeTuning {
+        tolerance: 4,
+        min_size_mm: 7.5,
+        snap_angle_deg: Some(3.5),
+        snap_round_percent: Some(6.0),
+    };
+    let session = session_with_a_short_line(Language::Fr, user).await;
+    let result = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [3] }),
+        )
+        .await;
+    let copy = file_of(&session, result["note"]["id"].as_str().unwrap());
+    assert_eq!(
+        copy.revision.unwrap().summary[0].text,
+        "Formes redressées : 1 (tolérance 4, taille minimale 7,5 mm, alignement horizontal/vertical 3,5°, alignement cercle/carré 6 %)"
+    );
+    // The answer is data, not text: its numbers keep the point.
+    assert_eq!(result["tuning"]["min_size_mm"], 7.5, "{result}");
+
+    let session = session_with_a_short_line(Language::En, user).await;
+    let result = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [3] }),
+        )
+        .await;
+    let copy = file_of(&session, result["note"]["id"].as_str().unwrap());
+    assert_eq!(
+        copy.revision.unwrap().summary[0].text,
+        "Shapes straightened: 1 (tolerance 4, minimum size 7.5 mm, horizontal/vertical snapping 3.5°, circle/square snapping 6 %)"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_tolerance_is_a_number_rounded_to_a_whole_step() {
+    let user = ShapeTuning {
+        tolerance: 2,
+        ..ShapeTuning::default()
+    };
+    let session = session_with_a_short_line(Language::En, user).await;
+    // A whole number written with a decimal point is accepted, not refused as invalid.
+    let result = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [0], "tolerance": 4.0 }),
+        )
+        .await;
+    assert_eq!(result["tuning"]["tolerance"], 4, "{result}");
+    assert_eq!(result["tuning"]["clamped"], json!([]));
+    // A fraction is rounded (and is not a clamping); out of range values are brought within limits.
+    for (given, used, clamped) in [
+        (json!(3.6), 4, json!([])),
+        (json!(2.4), 2, json!([])),
+        (json!(7.2), 5, json!(["tolerance"])),
+        (json!(0.2), 1, json!(["tolerance"])),
+    ] {
+        let result = session
+            .ok(
+                "straighten_shapes",
+                json!({ "note": CHIMIE, "strokes": [0], "tolerance": given }),
+            )
+            .await;
+        assert_eq!(result["tuning"]["tolerance"], used, "{given}: {result}");
+        assert_eq!(result["tuning"]["clamped"], clamped, "{given}: {result}");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn the_apps_original_values_leave_the_account_entry_as_it_was() {
     let session = session().await;
     let result = session

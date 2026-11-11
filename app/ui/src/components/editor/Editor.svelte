@@ -58,6 +58,7 @@
     ShapesSaver,
     clampShapeSettings,
     closedMinMm,
+    formatShapeNumber,
     sameShapeSettings,
     toShapeTuning,
   } from '../../lib/shape-settings';
@@ -430,18 +431,29 @@
   });
 
   // The preview of the panel: at once when it opens, then at most once per frame while a value or
-  // the selection changes.
+  // the selection changes (a frame already booked is kept: it reads the values when it runs).
+  let previewFrame: (() => void) | null = null;
+  function cancelPreviewFrame() {
+    previewFrame?.();
+    previewFrame = null;
+  }
   $effect(() => {
     if (!shapesPanel || !doc || !ink) {
+      cancelPreviewFrame();
       straightenPreview = null;
       return;
     }
     const [current, engine, tuning] = [doc, ink, toShapeTuning(shapes)];
     if (untrack(() => straightenPreview) === null) {
+      cancelPreviewFrame();
       straightenPreview = previewStraightening(current, engine, tuning);
       return;
     }
-    return nextFrame(() => (straightenPreview = previewStraightening(current, engine, tuning)));
+    if (previewFrame) return;
+    previewFrame = nextFrame(() => {
+      previewFrame = null;
+      if (shapesPanel && doc && ink) straightenPreview = previewStraightening(doc, ink, toShapeTuning(shapes));
+    });
   });
 
   // The source went (trashed, deleted) while "Comparer" was open: the dialog goes with it.
@@ -497,13 +509,18 @@
     onLibraryChanged(() => void checkDisk()).then(keep, () => {
       // Not watched: saving still detects conflicts.
     });
-    onSessionEnding(() => void drafts.flush()).then(keep, () => {
+    onSessionEnding(() => {
+      void drafts.flush();
+      // The setting being moved is kept too, before Windows ends the session.
+      void shapesSaver.flush();
+    }).then(keep, () => {
       // Not told: the drafts written after each change are there.
     });
     return () => {
       stopped = true;
       alive = false;
       clearTimeout(noticeTimer);
+      cancelPreviewFrame();
       void shapesSaver.flush();
       for (const stop of stops) stop();
       player.dispose();
@@ -1019,7 +1036,18 @@
       showNotice(t('videoExport.closeBusy'), true);
       return true;
     }
-    if (!alive || (!dirty && !titleEdited() && pendingWrites === 0)) return false;
+    if (!alive) return false;
+    if (!dirty && !titleEdited() && pendingWrites === 0) {
+      if (!shapesSaver.busy) return false;
+      // The setting of "Redresser les formes" is still being kept (the debounce, or a write under
+      // way): in the app the window waits for it, then closes; a browser tab cannot wait.
+      if (!windowClose.destroy) {
+        void shapesSaver.flush();
+        return false;
+      }
+      void closeWindow();
+      return true;
+    }
     if (windowClose.destroy) {
       if (dirty || titleEdited()) {
         closing = true;
@@ -1036,6 +1064,8 @@
     closing = false;
     leaving = false;
     await settled();
+    // The setting is kept before the window goes (a failed write is reported, and the window closes anyway).
+    await shapesSaver.flush();
     alive = false;
     await windowClose.destroy?.();
   }
@@ -1294,7 +1324,8 @@
     if (shapesOpen) closeShapes(!!document.activeElement?.closest('[data-panel="straighten"]'));
     const { doc: next, shapes: count } = straightenSelection(doc, ink, toShapeTuning(shapes));
     if (count === 0) {
-      return showNotice(t('editor.straighten.none', { line: shapes.minSizeMm, closed: closedMinMm(shapes.minSizeMm) }));
+      const [line, closed] = [shapes.minSizeMm, closedMinMm(shapes.minSizeMm)].map((mm) => formatShapeNumber(mm, currentLocale()));
+      return showNotice(t('editor.straighten.none', { line, closed }));
     }
     change(next);
     showNotice(count === 1 ? t('editor.straighten.doneOne') : t('editor.straighten.doneMany', { count }));

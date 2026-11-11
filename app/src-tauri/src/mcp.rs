@@ -442,6 +442,80 @@ mod tests {
             .path
     }
 
+    /// The assistant's environment on the settings in `dir`.
+    fn environment(dir: &Path) -> AppEnvironment {
+        AppEnvironment {
+            context: Arc::new(context(dir)),
+        }
+    }
+
+    #[test]
+    fn the_shape_tuning_is_read_from_the_settings_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(SettingsStore::FILE_NAME);
+        let environment = environment(dir.path());
+        let defaults = ShapeTuning::default();
+        // No file: the app's original values.
+        assert_eq!(environment.shape_tuning(), defaults);
+        // A file without a `[shapes]` section: the same.
+        std::fs::write(&file, "language = \"fr\"\n").unwrap();
+        assert_eq!(environment.shape_tuning(), defaults);
+
+        std::fs::write(
+            &file,
+            r"[shapes]
+tolerance = 4
+min_size_mm = 7.5
+snap_angle = false
+snap_angle_deg = 6.0
+snap_round = true
+snap_round_percent = 8.0
+",
+        )
+        .unwrap();
+        // An unticked box gives `None`, whatever its value; the others are as written.
+        assert_eq!(
+            environment.shape_tuning(),
+            ShapeTuning {
+                tolerance: 4,
+                min_size_mm: 7.5,
+                snap_angle_deg: None,
+                snap_round_percent: Some(8.0),
+            }
+        );
+
+        // Read afresh at each call: the user may change the setting while the assistant is connected.
+        std::fs::write(
+            &file,
+            r"[shapes]
+snap_angle = true
+snap_angle_deg = 2.5
+snap_round = false
+",
+        )
+        .unwrap();
+        assert_eq!(
+            environment.shape_tuning(),
+            ShapeTuning {
+                snap_angle_deg: Some(2.5),
+                snap_round_percent: None,
+                ..defaults
+            }
+        );
+
+        // A value out of range is brought within the limits.
+        std::fs::write(
+            &file,
+            r"[shapes]
+tolerance = 9
+min_size_mm = 2.0
+",
+        )
+        .unwrap();
+        let tuning = environment.shape_tuning();
+        assert_eq!((tuning.tolerance, tuning.min_size_mm), (5, 5.0));
+    }
+
     #[test]
     fn the_search_follows_the_library_after_a_write_tool() {
         let (_library_dir, library) = library();
