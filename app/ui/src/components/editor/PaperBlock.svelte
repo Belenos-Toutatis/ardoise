@@ -44,8 +44,7 @@
       style:--swatch={colour(id)}
       onclick={() => onbackground({ ...background, paper: id as Paper })}
     >
-      <span class="paper-dot" aria-hidden="true"></span>
-      <span class="paper-name">{t(`editor.papers.${id}`)}</span>
+      {t(`editor.papers.${id}`)}
     </button>
   {/each}
 </div>
@@ -74,57 +73,3 @@
     onchange={(e) => onbackground({ ...background, texture: e.currentTarget.checked })}
   />
 </label>
-
-<style>
-  /* The swatches' look is this block's own (scoped): the paper's colour in a round pastille, its name under it. */
-  .pane-swatches {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-
-  .pane-swatch {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.25rem;
-    min-width: 3.4rem;
-    padding: 0.25rem 0.2rem;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text);
-    font: inherit;
-    font-size: 0.75rem;
-    cursor: pointer;
-  }
-
-  .pane-swatch:disabled {
-    cursor: default;
-  }
-
-  .pane-swatch:disabled:not([aria-pressed='true']) {
-    opacity: 0.5;
-  }
-
-  .pane-swatch[aria-pressed='true'] {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-
-  .paper-dot {
-    width: 1.7rem;
-    height: 1.7rem;
-    border: 2px solid var(--border);
-    border-radius: 50%;
-    background: var(--swatch);
-  }
-
-  .pane-swatch[aria-pressed='true'] .paper-dot {
-    box-shadow: 0 0 0 2px var(--accent);
-  }
-
-  .paper-name {
-    text-align: center;
-  }
-</style>
