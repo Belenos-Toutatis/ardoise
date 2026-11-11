@@ -42,8 +42,17 @@ export const aboutJourneys = [
       });
 
       await check('le bouton ouvre l’écran ; il se lit au clavier (focus dans la fenêtre)', async () => {
-        await app.click('[data-action="open-about"]');
-        await app.waitFor(`document.querySelector(${JSON.stringify(DIALOG)})`, 'the About dialog');
+        // The settings panel may still grow above the button (the handwriting section fills in as the notes are
+        // read, more slowly in a full run): a click that landed beside the moving button is made again.
+        for (let attempt = 1; ; attempt++) {
+          await app.click('[data-action="open-about"]');
+          try {
+            await app.waitFor(`document.querySelector(${JSON.stringify(DIALOG)})`, 'the About dialog', 4000);
+            break;
+          } catch (error) {
+            if (attempt === 3) throw error;
+          }
+        }
         await app.waitFor(`document.querySelector(${JSON.stringify(DIALOG)}).contains(document.activeElement)`, 'the focus in the dialog');
         const title = await app.evaluate(`document.querySelector(${JSON.stringify(`${DIALOG} h2`)}).textContent`);
         if (title !== l('about.title')) throw new Error(`title "${title}"`);
