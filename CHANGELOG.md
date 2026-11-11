@@ -2,6 +2,10 @@
 
 ## Non publié
 
+### Corrigé (partage sur le réseau)
+
+- Dans l'éditeur, le bouton « Partager sur le réseau » enclenché était presque illisible (texte blanc sur fond gris clair) : il est maintenant bleu, avec le texte en blanc, comme dans la fenêtre du mode direct.
+
 ### Ajouté (raccourcis pour fermer et quitter)
 
 - `Ctrl + W` et `Ctrl + F4` ferment ce qui est ouvert : une boîte de dialogue, un panneau, la découpe, la relecture, l'éditeur (avec la question habituelle si la note n'est pas enregistrée), la projection ; en mode direct, Ardoise demande s'il faut terminer. Dans la bibliothèque seule, ces touches ne font rien.

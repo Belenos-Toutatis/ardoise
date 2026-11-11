@@ -35,7 +35,10 @@
     font-size: 0.875rem;
   }
 
-  .share-button.active {
+  /* With `.button` too: the editor's `.editor .button.active` (a light background for its tool toggles) weighs as much
+     as `.share-button.active` alone and came later, which left white text on a light background. */
+  .button.share-button.active,
+  .button.share-button.active:hover {
     border-color: var(--accent);
     background: var(--accent);
     color: var(--accent-text);
