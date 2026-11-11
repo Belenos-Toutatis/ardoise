@@ -2,7 +2,7 @@
 // production executable, a portable copy of it in a temporary folder, driven through WebView2's DevTools protocol like
 // the end-to-end journeys (`run.mjs`).
 //
-// Usage: node app/e2e/perf.mjs <path to ardoise.exe> [--only start,library,live,touchup] [--notes 1000]
+// Usage: node app/e2e/perf.mjs <path to ardoise.exe> [--only start,library,live,touchup,pen] [--notes 1000]
 //
 // Progress goes to stderr; the last line of stdout is `PERF-JSON {...}`: the raw measures (times in milliseconds, frame
 // intervals one by one). `xtask/src/perf.rs` computes the statistics, judges them against SPEC §8 and prints the table.
@@ -19,6 +19,10 @@
 //   interface: a lasso, a colour, Delete, Ctrl+Z, Ctrl+Z, Ctrl+Y, Ctrl+Z, again and again. Also the time of one edit: the
 //   longest frame just after each edit (what one edit costs on screen), and, on the same page, after a full redraw of
 //   the cache (`repaintFromScratch` of the canvas: what an edit would cost without the repaint of an area).
+// - pen (M14): as live, with the presentation window open, a layer « Correction » added and the Pen tool on, while the
+//   script writes with the computer's pen through the DevTools protocol (a move every 8 ms, strokes of 1.5 s, 0.3 s
+//   apart, at the foot of the page): the frame intervals of both windows, the strokes of both pens, and the latency of
+//   the computer's points to the projector (`window.__ardoiseLatency.computer` of the presentation window).
 import { execFileSync, spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,7 +32,7 @@ const argv = process.argv.slice(2);
 const exe = argv[0]?.startsWith('--') ? undefined : argv[0];
 const option = (name, fallback) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : fallback);
 if (!exe) {
-  console.error('usage: node app/e2e/perf.mjs <ardoise.exe> [--only start,library,live,touchup] [--notes 1000]');
+  console.error('usage: node app/e2e/perf.mjs <ardoise.exe> [--only start,library,live,touchup,pen] [--notes 1000]');
   process.exit(2);
 }
 const only = option('--only', '').split(',').filter(Boolean);
@@ -53,6 +57,12 @@ const LASSO_COLUMNS = 20;
 const EDIT_WINDOW_MS = 230;
 /** Full redraws of the cache timed on the page once the touch-ups are over. */
 const FULL_REDRAWS = 10;
+/** The computer's pen (M14): a move every this many ms, strokes this long, this far apart. */
+const PEN_MOVE_MS = 8;
+const PEN_STROKE_MS = 1500;
+const PEN_GAP_MS = 300;
+/** Where its strokes go: the foot of the page, below the lines of the simulated pen (its last baseline is at 19 600). */
+const PEN_Y = 20_700;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (...parts) => console.error(...parts);
@@ -129,6 +139,8 @@ async function startOnce({ appExe, local, args = [] }) {
     });
   const app = {
     spawnedAt,
+    /** The remote debugging port: the presentation window is another target of it. */
+    port,
     async evaluate(expression) {
       const reply = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
       if (reply.result?.exceptionDetails) {
@@ -169,9 +181,26 @@ async function startOnce({ appExe, local, args = [] }) {
         clickCount: type === 'mouseMoved' ? 0 : 1,
       });
     },
+    /** A pen event (`journeys-m8-input.mjs`): `pointerType: 'pen'`, the tip held with `buttons: 1`. */
+    async pen(type, x, y, { buttons = 0, force = 0.5 } = {}) {
+      await send('Input.dispatchMouseEvent', {
+        type,
+        x,
+        y,
+        pointerType: 'pen',
+        button: type === 'mouseMoved' && buttons === 0 ? 'none' : 'left',
+        buttons,
+        force,
+        clickCount: type === 'mouseMoved' ? 0 : 1,
+      });
+    },
+    /** Types text into the focused element. */
+    async type(text) {
+      await send('Input.insertText', { text });
+    },
     /** A key press: `key('z', { ctrl: true })`, `key('Delete')`. */
     async key(key, { ctrl = false } = {}) {
-      const windowsVirtualKeyCode = key.length === 1 ? key.toUpperCase().charCodeAt(0) : { Delete: 46, Escape: 27 }[key];
+      const windowsVirtualKeyCode = key.length === 1 ? key.toUpperCase().charCodeAt(0) : { Delete: 46, Escape: 27, Enter: 13 }[key];
       const base = { key, code: key.length === 1 ? `Key${key.toUpperCase()}` : key, modifiers: ctrl ? 2 : 0, windowsVirtualKeyCode };
       await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, text: key.length === 1 && !ctrl ? key : undefined });
       await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
@@ -579,6 +608,123 @@ async function measureLiveTouchUp(local) {
   }
 }
 
+/**
+ * Live mode with the tablet and the computer's pen together (M14, docs/design/tablet-live-classroom.md, "Performance (C)").
+ * As `measureLive` (the simulated tablet streams), with the presentation window open (the browser flags of `startOnce`
+ * keep the covered control window painting), a layer « Correction » added from the layers zone and the Pen tool on.
+ * While the frame intervals are recorded in the control window and in the presentation window, this script writes with
+ * the pen through the DevTools protocol (`pointerType: 'pen'`): a move every `PEN_MOVE_MS`, strokes of `PEN_STROKE_MS`,
+ * `PEN_GAP_MS` apart, at the foot of the page, below the simulated pen's lines. The latency of the computer's points on
+ * the projector is the presentation's `__ardoiseLatency.computer`, the samples of the measure only.
+ */
+async function measureLivePen(local) {
+  const { attach } = await import('./journeys-m12-resume.mjs');
+  const library = makeLibrary('pen-library', 0);
+  const appExe = portableCopy('pen', library);
+  const app = await start({ appExe, local, args: ['--simulated-tablet'] });
+  const j = JSON.stringify;
+  const strokes = `Number(document.querySelector('canvas.live-canvas')?.dataset.strokes ?? -1)`;
+  const zone = 'section.layers-zone[data-where="live"]';
+  const computerSamples = `window.__ardoiseLatency.computer.samples().length`;
+  let presentation = null;
+  try {
+    // The computer's default ink (red felt tip): nothing remembered in the browser's storage.
+    await app.evaluate(`(() => { try { localStorage.removeItem('ardoise.live.computerStyle'); } catch {} return true; })()`);
+    await app.waitFor(`document.querySelectorAll('.note-card').length === 8`, 'the demo notes');
+    await registerAndSync(app, 11);
+    await app.click('.tablet-panel button[data-action="live"]');
+    await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
+    await app.waitFor(`${strokes} > 0`, 'strokes on the live canvas', 15_000);
+
+    await app.evaluate(`window.__TAURI_INTERNALS__.invoke('open_presentation', { monitor: null }).then(() => true)`);
+    presentation = await attach(app.port, (t) => t.url.includes('view=presentation'), 'the presentation window', 30_000);
+    await presentation.waitFor(`typeof window.__ardoiseLatency?.computer?.samples === 'function'`, 'the latency of the computer’s points in the presentation', 20_000);
+
+    // A layer « Correction » for the computer (« Ajouter un calque » chooses it), then the Pen tool.
+    await app.click(`${zone} button[data-action="add-layer"]`);
+    await app.waitFor(`document.querySelector(${j(`${zone} li.layer[data-layer="1"][data-chosen="true"]`)}) !== null`, 'the new layer, chosen');
+    await app.click(`${zone} li.layer[data-layer="1"] button[data-action="rename-layer"]`);
+    await app.waitFor(`document.activeElement?.matches?.('input.layer-rename') === true`, 'the name field');
+    await app.evaluate(`(() => { document.activeElement.select(); return true; })()`);
+    await app.type('Correction');
+    await app.key('Enter');
+    await app.waitFor(`(document.querySelector(${j(`${zone} li.layer[data-layer="1"] .layer-name`)})?.textContent ?? '').trim() === 'Correction'`, 'the name « Correction »');
+    await app.click('[data-slot="touch-up"] button[data-action="pen"]');
+    await app.waitFor(`document.querySelector('canvas.live-canvas[data-tool="pen"]') !== null`, 'the Pen tool');
+
+    const geometry = await app.evaluate(`(() => {
+      const r = document.querySelector('canvas.live-canvas').getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    })()`);
+    // The live page of the simulated Bamboo Slate, held landscape (the tablet's area: SLATE_LARGE_WIDTH x HEIGHT).
+    const page = { width: 29700, height: 21600 };
+    const margin = 12;
+    const scale = Math.min((geometry.width - 2 * margin) / page.width, (geometry.height - 2 * margin) / page.height);
+    const at = (x, y) => ({
+      x: geometry.left + (geometry.width - page.width * scale) / 2 + x * scale,
+      y: geometry.top + (geometry.height - page.height * scale) / 2 + y * scale,
+    });
+    const moves = Math.round(PEN_STROKE_MS / PEN_MOVE_MS);
+    /** Stroke `n`: a wave of 5 000 units, one of four places along the foot of the page. */
+    const strokeAt = (n) => {
+      const x0 = 3000 + (n % 4) * 6000;
+      return Array.from({ length: moves + 1 }, (_, i) => at(x0 + (5000 * i) / moves, PEN_Y + 250 * Math.sin((i / moves) * 4 * Math.PI)));
+    };
+    /** One stroke of the pen, its moves on a fixed beat (a slow DevTools call is caught up, not added). */
+    const write = async (points) => {
+      await app.pen('mouseMoved', points[0].x, points[0].y);
+      await app.pen('mousePressed', points[0].x, points[0].y, { buttons: 1 });
+      const t0 = Date.now();
+      for (let i = 1; i < points.length; i++) {
+        const wait = t0 + i * PEN_MOVE_MS - Date.now();
+        if (wait > 0) await sleep(wait);
+        await app.pen('mouseMoved', points[i].x, points[i].y, { buttons: 1, force: 0.6 });
+      }
+      const last = points[points.length - 1];
+      await app.pen('mouseReleased', last.x, last.y);
+    };
+
+    // A first stroke out of the measure: the first outlines and the first IPC calls are not what is measured.
+    await write(strokeAt(3));
+    await sleep(LIVE_WARMUP_MS);
+    const before = await app.evaluate(strokes);
+    const samplesBefore = await presentation.evaluate(computerSamples);
+    let finished = 0;
+    const measured = (promise) =>
+      promise.then((intervals) => {
+        finished += 1;
+        return intervals;
+      });
+    const control = measured(app.evaluate(FRAMES(LIVE_MEASURE_MS)));
+    const projected = measured(presentation.evaluate(FRAMES(LIVE_MEASURE_MS)));
+    let penStrokes = 0;
+    // Whole strokes only: the last one ends after the frames, as the touch-ups' last iteration does.
+    while (finished < 2) {
+      await write(strokeAt(penStrokes));
+      penStrokes += 1;
+      if (finished < 2) await sleep(PEN_GAP_MS);
+    }
+    const [controlIntervals, presentationIntervals] = await Promise.all([control, projected]);
+    // The last stroke's end reaches both windows.
+    await sleep(300);
+    const after = await app.evaluate(strokes);
+    // The recorder keeps the last 2 000 samples: a warm-up stroke and a measure of some 1 000 points fit in it.
+    const latency = await presentation.evaluate(`window.__ardoiseLatency.computer.samples().slice(${samplesBefore})`);
+    return {
+      controlIntervals,
+      presentationIntervals,
+      strokesBefore: before,
+      strokesAfter: after,
+      penStrokes,
+      computerLatency: latency ?? [],
+      measuredMs: LIVE_MEASURE_MS,
+    };
+  } finally {
+    presentation?.close();
+    await app.close();
+  }
+}
+
 const result = {};
 let failed = false;
 try {
@@ -614,6 +760,10 @@ try {
   if (wants('touchup')) {
     log('live mode, loaded page, touch-ups');
     result.liveTouchUp = await measureLiveTouchUp(local);
+  }
+  if (wants('pen')) {
+    log('live mode, the tablet and the computer’s pen together');
+    result.livePen = await measureLivePen(local);
   }
 } catch (error) {
   failed = true;
