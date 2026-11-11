@@ -68,5 +68,21 @@ describe('latency statistics', () => {
     expect(target.__ardoiseLatency?.uiMedian()).toBe(4);
     expect(target.__ardoiseLatency?.p95()).toBeCloseTo(13.9, 9);
     expect(target.__ardoiseLatency?.uiSamples()).toEqual([3, 5]);
+    // The control window has no computer figures (it draws its own stroke).
+    expect(target.__ardoiseLatency?.computer).toBeUndefined();
+  });
+
+  it("exposes the computer's points apart in the presentation window (M14)", () => {
+    const tablet = new LatencyRecorder();
+    const computer = new LatencyRecorder();
+    const target = {} as Window;
+    exposeLatency(tablet, target, computer);
+    tablet.record(10, 1);
+    computer.record(20, 2);
+    computer.record(30, 3);
+    expect(target.__ardoiseLatency?.samples()).toEqual([10]);
+    expect(target.__ardoiseLatency?.computer?.samples()).toEqual([20, 30]);
+    expect(target.__ardoiseLatency?.computer?.median()).toBe(25);
+    expect(target.__ardoiseLatency?.computer?.p95()).toBeCloseTo(29.5, 9);
   });
 });

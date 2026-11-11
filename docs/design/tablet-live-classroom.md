@@ -725,3 +725,739 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
 | 6 | Edits and undo in Rust, event, feed, TS apply | edits, session, hub, model, feed.rs, live.ts, live-edits, live-state | hard |
 | 7 | Selection UI in the control window, overlay, keys | new `lib/live-selection`, LiveCanvas, live-render, LiveView, live-keys | standard |
 | 8 | e2e journeys, guide, H5, perf run | app/e2e, docs | standard |
+
+## M14: correct during live on one's own layer
+
+Decisions: `docs/questions.md` Q11 (2026-11-11), SPEC §4.2 « Corriger pendant le direct », §4.4 « Calques », §4.6
+« Calques à l'export »; ROADMAP M14 and H6. The layers zone follows the mockup the user validated
+(`target/maquettes/maquette-calques.html`, not in git: its script is the reference for the zone's behaviour). Exports:
+[exports-and-operations.md](exports-and-operations.md), "Layers at export (M14)". Written on 2026-11-11 from reading the
+code, nothing built or run: every "today" cites where it was read; "(supposé)" marks what was not checked.
+
+**Today.**
+- The tablet's layer is not stored: `LiveSession::current_layer` (session.rs) is the current page's last visible layer,
+  read at each pen down (`pen_down`) and by every snapshot (`LiveSnapshot.layer`). `LiveCommandKind::NewLayer` (the
+  toolbar's `data-action="new-layer"` in `LiveView.svelte`, and the tablet's button set to « nouveau calque ») ends the
+  tablet's stroke and adds a layer on top, which thereby receives the tablet's ink.
+- The control window writes nothing: its preview drags the projected area, the Select tool (M12) picks strokes of every
+  visible layer (`LiveCanvas.endLasso` passes `{ strokes: live.strokes, layers: live.layers }` to `pickStrokes`), and
+  the eraser end is ignored there (`LiveCanvas.onpointerdown`: `kind === 'eraser'` returns).
+- One stroke in progress at a time everywhere: `LiveSession.drawing: Option<Drawing>`; `strokeStart`, `points` and
+  `strokeEnd` name no pen; `hub::enqueue` merges `points` into the queue's last `strokeStart`/`points` of the same page;
+  `LiveState.apply` finishes the stroke in progress when a `strokeStart` arrives. Two pens at once would mix their
+  points in all three places.
+- The page's history (`edits::History`, M12) holds edits only (delete, recolour, clear); appended ink is never a step.
+- A layer's visibility never changes during a session, and the share relies on it (M12 "Viewers": `ViewerIndices`).
+- Editor: `LayersPanel.svelte` (a radio for the active layer, a checkbox to show, a name field, ↑ ↓ ⤓ on every row);
+  the lasso, the click, Ctrl+A and the eraser take every visible layer (`lib/editor/hit.ts` `selectInLasso`,
+  `hitStroke`, `strokesTouched`; `state.ts` `selectAll`, `erase`); hiding the active layer moves it to the nearest
+  visible one (`state.ts` `setLayerVisible` → `nearestVisibleLayer`).
+
+**Words.** The **tablet layer** of a page is where the tablet's ink goes. The **computer layer** ("le calque choisi" in
+the interface) is where the computer's pen, its eraser end and the selection act. Both are per page, in Rust, in memory
+only: a note has no active layer in its file. A **computer stroke** is written in the control window with the computer's
+pen or mouse (Pen tool); in the note it is an ordinary `Stroke`. No format change: which pen wrote a stroke is not stored.
+
+### Data model (package B)
+
+`Page` (session.rs) gets `tablet_layer: u32` and `computer_layer: u32`, always indices of `note.layers` (a page always
+has a layer: `Page::resumed`, `format.rs`). `current_layer` goes.
+
+| When | Tablet layer | Computer layer |
+|---|---|---|
+| Start (`LiveSession::new`: one blank page, « Calque 1 ») | 0 | 0: on the tablet's layer (Q11) |
+| New page (`NextPage` past the last, `NewPage`, the tablet's button set to « nouvelle page ») | 0 | 0 |
+| Resumed sheet (`Page::resumed`) | the last visible layer (M12; every layer hidden: the visible layer M12 adds) | the tablet's |
+| Tablet's button set to « nouveau calque », or `live_command` `newLayer` | the new top layer | unchanged |
+| `live_layers` `add` (« Ajouter un calque ») | unchanged | the new top layer |
+| `live_layers` `tablet` / `computer` | the layer named | the layer named |
+| `live_layers` `move`, `merge` | follows | follows |
+| `live_layers` `rename`, `visible` | unchanged | unchanged |
+
+- Following, as the mockup's `follow` and the editor's `ops.moveIndex`: moving `from` to `to`, an index equal to `from`
+  becomes `to`; with `from < to`, indices in `from + 1 ..= to` go down by one; with `from > to`, indices in `to .. from`
+  go up by one. Merging layer `i` into `i - 1`: indices `>= i` go down by one (`i` becomes `i - 1`).
+- A page keeps its two layers when it is left; coming back finds them as they were.
+- `LiveSnapshot.layer` keeps its name and becomes "the tablet's layer" (what it meant for every reader so far, since only
+  the tablet wrote). New `LiveSnapshot.computer_layer` (`computerLayer`). The share's `SharedSnapshot` (feed.rs) lists
+  its fields one by one: `layer` stays, `computerLayer` is not added.
+- **The tablet on a hidden layer** is allowed (Q11 default: a warning, no refusal). Its ink is recorded there as usual;
+  the presentation does not draw it (`LiveRenderer` draws visible layers only, `visible`), the share does not send it
+  (below, `hidden`). Hiding the tablet's layer does not move the tablet: `current_layer`'s "never a hidden one" goes.
+- **The computer on a hidden layer** is allowed as a choice (warning); its pen is refused (`liveLayerHidden`), its eraser
+  and the selection find nothing there (hidden strokes are never hit).
+- **A resumed sheet** (`hub::written_sheet`): today a sheet whose strokes did not change is written with the layers it
+  was read with, so that a layer the session added by itself (all hidden at the seed, the tablet's button) writes
+  nothing. M14 adds `Resumed.layers_edited`, set by every `live_layers` op that changes the note (`add`, `rename`,
+  `visible`, `move`, `merge`; not `tablet` nor `computer`): from then on the sheet's layers are written as they are,
+  new ink or not. A deliberate act on the layers is a change of the sheet, as in the editor.
+
+### Layer operations during live (package B)
+
+Command `live_layers(pageIndex, op) -> ()`. `LayerOp` (new `live/layers.rs`), mirrored by `LiveLayerOp` (live.ts):
+`add`, `rename { layer, name }`, `visible { layer, visible }`, `move { from, to }`, `merge { layer }` (into
+`layer - 1`), `computer { layer }`, `tablet { layer }`. Indices arrive as plain numbers (`f64`) and are checked in
+`live/layers.rs`, as M12's `StrokesEdit` does, so that a bad one gets a coded error rather than Tauri's rejection.
+
+- Refused as a whole, nothing changed: `liveEditStale` when `pageIndex` is not the page on screen; `liveLayerInvalid`
+  for a layer that does not exist or a number that is no index, `move` outside the list or onto itself, `merge` of the
+  bottom layer, a name empty once trimmed or longer than `MAX_LAYER_NAME` (200 characters), `add` beyond `MAX_LAYERS`
+  (100; our bound: the tablet's button does nothing beyond it either); `liveNotRunning` once the session is stopped,
+  for every op but `tablet` and `computer`, which change no note (as `newLayer` and `clearPage`: `LiveHub::command`,
+  its `rewrites`).
+- Done under the hub's lock, then one snapshot, as `NewLayer` today. A layer op is a click; the snapshot's clone of the
+  page is the cost M12 measured (58 ms for 50 000 strokes of 100 points in the test build, a few ms for a lesson).
+  - `add`: a layer `layer_name(french, len + 1)` on top, visible; the computer goes there; `page.touch()`.
+  - `rename`: the trimmed name (the same: no change, no event). `visible`: as asked (the same: nothing).
+  - `move`: the list reordered; every stroke's `layer` remapped (places unchanged: the revision and a selection stay);
+    the strokes kept in the page's history remapped too (`History::remap_layers`, like `History::turn` for a quarter
+    turn); both strokes in progress (`Drawing.layer`) remapped; both indices followed.
+  - `merge` of `i` into `i - 1`, as the editor's `ops.mergeDown` (the same result in both places): the lower layer stays,
+    with its name, visible if either was (as in the editor: merging into a hidden layer shows its ink); the strokes of
+    `i` take `i - 1` and move after the others in the list, so that they stay drawn above the lower layer's ink (drawing
+    order is layer, then list); the layers above shift down. Places move: the revision goes up (a selection is dropped)
+    and **the page's undo and redo steps are dropped**: their places would name other strokes, and a redo could delete
+    the pupil's ink. The strokes in progress are not in the list: only their layer follows.
+  - `tablet`, `computer`: the index; no `touch()` (the saver wakes on the snapshot and finds nothing to write).
+- No op ends a stroke in progress (unlike `NewLayer`, which still ends the tablet's).
+- **Not undoable with Ctrl+Z.** Ctrl+Z in front of the class undoes ink actions (Q11 lists strokes, eraser, touch-ups,
+  clearing). Undoing « Ajouter un calque » after the tablet wrote on it would have to move or delete the pupil's ink;
+  show, hide, rename and move are undone by the same click in the zone; merge loses no ink. The editor keeps undoing its
+  own layer ops (they are part of its doc).
+
+### The computer's strokes
+
+**From the window to the session** (B and C). One command, always called through the window's queue (below):
+`live_computer_pen(input) -> bool`. `ComputerPenInput` (new `live/pen.rs`), mirrored by `LiveComputerPenInput`:
+
+```ts
+interface ComputerSample { x: number; y: number; p: number; ms: number }
+type LiveComputerPenInput =
+  | { kind: 'begin'; stroke: number; pageIndex: number; style: LiveStyle; samples: ComputerSample[]; now: number }
+  | { kind: 'points'; stroke: number; samples: ComputerSample[]; now: number }
+  | { kind: 'end'; stroke: number; samples: ComputerSample[]; now: number }
+  | { kind: 'cancel'; stroke: number };
+```
+
+- `stroke`: the window's number for the gesture (a counter from 1). Rust ignores a call for another number than the
+  computer stroke in progress; a `begin` while one is in progress ends that one first (kept).
+- `x`, `y`: page units of the page shown, from the preview's transform (`LiveCanvas.pagePoint`); on a resumed sheet its
+  own units (`PenMapping` concerns the tablet only). `p`: `inkPressure(kind, e.pressure)` (gestures.ts): the pen's
+  pressure, 0.5 for a pressed mouse, as in the editor. `ms`: the event's `timeStamp`, coalesced events included; `now`:
+  `performance.now()` when the call is made (the same clock). The window drops a sample closer than 0.5 screen pixel to
+  the previous one (as `Canvas.svelte` and the marks).
+- `style`: the computer's ink (`lib/live-computer-style.ts`, below), `LiveStyle::sanitized` by Rust. The layer is Rust's
+  `computer_layer` of the page: the window's queue makes a choice of layer arrive before the pen that follows it.
+- Answer. `begin`: `true`, or `liveNotRunning` (never started, or stopped: `LiveHub::change` with `rewrites` true),
+  `liveEditStale` (`pageIndex` is not the page on screen), `liveLayerHidden` (the computer layer is hidden),
+  `liveEditInvalid` (no sample with finite coordinates, more than `MAX_PEN_SAMPLES` = 4096 samples in one call).
+  `points`, `end`: `true` while the stroke goes on; `false` once the session ended or dropped it (page change, quarter
+  turn, « Clear the page », stop, a newer stroke, `MAX_COMPUTER_POINTS` = 100 000 points reached): the window stops
+  sending for that gesture. `cancel`: whether there was a stroke to drop.
+- Checked before the lock (`LiveHub::computer_pen`, as `StrokesEdit::checked`): samples without finite `x`/`y` dropped,
+  `p` clamped to 0..=1 (non-finite: 1); under it, the coordinates clamped within one page size around the page (the page
+  is the session's), as `sanitize_marks` does for the marks.
+
+**Time.** Each sample becomes a wall-clock time (`SystemTime`, the clock of the tablet's stamps: `wall_ms(received)`
+in `Shared::input`): `wall = wall_now − max(0, now − ms)`, then at least the previous sample's of the stroke, at most
+`wall_now`, at least `wall_now − 10 000`. Anchored at each call, so the window's clock and Rust's never need to agree
+(only a call's IPC delay, about a millisecond, is not counted). Then `t` as `point_time` computes it, from the same
+origin: `note.created` (a fresh page takes the first sample of either pen as its `created` and stops being fresh) or, on
+a resumed sheet, `Resumed.origin` (M12 "Time"); floored, clamped to `u32`, never below the stroke's previous `t`. Never
+through the tablet's `Page.last_t`, whose 5 ms spacing is the tablet's rate: neither pen pushes the other's times. Equal
+times within a stroke are allowed (`format/strokes.rs` `apply_delta` accepts a zero delta; `replay.rs`: a sample never
+shows before the one it follows). The replay needs nothing new: `Timeline` already plays overlapping strokes point by
+point in note time (`crates/ardoise-media/src/replay.rs`, "when several strokes overlap in time"), so the computer's
+strokes appear at their time among the pupil's (Q11 default). `LivePoint.recv` of a computer point is that sample's
+wall time: the windows' latency figures then count from the pen's movement.
+
+**In the session** (B). `LiveSession.computer: Option<ComputerDrawing>` beside the tablet's `drawing`: what `Drawing`
+holds plus the window's number and the last wall time. Each call appends and emits at once (`strokeStart` with the first
+samples, then `points`). When it ends, the stroke goes at the tail of `note.strokes` (as `end_stroke` does), with
+`page.touch()`, `urgent` when the page has no file yet (a page's first stroke creates its note, whichever pen),
+`Resumed.ink_on_board` set as for the tablet (any ink written under the blackboard), an `Added` undo step (below), then
+`strokeEnd` and a `history` event.
+
+- Ended (kept) by: `end`; a page change (`NextPage`, `PreviousPage`, `NewPage`, also from the tablet's button); a
+  quarter turn (`hold`, before the page turns, so that it turns with the ink); `set_state(Idle)` (stop, the service
+  stopped, the end of the app: `close_at_session_end` then writes it); a `begin` with another number. Dropped
+  (`strokeCancel`) by: `cancel`; « Clear the page » (which drops the tablet's too, as today).
+- A lost link (`Waiting`, `Reconnecting`) ends the tablet's stroke, not the computer's. The computer writes whenever the
+  session runs (`is_running`: started and not stopped), the tablet connected or not.
+- `in_progress()` returns 0, 1 or 2 events (the tablet's first): `push_snapshot`, `subscribe` and `current_events` follow
+  the snapshot with both. Each function that ended "the stroke in progress" says which one it ends.
+
+**Events** (model.rs, live.ts). `strokeStart`, `points` and `strokeEnd` get `pen` (`LivePen`: `tablet` | `computer`,
+written only for `computer`: the tablet's events stay byte for byte as they are, for every test and every viewer) and
+`id` (the window's number, computer only). New: `strokeCancel { pageIndex, pen, id }` and
+`history { pageIndex, canUndo, canRedo }`. The four stroke events also carry `hidden`, never serialised
+(`#[serde(skip)]`): the stroke's layer was hidden when the event was made.
+
+- `hub::enqueue` merges `points` only into a `strokeStart`/`points` of the same page **and the same pen**;
+  `strokeCancel` and `history` are never merged (the default arm). `may_need_save` needs nothing new.
+- Every window gets every event. The share (`share/feed.rs`, allow list): `strokeStart`, `points`, `strokeEnd` with
+  `pen` (not `id`), `strokeCancel` with `pageIndex` and `pen`; all four left out when `hidden`; `history` left out (like
+  `revision`). A stroke on a hidden layer, the tablet's or the computer's, never reaches a viewer, whose list keeps
+  having no hidden stroke.
+- `hidden` is computed when the event is made. A change of visibility sends a snapshot followed by the strokes in
+  progress, `hidden` computed again: a viewer drops its strokes in progress at a snapshot (`LiveState.applySnapshot`)
+  and gets one back only if its layer shows.
+
+**Saving**: as for the tablet's ink (hub.rs, unchanged): dirty when a stroke ends, written at most every 5 s
+(`save_wait`), at once when the page has no file yet, when it is left, at `live_stop`.
+
+**Windows** (C).
+- `LiveState`: `computerCurrent: Stroke | null` beside `current`; events with `pen: 'computer'` go there, the others
+  where they go today; `strokeCancel` drops it; a snapshot drops both (the `strokeStart`s that follow bring them back);
+  `strokeCount` counts both; `computerLayer = snapshot.computerLayer ?? snapshot.layer`; `history` sets `canUndo` and
+  `canRedo` for the page shown; `lastComputerDone`: the `id` of the last computer `strokeEnd` or `strokeCancel`.
+  Latency: `pending` keeps the tablet's points only (the control window's `[data-latency-median]` stays the tablet's);
+  computer points go to their own list, `takeUnpaintedComputer()`. `live-state.svelte.ts` keeps no runtime import of
+  `api.ts` (the viewer runs it: `viewer/imports.test.ts`).
+- `live-render.ts`: `LiveSource.computerCurrent?`, `Scene.computerCurrent`, drawn after the cache like `current` and only
+  when its layer shows; the two in their layers' order (the lower first; on one layer, the tablet's first);
+  `PaintReport.computerPoints`. `SceneOptions.localComputer?: Stroke | null`, when given, is drawn instead of
+  `live.computerCurrent`.
+- Control window: the stroke is drawn from its own pointer events (`localComputer`, as the editor draws its stroke in
+  progress: no round trip), and Rust's copy is not drawn meanwhile. The local stroke goes when `lastComputerDone`
+  reaches its number (the finished stroke is then in `strokes`, on the cache in the same frame), when the page or the
+  note id changes, or 2 s after the window sent `end` or `cancel` (a lost answer).
+- Presentation window: draws `computerCurrent` from the events (no local ink there; its marks are unchanged) and records
+  the latency of computer points in a second `LatencyRecorder`: `window.__ardoiseLatency.computer` (`samples()`,
+  `median()`, `p95()`; `lib/latency.ts` `exposeLatency`).
+- Viewer: `ViewerCanvas.svelte` builds its `LiveSource` field by field: it adds `computerCurrent`. Nothing else.
+
+**Latency targets.** Projector: as the tablet's ink, a median under 30 ms from the pen's sample to the presentation's
+frame (SPEC §4.2's figure, measured by `__ardoiseLatency.computer`, `cargo xtask perf --only pen`). Share: under 150 ms
+to the other screen, stroke in progress included (SPEC §4.10); the e2e journey asserts a median under 50 ms from `recv`
+to the SSE message read by Node, as M11 does.
+
+As measured (2026-11-11, `cargo xtask perf`, AC power, after a full e2e run): projector median 40.1 ms (p95 44.0 ms,
+567 points), so the 30 ms target is missed; in the e2e journeys 40.0 and 40.5 ms, against 27.1 and 26.4 ms for the
+tablet's points and 14.3 ms from Rust's reception to the share. The figures do not start at the same place: a
+computer point's `recv` is its sample's time in the window (`sample_wall`: `wall_now − age`), so the window's own
+delay is in it (pointer events delivered once a frame, then waiting for the call in flight), where the tablet's
+starts at the notification out of the Bluetooth transport, its radio delay left out. Not tried: `pointerrawupdate`
+events, a call that does not wait for the previous one. Left to H6, in class, to tell whether anyone sees it.
+
+**The tablet is never slowed** (hub.rs, module documentation: nothing slow under the lock). Checks outside the lock;
+under it, at most 4096 samples appended and their events pushed (the points are copied into that one event, as
+`flush_points` does); a layer op is one snapshot, like a page change; `merge` moves strokes, no point is copied; nothing
+waits for a window or the disk. The window keeps one call in flight. Measured by a hub test: the tablet's input on one
+thread while another sends computer strokes (one call every 4 ms, 8 samples each); it prints the median and p99 of the
+tablet's Rust part (`sentAt − recv`) and asserts the p99 under 20 ms in the test build (supposé: a loose bound, to set
+from the first run). As built (`live/tests.rs` `the_tablet_is_never_slowed_by_the_computer_s_pen`, 2026-11-11, test
+build, other builds running): p99 4.5 to 4.9 ms, max 5.3 ms, median 2.0 to 2.2 ms (about 580 calls, 4 600 computer
+points, 500 tablet points), against a median of 0.06 ms for the tablet alone (`hub_latency`). The difference is the
+batching (at most one batch every 4 ms, which the computer's calls keep busy), not the lock: no point waits more than
+about one flush interval. Bound set to 10 ms (`NEVER_SLOWED_P99_MS`). Share (`share/tests.rs`, computer points, hub
+call → the viewer's socket): median 2.5 to 2.9 ms.
+
+### The window's queue, pen and eraser (C)
+
+`lib/live-computer.ts`:
+- `ComputerQueue`: the control window's computer commands one at a time, in order: `live_computer_pen`, `live_layers`,
+  `live_edit_strokes` (the eraser's and the selection's: `lib/live-touch-up.ts` takes the queue), `live_undo_edit`,
+  `live_redo_edit`. Tauri runs `async` commands on a pool of threads: two calls in flight could reach the hub in either
+  order, and a Ctrl+Z pressed just after the pen is lifted must reach it after the stroke's `end`. `live_command` (pages,
+  clear) stays outside: a clear or a page change that overtakes the end of a stroke drops or ends it, as the session
+  says.
+- `ComputerPen`: `down` (Pen tool; the pen's tip or the mouse's left button; the session running; the computer layer
+  visible, else `onblocked`), `move` (coalesced events), `up`, `cancel`. One call of the gesture in flight; samples that
+  come meanwhile go in the next call; `begin` at once, `end` with the last samples. A `false` answer, a page or note
+  change stops the gesture and drops the local stroke. `liveEditStale` is silent (the page changed under the pen);
+  other refusals go to the window's notice (`errorMessage`). Cancelled by `pointercancel`, a lost capture
+  (`release(e, true)`), a second finger landing (as a mark is), Esc, a page change.
+- `ComputerEraser`, for **the eraser end** (`pointerKind` = `eraser`): whole strokes of the computer layer, whatever the
+  tool (none, Select, Pen), as the editor's eraser end (`Canvas.svelte`: "The back of the pen erases ... whatever the
+  tool"). Radius: 18 screen pixels (`MARK_ERASER_PX`, the presentation marks' eraser) over the preview's scale: the
+  preview shows the whole page small (an A4 page some 800 px wide, about 37 page units a pixel), where the editor's
+  300 page units would be 8 px. Hit test: `strokesTouched(onLayer(live, live.computerLayer), [last, p], radius)`
+  (`lib/editor/hit.ts`, `onLayer` from package A). A gesture has a `group` number; each move that touches new strokes
+  sends `live_edit_strokes(pageIndex, live.revision, { kind: 'delete', indices, group })` through the queue, with the
+  indices those stroke objects have in `live.strokes` and the revision read when the call leaves the queue, not when it
+  is queued (objects are kept between moves, since a delete moves indices). On `liveEditStale` (the window's list is behind Rust's revision) the same objects are tried again
+  after the next change of the `LiveState`, at most three times; objects gone meanwhile are skipped. The projector and
+  the share see each delete as it happens. A ring of the eraser's size follows the eraser end in the control window
+  (`Scene` overlay, never projected).
+- **Mouse**: with Pen, the left button writes and the wheel still zooms; with no tool it drags the projected area, with
+  Select it draws a lasso (today). **Finger**: navigation in the control window whatever the tool (pan, pinch, double
+  tap: M8), never ink (Q11). **Palm rejection**: `PenPresence` as today (a finger is ignored while a pen touches or
+  hovered less than 1.2 s ago). The barrel button means nothing in live: a tip with it held writes.
+
+### Undo and redo (B; TS in C)
+
+The page's history gets the computer's ink. The tablet's writing is never a step; a new computer stroke or edit empties
+the redo steps (`History::record`), the tablet's writing does not (M12).
+
+| Computer action | Undo step | Undo | Redo |
+|---|---|---|---|
+| a stroke ended | `Added { indices: [place] }` | takes it off (`take_strokes`), pushes `RedoStep::Add { strokes }` | gives it back at its place (`give_back`), pushes `Added` |
+| an eraser gesture | one `Removed` per delete, tagged with the gesture's group | every step of the group, top down, in one command | the whole group again |
+| delete or recolour of a selection, « Clear the page » | unchanged (M12) | | |
+
+- What the tablet wrote is taken or given back only by the computer's eraser, delete or clear (on whichever layer the
+  computer chose), and an undo gives back exactly what they took. M12's argument still holds once "the tablet only
+  appends" reads "the pens only append" (`edits.rs` module documentation): a computer stroke joins the tail too, and
+  steps come off in reverse order.
+- Groups: `StrokesEdit::Delete` gets `group?: number` (`#[serde(default)]`; `CheckedEdit.group: Option<u32>`); a step
+  keeps its group; `undo_edit`/`redo_edit` take the top step and every next step of the same group, one `strokesEdited`
+  per step, in one publish. `MAX_UNDO_STEPS` and `MAX_UNDO_BYTES` count groups and drop whole groups, oldest first.
+  `restore_cleared_with` (« Undo the clearing ») goes through the same `undo_step` (as built: no longer, see "As built
+  (B)", « Annuler l'effacement »).
+- `canUndo`/`canRedo` reach the windows through `strokesEdited` and the snapshot (as today) and through `history` after a
+  computer stroke is recorded.
+- Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z (M12) are ignored while a computer gesture (pen or eraser) is under way, as the editor's
+  are (`Editor.svelte`: "A gesture under way commits on top of the doc it started from").
+- Viewers: an undo may now give back a stroke on a layer hidden since (delete, hide the layer, Ctrl+Z) and a redo take
+  one off. `ViewerIndices` becomes per stroke: `removed` and `recoloured` list visible strokes only (viewer numbering),
+  `inserted: Vec<Option<u32>>` follows the event's `inserted`, `None` for a hidden stroke, which `feed.rs` leaves out.
+  M12's "whether a stroke is hidden never changes during a session" goes; what keeps the viewers right is that every
+  change of visibility is a snapshot, which rebuilds their list from what shows.
+
+### Selection on the chosen layer (A and C)
+
+- Live: `LiveCanvas.endLasso` gives `pickStrokes` `onLayer({ strokes: live.strokes, layers: live.layers },
+  live.computerLayer)`. Choosing another layer drops the selection (`LiveView`, an effect on `live.computerLayer`), as a
+  page or revision change does (M12 `follow`). `live.select.help` says only the chosen layer's strokes are picked.
+- Rust does not check the layer of edited strokes: an edit is what the window chose, with M12's checks (index, hidden,
+  duplicate). The one window that edits drops its selection when the layer changes, and an undo must still reach
+  strokes of other layers.
+- The computer's stroke in progress cannot be chosen (not in `live.strokes`, M12); when it ends it joins the tail, no
+  index moves, a selection stays.
+- Tools: the computer's group has Select and Pen, exclusive, or neither (navigation: today's behaviour, also at the
+  start, so that a click on the preview still moves the area). Pen on turns Select off, which drops the selection (M12).
+
+### The computer's ink (C)
+
+`lib/live-computer-style.ts`: key `ardoise.live.computerStyle` in the browser's storage, JSON
+`{ tool, color: '#rrggbb', width }`; `loadComputerStyle(storage?)` gives a `LiveStyle` (a tool of `TOOLS`, an opaque
+colour, a width within the live slider's 10..1000, else the default); `saveComputerStyle(style, storage?)` at each
+change, ignoring a blocked storage (as `rememberCustomColor`). Default: felt tip, Inkspace red `#d80000`
+(`INKSPACE_COLORS[4]`), width 120 (`DEFAULT_WIDTHS.feltTip` of `LiveView`): it reads well on the projector next to a
+ballpoint (our choice; Q11 says red only).
+- In the browser's storage, not `ardoise.toml`: the pen is this PC's while the settings file is shared by the PCs
+  through Nextcloud; the export choices already live there (`export-options.ts`), remembered from one session to the
+  next by the WebView2 profile; and Rust needs the style only per stroke, which `begin` carries.
+- Apart from the tablet's style (`live_set_style`, the snapshot's `style`, `carried_ink`): the blackboard turns the
+  tablet's to chalk, not the computer's.
+
+### The layers zone (A; used by C)
+
+`components/layers/LayersZone.svelte`: the same in the editor's side panel (in place of `LayersPanel.svelte`, removed)
+and as the first block of the live window's side panel (in place of the toolbar's `new-layer` button). Pure helpers
+in `lib/layers-zone.ts`: `rowsTopFirst`, `layerWarnings(layers, chosen, tablet?)` (`tabletHidden` first, then
+`chosenHidden`), `followMove(index, from, to)`, `followMerge(index, merged)` (the mock uses the last two).
+
+```ts
+// Props. The component keeps only the rename field's state; the rest comes from the editor's doc or the live snapshot.
+{
+  where: 'editor' | 'live';
+  layers: readonly Layer[];        // bottom first, as in the note
+  chosen: number;                  // editor: doc.activeLayer; live: live.computerLayer
+  tablet?: number;                 // live: live.layer (the tablet's); absent in the editor
+  disabled?: boolean;              // editor: the split panel is open; live: the session is not running
+  onchoose: (index: number) => void;
+  onvisible: (index: number, visible: boolean) => void;
+  onrename: (index: number, name: string) => void;   // trimmed, non-empty, different from the old name
+  onmove: (from: number, to: number) => void;        // to = from ± 1
+  onmerge: (index: number) => void;                  // into index - 1
+  onadd: () => void;
+  ontablet?: (index: number) => void;                // live
+}
+```
+
+DOM, relied upon by the tests and journeys of every package:
+- `section.layers-zone[data-where]`, its `h3` (`layers.title`), `ul.layers` (`aria-label` `layers.list`), the rows top
+  first: `li.layer[data-layer={index}]`, with `data-chosen="true"` and class `chosen` on the chosen row (the frame),
+  `data-hidden="true"` on a hidden layer (its name in muted italics), `data-tablet="true"` on the tablet's row (live).
+- In a row, in this order: the eye `button[data-action="layer-visible"][data-visible="true"|"false"]` (eye, or eye
+  barred when hidden; `aria-label` `layers.hide` / `layers.show`); the name `button.layer-name[data-action="choose-layer"]`
+  (`aria-pressed` = chosen; `aria-label` and `title`: `layers.chosen.<where>` on the chosen row, `layers.choose` on the
+  others), replaced while renaming by `input.layer-rename` (`layers.nameField`); the pencil
+  `button[data-action="rename-layer"]` (`layers.rename`); live only, the tablet `button[data-action="tablet-layer"]`:
+  on the tablet's row `data-here="true"`, accent colour (warning colour when that layer is hidden), `layers.tabletHere`;
+  on the others invisible until the row is hovered or the button focused, then pale, `layers.tabletSend`, and always
+  pale under `@media (hover: none)` (a finger has no hover); on the chosen row only,
+  `button[data-action="layer-up"|"layer-down"|"layer-merge"]` (↑ ↓ ⤓; up disabled on the top row, down and merge on the
+  bottom one; `layers.up`, `layers.down`, `layers.merge`, plus `layers.mergeNoUndo` in the live title).
+- Under the list: `button[data-action="add-layer"]` (« + » `layers.add`); the warnings,
+  `p.notice[data-slot="layer-warning"][data-kind="tabletHidden"|"chosenHidden"]`, `role="status"` (live: the tablet's
+  layer hidden; both places: the chosen layer hidden); the help `p.help[data-slot="layers-help"]` (`layers.help.<where>`).
+- Mouse: a click anywhere on the row outside its buttons chooses it (the mockup); the buttons stop the click. The
+  keyboard's control is the name button (Tab, then Enter or Space). The row's click handler carries
+  `<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->` with that reason
+  (`npm run check` fails on warnings; precedent: `components/library/Menu.svelte`).
+- Rename: the pencil shows the field, focused, its text selected; Enter keeps (trimmed; empty or unchanged: nothing),
+  Esc gives the old name back, leaving the field keeps (the mockup); then the focus goes to the row's name button. One
+  field at a time; `disabled` closes it.
+- Icons (eye, eye barred, pencil, tablet): the mockup's inline SVG, `aria-hidden`, in
+  `components/layers/LayerIcon.svelte`; colours from the app's tokens.
+
+### Live window (C)
+
+- Toolbar: the style group becomes the tablet's, with the visible label `live.tabletStyle`; its controls are unchanged
+  (with a selection its swatches still recolour it, M12). The `touch-up` group (`data-slot` kept for the M12 tests)
+  becomes the computer's, labelled `live.computer.label`: `[data-action="select"]` (V), `[data-action="pen"]`
+  (`live.pen.toggle`, P, `aria-pressed`, `title` `live.pen.hint`, disabled at idle like Select),
+  `[data-action="computer-style"]` (a swatch and the tool's name, `aria-label` `live.pen.styleHint`), which opens
+  `[data-slot="computer-style"]` (`live.pen.style`: the tool `select`, the colour swatches, which here only set the
+  computer's colour, and the width slider; Esc or a click outside closes it), then Undo and Redo (unchanged; their
+  hint is `live.undoHint`). The `new-layer` button goes.
+- Side panel: first block `[data-section="layers"]`, `LayersZone where="live"`: `onchoose` → op `computer`, `ontablet` →
+  op `tablet`, the others their op, all through the queue; a refusal in the window's notice. With Pen on,
+  `[data-slot="pen-hint"]` (`live.pen.help`) under the preview's hint, as `select-hint` is.
+- `LiveCanvas`: `tool: 'none' | 'select' | 'pen'` replaces `selecting` (`data-tool` on the canvas); `computer` (the
+  window's queue, pen and eraser; absent in the presentation); `onblocked`. A pen down while the computer layer is
+  hidden calls `onblocked`, and the window shows `layers.warn.chosenHidden` as a notice (the zone shows it too).
+- Keys (`liveEditKeyAction`, while a session runs): P toggles Pen (the editor's key), V Select; `KEYS` adds `pen`; Esc
+  drops a pen gesture under way before anything else.
+
+**As built (C, interface).** Where the code says more than the sections above, or departs from them:
+- `SceneOptions.localComputer` is a list, `readonly Stroke[]`, not one stroke: a second gesture may begin before the
+  session ended the first, and both are drawn until `lastComputerDone` reaches them. Given, it replaces Rust's copy;
+  an empty list hides it (a cancelled gesture, until its `strokeCancel` comes). `Scene.computer` holds what is drawn;
+  `SceneOptions.eraser` / `Scene.eraser` is the ring (`ERASER_RING_PX`, 18, the marks' eraser), preview only.
+- `ComputerPen` keeps one call of the gesture in flight while the pen moves, and one queued that takes the samples (at
+  most `MAX_PEN_SAMPLES`) and `now` when it leaves. When the pen is lifted, every call still needed (the chunks of what
+  is pending, then `end`) is queued at once, so that a Ctrl+Z pressed after it comes after the `end` even after an IPC
+  stall (review, finding 5). A gesture cancelled before its `begin` left sends nothing. A `false` answer, a refusal or a
+  page or note change drops the local stroke at once (Rust's copy, if any, then shows until its `strokeEnd`). The window
+  going away (`dispose`) **cancels** a gesture under way, as a lost pointer capture does: the pen was not lifted, and an
+  interrupted stroke is no ink the teacher meant; a lifted stroke's `end` still leaves (finding 7).
+- `ComputerEraser` skips, when its call leaves, the strokes gone meanwhile and those of a layer hidden since (Rust would
+  refuse the whole delete). Each delete's answer (the page's new revision) is kept: until the window's list has caught
+  up, the next delete of the eraser is made at that revision, on the window's list less the strokes it deleted (no stale
+  answer between two deletes of a fast gesture). A stale call is tried again at once when the window's revision moved
+  meanwhile, else after the next notification of the `LiveState` (at most `STALE_WAIT_MS`, 2 s), at most
+  `STALE_RETRIES` (3) times, silently (finding 2). Groups come from `nextGroup()`, from a random value in 1..2^31 drawn
+  at load.
+- `LiveComputer.busy` (a pen or eraser gesture under way, or an eraser retry not sent yet) makes Ctrl+Z, Ctrl+Y and the
+  Undo / Redo buttons wait; `historyQueued()`, called before an undo, a redo or « Undo the clearing » is queued, drops
+  the retries not sent. `strokeEnding` (a lifted stroke whose `end` the session has not recorded) lets Ctrl+Z through
+  though `canUndo` is still false: the undo goes after the `end` (finding 4). « Undo the clearing » goes through the
+  queue (finding 1), and its offer goes when `canUndo` turns false (a merge dropped the history). The layer ops read
+  `pageIndex` at the click and go through the queue. Refusals of the pen, the eraser and the layer ops are told in their
+  own words (`lib/live-errors.ts`, `live.failed.*`), not in the selection's (finding 9).
+- The live window asks before a merge (`live.merge.*`, `Modal` `role="alertdialog"`, Esc and Ctrl+W answer « Annuler »):
+  Ctrl+Z cannot undo it, and when a shown layer goes into a hidden one, the hidden ink shows at once on the projector and
+  the share; the question says so then (finding 6). The editor's merge stays immediate (undoable there).
+- `LiveSelection.follow` also drops the strokes of a layer hidden since (finding 3), as the editor's `setLayerVisible`.
+- `loadComputerStyle` falls back field by field (a bad tool keeps a good colour). The panel's tool change takes that
+  tool's last width in the session, else `DEFAULT_WIDTHS`, as the tablet's does.
+- `LiveState`: computer `points` without a `strokeStart` (supposé: subscribed mid-stroke) start a stroke in the
+  tablet's style on `computerLayer`; a tablet `strokeCancel` (B never sends one) drops the tablet's stroke.
+- The toolbar groups are named by their visible labels (`aria-labelledby`): `live.tabletStyle` and
+  `live.computer.label`. `live.style` and `live.select.label` are then unused, with `live.layer.{new, current}`.
+- `lib/mock-live.ts`: after `live_stop` its session is gone, so `live_layers` `tablet` and `computer` answer
+  `liveNotRunning` there too (B accepts them); the zone is disabled at idle anyway.
+
+### Editor (A)
+
+- A click on a row (or its name button) chooses the layer. `setActiveLayer` now also clears the selection: the selection
+  belongs to the chosen layer.
+- Selection: the lasso, the click and the barrel button's lasso (`Canvas.svelte` `finish`: `selectInLasso`, `hitStroke`)
+  take `onLayer(doc.note, doc.activeLayer)`; Ctrl+A (`selectAll`) the chosen layer's strokes, when it shows. Moving,
+  scaling, recolouring, deleting, copying act on the selection: nothing to change.
+- Eraser, the tool or the eraser end, whole or partial: `state.erase` passes `doc.activeLayer`;
+  `ops.eraseWhole(note, path, radius, layer?)` and `ops.erasePartial(note, path, radius, layer?)` touch only that layer.
+- Pen, paste, duplicate: already on the active layer, refused on a hidden one with `editor.layers.hiddenActive`.
+- `lib/editor/hit.ts`: `Hittable` gets `only?: number`; `onLayer(note, layer)` returns `{ strokes, layers, only: layer }`;
+  with `only`, `layerVisible` is true for that layer alone and only while it shows (so a stroke whose layer has no entry
+  is never hit then); `drawingOrder`, `selectInLasso`, `hitStroke`, `strokesTouched` all go through `layerVisible`.
+  Splitting by a zone (`split.ts`) keeps every visible layer: it is not a selection.
+- **The chosen layer hidden.** Today the active layer moves to the nearest visible one. M14: it stays chosen and the zone
+  shows `layers.warn.chosenHidden` (the mockup). Reasons: one rule in both places (Q11: « pour que la règle soit la
+  même partout »); in live, a computer moved by itself would put the teacher's next stroke on the pupil's layer; hiding
+  then showing a layer gives the same state back; the frame always shows which layer is chosen. The pen then gives its
+  notice, the eraser and the selection find nothing. Opening a note still chooses the visible layer nearest the top
+  (`docFromNote`, unchanged).
+
+**As built (A, layers zone and editor).** Where the code says more than the sections above, or departs from them:
+- `lib/layers-zone.ts`: `rowsTopFirst(layers)` returns `{ index, layer }[]` (top first); `layerWarnings` returns
+  `{ kind, index, name }[]`; `followMove` is `ops.moveIndex` (a test compares them on every case); `followMerge(index,
+  merged)` takes `merged` itself down onto `merged - 1`.
+- `LayersZone.svelte` renders `data-section="layers"` on its own `section` (package C need not wrap it to get the
+  `[data-section="layers"]` block of "Live window (C)"). The section carries its own padding and bottom border (the
+  `side-section` / `side-block` look), so the owner puts nothing around it.
+- A click on the chosen row, and a click on the tablet icon of the tablet's own row, call nothing (the editor's
+  `setActiveLayer` and the live op would change nothing). The focus goes back to the name button after Enter and Esc in
+  the rename field, not when the field is left by clicking elsewhere (it would take the focus from what was clicked).
+- The add button shows « + » and `layers.add`; its `aria-label` is `layers.add` alone. `layers.mergeNoUndo` is in the
+  merge button's `title` in live, not in its `aria-label`.
+- The warning colours are component tokens (`--zone-warn`, `--zone-warn-bg`: the mockup's, with the dark theme's), as
+  `app.css` has no warning token. The global `.layers` / `.layer` rules of `app.css` are gone (the zone's rules are
+  scoped).
+- Editor: `setActiveLayer` and `addLayer` both clear the selection (the selection belongs to the chosen layer);
+  `setLayerVisible` still drops the hidden layer's strokes from the selection. `hit.ts`: `onLayer(note, layer)`;
+  `layerVisible` with `only` is true for that layer alone and only while it shows; `drawingOrder` with `only` lists
+  that layer's strokes in file order. `ops.eraseWhole` and `ops.erasePartial` take `layer?`; `state.erase` always passes
+  the active layer.
+- Test helper `components/layers/LayersZoneHarness.svelte` (props changed from outside, callbacks recorded).
+
+### Translations
+
+All added by package 0, in both catalogs (the French in the user's tone: short, plain; quotes « » and plain spaces, as
+the files have them). New:
+
+| Key | Français | English |
+|---|---|---|
+| `layers.title` | Calques | Layers |
+| `layers.list` | Calques de la page | Layers of the page |
+| `layers.add` | Ajouter un calque | Add a layer |
+| `layers.choose` | Agir sur « {name} » | Act on “{name}” |
+| `layers.chosen.editor` | Le stylet, la gomme et la sélection agissent sur « {name} » | The pen, the eraser and the selection act on “{name}” |
+| `layers.chosen.live` | L'ordinateur agit sur « {name} » | The computer acts on “{name}” |
+| `layers.show` | Afficher « {name} » | Show “{name}” |
+| `layers.hide` | Masquer « {name} » | Hide “{name}” |
+| `layers.rename` | Renommer « {name} » | Rename “{name}” |
+| `layers.nameField` | Nom du calque {n} | Name of layer {n} |
+| `layers.up` | Monter « {name} » | Move “{name}” up |
+| `layers.down` | Descendre « {name} » | Move “{name}” down |
+| `layers.merge` | Fusionner « {name} » avec le calque du dessous | Merge “{name}” into the layer below |
+| `layers.mergeNoUndo` | Ctrl+Z ne l'annule pas. | Ctrl+Z does not undo it. |
+| `layers.tabletHere` | La tablette écrit sur « {name} » | The tablet writes on “{name}” |
+| `layers.tabletSend` | Faire écrire la tablette sur « {name} » | Make the tablet write on “{name}” |
+| `layers.warn.tabletHidden` | La tablette écrit sur « {name} », qui est masqué : ce que l'élève écrit n'est ni projeté ni partagé. | The tablet writes on “{name}”, which is hidden: what the pupil writes is neither projected nor shared. |
+| `layers.warn.chosenHidden` | Le calque choisi, « {name} », est masqué : affichez-le pour y écrire. | The chosen layer, “{name}”, is hidden: show it to write on it. |
+| `layers.help.editor` | Le stylet, la gomme et la sélection agissent sur le calque choisi (encadré). | The pen, the eraser and the selection act on the chosen layer (framed). |
+| `layers.help.live` | Le stylet de l'ordinateur, sa gomme et la sélection agissent sur le calque choisi (encadré). La tablette écrit sur celui marqué de l'icône de tablette. | The computer's pen, its eraser and the selection act on the chosen layer (framed). The tablet writes on the one marked with the tablet icon. |
+| `live.tabletStyle` | Tablette | Tablet |
+| `live.computer.label` | Ordinateur | Computer |
+| `live.pen.toggle` | Stylo | Pen |
+| `live.pen.hint` | Écrire avec le stylet ou la souris de l'ordinateur sur le calque choisi (P) | Write with the computer's pen or mouse on the chosen layer (P) |
+| `live.pen.help` | Stylet ou souris : écrire · bout gomme du stylet : effacer des traits entiers du calque choisi · doigt : déplacer et zoomer la zone projetée. | Pen or mouse: write · eraser end of the pen: erase whole strokes of the chosen layer · finger: move and zoom the projected area. |
+| `live.pen.style` | Encre de l'ordinateur | Computer's ink |
+| `live.pen.styleHint` | Choisir l'outil, la couleur et l'épaisseur de l'ordinateur | Choose the computer's tool, colour and width |
+| `live.keys.list.pen.keys` | P | P |
+| `live.keys.list.pen.action` | Outil Stylo : écrire avec le stylet ou la souris de l'ordinateur | Pen tool: write with the computer's pen or mouse |
+| `errorCodes.liveLayerHidden` | Le calque choisi est masqué : affichez-le pour y écrire. | The chosen layer is hidden: show it to write on it. |
+| `errorCodes.liveLayerInvalid` | Cette opération sur les calques n'est pas possible. | This layer operation is not possible. |
+| `export.layers.*` | see [exports-and-operations.md](exports-and-operations.md), "Layers at export (M14)" | |
+
+Changed:
+
+| Key | Français | English |
+|---|---|---|
+| `live.select.help` | Lasso : sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner. Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris. | Lasso: select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect. The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked. |
+| `live.undoHint` | Annuler la dernière action de l'ordinateur : un trait, un coup de gomme, une retouche ou l'effacement de la page (Ctrl+Z) ; ce que la tablette a écrit n'est pas annulé | Undo the computer's last action: a stroke, an erasing, a touch-up or the clearing of the page (Ctrl+Z); what the tablet wrote is not undone |
+| `live.keys.list.undo.action` | Annuler, rétablir un trait ou un coup de gomme de l'ordinateur, une suppression, un changement de couleur ou l'effacement de la page | Undo, redo a stroke or an erasing of the computer, a delete, a change of colour or the clearing of the page |
+| `editor.layers.hiddenActive` | Le calque choisi est masqué : affichez-le ou choisissez-en un autre pour dessiner. | The chosen layer is hidden: show it or choose another one to draw. |
+
+Unused once A and C are in, removed by package E: `editor.layers.{label, add, active, visible, name, up, down, merge}`,
+`live.layer.{new, current}` (`editor.layers.defaultName` stays: `docFromNote` and the editor's « add »).
+
+**As built (package E).** Removed from both catalogs, after a search of `app/ui/src`, `app/e2e`, `app/scripts` and `app/src-tauri/src`
+found no use: `editor.layers.{label, add, active, visible, name, up, down, merge}`, `live.layer.{new, current}`,
+`live.style` and `live.select.label`. Kept, still used: `editor.layers.defaultName` (`docFromNote`, the editor's « add ») and
+`editor.layers.hiddenActive` (the editor's notice when the pen meets a hidden layer).
+
+### Contracts between packages
+
+Rust (package B; `model.rs` unless said):
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LivePen { #[default] Tablet, Computer }     // LivePen::is_tablet for skip_serializing_if
+
+// LiveSnapshot: `layer` (the tablet's, unchanged name) + `computer_layer: u32`.
+// LiveEvent:
+StrokeStart  { page_index, stroke: LiveStroke, pen: LivePen, id: Option<u32>, hidden: bool }
+Points       { page_index, points: Vec<LivePoint>, pen: LivePen, id: Option<u32>, hidden: bool }
+StrokeEnd    { page_index, pen: LivePen, id: Option<u32>, hidden: bool }
+StrokeCancel { page_index, pen: LivePen, id: Option<u32>, hidden: bool }     // new
+History      { page_index, can_undo: bool, can_redo: bool }                  // new
+// `pen`: skip_serializing_if = "LivePen::is_tablet"; `id`: skip_serializing_if = "Option::is_none"; `hidden`: skip.
+// ViewerIndices.inserted: Vec<Option<u32>>; removed and recoloured hold visible strokes only.
+
+// live/pen.rs
+#[derive(Deserialize)] pub struct ComputerSample { pub x: f64, pub y: f64, pub p: f64, pub ms: f64 }
+#[derive(Deserialize)] #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum ComputerPenInput {
+    Begin { stroke: u32, page_index: usize, style: LiveStyle, samples: Vec<ComputerSample>, now: f64 },
+    Points { stroke: u32, samples: Vec<ComputerSample>, now: f64 },
+    End { stroke: u32, samples: Vec<ComputerSample>, now: f64 },
+    Cancel { stroke: u32 },
+}
+pub const MAX_PEN_SAMPLES: usize = 4096;  pub const MAX_COMPUTER_POINTS: usize = 100_000;
+
+// live/layers.rs (same serde attributes)
+pub enum LayerOp { Add, Rename { layer: f64, name: String }, Visible { layer: f64, visible: bool },
+                   Move { from: f64, to: f64 }, Merge { layer: f64 }, Computer { layer: f64 }, Tablet { layer: f64 } }
+pub const MAX_LAYERS: usize = 100;  pub const MAX_LAYER_NAME: usize = 200;
+
+// edits.rs: StrokesEdit::Delete { indices: Vec<f64>, #[serde(default)] group: Option<f64> };
+// LiveEditError gains LayerHidden (code liveLayerHidden) and BadLayer, BadLayerName, TooManyLayers (liveLayerInvalid).
+
+// live.rs, registered in lib.rs:
+#[tauri::command] pub async fn live_computer_pen(runtime: State<'_, LiveRuntime>, input: ComputerPenInput) -> CommandResult<bool>
+#[tauri::command] pub async fn live_layers(runtime: State<'_, LiveRuntime>, page_index: usize, op: LayerOp) -> CommandResult<()>
+```
+
+**As built (B, 2026-11-11).** The shapes above are unchanged. Where the code goes further or differs:
+- `LiveEditError` also has `BadGroup` (a `group` that is no whole `u32`), `NoSample` (a `begin` without a finite sample)
+  and `TooManySamples { count }` (more than `MAX_PEN_SAMPLES` in any call): all `liveEditInvalid`, no new code.
+- `MAX_COMPUTER_POINTS` reached: the stroke **ends** there, kept (`strokeEnd`, `history`), and that call answers
+  `false`; the window's local stroke goes on `lastComputerDone` as for any end.
+- `points`, `end`, `cancel` for another number than the stroke in progress (or none), or on a stopped session: `false`,
+  never an error; `begin` on a stopped session: `liveNotRunning`; before the first start every call is `liveNotRunning`.
+  A refused `begin` (stale, hidden layer) leaves the stroke in progress as it is.
+- `strokeCancel` is sent for the computer only. « Clear the page »: `strokeCancel` of the computer's gesture, then the
+  snapshot; the tablet's stroke is still dropped by the snapshot alone, as before.
+- `hub::enqueue` merges points only into the last event of the same page, pen, `id` and `hidden`.
+- A `strokesEdited` that names nothing a viewer has (only strokes of a layer hidden since went or came back) is not sent
+  to the viewers at all (`share/feed.rs` `shared_edit`).
+- A merge always raises the revision and drops the page's history, even when the merged layer is empty.
+- A redo that gives back a computer stroke copies it before the lock (`LiveSession::next_redone`, `Prepared::of_all`),
+  as an undo does; a group's copies are made together.
+- Times: `t` never goes back within a stroke; `recv` follows the design's bounds in order (at least the previous
+  sample's, at most the call's wall time), so it may when the system clock itself goes back.
+- `newLayer` (the tablet's button) on a page of `MAX_LAYERS` layers does nothing at all.
+- Groups: steps next to each other naming the same group are one, whatever came before them. A control window that
+  restarts its counter (reloaded mid-session) could join a gesture to the previous window's last one if nothing came
+  between. For package C: number the gestures' groups from a value drawn at each load of the window, not from 1
+  (supposé enough).
+- **« Annuler l'effacement » (`live_restore_cleared`), fixed after the review.** Going through `undo_step` down to the
+  clearing, as written above and in M12, undid the computer's strokes written since (a correction made within the
+  8 s offer vanished, went to the redo stack under the clearing, and was lost from the file at the next write). Now
+  `History::unclear` undoes the clearing **out of order**: its strokes come back under what was written since,
+  whichever pen wrote it, at the places they had among the strokes it left (those of hidden layers, kept first in the
+  list); everything done since stays done. **The history after a restore**: the clearing is no longer in it (Ctrl+Y
+  does not clear again); every step done since stays where it was, each place it names moved for the strokes back
+  (a computer stroke or a delete of ink written since: by the number of strokes back; a stroke the clearing left:
+  by those that stood before it), so Ctrl+Z undoes the teacher's last stroke, then the other steps since, then those
+  from before the clearing, as if the clearing had never been done; the redo steps are dropped, as for any new action.
+  The tablet's ink is never a step and stays. The places are followed step by step, so they stay right when ink the
+  clearing left (a layer hidden at the clearing, shown since) was taken out in between (`Unclearing`, `edits.rs`).
+  Each `Removed` step keeps `left`, the strokes left in the list just after it. One `strokesEdited` (viewer
+  numbering per stroke, as any). After a merge (history dropped) there is no clearing to undo: `false`, as when the
+  page has none, and the window says `live.clearUndoFailed`. The copy of the cleared strokes is made before the lock
+  (`LiveSession::cleared_strokes`). The browser stand-in (`mock-live.ts` `restoreCleared`) does the same.
+
+TypeScript (`lib/live.ts`, `lib/api.ts`; package 0 writes them):
+
+```ts
+export type LivePen = 'tablet' | 'computer';
+// LiveSnapshot: `layer` = the tablet's layer; new `computerLayer?: number` (absent on the share's viewers).
+// LiveEvent: strokeStart / points / strokeEnd gain `pen?: 'computer'; id?: number`, and
+  | { type: 'strokeCancel'; pageIndex: number; pen?: 'computer'; id?: number }
+  | { type: 'history'; pageIndex: number; canUndo: boolean; canRedo: boolean }
+export interface ComputerSample { x: number; y: number; p: number; ms: number }
+export type LiveComputerPenInput = /* as above */;
+export type LiveLayerOp =
+  | { kind: 'add' } | { kind: 'rename'; layer: number; name: string } | { kind: 'visible'; layer: number; visible: boolean }
+  | { kind: 'move'; from: number; to: number } | { kind: 'merge'; layer: number }
+  | { kind: 'computer'; layer: number } | { kind: 'tablet'; layer: number };
+// LiveStrokesEdit: { kind: 'delete'; indices: number[]; group?: number } | (recolour unchanged)
+api.liveComputerPen: (input: LiveComputerPenInput) => call<boolean>('live_computer_pen', { input })
+api.liveLayers: (pageIndex: number, op: LiveLayerOp) => call<void>('live_layers', { pageIndex, op })
+```
+
+Interface between A and C: `LayersZone.svelte` (props and DOM above), `lib/layers-zone.ts`, `onLayer` and the optional
+`only` of `Hittable` in `lib/editor/hit.ts`.
+
+### Work packages
+
+One owner per file, as in M4 ("Rules"): a package that needs to change a file it does not own says so in its report.
+Each package works in its own worktree and branch, merged into `m14` by the session.
+
+| # | Package (profile) | Owns | Starts |
+|---|---|---|---|
+| 0 | Contracts (the session itself, one commit) | `locales/fr.json`, `locales/en.json` (every key of "Translations" and of the export section); `lib/live.ts`, `lib/api.ts` (the types and wrappers of "Contracts"); `lib/note.ts` (`ExportOptions.layers?`); `app/e2e/journeys-m14-{editor,live,export}.mjs` created as `export const … = []`, registered in `app/e2e/run.mjs` | first |
+| A | Layers zone and editor (developpeur) | new `components/layers/{LayersZone,LayerIcon}.svelte`, `LayersZone.test.ts`, `lib/layers-zone.ts` (+ test); `components/editor/LayersPanel.svelte` (removed), `Editor.svelte`, `Canvas.svelte`, their tests and test harnesses; `lib/editor/{state,ops,hit}.ts` and their tests; `app/e2e/journeys-m14-editor.mjs` | after 0 |
+| B | Live, Rust side (specialiste) | `app/src-tauri/src/live/{model,session,edits,hub,resume}.rs`, new `live/{pen,layers}.rs`, the tests `live/tests.rs`, `live/edits/tests.rs`, `live/resume/tests.rs`, new `live/pen/tests.rs`, `live/layers/tests.rs`; `app/src-tauri/src/live.rs`; `app/src-tauri/src/lib.rs` (two commands); `app/src-tauri/src/share/{feed,tests}.rs` | after 0, with A and D |
+| C | Live, interface (specialiste) | `components/live/*` (`LiveView`, `LiveCanvas`, `Presentation`, new `ComputerStyle.svelte`, their tests); `lib/live-state.svelte.ts`, `lib/live-render.ts`, `lib/live-select.svelte.ts`, `lib/live-keys.ts`, `lib/live-touch-up.ts`, `lib/live-actions.ts` and `lib/live-edits.ts` (if they need it), `lib/latency.ts`, new `lib/live-computer.ts`, `lib/live-computer-style.ts`, their tests; `lib/mock-live.ts` (+ tests: the rules of B for the new commands); `lib/live.ts` and `lib/api.ts` after 0 (comments only: the shapes are fixed); `viewer/ViewerCanvas.svelte`; `app/e2e/journeys-m14-live.mjs`, `app/e2e/journeys-m12-touchup.mjs` (only if a selector moved), `app/e2e/perf.mjs`, `xtask/src/perf.rs` | after A is merged (it imports the zone and `onLayer`); its e2e and perf once B is merged |
+| D | Layers at export (developpeur) | `crates/ardoise-render/src/{lib,svg,pdf,vector}.rs` and `crates/ardoise-render/tests/export_formats.rs`; `app/src-tauri/src/{export,autoexport,drag}.rs`, `app/src-tauri/src/mcp/write.rs` and `background.rs` (struct literals only); `lib/note.ts` after 0, `lib/export-options.ts`, `components/ExportDialog.svelte`, `lib/mock-export.ts` and their tests; `app/e2e/journeys-m14-export.mjs` | after 0, with A and B |
+| E | Guides and closing (developpeur) | `docs/guide/*.md` (FR and EN), `CHANGELOG.md`, `docs/hardware-tests.md` (H6), the locale files after 0 (removes the unused keys), the "as built" notes of this section and of the export one, `docs/performance.md` (by `cargo xtask perf --write` on the PC) | after A to D |
+| R | Independent review (relecteur), remarks fixed by their package's owner | – | last |
+
+Order: 0, then A, B and D in parallel, then C, then E, then R. `ROADMAP.md` is ticked only after `cargo xtask check` and
+`cargo xtask e2e` on the PC (CLAUDE.md).
+
+**Tests each package writes.**
+- A: `layers-zone.test.ts` (rows top first, warnings, following a move and a merge, the mockup's cases);
+  `LayersZone.test.ts` (a row click chooses, the name button with Enter and Space, `aria-pressed`, the eye's two states,
+  rename with Enter, Esc and blur, an empty name refused, up/down/merge on the chosen row only and their limits, add,
+  the tablet icon in live only, `data-here`, the hover class and `hover: none`, the two warnings, `disabled`); `hit`,
+  `ops`, `state` (`onLayer` and `only`, an orphan stroke never hit with `only`, erasers on one layer, `selectAll`,
+  `setActiveLayer` clears the selection, hiding the chosen layer keeps it); `Canvas` (lasso, click, barrel lasso and the
+  eraser end take the chosen layer only); `Editor` (the zone replaces the panel, the hidden-layer notice).
+- B: Rust unit tests per section above: the table of "Data model" (start, page, resume, button, every op and the
+  following of both indices, merge's order, revision and dropped history, move's remapped history and strokes in
+  progress, refusals and their codes, after stop); the computer stroke (begin, points, end, cancel; times on a fresh
+  page, on a resumed sheet, never pushed by the tablet nor pushing it; two strokes in progress, interleaved events with
+  `pen` and `id`, `enqueue` never merging across pens, a snapshot mid-strokes followed by both; ended by a page change,
+  a quarter turn, a stop; dropped by a clear; `false` afterwards; stale page, hidden layer, bad samples, the limits);
+  undo and redo (a computer stroke undone and redone at its place while the tablet appended after it, the tablet's
+  strokes never undone, an eraser group undone in one command, limits in groups, « Undo the clearing » with groups);
+  the share (hidden strokes in progress never sent, the tablet on a hidden layer, an undo giving back a stroke of a
+  layer hidden since, the allow list's `pen` and no `id`, `history` left out); the hub test of "The tablet is never
+  slowed"; a latency test hub → SSE for computer points, as M11's.
+- C: `live-state` (two strokes in progress, `pen`, `strokeCancel`, `history`, `computerLayer`, `lastComputerDone`, the
+  tablet-only latency list); `live-render` (both strokes drawn in their layers' order, a hidden one not, `localComputer`
+  instead of Rust's copy; the partial repaint of M12 unchanged); `live-computer` (the queue keeps order, one call in
+  flight, batching, end and cancel, a `false` answer, the eraser's groups and its stale retry); `live-computer-style`
+  (default, garbage, blocked storage); `LiveCanvas` (Pen: pen and mouse write, finger pans and pinches, palm rejection,
+  the eraser end erases the chosen layer only in every tool, selection on the chosen layer only, the local stroke
+  handed over on `lastComputerDone`); `LiveView` (the zone wired to `live_layers`, the tablet icon, warnings, P, the
+  style panel remembered, the selection dropped when the layer changes, the `new-layer` button gone); `mock-live` (the
+  new commands follow B's rules).
+- D: see the export section.
+
+### End-to-end journeys
+
+Driven through the real window as the others (`app/e2e/run.mjs`: WebView2 over CDP), in French and in English. The pen
+is `Input.dispatchMouseEvent` with `pointerType: 'pen'` and `force` (`journeys-m8-input.mjs` `pen`); CDP drops the
+eraser button (32) there (same file, "has no eraser button"): the journeys first try it, and when the page did not see
+`buttons & 32`, dispatch `PointerEvent`s built in the page (`pointerType: 'pen'`, `buttons: 32`) on the canvas instead,
+saying so in the log.
+
+- **`journeys-m14-live.mjs`** (C), « corriger pendant le direct : l'ordinateur écrit sur « Correction » pendant que la
+  tablette écrit » (`--simulated-tablet`, the share on loopback and the browser flags of `journeys-m12-touchup.mjs`):
+  open live and wait for the tablet's ink; project; join the share's stream (`joinStream`, `startShare`); the zone has
+  one row, chosen, with the tablet; « Ajouter un calque » → a second row, chosen, the tablet still on the first; rename
+  it « Correction » (pencil, type, Enter); Pen (P); draw a stroke while the tablet writes → the preview counts one more
+  stroke, the presentation draws it (`data-strokes`, `__ardoiseLatency.computer` has samples), and the stream got a
+  `strokeStart` with `pen: "computer"` and `points` **before** the pen was lifted, median `recv` → arrival under 50 ms;
+  Ctrl+Z → the stroke leaves the preview, the presentation and the stream (`strokesEdited`), and the tablet's strokes
+  are all still there; Ctrl+Y → back; the eraser end across a tablet stroke and the computer's stroke → only the
+  computer's goes; choose « Calque 1 » (a click on its row), erase a tablet stroke → it goes, Ctrl+Z → it comes back;
+  send the tablet to « Correction » (the pale icon on hover) → its next strokes come with `layer: 1`; hide the tablet's
+  layer → the warning, and for 2 s the stream gets no tablet stroke while the preview's count grows; show it again;
+  Finish. The note's file (read as `journeys-m12-touchup.mjs` decodes strokes): layers `[Calque 1, Correction]`, the
+  tablet's strokes on the layers it was on, the computer's on layer 1 in its style (red felt tip 120), its first `t`
+  within 150 ms of the wall time of the pen down on the page's clock, between the tablet's strokes written just before
+  and just after it.
+- **`journeys-m14-editor.mjs`** (A), « éditeur : la sélection, Ctrl+A et la gomme ne prennent que le calque choisi »:
+  open a note, draw strokes, « Ajouter un calque » (chosen), draw strokes crossing the first ones; a lasso around all →
+  only the second layer's strokes selected; Ctrl+A → the same; the Eraser tool (E) across both → only the second
+  layer's go; click the first row → the selection is empty, a lasso takes the first layer's strokes; hide the chosen
+  layer → it stays chosen, the warning shows, a pen stroke gives the notice and adds nothing; rename with Enter, then Esc
+  cancels; up, down and merge only on the chosen row; merge → one layer, every stroke kept.
+- **`journeys-m14-export.mjs`** (D): see the export section.
+
+### Performance (C)
+
+`cargo xtask perf --only pen` (new part `pen`, `perf.mjs` `measureLivePen`, `xtask/src/perf.rs`): as `live` (the
+simulated tablet streams), with the presentation open (the browser flags of `journeys-m12-touchup.mjs`, so that the
+covered control window keeps painting), a layer « Correction » added and Pen on; while the frame intervals are recorded
+in the control window and in the presentation window, the script draws with the pen through CDP (a move every 8 ms, a
+stroke of 1.5 s, 0.3 s off, at the foot of the page, below the simulated pen's lines, where the M12 pixel sheet puts its
+strokes). Rows: « Mode direct, la tablette et le stylet de l'ordinateur ensemble (≥ 60 i/s, ≤ 1 % d'images en
+retard) », one per window, judged with `LIVE_MIN_FPS` and `LIVE_DROPPED_MAX_PERCENT`; « Latence du stylet de
+l'ordinateur au vidéoprojecteur (médiane < 30 ms) », from `__ardoiseLatency.computer`. The strokes of both pens must
+have grown, or the measure says nothing.
+
+### Not done on purpose
+
+An eraser button in live (Q11: the pen's eraser end), a mouse eraser, the barrel button's lasso in live, undoing layer
+ops, deleting a layer (the editor has none either), storing which pen wrote a stroke, the computer's ink in the
+presentation window (its temporary marks are unchanged, Q11), the mockup's « nouveau » badge in the export dialog.
+
+### To check on Windows (H6 and the PC's runs)
+
+The pen's events in WebView2 on the Surface (rate, coalesced events, `pressure`, the pen's hover giving `:hover` for the
+tablet icon), Windows Ink's own feedback over the canvas (`touch-action: none` is set), the IPC rate of one call every
+few milliseconds, the eraser end (CDP cannot send it), the projector's latency figure, Acrobat Reader's and Firefox's
+layer panels (`/PageMode /UseOC` in Firefox is supposé), Inkscape's labels.

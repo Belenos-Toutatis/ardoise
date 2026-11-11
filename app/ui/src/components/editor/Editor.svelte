@@ -98,12 +98,12 @@
   import Modal, { modalOpen } from '../Modal.svelte';
   import PrintDialog from '../PrintDialog.svelte';
   import VideoExportDialog from '../VideoExportDialog.svelte';
+  import LayersZone from '../layers/LayersZone.svelte';
   import { clock } from '../narration/format';
   import RecordPanel from '../narration/RecordPanel.svelte';
   import { NarrationRecorder } from '../narration/recorder.svelte';
   import BackgroundImageSection from './BackgroundImageSection.svelte';
   import Canvas from './Canvas.svelte';
-  import LayersPanel from './LayersPanel.svelte';
   import OriginalPanel from './OriginalPanel.svelte';
   import PagePanel from './PagePanel.svelte';
   import RecoveryDialog from './RecoveryDialog.svelte';
@@ -2055,11 +2055,12 @@
           {#key currentPath}
             <OriginalPanel {original} error={originalError} disabled={split !== null} onrevert={revertOriginal} />
           {/key}
-          <LayersPanel
+          <LayersZone
+            where="editor"
             layers={doc.note.layers}
-            active={doc.activeLayer}
+            chosen={doc.activeLayer}
             disabled={split !== null}
-            onactive={(i) => reselect(setActiveLayer(doc!, i))}
+            onchoose={(i) => reselect(setActiveLayer(doc!, i))}
             onvisible={(i, visible) => change(setLayerVisible(doc!, i, visible))}
             onrename={(i, name) => change(renameLayer(doc!, i, name))}
             onmove={(from, to) => change(moveLayer(doc!, from, to))}

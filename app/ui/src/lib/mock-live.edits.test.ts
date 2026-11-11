@@ -177,13 +177,18 @@ describe('browser stand-in: touching up during live mode', () => {
     expect(startsOf(live.strokes)).toEqual([...first, ...written]);
     expect(redo()).toBe(true);
     expect(startsOf(live.strokes)).toEqual(written);
-    // The button goes through the history too, what came after the clearing first.
+    // The button gives the ink back under what came after the clearing, which stays done and stays to
+    // undo (M14); the clearing leaves the history, the redo steps go.
     edit({ kind: 'recolour', indices: [0], color: RED });
     expect(invoke('live_restore_cleared')).toBe(true);
     expect(startsOf(live.strokes)).toEqual([...first, ...written]);
-    expect(live.strokes.at(-1)?.color).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+    expect(live.strokes.at(-1)?.color).toEqual(RED);
     expect(invoke('live_restore_cleared')).toBe(false);
-    expect(live.canRedo).toBe(true);
+    expect(live.canRedo).toBe(false);
+    expect(undo()).toBe(true);
+    expect(live.strokes.at(-1)?.color).toEqual({ r: 0, g: 0, b: 0, a: 255 });
+    expect(undo()).toBe(false);
+    expect(startsOf(live.strokes)).toEqual([...first, ...written]);
   });
 
   it('turns what can come back with the page', async () => {

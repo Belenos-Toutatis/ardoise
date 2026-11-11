@@ -19,15 +19,26 @@
  * `live/edits.rs`: the same checks and codes, a revision per page, a history per page kept when it
  * is left and turned with it, `strokesEdited` events, « Clear the page » in the history.
  *
+ * Correcting during live (M14), with the rules of `live/pen.rs`, `live/layers.rs` and `session.rs`
+ * (docs/design/tablet-live-classroom.md, "M14" and its "As built (B)"): each page has the tablet's layer and
+ * the computer's (`layer`, `computerLayer` in the snapshot); `live_computer_pen` writes the computer's
+ * stroke beside the tablet's (`pen: 'computer'` and `id` on its events, `strokeCancel`, a `history` after
+ * every computer `strokeEnd`), its end is an undo step; an eraser's deletes of one `group` are undone and
+ * redone together; `live_layers` adds, renames, shows or hides, moves, merges, and chooses the layers of
+ * the computer and of the tablet, one snapshot when something changed.
+ *
  * Deterministic: the pen follows a seeded script (no `Math.random`), so that a test under
  * `vi.useFakeTimers` sees the same strokes every time.
  */
 import type { InkPoint } from './ink';
 import { wallClock } from './latency';
 import type {
+  ComputerSample,
   LiveBatch,
   LiveCommand,
+  LiveComputerPenInput,
   LiveEvent,
+  LiveLayerOp,
   LiveMark,
   LivePoint,
   LiveSessionState,
@@ -35,6 +46,7 @@ import type {
   LiveStopped,
   LiveStrokesEdit,
   LiveStrokesEdited,
+  LiveStroke,
   LiveStyle,
   LiveViewState,
   MonitorInfo,
@@ -154,13 +166,16 @@ interface Session {
   state: LiveSessionState;
   pages: Note[];
   pageIndex: number;
-  layer: number;
+  /** The tablet's layer and the computer's, per page (by note id): a page left keeps them. */
+  layersOf: Map<string, PageLayers>;
   style: LiveStyle;
   /** The style before the blackboard was switched on. */
   styleBeforeBoard: LiveStyle | null;
   view: LiveViewState;
   hover: { x: number; y: number } | null;
   current: Stroke | null;
+  /** The computer's stroke in progress (`live_computer_pen`). */
+  computer: ComputerDrawing | null;
   /** Note id → path in the demo library. */
   saved: Map<string, string>;
   /** Ids of the pages whose last write failed (reported once, written again by the next success). */
@@ -181,6 +196,21 @@ interface Session {
   reconnect?: ReturnType<typeof setTimeout>;
 }
 
+/** Where the pens write on a page (indices of its `layers`). */
+interface PageLayers {
+  tablet: number;
+  computer: number;
+}
+
+/** The computer's stroke in progress: the window's number of the gesture, its page, its points so far. */
+interface ComputerDrawing {
+  id: number;
+  pageIndex: number;
+  stroke: Stroke;
+  /** The wall time of its last sample (Unix ms). */
+  lastWall: number | null;
+}
+
 /** A sheet of the library that live mode took up again (`live_resume`). */
 interface ResumedSheet {
   /** Where the note is, and the binder it stays in. */
@@ -196,11 +226,23 @@ interface ResumedSheet {
   before: Note;
   /** Ink was added while the blackboard was on. */
   inkOnBoard: boolean;
+  /** The wall time (Unix ms) the computer's times count from: the resume's, less `timeBase`. */
+  origin: number;
+  /** A deliberate act on the layers (`live_layers`): its layers are written as they are, new ink or not. */
+  layersEdited: boolean;
 }
 
-/** Most strokes one edit may name, steps a page keeps (`live/edits.rs`). */
+/** Most strokes one edit may name, steps (groups) a page keeps (`live/edits.rs`). */
 const MAX_EDIT_STROKES = 1 << 20;
 const MAX_UNDO_STEPS = 100;
+/** Samples one call of the computer's pen may bring, points one computer stroke may hold (`live/pen.rs`). */
+export const MAX_PEN_SAMPLES = 4096;
+export const MAX_COMPUTER_POINTS = 100_000;
+/** A sample's time is at most this long before its call (ms). */
+const MAX_SAMPLE_AGE_MS = 10_000;
+/** Layers a page may have, characters a layer's name may have (`live/layers.rs`). */
+export const MAX_LAYERS = 100;
+export const MAX_LAYER_NAME = 200;
 
 interface ColourChange {
   index: number;
@@ -208,8 +250,16 @@ interface ColourChange {
   after: Rgba;
 }
 
-type UndoStep = { kind: 'removed'; strokes: PlacedStroke[]; cleared: boolean } | { kind: 'recoloured'; changes: ColourChange[] };
-type RedoStep = { kind: 'remove'; indices: number[]; cleared: boolean } | { kind: 'recolour'; changes: ColourChange[] };
+/** `group`: an eraser's gesture; steps next to each other with the same group are undone and redone together. */
+type UndoStep =
+  // `left`: the strokes left in the list just after the removal (what « Undo the clearing » needs).
+  | { kind: 'removed'; strokes: PlacedStroke[]; cleared: boolean; left: number; group?: number }
+  | { kind: 'recoloured'; changes: ColourChange[]; group?: number }
+  | { kind: 'added'; indices: number[]; group?: number };
+type RedoStep =
+  | { kind: 'remove'; indices: number[]; cleared: boolean; group?: number }
+  | { kind: 'recolour'; changes: ColourChange[]; group?: number }
+  | { kind: 'add'; strokes: PlacedStroke[]; group?: number };
 
 /** The edits of a page, and what the indices of its strokes mean. */
 interface PageHistory {
@@ -219,6 +269,8 @@ interface PageHistory {
 }
 
 let session: Session | null = null;
+/** A session was stopped (`live_stop`): the computer's pen then answers `false` instead of `liveNotRunning`. */
+let stoppedOnce = false;
 let pageCounter = 0;
 /** Revisions are never used twice: a command for another session or page cannot pass. */
 let lastRevision = 0;
@@ -268,6 +320,7 @@ function snapshot(): LiveSnapshot {
       orientation: heldAs,
       canTurnPage: true,
       layer: 0,
+      computerLayer: 0,
       style: DEFAULT_STYLE,
       view: IDLE_VIEW,
       hover: null,
@@ -279,6 +332,7 @@ function snapshot(): LiveSnapshot {
     } satisfies LiveSnapshot);
   }
   const history = historyOf(s, s.pages[s.pageIndex]);
+  const layers = layersOf(s, s.pages[s.pageIndex]);
   return copy({
     state: s.state,
     page: s.pages[s.pageIndex],
@@ -286,7 +340,8 @@ function snapshot(): LiveSnapshot {
     pageCount: s.pages.length,
     orientation: holdFor(s.pages[s.pageIndex], s),
     canTurnPage: !s.resumed.has(s.pages[s.pageIndex].id),
-    layer: s.layer,
+    layer: layers.tablet,
+    computerLayer: layers.computer,
     style: s.style,
     view: s.view,
     hover: s.hover,
@@ -296,6 +351,16 @@ function snapshot(): LiveSnapshot {
     canUndo: history.undo.length > 0,
     canRedo: history.redo.length > 0,
   } satisfies LiveSnapshot);
+}
+
+/** The layers the pens write on, on `page` (a new page: its first layer for both). */
+function layersOf(s: Session, page: Note): PageLayers {
+  let layers = s.layersOf.get(page.id);
+  if (!layers) {
+    layers = { tablet: 0, computer: 0 };
+    s.layersOf.set(page.id, layers);
+  }
+  return layers;
 }
 
 function historyOf(s: Session, page: Note): PageHistory {
@@ -331,15 +396,54 @@ function checkedIndices(indices: readonly number[]): number[] {
   return sorted;
 }
 
+/** An eraser's group: a whole `u32` (`BadGroup`). */
+function checkedGroup(group: unknown): number | undefined {
+  if (group === undefined || group === null) return undefined;
+  if (typeof group !== 'number' || !Number.isInteger(group) || group < 0 || group > 0xffff_ffff) {
+    throw invalid("an eraser's group is not valid");
+  }
+  return group;
+}
+
 function checkedColor(color: Rgba): Rgba {
   const channel = (v: number) => Number.isInteger(v) && v >= 0 && v <= 255;
   if (![color.r, color.g, color.b, color.a].every(channel) || color.a === 0) throw invalid('this colour is not valid');
   return { r: color.r, g: color.g, b: color.b, a: color.a };
 }
 
+/** The steps at the top of `steps` that go together: the top one and every next one of its group. */
+function topGroup<T extends { group?: number }>(steps: readonly T[]): number {
+  const top = steps[steps.length - 1];
+  if (!top) return 0;
+  let count = 1;
+  while (top.group !== undefined && count < steps.length && steps[steps.length - 1 - count].group === top.group) count++;
+  return count;
+}
+
+/** How many groups `steps` holds (a step without a group is one). */
+function groupCount(steps: readonly { group?: number }[]): number {
+  let count = 0;
+  steps.forEach((step, i) => {
+    if (i === 0 || step.group === undefined || steps[i - 1].group !== step.group) count++;
+  });
+  return count;
+}
+
+/** Pushes a step; beyond `MAX_UNDO_STEPS` groups the oldest group goes, whole. */
 function pushUndo(history: PageHistory, step: UndoStep): void {
   history.undo.push(step);
-  if (history.undo.length > MAX_UNDO_STEPS) history.undo.shift();
+  while (groupCount(history.undo) > MAX_UNDO_STEPS) {
+    const first = history.undo[0];
+    let count = 1;
+    while (first.group !== undefined && count < history.undo.length && history.undo[count].group === first.group) count++;
+    history.undo.splice(0, count);
+  }
+}
+
+/** A new step of the computer (a stroke, an edit): the steps undone can no longer be redone (`History::record`). */
+function record(history: PageHistory, step: UndoStep): void {
+  history.redo = [];
+  pushUndo(history, step);
 }
 
 function takeStrokes(page: Note, indices: readonly number[]): PlacedStroke[] {
@@ -369,6 +473,7 @@ function editStrokes(s: Session, pageIndex: number, revision: number, edit: Live
   const history = historyOf(s, page);
   const indices = checkedIndices(edit.indices);
   const color = edit.kind === 'recolour' ? checkedColor(edit.color) : null;
+  const group = edit.kind === 'delete' ? checkedGroup(edit.group) : undefined;
   if (pageIndex !== s.pageIndex || revision !== history.revision) throw stale();
   for (const index of indices) {
     const stroke = page.strokes[index];
@@ -381,14 +486,12 @@ function editStrokes(s: Session, pageIndex: number, revision: number, edit: Live
       .filter((index) => !same(page.strokes[index].color, color))
       .map((index) => ({ index, before: page.strokes[index].color, after: color }));
     if (changes.length === 0) return history.revision;
-    history.redo = [];
-    pushUndo(history, { kind: 'recoloured', changes });
+    record(history, { kind: 'recoloured', changes });
     recolourStrokes(page.strokes, [{ color, indices: changes.map((c) => c.index) }]);
     broadcast([edited(s, page, { recoloured: [{ color, indices: changes.map((c) => c.index) }] })]);
   } else {
     const strokes = takeStrokes(page, indices);
-    history.redo = [];
-    pushUndo(history, { kind: 'removed', strokes, cleared: false });
+    record(history, { kind: 'removed', strokes, cleared: false, left: page.strokes.length, ...(group !== undefined ? { group } : {}) });
     history.revision = lastRevision += 1;
     broadcast([edited(s, page, { removed: indices })]);
   }
@@ -407,53 +510,145 @@ function groupedColours(changes: readonly ColourChange[], pick: (change: ColourC
   return [...groups.values()];
 }
 
-/** Undoes the page's last step; false when it has none. */
+/** The group of a step, kept by the step that undoes or redoes it. */
+function grouped(group: number | undefined): { group?: number } {
+  return group === undefined ? {} : { group };
+}
+
+/** Undoes one step; returns its event. */
+function undoOne(s: Session, page: Note, history: PageHistory, step: UndoStep): LiveStrokesEdited {
+  switch (step.kind) {
+    case 'removed':
+      insertStrokes(page.strokes, step.strokes);
+      history.redo.push({ kind: 'remove', indices: step.strokes.map((placed) => placed.index), cleared: step.cleared, ...grouped(step.group) });
+      history.revision = lastRevision += 1;
+      return edited(s, page, { inserted: step.strokes });
+    case 'added': {
+      // A computer stroke taken off: it comes back at its place on a redo.
+      const strokes = takeStrokes(page, step.indices);
+      history.redo.push({ kind: 'add', strokes, ...grouped(step.group) });
+      history.revision = lastRevision += 1;
+      return edited(s, page, { removed: step.indices });
+    }
+    case 'recoloured': {
+      const recoloured = groupedColours(step.changes, (change) => change.before);
+      recolourStrokes(page.strokes, recoloured);
+      history.redo.push({ kind: 'recolour', changes: step.changes, ...grouped(step.group) });
+      return edited(s, page, { recoloured });
+    }
+  }
+}
+
+/** Redoes one step; returns its event. */
+function redoOne(s: Session, page: Note, history: PageHistory, step: RedoStep): LiveStrokesEdited {
+  switch (step.kind) {
+    case 'remove': {
+      const strokes = takeStrokes(page, step.indices);
+      pushUndo(history, { kind: 'removed', strokes, cleared: step.cleared, left: page.strokes.length, ...grouped(step.group) });
+      history.revision = lastRevision += 1;
+      return edited(s, page, { removed: step.indices });
+    }
+    case 'add':
+      insertStrokes(page.strokes, step.strokes);
+      pushUndo(history, { kind: 'added', indices: step.strokes.map((placed) => placed.index), ...grouped(step.group) });
+      history.revision = lastRevision += 1;
+      return edited(s, page, { inserted: step.strokes });
+    case 'recolour': {
+      const recoloured = groupedColours(step.changes, (change) => change.after);
+      recolourStrokes(page.strokes, recoloured);
+      pushUndo(history, { kind: 'recoloured', changes: step.changes, ...grouped(step.group) });
+      return edited(s, page, { recoloured });
+    }
+  }
+}
+
+/**
+ * Undoes the page's last step, with every step of its group (an eraser's gesture), top down: one
+ * `strokesEdited` per step, in one batch. False when there is none.
+ */
 function undoStep(s: Session): boolean {
   const page = s.pages[s.pageIndex];
   const history = historyOf(s, page);
-  const step = history.undo.pop();
-  if (!step) return false;
-  if (step.kind === 'removed') {
-    insertStrokes(page.strokes, step.strokes);
-    history.redo.push({ kind: 'remove', indices: step.strokes.map((placed) => placed.index), cleared: step.cleared });
-    history.revision = lastRevision += 1;
-    broadcast([edited(s, page, { inserted: step.strokes })]);
-  } else {
-    const recoloured = groupedColours(step.changes, (change) => change.before);
-    recolourStrokes(page.strokes, recoloured);
-    history.redo.push({ kind: 'recolour', changes: step.changes });
-    broadcast([edited(s, page, { recoloured })]);
+  const count = topGroup(history.undo);
+  if (count === 0) return false;
+  const events: LiveEvent[] = [];
+  for (let i = 0; i < count; i++) {
+    const step = history.undo.pop();
+    if (step) events.push(undoOne(s, page, history, step));
   }
+  broadcast(events);
   return true;
 }
 
 function redoStep(s: Session): boolean {
   const page = s.pages[s.pageIndex];
   const history = historyOf(s, page);
-  const step = history.redo.pop();
-  if (!step) return false;
-  if (step.kind === 'remove') {
-    pushUndo(history, { kind: 'removed', strokes: takeStrokes(page, step.indices), cleared: step.cleared });
-    history.revision = lastRevision += 1;
-    broadcast([edited(s, page, { removed: step.indices })]);
-  } else {
-    const recoloured = groupedColours(step.changes, (change) => change.after);
-    recolourStrokes(page.strokes, recoloured);
-    pushUndo(history, { kind: 'recoloured', changes: step.changes });
-    broadcast([edited(s, page, { recoloured })]);
+  const count = topGroup(history.redo);
+  if (count === 0) return false;
+  const events: LiveEvent[] = [];
+  for (let i = 0; i < count; i++) {
+    const step = history.redo.pop();
+    if (step) events.push(redoOne(s, page, history, step));
   }
+  broadcast(events);
   return true;
 }
 
-/** « Undo the clearing »: through the history, the edits made after it first. */
+/**
+ * « Undo the clearing », out of order as `History::unclear` does it (M14): the ink of the page's last
+ * clearing comes back under what was written since, whichever pen wrote it; what was done since stays
+ * done and in the history, each place it names moved for the strokes back (Ctrl+Z still undoes the
+ * last of it); the clearing leaves the history and the redo steps go. One `strokesEdited`. False when
+ * the page has no clearing to undo (none, already undone, or a merge dropped the history).
+ */
 function restoreCleared(s: Session): boolean {
-  const { undo } = historyOf(s, s.pages[s.pageIndex]);
-  const isClearing = (step: UndoStep | undefined) => step?.kind === 'removed' && step.cleared;
-  if (!undo.some(isClearing)) return false;
-  for (;;) {
-    const last = isClearing(undo[undo.length - 1]);
-    if (!undoStep(s) || last) return true;
+  const page = s.pages[s.pageIndex];
+  const history = historyOf(s, page);
+  const at = history.undo.map((step) => step.kind === 'removed' && step.cleared).lastIndexOf(true);
+  const clearing = history.undo[at];
+  if (clearing?.kind !== 'removed') return false;
+  history.undo.splice(at, 1);
+  // The clearing left `left` strokes, first in the list; after them come the strokes written since.
+  // For each cleared stroke, how many of those it left stood before it; which are still there.
+  const count = clearing.strokes.length;
+  const keptBefore = clearing.strokes.map((placed, i) => placed.index - i);
+  let present: number[] | null = null;
+  const keptNow = () => (present ? present.length : clearing.left);
+  const moved = (place: number) => {
+    if (place >= keptNow()) return place + count;
+    const rank = present ? present[place] : place;
+    return place + keptBefore.filter((before) => before <= rank).length;
+  };
+  for (const step of history.undo.slice(at)) {
+    switch (step.kind) {
+      case 'removed': {
+        const places = step.strokes.map((placed) => placed.index);
+        step.strokes = step.strokes.map((placed) => ({ ...placed, index: moved(placed.index) }));
+        if (places.some((place) => place < keptNow())) {
+          const ranks: number[] = present ?? Array.from({ length: clearing.left }, (_, i) => i);
+          present = ranks.filter((_, i) => !places.includes(i));
+        }
+        step.left += count;
+        break;
+      }
+      case 'recoloured':
+        step.changes = step.changes.map((change) => ({ ...change, index: moved(change.index) }));
+        break;
+      case 'added':
+        step.indices = step.indices.map((index) => index + count);
+        break;
+    }
   }
+  history.redo = [];
+  const kept = present;
+  const back = clearing.strokes.map((placed, i) => ({
+    index: i + (kept ? kept.filter((rank) => rank < keptBefore[i]).length : Math.min(keptBefore[i], clearing.left)),
+    stroke: placed.stroke,
+  }));
+  insertStrokes(page.strokes, back);
+  history.revision = lastRevision += 1;
+  broadcast([edited(s, page, { inserted: back })]);
+  return true;
 }
 
 /**
@@ -473,21 +668,31 @@ function holdFor(page: Note, s: Session): Orientation {
   return other[heldAs];
 }
 
+/** A stroke in progress as `strokeStart` sends it. */
+function wireStroke(stroke: Stroke, recv: (i: number) => number): LiveStroke {
+  const { points, ...style } = stroke;
+  return { ...style, points: points.map((p, i) => ({ x: p.x, y: p.y, p: p.pressure, t: p.t, recv: recv(i) })) };
+}
+
 function broadcast(events: LiveEvent[]): void {
   if (events.length === 0) return;
-  // Like Rust: a snapshot does not hold the stroke in progress, so it is followed by it.
+  // Like Rust: a snapshot does not hold the strokes in progress, so it is followed by them, the tablet's first.
   const last = events.map((e) => e.type).lastIndexOf('snapshot');
-  const drawing = session?.current;
-  if (last >= 0 && drawing && !events.slice(last).some((e) => e.type === 'strokeStart')) {
-    const { points, ...style } = drawing;
-    events = [
-      ...events,
-      {
-        type: 'strokeStart',
-        pageIndex: session!.pageIndex,
-        stroke: { ...style, points: points.map((p) => ({ x: p.x, y: p.y, p: p.pressure, t: p.t, recv: wallClock() })) },
-      },
-    ];
+  if (last >= 0 && session) {
+    const after = events.slice(last);
+    const started = (computer: boolean) => after.some((e) => e.type === 'strokeStart' && (e.pen === 'computer') === computer);
+    const drawing = session.current;
+    if (drawing && !started(false)) {
+      events = [...events, { type: 'strokeStart', pageIndex: session.pageIndex, stroke: wireStroke(drawing, () => wallClock()) }];
+    }
+    const computer = session.computer;
+    if (computer && computer.pageIndex === session.pageIndex && !started(true)) {
+      const walls = computerWalls.get(computer) ?? [];
+      events = [
+        ...events,
+        { type: 'strokeStart', pageIndex: computer.pageIndex, stroke: wireStroke(computer.stroke, (i) => walls[i] ?? wallClock()), pen: 'computer', id: computer.id },
+      ];
+    }
   }
   const batch: LiveBatch = { events, sentAt: wallClock() };
   for (const subscriber of [...subscribers]) subscriber(copy(batch));
@@ -546,7 +751,7 @@ function writePage(s: Session, page: Note): LiveEvent[] {
     sheet && (same || !sheet.inkOnBoard)
       ? {
           ...page,
-          layers: same ? sheet.before.layers : page.layers,
+          layers: same && !sheet.layersEdited ? sheet.before.layers : page.layers,
           background: { ...page.background, paper: sheet.before.background.paper },
         }
       : page;
@@ -615,6 +820,275 @@ function endStroke(s: Session): LiveEvent[] {
   return events;
 }
 
+// --- The computer's pen (M14) ------------------------------------------------------------------
+
+/** The wall time of each point of a computer stroke in progress (its `recv`), for a snapshot that repeats it. */
+const computerWalls = new WeakMap<ComputerDrawing, number[]>();
+
+/** A sample checked as `ComputerPenInput::checked` does: finite coordinates, the pressure within 0..1 (1 if not a number). */
+function checkedSamples(samples: readonly ComputerSample[] | undefined, begin: boolean): ComputerSample[] {
+  const list = samples ?? [];
+  if (list.length > MAX_PEN_SAMPLES) throw invalid(`too many samples in one call (${list.length})`);
+  const kept = list
+    .filter((sample) => Number.isFinite(sample.x) && Number.isFinite(sample.y))
+    .map((sample) => ({ ...sample, p: Number.isFinite(sample.p) ? Math.min(1, Math.max(0, sample.p)) : 1 }));
+  if (begin && kept.length === 0) throw invalid('a stroke needs one sample at least');
+  return kept;
+}
+
+/** The style as Rust sanitizes it: a tool of the list, an opaque colour, a width that makes sense. */
+function sanitizedStyle(style: LiveStyle | undefined): LiveStyle {
+  const tools: readonly string[] = ['ballpoint', 'fountainPen', 'feltTip', 'pencil', 'brush', 'highlighter', 'chalk'];
+  const tool = style && tools.includes(style.tool) ? style.tool : 'ballpoint';
+  const channel = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(255, Math.max(0, Math.round(v))) : 0);
+  const c = style?.color;
+  const color = c ? { r: channel(c.r), g: channel(c.g), b: channel(c.b), a: 255 } : { ...BLACK };
+  const width = style && Number.isFinite(style.width) ? Math.min(5000, Math.max(1, style.width)) : 60;
+  return { tool, color, width };
+}
+
+/** The origin of a page's times (Unix ms): its `created`, or a resumed sheet's shifted origin. */
+function timeOrigin(s: Session, page: Note): number {
+  return s.resumed.get(page.id)?.origin ?? page.created;
+}
+
+/** Appends `samples` to the computer's stroke (times as `sample_wall`, `note_time`); returns its new points. */
+function computerSamples(s: Session, drawing: ComputerDrawing, samples: readonly ComputerSample[], now: number): LivePoint[] {
+  const page = s.pages[drawing.pageIndex];
+  const wallNow = wallClock();
+  const { width, height } = page.page;
+  const walls = computerWalls.get(drawing) ?? [];
+  computerWalls.set(drawing, walls);
+  const points: LivePoint[] = [];
+  const room = MAX_COMPUTER_POINTS - drawing.stroke.points.length;
+  for (const sample of samples.slice(0, Math.max(0, room))) {
+    let wall = wallNow - Math.max(0, now - sample.ms);
+    if (drawing.lastWall !== null) wall = Math.max(wall, drawing.lastWall);
+    wall = Math.max(Math.min(wall, wallNow), wallNow - MAX_SAMPLE_AGE_MS);
+    drawing.lastWall = wall;
+    const previous = drawing.stroke.points[drawing.stroke.points.length - 1]?.t;
+    const since = Math.floor(wall - timeOrigin(s, page));
+    const t = Math.max(previous ?? 0, Math.min(0xffff_ffff, Math.max(0, since)));
+    const x = Math.min(2 * width, Math.max(-width, sample.x));
+    const y = Math.min(2 * height, Math.max(-height, sample.y));
+    drawing.stroke.points.push({ x, y, pressure: sample.p, t });
+    walls.push(wall);
+    points.push({ x, y, p: sample.p, t, recv: wall });
+  }
+  return points;
+}
+
+/** Ends the computer's stroke in progress: it joins the tail of its page, as an undo step (`strokeEnd`, then `history`). */
+function endComputer(s: Session): LiveEvent[] {
+  const drawing = s.computer;
+  if (!drawing) return [];
+  s.computer = null;
+  const page = s.pages[drawing.pageIndex];
+  const place = page.strokes.length;
+  page.strokes.push(drawing.stroke);
+  const history = historyOf(s, page);
+  record(history, { kind: 'added', indices: [place] });
+  const sheet = s.resumed.get(page.id);
+  if (sheet && s.view.board) sheet.inkOnBoard = true;
+  const events: LiveEvent[] = [
+    { type: 'strokeEnd', pageIndex: drawing.pageIndex, pen: 'computer', id: drawing.id },
+    { type: 'history', pageIndex: drawing.pageIndex, canUndo: history.undo.length > 0, canRedo: history.redo.length > 0 },
+  ];
+  // A page's first stroke creates its note, whichever pen.
+  if (!s.saved.has(page.id)) events.push(...savePage(s, page));
+  return events;
+}
+
+/** Drops the computer's stroke in progress (`strokeCancel`, with its number). */
+function cancelComputer(s: Session): LiveEvent[] {
+  const drawing = s.computer;
+  if (!drawing) return [];
+  s.computer = null;
+  return [{ type: 'strokeCancel', pageIndex: drawing.pageIndex, pen: 'computer', id: drawing.id }];
+}
+
+/** `live_computer_pen`, as `LiveHub::computer_pen` and `LiveSession::computer_pen` answer it. */
+function computerPen(input: LiveComputerPenInput): boolean {
+  const s = session;
+  if (!s) {
+    // Stopped: the pen only learns that its stroke does not go on; before any start, nothing runs.
+    if (input.kind === 'begin' || !stoppedOnce) throw { code: 'liveNotRunning', message: 'live mode is not running' };
+    return false;
+  }
+  const samples = input.kind === 'cancel' ? [] : checkedSamples(input.samples, input.kind === 'begin');
+  const ours = s.computer !== null && s.computer.id === input.stroke;
+  const events: LiveEvent[] = [];
+  let goesOn = true;
+  switch (input.kind) {
+    case 'begin': {
+      if (input.pageIndex !== s.pageIndex) throw stale();
+      const page = s.pages[s.pageIndex];
+      const layer = layersOf(s, page).computer;
+      if (page.layers[layer]?.visible === false) throw { code: 'liveLayerHidden', message: 'the chosen layer is hidden' };
+      events.push(...endComputer(s));
+      const { tool, color, width } = sanitizedStyle(input.style);
+      const drawing: ComputerDrawing = { id: input.stroke, pageIndex: s.pageIndex, stroke: { tool, color, width, layer, points: [] }, lastWall: null };
+      s.computer = drawing;
+      const points = computerSamples(s, drawing, samples, input.now);
+      events.push({ type: 'strokeStart', pageIndex: s.pageIndex, stroke: { tool, color, width, layer, points }, pen: 'computer', id: input.stroke });
+      break;
+    }
+    case 'points':
+    case 'end': {
+      if (!ours || !s.computer) return false;
+      const drawing = s.computer;
+      const points = computerSamples(s, drawing, samples, input.now);
+      if (points.length > 0) events.push({ type: 'points', pageIndex: drawing.pageIndex, points, pen: 'computer', id: drawing.id });
+      if (input.kind === 'end') {
+        events.push(...endComputer(s));
+      } else if (drawing.stroke.points.length >= MAX_COMPUTER_POINTS) {
+        // The limit: the stroke ends there, kept, and the window stops sending for that gesture.
+        events.push(...endComputer(s));
+        goesOn = false;
+      }
+      break;
+    }
+    case 'cancel':
+      if (!ours) return false;
+      events.push(...cancelComputer(s));
+      break;
+  }
+  broadcast(events);
+  return goesOn;
+}
+
+// --- Layers during live (M14) ----------------------------------------------------------------------
+
+function badLayer(message: string): { code: string; message: string } {
+  return { code: 'liveLayerInvalid', message };
+}
+
+/** An index of `page.layers`, checked as `live/layers.rs` does. */
+function existingLayer(page: Note, value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= page.layers.length) {
+    throw badLayer(`there is no layer ${String(value)}`);
+  }
+  return value;
+}
+
+/** Where a layer index goes once the layer `from` moved to `to` (`followMove`). */
+function followMoved(index: number, from: number, to: number): number {
+  if (index === from) return to;
+  if (from < to && index > from && index <= to) return index - 1;
+  if (from > to && index < from && index >= to) return index + 1;
+  return index;
+}
+
+/** Where a layer index goes once layer `merged` went into the one below it. */
+function followMerged(index: number, merged: number): number {
+  return index >= merged ? Math.max(0, index - 1) : index;
+}
+
+/** Every stroke the page's history keeps (to renumber their layers). */
+function keptStrokes(history: PageHistory): Stroke[] {
+  const out: Stroke[] = [];
+  for (const step of history.undo) if (step.kind === 'removed') out.push(...step.strokes.map((placed) => placed.stroke));
+  for (const step of history.redo) if (step.kind === 'add') out.push(...step.strokes.map((placed) => placed.stroke));
+  return out;
+}
+
+/** `live_layers`: refused as a whole, or done, with one snapshot when something changed. */
+function layerOp(s: Session, pageIndex: number, op: LiveLayerOp): void {
+  const page = s.pages[s.pageIndex];
+  const layers = layersOf(s, page);
+  if (pageIndex !== s.pageIndex) throw stale();
+  let changed = false;
+  let edited = false;
+  switch (op.kind) {
+    case 'add':
+      if (page.layers.length >= MAX_LAYERS) throw badLayer('this page has too many layers');
+      page.layers.push({ name: `Calque ${page.layers.length + 1}`, visible: true });
+      layers.computer = page.layers.length - 1;
+      changed = edited = true;
+      break;
+    case 'rename': {
+      const layer = existingLayer(page, op.layer);
+      const name = typeof op.name === 'string' ? op.name.trim() : '';
+      if (name === '' || [...name].length > MAX_LAYER_NAME) throw badLayer('this name is not valid');
+      if (page.layers[layer].name !== name) {
+        page.layers[layer] = { ...page.layers[layer], name };
+        changed = edited = true;
+      }
+      break;
+    }
+    case 'visible': {
+      const layer = existingLayer(page, op.layer);
+      if (typeof op.visible !== 'boolean') throw badLayer('visible is not a boolean');
+      if (page.layers[layer].visible !== op.visible) {
+        page.layers[layer] = { ...page.layers[layer], visible: op.visible };
+        changed = edited = true;
+      }
+      break;
+    }
+    case 'move': {
+      const from = existingLayer(page, op.from);
+      const to = existingLayer(page, op.to);
+      if (from === to) throw badLayer('a layer cannot move onto itself');
+      const count = page.layers.length;
+      const follow = (index: number) => (index < count ? followMoved(index, from, to) : index);
+      const [moved] = page.layers.splice(from, 1);
+      page.layers.splice(to, 0, moved);
+      // Places unchanged: the revision and a selection stay.
+      for (const stroke of [...page.strokes, ...keptStrokes(historyOf(s, page))]) stroke.layer = follow(stroke.layer);
+      layers.tablet = follow(layers.tablet);
+      layers.computer = follow(layers.computer);
+      if (s.current) s.current.layer = follow(s.current.layer);
+      if (s.computer && s.computer.pageIndex === s.pageIndex) s.computer.stroke.layer = follow(s.computer.stroke.layer);
+      changed = edited = true;
+      break;
+    }
+    case 'merge': {
+      const layer = existingLayer(page, op.layer);
+      if (layer === 0) throw badLayer('the bottom layer has none below it');
+      const lower = page.layers[layer - 1];
+      const upper = page.layers[layer];
+      page.layers.splice(layer, 1);
+      page.layers[layer - 1] = { ...lower, visible: lower.visible || upper.visible };
+      // The merged strokes go after the others: drawn above the lower layer's ink, as in the editor.
+      const kept: Stroke[] = [];
+      const merged: Stroke[] = [];
+      for (const stroke of page.strokes) {
+        if (stroke.layer === layer) merged.push({ ...stroke, layer: layer - 1 });
+        else kept.push(stroke.layer > layer ? { ...stroke, layer: stroke.layer - 1 } : stroke);
+      }
+      page.strokes = [...kept, ...merged];
+      // Places moved: the steps would name other strokes.
+      const history = historyOf(s, page);
+      history.undo = [];
+      history.redo = [];
+      history.revision = lastRevision += 1;
+      layers.tablet = followMerged(layers.tablet, layer);
+      layers.computer = followMerged(layers.computer, layer);
+      if (s.current) s.current.layer = followMerged(s.current.layer, layer);
+      if (s.computer && s.computer.pageIndex === s.pageIndex) s.computer.stroke.layer = followMerged(s.computer.stroke.layer, layer);
+      changed = edited = true;
+      break;
+    }
+    case 'computer': {
+      const layer = existingLayer(page, op.layer);
+      changed = layers.computer !== layer;
+      layers.computer = layer;
+      break;
+    }
+    case 'tablet': {
+      const layer = existingLayer(page, op.layer);
+      changed = layers.tablet !== layer;
+      layers.tablet = layer;
+      break;
+    }
+    default:
+      throw badLayer(String((op as { kind: unknown }).kind));
+  }
+  const sheet = s.resumed.get(page.id);
+  if (edited && sheet) sheet.layersEdited = true;
+  if (changed) broadcastSnapshot();
+}
+
 /** Three records of the pen: one batch. */
 function tick(s: Session): void {
   if (s.state !== 'live') return;
@@ -639,8 +1113,9 @@ function tick(s: Session): void {
       const last = events[events.length - 1];
       if (!s.current) {
         const { tool, color, width } = s.style;
-        s.current = { tool, color: { ...color }, width, layer: s.layer, points: [ink] };
-        events.push({ type: 'strokeStart', pageIndex: s.pageIndex, stroke: { tool, color: { ...color }, width, layer: s.layer, points: [point] } });
+        const layer = layersOf(s, page).tablet;
+        s.current = { tool, color: { ...color }, width, layer, points: [ink] };
+        events.push({ type: 'strokeStart', pageIndex: s.pageIndex, stroke: { tool, color: { ...color }, width, layer, points: [point] } });
       } else {
         s.current.points.push(ink);
         if (last?.type === 'strokeStart') last.stroke.points.push(point);
@@ -688,12 +1163,12 @@ function addPage(s: Session): void {
 }
 
 function goTo(s: Session, index: number): LiveEvent[] {
-  const events = endStroke(s);
+  // Both strokes in progress end there (kept); the page keeps its two layers.
+  const events = [...endStroke(s), ...endComputer(s)];
   const leaving = s.pages[s.pageIndex];
   if (s.saved.has(leaving.id)) events.push(...savePage(s, leaving));
   s.pageIndex = index;
   followTablet(s.pages[index]);
-  s.layer = s.pages[index].layers.length - 1;
   return events;
 }
 
@@ -714,21 +1189,26 @@ function runCommand(s: Session, command: LiveCommand): void {
       events = goTo(s, s.pages.length - 1);
       break;
     case 'newLayer': {
-      events = endStroke(s);
       const page = s.pages[s.pageIndex];
+      // Beyond the limit the tablet's button does nothing at all.
+      if (page.layers.length >= MAX_LAYERS) return;
+      events = endStroke(s);
       page.layers.push({ name: `Calque ${page.layers.length + 1}`, visible: true });
-      s.layer = page.layers.length - 1;
+      // The tablet writes on the new layer; the computer stays on its own.
+      layersOf(s, page).tablet = page.layers.length - 1;
       break;
     }
     case 'clearPage': {
       s.current = null;
+      // The computer's stroke in progress is dropped too, told before the snapshot.
+      events = cancelComputer(s);
       const page = s.pages[s.pageIndex];
       // What shows: nobody can tell that the ink of a hidden layer is going.
       const shown = page.strokes.flatMap((stroke, index) => (isDrawn(page, stroke) ? [index] : []));
       if (shown.length > 0) {
         const history = historyOf(s, page);
-        history.redo = [];
-        pushUndo(history, { kind: 'removed', strokes: takeStrokes(page, shown), cleared: true });
+        const strokes = takeStrokes(page, shown);
+        record(history, { kind: 'removed', strokes, cleared: true, left: page.strokes.length });
         history.revision = lastRevision += 1;
       }
       break;
@@ -768,12 +1248,13 @@ function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSna
     state: 'waiting',
     pages: [],
     pageIndex: 0,
-    layer: 0,
+    layersOf: new Map(),
     style: DEFAULT_STYLE,
     styleBeforeBoard: null,
     view: { ...IDLE_VIEW },
     hover: null,
     current: null,
+    computer: null,
     saved: new Map(),
     failed: new Set(),
     record: 0,
@@ -792,7 +1273,9 @@ function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSna
     s.view = { ...s.view, x: page.page.width / 2, y: page.page.height / 2, board: page.background.paper === 'slate' };
     if (s.view.board) s.style = CHALK_STYLE;
     if (!page.layers.some((layer) => layer.visible)) page.layers.push({ name: `Calque ${page.layers.length + 1}`, visible: true });
-    s.layer = page.layers.map((layer) => layer.visible).lastIndexOf(true);
+    // The tablet goes on the last visible layer, the computer with it.
+    const visible = page.layers.map((layer) => layer.visible).lastIndexOf(true);
+    s.layersOf.set(page.id, { tablet: visible, computer: visible });
   } else {
     addPage(s);
   }
@@ -808,6 +1291,7 @@ function openSession(first: { page: Note; sheet: ResumedSheet } | null): LiveSna
 
 function startSession(): LiveSnapshot {
   if (session) return snapshot();
+  stoppedOnce = false;
   return openSession(null);
 }
 
@@ -830,7 +1314,10 @@ function resumeSession(path: string): LiveSnapshot {
     timeBase: last + 1000,
     before: copy(stored.note),
     inkOnBoard: false,
+    origin: wallClock() - (last + 1000),
+    layersEdited: false,
   };
+  stoppedOnce = false;
   return openSession({ page, sheet });
 }
 
@@ -838,12 +1325,13 @@ function stopSession(): LiveStopped {
   const s = session;
   if (!s) return { saved: [], forks: [], narration: null };
   stopTimers(s);
-  const events = endStroke(s);
+  const events = [...endStroke(s), ...endComputer(s)];
   for (const page of s.pages) events.push(...savePage(s, page).filter((e) => e.type !== 'saved'));
   const paths = [...s.saved.values()];
   // A `saved` after a failure means that everything is written: not sent while a page failed.
   if (s.failed.size === 0) events.push({ type: 'saved', paths });
   session = null;
+  stoppedOnce = true;
   broadcast([...events, { type: 'snapshot', snapshot: snapshot() }]);
   const forks = s.forks.flatMap((fork) => (fork.type === 'sheetForked' ? [fork] : []));
   return {
@@ -900,6 +1388,11 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
       if (args.pageIndex !== s.pageIndex) throw stale();
       return redoStep(s);
     }
+    case 'live_computer_pen':
+      return computerPen(args.input as LiveComputerPenInput);
+    case 'live_layers':
+      layerOp(running(), args.pageIndex as number, args.op as LiveLayerOp);
+      return undefined;
     case 'live_page_background':
       return backgroundDataUrl(
         args.page as PageSize,
@@ -959,6 +1452,7 @@ export function resetMockLive(): void {
   savedMonitor = null;
   pageCounter = 0;
   lastRevision = 0;
+  stoppedOnce = false;
   heldAs = 'landscape';
   pageOrientation.clear();
   Object.assign(mockLiveConfig, { waitMs: 1200, tickMs: 15, pen: true, monitors: 2, saveError: null, resumeError: null });
@@ -1019,7 +1513,8 @@ export function setMockLiveOrientation(orientation: Orientation): void {
   const s = session;
   const before = s ? { ...s.pages[s.pageIndex].page } : null;
   const turns = s && !s.resumed.has(s.pages[s.pageIndex].id) ? turnsFrom(orientation, pageOrientation.get(s.pages[s.pageIndex].id) ?? 'landscape') : 0;
-  const events = s ? endStroke(s) : [];
+  // Both strokes in progress end (kept) before the page turns, so that it turns with their ink.
+  const events = s ? [...endStroke(s), ...endComputer(s)] : [];
   heldAs = orientation;
   if (!s || !before) return;
   s.hover = null;

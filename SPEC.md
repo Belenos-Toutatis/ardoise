@@ -97,6 +97,7 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
   - effacement rapide de la page, page suivante / précédente au clavier ou par le bouton de la tablette.
 - **Reprendre le direct sur une feuille** (ajout demandé par l'utilisateur le 2026-11-04, `docs/questions.md` Q9) : depuis le menu d'une note ou l'éditeur, le mode direct repart sur cette note. La nouvelle écriture s'ajoute à la note elle-même, qui garde son fond, ses calques et sa narration, et son état d'origine reste récupérable (« Revenir à l'original »). Si elle a changé ailleurs entre-temps, rien n'est écrasé : une nouvelle note est créée à côté, et Ardoise le dit. La page suivante crée une note neuve.
 - **Retoucher pendant le direct** (même ajout) : dans la fenêtre de commande, un outil Sélection (lasso ou clic) permet de supprimer des traits ou de changer leur couleur, sans passer par l'éditeur et pendant que la tablette continue d'écrire. Le vidéoprojecteur et les écrans du partage montrent aussitôt le résultat, jamais la sélection. Ctrl+Z annule ces actions et l'effacement de la page, pas l'écriture de la tablette.
+- **Corriger pendant le direct** (ajout demandé par l'utilisateur le 2026-11-11, `docs/questions.md` Q11) : pendant qu'un élève écrit avec la tablette, l'enseignant écrit en même temps dans la fenêtre de commande avec le stylet de l'ordinateur (outil Stylo, à côté de Sélection), avec son propre style (rouge par défaut). Une zone Calques dans la fenêtre de commande montre le calque où écrit la tablette et celui où agit l'ordinateur : l'ordinateur (stylo, bout gomme du stylet, sélection) n'agit que sur le calque choisi d'un clic, la tablette toujours sur le sien, qu'on peut changer. Ce que l'ordinateur écrit est enregistré dans la note à son heure, apparaît aussitôt au vidéoprojecteur et sur les écrans du partage, et Ctrl+Z l'annule.
 
 ### 4.3 Bibliothèque (P1)
 
@@ -112,7 +113,7 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 - **Couleurs** : palette (dont les couleurs d'Inkspace) + couleurs personnalisées mémorisées ; **épaisseur** réglable.
 - **Fonds** : blanc, crème, kraft, ardoise noire ; modèles ligné, Seyès, quadrillé 5 mm, millimétré, pointillé, partition (P3) ; texture de papier.
 - Le style peut s'appliquer à toute la note ou à une sélection de traits.
-- **Calques** : la tablette peut en créer (bouton), l'utilisateur peut les afficher/masquer, fusionner, réordonner.
+- **Calques** : la tablette peut en créer (bouton), l'utilisateur peut les afficher/masquer, fusionner, réordonner. Dans la zone Calques (ajout du 2026-11-11, Q11), un clic sur un calque le choisit, et le stylet, la gomme et la sélection n'agissent que sur lui ; un œil, barré quand le calque est masqué, l'affiche ou le masque ; un crayon après son nom le renomme.
 - **Sélection au lasso** : déplacer, redimensionner, recolorer, changer d'outil, supprimer, copier.
 - **Gomme** : trait entier ou partielle.
 - **Annuler / rétablir** sans limite pendant la session.
@@ -137,6 +138,7 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 - **Images** : PNG (fond transparent possible), JPG ; résolution au choix (P1).
 - **SVG** vectoriel, épaisseur variable fidèle à la pression, ouvrable dans Inkscape (P1).
 - **PDF** vectoriel, une ou plusieurs notes, format A4 ou taille réelle de la page (P1).
+- **Calques à l'export** (ajout du 2026-11-11, Q11) : pour le SVG et le PDF, au choix séparés (un calque du fichier par calque de la note, à afficher ou masquer dans Inkscape, Acrobat Reader ou Firefox) ou fusionnés ; une image (PNG, JPG, WebP) les fusionne toujours. Un calque masqué n'est jamais exporté.
 - **Copier** dans le presse-papiers pour coller directement dans Word ou OneNote (P1).
 - PSD avec un calque par calque de la note (P3, Inkspace le proposait).
 - Formats d'encre Wacom WILL / Universal Ink Model en lecture et écriture (P3).

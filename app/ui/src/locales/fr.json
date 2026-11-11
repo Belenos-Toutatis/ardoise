@@ -678,6 +678,8 @@
     "liveNotRunning": "Le mode direct n'est pas lancé.",
     "liveEditStale": "La page a changé entre-temps : refaites la sélection.",
     "liveEditInvalid": "Cette retouche n'est pas possible : refaites la sélection.",
+    "liveLayerHidden": "Le calque choisi est masqué : affichez-le pour y écrire.",
+    "liveLayerInvalid": "Cette opération sur les calques n'est pas possible.",
     "noMonitor": "Aucun écran disponible pour la présentation.",
     "simulationOnly": "Commande réservée à la tablette simulée.",
     "tablet": "Problème avec la tablette : {detail}",
@@ -941,16 +943,8 @@
       "music": "Portées"
     },
     "layers": {
-      "label": "Calques",
-      "add": "Ajouter un calque",
       "defaultName": "Calque {n}",
-      "active": "Dessiner sur « {name} »",
-      "visible": "Afficher « {name} »",
-      "name": "Nom du calque {n}",
-      "up": "Monter « {name} »",
-      "down": "Descendre « {name} »",
-      "merge": "Fusionner « {name} » avec le calque du dessous",
-      "hiddenActive": "Le calque actif est masqué : affichez-le ou choisissez un autre calque pour dessiner."
+      "hiddenActive": "Le calque choisi est masqué : affichez-le ou choisissez-en un autre pour dessiner."
     },
     "zoom": {
       "label": "Zoom",
@@ -1031,6 +1025,34 @@
       "hint": "Exporter la relecture en vidéo (MP4, WebM) ou en image animée (GIF, WebP)…"
     },
     "backgroundLoadFailed": "L'image de fond de cette note n'a pas pu être chargée ({message}). La note s'ouvre sans elle ; l'image reste dans le fichier tant que vous ne la retirez pas."
+  },
+  "layers": {
+    "title": "Calques",
+    "list": "Calques de la page",
+    "add": "Ajouter un calque",
+    "choose": "Agir sur « {name} »",
+    "chosen": {
+      "editor": "Le stylet, la gomme et la sélection agissent sur « {name} »",
+      "live": "L'ordinateur agit sur « {name} »"
+    },
+    "show": "Afficher « {name} »",
+    "hide": "Masquer « {name} »",
+    "rename": "Renommer « {name} »",
+    "nameField": "Nom du calque {n}",
+    "up": "Monter « {name} »",
+    "down": "Descendre « {name} »",
+    "merge": "Fusionner « {name} » avec le calque du dessous",
+    "mergeNoUndo": "Ctrl+Z ne l'annule pas.",
+    "tabletHere": "La tablette écrit sur « {name} »",
+    "tabletSend": "Faire écrire la tablette sur « {name} »",
+    "warn": {
+      "tabletHidden": "La tablette écrit sur « {name} », qui est masqué : ce que l'élève écrit n'est ni projeté ni partagé.",
+      "chosenHidden": "Le calque choisi, « {name} », est masqué : affichez-le pour y écrire."
+    },
+    "help": {
+      "editor": "Le stylet, la gomme et la sélection agissent sur le calque choisi (encadré).",
+      "live": "Le stylet de l'ordinateur, sa gomme et la sélection agissent sur le calque choisi (encadré). La tablette écrit sur celui marqué de l'icône de tablette."
+    }
   },
   "replay": {
     "bar": "Contrôles de la relecture",
@@ -1213,6 +1235,18 @@
       "webp": "Décoché : le fond est transparent, seul le tracé est exporté.",
       "svg": "Décoché : seul le tracé est exporté, sans papier.",
       "pdf": "Décoché : seul le tracé est exporté, sans papier."
+    },
+    "layers": {
+      "legend": "Calques",
+      "separate": "Séparés",
+      "merged": "Fusionnés",
+      "separateHint": {
+        "svg": "Un calque Inkscape par calque de la note, à afficher ou masquer dans Inkscape.",
+        "pdf": "Des calques PDF, à afficher ou masquer dans Acrobat Reader ou Firefox. Certains lecteurs les montrent tous, sans choix."
+      },
+      "mergedHint": "Un seul dessin, comme à l'écran.",
+      "flat": "Une image n'a pas de calques : ils sont toujours fusionnés.",
+      "hiddenNever": "Les calques masqués dans Ardoise ne sont jamais exportés : un calque masqué peut contenir les réponses."
     },
     "destinationFile": "Vous choisirez ensuite le fichier à créer.",
     "destinationFolder": "Chaque note donne un fichier, dans le dossier que vous choisirez. Aucun fichier existant n'est écrasé.",
@@ -1468,7 +1502,7 @@
     },
     "dismiss": "Fermer le message",
     "toolbar": "Outils du mode direct",
-    "style": "Style d'écriture",
+    "tabletStyle": "Tablette",
     "tool": "Outil",
     "color": "Couleur",
     "width": "Épaisseur",
@@ -1483,18 +1517,23 @@
       "position": "Page {n} / {count}",
       "new": "Nouvelle page"
     },
-    "layer": {
-      "new": "Nouveau calque",
-      "current": "Calque {n} / {count}"
-    },
     "clear": "Effacer la page",
     "board": "Tableau noir",
     "laser": "Pointeur laser",
+    "computer": {
+      "label": "Ordinateur"
+    },
+    "pen": {
+      "toggle": "Stylo",
+      "hint": "Écrire avec le stylet ou la souris de l'ordinateur sur le calque choisi (P)",
+      "help": "Stylet ou souris : écrire · bout gomme du stylet : effacer des traits entiers du calque choisi · doigt : déplacer et zoomer la zone projetée.",
+      "style": "Encre de l'ordinateur",
+      "styleHint": "Choisir l'outil, la couleur et l'épaisseur de l'ordinateur"
+    },
     "select": {
-      "label": "Retouche",
       "toggle": "Sélection",
       "hint": "Sélectionner des traits au lasso ou d'un clic pour les supprimer ou changer leur couleur (V)",
-      "help": "Lasso : sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner. Les pastilles de couleur changent la couleur de la sélection. Ce que la tablette écrit reste hors de la sélection.",
+      "help": "Lasso : sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner. Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris.",
       "bar": "Retoucher la sélection",
       "count": "Traits sélectionnés : {count}",
       "delete": "Supprimer",
@@ -1503,7 +1542,7 @@
     },
     "undo": "Annuler",
     "redo": "Rétablir",
-    "undoHint": "Annuler la dernière retouche ou le dernier effacement de la page (Ctrl+Z) ; ce que la tablette a écrit n'est pas annulé",
+    "undoHint": "Annuler la dernière action de l'ordinateur : un trait, un coup de gomme, une retouche ou l'effacement de la page (Ctrl+Z) ; ce que la tablette a écrit n'est pas annulé",
     "redoHint": "Rétablir ce qui vient d'être annulé (Ctrl+Y)",
     "preview": {
       "label": "Aperçu de la page {page} ; le rectangle bleu montre la zone projetée",
@@ -1594,6 +1633,10 @@
           "keys": "Suppr, Retour arrière",
           "action": "Effacer les annotations tracées sur la présentation (fenêtre projetée)"
         },
+        "pen": {
+          "keys": "P",
+          "action": "Outil Stylo : écrire avec le stylet ou la souris de l'ordinateur"
+        },
         "select": {
           "keys": "V",
           "action": "Outil Sélection (lasso ou clic sur un trait)"
@@ -1604,7 +1647,7 @@
         },
         "undo": {
           "keys": "Ctrl + Z, Ctrl + Y",
-          "action": "Annuler, rétablir une suppression, un changement de couleur ou l'effacement de la page"
+          "action": "Annuler, rétablir un trait ou un coup de gomme de l'ordinateur, une suppression, un changement de couleur ou l'effacement de la page"
         }
       }
     },
@@ -1620,6 +1663,18 @@
     "clearDone": "Page effacée.",
     "clearUndo": "Annuler l'effacement",
     "clearUndoFailed": "L'effacement ne peut plus être annulé : la page a changé entre-temps.",
+    "merge": {
+      "title": "Fusionner « {upper} » avec « {lower} » ?",
+      "noUndo": "Ctrl+Z ne pourra pas l'annuler.",
+      "hidden": "« {lower} » est masqué : une fois fusionné, son contenu sera projeté et partagé.",
+      "confirm": "Fusionner",
+      "cancel": "Annuler"
+    },
+    "failed": {
+      "layersStale": "La page a changé entre-temps : refaites l'opération sur les calques.",
+      "pen": "Ce trait n'a pas pu être écrit.",
+      "eraser": "Ce coup de gomme n'a pas pu être fait."
+    },
     "leave": {
       "title": "Terminer le mode direct ?",
       "message": "Chaque page écrite est enregistrée comme une note de la bibliothèque. Pour arrêter seulement la projection, utilisez « Arrêter la projection » : Échap la ferme aussi quand elle est affichée.",

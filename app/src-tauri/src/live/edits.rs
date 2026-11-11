@@ -5,13 +5,20 @@
 //! Strokes have no identity but their place in the list of the page's finished strokes. Two facts
 //! keep every place stored here right:
 //!
-//! - **The tablet only appends.** A stroke that ends goes at the tail: no place changes, so a
-//!   selection stays valid while the tablet writes, and a stroke written after an edit stays after
-//!   the places of the strokes that edit gives back.
+//! - **The pens only append.** A stroke that ends, the tablet's or the computer's (M14), goes at
+//!   the tail: no place changes, so a selection stays valid while they write, and a stroke written
+//!   after an edit stays after the places of the strokes that edit gives back.
 //! - **Steps come off their stack in reverse order.** When a step is undone, every later step was
 //!   undone first: what stands before its places is what stood there when it was done, whatever
-//!   the tablet added at the tail since. The same goes for redo. So a place in a step is simply
+//!   the pens added at the tail since. The same goes for redo. So a place in a step is simply
 //!   the place the stroke had, and is never translated.
+//!
+//! The computer's strokes are steps (`Added`); the tablet's never are. Steps of one gesture of the
+//! computer's eraser share a group, undone and redone together (M14).
+//!
+//! One step comes off out of order: « Undo the clearing » ([`History::unclear`]) takes the last
+//! clearing out from under the steps done since, which stay; every place they name is moved for
+//! the strokes that come back, so that the second fact holds again for them.
 //!
 //! No lock here and no I/O: [`LiveSession`](super::session::LiveSession) applies all this to its
 //! pages under the hub's lock, which is why nothing below costs more than a pass over the page's
@@ -61,14 +68,39 @@ pub enum LiveEditError {
     /// Channels out of 0..=255, or fully transparent (the ink would vanish without being deleted).
     #[error("this colour is not valid")]
     BadColor,
+    /// The group of an eraser's gesture is not a whole number that fits.
+    #[error("the group of the edit is not valid")]
+    BadGroup,
+    /// A `begin` of the computer's pen without any sample with finite coordinates.
+    #[error("the pen gave no sample")]
+    NoSample,
+    #[error("too many samples in one call ({count})")]
+    TooManySamples { count: usize },
+    /// The computer's layer is hidden: its pen does not write there (show it first).
+    #[error("the chosen layer is hidden")]
+    LayerHidden,
+    /// A layer that does not exist, a number that is no index, a move onto itself or outside the
+    /// list, a merge of the bottom layer.
+    #[error("there is no such layer, or it cannot go there")]
+    BadLayer,
+    /// Empty once trimmed, or too long.
+    #[error("this name cannot be the name of a layer")]
+    BadLayerName,
+    #[error("the page has as many layers as it may have")]
+    TooManyLayers,
 }
 
 impl LiveEditError {
     /// The error's code for the interface (`errorCodes.*`): a stale edit asks for a new selection,
-    /// any other is a mistake of the interface.
+    /// a hidden layer for the chosen one to be shown, a layer operation that makes no sense says
+    /// so; any other is a mistake of the interface.
     pub fn code(&self) -> &'static str {
         match self {
             LiveEditError::Stale => "liveEditStale",
+            LiveEditError::LayerHidden => "liveLayerHidden",
+            LiveEditError::BadLayer
+            | LiveEditError::BadLayerName
+            | LiveEditError::TooManyLayers => "liveLayerInvalid",
             _ => "liveEditInvalid",
         }
     }
@@ -116,8 +148,17 @@ impl EditColor {
     rename_all_fields = "camelCase"
 )]
 pub enum StrokesEdit {
-    Delete { indices: Vec<f64> },
-    Recolour { indices: Vec<f64>, color: EditColor },
+    Delete {
+        indices: Vec<f64>,
+        /// The gesture of the computer's eraser this delete is part of (M14): the deletes of one
+        /// gesture are undone and redone together. Absent for a delete of the selection.
+        #[serde(default)]
+        group: Option<f64>,
+    },
+    Recolour {
+        indices: Vec<f64>,
+        color: EditColor,
+    },
 }
 
 /// What an edit does.
@@ -134,14 +175,27 @@ pub enum EditAction {
 pub struct CheckedEdit {
     pub indices: Vec<u32>,
     pub action: EditAction,
+    /// The step's group ([`StrokesEdit::Delete`]).
+    pub group: Option<u32>,
 }
 
 impl StrokesEdit {
     pub fn checked(self) -> Result<CheckedEdit, LiveEditError> {
-        let (indices, action) = match self {
-            StrokesEdit::Delete { indices } => (indices, EditAction::Delete),
+        let (indices, action, group) = match self {
+            StrokesEdit::Delete { indices, group } => {
+                let group = match group {
+                    Some(group)
+                        if group.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&group) =>
+                    {
+                        Some(group as u32)
+                    }
+                    Some(_) => return Err(LiveEditError::BadGroup),
+                    None => None,
+                };
+                (indices, EditAction::Delete, group)
+            }
             StrokesEdit::Recolour { indices, color } => {
-                (indices, EditAction::Recolour(color.checked()?))
+                (indices, EditAction::Recolour(color.checked()?), None)
             }
         };
         if indices.is_empty() {
@@ -169,6 +223,7 @@ impl StrokesEdit {
         Ok(CheckedEdit {
             indices: sorted,
             action,
+            group,
         })
     }
 }
@@ -190,24 +245,36 @@ pub enum UndoStep {
     Removed {
         strokes: Arc<Vec<PlacedStroke>>,
         cleared: bool,
+        /// Strokes left in the list just after the removal: what « Undo the clearing » needs to
+        /// tell them from the strokes written since ([`History::unclear`]).
+        left: u32,
         /// Memory the strokes hold, worked out once.
         bytes: usize,
     },
     Recoloured(Vec<ColourChange>),
+    /// Strokes the computer wrote (M14), at these places (ascending): they are on the page, the
+    /// step holds nothing else.
+    Added {
+        indices: Vec<u32>,
+    },
+}
+
+/// Memory `strokes` hold, as the undo steps count it.
+fn stored_size(strokes: &[PlacedStroke]) -> usize {
+    strokes
+        .iter()
+        .map(|placed| size_of::<PlacedStroke>() + placed.stroke.points.len() * size_of::<Point>())
+        .sum()
 }
 
 impl UndoStep {
-    /// A removal of `strokes`.
-    pub fn removed(strokes: Vec<PlacedStroke>, cleared: bool) -> UndoStep {
-        let bytes = strokes
-            .iter()
-            .map(|placed| {
-                size_of::<PlacedStroke>() + placed.stroke.points.len() * size_of::<Point>()
-            })
-            .sum();
+    /// A removal of `strokes`, which left `left` strokes in the list.
+    pub fn removed(strokes: Vec<PlacedStroke>, cleared: bool, left: usize) -> UndoStep {
+        let bytes = stored_size(&strokes);
         UndoStep::Removed {
             strokes: Arc::new(strokes),
             cleared,
+            left: u32::try_from(left).unwrap_or(u32::MAX),
             bytes,
         }
     }
@@ -216,6 +283,7 @@ impl UndoStep {
         match self {
             UndoStep::Removed { bytes, .. } => *bytes,
             UndoStep::Recoloured(changes) => changes.len() * size_of::<ColourChange>(),
+            UndoStep::Added { indices } => indices.len() * size_of::<u32>(),
         }
     }
 
@@ -225,18 +293,50 @@ impl UndoStep {
 }
 
 /// A step that was undone. A removal keeps only its places: the strokes are back on the page.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RedoStep {
-    Remove { indices: Vec<u32>, cleared: bool },
+    Remove {
+        indices: Vec<u32>,
+        cleared: bool,
+    },
     Recolour(Vec<ColourChange>),
+    /// The computer's strokes an undo took off the page, each with its place: given back there.
+    /// Shared with the event that took them, as [`UndoStep::Removed`] is with the one that gives
+    /// them back.
+    Add {
+        strokes: Arc<Vec<PlacedStroke>>,
+    },
 }
 
-/// What can be undone and redone on a page. The tablet's writing is not in it, and does not empty
-/// the redo steps either: it moves no place, and only a new edit changes what they would redo.
+/// A step and the group it belongs to.
+#[derive(Debug, Clone)]
+struct Entry<S> {
+    step: S,
+    group: Option<u32>,
+}
+
+/// Whether a step of group `a` and one of group `b` are undone together: only steps that name the
+/// same group (the deletes of one gesture of the computer's eraser).
+fn same_group(a: Option<u32>, b: Option<u32>) -> bool {
+    a.is_some() && a == b
+}
+
+/// What can be undone and redone on a page: the edits, and the computer's strokes (M14). The
+/// tablet's writing is not in it, and does not empty the redo steps either: it moves no place, and
+/// only a new edit or computer stroke changes what they would redo.
+///
+/// Steps next to each other on a stack that name the same group are one group: undone and redone
+/// together, counted and dropped together by the limits ([`MAX_UNDO_STEPS`] groups,
+/// [`MAX_UNDO_BYTES`]). A step without a group is a group of its own.
 #[derive(Debug, Clone, Default)]
 pub struct History {
-    undo: VecDeque<UndoStep>,
-    redo: Vec<RedoStep>,
+    undo: VecDeque<Entry<UndoStep>>,
+    redo: Vec<Entry<RedoStep>>,
+    /// Groups on the undo stack, kept up to date: a gesture of the eraser may make many steps,
+    /// and the stack is not walked at each of them under the hub's lock.
+    groups: usize,
+    /// Memory the undo steps keep, kept up to date likewise.
+    bytes: usize,
 }
 
 impl History {
@@ -255,95 +355,382 @@ impl History {
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.groups = 0;
+        self.bytes = 0;
     }
 
-    /// A new edit: what was undone can no longer be redone.
-    pub fn record(&mut self, step: UndoStep) {
+    /// A new edit or computer stroke: what was undone can no longer be redone.
+    pub fn record(&mut self, step: UndoStep, group: Option<u32>) {
         self.redo.clear();
-        self.push_undo(step);
+        self.push_undo(step, group);
     }
 
-    /// Back on the undo stack, without touching the redo steps.
-    pub fn push_undo(&mut self, step: UndoStep) {
-        self.undo.push_back(step);
-        while self.undo.len() > MAX_UNDO_STEPS
-            || (self.undo.len() > 1 && self.stored_bytes() > MAX_UNDO_BYTES)
-        {
-            self.undo.pop_front();
+    /// Back on the undo stack, without touching the redo steps. The oldest groups go beyond the
+    /// limits, except the last group left, which holds no more than the page held.
+    pub fn push_undo(&mut self, step: UndoStep, group: Option<u32>) {
+        let joins = self
+            .undo
+            .back()
+            .is_some_and(|top| same_group(top.group, group));
+        if !joins {
+            self.groups += 1;
+        }
+        self.bytes += step.bytes();
+        self.undo.push_back(Entry { step, group });
+        while self.groups > MAX_UNDO_STEPS || (self.groups > 1 && self.bytes > MAX_UNDO_BYTES) {
+            self.drop_oldest_group();
         }
     }
 
-    pub fn pop_undo(&mut self) -> Option<UndoStep> {
-        self.undo.pop_back()
+    fn drop_oldest_group(&mut self) {
+        let Some(first) = self.undo.pop_front() else {
+            return;
+        };
+        self.bytes -= first.step.bytes();
+        self.groups -= 1;
+        while self
+            .undo
+            .front()
+            .is_some_and(|next| same_group(next.group, first.group))
+        {
+            if let Some(next) = self.undo.pop_front() {
+                self.bytes -= next.step.bytes();
+            }
+        }
     }
 
-    pub fn push_redo(&mut self, step: RedoStep) {
-        self.redo.push(step);
+    /// The last step done, and its group.
+    pub fn pop_undo(&mut self) -> Option<(UndoStep, Option<u32>)> {
+        let Entry { step, group } = self.undo.pop_back()?;
+        self.bytes -= step.bytes();
+        if !self.undo_joins(group) {
+            self.groups -= 1;
+        }
+        Some((step, group))
     }
 
-    pub fn pop_redo(&mut self) -> Option<RedoStep> {
-        self.redo.pop()
+    /// The next step to undo belongs to `group` (a group, not `None`).
+    pub fn undo_joins(&self, group: Option<u32>) -> bool {
+        self.undo
+            .back()
+            .is_some_and(|top| same_group(top.group, group))
+    }
+
+    pub fn push_redo(&mut self, step: RedoStep, group: Option<u32>) {
+        self.redo.push(Entry { step, group });
+    }
+
+    /// The last step undone, and its group.
+    pub fn pop_redo(&mut self) -> Option<(RedoStep, Option<u32>)> {
+        self.redo.pop().map(|Entry { step, group }| (step, group))
+    }
+
+    /// The next step to redo belongs to `group` (a group, not `None`).
+    pub fn redo_joins(&self, group: Option<u32>) -> bool {
+        self.redo
+            .last()
+            .is_some_and(|top| same_group(top.group, group))
     }
 
     /// Memory the undo steps keep, in bytes.
+    #[cfg(test)]
     pub fn stored_bytes(&self) -> usize {
-        self.undo.iter().map(UndoStep::bytes).sum()
+        self.bytes
     }
 
-    /// The strokes the next undo gives back, if it gives any.
-    pub fn next_restored(&self) -> Option<Arc<Vec<PlacedStroke>>> {
-        match self.undo.back() {
-            Some(UndoStep::Removed { strokes, .. }) => Some(strokes.clone()),
+    /// Groups on the undo stack.
+    #[cfg(test)]
+    pub fn undo_groups(&self) -> usize {
+        self.groups
+    }
+
+    /// The strokes the next undo gives back (all the steps of the group on top), to copy before
+    /// the lock is taken.
+    pub fn next_restored(&self) -> Vec<Arc<Vec<PlacedStroke>>> {
+        let Some(top) = self.undo.back() else {
+            return Vec::new();
+        };
+        self.undo
+            .iter()
+            .rev()
+            .take_while(|entry| std::ptr::eq(*entry, top) || same_group(entry.group, top.group))
+            .filter_map(|entry| match &entry.step {
+                UndoStep::Removed { strokes, .. } => Some(strokes.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The strokes the next redo gives back (the computer's strokes of the group on top).
+    pub fn next_redone(&self) -> Vec<Arc<Vec<PlacedStroke>>> {
+        let Some(top) = self.redo.last() else {
+            return Vec::new();
+        };
+        self.redo
+            .iter()
+            .rev()
+            .take_while(|entry| std::ptr::eq(*entry, top) || same_group(entry.group, top.group))
+            .filter_map(|entry| match &entry.step {
+                RedoStep::Add { strokes } => Some(strokes.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The strokes the page's last « Clear the page » took, to copy before the lock is taken.
+    pub fn last_cleared(&self) -> Option<Arc<Vec<PlacedStroke>>> {
+        self.undo.iter().rev().find_map(|entry| match &entry.step {
+            UndoStep::Removed {
+                strokes,
+                cleared: true,
+                ..
+            } => Some(strokes.clone()),
             _ => None,
+        })
+    }
+
+    /// « Undo the clearing », out of order (M14): takes the page's last « Clear the page » out of
+    /// the history, and gives its strokes with the places they go back to in the list as it is now,
+    /// under what was written since, whichever pen wrote it. The steps done since stay, every place
+    /// they name moved for the strokes that come back, so that Ctrl+Z still undoes the last of
+    /// them, and then the steps from before the clearing as before. The clearing itself can no
+    /// longer be redone, and the redo steps go, as for any new action. `None`: no clearing to undo.
+    pub fn unclear(&mut self) -> Option<(Arc<Vec<PlacedStroke>>, Vec<u32>)> {
+        let at = self
+            .undo
+            .iter()
+            .rposition(|entry| entry.step.is_clearing())?;
+        let Entry { step, group } = self.undo.remove(at)?;
+        let (strokes, left) = match step {
+            UndoStep::Removed { strokes, left, .. } => (strokes, left),
+            step => {
+                self.undo.insert(at, Entry { step, group });
+                return None;
+            }
+        };
+        let mut moving = Unclearing::new(strokes.iter().map(|placed| placed.index), left);
+        for entry in self.undo.iter_mut().skip(at) {
+            moving.follow(&mut entry.step);
         }
+        self.redo.clear();
+        self.recount();
+        let places = moving.places_now();
+        Some((strokes, places))
     }
 
-    /// A « Clear the page » can still be undone.
-    pub fn holds_clearing(&self) -> bool {
-        self.undo.iter().any(UndoStep::is_clearing)
+    /// Groups and bytes counted again, after a step left from the middle of the stack.
+    fn recount(&mut self) {
+        let mut previous: Option<&Entry<UndoStep>> = None;
+        self.groups = 0;
+        for entry in &self.undo {
+            if !previous.is_some_and(|previous| same_group(previous.group, entry.group)) {
+                self.groups += 1;
+            }
+            previous = Some(entry);
+        }
+        self.bytes = self.undo.iter().map(|entry| entry.step.bytes()).sum();
     }
 
-    /// The next undo is that of a « Clear the page ».
-    pub fn next_is_clearing(&self) -> bool {
-        self.undo.back().is_some_and(UndoStep::is_clearing)
+    /// Every stroke kept to come back (by an undo or a redo), for `change`.
+    fn kept_strokes(&mut self, mut change: impl FnMut(&mut Stroke)) {
+        let undone = self
+            .undo
+            .iter_mut()
+            .filter_map(|entry| match &mut entry.step {
+                UndoStep::Removed { strokes, .. } => Some(strokes),
+                _ => None,
+            });
+        let redone = self
+            .redo
+            .iter_mut()
+            .filter_map(|entry| match &mut entry.step {
+                RedoStep::Add { strokes } => Some(strokes),
+                _ => None,
+            });
+        for strokes in undone.chain(redone) {
+            for placed in Arc::make_mut(strokes) {
+                change(&mut placed.stroke);
+            }
+        }
     }
 
     /// The page, of size `width` × `height`, turns: the strokes kept to come back turn with it, so
     /// that they return to where they would be if they had stayed. Colours and places do not change.
     pub fn turn(&mut self, width: f32, height: f32, turns: u8) {
-        for step in &mut self.undo {
-            if let UndoStep::Removed { strokes, .. } = step {
-                for placed in Arc::make_mut(strokes) {
-                    for point in &mut placed.stroke.points {
-                        (point.x, point.y) = turn_point(point.x, point.y, width, height, turns);
+        self.kept_strokes(|stroke| {
+            for point in &mut stroke.points {
+                (point.x, point.y) = turn_point(point.x, point.y, width, height, turns);
+            }
+        });
+    }
+
+    /// The page's layers were reordered (M14, « monter », « descendre »): the strokes kept to come
+    /// back take the new index of their layer (`follow`). Places do not change.
+    pub fn remap_layers(&mut self, follow: impl Fn(u32) -> u32) {
+        self.kept_strokes(|stroke| stroke.layer = follow(stroke.layer));
+    }
+}
+
+/// Copies of the strokes an undo or a redo gives back, for the page (the windows get the stored
+/// ones): made by the hub before it takes its lock, since those points can be many.
+#[derive(Debug)]
+pub struct Prepared {
+    copies: Vec<(Arc<Vec<PlacedStroke>>, Vec<Stroke>)>,
+}
+
+impl Prepared {
+    /// Copies of each of `sources` (the steps of a group).
+    pub fn of_all(sources: Vec<Arc<Vec<PlacedStroke>>>) -> Prepared {
+        let copies = sources
+            .into_iter()
+            .map(|source| {
+                let copy = source.iter().map(|placed| placed.stroke.clone()).collect();
+                (source, copy)
+            })
+            .collect();
+        Prepared { copies }
+    }
+
+    /// Strokes copied, in all.
+    #[cfg(test)]
+    pub fn copied(&self) -> Vec<&Stroke> {
+        self.copies.iter().flat_map(|(_, copy)| copy).collect()
+    }
+
+    /// The copy of `stored`: the one `prepared` holds when it was made from them (taken out of
+    /// it), else a new one (another command got in between).
+    pub fn copy_of(
+        prepared: &mut Option<Prepared>,
+        stored: &Arc<Vec<PlacedStroke>>,
+    ) -> Vec<Stroke> {
+        let made = prepared.as_mut().and_then(|prepared| {
+            let at = prepared
+                .copies
+                .iter()
+                .position(|(source, _)| Arc::ptr_eq(source, stored))?;
+            Some(prepared.copies.swap_remove(at).1)
+        });
+        made.unwrap_or_else(|| stored.iter().map(|placed| placed.stroke.clone()).collect())
+    }
+}
+
+/// How the places named by the steps done after a « Clear the page » move when its strokes come
+/// back under them ([`History::unclear`]).
+///
+/// After a clearing the list is the strokes it left (`kept`: those of hidden layers, and any written
+/// while it was undone), in their order, then the strokes written since, in theirs: a pen only
+/// appends, an edit only takes strokes out, its undo puts them back where they were, and a step
+/// done since never gives back a stroke from before the clearing (that would undo the clearing
+/// first). So a place below the number of kept strokes still there is a kept stroke, whose rank
+/// among them says which cleared strokes stood before it; any other place is a stroke written
+/// since, which comes after all of them. Which kept strokes are still there changes only when a
+/// step takes one out (its layer shown since): followed step by step, in order.
+struct Unclearing {
+    /// For each cleared stroke, in order, how many kept strokes stood before it.
+    kept_before: Vec<u32>,
+    /// How many strokes the clearing left.
+    kept: u32,
+    /// The ranks among them of those still in the list; `None` while all are (the usual case:
+    /// nothing to follow).
+    present: Option<Vec<u32>>,
+}
+
+impl Unclearing {
+    /// For a clearing that took the strokes at `places` (ascending) and left `kept`.
+    fn new(places: impl Iterator<Item = u32>, kept: u32) -> Unclearing {
+        let kept_before = places
+            .enumerate()
+            .map(|(i, place)| place.saturating_sub(u32::try_from(i).unwrap_or(u32::MAX)))
+            .collect();
+        Unclearing {
+            kept_before,
+            kept,
+            present: None,
+        }
+    }
+
+    /// How many strokes come back.
+    fn count(&self) -> u32 {
+        u32::try_from(self.kept_before.len()).unwrap_or(u32::MAX)
+    }
+
+    /// How many of the kept strokes are in the list now.
+    fn kept_now(&self) -> usize {
+        self.present.as_ref().map_or(self.kept as usize, Vec::len)
+    }
+
+    /// Where the stroke at `place` of the list stands once the cleared strokes are back.
+    fn moved(&self, place: u32) -> u32 {
+        let at = place as usize;
+        if at < self.kept_now() {
+            let rank = self.present.as_ref().map_or(place, |present| present[at]);
+            let before = self.kept_before.partition_point(|&kept| kept <= rank);
+            place + u32::try_from(before).unwrap_or(u32::MAX)
+        } else {
+            place.saturating_add(self.count())
+        }
+    }
+
+    /// The strokes at `places` (ascending) leave the list.
+    fn removed(&mut self, places: &[u32]) {
+        let kept_now = self.kept_now();
+        if !places.iter().any(|&place| (place as usize) < kept_now) {
+            return;
+        }
+        let kept = self.kept;
+        let present = self.present.get_or_insert_with(|| (0..kept).collect());
+        let mut at = 0;
+        let mut taken = places.iter().peekable();
+        present.retain(|_| {
+            let gone = taken.next_if(|&&place| place as usize == at).is_some();
+            at += 1;
+            !gone
+        });
+    }
+
+    /// A step done after the clearing, in order: its places move, and what it takes out is followed.
+    fn follow(&mut self, step: &mut UndoStep) {
+        match step {
+            UndoStep::Removed { strokes, left, .. } => {
+                let places: Vec<u32> = strokes.iter().map(|placed| placed.index).collect();
+                let moved: Vec<u32> = places.iter().map(|&place| self.moved(place)).collect();
+                if moved != places {
+                    for (placed, place) in Arc::make_mut(strokes).iter_mut().zip(moved) {
+                        placed.index = place;
                     }
+                }
+                self.removed(&places);
+                *left = left.saturating_add(self.count());
+            }
+            UndoStep::Recoloured(changes) => {
+                for change in changes {
+                    change.index = self.moved(change.index);
+                }
+            }
+            // A stroke written since: after every stroke that comes back.
+            UndoStep::Added { indices } => {
+                for index in indices {
+                    *index = index.saturating_add(self.count());
                 }
             }
         }
     }
-}
 
-/// A copy of the strokes an undo gives back, for the page (the windows get the stored ones): made
-/// by the hub before it takes its lock, since those points can be many.
-#[derive(Debug)]
-pub struct Prepared {
-    source: Arc<Vec<PlacedStroke>>,
-    copy: Vec<Stroke>,
-}
-
-impl Prepared {
-    pub fn of(source: Arc<Vec<PlacedStroke>>) -> Prepared {
-        let copy = source.iter().map(|placed| placed.stroke.clone()).collect();
-        Prepared { source, copy }
-    }
-
-    /// The copy of `stored`: `prepared` when it was made from them, else a new one (another
-    /// command got in between).
-    pub fn copy_of(prepared: Option<Prepared>, stored: &Arc<Vec<PlacedStroke>>) -> Vec<Stroke> {
-        match prepared {
-            Some(prepared) if Arc::ptr_eq(&prepared.source, stored) => prepared.copy,
-            _ => stored.iter().map(|placed| placed.stroke.clone()).collect(),
-        }
+    /// Where the cleared strokes go back in the list as it is now (ascending): each after the kept
+    /// strokes that stood before it and are still there, and before the strokes written since.
+    fn places_now(&self) -> Vec<u32> {
+        self.kept_before
+            .iter()
+            .enumerate()
+            .map(|(i, &before)| {
+                let kept = match &self.present {
+                    None => before.min(self.kept),
+                    Some(present) => u32::try_from(present.partition_point(|&rank| rank < before))
+                        .unwrap_or(u32::MAX),
+                };
+                u32::try_from(i).unwrap_or(u32::MAX).saturating_add(kept)
+            })
+            .collect()
     }
 }
 
@@ -408,14 +795,29 @@ pub fn hidden_before(layers: &[Layer], list: &[Stroke]) -> Option<Vec<u32>> {
     )
 }
 
-/// `places` of a page in the numbering of a viewer (see [`hidden_before`]).
-pub fn viewer_places(hidden_before: &[u32], places: impl Iterator<Item = u32>) -> Vec<u32> {
-    places
-        .map(|place| {
-            let hidden = hidden_before.get(place as usize).copied().unwrap_or(0);
-            place.saturating_sub(hidden)
-        })
-        .collect()
+/// Where the stroke at `place` of `list` stands in a viewer's list (see [`hidden_before`]):
+/// `None` for a hidden stroke, which a viewer never has (M14: an undo may give back, a redo take, a
+/// stroke whose layer was hidden since it was done), or for a place outside the list.
+pub fn viewer_place(
+    hidden_before: &[u32],
+    layers: &[Layer],
+    list: &[Stroke],
+    place: u32,
+) -> Option<u32> {
+    let stroke = list.get(place as usize)?;
+    if !is_drawn(layers, stroke) {
+        return None;
+    }
+    let hidden = hidden_before.get(place as usize).copied().unwrap_or(0);
+    Some(place.saturating_sub(hidden))
+}
+
+/// Whether ink of layer `layer` is hidden on a page of `layers` (a layer that does not exist
+/// shows, as [`is_drawn`] has it).
+pub fn layer_hidden(layers: &[Layer], layer: u32) -> bool {
+    layers
+        .get(layer as usize)
+        .is_some_and(|layer| !layer.visible)
 }
 
 /// The new colour of strokes as the windows get it: one entry per colour, indices in the order

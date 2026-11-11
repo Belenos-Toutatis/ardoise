@@ -71,6 +71,15 @@ describe('mock export', () => {
     expect(await code(api.exportNotes(source, 'jpg', { ...OPTIONS, quality: 0 }, 'C:\\x'))).toBe('exportFailed');
   });
 
+  it('takes `separate`, `merged` or no layers option, like the desktop app, and refuses any other word', async () => {
+    const source = [{ path: pathOf('Liste de courses') }];
+    for (const layers of [undefined, 'separate', 'merged'] as const) {
+      await expect(api.exportNotes(source, 'pdf', { ...OPTIONS, layers }, 'C:\\out\\a.pdf')).resolves.toEqual(['C:\\out\\a.pdf']);
+    }
+    const both = { ...OPTIONS, layers: 'both' } as unknown as ExportOptions;
+    expect(await code(api.exportNotes(source, 'svg', both, 'C:\\out\\a.svg'))).toBe('exportFailed');
+  });
+
   it('refuses an image over 16 384 pixels on a side, for PNG, JPG and the clipboard', async () => {
     const wide = { path: 'C:\\demo\\Ardoise\\Wide.ardoise', note: { ...note([]), page: { width: 300_000, height: 21600 } } };
     // 3 000 mm at 150 dpi is 17 717 px; at 96 dpi 11 339 px.

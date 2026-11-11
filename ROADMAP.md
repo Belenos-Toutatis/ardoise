@@ -280,6 +280,37 @@ Raccourcis pour fermer et quitter (2026-11-07, demandés par l’utilisateur) : 
 
 Restent à essayer dans la vraie bibliothèque : **Comparer** et la relecture à l'écran sur ces notes, et une note avec une vraie narration (aucune des quatre n'en a).
 
+## M14 — Corriger pendant le direct, sur son propre calque
+
+Ajouté à la demande de l'utilisateur le 2026-11-11 (SPEC §4.2, §4.4 et §4.6, `docs/questions.md` Q11), à partir d'une maquette qu'il a validée.
+
+- [x] Zone Calques, la même dans l'éditeur et dans la fenêtre de commande du direct : un clic sur la ligne choisit le calque ; œil ou œil barré ; crayon pour renommer (Entrée valide, Échap annule) ; monter, descendre et fusionner sur la ligne choisie ; « Ajouter un calque » choisit le nouveau calque ; avertissements (calque choisi masqué, tablette sur un calque masqué) ; traductions FR et EN.
+- [x] Éditeur : le stylo, la gomme et la sélection n'agissent que sur le calque choisi.
+- [x] Mode direct, côté Rust : le calque de la tablette et celui de l'ordinateur, séparés ; écrire un trait de l'ordinateur pendant que la tablette écrit, sans jamais la gêner ; gommer des traits du calque choisi ; envoyer la tablette sur un autre calque ; ajouter, renommer, afficher ou masquer, réordonner et fusionner des calques pendant le direct ; tout est enregistré dans la note, à son heure ; Ctrl+Z annule les actions de l'ordinateur, jamais l'écriture de la tablette.
+- [x] Mode direct, interface : outil Stylo à côté de Sélection ; style propre à l'ordinateur (rouge par défaut, retenu) ; bout gomme du stylet ; sélection limitée au calque choisi ; la zone Calques dans le panneau de côté, à la place du bouton « Nouveau calque ».
+- [x] Vidéoprojecteur et partage : le trait de l'ordinateur apparaît pendant qu'il s'écrit, comme celui de la tablette.
+- [x] Export : « Calques : séparés ou fusionnés » pour le SVG et le PDF (calques PDF, un par nom pour toutes les pages) ; images toujours fusionnées ; calques masqués jamais exportés.
+- [x] Guides FR et EN, `CHANGELOG.md` ; procédure H6 dans `docs/hardware-tests.md`.
+- [x] Relecture indépendante, remarques corrigées.
+
+**Critères de fin** :
+- `CHECK OK` et `E2E OK` ;
+- un parcours de bout en bout : la tablette simulée écrit sur son calque pendant que l'ordinateur écrit au stylet sur un calque « Correction » ; le fichier de la note a les deux calques, chaque trait à sa place et à son heure ; la présentation et un écran du partage montrent les deux ; Ctrl+Z annule le trait de l'ordinateur, pas ceux de la tablette ; la gomme ne touche que le calque choisi ;
+- un parcours de bout en bout dans l'éditeur : la sélection et la gomme ne prennent que le calque choisi ;
+- des tests de l'export : un PDF à calques séparés a ses calques, un SVG fusionné n'en a qu'un, un calque masqué n'est dans aucun fichier ;
+- `cargo xtask perf` : le mode direct reste à 60 images/s quand la tablette et l'ordinateur écrivent ensemble.
+
+
+Vérifié sous Windows le 2026-11-11 : `CHECK OK`, `E2E OK` (88 parcours, FR et EN, dont les trois de M14 : l'ordinateur écrit sur « Correction » pendant que la tablette écrit, la sélection et la gomme de l'éditeur limitées au calque choisi, l'export à calques séparés ou fusionnés), après deux relectures indépendantes (partie Rust, interface) dont les remarques sont corrigées. `cargo xtask perf` : le mode direct reste à 59,5 images/s dans la fenêtre de commande et à 59,4 au vidéoprojecteur quand la tablette et le stylet de l'ordinateur écrivent ensemble. Pendant que l'ordinateur écrit, la partie Rust du trait de la tablette prend 2 ms en médiane et moins de 5 ms au 99e centile (test du hub).
+
+Non atteint, à surveiller en H6 : le trait de l'ordinateur arrive au vidéoprojecteur en 40 ms (médiane), pour 30 ms visés dans la conception. Cette mesure part du moment où le stylet touche l'écran, attente dans la fenêtre comprise ; celle de la tablette (27 ms dans les parcours) ne part que de la réception Bluetooth. Depuis sa réception par Rust, un point de l'ordinateur arrive au partage en 14 ms. Sur l'écran de l'enseignant, le trait se dessine sans aller-retour.
+
+Pendant ces vérifications, deux défauts des tests sont corrigés : un parcours de M12 comptait les cartes de la bibliothèque avant qu'elle ait relu le dossier, et une fenêtre qui ne démarrait pas arrêtait toute la série. La bibliothèque de 1 000 notes reste au-dessus de 2 s, comme avant M14 : des mesures alternées avec l'exécutable d'avant ne montrent aucune différence (le PC varie de ±0,7 s d'une mesure à l'autre).
+
+### Point de contrôle H6 [matériel]
+
+- [ ] [matériel] En classe, avec la vraie tablette et le partage vers le PC du vidéoprojecteur : un élève écrit pendant que l'enseignant corrige au stylet de la Surface sur un calque « Correction », gomme et annule ; puis un export PDF à calques séparés, ouvert dans Acrobat Reader ou Firefox.
+
 ---
 
 ## Lancer une étape avec `/goal`

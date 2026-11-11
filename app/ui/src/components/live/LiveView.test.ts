@@ -6,7 +6,7 @@ import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { FakeContext } from '../../lib/live-fake-canvas';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
-import { mockLiveConfig, mockLiveTick, resetMockLive } from '../../lib/mock-live';
+import { mockLiveConfig, mockLiveInvoke, mockLiveTick, resetMockLive } from '../../lib/mock-live';
 import { mockNarration, resetMockNarration } from '../../lib/mock-narration';
 import { resetMockTablet } from '../../lib/mock-tablet';
 import { quit } from '../../lib/editor/window-close';
@@ -199,8 +199,12 @@ describe('live view (control window)', () => {
     await vi.waitFor(() => expect(view.canvas().dataset.page).toBe('1/2'));
     view.action('new-page').click();
     await vi.waitFor(() => expect(view.canvas().dataset.page).toBe('3/3'));
-    view.action('new-layer').click();
-    await vi.waitFor(() => expect(view.action('new-layer').title).toBe('Calque 2 / 2'));
+    // The tablet's « new layer » (its button, or the command): the tablet goes there, the computer stays (M14).
+    expect(view.action('new-layer')).toBeNull();
+    mockLiveInvoke('live_command', { command: { kind: 'newLayer' } });
+    await vi.waitFor(() => expect(view.target.querySelectorAll('li.layer')).toHaveLength(2));
+    expect(view.target.querySelector('li.layer[data-tablet="true"]')!.getAttribute('data-layer')).toBe('1');
+    expect(view.target.querySelector('li.layer[data-chosen="true"]')!.getAttribute('data-layer')).toBe('0');
     mockLiveTick(150);
     await tick();
     expect(Number(view.canvas().dataset.strokes)).toBeGreaterThan(0);

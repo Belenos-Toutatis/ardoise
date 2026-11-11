@@ -7,6 +7,7 @@ import type { PixelsRef } from '../background';
 import type { Tool } from '../ink';
 import { INKSPACE_COLORS, type Background, type Note, type PageSize, type Rgba, type Stroke } from '../note';
 import { type Affine, type Rect, type Vec } from './geometry';
+import { layerVisible, onLayer } from './hit';
 import * as ops from './ops';
 import type { Orientation } from './page-size';
 
@@ -71,7 +72,7 @@ export function nearestVisibleLayer(note: Note, index: number): number | null {
   return null;
 }
 
-/** New ink goes on the active layer only while it is visible (never on a hidden layer). */
+/** New ink goes on the active layer only while it is visible (never on a hidden layer: the pen says so instead). */
 export function canDraw(doc: Doc): boolean {
   return doc.note.layers[doc.activeLayer]?.visible ?? true;
 }
@@ -100,16 +101,19 @@ export function clearSelection(doc: Doc): Doc {
   return doc.selection.length === 0 ? doc : { ...doc, selection: [] };
 }
 
+/** Ctrl+A: the strokes of the chosen layer, when it shows (the selection belongs to the chosen layer). */
 export function selectAll(doc: Doc): Doc {
+  const only = onLayer(doc.note, doc.activeLayer);
   return select(
     doc,
-    doc.note.strokes.flatMap((s, i) => (doc.note.layers[s.layer]?.visible === false ? [] : [i])),
+    doc.note.strokes.flatMap((s, i) => (layerVisible(only, s.layer) ? [i] : [])),
   );
 }
 
+/** Chooses the layer the pen, the eraser and the selection act on; the selection of the old one goes. */
 export function setActiveLayer(doc: Doc, layer: number): Doc {
   if (layer < 0 || layer >= doc.note.layers.length || layer === doc.activeLayer) return doc;
-  return { ...doc, activeLayer: layer };
+  return { ...doc, activeLayer: layer, selection: [] };
 }
 
 /** A new stroke drawn with the tool settings on the active layer (none if it is hidden). */
@@ -118,8 +122,11 @@ export function addStroke(doc: Doc, stroke: Omit<Stroke, 'layer'>): Doc {
   return withNote(doc, ops.addStroke(doc.note, { ...stroke, layer: doc.activeLayer }), []);
 }
 
+/** The eraser touches the strokes of the active layer only (none when it is hidden). */
 export function erase(doc: Doc, path: readonly Vec[], radius: number, mode: EraserMode): Doc {
-  const note = mode === 'whole' ? ops.eraseWhole(doc.note, path, radius) : ops.erasePartial(doc.note, path, radius);
+  const layer = doc.activeLayer;
+  const note =
+    mode === 'whole' ? ops.eraseWhole(doc.note, path, radius, layer) : ops.erasePartial(doc.note, path, radius, layer);
   return note === doc.note ? doc : withNote(doc, note, []);
 }
 
@@ -172,9 +179,10 @@ export function selectionBounds(doc: Doc): Rect | null {
 
 // --- Layers -------------------------------------------------------------------------------
 
+/** A new top layer, which becomes the chosen one (the selection of the old one goes). */
 export function addLayer(doc: Doc, name: string): Doc {
   const note = ops.addLayer(doc.note, name);
-  return { ...doc, note, activeLayer: note.layers.length - 1 };
+  return { ...doc, note, selection: [], activeLayer: note.layers.length - 1 };
 }
 
 export function setLayerVisible(doc: Doc, index: number, visible: boolean): Doc {
@@ -182,10 +190,8 @@ export function setLayerVisible(doc: Doc, index: number, visible: boolean): Doc 
   if (note === doc.note) return doc;
   // Hidden strokes cannot stay selected.
   const selection = visible ? doc.selection : doc.selection.filter((i) => doc.note.strokes[i]?.layer !== index);
-  // New ink must not land on a hidden layer: draw on the nearest visible one instead.
-  const activeLayer =
-    !visible && index === doc.activeLayer ? (nearestVisibleLayer(note, index) ?? doc.activeLayer) : doc.activeLayer;
-  return { ...withNote(doc, note, selection), activeLayer };
+  // The chosen layer stays chosen even hidden (the zone warns, the pen refuses, the eraser and the selection find nothing).
+  return withNote(doc, note, selection);
 }
 
 export function renameLayer(doc: Doc, index: number, name: string): Doc {

@@ -91,7 +91,7 @@ describe('live drawing', () => {
     offscreen.reset();
     strokes.push(stroke(9000));
     const second = renderer.paint(target, scene(live));
-    expect(second).toEqual({ full: false, appended: 1, currentPoints: 0 });
+    expect(second).toEqual({ full: false, appended: 1, currentPoints: 0, computerPoints: 0 });
     expect(offscreen.ops('fill')).toHaveLength(1);
     expect(offscreen.ops('fillRect')).toHaveLength(0);
 

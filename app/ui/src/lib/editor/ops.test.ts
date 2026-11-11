@@ -178,6 +178,30 @@ describe('eraser', () => {
     expect(times.every((t) => Number.isInteger(t) && t >= 0)).toBe(true);
   });
 
+  it('touches only the strokes of the layer it is given, whole or partial', () => {
+    const n = note([hline(0, 900, 1000, 100, 0), hline(0, 900, 1000, 100, 1)], 2);
+    const path = [{ x: 450, y: 1000 }];
+    expect(eraseWhole(n, path, 50, 1).strokes).toEqual([n.strokes[0]]);
+    expect(eraseWhole(n, path, 50, 0).strokes).toEqual([n.strokes[1]]);
+    expect(eraseWhole(n, path, 50).strokes).toEqual([]);
+    const cut = erasePartial(n, path, 100, 0);
+    expect(cut.strokes[cut.strokes.length - 1]).toBe(n.strokes[1]);
+    expect(cut.strokes.slice(0, -1).every((s) => s.layer === 0)).toBe(true);
+    expect(cut.strokes.length).toBe(3);
+    // Nothing of the chosen layer under the eraser: the note is returned as it is.
+    expect(eraseWhole(n, [{ x: 450, y: 5000 }], 50, 1)).toBe(n);
+    expect(erasePartial(n, [{ x: 450, y: 5000 }], 100, 1)).toBe(n);
+  });
+
+  it('touches nothing of a hidden layer, or of a layer the note does not have', () => {
+    const n = setLayerVisible(note([hline(0, 900, 1000, 100, 1)], 2), 1, false);
+    expect(eraseWhole(n, [{ x: 450, y: 1000 }], 50, 1)).toBe(n);
+    expect(erasePartial(n, [{ x: 450, y: 1000 }], 100, 1)).toBe(n);
+    const orphan = note([hline(0, 900, 1000, 100, 4)], 2);
+    expect(eraseWhole(orphan, [{ x: 450, y: 1000 }], 50, 4)).toBe(orphan);
+    expect(erasePartial(orphan, [{ x: 450, y: 1000 }], 100, 4)).toBe(orphan);
+  });
+
   it('leaves untouched notes and hidden layers alone', () => {
     const n = note([hline(0, 900, 1000)]);
     expect(erasePartial(n, [{ x: 5000, y: 5000 }], 100)).toBe(n);

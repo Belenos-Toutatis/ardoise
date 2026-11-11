@@ -181,3 +181,28 @@ describe('a page of many thousands of strokes', () => {
     console.info(`lasso on ${page.strokes.length} strokes: first ${first.toFixed(0)} ms, then ${second.toFixed(0)} ms; click ${click.toFixed(0)} ms; ${picked.length} chosen`);
   });
 });
+
+describe('the selection and the layers shown (M14)', () => {
+  const strokes = [line(0, 0), line(0, 100, { layer: 1 }), line(0, 200), line(0, 300, { layer: 1 })];
+  const source = (layers: Layer[]): SelectionSource => ({ strokes, layers, noteId: 'n1', pageIndex: 0, revision: 7 });
+  const shown: Layer[] = [
+    { name: 'Calque 1', visible: true },
+    { name: 'Correction', visible: true },
+  ];
+
+  it('drops the strokes of a layer hidden since, keeps the others, and the revision', () => {
+    const selection = new LiveSelection();
+    selection.choose(source(shown), [0, 1, 2, 3], 'replace');
+    const before = selection.indices;
+    selection.follow(source(shown));
+    expect(selection.indices).toBe(before);
+    selection.follow(source([shown[0], { ...shown[1], visible: false }]));
+    expect(selection.indices).toEqual([0, 2]);
+    expect(selection.revision).toBe(7);
+    // Shown again: what left the selection does not come back by itself.
+    selection.follow(source(shown));
+    expect(selection.indices).toEqual([0, 2]);
+    selection.follow(source([{ ...shown[0], visible: false }, shown[1]]));
+    expect(selection.any).toBe(false);
+  });
+});

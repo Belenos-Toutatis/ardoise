@@ -149,13 +149,22 @@ export class LatencyRecorder {
   }
 }
 
-/** What the end-to-end journey reads (`window.__ardoiseLatency`). */
-export interface LatencyProbe {
+/** The end-to-end figures of one kind of point. */
+export interface LatencyFigures {
   samples(): number[];
   median(): number | null;
   p95(): number | null;
+}
+
+/** What the end-to-end journey reads (`window.__ardoiseLatency`): the tablet's points. */
+export interface LatencyProbe extends LatencyFigures {
   uiSamples(): number[];
   uiMedian(): number | null;
+  /**
+   * The presentation window (M14): the points of the computer's pen, from the pen's sample (their `recv`) to
+   * the frame after the one that drew them. Absent in the control window, which draws its own stroke.
+   */
+  computer?: LatencyFigures;
 }
 
 declare global {
@@ -164,14 +173,21 @@ declare global {
   }
 }
 
-/** Exposes `recorder` as `window.__ardoiseLatency`. */
-export function exposeLatency(recorder: LatencyRecorder, target: Window | undefined = globalThis.window): void {
+function figures(recorder: LatencyRecorder): LatencyFigures {
+  return { samples: () => recorder.samples(), median: () => recorder.median(), p95: () => recorder.p95() };
+}
+
+/** Exposes `recorder` (and `computer`, the computer's points) as `window.__ardoiseLatency`. */
+export function exposeLatency(
+  recorder: LatencyRecorder,
+  target: Window | undefined = globalThis.window,
+  computer?: LatencyRecorder,
+): void {
   if (!target) return;
   target.__ardoiseLatency = {
-    samples: () => recorder.samples(),
-    median: () => recorder.median(),
-    p95: () => recorder.p95(),
+    ...figures(recorder),
     uiSamples: () => recorder.uiSamples(),
     uiMedian: () => recorder.uiMedian(),
+    ...(computer ? { computer: figures(computer) } : {}),
   };
 }

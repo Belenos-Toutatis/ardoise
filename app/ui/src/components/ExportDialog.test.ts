@@ -287,7 +287,7 @@ describe('export dialog: exporting', () => {
     expect(ui.target.querySelector('.export-result')?.textContent).toContain('Fichiers créés : 2');
   });
 
-  it('puts several notes in one PDF, one page each in the order given, in A4', async () => {
+  it('puts several notes in one PDF, one page each in the order given, in A4, naming no layers they do not have', async () => {
     const spy = vi.spyOn(api, 'exportNotes');
     const titles = ['Réunion parents', 'Liste de courses', 'Cours de physique'];
     const ui = await render(titles);
@@ -302,6 +302,8 @@ describe('export dialog: exporting', () => {
       { ...DEFAULTS, pdfPage: 'a4' },
       'C:\\Users\\demo\\Exports\\Notes.pdf',
     );
+    // Notes of one layer each: the dialog offered no choice, the request names none.
+    expect('layers' in spy.mock.calls[0][2]).toBe(false);
     expect(ui.target.querySelector('.export-result code')?.textContent).toBe('C:\\Users\\demo\\Exports\\Notes.pdf');
   });
 
@@ -476,5 +478,206 @@ describe('export dialog: exporting', () => {
     ui.dialog().dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
     expect(document.activeElement).toBe(controls[0]);
     outside.remove();
+  });
+});
+
+/** Gives the demo note `title` one more layer, with a stroke on it unless `ink` is false. */
+function addLayer(title: string, name: string, { visible = true, ink = true } = {}) {
+  const note = mockLibrary().notes.get(pathOf(title))!.note;
+  const index = note.layers.length;
+  note.layers.push({ name, visible });
+  if (ink) note.strokes.push({ ...structuredClone(note.strokes[0]), layer: index });
+}
+
+type Ui = Awaited<ReturnType<typeof render>>;
+
+describe('export dialog: layers', () => {
+  const block = (ui: Ui) => ui.target.querySelector<HTMLFieldSetElement>('[data-slot="export-layers"]');
+  const flat = (ui: Ui) => ui.target.querySelector('[data-slot="export-layers-flat"]');
+  const hidden = (ui: Ui) => ui.target.querySelector('[data-slot="export-layers-hidden"]');
+  const layerRadio = (ui: Ui, value: 'separate' | 'merged') =>
+    ui.target.querySelector<HTMLInputElement>(`input[type="radio"][name="export-layers"][value="${value}"]`)!;
+
+  it('says nothing of layers for a note with one layer, in any format', async () => {
+    const ui = await render(['Liste de courses']);
+    for (const format of ['PNG (image)', 'SVG (vectoriel)', 'PDF']) {
+      await ui.choose(format);
+      expect(block(ui)).toBeNull();
+      expect(flat(ui)).toBeNull();
+      expect(hidden(ui)).toBeNull();
+    }
+  });
+
+  it('does not count a layer without ink, nor a hidden one, as a layer to keep apart', async () => {
+    addLayer('Liste de courses', 'Vide', { ink: false });
+    addLayer('Liste de courses', 'Réponses', { visible: false });
+    const ui = await render(['Liste de courses']);
+    await ui.choose('PDF');
+    expect(block(ui)).toBeNull();
+    // The hidden layer holds ink: the dialog says it is never exported, in every format.
+    expect(hidden(ui)?.textContent).toContain('ne sont jamais exportés');
+    await ui.choose('PNG (image)');
+    expect(hidden(ui)).not.toBeNull();
+    expect(flat(ui)).toBeNull();
+  });
+
+  it('offers separate or merged layers for SVG and PDF with the format defaults, and says images merge', async () => {
+    addLayer('Liste de courses', 'Correction');
+    addLayer('Liste de courses', 'Réponses', { visible: false });
+    const ui = await render(['Liste de courses']);
+    // An image: the sentence, no choice.
+    expect(block(ui)).toBeNull();
+    expect(flat(ui)?.textContent).toBe("Une image n'a pas de calques : ils sont toujours fusionnés.");
+    expect(hidden(ui)?.textContent).toContain('peut contenir les réponses');
+
+    await ui.choose('SVG (vectoriel)');
+    expect(flat(ui)).toBeNull();
+    expect(block(ui)?.querySelector('legend')?.textContent).toBe('Calques');
+    expect(layerRadio(ui, 'separate').checked).toBe(true);
+    expect(layerRadio(ui, 'merged').checked).toBe(false);
+    expect(block(ui)?.textContent).toContain('Un calque Inkscape par calque de la note');
+    expect(block(ui)?.textContent).toContain("Un seul dessin, comme à l'écran.");
+    expect(hidden(ui)).not.toBeNull();
+
+    await ui.choose('PDF');
+    expect(layerRadio(ui, 'separate').checked).toBe(false);
+    expect(layerRadio(ui, 'merged').checked).toBe(true);
+    expect(block(ui)?.textContent).toContain('Acrobat Reader ou Firefox');
+    // The radios are named by their word and described by their hint.
+    const described = layerRadio(ui, 'separate').getAttribute('aria-describedby')!;
+    expect(document.getElementById(described)?.textContent).toContain('Acrobat Reader');
+  });
+
+  it('speaks English', async () => {
+    addLayer('Liste de courses', 'Answers');
+    const ui = await render(['Liste de courses'], 'en');
+    expect(flat(ui)?.textContent).toBe('An image has no layers: they are always merged.');
+    await ui.choose('PDF');
+    expect(block(ui)?.querySelector('legend')?.textContent).toBe('Layers');
+    expect(block(ui)?.textContent).toContain('Separate');
+    expect(block(ui)?.textContent).toContain('Merged');
+    expect(block(ui)?.textContent).toContain('Some readers show them all, with no choice.');
+  });
+
+  it('shows the block when only one of several notes has two layers, and for the note the editor gave', async () => {
+    addLayer('Réunion parents', 'Correction');
+    const ui = await render(['Liste de courses', 'Réunion parents']);
+    await ui.choose('PDF');
+    expect(block(ui)).not.toBeNull();
+    cleanup?.();
+    cleanup = null;
+
+    const path = pathOf('Liste de courses');
+    const { note } = await api.openNote(path);
+    const edited = {
+      ...note,
+      layers: [...note.layers, { name: 'Correction', visible: true }],
+      strokes: [...note.strokes, { ...note.strokes[0], layer: 1 }],
+    };
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(ExportDialog, { target, props: { sources: [{ path, note: edited }], subject: 'S', onclose: vi.fn() } });
+    cleanup = () => {
+      unmount(component);
+      target.remove();
+    };
+    await settle();
+    target.querySelector<HTMLInputElement>('input[name="export-format"][value="svg"]')!.click();
+    await settle();
+    expect(target.querySelector('[data-slot="export-layers"]')).not.toBeNull();
+  });
+
+  it('puts the choice in the request of an SVG or a PDF, and nothing in the request of an image', async () => {
+    addLayer('Liste de courses', 'Correction');
+    const spy = vi.spyOn(api, 'exportNotes');
+    const ui = await render(['Liste de courses']);
+    ui.button('Exporter…').click();
+    await settle();
+    expect(spy.mock.calls[0][2]).toEqual(DEFAULTS);
+    expect('layers' in spy.mock.calls[0][2]).toBe(false);
+
+    await ui.choose('SVG (vectoriel)');
+    ui.button('Exporter de nouveau…').click();
+    await settle();
+    expect(spy.mock.calls[1][1]).toBe('svg');
+    expect(spy.mock.calls[1][2]).toEqual({ ...DEFAULTS, layers: 'separate' });
+
+    await ui.choose('PDF');
+    ui.button('Exporter de nouveau…').click();
+    await settle();
+    expect(spy.mock.calls[2][2]).toEqual({ ...DEFAULTS, layers: 'merged' });
+  });
+
+  it('names no layers for a one-layer note, even with « Séparés » remembered for the PDF', async () => {
+    addLayer('Liste de courses', 'Correction');
+    const spy = vi.spyOn(api, 'exportNotes');
+    const first = await render(['Liste de courses']);
+    await first.choose('PDF');
+    layerRadio(first, 'separate').click();
+    await settle();
+    first.button('Exporter…').click();
+    await settle();
+    expect(spy.mock.calls[0][2]).toEqual({ ...DEFAULTS, layers: 'separate' });
+    cleanup?.();
+    cleanup = null;
+
+    // The PDF and « Séparés » are remembered; this note has one layer: no block, and the request names no layers
+    // (a PDF layer of its own would open the reader's layers panel for nothing).
+    const ui = await render(['Réunion parents']);
+    expect(ui.radio('PDF').checked).toBe(true);
+    expect(block(ui)).toBeNull();
+    ui.button('Exporter…').click();
+    await settle();
+    expect(spy.mock.calls[1][1]).toBe('pdf');
+    expect(spy.mock.calls[1][2]).toEqual(DEFAULTS);
+    expect('layers' in spy.mock.calls[1][2]).toBe(false);
+  });
+
+  it('remembers the choice per format, after an export that succeeded', async () => {
+    addLayer('Liste de courses', 'Correction');
+    const spy = vi.spyOn(api, 'exportNotes');
+    const ui = await render(['Liste de courses']);
+    await ui.choose('PDF');
+    layerRadio(ui, 'separate').click();
+    await settle();
+    // Not saved before an export.
+    await ui.remount();
+    expect(ui.radio('PNG (image)').checked).toBe(true);
+    await ui.choose('PDF');
+    expect(layerRadio(ui, 'merged').checked).toBe(true);
+
+    layerRadio(ui, 'separate').click();
+    await settle();
+    ui.button('Exporter…').click();
+    await settle();
+    expect(spy.mock.calls[0][2]).toEqual({ ...DEFAULTS, layers: 'separate' });
+
+    await ui.remount();
+    // The format, the PDF choice, and the SVG's own default.
+    expect(ui.radio('PDF').checked).toBe(true);
+    expect(layerRadio(ui, 'separate').checked).toBe(true);
+    await ui.choose('SVG (vectoriel)');
+    expect(layerRadio(ui, 'separate').checked).toBe(true);
+    layerRadio(ui, 'merged').click();
+    await settle();
+    ui.button('Exporter…').click();
+    await settle();
+    expect(spy.mock.calls[1][2]).toEqual({ ...DEFAULTS, layers: 'merged' });
+
+    // Each format keeps its own: PDF still separate, SVG now merged.
+    await ui.remount();
+    expect(layerRadio(ui, 'merged').checked).toBe(true);
+    await ui.choose('PDF');
+    expect(layerRadio(ui, 'separate').checked).toBe(true);
+  });
+
+  it('disables the choice while exporting', async () => {
+    addLayer('Liste de courses', 'Correction');
+    vi.spyOn(api, 'exportNotes').mockImplementationOnce(() => new Promise(() => {}));
+    const ui = await render(['Liste de courses']);
+    await ui.choose('PDF');
+    ui.button('Exporter…').click();
+    await settle();
+    expect(block(ui)?.disabled).toBe(true);
   });
 });

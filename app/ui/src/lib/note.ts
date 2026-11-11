@@ -210,6 +210,12 @@ export interface ExportOptions {
   quality: number;
   /** PDF page: the note's own size, or A4 in the note's orientation (note fitted, centred). */
   pdfPage: 'actual' | 'a4';
+  /**
+   * SVG and PDF: one layer per layer of the note (`separate`: Inkscape layers, PDF optional content) or
+   * one drawing (`merged`). Absent: the format's default (SVG separate, PDF merged). Ignored by the images,
+   * which are always merged. Hidden layers are never exported.
+   */
+  layers?: 'separate' | 'merged';
 }
 
 /**

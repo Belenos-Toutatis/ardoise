@@ -1,9 +1,10 @@
-//! `cargo xtask perf [--write] [--only start,library,live,touchup,export,size]`: measures the targets of
+//! `cargo xtask perf [--write] [--only start,library,live,touchup,pen,export,size]`: measures the targets of
 //! SPEC §8 on the production executable (`target/release/ardoise.exe`, built by `cargo xtask
 //! check`), prints a table (target, measured value, verdict) and, with `--write`, puts it in
 //! `docs/performance.md`.
 //!
-//! - start, library of 1,000 notes, live mode, live mode touched up (M12): `app/e2e/perf.mjs` drives a portable copy of the
+//! - start, library of 1,000 notes, live mode, live mode touched up (M12), live mode with the computer's pen (M14):
+//!   `app/e2e/perf.mjs` drives a portable copy of the
 //!   executable through WebView2's DevTools protocol and returns raw measures (times, frame
 //!   intervals); the statistics and the verdicts are computed here, where they are unit-tested.
 //! - MP4 1080p of a 2-minute replay: the release benchmark `export_speed_mp4_2min` of
@@ -34,12 +35,17 @@ const LIVE_MIN_FPS: f64 = 57.0;
 const DROPPED_MS: f64 = 25.0;
 /// At most this share of dropped frames in live mode.
 const LIVE_DROPPED_MAX_PERCENT: f64 = 1.0;
+/// SPEC §4.2's figure for the tablet's ink, held for the computer's pen too (docs/design/tablet-live-classroom.md, M14,
+/// "Latency targets"): a median under 30 ms from the pen's sample to the presentation's frame.
+const COMPUTER_PEN_LATENCY_MS: f64 = 30.0;
 /// SPEC §8: MP4 1080p of a 2-minute replay in under 2 minutes.
 const EXPORT_SECONDS: f64 = 120.0;
 /// SPEC §8: executable under 30 MB (the same bound as `cargo xtask selftest`).
 const MAX_EXE_BYTES: u64 = 30 * 1024 * 1024;
 
-const PARTS: [&str; 6] = ["start", "library", "live", "touchup", "export", "size"];
+const PARTS: [&str; 7] = [
+    "start", "library", "live", "touchup", "pen", "export", "size",
+];
 const START_MARK: &str = "<!-- perf:start -->";
 const END_MARK: &str = "<!-- perf:end -->";
 
@@ -173,6 +179,29 @@ pub struct EditCost {
     pub full_redraws: u64,
 }
 
+/// Live mode with the tablet and the computer's pen writing together, the presentation window open (M14).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LivePen {
+    /// The frames of the control window and of the presentation window during the measure.
+    pub control: Option<FrameStats>,
+    pub presentation: Option<FrameStats>,
+    /// Strokes on the control window's preview before and after the measure, both pens' together.
+    pub strokes: (i64, i64),
+    /// Strokes the script wrote with the computer's pen during the measure.
+    pub pen_strokes: u64,
+    /// Latency of the computer's points to the projector (`__ardoiseLatency.computer`), ms, one per point.
+    pub latency: Vec<f64>,
+}
+
+impl LivePen {
+    /// Both pens wrote during the measure: more new strokes than the pen's (so the tablet wrote too), and the pen's points
+    /// reached the projector. Otherwise the measure says nothing.
+    fn both_wrote(&self) -> bool {
+        let pen = i64::try_from(self.pen_strokes).unwrap_or(i64::MAX);
+        self.pen_strokes > 0 && self.strokes.1 - self.strokes.0 > pen && !self.latency.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Export {
     pub frames: u64,
@@ -188,6 +217,7 @@ pub struct Measures {
     pub library: Option<Library>,
     pub live: Option<Live>,
     pub touch_up: Option<TouchUp>,
+    pub live_pen: Option<LivePen>,
     pub export: Option<Export>,
     pub exe_bytes: Option<u64>,
 }
@@ -265,6 +295,21 @@ pub fn parse_harness(json: &str, into: &mut Measures) -> Result<(), String> {
             edits: touch_up["edits"].as_u64().unwrap_or(0),
             removed_per_delete: touch_up["removedPerDelete"].as_f64().unwrap_or(0.0),
             edit_cost: edit_cost(touch_up),
+        });
+    }
+    if let Some(pen) = value.get("livePen") {
+        into.live_pen = Some(LivePen {
+            control: FrameStats::of(&numbers(&pen["controlIntervals"])),
+            presentation: FrameStats::of(&numbers(&pen["presentationIntervals"])),
+            strokes: (
+                pen["strokesBefore"].as_i64().unwrap_or(-1),
+                pen["strokesAfter"].as_i64().unwrap_or(-1),
+            ),
+            pen_strokes: pen["penStrokes"].as_u64().unwrap_or(0),
+            latency: numbers(&pen["computerLatency"])
+                .into_iter()
+                .filter(|ms| ms.is_finite())
+                .collect(),
         });
     }
     Ok(())
@@ -608,6 +653,9 @@ fn build_rows(m: &Measures, lang: Lang) -> Vec<Row> {
             });
         }
     }
+    if let Some(pen) = &m.live_pen {
+        rows.extend(live_pen_rows(pen, lang));
+    }
     if let Some(export) = &m.export {
         rows.push(Row {
             target: t(
@@ -640,6 +688,89 @@ fn build_rows(m: &Measures, lang: Lang) -> Vec<Row> {
             verdict: judge(bytes < MAX_EXE_BYTES),
         });
     }
+    rows
+}
+
+/// Live mode with both pens: one row of frames per window, judged like live mode, and the latency of the computer's pen to
+/// the projector. Unless both pens wrote during the measure, the three rows say so and are missed.
+fn live_pen_rows(pen: &LivePen, lang: Lang) -> Vec<Row> {
+    let fr = lang == Lang::Fr;
+    let t = |en: &str, fr_text: &str| (if fr { fr_text } else { en }).to_owned();
+    let invalid = || {
+        t(
+            "invalid: the strokes of both pens did not grow during the measure",
+            "invalide : les traits des deux stylets n'ont pas augmenté pendant la mesure",
+        )
+    };
+    let mut rows = Vec::new();
+    for (stats, window_en, window_fr) in [
+        (&pen.control, "control window", "fenêtre de commande"),
+        (&pen.presentation, "projector", "vidéoprojecteur"),
+    ] {
+        let (measured, verdict) = match stats {
+            Some(stats) if pen.both_wrote() => (
+                format!(
+                    "{}; {} {}",
+                    frames_text(stats, lang),
+                    pen.pen_strokes,
+                    t("strokes of the pen", "traits du stylet")
+                ),
+                judge(
+                    stats.mean_fps >= LIVE_MIN_FPS
+                        && stats.percent(stats.dropped) <= LIVE_DROPPED_MAX_PERCENT,
+                ),
+            ),
+            Some(_) => (invalid(), Verdict::Missed),
+            None => (
+                t("no frame measured", "aucune image mesurée"),
+                Verdict::Missed,
+            ),
+        };
+        rows.push(Row {
+            target: t(
+                &format!(
+                    "Live mode, the tablet and the computer's pen together, {window_en} (>= 60 fps, <= 1 % late frames)"
+                ),
+                &format!(
+                    "Mode direct, la tablette et le stylet de l'ordinateur ensemble, {window_fr} (>= 60 images/s, <= 1 % d'images en retard)"
+                ),
+            ),
+            measured,
+            verdict,
+        });
+    }
+    let (measured, verdict) = if pen.latency.is_empty() {
+        (
+            t(
+                "no point of the pen reached the projector",
+                "aucun point du stylet n'a atteint le vidéoprojecteur",
+            ),
+            Verdict::Missed,
+        )
+    } else if !pen.both_wrote() {
+        (invalid(), Verdict::Missed)
+    } else {
+        let mut sorted = pen.latency.clone();
+        sorted.sort_by(f64::total_cmp);
+        let middle = percentile(&sorted, 0.5);
+        (
+            format!(
+                "{} ms (p95 {} ms, {} points)",
+                num(middle, 1, lang),
+                num(percentile(&sorted, 0.95), 1, lang),
+                sorted.len()
+            ),
+            judge(middle < COMPUTER_PEN_LATENCY_MS),
+        )
+    };
+    rows.push(Row {
+        target: t(
+            "Latency of the computer's pen to the projector (median < 30 ms)",
+            "Latence du stylet de l'ordinateur au vidéoprojecteur (médiane < 30 ms)",
+        ),
+        measured,
+        verdict,
+    });
     rows
 }
 
@@ -844,7 +975,7 @@ pub fn command(args: &[&str], root: &Path) -> ExitCode {
         measures.exe_bytes = fs::metadata(&exe).ok().map(|m| m.len());
     }
 
-    let harness: Vec<&str> = ["start", "library", "live", "touchup"]
+    let harness: Vec<&str> = ["start", "library", "live", "touchup", "pen"]
         .into_iter()
         .filter(|p| wanted(&only, p))
         .collect();
@@ -1044,6 +1175,7 @@ mod tests {
                 removed_per_delete: 100.0,
                 edit_cost: None,
             }),
+            live_pen: None,
             export: Some(Export {
                 frames: 3600,
                 seconds: 47.3,
@@ -1160,6 +1292,114 @@ mod tests {
         none.touch_up.as_mut().unwrap().edits = 0;
         assert_eq!(touch_up(&none).verdict, Missed);
         assert_eq!(touch_up(&measures()).verdict, Ok);
+    }
+
+    fn pen() -> LivePen {
+        LivePen {
+            control: Some(steady(16.7, 480)),
+            presentation: Some(steady(16.7, 480)),
+            strokes: (300, 312),
+            pen_strokes: 5,
+            latency: vec![12.0, 14.0, 18.0, 16.0, 40.0],
+        }
+    }
+
+    fn pen_rows(pen: LivePen, lang: Lang) -> Vec<Row> {
+        let m = Measures {
+            live_pen: Some(pen),
+            ..Measures::default()
+        };
+        rows(&m, lang)
+    }
+
+    #[test]
+    fn live_mode_with_the_computer_pen_is_judged_per_window_and_by_its_latency() {
+        use Verdict::*;
+        let table = pen_rows(pen(), Lang::En);
+        assert_eq!(table.len(), 3);
+        assert!(table[0].target.contains("together, control window"));
+        assert!(table[1].target.contains("together, projector"));
+        assert!(table[2].target.starts_with("Latency of the computer's pen"));
+        assert_eq!(
+            table.iter().map(|r| r.verdict).collect::<Vec<_>>(),
+            [Ok, Ok, Ok]
+        );
+        assert!(table[0].measured.ends_with("; 5 strokes of the pen"));
+        // p95 of 12, 14, 16, 18, 40: 18 + 0.8 x 22.
+        assert_eq!(table[2].measured, "16.0 ms (p95 35.6 ms, 5 points)");
+
+        // One window drops frames: that row only.
+        let mut jerky = pen();
+        let mut intervals = vec![16.7; 95];
+        intervals.extend([40.0; 5]);
+        jerky.presentation = FrameStats::of(&intervals);
+        let verdicts: Vec<Verdict> = pen_rows(jerky, Lang::En)
+            .iter()
+            .map(|r| r.verdict)
+            .collect();
+        assert_eq!(verdicts, [Ok, Missed, Ok]);
+
+        // The median latency at 30 ms or more misses.
+        let mut slow = pen();
+        slow.latency = vec![29.0, 31.0, 35.0];
+        assert_eq!(pen_rows(slow, Lang::En)[2].verdict, Missed);
+
+        // The tablet wrote nothing besides the pen's strokes, or the pen's points never reached the projector: the
+        // measure says nothing.
+        let mut tablet_quiet = pen();
+        tablet_quiet.strokes = (300, 305);
+        let quiet = pen_rows(tablet_quiet, Lang::En);
+        assert!(quiet.iter().all(|r| r.verdict == Missed));
+        assert!(quiet[0].measured.starts_with("invalid"));
+        assert!(quiet[2].measured.starts_with("invalid"));
+        let mut unseen = pen();
+        unseen.latency.clear();
+        let unseen = pen_rows(unseen, Lang::En);
+        assert!(unseen.iter().all(|r| r.verdict == Missed));
+        assert!(unseen[2].measured.starts_with("no point"));
+        let mut no_pen = pen();
+        no_pen.pen_strokes = 0;
+        assert!(
+            pen_rows(no_pen, Lang::En)
+                .iter()
+                .all(|r| r.verdict == Missed)
+        );
+        let mut no_frames = pen();
+        no_frames.control = None;
+        let rows = pen_rows(no_frames, Lang::En);
+        assert_eq!(rows[0].verdict, Missed);
+        assert!(rows[0].measured.starts_with("no frame"));
+
+        let french = pen_rows(pen(), Lang::Fr);
+        assert!(french[0].target.starts_with(
+            "Mode direct, la tablette et le stylet de l'ordinateur ensemble, fenêtre de commande"
+        ));
+        assert!(french[1].target.contains("ensemble, vidéoprojecteur"));
+        assert_eq!(
+            french[2].target,
+            "Latence du stylet de l'ordinateur au vidéoprojecteur (médiane < 30 ms)"
+        );
+        assert_eq!(french[2].measured, "16,0 ms (p95 35,6 ms, 5 points)");
+        assert!(french[0].measured.contains(" ; 5 traits du stylet"));
+    }
+
+    #[test]
+    fn the_harness_output_of_the_pen_is_read() {
+        let json = r#"{"livePen":{"controlIntervals":[16,17,16],"presentationIntervals":[16,16],
+            "strokesBefore":40,"strokesAfter":52,"penStrokes":4,"computerLatency":[11.5,12,null,13],
+            "measuredMs":8000}}"#;
+        let mut m = Measures::default();
+        parse_harness(json, &mut m).unwrap();
+        let pen = m.live_pen.unwrap();
+        assert_eq!(pen.control.unwrap().frames, 3);
+        assert_eq!(pen.presentation.unwrap().frames, 2);
+        assert_eq!((pen.strokes, pen.pen_strokes), ((40, 52), 4));
+        assert_eq!(pen.latency, vec![11.5, 12.0, 13.0]);
+        // An older harness has no such part: no row.
+        let mut m = Measures::default();
+        parse_harness(r#"{"live":{"intervals":[16]}}"#, &mut m).unwrap();
+        assert!(m.live_pen.is_none());
+        assert!(PARTS.contains(&"pen"));
     }
 
     #[test]

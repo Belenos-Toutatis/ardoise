@@ -1534,68 +1534,6 @@ select {
   font-size: 0.875rem;
 }
 
-.layers {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.layer {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.2rem 0.3rem;
-  border: 1px solid transparent;
-  border-radius: 6px;
-}
-
-.layer.active {
-  border-color: var(--accent);
-  background: var(--surface-2);
-}
-
-.layer .name {
-  flex: 1;
-  min-width: 0;
-  padding: 0.15rem 0.35rem;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 0.875rem;
-}
-
-.layer .name:hover,
-.layer .name:focus {
-  border-color: var(--border);
-  background: var(--surface);
-}
-
-.layer .icon {
-  width: 1.6rem;
-  height: 1.6rem;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-}
-
-.layer .icon:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.layer .icon:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
 .editor-dialog-backdrop {
   position: absolute;
   inset: 0;

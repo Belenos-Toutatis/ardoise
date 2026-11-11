@@ -1,6 +1,7 @@
 /**
  * Hit tests: drawing order, lasso selection, click selection, eraser contact. Only strokes on
- * visible layers can be hit; a stroke whose layer has no entry is drawn (and hit) on top.
+ * visible layers can be hit; a stroke whose layer has no entry is drawn (and hit) on top. Given a
+ * `Hittable` made by `onLayer`, only the strokes of that one layer can be hit.
  */
 import type { Note, Stroke } from '../note';
 import {
@@ -16,16 +17,35 @@ import {
 } from './geometry';
 
 /** What the hit tests read of a page: the editor's note, or the live session's strokes and layers. */
-export type Hittable = Pick<Note, 'strokes' | 'layers'>;
+export type Hittable = Pick<Note, 'strokes' | 'layers'> & {
+  /** Only this layer's strokes can be hit (the chosen layer: pen, eraser and selection act on it). */
+  only?: number;
+};
 
-/** A stroke on a layer index without entry counts as visible. */
+/** The page as the chosen layer sees it: the pen, the eraser and the selection touch that layer's strokes alone. */
+export function onLayer(note: Hittable, layer: number): Hittable {
+  return { strokes: note.strokes, layers: note.layers, only: layer };
+}
+
+/**
+ * Whether a stroke on `layer` can be hit. A layer index without entry counts as visible, unless
+ * the hit is restricted to one layer (`only`): then the layer must be that one, and it must show.
+ */
 export function layerVisible(note: Hittable, layer: number): boolean {
+  if (note.only !== undefined) return layer === note.only && note.layers[layer]?.visible === true;
   const entry = note.layers[layer];
   return entry ? entry.visible : true;
 }
 
 /** Indices of the visible strokes, in drawing order: layer by layer, then file order. */
 export function drawingOrder(note: Hittable): number[] {
+  if (note.only !== undefined) {
+    const order: number[] = [];
+    note.strokes.forEach((stroke, i) => {
+      if (layerVisible(note, stroke.layer)) order.push(i);
+    });
+    return order;
+  }
   const buckets: number[][] = note.layers.map(() => []);
   const orphans: number[] = [];
   note.strokes.forEach((stroke, i) => {

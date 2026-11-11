@@ -18,6 +18,17 @@
    * deselects first. Undo and Redo (Ctrl+Z, Ctrl+Y) go through the page's history: a delete, a change
    * of colour, « Clear the page », never what the tablet wrote. The selection is dropped when the page
    * or its revision changes, and with the Select tool when the session is over.
+   *
+   * Correcting during live (M14, SPEC §4.2 « Corriger pendant le direct »): the toolbar's style group is the
+   * tablet's; the computer's group has Select (V) and Pen (P), exclusive or neither (then the preview moves
+   * the projected area), its ink (`ComputerStyle`, remembered on this PC), Undo and Redo. With Pen the
+   * computer's pen or mouse writes on the chosen layer; its eraser end erases strokes of that layer whatever
+   * the tool (`LiveComputer`: one queue for every command acting on the page, so that they reach Rust in
+   * order). The side panel opens on the layers zone (`LayersZone`, `live_layers`): a click chooses the layer
+   * the computer acts on, the tablet icon the one the tablet writes on. Choosing another layer drops the
+   * selection, hiding a layer drops its strokes from it; Ctrl+Z waits for a gesture under way to end (and goes
+   * once the stroke just written is recorded); Esc drops it first. A merge, which Ctrl+Z cannot undo, is asked
+   * first. « Undo the clearing » goes through the same queue, after the strokes and erasings asked for before.
    */
   import { onMount, untrack } from 'svelte';
   import { api, errorMessage, type AppState } from '../../lib/api';
@@ -26,7 +37,10 @@
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { TOOLS, loadInk, type Ink, type Tool } from '../../lib/ink';
   import { LatencyRecorder, exposeLatency } from '../../lib/latency';
-  import type { LiveCommandKind, LiveStopped, LiveStyle, LiveViewState, MonitorInfo, SheetFork } from '../../lib/live';
+  import type { LiveCommandKind, LiveLayerOp, LiveStopped, LiveStyle, LiveViewState, MonitorInfo, SheetFork } from '../../lib/live';
+  import { LiveComputer } from '../../lib/live-computer';
+  import { loadComputerStyle, saveComputerStyle } from '../../lib/live-computer-style';
+  import { computerErrorText } from '../../lib/live-errors';
   import {
     changeView,
     runKeyAction,
@@ -54,6 +68,8 @@
   import ShareButton from '../share/ShareButton.svelte';
   import OrientationIcon from '../tablet/OrientationIcon.svelte';
   import { NarrationRecorder } from '../narration/recorder.svelte';
+  import LayersZone from '../layers/LayersZone.svelte';
+  import ComputerStyle from './ComputerStyle.svelte';
   import LiveCanvas from './LiveCanvas.svelte';
 
   let {
@@ -100,6 +116,7 @@
     'board',
     'laser',
     'select',
+    'pen',
     'delete',
     'undo',
     'zoom',
@@ -116,6 +133,24 @@
   const selection = new LiveSelection();
   const latency = new LatencyRecorder();
   const recorder = new NarrationRecorder();
+  /** The computer's ink (M14): this PC's, remembered in the browser's storage. */
+  let computerStyle = $state.raw<LiveStyle>(loadComputerStyle());
+  /** The computer's ink panel shows. */
+  let computerStyleOpen = $state(false);
+  /** The Pen tool is on (exclusive with Select). */
+  let penOn = $state(false);
+  /** Width last used per tool by the computer, in this session. */
+  const computerWidths: Partial<Record<Tool, number>> = {};
+  let canvas = $state<ReturnType<typeof LiveCanvas>>();
+  /** The computer's queue, pen and eraser: every command acting on the page goes through its queue. */
+  const computer = new LiveComputer({
+    live,
+    commands: api,
+    style: () => computerStyle,
+    onerror: (error, from) => (notice = computerErrorText(error, from)),
+  });
+  /** A merge of the layers zone waiting for its answer (Ctrl+Z cannot undo it). */
+  let mergeAsk = $state.raw<{ layer: number; upper: string; lower: string; reveals: boolean } | null>(null);
 
   let ink = $state.raw<Ink | null>(null);
   let starting = $state(true);
@@ -162,6 +197,8 @@
   const widths: Partial<Record<Tool, number>> = {};
 
   const sessionState = $derived(live.ready ? live.state : 'idle');
+  /** The computer's tool on the preview. */
+  const tool = $derived(selection.active ? 'select' : penOn ? 'pen' : 'none');
   const selectedMonitor = $derived(monitors.find((m) => m.key === monitorKey) ?? null);
   const aspect = $derived(aspectOf(live.presentation ?? selectedMonitor));
   const microphone = $derived(chosenMicrophone === undefined ? app.microphone : chosenMicrophone);
@@ -211,6 +248,7 @@
     live,
     selection,
     commands: api,
+    queue: computer.queue,
     onerror: (error) => (notice = errorMessage(error)),
     onhistory: dropUndo,
   };
@@ -220,15 +258,31 @@
     selection.follow(live);
   });
 
-  // The Select tool belongs to a running session: the edits are refused (`liveNotRunning`) at idle.
+  // The Select and Pen tools belong to a running session: the edits are refused (`liveNotRunning`) at idle.
   $effect(() => {
-    if (sessionState === 'idle') untrack(() => selection.toggle(false));
+    if (sessionState === 'idle') {
+      untrack(() => {
+        selection.toggle(false);
+        penOn = false;
+      });
+    }
+  });
+
+  // The selection belongs to the chosen layer: choosing another one drops it (M14).
+  $effect(() => {
+    void live.computerLayer;
+    untrack(() => selection.clear());
   });
 
   // The offer concerns the page that was cleared: it goes when the page changes.
   $effect(() => {
     void live.pageIndex;
     dropUndo();
+  });
+
+  // Nothing left to undo (a merge dropped the page's history): the clearing cannot come back either.
+  $effect(() => {
+    if (!live.canUndo) untrack(dropUndo);
   });
 
   onMount(() => {
@@ -287,6 +341,7 @@
       destroyed = true;
       clearInterval(timer);
       clearTimeout(undoTimer);
+      computer.dispose();
       live.close();
       recorder.dispose();
       // A recording is never thrown away silently: the pages get the sound recorded so far. (The
@@ -465,10 +520,12 @@
     undoClear = false;
   }
 
+  /** « Undo the clearing »: through the queue, after the strokes and erasings asked for before it. */
   async function undoClearing() {
     dropUndo();
+    computer.historyQueued();
     try {
-      if (!(await api.liveRestoreCleared())) notice = t('live.clearUndoFailed');
+      if (!(await computer.queue.run(() => api.liveRestoreCleared()))) notice = t('live.clearUndoFailed');
     } catch (error) {
       notice = errorMessage(error);
     }
@@ -515,14 +572,74 @@
   }
 
   function undoEdit(again = false) {
-    if (again ? !live.canRedo : !live.canUndo) return;
+    // A gesture under way commits after the step it would undo: Ctrl+Z waits for it to end.
+    if (computer.busy) return;
+    // The stroke just written is a step once its `end` is recorded: the undo goes after it in the queue.
+    if (again ? !live.canRedo : !live.canUndo && !computer.strokeEnding) return;
+    computer.historyQueued();
     void stepHistory(touchUp, again);
+  }
+
+  /** The Select tool on or off; on, the Pen tool goes off. */
+  function toggleSelect(on = !selection.active) {
+    selection.toggle(on);
+    if (on) penOn = false;
+  }
+
+  /** The Pen tool on or off; on, the Select tool goes off, and with it the selection. */
+  function togglePen(on = !penOn) {
+    penOn = on;
+    if (on) selection.toggle(false);
+  }
+
+  /** The computer's ink changed in its panel: kept, and remembered on this PC. A new tool takes its last width. */
+  function setComputerStyle(next: LiveStyle) {
+    let style = next;
+    if (next.tool !== computerStyle.tool) {
+      computerWidths[computerStyle.tool] = computerStyle.width;
+      style = { ...next, width: computerWidths[next.tool] ?? DEFAULT_WIDTHS[next.tool] };
+    }
+    computerStyle = style;
+    saveComputerStyle(style);
+  }
+
+  /** An act in the layers zone: through the computer's queue, after its strokes and edits; a refusal is told. */
+  function layerOp(op: LiveLayerOp) {
+    notice = null;
+    const pageIndex = live.pageIndex;
+    computer.queue.run(() => api.liveLayers(pageIndex, op)).catch((error: unknown) => (notice = computerErrorText(error, 'layers')));
+  }
+
+  /**
+   * « ⤓ »: asks first. Ctrl+Z cannot undo a merge during live (it drops the page's history), and merging a shown
+   * layer into a hidden one shows the hidden ink at once, on the projector and on the share.
+   */
+  function askMerge(layer: number) {
+    const upper = live.layers[layer];
+    const lower = live.layers[layer - 1];
+    if (!upper || !lower) return;
+    mergeAsk = { layer, upper: upper.name, lower: lower.name, reveals: !lower.visible && upper.visible };
+  }
+
+  function confirmMerge() {
+    const ask = mergeAsk;
+    mergeAsk = null;
+    if (ask) layerOp({ kind: 'merge', layer: ask.layer });
+  }
+
+  /** The pen came down on a hidden layer: nothing is written, and the window says why. */
+  function penBlocked() {
+    const name = live.layers[live.computerLayer]?.name ?? '';
+    notice = t('layers.warn.chosenHidden', { name });
   }
 
   function runEditKey(action: LiveEditKeyAction) {
     switch (action.kind) {
       case 'select':
-        selection.toggle();
+        toggleSelect();
+        break;
+      case 'pen':
+        togglePen();
         break;
       case 'deselect':
         selection.clear();
@@ -601,7 +718,20 @@
 
   function onkeydown(e: KeyboardEvent) {
     // The question about ending live mode has its own keys.
-    if (e.defaultPrevented || confirmLeave || confirmQuit || share.panelOpen) return;
+    if (e.defaultPrevented || confirmLeave || confirmQuit || mergeAsk || share.panelOpen) return;
+    if (e.key === 'Escape') {
+      // Esc drops a gesture of the computer's pen or eraser under way before anything else, then closes
+      // the computer's ink panel.
+      if (canvas?.cancelGesture() || computer.cancel()) {
+        e.preventDefault();
+        return;
+      }
+      if (computerStyleOpen) {
+        e.preventDefault();
+        computerStyleOpen = false;
+        return;
+      }
+    }
     // Touching up first: V, undo and redo, and Delete and Esc while something is selected. Only while
     // a session runs, like the Select button (the edits are refused once it is over).
     const edit = live.ready && sessionState !== 'idle' ? liveEditKeyAction(e, selection.any) : null;
@@ -618,7 +748,7 @@
 
   /** Space is "next page" already on key down: a focused button must not also be pressed on key up. */
   function onkeyup(e: KeyboardEvent) {
-    if (isSpaceKey(e.key) && !confirmLeave && !confirmQuit && !share.panelOpen && !isTypingTarget(e.target)) e.preventDefault();
+    if (isSpaceKey(e.key) && !confirmLeave && !confirmQuit && !mergeAsk && !share.panelOpen && !isTypingTarget(e.target)) e.preventDefault();
   }
 
   const mm = (units: number) => (units / 100).toFixed(units < 100 ? 2 : 1);
@@ -737,7 +867,8 @@
   {/if}
 
   <div class="live-toolbar" role="toolbar" aria-label={t('live.toolbar')}>
-    <div class="group" role="group" aria-label={t('live.style')}>
+    <div class="group" role="group" aria-labelledby="live-tablet-style">
+      <span class="group-label" id="live-tablet-style">{t('live.tabletStyle')}</span>
       <label class="group">
         <span class="label">{t('live.tool')}</span>
         <select value={live.style.tool} onchange={(e) => setTool(e.currentTarget.value as Tool)}>
@@ -798,15 +929,6 @@
     </div>
 
     <div class="group" role="group">
-      <button
-        type="button"
-        class="button small-button"
-        data-action="new-layer"
-        title={t('live.layer.current', { n: live.layer + 1, count: Math.max(1, live.layers.length) })}
-        onclick={() => command('newLayer')}
-      >
-        {t('live.layer.new')}
-      </button>
       <button type="button" class="button small-button" data-action="clear-page" onclick={() => command('clearPage')}>
         {t('live.clear')}
       </button>
@@ -833,7 +955,8 @@
       </button>
     </div>
 
-    <div class="group" role="group" aria-label={t('live.select.label')} data-slot="touch-up">
+    <div class="group" role="group" aria-labelledby="live-computer-tools" data-slot="touch-up">
+      <span class="group-label" id="live-computer-tools">{t('live.computer.label')}</span>
       <button
         type="button"
         class="button small-button toggle"
@@ -842,10 +965,29 @@
         aria-pressed={selection.active}
         title={t('live.select.hint')}
         disabled={sessionState === 'idle'}
-        onclick={() => selection.toggle()}
+        onclick={() => toggleSelect()}
       >
         {t('live.select.toggle')}
       </button>
+      <button
+        type="button"
+        class="button small-button toggle"
+        data-action="pen"
+        class:active={penOn}
+        aria-pressed={penOn}
+        title={t('live.pen.hint')}
+        disabled={sessionState === 'idle'}
+        onclick={() => togglePen()}
+      >
+        {t('live.pen.toggle')}
+      </button>
+      <ComputerStyle
+        style={computerStyle}
+        colors={COLORS}
+        disabled={sessionState === 'idle'}
+        bind:open={computerStyleOpen}
+        onchange={setComputerStyle}
+      />
       <button
         type="button"
         class="button small-button"
@@ -900,6 +1042,7 @@
   <div class="live-main">
     <div class="live-preview">
       <LiveCanvas
+        bind:this={canvas}
         {live}
         {ink}
         mode="preview"
@@ -907,9 +1050,11 @@
         {latency}
         label={t('live.preview.label', { page: `${live.pageIndex + 1} / ${live.pageCount}` })}
         onview={setView}
-        selecting={selection.active}
+        {tool}
         selection={selection.indices}
         onselect={(picked, combine) => selection.choose(live, picked, combine)}
+        {computer}
+        onblocked={penBlocked}
       />
       {#if selection.any}
         <div class="select-bar" role="toolbar" aria-label={t('live.select.bar')} data-slot="select-bar">
@@ -935,6 +1080,21 @@
     </div>
 
     <aside class="live-side">
+      <LayersZone
+        where="live"
+        layers={live.layers}
+        chosen={live.computerLayer}
+        tablet={live.layer}
+        disabled={sessionState === 'idle'}
+        onchoose={(layer) => layerOp({ kind: 'computer', layer })}
+        ontablet={(layer) => layerOp({ kind: 'tablet', layer })}
+        onvisible={(layer, visible) => layerOp({ kind: 'visible', layer, visible })}
+        onrename={(layer, name) => layerOp({ kind: 'rename', layer, name })}
+        onmove={(from, to) => layerOp({ kind: 'move', from, to })}
+        onmerge={askMerge}
+        onadd={() => layerOp({ kind: 'add' })}
+      />
+
       <section class="side-block" aria-labelledby="live-projection-title">
         <h3 id="live-projection-title">{t('live.projection.title')}</h3>
         {#if monitorsLoaded && monitors.length === 0}
@@ -1038,6 +1198,9 @@
         {#if selection.active}
           <p class="muted small" data-slot="select-hint">{t('live.select.help')}</p>
         {/if}
+        {#if penOn}
+          <p class="muted small" data-slot="pen-hint">{t('live.pen.help')}</p>
+        {/if}
       </section>
 
       <section class="side-block" aria-labelledby="live-keys-title">
@@ -1069,6 +1232,25 @@
           }}
         >
           {t('live.leave.confirm')}
+        </button>
+      </div>
+    </Modal>
+  {/if}
+
+  {#if mergeAsk}
+    <Modal title={t('live.merge.title', { upper: mergeAsk.upper, lower: mergeAsk.lower })} role="alertdialog" onclose={() => (mergeAsk = null)}>
+      <div data-slot="merge-question">
+        <p>{t('live.merge.noUndo')}</p>
+        {#if mergeAsk.reveals}
+          <p data-slot="merge-reveals">{t('live.merge.hidden', { lower: mergeAsk.lower })}</p>
+        {/if}
+      </div>
+      <div class="actions">
+        <button type="button" class="button primary" data-autofocus data-action="merge-cancel" onclick={() => (mergeAsk = null)}>
+          {t('live.merge.cancel')}
+        </button>
+        <button type="button" class="button danger" data-action="merge-confirm" onclick={confirmMerge}>
+          {t('live.merge.confirm')}
         </button>
       </div>
     </Modal>
@@ -1196,6 +1378,12 @@
   .label {
     color: var(--muted);
     font-size: 0.875rem;
+  }
+
+  .group-label {
+    color: var(--muted);
+    font-size: 0.875rem;
+    font-weight: 600;
   }
 
   .small-button {

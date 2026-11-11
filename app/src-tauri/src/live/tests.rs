@@ -25,10 +25,12 @@ use super::hub::{
     save_wait,
 };
 use super::model::{
-    ForkReason, ForkedSheet, LiveBatch, LiveCommand, LiveCommandKind, LiveEvent, LiveMark,
-    LivePoint, LiveSessionState, LiveStyle, LiveViewState, MAX_MARK_POINTS, MAX_MARKS,
+    ForkReason, ForkedSheet, LiveBatch, LiveCommand, LiveCommandKind, LiveEvent, LiveMark, LivePen,
+    LivePoint, LiveSessionState, LiveStroke, LiveStyle, LiveViewState, MAX_MARK_POINTS, MAX_MARKS,
     MAX_MARKS_POINTS, MarkPoint,
 };
+use super::pen::tests::RED_PEN;
+use super::pen::{ComputerPenInput, ComputerSample};
 use super::session::LiveSession;
 use crate::commands::CommandError;
 use crate::library::tests::{library, sample_note};
@@ -1238,6 +1240,7 @@ fn the_json_has_the_shapes_of_live_ts() {
             "canRedo",
             "canTurnPage",
             "canUndo",
+            "computerLayer",
             "hover",
             "layer",
             "orientation",
@@ -1258,6 +1261,7 @@ fn the_json_has_the_shapes_of_live_ts() {
         (json!(0), json!(1))
     );
     assert_eq!(snapshot["layer"], 0);
+    assert_eq!(snapshot["computerLayer"], 0);
     assert_eq!(snapshot["canTurnPage"], true);
     assert_eq!(snapshot["hover"], Value::Null);
     assert_eq!(snapshot["presentation"], Value::Null);
@@ -2020,3 +2024,372 @@ fn a_page_whose_write_was_slow_is_written_later_and_at_once_when_it_is_left() {
     assert!(begun.elapsed() < config().save_interval * 6);
     hub.stop().unwrap();
 }
+
+// --- The computer's pen (M14) ------------------------------------------------------------------
+
+/// A sample of the computer's pen at (`x`, 100), taken when the call leaves.
+fn computer_sample(x: f64) -> ComputerSample {
+    ComputerSample {
+        x,
+        y: 100.0,
+        p: 0.5,
+        ms: 0.0,
+    }
+}
+
+fn computer_points(stroke: u32, xs: &[f64]) -> ComputerPenInput {
+    ComputerPenInput::Points {
+        stroke,
+        samples: xs.iter().map(|&x| computer_sample(x)).collect(),
+        now: 0.0,
+    }
+}
+
+/// A tablet event's pen and points.
+fn pen_points(event: &LiveEvent) -> Option<(LivePen, Option<u32>, Vec<f32>)> {
+    match event {
+        LiveEvent::StrokeStart {
+            stroke, pen, id, ..
+        } => Some((*pen, *id, stroke.points.iter().map(|p| p.x).collect())),
+        LiveEvent::Points {
+            points, pen, id, ..
+        } => Some((*pen, *id, points.iter().map(|p| p.x).collect())),
+        _ => None,
+    }
+}
+
+#[test]
+fn the_queue_never_merges_the_points_of_two_pens() {
+    let point = |x: f32| LivePoint {
+        x,
+        y: 0.0,
+        p: 1.0,
+        t: 0,
+        recv: 0.0,
+    };
+    let start = |pen: LivePen, id: Option<u32>, x: f32| LiveEvent::StrokeStart {
+        page_index: 0,
+        stroke: LiveStroke {
+            tool: Tool::Ballpoint,
+            color: Rgba::BLACK,
+            width: 60.0,
+            layer: 0,
+            points: vec![point(x)],
+        },
+        pen,
+        id,
+        hidden: false,
+    };
+    let points = |pen: LivePen, id: Option<u32>, x: f32, hidden: bool| LiveEvent::Points {
+        page_index: 0,
+        points: vec![point(x)],
+        pen,
+        id,
+        hidden,
+    };
+    let (tablet, computer) = (LivePen::Tablet, LivePen::Computer);
+    let mut queue = Vec::new();
+    for event in [
+        start(tablet, None, 1.0),
+        points(tablet, None, 2.0, false),
+        start(computer, Some(1), 10.0),
+        points(computer, Some(1), 11.0, false),
+        points(tablet, None, 3.0, false),
+        points(tablet, None, 4.0, false),
+        points(computer, Some(1), 12.0, false),
+        points(computer, Some(2), 20.0, false),
+        points(computer, Some(2), 21.0, true),
+        LiveEvent::History {
+            page_index: 0,
+            can_undo: true,
+            can_redo: false,
+        },
+        LiveEvent::History {
+            page_index: 0,
+            can_undo: false,
+            can_redo: false,
+        },
+        LiveEvent::StrokeCancel {
+            page_index: 0,
+            pen: computer,
+            id: Some(2),
+            hidden: false,
+        },
+        LiveEvent::StrokeCancel {
+            page_index: 0,
+            pen: computer,
+            id: Some(2),
+            hidden: false,
+        },
+    ] {
+        super::hub::enqueue(&mut queue, event);
+    }
+    let merged: Vec<_> = queue.iter().filter_map(pen_points).collect();
+    assert_eq!(
+        merged,
+        [
+            (tablet, None, vec![1.0, 2.0]),
+            (computer, Some(1), vec![10.0, 11.0]),
+            (tablet, None, vec![3.0, 4.0]),
+            (computer, Some(1), vec![12.0]),
+            (computer, Some(2), vec![20.0]),
+            (computer, Some(2), vec![21.0]),
+        ]
+    );
+    assert_eq!(queue.len(), 10, "history and cancels are never merged");
+}
+
+#[test]
+fn a_window_gets_both_strokes_in_order_and_a_late_one_both_strokes_so_far() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(HubConfig {
+        // Everything falls in a few batches: what the queue merges is what is checked.
+        flush_interval: Duration::from_millis(40),
+        save_interval: Duration::from_secs(60),
+    });
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    send(&mut sink, &[pen(5000, 100, 800), pen(5010, 100, 800)]);
+    let begin = ComputerPenInput::Begin {
+        stroke: 1,
+        page_index: 0,
+        style: LiveStyle::default(),
+        samples: vec![computer_sample(100.0)],
+        now: 0.0,
+    };
+    assert!(hub.computer_pen(begin).unwrap());
+    send(&mut sink, &[pen(5020, 100, 800)]);
+    assert!(
+        hub.computer_pen(computer_points(1, &[110.0, 120.0]))
+            .unwrap()
+    );
+    send(&mut sink, &[pen(5030, 100, 800)]);
+
+    // A window opened now starts from both strokes so far.
+    let late = Arc::new(Window::default());
+    hub.subscribe("presentation", late.clone());
+    assert!(hub.computer_pen(computer_points(1, &[130.0])).unwrap());
+    send(&mut sink, &[pen(5040, 100, 0)]);
+    let end = ComputerPenInput::End {
+        stroke: 1,
+        samples: Vec::new(),
+        now: 0.0,
+    };
+    assert!(hub.computer_pen(end).unwrap());
+    wait_until("both ends in both windows", || {
+        [&window, &late].iter().all(|w| {
+            w.events()
+                .iter()
+                .filter(|e| matches!(e, LiveEvent::StrokeEnd { .. }))
+                .count()
+                == 2
+        })
+    });
+    let xs = |events: &[LiveEvent], wanted: LivePen| -> Vec<f32> {
+        events
+            .iter()
+            .filter_map(pen_points)
+            .filter(|(pen, ..)| *pen == wanted)
+            .flat_map(|(_, _, xs)| xs)
+            .collect()
+    };
+    for w in [&window, &late] {
+        let events = w.events();
+        assert_eq!(
+            xs(&events, LivePen::Tablet),
+            [5000.0, 5010.0, 5020.0, 5030.0]
+        );
+        assert_eq!(xs(&events, LivePen::Computer), [100.0, 110.0, 120.0, 130.0]);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, LiveEvent::History { .. }))
+        );
+    }
+    let events = late.events();
+    assert!(matches!(events[0], LiveEvent::Snapshot { .. }));
+    assert!(matches!(
+        events[1],
+        LiveEvent::StrokeStart {
+            pen: LivePen::Tablet,
+            ..
+        }
+    ));
+    assert!(matches!(
+        events[2],
+        LiveEvent::StrokeStart {
+            pen: LivePen::Computer,
+            id: Some(1),
+            ..
+        }
+    ));
+    // The tablet's stroke ended first: it is first in the page.
+    let strokes = hub.snapshot().page.strokes;
+    assert_eq!(strokes.len(), 2);
+    assert_eq!(strokes[0].points[0].x, 5000.0);
+    hub.stop().unwrap();
+}
+
+/// What a window gets, for the latency of each pen: `sentAt − recv` of every point.
+#[derive(Default)]
+struct PenLatency {
+    tablet: Mutex<Vec<f64>>,
+    computer: Mutex<Vec<f64>>,
+}
+
+impl BatchSink for PenLatency {
+    fn send(&self, batch: LiveBatch) -> Result<(), String> {
+        for event in &batch.events {
+            let (pen, points) = match event {
+                LiveEvent::StrokeStart { stroke, pen, .. } => (*pen, &stroke.points),
+                LiveEvent::Points { points, pen, .. } => (*pen, points),
+                _ => continue,
+            };
+            let samples = match pen {
+                LivePen::Tablet => &self.tablet,
+                LivePen::Computer => &self.computer,
+            };
+            let mut samples = samples.lock().unwrap();
+            samples.extend(points.iter().map(|point| batch.sent_at - point.recv));
+        }
+        Ok(())
+    }
+}
+
+/// Median and 99th percentile of `samples` (sorted here).
+fn median_p99(samples: &mut [f64]) -> (f64, f64) {
+    samples.sort_by(f64::total_cmp);
+    let n = samples.len();
+    assert!(n > 0, "no samples");
+    (samples[n / 2], samples[(n * 99 / 100).min(n - 1)])
+}
+
+/// The tablet bound to under p99 = [`NEVER_SLOWED_P99_MS`] while the computer writes
+/// (docs/design/tablet-live-classroom.md, "The tablet is never slowed"): 3 s of simulated
+/// handwriting streamed in real time on one thread while another sends the computer's strokes,
+/// a call every 4 ms of 8 samples each (strokes of 1.5 s, 0.3 s apart). `cargo test -p ardoise
+/// never_slowed -- --nocapture` prints the figures.
+#[test]
+fn the_tablet_is_never_slowed_by_the_computer_s_pen() {
+    let (_dir, library) = library();
+    let hub = Arc::new(LiveHub::new(HubConfig::default()));
+    let latency = Arc::new(PenLatency::default());
+    hub.subscribe("main", latency.clone());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+
+    let done = Arc::new(AtomicBool::new(false));
+    let computer = {
+        let (hub, done) = (hub.clone(), done.clone());
+        std::thread::spawn(move || {
+            let clock = Instant::now();
+            let ms = || clock.elapsed().as_secs_f64() * 1000.0;
+            let mut calls = 0u32;
+            let mut stroke = 0u32;
+            while !done.load(Ordering::SeqCst) {
+                stroke += 1;
+                let started = Instant::now();
+                let mut first = true;
+                while started.elapsed() < Duration::from_millis(1500)
+                    && !done.load(Ordering::SeqCst)
+                {
+                    let now = ms();
+                    let samples: Vec<ComputerSample> = (0..8)
+                        .map(|i| ComputerSample {
+                            x: 1000.0 + f64::from(calls % 2000) * 5.0 + f64::from(i),
+                            y: 14_000.0,
+                            p: 0.5,
+                            ms: now - 4.0 + f64::from(i) * 0.5,
+                        })
+                        .collect();
+                    let input = if first {
+                        ComputerPenInput::Begin {
+                            stroke,
+                            page_index: 0,
+                            style: RED_PEN,
+                            samples,
+                            now,
+                        }
+                    } else {
+                        ComputerPenInput::Points {
+                            stroke,
+                            samples,
+                            now,
+                        }
+                    };
+                    first = false;
+                    assert!(hub.computer_pen(input).unwrap());
+                    calls += 1;
+                    std::thread::sleep(Duration::from_millis(4));
+                }
+                let end = ComputerPenInput::End {
+                    stroke,
+                    samples: Vec::new(),
+                    now: ms(),
+                };
+                assert!(hub.computer_pen(end).unwrap());
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            (calls, stroke)
+        })
+    };
+
+    let script = ardoise_sim::drawings::live_script(3, A5.width, A5.height);
+    let begin = Instant::now();
+    let mut due = Duration::ZERO;
+    let sample = Duration::from_millis(5);
+    for segment in script.segments() {
+        match segment {
+            ardoise_sim::PenSegment::Near(points) => {
+                let records: Vec<LiveRecord> = points
+                    .iter()
+                    .map(|p| LiveRecord::Pen(*p))
+                    .chain([LiveRecord::ProximityOut])
+                    .collect();
+                for chunk in records.chunks(3) {
+                    due += sample * u32::try_from(chunk.len()).unwrap();
+                    std::thread::sleep((begin + due).saturating_duration_since(Instant::now()));
+                    send(&mut sink, chunk);
+                }
+            }
+            ardoise_sim::PenSegment::Away(pause) => due += *pause,
+        }
+    }
+    done.store(true, Ordering::SeqCst);
+    let (calls, strokes) = computer.join().unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    let mut tablet = latency.tablet.lock().unwrap().clone();
+    let mut computer = latency.computer.lock().unwrap().clone();
+    let snapshot = hub.snapshot();
+    hub.stop().unwrap();
+
+    let (median, p99) = median_p99(&mut tablet);
+    let (computer_median, computer_p99) = median_p99(&mut computer);
+    println!(
+        "tablet with the computer's pen ({calls} calls, {strokes} strokes): {} tablet points, \
+         median {median:.3} ms, p99 {p99:.3} ms, max {:.3} ms; computer points {}, median \
+         {computer_median:.3} ms, p99 {computer_p99:.3} ms",
+        tablet.len(),
+        tablet[tablet.len() - 1],
+        computer.len(),
+    );
+    assert!(
+        tablet.len() > 200 && calls > 300,
+        "{} points, {calls} calls",
+        tablet.len()
+    );
+    // Both pens wrote on the page.
+    let pens: Vec<Tool> = snapshot.page.strokes.iter().map(|s| s.tool).collect();
+    assert!(pens.contains(&Tool::Ballpoint) && pens.contains(&Tool::FeltTip));
+    assert!(tablet[0] >= 0.0);
+    assert!(median < 10.0, "median {median} ms");
+    assert!(p99 < NEVER_SLOWED_P99_MS, "99th percentile {p99} ms");
+}
+
+/// The bound of [`the_tablet_is_never_slowed_by_the_computer_s_pen`], in the unoptimised test
+/// build, set from the first runs (2026-11-11, Windows 11, other builds running meanwhile): p99 4.5
+/// to 4.9 ms, max 5.3 ms, median 2.0 to 2.2 ms, against a median of 0.06 ms for the tablet alone
+/// (`hub_latency`). The difference is the batching (SPEC §6.2: at most a batch every 4 ms, which
+/// the computer's calls now keep busy), not the lock: a point waits at most one flush interval. Twice
+/// the p99 measured: above it, something waited under the lock.
+const NEVER_SLOWED_P99_MS: f64 = 10.0;

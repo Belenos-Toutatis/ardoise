@@ -310,12 +310,12 @@ describe('note editor', () => {
   });
 
   it('hides and shows layers, and draws on a new layer', async () => {
-    const { paths, input, button, drag } = await render('Cours de physique');
+    const { paths, button, drag } = await render('Cours de physique');
     expect(paths()).toHaveLength(2);
-    input('Afficher « Calque 1 »').click();
+    button('Masquer « Calque 1 »').click();
     await tick();
     expect(paths()).toHaveLength(0);
-    input('Afficher « Calque 1 »').click();
+    button('Afficher « Calque 1 »').click();
     await tick();
     expect(paths()).toHaveLength(2);
 
@@ -323,10 +323,10 @@ describe('note editor', () => {
     await tick();
     await drag(line(5000, 15000, 15000));
     expect(paths()).toHaveLength(3);
-    input('Afficher « Calque 2 »').click();
+    button('Masquer « Calque 2 »').click();
     await tick();
     expect(paths()).toHaveLength(2);
-    input('Afficher « Calque 1 »').click();
+    button('Masquer « Calque 1 »').click();
     await tick();
     expect(paths()).toHaveLength(0);
   });
@@ -970,11 +970,11 @@ describe('note editor', () => {
   });
 
   it('keeps crops from deleting strokes on hidden layers', async () => {
-    const { path, button, input, drag, onsaved } = await render('Liste de courses');
+    const { path, button, drag, onsaved } = await render('Liste de courses');
     button('+ Ajouter un calque').click();
     await tick();
     await drag(line(20000, 25000, 18000));
-    input('Afficher « Calque 2 »').click();
+    button('Masquer « Calque 2 »').click();
     await tick();
     button('Recadrer autour du contenu').click();
     await tick();
@@ -985,30 +985,71 @@ describe('note editor', () => {
     expect(stored.strokes.map((s) => s.layer)).toEqual([0, 1]);
   });
 
-  it('never draws on a hidden layer', async () => {
-    const { target, paths, input, button, drag } = await render('Cours de physique');
+  it('never draws on a hidden layer: it stays chosen, the zone warns and the pen says why', async () => {
+    const { target, paths, button, drag } = await render('Cours de physique');
+    const chosen = () => target.querySelector<HTMLElement>('li.layer[data-chosen="true"]')?.dataset.layer;
+    const warning = () => target.querySelector<HTMLElement>('[data-slot="layer-warning"]');
     button('+ Ajouter un calque').click();
     await tick();
-    // Hiding the active layer moves drawing to the visible one below.
-    input('Afficher « Calque 2 »').click();
+    expect(chosen()).toBe('1');
+    // Hiding the chosen layer does not move the choice.
+    button('Masquer « Calque 2 »').click();
     await tick();
-    expect(input('Dessiner sur « Calque 1 »').checked).toBe(true);
+    expect(chosen()).toBe('1');
+    expect(warning()?.dataset.kind).toBe('chosenHidden');
+    expect(warning()?.textContent).toContain('Le calque choisi, « Calque 2 », est masqué');
+    // The pen draws nothing and says why.
     await drag(line(5000, 15000, 15000));
-    expect(paths()).toHaveLength(3);
-    // Nothing visible: the pen draws nothing and says why.
-    input('Afficher « Calque 1 »').click();
+    expect(paths()).toHaveLength(2);
+    expect(target.textContent).toContain('affichez-le ou choisissez-en un autre pour dessiner');
+    // Choosing the visible layer below gives the pen back, and the warning goes.
+    button('Agir sur « Calque 1 »').click();
     await tick();
+    expect(warning()).toBeNull();
     await drag(line(5000, 15000, 18000));
-    expect(paths()).toHaveLength(0);
-    expect(target.textContent).toContain('Le calque actif est masqué');
-    input('Afficher « Calque 1 »').click();
+    expect(paths()).toHaveLength(3);
+    // Showing the hidden layer gives the same state back.
+    button('Afficher « Calque 2 »').click();
     await tick();
     expect(paths()).toHaveLength(3);
+    expect(chosen()).toBe('0');
   });
 
-  it('lets Space toggle a checkbox, and pans elsewhere', async () => {
-    const { svg, input } = await render('Cours de physique');
-    const box = input('Afficher « Calque 1 »');
+  it('shows the layers zone in place of the layers panel', async () => {
+    const { target } = await render('Cours de physique');
+    const zone = target.querySelector<HTMLElement>('.editor-side section.layers-zone')!;
+    expect(zone.dataset.where).toBe('editor');
+    expect(zone.querySelector('input[type="radio"], input[type="checkbox"]')).toBeNull();
+    expect(zone.querySelector('[data-action="tablet-layer"]')).toBeNull();
+    expect(zone.querySelector('[data-slot="layers-help"]')?.textContent).toContain('calque choisi (encadré)');
+    expect(target.querySelectorAll('#editor-layers-heading')).toHaveLength(0);
+  });
+
+  it('chooses a layer with a click on its row, takes the selection off it, and Ctrl+A takes that layer only', async () => {
+    const { target, button, drag, key } = await render('Cours de physique');
+    const row = (n: number) => target.querySelector<HTMLElement>(`li.layer[data-layer="${n}"]`)!;
+    const selected = () => target.textContent?.match(/Traits sélectionnés : (\d+)/)?.[1] ?? null;
+    button('+ Ajouter un calque').click();
+    await tick();
+    await drag(line(5000, 15000, 15000));
+    button('Sélection').click();
+    await tick();
+    // The new layer holds one stroke, the first holds the note's two.
+    await key('a', { ctrlKey: true });
+    expect(selected()).toBe('1');
+    row(0).click();
+    await tick();
+    expect(row(0).dataset.chosen).toBe('true');
+    expect(row(1).dataset.chosen).toBeUndefined();
+    expect(selected()).toBeNull();
+    expect(target.querySelector('rect.selection')).toBeNull();
+    await key('a', { ctrlKey: true });
+    expect(selected()).toBe('2');
+  });
+
+  it('lets Space press a button, and pans elsewhere', async () => {
+    const { svg, button } = await render('Cours de physique');
+    const box = button('Masquer « Calque 1 »');
     box.focus();
     const onBox = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
     box.dispatchEvent(onBox);
@@ -1350,7 +1391,8 @@ describe('note editor: split, copy image and export', () => {
 
   it('locks the page panel, the layers panel and the style controls while the split panel is open', async () => {
     const { target, button } = await render('Cours de physique');
-    const section = (heading: string) => target.querySelector<HTMLElement>(`section[aria-labelledby="${heading}"]`)!;
+    const section = (selector: string) =>
+      target.querySelector<HTMLElement>(selector.startsWith('.') ? selector : `section[aria-labelledby="${selector}"]`)!;
     const controls = (root: ParentNode) => [...root.querySelectorAll<HTMLElement>('button, input, select')];
     const toolbarControls = () =>
       controls(target.querySelector('.toolbar')!).filter((c) => !c.closest('.share'));
@@ -1363,7 +1405,7 @@ describe('note editor: split, copy image and export', () => {
     expect(toolbarControls().length).toBeGreaterThan(10);
     expect(free(toolbarControls())).toBe(true);
     expect(free(controls(section('editor-page-heading')))).toBe(true);
-    expect(controls(section('editor-layers-heading')).some((c) => (c as HTMLInputElement).disabled)).toBe(true);
+    expect(controls(section('.layers-zone')).some((c) => (c as HTMLInputElement).disabled)).toBe(true);
     expect(button('+ Ajouter un calque').disabled).toBe(false);
 
     button('Découper').click();
@@ -1376,7 +1418,7 @@ describe('note editor: split, copy image and export', () => {
     // Paper, template, texture, two orientations, paper size, two sides and Apply, the scale option,
     // two turns, two crops, and the background image's button.
     expect(controls(section('editor-page-heading')).length).toBe(15);
-    expect(locked(controls(section('editor-layers-heading')))).toBe(true);
+    expect(locked(controls(section('.layers-zone')))).toBe(true);
     // The split's own buttons, copy and export stay available.
     expect(button('Découper').disabled).toBe(false);
     expect(button("Copier l'image").disabled).toBe(false);

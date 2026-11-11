@@ -7,9 +7,19 @@
   import { onMount } from 'svelte';
   import { api, errorMessage } from '../lib/api';
   import { pickExportFile, pickExportFolder } from '../lib/dialogs';
-  import { DPI_CHOICES, FORMATS, dpiFits, exportStem, isRaster, loadChoice, saveChoice } from '../lib/export-options';
+  import {
+    DPI_CHOICES,
+    FORMATS,
+    dpiFits,
+    exportStem,
+    hasLayers,
+    isRaster,
+    layerInk,
+    loadChoice,
+    saveChoice,
+  } from '../lib/export-options';
   import { t } from '../lib/i18n.svelte';
-  import type { ExportFormat, ExportOptions, ExportSource, PageSize } from '../lib/note';
+  import type { ExportFormat, ExportOptions, ExportSource, Note } from '../lib/note';
   import { beginWork } from '../lib/work';
   import Modal from './Modal.svelte';
   import TextExportSection from './TextExportSection.svelte';
@@ -29,18 +39,23 @@
   const uid = $props.id();
   /** Rows of the "Which format?" comparison, in `export.compare.rows`. */
   const COMPARE_ROWS = ['zoom', 'transparent', 'size', 'several', 'opens', 'bestFor'] as const;
+  /** The two choices of the layers block, in `export.layers`. */
+  const LAYER_CHOICES = ['separate', 'merged'] as const;
 
   const initial = loadChoice();
   let format = $state<ExportFormat>(initial.format);
   let options = $state<ExportOptions>({ ...initial.options });
+  /** SVG and PDF: separate or merged layers, remembered per format. */
+  let layers = $state({ ...initial.layers });
   let phase = $state<'idle' | 'running' | 'done'>('idle');
   let error = $state<string | null>(null);
   /** The last export was cancelled by the user: a neutral notice, not an error. */
   let cancelled = $state(false);
   /** Cancellation was asked and the export has not stopped yet. */
   let cancelling = $state(false);
-  /** Page sizes of the exported notes, once known (an image over 16 384 px is refused). */
-  let pages = $state.raw<PageSize[] | null>(null);
+  /** The exported notes, once read: their page sizes (an image over 16 384 px is refused) and their layers. */
+  let notes = $state.raw<Note[] | null>(null);
+  const pages = $derived(notes ? notes.map((note) => note.page) : null);
   let written = $state<string[]>([]);
   let destination = $state('');
 
@@ -55,17 +70,23 @@
   const someTooLarge = $derived(fits.includes(false));
   /** Even the lowest resolution gives a too large image: only PDF and SVG are possible. */
   const nothingFits = $derived(!fits.includes(true));
+  /** The format whose layers the dialog offers to keep apart; null for an image. */
+  const layerFormat = $derived(hasLayers(format) ? format : null);
+  // The layers block matters only for a note with two or more visible layers holding ink; the sentence about hidden
+  // layers only for a note whose hidden layer holds ink. Until the notes are read, neither is shown.
+  const several = $derived(notes?.some((note) => layerInk(note).visible >= 2) ?? false);
+  const someHidden = $derived(notes?.some((note) => layerInk(note).hidden) ?? false);
 
-  // The pages of the notes held by the library are read once; until then (or if it fails) every
-  // resolution is offered and the desktop app refuses what is too large.
+  // The notes held by the library are read once; until then (or if it fails) every resolution is offered and the
+  // desktop app refuses what is too large.
   onMount(() => {
     let alive = true;
-    const sizes = sources.map((source) =>
-      source.note ? Promise.resolve(source.note.page) : api.openNote(source.path).then((opened) => opened.note.page),
+    const read = sources.map((source) =>
+      source.note ? Promise.resolve(source.note) : api.openNote(source.path).then((opened) => opened.note),
     );
-    Promise.all(sizes)
+    Promise.all(read)
       .then((all) => {
-        if (alive) pages = all;
+        if (alive) notes = all;
       })
       .catch(() => {});
     return () => {
@@ -109,14 +130,17 @@
     cancelling = false;
     destination = chosen;
     try {
-      const request = { ...options };
+      // The request names the layers only when the dialog offered the choice (an SVG or a PDF of notes with two
+      // shown layers holding ink): an image has none, and a one-layer note must not get a layer of its own in the
+      // PDF (an optional content group, the reader's layers panel opened) because « Separate » was remembered.
+      const request: ExportOptions = layerFormat && several ? { ...options, layers: layers[layerFormat] } : { ...options };
       written = await api.exportNotes(
         sources.map((source) => ({ ...source })),
         format,
         request,
         chosen,
       );
-      saveChoice({ format, options: request });
+      saveChoice({ format, options: { ...options }, layers: { ...layers } });
       phase = 'done';
     } catch (e) {
       if (typeof e === 'object' && e !== null && 'code' in e && e.code === 'cancelled') cancelled = true;
@@ -251,6 +275,34 @@
       <p class="muted small">{t(`export.backgroundHints.${format}`)}</p>
     </fieldset>
 
+    {#if several && layerFormat}
+      <fieldset class="export-fieldset" data-slot="export-layers" disabled={running}>
+        <legend>{t('export.layers.legend')}</legend>
+        {#each LAYER_CHOICES as value (value)}
+          <label class="choice layer-choice">
+            <input
+              type="radio"
+              name="export-layers"
+              {value}
+              bind:group={layers[layerFormat]}
+              aria-describedby="{uid}-layers-{value}"
+            />
+            <span class="layer-text">
+              <span class="choice-name">{t(`export.layers.${value}`)}</span>
+              <span class="muted small" id="{uid}-layers-{value}">
+                {value === 'separate' ? t(`export.layers.separateHint.${layerFormat}`) : t('export.layers.mergedHint')}
+              </span>
+            </span>
+          </label>
+        {/each}
+      </fieldset>
+    {:else if several}
+      <p class="muted small" data-slot="export-layers-flat">{t('export.layers.flat')}</p>
+    {/if}
+    {#if someHidden}
+      <p class="muted small" data-slot="export-layers-hidden">{t('export.layers.hiddenNever')}</p>
+    {/if}
+
     <p class="muted small">
       {#if format === 'pdf' && many}
         {t('export.destinationPdfMany')}
@@ -299,3 +351,15 @@
     <TextExportSection {sources} disabled={running} />
   </div>
 </Modal>
+
+<style>
+  .layer-choice {
+    align-items: flex-start;
+    margin-top: 0.35rem;
+  }
+
+  .layer-text {
+    display: flex;
+    flex-direction: column;
+  }
+</style>

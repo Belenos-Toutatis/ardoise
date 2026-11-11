@@ -1,14 +1,15 @@
 //! SVG export (SPEC §4.6): the page in millimetres, coordinates in device units (10 µm), one
 //! `<path>` per fill of each visible stroke ([`crate::look`]), each note layer as an Inkscape
-//! layer; the background image as an `<image>` holding its file (PNG or JPEG) in a data URI,
+//! layer (or, merged, all of them in one); the background image as an `<image>` holding its file (PNG or JPEG) in a data URI,
 //! placed by a matrix and clipped to the page. Opens in Inkscape and in browsers.
 
 use std::fmt::Write;
 
+use crate::LayerMode;
 use crate::background::{Mark, Shape, VectorBackground};
 use crate::look::{Blend, Fill};
 use crate::picture::{NoteView, PlacedPicture};
-use crate::vector::Scene;
+use crate::vector::{LayerFills, Scene};
 
 /// JPEG quality of the embedded paper texture (a faint grain).
 pub(crate) const TEXTURE_QUALITY: u8 = 85;
@@ -18,11 +19,16 @@ pub(crate) const TEXTURE_QUALITY: u8 = 85;
 pub struct SvgOptions {
     /// Draw the paper colour, template and texture; otherwise the page is transparent.
     pub background: bool,
+    /// One Inkscape layer per note layer, or one for all of them.
+    pub layers: LayerMode,
 }
 
 impl Default for SvgOptions {
     fn default() -> Self {
-        Self { background: true }
+        Self {
+            background: true,
+            layers: LayerMode::Separate,
+        }
     }
 }
 
@@ -57,23 +63,50 @@ pub fn note_to_svg<'a>(view: impl Into<NoteView<'a>>, options: &SvgOptions) -> S
     if let Some(background) = &scene.background {
         write_background(&mut out, background, scene.picture.as_ref(), w, h);
     }
-    for layer in &scene.layers {
-        let label = match &layer.name {
-            Some(name) => escape(name),
-            None => format!("{}", layer.index + 1),
-        };
-        let _ = writeln!(
-            out,
-            "<g id=\"layer{}\" inkscape:groupmode=\"layer\" inkscape:label=\"{label}\">",
-            layer.index + 1
-        );
-        for fill in &layer.fills {
-            write_fill(&mut out, fill);
+    match options.layers {
+        LayerMode::Separate => {
+            for layer in &scene.layers {
+                let _ = writeln!(
+                    out,
+                    "<g id=\"layer{}\" inkscape:groupmode=\"layer\" inkscape:label=\"{}\">",
+                    layer.index + 1,
+                    layer_label(layer)
+                );
+                for fill in &layer.fills {
+                    write_fill(&mut out, fill);
+                }
+                out.push_str("</g>\n");
+            }
         }
-        out.push_str("</g>\n");
+        LayerMode::Merged if !scene.layers.is_empty() => {
+            // The label says what was merged, so that Inkscape shows it.
+            let label = scene
+                .layers
+                .iter()
+                .map(layer_label)
+                .collect::<Vec<_>>()
+                .join(" + ");
+            let _ = writeln!(
+                out,
+                "<g id=\"ink\" inkscape:groupmode=\"layer\" inkscape:label=\"{label}\">"
+            );
+            for fill in scene.fills() {
+                write_fill(&mut out, fill);
+            }
+            out.push_str("</g>\n");
+        }
+        LayerMode::Merged => {}
     }
     out.push_str("</svg>\n");
     out
+}
+
+/// The Inkscape label of a layer, escaped: its name, or its number when the note has no entry.
+fn layer_label(layer: &LayerFills) -> String {
+    match &layer.name {
+        Some(name) => escape(name),
+        None => format!("{}", layer.index + 1),
+    }
 }
 
 /// The paper, its texture, the template and the background image, in a locked Inkscape layer.
@@ -397,7 +430,13 @@ mod tests {
         assert!(svg.contains("fill-opacity=\"0.3\""));
         assert!(svg.contains("fill-opacity=\"0.9\""));
 
-        let bare = note_to_svg(&n, &SvgOptions { background: false });
+        let bare = note_to_svg(
+            &n,
+            &SvgOptions {
+                background: false,
+                ..SvgOptions::default()
+            },
+        );
         assert!(!bare.contains("<rect"));
         assert_eq!(bare.matches("<path ").count(), 5);
     }
@@ -417,5 +456,56 @@ mod tests {
         assert!(svg.contains("xlink:href=\"data:image/jpeg;base64,/9j/"));
         assert!(svg.matches("<circle ").count() > 50);
         assert_eq!(svg.matches("<path ").count(), 0);
+    }
+
+    #[test]
+    fn merged_layers_make_one_inkscape_layer_labelled_with_what_it_holds() {
+        let mut n = note(
+            vec![
+                line(Tool::Ballpoint, 500.0),
+                line(Tool::Ballpoint, 1500.0),
+                line(Tool::Ballpoint, 2500.0),
+            ],
+            Background {
+                paper: Paper::White,
+                template: Template::Blank,
+                texture: false,
+            },
+        );
+        n.layers = ["Bas", "Secret", "Haut & co"]
+            .iter()
+            .enumerate()
+            .map(|(i, name)| Layer {
+                name: (*name).into(),
+                visible: i != 1,
+            })
+            .collect();
+        n.strokes[0].layer = 2;
+        n.strokes[1].layer = 1;
+        n.strokes[2].layer = 0;
+        let options = |layers| SvgOptions {
+            background: false,
+            layers,
+        };
+
+        let merged = note_to_svg(&n, &options(LayerMode::Merged));
+        assert_eq!(merged.matches("inkscape:groupmode=\"layer\"").count(), 1);
+        assert_eq!(merged.matches("<path ").count(), 2);
+        assert!(merged.contains(
+            "<g id=\"ink\" inkscape:groupmode=\"layer\" inkscape:label=\"Bas + Haut &amp; co\">"
+        ));
+        assert!(!merged.contains("Secret"));
+
+        let separate = note_to_svg(&n, &options(LayerMode::Separate));
+        assert_eq!(separate.matches("inkscape:groupmode=\"layer\"").count(), 2);
+        assert!(separate.contains("<g id=\"layer1\""));
+        assert!(separate.contains("<g id=\"layer3\""));
+        assert!(!separate.contains("Secret"));
+        assert_eq!(SvgOptions::default().layers, LayerMode::Separate);
+
+        // Nothing to draw, nothing to merge: no empty layer.
+        n.strokes.clear();
+        let empty = note_to_svg(&n, &options(LayerMode::Merged));
+        assert!(!empty.contains("inkscape:groupmode"));
     }
 }

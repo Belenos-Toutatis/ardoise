@@ -75,7 +75,7 @@ describe('selection highlight', () => {
     const { renderer, target, page, layer } = setup();
     const strokes = [stroke(1000), stroke(5000), stroke(9000)];
     const live = source(strokes);
-    expect(renderer.paint(target, preview(live, []))).toEqual({ full: true, appended: 0, currentPoints: 0 });
+    expect(renderer.paint(target, preview(live, []))).toEqual({ full: true, appended: 0, currentPoints: 0, computerPoints: 0 });
     expect(layer()).toBeUndefined();
 
     page().ctx.reset();

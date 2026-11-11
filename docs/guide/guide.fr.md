@@ -353,10 +353,13 @@ Un simple changement de titre, d'étiquette ou de favori fait ailleurs ne crée 
 
 ### La fenêtre de commande
 
-- **Outil** (stylo à bille, plume, feutre, crayon, pinceau, surligneur, craie), **Couleur** (dont **Blanc craie** et
-  **Jaune**) et **Épaisseur** : le trait suivant en tient compte, pas les précédents.
+- **Tablette** : **Outil** (stylo à bille, plume, feutre, crayon, pinceau, surligneur, craie), **Couleur** (dont
+  **Blanc craie** et **Jaune**) et **Épaisseur** sont le style de la tablette : le trait suivant en tient compte, pas
+  les précédents. Le groupe **Ordinateur** (**Sélection**, **Stylo**, l'encre de l'ordinateur, **Annuler**,
+  **Rétablir**) sert à retoucher et à corriger : voir plus bas.
 - **Pages** : **Page précédente**, **Page suivante** (la position s'affiche : « Page 2 / 5 »), **Nouvelle page**.
-  **Nouveau calque** ajoute un calque à la page en cours. **Effacer la page** (ou `Ctrl + Suppr`) efface la page en cours
+  Les calques de la page se gèrent dans la zone **Calques**, en haut du panneau de côté (voir **Corriger pendant le
+  direct**). **Effacer la page** (ou `Ctrl + Suppr`) efface la page en cours
   seulement ; un message « Page effacée. » propose pendant 8 secondes **Annuler l'effacement**, qui rend l'encre (`Ctrl + Z` la rend aussi, sans limite de temps : voir **Retoucher pendant le direct**). Si la
   page a changé entre-temps, Ardoise dit que l'effacement ne peut plus être annulé.
 - **Tableau noir** : fond ardoise et craie blanche. **Pointeur laser** : le stylet en survol, sans toucher la tablette,
@@ -372,7 +375,8 @@ Un simple changement de titre, d'étiquette ou de favori fait ailleurs ne crée 
   chaque note, la relecture de la note le rejoue (chapitre 9).
 
 Le *bouton de la tablette* fait, pendant le direct, ce que l'option **Bouton de la tablette en mode direct** indique
-(nouvelle page ou nouveau calque). *Ce que la Bamboo Slate envoie à l'appui n'est pas encore vérifié sur la vraie
+(nouvelle page ou nouveau calque). Un nouveau calque est créé en haut et reçoit aussitôt l'écriture de la tablette ;
+l'ordinateur reste sur son calque. *Ce que la Bamboo Slate envoie à l'appui n'est pas encore vérifié sur la vraie
 tablette.* Les touches de la page suivante et précédente marchent dans tous les cas.
 
 ### Retoucher pendant le direct
@@ -382,8 +386,8 @@ ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tab
 
 **Choisir des traits**
 
-- Cliquez sur **Sélection** dans la barre d'outils, ou appuyez sur `V`. Un second appui quitte
-  l'outil.
+- Cliquez sur **Sélection** (groupe **Ordinateur**) dans la barre d'outils, ou appuyez sur `V`. Un second appui quitte
+  l'outil. **Sélection** et **Stylo** (voir **Corriger pendant le direct**) s'excluent : choisir l'un quitte l'autre.
 - **Lasso** : dans l'aperçu, appuyez avec la souris et entourez les traits, puis relâchez. Un trait est choisi quand la
   moitié au moins de ses points est dans le lasso.
 - **Clic** : cliquez sur un trait pour le choisir seul. Cliquez sur l'encre elle-même, pas à côté.
@@ -391,8 +395,10 @@ ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tab
 - Un geste dans le vide, ou `Échap`, enlève la sélection. `Échap` ne ferme rien d'autre tant que des traits sont choisis.
 - Un doigt et la molette continuent de déplacer et de zoomer l'aperçu.
 - Les traits choisis sont entourés de bleu dans l'aperçu. Une barre dit « Traits sélectionnés : 3 ».
-- On ne peut pas choisir le trait que la tablette est en train d'écrire, ni les traits d'un calque masqué. Sur une
-  feuille reprise, on peut choisir les anciens traits de la feuille.
+- **Seuls les traits du calque choisi sont pris** (zone **Calques**, voir plus bas) ; choisir un autre calque enlève la
+  sélection. On ne peut pas choisir le trait que la tablette est en train d'écrire, ni les traits d'un calque masqué ;
+  masquer un calque enlève ses traits de la sélection.
+  Sur une feuille reprise, on peut choisir les anciens traits de la feuille, en choisissant leur calque.
 
 **Supprimer** : cliquez sur **Supprimer** dans la barre, ou appuyez sur `Suppr` ou `Retour arrière`.
 
@@ -402,13 +408,14 @@ sa couleur. Sans sélection, une pastille règle la couleur du stylo, comme avan
 
 **Annuler et rétablir**
 
-- `Ctrl + Z` (ou **Annuler**) annule la dernière retouche : une suppression, un changement de couleur, ou **Effacer la
-  page**. Les traits supprimés reviennent à leur place.
+- `Ctrl + Z` (ou **Annuler**) annule la dernière action de l'ordinateur : un trait ou un coup de gomme (voir
+  **Corriger pendant le direct**), une suppression, un changement de couleur, ou **Effacer la page**. Les traits
+  supprimés reviennent à leur place.
 - `Ctrl + Y` ou `Ctrl + Maj + Z` (ou **Rétablir**) refait ce qui vient d'être annulé. Une nouvelle retouche vide ce qui
   pouvait être rétabli.
 - **Ce qui n'est jamais annulé** : ce que la tablette a écrit. Un trait écrit entre-temps reste, dans quelque ordre que
-  vous annuliez ou rétablissiez. Les changements d'outil, de couleur du stylo ou d'épaisseur, et les changements de
-  page, ne sont pas non plus des retouches.
+  vous annuliez ou rétablissiez. Les changements d'outil, de couleur du stylo ou d'épaisseur, les changements de
+  page et les opérations sur les calques ne sont pas non plus des retouches.
 - Chaque page a sa propre liste, qui garde les 100 dernières retouches. Si vous quittez une page puis y revenez,
   `Ctrl + Z` annule encore ses retouches. Les listes disparaissent quand vous terminez le mode direct.
 - Les boutons **Annuler** et **Rétablir** sont grisés quand il n'y a rien à faire.
@@ -420,6 +427,90 @@ des traits de la page : on ne les choisit pas.
 **Dans la note.** Quand vous terminez, la note contient ce qu'il y avait à l'écran : traits supprimés absents, couleurs
 changées. Sur une feuille reprise, la retouche d'un ancien trait est enregistrée dans la note elle-même ;
 « Revenir à l'original » (chapitre 8) rend toujours la première version.
+
+### Corriger pendant le direct
+
+*Demande la tablette.* En classe, un élève écrit sur la tablette, projetée en direct, et vous corrigez en même temps
+avec le stylet de votre ordinateur (une Surface, par exemple), dans une autre couleur et **sur un calque à vous** : ce
+que vous écrivez est enregistré dans la note, sans se mêler à l'écriture de l'élève. La tablette continue d'écrire
+pendant ce temps, sans jamais être gênée.
+
+**Deux calques, deux repères.** La zone **Calques**, en haut du panneau de côté de la fenêtre de commande, liste les
+calques de la page, le plus haut en premier.
+
+- Le *cadre* entoure le **calque choisi** : c'est là que l'ordinateur agit (stylo, bout gomme du stylet, sélection).
+  Un clic sur une ligne choisit son calque.
+- L'*icône de tablette* marque le calque où **écrit la tablette**. Elle reste sur son calque tant que vous ne
+  l'envoyez pas ailleurs.
+
+Au début du mode direct, l'ordinateur est sur le même calque que la tablette : vous ajoutez votre calque quand vous en
+avez besoin.
+
+**L'outil Stylo.** Cliquez sur **Stylo** (groupe **Ordinateur**) ou appuyez sur `P` ; un second appui quitte l'outil.
+Dans l'aperçu :
+
+- le *stylet* et la *souris* écrivent sur le calque choisi ;
+- le *bout gomme du stylet* efface des traits entiers du calque choisi, quel que soit l'outil (un petit cercle suit la
+  gomme) ; les traits des autres calques ne sont jamais touchés ;
+- le *doigt* ne fait jamais d'encre : il déplace et zoome la zone projetée, comme avant.
+
+**L'encre de l'ordinateur.** Elle est séparée de celle de la tablette : **rouge** par défaut, en feutre. Le bouton
+placé après **Stylo** (une pastille de couleur et le nom de l'outil) ouvre **Encre de l'ordinateur** : **Outil**,
+**Couleur** et **Épaisseur**. Ces réglages ne touchent ni le style de la tablette (groupe **Tablette**) ni une
+sélection ; Ardoise les retient d'une séance à l'autre, sur ce PC. `Échap` ou un clic ailleurs ferme le panneau.
+
+**Un exemple en classe.** L'élève écrit son exercice sur la tablette ; vous voulez le corriger en rouge, sans rien
+mélanger à son écriture.
+
+1. Dans la zone **Calques**, cliquez sur **Ajouter un calque**. Le nouveau calque se met en haut et devient le calque
+   choisi ; la tablette reste sur le calque de l'élève.
+2. Cliquez sur le crayon à côté de son nom, tapez « Correction », puis `Entrée`.
+3. Cliquez sur **Stylo** (ou `P`). L'encre est déjà rouge.
+4. Écrivez sur l'aperçu avec le stylet de l'ordinateur *pendant que l'élève écrit*. Votre trait apparaît aussitôt au
+   vidéoprojecteur et sur l'écran du partage, comme celui de la tablette.
+5. Une erreur de votre part : passez le bout gomme du stylet dessus, ou appuyez sur `Ctrl + Z`.
+6. Pour retoucher ce que l'élève a écrit, cliquez sur son calque dans la zone, puis utilisez la gomme du stylet ou
+   **Sélection**.
+
+**Ce que montrent le vidéoprojecteur et le partage.** Les deux calques, mêlés, comme à l'écran, sauf les calques
+masqués, qu'ils ne montrent jamais. Ni le cadre, ni le lasso, ni le cercle de la gomme ne sont projetés.
+
+**Annuler avec `Ctrl + Z`.** Il annule les actions de l'*ordinateur* : un trait, un coup de gomme, une retouche,
+**Effacer la page** (voir **Retoucher pendant le direct**). Jamais l'écriture de la tablette. Les opérations sur les
+calques (ajouter, masquer, renommer, déplacer, fusionner) ne s'annulent pas avec `Ctrl + Z` : pour défaire un masquage
+ou un déplacement, refaites le même clic.
+
+**Envoyer la tablette sur un autre calque.** Passez la souris sur la ligne d'un autre calque : une icône de tablette
+pâle apparaît ; cliquez dessus. (Sur un écran tactile, ces icônes sont toujours visibles.) Ce que l'élève écrira
+ensuite ira sur ce calque ; ce qu'il a déjà écrit ne bouge pas. Si le bouton de la tablette est réglé sur **Nouveau
+calque** (**Bouton de la tablette en mode direct**, chapitre 5), un appui crée un calque en haut et y envoie la
+tablette ; l'ordinateur reste où il est.
+
+**Les autres gestes de la zone Calques**
+
+- L'*œil* masque ou affiche un calque ; il est *barré* quand le calque est masqué, et le nom passe en gris italique.
+- Le *crayon* renomme : `Entrée` garde le nouveau nom, `Échap` rend l'ancien.
+- Sur la ligne choisie seulement, **↑** et **↓** montent et descendent le calque, et **⤓** le fusionne avec le calque
+  du dessous. **Fusionner pendant le direct ne s'annule pas** : `Ctrl + Z` ne le défait pas, et la liste des
+  annulations de la page est vidée (celles des autres pages ne sont pas touchées ; **Annuler l'effacement** disparaît
+  aussi). Ardoise demande donc d'abord : « Fusionner « … » avec « … » ? Ctrl+Z ne pourra pas l'annuler. », avec
+  **Fusionner** et **Annuler** (`Échap` répond **Annuler**). Si le calque du dessous est masqué, la question le dit
+  aussi : une fois fusionné, son contenu sera projeté et partagé (le calque fusionné est affiché).
+- **Ajouter un calque** en crée un nouveau, en haut.
+- Les boutons de la zone sont grisés quand le mode direct n'est pas en cours.
+
+**Les avertissements.** Ils apparaissent sous la liste.
+
+- *« La tablette écrit sur « … », qui est masqué : ce que l'élève écrit n'est ni projeté ni partagé. »* L'écriture de
+  l'élève est bien enregistrée dans la note, mais personne ne la voit : réaffichez le calque, ou envoyez la tablette
+  sur un autre.
+- *« Le calque choisi, « … », est masqué : affichez-le pour y écrire. »* Le stylo n'écrit pas tant que le calque choisi
+  est masqué (le même message s'affiche si vous essayez), et la gomme et la sélection n'y trouvent rien.
+
+**Dans la note et à la relecture.** Les calques, leurs noms et leur état (affiché ou masqué) sont enregistrés dans la
+note, avec chaque trait de l'ordinateur à côté de ceux de l'élève. À la relecture (chapitre 9), les traits de
+l'ordinateur apparaissent à l'heure où vous les avez écrits, mêlés à ceux de l'élève. Les annotations tracées sur la
+présentation (voir plus bas) ne changent pas : elles ne sont jamais enregistrées.
 
 ### Projeter sur un vidéoprojecteur
 
@@ -746,8 +837,9 @@ La barre d'outils propose quatre outils (**Outil**) :
   ou **Choisir une autre couleur** ; les couleurs personnalisées sont mémorisées) et l'**Épaisseur**. L'épaisseur du trait
   suit la pression du stylet. **Appliquer à toute la note :** **Couleur**, **Encre** ou **Épaisseur** change tous les
   traits d'un coup.
-- **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**.
-- **Sélection** (le lasso) : entourez des traits pour les sélectionner ; `Maj` + lasso ajoute, `Ctrl` + lasso retire. Le
+- **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**. Elle n'efface que sur le calque choisi (voir
+  **Calques**).
+- **Sélection** (le lasso) : entourez des traits du calque choisi pour les sélectionner ; `Maj` + lasso ajoute, `Ctrl` + lasso retire. Le
   panneau **Sélection** propose **Copier**, **Couper**, **Coller**, **Dupliquer**, **Redresser les formes**, **Supprimer**.
   Les changements de couleur, d'encre et d'épaisseur s'appliquent alors à la sélection ; on la déplace (en la saisissant
   à l'intérieur de son cadre) et on la redimensionne (par les poignées du cadre) à la souris, ou au stylet (voir ci-dessous
@@ -809,9 +901,27 @@ exports et les vidéos. Les PDF sont rendus par Windows.
 
 ### Calques
 
-Le panneau **Calques** liste les calques. **Ajouter un calque** en crée un ; on peut choisir celui sur lequel dessiner,
-l'afficher ou le masquer, le renommer, le monter ou le descendre, et le fusionner avec celui du dessous. Un calque
-masqué n'accepte pas l'écriture : affichez-le d'abord.
+La zone **Calques**, en bas du panneau de droite, liste les calques de la page, le plus haut en premier. Un calque est
+une feuille transparente superposée aux autres : l'écriture d'une tablette, vos annotations, une correction.
+
+- **Choisir un calque** : cliquez sur sa ligne, qui s'entoure d'un cadre. **Le stylo, la gomme et la sélection n'agissent
+  que sur le calque choisi** : le lasso, le clic, `Ctrl + A` (**Tout sélectionner**) et la gomme ne prennent que ses
+  traits, et ce que vous dessinez, collez ou dupliquez y va. Pour toucher à l'encre d'un autre calque, choisissez-le
+  d'abord. Changer de calque choisi enlève la sélection. À l'ouverture d'une note, le calque choisi est le plus haut des
+  calques affichés.
+- **Afficher ou masquer** : l'*œil* au début de la ligne ; il est *barré* quand le calque est masqué, et son nom passe en
+  gris italique. Un calque masqué n'est ni dessiné à l'écran ni exporté (chapitre 10).
+- **Renommer** : le *crayon* après le nom. Tapez le nom, `Entrée` le garde, `Échap` rend l'ancien (cliquer ailleurs le
+  garde aussi) ; un nom vide ne change rien.
+- **Monter**, **descendre**, **fusionner avec le calque du dessous** : les boutons **↑**, **↓** et **⤓**, sur la ligne
+  choisie seulement.
+- **Ajouter un calque** (sous la liste) crée un calque tout en haut et le choisit.
+- **Un avertissement** s'affiche quand le calque choisi est masqué : « Le calque choisi, « … », est masqué : affichez-le
+  pour y écrire. » Tant qu'il l'est, le stylo n'écrit pas, et la gomme et la sélection n'y trouvent rien : affichez-le,
+  ou choisissez un autre calque.
+
+Ajouter, masquer, renommer, déplacer et fusionner s'annulent avec `Ctrl + Z`. Pour les calques pendant le mode direct,
+voir **Corriger pendant le direct** (chapitre 6).
 
 ### Découper une note
 
@@ -944,8 +1054,30 @@ Réglages : **Résolution** (**96 ppp (écran)**, **150 ppp (usuel)**, **300 ppp
 PDF** (**Taille réelle de la page** ou **A4 (note ajustée et centrée)**), **Inclure le fond** (décoché, seul le tracé est
 exporté). Ardoise vous demande ensuite le fichier à créer (ou le dossier, pour un export à un fichier par note : aucun
 fichier existant n'est alors écrasé). Les résolutions qui donneraient une image de plus de 16 384 pixels de côté ne
-sont pas proposées ; utilisez alors le PDF ou le SVG. Le SVG garde l'épaisseur du trait selon la pression ; les
-calques apparaissent comme calques dans Inkscape. Tous les formats dessinent les traits exactement comme l'écran.
+sont pas proposées ; utilisez alors le PDF ou le SVG. Le SVG garde l'épaisseur du trait selon la pression. Tous les
+formats dessinent les traits exactement comme l'écran. Pour les calques de la note, voir juste en dessous.
+
+### Les calques à l'export
+
+Quand une note a au moins deux calques affichés qui portent de l'encre, la fenêtre **Exporter** montre, pour le **SVG**
+et le **PDF**, le choix **Calques** :
+
+- **Séparés** : un calque du fichier par calque de la note. Dans un SVG, ce sont des calques Inkscape, à afficher ou
+  masquer dans Inkscape. Dans un PDF, ce sont des calques PDF, à afficher ou masquer dans Acrobat Reader ou Firefox (leur
+  panneau des calques) ; certains lecteurs les montrent tous, sans choix, et un lecteur qui ne gère pas les calques PDF
+  dessine tout. Dans un PDF de plusieurs notes, les calques de même nom ne font qu'un seul interrupteur pour toutes les
+  pages.
+- **Fusionnés** : un seul dessin, comme à l'écran.
+
+Au départ, le SVG est en **Séparés** et le PDF en **Fusionnés**. Ardoise retient le dernier choix, pour chacun des deux
+formats.
+
+- **Une image** (PNG, JPG, WebP) n'a pas de calques : ils sont toujours fusionnés. La fenêtre le dit quand une note a
+  plusieurs calques.
+- **Un calque masqué n'est jamais exporté**, même en **Séparés** : il peut contenir les réponses. La fenêtre le rappelle
+  quand une note a un calque masqué qui porte de l'encre.
+- L'export automatique pour le téléphone, **Imprimer…** et **Copier l'image** n'ont pas ce choix : leurs
+  calques sont fusionnés, comme avant.
 
 ### Le texte de l'écriture
 
@@ -1050,6 +1182,9 @@ présentation s'utilisent au stylet ou au doigt.
   doigt) saisit la sélection au lieu de dessiner : posée dans le cadre, elle la déplace ; posée sur une poignée, elle la
   redimensionne (avec les outils **Stylo** et **Gomme**). Hors du cadre, elle dessine comme d'habitude.
 - La *paume* posée sur l'écran est ignorée tant que le stylet est utilisé ou proche de l'écran.
+- Dans l'aperçu du *mode direct*, l'outil **Stylo** (touche `P`) écrit au stylet sur le calque choisi, et le dos du
+  stylet efface des traits entiers de ce calque : voir **Corriger pendant le direct** (chapitre 6). Le doigt y déplace
+  seulement la zone projetée.
 
 *Le doigt*
 
@@ -1215,7 +1350,7 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte, sauf ceux
 | `Ctrl + S` | Enregistrer |
 | `Ctrl + Z` | Annuler |
 | `Ctrl + Y`, `Ctrl + Maj + Z` | Rétablir |
-| `Ctrl + A` | Tout sélectionner |
+| `Ctrl + A` | Tout sélectionner (les traits du calque choisi) |
 | `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copier, couper, coller des traits |
 | `Suppr` ou `Retour arrière` | Supprimer la sélection |
 | `Échap` | Désélectionner |
@@ -1253,10 +1388,11 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte, sauf ceux
 | `W` | **Largeur** |
 | `Maj + flèches` | Déplacer la zone projetée |
 | `Suppr` ou `Retour arrière` | Effacer les annotations écrites sur la présentation ; **avec des traits choisis** (fenêtre de commande), les supprimer |
-| `V` | Outil **Sélection** (fenêtre de commande) : lasso ou clic sur un trait |
-| `Ctrl + Z` | Annuler une suppression, un changement de couleur ou **Effacer la page** (fenêtre de commande) |
+| `V` | Outil **Sélection** (fenêtre de commande) : lasso ou clic sur un trait du calque choisi |
+| `P` | Outil **Stylo** (fenêtre de commande) : écrire avec le stylet ou la souris de l'ordinateur sur le calque choisi |
+| `Ctrl + Z` | Annuler un trait ou un coup de gomme de l'ordinateur, une suppression, un changement de couleur ou **Effacer la page** (fenêtre de commande) |
 | `Ctrl + Y` ou `Ctrl + Maj + Z` | Rétablir (fenêtre de commande) |
-| `Échap` | Enlever la sélection s'il y en a une ; sinon fermer la projection si elle est affichée ; sinon, demander s'il faut **Terminer** le mode direct |
+| `Échap` | Abandonner le geste du stylet en cours ; fermer le panneau **Encre de l'ordinateur** s'il est ouvert ; enlever la sélection s'il y en a une ; sinon fermer la projection si elle est affichée ; sinon, demander s'il faut **Terminer** le mode direct |
 
 ### Dans les fenêtres
 

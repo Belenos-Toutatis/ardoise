@@ -10,10 +10,18 @@
  *   only; the share's viewers are never sent either, and keep the defaults);
  * - plain ones for the canvases, which are told of every change through `subscribe` and draw
  *   on the next animation frame: the finished strokes of the page (`strokes`, appended in
- *   place; `generation` changes when they are replaced or edited), the stroke in progress (`current`,
- *   whose points grow in place), the hovering pen (`hover`), and the points not painted yet
- *   (for the latency), and the marks written over the presentation (`marks`, replaced whole by
- *   each `marks` event; the viewers of the share draw them, the windows draw their own).
+ *   place; `generation` changes when they are replaced or edited), the strokes in progress, one per
+ *   pen (`current`, the tablet's, and `computerCurrent`, M14: the control window's pen or mouse;
+ *   their points grow in place), the hovering pen (`hover`), and the points not painted yet
+ *   (for the latency, the tablet's and the computer's apart), and the marks written over the
+ *   presentation (`marks`, replaced whole by each `marks` event; the viewers of the share draw them,
+ *   the windows draw their own).
+ *
+ * The two pens (M14): events with `pen: 'computer'` concern `computerCurrent`, the others `current`, and
+ * a stroke of one pen never ends the other's. `lastComputerDone` is the window's number (`id`) of the
+ * last computer stroke the session ended or dropped: the control window draws its own stroke until
+ * then (`ComputerPen.locals`). `computerLayer` is the layer the computer acts on (`layer` stays the
+ * tablet's); `history` keeps `canUndo` and `canRedo` up to date when a computer stroke is recorded.
  *
  * Assumptions about the Rust side (package B), each handled both ways where it is unclear:
  * - A snapshot's `page.strokes` holds the finished strokes only, and it ends the stroke in
@@ -114,15 +122,20 @@ export class LiveState {
   pageCount = $state(1);
   /** How the tablet is held now. */
   orientation = $state<Orientation>('landscape');
-  /** Layer receiving new strokes. */
+  /** The layer the tablet writes on (M14: it may be a hidden one). */
   layer = $state(0);
+  /**
+   * The layer the computer's pen, its eraser and the selection act on (M14, the control window's chosen
+   * layer). Absent from a snapshot (the share's viewers): the tablet's.
+   */
+  computerLayer = $state(0);
   style = $state.raw<LiveStyle>(DEFAULT_STYLE);
   view = $state.raw<LiveViewState>(DEFAULT_VIEW);
   presentation = $state.raw<MonitorInfo | null>(null);
   saved = $state.raw<string[]>([]);
   /** Pages that could not be written into the library, by page; cleared by the next `saved`. */
   saveErrors = $state.raw<SaveError[]>([]);
-  /** Strokes of the page, the one in progress included (`data-strokes`). */
+  /** Strokes of the page, those in progress included (`data-strokes`). */
   strokeCount = $state(0);
   /** The page: size, paper, layers (its strokes are `strokes`). */
   noteId = $state('');
@@ -156,8 +169,12 @@ export class LiveState {
    * replaced) tells a canvas that nothing but a full redraw is right.
    */
   edits: StrokeEdit[] = [];
-  /** The stroke in progress (its points grow in place). */
+  /** The tablet's stroke in progress (its points grow in place). */
   current: Stroke | null = null;
+  /** The computer's stroke in progress, as the session sends it (its points grow in place). */
+  computerCurrent: Stroke | null = null;
+  /** The `id` of the last computer stroke the session ended (`strokeEnd`) or dropped (`strokeCancel`); 0 before any. */
+  lastComputerDone = 0;
   /** Where the pen hovers (page units), or null. */
   hover: { x: number; y: number } | null = null;
   /**
@@ -167,6 +184,7 @@ export class LiveState {
   marks: readonly Stroke[] = [];
 
   private unpainted: PendingSample[] = [];
+  private unpaintedComputer: PendingSample[] = [];
   private early: { batch: LiveBatch; arrival: number }[] = [];
   private listeners = new Set<() => void>();
   private closed = false;
@@ -197,6 +215,7 @@ export class LiveState {
     this.listeners.clear();
     this.early = [];
     this.unpainted = [];
+    this.unpaintedComputer = [];
   }
 
   /** The snapshot returned by `live_subscribe`; batches received before it are applied after. */
@@ -240,29 +259,63 @@ export class LiveState {
         break;
       case 'strokeStart': {
         if (event.pageIndex !== this.pageIndex) break;
-        if (this.current) this.finishStroke();
         const { points, ...style } = event.stroke;
-        this.current = { ...style, points: points.map(inkPoint) };
-        // The pen writes: it no longer hovers (no laser dot left behind).
-        this.hover = null;
-        this.pending(points, arrival);
-        this.strokeCount = this.strokes.length + 1;
+        const stroke = { ...style, points: points.map(inkPoint) };
+        if (event.pen === 'computer') {
+          // A `begin` while a stroke is in progress ends that one first (kept).
+          if (this.computerCurrent) this.finishComputer();
+          this.computerCurrent = stroke;
+          this.pending(points, arrival, true);
+        } else {
+          if (this.current) this.finishStroke();
+          this.current = stroke;
+          // The pen writes: it no longer hovers (no laser dot left behind).
+          this.hover = null;
+          this.pending(points, arrival);
+        }
+        this.countStrokes();
         break;
       }
       case 'points': {
         if (event.pageIndex !== this.pageIndex) break;
-        if (!this.current) {
+        const computer = event.pen === 'computer';
+        let stroke = computer ? this.computerCurrent : this.current;
+        if (!stroke) {
+          // (supposé) Subscribed in the middle of a stroke: it goes on in the tablet's style, on its pen's layer.
           const { tool, color, width } = this.style;
-          this.current = { tool, color, width, layer: this.layer, points: [] };
-          this.strokeCount = this.strokes.length + 1;
+          stroke = { tool, color, width, layer: computer ? this.computerLayer : this.layer, points: [] };
+          if (computer) this.computerCurrent = stroke;
+          else this.current = stroke;
+          this.countStrokes();
         }
-        const points = this.current.points;
+        const points = stroke.points;
         for (const p of event.points) points.push(inkPoint(p));
-        this.pending(event.points, arrival);
+        this.pending(event.points, arrival, computer);
         break;
       }
       case 'strokeEnd':
-        if (event.pageIndex === this.pageIndex && this.current) this.finishStroke();
+        if (event.pen === 'computer') {
+          if (event.pageIndex === this.pageIndex && this.computerCurrent) this.finishComputer();
+          if (event.id !== undefined) this.lastComputerDone = event.id;
+        } else if (event.pageIndex === this.pageIndex && this.current) {
+          this.finishStroke();
+        }
+        break;
+      case 'strokeCancel':
+        // Sent for the computer (its `cancel`, « Clear the page »); a tablet's one drops the tablet's stroke.
+        if (event.pen === 'computer') {
+          if (event.pageIndex === this.pageIndex) this.computerCurrent = null;
+          if (event.id !== undefined) this.lastComputerDone = event.id;
+        } else if (event.pageIndex === this.pageIndex) {
+          this.current = null;
+        }
+        this.countStrokes();
+        break;
+      case 'history':
+        if (event.pageIndex === this.pageIndex) {
+          this.canUndo = event.canUndo;
+          this.canRedo = event.canRedo;
+        }
         break;
       case 'hover':
         this.hover = { x: event.x, y: event.y };
@@ -307,7 +360,7 @@ export class LiveState {
     this.generation += 1;
     this.edits.push({ generation: this.generation, touched });
     if (this.edits.length > MAX_EDIT_LOG) this.edits.shift();
-    this.strokeCount = this.strokes.length + (this.current ? 1 : 0);
+    this.countStrokes();
     if (edit.revision !== undefined) this.revision = edit.revision;
     if (edit.canUndo !== undefined) this.canUndo = edit.canUndo;
     if (edit.canRedo !== undefined) this.canRedo = edit.canRedo;
@@ -335,21 +388,44 @@ export class LiveState {
     this.forks = this.forks.filter((f) => f !== fork);
   }
 
+  /** The tablet's stroke in progress joins the page (at the tail, as in the session). */
   private finishStroke(): void {
     if (this.current && this.current.points.length > 0) this.strokes.push(this.current);
     this.current = null;
-    this.strokeCount = this.strokes.length;
+    this.countStrokes();
   }
 
-  private pending(points: readonly LivePoint[], arrival: number): void {
-    for (const p of points) this.unpainted.push({ recv: p.recv, arrival });
-    if (this.unpainted.length > MAX_UNPAINTED) this.unpainted.splice(0, this.unpainted.length - MAX_UNPAINTED);
+  /** The computer's stroke in progress joins the page, likewise. */
+  private finishComputer(): void {
+    if (this.computerCurrent && this.computerCurrent.points.length > 0) this.strokes.push(this.computerCurrent);
+    this.computerCurrent = null;
+    this.countStrokes();
   }
 
-  /** The points received since the last call: the frame that just drew them takes them. */
+  private countStrokes(): void {
+    this.strokeCount = this.strokes.length + (this.current ? 1 : 0) + (this.computerCurrent ? 1 : 0);
+  }
+
+  private pending(points: readonly LivePoint[], arrival: number, computer = false): void {
+    const list = computer ? this.unpaintedComputer : this.unpainted;
+    for (const p of points) list.push({ recv: p.recv, arrival });
+    if (list.length > MAX_UNPAINTED) list.splice(0, list.length - MAX_UNPAINTED);
+  }
+
+  /**
+   * The tablet's points received since the last call: the frame that just drew them takes them (the control
+   * window's latency figure is the tablet's).
+   */
   takeUnpainted(): PendingSample[] {
     const out = this.unpainted;
     this.unpainted = [];
+    return out;
+  }
+
+  /** The computer's points received since the last call, likewise (the presentation measures their latency apart). */
+  takeUnpaintedComputer(): PendingSample[] {
+    const out = this.unpaintedComputer;
+    this.unpaintedComputer = [];
     return out;
   }
 
@@ -360,9 +436,10 @@ export class LiveState {
 
   private applySnapshot(s: LiveSnapshot): void {
     const samePage = this.ready && s.pageIndex === this.pageIndex && s.page.id === this.noteId;
-    // The stroke in progress is not in the page; if there is one, the `strokeStart` that follows
-    // brings it back. Kept here, that event would finish it as a partial stroke of the page.
+    // The strokes in progress are not in the page; the `strokeStart`s that follow bring them back
+    // (the tablet's first). Kept here, those events would finish them as partial strokes of the page.
     this.current = null;
+    this.computerCurrent = null;
     if (!samePage) this.marks = [];
     if (!samePage || !sameStrokes(this.strokes, s.page.strokes)) {
       this.strokes = [...s.page.strokes];
@@ -375,6 +452,7 @@ export class LiveState {
     this.pageCount = Math.max(1, s.pageCount);
     this.orientation = s.orientation;
     this.layer = s.layer;
+    this.computerLayer = s.computerLayer ?? s.layer;
     this.noteId = s.page.id;
     if (this.pageSize.width !== s.page.page.width || this.pageSize.height !== s.page.page.height) {
       this.pageSize = s.page.page;
@@ -389,7 +467,7 @@ export class LiveState {
     this.hover = s.hover;
     if (JSON.stringify(this.presentation) !== JSON.stringify(s.presentation)) this.presentation = s.presentation;
     this.mergeSaved(s.saved);
-    this.strokeCount = this.strokes.length;
+    this.countStrokes();
     this.revision = s.revision ?? 0;
     this.canUndo = s.canUndo ?? false;
     this.canRedo = s.canRedo ?? false;

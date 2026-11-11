@@ -97,10 +97,10 @@ const TRANSFORM = fitTransform(A4, { width: 800, height: 560 }, 12);
 const at = (x: number, y: number) => pageToScreen(TRANSFORM, { x, y });
 
 async function render(
-  options: { mode?: 'preview' | 'presentation'; selecting?: boolean; selection?: readonly number[]; strokes?: Stroke[] } = {},
+  options: { mode?: 'preview' | 'presentation'; selecting?: boolean; selection?: readonly number[]; strokes?: Stroke[]; computerLayer?: number } = {},
 ) {
   const live = new LiveState();
-  live.initial(snapshot(options.strokes ?? [line(3000, 4000), line(3000, 8000), line(12000, 4000, 1)]));
+  live.initial({ ...snapshot(options.strokes ?? [line(3000, 4000), line(3000, 8000), line(12000, 4000, 1)]), computerLayer: options.computerLayer ?? 0 });
   const target = document.createElement('div');
   document.body.append(target);
   const onview = vi.fn<(view: LiveViewState) => void>();
@@ -117,7 +117,7 @@ async function render(
       onview,
       onselect,
       onmarks,
-      selecting: options.selecting ?? true,
+      tool: options.selecting === false ? 'none' : 'select',
       selection: options.selection ?? [],
     },
   });

@@ -142,6 +142,7 @@ export function liveKeyAction(e: KeyInput): LiveKeyAction | null {
 /** What the control window's keys do to the page's ink (M12): not used by the presentation window. */
 export type LiveEditKeyAction =
   | { kind: 'select' }
+  | { kind: 'pen' }
   | { kind: 'deselect' }
   | { kind: 'deleteSelection' }
   | { kind: 'undo' }
@@ -153,6 +154,7 @@ export type LiveEditKeyAction =
  * | Keys                               | Action                                          |
  * |------------------------------------|-------------------------------------------------|
  * | V                                  | the Select tool on or off (the editor's key)    |
+ * | P                                  | the Pen tool on or off (M14, the editor's key)  |
  * | Ctrl + Z                           | undo a delete, a change of colour, a clearing   |
  * | Ctrl + Y, Ctrl + Shift + Z         | redo                                            |
  * | Delete, Backspace (with selection) | delete the selection (otherwise: the marks)     |
@@ -168,6 +170,7 @@ export function liveEditKeyAction(e: KeyInput, hasSelection: boolean): LiveEditK
   }
   if (e.altKey || e.repeat) return null;
   if (key === 'v') return { kind: 'select' };
+  if (key === 'p') return { kind: 'pen' };
   if (!hasSelection || e.shiftKey) return null;
   if (key === 'Delete' || key === 'Backspace') return { kind: 'deleteSelection' };
   return key === 'Escape' ? { kind: 'deselect' } : null;
