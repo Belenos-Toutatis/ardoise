@@ -42,3 +42,41 @@ export async function collapsePanel(app) {
   await app.click(`${SIDE} [data-action="side-collapse"]`);
   await app.waitFor(`document.querySelector(${JSON.stringify(SIDE)})?.dataset.collapsed === 'true'`, 'the pane collapsed');
 }
+
+/**
+ * The red dot of the Sound tab while recording (§4, O12): opens the tab, starts a recording from the narration panel,
+ * checks the dot and the tab's hidden text, then cancels (nothing is kept). The journeys have no microphone, so a PC
+ * without one cannot record: a log line says so and the function returns false (vitest checks the dot with
+ * `mock-narration`). `l`: the journey's catalog lookup.
+ */
+export async function checkRecordingDot(app, l) {
+  await openTab(app, 'sound');
+  const panel = tabPanel('sound');
+  const visible = (selector) => `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; })()`;
+  const start = `${panel} [data-action="narration-start"]`;
+  if (!(await app.evaluate(visible(start)))) {
+    await app.click(`${panel} [data-action="narration-open"]`);
+    await app.waitFor(visible(start), 'the start button of the narration panel');
+  }
+  await app.click(start);
+  const outcome = await app
+    .waitFor(
+      `document.querySelector('.record[data-phase="recording"]') ? 'recording' : document.querySelector('[data-slot="record-error"]') ? 'error' : false`,
+      'a recording or its error',
+      8000,
+    )
+    .catch(() => 'none');
+  const dot = `(document.querySelector(${JSON.stringify(tabButton('sound'))})?.getAttribute('data-dot') ?? null)`;
+  if (outcome !== 'recording') {
+    console.log(`    skipped: l’enregistrement ne démarre pas sur ce PC (${outcome}), pastille rouge non vérifiée ici (O12)`);
+    if ((await app.evaluate(dot)) === 'rec') throw new Error('the Sound tab shows a recording that did not start');
+    await app.evaluate(`document.querySelector('[data-action="narration-close"]')?.click()`);
+    return false;
+  }
+  await app.waitFor(`${dot} === 'rec'`, 'the red dot on the Sound tab');
+  const said = await app.evaluate(`(document.querySelector(${JSON.stringify(tabButton('sound'))})?.textContent ?? '').replace(/\s+/g, ' ')`);
+  if (!said.includes(l('side.dot.rec'))) throw new Error('the Sound tab does not say that it is recording');
+  await app.click(`${panel} [data-action="narration-cancel"]`);
+  await app.waitFor(`${dot} === null`, 'the red dot to go');
+  return true;
+}

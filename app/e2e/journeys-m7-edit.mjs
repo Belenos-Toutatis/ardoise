@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openTab } from './side-panel.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -73,6 +74,8 @@ export const editJourneys = [
       });
 
       await check(`« ${l('editor.original.button')} » après confirmation, puis sauvegarde`, async () => {
+        // « Revenir à l'original » lives in the Page tab of the side panel (M16).
+        await openTab(app, 'page');
         await app.click('[data-action="original"]');
         await app.waitFor(`document.querySelector('[data-action="original-confirm"]') !== null`, 'the confirmation');
         await app.click('[data-action="original-confirm"]');

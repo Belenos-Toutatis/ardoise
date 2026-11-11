@@ -30,6 +30,7 @@ import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openTab } from './side-panel.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -597,9 +598,10 @@ async function startLive(app, check) {
 export const PANEL = '.share-panel';
 const viewersAre = (n) => `document.querySelector('[data-share-viewers]')?.getAttribute('data-share-viewers') === '${n}'`;
 
-/** Opens the share panel with the toolbar button (live window or editor). */
+/** Opens the share panel with the button of the Projection tab (live window or editor; M16: no longer in a toolbar). */
 export async function openPanel(app) {
   if (await app.evaluate(`document.querySelector(${j(PANEL)}) !== null`)) return;
+  await openTab(app, 'projection');
   await app.click('button[data-action="share"]');
   await app.waitFor(`document.querySelector(${j(PANEL)}) !== null`, 'the share panel');
 }
@@ -652,6 +654,7 @@ export const shareJourneys = [
         await startLive(app, check);
 
         await check('« Partager sur le réseau » : le panneau montre le code, l’adresse et 0 écran', async () => {
+          await openTab(app, 'projection');
           await app.click('button[data-action="share"]');
           await app.waitFor(`document.querySelector(${j(PANEL)}) !== null`, 'the share panel', 15_000);
           await app.waitFor(`document.querySelector('[data-share-code]') !== null`, 'the access code', 15_000);
@@ -1035,6 +1038,11 @@ export const shareJourneys = [
         });
 
         await check('dans l’éditeur, « Partager sur le réseau » enclenché se lit : texte de l’accent sur fond de l’accent', async () => {
+          // M16: the button is in the Projection tab, no longer in the toolbar.
+          await openTab(app, 'projection');
+          if (await app.evaluate(`document.querySelector('.toolbar [data-action="share"]') !== null`)) {
+            throw new Error('the share button is still in the editor’s toolbar');
+          }
           // The editor's light background for its own toggles once won over the share button's, leaving white on light grey.
           const look = await app.evaluate(`(() => {
             const button = document.querySelector('button[data-action="share"]');
@@ -1206,6 +1214,7 @@ export const shareJourneys = [
 
         let found = 0;
         await check('« Partager sur le réseau » : le partage démarre sur un autre port et le dit', async () => {
+          await openTab(app, 'projection');
           await app.click('button[data-action="share"]');
           await app.waitFor(`document.querySelector(${j(PANEL)}) !== null`, 'the share panel', 15_000);
           await app.waitFor(`document.querySelector('[data-share-code]') !== null`, 'the access code', 15_000);
@@ -1250,6 +1259,7 @@ export const shareJourneys = [
             `port ${found} to close`,
             10_000,
           );
+          await openTab(app, 'projection');
           await app.click('button[data-action="share"]');
           await app.waitFor(`document.querySelector('[data-share-code]') !== null`, 'the access code', 15_000);
           const again = await app.waitFor(shownPortExpression(), 'an address in the panel', 15_000);

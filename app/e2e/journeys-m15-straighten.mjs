@@ -181,7 +181,8 @@ export const straightenSettingJourneys = [
       });
 
       await check('un clic ailleurs ferme aussi le panneau', async () => {
-        await app.click('.editor-side h3');
+        // The open tab's title, outside the shapes panel (M16: the side panel's `h2`; there is no `h3` to hit any more).
+        await app.click('.editor-side [data-slot="side-title"]');
         await app.waitFor(`document.querySelector(${JSON.stringify(PANEL)}) === null`, 'the closed panel');
         if ((await app.evaluate(`document.querySelectorAll('g.straighten-preview').length`)) !== 0) throw new Error('the preview stays');
         if ((await app.evaluate(paths)) !== hand) throw new Error('a click outside straightened');

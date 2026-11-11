@@ -27,6 +27,7 @@
 import { closePanel, EventStream, request, until } from './journeys-m11-share.mjs';
 import { attach, canvasData, LIVE_CANVAS, notesOf, registerTablet, STATUS, stopLive, text } from './journeys-m12-resume.mjs';
 import { decodeStrokes } from './journeys-m12-touchup.mjs';
+import { openTab } from './side-panel.mjs';
 
 const j = JSON.stringify;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -414,8 +415,9 @@ async function joinStream(app, code) {
   return stream;
 }
 
-/** Starts the share from the toolbar; returns its access code (spaces out). */
+/** Starts the share from the Projection tab of the side panel (M16); returns its access code (spaces out). */
 async function startShare(app) {
+  await openTab(app, 'projection');
   await app.click('button[data-action="share"]');
   await app.waitFor(`document.querySelector('[data-share-code]') !== null`, 'the access code', 15_000);
   return app.evaluate(`document.querySelector('[data-share-code]').textContent.replace(/[\\s\\u00a0\\u202f]+/g, '')`);
@@ -554,6 +556,8 @@ export const liveComputerJourneys = [
         // --- The layers zone -----------------------------------------------------------------------------------------
 
         await check('la zone des calques : une ligne, choisie, avec la tablette ; plus de bouton « Nouveau calque »', async () => {
+          // The share started from Projection left that tab open; the zone is in Calques (M16).
+          await openTab(app, 'layers');
           await app.waitFor(`document.querySelector(${j(ZONE)}) !== null`, 'the layers zone of the live window');
           const list = await rows();
           if (list.length !== 1) throw new Error(`the zone has ${list.length} rows: ${j(list)}`);
