@@ -252,7 +252,8 @@ interface ColourChange {
 
 /** `group`: an eraser's gesture; steps next to each other with the same group are undone and redone together. */
 type UndoStep =
-  | { kind: 'removed'; strokes: PlacedStroke[]; cleared: boolean; group?: number }
+  // `left`: the strokes left in the list just after the removal (what « Undo the clearing » needs).
+  | { kind: 'removed'; strokes: PlacedStroke[]; cleared: boolean; left: number; group?: number }
   | { kind: 'recoloured'; changes: ColourChange[]; group?: number }
   | { kind: 'added'; indices: number[]; group?: number };
 type RedoStep =
@@ -490,7 +491,7 @@ function editStrokes(s: Session, pageIndex: number, revision: number, edit: Live
     broadcast([edited(s, page, { recoloured: [{ color, indices: changes.map((c) => c.index) }] })]);
   } else {
     const strokes = takeStrokes(page, indices);
-    record(history, { kind: 'removed', strokes, cleared: false, ...(group !== undefined ? { group } : {}) });
+    record(history, { kind: 'removed', strokes, cleared: false, left: page.strokes.length, ...(group !== undefined ? { group } : {}) });
     history.revision = lastRevision += 1;
     broadcast([edited(s, page, { removed: indices })]);
   }
@@ -541,10 +542,12 @@ function undoOne(s: Session, page: Note, history: PageHistory, step: UndoStep): 
 /** Redoes one step; returns its event. */
 function redoOne(s: Session, page: Note, history: PageHistory, step: RedoStep): LiveStrokesEdited {
   switch (step.kind) {
-    case 'remove':
-      pushUndo(history, { kind: 'removed', strokes: takeStrokes(page, step.indices), cleared: step.cleared, ...grouped(step.group) });
+    case 'remove': {
+      const strokes = takeStrokes(page, step.indices);
+      pushUndo(history, { kind: 'removed', strokes, cleared: step.cleared, left: page.strokes.length, ...grouped(step.group) });
       history.revision = lastRevision += 1;
       return edited(s, page, { removed: step.indices });
+    }
     case 'add':
       insertStrokes(page.strokes, step.strokes);
       pushUndo(history, { kind: 'added', indices: step.strokes.map((placed) => placed.index), ...grouped(step.group) });
@@ -591,15 +594,61 @@ function redoStep(s: Session): boolean {
   return true;
 }
 
-/** « Undo the clearing »: through the history, the edits made after it first. */
+/**
+ * « Undo the clearing », out of order as `History::unclear` does it (M14): the ink of the page's last
+ * clearing comes back under what was written since, whichever pen wrote it; what was done since stays
+ * done and in the history, each place it names moved for the strokes back (Ctrl+Z still undoes the
+ * last of it); the clearing leaves the history and the redo steps go. One `strokesEdited`. False when
+ * the page has no clearing to undo (none, already undone, or a merge dropped the history).
+ */
 function restoreCleared(s: Session): boolean {
-  const { undo } = historyOf(s, s.pages[s.pageIndex]);
-  const isClearing = (step: UndoStep | undefined) => step?.kind === 'removed' && step.cleared;
-  if (!undo.some(isClearing)) return false;
-  for (;;) {
-    const last = isClearing(undo[undo.length - 1]);
-    if (!undoStep(s) || last) return true;
+  const page = s.pages[s.pageIndex];
+  const history = historyOf(s, page);
+  const at = history.undo.map((step) => step.kind === 'removed' && step.cleared).lastIndexOf(true);
+  const clearing = history.undo[at];
+  if (clearing?.kind !== 'removed') return false;
+  history.undo.splice(at, 1);
+  // The clearing left `left` strokes, first in the list; after them come the strokes written since.
+  // For each cleared stroke, how many of those it left stood before it; which are still there.
+  const count = clearing.strokes.length;
+  const keptBefore = clearing.strokes.map((placed, i) => placed.index - i);
+  let present: number[] | null = null;
+  const keptNow = () => (present ? present.length : clearing.left);
+  const moved = (place: number) => {
+    if (place >= keptNow()) return place + count;
+    const rank = present ? present[place] : place;
+    return place + keptBefore.filter((before) => before <= rank).length;
+  };
+  for (const step of history.undo.slice(at)) {
+    switch (step.kind) {
+      case 'removed': {
+        const places = step.strokes.map((placed) => placed.index);
+        step.strokes = step.strokes.map((placed) => ({ ...placed, index: moved(placed.index) }));
+        if (places.some((place) => place < keptNow())) {
+          const ranks: number[] = present ?? Array.from({ length: clearing.left }, (_, i) => i);
+          present = ranks.filter((_, i) => !places.includes(i));
+        }
+        step.left += count;
+        break;
+      }
+      case 'recoloured':
+        step.changes = step.changes.map((change) => ({ ...change, index: moved(change.index) }));
+        break;
+      case 'added':
+        step.indices = step.indices.map((index) => index + count);
+        break;
+    }
   }
+  history.redo = [];
+  const kept = present;
+  const back = clearing.strokes.map((placed, i) => ({
+    index: i + (kept ? kept.filter((rank) => rank < keptBefore[i]).length : Math.min(keptBefore[i], clearing.left)),
+    stroke: placed.stroke,
+  }));
+  insertStrokes(page.strokes, back);
+  history.revision = lastRevision += 1;
+  broadcast([edited(s, page, { inserted: back })]);
+  return true;
 }
 
 /**
@@ -1158,7 +1207,8 @@ function runCommand(s: Session, command: LiveCommand): void {
       const shown = page.strokes.flatMap((stroke, index) => (isDrawn(page, stroke) ? [index] : []));
       if (shown.length > 0) {
         const history = historyOf(s, page);
-        record(history, { kind: 'removed', strokes: takeStrokes(page, shown), cleared: true });
+        const strokes = takeStrokes(page, shown);
+        record(history, { kind: 'removed', strokes, cleared: true, left: page.strokes.length });
         history.revision = lastRevision += 1;
       }
       break;

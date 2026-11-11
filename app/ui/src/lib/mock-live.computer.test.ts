@@ -425,12 +425,90 @@ describe('browser stand-in: undo and redo of the computer', () => {
     expect(refused(() => del([0], 1.5))).toBe('liveEditInvalid');
   });
 
-  it('« Undo the clearing » goes through the groups too', async () => {
+  const undo = () => invoke('live_undo_edit', { pageIndex: 0 });
+  const redo = () => invoke('live_redo_edit', { pageIndex: 0 });
+  const restore = () => invoke('live_restore_cleared');
+
+  it('« Undo the clearing » keeps the computer strokes written since: under them, still to undo; never the tablet', async () => {
     const s = await withTablet();
+    const cleared = [...s.live.strokes];
     invoke('live_command', { command: { kind: 'clearPage' } });
     s.tabletUntil(1);
-    invoke('live_edit_strokes', { pageIndex: 0, revision: s.live.revision, edit: { kind: 'delete', indices: [0], group: 5 } });
-    expect(invoke('live_restore_cleared')).toBe(true);
-    expect(s.live.strokes).toHaveLength(3);
+    s.write(1);
+    s.tabletUntil(3);
+    const since = [...s.live.strokes];
+    expect(since.map((st) => st.tool)).toEqual(['ballpoint', 'feltTip', 'ballpoint']);
+    const batches = s.batches.length;
+    expect(restore()).toBe(true);
+    // One event: the cleared ink under all of it.
+    const sent = s.batches.slice(batches).flatMap((batch) => batch.events);
+    expect(sent.filter((e) => e.type === 'strokesEdited')).toHaveLength(1);
+    expect(s.live.strokes).toEqual([...cleared, ...since]);
+    expect(s.page().strokes).toEqual(s.live.strokes);
+    expect([s.live.canUndo, s.live.canRedo]).toEqual([true, false]);
+    // Ctrl+Z undoes the red stroke, Ctrl+Y gives it back at its place; the tablet's are never undone.
+    expect(undo()).toBe(true);
+    expect(s.live.strokes).toEqual([...cleared, since[0], since[2]]);
+    expect(redo()).toBe(true);
+    expect(s.live.strokes).toEqual([...cleared, ...since]);
+    expect(undo()).toBe(true);
+    expect(undo()).toBe(false);
+    expect(s.live.strokes).toEqual([...cleared, since[0], since[2]]);
+    expect(restore()).toBe(false);
+  });
+
+  it("« Undo the clearing » keeps an eraser's gesture done since, which Ctrl+Z undoes whole", async () => {
+    const s = await withTablet();
+    const cleared = [...s.live.strokes];
+    invoke('live_command', { command: { kind: 'clearPage' } });
+    s.tabletUntil(2);
+    const since = [...s.live.strokes];
+    s.write(1);
+    const red = s.live.strokes[2];
+    const erase = () =>
+      invoke('live_edit_strokes', { pageIndex: 0, revision: s.live.revision, edit: { kind: 'delete', indices: [0], group: 5 } });
+    erase();
+    erase();
+    expect(s.live.strokes).toEqual([red]);
+    expect(restore()).toBe(true);
+    expect(s.live.strokes).toEqual([...cleared, red]);
+    expect(undo()).toBe(true);
+    expect(s.live.strokes).toEqual([...cleared, ...since, red]);
+    expect(undo()).toBe(true);
+    expect(s.live.strokes).toEqual([...cleared, ...since]);
+    expect(s.page().strokes).toEqual(s.live.strokes);
+  });
+
+  it('« Undo the clearing » finds the places when ink it left was taken out since', async () => {
+    const s = await withTablet();
+    // A red stroke on a layer hidden at the clearing: it stays. Shown again, it is deleted.
+    s.layers({ kind: 'add' });
+    s.write(1);
+    const [first, second, hidden] = s.live.strokes;
+    s.layers({ kind: 'visible', layer: 1, visible: false });
+    invoke('live_command', { command: { kind: 'clearPage' } });
+    expect(s.live.strokes).toEqual([hidden]);
+    s.tabletUntil(2);
+    const tablet = s.live.strokes[1];
+    s.layers({ kind: 'visible', layer: 1, visible: true });
+    invoke('live_edit_strokes', { pageIndex: 0, revision: s.live.revision, edit: { kind: 'delete', indices: [0] } });
+    s.write(2, 6, 9000);
+    const red = s.live.strokes[1];
+    expect(restore()).toBe(true);
+    expect(s.live.strokes).toEqual([first, second, tablet, red]);
+    expect(undo()).toBe(true);
+    expect(undo()).toBe(true);
+    // Back to the page before the clearing, then what the tablet wrote since.
+    expect(s.live.strokes).toEqual([first, second, hidden, tablet]);
+  });
+
+  it('« Undo the clearing » after a merge of layers: nothing to give back', async () => {
+    const s = await withTablet();
+    s.layers({ kind: 'add' });
+    invoke('live_command', { command: { kind: 'clearPage' } });
+    s.write(1);
+    s.layers({ kind: 'merge', layer: 1 });
+    expect(restore()).toBe(false);
+    expect(s.live.strokes.map((st) => st.tool)).toEqual(['feltTip']);
   });
 });

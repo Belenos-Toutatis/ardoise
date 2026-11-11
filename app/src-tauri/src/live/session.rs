@@ -1710,7 +1710,9 @@ impl LiveSession {
                 // An empty page is no step (a second press is harmless).
                 if !shown.is_empty() {
                     let (strokes, _) = page.take_strokes(shown);
-                    page.history.record(UndoStep::removed(strokes, true), None);
+                    let left = page.note.strokes.len();
+                    page.history
+                        .record(UndoStep::removed(strokes, true, left), None);
                 }
                 self.push_snapshot(out);
             }
@@ -1758,8 +1760,9 @@ impl LiveSession {
         let edited = match edit.action {
             EditAction::Delete => {
                 let (strokes, edited) = page.take_strokes(edit.indices);
+                let left = page.note.strokes.len();
                 page.history
-                    .record(UndoStep::removed(strokes, false), edit.group);
+                    .record(UndoStep::removed(strokes, false, left), edit.group);
                 edited
             }
             EditAction::Recolour(after) => {
@@ -1797,6 +1800,15 @@ impl LiveSession {
     /// The computer's strokes the next redo on the page on screen gives back, likewise.
     pub fn next_redone(&self) -> Vec<Arc<Vec<PlacedStroke>>> {
         self.current_page().history.next_redone()
+    }
+
+    /// The strokes « Undo the clearing » gives back on the page on screen, likewise.
+    pub fn cleared_strokes(&self) -> Vec<Arc<Vec<PlacedStroke>>> {
+        self.current_page()
+            .history
+            .last_cleared()
+            .into_iter()
+            .collect()
     }
 
     /// Undoes the last step of page `page_index` (the one on screen, or the call is stale), with
@@ -1882,8 +1894,9 @@ impl LiveSession {
             let edited = match step {
                 RedoStep::Remove { indices, cleared } => {
                     let (strokes, edited) = page.take_strokes(indices);
+                    let left = page.note.strokes.len();
                     page.history
-                        .push_undo(UndoStep::removed(strokes, cleared), group);
+                        .push_undo(UndoStep::removed(strokes, cleared, left), group);
                     edited
                 }
                 RedoStep::Recolour(changes) => {
@@ -1913,24 +1926,40 @@ impl LiveSession {
     }
 
     /// « Undo the clearing »: gives back the ink of the last « Clear the page » of the page on
-    /// screen, under what was written since. It takes its place in the page's history: edits made
-    /// after the clearing are undone first (a redo brings them back). Returns whether anything was
-    /// restored: not when that page has no clearing to undo.
+    /// screen, under what was written since, whichever pen wrote it (M14). Out of order: what was
+    /// done since stays done, the computer's strokes and edits included, and keeps its place in
+    /// the history (Ctrl+Z still undoes the last of it); the clearing leaves the history, and the
+    /// redo steps go ([`History::unclear`]). One `strokesEdited`. Returns whether anything was
+    /// restored: not when that page has no clearing to undo (none, already undone, or a merge of
+    /// layers dropped the history since). `prepared`: a copy of the cleared strokes
+    /// ([`cleared_strokes`](Self::cleared_strokes)).
     pub fn restore_cleared_with(
         &mut self,
         prepared: Option<Prepared>,
         out: &mut Vec<LiveEvent>,
     ) -> bool {
-        if !self.current_page().history.holds_clearing() {
+        let index = self.current;
+        let page = &mut self.pages[index];
+        let Some((mut strokes, places)) = page.history.unclear() else {
             return false;
-        }
+        };
         let mut prepared = prepared;
-        loop {
-            let last = self.current_page().history.next_is_clearing();
-            if !self.undo_step(prepared.take(), out) || last {
-                return true;
+        let copy = Prepared::copy_of(&mut prepared, &strokes);
+        // Dropped first: the copy's source is the same `Arc`, which may now change in place.
+        drop(prepared);
+        // Below strokes of a hidden layer taken out since, the places are not the ones they had.
+        if strokes
+            .iter()
+            .map(|placed| placed.index)
+            .ne(places.iter().copied())
+        {
+            for (placed, place) in Arc::make_mut(&mut strokes).iter_mut().zip(places) {
+                placed.index = place;
             }
         }
+        let edited = page.give_back(strokes, copy);
+        out.push(page.event(index, edited));
+        true
     }
 
     /// Ink of the strokes to come (the stroke in progress keeps its own).

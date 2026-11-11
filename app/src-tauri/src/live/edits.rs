@@ -16,6 +16,10 @@
 //! The computer's strokes are steps (`Added`); the tablet's never are. Steps of one gesture of the
 //! computer's eraser share a group, undone and redone together (M14).
 //!
+//! One step comes off out of order: « Undo the clearing » ([`History::unclear`]) takes the last
+//! clearing out from under the steps done since, which stay; every place they name is moved for
+//! the strokes that come back, so that the second fact holds again for them.
+//!
 //! No lock here and no I/O: [`LiveSession`](super::session::LiveSession) applies all this to its
 //! pages under the hub's lock, which is why nothing below costs more than a pass over the page's
 //! list (moves, no copy of points).
@@ -241,6 +245,9 @@ pub enum UndoStep {
     Removed {
         strokes: Arc<Vec<PlacedStroke>>,
         cleared: bool,
+        /// Strokes left in the list just after the removal: what « Undo the clearing » needs to
+        /// tell them from the strokes written since ([`History::unclear`]).
+        left: u32,
         /// Memory the strokes hold, worked out once.
         bytes: usize,
     },
@@ -261,12 +268,13 @@ fn stored_size(strokes: &[PlacedStroke]) -> usize {
 }
 
 impl UndoStep {
-    /// A removal of `strokes`.
-    pub fn removed(strokes: Vec<PlacedStroke>, cleared: bool) -> UndoStep {
+    /// A removal of `strokes`, which left `left` strokes in the list.
+    pub fn removed(strokes: Vec<PlacedStroke>, cleared: bool, left: usize) -> UndoStep {
         let bytes = stored_size(&strokes);
         UndoStep::Removed {
             strokes: Arc::new(strokes),
             cleared,
+            left: u32::try_from(left).unwrap_or(u32::MAX),
             bytes,
         }
     }
@@ -469,16 +477,58 @@ impl History {
             .collect()
     }
 
-    /// A « Clear the page » can still be undone.
-    pub fn holds_clearing(&self) -> bool {
-        self.undo.iter().any(|entry| entry.step.is_clearing())
+    /// The strokes the page's last « Clear the page » took, to copy before the lock is taken.
+    pub fn last_cleared(&self) -> Option<Arc<Vec<PlacedStroke>>> {
+        self.undo.iter().rev().find_map(|entry| match &entry.step {
+            UndoStep::Removed {
+                strokes,
+                cleared: true,
+                ..
+            } => Some(strokes.clone()),
+            _ => None,
+        })
     }
 
-    /// The next undo is that of a « Clear the page ».
-    pub fn next_is_clearing(&self) -> bool {
-        self.undo
-            .back()
-            .is_some_and(|entry| entry.step.is_clearing())
+    /// « Undo the clearing », out of order (M14): takes the page's last « Clear the page » out of
+    /// the history, and gives its strokes with the places they go back to in the list as it is now,
+    /// under what was written since, whichever pen wrote it. The steps done since stay, every place
+    /// they name moved for the strokes that come back, so that Ctrl+Z still undoes the last of
+    /// them, and then the steps from before the clearing as before. The clearing itself can no
+    /// longer be redone, and the redo steps go, as for any new action. `None`: no clearing to undo.
+    pub fn unclear(&mut self) -> Option<(Arc<Vec<PlacedStroke>>, Vec<u32>)> {
+        let at = self
+            .undo
+            .iter()
+            .rposition(|entry| entry.step.is_clearing())?;
+        let Entry { step, group } = self.undo.remove(at)?;
+        let (strokes, left) = match step {
+            UndoStep::Removed { strokes, left, .. } => (strokes, left),
+            step => {
+                self.undo.insert(at, Entry { step, group });
+                return None;
+            }
+        };
+        let mut moving = Unclearing::new(strokes.iter().map(|placed| placed.index), left);
+        for entry in self.undo.iter_mut().skip(at) {
+            moving.follow(&mut entry.step);
+        }
+        self.redo.clear();
+        self.recount();
+        let places = moving.places_now();
+        Some((strokes, places))
+    }
+
+    /// Groups and bytes counted again, after a step left from the middle of the stack.
+    fn recount(&mut self) {
+        let mut previous: Option<&Entry<UndoStep>> = None;
+        self.groups = 0;
+        for entry in &self.undo {
+            if !previous.is_some_and(|previous| same_group(previous.group, entry.group)) {
+                self.groups += 1;
+            }
+            previous = Some(entry);
+        }
+        self.bytes = self.undo.iter().map(|entry| entry.step.bytes()).sum();
     }
 
     /// Every stroke kept to come back (by an undo or a redo), for `change`.
@@ -561,6 +611,126 @@ impl Prepared {
             Some(prepared.copies.swap_remove(at).1)
         });
         made.unwrap_or_else(|| stored.iter().map(|placed| placed.stroke.clone()).collect())
+    }
+}
+
+/// How the places named by the steps done after a « Clear the page » move when its strokes come
+/// back under them ([`History::unclear`]).
+///
+/// After a clearing the list is the strokes it left (`kept`: those of hidden layers, and any written
+/// while it was undone), in their order, then the strokes written since, in theirs: a pen only
+/// appends, an edit only takes strokes out, its undo puts them back where they were, and a step
+/// done since never gives back a stroke from before the clearing (that would undo the clearing
+/// first). So a place below the number of kept strokes still there is a kept stroke, whose rank
+/// among them says which cleared strokes stood before it; any other place is a stroke written
+/// since, which comes after all of them. Which kept strokes are still there changes only when a
+/// step takes one out (its layer shown since): followed step by step, in order.
+struct Unclearing {
+    /// For each cleared stroke, in order, how many kept strokes stood before it.
+    kept_before: Vec<u32>,
+    /// How many strokes the clearing left.
+    kept: u32,
+    /// The ranks among them of those still in the list; `None` while all are (the usual case:
+    /// nothing to follow).
+    present: Option<Vec<u32>>,
+}
+
+impl Unclearing {
+    /// For a clearing that took the strokes at `places` (ascending) and left `kept`.
+    fn new(places: impl Iterator<Item = u32>, kept: u32) -> Unclearing {
+        let kept_before = places
+            .enumerate()
+            .map(|(i, place)| place.saturating_sub(u32::try_from(i).unwrap_or(u32::MAX)))
+            .collect();
+        Unclearing {
+            kept_before,
+            kept,
+            present: None,
+        }
+    }
+
+    /// How many strokes come back.
+    fn count(&self) -> u32 {
+        u32::try_from(self.kept_before.len()).unwrap_or(u32::MAX)
+    }
+
+    /// How many of the kept strokes are in the list now.
+    fn kept_now(&self) -> usize {
+        self.present.as_ref().map_or(self.kept as usize, Vec::len)
+    }
+
+    /// Where the stroke at `place` of the list stands once the cleared strokes are back.
+    fn moved(&self, place: u32) -> u32 {
+        let at = place as usize;
+        if at < self.kept_now() {
+            let rank = self.present.as_ref().map_or(place, |present| present[at]);
+            let before = self.kept_before.partition_point(|&kept| kept <= rank);
+            place + u32::try_from(before).unwrap_or(u32::MAX)
+        } else {
+            place.saturating_add(self.count())
+        }
+    }
+
+    /// The strokes at `places` (ascending) leave the list.
+    fn removed(&mut self, places: &[u32]) {
+        let kept_now = self.kept_now();
+        if !places.iter().any(|&place| (place as usize) < kept_now) {
+            return;
+        }
+        let kept = self.kept;
+        let present = self.present.get_or_insert_with(|| (0..kept).collect());
+        let mut at = 0;
+        let mut taken = places.iter().peekable();
+        present.retain(|_| {
+            let gone = taken.next_if(|&&place| place as usize == at).is_some();
+            at += 1;
+            !gone
+        });
+    }
+
+    /// A step done after the clearing, in order: its places move, and what it takes out is followed.
+    fn follow(&mut self, step: &mut UndoStep) {
+        match step {
+            UndoStep::Removed { strokes, left, .. } => {
+                let places: Vec<u32> = strokes.iter().map(|placed| placed.index).collect();
+                let moved: Vec<u32> = places.iter().map(|&place| self.moved(place)).collect();
+                if moved != places {
+                    for (placed, place) in Arc::make_mut(strokes).iter_mut().zip(moved) {
+                        placed.index = place;
+                    }
+                }
+                self.removed(&places);
+                *left = left.saturating_add(self.count());
+            }
+            UndoStep::Recoloured(changes) => {
+                for change in changes {
+                    change.index = self.moved(change.index);
+                }
+            }
+            // A stroke written since: after every stroke that comes back.
+            UndoStep::Added { indices } => {
+                for index in indices {
+                    *index = index.saturating_add(self.count());
+                }
+            }
+        }
+    }
+
+    /// Where the cleared strokes go back in the list as it is now (ascending): each after the kept
+    /// strokes that stood before it and are still there, and before the strokes written since.
+    fn places_now(&self) -> Vec<u32> {
+        self.kept_before
+            .iter()
+            .enumerate()
+            .map(|(i, &before)| {
+                let kept = match &self.present {
+                    None => before.min(self.kept),
+                    Some(present) => u32::try_from(present.partition_point(|&rank| rank < before))
+                        .unwrap_or(u32::MAX),
+                };
+                u32::try_from(i).unwrap_or(u32::MAX).saturating_add(kept)
+            })
+            .collect()
     }
 }
 

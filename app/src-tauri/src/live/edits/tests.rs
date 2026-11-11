@@ -673,7 +673,8 @@ fn clearing_the_page_and_its_restoration_are_steps_of_the_history() {
     assert_eq!(starts(&session), [1000.0, 2000.0, 7000.0]);
     assert!(!session.restore_cleared_with(None, &mut out), "only once");
 
-    // Edits made after a clearing come off with it (and can be redone); two clearings, one at a time.
+    // What was done after a clearing stays done (M14), and stays in the history; two clearings,
+    // one at a time.
     session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
     write(&mut session, 7500);
     session.edit(recolour(&[0], RED), &mut out).unwrap();
@@ -681,11 +682,20 @@ fn clearing_the_page_and_its_restoration_are_steps_of_the_history() {
     write(&mut session, 8000);
     session.edit(delete(&[0]), &mut out).unwrap();
     assert!(session.restore_cleared_with(None, &mut out));
+    assert_eq!(starts(&session), [7500.0]);
+    assert_eq!(colours(&session), [RED]);
+    // Ctrl+Z undoes the delete done after it, at its place moved for the stroke back.
+    assert!(session.undo(&mut out));
     assert_eq!(starts(&session), [7500.0, 8000.0]);
     assert!(session.restore_cleared_with(None, &mut out));
     assert_eq!(starts(&session), [1000.0, 2000.0, 7000.0, 7500.0, 8000.0]);
+    assert_eq!(colours(&session)[3], RED);
+    // The restore is a new action: no redo; the recolour done since is still to undo.
+    assert!(!session.snapshot().can_redo);
+    assert!(session.undo(&mut out));
     assert_eq!(colours(&session), [Rgba::BLACK; 5]);
-    assert!(session.snapshot().can_redo);
+    assert!(!session.undo(&mut out), "the clearings left the history");
+    assert_eq!(starts(&session), [1000.0, 2000.0, 7000.0, 7500.0, 8000.0]);
 }
 
 #[test]
@@ -1877,8 +1887,8 @@ fn the_limits_count_groups_and_drop_whole_ones() {
     let third = MAX_UNDO_BYTES / 3 / size_of::<Point>();
     let mut history = History::default();
     for group in 0..3 {
-        history.record(UndoStep::removed(vec![heavy(third)], false), Some(group));
-        history.push_undo(UndoStep::removed(vec![heavy(third)], false), Some(group));
+        history.record(UndoStep::removed(vec![heavy(third)], false, 0), Some(group));
+        history.push_undo(UndoStep::removed(vec![heavy(third)], false, 0), Some(group));
         assert_eq!(history.undo_groups(), 1, "group {group}");
         assert!(history.stored_bytes() > MAX_UNDO_BYTES / 2);
     }
@@ -1890,7 +1900,7 @@ fn the_limits_count_groups_and_drop_whole_ones() {
     assert_eq!((history.undo_groups(), history.stored_bytes()), (0, 0));
     // Alone, a group larger than the limit stays.
     for _ in 0..4 {
-        history.push_undo(UndoStep::removed(vec![heavy(third)], false), Some(5));
+        history.push_undo(UndoStep::removed(vec![heavy(third)], false, 0), Some(5));
     }
     assert!(history.stored_bytes() > MAX_UNDO_BYTES);
     assert_eq!(history.undo_groups(), 1);
@@ -1898,35 +1908,206 @@ fn the_limits_count_groups_and_drop_whole_ones() {
     history.clear();
     history.record(UndoStep::Added { indices: vec![0] }, None);
     history.record(UndoStep::Added { indices: vec![1] }, None);
-    history.record(UndoStep::removed(Vec::new(), false), Some(3));
+    history.record(UndoStep::removed(Vec::new(), false, 0), Some(3));
     history.record(UndoStep::Added { indices: vec![2] }, None);
-    history.record(UndoStep::removed(Vec::new(), false), Some(3));
+    history.record(UndoStep::removed(Vec::new(), false, 0), Some(3));
     assert_eq!(history.undo_groups(), 5);
 }
 
+/// A page of three strokes, the middle one on a hidden layer: a clearing takes the other two.
+fn page_with_a_hidden_stroke() -> LiveSession {
+    let mut session = with_strokes(3);
+    let page = session.page_mut(0).unwrap();
+    page.note.layers = vec![
+        Layer {
+            name: "Calque 1".into(),
+            visible: true,
+        },
+        Layer {
+            name: "Réponses".into(),
+            visible: false,
+        },
+    ];
+    page.note.strokes[1].layer = 1;
+    session
+}
+
 #[test]
-fn undoing_the_clearing_takes_the_groups_after_it_whole() {
+fn undoing_the_clearing_keeps_the_computer_s_strokes_written_since_and_their_steps() {
+    let drawn = |session: &LiveSession| -> Vec<Stroke> {
+        let page = &session.pages()[0];
+        let drawn = |s: &&Stroke| crate::share::page::is_drawn(&page.note.layers, s);
+        page.note.strokes.iter().filter(drawn).cloned().collect()
+    };
+    let mut session = page_with_a_hidden_stroke();
+    let mut window = Follower::default();
+    let mut viewer = Follower {
+        viewer: true,
+        ..Follower::default()
+    };
+    let mut out = vec![LiveEvent::Snapshot {
+        snapshot: Arc::new(session.snapshot()),
+    }];
+    session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
+    assert_eq!(starts(&session), [2000.0], "the hidden stroke stays");
+    // Within the offer: the tablet writes, the teacher corrects in red, the tablet again, red again.
+    write_to(&mut session, 7000, &mut out);
+    session.computer_stroke(1, 7100.0, &mut out);
+    write_to(&mut session, 8000, &mut out);
+    session.computer_stroke(2, 8100.0, &mut out);
+    let written = revision(&session);
+
+    let at = out.len();
+    let prepared = Prepared::of_all(session.cleared_strokes());
+    let source = prepared.copied()[0].points.as_ptr();
+    assert!(session.restore_cleared_with(Some(prepared), &mut out));
+    // One event: the cleared ink back under all of it, in its order; nothing else moved.
+    assert_eq!(edits_of(&out[at..]), 1);
+    let LiveEvent::StrokesEdited {
+        removed,
+        inserted,
+        viewers,
+        can_undo,
+        can_redo,
+        ..
+    } = &out[at]
+    else {
+        panic!("{out:?}");
+    };
+    assert!(removed.is_empty());
+    let places: Vec<u32> = inserted.iter().map(|placed| placed.index).collect();
+    assert_eq!(places, [0, 2]);
+    // A viewer has no hidden stroke: for it they go at 0 and 1.
+    assert_eq!(
+        viewers.as_deref().map(|v| v.inserted.clone()),
+        Some(vec![Some(0), Some(1)])
+    );
+    assert!(*can_undo && !*can_redo);
+    assert_eq!(
+        starts(&session),
+        [1000.0, 2000.0, 3000.0, 7000.0, 7100.0, 8000.0, 8100.0]
+    );
+    assert_ne!(revision(&session), written);
+    // The copy made before the lock went in.
+    assert_eq!(session.pages()[0].note.strokes[0].points.as_ptr(), source);
+
+    // Ctrl+Z undoes the teacher's last stroke, Ctrl+Y gives it back at its place.
+    assert!(session.undo(&mut out));
+    assert_eq!(
+        starts(&session),
+        [1000.0, 2000.0, 3000.0, 7000.0, 7100.0, 8000.0]
+    );
+    assert!(session.redo(&mut out));
+    assert_eq!(
+        starts(&session),
+        [1000.0, 2000.0, 3000.0, 7000.0, 7100.0, 8000.0, 8100.0]
+    );
+    // Then the first one; what the tablet wrote never goes.
+    assert!(session.undo(&mut out));
+    assert!(session.undo(&mut out));
+    assert!(!session.undo(&mut out));
+    assert_eq!(starts(&session), [1000.0, 2000.0, 3000.0, 7000.0, 8000.0]);
+    let tools: Vec<Tool> = session.pages()[0]
+        .note
+        .strokes
+        .iter()
+        .map(|s| s.tool)
+        .collect();
+    assert_eq!(tools, [Tool::Ballpoint; 5]);
+    // Only once.
+    assert!(!session.restore_cleared_with(None, &mut out));
+    window.follow(&out);
+    viewer.follow(&out);
+    assert_eq!(window.strokes, session.pages()[0].note.strokes);
+    assert_eq!(viewer.strokes, drawn(&session));
+}
+
+#[test]
+fn undoing_the_clearing_keeps_an_eraser_s_gesture_done_since_undone_as_one() {
     let mut session = with_strokes(3);
     let mut out = Vec::new();
     session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
     write(&mut session, 7000);
     write(&mut session, 7500);
     session.computer_stroke(1, 8000.0, &mut out);
+    // One gesture of the eraser across the tablet's two strokes.
     session.edit(erase(&[0], 4), &mut out).unwrap();
     session.edit(erase(&[0], 4), &mut out).unwrap();
     assert_eq!(starts(&session), [8000.0]);
-    // As the hub does it: the copy of the group on top prepared before the lock.
-    let prepared = Prepared::of_all(session.next_restored());
-    assert_eq!(prepared.copied().len(), 2);
     out.clear();
-    assert!(session.restore_cleared_with(Some(prepared), &mut out));
-    // The gesture (two steps), the computer's stroke, then the clearing: four events.
-    assert_eq!(edits_of(&out), 4);
+    assert!(session.restore_cleared_with(None, &mut out));
+    assert_eq!(edits_of(&out), 1);
+    assert_eq!(starts(&session), [1000.0, 2000.0, 3000.0, 8000.0]);
+    // Ctrl+Z: the whole gesture comes back at its places, then the computer's stroke goes.
+    out.clear();
+    assert!(session.undo(&mut out));
+    assert_eq!(edits_of(&out), 2);
+    assert_eq!(
+        starts(&session),
+        [1000.0, 2000.0, 3000.0, 7000.0, 7500.0, 8000.0]
+    );
+    assert!(session.undo(&mut out));
     assert_eq!(starts(&session), [1000.0, 2000.0, 3000.0, 7000.0, 7500.0]);
-    assert!(!session.snapshot().can_undo);
-    // All of it can be redone, in its order.
+    assert!(!session.undo(&mut out));
+    // And all of it again, in its order.
     while session.redo(&mut out) {}
-    assert_eq!(starts(&session), [8000.0]);
+    assert_eq!(starts(&session), [1000.0, 2000.0, 3000.0, 8000.0]);
+}
+
+#[test]
+fn undoing_the_clearing_finds_the_places_when_kept_ink_was_taken_out_since() {
+    // [A H B]: the clearing takes A and B and keeps H (its layer hidden). Then H's layer is shown
+    // and H deleted, the tablet and the computer write.
+    let mut session = page_with_a_hidden_stroke();
+    let mut out = Vec::new();
+    session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
+    write(&mut session, 7000);
+    session
+        .layer_op(
+            CheckedLayerOp::Visible {
+                layer: 1,
+                visible: true,
+            },
+            &mut out,
+        )
+        .unwrap();
+    session.edit(delete(&[0]), &mut out).unwrap();
+    session.computer_stroke(1, 8000.0, &mut out);
+    assert_eq!(starts(&session), [7000.0, 8000.0]);
+    let mut window = Follower::default();
+    window.follow(&[LiveEvent::Snapshot {
+        snapshot: Arc::new(session.snapshot()),
+    }]);
+    out.clear();
+    assert!(session.restore_cleared_with(None, &mut out));
+    assert_eq!(starts(&session), [1000.0, 3000.0, 7000.0, 8000.0]);
+    // Undone step by step, back to the page before the clearing and what the tablet wrote since.
+    assert!(session.undo(&mut out));
+    assert_eq!(starts(&session), [1000.0, 3000.0, 7000.0]);
+    assert!(session.undo(&mut out));
+    assert_eq!(starts(&session), [1000.0, 2000.0, 3000.0, 7000.0]);
+    assert_eq!(session.pages()[0].note.strokes[1].layer, 1);
+    window.follow(&out);
+    assert_eq!(window.strokes, session.pages()[0].note.strokes);
+}
+
+#[test]
+fn after_a_merge_there_is_no_clearing_to_undo() {
+    let mut session = with_strokes(2);
+    let mut out = Vec::new();
+    session.layer_op(CheckedLayerOp::Add, &mut out).unwrap();
+    session.command(LiveCommandKind::ClearPage, LiveButton::NewPage, 0, &mut out);
+    session.computer_stroke(1, 5000.0, &mut out);
+    session
+        .layer_op(CheckedLayerOp::Merge { layer: 1 }, &mut out)
+        .unwrap();
+    let before = session.snapshot();
+    out.clear();
+    // Refused as any restore with nothing to give back: `false`, nothing changed.
+    assert!(!session.restore_cleared_with(None, &mut out));
+    assert!(out.is_empty());
+    assert_eq!(session.snapshot(), before);
+    assert_eq!(starts(&session), [5000.0]);
 }
 
 #[test]
@@ -2061,14 +2242,49 @@ fn the_computer_s_ink_is_undone_through_the_hub_and_written() {
     assert_eq!(stroke_starts(&hub), [1000.0, 2000.0]);
     assert!(hub.redo_edit(0).unwrap());
     assert_eq!(stroke_starts(&hub), [1000.0, 2000.0, 5000.0]);
+
+    // « Clear the page », the tablet and the computer write, « Undo the clearing »: both inks.
+    hub.command(LiveCommandKind::ClearPage).unwrap();
+    stroke(&mut sink, 7000, 3);
+    assert!(hub.computer_pen(begin(2, 0, at_once(&[8000.0]))).unwrap());
+    assert!(hub.computer_pen(end(2, Vec::new())).unwrap());
+    assert!(hub.restore_cleared().unwrap());
+    assert_eq!(
+        stroke_starts(&hub),
+        [1000.0, 2000.0, 5000.0, 7000.0, 8000.0]
+    );
+    let path = notes_in(&library)[0].clone();
+    wait_until("both inks in the file", || {
+        crate::live::tests::stroke_count(&library, &path) == Some(5)
+    });
+    // Ctrl+Z undoes the stroke written after the clearing; the clearing is gone from the history.
+    assert!(hub.undo_edit(0).unwrap());
+    assert_eq!(stroke_starts(&hub), [1000.0, 2000.0, 5000.0, 7000.0]);
+    assert!(hub.redo_edit(0).unwrap());
+    assert_eq!(
+        stroke_starts(&hub),
+        [1000.0, 2000.0, 5000.0, 7000.0, 8000.0]
+    );
+    assert!(!hub.restore_cleared().unwrap());
     let saved = hub.stop().unwrap();
     let written = library
         .read(std::path::Path::new(&saved[0]))
         .unwrap()
         .file
         .note;
-    assert_eq!(written.strokes.len(), 3);
-    assert_eq!(written.strokes[2].tool, Tool::FeltTip);
+    let starts: Vec<f32> = written.strokes.iter().map(|s| s.points[0].x).collect();
+    assert_eq!(starts, [1000.0, 2000.0, 5000.0, 7000.0, 8000.0]);
+    let tools: Vec<Tool> = written.strokes.iter().map(|s| s.tool).collect();
+    assert_eq!(
+        tools,
+        [
+            Tool::Ballpoint,
+            Tool::Ballpoint,
+            Tool::FeltTip,
+            Tool::Ballpoint,
+            Tool::FeltTip
+        ]
+    );
     wait_until("the events", || {
         window.has(|e| matches!(e, LiveEvent::History { .. }))
     });
