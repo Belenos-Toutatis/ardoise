@@ -1663,6 +1663,18 @@
     "clearDone": "Page cleared.",
     "clearUndo": "Undo clearing",
     "clearUndoFailed": "The clearing can no longer be undone: the page has changed since.",
+    "merge": {
+      "title": "Merge “{upper}” into “{lower}”?",
+      "noUndo": "Ctrl+Z will not be able to undo it.",
+      "hidden": "“{lower}” is hidden: once merged, its content will be projected and shared.",
+      "confirm": "Merge",
+      "cancel": "Cancel"
+    },
+    "failed": {
+      "layersStale": "The page changed in the meantime: do the layer operation again.",
+      "pen": "This stroke could not be written.",
+      "eraser": "This erasing could not be done."
+    },
     "leave": {
       "title": "End live mode?",
       "message": "Every page you wrote is saved as a note in the library. To stop only the projection, use \"Stop projecting\": Esc also closes it while it is shown.",
