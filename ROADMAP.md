@@ -315,18 +315,24 @@ Pendant ces vérifications, deux défauts des tests sont corrigés : un parcours
 
 Ajouté à la demande de l'utilisateur le 2026-11-11 (SPEC §4.4, `docs/questions.md` Q12), à partir d'une maquette qu'il a validée.
 
-- [ ] `ardoise-ink` : les seuils de `shapes.rs` deviennent un réglage (`ShapeTuning` : tolérance sur cinq crans, taille minimale, alignement horizontal ou vertical, cercle ou carré) ; avec les valeurs par défaut, exactement les résultats d'aujourd'hui ; les protections de l'écriture ne dépendent pas du réglage ; le WebAssembly reçoit le réglage avec les traits.
-- [ ] Réglages : section `[shapes]` de `ardoise.toml` (valeurs ramenées dans leurs limites), lue et écrite par l'application (`set_shapes`), lue par le serveur de l'assistant.
-- [ ] Éditeur : bouton partagé « Redresser les formes » et sa flèche ; panneau avec les trois réglages, le nombre de formes reconnues et l'aperçu en pointillés sur la page ; « Valeurs par défaut » ; Échap ; le panneau tient dans la fenêtre et défile ; le bouton du bloc Sélection et la touche F redressent avec les mêmes valeurs ; traductions FR et EN.
-- [ ] Assistant : `straighten_shapes` redresse avec les valeurs retenues, en accepte d'autres pour un appel et dit celles qu'il a utilisées.
-- [ ] Guides FR et EN (dont celui de l'assistant), `CHANGELOG.md`.
-- [ ] Relecture indépendante, remarques corrigées.
+- [x] `ardoise-ink` : les seuils de `shapes.rs` deviennent un réglage (`ShapeTuning` : tolérance sur cinq crans, taille minimale, alignement horizontal ou vertical, cercle ou carré) ; avec les valeurs par défaut, exactement les résultats d'aujourd'hui ; les protections de l'écriture ne dépendent pas du réglage ; le WebAssembly reçoit le réglage avec les traits.
+- [x] Réglages : section `[shapes]` de `ardoise.toml` (valeurs ramenées dans leurs limites), lue et écrite par l'application (`set_shapes`), lue par le serveur de l'assistant.
+- [x] Éditeur : bouton partagé « Redresser les formes » et sa flèche ; panneau avec les trois réglages, le nombre de formes reconnues et l'aperçu en pointillés sur la page ; « Valeurs par défaut » ; Échap ; le panneau tient dans la fenêtre et défile ; le bouton du bloc Sélection et la touche F redressent avec les mêmes valeurs ; traductions FR et EN.
+- [x] Assistant : `straighten_shapes` redresse avec les valeurs retenues, en accepte d'autres pour un appel et dit celles qu'il a utilisées.
+- [x] Guides FR et EN (dont celui de l'assistant), `CHANGELOG.md`.
+- [x] Relecture indépendante, remarques corrigées.
 
 **Critères de fin** :
 - `CHECK OK` et `E2E OK` ;
 - des tests de `ardoise-ink` : avec les valeurs par défaut, les mêmes formes qu'avant sur tous les tests existants, et aucune lettre de 4 à 12 mm changée ; chaque réglage agit dans le bon sens (une forme moins nette reconnue en souple et pas en stricte ; une droite de 7 mm reconnue à 5 mm et pas à 10 ; un trait incliné de 3° rendu horizontal à 4°, gardé incliné à 2° ou sans la case ; une ellipse à 7 % du cercle devenue cercle à 10 %, gardée ellipse à 5 %) ; un petit O debout jamais redressé, même au réglage le plus large ;
 - un parcours de bout en bout dans l'éditeur : ouvrir le panneau, l'aperçu et le nombre de formes changent avec les curseurs, « Redresser » applique ce que montrait l'aperçu, Ctrl+Z annule, les valeurs sont retrouvées après un redémarrage, et le panneau défile dans une fenêtre basse sans dépasser son bas ;
 - un test du serveur de l'assistant : `straighten_shapes` suit les valeurs de `ardoise.toml` et celles données à l'appel, et les dit.
+
+Vérifié sous Windows le 2026-11-11 : `CHECK OK`, `E2E OK` (92 parcours, FR et EN, dont les deux de M15 : le panneau, son aperçu en pointillés, le nombre de formes qui suit la taille minimale, « Redresser », Ctrl+Z, la touche F, la fenêtre basse où il défile, le thème sombre ; et les valeurs de `ardoise.toml` lues au démarrage), après une relecture indépendante dont les remarques sont corrigées. Avec les valeurs par défaut, le redressement donne exactement les résultats d'avant (comparaison bit à bit sur 23 420 entrées). Sur les lettres de 4 à 12 mm de 300 mains simulées : la tolérance « souple » n'en change aucune de plus à 10 mm ; à 5 mm, des traits droits de lettres et des o ronds de 9 à 12 mm sont redressés, d'où l'avertissement sous 10 mm ; les O, 0 et D jamais. Aperçu : 2 ms pour 60 traits, 7 à 8 ms pour 330, 17 à 19 ms pour 860 (WebAssembly).
+
+Trouvé par les parcours sur le vrai exécutable : une règle de style commune écrasait le panneau à 14 px de haut (corrigé ; les tests de l'interface, sans mise en page, ne pouvaient pas le voir). Et la cause d'un plantage du PC le même jour : des Edge sans fenêtre laissés par les parcours du partage (633 processus, 8 Go de mémoire) ; leur fermeture est corrigée, et chaque série de parcours arrête et signale ce qui en resterait.
+
+Reste à essayer sur de vraies notes : les crans de tolérance viennent de mains simulées.
 
 ---
 
