@@ -65,7 +65,7 @@ tools that only add, even though nothing is ever deleted permanently), `false` o
 | `trash_note` | `note` | to the library trash, restorable from the app |
 | `merge_notes` | `notes` (≥ 2), `layout` (`overlay`/`endToEnd`), `title?` | the M5 merge, a new note |
 | `split_note` | `note`, `at_ms` or `polygon` (mm), `title?` | the M5 split **on copies** (M13, `revision.md`): the file of a note that is not a revision is not written, both parts are new notes next to it, revisions of it; on a revision what stays is saved over it, its version before going to the library's trash, and what moves is a new note |
-| `straighten_shapes` | `note`, `strokes?` (indices; default the drawings found by Windows' ink analysis on visible layers, required without it) | the M7 straightening **on a copy** of a note that is not a revision (M13, `revision.md`: the original is not written), in place on a revision (its version before goes to the library's trash as a note of its own) |
+| `straighten_shapes` | `note`, `strokes?` (indices; default the drawings found by Windows' ink analysis on visible layers, required without it), `tolerance?` (1-5), `min_size_mm?` (5-25), `snap_angle_deg?` (0 = off, else 1-10), `snap_round_percent?` (0 = off, else 2-20) (M15: values for this call; default the user's `[shapes]` setting) | the M7 straightening **on a copy** of a note that is not a revision (M13, `revision.md`: the original is not written), in place on a revision (its version before goes to the library's trash as a note of its own) |
 | `preview_revision`, `create_revision`, `edit_revision` | `note`, `orders`, `expected_version`, `summary` (`create_revision` also `title?`; the preview has neither of the two, it also has `region?`, `dpi?`, `labels?` and answers `version`) | M13, see `docs/design/revision.md`: a list of orders retouches the strokes in memory (preview, nothing written), on a new copy next to the note, or in place on a note that already is a revision |
 | `revision_orders` | none | M13: the JSON schema of one order, from the doc comments of `ardoise_revise::Order`. In the write group, as nothing else uses it; it reads nothing |
 | `export_note` | `notes`, `format` (`png`/`jpg`/`webp`/`svg`/`pdf`/`txt`/`md`/`docx`/`gif`/`webm`/`mp4`), `path` (absolute file or folder), options of each format (dpi, background, quality, …) | the app's exports; never overwrites (" (2)" added), returns the written paths |
@@ -487,3 +487,31 @@ What changes in this document's tools:
 - Codes: `invalidOrders` (the engine's message) and `notARevision`.
 - The prompts `ameliorer_note` / `improve_note` are the only ones that need the write tools: a `--read-only` server does not
   serve them.
+
+## As built — the shapes setting (M15)
+
+`straighten_shapes` follows the user's setting of "Redresser les formes" (SPEC §4.4, `docs/questions.md` Q12): the
+section `[shapes]` of `ardoise.toml` (`ardoise_core::settings::ShapeSettings`), brought within its limits when read, the
+same for every note and every PC using the copy.
+
+- **Where the server gets it.** `Environment::shape_tuning()` (a new method of the trait, defaulting to
+  `ShapeTuning::default()`, the thresholds of before M15) returns the `ardoise_ink::ShapeTuning` the settings give (a box
+  that is off is `None`). The app's `AppEnvironment` reads `ardoise.toml` afresh at each call through `current_state`,
+  as it does for the library, so a change made in the editor while the assistant is connected is seen at the next
+  call. The `--mcp` process is the same exe and the same store: nothing else to configure. An unreadable settings file
+  gives the defaults, as everywhere else.
+- **Arguments for one call.** `tolerance` (integer 1-5), `min_size_mm` (5-25), `snap_angle_deg` (`0` = never, else
+  1-10), `snap_round_percent` (`0` = never, else 2-20). A value out of range is brought within the limits, not refused
+  (the style of `limit` and `dpi`), and named in `tuning.clamped`. The call never changes the user's setting.
+- **The answer** (also when nothing is straightened) has `tuning`: `{ tolerance, min_size_mm, snap_angle_deg,
+  snap_round_percent, source, clamped }`, `0` standing for an alignment that is off, `source` being `settings`, `arguments`
+  (all four given) or `settings_and_arguments`.
+- **The account entry** of the copy ("Shapes straightened: N") adds the values, in the language of the app, only when they
+  are not the original ones: "Shapes straightened: 2 (tolerance 4, minimum size 7 mm, horizontal/vertical snapping 3°,
+  circle/square snapping off)". With the original values it reads as before.
+- The schema of the four arguments is written out like the others (`schema.rs`); the tool's description stays well
+  under 2000 characters.
+- Tests: `tests/write_tools.rs` (the values of the setting, of a call, their limits, the account entry); the behavioural
+  test that a 7 mm line is straightened with `min_size_mm: 5` needs `ardoise-ink`'s `straighten_with` to follow the tuning
+  (package A of M15). Settings and the app's command: `ardoise-core/src/settings.rs`, `app/src-tauri/src/commands.rs`
+  (`set_shapes`).

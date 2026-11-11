@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use ardoise_core::library::Library;
 use ardoise_hwr::Language;
+use ardoise_ink::ShapeTuning;
 use ardoise_mcp::write::{ExportFormat, ExportTarget};
 use ardoise_mcp::{Host, ServerOptions, build_tool_router};
 use rmcp::model::CallToolRequestParams;
@@ -307,6 +308,7 @@ async fn a_host_without_write_services_fails_with_a_code() {
             root: harness.root.clone(),
             hidden: None,
             language: Language::En,
+            tuning: Default::default(),
         }),
         harness.fake.clone(),
     );
@@ -1013,6 +1015,230 @@ async fn nothing_straightened_makes_no_copy_and_saves_nothing() {
     assert_eq!(error["code"], "invalidArguments");
     assert_eq!(fingerprint(&session, CHIMIE), before);
     assert_eq!(session.harness.library().list().notes.len(), notes);
+}
+
+const SHORT: &str = "66666666-6666-4666-8666-666666666666";
+
+/// A session whose library also has a note with one straight line 7 mm long, and where the
+/// user's setting of "Redresser les formes" is `tuning`.
+async fn session_with_a_short_line(language: Language, tuning: ShapeTuning) -> Session {
+    let mut harness = Harness::new(language);
+    harness.tuning = tuning;
+    let mut note = make_note(SHORT, "Trait court", 7);
+    // 7 mm = 700 units of 10 µm, a hair off the straight.
+    note.strokes = vec![ardoise_ink::Stroke {
+        tool: ardoise_ink::Tool::Ballpoint,
+        color: ardoise_ink::Rgba::BLACK,
+        width: 60.0,
+        layer: 0,
+        points: (0..=7)
+            .map(|i| ardoise_ink::Point {
+                x: 3_000.0 + i as f32 * 100.0,
+                y: 4_000.0 + (i % 2) as f32 * 3.0,
+                pressure: 0.6,
+                t: i as u32 * 10,
+            })
+            .collect(),
+    }];
+    harness
+        .library()
+        .create(Path::new(""), &ardoise_core::format::NoteFile::new(note))
+        .unwrap();
+    let host = harness.host();
+    session_on(harness, host, ServerOptions::default()).await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn straightening_says_the_values_of_the_users_setting() {
+    let user = ShapeTuning {
+        tolerance: 4,
+        min_size_mm: 7.5,
+        snap_angle_deg: None,
+        snap_round_percent: Some(6.0),
+    };
+    let session = session_with_a_short_line(Language::En, user).await;
+    let result = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [3] }),
+        )
+        .await;
+    assert_eq!(
+        result["tuning"],
+        json!({
+            "tolerance": 4,
+            "min_size_mm": 7.5,
+            "snap_angle_deg": 0.0,
+            "snap_round_percent": 6.0,
+            "source": "settings",
+            "clamped": [],
+        }),
+        "{result}"
+    );
+    // The account entry of the copy says them too (they are not the app's original values).
+    let copy = file_of(&session, result["note"]["id"].as_str().unwrap());
+    assert_eq!(
+        copy.revision.unwrap().summary[0].text,
+        "Shapes straightened: 1 (tolerance 4, minimum size 7.5 mm, horizontal/vertical snapping off, circle/square snapping 6 %)"
+    );
+    // The answer of a call that finds nothing says them as well.
+    let none = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [0] }),
+        )
+        .await;
+    assert_eq!(none["straightened"], 0);
+    assert_eq!(none["tuning"]["tolerance"], 4, "{none}");
+    assert_eq!(none["tuning"]["source"], "settings");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_apps_original_values_leave_the_account_entry_as_it_was() {
+    let session = session().await;
+    let result = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [3] }),
+        )
+        .await;
+    assert_eq!(
+        result["tuning"],
+        json!({
+            "tolerance": 3,
+            "min_size_mm": 10.0,
+            "snap_angle_deg": 4.0,
+            "snap_round_percent": 10.0,
+            "source": "settings",
+            "clamped": [],
+        })
+    );
+    let copy = file_of(&session, result["note"]["id"].as_str().unwrap());
+    assert_eq!(
+        copy.revision.unwrap().summary[0].text,
+        "Shapes straightened: 1"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn values_given_for_one_call_replace_the_setting_and_are_brought_within_limits() {
+    let user = ShapeTuning {
+        tolerance: 2,
+        min_size_mm: 12.0,
+        snap_angle_deg: Some(3.0),
+        snap_round_percent: None,
+    };
+    let session = session_with_a_short_line(Language::Fr, user).await;
+    let result = session
+        .ok(
+            "straighten_shapes",
+            json!({
+                "note": CHIMIE,
+                "strokes": [3],
+                "tolerance": 9,
+                "min_size_mm": 2.5,
+                "snap_angle_deg": 0,
+                "snap_round_percent": 50,
+            }),
+        )
+        .await;
+    assert_eq!(
+        result["tuning"],
+        json!({
+            "tolerance": 5,
+            "min_size_mm": 5.0,
+            "snap_angle_deg": 0.0,
+            "snap_round_percent": 20.0,
+            "source": "arguments",
+            "clamped": ["tolerance", "min_size_mm", "snap_round_percent"],
+        }),
+        "{result}"
+    );
+    let copy = file_of(&session, result["note"]["id"].as_str().unwrap());
+    assert_eq!(
+        copy.revision.unwrap().summary[0].text,
+        "Formes redressées : 1 (tolérance 5, taille minimale 5 mm, alignement horizontal/vertical désactivé, alignement cercle/carré 20 %)"
+    );
+
+    // One value only: the others stay the user's. A low angle is brought up to 1, and 0 is off.
+    let one = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [3], "snap_angle_deg": 0.2 }),
+        )
+        .await;
+    assert_eq!(
+        one["tuning"],
+        json!({
+            "tolerance": 2,
+            "min_size_mm": 12.0,
+            "snap_angle_deg": 1.0,
+            "snap_round_percent": 0.0,
+            "source": "settings_and_arguments",
+            "clamped": ["snap_angle_deg"],
+        }),
+        "{one}"
+    );
+    // The user's setting is not touched by a call.
+    let again = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": CHIMIE, "strokes": [3] }),
+        )
+        .await;
+    assert_eq!(again["tuning"]["tolerance"], 2);
+    assert_eq!(again["tuning"]["source"], "settings");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_short_line_is_left_alone_with_the_default_minimum_size() {
+    let session = session_with_a_short_line(Language::En, ShapeTuning::default()).await;
+    let result = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": SHORT, "strokes": [0] }),
+        )
+        .await;
+    assert_eq!(result["straightened"], 0, "{result}");
+    assert_eq!(result["saved"], false);
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "needs M15 package A (straighten_with follows the tuning)"]
+async fn a_short_line_is_straightened_when_the_minimum_size_allows_it() {
+    // Through the call's own value...
+    let session = session_with_a_short_line(Language::En, ShapeTuning::default()).await;
+    let left = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": SHORT, "strokes": [0] }),
+        )
+        .await;
+    assert_eq!(left["straightened"], 0, "{left}");
+    let made = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": SHORT, "strokes": [0], "min_size_mm": 5 }),
+        )
+        .await;
+    assert_eq!(made["straightened"], 1, "{made}");
+    assert_eq!(made["shapes"][0]["shape"], "line");
+    assert_eq!(made["tuning"]["source"], "settings_and_arguments");
+
+    // ... and through the user's setting.
+    let user = ShapeTuning {
+        min_size_mm: 5.0,
+        ..ShapeTuning::default()
+    };
+    let session = session_with_a_short_line(Language::En, user).await;
+    let made = session
+        .ok(
+            "straighten_shapes",
+            json!({ "note": SHORT, "strokes": [0] }),
+        )
+        .await;
+    assert_eq!(made["straightened"], 1, "{made}");
+    assert_eq!(made["tuning"]["min_size_mm"], 5.0);
 }
 
 #[tokio::test(flavor = "current_thread")]

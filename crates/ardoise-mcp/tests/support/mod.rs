@@ -14,7 +14,7 @@ use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Note, Origin, PageSize
 use ardoise_core::ops::{self, NewNote};
 use ardoise_hwr::structure::{DrawingArea, Item, Structure, from_recognition, ink_boxes};
 use ardoise_hwr::{Bounds, HwrError, Language, Line, Recognition, Word};
-use ardoise_ink::{Point, Rgba, Stroke, Tool};
+use ardoise_ink::{Point, Rgba, ShapeTuning, Stroke, Tool};
 use ardoise_mcp::write::{ExportOutcome, ExportRequest, ExportTarget, MergeLayout, WriteServices};
 use ardoise_mcp::{
     Correction, Environment, Handwriting, Host, ServerOptions, TextHit, TextSearch, TextStatus,
@@ -41,6 +41,8 @@ pub struct Env {
     pub root: PathBuf,
     pub hidden: Option<String>,
     pub language: Language,
+    /// The user's "Redresser les formes" setting.
+    pub tuning: ShapeTuning,
 }
 
 impl Environment for Env {
@@ -54,6 +56,10 @@ impl Environment for Env {
 
     fn language(&self) -> Language {
         self.language
+    }
+
+    fn shape_tuning(&self) -> ShapeTuning {
+        self.tuning
     }
 }
 
@@ -463,6 +469,8 @@ pub struct Harness {
     pub fake: Arc<Fake>,
     pub write: Arc<FakeWrite>,
     pub language: Language,
+    /// What the server reads as the user's setting of `straighten_shapes`.
+    pub tuning: ShapeTuning,
 }
 
 impl Harness {
@@ -528,6 +536,7 @@ impl Harness {
             fake,
             write,
             language,
+            tuning: ShapeTuning::default(),
         }
     }
 
@@ -537,6 +546,7 @@ impl Harness {
                 root: self.root.clone(),
                 hidden: Some("Exports".into()),
                 language: self.language,
+                tuning: self.tuning,
             }),
             self.fake.clone(),
         )

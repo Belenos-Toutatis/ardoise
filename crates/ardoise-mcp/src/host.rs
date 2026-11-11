@@ -15,6 +15,7 @@ use ardoise_core::library::{FileStamp, Library, NoteEntry};
 use ardoise_core::note::Note;
 use ardoise_hwr::structure::Structure;
 use ardoise_hwr::{HwrError, Language, Recognition};
+use ardoise_ink::ShapeTuning;
 
 use crate::bridge::{AppBridge, NoApp};
 use crate::error::ToolError;
@@ -34,6 +35,13 @@ pub trait Environment: Send + Sync {
 
     /// The language of the app (prompts follow it).
     fn language(&self) -> Language;
+
+    /// The user's setting of "Redresser les formes" (`[shapes]` of `ardoise.toml`), read afresh at
+    /// each call: what `straighten_shapes` uses unless the call gives other values. The app's
+    /// original thresholds by default.
+    fn shape_tuning(&self) -> ShapeTuning {
+        ShapeTuning::default()
+    }
 }
 
 /// Where the text of one note was found by the search.

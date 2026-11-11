@@ -1769,6 +1769,7 @@ async fn a_host_without_write_services_cannot_write_a_copy() {
             root: harness.root.clone(),
             hidden: None,
             language: Language::En,
+            tuning: Default::default(),
         }),
         harness.fake.clone(),
     );
