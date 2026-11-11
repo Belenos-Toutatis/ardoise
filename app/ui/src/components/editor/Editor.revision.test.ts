@@ -40,6 +40,7 @@ const app: AppState = {
   openDiagnostic: false,
   autoExport: { format: 'off', folder: 'Exports' },
   microphone: null,
+  shapes: { tolerance: 3, minSizeMm: 10, snapAngle: true, snapAngleDeg: 4, snapRound: true, snapRoundPercent: 10 },
 };
 
 const PHYSICS = 'Cours de physique';

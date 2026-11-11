@@ -58,9 +58,25 @@ export interface Ink {
   pressureForWidth(tool: Tool, width: number, diameter: number): number;
   /**
    * The clear shapes (line, ellipse, rectangle, arrow) among `strokes`, straightened
-   * (`ardoise_ink::shapes`). Strokes that are no clear shape are in no result.
+   * (`ardoise_ink::shapes`) with `tuning` (the defaults, the thresholds of before M15, when
+   * absent). Strokes that are no clear shape are in no result.
    */
-  straighten(strokes: readonly ShapeStroke[]): Straightened[];
+  straighten(strokes: readonly ShapeStroke[], tuning?: ShapeTuning): Straightened[];
+}
+
+/**
+ * How `straighten` recognises shapes (`ardoise_ink::ShapeTuning`; built from the user's
+ * `ShapeSettings` by `toShapeTuning` in `lib/shape-settings.ts`).
+ */
+export interface ShapeTuning {
+  /** 1 (strict) to 5 (lenient); 3: the thresholds of before M15. */
+  tolerance: number;
+  /** Smallest line or arrow, in mm; a closed shape needs 3 mm more. */
+  minSizeMm: number;
+  /** Nearly horizontal or vertical within this many degrees becomes exactly so; `null`: never. */
+  snapAngleDeg: number | null;
+  /** Nearly round or square within this percentage becomes a circle or a square; `null`: never. */
+  snapRoundPercent: number | null;
 }
 
 interface Exports {
@@ -116,7 +132,9 @@ export async function instantiateInk(bytes: BufferSource): Promise<Ink> {
     }
   }
 
-  function straighten(strokes: readonly ShapeStroke[]): Straightened[] {
+  // M15 contract: package A passes `tuning` to the WebAssembly; until then it is ignored.
+  function straighten(strokes: readonly ShapeStroke[], tuning?: ShapeTuning): Straightened[] {
+    void tuning;
     const words = 1 + strokes.reduce((sum, s) => sum + 5 + 4 * s.points.length, 0);
     const ptr = wasm.ink_alloc(words);
     try {

@@ -5,6 +5,8 @@
 import type { AppState, LibraryInspection, NoteOutlines } from './api';
 import { mockBackgroundInvoke } from './mock-background';
 import { UNHANDLED, setMockAutoExportSettings } from './mock-data';
+import { DEFAULT_SHAPE_SETTINGS, clampShapeSettings } from './shape-settings';
+import type { ShapeSettings } from './note';
 import { mockDraftsInvoke } from './mock-drafts';
 import { checkAutoExport, mockExportInvoke } from './mock-export';
 import { mockDragInvoke } from './mock-drag';
@@ -46,6 +48,7 @@ const state: AppState = {
   openDiagnostic: new URLSearchParams(location.search).has('diagnostic'),
   autoExport: { format: 'off', folder: 'Exports' },
   microphone: null,
+  shapes: { ...DEFAULT_SHAPE_SETTINGS },
 };
 
 const libraries = new Set<string>();
@@ -67,6 +70,9 @@ export async function mockInvoke<T>(command: string, args: Record<string, unknow
       case 'set_auto_export':
         state.autoExport = checkAutoExport(args.autoExport as AppState['autoExport']);
         setMockAutoExportSettings(state.autoExport);
+        return { ...state };
+      case 'set_shapes':
+        state.shapes = clampShapeSettings(args.shapes as Partial<ShapeSettings>);
         return { ...state };
       case 'inspect_library': {
         const path = args.path as string;

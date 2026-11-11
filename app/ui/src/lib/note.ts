@@ -265,6 +265,27 @@ export interface AutoExportSettings {
   folder: string;
 }
 
+/**
+ * "Redresser les formes" as the user set it (SPEC §4.4, Q12): `[shapes]` of `ardoise.toml`, the
+ * same for every note and every PC using this copy. A value an alignment box turns off is kept,
+ * so that ticking the box again brings it back. `lib/shape-settings.ts`: defaults, limits, and the
+ * `ShapeTuning` that `Ink.straighten` takes.
+ */
+export interface ShapeSettings {
+  /** 1 (strict) to 5 (lenient); 3: the thresholds of before M15. */
+  tolerance: number;
+  /** Smallest line or arrow, in mm (5 to 25; 10); a closed shape needs 3 mm more. */
+  minSizeMm: number;
+  /** Make what is nearly horizontal or vertical exactly so. */
+  snapAngle: boolean;
+  /** Up to how many degrees (1 to 10; 4). */
+  snapAngleDeg: number;
+  /** Make a circle or a square of what is nearly round or square. */
+  snapRound: boolean;
+  /** Within how many percent of round or square (2 to 20; 10). */
+  snapRoundPercent: number;
+}
+
 /** Colours of Inkspace's palette, offered first. */
 export const INKSPACE_COLORS: Rgba[] = [
   { r: 0x00, g: 0x00, b: 0x00, a: 255 },

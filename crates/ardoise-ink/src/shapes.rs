@@ -190,6 +190,94 @@ pub struct Straightened {
     pub strokes: Vec<Stroke>,
 }
 
+/// How [`straighten_with`] recognises shapes: the user's setting next to the editor's button
+/// (SPEC §4.4, `docs/questions.md` Q12, milestone M15). [`ShapeTuning::default`] is the fixed
+/// thresholds of before M15 and must give exactly the same results. The protections of
+/// handwriting (`letter_like`, [`LETTER_MAX_AXIS`]) do not depend on it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShapeTuning {
+    /// How far a stroke may stray from its ideal shape: 1 (strict) to 5 (lenient), 3 being the
+    /// thresholds of before (`FIT_*`, `LINE_*`…).
+    pub tolerance: u8,
+    /// Smallest line or arrow shaft, in millimetres (5 to 25; 10 by default, [`MIN_SIZE`]); a
+    /// closed shape needs [`CLOSED_EXTRA_MM`] more (13 mm by default, [`MIN_CLOSED_SIZE`]).
+    pub min_size_mm: f64,
+    /// A line, shaft, rectangle or ellipse axis within this many degrees of horizontal or vertical
+    /// becomes exactly so (1 to 10; 4 by default, `SNAP_ANGLE`). `None`: never.
+    pub snap_angle_deg: Option<f64>,
+    /// An ellipse or rectangle whose short ÷ long side is within this percentage of 1 becomes a
+    /// circle or a square (2 to 20; 10 by default, `SNAP_RATIO`). `None`: never.
+    pub snap_round_percent: Option<f64>,
+}
+
+/// How much longer than [`ShapeTuning::min_size_mm`] a closed shape must be, in millimetres.
+pub const CLOSED_EXTRA_MM: f64 = 3.0;
+
+impl ShapeTuning {
+    pub const TOLERANCE_MIN: u8 = 1;
+    pub const TOLERANCE_MAX: u8 = 5;
+    pub const MIN_SIZE_MM_MIN: f64 = 5.0;
+    pub const MIN_SIZE_MM_MAX: f64 = 25.0;
+    pub const SNAP_ANGLE_DEG_MIN: f64 = 1.0;
+    pub const SNAP_ANGLE_DEG_MAX: f64 = 10.0;
+    pub const SNAP_ROUND_PERCENT_MIN: f64 = 2.0;
+    pub const SNAP_ROUND_PERCENT_MAX: f64 = 20.0;
+
+    /// The same tuning with every value brought within its limits (a value that is not a
+    /// number takes its default).
+    pub fn clamped(self) -> ShapeTuning {
+        let default = ShapeTuning::default();
+        let within = |value: f64, min: f64, max: f64, fallback: f64| {
+            if value.is_finite() {
+                value.clamp(min, max)
+            } else {
+                fallback
+            }
+        };
+        ShapeTuning {
+            tolerance: self
+                .tolerance
+                .clamp(Self::TOLERANCE_MIN, Self::TOLERANCE_MAX),
+            min_size_mm: within(
+                self.min_size_mm,
+                Self::MIN_SIZE_MM_MIN,
+                Self::MIN_SIZE_MM_MAX,
+                default.min_size_mm,
+            ),
+            snap_angle_deg: self
+                .snap_angle_deg
+                .map(|deg| within(deg, Self::SNAP_ANGLE_DEG_MIN, Self::SNAP_ANGLE_DEG_MAX, 4.0)),
+            snap_round_percent: self.snap_round_percent.map(|percent| {
+                within(
+                    percent,
+                    Self::SNAP_ROUND_PERCENT_MIN,
+                    Self::SNAP_ROUND_PERCENT_MAX,
+                    10.0,
+                )
+            }),
+        }
+    }
+}
+
+impl Default for ShapeTuning {
+    fn default() -> Self {
+        ShapeTuning {
+            tolerance: 3,
+            min_size_mm: 10.0,
+            snap_angle_deg: Some(4.0),
+            snap_round_percent: Some(10.0),
+        }
+    }
+}
+
+/// [`straighten`] with the user's `tuning` (brought within its limits first).
+///
+/// M15 contract: package A makes the thresholds follow `tuning`; until then it ignores it.
+pub fn straighten_with(strokes: &[Stroke], tuning: &ShapeTuning) -> Vec<Straightened> {
+    let _ = tuning.clamped();
+    straighten(strokes)
+}
+
 /// Recognises the shapes among `strokes` and returns their straightened versions, ordered by
 /// their first source. Strokes that are no clear shape appear in no result. Arrows may combine
 /// several strokes of the same layer; every other shape is one stroke.
