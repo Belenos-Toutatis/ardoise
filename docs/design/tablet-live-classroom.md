@@ -1120,6 +1120,28 @@ DOM, relied upon by the tests and journeys of every package:
   notice, the eraser and the selection find nothing. Opening a note still chooses the visible layer nearest the top
   (`docFromNote`, unchanged).
 
+**As built (A, layers zone and editor).** Where the code says more than the sections above, or departs from them:
+- `lib/layers-zone.ts`: `rowsTopFirst(layers)` returns `{ index, layer }[]` (top first); `layerWarnings` returns
+  `{ kind, index, name }[]`; `followMove` is `ops.moveIndex` (a test compares them on every case); `followMerge(index,
+  merged)` takes `merged` itself down onto `merged - 1`.
+- `LayersZone.svelte` renders `data-section="layers"` on its own `section` (package C need not wrap it to get the
+  `[data-section="layers"]` block of "Live window (C)"). The section carries its own padding and bottom border (the
+  `side-section` / `side-block` look), so the owner puts nothing around it.
+- A click on the chosen row, and a click on the tablet icon of the tablet's own row, call nothing (the editor's
+  `setActiveLayer` and the live op would change nothing). The focus goes back to the name button after Enter and Esc in
+  the rename field, not when the field is left by clicking elsewhere (it would take the focus from what was clicked).
+- The add button shows « + » and `layers.add`; its `aria-label` is `layers.add` alone. `layers.mergeNoUndo` is in the
+  merge button's `title` in live, not in its `aria-label`.
+- The warning colours are component tokens (`--zone-warn`, `--zone-warn-bg`: the mockup's, with the dark theme's), as
+  `app.css` has no warning token. The global `.layers` / `.layer` rules of `app.css` are gone (the zone's rules are
+  scoped).
+- Editor: `setActiveLayer` and `addLayer` both clear the selection (the selection belongs to the chosen layer);
+  `setLayerVisible` still drops the hidden layer's strokes from the selection. `hit.ts`: `onLayer(note, layer)`;
+  `layerVisible` with `only` is true for that layer alone and only while it shows; `drawingOrder` with `only` lists
+  that layer's strokes in file order. `ops.eraseWhole` and `ops.erasePartial` take `layer?`; `state.erase` always passes
+  the active layer.
+- Test helper `components/layers/LayersZoneHarness.svelte` (props changed from outside, callbacks recorded).
+
 ### Translations
 
 All added by package 0, in both catalogs (the French in the user's tone: short, plain; quotes « » and plain spaces, as
