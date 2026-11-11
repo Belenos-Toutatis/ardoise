@@ -46,6 +46,17 @@ pub use pdf::{PdfOptions, PdfPage, notes_to_pdf};
 pub use picture::{NoteView, Picture, PictureError, PictureFormat, StoredImage};
 pub use svg::{SvgOptions, note_to_svg};
 
+/// What the vector formats do with the layers of a note (SPEC §4.6, "Calques à l'export").
+/// Hidden layers are never written, in either mode; the images always merge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerMode {
+    /// One layer of the file per layer of the note: Inkscape layers in SVG, optional content
+    /// groups in PDF.
+    Separate,
+    /// One drawing, as on screen.
+    Merged,
+}
+
 /// Smallest and largest resolution of the image exports, in dots per inch.
 pub const MIN_DPI: u32 = 72;
 pub const MAX_DPI: u32 = 600;

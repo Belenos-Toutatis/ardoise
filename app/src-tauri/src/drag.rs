@@ -74,6 +74,7 @@ fn png_for_drag(view: NoteView<'_>) -> CommandResult<Vec<u8>> {
             background: true,
             quality: 90,
             pdf_page: PdfPageSize::Actual,
+            layers: None,
         };
         check_dpi(dpi)?;
         match image_bytes(view, ExportFormat::Png, &options) {
@@ -353,6 +354,7 @@ mod tests {
             background: true,
             quality: 90,
             pdf_page: PdfPageSize::Actual,
+            layers: None,
         };
         let expected = image_bytes(&note, ExportFormat::Png, &options).unwrap();
         assert_eq!(fs::read(&files[0]).unwrap(), expected);
