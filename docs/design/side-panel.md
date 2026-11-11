@@ -926,6 +926,9 @@ Nothing uses the new files yet, so `cargo xtask check` stays as it was. Package 
 
 Open points (the user's call; each with a recommendation; none is decided by this document beyond its default):
 
+**Decided by the lead (2026-11-11): every recommendation below is taken (O1–O15), within what the user accepted in
+Q13; the user is told in the M16 report and can still change any of them.**
+
 - **O1. Does live always open on Calques?** Q13 says the tab and the collapsed state are remembered « pour chaque
   fenêtre » and « Le direct s'ouvre sur Calques »; the end criteria want the tab and the collapsed state found again on
   reopening in each window; the mockup's script forces Calques and an open pane each time live opens. Recommendation:
