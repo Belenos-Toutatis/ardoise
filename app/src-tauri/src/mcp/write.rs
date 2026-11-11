@@ -27,7 +27,7 @@ use ardoise_mcp::write::{
     VideoResolution, VideoTiming, WriteServices, check_replay_plan,
 };
 use ardoise_media::OpenH264Codec;
-use ardoise_render::{NoteView, PdfOptions, notes_to_pdf};
+use ardoise_render::{LayerMode, NoteView, PdfOptions, notes_to_pdf};
 use serde_json::json;
 
 use super::AppHandwriting;
@@ -157,6 +157,7 @@ fn image_options(request: &ExportRequest) -> export::ExportOptions {
             PdfPage::Actual => export::PdfPageSize::Actual,
             PdfPage::A4 => export::PdfPageSize::A4,
         },
+        layers: None,
     }
 }
 
@@ -264,6 +265,7 @@ impl AppWrite {
                         &PdfOptions {
                             page: options.pdf_page.into(),
                             background: options.background,
+                            layers: LayerMode::Merged,
                         },
                     )
                     .map_err(|error| tool_error(export::render_error(error)))?
@@ -881,7 +883,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(outcome.files, std::slice::from_ref(&pdf));
-        assert!(fs::read(&pdf).unwrap().starts_with(b"%PDF"));
+        let bytes = fs::read(&pdf).unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
+        // The assistant's PDF is the merged one, as before the layers option.
+        assert!(!bytes.windows(12).any(|w| w == b"OCProperties"));
 
         // A note that is not in the library: a coded error, nothing written.
         let missing = request(
