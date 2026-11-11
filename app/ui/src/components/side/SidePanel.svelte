@@ -368,6 +368,12 @@
     border-bottom: 0;
   }
 
+  /* The block's gap spaces its paragraphs: the global `p` margin would come on top of it. Specificity (0,1,1): above
+     the global `p`, below any rule a block scopes for its own paragraphs. */
+  :where(.side-pane) :global(.pane-block p) {
+    margin: 0;
+  }
+
   /* The discreet title of a block (an `h3`). */
   :where(.side-pane) :global(.pane-title) {
     margin: 0;
