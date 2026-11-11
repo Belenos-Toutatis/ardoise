@@ -1222,6 +1222,11 @@ Changed:
 Unused once A and C are in, removed by package E: `editor.layers.{label, add, active, visible, name, up, down, merge}`,
 `live.layer.{new, current}` (`editor.layers.defaultName` stays: `docFromNote` and the editor's « add »).
 
+**As built (package E).** Removed from both catalogs, after a search of `app/ui/src`, `app/e2e`, `app/scripts` and `app/src-tauri/src`
+found no use: `editor.layers.{label, add, active, visible, name, up, down, merge}`, `live.layer.{new, current}`,
+`live.style` and `live.select.label`. Kept, still used: `editor.layers.defaultName` (`docFromNote`, the editor's « add ») and
+`editor.layers.hiddenActive` (the editor's notice when the pen meets a hidden layer).
+
 ### Contracts between packages
 
 Rust (package B; `model.rs` unless said):
