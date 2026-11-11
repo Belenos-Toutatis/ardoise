@@ -1,7 +1,8 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { TOOLS, instantiateInk, type InkStroke, type ShapeStroke } from './ink';
+import { DEFAULT_SHAPE_TUNING, TOOLS, instantiateInk, type InkStroke, type ShapeStroke } from './ink';
+import { DEFAULT_SHAPE_SETTINGS, toShapeTuning } from './shape-settings';
 
 const bytes = readFileSync(new URL('../assets/ardoise_ink.wasm', import.meta.url));
 
@@ -74,5 +75,52 @@ describe('stroke geometry in WebAssembly', () => {
     expect(new Set(made.points.map((p) => p.pressure)).size).toBe(1);
     expect(ink.straighten([])).toEqual([]);
     expect(ink.straighten([small])).toEqual([]);
+  });
+
+  /** A slightly wobbly line of `length` device units at `degrees` from the horizontal. */
+  function line(length: number, degrees: number): ShapeStroke {
+    const angle = (degrees * Math.PI) / 180;
+    const [cos, sin] = [Math.cos(angle), Math.sin(angle)];
+    return {
+      tool: 'ballpoint',
+      color: { r: 20, g: 20, b: 20, a: 255 },
+      width: 50,
+      layer: 1,
+      points: Array.from({ length: 30 }, (_, i) => {
+        const along = (length * i) / 29;
+        const across = 2 * Math.sin(i * 0.9);
+        return { x: 2000 + along * cos - across * sin, y: 3000 + along * sin + across * cos, pressure: 0.5, t: 5 * i };
+      }),
+    };
+  }
+
+  it('straightens with the tuning it is given, and with the defaults without one', async () => {
+    const ink = await instantiateInk(bytes);
+    // 7 mm, turned by 3 degrees: too short for the default minimum of 10 mm.
+    const short = line(700, 3);
+    expect(ink.straighten([short])).toEqual([]);
+    expect(ink.straighten([short], DEFAULT_SHAPE_TUNING)).toEqual([]);
+    const small = { ...DEFAULT_SHAPE_TUNING, minSizeMm: 5 };
+    const [snapped, ...none] = ink.straighten([short], small);
+    expect(none).toEqual([]);
+    expect(snapped.shape).toBe('line');
+    const ys = snapped.strokes[0].points.map((p) => p.y);
+    expect(new Set(ys).size).toBe(1);
+    // Without the alignment it keeps its slope (700 x sin 3 degrees = 37 units).
+    const [tilted] = ink.straighten([short], { ...small, snapAngleDeg: null });
+    const points = tilted.strokes[0].points;
+    expect(points[points.length - 1].y - points[0].y).toBeGreaterThan(30);
+    // A long line: no tuning is the default tuning.
+    const long = line(5000, 20);
+    expect(ink.straighten([long])).toEqual(ink.straighten([long], DEFAULT_SHAPE_TUNING));
+    expect(ink.straighten([long])).toHaveLength(1);
+    // Values out of their limits are brought within them by Rust: a minimum of 0 is 5 mm.
+    const wild = { tolerance: 99, minSizeMm: 0, snapAngleDeg: 50, snapRoundPercent: 500 };
+    expect(ink.straighten([short], wild)).toHaveLength(1);
+    expect(ink.straighten([short], { ...wild, tolerance: Number.NaN, minSizeMm: Number.NaN })).toEqual([]);
+  });
+
+  it('has the same default tuning as the settings', () => {
+    expect(toShapeTuning({ ...DEFAULT_SHAPE_SETTINGS })).toEqual(DEFAULT_SHAPE_TUNING);
   });
 });

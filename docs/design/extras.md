@@ -131,6 +131,8 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
   shape, was not enough: a capital O 15 to 20 mm high is still an ellipse by every measure.
 - Editor: "Redresser les formes" on the selection (Selection tool), with its help text; nothing selected = the
   action is disabled with an explanation.
+- M15 makes the thresholds a user setting (tolerance, minimum size, alignment): see "M15: tuning the straightening"
+  at the end of this document.
 
 ## Back to the original (`edit`)
 
@@ -429,3 +431,136 @@ notes go one after the other (a rule between two notes in Markdown, a new page i
   correction, without an engine), `TextExportSection.test.ts` (the option). On Windows, `cargo test -p ardoise-hwr
   --test structure -- --nocapture` analyses a synthetic page with an underlined title and prints the recognition, the
   regions, the structure and the underlined words.
+
+## M15: tuning the straightening
+
+"Redresser les formes" gets a user setting (SPEC §4.4, `docs/questions.md` Q12, ROADMAP M15). This section is the
+recogniser's side (package A: `crates/ardoise-ink`, `crates/ardoise-ink-wasm`, `app/ui/src/lib/ink.ts`); the setting
+itself (`[shapes]` of `ardoise.toml`), the editor's panel and the assistant's tool are described with their code.
+
+- **`ardoise_ink::ShapeTuning`** `{ tolerance: u8 (1..=5), min_size_mm (5..=25), snap_angle_deg: Option (1..=10),
+  snap_round_percent: Option (2..=20) }`, `clamped()` (out of range: to the limit; not a number: the default),
+  `Default` = `3, 10, Some(4), Some(10)`, the thresholds of before. `straighten_with(strokes, &tuning)` clamps the tuning
+  and resolves it into a private `Params` (one value per threshold that the tuning moves), threaded through the
+  recognisers instead of the constants; `straighten(strokes)` is `straighten_with(strokes, &ShapeTuning::default())`.
+- **Same results by default.** The default tuning resolves to `Params::DEFAULT`, built from the constants themselves,
+  and `Params::with_factor(default, 1.0)` gives bit for bit the same values (tested, so the steps next to the default
+  move from it without a jump). All the earlier tests pass unchanged; a one-off check compiled the code of before beside
+  the new one and found bit-identical results on 23,420 inputs (noisy shapes of 5 to 60 mm, the glyphs at 4 to 30 mm,
+  the closed letters, 20 pages of 180 strokes; 6,391 shapes).
+
+### What each setting moves
+
+| Setting | Thresholds | Not moved |
+|---|---|---|
+| Tolerance (steps 1-5) | × the step's factor: `CLOSE_GAP`, `FIT_MEAN`, `FIT_MAX` (closed shapes), `LINE_MAX_DEV`, `LINE_RMS_DEV` (lines), `SEG_EPS`, `MERGE_DEV` (the split into straight pieces: lines and arrows), `BARB_REACH` (a barb starts near the tip); `RECT_COHERENCE`: its shortfall from 1 (0.55 → 0.73 strict, 0.415 lenient) | `MIN_ASPECT`, `RECT_SIDE_SHARE`, `LINE_MAX_PATH`, the hooks, `MERGE_TURN`, the barbs' angles and length shares, the partner strokes' reach and span, `SEG_EPS_MIN` and the other absolute sizes |
+| Minimum size | `MIN_SIZE` = `min_size_mm` × 100 units, `MIN_CLOSED_SIZE` = (`min_size_mm` + `CLOSED_EXTRA_MM`, 3) × 100; the shortest barb `BARB_MIN` (250 units) × `min_size_mm` / 10 below 10 mm (1.25 mm at 5 mm: an arrow of 1 cm has barbs of about 1.5 mm) | |
+| Horizontal or vertical | `SNAP_ANGLE` = `snap_angle_deg` (lines, shafts, ellipse axes, rectangles); off: never | |
+| Circle or square | `SNAP_RATIO` = (100 − `snap_round_percent`) / 100; off: never | the letter rule's `LETTER_MAX_RATIO` (0.9) |
+
+The protections of handwriting are fixed: `letter_like` (an upright oval under `LETTER_MAX_AXIS`, 25 mm, short ÷ long
+axis below `LETTER_MAX_RATIO`, 0.9, within 40° of the vertical). `LETTER_MAX_RATIO` was `SNAP_RATIO`; it is now its own
+constant, so that snapping within 20 % does not widen what counts as round.
+
+### Choosing the tolerance factors
+
+Factors **0.6, 0.8, 1, 1.15, 1.3** (`TOLERANCE_FACTORS`). Measured with ignored tests (`cargo test --release -p
+ardoise-ink measure_tolerance -- --ignored --nocapture`, and `measure_tuned_letters`) on a family of shapes drawn more
+and more unsteadily: `noisy(kind, size, noise)` is the random hand of the earlier measurements with its wobble × `noise`
+(the pen's jitter unchanged), 15 to 60 mm, ellipses lying (aspect 0.45-1), arrows in one stroke or as a line and a
+"V" whose apex misses the tip by `noise` × 4 % of a barb. A first run showed that wobbly lines were rejected by the
+split into pieces (`SEG_EPS`, unscaled at first), not by `LINE_*_DEV` (at twice the usual wobble, 224 of 300 lines were
+"several pieces" and none failed the deviation tests): so `SEG_EPS` and `MERGE_DEV` are part of the tolerance.
+
+Recognised out of 300 hands, by tolerance step 1 to 5 (`measure_tolerance_steps`); every row is non-decreasing, and a
+test (`each_tolerance_step_recognises_at_least_as_much_as_the_stricter_ones`) checks it on a smaller family:
+
+| Shape, wobble | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| Line × 1 (the usual hand) | 184 | 284 | 300 | 300 | 300 |
+| Line × 1.5 | 36 | 141 | 254 | 285 | 297 |
+| Line × 2 | 8 | 39 | 116 | 198 | 248 |
+| Line × 2.5 | 3 | 10 | 40 | 83 | 136 |
+| Ellipse × 4 | 233 | 298 | 300 | 300 | 300 |
+| Ellipse × 6 | 115 | 203 | 273 | 296 | 300 |
+| Rectangle × 3 | 170 | 272 | 298 | 299 | 300 |
+| Rectangle × 5 | 37 | 92 | 166 | 225 | 259 |
+| Arrow × 2 | 107 | 223 | 258 | 264 | 277 |
+| Arrow × 3 | 15 | 72 | 142 | 181 | 204 |
+
+(Ellipses are already very tolerant at step 3: a lenient step helps lines, rectangles and arrows most. 12 arrows of
+300 are recognised at no step, 11 of them because their barbs are shorter than 2.5 mm.)
+
+What a more lenient step also straightens (`measure_tolerance_on_curves`, 200 hands each, steps 1 to 5):
+
+- arcs with a 4 cm chord taken for lines: 15°: 2 / 199 / 200 / 200 / 200; 20°: 0 / 1 / 191 / 200 / 200; 25°: 0 / 0 /
+  0 / 131 / 200; 30°: 0 / 0 / 0 / 0 / 21; 35° and more: never. So "souple" makes a gentle curve (2 mm of bulge on
+  4 cm) straight, "stricte" keeps even 15° arcs;
+- loops left open: 36° open: 0 / 0 / 30 / 152 / 197 become closed shapes; 54° open: 1 at step 5; more: never;
+- large letters (the glyphs at 18 and 30 mm, 4,800 runs): changed beyond a single straight stroke 0 / 0 / 0 / 0 / 1.
+
+The lenient end stops at 1.3 because handwriting starts to change beyond it: the closed capital D glyph written 3 cm
+high becomes an ellipse in 1 % of the hands at 1.3, 12 % at 1.4; from 1.5 a D of 9 to 18 mm becomes a rectangle (the
+rectangle has no letter rule), and at 1.7, 196 of the 4,800 large letter runs change. Below 1 the steps are
+spaced as widely as the data allow while "stricte" still recognises carefully drawn shapes (all lines at half the usual
+wobble, 61 % at the usual one).
+
+### Handwriting with the tuning
+
+`measure_tuned_letters`: the glyphs at 4, 6.5, 9 and 12 mm (28,800 runs) and the closed letters o, O, 0, Q, D at 4,
+6, 9 and 12 mm (300 hands each):
+
+| Tuning | Glyph runs changed | Closed letters changed |
+|---|---|---|
+| default (step 3, 10 mm) | 900: all single straight strokes of 12 mm letters (the stems of K and 4, the strokes of x, which are 10 mm or more) | none |
+| step 5, 10 mm | the same 900 | none |
+| step 3, 5 mm | 3,109: single straight strokes only (K, 4, x from 6.5 mm, Y from 9 mm, F at 12 mm) | lower-case o of 9 and 12 mm: 156 and 153 of 300 (the round ones become circles); Q of 12 mm: 164 (its 5 mm tail becomes a line) |
+| step 5, 5 mm | 3,112 (3 more F) | o: 156 and 153; Q: 196 |
+| step 5, 5 mm, 10°, 20 % | the same as step 5, 5 mm | the same |
+
+At the default minimum size the lenient step changes no more handwriting than the default (tested:
+`handwriting_stays_as_it_is_at_the_most_lenient_tolerance`). At 5 mm a letter is only ever changed by a stroke that is
+itself one straight segment or a round loop: never a capital O, a 0 or a D (tested with upright ovals of 9 to 22 mm,
+`a_small_upright_o_is_never_straightened_whatever_the_tuning`), which is what the editor's warning below 10 mm says.
+
+### WebAssembly
+
+- `ink_straighten_tuned(ptr, words, tolerance, min_size_mm, snap_angle_deg, snap_round_percent) -> usize` replaces
+  `ink_straighten(ptr, words)` (removed: `ink.ts` was its only caller). The four values are `f64`; a negative angle or
+  percentage turns that alignment off; `tuning_from` rounds the tolerance (not a number: step 3) and `straighten_with`
+  clamps the rest (not a number: the default). The strokes' words and the result (`ink_straighten_result`) are
+  unchanged.
+- `Ink.straighten(strokes, tuning = DEFAULT_SHAPE_TUNING)` passes `snapAngleDeg ?? -1` and `snapRoundPercent ?? -1`.
+  `DEFAULT_SHAPE_TUNING` (`ink.ts`) equals `toShapeTuning(DEFAULT_SHAPE_SETTINGS)` (tested in `ink.test.ts`, with a 7 mm
+  line straightened at 5 mm only, kept tilted without the alignment, and out-of-range values clamped by Rust).
+
+### Speed (the preview runs `straighten` at most once per animation frame)
+
+Native, release, in one process with the code of before M15 compiled beside it (a one-off comparison; `measure_speed`
+is the kept measurement), on a selection of handwritten glyphs of 5 to 9 mm and shapes of 2 to 6 cm, medians of 31
+runs:
+
+| Selection | Before M15 | Now, default | Now, widest (step 5, 5 mm, 10°, 20 %) |
+|---|---|---|---|
+| 58 strokes, 4,900 points | 0.63 ms | 0.53 ms | 0.60 ms |
+| 341 strokes, 21,000 points | 3.3 ms | 2.1 ms | 2.9 ms |
+| 821 strokes, 48,000 points | 11.5 ms | 4.7 ms | 7.3 ms |
+
+(While two other builds ran on the PC, every figure was about 2.5 times higher.) The widest tuning first took 44 and
+284 ms on the two large selections: with a 5 mm minimum nearly every letter stroke is an arrow shaft to try, and the
+search for its partner strokes measured the farthest point of every other stroke. It now skips the strokes whose
+pieces all end outside the reach (a box test with a margin, so that it never decides otherwise than the distances),
+then checks the distance of the ends before the farthest point. The decisions are the same: the check above found
+bit-identical results after these changes, and the default got faster too.
+
+WebAssembly in Node (vitest), the call alone (encoding the strokes and decoding the result in TypeScript are
+negligible), curvy letters of 90 points and dense shapes: 60 strokes (6,000 points) 1.6-1.9 ms, 330 strokes (32,000
+points) 7-8 ms, 860 strokes (82,000 points) 17-19 ms, with either tuning (up to twice that on the loaded PC). About
+half of it is `f64::hypot`, a software routine in WebAssembly; `(x² + y²).sqrt()` would halve it but changes results
+by an ulp, and the default would no longer give exactly the results of before.
+
+So a typical selection (50 strokes of writing and 10 shapes) costs about 2 ms, well within a frame, and a few hundred
+strokes about half a frame. A whole dense page (800 strokes and more) takes about one frame: the editor should
+recompute only when a value changed, coalesced to one call per frame, and could wait for the slider to settle on such
+selections. Possible later work here: a prepared selection (strokes decoded and cleaned once, then straightened with
+each new tuning).

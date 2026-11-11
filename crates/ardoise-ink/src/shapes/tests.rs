@@ -1436,3 +1436,745 @@ fn measure_ellipse_varieties() {
         }
     }
 }
+
+// --- Tuning (M15) ---------------------------------------------------------------------------
+
+/// The tuning with only some values changed from the default.
+fn tuning(tolerance: u8, min_size_mm: f64) -> ShapeTuning {
+    ShapeTuning {
+        tolerance,
+        min_size_mm,
+        ..ShapeTuning::default()
+    }
+}
+
+/// One hand-drawn shape of `kind` whose long side is `size` units, `noise` times as unsteady
+/// as the hands of `drawn` (a larger wobble; the same jitter, that of the pen); arrows get their head drawn apart (a "V" whose
+/// apex misses the tip by `noise` × 4 % of a barb) every other time.
+fn noisy(kind: Shape, size: f64, noise: f64, rng: &mut Lcg) -> Vec<Stroke> {
+    let c = v(12_000.0, 9000.0);
+    match kind {
+        Shape::Ellipse => {
+            let a = size / 2.0;
+            let b = a * rng.range(0.45, 1.0);
+            // Lying down, so that the letter rule (upright ovals under 25 mm) stays out of it.
+            let theta = rng.range(-0.6, 0.6);
+            let sweep = (if rng.unit() < 0.5 { -1.0 } else { 1.0 }) * TAU * rng.range(0.95, 1.1);
+            let ideal = arc(c, a, b, theta, rng.range(0.0, TAU), sweep);
+            vec![hand(&ideal, rng, noise * 0.025 * b, 0.006 * b, 0)]
+        }
+        Shape::Rectangle => {
+            let (w, h) = (size, size * rng.range(0.4, 1.0));
+            let theta = rng.range(-0.5, 0.5);
+            let ideal = rectangle(
+                c,
+                w,
+                h,
+                theta,
+                0.04 * h,
+                rng.range(0.97, 1.1),
+                rng.unit() < 0.5,
+            );
+            vec![hand(&ideal, rng, noise * 0.02 * h, 0.004 * h, 0)]
+        }
+        Shape::Line => {
+            let angle = rng.range(0.0, TAU);
+            let b = c + V::new(size, 0.0).rot(angle);
+            vec![hand(&polyline(&[c, b]), rng, noise * 0.012 * size, 10.0, 0)]
+        }
+        Shape::Arrow => {
+            let angle = rng.range(0.0, TAU);
+            let tip = c + V::new(size, 0.0).rot(angle);
+            let barb = 0.15 * size;
+            let (t, p, b1, b2) = arrow_points(c, tip, barb, rng.range(0.35, 0.7));
+            let (wobble, jitter) = (noise * 0.008 * size, 0.0015 * size);
+            if rng.unit() < 0.5 {
+                vec![hand(&polyline(&[t, p, b1, p, b2]), rng, wobble, jitter, 0)]
+            } else {
+                let off = V::new(noise * 0.04 * barb, 0.0).rot(rng.range(0.0, TAU));
+                vec![
+                    hand(&polyline(&[t, p]), rng, wobble, jitter, 0),
+                    hand(
+                        &polyline(&[b1 + off, p + off, b2 + off]),
+                        rng,
+                        0.3 * wobble,
+                        jitter,
+                        2000,
+                    ),
+                ]
+            }
+        }
+    }
+}
+
+/// Whether `result` is exactly one `kind`.
+fn recognised_as(result: &[Straightened], kind: Shape) -> bool {
+    result.len() == 1 && result[0].shape == kind
+}
+
+/// The factors tried by the measurements.
+const TRIED_FACTORS: [f64; 12] = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.15, 1.3, 1.5, 1.7, 2.0];
+
+#[test]
+#[ignore = "measurement, prints a table"]
+fn measure_tolerance_on_noisy_shapes() {
+    let trials = 300;
+    let default = ShapeTuning::default();
+    for kind in Shape::ALL {
+        println!("{kind:?}: recognised out of {trials}, by noise (rows) and factor (columns)");
+        println!("noise  {TRIED_FACTORS:?}");
+        for noise in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0] {
+            let counts: Vec<usize> = TRIED_FACTORS
+                .iter()
+                .map(|&k| {
+                    let params = Params::with_factor(&default, k);
+                    (0..trials)
+                        .filter(|&seed| {
+                            let mut rng = Lcg::new(20_000 + seed);
+                            let size = rng.range(1500.0, 6000.0);
+                            let strokes = noisy(kind, size, noise, &mut rng);
+                            recognised_as(&recognise(&strokes, &params), kind)
+                        })
+                        .count()
+                })
+                .collect();
+            println!("{noise:>4}  {counts:?}");
+        }
+    }
+}
+
+/// Whether `result` changes more of a glyph than a stroke that is itself one straight segment.
+fn beyond_straight_strokes(
+    result: &[Straightened],
+    written: &[(Stroke, bool)],
+    glyph: &Glyph,
+) -> bool {
+    result.iter().any(|group| {
+        group.shape != Shape::Line
+            || group
+                .sources
+                .iter()
+                .any(|&i| !written[i].1 || glyph[i].0.len() != 2)
+    })
+}
+
+/// Handwriting 4 to 12 mm high that `params` changes: (glyph runs, glyph runs changed, of which
+/// by more than a line made of a single straight stroke, closed letters changed).
+fn letters_changed_with(params: &Params, seeds: u64) -> (usize, usize, usize, usize) {
+    let (mut runs, mut changed, mut unexpected) = (0, 0, 0);
+    for seed in 0..seeds {
+        let mut rng = Lcg::new(9000 + seed);
+        for (_, glyph) in glyphs(&mut rng) {
+            for height in [400.0, 650.0, 900.0, 1200.0] {
+                let written = write(&glyph, v(3000.0, 3000.0), height, &mut rng);
+                let strokes: Vec<Stroke> = written.iter().map(|(s, _)| s.clone()).collect();
+                let result = recognise(&strokes, params);
+                runs += 1;
+                changed += usize::from(!result.is_empty());
+                unexpected += usize::from(beyond_straight_strokes(&result, &written, &glyph));
+            }
+        }
+    }
+    let mut closed = 0;
+    for kind in Loop::ALL {
+        for mm in [4.0, 6.0, 9.0, 12.0] {
+            for seed in 0..seeds {
+                let mut rng = Lcg::new(1000 + seed);
+                let strokes = closed_letter(kind, v(3000.0, 3000.0), mm * 100.0, &mut rng);
+                closed += usize::from(!recognise(&strokes, params).is_empty());
+            }
+        }
+    }
+    (runs, changed, unexpected, closed)
+}
+
+#[test]
+#[ignore = "measurement, prints a table"]
+fn measure_tolerance_on_handwriting() {
+    let seeds = 200;
+    for mm in [10.0, 8.0, 5.0] {
+        for &k in &TRIED_FACTORS {
+            let params = Params::with_factor(&tuning(3, mm).clamped(), k);
+            let (runs, changed, unexpected, closed) = letters_changed_with(&params, seeds);
+            println!(
+                "min {mm} mm, factor {k}: glyphs changed {changed}/{runs} ({unexpected} beyond a \
+                 straight stroke), closed letters changed {closed}/{}",
+                Loop::ALL.len() as u64 * 4 * seeds
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "measurement, prints a table"]
+fn measure_tolerance_on_curves() {
+    // Arcs with a chord of 4 cm, from barely to clearly curved: taken for lines?
+    let default = ShapeTuning::default();
+    let trials = 200;
+    println!("arc sweep (degrees) -> lines out of {trials}, by factor {TRIED_FACTORS:?}");
+    for degrees in [15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 50.0, 60.0] {
+        let sweep = f64::to_radians(degrees);
+        let radius = 2000.0 / (sweep / 2.0).sin();
+        let counts: Vec<usize> = TRIED_FACTORS
+            .iter()
+            .map(|&k| {
+                let params = Params::with_factor(&default, k);
+                (0..trials)
+                    .filter(|&seed| {
+                        let mut rng = Lcg::new(30_000 + seed);
+                        let start = rng.range(0.0, TAU);
+                        let ideal = arc(v(15_000.0, 15_000.0), radius, radius, 0.0, start, sweep);
+                        let stroke = hand(&ideal, &mut rng, 15.0, 6.0, 0);
+                        recognised_as(&recognise(&[stroke], &params), Shape::Line)
+                    })
+                    .count()
+            })
+            .collect();
+        println!("{degrees:>4}  {counts:?}");
+    }
+    // Loops left open, from a small gap to a "C": taken for closed shapes?
+    println!("open loop (turns) -> changed out of {trials}, by factor");
+    for turns in [0.9, 0.85, 0.8, 0.75, 0.7, 0.65] {
+        let counts: Vec<usize> = TRIED_FACTORS
+            .iter()
+            .map(|&k| {
+                let params = Params::with_factor(&default, k);
+                (0..trials)
+                    .filter(|&seed| {
+                        let mut rng = Lcg::new(31_000 + seed);
+                        let ideal = arc(
+                            v(12_000.0, 9000.0),
+                            2500.0,
+                            rng.range(1500.0, 2500.0),
+                            rng.range(-0.5, 0.5),
+                            rng.range(0.0, TAU),
+                            TAU * turns,
+                        );
+                        let stroke = hand(&ideal, &mut rng, 40.0, 10.0, 0);
+                        !recognise(&[stroke], &params).is_empty()
+                    })
+                    .count()
+            })
+            .collect();
+        println!("{turns:>4}  {counts:?}");
+    }
+    // Large letters (18 and 30 mm): anything changed beyond a single straight stroke?
+    for &k in &TRIED_FACTORS {
+        let params = Params::with_factor(&default, k);
+        let (mut large, mut runs) = (0, 0);
+        for seed in 0..100 {
+            let mut rng = Lcg::new(9000 + seed);
+            for (_, glyph) in glyphs(&mut rng) {
+                for height in [1800.0, 3000.0] {
+                    let written = write(&glyph, v(3000.0, 3000.0), height, &mut rng);
+                    let strokes: Vec<Stroke> = written.iter().map(|(s, _)| s.clone()).collect();
+                    runs += 1;
+                    let result = recognise(&strokes, &params);
+                    large += usize::from(beyond_straight_strokes(&result, &written, &glyph));
+                }
+            }
+        }
+        println!("factor {k}: large letters changed beyond a straight stroke {large}/{runs}");
+    }
+}
+
+#[test]
+#[ignore = "measurement, prints a table"]
+fn measure_tolerance_steps() {
+    let trials = 300;
+    for kind in Shape::ALL {
+        println!("{kind:?}: recognised out of {trials}, by noise and tolerance step 1..5");
+        for noise in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0] {
+            let counts: Vec<usize> = (1..=5)
+                .map(|step| {
+                    let tuning = tuning(step, 10.0);
+                    (0..trials)
+                        .filter(|&seed| {
+                            let mut rng = Lcg::new(20_000 + seed);
+                            let size = rng.range(1500.0, 6000.0);
+                            let strokes = noisy(kind, size, noise, &mut rng);
+                            recognised_as(&straighten_with(&strokes, &tuning), kind)
+                        })
+                        .count()
+                })
+                .collect();
+            println!("{noise:>4}  {counts:?}");
+        }
+    }
+}
+
+#[test]
+#[ignore = "measurement, prints a table"]
+fn measure_tuned_letters() {
+    let seeds = 300;
+    let lenient = |min_size_mm| tuning(ShapeTuning::TOLERANCE_MAX, min_size_mm);
+    for (name, tuning) in [
+        ("default", ShapeTuning::default()),
+        ("tolerance 5, 10 mm", lenient(10.0)),
+        ("tolerance 3, 5 mm", tuning(3, 5.0)),
+        ("tolerance 5, 5 mm", lenient(5.0)),
+        ("tolerance 5, 5 mm, 10 deg, 20 %", widest()),
+    ] {
+        let mut glyph_runs = 0;
+        let mut changed = std::collections::BTreeMap::<String, usize>::new();
+        for seed in 0..seeds {
+            let mut rng = Lcg::new(9000 + seed);
+            for (letter, glyph) in glyphs(&mut rng) {
+                for height in [400.0, 650.0, 900.0, 1200.0] {
+                    let written = write(&glyph, v(3000.0, 3000.0), height, &mut rng);
+                    let strokes: Vec<Stroke> = written.iter().map(|(s, _)| s.clone()).collect();
+                    let result = straighten_with(&strokes, &tuning);
+                    glyph_runs += 1;
+                    if !result.is_empty() {
+                        let kind = if beyond_straight_strokes(&result, &written, &glyph) {
+                            "beyond a straight stroke"
+                        } else {
+                            "straight stroke"
+                        };
+                        let key = format!("{letter} {} mm ({kind})", height / 100.0);
+                        *changed.entry(key).or_default() += 1;
+                    }
+                }
+            }
+        }
+        let total: usize = changed.values().sum();
+        println!("{name}: glyphs changed {total}/{glyph_runs}: {changed:?}");
+        let mut closed = Vec::new();
+        for kind in Loop::ALL {
+            for mm in [4.0, 6.0, 9.0, 12.0] {
+                let hits = (0..seeds)
+                    .filter(|&seed| {
+                        let mut rng = Lcg::new(1000 + seed);
+                        let strokes = closed_letter(kind, v(3000.0, 3000.0), mm * 100.0, &mut rng);
+                        !straighten_with(&strokes, &tuning).is_empty()
+                    })
+                    .count();
+                if hits > 0 {
+                    closed.push(format!("{kind:?} {mm} mm: {hits}"));
+                }
+            }
+        }
+        println!(
+            "{name}: closed letters (o, O, 0, Q, D at 4, 6, 9, 12 mm; {seeds} each) changed: {closed:?}"
+        );
+    }
+}
+
+#[test]
+fn the_default_tuning_holds_the_thresholds_of_before() {
+    // Exactly the constants, whichever way they are reached: the results are those of before.
+    assert_eq!(Params::new(&ShapeTuning::default()), Params::DEFAULT);
+    assert_eq!(
+        Params::with_factor(&ShapeTuning::default(), TOLERANCE_FACTORS[2]),
+        Params::DEFAULT
+    );
+    assert_eq!(TOLERANCE_FACTORS[2], 1.0);
+    assert_eq!(Params::DEFAULT.min_size, 1000.0);
+    assert_eq!(Params::DEFAULT.min_closed_size, 1300.0);
+    assert_eq!(Params::DEFAULT.snap_ratio, Some(0.9));
+    assert_eq!(ShapeTuning::default().clamped(), ShapeTuning::default());
+    let mut rng = Lcg::new(50);
+    let strokes = vec![
+        hand(
+            &rectangle(v(9000.0, 9000.0), 5000.0, 3000.0, 0.3, 200.0, 1.05, false),
+            &mut rng,
+            60.0,
+            12.0,
+            0,
+        ),
+        hand(
+            &polyline(&[v(2000.0, 2000.0), v(9000.0, 2300.0)]),
+            &mut rng,
+            50.0,
+            8.0,
+            0,
+        ),
+    ];
+    assert_eq!(
+        straighten(&strokes),
+        straighten_with(&strokes, &ShapeTuning::default())
+    );
+}
+
+#[test]
+fn each_tolerance_step_recognises_at_least_as_much_as_the_stricter_ones() {
+    // Shapes drawn more and more unsteadily: the number recognised never falls from one step to
+    // the next, and the lenient end recognises clearly more than the strict one.
+    let mut totals = [0usize; 5];
+    for kind in Shape::ALL {
+        for noise in [1.0, 2.0, 3.0, 4.0] {
+            let counts: Vec<usize> = (1..=5)
+                .map(|step| {
+                    (0..12)
+                        .filter(|&seed| {
+                            let mut rng = Lcg::new(60_000 + seed);
+                            let size = rng.range(1500.0, 6000.0);
+                            let strokes = noisy(kind, size, noise, &mut rng);
+                            recognised_as(&straighten_with(&strokes, &tuning(step, 10.0)), kind)
+                        })
+                        .count()
+                })
+                .collect();
+            assert!(
+                counts.windows(2).all(|w| w[0] <= w[1]),
+                "{kind:?} at noise {noise}: {counts:?}"
+            );
+            for (total, count) in totals.iter_mut().zip(&counts) {
+                *total += count;
+            }
+        }
+    }
+    assert!(totals.windows(2).all(|w| w[0] < w[1]), "{totals:?}");
+}
+
+#[test]
+fn a_wobbly_line_is_straightened_when_lenient_and_not_when_strict() {
+    let mut rng = Lcg::new(61);
+    let a = v(3000.0, 8000.0);
+    let b = a + V::new(6000.0, 0.0).rot(0.4);
+    // A wobble of 2.4 % of the length (twice that of the usual hand).
+    let source = hand(&polyline(&[a, b]), &mut rng, 0.024 * 6000.0, 10.0, 0);
+    let at = |step| straighten_with(std::slice::from_ref(&source), &tuning(step, 10.0));
+    assert!(at(1).is_empty() && at(2).is_empty(), "{:?}", at(2));
+    assert!(recognised_as(&at(5), Shape::Line));
+}
+
+#[test]
+fn the_minimum_size_follows_the_setting() {
+    let mut rng = Lcg::new(62);
+    // A line of 7 mm.
+    let line = hand(
+        &polyline(&[v(3000.0, 3000.0), v(3700.0, 3050.0)]),
+        &mut rng,
+        6.0,
+        3.0,
+        0,
+    );
+    let line = std::slice::from_ref(&line);
+    assert!(recognised_as(
+        &straighten_with(line, &tuning(3, 5.0)),
+        Shape::Line
+    ));
+    assert!(straighten_with(line, &tuning(3, 10.0)).is_empty());
+    assert!(straighten(line).is_empty());
+    // A circle 11.5 mm wide: a closed shape needs 3 mm more than the minimum.
+    let circle = hand(
+        &arc(v(9000.0, 9000.0), 575.0, 560.0, 0.0, 0.5, TAU * 1.03),
+        &mut rng,
+        8.0,
+        3.0,
+        0,
+    );
+    let circle = std::slice::from_ref(&circle);
+    assert!(recognised_as(
+        &straighten_with(circle, &tuning(3, 8.0)),
+        Shape::Ellipse
+    ));
+    assert!(straighten_with(circle, &tuning(3, 10.0)).is_empty());
+    assert!(straighten_with(circle, &tuning(3, 9.0)).is_empty());
+}
+
+/// The angle of a straightened line, degrees.
+fn line_angle(result: &[Straightened]) -> f64 {
+    let p = pts(&single(result, Shape::Line).strokes[0]);
+    let d = p[p.len() - 1] - p[0];
+    d.y.atan2(d.x).to_degrees()
+}
+
+#[test]
+fn snapping_to_the_axes_follows_the_setting() {
+    let mut rng = Lcg::new(63);
+    let a = v(4000.0, 6000.0);
+    let b = a + V::new(8000.0, 0.0).rot(f64::to_radians(3.0));
+    let source = hand(&polyline(&[a, b]), &mut rng, 30.0, 5.0, 0);
+    let source = std::slice::from_ref(&source);
+    let with = |deg: Option<f64>| ShapeTuning {
+        snap_angle_deg: deg,
+        ..ShapeTuning::default()
+    };
+    assert_eq!(line_angle(&straighten_with(source, &with(Some(4.0)))), 0.0);
+    assert_eq!(line_angle(&straighten(source)), 0.0);
+    for kept in [with(Some(2.0)), with(None)] {
+        let angle = line_angle(&straighten_with(source, &kept));
+        assert!((angle - 3.0).abs() < 0.5, "{kept:?}: {angle} degrees");
+    }
+    // A rectangle turned by 3 degrees too.
+    let rect = hand(
+        &rectangle(
+            v(10_000.0, 9000.0),
+            6000.0,
+            4000.0,
+            f64::to_radians(3.0),
+            150.0,
+            1.04,
+            false,
+        ),
+        &mut rng,
+        40.0,
+        8.0,
+        0,
+    );
+    let rect = std::slice::from_ref(&rect);
+    let edge_angle = |tuning: &ShapeTuning| {
+        let p = pts(&single(&straighten_with(rect, tuning), Shape::Rectangle).strokes[0]);
+        let corner = corners_of(&p)[0];
+        let e = p[corner] - p[0];
+        e.y.atan2(e.x).to_degrees().rem_euclid(90.0)
+    };
+    assert_eq!(edge_angle(&with(Some(4.0))), 0.0);
+    for kept in [with(Some(2.0)), with(None)] {
+        let angle = edge_angle(&kept);
+        assert!((angle - 3.0).abs() < 1.0, "{kept:?}: {angle} degrees");
+    }
+}
+
+#[test]
+fn snapping_to_circles_and_squares_follows_the_setting() {
+    let mut rng = Lcg::new(64);
+    let with = |percent: Option<f64>| ShapeTuning {
+        snap_round_percent: percent,
+        ..ShapeTuning::default()
+    };
+    // An ellipse 7 % off round (short axis 0.93 times the long one).
+    let source = hand(
+        &arc(v(12_000.0, 9000.0), 2000.0, 1860.0, 0.3, 0.0, TAU * 1.02),
+        &mut rng,
+        12.0,
+        4.0,
+        0,
+    );
+    let source = std::slice::from_ref(&source);
+    let roundness = |tuning: &ShapeTuning| {
+        let p = pts(&single(&straighten_with(source, tuning), Shape::Ellipse).strokes[0]);
+        let n = p.len() - 1;
+        let centre = p[..n].iter().fold(V::new(0.0, 0.0), |s, &q| s + q) * (1.0 / n as f64);
+        let (min, max) = p
+            .iter()
+            .map(|q| q.dist(centre))
+            .fold((f64::MAX, 0.0f64), |(lo, hi), r| (lo.min(r), hi.max(r)));
+        min / max
+    };
+    assert!(roundness(&with(Some(10.0))) > 0.999);
+    assert!(roundness(&ShapeTuning::default()) > 0.999);
+    for kept in [with(Some(5.0)), with(None)] {
+        let ratio = roundness(&kept);
+        assert!((ratio - 0.93).abs() < 0.02, "{kept:?}: {ratio}");
+    }
+    // A rectangle 7 % off square.
+    let rect = hand(
+        &rectangle(v(10_000.0, 9000.0), 5000.0, 4650.0, 0.0, 150.0, 1.04, false),
+        &mut rng,
+        30.0,
+        6.0,
+        0,
+    );
+    let rect = std::slice::from_ref(&rect);
+    let sides = |tuning: &ShapeTuning| {
+        let p = pts(&single(&straighten_with(rect, tuning), Shape::Rectangle).strokes[0]);
+        let c = corners_of(&p);
+        let (s1, s2) = (p[0].dist(p[c[0]]), p[c[0]].dist(p[c[1]]));
+        s1.min(s2) / s1.max(s2)
+    };
+    assert!(sides(&with(Some(10.0))) > 0.9999);
+    for kept in [with(Some(5.0)), with(None)] {
+        let ratio = sides(&kept);
+        assert!((ratio - 0.93).abs() < 0.03, "{kept:?}: {ratio}");
+    }
+}
+
+/// The widest tuning there is: lenient, 5 mm, snapping within 10 degrees and 20 %.
+fn widest() -> ShapeTuning {
+    ShapeTuning {
+        tolerance: ShapeTuning::TOLERANCE_MAX,
+        min_size_mm: ShapeTuning::MIN_SIZE_MM_MIN,
+        snap_angle_deg: Some(ShapeTuning::SNAP_ANGLE_DEG_MAX),
+        snap_round_percent: Some(ShapeTuning::SNAP_ROUND_PERCENT_MAX),
+    }
+}
+
+#[test]
+fn a_small_upright_o_is_never_straightened_whatever_the_tuning() {
+    // An O or a 0 standing up (long axis within 30 degrees of the vertical), clearly not round,
+    // from 9 mm (above the smallest closed shape of the widest tuning, 8 mm) to 22 mm.
+    for (k, mm) in [9.0, 12.0, 15.0, 18.0, 22.0].into_iter().enumerate() {
+        for seed in 0..40 {
+            let mut rng = Lcg::new(65_000 + 100 * k as u64 + seed);
+            let a = mm * 50.0;
+            let b = a * rng.range(0.55, 0.8);
+            let theta = PI / 2.0 + rng.range(-0.5, 0.5);
+            let sweep = (if rng.unit() < 0.5 { -1.0 } else { 1.0 }) * TAU * rng.range(0.97, 1.08);
+            let ideal = arc(v(9000.0, 9000.0), a, b, theta, rng.range(0.0, TAU), sweep);
+            let stroke = hand(&ideal, &mut rng, 0.012 * mm * 100.0, 0.004 * mm * 100.0, 0);
+            for tuning in [widest(), ShapeTuning::default(), tuning(5, 10.0)] {
+                let result = straighten_with(std::slice::from_ref(&stroke), &tuning);
+                assert!(
+                    result.is_empty(),
+                    "O of {mm} mm, seed {seed}, {tuning:?}: {result:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn handwriting_stays_as_it_is_at_the_most_lenient_tolerance() {
+    // The protections of handwriting do not depend on the tolerance: at the default minimum size
+    // the lenient step changes no letter of 4 to 9 mm, and no closed letter of 4 to 12 mm.
+    let lenient = tuning(ShapeTuning::TOLERANCE_MAX, 10.0);
+    let mut rng = Lcg::new(66);
+    for (name, glyph) in glyphs(&mut rng) {
+        for height in [400.0, 650.0, 900.0] {
+            let strokes: Vec<Stroke> = write(&glyph, v(3000.0, 3000.0), height, &mut rng)
+                .into_iter()
+                .map(|(s, _)| s)
+                .collect();
+            let result = straighten_with(&strokes, &lenient);
+            assert!(result.is_empty(), "{name} at {height}: {result:?}");
+        }
+    }
+    for kind in Loop::ALL {
+        for mm in [4.0, 6.0, 9.0, 12.0] {
+            let changed = (0..40)
+                .filter(|&seed| {
+                    let mut rng = Lcg::new(1000 + seed);
+                    let strokes = closed_letter(kind, v(3000.0, 3000.0), mm * 100.0, &mut rng);
+                    !straighten_with(&strokes, &lenient).is_empty()
+                })
+                .count();
+            assert_eq!(changed, 0, "{kind:?} at {mm} mm");
+        }
+    }
+}
+
+#[test]
+fn out_of_range_tuning_is_brought_within_its_limits() {
+    let wild = ShapeTuning {
+        tolerance: 0,
+        min_size_mm: 1.0,
+        snap_angle_deg: Some(45.0),
+        snap_round_percent: Some(-3.0),
+    };
+    assert_eq!(
+        wild.clamped(),
+        ShapeTuning {
+            tolerance: 1,
+            min_size_mm: 5.0,
+            snap_angle_deg: Some(10.0),
+            snap_round_percent: Some(2.0),
+        }
+    );
+    let high = ShapeTuning {
+        tolerance: 200,
+        min_size_mm: 90.0,
+        snap_angle_deg: Some(0.0),
+        snap_round_percent: Some(75.0),
+    };
+    assert_eq!(
+        high.clamped(),
+        ShapeTuning {
+            tolerance: 5,
+            min_size_mm: 25.0,
+            snap_angle_deg: Some(1.0),
+            snap_round_percent: Some(20.0),
+        }
+    );
+    let not_numbers = ShapeTuning {
+        tolerance: 3,
+        min_size_mm: f64::NAN,
+        snap_angle_deg: Some(f64::INFINITY),
+        snap_round_percent: Some(f64::NAN),
+    };
+    assert_eq!(not_numbers.clamped(), ShapeTuning::default());
+    let off = ShapeTuning {
+        snap_angle_deg: None,
+        snap_round_percent: None,
+        ..ShapeTuning::default()
+    };
+    assert_eq!(off.clamped(), off);
+    // The thresholds come from the clamped values.
+    assert_eq!(Params::new(&wild), Params::new(&wild.clamped()));
+    assert_eq!(Params::new(&high), Params::new(&high.clamped()));
+    assert_eq!(Params::new(&not_numbers), Params::DEFAULT);
+    assert_eq!(Params::new(&high).min_size, 2500.0);
+    assert_eq!(Params::new(&high).min_closed_size, 2800.0);
+    // A line of 2 cm is too short for a minimum of 25 mm, long enough for one of 5 mm.
+    let mut rng = Lcg::new(67);
+    let line = hand(
+        &polyline(&[v(2000.0, 2000.0), v(4000.0, 2100.0)]),
+        &mut rng,
+        15.0,
+        5.0,
+        0,
+    );
+    let line = std::slice::from_ref(&line);
+    assert!(straighten_with(line, &high).is_empty());
+    assert!(recognised_as(&straighten_with(line, &wild), Shape::Line));
+}
+
+#[test]
+fn small_arrows_are_recognised_with_a_small_minimum_size() {
+    // An arrow of 8 mm with barbs of 1.6 mm, under the 2.5 mm of the default barbs.
+    let mut rng = Lcg::new(68);
+    let (t, p, b1, b2) = arrow_points(v(3000.0, 3000.0), v(3800.0, 3100.0), 160.0, 0.5);
+    let arrow = hand(&polyline(&[t, p, b1, p, b2]), &mut rng, 3.0, 1.0, 0);
+    let arrow = std::slice::from_ref(&arrow);
+    assert!(recognised_as(
+        &straighten_with(arrow, &tuning(3, 5.0)),
+        Shape::Arrow
+    ));
+    assert!(straighten(arrow).is_empty());
+}
+
+/// A selection of `letters` handwritten glyphs (5 to 9 mm) and `shapes` shapes (2 to 6 cm).
+fn selection(letters: usize, shapes: usize, rng: &mut Lcg) -> Vec<Stroke> {
+    let all = glyphs(rng);
+    let mut strokes = Vec::new();
+    for k in 0..letters {
+        let (_, glyph) = &all[k % all.len()];
+        let origin = v(
+            1000.0 + 700.0 * (k % 25) as f64,
+            1000.0 + 1100.0 * (k / 25) as f64,
+        );
+        let height = rng.range(500.0, 900.0);
+        strokes.extend(
+            write(glyph, origin, height, rng)
+                .into_iter()
+                .map(|(s, _)| s),
+        );
+    }
+    for k in 0..shapes {
+        let kind = Shape::ALL[k % Shape::ALL.len()];
+        let size = rng.range(2000.0, 6000.0);
+        strokes.extend(noisy(kind, size, 1.0, rng));
+    }
+    strokes
+}
+
+#[test]
+#[ignore = "measurement, prints timings (run with --release)"]
+fn measure_speed() {
+    use std::time::Instant;
+    let mut rng = Lcg::new(70);
+    for (letters, shapes) in [(40, 10), (250, 30), (600, 60)] {
+        let strokes = selection(letters, shapes, &mut rng);
+        let points: usize = strokes.iter().map(|s| s.points.len()).sum();
+        for (name, tuning) in [("default", ShapeTuning::default()), ("widest", widest())] {
+            let mut times: Vec<f64> = (0..21)
+                .map(|_| {
+                    let start = Instant::now();
+                    let result = straighten_with(&strokes, &tuning);
+                    std::hint::black_box(result);
+                    start.elapsed().as_secs_f64() * 1000.0
+                })
+                .collect();
+            times.sort_by(f64::total_cmp);
+            let found = straighten_with(&strokes, &tuning).len();
+            println!(
+                "{} strokes ({points} points), {name}: median {:.2} ms, max {:.2} ms, {found} shapes",
+                strokes.len(),
+                times[times.len() / 2],
+                times[times.len() - 1],
+            );
+        }
+    }
+}

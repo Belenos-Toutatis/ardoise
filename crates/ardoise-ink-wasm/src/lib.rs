@@ -14,16 +14,20 @@
 //!
 //! Tool codes are indices into [`Tool::ALL`]; an unknown code means the ballpoint.
 //!
-//! Straightening shapes ([`ardoise_ink::straighten`]): the caller writes strokes into words
-//! reserved by `ink_alloc` (see [`decode_strokes`]) and calls `ink_straighten(ptr, words)`,
-//! which returns the length in words of the result, at `ink_straighten_result()` until the next
-//! call: `[group count, then for each group: source count, the sources (indices of the given
-//! strokes), shape code (index into Shape::ALL), stroke count, the strokes]`, the strokes
-//! encoded like the input.
+//! Straightening shapes ([`ardoise_ink::straighten_with`]): the caller writes strokes into
+//! words reserved by `ink_alloc` (see [`decode_strokes`]) and calls
+//! `ink_straighten_tuned(ptr, words, tolerance, min_size_mm, snap_angle_deg,
+//! snap_round_percent)`, the four last arguments being the user's tuning as `f64` (see
+//! [`tuning_from`]: a negative angle or percentage turns that alignment off, values out of
+//! their limits are brought within them; the default tuning is `3, 10, 4, 10`). It returns the
+//! length in words of the result, at `ink_straighten_result()` until the next call: `[group
+//! count, then for each group: source count, the sources (indices of the given strokes), shape
+//! code (index into Shape::ALL), stroke count, the strokes]`, the strokes encoded like the
+//! input.
 
 use std::cell::RefCell;
 
-use ardoise_ink::{Point, Rgba, Shape, Stroke, Tool, outline, straighten};
+use ardoise_ink::{Point, Rgba, Shape, ShapeTuning, Stroke, Tool, outline, straighten_with};
 
 thread_local! {
     static RESULT: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
@@ -130,10 +134,34 @@ pub fn encode_stroke(out: &mut Vec<u32>, stroke: &Stroke) {
     }
 }
 
-/// The shapes recognised among the strokes in `words`, encoded as described in the module
-/// documentation.
-pub fn straighten_words(words: &[u32]) -> Vec<u32> {
-    let groups = straighten(&decode_strokes(words));
+/// The tuning given to `ink_straighten_tuned`: the tolerance step (rounded; not a number: the
+/// default step), the minimum size in millimetres, and the alignments, a negative angle or
+/// percentage meaning "off". [`straighten_with`] brings every value within its limits
+/// ([`ShapeTuning::clamped`]: a value that is not a number takes its default).
+pub fn tuning_from(
+    tolerance: f64,
+    min_size_mm: f64,
+    snap_angle_deg: f64,
+    snap_round_percent: f64,
+) -> ShapeTuning {
+    // Not a number stays on (and takes its default in `clamped`).
+    let off_if_negative = |value: f64| (value >= 0.0 || value.is_nan()).then_some(value);
+    ShapeTuning {
+        tolerance: if tolerance.is_finite() {
+            tolerance.round().clamp(0.0, f64::from(u8::MAX)) as u8
+        } else {
+            ShapeTuning::default().tolerance
+        },
+        min_size_mm,
+        snap_angle_deg: off_if_negative(snap_angle_deg),
+        snap_round_percent: off_if_negative(snap_round_percent),
+    }
+}
+
+/// The shapes recognised with `tuning` among the strokes in `words`, encoded as described in
+/// the module documentation.
+pub fn straighten_words(words: &[u32], tuning: &ShapeTuning) -> Vec<u32> {
+    let groups = straighten_with(&decode_strokes(words), tuning);
     let mut out = vec![groups.len() as u32];
     for group in &groups {
         out.push(group.sources.len() as u32);
@@ -206,26 +234,35 @@ pub extern "C" fn ink_result() -> *const f32 {
     RESULT.with(|result| result.borrow().as_ptr())
 }
 
-/// Straightens the strokes held in the `count` words at `words` (see [`decode_strokes`]);
-/// returns the length of the result (see [`ink_straighten_result`]).
+/// Straightens the strokes held in the `count` words at `words` (see [`decode_strokes`]) with
+/// the tuning of the four last arguments (see [`tuning_from`]); returns the length of the result
+/// (see [`ink_straighten_result`]).
 ///
 /// # Safety
 /// `words` must point to `count` initialised words (from [`ink_alloc`]).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ink_straighten(words: *const u32, count: usize) -> usize {
+pub unsafe extern "C" fn ink_straighten_tuned(
+    words: *const u32,
+    count: usize,
+    tolerance: f64,
+    min_size_mm: f64,
+    snap_angle_deg: f64,
+    snap_round_percent: f64,
+) -> usize {
     let words = if words.is_null() || count == 0 {
         &[][..]
     } else {
         // SAFETY: the caller guarantees `count` initialised words at `words`.
         unsafe { std::slice::from_raw_parts(words, count) }
     };
-    let result = straighten_words(words);
+    let tuning = tuning_from(tolerance, min_size_mm, snap_angle_deg, snap_round_percent);
+    let result = straighten_words(words, &tuning);
     let len = result.len();
     SHAPES.with(|shapes| *shapes.borrow_mut() = result);
     len
 }
 
-/// Address of the last result of [`ink_straighten`].
+/// Address of the last result of [`ink_straighten_tuned`].
 #[unsafe(no_mangle)]
 pub extern "C" fn ink_straighten_result() -> *const u32 {
     SHAPES.with(|shapes| shapes.borrow().as_ptr())
@@ -323,22 +360,103 @@ mod tests {
         }
         assert_eq!(decode_strokes(&data), strokes);
 
-        let ptr = ink_alloc(data.len());
-        // SAFETY: ptr holds `data.len()` words reserved just above.
-        let result = unsafe {
-            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
-            let len = ink_straighten(ptr, data.len());
-            let result = std::slice::from_raw_parts(ink_straighten_result(), len).to_vec();
-            ink_free(ptr, data.len());
-            result
-        };
-        let native = straighten(&strokes);
+        let result = straighten_through_memory(&data, [3.0, 10.0, 4.0, 10.0]);
+        let native = straighten_with(&strokes, &ShapeTuning::default());
         assert_eq!(native.len(), 1);
         let mut expected = vec![1, 1, 1, 0, 1];
         encode_stroke(&mut expected, &native[0].strokes[0]);
         assert_eq!(result, expected);
         assert_eq!(native[0].strokes[0].layer, 2);
         assert_eq!(native[0].strokes[0].tool, Tool::Highlighter);
+    }
+
+    /// What `ink_straighten_tuned` gives for `data` with the tuning `[tolerance, min size,
+    /// angle, percentage]`.
+    fn straighten_through_memory(data: &[u32], tuning: [f64; 4]) -> Vec<u32> {
+        let ptr = ink_alloc(data.len());
+        let [tolerance, min_size, angle, percent] = tuning;
+        // SAFETY: ptr holds `data.len()` words reserved just above.
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+            let len = ink_straighten_tuned(ptr, data.len(), tolerance, min_size, angle, percent);
+            let result = std::slice::from_raw_parts(ink_straighten_result(), len).to_vec();
+            ink_free(ptr, data.len());
+            result
+        }
+    }
+
+    #[test]
+    fn the_tuning_passed_through_memory_is_the_native_one() {
+        // A line of 7 mm turned by 3 degrees: straightened with a minimum of 5 mm only, and
+        // made horizontal unless the alignment is off.
+        let mut line = stroke(Tool::Ballpoint);
+        for (i, p) in line.points.iter_mut().enumerate() {
+            let x = 24.0 * i as f32;
+            p.x = 1000.0 + x;
+            p.y = 2000.0 + x * 0.052 + 2.0 * (i as f32 * 0.9).sin();
+        }
+        let mut data = vec![1];
+        encode_stroke(&mut data, &line);
+        let strokes = [line];
+        for tuning in [
+            [3.0, 10.0, 4.0, 10.0],
+            [3.0, 5.0, 4.0, 10.0],
+            [3.0, 5.0, -1.0, 10.0],
+            [5.0, 5.0, 10.0, -1.0],
+            [1.0, 5.0, 2.0, 2.0],
+        ] {
+            let [tolerance, min_size, angle, percent] = tuning;
+            let native =
+                straighten_with(&strokes, &tuning_from(tolerance, min_size, angle, percent));
+            let mut expected = vec![native.len() as u32];
+            for group in &native {
+                expected.extend([1, 0, 0, group.strokes.len() as u32]);
+                for s in &group.strokes {
+                    encode_stroke(&mut expected, s);
+                }
+            }
+            assert_eq!(
+                straighten_through_memory(&data, tuning),
+                expected,
+                "{tuning:?}"
+            );
+        }
+        assert_eq!(
+            straighten_through_memory(&data, [3.0, 10.0, 4.0, 10.0]),
+            [0]
+        );
+        let horizontal = straighten_through_memory(&data, [3.0, 5.0, 4.0, 10.0]);
+        let tilted = straighten_through_memory(&data, [3.0, 5.0, -1.0, 10.0]);
+        // [groups, sources, source, shape, strokes, tool, colour, width, layer, points, x, y...]
+        let first_y = |words: &[u32]| f32::from_bits(words[11]);
+        let last_y = |words: &[u32]| f32::from_bits(words[words.len() - 3]);
+        assert_eq!(first_y(&horizontal), last_y(&horizontal));
+        assert!(last_y(&tilted) - first_y(&tilted) > 20.0);
+    }
+
+    #[test]
+    fn tuning_arguments_are_read_as_documented() {
+        assert_eq!(tuning_from(3.0, 10.0, 4.0, 10.0), ShapeTuning::default());
+        assert_eq!(
+            tuning_from(2.6, 7.5, -1.0, -0.5),
+            ShapeTuning {
+                tolerance: 3,
+                min_size_mm: 7.5,
+                snap_angle_deg: None,
+                snap_round_percent: None,
+            }
+        );
+        // Out of range or not numbers: brought within the limits by `clamped`.
+        assert_eq!(
+            tuning_from(f64::NAN, f64::NAN, f64::NAN, 1e9).clamped(),
+            ShapeTuning {
+                snap_round_percent: Some(ShapeTuning::SNAP_ROUND_PERCENT_MAX),
+                ..ShapeTuning::default()
+            }
+        );
+        assert_eq!(tuning_from(-7.0, 0.0, 0.0, 0.0).clamped().tolerance, 1);
+        assert_eq!(tuning_from(1e12, 0.0, 0.0, 0.0).clamped().tolerance, 5);
+        assert_eq!(tuning_from(f64::INFINITY, 0.0, 0.0, 0.0).tolerance, 3);
     }
 
     #[test]
@@ -349,10 +467,12 @@ mod tests {
         data.truncate(data.len() - 7);
         assert_eq!(decode_strokes(&data).len(), 1);
         assert!(decode_strokes(&[]).is_empty());
-        assert_eq!(straighten_words(&[]), [0]);
-        assert_eq!(straighten_words(&[5, 1, 2]), [0]);
+        let default = ShapeTuning::default();
+        assert_eq!(straighten_words(&[], &default), [0]);
+        assert_eq!(straighten_words(&[5, 1, 2], &default), [0]);
         // SAFETY: a null pointer with no words is accepted.
-        assert_eq!(unsafe { ink_straighten(std::ptr::null(), 0) }, 1);
+        let len = unsafe { ink_straighten_tuned(std::ptr::null(), 0, 3.0, 10.0, 4.0, 10.0) };
+        assert_eq!(len, 1);
         for tool in Tool::ALL {
             assert_eq!(tool_from_code(tool_code(tool)), tool);
         }
