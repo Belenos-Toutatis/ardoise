@@ -338,25 +338,56 @@ does not create a new note.
   do not change. The **Computer** group (**Select**, **Pen**, the computer's ink, **Undo**, **Redo**) is for touching up
   and correcting: see below.
 - **Pages**: **Previous page**, **Next page** (the position is shown: "Page 2 / 5"), **New page**. The page's layers
-  are managed in the **Layers** zone, at the top of the side panel (see **Correcting during live mode**). **Clear the page** (or `Ctrl + Delete`) clears the current page only; a "Page cleared." message offers **Undo
+  are managed in the **Layers** tab of the side panel (see **The control window's side panel** below and **Correcting during live mode**). **Clear the page** (or `Ctrl + Delete`) clears the current page only; a "Page cleared." message offers **Undo
   clearing** for 8 seconds, which gives the ink back (`Ctrl + Z` gives it back too, with no time limit: see **Touching up during live mode**). If the page has changed meanwhile, Ardoise says the clearing can
   no longer be undone.
 - **Blackboard**: slate background and white chalk. **Laser pointer**: the pen hovering, without touching the tablet,
-  shows a red dot on screen *without writing anything*; touching the tablet writes again.
+  shows a red dot on screen *without writing anything*; touching the tablet writes again. Both can also be set with
+  switches, in the **Projection** tab (**Projected area** block); the toolbar buttons stay, within reach.
 - **Tablet position**: four buttons that change the position at once; the current page turns with what is already
   drawn on it.
 - The preview shows the whole page; a *blue rectangle* shows the projected area. Drag it to move the area, the wheel
   zooms. **Zoom in**, **Zoom out**, **Whole page** and **Width** (the page across the whole width of the projected area)
-  are also offered.
+  are also offered, in the **Projection** tab, **Projected area** block.
 - **Latency**: the time between the computer receiving a point and drawing it, measured and shown (target: under
   30 ms).
-- **Record the narration**: talk during the session; the sound is cut page by page and saved with each note, and the
+- **Record the narration** (**Sound** tab): talk during the session; the sound is cut page by page and saved with each note, and the
   note's replay plays it (chapter 9).
 
 The *tablet's button* does, during live mode, what the **Tablet button in live mode** option says (new page or new
 layer). A new layer is created on top and receives the tablet's writing at once; the computer stays on its own layer.
 *What the Bamboo Slate sends when the button is pressed has not yet been checked on the real tablet.* The keys for next
 and previous page work in any case.
+
+### The control window's side panel
+
+To the right of the preview, a column of icons, the *rail*, holds what is set up around the page. A click on an icon
+opens its tab to the left of the rail. A click on the tab that is already open, or on **›** at the top of the panel,
+*collapses* it: the preview takes the whole width and the rail stays. The tabs, from top to bottom:
+
+- **Layers**: the **Layers** zone (see **Correcting during live mode**). This is the tab that is open at the start.
+- **Sound**: **Record the narration** during the session.
+- **Projection**: the **Projector** (the projection screen, **Project**, **Stop projecting**), the **Projected area**
+  (zoom, **Whole page**, **Width**, the **Blackboard** and **Laser pointer** switches) and **Network sharing**: the
+  **Share on the network** button is no longer in the toolbar.
+- **Help**: the live mode shortcuts (see chapter 17).
+
+*Page* and *Background* (paper and an image under the page in live mode) are not offered in this window yet.
+
+Ardoise remembers the open tab and the collapsed state of this window, on this PC, and finds them again at the next
+live mode.
+
+**The badges** show when the panel is collapsed too: the *number of layers* on **Layers**; an *orange dot* when the
+tablet's layer, or the chosen layer, is hidden (the warning of the **Layers** zone says which); a *red dot* on **Sound**
+during a recording; a *blue dot* on **Projection** while a projection or a share is running.
+
+**Above the open tab**, whichever it is, comes the selection bar ("Selected strokes: 3", **Delete**, **Deselect**) and,
+while the **Select** or **Pen** tool is on, its one-sentence help. When strokes are chosen, the panel opens again if it
+was collapsed.
+
+**With the keyboard.** `↓` and `↑` move from one icon to the next, `Home` and `End` go to the first and the last,
+without opening anything; `Enter` opens the tab or collapses it. `Space` does not do that here: in live mode it always
+means "next page", even when an icon has the focus.
 
 ### Touching up during live mode
 
@@ -373,13 +404,14 @@ touch up in the control window, and **the tablet keeps writing meanwhile**.
 - `Shift` + lasso or click adds strokes to the ones already chosen. `Ctrl` + lasso or click removes some.
 - A gesture on empty paper, or `Esc`, clears the selection. While strokes are chosen, `Esc` does nothing else.
 - A finger and the wheel still move and zoom the preview.
-- The chosen strokes are outlined in blue in the preview. A bar says "Selected strokes: 3".
+- The chosen strokes are outlined in blue in the preview. The selection bar, above the open tab of the side panel, says
+  "Selected strokes: 3" (see **The control window's side panel**).
 - **Only the strokes of the chosen layer are picked** (the **Layers** zone, see below); choosing another layer clears
   the selection. You cannot choose the stroke the tablet is writing right now, nor the strokes of a hidden layer;
   hiding a layer takes its strokes out of the selection. On a resumed sheet, you can choose the sheet's old strokes, by
   choosing their layer.
 
-**Deleting**: click **Delete** in the bar, or press `Delete` or `Backspace`.
+**Deleting**: click **Delete** in the selection bar, or press `Delete` or `Backspace`.
 
 **Changing the colour**: click a **Colour** swatch. Only the chosen strokes change, and the new colour shows at once
 inside the blue outline. They stay chosen, so that you can try another colour. **The pen's colour does not change**: what the tablet writes next keeps its colour. With nothing
@@ -411,7 +443,7 @@ back the first version.
 computer's pen (a Surface, for example), in another colour and **on a layer of your own**: what you write is saved in
 the note, without mixing with the pupil's writing. The tablet keeps writing meanwhile, and is never held up.
 
-**Two layers, two marks.** The **Layers** zone, at the top of the control window's side panel, lists the page's layers,
+**Two layers, two marks.** The **Layers** zone, in the **Layers** tab of the control window's side panel, lists the page's layers,
 the highest first.
 
 - The *frame* surrounds the **chosen layer**: that is where the computer acts (pen, eraser end of the pen, selection).
@@ -485,7 +517,7 @@ never saved.
 ### Projecting on a video projector
 
 1. Plug in the projector and, in Windows, press `Win + P` and choose *Extend*: each screen has its own desktop.
-2. In the **Projection** section of the control window, choose the **Projection screen** in the list (the **Refresh the
+2. In the **Projection** tab of the control window's side panel, **Projector** block, choose the **Projection screen** in the list (the **Refresh the
    list of screens** button updates it) and click **Project**.
 3. A *presentation* window opens *full screen on the chosen screen*, with no interface element at all (the mouse
    cursor disappears after 2 seconds without moving). The control window stays on the computer's screen. What you
@@ -510,7 +542,7 @@ zoom the projected area.
 ### On the keyboard
 
 The same keys work in the control window and in the presentation (a presentation remote sends Page Down and Page
-Up): see chapter 17.
+Up): see chapter 17, or the **Help** tab of the side panel.
 
 ### Showing the sheet on another computer of the network
 
@@ -529,8 +561,8 @@ Another computer on the same network (for instance the classroom PC linked to th
 *Nothing else is reachable*: not the library, not the notes' titles, not the other notes, not a file of the PC. The
 other computer cannot change what is shown, but it can adjust its own display (see below).
 
-**On the Ardoise side.** Click **Share on the network**, in the live mode control window or in the editor toolbar. The
-panel that opens gives:
+**On the Ardoise side.** Open the **Projection** tab of the side panel, in the live mode control window or in the editor,
+and click **Share on the network** (**Network sharing** block). The panel that opens gives:
 
 - the *address* to type in the other computer's browser, like `http://192.168.1.23:8765` (if the PC has several, all
   are listed);
@@ -540,8 +572,9 @@ panel that opens gives:
 - **Pause** (the image freezes on the screens; you keep writing, then **Resume** shows the current state) and **Stop
   sharing**.
 
-While a share is running, an indicator with the number of screens stays at the top of the library and of the
-toolbars: a click reopens the panel.
+While a share is running, an indicator with the number of screens stays at the top of the library, the **Share on the
+network** button of the **Projection** tab shows it too (a click reopens the panel), and the **Projection** icon of the
+rail carries a blue dot, even when the panel is collapsed.
 
 **On the other computer.**
 
@@ -777,6 +810,37 @@ not touched, and the copy disappears as soon as you save (or choose **Go back wi
   will offer it at the next start. (When Windows forces the shutdown without waiting, the backup copy is written all the
   same.)
 
+### The editor's side panel
+
+To the right of the page, a column of icons, the *rail*, holds everything that is set up around the page. A click on an
+icon opens its tab to the left of the rail. A click on the tab that is already open, or on **›** at the top of the
+panel, *collapses* it: the page takes the whole width and the rail stays. The tabs, from top to bottom:
+
+- **Layers**: the **Layers** zone (see below). This is the tab that is open at the start.
+- **Page**: the **Paper** (colour as swatches, template, texture), the **Sheet format** and its orientation, **Turn and
+  crop**, and **Back to the original** (see below).
+- **Background**: the **Background image or PDF**.
+- **Sound**: the narration. During a replay, this is where you record; outside a replay, the tab offers **Start the
+  replay**.
+- **Projection**: **Share on the network** (the button is no longer in the toolbar; see the end of chapter 6).
+- **Help**: the editor's keyboard shortcuts (see chapter 17).
+
+Ardoise remembers the open tab and the collapsed state of the editor, on this PC, and finds them again when you open
+another note or open the editor again. The changes made in the **Page** tab are undone with `Ctrl + Z`, as before.
+
+**The badges** show when the panel is collapsed too: the *number of layers* on **Layers**; an *orange dot* when the
+chosen layer is hidden; a *red dot* on **Sound** during a recording; a *blue dot* on **Projection** during a share.
+
+**Above the open tab**, whichever it is, come the split (when it is open) and the selection: "Selected strokes: 3",
+**Copy**, **Cut**, **Paste**, **Duplicate**, **Straighten shapes**, **Delete**, and the **Deselect** cross. As soon as
+strokes are chosen, or a split starts, the panel opens again if it was collapsed.
+
+**The replay** opens the **Sound** tab so that you can record the narration, even with the panel collapsed; when you
+leave the replay, Ardoise puts back the tab and the state you had.
+
+**With the keyboard.** `↓` and `↑` move from one icon to the next, `Home` and `End` go to the first and the last,
+without opening anything; `Enter` or `Space` opens the tab or collapses it.
+
 ### The tools
 
 The toolbar offers four tools (**Tool**):
@@ -787,7 +851,8 @@ The toolbar offers four tools (**Tool**):
   pressure. **Apply to the whole note:** **Colour**, **Ink** or **Width** changes all the strokes at once.
 - **Eraser**: **Whole strokes** or **Partial**, with its **Size**. It erases only on the chosen layer (see **Layers**).
 - **Select** (the lasso): draw around strokes of the chosen layer to select them; `Shift` + lasso adds, `Ctrl` + lasso removes. The
-  **Selection** panel offers **Copy**, **Cut**, **Paste**, **Duplicate**, **Straighten shapes**, **Delete**. Changes of
+  **Selection** block, above the open tab of the side panel, offers **Copy**, **Cut**, **Paste**, **Duplicate**,
+  **Straighten shapes**, **Delete**. Changes of
   colour, ink and width then apply to the selection; you move it (by grabbing it inside its frame) and resize it (by the
   frame's handles) with the mouse, or with the pen (see below and chapter 12).
 - **Move the page**: drag the page (holding the space bar, or the middle mouse button, does the same with any tool).
@@ -832,16 +897,17 @@ bottom. A small upright oval (an "O", a "0") is never straightened, whatever the
 
 ### Copy and paste
 
-`Ctrl + C`, `Ctrl + X` and `Ctrl + V` (or the buttons of the **Selection** panel) copy, cut and paste strokes *from one
+`Ctrl + C`, `Ctrl + X` and `Ctrl + V` (or the buttons of the **Selection** block) copy, cut and paste strokes *from one
 note to another*, from one window to another, through Windows' clipboard. Pasted strokes keep their colour, tool and
 width; they are replayed last. Anything that does not come from Ardoise is ignored.
 
 ### The sheet: paper, template, format, orientation
 
-The **Page** panel (on the right) sets up the sheet:
+The **Page** tab of the side panel sets up the sheet:
 
-- **Paper**: **White**, **Cream**, **Kraft**, **Black slate** (or **Custom**); **Template**: **Blank**, **Lined**,
-  **Seyès**, **5 mm squares**, **Graph paper (mm)**, **Dotted**, **Music staves**; **Paper texture**.
+- **Paper**: four colour swatches, **White**, **Cream**, **Kraft**, **Black slate** (and **Custom** when the note has a
+  paper of another colour); **Template**: **Blank**, **Lined**, **Seyès**, **5 mm squares**, **Graph paper (mm)**,
+  **Dotted**, **Music staves**; **Paper texture** switch.
 - **Sheet orientation**: **Portrait** or **Landscape**. **The writing does not turn**: only the sheet changes direction,
   and the writing keeps its place (if it goes beyond, it is moved back inside the sheet when it fits; otherwise the
   part outside is kept but not shown, and a message says so).
@@ -854,7 +920,7 @@ The **Page** panel (on the right) sets up the sheet:
 
 ### Background image or PDF
 
-In the **Page** panel, the **Background image or PDF** section puts an image (PNG or JPEG) or a PDF page *under* the
+In the **Background** tab of the side panel, the **Background image or PDF** section puts an image (PNG or JPEG) or a PDF page *under* the
 writing, to annotate a worksheet, a document or a photo: **Choose a PDF or an image…**, the PDF page if needed, then
 **Put in the background**. Set the **Placement** (**Whole**, **Fill the page**, **Stretched**) and the **Opacity**;
 **Replace…** changes the file, **Remove the image** removes it, **Turn the image alone** turns the image without
@@ -864,7 +930,7 @@ thumbnails, exports and videos. PDFs are rendered by Windows.
 
 ### Layers
 
-The **Layers** zone, at the bottom of the right-hand panel, lists the page's layers, the highest first. A layer is a
+The **Layers** zone, in the **Layers** tab of the side panel (open at the start), lists the page's layers, the highest first. A layer is a
 transparent sheet laid over the others: a tablet's writing, your annotations, a correction.
 
 - **Choosing a layer**: click its row, which gets a frame. **The pen, the eraser and the selection act only on the
@@ -897,7 +963,7 @@ must keep at least one stroke.
 
 ### Back to the original
 
-For a note received from the tablet, **Back to the original** (in the **Original** panel) restores the ink as it
+For a note received from the tablet, **Back to the original** (**Page** tab, **Original** block) restores the ink as it
 arrived, without your edits. Ardoise spells out what is lost (strokes added, erased, moved, layers, rotation, format)
 and what stays (title, tags, favourite, paper, narration, background image). The action can be undone (`Ctrl + Z`); then
 save to keep it. For a note that has never been modified there is no original yet: Ardoise keeps the previous version
@@ -945,7 +1011,7 @@ Touch screens work as in the editor: one finger scrolls, two fingers zoom.
 
 ### Narration
 
-During a replay, **Record a narration** (in the **Narration** panel) lets you talk while the stroke is drawn; the sound
+During a replay, **Record a narration** (in the **Sound** tab of the side panel, which opens by itself with the replay) lets you talk while the stroke is drawn; the sound
 is stored *in the note*. The narration follows the replay's speed and dead-time setting at the moment you start it.
 Choose the **Microphone** (the list remembers your choice on this PC; **Refresh the list of microphones** if you have
 just plugged one in) and look at the **Microphone level** before starting: **Start**, then **Stop and save**. A new
@@ -1066,7 +1132,7 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
 ### Showing the live sheet
 
 To have the sheet (or the open note) appear in the browser of another computer of the network, with no file to send:
-**Share on the network**, see the end of chapter 6.
+**Share on the network** (**Projection** tab of the side panel), see the end of chapter 6.
 
 ## 11. Importing your Inkspace notes
 
@@ -1262,7 +1328,7 @@ possible to understand what happened.
 
 ## 17. Keyboard shortcuts
 
-These shortcuts do nothing while you are typing in a text field.
+These shortcuts do nothing while you are typing in a text field, except those of **Closing and quitting**. Each window also shows its list in the **Help** tab of its side panel: it is the same list, which the application's tests compare with the keys the window really handles.
 
 ### Closing and quitting
 
@@ -1301,7 +1367,7 @@ These shortcuts do nothing while you are typing in a text field.
 | `Esc` | Deselect |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
 | `V`, `P`, `E`, `H` | Tools **Select**, **Pen**, **Eraser**, **Move the page** |
-| `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button) |
+| `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button, a rail icon included) |
 | `F` | **Straighten shapes** |
 | `R` | **Replay** |
 | `Ctrl + 0` | **Fit** (whole page). On an AZERTY keyboard: `Ctrl + à` or `Ctrl + Shift + à` |
@@ -1332,7 +1398,7 @@ These shortcuts do nothing while you are typing in a text field.
 | `0` (on an AZERTY keyboard, the `à` key) | **Whole page** |
 | `W` | **Width** |
 | `Shift + arrows` | Move the projected area |
-| `Delete` or `Backspace` | Clear the marks written over the presentation; **with strokes chosen** (control window), delete them |
+| `Delete` or `Backspace` | Control window, **with strokes chosen**: delete them (with nothing chosen, nothing happens). Projected window: clear the marks written over the presentation |
 | `V` | **Select** tool (control window): lasso or click a stroke of the chosen layer |
 | `P` | **Pen** tool (control window): write with the computer's pen or mouse on the chosen layer |
 | `Ctrl + Z` | Undo a stroke or an erasing of the computer, a deletion, a change of colour or **Clear the page** (control window) |

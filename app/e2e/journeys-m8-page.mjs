@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openTab } from './side-panel.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -33,6 +34,8 @@ export const pageJourneys = [
       });
 
       await check(`« ${l('editor.page.portrait')} » échange la largeur et la hauteur`, async () => {
+        // The page format is in the Page tab of the side panel (M16).
+        await openTab(app, 'page');
         await app.click('[data-action="orientation-portrait"]');
         await app.waitFor(`${page} === '21600x29700'`, 'the portrait page');
       });

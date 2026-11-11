@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openTab } from './side-panel.mjs';
 
 const locales = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'src', 'locales');
 const catalogs = {
@@ -65,6 +66,8 @@ export const uiJourneys = [
       });
 
       await check('Échap avec la projection : elle se ferme, le direct continue sans question', async () => {
+        // The projector block is in the Projection tab of the side panel (M16).
+        await openTab(app, 'projection');
         await app.click('button[data-action="project"]');
         await app.waitFor(`document.querySelector('button[data-action="stop-projecting"]') !== null`, 'the projection');
         await app.key('Escape');

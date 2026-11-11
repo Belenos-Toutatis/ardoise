@@ -385,6 +385,10 @@ checked: a real shutdown or logoff (Windows' own "apps preventing shutdown" scre
 - **Fit**: `StraightenPanel.fit()` (on mount, on window resize, and when the toolbar's size changes) sets `--room` (the window's height less the button's bottom, a 6 px gap and a 12 px margin, never under 160 px: on a window lower than the app's 560 px minimum height, with very little room under the button, the panel would pass the bottom of the window) and `--shift` (moves it left when the button is so far right that the panel would leave the window). The CSS does the rest: `max-height: var(--room)`, `overflow-y: auto`, `overscroll-behavior: contain` (a wheel turn does not zoom the page behind), `width: min(360px, 100vw - 24px)`, and the button row `position: sticky; bottom: 0` with the panel's background. The warning uses the new `--warn` and `--warn-bg` tokens (light and dark).
 - **Tests**: `Editor.shapes.test.ts` stubs `Ink.straighten` with a recognition that follows `minSizeMm`; the real one is tested in Rust and `ink.test.ts`. Journey: `app/e2e/journeys-m15-straighten.mjs` (it needs the WebAssembly to follow the tuning).
 
+## M16: the tabbed side panel
+
+The editor's side panel and the live control window's are one rail of tabs (Layers, Page, Background, Sound, Projection, Help) with its badges, its block above the open tab and its list of shortcuts: see `docs/design/side-panel.md`.
+
 ## Closing and quitting
 
 `Ctrl + W` and `Ctrl + F4` close what is open, `Ctrl + Q` quits (`lib/close-keys.ts`). They work from a text field too.

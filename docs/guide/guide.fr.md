@@ -358,26 +358,58 @@ Un simple changement de titre, d'étiquette ou de favori fait ailleurs ne crée 
   les précédents. Le groupe **Ordinateur** (**Sélection**, **Stylo**, l'encre de l'ordinateur, **Annuler**,
   **Rétablir**) sert à retoucher et à corriger : voir plus bas.
 - **Pages** : **Page précédente**, **Page suivante** (la position s'affiche : « Page 2 / 5 »), **Nouvelle page**.
-  Les calques de la page se gèrent dans la zone **Calques**, en haut du panneau de côté (voir **Corriger pendant le
-  direct**). **Effacer la page** (ou `Ctrl + Suppr`) efface la page en cours
+  Les calques de la page se gèrent dans l'onglet **Calques** du panneau de côté (voir **Le panneau de côté de la fenêtre
+  de commande** plus bas et **Corriger pendant le direct**). **Effacer la page** (ou `Ctrl + Suppr`) efface la page en cours
   seulement ; un message « Page effacée. » propose pendant 8 secondes **Annuler l'effacement**, qui rend l'encre (`Ctrl + Z` la rend aussi, sans limite de temps : voir **Retoucher pendant le direct**). Si la
   page a changé entre-temps, Ardoise dit que l'effacement ne peut plus être annulé.
 - **Tableau noir** : fond ardoise et craie blanche. **Pointeur laser** : le stylet en survol, sans toucher la tablette,
-  montre un point rouge à l'écran *sans rien écrire* ; en touchant la tablette on écrit de nouveau.
+  montre un point rouge à l'écran *sans rien écrire* ; en touchant la tablette on écrit de nouveau. Les deux se
+  règlent aussi par des interrupteurs, dans l'onglet **Projection** (bloc **Zone projetée**) ; les boutons de la barre
+  d'outils restent, pour les avoir sous la main.
 - **Position de la tablette** : quatre boutons qui changent aussitôt la position ; la page en cours tourne avec ce
   qui y est déjà dessiné.
 - L'aperçu montre la page entière ; un *rectangle bleu* indique la zone projetée. Faites-le glisser pour déplacer la
   zone, la molette zoome. **Agrandir**, **Réduire**, **Page entière** et **Largeur** (la page sur toute la largeur de la
-  zone projetée) sont aussi proposés.
+  zone projetée) sont aussi proposés, dans l'onglet **Projection**, bloc **Zone projetée**.
 - **Latence** : le temps entre la réception du point par l'ordinateur et son dessin, mesuré et affiché (objectif :
   moins de 30 ms).
-- **Enregistrer la narration** : raconter pendant la séance ; le son est découpé page par page et enregistré avec
-  chaque note, la relecture de la note le rejoue (chapitre 9).
+- **Enregistrer la narration** (onglet **Son**) : raconter pendant la séance ; le son est découpé page par page et
+  enregistré avec chaque note, la relecture de la note le rejoue (chapitre 9).
 
 Le *bouton de la tablette* fait, pendant le direct, ce que l'option **Bouton de la tablette en mode direct** indique
 (nouvelle page ou nouveau calque). Un nouveau calque est créé en haut et reçoit aussitôt l'écriture de la tablette ;
 l'ordinateur reste sur son calque. *Ce que la Bamboo Slate envoie à l'appui n'est pas encore vérifié sur la vraie
 tablette.* Les touches de la page suivante et précédente marchent dans tous les cas.
+
+### Le panneau de côté de la fenêtre de commande
+
+À droite de l'aperçu, une colonne d'icônes, le *rail*, range ce qui se règle autour de la page. Un clic sur une icône
+ouvre son onglet à gauche du rail. Un clic sur l'onglet déjà ouvert, ou sur **›** en haut du panneau, le *replie* :
+l'aperçu prend toute la largeur et le rail reste. Les onglets, de haut en bas :
+
+- **Calques** : la zone **Calques** (voir **Corriger pendant le direct**). C'est l'onglet ouvert au départ.
+- **Son** : **Enregistrer la narration** pendant la séance.
+- **Projection** : le **Vidéoprojecteur** (l'écran de projection, **Projeter**, **Arrêter la projection**), la **Zone
+  projetée** (zoom, **Page entière**, **Largeur**, interrupteurs **Tableau noir** et **Pointeur laser**) et le
+  **Partage sur le réseau** : le bouton **Partager sur le réseau** n'est plus dans la barre d'outils.
+- **Aide** : les raccourcis du mode direct (voir le chapitre 17).
+
+*Page* et *Fond* (papier et image sous la page en direct) ne sont pas encore proposés dans cette fenêtre.
+
+Ardoise retient l'onglet ouvert et l'état replié de cette fenêtre, sur ce PC, et les retrouve au mode direct suivant.
+
+**Les pastilles** se voient aussi panneau replié : le *nombre de calques* sur **Calques** ; un *point orange* quand le
+calque de la tablette, ou le calque choisi, est masqué (l'avertissement de la zone **Calques** dit lequel) ; un *point
+rouge* sur **Son** pendant un enregistrement ; un *point bleu* sur **Projection** tant qu'une projection ou un partage
+est en cours.
+
+**Au-dessus de l'onglet ouvert**, quel qu'il soit, s'affichent la barre de la sélection (« Traits sélectionnés : 3 »,
+**Supprimer**, **Désélectionner**) et, tant qu'un outil **Sélection** ou **Stylo** est actif, son aide en une phrase.
+Quand des traits sont choisis, le panneau se rouvre s'il était replié.
+
+**Au clavier.** `↓` et `↑` passent d'une icône à l'autre, `Début` et `Fin` vont à la première et à la dernière,
+sans rien ouvrir ; `Entrée` ouvre l'onglet ou le replie. `Espace` ne fait pas cela ici : en mode direct il veut toujours
+dire « page suivante », même quand une icône a le focus.
 
 ### Retoucher pendant le direct
 
@@ -394,13 +426,14 @@ ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tab
 - `Maj` + lasso ou clic ajoute des traits à ceux déjà choisis. `Ctrl` + lasso ou clic en retire.
 - Un geste dans le vide, ou `Échap`, enlève la sélection. `Échap` ne ferme rien d'autre tant que des traits sont choisis.
 - Un doigt et la molette continuent de déplacer et de zoomer l'aperçu.
-- Les traits choisis sont entourés de bleu dans l'aperçu. Une barre dit « Traits sélectionnés : 3 ».
+- Les traits choisis sont entourés de bleu dans l'aperçu. La barre de la sélection, au-dessus de l'onglet ouvert du
+  panneau de côté, dit « Traits sélectionnés : 3 » (voir **Le panneau de côté de la fenêtre de commande**).
 - **Seuls les traits du calque choisi sont pris** (zone **Calques**, voir plus bas) ; choisir un autre calque enlève la
   sélection. On ne peut pas choisir le trait que la tablette est en train d'écrire, ni les traits d'un calque masqué ;
   masquer un calque enlève ses traits de la sélection.
   Sur une feuille reprise, on peut choisir les anciens traits de la feuille, en choisissant leur calque.
 
-**Supprimer** : cliquez sur **Supprimer** dans la barre, ou appuyez sur `Suppr` ou `Retour arrière`.
+**Supprimer** : cliquez sur **Supprimer** dans la barre de la sélection, ou appuyez sur `Suppr` ou `Retour arrière`.
 
 **Changer la couleur** : cliquez sur une pastille de **Couleur**. Seuls les traits choisis changent, et la nouvelle
 couleur se voit aussitôt à l'intérieur du contour bleu. Ils restent choisis, pour essayer une autre couleur. **La couleur du stylo ne change pas** : ce que la tablette écrit ensuite garde
@@ -435,7 +468,7 @@ avec le stylet de votre ordinateur (une Surface, par exemple), dans une autre co
 que vous écrivez est enregistré dans la note, sans se mêler à l'écriture de l'élève. La tablette continue d'écrire
 pendant ce temps, sans jamais être gênée.
 
-**Deux calques, deux repères.** La zone **Calques**, en haut du panneau de côté de la fenêtre de commande, liste les
+**Deux calques, deux repères.** La zone **Calques**, dans l'onglet **Calques** du panneau de côté de la fenêtre de commande, liste les
 calques de la page, le plus haut en premier.
 
 - Le *cadre* entoure le **calque choisi** : c'est là que l'ordinateur agit (stylo, bout gomme du stylet, sélection).
@@ -515,7 +548,7 @@ présentation (voir plus bas) ne changent pas : elles ne sont jamais enregistré
 ### Projeter sur un vidéoprojecteur
 
 1. Branchez le projecteur et, dans Windows, appuyez sur `Win + P` puis choisissez *Étendre* : chaque écran a son bureau.
-2. Dans la section **Projection** de la fenêtre de commande, choisissez l'**Écran de projection** dans la liste (le
+2. Dans l'onglet **Projection** du panneau de côté de la fenêtre de commande, bloc **Vidéoprojecteur**, choisissez l'**Écran de projection** dans la liste (le
    bouton **Actualiser la liste des écrans** la remet à jour) et cliquez sur **Projeter**.
 3. Une fenêtre de *présentation* s'ouvre *en plein écran sur l'écran choisi*, sans aucun élément d'interface (le
    curseur de la souris disparaît après 2 secondes d'immobilité). La fenêtre de commande reste sur l'écran de
@@ -541,7 +574,7 @@ les montre aussi. Deux doigts zooment la zone projetée.
 ### Au clavier
 
 Les mêmes touches marchent dans la fenêtre de commande et dans la présentation (une télécommande de présentation
-envoie Page suivante et Page précédente) : voir le chapitre 17.
+envoie Page suivante et Page précédente) : voir le chapitre 17, ou l'onglet **Aide** du panneau de côté.
 
 ### Montrer la feuille sur un autre ordinateur du réseau
 
@@ -560,8 +593,8 @@ dans un *simple navigateur* : rien à installer dessus. Il montre :
 *Rien d'autre n'est accessible* : ni la bibliothèque, ni les titres des notes, ni les autres notes, ni un fichier du PC.
 L'autre ordinateur ne peut pas changer ce qui est montré, mais il peut régler son propre affichage (voir plus bas).
 
-**Côté Ardoise.** Cliquez sur **Partager sur le réseau**, dans la fenêtre de commande du mode direct ou dans la barre
-d'outils de l'éditeur. Le panneau qui s'ouvre donne :
+**Côté Ardoise.** Ouvrez l'onglet **Projection** du panneau de côté, dans la fenêtre de commande du mode direct ou dans
+l'éditeur, et cliquez sur **Partager sur le réseau** (bloc **Partage sur le réseau**). Le panneau qui s'ouvre donne :
 
 - l'*adresse* à taper dans le navigateur de l'autre ordinateur, de la forme `http://192.168.1.23:8765` (si le PC en a
   plusieurs, elles sont toutes listées) ;
@@ -571,8 +604,9 @@ d'outils de l'éditeur. Le panneau qui s'ouvre donne :
 - **Pause** (l'image se fige sur les écrans ; vous continuez d'écrire, puis **Reprendre** montre l'état actuel) et
   **Arrêter le partage**.
 
-Tant qu'un partage est en cours, un indicateur avec le nombre d'écrans reste en haut de la bibliothèque et des barres
-d'outils : un clic rouvre le panneau.
+Tant qu'un partage est en cours, un indicateur avec le nombre d'écrans reste en haut de la bibliothèque, le bouton **Partager
+sur le réseau** de l'onglet **Projection** le montre aussi (un clic rouvre le panneau) et l'icône **Projection** du rail porte
+un point bleu, même panneau replié.
 
 **Côté autre ordinateur.**
 
@@ -828,6 +862,39 @@ que vous choisissez **Revenir sans enregistrer**).
   enregistrer, ou arrêter quand même : la copie de secours est alors déjà sur le disque et Ardoise la proposera au
   prochain lancement. (Quand Windows impose l'arrêt sans attendre, la copie de secours est écrite quand même.)
 
+### Le panneau de côté de l'éditeur
+
+À droite de la page, une colonne d'icônes, le *rail*, range tout ce qui se règle autour de la page. Un clic sur une icône
+ouvre son onglet à gauche du rail. Un clic sur l'onglet déjà ouvert, ou sur **›** en haut du panneau, le *replie* : la page
+prend toute la largeur et le rail reste. Les onglets, de haut en bas :
+
+- **Calques** : la zone **Calques** (voir plus bas). C'est l'onglet ouvert au départ.
+- **Page** : le **Papier** (couleur en pastilles, modèle, texture), le **Format de la feuille** et son orientation,
+  **Tourner et recadrer**, et **Revenir à l'original** (voir plus bas).
+- **Fond** : l'**Image ou PDF de fond**.
+- **Son** : la narration. Pendant une relecture, c'est là qu'on enregistre ; en dehors d'une relecture, l'onglet propose
+  **Lancer la relecture**.
+- **Projection** : **Partager sur le réseau** (le bouton n'est plus dans la barre d'outils ; voir la fin du chapitre 6).
+- **Aide** : les raccourcis clavier de l'éditeur (voir le chapitre 17).
+
+Ardoise retient l'onglet ouvert et l'état replié de l'éditeur, sur ce PC, et les retrouve quand vous ouvrez une autre
+note ou rouvrez l'éditeur. Les modifications de l'onglet **Page** s'annulent avec `Ctrl + Z`, comme avant.
+
+**Les pastilles** se voient aussi panneau replié : le *nombre de calques* sur **Calques** ; un *point orange* quand le
+calque choisi est masqué ; un *point rouge* sur **Son** pendant un enregistrement ; un *point bleu* sur **Projection**
+pendant un partage.
+
+**Au-dessus de l'onglet ouvert**, quel qu'il soit, s'affichent la découpe (quand elle est ouverte) et la sélection :
+« Traits sélectionnés : 3 », **Copier**, **Couper**, **Coller**, **Dupliquer**, **Redresser les formes**,
+**Supprimer**, et la croix **Désélectionner**. Dès que des traits sont choisis, ou qu'une découpe commence, le panneau se
+rouvre s'il était replié.
+
+**La relecture** ouvre l'onglet **Son** pour qu'on puisse enregistrer la narration, même panneau replié ; en la quittant,
+Ardoise remet l'onglet et l'état d'avant.
+
+**Au clavier.** `↓` et `↑` passent d'une icône à l'autre, `Début` et `Fin` vont à la première et à la dernière, sans
+rien ouvrir ; `Entrée` ou `Espace` ouvre l'onglet ou le replie.
+
 ### Les outils
 
 La barre d'outils propose quatre outils (**Outil**) :
@@ -840,7 +907,8 @@ La barre d'outils propose quatre outils (**Outil**) :
 - **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**. Elle n'efface que sur le calque choisi (voir
   **Calques**).
 - **Sélection** (le lasso) : entourez des traits du calque choisi pour les sélectionner ; `Maj` + lasso ajoute, `Ctrl` + lasso retire. Le
-  panneau **Sélection** propose **Copier**, **Couper**, **Coller**, **Dupliquer**, **Redresser les formes**, **Supprimer**.
+  bloc **Sélection**, au-dessus de l'onglet ouvert du panneau de côté, propose **Copier**, **Couper**, **Coller**,
+  **Dupliquer**, **Redresser les formes**, **Supprimer**.
   Les changements de couleur, d'encre et d'épaisseur s'appliquent alors à la sélection ; on la déplace (en la saisissant
   à l'intérieur de son cadre) et on la redimensionne (par les poignées du cadre) à la souris, ou au stylet (voir ci-dessous
   et le chapitre 12).
@@ -892,16 +960,17 @@ visibles en bas. Un petit ovale debout (un « O », un « 0 ») n'est jamais red
 
 ### Copier et coller
 
-`Ctrl + C`, `Ctrl + X` et `Ctrl + V` (ou les boutons du panneau **Sélection**) copient, coupent et collent des traits
+`Ctrl + C`, `Ctrl + X` et `Ctrl + V` (ou les boutons du bloc **Sélection**) copient, coupent et collent des traits
 *d'une note à l'autre*, d'une fenêtre à l'autre, par le presse-papiers de Windows. Les traits collés gardent leur
 couleur, leur outil et leur épaisseur ; ils sont rejoués en dernier. Ce qui ne vient pas d'Ardoise est ignoré.
 
 ### La feuille : papier, modèle, format, orientation
 
-Le panneau **Page** (à droite) règle la feuille :
+L'onglet **Page** du panneau de côté règle la feuille :
 
-- **Papier** : **Blanc**, **Crème**, **Kraft**, **Ardoise noire** (ou **Personnalisé**) ; **Modèle** : **Uni**,
-  **Ligné**, **Seyès**, **Quadrillé 5 mm**, **Millimétré**, **Pointillé**, **Portées** ; **Texture du papier**.
+- **Papier** : quatre pastilles de couleur, **Blanc**, **Crème**, **Kraft**, **Ardoise noire** (et **Personnalisé** quand
+  la note a un papier d'une autre couleur) ; **Modèle** : **Uni**, **Ligné**, **Seyès**, **Quadrillé 5 mm**,
+  **Millimétré**, **Pointillé**, **Portées** ; interrupteur **Texture du papier**.
 - **Orientation de la feuille** : **Portrait** ou **Paysage**. **L'écriture ne tourne pas** : seule la feuille change de
   sens, et l'écriture garde sa place (si elle dépasse, elle est replacée dans la feuille quand elle y tient ; sinon la
   partie hors cadre est conservée mais pas affichée, et un message le dit).
@@ -914,7 +983,7 @@ Le panneau **Page** (à droite) règle la feuille :
 
 ### Image ou PDF de fond
 
-Dans le panneau **Page**, la section **Image ou PDF de fond** place une image (PNG ou JPEG) ou une page de PDF *sous*
+Dans l'onglet **Fond** du panneau de côté, la section **Image ou PDF de fond** place une image (PNG ou JPEG) ou une page de PDF *sous*
 l'écriture, pour annoter une fiche, un document ou une photo : **Choisir un PDF ou une image…**, la page du PDF si
 besoin, puis **Mettre en fond**. Réglez le **Placement** (**Entière**, **Pleine page**, **Étirée**) et l'**Opacité** ; **Remplacer…**
 change le fichier, **Retirer l'image** l'enlève, **Tourner l'image seule** tourne l'image sans toucher à la feuille ni
@@ -924,7 +993,7 @@ exports et les vidéos. Les PDF sont rendus par Windows.
 
 ### Calques
 
-La zone **Calques**, en bas du panneau de droite, liste les calques de la page, le plus haut en premier. Un calque est
+La zone **Calques**, dans l'onglet **Calques** du panneau de côté (ouvert au départ), liste les calques de la page, le plus haut en premier. Un calque est
 une feuille transparente superposée aux autres : l'écriture d'une tablette, vos annotations, une correction.
 
 - **Choisir un calque** : cliquez sur sa ligne, qui s'entoure d'un cadre. **Le stylo, la gomme et la sélection n'agissent
@@ -959,7 +1028,7 @@ Chaque note doit garder au moins un trait.
 
 ### Revenir à l'original
 
-Pour une note reçue de la tablette, **Revenir à l'original** (panneau **Original**) rétablit l'encre telle qu'elle est
+Pour une note reçue de la tablette, **Revenir à l'original** (onglet **Page**, bloc **Original**) rétablit l'encre telle qu'elle est
 arrivée, sans vos modifications. Ardoise précise ce qui est perdu (traits ajoutés, effacés, déplacés, calques, rotation,
 format) et ce qui reste (titre, étiquettes, favori, papier, narration, image de fond). L'action est annulable
 (`Ctrl + Z`) ; enregistrez ensuite pour la garder. Pour une note qui n'a jamais été modifiée, il n'y a pas encore
@@ -1011,7 +1080,7 @@ Les écrans tactiles marchent comme dans l'éditeur : un doigt fait défiler, de
 
 ### Narration
 
-Pendant une relecture, **Enregistrer une narration** (dans le panneau **Narration**) vous laisse raconter pendant que le
+Pendant une relecture, **Enregistrer une narration** (dans l'onglet **Son** du panneau de côté, qui s'ouvre tout seul avec la relecture) vous laisse raconter pendant que le
 tracé défile ; le son est rangé *dans la note*. La narration suit la vitesse et les temps morts de la relecture
 au moment où vous la démarrez. Choisissez le **Micro** (la liste mémorise votre choix sur ce PC ; **Actualiser la liste
 des micros** si vous venez de le brancher) et regardez le **Niveau du micro** avant de lancer : **Démarrer**, puis
@@ -1136,7 +1205,7 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
 ### Montrer la feuille en direct
 
 Pour que la feuille (ou la note ouverte) s'affiche dans le navigateur d'un autre ordinateur du réseau, sans fichier à
-envoyer : **Partager sur le réseau**, voir la fin du chapitre 6.
+envoyer : **Partager sur le réseau** (onglet **Projection** du panneau de côté), voir la fin du chapitre 6.
 
 ## 11. Importer les notes d'Inkspace
 
@@ -1340,7 +1409,9 @@ permet de comprendre ce qui s'est passé.
 
 ## 17. Raccourcis clavier
 
-Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte, sauf ceux de **Fermer et quitter**.
+Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte, sauf ceux de **Fermer et quitter**. Chaque fenêtre
+montre aussi sa liste dans l'onglet **Aide** de son panneau de côté : c'est la même liste, que les tests de l'application
+comparent aux touches que la fenêtre traite vraiment.
 
 ### Fermer et quitter
 
@@ -1379,7 +1450,7 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte, sauf ceux
 | `Échap` | Désélectionner |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
 | `V`, `P`, `E`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Déplacer la page** |
-| `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton) |
+| `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton, y compris une icône du rail) |
 | `F` | **Redresser les formes** |
 | `R` | **Relecture** |
 | `Ctrl + 0` | **Ajuster** (page entière). Au clavier AZERTY : `Ctrl + à` ou `Ctrl + Maj + à` |
@@ -1410,7 +1481,7 @@ Ces raccourcis n'agissent pas quand vous tapez dans un champ de texte, sauf ceux
 | `0` (au clavier AZERTY, la touche `à`) | **Page entière** |
 | `W` | **Largeur** |
 | `Maj + flèches` | Déplacer la zone projetée |
-| `Suppr` ou `Retour arrière` | Effacer les annotations écrites sur la présentation ; **avec des traits choisis** (fenêtre de commande), les supprimer |
+| `Suppr` ou `Retour arrière` | Fenêtre de commande, **avec des traits choisis** : les supprimer (sans sélection, rien). Fenêtre projetée : effacer les annotations écrites sur la présentation |
 | `V` | Outil **Sélection** (fenêtre de commande) : lasso ou clic sur un trait du calque choisi |
 | `P` | Outil **Stylo** (fenêtre de commande) : écrire avec le stylet ou la souris de l'ordinateur sur le calque choisi |
 | `Ctrl + Z` | Annuler un trait ou un coup de gomme de l'ordinateur, une suppression, un changement de couleur ou **Effacer la page** (fenêtre de commande) |
