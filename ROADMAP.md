@@ -280,6 +280,30 @@ Raccourcis pour fermer et quitter (2026-11-07, demandés par l’utilisateur) : 
 
 Restent à essayer dans la vraie bibliothèque : **Comparer** et la relecture à l'écran sur ces notes, et une note avec une vraie narration (aucune des quatre n'en a).
 
+## M14 — Corriger pendant le direct, sur son propre calque
+
+Ajouté à la demande de l'utilisateur le 2026-11-11 (SPEC §4.2, §4.4 et §4.6, `docs/questions.md` Q11), à partir d'une maquette qu'il a validée.
+
+- [ ] Zone Calques, la même dans l'éditeur et dans la fenêtre de commande du direct : un clic sur la ligne choisit le calque ; œil ou œil barré ; crayon pour renommer (Entrée valide, Échap annule) ; monter, descendre et fusionner sur la ligne choisie ; « Ajouter un calque » choisit le nouveau calque ; avertissements (calque choisi masqué, tablette sur un calque masqué) ; traductions FR et EN.
+- [ ] Éditeur : le stylo, la gomme et la sélection n'agissent que sur le calque choisi.
+- [ ] Mode direct, côté Rust : le calque de la tablette et celui de l'ordinateur, séparés ; écrire un trait de l'ordinateur pendant que la tablette écrit, sans jamais la gêner ; gommer des traits du calque choisi ; envoyer la tablette sur un autre calque ; ajouter, renommer, afficher ou masquer, réordonner et fusionner des calques pendant le direct ; tout est enregistré dans la note, à son heure ; Ctrl+Z annule les actions de l'ordinateur, jamais l'écriture de la tablette.
+- [ ] Mode direct, interface : outil Stylo à côté de Sélection ; style propre à l'ordinateur (rouge par défaut, retenu) ; bout gomme du stylet ; sélection limitée au calque choisi ; la zone Calques dans le panneau de côté, à la place du bouton « Nouveau calque ».
+- [ ] Vidéoprojecteur et partage : le trait de l'ordinateur apparaît pendant qu'il s'écrit, comme celui de la tablette.
+- [ ] Export : « Calques : séparés ou fusionnés » pour le SVG et le PDF (calques PDF, un par nom pour toutes les pages) ; images toujours fusionnées ; calques masqués jamais exportés.
+- [ ] Guides FR et EN, `CHANGELOG.md` ; procédure H6 dans `docs/hardware-tests.md`.
+- [ ] Relecture indépendante, remarques corrigées.
+
+**Critères de fin** :
+- `CHECK OK` et `E2E OK` ;
+- un parcours de bout en bout : la tablette simulée écrit sur son calque pendant que l'ordinateur écrit au stylet sur un calque « Correction » ; le fichier de la note a les deux calques, chaque trait à sa place et à son heure ; la présentation et un écran du partage montrent les deux ; Ctrl+Z annule le trait de l'ordinateur, pas ceux de la tablette ; la gomme ne touche que le calque choisi ;
+- un parcours de bout en bout dans l'éditeur : la sélection et la gomme ne prennent que le calque choisi ;
+- des tests de l'export : un PDF à calques séparés a ses calques, un SVG fusionné n'en a qu'un, un calque masqué n'est dans aucun fichier ;
+- `cargo xtask perf` : le mode direct reste à 60 images/s quand la tablette et l'ordinateur écrivent ensemble.
+
+### Point de contrôle H6 [matériel]
+
+- [ ] [matériel] En classe, avec la vraie tablette et le partage vers le PC du vidéoprojecteur : un élève écrit pendant que l'enseignant corrige au stylet de la Surface sur un calque « Correction », gomme et annule ; puis un export PDF à calques séparés, ouvert dans Acrobat Reader ou Firefox.
+
 ---
 
 ## Lancer une étape avec `/goal`
