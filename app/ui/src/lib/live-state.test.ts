@@ -502,3 +502,42 @@ describe('live state: snapshots in the middle of a stroke', () => {
     expect(strokesOf(live)).toEqual({ finished: 1, current: 2, count: 2 });
   });
 });
+
+describe('live state: the paper and the image of the page (M17)', () => {
+  const key = (k: string) => ({ key: k, width: 2480, height: 3508 });
+  const CUSTOM = { custom: { r: 1, g: 2, b: 3, a: 255 } };
+
+  it("keeps the page's own paper apart from the slate the blackboard paints", () => {
+    const live = ready({
+      page: page('p1', [], { background: { paper: 'slate', template: 'seyes', texture: true } }),
+      pagePaper: 'cream',
+    });
+    expect(live.background.paper).toBe('slate');
+    expect(live.pagePaper).toBe('cream');
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ pagePaper: CUSTOM }) }));
+    expect(live.pagePaper).toEqual(CUSTOM);
+  });
+
+  it("reads a snapshot without `pagePaper` (the share's viewers) as the background's paper, and no image", () => {
+    const live = ready({ page: page('p1', [], { background: { paper: 'kraft', template: 'blank', texture: false } }) });
+    expect(live.pagePaper).toBe('kraft');
+    expect(live.imagePixels).toBeNull();
+  });
+
+  it("keeps the key and size of the image's pixels, and drops them with the image", () => {
+    const live = ready({ imagePixels: key('one') });
+    expect(live.imagePixels).toEqual(key('one'));
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ imagePixels: key('two') }) }));
+    expect(live.imagePixels?.key).toBe('two');
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ imagePixels: null }) }));
+    expect(live.imagePixels).toBeNull();
+  });
+
+  it('does not change the objects it hands out when the same snapshot comes again', () => {
+    const live = ready({ imagePixels: key('one'), pagePaper: CUSTOM });
+    const [pixels, paper] = [live.imagePixels, live.pagePaper];
+    live.receive(batch({ type: 'snapshot', snapshot: snapshot({ imagePixels: key('one'), pagePaper: { custom: { ...CUSTOM.custom } } }) }));
+    expect(live.imagePixels).toBe(pixels);
+    expect(live.pagePaper).toBe(paper);
+  });
+});

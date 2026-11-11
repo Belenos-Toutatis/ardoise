@@ -20,11 +20,11 @@ afterEach(() => {
 
 const WHITE: Background = { paper: 'white', template: 'lined', texture: false };
 
-function render(background: Background, disabled = false) {
+function render(background: Background, disabled = false, colourDisabled = false) {
   const target = document.createElement('div');
   document.body.append(target);
   const onbackground = vi.fn();
-  const component = mount(PaperBlock, { target, props: { background, disabled, onbackground } });
+  const component = mount(PaperBlock, { target, props: { background, disabled, colourDisabled, onbackground } });
   cleanup = () => {
     unmount(component);
     target.remove();
@@ -84,6 +84,30 @@ describe('paper block', () => {
     const controls = [...target.querySelectorAll<HTMLElement>('button, select, input')] as HTMLButtonElement[];
     expect(controls).toHaveLength(6);
     expect(controls.every((c) => c.disabled)).toBe(true);
+  });
+
+  // Milestone M17: under the blackboard live mode keeps the colour for later; the template and the texture still apply.
+  it('locks the swatches alone when the colour is disabled, and tells the one that is chosen', async () => {
+    const { target, swatch, onbackground } = render({ ...WHITE, paper: 'cream' }, false, true);
+    for (const id of ['white', 'cream', 'kraft', 'slate']) expect(swatch(id).disabled, id).toBe(true);
+    expect(swatch('cream').getAttribute('aria-pressed')).toBe('true');
+    swatch('kraft').click();
+    expect(onbackground).not.toHaveBeenCalled();
+    const template = target.querySelector<HTMLSelectElement>('select[data-field="template"]')!;
+    const texture = target.querySelector<HTMLInputElement>('input[data-field="texture"]')!;
+    expect(template.disabled).toBe(false);
+    expect(texture.disabled).toBe(false);
+    template.value = 'grid5mm';
+    template.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(onbackground).toHaveBeenLastCalledWith({ paper: 'cream', template: 'grid5mm', texture: false });
+    texture.click();
+    await tick();
+    expect(onbackground).toHaveBeenLastCalledWith({ paper: 'cream', template: 'lined', texture: true });
+  });
+
+  it('leaves the swatches alone by default (the editor)', () => {
+    const { swatch } = render(WHITE);
+    for (const id of ['white', 'cream', 'kraft', 'slate']) expect(swatch(id).disabled, id).toBe(false);
   });
 
   it('speaks English too', () => {

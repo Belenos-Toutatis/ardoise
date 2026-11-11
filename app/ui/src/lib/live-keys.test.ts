@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTypingTarget, liveKeyAction, type KeyInput } from './live-keys';
+import { isTypingTarget, liveEditKeyAction, liveKeyAction, type KeyInput } from './live-keys';
 
 const key = (k: string, extra: Partial<KeyInput> = {}) => liveKeyAction({ key: k, ...extra });
 const element = (tagName: string, extra: Record<string, unknown> = {}) => ({ tagName, ...extra }) as unknown as EventTarget;
@@ -122,5 +122,63 @@ describe('page width and marks (M8)', () => {
     // Clearing the page itself stays Ctrl + Delete.
     expect(key('Delete', { ctrlKey: true })).toEqual({ kind: 'command', command: 'clearPage' });
     expect(key('Delete', { target: element('INPUT', { type: 'text' }) })).toBeNull();
+  });
+});
+
+// Milestone M17: the Page and Fond tabs hold selects and a slider; the class's remote must turn the page whatever has the
+// focus there, or it would change the paper in front of the class.
+describe("the class's remote in the side panel (M17)", () => {
+  const next = { kind: 'command', command: 'nextPage' };
+  const previous = { kind: 'command', command: 'previousPage' };
+  const controls: [string, EventTarget][] = [
+    ['a select (the template, the fit)', element('SELECT')],
+    ['a select in lower case', element('select')],
+    ['a range input (the opacity)', element('INPUT', { type: 'range' })],
+    ['a range input in lower case', element('input', { type: 'RANGE' })],
+    ['a checkbox (the texture)', element('INPUT', { type: 'checkbox' })],
+    ['a button (a swatch)', element('BUTTON')],
+  ];
+
+  it.each(controls)('turns the page with Page Down and Page Up from %s', (_name, target) => {
+    expect(key('PageDown', { target })).toEqual(next);
+    expect(key('PageUp', { target })).toEqual(previous);
+  });
+
+  it("turns it with the remote's key also held with Shift", () => {
+    expect(key('PageDown', { target: element('SELECT'), shiftKey: true })).toEqual(next);
+  });
+
+  it('keeps every other key for the select and the slider', () => {
+    for (const target of [element('SELECT'), element('INPUT', { type: 'range' })]) {
+      for (const k of ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', ' ', 'Home', 'End', 'b', 'l', 'w', '0', '+', 'Escape']) {
+        expect(key(k, { target }), k).toBeNull();
+      }
+    }
+  });
+
+  it('leaves Page Up and Page Down to the fields that are typed in', () => {
+    for (const target of [
+      element('INPUT', { type: 'text' }),
+      element('INPUT', { type: 'number' }),
+      element('INPUT', { type: 'search' }),
+      element('INPUT'),
+      element('TEXTAREA'),
+      element('DIV', { isContentEditable: true }),
+    ]) {
+      expect(key('PageDown', { target })).toBeNull();
+      expect(key('PageUp', { target })).toBeNull();
+    }
+  });
+
+  it('does not change the other keys of the page, nor the keys of touching up in a select', () => {
+    expect(key('PageDown')).toEqual(next);
+    expect(key('PageUp', { target: element('CANVAS') })).toEqual(previous);
+    expect(key('PageDown', { ctrlKey: true, target: element('SELECT') })).toBeNull();
+    expect(key('PageDown', { altKey: true, target: element('SELECT') })).toBeNull();
+    // A press held down turns the page once.
+    expect(key('PageDown', { repeat: true, target: element('SELECT') })).toBeNull();
+    // V and P (the computer's tools) and Ctrl + Z stay the select's own while it has the focus.
+    expect(liveEditKeyAction({ key: 'v', target: element('SELECT') }, false)).toBeNull();
+    expect(liveEditKeyAction({ key: 'z', ctrlKey: true, target: element('INPUT', { type: 'range' }) }, false)).toBeNull();
   });
 });
