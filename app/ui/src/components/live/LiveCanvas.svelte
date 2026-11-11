@@ -7,12 +7,22 @@
    *
    * Drawing is `lib/live-render.ts`; this component sizes the canvas (CSS pixels ×
    * `devicePixelRatio`), loads the paper (`render_background`; `live_page_background` for a
-   * resumed sheet with a background image, whose pixels the session holds), and paints on the next
+   * page with a background image, whose pixels the session holds), and paints on the next
    * animation frame after a change, then records the latency of the points it painted: the
    * interface part when the drawing ends, the end-to-end figure at the start of the next frame
    * (`lib/latency.ts`).
    * Attributes for tests: `data-strokes` (strokes of the page, the one in progress included),
-   * `data-page` (`n/N`), `data-full-redraws` and `data-partial-redraws` (`lib/perf.ts`).
+   * `data-page` (`n/N`), `data-full-redraws` and `data-partial-redraws` (`lib/perf.ts`) and, since M17, the ones the
+   * journeys read in the projected windows: `data-drawn` (strokes drawn: visible layers only, the one in progress
+   * included), `data-paper` (`white|cream|kraft|slate|custom`: the effective paper, slate under the blackboard),
+   * `data-template`, `data-image` (the page's image name, empty without one), `data-paper-ready` (`true` once the
+   * picture of the current paper is drawn), `data-zoom` (the view's zoom).
+   *
+   * The paper (M17): keyed on the page, the effective background, the image's placement and the key of its pixels
+   * (`LiveState.imagePixels`), so that another file placed alike is drawn again; rendered by `paper` when the window
+   * has its own way (the editor's projection window renders its staged pixels), else by `live_page_background` for a
+   * page with an image and `render_background` for the others. `interactive` false (the editor's projection window)
+   * shows the page and nothing else: no marks, no pinch, no wheel; the pointer only wakes the window's cursor.
    *
    * Pen and touch (docs/design/tablet-live-classroom.md, "M8: pen and touch"). `preview`: a
    * finger drags the projected area as the mouse does, two fingers pinch it (zoom and move), a
@@ -126,14 +136,13 @@
     onblocked?: () => void;
     /**
      * Presentation (M17, the editor's projection window): false shows the page and nothing else: no marks,
-     * no pinch, no wheel, the pointer only wakes the cursor. Default true. Declared by package 0, implemented
-     * by package B (until then every window is interactive as before).
+     * no pinch, no wheel, the pointer only wakes the cursor (the window's own listeners, not this canvas's). Default true.
      */
     interactive?: boolean;
     /**
      * Renders the paper (PNG data URL) of `page` with `background`, `widthPx` wide. Default: `live_page_background`
      * for a page with an image, else `render_background`. The editor's projection window passes
-     * `api.renderBackground` with the editor's staged pixels. Declared by package 0, implemented by package B.
+     * `api.renderBackground` with the editor's staged pixels.
      */
     paper?: (page: PageSize, background: Background, widthPx: number) => Promise<string>;
   } = $props();
@@ -152,6 +161,8 @@
   /** The rendered paper once loaded, and what it was rendered for. */
   let backgroundImage: HTMLImageElement | null = null;
   let backgroundFor = '';
+  /** The picture of the current paper is drawn (`data-paper-ready`); false from a change of paper until its picture shows. */
+  let paperReady = $state(false);
   /** Bumped by each paper request: only the latest one is shown. */
   let backgroundRequest = 0;
   let context: Ctx2D | null = null;
@@ -173,6 +184,21 @@
   let visibilityEpoch = 0;
 
   const renderer = new LiveRenderer(createSurface);
+
+  /** The paper shown: the page's own, slate under the blackboard. */
+  const shown = $derived(effectiveBackground(live.background, live.view.board));
+  const paperName = $derived(typeof shown.paper === 'string' ? shown.paper : 'custom');
+  /** Strokes drawn: those of visible layers, the ones in progress included (`data-drawn`). */
+  const drawn = $derived.by(() => {
+    void live.strokeCount;
+    void live.revision;
+    const layers = live.layers;
+    const visible = (stroke: Stroke) => layers[stroke.layer]?.visible !== false;
+    let count = 0;
+    for (const stroke of live.strokes) if (visible(stroke)) count += 1;
+    for (const stroke of [live.current, live.computerCurrent]) if (stroke && visible(stroke)) count += 1;
+    return count;
+  });
 
   function nominalSize(): Size {
     return NOMINAL[mode];
@@ -371,23 +397,29 @@
     const page = live.pageSize;
     const background = effectiveBackground(live.background, live.view.board);
     const sheetImage = live.pageImage;
+    const pixelsKey = live.imagePixels?.key ?? '';
+    const render = paper;
     const transform = sceneTransform({ pageSize: page, view: live.view }, { mode, viewport: size });
     const widthPx = backgroundPixels({ page, transform, pixelRatio });
-    // Two notes may place an image alike: the note tells their pixels apart.
-    const paper = JSON.stringify(sheetImage ? [page, background, sheetImage, live.noteId] : [page, background]);
-    const wanted = `${paper}@${widthPx}`;
+    // Two notes may place an image alike, and a file may be replaced by another of the same name and place: the note
+    // and the key of the pixels tell them apart.
+    const paperKey = JSON.stringify(sheetImage ? [page, background, sheetImage, live.noteId, pixelsKey] : [page, background]);
+    const wanted = `${paperKey}@${widthPx}`;
     if (wanted === backgroundFor) return;
     // Another paper: the old image must not show meanwhile (the paper colour does).
-    if (!backgroundFor.startsWith(paper + '@')) {
+    if (!backgroundFor.startsWith(paperKey + '@')) {
       backgroundImage = null;
+      paperReady = false;
       schedule();
     }
     backgroundFor = wanted;
     const request = ++backgroundRequest;
     const current = () => !destroyed && request === backgroundRequest;
-    const rendered = sheetImage
-      ? api.livePageBackground(live.pageIndex, page, background, widthPx)
-      : api.renderBackground(page, background, widthPx);
+    const rendered = render
+      ? render(page, background, widthPx)
+      : sheetImage
+        ? api.livePageBackground(live.pageIndex, page, background, widthPx)
+        : api.renderBackground(page, background, widthPx);
     rendered
       .then((url) => {
         if (!current() || typeof Image === 'undefined') return;
@@ -395,6 +427,7 @@
         const show = () => {
           if (!current()) return;
           backgroundImage = image;
+          paperReady = true;
           schedule();
         };
         // A photo or a page of a PDF is large: decoded before it is drawn, away from the frames
@@ -413,7 +446,7 @@
   // Wheel: zoom the projected area around the pointer (a non-passive listener: no page scroll).
   $effect(() => {
     const el = canvas;
-    if (!el || mode !== 'preview' || !onview) return;
+    if (!el || mode !== 'preview' || !onview || !interactive) return;
     const onwheel = (e: WheelEvent) => {
       e.preventDefault();
       const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
@@ -571,6 +604,8 @@
 
   /** Preview: grabs the projected area (or, outside it, centres it there first). Presentation: starts a mark. */
   function onpointerdown(e: PointerEvent) {
+    // A display-only window (the editor's projection) takes nothing from the pointer.
+    if (!interactive) return;
     const kind = pointerKind(e);
     const id = pointerId(e);
     if (kind === 'pen' || kind === 'eraser') {
@@ -628,6 +663,7 @@
   }
 
   function onpointermove(e: PointerEvent) {
+    if (!interactive) return;
     const kind = pointerKind(e);
     const id = pointerId(e);
     if (kind === 'pen' || kind === 'eraser') {
@@ -775,10 +811,16 @@
     class:zoomed={live.view.zoom > 1.001 && tool === 'none'}
     class:selecting={tool === 'select' && mode === 'preview'}
     class:pen={tool === 'pen' && mode === 'preview'}
-    class:writable={mode === 'presentation'}
+    class:writable={mode === 'presentation' && interactive}
     data-tool={mode === 'preview' ? tool : undefined}
     data-strokes={live.strokeCount}
     data-page="{live.pageIndex + 1}/{live.pageCount}"
+    data-drawn={drawn}
+    data-paper={paperName}
+    data-template={shown.template}
+    data-image={live.pageImage?.name ?? ''}
+    data-paper-ready={paperReady}
+    data-zoom={live.view.zoom}
     {onpointerdown}
     {onpointermove}
     onpointerup={(e) => release(e)}

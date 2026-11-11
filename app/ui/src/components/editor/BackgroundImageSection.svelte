@@ -6,6 +6,10 @@
    * Rust (`stage_background_image`), which keeps the pixels in memory until the note is saved; each
    * change is one undoable step of the editor. When the image's orientation differs from the
    * note's, the user is offered to switch the note's orientation, in the same step.
+   *
+   * M17: live mode's Fond tab uses it too (the image goes under the writing of the page on screen, `live_page_image`):
+   * `offerOrientation` false (a page of live mode follows the tablet: the image is placed on the page as it is) and
+   * its own `hint`; `onset` may be asynchronous, the busy state lasting until it is done.
    */
   import { api, errorMessage } from '../../lib/api';
   import {
@@ -28,6 +32,8 @@
     image,
     pixels,
     disabled = false,
+    offerOrientation = true,
+    hint,
     onset,
     onturn,
     onfit,
@@ -39,8 +45,12 @@
     /** The pixels of `image`; absent when they cannot be read (the image is then not drawn). */
     pixels: PixelsRef | undefined;
     disabled?: boolean;
+    /** The image of another orientation than the page's offers to switch the page's orientation (the editor); live mode never does. */
+    offerOrientation?: boolean;
+    /** The sentence under the title (default: the editor's). */
+    hint?: string;
     /** The image to put; `orientation` when the note's orientation is to switch in the same step (the image is placed on the switched page). */
-    onset: (image: BackgroundImage, pixels: PixelsRef, orientation?: Orientation) => void;
+    onset: (image: BackgroundImage, pixels: PixelsRef, orientation?: Orientation) => void | Promise<void>;
     /** The image alone turned a quarter turn. */
     onturn: (direction: 'cw' | 'ccw') => void;
     onfit: (fit: ImageFit) => void;
@@ -86,11 +96,11 @@
       const staged = await api.stageBackgroundImage(path, pdfPage);
       pending = null;
       const orientation = orientationOf(staged);
-      if (staged.width !== staged.height && orientation !== orientationOf(page)) {
+      if (offerOrientation && staged.width !== staged.height && orientation !== orientationOf(page)) {
         offer = { staged, orientation };
         return;
       }
-      onset(importedImage(page, staged), pixelsOf(staged));
+      await onset(importedImage(page, staged), pixelsOf(staged));
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -115,7 +125,7 @@
 
 <section class="pane-block" data-section="background-image" aria-labelledby="editor-background-image-heading">
   <h3 class="pane-title" id="editor-background-image-heading">{t('background.editor.title')}</h3>
-  <p class="pane-help">{t('background.editor.hint')}</p>
+  <p class="pane-help">{hint ?? t('background.editor.hint')}</p>
 
   {#if offer}
     {@const current = orientationOf(page)}

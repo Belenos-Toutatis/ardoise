@@ -91,7 +91,7 @@ function render(resume: string | null = null) {
   const q = <E extends Element = HTMLElement>(selector: string) => target.querySelector<E>(selector);
   const action = (name: string) => q<HTMLButtonElement>(`button[data-action="${name}"]`)!;
   const canvas = () => q<HTMLCanvasElement>('canvas.live-canvas')!;
-  const zoom = () => Number(q<HTMLElement>('[data-zoom]')!.dataset.zoom);
+  const zoom = () => Number(q<HTMLElement>('[data-section="zone"] [data-zoom]')!.dataset.zoom);
   const fire = (type: string, p: { x: number; y: number }) => {
     const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, button: 0, buttons: type === 'pointerup' ? 0 : 1 });
     const props = { pointerType: 'mouse', pointerId: 1, pressure: 0.5, timeStamp: 0 };

@@ -224,7 +224,7 @@ describe('live view (control window)', () => {
     view.action('laser').click();
     await tick();
     expect(view.action('laser').getAttribute('aria-pressed')).toBe('true');
-    const level = () => view.target.querySelector<HTMLElement>('[data-zoom]')!;
+    const level = () => view.target.querySelector<HTMLElement>('[data-section="zone"] [data-zoom]')!;
     view.button('Agrandir').click();
     await tick();
     expect(Number(level().dataset.zoom)).toBeCloseTo(1.25, 6);
@@ -242,7 +242,7 @@ describe('live view (control window)', () => {
   it('shows the page width from the button and from the W key (M8)', async () => {
     const view = render();
     await live(view);
-    const level = () => view.target.querySelector<HTMLElement>('[data-zoom]')!;
+    const level = () => view.target.querySelector<HTMLElement>('[data-section="zone"] [data-zoom]')!;
     expect(Number(level().dataset.zoom)).toBe(1);
     view.action('page-width').click();
     await tick();
@@ -282,7 +282,7 @@ describe('live view (control window)', () => {
   it('chooses a screen and projects, then stops projecting', async () => {
     const view = render();
     await live(view);
-    const select = () => view.target.querySelector<HTMLSelectElement>('.live-side select')!;
+    const select = () => view.target.querySelector<HTMLSelectElement>('.live-side [data-tab-panel="projection"] select')!;
     await vi.waitFor(() => expect(select().options).toHaveLength(2));
     expect([...select().options].map((o) => o.textContent?.trim())).toEqual([
       'Écran 1 (principal) — 1920 × 1080',
@@ -399,10 +399,10 @@ describe('live view (control window)', () => {
     expect(view.action('laser').getAttribute('aria-pressed')).toBe('true');
     press('+');
     await tick();
-    expect(Number(view.target.querySelector<HTMLElement>('[data-zoom]')!.dataset.zoom)).toBeCloseTo(1.25, 6);
+    expect(Number(view.target.querySelector<HTMLElement>('[data-section="zone"] [data-zoom]')!.dataset.zoom)).toBeCloseTo(1.25, 6);
     press('0');
     await tick();
-    expect(Number(view.target.querySelector<HTMLElement>('[data-zoom]')!.dataset.zoom)).toBe(1);
+    expect(Number(view.target.querySelector<HTMLElement>('[data-section="zone"] [data-zoom]')!.dataset.zoom)).toBe(1);
     // A key typed in a field is the field's.
     const slider = view.target.querySelector<HTMLInputElement>('.live-toolbar input[type="range"]')!;
     press('ArrowRight', {}, slider);
