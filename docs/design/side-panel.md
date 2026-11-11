@@ -922,6 +922,43 @@ only after `cargo xtask check` and `cargo xtask e2e` on the PC (CLAUDE.md).
 
 Nothing uses the new files yet, so `cargo xtask check` stays as it was. Package 0 does not touch any window.
 
+#### Package 0, as built
+
+Everything above is built as written; what was settled or added:
+
+- **`aria-expanded` on `role="tab"`**: `npm run check` (svelte-check, `--fail-on-warnings`) accepts it, so it stays and
+  `side.collapsed` stays unused (a spare key; D may remove it with the others of §9).
+- **`role="switch"`**: svelte-check accepts `<input type="checkbox" role="switch">` with or without `aria-checked`.
+  Decision: **no `aria-checked`** (ARIA in HTML says not to repeat the state of a native checkbox: the browser exposes
+  `checked`). A, B1 and C write `<input type="checkbox" role="switch" class="pane-switch" …>` only; §2's « aria-checked
+  repeated » is dropped.
+- **Arrow keys on the rail (package A)**: an `onkeydown` on the `role="tablist"` div makes svelte-check warn
+  `a11y_interactive_supports_focus` (a `tablist` with a handler must have a `tabindex`). Put the handler on each tab
+  button instead (the keys bubble from the focused tab and the tablist stays plain), or `svelte-ignore` it with a reason.
+- **`SidePanelState.toggle(tab, available)`** does nothing for a tab that is not in `available`. The constructor's second
+  argument is the storage (default: the browser's `localStorage`; `null`: none), so a test can inject one.
+- **Extra exports** (A may use them): `SideIconName` (`SideIcon.svelte`'s `module` script), `usKeyCode(key)` and
+  `keyPress(key, code, mods)` in `lib/shortcuts.ts` (the sweep and `chordEvents` build their key presses with them: a
+  letter is lower-case, upper-case with Shift, `code` defaults to the US one).
+- **`chordParts`** is final, not simple: Ctrl, Alt, Maj (only `shift: true`, not `'any'`), then the key (`-` shown as
+  « − », a letter in capitals, the named keys through `shortcuts.keys.*`). `ShortcutsHelp` is complete too (content and
+  hooks; no style): its ids are `side-help-title-{where}`, and `ShareBlock`'s `side-share-title`.
+- **`SidePanel.svelte`** is the contract and nothing more: no style (the `hidden` rule `.side-pane:not([hidden])` is A's),
+  no arrow keys, no focus move after « › ». Tests build the snippets with `createRawSnippet`, so `SidePanelHarness.svelte`
+  is not needed unless A wants one.
+- **The editor's table was checked** against a scratch implementation of §6's mapping (the nine numbered rules, with
+  `closeKey` and `isFitKey`): `sweepShortcuts(EDITOR_SHORTCUTS, EDITOR_KEY_CONTEXTS, does)` is `[]`, so B2's sweep test
+  should pass as soon as `editorKeyAction` follows §6; if it does not, the mapping differs from §6 (read the sentences).
+  The live table passes its sweep now (`lib/live-shortcuts.test.ts`, which C extends with the probes' parts).
+- **Tests that package 0 commits for files that A, B2 or C own** (they extend them, nobody recreates them):
+  `lib/side-panel.test.ts`, `lib/shortcuts.test.ts`, `lib/shortcuts-sweep.test.ts`, `components/side/SidePanel.test.ts`,
+  `components/side/ShortcutsHelp.test.ts`, `components/share/ShareBlock.test.ts`, `lib/live-shortcuts.test.ts`, and
+  `lib/shortcuts-tables.test.ts` (labels and contexts of both tables, in both catalogs). `lib/editor/shortcuts.test.ts`
+  and `lib/editor/keys.test.ts` stay B2's.
+- **Catalogs**: `side`, `shortcuts` (new top-level namespaces, after `editor`), `editor.keys`, `editor.sound`,
+  `editor.page.paperTitle|turnCropTitle`, `live.projection.projector`, `live.zoom.area`, `share.block`, and the three
+  changed `live.keys.list.<id>.action`; `side.badge.layers` and `share.block.active` are plural (`one` / `other`).
+
 ## 13. Risks and open points
 
 Open points (the user's call; each with a recommendation; none is decided by this document beyond its default):

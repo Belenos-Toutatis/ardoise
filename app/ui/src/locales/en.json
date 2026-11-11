@@ -950,7 +950,9 @@
       "inkOutsideOne": "One stroke goes beyond the sheet: it is kept but not shown.",
       "inkOutsideMany": "{count} strokes go beyond the sheet: they are kept but not shown.",
       "rotateLabel": "Turn the sheet with the writing",
-      "rotateHint": "The sheet, the writing and the background image turn together by a quarter turn."
+      "rotateHint": "The sheet, the writing and the background image turn together by a quarter turn.",
+      "paperTitle": "Paper",
+      "turnCropTitle": "Turn and crop"
     },
     "original": {
       "label": "Original",
@@ -1074,7 +1076,88 @@
       "button": "Video",
       "hint": "Export the replay as a video (MP4, WebM) or an animated image (GIF, WebP)…"
     },
-    "backgroundLoadFailed": "This note's background image could not be loaded ({message}). The note opens without it; the image stays in the file unless you remove it."
+    "backgroundLoadFailed": "This note's background image could not be loaded ({message}). The note opens without it; the image stays in the file unless you remove it.",
+    "keys": {
+      "list": {
+        "select": "Select tool",
+        "pen": "Pen tool",
+        "eraser": "Eraser tool",
+        "pan": "Move-the-page tool",
+        "panHold": "Move the page while the key is held (unless a button has the focus)",
+        "straighten": "Straighten the shapes of the selection",
+        "replay": "Replay",
+        "undo": "Undo",
+        "redo": "Redo",
+        "selectAll": "Select all (the strokes of the chosen layer)",
+        "clipboard": "Copy, cut, paste strokes",
+        "delete": "Delete the selection",
+        "deselect": "Deselect (first closes the split or the setting of “Straighten shapes” when open)",
+        "fit": "Fit: the whole page",
+        "fitWidth": "Width: the page across the window",
+        "pages": "Previous page, next page (the note before, the note after)",
+        "save": "Save",
+        "close": "Back to the library (first closes the split or the replay)",
+        "quit": "Quit Ardoise",
+        "leaveReplay": "Leave the replay",
+        "playPause": "Play / pause"
+      }
+    },
+    "sound": {
+      "replayFirst": "A narration is heard and recorded during a replay.",
+      "startReplay": "Start the replay"
+    }
+  },
+  "side": {
+    "label": "Side panel",
+    "tablist": "Panel tabs",
+    "tabs": {
+      "layers": "Layers",
+      "page": "Page",
+      "background": "Background",
+      "sound": "Sound",
+      "projection": "Projection",
+      "help": "Help"
+    },
+    "openTitle": "{tab} (click to collapse)",
+    "collapse": "Collapse the panel",
+    "collapsed": "collapsed",
+    "badge": {
+      "layers": {
+        "one": "{count} layer",
+        "other": "{count} layers"
+      }
+    },
+    "dot": {
+      "warn": "a layer in use is hidden",
+      "rec": "recording",
+      "live": "projecting or sharing"
+    },
+    "help": {
+      "editor": "Editor shortcuts",
+      "live": "Live mode shortcuts",
+      "replay": "During a replay",
+      "presentation": "In the projected window",
+      "typingEditor": "They do nothing while you type in a text field, except Ctrl + S, Ctrl + W, Ctrl + F4 and Ctrl + Q.",
+      "typingLive": "They do nothing while you type in a text field, except Ctrl + W, Ctrl + F4 and Ctrl + Q. Space turns the page even when a button has the focus."
+    }
+  },
+  "shortcuts": {
+    "keys": {
+      "arrowLeft": "←",
+      "arrowRight": "→",
+      "arrowUp": "↑",
+      "arrowDown": "↓",
+      "pageUp": "Page Up",
+      "pageDown": "Page Down",
+      "space": "Space",
+      "delete": "Delete",
+      "backspace": "Backspace",
+      "escape": "Esc",
+      "ctrl": "Ctrl",
+      "shift": "Shift",
+      "alt": "Alt",
+      "shiftArrows": "Shift + arrows"
+    }
   },
   "layers": {
     "title": "Layers",
@@ -1605,7 +1688,8 @@
       "fit": "Whole page",
       "fitWidth": "Width",
       "fitWidthTitle": "Show the page across the projected area's width (W)",
-      "level": "× {zoom}"
+      "level": "× {zoom}",
+      "area": "Projected area"
     },
     "projection": {
       "title": "Projection",
@@ -1619,7 +1703,8 @@
       "on": "Projected on {name}.",
       "off": "Nothing is projected.",
       "none": "No screen detected.",
-      "single": "Only one screen is detected: the presentation will cover this window. Press Esc to close it."
+      "single": "Only one screen is detected: the presentation will cover this window. Press Esc to close it.",
+      "projector": "Projector"
     },
     "latency": {
       "label": "Latency",
@@ -1669,7 +1754,7 @@
         },
         "leave": {
           "keys": "Esc",
-          "action": "Deselect first if something is selected; then close the projection if it is shown, otherwise end live mode (after confirmation)"
+          "action": "Drop the pen gesture under way, close the “Computer's ink” panel, deselect; otherwise close the projection when it is shown, otherwise end live mode (after confirmation)"
         },
         "close": {
           "keys": "Ctrl + W, Ctrl + F4",
@@ -1681,7 +1766,7 @@
         },
         "marks": {
           "keys": "Delete, Backspace",
-          "action": "Clear the annotations drawn over the presentation (projected window)"
+          "action": "Clear the annotations drawn over the presentation"
         },
         "pen": {
           "keys": "P",
@@ -1693,7 +1778,7 @@
         },
         "delete": {
           "keys": "Delete, Backspace",
-          "action": "With a selection: delete it (without one: clear the annotations)"
+          "action": "Delete the selection"
         },
         "undo": {
           "keys": "Ctrl + Z, Ctrl + Y",
@@ -1789,7 +1874,15 @@
     "stop": "Stop sharing",
     "helpTitle": "Good to know",
     "helpFirewall": "The first time, Windows asks for the firewall's permission: allow it for private networks (\"Private network\").",
-    "helpEnd": "The share stops when you decide, or when you close Ardoise. Only the Ardoise computer sends: the other screens just watch."
+    "helpEnd": "The share stops when you decide, or when you close Ardoise. Only the Ardoise computer sends: the other screens just watch.",
+    "block": {
+      "title": "Network sharing",
+      "idle": "Another computer on the network shows the page in a browser.",
+      "active": {
+        "one": "Shared: {count} screen connected.",
+        "other": "Shared: {count} screens connected."
+      }
+    }
   },
   "handwriting": {
     "languages": {
