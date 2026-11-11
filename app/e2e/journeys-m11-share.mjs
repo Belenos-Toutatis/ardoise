@@ -299,14 +299,62 @@ function freePort() {
 /** What the console said (or an exception) that is about the page's policy or about WebAssembly. */
 export const BROWSER_PROBLEM = /content security policy|\bcsp\b|refused to|webassembly|\.wasm/i;
 
+/** The profile folders of the Edges this run started and has not yet removed (`sweepBrowsers`). */
+const liveProfiles = new Set();
+
+/**
+ * Kills every Edge process whose command line names one of `dirs` (profile folders this run made: never the
+ * user's own Edge), and returns how many there were. A headless Edge whose first process is gone, or whose
+ * processes are not all in its first process's tree, survives `taskkill /T`: left behind, run after run, they
+ * filled the PC's memory (2026-11-11: 633 processes, 8 GB, builds failing and the PC crashing).
+ */
+export function killEdgesUsing(dirs) {
+  if (dirs.length === 0 || process.platform !== 'win32') return 0;
+  const list = dirs.map((d) => `'${d.replace(/'/g, "''")}'`).join(',');
+  const script =
+    `$dirs = @(${list}); $n = 0; ` +
+    `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | ` +
+    `Where-Object { $c = $_.CommandLine; $c -and @($dirs | Where-Object { $c.Contains($_) }).Count -gt 0 } | ` +
+    `ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $n++ }; $n`;
+  try {
+    const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 180_000, stdio: ['ignore', 'pipe', 'ignore'] });
+    return Number(out.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The end of a run: kills what is left of the Edges this run started and removes their profiles. Returns how
+ * many Edge processes were still running (0 when every `close()` did its job).
+ */
+export async function sweepBrowsers() {
+  const dirs = [...liveProfiles];
+  const killed = killEdgesUsing(dirs);
+  for (const dir of dirs) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+        liveProfiles.delete(dir);
+        break;
+      } catch {
+        await sleep(250);
+      }
+    }
+  }
+  return killed;
+}
+
 /**
  * Headless Edge on a temporary profile, one page, driven over the DevTools protocol (same calls as the app's
- * window in `run.mjs`). `close()` kills the whole process tree and removes the profile: call it in a `finally`.
+ * window in `run.mjs`). `close()` asks Edge to close, kills the whole process tree, kills what still uses the
+ * profile, and removes the profile: call it in a `finally`.
  * `extraArgs`: more command-line arguments of Edge (a journey that keeps a window over the screen asks for the ones that stop Chromium from pausing a page it thinks hidden).
  * `messages`: every console message of level error or warning, log entry and uncaught exception of the page.
  */
 export async function startBrowser(exe, extraArgs = []) {
   const dir = mkdtempSync(join(tmpdir(), 'ardoise-e2e-edge-'));
+  liveProfiles.add(dir);
   const port = await freePort();
   const child = spawn(
     exe,
@@ -328,9 +376,31 @@ export async function startBrowser(exe, extraArgs = []) {
       } catch {
         // Already closed.
       }
-      if (child.pid !== undefined && child.exitCode === null) {
+      // First Edge closes itself, all its processes (the browser target's `Browser.close`).
+      try {
+        const version = await (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2000) })).json();
+        const target = new WebSocket(version.webSocketDebuggerUrl);
+        await new Promise((resolve, reject) => {
+          target.addEventListener('open', resolve);
+          target.addEventListener('error', reject);
+          setTimeout(() => reject(new Error('no answer')), 2000);
+        });
+        target.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
+        for (let i = 0; i < 20; i++) {
+          await sleep(150);
+          const up = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(500) }).then(
+            () => true,
+            () => false,
+          );
+          if (!up) break;
+        }
+      } catch {
+        // Not answering any more: the kills below.
+      }
+      if (child.pid !== undefined) {
         try {
-          // Edge starts a process per tab, for the GPU...: the whole tree, or the profile stays locked.
+          // Edge starts a process per tab, for the GPU...: the whole tree, or the profile stays locked. Even when
+          // the first process has ended: what it started may still run.
           execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
         } catch {
           child.kill();
@@ -339,8 +409,11 @@ export async function startBrowser(exe, extraArgs = []) {
       for (let attempt = 0; attempt < 20; attempt++) {
         try {
           rmSync(dir, { recursive: true, force: true });
+          liveProfiles.delete(dir);
           return;
         } catch {
+          // Still locked: something of this Edge runs outside the tree that was killed.
+          if (attempt === 4) killEdgesUsing([dir]);
           await sleep(250);
         }
       }

@@ -28,7 +28,7 @@ import { hardFixJourneys } from './journeys-m10-fix-hard.mjs';
 import { inkspaceJourneys } from './journeys-m10-inkspace.mjs';
 import { libraryJourneys } from './journeys-m10-library.mjs';
 import { uiJourneys } from './journeys-m10-ui.mjs';
-import { shareJourneys } from './journeys-m11-share.mjs';
+import { shareJourneys, sweepBrowsers } from './journeys-m11-share.mjs';
 import { resumeJourneys } from './journeys-m12-resume.mjs';
 import { touchUpJourneys } from './journeys-m12-touchup.mjs';
 import { revisionJourneys } from './journeys-m13-revision.mjs';
@@ -367,5 +367,8 @@ if (!only || only.some((part) => 'serveur MCP'.includes(part))) {
     if (failed) failures++;
   }
 }
+// Nothing of the headless Edges must outlive the run: what `close()` missed is killed here, and said.
+const leftEdges = await sweepBrowsers();
+if (leftEdges > 0) console.log(`\nAttention : ${leftEdges} processus Edge sans fenêtre restaient ouverts après leurs parcours ; arrêtés.`);
 console.log(failures === 0 ? '\nTous les parcours ont réussi.' : `\n${failures} parcours en échec.`);
 process.exit(failures === 0 ? 0 : 1);
