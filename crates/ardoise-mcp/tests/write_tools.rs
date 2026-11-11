@@ -1204,7 +1204,6 @@ async fn a_short_line_is_left_alone_with_the_default_minimum_size() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "needs M15 package A (straighten_with follows the tuning)"]
 async fn a_short_line_is_straightened_when_the_minimum_size_allows_it() {
     // Through the call's own value...
     let session = session_with_a_short_line(Language::En, ShapeTuning::default()).await;
