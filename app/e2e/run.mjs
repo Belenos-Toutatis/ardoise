@@ -111,8 +111,9 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
     stdio: 'ignore',
   });
 
+  // Up to 40 s: a fresh WebView2 profile on a busy PC can take more than 20 s to listen.
   let target;
-  for (let i = 0; i < 80 && !target; i++) {
+  for (let i = 0; i < 160 && !target; i++) {
     await sleep(250);
     try {
       const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
@@ -291,7 +292,12 @@ async function startApp(language, port, args = [], { settings = '', env = {}, br
     },
   };
   // `complete` is not enough: the interface shows "Loading…" until the settings are read, and a journey that clicks at once would find nothing.
-  await app.waitFor('document.readyState === "complete" && document.querySelector("#app .shell") !== null', 'the interface');
+  try {
+    await app.waitFor('document.readyState === "complete" && document.querySelector("#app .shell") !== null', 'the interface');
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
   return app;
 }
 
@@ -303,15 +309,28 @@ for (const language of ['fr', 'en']) {
     // A journey may ask for settings and environment variables that depend on a free TCP port (`app.sharePort`).
     const context = { sharePort: await freePort() };
     const given = (value) => (typeof value === 'function' ? value(context) : value);
-    const app = await startApp(language, port++, journey.args, { settings: given(journey.settings), env: given(journey.env), browserArgs: journey.browserArgs });
-    app.sharePort = context.sharePort;
     const label = `[${language.toUpperCase()}] ${journey.name}`;
     console.log(`\n${label}`);
+    let app;
+    try {
+      app = await startApp(language, port++, journey.args, { settings: given(journey.settings), env: given(journey.env), browserArgs: journey.browserArgs });
+    } catch (error) {
+      // A window that does not start fails this journey, not the whole run.
+      failures++;
+      console.log(`  ✘ 0. ${error.message}`);
+      console.log(`  → ${label} : ÉCHEC`);
+      continue;
+    }
+    app.sharePort = context.sharePort;
     let step = 0;
+    // The step that threw, when it was inside `check`; otherwise the failure came after the last passed step.
+    let failedStep = 0;
     let passed = false;
     const check = async (description, action) => {
       step++;
+      failedStep = step;
       await action();
+      failedStep = 0;
       console.log(`  ✔ ${step}. ${description}`);
     };
     try {
@@ -322,7 +341,7 @@ for (const language of ['fr', 'en']) {
       failures++;
       // A window that no longer answers must not keep the error from being printed.
       const shot = await Promise.race([app.screenshot('failure').catch(() => null), sleep(5000).then(() => null)]);
-      console.log(`  ✘ ${step + 1}. ${error.message}`);
+      console.log(`  ✘ ${failedStep || step + 1}. ${error.message}`);
       console.log(`  → ${label} : ÉCHEC${shot ? ` (capture : ${shot})` : ''}`);
     } finally {
       await app.close();
