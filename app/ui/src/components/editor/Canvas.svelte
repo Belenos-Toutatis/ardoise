@@ -78,6 +78,7 @@
     onblocked,
     split = null,
     onzone,
+    straighten = null,
   }: {
     doc: Doc;
     tools: ToolSettings;
@@ -100,6 +101,12 @@
      */
     split?: { preview: SplitPreview; tracing: boolean; zone: readonly (readonly [number, number])[] | null } | null;
     onzone?: (polygon: [number, number][]) => void;
+    /**
+     * The setting of "Redresser les formes" is open (M15): the strokes the shapes would replace
+     * (`sources`, indices in `doc`) are faded, and the shapes are drawn over them as a dashed
+     * accent line. Nothing of it is in the note.
+     */
+    straighten?: { sources: readonly number[]; strokes: readonly Stroke[] } | null;
   } = $props();
 
   /** Screen pixels per device unit at real size (96 dpi, 10 µm units). */
@@ -169,7 +176,8 @@
     const selected = new Set(shown.selection);
     // Nothing to highlight yet (no zone traced): the page stays as it is.
     const preview = split && split.preview.movedCount > 0 ? split.preview : null;
-    const out: { i: number; d: string; fill: string; highlighter: boolean; selected: boolean; side: Side }[] = [];
+    const out: { i: number; d: string; fill: string; highlighter: boolean; selected: boolean; side: Side; faded: boolean }[] = [];
+    const faded = new Set(straighten?.sources);
     for (const i of drawingOrder(note)) {
       const stroke = note.strokes[i];
       const base = {
@@ -177,6 +185,7 @@
         fill: cssColor(stroke.color),
         highlighter: stroke.tool === 'highlighter',
         selected: selected.has(i),
+        faded: faded.has(i),
       };
       const part = preview?.cut.get(i);
       if (part) {
@@ -188,6 +197,15 @@
     }
     return out;
   });
+
+  /** The straightened shapes of the setting's preview, as centre lines (a few strokes at most, not cached). */
+  const previewLines = $derived(
+    straighten && !dragAffine
+      ? straighten.strokes
+          .filter((stroke) => stroke.points.length > 1)
+          .map((stroke) => 'M' + stroke.points.map((p) => `${p.x} ${p.y}`).join('L'))
+      : [],
+  );
 
   const selectionBox = $derived.by(() => {
     const bounds = selectionBounds(shown);
@@ -727,6 +745,7 @@
           class:highlighter={item.highlighter}
           class:split-kept={item.side === 'kept'}
           class:split-moved={item.side === 'moved'}
+          class:straighten-faded={item.faded}
           transform={item.selected && dragAffine ? svgMatrix(dragAffine) : undefined}
         />
       {/each}
@@ -740,6 +759,13 @@
         />
       {/if}
     </g>
+    {#if previewLines.length > 0}
+      <g class="straighten-preview" data-slot="straighten-preview" pointer-events="none">
+        {#each previewLines as d}
+          <path {d} fill="none" />
+        {/each}
+      </g>
+    {/if}
     {#if selectionBox}
       <rect
         class="selection"
@@ -855,8 +881,18 @@
     fill: rgb(47 111 223 / 12%);
   }
 
-  .split-kept {
+  .split-kept,
+  .straighten-faded {
     opacity: 0.3;
+  }
+
+  .straighten-preview path {
+    stroke: var(--accent);
+    stroke-width: 2px;
+    stroke-dasharray: 6 4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
   }
 
   .split-moved {
