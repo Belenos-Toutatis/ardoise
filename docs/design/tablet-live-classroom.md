@@ -1099,6 +1099,29 @@ DOM, relied upon by the tests and journeys of every package:
 - Keys (`liveEditKeyAction`, while a session runs): P toggles Pen (the editor's key), V Select; `KEYS` adds `pen`; Esc
   drops a pen gesture under way before anything else.
 
+**As built (C, interface).** Where the code says more than the sections above, or departs from them:
+- `SceneOptions.localComputer` is a list, `readonly Stroke[]`, not one stroke: a second gesture may begin before the
+  session ended the first, and both are drawn until `lastComputerDone` reaches them. Given, it replaces Rust's copy;
+  an empty list hides it (a cancelled gesture, until its `strokeCancel` comes). `Scene.computer` holds what is drawn;
+  `SceneOptions.eraser` / `Scene.eraser` is the ring (`ERASER_RING_PX`, 18, the marks' eraser), preview only.
+- `ComputerPen` keeps one call of the gesture in flight and at most one waiting in the queue; the waiting call takes the
+  samples (at most `MAX_PEN_SAMPLES`) and `now` when it leaves. So `end` is queued as soon as the pen is lifted, before
+  a Ctrl+Z pressed after it. A gesture cancelled before its `begin` left sends nothing. A `false` answer, a refusal or a
+  page or note change drops the local stroke at once (Rust's copy, if any, then shows until its `strokeEnd`).
+- `ComputerEraser` skips, when its call leaves, the strokes gone meanwhile and those of a layer hidden since (Rust would
+  refuse the whole delete); a stale call is tried again after the next notification of the `LiveState`, at most
+  `STALE_RETRIES` (3) times, silently. Groups come from `nextGroup()`, from a random value in 1..2^31 drawn at load.
+- `LiveComputer.busy` (a pen or eraser gesture under way) makes Ctrl+Z, Ctrl+Y and the Undo / Redo buttons wait. The
+  layer ops read `pageIndex` at the click and go through the queue; every refusal shows in the window's notice.
+- `loadComputerStyle` falls back field by field (a bad tool keeps a good colour). The panel's tool change takes that
+  tool's last width in the session, else `DEFAULT_WIDTHS`, as the tablet's does.
+- `LiveState`: computer `points` without a `strokeStart` (supposé: subscribed mid-stroke) start a stroke in the
+  tablet's style on `computerLayer`; a tablet `strokeCancel` (B never sends one) drops the tablet's stroke.
+- The toolbar groups are named by their visible labels (`aria-labelledby`): `live.tabletStyle` and
+  `live.computer.label`. `live.style` and `live.select.label` are then unused, with `live.layer.{new, current}`.
+- `lib/mock-live.ts`: after `live_stop` its session is gone, so `live_layers` `tablet` and `computer` answer
+  `liveNotRunning` there too (B accepts them); the zone is disabled at idle anyway.
+
 ### Editor (A)
 
 - A click on a row (or its name button) chooses the layer. `setActiveLayer` now also clears the selection: the selection
