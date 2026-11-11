@@ -22,18 +22,32 @@
    * contact or hovering (palm rejection). `onmarkschange` reports every change of the marks, the
    * one in progress included, for the window to pass them on to the viewers of the share.
    *
-   * Selecting (M12, control window only, `selecting`): the mouse and the pen draw a lasso, or click a
+   * Selecting (M12, control window only, `tool` = `select`): the mouse and the pen draw a lasso, or click a
    * stroke (`lib/live-select.svelte.ts`), instead of dragging the projected area; Shift adds to the
-   * selection and Ctrl removes from it. A finger and the wheel keep navigating. The result goes to
-   * `onselect`; the chosen strokes (`selection`, indices of the finished strokes) and the lasso being
-   * drawn are painted over the page in this window only (`LiveRenderer`, apart from its cache).
+   * selection and Ctrl removes from it. Only strokes of the chosen layer are picked (M14). A finger and the
+   * wheel keep navigating. The result goes to `onselect`; the chosen strokes (`selection`, indices of the
+   * finished strokes) and the lasso being drawn are painted over the page in this window only
+   * (`LiveRenderer`, apart from its cache).
+   *
+   * The computer's hand (M14, control window only, `computer`: `lib/live-computer.ts`). With `tool` = `pen`
+   * the pen's tip and the mouse's left button write on the chosen layer (the computer's): the window draws
+   * its own stroke at once (`LiveComputer.locals`) and sends the samples, coalesced events included, those
+   * closer than half a screen pixel to the previous one dropped. The pen's eraser end erases whole strokes of
+   * the chosen layer whatever the tool, within `MARK_ERASER_PX` screen pixels, with a ring of that size around
+   * it. A pen down while the chosen layer is hidden calls `onblocked` and writes nothing. A finger always
+   * navigates (never ink), the wheel always zooms; a finger is ignored while a pen is near (`PenPresence`).
+   * `pointercancel`, a lost capture, a second finger and a page change drop the gesture under way.
+   * The presentation records the latency of the computer's points apart (`computerLatency`).
    */
+  import { untrack } from 'svelte';
   import { api } from '../../lib/api';
   import type { Vec } from '../../lib/editor/geometry';
+  import { onLayer } from '../../lib/editor/hit';
   import { PenPresence, TouchGestures, inkPressure, pointerKind, type PointerKind, type TouchAction } from '../../lib/gestures';
   import type { Ink, InkPoint } from '../../lib/ink';
-  import { wallClock, type LatencyRecorder } from '../../lib/latency';
-  import type { LiveViewState } from '../../lib/live';
+  import { wallClock, type LatencyRecorder, type PendingSample } from '../../lib/latency';
+  import type { ComputerSample, LiveViewState } from '../../lib/live';
+  import type { LiveComputer } from '../../lib/live-computer';
   import {
     LiveRenderer,
     backgroundPixels,
@@ -71,9 +85,12 @@
     onview,
     onmarks,
     onmarkschange,
-    selecting = false,
+    tool = 'none',
     selection = [],
     onselect,
+    computer,
+    onblocked,
+    computerLatency = null,
   }: {
     live: LiveState;
     ink: Ink | null;
@@ -82,20 +99,29 @@
     label: string;
     /** Preview: shape (width / height) of the projected area. */
     aspect?: number;
-    /** Records the latency of the points painted. */
+    /** Records the latency of the tablet's points painted. */
     latency?: LatencyRecorder | null;
+    /** Presentation: records the latency of the computer's points painted. */
+    computerLatency?: LatencyRecorder | null;
     /** The user moved or zoomed the projected area (preview: drag, wheel, pinch; presentation: pinch). */
     onview?: (view: LiveViewState) => void;
     /** Presentation: the number of marks written over the page changed. */
     onmarks?: (count: number) => void;
     /** Presentation: the marks changed, or the mark being written grew (its points change in place). */
     onmarkschange?: (marks: readonly Stroke[], current: Stroke | null) => void;
-    /** Preview: the selection tool is on (the mouse and the pen choose strokes instead of moving the area). */
-    selecting?: boolean;
+    /**
+     * Preview: the computer's tool. `select`: the mouse and the pen choose strokes; `pen`: they write on the
+     * chosen layer; `none`: they move the projected area.
+     */
+    tool?: 'none' | 'select' | 'pen';
     /** Preview: the chosen strokes (indices of the finished strokes; a new array at each change). */
     selection?: readonly number[];
     /** Preview: a lasso or a click ended; `picked` is empty when it found nothing. */
     onselect?: (picked: number[], combine: Combine) => void;
+    /** Preview: the control window's queue, pen and eraser (absent in the presentation). */
+    computer?: LiveComputer;
+    /** Preview: the pen came down while the chosen layer is hidden (nothing is written). */
+    onblocked?: () => void;
   } = $props();
 
   /** jsdom (tests) has no layout: a nominal size. */
@@ -124,6 +150,9 @@
   let markDrag: { id: number; kind: 'write' | 'erase'; t0: number } | null = null;
   /** The lasso being drawn with the mouse or the pen (page units; the points grow in place). */
   let lassoDrag: { id: number; points: Vec[]; combine: Combine } | null = null;
+  /** The computer's pen writing (its last sample, page units), and its eraser end erasing. */
+  let penDrag: { id: number; kind: PointerKind; last: Vec } | null = null;
+  let eraseDrag: { id: number } | null = null;
   const presence = new PenPresence();
   const fingers = new TouchGestures();
   /** Bumped when the window is hidden or shown: frames awaited across that say nothing. */
@@ -175,6 +204,7 @@
     context ??= el.getContext('2d');
     if (!context) {
       live.takeUnpainted();
+      live.takeUnpaintedComputer();
       return;
     }
     const width = Math.max(1, Math.round(size.width * pixelRatio));
@@ -194,15 +224,24 @@
         markCurrent,
         selection,
         lasso: lassoDrag?.points ?? null,
+        localComputer: computer?.locals(),
+        eraser: computer?.eraser.ring ?? null,
       }),
     );
     noteLiveRedraw(el, report, startedAt);
     const drawEnd = wallClock();
     const painted = live.takeUnpainted();
+    const paintedComputer = live.takeUnpaintedComputer();
     // Points drawn without their outline (geometry still loading) or in a hidden window say
     // nothing about the latency.
-    if (!latency || !ink || document.hidden || painted.length === 0) return;
-    const recorder = latency;
+    if (!ink || document.hidden) return;
+    record(latency, painted, drawEnd);
+    record(computerLatency, paintedComputer, drawEnd);
+  }
+
+  /** The interface part of `painted` now, the end-to-end figure when the next frame begins. */
+  function record(recorder: LatencyRecorder | null, painted: PendingSample[], drawEnd: number) {
+    if (!recorder || painted.length === 0) return;
     recorder.painted(painted, drawEnd);
     afterNextFrame(() => recorder.presented(painted, wallClock()));
   }
@@ -249,11 +288,32 @@
   // Turning the tool off, or turning the page, drops the lasso being drawn.
   $effect(() => {
     void live.pageIndex;
-    void selecting;
+    void tool;
     if (lassoDrag) {
       lassoDrag = null;
       schedule();
     }
+  });
+
+  // The computer's local strokes and its eraser's ring are drawn here: their changes ask for a frame.
+  $effect(() => {
+    const hand = computer;
+    if (!hand) return;
+    hand.onchange = schedule;
+    return () => {
+      if (hand.onchange === schedule) hand.onchange = undefined;
+    };
+  });
+
+  // Another page or note under the pen: the gestures under way stop (the session ended the stroke there).
+  $effect(() => {
+    void live.pageIndex;
+    void live.noteId;
+    untrack(() => {
+      if (computer?.cancel()) schedule();
+      penDrag = null;
+      eraseDrag = null;
+    });
   });
 
   // Follow the size of the box and the screen's pixel density.
@@ -451,10 +511,48 @@
     schedule();
   }
 
-  /** The lasso (or click) ended: the strokes it picks go to `onselect`. */
+  /** The lasso (or click) ended: the strokes of the chosen layer it picks go to `onselect`. */
   function endLasso(drag: { points: Vec[]; combine: Combine }) {
     const { scale } = sceneTransform(live, { mode, viewport: size });
-    onselect?.(pickStrokes({ strokes: live.strokes, layers: live.layers }, drag.points, scale), drag.combine);
+    const page = onLayer({ strokes: live.strokes, layers: live.layers }, live.computerLayer);
+    onselect?.(pickStrokes(page, drag.points, scale), drag.combine);
+  }
+
+  /** The session runs: the computer may write (the tablet connected or not). */
+  function running(): boolean {
+    return live.ready && live.state !== 'idle';
+  }
+
+  /** A sample of the computer's pen: page units, the pen's pressure (0.5 for a pressed mouse), the event's time. */
+  function penSample(e: PointerEvent, kind: PointerKind, p: Vec): ComputerSample {
+    return { x: p.x, y: p.y, p: inkPressure(kind, e.pressure), ms: e.timeStamp };
+  }
+
+  /** The Pen tool: the pen's tip or the mouse's left button begins a stroke on the chosen layer. */
+  function startPen(e: PointerEvent, kind: PointerKind, id: number, hand: LiveComputer) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    if (!running()) return;
+    if (live.layers[live.computerLayer]?.visible === false) {
+      onblocked?.();
+      return;
+    }
+    capture(id);
+    const p = pagePoint(e);
+    penDrag = { id, kind, last: p };
+    hand.pen.down({ pageIndex: live.pageIndex, noteId: live.noteId, layer: live.computerLayer }, penSample(e, kind, p));
+    schedule();
+  }
+
+  /** The pen's eraser end, whatever the tool: whole strokes of the chosen layer within its ring. */
+  function startErase(e: PointerEvent, id: number, hand: LiveComputer) {
+    e.preventDefault();
+    if (!running()) return;
+    capture(id);
+    const { scale } = sceneTransform(live, { mode, viewport: size });
+    eraseDrag = { id };
+    hand.eraser.down(pagePoint(e), MARK_ERASER_PX / scale);
+    schedule();
   }
 
   /** Preview: grabs the projected area (or, outside it, centres it there first). Presentation: starts a mark. */
@@ -475,6 +573,8 @@
         markDrag = null;
         drag = null;
         dragging = false;
+        if (penDrag) computer?.pen.cancel();
+        penDrag = null;
         if (dropped) onmarkschange?.(marks, null);
         schedule();
         return;
@@ -485,11 +585,19 @@
       startMark(e, kind, id);
       return;
     }
-    if (selecting && onselect && (kind === 'mouse' || kind === 'pen')) {
+    if (kind === 'eraser') {
+      if (computer) startErase(e, id, computer);
+      return;
+    }
+    if (tool === 'select' && onselect && (kind === 'mouse' || kind === 'pen')) {
       startLasso(e, id);
       return;
     }
-    if (!onview || e.button !== 0 || kind === 'eraser') return;
+    if (tool === 'pen' && computer && (kind === 'mouse' || kind === 'pen')) {
+      startPen(e, kind, id, computer);
+      return;
+    }
+    if (!onview || e.button !== 0) return;
     e.preventDefault();
     const p = pagePoint(e);
     const area = projectedArea(live.pageSize, live.view, aspect);
@@ -536,6 +644,35 @@
       schedule();
       return;
     }
+    if (penDrag && id === penDrag.id && computer) {
+      const { scale } = sceneTransform(live, { mode, viewport: size });
+      const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+      const samples: ComputerSample[] = [];
+      for (const ev of events.length > 0 ? events : [e]) {
+        const q = pagePoint(ev);
+        if (Math.hypot(q.x - penDrag.last.x, q.y - penDrag.last.y) * scale < 0.5) continue;
+        samples.push(penSample(ev, penDrag.kind, q));
+        penDrag.last = q;
+      }
+      if (samples.length > 0) {
+        computer.pen.move(samples);
+        schedule();
+      }
+      return;
+    }
+    if (eraseDrag && id === eraseDrag.id && computer) {
+      computer.eraser.move(pagePoint(e));
+      schedule();
+      return;
+    }
+    if (computer && kind === 'eraser') {
+      // The eraser end hovers: its ring follows it.
+      computer.eraser.hover(pagePoint(e));
+      schedule();
+    } else if (computer?.eraser.ring) {
+      computer.eraser.hover(null);
+      schedule();
+    }
     if (lassoDrag) {
       if (id !== lassoDrag.id) return;
       const { scale } = sceneTransform(live, { mode, viewport: size });
@@ -577,6 +714,18 @@
       if (!cancelled) endLasso(done);
       schedule();
     }
+    if (penDrag && penDrag.id === id) {
+      penDrag = null;
+      if (cancelled) computer?.pen.cancel();
+      else computer?.pen.up();
+      schedule();
+    }
+    if (eraseDrag && eraseDrag.id === id) {
+      eraseDrag = null;
+      computer?.eraser.up();
+      computer?.eraser.hover(null);
+      schedule();
+    }
     if (!drag || id !== drag.id) return;
     drag = null;
     dragging = false;
@@ -585,6 +734,21 @@
   function onpointerleave(e: PointerEvent) {
     const kind = pointerKind(e);
     if (kind === 'pen' || kind === 'eraser') presence.gone(pointerId(e));
+    if (computer?.eraser.ring && !eraseDrag) {
+      computer.eraser.hover(null);
+      schedule();
+    }
+  }
+
+  /** Esc: drops the pen's or the eraser's gesture under way; true if there was one. */
+  export function cancelGesture(): boolean {
+    const was = penDrag !== null || eraseDrag !== null;
+    if (penDrag) computer?.pen.cancel();
+    if (eraseDrag) computer?.eraser.cancel();
+    penDrag = null;
+    eraseDrag = null;
+    if (was) schedule();
+    return was;
   }
 </script>
 
@@ -594,9 +758,11 @@
     class="live-canvas"
     class:interactive={mode === 'preview' && !!onview}
     class:dragging
-    class:zoomed={live.view.zoom > 1.001 && !selecting}
-    class:selecting={selecting && mode === 'preview'}
+    class:zoomed={live.view.zoom > 1.001 && tool === 'none'}
+    class:selecting={tool === 'select' && mode === 'preview'}
+    class:pen={tool === 'pen' && mode === 'preview'}
     class:writable={mode === 'presentation'}
+    data-tool={mode === 'preview' ? tool : undefined}
     data-strokes={live.strokeCount}
     data-page="{live.pageIndex + 1}/{live.pageCount}"
     {onpointerdown}
@@ -641,7 +807,8 @@
     cursor: crosshair;
   }
 
-  .live-canvas.selecting {
+  .live-canvas.selecting,
+  .live-canvas.pen {
     cursor: crosshair;
   }
 

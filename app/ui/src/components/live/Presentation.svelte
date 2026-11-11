@@ -11,6 +11,9 @@
    * pinch with two fingers to zoom the projected area (docs/design/tablet-live-classroom.md,
    * "M8: writing over the presentation"). The marks stay in this window, which draws them itself;
    * they are also reported to Rust (`MarksSender`) for the viewers of the share.
+   *
+   * M14: the computer's stroke in progress (the control window's pen) is drawn from the session's events, and
+   * the latency of its points is kept apart: `window.__ardoiseLatency.computer`.
    */
   import { onMount } from 'svelte';
   import { api } from '../../lib/api';
@@ -32,6 +35,8 @@
 
   const live = new LiveState();
   const latency = new LatencyRecorder();
+  /** The computer's points (M14: the control window's pen), measured apart from the tablet's. */
+  const computerLatency = new LatencyRecorder();
   let ink = $state.raw<Ink | null>(null);
   let cursorHidden = $state(false);
   let cursorTimer: ReturnType<typeof setTimeout> | undefined;
@@ -52,7 +57,7 @@
 
   onMount(() => {
     let alive = true;
-    exposeLatency(latency);
+    exposeLatency(latency, window, computerLatency);
     // The page's accessible name follows the user's language.
     api
       .appState()
@@ -122,6 +127,7 @@
     {ink}
     mode="presentation"
     {latency}
+    {computerLatency}
     label={t('presentation.canvas', { page: `${live.pageIndex + 1} / ${live.pageCount}` })}
     onview={(view) => changeView(actions, view)}
     onmarks={(count) => (markCount = count)}

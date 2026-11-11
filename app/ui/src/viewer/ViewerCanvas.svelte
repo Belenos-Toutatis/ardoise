@@ -111,6 +111,7 @@
       generation: live.generation,
       edits: live.edits,
       current: live.current,
+      computerCurrent: live.computerCurrent,
       hover: live.hover,
       view: view.current,
     };
@@ -129,6 +130,7 @@
     noteLiveRedraw(el, report, startedAt);
     // Nobody measures the latency here: the points painted are not kept.
     live.takeUnpainted();
+    live.takeUnpaintedComputer();
   }
 
   onMount(() => () => {
