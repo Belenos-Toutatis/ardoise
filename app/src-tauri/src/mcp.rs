@@ -18,6 +18,7 @@ use ardoise_core::note::Note;
 use ardoise_core::settings::SettingsStore;
 use ardoise_hwr::structure::{Structure, structure_of};
 use ardoise_hwr::{HwrError, Language, Recognition, SystemRecognizer};
+use ardoise_ink::ShapeTuning;
 use ardoise_mcp::{
     Environment, Handwriting, Host, ServerOptions, TextHit, TextSearch, TextStatus, ToolError,
 };
@@ -90,6 +91,12 @@ impl Environment for AppEnvironment {
         } else {
             Language::En
         }
+    }
+
+    /// `[shapes]` of `ardoise.toml`, the setting next to the editor's button (read afresh: the
+    /// user may change it while the assistant is connected).
+    fn shape_tuning(&self) -> ShapeTuning {
+        ardoise_core::settings::ShapeSettings::from(current_state(&self.context).shapes()).tuning()
     }
 }
 

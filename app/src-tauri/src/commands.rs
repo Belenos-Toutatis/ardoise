@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 
 use ardoise_core::library;
 use ardoise_core::settings::{
-    AutoExport, AutoExportFormat, Language, Settings, SettingsError, SettingsStore, Theme,
+    AutoExport, AutoExportFormat, Language, Settings, SettingsError, SettingsStore, ShapeSettings,
+    Theme,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::watcher::LibraryWatch;
@@ -65,6 +66,49 @@ pub struct AutoExportState {
     pub folder: String,
 }
 
+/// `ShapeSettings` in `note.ts` ("Redresser les formes", `[shapes]` of `ardoise.toml`, SPEC
+/// §4.4). The interface sends the same shape back to [`set_shapes`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShapesState {
+    pub tolerance: u8,
+    pub min_size_mm: f64,
+    pub snap_angle: bool,
+    pub snap_angle_deg: f64,
+    pub snap_round: bool,
+    pub snap_round_percent: f64,
+}
+
+impl From<&ShapeSettings> for ShapesState {
+    fn from(shapes: &ShapeSettings) -> Self {
+        // Always within the limits, whatever the file said.
+        let shapes = shapes.clone().clamped();
+        ShapesState {
+            tolerance: shapes.tolerance,
+            min_size_mm: shapes.min_size_mm,
+            snap_angle: shapes.snap_angle,
+            snap_angle_deg: shapes.snap_angle_deg,
+            snap_round: shapes.snap_round,
+            snap_round_percent: shapes.snap_round_percent,
+        }
+    }
+}
+
+impl From<&ShapesState> for ShapeSettings {
+    fn from(shapes: &ShapesState) -> Self {
+        ShapeSettings {
+            tolerance: shapes.tolerance,
+            min_size_mm: shapes.min_size_mm,
+            snap_angle: shapes.snap_angle,
+            snap_angle_deg: shapes.snap_angle_deg,
+            snap_round: shapes.snap_round,
+            snap_round_percent: shapes.snap_round_percent,
+            extra: Default::default(),
+        }
+        .clamped()
+    }
+}
+
 /// Everything the interface needs to draw its first screen.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,6 +124,8 @@ pub struct AppState {
     self_test: bool,
     open_diagnostic: bool,
     auto_export: AutoExportState,
+    /// "Redresser les formes" (the same for every note and computer).
+    shapes: ShapesState,
     /// Microphone chosen on this computer for the narration (`None`: the system's default).
     microphone: Option<String>,
 }
@@ -107,6 +153,10 @@ impl AppState {
 
     pub fn auto_export(&self) -> &AutoExportState {
         &self.auto_export
+    }
+
+    pub fn shapes(&self) -> &ShapesState {
+        &self.shapes
     }
 
     #[cfg(test)]
@@ -171,6 +221,7 @@ fn state_from(context: &AppContext, loaded: Result<Settings, SettingsError>) -> 
             format: settings.auto_export.format.known(),
             folder: settings.auto_export.folder,
         },
+        shapes: ShapesState::from(&settings.shapes),
     }
 }
 
@@ -252,6 +303,28 @@ pub fn set_auto_export(
     auto_export: AutoExport,
 ) -> CommandResult<AppState> {
     set_auto_export_in(&context, auto_export)
+}
+
+/// Sets "Redresser les formes" (`[shapes]`, shared by every PC and every note). Values outside
+/// their limits are brought within them (`ShapeTuning`'s limits, as in the interface), the
+/// ticked-off box of an alignment keeps its value, and keys of the section this version does not
+/// know are kept. Returns the state with the values as stored.
+pub(crate) fn set_shapes_in(context: &AppContext, shapes: ShapesState) -> CommandResult<AppState> {
+    let given = ShapeSettings::from(&shapes);
+    update(context, |settings| {
+        let stored = &mut settings.shapes;
+        stored.tolerance = given.tolerance;
+        stored.min_size_mm = given.min_size_mm;
+        stored.snap_angle = given.snap_angle;
+        stored.snap_angle_deg = given.snap_angle_deg;
+        stored.snap_round = given.snap_round;
+        stored.snap_round_percent = given.snap_round_percent;
+    })
+}
+
+#[tauri::command]
+pub fn set_shapes(context: State<'_, AppContext>, shapes: ShapesState) -> CommandResult<AppState> {
+    set_shapes_in(&context, shapes)
 }
 
 /// What a folder chosen as the library holds (`LibraryInspection` in `api.ts`).
@@ -583,6 +656,116 @@ mod tests {
         assert_eq!(current_state(&other).microphone(), Some("wasapi:other"));
         let third = self::context(settings.path(), "PC-C");
         assert_eq!(current_state(&third).microphone(), None);
+    }
+
+    fn shapes(tolerance: u8, min_size_mm: f64, snap_angle_deg: f64) -> ShapesState {
+        ShapesState {
+            tolerance,
+            min_size_mm,
+            snap_angle: true,
+            snap_angle_deg,
+            snap_round: false,
+            snap_round_percent: 6.0,
+        }
+    }
+
+    #[test]
+    fn the_shapes_are_the_defaults_in_a_fresh_state() {
+        let settings = tempfile::tempdir().unwrap();
+        let state = current_state(&context(settings.path(), "PC-A"));
+        assert_eq!(
+            state.shapes(),
+            &ShapesState::from(&ShapeSettings::default())
+        );
+        assert_eq!(
+            serde_json::to_value(&state).unwrap()["shapes"],
+            serde_json::json!({
+                "tolerance": 3,
+                "minSizeMm": 10.0,
+                "snapAngle": true,
+                "snapAngleDeg": 4.0,
+                "snapRound": true,
+                "snapRoundPercent": 10.0
+            })
+        );
+        // Reading does not create the file.
+        assert!(!settings.path().join(SettingsStore::FILE_NAME).exists());
+    }
+
+    #[test]
+    fn the_shapes_are_stored_for_every_pc_and_come_back_in_the_state() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path(), "PC-A");
+        let state = set_shapes_in(&context, shapes(5, 7.5, 2.0)).unwrap();
+        assert_eq!(state.shapes(), &shapes(5, 7.5, 2.0));
+        let file = settings.path().join(SettingsStore::FILE_NAME);
+        let text = fs::read_to_string(&file).unwrap();
+        assert!(text.contains("[shapes]"), "{text}");
+        assert!(text.contains("tolerance = 5"), "{text}");
+        assert!(text.contains("snap_round = false"), "{text}");
+        // Read back from disk by another computer sharing the file.
+        let other = self::context(settings.path(), "PC-B");
+        assert_eq!(current_state(&other).shapes(), &shapes(5, 7.5, 2.0));
+        // The interface sends the same shape back.
+        let json = serde_json::to_value(current_state(&context).shapes()).unwrap();
+        let parsed: ShapesState = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, shapes(5, 7.5, 2.0));
+    }
+
+    #[test]
+    fn out_of_range_shapes_are_brought_within_their_limits() {
+        let settings = tempfile::tempdir().unwrap();
+        let context = context(settings.path(), "PC-A");
+        let state = set_shapes_in(
+            &context,
+            ShapesState {
+                tolerance: 0,
+                min_size_mm: 400.0,
+                snap_angle: false,
+                snap_angle_deg: 0.0,
+                snap_round: true,
+                snap_round_percent: 99.0,
+            },
+        )
+        .unwrap();
+        let expected = ShapesState {
+            tolerance: 1,
+            min_size_mm: 25.0,
+            snap_angle: false,
+            snap_angle_deg: 1.0,
+            snap_round: true,
+            snap_round_percent: 20.0,
+        };
+        assert_eq!(state.shapes(), &expected);
+        assert_eq!(current_state(&context).shapes(), &expected);
+    }
+
+    #[test]
+    fn setting_the_shapes_keeps_unknown_keys_and_the_other_sections() {
+        let settings = tempfile::tempdir().unwrap();
+        fs::write(
+            settings.path().join(SettingsStore::FILE_NAME),
+            "[shapes]\ntolerance = 2\nfuture = 3\n\n[other]\nkept = true\n",
+        )
+        .unwrap();
+        let context = context(settings.path(), "PC-A");
+        assert_eq!(current_state(&context).shapes().tolerance, 2);
+        set_shapes_in(&context, shapes(4, 10.0, 4.0)).unwrap();
+        let text = fs::read_to_string(settings.path().join(SettingsStore::FILE_NAME)).unwrap();
+        assert!(text.contains("future = 3"), "{text}");
+        assert!(text.contains("[other]"), "{text}");
+        assert!(text.contains("tolerance = 4"), "{text}");
+    }
+
+    #[test]
+    fn unreadable_settings_refuse_the_shapes_without_touching_the_file() {
+        let settings = tempfile::tempdir().unwrap();
+        let file = settings.path().join(SettingsStore::FILE_NAME);
+        fs::write(&file, "language = [broken").unwrap();
+        let error =
+            set_shapes_in(&context(settings.path(), "PC-A"), shapes(2, 10.0, 4.0)).unwrap_err();
+        assert_eq!(error.code, "settings");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "language = [broken");
     }
 
     #[test]

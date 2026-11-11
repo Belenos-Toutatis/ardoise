@@ -146,7 +146,11 @@ note »). Dans tous les cas, **regardez toujours la copie** (et **Comparer**) av
 - « Mets en couleur les mots à retenir et encadre le résultat dans la note de cours sur la dilution. »
 - « Corrige les fautes d'orthographe de ma note avec ma propre écriture. »
 - « Redresse les formes de ma note de physique » (cela aussi se fait maintenant sur une copie : l'originale n'est plus
-  modifiée).
+  modifiée). L'assistant redresse avec **les mêmes valeurs que le réglage** à côté du bouton « Redresser les formes » de
+  l'éditeur (tolérance, taille minimale, alignement automatique) et vous dit celles qu'il a utilisées, aussi dans le
+  compte rendu de la copie quand elles ne sont pas les valeurs d'origine. Vous pouvez lui en demander d'autres pour une
+  fois (« avec une tolérance plus stricte », « même les traits de 6 mm ») sans toucher à votre réglage ; en dessous de
+  10 mm, des lettres peuvent être redressées.
 - « Découpe ma note en deux à cet endroit » (les deux morceaux sont des notes neuves, la note de départ reste telle
   quelle).
 - Dans Claude Code, l'invite `ameliorer_note` (ou `improve_note` en anglais) déroule tout cela pas à pas, avec les
