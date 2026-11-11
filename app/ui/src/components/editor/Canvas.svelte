@@ -26,7 +26,7 @@
     type Rect,
     type Vec,
   } from '../../lib/editor/geometry';
-  import { drawingOrder, hitStroke, selectInLasso } from '../../lib/editor/hit';
+  import { drawingOrder, hitStroke, onLayer, selectInLasso } from '../../lib/editor/hit';
   import {
     PenPresence,
     TouchGestures,
@@ -641,12 +641,14 @@
         lasso = null;
         if (cancelled) break;
         const bounds = boundsOfPoints(d.points);
+        // The selection takes strokes of the chosen layer only.
+        const chosen = onLayer(doc.note, doc.activeLayer);
         let picked: number[];
         if (!bounds || Math.max(bounds.width, bounds.height) * view.scale < 4) {
-          const hit = hitStroke(doc.note, d.points[0], 6 / view.scale);
+          const hit = hitStroke(chosen, d.points[0], 6 / view.scale);
           picked = hit === null ? [] : [hit];
         } else {
-          picked = selectInLasso(doc.note, d.points);
+          picked = selectInLasso(chosen, d.points);
         }
         const next =
           d.combine === 'add'
