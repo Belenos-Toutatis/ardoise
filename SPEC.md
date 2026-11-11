@@ -120,7 +120,7 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 - **Rotation** de la page par quart de tour ; **recadrage** (manuel ou automatique autour du contenu).
 - **Découper une page** : à un instant choisi sur la ligne du temps (tout ce qui a été écrit après passe dans une nouvelle note), ou selon une zone tracée.
 - **Assembler des pages** : superposer plusieurs notes sur une seule page, ou les mettre bout à bout (page longue).
-- **Redresser les formes** : transformer un tracé à main levée en droite, cercle, rectangle, flèche (P2).
+- **Redresser les formes** : transformer un tracé à main levée en droite, cercle, rectangle, flèche (P2). Un réglage à côté du bouton (ajout du 2026-11-11, Q12) choisit la tolérance, de stricte à souple, la taille minimale des formes et l'alignement automatique (rendre horizontal ou vertical, faire un cercle ou un carré) ; tant qu'il est ouvert, la page montre ce qui serait redressé. Les valeurs sont retenues pour toutes les notes, et l'assistant redresse avec les mêmes.
 - **Fond image ou PDF** importé, à annoter (P2).
 - Zone de texte tapé au clavier (P3).
 - **Revenir à l'original** de la tablette (P2).

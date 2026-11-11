@@ -311,6 +311,23 @@ Pendant ces vérifications, deux défauts des tests sont corrigés : un parcours
 
 - [ ] [matériel] En classe, avec la vraie tablette et le partage vers le PC du vidéoprojecteur : un élève écrit pendant que l'enseignant corrige au stylet de la Surface sur un calque « Correction », gomme et annule ; puis un export PDF à calques séparés, ouvert dans Acrobat Reader ou Firefox.
 
+## M15 — Régler « Redresser les formes »
+
+Ajouté à la demande de l'utilisateur le 2026-11-11 (SPEC §4.4, `docs/questions.md` Q12), à partir d'une maquette qu'il a validée.
+
+- [ ] `ardoise-ink` : les seuils de `shapes.rs` deviennent un réglage (`ShapeTuning` : tolérance sur cinq crans, taille minimale, alignement horizontal ou vertical, cercle ou carré) ; avec les valeurs par défaut, exactement les résultats d'aujourd'hui ; les protections de l'écriture ne dépendent pas du réglage ; le WebAssembly reçoit le réglage avec les traits.
+- [ ] Réglages : section `[shapes]` de `ardoise.toml` (valeurs ramenées dans leurs limites), lue et écrite par l'application (`set_shapes`), lue par le serveur de l'assistant.
+- [ ] Éditeur : bouton partagé « Redresser les formes » et sa flèche ; panneau avec les trois réglages, le nombre de formes reconnues et l'aperçu en pointillés sur la page ; « Valeurs par défaut » ; Échap ; le panneau tient dans la fenêtre et défile ; le bouton du bloc Sélection et la touche F redressent avec les mêmes valeurs ; traductions FR et EN.
+- [ ] Assistant : `straighten_shapes` redresse avec les valeurs retenues, en accepte d'autres pour un appel et dit celles qu'il a utilisées.
+- [ ] Guides FR et EN (dont celui de l'assistant), `CHANGELOG.md`.
+- [ ] Relecture indépendante, remarques corrigées.
+
+**Critères de fin** :
+- `CHECK OK` et `E2E OK` ;
+- des tests de `ardoise-ink` : avec les valeurs par défaut, les mêmes formes qu'avant sur tous les tests existants, et aucune lettre de 4 à 12 mm changée ; chaque réglage agit dans le bon sens (une forme moins nette reconnue en souple et pas en stricte ; une droite de 7 mm reconnue à 5 mm et pas à 10 ; un trait incliné de 3° rendu horizontal à 4°, gardé incliné à 2° ou sans la case ; une ellipse à 7 % du cercle devenue cercle à 10 %, gardée ellipse à 5 %) ; un petit O debout jamais redressé, même au réglage le plus large ;
+- un parcours de bout en bout dans l'éditeur : ouvrir le panneau, l'aperçu et le nombre de formes changent avec les curseurs, « Redresser » applique ce que montrait l'aperçu, Ctrl+Z annule, les valeurs sont retrouvées après un redémarrage, et le panneau défile dans une fenêtre basse sans dépasser son bas ;
+- un test du serveur de l'assistant : `straighten_shapes` suit les valeurs de `ardoise.toml` et celles données à l'appel, et les dit.
+
 ---
 
 ## Lancer une étape avec `/goal`
