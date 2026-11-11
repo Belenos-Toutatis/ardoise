@@ -334,6 +334,43 @@ Trouvé par les parcours sur le vrai exécutable : une règle de style commune �
 
 Reste à essayer sur de vraies notes : les crans de tolérance viennent de mains simulées.
 
+## M16 — Le panneau de côté à onglets
+
+Ajouté à la demande de l'utilisateur le 2026-11-11 (SPEC §5, `docs/questions.md` Q13), à partir d'une maquette qu'il a validée. M16 range dans le rail ce qui existe déjà ; M17 ajoute les fonctions nouvelles.
+
+- [ ] Un composant commun : le rail d'icônes (Calques, Page, Fond, Son, Projection, Aide) et son panneau ; un clic sur l'onglet ouvert ou sur › replie le panneau, un clic sur une icône le rouvre ; l'onglet ouvert et l'état replié retenus pour chaque fenêtre ; des pastilles (nombre de calques, point orange quand le calque choisi ou celui de la tablette est masqué, point rouge pendant un enregistrement, point bleu pendant une projection ou un partage) ; au clavier ; traductions FR et EN.
+- [ ] Éditeur : le panneau de côté passe dans le rail — Calques ; Page (papier, format de la feuille, tourner et recadrer, original) ; Fond (image ou PDF) ; Son (narration pendant une relecture) ; Projection (partage sur le réseau, qui quitte la barre d'outils) ; Aide. La sélection s'affiche au-dessus de l'onglet ouvert et rouvre le panneau replié.
+- [ ] Fenêtre de commande du direct : le même rail — Calques, ouvert d'office ; Son ; Projection (vidéoprojecteur, zone projetée, tableau noir, pointeur laser, partage) ; Aide. Page et Fond n'y apparaissent qu'avec M17.
+- [ ] Aide : une seule liste des raccourcis de chaque fenêtre, qui sert à l'aide et aux touches elles-mêmes (ou que les tests confrontent aux touches traitées).
+- [ ] Le rafraîchissement de la maquette : titres de blocs discrets, pastilles pour la couleur du papier, interrupteurs pour les options, curseurs avec leur valeur, boutons à icônes ; thème sombre ; fenêtre étroite.
+- [ ] Guides FR et EN, `CHANGELOG.md`.
+- [ ] Relecture indépendante, remarques corrigées.
+
+**Critères de fin** :
+- `CHECK OK` et `E2E OK`, les parcours existants passant par les onglets là où leur contenu a déménagé ;
+- un parcours de bout en bout dans chaque fenêtre : chaque onglet montre son contenu, replier puis rouvrir, l'onglet et l'état replié retrouvés à la réouverture, les pastilles (calque masqué, enregistrement, partage), la sélection au-dessus de l'onglet ouvert, le partage lancé depuis l'onglet Projection ;
+- des tests de l'aide : chaque raccourci affiché agit vraiment dans sa fenêtre.
+
+## M17 — Papier et fond en direct, projection de l'éditeur, son pendant qu'on écrit
+
+Ajouté avec M16 (SPEC §4.2, §4.4 et §4.5, `docs/questions.md` Q13). Les blocs marqués « nouveau » dans la maquette.
+
+- [ ] Direct, onglets Page et Fond : changer le papier (couleur, modèle, texture) de la page en cours et mettre une image ou une page de PDF dessous ; au vidéoprojecteur, sur le partage et dans la note ; une nouvelle page garde le papier de la précédente, pas l'image de fond.
+- [ ] Éditeur, onglet Projection : la page de l'éditeur en plein écran sur le vidéoprojecteur (papier, fond, calques visibles), mise à jour à chaque trait, avec le zoom et « Page entière » / « Largeur » ; arrêt par son bouton ou en quittant l'éditeur.
+- [ ] Éditeur, onglet Son, « Pendant que j'écris » : les traits écrits pendant l'enregistrement (stylet, souris, doigt) prennent l'heure du son et se rejouent avec lui, après les traits déjà présents, à l'écran et dans les exports vidéo ; enregistrer un nouveau son sur une note qui en a un demande d'abord.
+- [ ] Guides FR et EN, `CHANGELOG.md` ; procédure H7 dans `docs/hardware-tests.md`.
+- [ ] Relecture indépendante, remarques corrigées.
+
+**Critères de fin** :
+- `CHECK OK` et `E2E OK` ;
+- un parcours de bout en bout du direct : le papier et une image de fond changés sur la page en cours apparaissent au vidéoprojecteur, sur le partage et dans le fichier de la note ; la page suivante garde le papier, pas l'image ;
+- un parcours de bout en bout de l'éditeur projeté : un trait tracé dans l'éditeur apparaît dans la fenêtre de présentation ;
+- des tests du son pendant qu'on écrit : les heures des traits suivent celles du son, la relecture et l'export vidéo les rejouent ensemble, un son existant n'est jamais remplacé sans le demander.
+
+### Point de contrôle H7 [matériel]
+
+- [ ] [matériel] En classe : changer le papier et poser une fiche en PDF sous la page pendant le direct ; projeter une note de l'éditeur et y écrire ; enregistrer le son en écrivant au stylet de la Surface, puis relire la note et exporter sa vidéo.
+
 ---
 
 ## Lancer une étape avec `/goal`

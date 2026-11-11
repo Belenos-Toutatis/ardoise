@@ -167,3 +167,24 @@ L'utilisateur demande un réglage de la sensibilité de la détection des formes
 - Les protections de l'écriture restent, quel que soit le réglage : un petit ovale debout (un O, un 0) de moins de 2,5 cm n'est jamais redressé.
 
 SPEC §4.4 est mis à jour et le jalon M15 est ajouté à ROADMAP.md.
+
+## Q13 — Le panneau de côté à onglets, et trois fonctions qu'il fait apparaître (jalons M16 et M17, 2026-11-11) — **tranchée**
+
+L'utilisateur trouve que la barre latérale droite pourrait être modernisée, « avec des petits onglets comme dans Photoshop ». Une première maquette (`target/maquettes/maquette-barre-laterale.html`, hors de git) proposait un rail d'icônes différent pour l'éditeur et pour la fenêtre de commande du direct.
+
+**Décisions de l'utilisateur (2026-11-11)** :
+- Des changements à la première maquette : les deux fenêtres doivent partager les mêmes onglets. Aide, Son et Projection aussi dans l'éditeur, Page aussi en mode direct ; « je ne vois pas ce qui empêche les boutons d'être dans les deux modes ».
+- Enregistrer le son aussi pendant qu'il dessine sur l'écran tactile de sa Surface, pas seulement avec la tablette Wacom.
+- La maquette mise à jour (le même rail dans les deux fenêtres : Calques, Page, Fond, Son, Projection, Aide) lui convient.
+
+**Découpage et choix par défaut, proposés avec le texte du SPEC et acceptés** (« Oui, lance-le ») :
+- Deux jalons : M16 range dans le rail tout ce qui existe déjà ; M17 ajoute les trois fonctions nouvelles (papier et fond pendant le direct, projection de l'éditeur, son pendant qu'on écrit dans l'éditeur). Jusqu'à M17, ce qui n'existe pas encore n'apparaît pas.
+- L'onglet ouvert et l'état replié sont retenus pour chaque fenêtre, sur chaque PC. Le direct s'ouvre sur Calques.
+- Le partage sur le réseau passe dans l'onglet Projection, dans les deux fenêtres ; le bouton « Partager sur le réseau » de la barre d'outils de l'éditeur disparaît, un point bleu sur l'icône Projection dit qu'un partage (ou une projection) est en cours.
+- « Revenir à l'original » passe dans l'onglet Page de l'éditeur.
+- L'onglet Aide montre les vrais raccourcis de la fenêtre, tirés de l'application elle-même (une seule liste pour l'aide et pour les touches), en français et en anglais.
+- Papier et fond en direct : le changement vaut pour la page en cours ; une nouvelle page garde le papier de la précédente, pas l'image de fond ; tout est enregistré dans la note ; on revient en arrière en rechoisissant l'ancien réglage, pas avec Ctrl+Z (réservé à l'écriture de l'ordinateur).
+- Projection de l'éditeur : la page telle qu'elle est dans l'éditeur (papier, fond, calques visibles), mise à jour à chaque trait, avec le zoom et « Page entière » / « Largeur » ; le tableau noir et le pointeur laser restent propres au direct ; elle s'arrête avec son bouton ou quand on quitte l'éditeur.
+- Son pendant qu'on écrit dans l'éditeur : pendant l'enregistrement, les traits écrits dans l'éditeur (stylet, souris ou doigt) prennent l'heure du son et se rejouent avec lui, après les traits déjà présents. Une note n'a qu'un seul son, comme aujourd'hui : en enregistrer un autre demande d'abord si l'on remplace le premier.
+
+SPEC §4.2, §4.4, §4.5 et §5 sont mis à jour ; les jalons M16 et M17 sont ajoutés à ROADMAP.md.

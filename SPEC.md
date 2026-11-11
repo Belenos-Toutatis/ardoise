@@ -98,6 +98,7 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 - **Reprendre le direct sur une feuille** (ajout demandé par l'utilisateur le 2026-11-04, `docs/questions.md` Q9) : depuis le menu d'une note ou l'éditeur, le mode direct repart sur cette note. La nouvelle écriture s'ajoute à la note elle-même, qui garde son fond, ses calques et sa narration, et son état d'origine reste récupérable (« Revenir à l'original »). Si elle a changé ailleurs entre-temps, rien n'est écrasé : une nouvelle note est créée à côté, et Ardoise le dit. La page suivante crée une note neuve.
 - **Retoucher pendant le direct** (même ajout) : dans la fenêtre de commande, un outil Sélection (lasso ou clic) permet de supprimer des traits ou de changer leur couleur, sans passer par l'éditeur et pendant que la tablette continue d'écrire. Le vidéoprojecteur et les écrans du partage montrent aussitôt le résultat, jamais la sélection. Ctrl+Z annule ces actions et l'effacement de la page, pas l'écriture de la tablette.
 - **Corriger pendant le direct** (ajout demandé par l'utilisateur le 2026-11-11, `docs/questions.md` Q11) : pendant qu'un élève écrit avec la tablette, l'enseignant écrit en même temps dans la fenêtre de commande avec le stylet de l'ordinateur (outil Stylo, à côté de Sélection), avec son propre style (rouge par défaut). Une zone Calques dans la fenêtre de commande montre le calque où écrit la tablette et celui où agit l'ordinateur : l'ordinateur (stylo, bout gomme du stylet, sélection) n'agit que sur le calque choisi d'un clic, la tablette toujours sur le sien, qu'on peut changer. Ce que l'ordinateur écrit est enregistré dans la note à son heure, apparaît aussitôt au vidéoprojecteur et sur les écrans du partage, et Ctrl+Z l'annule.
+- **Papier et fond pendant le direct** (ajout demandé par l'utilisateur le 2026-11-11, `docs/questions.md` Q13) : dans la fenêtre de commande, changer le papier (couleur, modèle, texture) et mettre une image ou une page de PDF sous la page en cours, au vidéoprojecteur et sur le partage aussi.
 
 ### 4.3 Bibliothèque (P1)
 
@@ -124,6 +125,7 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 - **Fond image ou PDF** importé, à annoter (P2).
 - Zone de texte tapé au clavier (P3).
 - **Revenir à l'original** de la tablette (P2).
+- **Projeter la note de l'éditeur** (ajout du 2026-11-11, Q13) : la page de l'éditeur en plein écran sur le vidéoprojecteur, mise à jour à chaque trait, avec le zoom de la zone projetée.
 
 ### 4.5 Relecture et vidéo
 
@@ -131,7 +133,7 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 - Option « supprimer les temps morts » (raccourcit les pauses longues) (P1).
 - **Exports animés** (P1) : MP4 (H.264), GIF animé, WebP animé, WebM. Réglages : résolution (720p, 1080p, 4K, ou taille de la page), images par seconde, durée cible ou vitesse, fond inclus ou transparent (GIF/WebP), image finale figée pendant N secondes.
 - Le MP4 utilise l'encodeur intégré à Windows (Media Foundation : vidéo H.264, son AAC). S'il manque (éditions « N » de Windows sans le Media Feature Pack), l'application propose de télécharger OpenH264 chez Cisco, en affichant sa licence, et le range dans son dossier local.
-- **Narration au micro** (P1) : choix du micro parmi ceux connectés, niveau d'entrée visible, enregistrement pendant une relecture ou pendant le mode direct ; le son est intégré aux exports MP4 et WebM.
+- **Narration au micro** (P1) : choix du micro parmi ceux connectés, niveau d'entrée visible, enregistrement pendant une relecture, pendant le mode direct, ou pendant qu'on écrit dans l'éditeur (ajout du 2026-11-11, Q13 : les traits écrits pendant l'enregistrement prennent l'heure du son) ; le son est intégré aux exports MP4 et WebM.
 
 ### 4.6 Export, import, partage
 
@@ -198,6 +200,7 @@ Ajouté à la demande de l'utilisateur le 2026-11-02. Un autre ordinateur du mê
 
 - Fenêtre principale : barre latérale (classeurs, étiquettes, tablette avec état de connexion et batterie), grille de notes, éditeur plein espace à l'ouverture d'une note.
 - Barre d'outils de l'éditeur : outils, couleurs, épaisseur, fond, calques, relecture, export.
+- **Panneau de côté à onglets** (ajout demandé par l'utilisateur le 2026-11-11, `docs/questions.md` Q13) : dans l'éditeur et dans la fenêtre de commande du direct, le même rail d'icônes à droite — Calques, Page, Fond, Son, Projection, Aide —, dont le contenu s'adapte à la fenêtre. Un clic sur l'onglet ouvert replie le panneau et la page prend toute la largeur. Des pastilles disent le nombre de calques, un calque masqué, un enregistrement, une projection ou un partage en cours. La sélection s'affiche au-dessus de l'onglet ouvert.
 - Tout est faisable à la souris ; les actions fréquentes ont un raccourci clavier.
 - Retour visuel pour toute opération longue (synchro, export vidéo) avec annulation possible.
 - Messages d'erreur compréhensibles et actionnables (« Bluetooth désactivé : l'activer dans les paramètres Windows »), jamais un code brut seul.
