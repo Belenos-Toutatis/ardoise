@@ -236,6 +236,21 @@ describe('editor side panel: Son', () => {
     expect(sideOf(target)).toEqual({ tab: 'help', collapsed: false });
   });
 
+  it('does not remember the view a replay forces: closing the editor during it keeps the user’s own', async () => {
+    const { target, key, tab, stored } = await render();
+    tab('layers').click();
+    await tick();
+    expect(stored()).toEqual({ tab: 'layers', collapsed: true });
+    await key('r');
+    expect(target.querySelector('.replay-bar')).toBeTruthy();
+    expect(sideOf(target)).toEqual({ tab: 'sound', collapsed: false });
+    expect(stored()).toEqual({ tab: 'layers', collapsed: true });
+    // Back to the library (the editor goes) while the replay runs: the stored view is still the user's.
+    cleanup?.();
+    cleanup = null;
+    expect(localStorage.getItem(sideStorageKey('editor'))).toBe('{"tab":"layers","collapsed":true}');
+  });
+
   it('locks the tabs that edit the note during a replay (they used to disappear)', async () => {
     const { target, toolbarButton, panel } = await render();
     toolbarButton('Relecture').click();

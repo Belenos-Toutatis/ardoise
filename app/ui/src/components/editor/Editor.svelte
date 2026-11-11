@@ -1510,9 +1510,10 @@
 
   function enterReplay() {
     if (!doc || split || replaying || canvas?.dragging()) return;
-    // The replay shows Son (the narration) and gives the tab back when it ends.
+    // The replay shows Son (the narration) and gives the tab back when it ends. The forced view is not remembered:
+    // leaving the editor during the replay must keep the view the user had (the stored one).
     sideBeforeReplay = side.snapshot();
-    side.open('sound');
+    side.open('sound', { persist: false });
     player.load(doc.note);
     narration = null;
     narrationError = null;
@@ -2177,7 +2178,7 @@
       {#if hasSelection && !replaying}
         <section class="pane-block" aria-labelledby="editor-selection-heading" data-section="selection">
           <h3 class="pane-title" id="editor-selection-heading">{t('editor.selection.label')}</h3>
-          <div class="selection-count">
+          <div class="selection-head">
             <p class="pane-help">{t('editor.selection.count', { count: doc?.selection.length ?? 0 })}</p>
             <button
               type="button"
@@ -2280,14 +2281,14 @@
 
 <style>
   /* The selection block's count, with its « ✕ » beside it. */
-  .selection-count {
+  .selection-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
   }
 
-  .selection-count p {
+  .selection-head p {
     margin: 0;
   }
 
