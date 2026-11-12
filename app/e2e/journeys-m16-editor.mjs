@@ -10,9 +10,9 @@
 // Written without a run (the other packages were not merged when this was written): the selectors are the doc's
 // (§2 "DOM contract", §5, §7). The lines that rely on a hook the doc leaves to a package carry `M16-D: check`.
 //
-// Limits: the red recording dot needs a microphone (the journeys have none, `journeys-m12-resume.mjs`): the step tries to
-// record in a replay and is skipped with a log line when recording cannot start (O12; vitest checks the dot with
-// `mock-narration`). « Found again on reopening » (O13) is the editor closed and opened again in the same run, and the
+// The red recording dot is checked on a real recording of the simulated microphone (`--simulated-microphone`, M17: the
+// PC's own microphone stays off), in a replay; it is skipped with a log line when recording cannot start (O12; vitest
+// checks the dot with `mock-narration`). « Found again on reopening » (O13) is the editor closed and opened again in the same run, and the
 // value stored in the browser's storage read back; the runner gives each journey a fresh profile, so no restart is tried.
 import { closePanel, openPanel, PANEL } from './journeys-m11-share.mjs';
 import { closeEditor, text } from './journeys-m12-resume.mjs';
@@ -29,7 +29,8 @@ const CONTENT = {
   layers: 'section.layers-zone[data-where="editor"]',
   page: '[data-section="page-format"]',
   background: '[data-section="background-image"]',
-  sound: 'button[data-action="sound-replay"]',
+  // M17: the mode of the recording (« Pendant que j'écris » by default, its own recording below it).
+  sound: '[data-section="narration"] [data-field="narration-mode"]',
   projection: '[data-section="share"] button[data-action="share"]',
   help: '[data-section="shortcuts"] dl.keys',
 };
@@ -81,6 +82,7 @@ const inState = (app, tab, collapsed, what) =>
 export const sidePanelEditorJourneys = [
   {
     name: 'panneau de côté de l’éditeur : onglets, repli, pastilles, sélection, partage',
+    args: ['--simulated-microphone'],
     settings: (ctx) => `[share]\nport = ${ctx.sharePort}\n`,
     env: { ARDOISE_SHARE_LOOPBACK: '1' },
     async run(app, check) {
@@ -125,6 +127,11 @@ export const sidePanelEditorJourneys = [
           await openTab(app, 'page');
           if ((await app.evaluate(onScreen(`${tabPanel('page')} ${block}`))) !== true) throw new Error(`${block} is not on screen in the Page tab`);
         }
+        // Son (M17): « Pendant que j'écris » is the mode shown by default, with its own recording.
+        await openTab(app, 'sound');
+        const mode = await app.evaluate(`document.querySelector(${j(`${tabPanel('sound')} ${CONTENT.sound} input:checked`)})?.value ?? null`);
+        if (mode !== 'writing') throw new Error(`the Sound tab opens on the mode ${j(mode)}, expected writing`);
+        if ((await app.evaluate(onScreen(`${tabPanel('sound')} [data-action="narration-open"]`))) !== true) throw new Error('the Sound tab has no recording while writing');
         // The help lists every entry of the editor's table that has no group, with its label (the replay's two are in their own list).
         await openTab(app, 'help');
         const grouped = ['leaveReplay', 'playPause'];
@@ -226,8 +233,8 @@ export const sidePanelEditorJourneys = [
         await app.waitFor(`document.querySelector('button[data-action="replay-toggle"]')?.getAttribute('aria-pressed') === 'true'`, 'the replay');
         // M16-D: check against B1 (the narration block of a replay holds RecordPanel's open button, §7).
         await app.waitFor(onScreen(`${tabPanel('sound')} [data-section="narration"] [data-action="narration-open"]`), 'the narration panel in the Sound tab');
-        // The recording dot: the PC may have no microphone (O12).
-        await checkRecordingDot(app, l);
+        // The recording dot, on the simulated microphone (O12).
+        await checkRecordingDot(app, l, { simulated: true });
         await app.key('r');
         await inState(app, 'layers', true, 'the replay to give the tab and the collapsed state back');
         await app.waitFor(`document.querySelector('button[data-action="replay-toggle"]')?.getAttribute('aria-pressed') === 'false'`, 'the replay to end');
