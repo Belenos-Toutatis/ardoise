@@ -3,6 +3,7 @@
 //! ```text
 //! cargo run -p ardoise-ble --example survey -- scan [SECONDS] [--out FILE]
 //! cargo run -p ardoise-ble --example survey -- gatt ADDRESS [SECONDS] [--out FILE]
+//! cargo run -p ardoise-ble --example survey -- send ADDRESS CHARACTERISTIC STEP... [--out FILE]
 //! ```
 //!
 //! - `scan` (default 20 s) listens and prints everything each device advertises: name, services,
@@ -12,6 +13,11 @@
 //!   reads the readable ones, then enables every notification and prints what arrives for `SECONDS`
 //!   (default 30). It never writes a characteristic value: its only writes are the standard "enable
 //!   notifications" descriptors.
+//! - `send` connects to `ADDRESS`, enables the notifications of the service that holds `CHARACTERISTIC` (a
+//!   UUID, or its 16-bit form), then runs the steps in order and prints every notification received
+//!   meanwhile. A step is a frame to write to the characteristic, in hexadecimal (`120104`), or a pause in
+//!   seconds (`wait:20`). It writes exactly the frames given, nothing else: only frames whose meaning is known
+//!   (seen in a capture of the vendor's application) belong on its command line.
 //!
 //! `--out FILE` also records one JSON object per line. That file holds Bluetooth addresses: keep it
 //! out of git (`testdata/private/`).
@@ -26,6 +32,8 @@ fn main() -> ExitCode {
             eprintln!("{message}");
             eprintln!("usage: survey scan [SECONDS] [--out FILE]");
             eprintln!("       survey gatt ADDRESS [SECONDS] [--out FILE]");
+            eprintln!("       survey send ADDRESS CHARACTERISTIC STEP... [--out FILE]");
+            eprintln!("       (STEP: a frame in hexadecimal, or wait:SECONDS)");
             ExitCode::FAILURE
         }
     }
@@ -43,6 +51,46 @@ enum Command {
         seconds: u64,
         out: Option<String>,
     },
+    Send {
+        address: String,
+        characteristic: String,
+        steps: Vec<Step>,
+        out: Option<String>,
+    },
+}
+
+/// One step of `send`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Step {
+    /// Write this frame to the characteristic.
+    Write(Vec<u8>),
+    /// Only listen, for this many seconds.
+    Wait(u64),
+}
+
+impl Step {
+    fn parse(word: &str) -> Result<Self, String> {
+        if let Some(seconds) = word.strip_prefix("wait:") {
+            return seconds
+                .parse::<u64>()
+                .map(Self::Wait)
+                .map_err(|_| format!("not a number of seconds: {seconds}"));
+        }
+        let digits: Vec<u8> = word.bytes().filter(|b| *b != b'_').collect();
+        if digits.is_empty() || !digits.len().is_multiple_of(2) {
+            return Err(format!("not a frame in hexadecimal: {word}"));
+        }
+        digits
+            .chunks(2)
+            .map(|pair| {
+                std::str::from_utf8(pair)
+                    .ok()
+                    .and_then(|text| u8::from_str_radix(text, 16).ok())
+            })
+            .collect::<Option<Vec<u8>>>()
+            .map(Self::Write)
+            .ok_or_else(|| format!("not a frame in hexadecimal: {word}"))
+    }
 }
 
 impl Command {
@@ -73,7 +121,19 @@ impl Command {
                 seconds: seconds(tail.first(), 30)?,
                 out,
             }),
-            _ => Err("expected `scan` or `gatt ADDRESS`".to_owned()),
+            ["send", address, characteristic, steps @ ..] if !steps.is_empty() => Ok(Self::Send {
+                address: (*address).to_owned(),
+                characteristic: (*characteristic).to_owned(),
+                steps: steps
+                    .iter()
+                    .map(|word| Step::parse(word))
+                    .collect::<Result<_, _>>()?,
+                out,
+            }),
+            _ => Err(
+                "expected `scan`, `gatt ADDRESS` or `send ADDRESS CHARACTERISTIC STEP...`"
+                    .to_owned(),
+            ),
         }
     }
 }
@@ -186,6 +246,20 @@ fn run(command: Command) -> ExitCode {
                 seconds,
                 out,
             } => windows_impl::gatt(&address, seconds, windows_impl::Record::new(out)?).await,
+            Command::Send {
+                address,
+                characteristic,
+                steps,
+                out,
+            } => {
+                windows_impl::send(
+                    &address,
+                    &characteristic,
+                    &steps,
+                    windows_impl::Record::new(out)?,
+                )
+                .await
+            }
         }
     });
     runtime.shutdown_background();
@@ -207,7 +281,7 @@ mod windows_impl {
 
     use btleplug::api::{
         BDAddr, Central as _, CentralEvent, CharPropFlags, Characteristic, Manager as _,
-        Peripheral as _, PeripheralProperties, ScanFilter,
+        Peripheral as _, PeripheralProperties, ScanFilter, WriteType,
     };
     use btleplug::platform::{Adapter, Manager, Peripheral, PeripheralId};
     use futures::StreamExt as _;
@@ -215,7 +289,7 @@ mod windows_impl {
     use tokio::time::{MissedTickBehavior, timeout};
     use uuid::Uuid;
 
-    use super::{ascii, describe_mibeacon, hex};
+    use super::{Step, ascii, describe_mibeacon, hex};
 
     /// The 16-bit service of Xiaomi's "Mi" Bluetooth protocol (MiBeacon in advertisements).
     const XIAOMI_SERVICE: Uuid = Uuid::from_u128(0x0000fe95_0000_1000_8000_00805f9b34fb);
@@ -476,6 +550,135 @@ mod windows_impl {
         })
     }
 
+    /// A characteristic UUID from the command line: whole, or its 16-bit form.
+    fn parse_uuid(text: &str) -> Result<Uuid, String> {
+        if text.len() == 4 {
+            return u16::from_str_radix(text, 16)
+                .map(|short| {
+                    Uuid::from_u128(u128::from(short) << 96 | 0x0000_1000_8000_0080_5f9b_34fb)
+                })
+                .map_err(|_| format!("not a characteristic UUID: {text}"));
+        }
+        Uuid::parse_str(text).map_err(|_| format!("not a characteristic UUID: {text}"))
+    }
+
+    pub(super) async fn send(
+        address: &str,
+        characteristic: &str,
+        steps: &[Step],
+        mut record: Record,
+    ) -> Result<(), String> {
+        let parsed: BDAddr = address
+            .trim()
+            .parse()
+            .map_err(|_| format!("invalid Bluetooth address {address:?}"))?;
+        let target = parse_uuid(characteristic)?;
+        let adapter = adapter().await?;
+        println!("looking for {parsed}...");
+        let peripheral = find(&adapter, parsed).await?;
+        timeout(STEP * 2, peripheral.connect())
+            .await
+            .map_err(|_| "the connection timed out".to_owned())?
+            .map_err(|e| format!("cannot connect: {e}"))?;
+        record.line("connected", json!({"type": "connected"}));
+        let outcome = converse(&peripheral, target, steps, &mut record).await;
+        let _ = timeout(STEP, peripheral.disconnect()).await;
+        record.line("disconnected by the survey", json!({"type": "closed"}));
+        outcome
+    }
+
+    async fn converse(
+        peripheral: &Peripheral,
+        target: Uuid,
+        steps: &[Step],
+        record: &mut Record,
+    ) -> Result<(), String> {
+        timeout(STEP * 2, peripheral.discover_services())
+            .await
+            .map_err(|_| "listing the services timed out".to_owned())?
+            .map_err(|e| format!("cannot list the services: {e}"))?;
+        let characteristics = peripheral.characteristics();
+        let command = characteristics
+            .iter()
+            .find(|c| c.uuid == target)
+            .ok_or_else(|| format!("the device has no characteristic {}", short(target)))?;
+        let write_type = if command.properties.contains(CharPropFlags::WRITE) {
+            WriteType::WithResponse
+        } else if command
+            .properties
+            .contains(CharPropFlags::WRITE_WITHOUT_RESPONSE)
+        {
+            WriteType::WithoutResponse
+        } else {
+            return Err(format!("{} cannot be written", short(target)));
+        };
+
+        let mut notifications = peripheral
+            .notifications()
+            .await
+            .map_err(|e| e.to_string())?;
+        for characteristic in characteristics.iter().filter(|c| {
+            c.service_uuid == command.service_uuid
+                && c.properties
+                    .intersects(CharPropFlags::NOTIFY | CharPropFlags::INDICATE)
+        }) {
+            let uuid = short(characteristic.uuid);
+            timeout(STEP, peripheral.subscribe(characteristic))
+                .await
+                .map_err(|_| format!("enabling the notifications of {uuid} timed out"))?
+                .map_err(|e| format!("notifications refused on {uuid}: {e}"))?;
+            record.line(
+                &format!("notifications enabled on {uuid}"),
+                json!({"type": "subscribed", "uuid": uuid}),
+            );
+        }
+
+        let mut count = 0usize;
+        let mut open = true;
+        for step in steps {
+            let pause = match step {
+                Step::Write(frame) => {
+                    record.line(
+                        &format!("-> {}  [{}]", short(target), hex(frame)),
+                        json!({"type": "write", "uuid": short(target), "hex": hex(frame)}),
+                    );
+                    timeout(STEP, peripheral.write(command, frame, write_type))
+                        .await
+                        .map_err(|_| "the write timed out".to_owned())?
+                        .map_err(|e| format!("the write failed: {e}"))?;
+                    Duration::from_millis(600)
+                }
+                Step::Wait(seconds) => Duration::from_secs(*seconds),
+            };
+            let deadline = tokio::time::Instant::now() + pause;
+            while open {
+                tokio::select! {
+                    () = tokio::time::sleep_until(deadline) => break,
+                    notification = notifications.next() => match notification {
+                        Some(notification) => {
+                            count += 1;
+                            let uuid = short(notification.uuid);
+                            record.line(
+                                &format!("<- {uuid}  [{}]", hex(&notification.value)),
+                                json!({"type": "notification", "uuid": uuid, "hex": hex(&notification.value)}),
+                            );
+                        }
+                        None => open = false,
+                    },
+                }
+            }
+            if !open || !peripheral.is_connected().await.unwrap_or(false) {
+                record.line(
+                    "the device closed the connection",
+                    json!({"type": "disconnected"}),
+                );
+                break;
+            }
+        }
+        println!("{count} notification(s) received");
+        Ok(())
+    }
+
     fn properties_text(properties: CharPropFlags) -> String {
         let names = [
             (CharPropFlags::BROADCAST, "broadcast"),
@@ -689,6 +892,23 @@ mod tests {
                 out: Some("b.jsonl".to_owned())
             })
         );
+        assert_eq!(
+            Command::parse(&words("send 00:00:5E:00:53:01 2a00 0a_ff01 wait:3 00")),
+            Ok(Command::Send {
+                address: "00:00:5E:00:53:01".to_owned(),
+                characteristic: "2a00".to_owned(),
+                steps: vec![
+                    Step::Write(vec![0x0a, 0xff, 0x01]),
+                    Step::Wait(3),
+                    Step::Write(vec![0x00])
+                ],
+                out: None
+            })
+        );
+        assert!(Command::parse(&words("send 00:00:5E:00:53:01 2a00")).is_err());
+        assert!(Command::parse(&words("send 00:00:5E:00:53:01 2a00 0a0")).is_err());
+        assert!(Command::parse(&words("send 00:00:5E:00:53:01 2a00 zz")).is_err());
+        assert!(Command::parse(&words("send 00:00:5E:00:53:01 2a00 wait:soon")).is_err());
         assert!(Command::parse(&words("gatt")).is_err());
         assert!(Command::parse(&words("scan soon")).is_err());
         assert!(Command::parse(&words("scan 1 2")).is_err());
