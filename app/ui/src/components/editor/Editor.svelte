@@ -43,6 +43,17 @@
    * Page, Fond, Son, Projection and Aide, the selection and the split panel above the open tab. A replay shows
    * Son and gives back the tab it found when it ends; a selection appearing or a split starting reopens a collapsed
    * pane. A replay is read-only: the tabs that edit the note are disabled meanwhile.
+   *
+   * Milestone M17 (docs/design/paper-projection-narration.md §2.6, §3.4, §3.5):
+   * - The Projection tab projects the page (`EditorProjection`, `EditorProjectionTab`): what the editor shows (a replay
+   *   included) and the stroke in progress are fed to the projection window while it is open; the area it shows follows
+   *   what the canvas shows and is framed on the page; another note keeps the projection, leaving the editor closes it.
+   * - Son « Pendant que j'écris »: a narration recorded while writing (`WritingClock`). The strokes written meanwhile
+   *   take the time of the sound; « Arrêter » keeps the sound in memory (staged by Rust) and saves the note with it at
+   *   once (`saveNote`'s narration key); a failed save keeps both for the next save (a copy takes the sound too), « Ne
+   *   pas enregistrer » and « Recharger » let the sound go. « Annuler » drops the sound and keeps the strokes. While it
+   *   records, what acts on the timeline it writes waits: the replay, « Revenir à l'original », the split, the video.
+   *   The narration the note stores is known from its opening (`OpenedNote.narration`), not only in a replay.
    */
   import { tick, untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, onSessionEnding, type AppState } from '../../lib/api';
@@ -104,6 +115,8 @@
     type SplitMode,
   } from '../../lib/editor/split';
   import { defaultWindowClose, type WindowClose } from '../../lib/editor/window-close';
+  import { EditorProjection } from '../../lib/editor/projection.svelte';
+  import { WritingClock, lastSampleTime, nextStrokeBase, noteSoundEnd, writingOrigin } from '../../lib/editor/writing-clock';
   import { largestFittingDpi } from '../../lib/export-options';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { share } from '../../lib/share-state.svelte';
@@ -124,7 +137,7 @@
   import LayersZone from '../layers/LayersZone.svelte';
   import { clock } from '../narration/format';
   import { NarrationRecorder } from '../narration/recorder.svelte';
-  import ShareBlock from '../share/ShareBlock.svelte';
+  import EditorProjectionTab from '../projection/EditorProjectionTab.svelte';
   import ShortcutsHelp from '../side/ShortcutsHelp.svelte';
   import SidePanel from '../side/SidePanel.svelte';
   import BackgroundImageSection from './BackgroundImageSection.svelte';
@@ -281,8 +294,15 @@
   const player = new ReplayPlayer();
   const recorder = new NarrationRecorder();
   let replaying = $state(false);
-  /** The narration stored in the note, while replaying. */
+  /** The narration stored in the note (told when it opens, read again after a recording or a deletion). */
   let narration = $state.raw<NarrationInfo | null>(null);
+  /** The clock of the writing recording under way (M17): the strokes drawn meanwhile take their times from it. */
+  let writingClock = $state.raw<WritingClock | null>(null);
+  /**
+   * The sound of a writing recording kept in memory by Rust until the note is saved with it (`key`); `info`: where it
+   * lies in note time (an estimate until the note's narration is read again), so that new strokes go after it.
+   */
+  let stagedNarration = $state.raw<{ key: string; durationMs: number; info: NarrationInfo } | null>(null);
   /** The narration's sound (a Blob URL) while it plays along. */
   let narrationUrl = $state<string | null>(null);
   let narrationLoading = $state(false);
@@ -299,8 +319,16 @@
   /** The tab and collapsed state the replay found: given back when it ends (it shows Son meanwhile). */
   let sideBeforeReplay: SideView | null = null;
 
+  // The projection of the page (M17): one for the editor's life, so that another note stays projected.
+  const pageProjection = new EditorProjection();
+
   const doc = $derived(history?.present ?? null);
-  const dirty = $derived(!!doc && doc.note !== savedNote);
+  /** The note differs from the one last saved. */
+  const noteDirty = $derived(!!doc && doc.note !== savedNote);
+  /** Something waits to be saved: the note's changes, or the sound of a writing recording. */
+  const dirty = $derived(noteDirty || (!!doc && stagedNarration !== null));
+  /** What new strokes go after (O14): the sound waiting to be saved, else the stored narration. */
+  const strokeNarration = $derived(stagedNarration?.info ?? narration);
   const hasSelection = $derived((doc?.selection.length ?? 0) > 0);
   /** The split panel is open or a replay runs: the tabs that edit the note are disabled. */
   const locked = $derived(split !== null || replaying);
@@ -313,7 +341,7 @@
         dot: doc && layerWarnings(layers, doc.activeLayer).length > 0 ? 'warn' : undefined,
       },
       sound: { dot: recorder.phase === 'recording' ? 'rec' : undefined },
-      projection: { dot: share.status.active ? 'live' : undefined },
+      projection: { dot: share.status.active || pageProjection.presentation ? 'live' : undefined },
     };
   });
   // A selection appearing reopens a collapsed pane (not at each change of the selection).
@@ -405,8 +433,9 @@
   );
   $effect(() => {
     const present = history?.present;
+    // Not for a sound alone: the draft keeps the strokes, the sound has its own backup copy (R4).
     const snapshot =
-      present && dirty && stamp
+      present && noteDirty && stamp
         ? {
             path: currentPath,
             noteId,
@@ -427,6 +456,17 @@
     const shown = present.note;
     const imageKey = present.backgroundPixels?.key ?? null;
     untrack(() => share.showNote(shown, imageKey));
+  });
+
+  // The projection (M17) shows what the editor shows, a replay included, at every change while it is open (the feed
+  // sends only what changed: `lib/projection-feed.ts`). A drag's transient page is not fed: its result is.
+  $effect(() => {
+    if (!pageProjection.presentation) return;
+    const present = history?.present;
+    if (!present) return;
+    const shown = (replayDoc ?? present).note;
+    const imageKey = present.backgroundPixels?.key ?? null;
+    untrack(() => pageProjection.show(shown, imageKey));
   });
 
   /** False once the editor was closed or destroyed: late results call back no one. */
@@ -534,6 +574,8 @@
     const closer = untrack(() => windowClose);
     // « Reprendre en mode direct » needs to know whether a tablet is registered.
     tablet.start();
+    // The Projection tab hears where the projection is open, also when its own window closes it.
+    untrack(() => pageProjection.watch());
     let stopped = false;
     const stops: (() => void)[] = [];
     const keep = (unlisten: () => void) => {
@@ -562,7 +604,9 @@
       for (const stop of stops) stop();
       player.dispose();
       recorder.dispose();
-      // A recording is never thrown away silently: it goes into its note (or stays pending).
+      // Leaving the editor stops its projection (Q13); another note kept it.
+      pageProjection.dispose();
+      // A recording is never thrown away silently: it goes into its note (or stays pending, or staged with a copy).
       salvageRecording();
       // Unsaved edits leave with the editor only as a draft (written now, with its image's pixels).
       const kept = drafts.dispose();
@@ -597,6 +641,10 @@
     printing = null;
     closeVideo();
     resetReplay();
+    narration = null;
+    // A sound kept for the note left was let go or saved by the answer that led here; Rust keeps its backup copy anyway.
+    stagedNarration = null;
+    writingClock = null;
     original = null;
     originalError = null;
     revision = null;
@@ -635,6 +683,9 @@
       savedNote = start.note;
       stamp = opened.stamp;
       revision = opened.revision ?? null;
+      // M17: the note says its narration when it opens (Rust before M17 did not: it is read then).
+      if (opened.narration !== undefined) narration = opened.narration;
+      else void loadNarration();
       title = opened.note.title;
       titleDraft = opened.note.title;
       targetTitle = opened.note.title;
@@ -717,26 +768,61 @@
   async function writeNote(): Promise<boolean> {
     const present = history?.present;
     if (!present || !stamp) return false;
-    if (present.note === savedNote) return true;
+    // The sound of a writing recording goes with the note, in the same write.
+    const staged = stagedNarration;
+    if (present.note === savedNote && !staged) return true;
     const gen = generation;
     const target = currentPath;
     saving = true;
     saveError = null;
     conflict = null;
     try {
-      const next = await api.saveNote(target, { ...present.note, title }, stamp, present.backgroundPixels?.key);
+      const note = { ...present.note, title };
+      const imageKey = present.backgroundPixels?.key;
+      const next = staged
+        ? await api.saveNote(target, note, stamp, imageKey, staged.key)
+        : await api.saveNote(target, note, stamp, imageKey);
       if (gen !== generation) return false;
       stamp = next;
       savedNote = present.note;
       notifySaved(target);
       void refreshOriginal();
+      if (staged) soundSaved(staged);
       return true;
     } catch (error) {
-      if (gen === generation) writeFailed(error);
+      if (gen === generation) {
+        writeFailed(error);
+        if (staged) soundNotSaved(staged, error);
+      }
       return false;
     } finally {
       saving = false;
     }
+  }
+
+  /** The sound kept in memory went into the note with it: it is the note's narration now. */
+  function soundSaved(staged: { key: string }) {
+    if (stagedNarration?.key === staged.key) stagedNarration = null;
+    void loadNarration();
+  }
+
+  /**
+   * A save with the sound failed: the sound stays kept for the next save (a conflict, a disk error), unless Rust no
+   * longer has it (`noStagedNarration`: its backup copy remains, the error says where).
+   */
+  function soundNotSaved(staged: { key: string }, error: unknown) {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : null;
+    if (code === 'noStagedNarration' && stagedNarration?.key === staged.key) stagedNarration = null;
+  }
+
+  /** The sound kept in memory is let go (« Ne pas enregistrer », « Recharger », or replaced by a new recording). */
+  async function dropStaged(): Promise<void> {
+    const staged = stagedNarration;
+    if (!staged) return;
+    stagedNarration = null;
+    await api.narrationDropStaged(staged.key).catch(() => {
+      // Already gone: nothing is kept for it.
+    });
   }
 
   function retitle(): Promise<void> {
@@ -782,11 +868,17 @@
         const created = await api.createNote(binderOf(currentPath, app.library), copyTitle);
         // `save_note` keeps the new file's own id; the content is the edited note's.
         const note: Note = { ...present.note, title: copyTitle, created: created.created, origin: { kind: 'ardoise' } };
-        // The copy gets the background image too (the same staged pixels).
+        // The copy gets the background image too (the same staged pixels), and the sound of a writing recording kept
+        // in memory: the strokes timed on it go with it.
+        const staged = stagedNarration;
+        const imageKey = present.backgroundPixels?.key;
         let next: FileStamp;
         try {
-          next = await api.saveNote(created.path, note, created.stamp, present.backgroundPixels?.key);
+          next = staged
+            ? await api.saveNote(created.path, note, created.stamp, imageKey, staged.key)
+            : await api.saveNote(created.path, note, created.stamp, imageKey);
         } catch (error) {
+          if (staged && gen === generation) soundNotSaved(staged, error);
           // No blank "Copie de …" note is left behind (it goes to the trash, best effort).
           await api.trashNotes([created.path]).catch(() => {});
           throw error;
@@ -806,8 +898,9 @@
         void refreshOriginal(true);
         revision = null;
         revisionDialog = null;
-        // The copy has no narration.
-        if (replaying) void loadNarration();
+        // The copy has no narration, or the sound it was saved with.
+        if (staged && stagedNarration?.key === staged.key) stagedNarration = null;
+        void loadNarration();
         return true;
       } catch (error) {
         if (gen === generation) saveError = errorMessage(error);
@@ -860,6 +953,8 @@
   }
 
   function reload() {
+    // The note on disk comes back as it is: a sound kept for the edited one goes.
+    void dropStaged();
     void open(currentPath);
   }
 
@@ -1128,6 +1223,8 @@
 
   function discardAndLeave() {
     void drafts.discard(noteId);
+    // « Ne pas enregistrer »: a sound kept for the note goes with its changes.
+    void dropStaged();
     const target = switching;
     const resume = resuming;
     switching = null;
@@ -1238,7 +1335,17 @@
   function pasteDecoded(strokes: Stroke[]) {
     if (!doc) return;
     if (!canDraw(doc)) return hiddenLayerNotice();
-    change(pasteStrokes(doc, strokes));
+    change(pasteStrokes(doc, strokes, pasteTime(doc.note)));
+  }
+
+  /**
+   * When pasted strokes begin (M17): during a writing recording, at the sound's current time (O15); after a note-time
+   * narration that ends after the ink, after it (O14); otherwise the editor's rule (undefined: after the note's ink).
+   */
+  function pasteTime(note: Note): number | undefined {
+    if (writingClock) return writingClock.noteTime(performance.now());
+    const end = noteSoundEnd(strokeNarration);
+    return end !== null && end > lastSampleTime(note) ? nextStrokeBase(note, strokeNarration) : undefined;
   }
 
   /**
@@ -1371,6 +1478,8 @@
   /** "Revenir à l'original", confirmed: the original's ink, as one undoable step. */
   function revertOriginal() {
     if (!doc || !original || original.source === 'none' || split || replaying) return;
+    // The original's ink would replace the strokes timed on the sound being recorded (O20).
+    if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
     const next = revertToOriginal(doc, original);
     if (next === doc) return;
     change(next);
@@ -1401,6 +1510,8 @@
   }
 
   function openVideo() {
+    // The video is the timeline the recording is writing (O20).
+    if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
     const source = currentSource();
     if (source) video = source;
   }
@@ -1428,6 +1539,8 @@
   function toggleSplit() {
     if (!doc) return;
     if (split) return cancelSplit();
+    // A split by time cuts the timeline the recording is writing (O20).
+    if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
     if (hasSelection) reselect(clearSelection(doc));
     const span = timeRange(doc.note);
     split = {
@@ -1510,13 +1623,17 @@
 
   function enterReplay() {
     if (!doc || split || replaying || canvas?.dragging()) return;
+    // A writing recording is writing the timeline the replay would play (O20).
+    if (recorder.busy) return showNotice(t('editor.replay.recordingBusy'), true);
     // The replay shows Son (the narration) and gives the tab back when it ends. The forced view is not remembered:
     // leaving the editor during the replay must keep the view the user had (the stored one).
     sideBeforeReplay = side.snapshot();
     side.open('sound', { persist: false });
     player.load(doc.note);
-    narration = null;
     narrationError = null;
+    // The writing recording's panel, if it was open, is not the replay's.
+    recordOpen = false;
+    confirmDelete = false;
     replaying = true;
     void loadNarration();
   }
@@ -1536,7 +1653,6 @@
   function resetReplay() {
     player.pause();
     replaying = false;
-    narration = null;
     narrationError = null;
     narrationLoading = false;
     recordOpen = false;
@@ -1554,23 +1670,33 @@
    */
   function salvageRecording() {
     if (recorder.phase !== 'recording') return;
+    // A replay recording runs only in a replay; outside one it is a writing recording.
+    if (!replaying) {
+      // Kept by Rust in memory with its backup copy (the draft keeps the strokes). Without its clock, its own stop is
+      // already on its way (« Annuler »).
+      const writing = writingClock;
+      writingClock = null;
+      if (writing) void recorder.stop(true, null, null, writing.noteZeroWallMs);
+      return;
+    }
     player.pause();
     void recorder.stop(true, stamp, currentPath, replayStartedAt);
   }
 
-  /** Reads the narration stored in the note (what the bar and the side panel show). */
+  /** Reads the narration stored in the note (what the Son tab, the replay bar and the strokes' times go by). */
   async function loadNarration() {
     const gen = generation;
+    const target = currentPath;
     try {
-      const info = await api.narrationInfo(currentPath);
-      if (gen !== generation || !replaying) return;
+      const info = await api.narrationInfo(target);
+      if (gen !== generation || target !== currentPath) return;
       narration = info;
       narrationError = null;
       if (!info) dropNarrationSound();
     } catch (error) {
-      if (gen !== generation || !replaying) return;
+      if (gen !== generation || target !== currentPath) return;
       narration = null;
-      narrationError = t('replay.narrationFailed', { message: errorMessage(error) });
+      if (replaying) narrationError = t('replay.narrationFailed', { message: errorMessage(error) });
       dropNarrationSound();
     }
   }
@@ -1628,6 +1754,8 @@
     if (!replaying || recorder.busy) return;
     dropNarrationSound();
     player.pause();
+    // « Remplacer » was answered: a sound kept for the next save would overwrite this one, it goes.
+    await dropStaged();
     const { speed, maxPauseMs } = player.options;
     const started = await recorder.start(microphone, { kind: 'replay', path: currentPath, speed, maxPauseMs, startMs: 0 });
     if (!started) return;
@@ -1661,6 +1789,47 @@
     if (!result.ok || !result.saved) return;
     showNotice(t('narration.record.saved', { duration: clock(result.saved.durationMs) }));
     await loadNarration();
+  }
+
+  /**
+   * « Démarrer » outside a replay (« Pendant que j'écris », M17): the sound is recorded in note time, after the ink the
+   * note holds (`writingOrigin`); from the moment Rust answered, the strokes drawn take their times from its clock.
+   */
+  async function startWriting() {
+    if (replaying || recorder.busy || !history) return;
+    // « Remplacer » was answered: a sound kept for the next save is replaced by this one.
+    await dropStaged();
+    const started = await recorder.start(microphone, { kind: 'writing', path: currentPath });
+    if (!started || !alive || !history) return;
+    writingClock = new WritingClock(writingOrigin(history.present.note), performance.now(), Date.now());
+  }
+
+  /**
+   * « Arrêter » (`keep`) or « Annuler » of a writing recording. Stopped and kept, Rust keeps the sound in memory and the
+   * note is saved with it at once (O10); cancelled, the sound goes and the strokes stay (O16).
+   */
+  async function stopWriting(keep: boolean) {
+    const clockNow = writingClock;
+    if (recorder.phase !== 'recording' || !clockNow) return;
+    // Strokes begun from now on follow the editor's rule; one being drawn keeps the sound's clock to its end.
+    writingClock = null;
+    const end = clockNow.noteTime(performance.now());
+    if (keep) recordOpen = false;
+    const gen = generation;
+    const outcome = await recorder.stop(keep, null, null, keep ? clockNow.noteZeroWallMs : null);
+    const key = outcome.saved?.staged;
+    if (!keep || !key || !alive || gen !== generation) return;
+    const durationMs = outcome.saved?.durationMs ?? 0;
+    stagedNarration = {
+      key,
+      durationMs,
+      // The sound ended when « Arrêter » was pressed: it lies before that in note time (Rust's own start is read back).
+      info: { durationMs, base: 'note', speed: 1, maxPauseMs: null, startMs: Math.round(end - durationMs) },
+    };
+    const saved = await save();
+    if (!alive || gen !== generation) return;
+    if (saved) showNotice(t('editor.sound.saved', { duration: clock(durationMs) }));
+    else showNotice(t('editor.sound.notSaved'), true);
   }
 
   /** « Réessayer »: the kept recording goes into the note as it is now (its current path and stamp). */
@@ -2072,6 +2241,13 @@
             split.error = null;
           }
         }}
+        strokeClock={writingClock}
+        narration={strokeNarration}
+        oninprogress={(event) => {
+          if (pageProjection.presentation) pageProjection.stroke(event);
+        }}
+        onvisible={(rect) => pageProjection.visible(rect)}
+        projected={pageProjection.frame}
       />
       <aside class="editor-side" aria-label={t('side.label')}>
         <SidePanel where="editor" panel={side} {badges} above={(split || (hasSelection && !replaying)) ? aboveBlock : undefined}>
@@ -2123,14 +2299,15 @@
             <EditorSound
               {replaying}
               {narration}
+              staged={stagedNarration?.durationMs ?? null}
               {recorder}
               bind:open={recordOpen}
               bind:confirmDelete
               device={microphone}
               ondevice={chooseMicrophone}
-              onstart={startRecording}
-              onstop={() => void stopRecording(true)}
-              oncancel={() => void stopRecording(false)}
+              onstart={() => void (replaying ? startRecording() : startWriting())}
+              onstop={() => void (replaying ? stopRecording(true) : stopWriting(true))}
+              oncancel={() => void (replaying ? stopRecording(false) : stopWriting(false))}
               onretry={() => void retryRecording()}
               ondelete={deleteNarration}
               onreplay={enterReplay}
@@ -2141,7 +2318,7 @@
             />
           {/snippet}
           {#snippet projection()}
-            <ShareBlock />
+            <EditorProjectionTab projection={pageProjection} />
           {/snippet}
           {#snippet help()}
             <ShortcutsHelp where="editor" shortcuts={EDITOR_SHORTCUTS} />

@@ -1,3 +1,8 @@
+<script lang="ts" module>
+  /** The id of the next stroke in progress (`oninprogress`): unique for the app's life, whatever canvas draws it. */
+  let nextStrokeId = 1;
+</script>
+
 <script lang="ts">
   /**
    * The page: an SVG whose `viewBox` is the visible part of the page in device units, the
@@ -10,6 +15,11 @@
    * whatever the tool, the pen's barrel button draws a lasso, a finger pans (two fingers pinch,
    * a double tap fits the page) unless "Draw with a finger" is on, and a finger is ignored while
    * a pen is in contact or hovering.
+   *
+   * M17 (docs/design/paper-projection-narration.md §2.6, §3.2): while a writing recording runs, a stroke takes its
+   * times from `strokeClock` (the sound's clock); otherwise it goes after the note's ink and the end of a note-time
+   * narration (`nextStrokeBase`). The stroke in progress is told to `oninprogress` (the projection streams it), what
+   * the canvas shows of the page to `onvisible`, and the projected area is drawn as a dashed frame (`projected`).
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api';
@@ -62,9 +72,12 @@
     type View,
     type Viewport,
   } from '../../lib/editor/view';
+  import { nextStrokeBase, type StrokeClock } from '../../lib/editor/writing-clock';
   import { t } from '../../lib/i18n.svelte';
   import type { Ink, InkPoint } from '../../lib/ink';
-  import { cssColor, type Note, type Stroke } from '../../lib/note';
+  import { cssColor, type Stroke } from '../../lib/note';
+  import type { InProgress } from '../../lib/projection-feed';
+  import type { NarrationInfo } from '../../lib/video';
 
   let {
     doc,
@@ -79,6 +92,11 @@
     split = null,
     onzone,
     straighten = null,
+    strokeClock = null,
+    narration = null,
+    oninprogress,
+    onvisible,
+    projected = null,
   }: {
     doc: Doc;
     tools: ToolSettings;
@@ -107,6 +125,19 @@
      * accent line. Nothing of it is in the note.
      */
     straighten?: { sources: readonly number[]; strokes: readonly Stroke[] } | null;
+    /**
+     * A writing recording runs (M17): a stroke begun now takes its times from the sound's clock (the note time of its
+     * pointer events), to its end even if the recording stops meanwhile. Null: the editor's rule.
+     */
+    strokeClock?: StrokeClock | null;
+    /** The note's narration: outside a recording, a stroke goes after the end of one in note time (O14). */
+    narration?: NarrationInfo | null;
+    /** The stroke in progress: begun, grown (all its points so far), ended (`committed`: the doc gets it next). */
+    oninprogress?: (event: InProgress) => void;
+    /** What the canvas shows of the page (page units), at each change of the view or of its size. */
+    onvisible?: (rect: Rect) => void;
+    /** The area the projection shows (page units), drawn as a dashed frame; null: none. */
+    projected?: Rect | null;
   } = $props();
 
   /** Screen pixels per device unit at real size (96 dpi, 10 µm units). */
@@ -118,7 +149,8 @@
 
   type Drag =
     | { kind: 'pan'; id: number; start: Vec; view: View }
-    | { kind: 'pen'; id: number; points: InkPoint[]; t0: number; base: number }
+    /** `stroke`: the id the stroke in progress is told by (`oninprogress`). */
+    | { kind: 'pen'; id: number; points: InkPoint[]; t0: number; base: number; stroke: number }
     | { kind: 'eraser'; id: number; last: Vec }
     /** `barrel`: started by the pen's barrel button, which ends when the button is released. */
     | { kind: 'lasso'; id: number; points: Vec[]; combine: Combine; barrel?: boolean }
@@ -273,6 +305,18 @@
     return () => observer.disconnect();
   });
 
+  // What the canvas shows of the page, at each change of the view or of the stage's size (the projected area follows it).
+  $effect(() => {
+    const rect = box;
+    untrack(() => onvisible?.(rect));
+  });
+
+  // A stroke still being drawn when the canvas goes (another note opens) is told to be dropped.
+  $effect(() => () => {
+    const current = drag;
+    if (current?.kind === 'pen') oninprogress?.({ kind: 'end', id: current.stroke, committed: false });
+  });
+
   // The background, re-rendered when the page, the paper, the background image or the zoom
   // bucket changes.
   $effect(() => {
@@ -321,10 +365,12 @@
     return typeof e.pointerId === 'number' ? e.pointerId : 1;
   }
 
-  function lastTime(note: Note): number {
-    let last = -1;
-    for (const stroke of note.strokes) for (const p of stroke.points) if (p.t > last) last = p.t;
-    return last;
+  /**
+   * The note time of a stroke's first sample put down at `timeStamp`: the sound's clock during a writing recording,
+   * else after the note's ink and a note-time narration (whole milliseconds).
+   */
+  function strokeBase(timeStamp: number): number {
+    return strokeClock ? Math.round(strokeClock.noteTime(timeStamp)) : nextStrokeBase(doc.note, narration);
   }
 
   /** The pen's pressure is recorded, so the line follows it; a mouse or a finger has a constant one. */
@@ -368,6 +414,7 @@
   function dropDrag() {
     grabbingFinger = false;
     if (!drag) return;
+    if (drag.kind === 'pen') oninprogress?.({ kind: 'end', id: drag.stroke, committed: false });
     drag = null;
     dragKind = null;
     if (frame && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(frame);
@@ -506,9 +553,23 @@
     }
     switch (tools.mode) {
       case 'pen': {
-        const d = { t0: e.timeStamp, base: lastTime(doc.note) + 500 };
-        begin({ kind: 'pen', id, points: [sample(e, p, d)], ...d });
+        const d = { t0: e.timeStamp, base: strokeBase(e.timeStamp) };
+        const stroke = nextStrokeId++;
+        const points = [sample(e, p, d)];
+        begin({ kind: 'pen', id, points, ...d, stroke });
         showLive();
+        oninprogress?.({
+          kind: 'begin',
+          id: stroke,
+          tool: tools.tool,
+          color: { ...tools.color },
+          width: tools.width,
+          layer: doc.activeLayer,
+          points,
+          // A point's wall time is the time origin plus its event's `timeStamp`.
+          wallAtBase: performance.timeOrigin + d.t0,
+          base: d.base,
+        });
         break;
       }
       case 'eraser':
@@ -572,6 +633,7 @@
       }
       case 'pen': {
         const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+        const before = drag.points.length;
         for (const ev of events.length > 0 ? events : [e]) {
           const p = pagePoint(ev);
           const last = drag.points[drag.points.length - 1];
@@ -579,6 +641,7 @@
           drag.points.push(sample(ev, p, drag));
         }
         scheduleLive();
+        if (drag.points.length > before) oninprogress?.({ kind: 'grow', id: drag.stroke, points: drag.points });
         break;
       }
       case 'eraser': {
@@ -646,6 +709,8 @@
     frame = 0;
     switch (d.kind) {
       case 'pen':
+        // Told first: the doc that gets the stroke is what the projection compares with next.
+        oninprogress?.({ kind: 'end', id: d.stroke, committed: !cancelled });
         if (!cancelled) {
           onchange(addStroke(doc, { tool: tools.tool, color: { ...tools.color }, width: tools.width, points: d.points }));
         }
@@ -798,6 +863,17 @@
     {#if hover && (tools.mode === 'eraser' || eraserEnd) && !split && !readonly}
       <circle class="eraser" cx={hover.x} cy={hover.y} r={tools.eraserRadius} />
     {/if}
+    {#if projected}
+      <rect
+        class="projected"
+        data-slot="projected-area"
+        x={projected.x}
+        y={projected.y}
+        width={projected.width}
+        height={projected.height}
+        pointer-events="none"
+      />
+    {/if}
   </svg>
   <div class="zoom" role="group" aria-label={t('editor.zoom.label')}>
     <button class="button ghost" type="button" title={t('editor.zoom.out')} aria-label={t('editor.zoom.out')} onclick={() => zoomBy(1 / 1.25)}>−</button>
@@ -935,6 +1011,16 @@
     fill: rgb(255 255 255 / 35%);
     stroke: var(--muted);
     stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+  }
+
+  /* What the class sees on the projector (M17, O5): a dashed frame, never in the way of the pen. */
+  .projected {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2px;
+    stroke-dasharray: 8 5;
     vector-effect: non-scaling-stroke;
     pointer-events: none;
   }

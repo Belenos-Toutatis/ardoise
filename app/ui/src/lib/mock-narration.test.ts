@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from './api';
 import { mockLibrary, resetMockLibrary } from './mock-data';
-import { mockNarration, mockNarrationOf, resetMockNarration, setMockNarration } from './mock-narration';
+import { mockNarration, mockNarrationOf, mockStagedNarration, resetMockNarration, setMockNarration } from './mock-narration';
 import type { NarrationInfo, NarrationTarget } from './video';
 
 beforeEach(() => {
@@ -266,5 +266,88 @@ describe('mock narration of a note', () => {
     await api.narrationStart(null, { kind: 'live' });
     vi.advanceTimersByTime(2500);
     expect(await api.narrationStop(true, null, null, null)).toEqual({ stamp: null, durationMs: 2500, pages: 3 });
+  });
+});
+
+describe('mock narration recorded while writing (M17)', () => {
+  const writing = (path: string): NarrationTarget => ({ kind: 'writing', path });
+
+  it('keeps the sound in memory at the stop, in note time, placed from the wall clock at note time 0', async () => {
+    const path = pathOf('Cours de physique');
+    const entry = mockLibrary().notes.get(path)!;
+    const before = entry.stamp;
+    expect(await code(api.narrationStart(null, writing('C:\nowhere.ardoise')))).toBe('noteNotFound');
+    vi.setSystemTime(new Date(5_000_000));
+    await api.narrationStart(null, writing(path));
+    expect((await api.narrationStatus()).state).toBe('recording');
+    vi.advanceTimersByTime(4000);
+    // Note time 0 was 3 s before the capture began on the wall clock (the note's ink ends before that).
+    const saved = await api.narrationStop(true, null, null, 5_000_000 - 3000);
+    expect(saved).toMatchObject({ stamp: null, durationMs: 4000, pages: 1 });
+    expect(typeof saved?.staged).toBe('string');
+    // Nothing is written yet: the note waits to be saved with it.
+    expect(entry.stamp).toEqual(before);
+    expect(mockNarrationOf(path)).toBeNull();
+    expect(mockStagedNarration()).toEqual({
+      key: saved!.staged,
+      info: { durationMs: 4000, base: 'note', speed: 1, maxPauseMs: null, startMs: 3000 } satisfies NarrationInfo,
+    });
+    expect((await api.narrationStatus()).pending).toBe(false);
+  });
+
+  it('replaces the sound kept by a newer one, and drops it on request (its key only)', async () => {
+    const path = pathOf('Cours de physique');
+    await api.narrationStart(null, writing(path));
+    vi.advanceTimersByTime(1000);
+    const first = (await api.narrationStop(true, null, null, Date.now()))!.staged!;
+    await api.narrationStart(null, writing(path));
+    vi.advanceTimersByTime(2000);
+    const second = (await api.narrationStop(true, null, null, Date.now()))!.staged!;
+    expect(second).not.toBe(first);
+    expect(mockStagedNarration()?.key).toBe(second);
+    // The old key drops nothing.
+    await api.narrationDropStaged(first);
+    expect(mockStagedNarration()?.key).toBe(second);
+    await api.narrationDropStaged(second);
+    expect(mockStagedNarration()).toBeNull();
+  });
+
+  it('keeps nothing when cancelled, empty or silent', async () => {
+    const path = pathOf('Cours de physique');
+    await api.narrationStart(null, writing(path));
+    vi.advanceTimersByTime(500);
+    expect(await api.narrationStop(false, null, null, null)).toBeNull();
+    expect(mockStagedNarration()).toBeNull();
+    mockNarration.empty = true;
+    await api.narrationStart(null, writing(path));
+    expect(await code(api.narrationStop(true, null, null, Date.now()))).toBe('emptyRecording');
+    mockNarration.empty = false;
+    mockNarration.silent = true;
+    await api.narrationStart(null, writing(path));
+    vi.advanceTimersByTime(1500);
+    expect(await code(api.narrationStop(true, null, null, Date.now()))).toBe('microphoneSilent');
+    expect(mockStagedNarration()).toBeNull();
+    expect((await api.narrationStatus()).state).toBe('idle');
+  });
+
+  it('goes into the note with the save that names its key, in the same write', async () => {
+    const path = pathOf('Cours de physique');
+    await api.narrationStart(null, writing(path));
+    vi.advanceTimersByTime(1500);
+    const key = (await api.narrationStop(true, null, null, Date.now() - 1500 - 800))!.staged!;
+    const opened = await api.openNote(path);
+    // An unknown key writes nothing.
+    expect(await code(api.saveNote(path, opened.note, opened.stamp, undefined, 'staged-unknown'))).toBe('noStagedNarration');
+    expect(mockLibrary().notes.get(path)!.stamp).toEqual(opened.stamp);
+    // A conflict leaves the sound kept.
+    const stale = { ...opened.stamp, len: opened.stamp.len + 1 };
+    expect(await code(api.saveNote(path, opened.note, stale, undefined, key))).toBe('noteConflict');
+    expect(mockStagedNarration()?.key).toBe(key);
+    const next = await api.saveNote(path, opened.note, opened.stamp, undefined, key);
+    expect(next).not.toEqual(opened.stamp);
+    expect(mockNarrationOf(path)).toEqual({ durationMs: 1500, base: 'note', speed: 1, maxPauseMs: null, startMs: 800 });
+    expect(mockStagedNarration()).toBeNull();
+    // The note tells it when it opens again.
+    expect((await api.openNote(path)).narration).toEqual(mockNarrationOf(path));
   });
 });
