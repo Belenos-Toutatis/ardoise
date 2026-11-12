@@ -431,13 +431,32 @@ ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tab
 - **Clic** : cliquez sur un trait pour le choisir seul. Cliquez sur l'encre elle-même, pas à côté.
 - `Maj` + lasso ou clic ajoute des traits à ceux déjà choisis. `Ctrl` + lasso ou clic en retire.
 - Un geste dans le vide, ou `Échap`, enlève la sélection. `Échap` ne ferme rien d'autre tant que des traits sont choisis.
-- Un doigt et la molette continuent de déplacer et de zoomer l'aperçu.
+- Un doigt hors du cadre de la sélection et la molette continuent de déplacer et de zoomer l'aperçu.
 - Les traits choisis sont entourés de bleu dans l'aperçu. La barre de la sélection, au-dessus de l'onglet ouvert du
   panneau de côté, dit « Traits sélectionnés : 3 » (voir **Le panneau de côté de la fenêtre de commande**).
 - **Seuls les traits du calque choisi sont pris** (zone **Calques**, voir plus bas) ; choisir un autre calque enlève la
   sélection. On ne peut pas choisir le trait que la tablette est en train d'écrire, ni les traits d'un calque masqué ;
   masquer un calque enlève ses traits de la sélection.
   Sur une feuille reprise, on peut choisir les anciens traits de la feuille, en choisissant leur calque.
+
+**Déplacer et redimensionner** : les traits choisis sont entourés d'un cadre en pointillés, avec un petit carré à chacun
+de ses quatre coins.
+
+- **Déplacer** : posez le stylet, le doigt ou la souris **dans le cadre** (ou tout près de son bord : environ 4 pixels
+  pour la souris, 12 pour le stylet, 16 pour le doigt) et glissez. Les traits suivent, et se posent là où vous relâchez.
+- **Redimensionner** : saisissez un **coin** (le stylet et le doigt n'ont pas besoin de viser pile : 16 et 22 pixels
+  autour du carré, 8 pour la souris) et glissez le long de la diagonale. Le coin opposé ne bouge pas ; l'épaisseur du trait
+  suit la taille. On ne peut pas descendre sous un vingtième de la taille, ni dépasser vingt fois.
+- Un simple appui dans le cadre, sans glisser, ne change rien : il ne refait pas de sélection. Avec `Maj` ou `Ctrl`,
+  un geste est toujours un lasso, même sur le cadre. Hors du cadre, la souris et le stylet entourent comme avant et un doigt
+  déplace l'aperçu.
+- Pendant le geste, les traits se voient soulevés, à la place où vous les menez, et l'endroit qu'ils quittent est vide. `Échap`
+  (ou un deuxième doigt, qui prend le geste pour un zoom) abandonne le geste : les traits restent où ils étaient et rien n'est
+  envoyé.
+- **Le vidéoprojecteur et l'autre écran du réseau ne bougent qu'au relâchement** : ils montrent le résultat, d'un coup, jamais
+  le cadre ni les carrés. La sélection reste, pour déplacer encore ou redimensionner. `Ctrl + Z` remet les traits à leur
+  place (un pas par déplacement ou par redimensionnement).
+- Dans l'éditeur, le cadre et ses coins se prennent de la même façon.
 
 **Supprimer** : cliquez sur **Supprimer** dans la barre de la sélection, ou appuyez sur `Suppr` ou `Retour arrière`.
 
@@ -448,7 +467,7 @@ sa couleur. Sans sélection, une pastille règle la couleur du stylo, comme avan
 **Annuler et rétablir**
 
 - `Ctrl + Z` (ou **Annuler**) annule la dernière action de l'ordinateur : un trait ou un coup de gomme (voir
-  **Corriger pendant le direct**), une suppression, un changement de couleur, ou **Effacer la page**. Les traits
+  **Corriger pendant le direct**), une suppression, un changement de couleur, un déplacement ou un redimensionnement, ou **Effacer la page**. Les traits
   supprimés reviennent à leur place.
 - `Ctrl + Y` ou `Ctrl + Maj + Z` (ou **Rétablir**) refait ce qui vient d'être annulé. Une nouvelle retouche vide ce qui
   pouvait être rétabli.
@@ -460,7 +479,7 @@ sa couleur. Sans sélection, une pastille règle la couleur du stylo, comme avan
 - Les boutons **Annuler** et **Rétablir** sont grisés quand il n'y a rien à faire.
 
 **Le vidéoprojecteur et l'autre écran du réseau ne voient que le résultat.** Jamais le contour bleu ni le lasso : un
-trait supprimé disparaît, un trait recoloré change de couleur. Les annotations tracées sur la présentation ne sont pas
+trait supprimé disparaît, un trait recoloré change de couleur, un trait déplacé ou redimensionné apparaît à sa nouvelle place. Les annotations tracées sur la présentation ne sont pas
 des traits de la page : on ne les choisit pas.
 
 **Dans la note.** Quand vous terminez, la note contient ce qu'il y avait à l'écran : traits supprimés absents, couleurs
