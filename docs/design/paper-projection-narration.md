@@ -5,7 +5,7 @@ Decisions: `docs/questions.md` Q13 (2026-11-11: the three M17 bullets), SPEC §4
 and its checkpoint H7. Look: the mockup the user validated, `target/maquettes/maquette-barre-laterale.html` (not in git;
 its blocks marked « nouveau »: live Page and Fond, the editor's Projection, the editor's Son « Pendant que j'écris » /
 « Pendant une relecture »). M16 prepared the ground: [side-panel.md](side-panel.md) §11 "M17 fit" and "As built".
-Written on 2026-11-11 from reading the code at commit b9eaa8a (branch `m17`), nothing built or run: every "today"
+Written on 2026-11-11 from reading the code at commit d828ba2 (branch `m17`), nothing built or run: every "today"
 cites where it was read; "(supposé)" marks what was not checked.
 
 **Words.** The **page** of live mode is the current page of the session (`LiveSession.current`). Its **paper** is its

@@ -3,7 +3,7 @@
 Decisions: `docs/questions.md` Q13 (2026-11-11), SPEC §5 « Panneau de côté à onglets », ROADMAP M16 — and M17, which
 comes next and must plug in without rework (§11). Look and behaviour: the mockup the user validated,
 `target/maquettes/maquette-barre-laterale.html` (not in git; its script is the reference for the rail, its CSS for the
-look, its « nouveau » blocks are M17). Written on 2026-11-11 from reading the code at commit b9a5d48, nothing built or
+look, its « nouveau » blocks are M17). Written on 2026-11-11 from reading the code at commit b0ecacb, nothing built or
 run: every "today" cites where it was read; "(supposé)" marks what was not checked.
 
 **Words.** The **rail**: the column of icon tabs on the right edge of the editor and of the live control window. A
@@ -249,7 +249,7 @@ classes, never rename or remove these.
   bar on its left (mockup `.tab.on::before`). The above block: `--accent-soft` background (mockup `.selection`).
 - **Collisions.** In M15 the global `.panel` rule (`app.css:306–315`, `position: absolute; inset: 0 0 0 auto`) squashed
   `StraightenPanel` to a 14 px strip in the real window while jsdom, which applies no stylesheet, saw nothing (commit
-  7dd0991). app.css also styles, globally, `.count` (570), `.actions` (480), `.chosen` (232), `.badge` (1160),
+  c929875). app.css also styles, globally, `.count` (570), `.actions` (480), `.chosen` (232), `.badge` (1160),
   `.selection-bar` (809), `.selection-panel` (834), `.icon-button` (580), `.check` (352), `.editor .buttons` (1357),
   `.side-section .row`, `.banner.notice`. So none of the mockup's names (`.panel`, `.panel-head`, `.tab`, `.count`,
   `.dot`, `.block`, `.row`, `.selection`, `.icon`, `.switch`, `.swatch`, `.actions`, `.notice`) is used as is.
