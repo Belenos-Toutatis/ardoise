@@ -205,7 +205,7 @@ reconnects gets a fresh snapshot. Messages (`type` field; TypeScript in `app/ui/
 |---|---|
 | `{"type":"waiting"}` | the Ardoise PC shows nothing to share: waiting screen |
 | `{"type":"live","reset":bool,"batch":LiveBatch}` | a batch of live mode, as the presentation window gets it (stripped, see below). `reset: true` on the first batch of a subscription: it starts with a snapshot, the viewer starts again from it |
-| `{"type":"livePaper","key":string,"version":string}` | the paper of a live page that is not plain (a resumed sheet: template, texture, background image, page of a PDF) can be fetched at `/paper/<key>`; it is drawn under the strokes while the page's snapshot has `paperKey` = `key`. `version` is a digest of its bytes: the same `key` and `version` are the picture already fetched. Never inside a batch, right after the snapshot of each subscription, and when the paper changes. Ordinary live pages never get one (see "The paper of a live page") |
+| `{"type":"livePaper","key":string,"version":string}` | the paper of a live page that is not plain (a template, a texture, a background image or page of a PDF: a resumed sheet's, or chosen in the live window's Page and Fond tabs since M17) can be fetched at `/paper/<key>`; it is drawn under the strokes while the page's snapshot has `paperKey` = `key`. `version` is a digest of its bytes: the same `key` and `version` are the picture already fetched. Never inside a batch, right after the snapshot of each subscription, and when the paper changes. A page with plain paper (blank template, no texture, no image) never gets one (see "The paper of a live page") |
 | `{"type":"note","page":SharedPage,"background":string\|null}` | the whole page of the note open in the editor; `background`: the paper (template, texture, background image) as a PNG data URL, `null` when it is plain paper (the paper colour is drawn) |
 | `{"type":"noteStrokes","strokes":Stroke[]}` | strokes added at the end of the page last sent (the common case while writing in the editor) |
 | `{"type":"pause","paused":bool}` | the share is paused (the image is frozen; the viewer shows a discreet badge) or resumed |
@@ -351,16 +351,21 @@ share start, a few hundred KB.
   the viewers' sinks keeps the last batch and its text (`Arc<str>`): viewers that were up to date get equal batches
   one after the other, and the text (the whole page, after a page change) is written once for all of them.
 
-### The paper of a live page (M12)
+### The paper of a live page (M12, extended by M17)
 
-A session seeded from a note (`live_resume`) has a page that may have a template, a texture and a background image or
-page of a PDF. A browser cannot draw them, and the hub's events carry no pixels. Every other live page is plain paper:
-white, or slate with the blackboard, which the viewer fills with the paper colour; **nothing below happens for them**: no
-key, no message, no thread (a test checks it).
+A live page may have a template, a texture and a background image or page of a PDF: a page of a session seeded from a
+note (`live_resume`) has its own, and since M17 the teacher gives any page of the session a template, a texture or an
+image from the live window's Page and Fond tabs (`docs/design/paper-projection-narration.md` §1). A browser cannot draw
+them, and the hub's events carry no pixels. A page whose paper is **plain** (blank template, no texture, no image: white,
+another colour, or slate with the blackboard, which the viewer fills with the paper colour) gets **nothing below**: no key,
+no message, no thread (a test checks it). Until M17 this was true of every page of a session that was not resumed; now an
+ordinary page with a Seyès template, a texture or an image gets a key and a picture like a resumed sheet, and a white blank
+page still costs nothing.
 
 - **The key** (`paper_key`, `share/live_paper.rs`). `SharedSnapshot` has `paperKey`: 16 hex digits, a digest of the note's
   id, the page size, the paper as drawn (slate while the blackboard is on, like `effectiveBackground`), the template, the
-  texture and the image's description. Absent on plain paper. It is opaque and tells nothing of the note; it costs a
+  texture, the image's description and, since M17, the key of the image's pixels (`imagePixels.key`, a digest of the bytes:
+  another file under the same name and in the same place is another picture). Absent on plain paper. It is opaque and tells nothing of the note; it costs a
   hash per snapshot of such a page.
 - **The picture does not travel in the stream.** `livePaper` says only `key` and `version`; the viewer fetches the PNG with
   `GET /paper/<key>`. It used to be a data URL in the message, which trapped a slow viewer, measured on 2026-11-04 over
@@ -401,7 +406,9 @@ key, no message, no thread (a test checks it).
   hides it with the snapshot itself, at once, in whatever order the two arrive, and going to a plain page clears it
   **without any message**. Back on the sheet the viewer still has the picture: nothing is fetched, nothing flashes.
 - **Rendering.** What `page.rs` does for the editor's note: `background_png` at `PAPER_PX` (2 560 px) on the longer side;
-  the pixels are the session's (`ResumeBase::picture`, decoded once), not the editor's staging area. The two last pictures are
+  the pixels are the page's own (`PageImage`, `live/paper.rs`: the member written with the page, decoded on demand, the last
+  two decoded pictures kept), not the editor's staging area. If the hub's image changed after the snapshot asked for it,
+  the picture is skipped and the next snapshot asks again. The two last pictures are
   kept (`LivePapers::pictures`): the sheet and the sheet on the blackboard.
 - **Threads.** `ShareSink::send`, on the hub's flusher, calls `LivePapers::saw` for each snapshot in a batch: a comparison
   under a small lock of its own. Only when the paper changed does it start the `share-paper` thread, which ends when
@@ -497,9 +504,9 @@ included) and keeps the previous one: same `id`, page, background, background im
 a prefix of the new ones → `append` = the new strokes; otherwise only `full`. The background is rendered by
 `notes::background_png` (with the staged picture under `imageKey`, like `render_background`) at 2 560 px on the
 longer side, **only when it changed** (cached by page size, background and image placement), in `spawn_blocking`;
-plain paper (template `blank`, no texture, no image) gives `null`. Ordinary live pages are plain paper too (white, or
-slate with the blackboard): the viewer draws their paper colour, as the app does before its PNG arrives. A resumed sheet
-is not: "The paper of a live page" above.
+plain paper (template `blank`, no texture, no image) gives `null`. A live page with plain paper (white, another colour,
+or slate with the blackboard) is plain too: the viewer draws its paper colour, as the app does before its PNG arrives. A
+page with a template, a texture or an image, resumed or not, is not: "The paper of a live page" above.
 
 ### Commands (`share.rs`)
 
@@ -652,7 +659,7 @@ written and flushed per message) → LAN → `fetch` reader → `LiveState` → 
   batches, note diff (append / full), a share started with a real `LiveHub` and a TCP client receiving live points
   without any path. A resumed sheet with a template, an image and a hidden layer over real TCP (the message, the picture
   fetched and its pixels, `401` and `404`, late joiner, plain page and back, pause, reconnection, blackboard, nothing else of
-  the note in any message nor in the file; strokes going on during a download not read); ordinary pages (no key, no message); `LivePapers` (no work on plain paper, rendered once); ink on the
+  the note in any message nor in the file; strokes going on during a download not read); pages with plain paper (no key, no message), and since M17 an ordinary page with a Seyès template, a texture or an image (a key, the picture served, another key for other pixels); `LivePapers` (no work on plain paper, rendered once); ink on the
   paper against the editor's scene, pixel by pixel, with the image's `rect` and `quarter_turns`.
 - vitest: SSE parser, stream client (fake `fetch`: 401, 503, reconnect, `end`), viewer state (note → snapshot,
   append, pause, reset, the paper of a live page), the paper's fetch (`viewer-paper.test.ts`: once, retries, a stale key dropped,

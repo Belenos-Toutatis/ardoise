@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /// <reference types="node" />
 // Milestone M16, package C: the live control window's side panel is the shared tabbed rail
-// (docs/design/side-panel.md, §8). Four tabs (Calques, Son, Projection, Aide) and no Page or Fond until M17; Calques
+// (docs/design/side-panel.md, §8). Six tabs since M17 (Calques, Page, Fond, Son, Projection, Aide; Page and Fond have
+// their own file, `LiveView.page.test.ts`); Calques
 // open by default, then the window remembers its tab and fold; each tab holds what the old panel had; the selection's
 // bar and the Select and Pen hints sit above the open tab (a selection reopens the pane, a hint does not); the badges
 // follow the layers, the recording, the projection and the share; the blackboard and laser are switches of the
@@ -127,12 +128,13 @@ function press(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
 const stored = () => JSON.parse(localStorage.getItem(sideStorageKey('live')) ?? 'null');
 
 describe('the live window side panel: tabs', () => {
-  it('has the rail Calques, Son, Projection, Aide and no Page or Fond, in an aside with its label', async () => {
+  it('has the rail Calques, Page, Fond, Son, Projection, Aide, in an aside with its label', async () => {
     const view = render();
     expect(view.side().getAttribute('aria-label')).toBe('Panneau de côté');
     expect(view.q('[data-side-panel="live"]')).not.toBeNull();
-    expect(view.tabs().map((b) => b.dataset.tab)).toEqual(['layers', 'sound', 'projection', 'help']);
-    expect(view.q('[data-tab-panel="page"], [data-tab-panel="background"]')).toBeNull();
+    expect(view.tabs().map((b) => b.dataset.tab)).toEqual(['layers', 'page', 'background', 'sound', 'projection', 'help']);
+    expect(view.q('[data-tab-panel="page"] [data-section="live-paper"]')).not.toBeNull();
+    expect(view.q('[data-tab-panel="background"] [data-section="background-image"]')).not.toBeNull();
   });
 
   it('opens on Calques by default, the zone shown and the other tabs hidden', async () => {
@@ -141,7 +143,7 @@ describe('the live window side panel: tabs', () => {
     expect(sideOf(view.target)).toEqual({ tab: 'layers', collapsed: false });
     expect(view.panel('layers').hidden).toBe(false);
     expect(view.panel('layers').querySelector('section.layers-zone[data-where="live"]')).not.toBeNull();
-    for (const id of ['sound', 'projection', 'help']) expect(view.panel(id).hidden).toBe(true);
+    for (const id of ['page', 'background', 'sound', 'projection', 'help']) expect(view.panel(id).hidden).toBe(true);
     expect(view.q('[data-slot="side-title"]')!.textContent).toBe('Calques');
   });
 
@@ -155,7 +157,7 @@ describe('the live window side panel: tabs', () => {
     expect(where('button[data-action="project"]')).toBe('projection');
     expect(where('[data-presentation]')).toBe('projection');
     expect(where('[data-section="zone"]')).toBe('projection');
-    expect(where('[data-zoom]')).toBe('projection');
+    expect(where('[data-section="zone"] [data-zoom]')).toBe('projection');
     expect(where('button[data-action="whole-page"]')).toBe('projection');
     expect(where('button[data-action="page-width"]')).toBe('projection');
     expect(where('input[data-field="board"]')).toBe('projection');
@@ -163,9 +165,9 @@ describe('the live window side panel: tabs', () => {
     expect(where('[data-section="share"]')).toBe('projection');
     expect(where('button[data-action="share"]')).toBe('projection');
     expect(where('dl.keys')).toBe('help');
-    // The preview's hint is under the zone block; the screen list is the first select of the side panel.
+    // The preview's hint is under the zone block; the paper's template select (M17) is in the Page tab.
     expect(view.q('[data-section="zone"]')!.textContent).toContain('Faites glisser le rectangle bleu');
-    expect(view.q('aside.live-side select')).toBe(view.panel('projection').querySelector('select'));
+    expect(where('select[data-field="template"]')).toBe('page');
     // The toolbar keeps the blackboard and the laser buttons, and no longer the share.
     expect(view.q('.live-toolbar [data-action="board"]')).not.toBeNull();
     expect(view.q('.live-toolbar [data-action="laser"]')).not.toBeNull();
@@ -187,7 +189,7 @@ describe('the live window side panel: tabs', () => {
     expect(sideOf(view.target)).toEqual({ tab: 'projection', collapsed: true });
     expect(stored()).toEqual({ tab: 'projection', collapsed: true });
     expect(view.q<HTMLElement>('.side-pane')!.hidden).toBe(true);
-    expect(view.tabs()).toHaveLength(4);
+    expect(view.tabs()).toHaveLength(6);
     // « › » folds as well.
     await openSideTab(view.target, 'help');
     view.q<HTMLButtonElement>('[data-action="side-collapse"]')!.click();
@@ -206,12 +208,13 @@ describe('the live window side panel: tabs', () => {
     expect(view.action('project')).not.toBeNull();
   });
 
-  it('shows Calques for a remembered tab it lacks, and keeps the remembered one until another is chosen', async () => {
+  it('shows at once a Page tab remembered before the window had one, and remembers the next choice', async () => {
     rememberSide('live', { tab: 'page', collapsed: false });
     const view = render();
     await live(view);
-    expect(sideOf(view.target)).toEqual({ tab: 'layers', collapsed: false });
-    expect(view.panel('layers').hidden).toBe(false);
+    expect(sideOf(view.target)).toEqual({ tab: 'page', collapsed: false });
+    expect(view.panel('page').hidden).toBe(false);
+    expect(view.panel('layers').hidden).toBe(true);
     expect(stored()).toEqual({ tab: 'page', collapsed: false });
     await openSideTab(view.target, 'sound');
     expect(stored()).toEqual({ tab: 'sound', collapsed: false });
@@ -357,7 +360,7 @@ describe('the live window side panel: badges', () => {
   it('has a blue dot on Projection while the projector is on, and none on Aide', async () => {
     const view = render();
     await live(view);
-    await vi.waitFor(() => expect(view.q<HTMLSelectElement>('aside.live-side select')!.options.length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(view.q<HTMLSelectElement>('[data-tab-panel="projection"] select')!.options.length).toBeGreaterThan(0));
     expect(view.tab('projection').dataset.dot).toBeUndefined();
     view.action('project')!.click();
     await vi.waitFor(() => expect(view.tab('projection').dataset.dot).toBe('live'));
@@ -472,7 +475,7 @@ describe('the live window side panel: the switches of the projected area', () =>
     await tick();
     expect(view.above()).toBeNull();
     // A field typed in still keeps its keys: the screen list is a select.
-    const select = view.q<HTMLSelectElement>('aside.live-side select')!;
+    const select = view.q<HTMLSelectElement>('[data-tab-panel="projection"] select')!;
     expect(keyOn(select, ' ').down.defaultPrevented).toBe(false);
     expect(keyOn(select, 'v').down.defaultPrevented).toBe(false);
   });

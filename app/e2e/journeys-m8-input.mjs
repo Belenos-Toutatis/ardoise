@@ -40,7 +40,7 @@ const pen = (app, type, x, y, { buttons = 0, force = 0.5 } = {}) =>
   });
 
 /** A pen stroke along `points` with the given buttons held and a pressure that grows along the line. */
-async function penStroke(app, points, { buttons = 1, force = (i, n) => 0.1 + (0.8 * i) / n } = {}) {
+export async function penStroke(app, points, { buttons = 1, force = (i, n) => 0.1 + (0.8 * i) / n } = {}) {
   const [first, ...rest] = points;
   await pen(app, 'mouseMoved', first.x, first.y);
   await pen(app, 'mousePressed', first.x, first.y, { buttons, force: force(0, points.length) });

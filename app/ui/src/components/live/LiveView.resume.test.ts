@@ -168,11 +168,11 @@ describe('live view resumed on a sheet', () => {
     expect(view.positions()).toHaveLength(4);
     for (const b of view.positions()) {
       expect(b.disabled).toBe(true);
-      expect(b.title).toContain('Une feuille reprise ne se tourne jamais');
+      expect(b.title).toContain('Cette page ne se tourne pas avec la tablette');
       // The name of the position stays for assistive technology.
       expect(b.getAttribute('aria-label')).toMatch(/^(Paysage|Portrait)/);
     }
-    expect(view.slot('orientation')!.title).toContain('ne se tourne jamais');
+    expect(view.slot('orientation')!.title).toContain('ne se tourne pas');
 
     // A click that would still arrive changes nothing.
     const turn = vi.spyOn(api, 'tabletSetOrientation');
@@ -188,8 +188,8 @@ describe('live view resumed on a sheet', () => {
   });
 
   it.each([
-    ['fr', "Une feuille reprise ne se tourne jamais : la page suivante suivra de nouveau la position de la tablette."],
-    ['en', "A resumed sheet is never turned: the next page follows the tablet's position again."],
+    ['fr', "Cette page ne se tourne pas avec la tablette : c'est une feuille reprise, ou une page écrite sur une image. Une nouvelle page suivra de nouveau la position de la tablette."],
+    ['en', "This page does not turn with the tablet: it is a resumed sheet, or a page written over an image. A new page follows the tablet's position again."],
   ] as const)('explains the disabled buttons in %s', async (locale, text) => {
     setLocale(locale);
     const view = render();

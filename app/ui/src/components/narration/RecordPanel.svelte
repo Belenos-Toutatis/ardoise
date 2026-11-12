@@ -6,8 +6,11 @@
    * `onstop`, `oncancel`), because the target and the saving differ. A recording that could not be
    * saved is kept by Rust (`recorder.pending`): the panel then offers to retry (`onretry`, which
    * knows the note's current path and stamp; no retry for the live view) or to abandon it.
+   *
+   * M17 (O11): with `replaces`, « Démarrer » first asks whether the narration the note has (`replacedMs` long) is to be
+   * replaced; only « Remplacer » starts. The live view passes no `replaces`.
    */
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { t } from '../../lib/i18n.svelte';
   import { clock } from './format';
   import MicrophonePicker from './MicrophonePicker.svelte';
@@ -25,6 +28,7 @@
     openLabel,
     openHint,
     replaces = false,
+    replacedMs = null,
     info = null,
     saveNote = null,
     warning = null,
@@ -45,8 +49,10 @@
     open?: boolean;
     openLabel: string;
     openHint?: string;
-    /** A narration is already stored: a new recording replaces it. */
+    /** A narration is already stored: a new recording replaces it, which « Démarrer » asks first. */
     replaces?: boolean;
+    /** How long the narration a new recording replaces is, milliseconds (said in the question). */
+    replacedMs?: number | null;
     /** Said before starting. */
     info?: string | null;
     /** Said before starting, after `info`: where the sound goes. */
@@ -60,15 +66,44 @@
   const idle = $derived(recorder.phase === 'idle');
   const pending = $derived(idle && recorder.pending);
   let confirmDiscard = $state(false);
+  /** « Démarrer » asked whether to replace the stored narration: the answer waits. */
+  let askingReplace = $state(false);
+  let replaceNo = $state<HTMLButtonElement>();
+  let startButton = $state<HTMLButtonElement>();
 
   // A recording kept by an earlier failure (this screen, or one left before) is offered again.
   onMount(() => {
     void recorder.refreshPending();
   });
 
+  // The question goes with what it was about: the panel folded, a recording started elsewhere, no narration to replace.
+  $effect(() => {
+    if (!open || !idle || !replaces) askingReplace = false;
+  });
+
   async function discard() {
     confirmDiscard = false;
     await recorder.discard();
+  }
+
+  /** « Démarrer »: at once, or after the question when a narration would be replaced. */
+  async function start() {
+    if (!replaces) return onstart();
+    askingReplace = true;
+    // The button pressed went: the focus goes to the answer that keeps the narration (a held Enter replaces nothing).
+    await tick();
+    replaceNo?.focus();
+  }
+
+  async function keep() {
+    askingReplace = false;
+    await tick();
+    startButton?.focus();
+  }
+
+  function replace() {
+    askingReplace = false;
+    onstart();
   }
 </script>
 
@@ -132,14 +167,45 @@
       {#if warning}
         <p class="small warning" role="status" data-slot="unsaved-warning">{warning}</p>
       {/if}
-      <div class="buttons">
-        <button type="button" class="button small-button primary" data-action="narration-start" onclick={onstart}>
-          {t('narration.record.start')}
-        </button>
-        <button type="button" class="button small-button" data-action="narration-close" onclick={() => (open = false)}>
-          {t('narration.record.close')}
-        </button>
-      </div>
+      {#if askingReplace}
+        <div class="question" role="alert" data-slot="replace-question">
+          <p class="small">{t('narration.record.replaceQuestion', { duration: clock(replacedMs ?? 0) })}</p>
+          <div class="buttons">
+            <button
+              type="button"
+              class="button small-button danger"
+              data-action="narration-replace-yes"
+              onclick={replace}
+            >
+              {t('narration.record.replaceYes')}
+            </button>
+            <button
+              bind:this={replaceNo}
+              type="button"
+              class="button small-button"
+              data-action="narration-replace-no"
+              onclick={() => void keep()}
+            >
+              {t('narration.record.replaceNo')}
+            </button>
+          </div>
+        </div>
+      {:else}
+        <div class="buttons">
+          <button
+            bind:this={startButton}
+            type="button"
+            class="button small-button primary"
+            data-action="narration-start"
+            onclick={() => void start()}
+          >
+            {t('narration.record.start')}
+          </button>
+          <button type="button" class="button small-button" data-action="narration-close" onclick={() => (open = false)}>
+            {t('narration.record.close')}
+          </button>
+        </div>
+      {/if}
     {:else}
       <p class="elapsed" role="timer" data-elapsed={Math.floor(recorder.elapsedMs)}>
         <span class="dot live" aria-hidden="true"></span>
@@ -222,6 +288,16 @@
 
   .warning {
     padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    background: var(--surface-2);
+  }
+
+  .question {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 0.65rem;
+    border-left: 4px solid var(--accent);
     border-radius: 6px;
     background: var(--surface-2);
   }

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
+import BackgroundImageSection from './BackgroundImageSection.svelte';
 import Editor from './Editor.svelte';
 
 // The real stroke geometry, instantiated from the module's bytes (jsdom cannot fetch it).
@@ -214,5 +215,84 @@ describe('background image in the editor', () => {
     await vi.waitFor(() => expect(section()?.querySelector('[role="alert"]')).toBeTruthy());
     expect(section()?.textContent).toContain("ce fichier n'est ni un PDF ni une image PNG ou JPEG");
     expect(section()?.textContent).toContain('ancienne.png');
+  });
+});
+
+// Milestone M17: live mode's Fond tab uses the same section, with no offer to turn the page and a sentence of its own.
+describe('the background image section on its own (M17)', () => {
+  const LANDSCAPE = { width: 29700, height: 21600 };
+
+  function mountSection(props: Record<string, unknown> = {}) {
+    const target = document.createElement('div');
+    document.body.append(target);
+    const onset = vi.fn();
+    const component = mount(BackgroundImageSection, {
+      target,
+      props: {
+        page: LANDSCAPE,
+        image: undefined,
+        pixels: undefined,
+        onset,
+        onturn: vi.fn(),
+        onfit: vi.fn(),
+        onopacity: vi.fn(),
+        onremove: vi.fn(),
+        ...props,
+      },
+    });
+    cleanup = () => {
+      unmount(component);
+      target.remove();
+    };
+    return { target, onset };
+  }
+
+  /** The user picks the PDF (three portrait pages in the stand-in) and puts page `pdfPage` of it. */
+  async function placePdf(target: HTMLElement, pdfPage = '1') {
+    (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\\Documents\\fiche.pdf';
+    target.querySelector<HTMLButtonElement>('button[data-action="background-choose"]')!.click();
+    await vi.waitFor(() => expect(target.querySelector('[data-slot="background-pdf"]')).toBeTruthy());
+    choose(target.querySelector('select')!, pdfPage);
+    [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Mettre en fond')!.click();
+  }
+
+  it('says its own sentence under the title when it is given one, the editor\'s otherwise', () => {
+    const editor = mountSection();
+    expect(editor.target.querySelector('.pane-help')?.textContent).toContain('Pour annoter une fiche');
+    cleanup?.();
+    const live = mountSection({ hint: 'Sous l\'écriture de la page en cours.' });
+    expect(live.target.querySelector('.pane-help')?.textContent).toBe('Sous l\'écriture de la page en cours.');
+  });
+
+  it('offers to switch the orientation by default, and puts the image as it is without the offer', async () => {
+    const asking = mountSection();
+    await placePdf(asking.target);
+    await vi.waitFor(() => expect(asking.target.querySelector('[data-slot="background-orientation-offer"]')).toBeTruthy());
+    expect(asking.onset).not.toHaveBeenCalled();
+    cleanup?.();
+
+    const plain = mountSection({ offerOrientation: false });
+    await placePdf(plain.target, '2');
+    await vi.waitFor(() => expect(plain.onset).toHaveBeenCalledTimes(1));
+    expect(plain.target.querySelector('[data-slot="background-orientation-offer"]')).toBeNull();
+    const [image, pixels, orientation] = plain.onset.mock.calls[0];
+    // Contained on the landscape page, whole and upright: the page is not turned.
+    expect(image).toMatchObject({ name: 'fiche.pdf', pdfPage: 2, quarterTurns: 0, opacity: 1 });
+    expect(image.rect.height).toBeCloseTo(LANDSCAPE.height, 0);
+    expect(image.rect.width).toBeLessThan(LANDSCAPE.width);
+    expect(pixels.key).toMatch(/^mock-/);
+    expect(orientation).toBeUndefined();
+  });
+
+  it('stays busy until an asynchronous `onset` is done', async () => {
+    let finish = () => {};
+    const { target } = mountSection({
+      offerOrientation: false,
+      onset: vi.fn(() => new Promise<void>((resolve) => (finish = resolve))),
+    });
+    await placePdf(target);
+    await vi.waitFor(() => expect(target.querySelector('[role="status"]')?.textContent).toContain('Import'));
+    finish();
+    await vi.waitFor(() => expect(target.querySelector('[role="status"]')).toBeNull());
   });
 });

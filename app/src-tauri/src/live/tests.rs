@@ -1242,11 +1242,13 @@ fn the_json_has_the_shapes_of_live_ts() {
             "canUndo",
             "computerLayer",
             "hover",
+            "imagePixels",
             "layer",
             "orientation",
             "page",
             "pageCount",
             "pageIndex",
+            "pagePaper",
             "presentation",
             "revision",
             "saved",
@@ -2334,27 +2336,7 @@ fn the_tablet_is_never_slowed_by_the_computer_s_pen() {
         })
     };
 
-    let script = ardoise_sim::drawings::live_script(3, A5.width, A5.height);
-    let begin = Instant::now();
-    let mut due = Duration::ZERO;
-    let sample = Duration::from_millis(5);
-    for segment in script.segments() {
-        match segment {
-            ardoise_sim::PenSegment::Near(points) => {
-                let records: Vec<LiveRecord> = points
-                    .iter()
-                    .map(|p| LiveRecord::Pen(*p))
-                    .chain([LiveRecord::ProximityOut])
-                    .collect();
-                for chunk in records.chunks(3) {
-                    due += sample * u32::try_from(chunk.len()).unwrap();
-                    std::thread::sleep((begin + due).saturating_duration_since(Instant::now()));
-                    send(&mut sink, chunk);
-                }
-            }
-            ardoise_sim::PenSegment::Away(pause) => due += *pause,
-        }
-    }
+    stream_handwriting(&mut sink, 3);
     done.store(true, Ordering::SeqCst);
     let (calls, strokes) = computer.join().unwrap();
     std::thread::sleep(Duration::from_millis(50));
@@ -2393,3 +2375,170 @@ fn the_tablet_is_never_slowed_by_the_computer_s_pen() {
 /// the computer's calls now keep busy), not the lock: a point waits at most one flush interval. Twice
 /// the p99 measured: above it, something waited under the lock.
 const NEVER_SLOWED_P99_MS: f64 = 10.0;
+
+/// What a window gets of the tablet's points, for their latency (`sentAt − recv`), each point once:
+/// the stroke in progress that follows a snapshot repeats the points already sent.
+#[derive(Default)]
+struct FreshLatency {
+    /// The points seen, by time and place.
+    seen: Mutex<std::collections::HashSet<(u32, u32, u32)>>,
+    tablet: Mutex<Vec<f64>>,
+}
+
+impl BatchSink for FreshLatency {
+    fn send(&self, batch: LiveBatch) -> Result<(), String> {
+        let mut seen = self.seen.lock().unwrap();
+        let mut tablet = self.tablet.lock().unwrap();
+        for event in &batch.events {
+            let points = match event {
+                LiveEvent::StrokeStart {
+                    stroke,
+                    pen: LivePen::Tablet,
+                    ..
+                } => &stroke.points,
+                LiveEvent::Points {
+                    points,
+                    pen: LivePen::Tablet,
+                    ..
+                } => points,
+                _ => continue,
+            };
+            for point in points {
+                if seen.insert((point.t, point.x.to_bits(), point.y.to_bits())) {
+                    tablet.push(batch.sent_at - point.recv);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `seconds` of the simulator's handwriting streamed to `sink` in real time, in notifications of
+/// three records 5 ms apart.
+fn stream_handwriting(sink: &mut HubSink, seconds: u32) {
+    let script = ardoise_sim::drawings::live_script(seconds, A5.width, A5.height);
+    let begin = Instant::now();
+    let mut due = Duration::ZERO;
+    let sample = Duration::from_millis(5);
+    for segment in script.segments() {
+        match segment {
+            ardoise_sim::PenSegment::Near(points) => {
+                let records: Vec<LiveRecord> = points
+                    .iter()
+                    .map(|p| LiveRecord::Pen(*p))
+                    .chain([LiveRecord::ProximityOut])
+                    .collect();
+                for chunk in records.chunks(3) {
+                    due += sample * u32::try_from(chunk.len()).unwrap();
+                    std::thread::sleep((begin + due).saturating_duration_since(Instant::now()));
+                    send(sink, chunk);
+                }
+            }
+            ardoise_sim::PenSegment::Away(pause) => due += *pause,
+        }
+    }
+}
+
+/// The tablet bound to under p99 = [`NEVER_SLOWED_P99_MS`] while the live window's Page and Fond
+/// tabs change the page being written (M17, docs/design/paper-projection-narration.md §1.8): 3 s of
+/// simulated handwriting streamed in real time on one thread while another changes the paper and
+/// sets, places or removes a 4096 px image every 50 ms, staging its megabytes before each `set` as
+/// the window does. Under the lock only an `Arc` changes hands: nothing is decoded, read or copied
+/// there. `cargo test -p ardoise never_slowed -- --nocapture` prints the figures. Each point counts
+/// once, when it first reaches the window: a snapshot is followed by the stroke in progress so far
+/// (M12), whose earlier points went out before.
+#[test]
+fn the_tablet_is_never_slowed_by_the_paper_and_the_image_of_the_page() {
+    use ardoise_core::format::BackgroundFile;
+    use ardoise_core::note::{Background, BackgroundImage, ImageFit, ImageRect, Template};
+
+    use super::LivePageImageOp;
+    use crate::background::{Staged, Staging};
+
+    let (_dir, library) = library();
+    let hub = Arc::new(LiveHub::new(HubConfig::default()));
+    let latency = Arc::new(FreshLatency::default());
+    hub.subscribe("main", latency.clone());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+
+    let done = Arc::new(AtomicBool::new(false));
+    let window = {
+        let (hub, done) = (hub.clone(), done.clone());
+        std::thread::spawn(move || {
+            let staging = Staging::default();
+            // Two files of 4 MB standing for 4096 px worksheets (never decoded in this test: the
+            // hub does not decode them, and the thumbnails find no picture in them).
+            let files: Vec<Vec<u8>> = (0..2u8)
+                .map(|n| (0..4u32 << 20).map(|i| (i as u8) ^ n).collect())
+                .collect();
+            let image = BackgroundImage {
+                name: "fiche.pdf".to_owned(),
+                pdf_page: Some(1),
+                rect: ImageRect::fit(A5, (4096, 2896), ImageFit::Contain),
+                quarter_turns: 0,
+                opacity: 1.0,
+            };
+            let papers = [
+                Background {
+                    paper: Paper::Cream,
+                    template: Template::Seyes,
+                    texture: true,
+                },
+                Background::default(),
+            ];
+            let mut ops = 0usize;
+            while !done.load(Ordering::SeqCst) {
+                hub.set_page_paper(0, papers[ops % 2]).unwrap();
+                let op = match ops % 3 {
+                    0 => LivePageImageOp::Set {
+                        key: staging.put(Staged {
+                            file: BackgroundFile {
+                                extension: "png".to_owned(),
+                                bytes: files[(ops / 3) % 2].clone(),
+                            },
+                            width: 4096,
+                            height: 2896,
+                        }),
+                        image: image.clone(),
+                    },
+                    1 => LivePageImageOp::Place {
+                        image: BackgroundImage {
+                            opacity: 0.5,
+                            ..image.clone()
+                        },
+                    },
+                    _ => LivePageImageOp::Remove,
+                };
+                hub.change_page_image(0, op, &staging).unwrap();
+                ops += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            ops
+        })
+    };
+
+    stream_handwriting(&mut sink, 3);
+    done.store(true, Ordering::SeqCst);
+    let ops = window.join().unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    let mut tablet = latency.tablet.lock().unwrap().clone();
+    let snapshot = hub.snapshot();
+    hub.stop().unwrap();
+
+    let (median, p99) = median_p99(&mut tablet);
+    println!(
+        "tablet with the paper and the image changed ({ops} times each): {} tablet points, \
+         median {median:.3} ms, p99 {p99:.3} ms, max {:.3} ms",
+        tablet.len(),
+        tablet[tablet.len() - 1],
+    );
+    assert!(
+        tablet.len() > 200 && ops > 20,
+        "{} points, {ops} ops",
+        tablet.len()
+    );
+    assert!(!snapshot.page.strokes.is_empty());
+    assert!(tablet[0] >= 0.0);
+    assert!(median < 10.0, "median {median} ms");
+    assert!(p99 < NEVER_SLOWED_P99_MS, "99th percentile {p99} ms");
+}

@@ -29,6 +29,7 @@ use super::model::{
     LiveSessionState, LiveSnapshot, LiveStroke, LiveStyle, LiveViewState, PlacedStroke,
     RecolouredStrokes, ViewerIndices, sanitize_marks,
 };
+use super::paper::{ImageChange, PageImage, PaperError, refitted, within_reach};
 use super::pen::{CheckedPen, MAX_COMPUTER_POINTS, PenAction, PenSample, note_time, sample_wall};
 use super::resume::{PenMapping, ResumeBase, ResumeSeed, hold_for};
 use crate::library::path_text;
@@ -79,6 +80,12 @@ struct Resumed {
     /// ink or not, as in the editor (`hub::written_sheet`). The layer the session adds by itself
     /// (every layer hidden, the tablet's button) stays out of the file until ink goes on it.
     layers_edited: bool,
+    /// A deliberate change of its paper in the live window's Page tab (M17): from then on the sheet
+    /// is written with its own paper ([`Page::own_paper`]), new ink or not (`hub::written_sheet`).
+    paper_edited: bool,
+    /// A deliberate change of its image in the Fond tab (M17): from then on the sheet is written
+    /// with the page's pixels, or without any after a removal (`hub::page_file`).
+    image_edited: bool,
 }
 
 /// One page of the session: a note, and where it stands on disk.
@@ -121,8 +128,14 @@ pub struct Page {
     /// Time of the page's last pen sample, ms since `note.created`.
     last_t: Option<u32>,
     /// The paper the blackboard took the page from, given back when it is turned off (`None`:
-    /// white, for a page made while the blackboard was on).
+    /// white, for the first page of a session made while the blackboard was on). Also the page's
+    /// own paper chosen in the Page tab (M17), and the one a new page takes from the page it is
+    /// made from: the blackboard turned on later gives it back, slate included.
     paper_before_board: Option<Paper>,
+    /// The pixels of the page's background image (`note.background_image` places them), written
+    /// with the page as its `background.*` member (M17). On a resumed sheet, its file's, until the
+    /// Fond tab changes them.
+    image: Option<Arc<PageImage>>,
     /// Seeded from an existing note.
     resumed: Option<Resumed>,
     /// What the indices of its strokes mean ([`LiveSnapshot::revision`]). Starts from the
@@ -173,6 +186,7 @@ impl Page {
             fresh: true,
             last_t: None,
             paper_before_board: None,
+            image: None,
             resumed: None,
             revision,
             history: History::default(),
@@ -195,6 +209,7 @@ impl Page {
             base,
             saved,
             time_base,
+            image,
         } = seed;
         let mut note = base.file.note.clone();
         if !note.layers.iter().any(|layer| layer.visible) {
@@ -223,6 +238,7 @@ impl Page {
         // Its own paper, whatever the blackboard does and from whichever page it is turned off: a
         // sheet with slate paper keeps it too.
         page.paper_before_board = Some(page.note.background.paper);
+        page.image = image;
         page.resumed = Some(Resumed {
             base,
             origin: now_ms.saturating_sub(i64::from(time_base)),
@@ -230,8 +246,83 @@ impl Page {
             fork: None,
             ink_on_board: false,
             layers_edited: false,
+            paper_edited: false,
+            image_edited: false,
         });
         page
+    }
+
+    /// The page's own paper: what it has without the blackboard (the Page tab shows it). While the
+    /// blackboard is on (`board`), the paper it gives back when turned off.
+    pub fn own_paper(&self, board: bool) -> Paper {
+        if board {
+            self.paper_before_board.unwrap_or(Paper::White)
+        } else {
+            self.note.background.paper
+        }
+    }
+
+    /// The pixels of the page's background image.
+    pub fn image(&self) -> Option<&Arc<PageImage>> {
+        self.image.as_ref()
+    }
+
+    /// Something was written on the page: a stroke, or an edit that can bring one back (its
+    /// history).
+    fn has_ink(&self) -> bool {
+        !self.note.strokes.is_empty() || !self.history.is_empty()
+    }
+
+    /// The page never turns with the tablet, which follows it ([`hold_for`], `pen_mapping`): a
+    /// resumed sheet (M12), or a page of the session whose image was written on (M17: a worksheet
+    /// is never turned under the pupils' writing). A page with an image and no ink takes the
+    /// tablet's new size instead, its image placed again ([`refitted`]).
+    pub fn held_fixed(&self) -> bool {
+        self.resumed.is_some() || (self.note.background_image.is_some() && self.has_ink())
+    }
+
+    /// The resumed sheet's paper was changed on purpose: see the field of `Resumed`.
+    pub fn paper_edited(&self) -> bool {
+        self.resumed
+            .as_ref()
+            .is_some_and(|resumed| resumed.paper_edited)
+    }
+
+    /// The resumed sheet's image was changed on purpose: see the field of `Resumed`.
+    pub fn image_edited(&self) -> bool {
+        self.resumed
+            .as_ref()
+            .is_some_and(|resumed| resumed.image_edited)
+    }
+
+    /// A deliberate change of the page's paper.
+    fn paper_changed(&mut self) {
+        if let Some(resumed) = &mut self.resumed {
+            resumed.paper_edited = true;
+        }
+        self.touch();
+    }
+
+    /// A deliberate change of the page's image.
+    fn image_changed(&mut self) {
+        if let Some(resumed) = &mut self.resumed {
+            resumed.image_edited = true;
+        }
+        self.touch();
+    }
+
+    /// The page becomes `size` (the tablet turned, before any ink): its image, if any, is placed
+    /// again on it with the fit it has ([`refitted`]).
+    fn resize(&mut self, size: PageSize) {
+        let before = self.note.page;
+        if before == size {
+            return;
+        }
+        self.note.page = size;
+        if let (Some(image), Some(pixels)) = (&mut self.note.background_image, &self.image) {
+            image.rect = refitted(image, before, size, (pixels.width, pixels.height));
+            self.touch();
+        }
     }
 
     /// The tablet's layer and the computer's.
@@ -338,16 +429,19 @@ impl Page {
 
     /// Turns the page `turns` clockwise quarter turns, ink and all, so that it is held as
     /// `orientation` (the page size is swapped for an odd number of turns). Times, pressures,
-    /// layers and narration are untouched. A resumed sheet is never turned (a turn knows nothing of
-    /// its background image, and would rewrite a note for how the tablet happens to be held): the
-    /// tablet follows it, as near to `orientation` as the sheet allows.
+    /// layers and narration are untouched. A page [`held_fixed`](Self::held_fixed) is never turned
+    /// (a resumed sheet would be rewritten for how the tablet happens to be held; the ink of a
+    /// worksheet would leave the image it was written on): the tablet follows it, as near to
+    /// `orientation` as the page allows. A page with an image and no ink has its image placed again
+    /// upright ([`refitted`]).
     fn turn(&mut self, turns: u8, orientation: Orientation) {
-        if self.resumed.is_some() {
+        if self.held_fixed() {
             self.orientation = hold_for(self.note.page, orientation);
             return;
         }
         if !turns.is_multiple_of(4) {
-            let (width, height) = (self.note.page.width as f32, self.note.page.height as f32);
+            let before = self.note.page;
+            let (width, height) = (before.width as f32, before.height as f32);
             for stroke in &mut self.note.strokes {
                 for point in &mut stroke.points {
                     (point.x, point.y) = turn_point(point.x, point.y, width, height, turns);
@@ -355,10 +449,10 @@ impl Page {
             }
             self.history.turn(width, height, turns);
             if turns % 2 == 1 {
-                self.note.page = PageSize {
-                    width: self.note.page.height,
-                    height: self.note.page.width,
-                };
+                self.resize(PageSize {
+                    width: before.height,
+                    height: before.width,
+                });
             }
             self.touch();
         }
@@ -366,9 +460,11 @@ impl Page {
     }
 
     /// Changed since it was written, and worth a file: a note is created only once a stroke
-    /// ended on the page, then rewritten whenever it changes.
+    /// ended on the page, or once it has an image (M17: a worksheet shown in class is kept, ink or
+    /// not; paper alone is not worth a note), then rewritten whenever it changes.
     pub fn needs_write(&self) -> bool {
-        self.version != self.saved_version && (self.file.is_some() || !self.note.strokes.is_empty())
+        self.version != self.saved_version
+            && (self.file.is_some() || !self.note.strokes.is_empty() || self.image.is_some())
     }
 
     /// Takes the strokes at `indices` (ascending, all on the page) off the page. A viewer is told of
@@ -698,7 +794,8 @@ impl LiveSession {
             marks: Vec::new(),
             marks_page: None,
         };
-        let page = session.new_page(now_ms);
+        // Each lesson starts on plain white paper (docs/design/paper-projection-narration.md O2).
+        let page = session.new_page(now_ms, None);
         session.pages.push(page);
         session
     }
@@ -893,11 +990,19 @@ impl LiveSession {
         &self.pages[self.current]
     }
 
-    fn new_page(&self, now_ms: i64) -> Page {
-        let paper = if self.view.board {
+    /// A new page created at `now_ms`, made from the page `from` (the page on screen when it is
+    /// made; `None` for the first page of a session: white, as a lesson starts): it keeps its
+    /// paper, not its image (`docs/questions.md` Q13): its template and texture, and its own paper,
+    /// which the page itself shows unless the blackboard is on (then slate, the own paper coming
+    /// back when the blackboard is turned off).
+    fn new_page(&self, now_ms: i64, from: Option<&Page>) -> Page {
+        let board = self.view.board;
+        let own = from.map(|page| page.own_paper(board));
+        let kept = from.map_or_else(Background::default, |page| page.note.background);
+        let paper = if board {
             Paper::Slate
         } else {
-            Paper::White
+            own.unwrap_or(Paper::White)
         };
         let note = Note {
             id: uuid::Uuid::new_v4().to_string(),
@@ -905,10 +1010,7 @@ impl LiveSession {
             created: now_ms,
             modified: now_ms,
             page: self.size,
-            background: Background {
-                paper,
-                ..Background::default()
-            },
+            background: Background { paper, ..kept },
             background_image: None,
             tags: Vec::new(),
             favorite: false,
@@ -920,20 +1022,23 @@ impl LiveSession {
             timing: Timing::Recorded,
             origin: Origin::Live,
         };
-        Page::new(note, self.orientation, first_revision(self.id))
+        let mut page = Page::new(note, self.orientation, first_revision(self.id));
+        page.paper_before_board = own;
+        page
     }
 
     /// The whole session, for a window that draws it from scratch.
     pub fn snapshot(&self) -> LiveSnapshot {
-        let mut page = self.current_page().note.clone();
-        page.id.clone_from(&self.current_page().shown_id);
+        let shown = self.current_page();
+        let mut page = shown.note.clone();
+        page.id.clone_from(&shown.shown_id);
         LiveSnapshot {
             state: self.state,
             page,
             page_index: self.current,
             page_count: self.pages.len(),
             orientation: self.current_page().orientation,
-            can_turn_page: !self.current_page().is_resumed(),
+            can_turn_page: !shown.held_fixed(),
             layer: self.current_page().tablet_layer,
             computer_layer: self.current_page().computer_layer,
             style: self.style,
@@ -944,6 +1049,8 @@ impl LiveSession {
             revision: self.current_page().revision,
             can_undo: self.current_page().history.can_undo(),
             can_redo: self.current_page().history.can_redo(),
+            page_paper: shown.own_paper(self.view.board),
+            image_pixels: shown.image.as_ref().map(|image| image.pixels()),
         }
     }
 
@@ -1081,12 +1188,14 @@ impl LiveSession {
     ///   was written in (the writing stays upright; the page swaps its width and height for a
     ///   quarter turn); the shared view follows (zoom kept, centre turned);
     /// - blank pages never written to disk just take the new size (a page whose strokes all went
-    ///   is not blank while they can come back);
+    ///   is not blank while they can come back); so does a page of the session with an image and
+    ///   no ink, written or not, its image placed again with the fit it has (M17);
     /// - the other pages keep their ink and orientation, until they are shown again
     ///   ([`follow`](Self::follow)): the pen's points are always in the current orientation;
-    /// - a resumed sheet stays as it is, whichever of these it is: only the way it is to be held
-    ///   follows ([`Page::turn`]), and [`pen_mapping`](Self::pen_mapping) takes the pen's points
-    ///   to it from the new orientation.
+    /// - a page [`held_fixed`](Page::held_fixed) (a resumed sheet, a worksheet written on) stays
+    ///   as it is, whichever of these it is: only the way it is to be held follows
+    ///   ([`Page::turn`]), and [`pen_mapping`](Self::pen_mapping) takes the pen's points to it from
+    ///   the new orientation.
     ///
     /// Returns whether anything changed.
     fn hold(
@@ -1108,15 +1217,18 @@ impl LiveSession {
         self.orientation = orientation;
         let shown = self.current_page();
         let before = shown.note.page;
-        let turns = if shown.is_resumed() {
+        let turns = if shown.held_fixed() {
             0
         } else {
             orientation.turns_from(shown.orientation)
         };
         for index in 0..self.pages.len() {
             let page = &mut self.pages[index];
-            if page.note.strokes.is_empty() && page.file.is_none() && page.history.is_empty() {
-                page.note.page = size;
+            let follows = !page.is_resumed()
+                && !page.has_ink()
+                && (page.file.is_none() || page.note.background_image.is_some());
+            if follows {
+                page.resize(size);
                 page.orientation = orientation;
             } else if index == self.current {
                 page.turn(turns, orientation);
@@ -1161,10 +1273,10 @@ impl LiveSession {
     }
 
     /// How the pen's points land on the current page: as they come, on a page of the session; on a
-    /// resumed sheet, turned to the way it is held and fitted in it.
+    /// page [`held_fixed`](Page::held_fixed), turned to the way it is held and fitted in it.
     fn pen_mapping(&self) -> PenMapping {
         let page = self.current_page();
-        if page.is_resumed() {
+        if page.held_fixed() {
             PenMapping::for_sheet(
                 self.size,
                 page.orientation.turns_from(self.orientation),
@@ -1579,6 +1691,109 @@ impl LiveSession {
         }
     }
 
+    // --- Paper and image (M17) ------------------------------------------------------------------
+
+    /// The Page tab's paper (colour, template, texture) for page `page_index`, the one on screen
+    /// (else stale). With the blackboard off the page takes it whole; with it on, the template and
+    /// the texture at once, the colour as the paper the blackboard gives back (the page stays slate
+    /// meanwhile: docs/design/paper-projection-narration.md O1). Either way the colour is the
+    /// page's own paper, which a blackboard turned on later gives back too. Nothing when it is the
+    /// page's already; else one snapshot. Not a step of the page's history (Ctrl+Z does not undo
+    /// it), no stroke in progress ends, no index moves.
+    pub fn set_page_paper(
+        &mut self,
+        page_index: usize,
+        background: Background,
+        out: &mut Vec<LiveEvent>,
+    ) -> Result<(), PaperError> {
+        if page_index != self.current {
+            return Err(PaperError::Stale);
+        }
+        let board = self.view.board;
+        let page = &mut self.pages[page_index];
+        let now = Background {
+            paper: page.own_paper(board),
+            ..page.note.background
+        };
+        if now == background {
+            return Ok(());
+        }
+        if board {
+            page.note.background.template = background.template;
+            page.note.background.texture = background.texture;
+        } else {
+            page.note.background = background;
+        }
+        page.paper_before_board = Some(background.paper);
+        page.paper_changed();
+        self.push_snapshot(out);
+        Ok(())
+    }
+
+    /// The Fond tab's change of the image of page `page_index`, the one on screen (else stale),
+    /// its description checked already but for how far it reaches from this page
+    /// ([`within_reach`]). `set`: these pixels, placed so; `place`: the same image (same name and
+    /// page of the PDF) placed otherwise; `remove`: no image any more. Nothing when it changes
+    /// nothing; else one snapshot. Not a step of the page's history, no stroke in progress ends,
+    /// no index moves. A page of the session whose image goes no longer stays fixed under the
+    /// tablet ([`Page::held_fixed`]): it turns at once to the way the tablet is held, if it was
+    /// written another way, so that the pen's points land where they should.
+    pub fn set_page_image(
+        &mut self,
+        page_index: usize,
+        change: ImageChange,
+        out: &mut Vec<LiveEvent>,
+    ) -> Result<(), PaperError> {
+        if page_index != self.current {
+            return Err(PaperError::Stale);
+        }
+        let page = &mut self.pages[page_index];
+        let size = page.note.page;
+        let removed = matches!(change, ImageChange::Remove);
+        match change {
+            ImageChange::Set { image, pixels } => {
+                if !within_reach(&image.rect, size) {
+                    return Err(PaperError::BadRect);
+                }
+                let same_pixels = page.image.as_ref().is_some_and(|p| p.key == pixels.key);
+                if same_pixels && page.note.background_image.as_ref() == Some(&image) {
+                    return Ok(());
+                }
+                page.note.background_image = Some(image);
+                page.image = Some(pixels);
+            }
+            ImageChange::Place { image } => {
+                let Some(shown) = &page.note.background_image else {
+                    return Err(PaperError::NotThisImage);
+                };
+                if shown.name != image.name || shown.pdf_page != image.pdf_page {
+                    return Err(PaperError::NotThisImage);
+                }
+                if !within_reach(&image.rect, size) {
+                    return Err(PaperError::BadRect);
+                }
+                if *shown == image {
+                    return Ok(());
+                }
+                page.note.background_image = Some(image);
+            }
+            ImageChange::Remove => {
+                if page.note.background_image.is_none() && page.image.is_none() {
+                    return Ok(());
+                }
+                page.note.background_image = None;
+                page.image = None;
+            }
+        }
+        page.image_changed();
+        if removed {
+            self.follow();
+            self.fit_view(size);
+        }
+        self.push_snapshot(out);
+        Ok(())
+    }
+
     /// Leaves page `index`: its changes are written now.
     fn leave(&mut self, index: usize) {
         if let Some(page) = self.pages.get_mut(index)
@@ -1638,7 +1853,7 @@ impl LiveSession {
                 if self.current + 1 < self.pages.len() {
                     self.current += 1;
                 } else {
-                    let page = self.new_page(now_ms);
+                    let page = self.new_page(now_ms, Some(self.current_page()));
                     self.pages.push(page);
                     self.current = self.pages.len() - 1;
                 }
@@ -1666,7 +1881,7 @@ impl LiveSession {
                 self.end_strokes(out);
                 let left = self.current;
                 let before = self.current_page().note.page;
-                let page = self.new_page(now_ms);
+                let page = self.new_page(now_ms, Some(self.current_page()));
                 self.pages.push(page);
                 self.current = self.pages.len() - 1;
                 self.leave(left);

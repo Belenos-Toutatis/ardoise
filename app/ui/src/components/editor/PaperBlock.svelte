@@ -1,9 +1,10 @@
 <script lang="ts">
   /**
    * The paper of a page (milestone M16): its colour as round swatches, its template and its texture. Used by the
-   * editor's Page tab; M17 gives it to live mode's Page tab with the live operation as `onbackground`. A paper that is
-   * a custom colour shows one more swatch, pressed and disabled (nothing else can choose it here), as the select's
-   * extra option did.
+   * editor's Page tab; M17 gives it to live mode's Page tab with the live operation as `onbackground`, and, while the
+   * blackboard is on, `colourDisabled` (the colour comes back with the board off; the template and the texture apply
+   * at once). A paper that is a custom colour shows one more swatch, pressed and disabled (nothing else can choose it
+   * here), as the select's extra option did.
    */
   import { t } from '../../lib/i18n.svelte';
   import { paperRgb } from '../../lib/live-render';
@@ -12,11 +13,14 @@
   let {
     background,
     disabled = false,
+    colourDisabled = false,
     onbackground,
   }: {
     background: Background;
     /** The page cannot change now (the split panel is open, a replay runs). */
     disabled?: boolean;
+    /** The swatches cannot be chosen (live mode, blackboard on); the template and the texture still can. */
+    colourDisabled?: boolean;
     onbackground: (background: Background) => void;
   } = $props();
 
@@ -40,7 +44,7 @@
       class="pane-swatch"
       data-paper={id}
       aria-pressed={id === 'custom' ? true : background.paper === id}
-      disabled={disabled || id === 'custom'}
+      disabled={disabled || colourDisabled || id === 'custom'}
       style:--swatch={colour(id)}
       onclick={() => onbackground({ ...background, paper: id as Paper })}
     >

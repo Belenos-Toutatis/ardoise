@@ -31,23 +31,42 @@
    * first. « Undo the clearing » goes through the same queue, after the strokes and erasings asked for before.
    *
    * The side panel (M16; docs/design/side-panel.md, §8) is the shared tabbed rail (`SidePanel`): Calques (the layers
-   * zone, open by default), Son (the narration), Projection (the projector, the projected area with the blackboard and
-   * the laser pointer, the share on the network) and Aide (the keys, from `LIVE_SHORTCUTS`); no Page or Fond until M17.
+   * zone, open by default), Page and Fond (M17, below), Son (the narration), Projection (the projector, the projected
+   * area with the blackboard and the laser pointer, the share on the network) and Aide (the keys, from `LIVE_SHORTCUTS`).
    * Above the open tab, whatever it is: the selection's bar (a selection reopens the pane) and the hints of the Select
    * and Pen tools. Its badges follow the layers (count, a hidden layer in use), the recording and the projection or share.
+   *
+   * Paper and image of the current page (M17, docs/design/paper-projection-narration.md §1.6): Page (`PaperBlock`: the
+   * paper's colour, template and texture, `live_page_paper`; under the blackboard the swatches wait, the board's slate
+   * keeps the page) and Fond (`BackgroundImageSection`: a file or a page of a PDF under the writing, its fit, quarter turn
+   * and opacity, `live_page_image`; no offer to turn the page, a page of live mode follows the tablet). Both wait while
+   * the session does not run, act on the page on screen (the page index is read when the click is made, or when the file
+   * is chosen for an image: a page that changed meanwhile is refused, `liveEditStale`) and are not undone by Ctrl+Z.
+   * The class's remote keeps working in them: Page Up and Page Down turn the page even with a select or the slider
+   * focused (`liveKeyAction`), and a choice made with the mouse gives the focus back.
    */
   import { onMount, untrack } from 'svelte';
   import { api, errorMessage, type AppState } from '../../lib/api';
   import { bridgeScreens, drivePresentation, until } from '../../lib/app-bridge.svelte';
+  import { refit, turnImageAlone, type ImageFit } from '../../lib/background';
   import { INKSPACE_COLOR_NAMES, sameColor } from '../../lib/editor/colors';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { TOOLS, loadInk, type Ink, type Tool } from '../../lib/ink';
   import { LatencyRecorder, exposeLatency } from '../../lib/latency';
-  import type { LiveCommandKind, LiveLayerOp, LiveStopped, LiveStyle, LiveViewState, MonitorInfo, SheetFork } from '../../lib/live';
+  import type {
+    LiveCommandKind,
+    LiveLayerOp,
+    LivePageImageOp,
+    LiveStopped,
+    LiveStyle,
+    LiveViewState,
+    MonitorInfo,
+    SheetFork,
+  } from '../../lib/live';
   import { layerWarnings } from '../../lib/layers-zone';
   import { LiveComputer } from '../../lib/live-computer';
   import { loadComputerStyle, saveComputerStyle } from '../../lib/live-computer-style';
-  import { computerErrorText } from '../../lib/live-errors';
+  import { computerErrorText, pageErrorText } from '../../lib/live-errors';
   import {
     changeView,
     runKeyAction,
@@ -65,7 +84,7 @@
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
   import { deleteSelected, recolourSelected, stepHistory, type TouchUp } from '../../lib/live-touch-up';
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
-  import { INKSPACE_COLORS, cssColor, type Rgba } from '../../lib/note';
+  import { INKSPACE_COLORS, cssColor, type Background, type BackgroundImage, type Rgba } from '../../lib/note';
   import { ORIENTATIONS, type Orientation } from '../../lib/orientation';
   import { share } from '../../lib/share-state.svelte';
   import { SidePanelState, type SideBadges } from '../../lib/side-panel.svelte';
@@ -82,6 +101,8 @@
   import OrientationIcon from '../tablet/OrientationIcon.svelte';
   import { NarrationRecorder } from '../narration/recorder.svelte';
   import LayersZone from '../layers/LayersZone.svelte';
+  import BackgroundImageSection from '../editor/BackgroundImageSection.svelte';
+  import PaperBlock from '../editor/PaperBlock.svelte';
   import ComputerStyle from './ComputerStyle.svelte';
   import LiveCanvas from './LiveCanvas.svelte';
 
@@ -228,6 +249,22 @@
       ? live.orientation
       : null,
   );
+  /** The page's paper as the snapshot gives it: its own colour (the blackboard's slate is not a choice), its template, its texture. */
+  const shownBackground = $derived<Background>({ ...live.background, paper: live.pagePaper });
+  /**
+   * The paper last asked for in the Page tab, until a snapshot gives it back (or it is refused, or the page changes):
+   * a second choice made before then builds on the first instead of on the snapshot before it.
+   */
+  let askedPaper = $state.raw<{ pageIndex: number; background: Background } | null>(null);
+  /** The page's paper as the Page tab shows it. */
+  const pageBackground = $derived<Background>(
+    askedPaper !== null && askedPaper.pageIndex === live.pageIndex ? askedPaper.background : shownBackground,
+  );
+  $effect(() => {
+    const asked = askedPaper;
+    if (asked === null) return;
+    if (asked.pageIndex !== live.pageIndex || sameBackground(asked.background, shownBackground)) askedPaper = null;
+  });
   const savedCount = $derived(live.saved.length);
   const savedText = $derived(
     savedCount === 0 ? t('live.saved.none') : savedCount === 1 ? t('live.saved.one') : t('live.saved.many', { count: savedCount }),
@@ -648,6 +685,54 @@
   function penBlocked() {
     const name = live.layers[live.computerLayer]?.name ?? '';
     notice = t('layers.warn.chosenHidden', { name });
+  }
+
+  function sameBackground(a: Background, b: Background): boolean {
+    return JSON.stringify(a.paper) === JSON.stringify(b.paper) && a.template === b.template && a.texture === b.texture;
+  }
+
+  /** The Page tab: the paper of the page on screen (`pageIndex` is read now, at the click). */
+  function setPaper(background: Background) {
+    notice = null;
+    const pageIndex = live.pageIndex;
+    const asked = { pageIndex, background };
+    askedPaper = asked;
+    api.livePagePaper(pageIndex, background).catch((error: unknown) => {
+      if (askedPaper === asked) askedPaper = null;
+      notice = pageErrorText(error, 'paper');
+    });
+  }
+
+  /** The page on screen when the last click in the Fond tab was made (the choice of a file, which takes a while). */
+  let imageFrom: number | null = null;
+  /** The last thing done in the side tabs was a pointer's (a choice made with a key keeps its focus). */
+  let pointerChoice = false;
+
+  /** An act in the Fond tab: refused as a whole, told in a notice; resolved once Rust has answered. */
+  async function pageImage(op: LivePageImageOp, pageIndex = live.pageIndex): Promise<void> {
+    notice = null;
+    try {
+      await api.livePageImage(pageIndex, op);
+    } catch (error) {
+      notice = pageErrorText(error, 'image');
+    }
+  }
+
+  /** The image's description changed (fit, quarter turn, opacity): the same pixels, placed otherwise. */
+  function placeImage(change: (image: BackgroundImage, pixels: { width: number; height: number }) => BackgroundImage) {
+    const image = live.pageImage;
+    const pixels = live.imagePixels;
+    if (image && pixels) void pageImage({ kind: 'place', image: change(image, pixels) });
+  }
+
+  /**
+   * A choice made in a select or with the slider of the Page and Fond tabs by the mouse gives the focus back, so that
+   * the class's remote (Page Up, Page Down: they turn the page whoever has the focus, but the arrows are the control's)
+   * and the keys of live mode go on at once.
+   */
+  function releaseFocus(e: Event) {
+    const el = e.target;
+    if (pointerChoice && (el instanceof HTMLSelectElement || (el instanceof HTMLInputElement && el.type === 'range'))) el.blur();
   }
 
   function runEditKey(action: LiveEditKeyAction) {
@@ -1091,6 +1176,56 @@
             onadd={() => layerOp({ kind: 'add' })}
           />
         {/snippet}
+        {#snippet page()}
+          <section
+            class="pane-block"
+            aria-labelledby="live-paper-heading"
+            data-section="live-paper"
+            onpointerdowncapture={() => (pointerChoice = true)}
+            onkeydowncapture={() => (pointerChoice = false)}
+            onchange={releaseFocus}
+          >
+            <h3 class="pane-title" id="live-paper-heading">{t('editor.page.paperTitle')}</h3>
+            <p class="pane-help">{t('live.page.help')}</p>
+            <PaperBlock
+              background={pageBackground}
+              disabled={sessionState === 'idle'}
+              colourDisabled={live.view.board}
+              onbackground={setPaper}
+            />
+            {#if live.view.board}
+              <p class="pane-help" data-slot="paper-board">{t('live.page.board')}</p>
+            {:else if live.pagePaper === 'slate'}
+              <p class="pane-help" data-slot="paper-slate">{t('live.page.slate')}</p>
+            {/if}
+            <p class="pane-help">{t('live.page.back')}</p>
+          </section>
+        {/snippet}
+        {#snippet background()}
+          <!-- Clicks and changes are only listened to (the page the click was made on, the focus given back). -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="pane-through"
+            onpointerdowncapture={() => (pointerChoice = true)}
+            onkeydowncapture={() => (pointerChoice = false)}
+            onclickcapture={() => (imageFrom = live.pageIndex)}
+            onchange={releaseFocus}
+          >
+            <BackgroundImageSection
+              page={live.pageSize}
+              image={live.pageImage ?? undefined}
+              pixels={live.imagePixels ?? undefined}
+              disabled={sessionState === 'idle'}
+              offerOrientation={false}
+              hint={t('live.background.help')}
+              onset={(image, pixels) => pageImage({ kind: 'set', key: pixels.key, image }, imageFrom ?? live.pageIndex)}
+              onturn={(direction) => placeImage((image, pixels) => turnImageAlone(image, live.pageSize, pixels, direction))}
+              onfit={(fit: ImageFit) => placeImage((image, pixels) => refit(image, live.pageSize, pixels, fit))}
+              onopacity={(opacity) => placeImage((image) => ({ ...image, opacity }))}
+              onremove={() => void pageImage({ kind: 'remove' })}
+            />
+          </div>
+        {/snippet}
         {#snippet sound()}
           <section class="pane-block" aria-labelledby="live-narration-title" data-section="narration">
             <h3 class="pane-title" id="live-narration-title">{t('live.narration.title')}</h3>
@@ -1519,5 +1654,10 @@
     display: flex;
     flex: none;
     min-height: 0;
+  }
+
+  /* Listens for the Fond tab's clicks and changes without being a box of its own. */
+  .pane-through {
+    display: contents;
   }
 </style>

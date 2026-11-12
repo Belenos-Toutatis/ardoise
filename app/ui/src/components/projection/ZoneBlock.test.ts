@@ -20,6 +20,7 @@ interface Init {
   max?: number;
   hint?: string;
   children?: boolean;
+  widthTitle?: string;
 }
 
 function render(init: Init = {}) {
@@ -36,6 +37,7 @@ function render(init: Init = {}) {
       onwhole: calls.whole,
       onwidth: calls.width,
       hint: init.hint,
+      widthTitle: init.widthTitle,
       children: init.children ? createRawSnippet(() => ({ render: () => '<p data-slot="extra">extra</p>' })) : undefined,
     },
   });
@@ -92,6 +94,13 @@ describe('the projected area block', () => {
     const bare = render();
     expect(bare.q('p.pane-help')).toBeNull();
     expect(bare.q('[data-slot="extra"]')).toBeNull();
+  });
+
+  it('titles « Largeur » as the window says (M17, the editor), live’s title with its key by default', () => {
+    const view = render({ widthTitle: 'Afficher la page sur toute la largeur du vidéoprojecteur' });
+    expect(view.q('button[data-action="page-width"]')!.title).toBe('Afficher la page sur toute la largeur du vidéoprojecteur');
+    cleanup?.();
+    expect(render().q('button[data-action="page-width"]')!.title).toContain('(W)');
   });
 
   it('speaks English', () => {

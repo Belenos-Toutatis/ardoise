@@ -18,6 +18,7 @@ import { share } from '../../lib/share-state.svelte';
 import { SIDE_TABS, sideStorageKey } from '../../lib/side-panel.svelte';
 import { openSideTab, rememberSide, sideOf, tabPanelOf } from '../side/side-test-helpers';
 import Editor from './Editor.svelte';
+import { NARRATION_MODE_KEY } from './EditorSound.svelte';
 
 vi.mock('../VideoExportDialog.svelte', async () => ({
   default: (await import('./VideoExportDialogDouble.svelte')).default,
@@ -102,6 +103,13 @@ async function render(title = 'Cours de physique') {
   return { path, target, q, panel, tab, action, key, toolbarButton, stored };
 }
 
+/** Chooses when the sound is recorded in the Son tab (M17), as a click on the segmented control does. */
+async function chooseMode(target: HTMLElement, mode: 'writing' | 'replay') {
+  await openSideTab(target, 'sound');
+  target.querySelector<HTMLInputElement>(`[data-field="narration-mode"] input[value="${mode}"]`)!.click();
+  await tick();
+}
+
 const BLACK = { r: 0, g: 0, b: 0, a: 255 };
 
 /** A stroke of 21 samples spread over [t0, t1] ms. */
@@ -150,7 +158,9 @@ describe('editor side panel: the rail and its tabs', () => {
     expect(where('[data-section="original"]')).toBe('page');
     expect(where('[data-section="background-image"]')).toBe('background');
     expect(where('[data-section="narration"]')).toBe('sound');
-    expect(where('button[data-action="sound-replay"]')).toBe('sound');
+    // M17: the mode of the recording, « Pendant que j'écris » shown by default (its recording, not the replay's button).
+    expect(where('[data-field="narration-mode"]')).toBe('sound');
+    expect(where('button[data-action="narration-open"]')).toBe('sound');
     expect(where('[data-section="share"] button[data-action="share"]')).toBe('projection');
     expect(where('[data-section="shortcuts"]')).toBe('help');
     // The page's controls keep their hooks.
@@ -193,8 +203,9 @@ describe('editor side panel: the rail and its tabs', () => {
 });
 
 describe('editor side panel: Son', () => {
-  it('says that the narration lives in a replay and starts one', async () => {
+  it('« Pendant une relecture » says that the narration lives in a replay and starts one', async () => {
     const { target, q, action, panel } = await render();
+    await chooseMode(target, 'replay');
     expect(panel('sound').textContent).toContain("La narration s'écoute et s'enregistre pendant une relecture.");
     expect(target.querySelector('[data-action="narration-open"]')).toBeNull();
     action('sound-replay').click();
@@ -203,9 +214,12 @@ describe('editor side panel: Son', () => {
     expect(sideOf(target)).toEqual({ tab: 'sound', collapsed: false });
     expect(panel('sound').querySelector('[data-action="narration-open"]')).toBeTruthy();
     expect(target.querySelector('[data-action="sound-replay"]')).toBeNull();
+    // The replay's own content, whatever the mode: no choice of mode meanwhile.
+    expect(target.querySelector('[data-field="narration-mode"]')).toBeNull();
   });
 
   it('is disabled while the split panel is open', async () => {
+    localStorage.setItem(NARRATION_MODE_KEY, 'replay');
     const { action, toolbarButton } = await render();
     expect(action('sound-replay').disabled).toBe(false);
     toolbarButton('Découper').click();
@@ -382,10 +396,9 @@ describe('editor side panel: badges', () => {
     const path = demoPath('Liste de courses');
     const entry = mockLibrary().notes.get(path)!;
     entry.note = { ...entry.note, strokes: [slowStroke(3000, 0, 1000), slowStroke(6000, 3000, 4000)] };
-    const { target, tab, action } = await render('Liste de courses');
+    const { target, tab, action, key } = await render('Liste de courses');
     vi.useFakeTimers();
-    action('sound-replay').click();
-    await tick();
+    await key('r');
     expect(tab('sound').hasAttribute('data-dot')).toBe(false);
     action('narration-open').click();
     await tick();
@@ -397,5 +410,20 @@ describe('editor side panel: badges', () => {
     action('narration-cancel').click();
     await vi.waitFor(() => expect(tab('sound').hasAttribute('data-dot')).toBe(false));
     expect(target.querySelector('.replay-bar')).toBeTruthy();
+  });
+
+  it('shows the red dot on Son while a narration records as the teacher writes (M17)', async () => {
+    const { target, tab, action } = await render('Liste de courses');
+    await openSideTab(target, 'sound');
+    vi.useFakeTimers();
+    action('narration-open').click();
+    await tick();
+    await vi.waitFor(() => expect(action('narration-start')).toBeTruthy());
+    action('narration-start').click();
+    await vi.waitFor(() => expect(tab('sound').dataset.dot).toBe('rec'));
+    expect(target.querySelector('.replay-bar')).toBeNull();
+    await vi.advanceTimersByTimeAsync(300);
+    action('narration-cancel').click();
+    await vi.waitFor(() => expect(tab('sound').hasAttribute('data-dot')).toBe(false));
   });
 });

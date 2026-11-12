@@ -13,6 +13,7 @@ import type {
   LiveComputerPenInput,
   LiveLayerOp,
   LiveMark,
+  LivePageImageOp,
   LiveSnapshot,
   LiveStopped,
   LiveStrokesEdit,
@@ -22,6 +23,8 @@ import type {
 } from './live';
 import { mockDiagnosticStart, mockInvoke, mockOnLibraryChanged } from './mock';
 import { mockLiveSubscribe } from './mock-live';
+import { mockProjectionSubscribe, mockProjectionWatch } from './mock-projection';
+import type { ProjectionStatus, ProjectionUpdate } from './projection';
 import { mockShareSubscribe } from './mock-share';
 import { mockTabletSubscribe } from './mock-tablet';
 import type { Orientation } from './orientation';
@@ -234,10 +237,12 @@ export const api = {
    * Saves an edited note (thumbnail regenerated, tablet original and other members kept);
    * rejects with code `noteConflict` if the file changed since `stamp`. `imageKey`: the staged
    * pixels of the note's background image (`backgroundMissing` if they are gone); without it the
-   * file's own image is kept.
+   * file's own image is kept. `narrationKey` (M17): the sound of a recording made while writing, kept
+   * in memory (`NarrationSaved.staged`), written in the same save (`noStagedNarration` if it is gone;
+   * nothing is written then).
    */
-  saveNote: (path: string, note: Note, stamp: FileStamp, imageKey?: string) =>
-    call<FileStamp>('save_note', { path, note, stamp, imageKey }),
+  saveNote: (path: string, note: Note, stamp: FileStamp, imageKey?: string, narrationKey?: string) =>
+    call<FileStamp>('save_note', { path, note, stamp, imageKey, narrationKey }),
   /**
    * PNG data URL of a page background (paper, template, texture) `widthPx` pixels wide, with the
    * background image `image` over the paper (its pixels staged under `key`).
@@ -400,6 +405,19 @@ export const api = {
    * `computer`, which change no note). Every window gets a snapshot; Ctrl+Z does not undo it.
    */
   liveLayers: (pageIndex: number, op: LiveLayerOp) => call<void>('live_layers', { pageIndex, op }),
+  /**
+   * Changes the paper (colour, template, texture) of page `pageIndex`, the one on screen (M17): refused with
+   * `liveEditStale` (another page), `liveNotRunning` or `liveEditInvalid`. On the blackboard only the template and the
+   * texture show at once; the colour comes back when it is turned off. Every window gets a snapshot; Ctrl+Z does not
+   * undo it.
+   */
+  livePagePaper: (pageIndex: number, background: Background) => call<void>('live_page_paper', { pageIndex, background }),
+  /**
+   * Sets, places again or removes the background image of page `pageIndex`, the one on screen (M17; `LivePageImageOp`):
+   * refused with `liveEditStale`, `liveNotRunning`, `liveEditInvalid` or `backgroundMissing` (a `set` whose key is not
+   * staged). Every window gets a snapshot; Ctrl+Z does not undo it.
+   */
+  livePageImage: (pageIndex: number, op: LivePageImageOp) => call<void>('live_page_image', { pageIndex, op }),
   liveSetView: (view: LiveViewState) => call<void>('live_set_view', { view }),
   /**
    * The marks written over the presentation on page `pageIndex`, the whole list: the viewers of
@@ -412,6 +430,32 @@ export const api = {
   openPresentation: (monitor: string | null, remember = true) =>
     call<MonitorInfo>('open_presentation', { monitor, remember }),
   closePresentation: () => call<void>('close_presentation'),
+
+  // --- The editor's projection (M17; Rust side: projection.rs, docs/design/paper-projection-narration.md §2) -----
+
+  /**
+   * Opens the projection window (the editor's page full screen) on `monitor` (null: the saved or default screen, the
+   * same as the live presentation's: one projector per PC). Closes a live presentation window first. Fails with
+   * `noMonitor` or `unexpected`.
+   */
+  projectionOpen: (monitor: string | null) => call<MonitorInfo>('projection_open', { monitor }),
+  projectionClose: () => call<void>('projection_close'),
+  /** Where the projection is open now; then `onStatus` at every change (also when it is closed from its own window). */
+  projectionWatch: (onStatus: (status: ProjectionStatus) => void) => {
+    if (!inDesktopApp()) return mockProjectionWatch(onStatus);
+    const channel = new Channel<ProjectionStatus>();
+    channel.onmessage = onStatus;
+    return invoke<ProjectionStatus>('projection_watch', { onEvent: channel });
+  },
+  /** The projection window's subscription: the snapshot now, then live's own batches (same shape as `liveSubscribe`). */
+  projectionSubscribe: (onBatch: (batch: LiveBatch) => void) => {
+    if (!inDesktopApp()) return mockProjectionSubscribe(onBatch);
+    const channel = new Channel<LiveBatch>();
+    channel.onmessage = onBatch;
+    return invoke<LiveSnapshot>('projection_subscribe', { onEvent: channel });
+  },
+  /** One update from the editor (`lib/projection-feed.ts`); `projectionStale` and `projectionInvalid` ask for the whole page. */
+  projectionUpdate: (update: ProjectionUpdate) => call<void>('projection_update', { update }),
 
   // --- LAN share (M11; Rust side: share.rs, docs/design/lan-share.md) -----------------------
 
@@ -481,7 +525,9 @@ export const api = {
    * moment the replay was at instant 0 and playing, which places the sound in replay time.
    * Live recordings go to their pages (`path` and `replayStartedAtMs` are null). A replay
    * recording that cannot be saved stays pending (`narrationRetry`, `narrationDiscard`).
-   * Returns null when nothing is saved.
+   * A writing recording (M17, target `writing`) is not written: its sound is kept in memory and
+   * `staged` names it (`saveNote`'s `narrationKey`); there `replayStartedAtMs` is the wall clock at
+   * which note time was 0. Returns null when nothing is saved.
    */
   narrationStop: (save: boolean, stamp: FileStamp | null, path: string | null, replayStartedAtMs: number | null) =>
     call<NarrationSaved | null>('narration_stop', { save, stamp, path, replayStartedAtMs }),
@@ -489,6 +535,11 @@ export const api = {
   narrationRetry: (path: string, stamp: FileStamp | null) => call<NarrationSaved>('narration_retry', { path, stamp }),
   /** Throws the pending recording away (`noPendingNarration` if there is none). */
   narrationDiscard: () => call<void>('narration_discard'),
+  /**
+   * Drops the sound of a writing recording kept in memory under `key` (`NarrationSaved.staged`), with its backup
+   * copy: « Ne pas enregistrer » or a reload (M17).
+   */
+  narrationDropStaged: (key: string) => call<void>('narration_drop_staged', { key }),
   /** The narration stored in a note, or null. */
   narrationInfo: (path: string) => call<NarrationInfo | null>('narration_info', { path }),
   /** The narration as stored, an Ogg Opus stream (a WAV file in the browser stand-in), to play during the replay. */

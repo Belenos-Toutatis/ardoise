@@ -12,6 +12,7 @@ import {
   moveLayer,
   removeStrokes,
   renameLayer,
+  retimedForPaste,
   rotateQuarter,
   setBackground,
   setLayerVisible,
@@ -368,5 +369,41 @@ describe('the background image follows page operations', () => {
     expect(out.strokes[0].points[0]).toMatchObject({ x: 200, y: 1000 });
     expect(out.backgroundImage?.opacity).toBe(0.8);
     expect('backgroundImage' in cropTo(note([hline(1000, 4000, 3000)]), { x: 800, y: 2000, width: 5000, height: 4000 })).toBe(false);
+  });
+});
+
+describe('retimedForPaste at a given time (M17)', () => {
+  const copied = [
+    line([
+      [0, 0],
+      [5, 5],
+      [9, 9],
+    ]),
+    {
+      ...line([
+        [1, 1],
+        [6, 6],
+      ]),
+      points: [
+        { x: 1, y: 1, pressure: 0.5, t: 100 },
+        { x: 6, y: 6, pressure: 0.5, t: 140 },
+      ],
+    },
+  ];
+
+  it('puts the first sample at that note time, keeping the rhythm (a paste during a writing recording, O15)', () => {
+    const n = note([line([[0, 0], [10, 10]])]);
+    const moved = retimedForPaste(n, copied, 12_345.6);
+    expect(moved[0].points.map((p) => p.t)).toEqual([12_346, 12_356, 12_366]);
+    expect(moved[1].points.map((p) => p.t)).toEqual([12_446, 12_486]);
+    // The originals are untouched.
+    expect(copied[0].points[0].t).toBe(0);
+  });
+
+  it('never goes below 0, and without a time keeps the rule of before', () => {
+    const n = note([line([[0, 0], [10, 10]])]);
+    expect(retimedForPaste(n, copied, -50)[0].points[0].t).toBe(0);
+    expect(retimedForPaste(n, copied)[0].points[0].t).toBe(10 + 500);
+    expect(retimedForPaste(n, copied, Number.NaN)[0].points[0].t).toBe(10 + 500);
   });
 });

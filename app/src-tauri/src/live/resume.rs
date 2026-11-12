@@ -6,7 +6,7 @@
 //! No clock and no file here: the hub reads the note, the session writes on it.
 
 use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use ardoise_core::format::NoteFile;
@@ -16,11 +16,10 @@ use ardoise_core::settings::Orientation;
 use ardoise_device::pages::turn_point;
 use ardoise_media::replay::{ReplayOptions, Timeline};
 use ardoise_media::{Narration, NarrationHeader, narration_header};
-use ardoise_render::Picture;
 
 use super::hub::file_fingerprint;
+use super::paper::PageImage;
 use super::session::SavedFile;
-use crate::background::picture_of;
 
 /// Note time left between what a resumed note already holds and what is written on it: the time
 /// since the resume counts from there. Any small value will do (nothing is synchronised with
@@ -33,28 +32,14 @@ pub const RESUME_GAP_MS: u32 = 1000;
 /// disk before the resume, which `original::keep_original` keeps.
 ///
 /// In memory for the whole session, not read again: a note deleted meanwhile must still give the
-/// new note its background image.
+/// new note its background image. Its pixels, to draw, are the page's ([`ResumeSeed::image`]).
 pub struct ResumeBase {
     pub file: NoteFile,
-    /// The decoded background image, for the page's thumbnails: decoded once, at the first write
-    /// (a sheet that is not written never needs it).
-    picture: OnceLock<Option<Picture>>,
 }
 
 impl ResumeBase {
     pub fn new(file: NoteFile) -> ResumeBase {
-        ResumeBase {
-            file,
-            picture: OnceLock::new(),
-        }
-    }
-
-    /// The pixels of the note's background image; `None` without one, or when they cannot be
-    /// decoded (the member stays in the file all the same).
-    pub fn picture(&self) -> Option<&Picture> {
-        self.picture
-            .get_or_init(|| picture_of(&self.file.note, self.file.background.as_ref()))
-            .as_ref()
+        ResumeBase { file }
     }
 }
 
@@ -75,9 +60,15 @@ pub struct ResumeSeed {
     pub saved: SavedFile,
     /// Note time at which the time since the resume starts ([`time_base`]).
     pub time_base: u32,
+    /// The pixels of the note's background image, the page's to draw and to write (M17): `None`
+    /// without an image, or when its member is missing or its header cannot be read (the member
+    /// then stays in the file as it is, and nothing is drawn).
+    pub image: Option<Arc<PageImage>>,
 }
 
 impl ResumeSeed {
+    /// Before the hub's lock is taken: hashing the image's bytes and reading its header take a
+    /// moment.
     pub fn of(loaded: LoadedNote) -> ResumeSeed {
         let saved = SavedFile {
             content: file_fingerprint(&loaded.file),
@@ -85,10 +76,19 @@ impl ResumeSeed {
             stamp: loaded.stamp,
         };
         let time_base = time_base(&loaded.file.note, loaded.file.audio.as_deref());
+        let image = loaded
+            .file
+            .note
+            .background_image
+            .as_ref()
+            .and(loaded.file.background.as_ref())
+            .and_then(PageImage::of_member)
+            .map(Arc::new);
         ResumeSeed {
             base: Arc::new(ResumeBase::new(loaded.file)),
             saved,
             time_base,
+            image,
         }
     }
 }

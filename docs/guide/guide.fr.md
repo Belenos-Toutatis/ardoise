@@ -325,8 +325,10 @@ faut aussi ne choisir qu'une seule note.
 - **L'orientation** : la feuille n'est jamais tournée. Si elle est en paysage et que la tablette est réglée en portrait
   (ou l'inverse), un avis dit comment tenir la tablette : « Pour écrire sur cette feuille, tenez la tablette ainsi : … ».
   Les quatre boutons de position sont grisés pour cette feuille.
-- **La page suivante** crée une note neuve, à la racine de la bibliothèque, et suit de nouveau la position réglée pour
-  la tablette : les boutons de position fonctionnent alors.
+- **La page suivante** crée une note neuve, à la racine de la bibliothèque, avec le papier de la feuille (couleur,
+  modèle, texture, pas son image), et suit de nouveau la position réglée pour la tablette : les boutons de position
+  fonctionnent alors. Les onglets **Page** et **Fond** changent le papier et l'image de la feuille en cours (voir
+  **Le papier et l'image de la page en cours**).
 - **La narration** : si vous enregistrez, le son s'ajoute après l'ancien sans le recouvrir, et la relecture reste juste
   malgré le temps passé entre les deux séances. Si le son ne peut pas s'y ajouter (plus de 4 heures en tout, ou ancienne
   narration illisible), il part dans une note neuve à côté de la feuille, et Ardoise vous le dit en terminant.
@@ -388,13 +390,14 @@ ouvre son onglet à gauche du rail. Un clic sur l'onglet déjà ouvert, ou sur *
 l'aperçu prend toute la largeur et le rail reste. Les onglets, de haut en bas :
 
 - **Calques** : la zone **Calques** (voir **Corriger pendant le direct**). C'est l'onglet ouvert au départ.
+- **Page** : le **Papier** de la page en cours (couleur, modèle, texture) ; voir **Le papier et l'image de la page en
+  cours** plus bas.
+- **Fond** : l'**Image ou PDF de fond** de la page en cours ; voir le même paragraphe.
 - **Son** : **Enregistrer la narration** pendant la séance.
 - **Projection** : le **Vidéoprojecteur** (l'écran de projection, **Projeter**, **Arrêter la projection**), la **Zone
   projetée** (zoom, **Page entière**, **Largeur**, interrupteurs **Tableau noir** et **Pointeur laser**) et le
   **Partage sur le réseau** : le bouton **Partager sur le réseau** n'est plus dans la barre d'outils.
 - **Aide** : les raccourcis du mode direct (voir le chapitre 17).
-
-*Page* et *Fond* (papier et image sous la page en direct) ne sont pas encore proposés dans cette fenêtre.
 
 Ardoise retient l'onglet ouvert et l'état replié de cette fenêtre, sur ce PC, et les retrouve au mode direct suivant.
 
@@ -409,7 +412,10 @@ Quand des traits sont choisis, le panneau se rouvre s'il était replié.
 
 **Au clavier.** `↓` et `↑` passent d'une icône à l'autre, `Début` et `Fin` vont à la première et à la dernière,
 sans rien ouvrir ; `Entrée` ouvre l'onglet ou le replie. `Espace` ne fait pas cela ici : en mode direct il veut toujours
-dire « page suivante », même quand une icône a le focus.
+dire « page suivante », même quand une icône a le focus. Il en va de même de `Pg suiv` et `Pg préc` quand une liste
+(**Modèle**, **Placement**) ou un curseur (**Opacité**) des onglets **Page** et **Fond** a le focus : ils tournent
+toujours la page, pour que la télécommande de la salle marche après un choix à la souris ; ces listes et ce curseur
+rendent d'ailleurs le focus après chaque choix.
 
 ### Retoucher pendant le direct
 
@@ -545,6 +551,53 @@ note, avec chaque trait de l'ordinateur à côté de ceux de l'élève. À la re
 l'ordinateur apparaissent à l'heure où vous les avez écrits, mêlés à ceux de l'élève. Les annotations tracées sur la
 présentation (voir plus bas) ne changent pas : elles ne sont jamais enregistrées.
 
+### Le papier et l'image de la page en cours
+
+*Demande la tablette. Vérifié avec la tablette simulée, pas encore avec la vraie (essai H7).* Pendant le direct, vous
+pouvez changer le papier de la page qui est à l'écran et mettre une fiche ou un document *sous* l'écriture, sans arrêter
+la tablette : un élève écrit, vous passez du blanc au Seyès, ou vous posez l'énoncé d'un exercice pour que la classe le
+complète. Le changement apparaît aussitôt au vidéoprojecteur et sur l'écran du partage, et il est enregistré avec la page.
+Les onglets **Page** et **Fond** sont grisés tant que le direct n'est pas lancé.
+
+**Le papier** (onglet **Page**, bloc **Papier**) : les mêmes réglages que dans l'éditeur, la couleur en pastilles
+(**Blanc**, **Crème**, **Kraft**, **Ardoise noire**), le **Modèle** (**Uni**, **Ligné**, **Seyès**, **Quadrillé 5 mm**,
+**Millimétré**, **Pointillé**, **Portées**) et l'interrupteur **Texture du papier**.
+
+- **Une nouvelle page garde le papier** (couleur, modèle, texture) de la page qui était à l'écran quand vous l'avez créée,
+  mais *jamais son image*. Une page déjà créée garde le sien : changer le papier de la page 3 ne touche pas la page 2. Une
+  nouvelle séance repart sur du blanc uni.
+- **Le tableau noir** : tant qu'il est allumé (`B`), les pastilles de couleur sont grisées et une phrase le dit : la
+  couleur choisie *reviendra quand le tableau noir sera éteint*. Le modèle et la texture, eux, s'appliquent tout de suite.
+  Choisir **Ardoise noire** avec le tableau noir éteint donne un papier noir où l'écriture de la tablette reste noire : pour
+  écrire à la craie, allumez plutôt le tableau noir.
+- **On ne revient pas en arrière avec `Ctrl + Z`**, qui n'annule que ce que l'ordinateur écrit : rechoisissez l'ancien
+  réglage.
+- Une page qui n'a ni écriture ni image n'est pas enregistrée, même si vous avez changé son papier.
+
+**L'image** (onglet **Fond**, bloc **Image ou PDF de fond**) : **Choisir un PDF ou une image…**, la page du PDF s'il y en
+a plusieurs, puis **Mettre en fond**. L'image (PNG ou JPEG) ou la page de PDF se place *sous* l'écriture de la page en
+cours, **Entière** (toute visible, sans déformation) ; **Placement** (**Entière**, **Pleine page**, **Étirée**),
+**Opacité**, **Tourner l'image seule**, **Remplacer…** et **Retirer l'image** la règlent ensuite, comme dans l'éditeur
+(chapitre 8). L'import d'une page de PDF peut prendre quelques secondes : la tablette continue d'écrire pendant ce temps.
+
+- **Une nouvelle page n'a pas d'image.** Revenir à la page d'avant retrouve la sienne : la fiche peut être sur la page 2 et
+  une photo sur la page 3.
+- **L'image est enregistrée avec la page**, comme image de fond de la note. Une page qui n'a que l'image, sans rien
+  d'écrit, devient quand même une note, pour qu'une fiche montrée en classe soit gardée. Si vous retirez ensuite l'image,
+  la note reste dans la bibliothèque, vide : mettez-la à la corbeille si elle ne sert plus.
+- **Ardoise ne propose pas de passer la feuille en portrait ou en paysage** (une page du direct suit la tablette) : la
+  fiche est placée telle qu'elle est, et une fiche en portrait sur une page en paysage est rétrécie. Tenez la tablette en
+  portrait *avant* d'écrire pour qu'elle remplisse la page : tant que la page n'a pas d'écriture, elle suit la tablette et
+  l'image est replacée avec le même placement.
+- **Une page qui a une image et de l'écriture ne tourne plus avec la tablette**, comme une feuille reprise : les boutons de
+  position sont grisés, Ardoise dit comment tenir la tablette, et la page suivante suit de nouveau la position réglée. Si
+  vous retirez l'image, la page se remet à suivre la tablette : elle se tourne aussitôt, écriture comprise.
+- Sur une **feuille reprise** (voir plus haut), changer le papier ou l'image est un changement voulu : il est enregistré
+  dans la note même sans écriture nouvelle. **Revenir à l'original** (chapitre 8) rend l'écriture d'avant, pas le papier ni
+  l'image.
+- **Sur l'écran du partage**, le papier et l'image sont envoyés une fois sous forme d'image ; l'autre ordinateur montre la
+  couleur du papier en attendant de l'avoir reçue.
+
 ### Projeter sur un vidéoprojecteur
 
 1. Branchez le projecteur et, dans Windows, appuyez sur `Win + P` puis choisissez *Étendre* : chaque écran a son bureau.
@@ -556,7 +609,8 @@ présentation (voir plus bas) ne changent pas : elles ne sont jamais enregistré
 4. **Arrêter la projection** ferme la présentation. Ardoise retient l'écran choisi sur ce PC.
 
 Avec un seul écran, la présentation recouvre la fenêtre de commande : appuyez sur `Échap` dans la présentation pour la
-fermer.
+fermer. Il n'y a jamais deux fenêtres projetées à la fois : projeter le direct ferme la projection d'une note de
+l'éditeur (chapitre 8), et inversement.
 
 *À quoi sert `Échap`.* Dans la fenêtre de commande comme dans la présentation, quand la projection est affichée,
 `Échap` la ferme (comme dans un diaporama) ; quand rien n'est projeté, `Échap` demande s'il faut terminer le mode
@@ -872,9 +926,12 @@ prend toute la largeur et le rail reste. Les onglets, de haut en bas :
 - **Page** : le **Papier** (couleur en pastilles, modèle, texture), le **Format de la feuille** et son orientation,
   **Tourner et recadrer**, et **Revenir à l'original** (voir plus bas).
 - **Fond** : l'**Image ou PDF de fond**.
-- **Son** : la narration. Pendant une relecture, c'est là qu'on enregistre ; en dehors d'une relecture, l'onglet propose
-  **Lancer la relecture**.
-- **Projection** : **Partager sur le réseau** (le bouton n'est plus dans la barre d'outils ; voir la fin du chapitre 6).
+- **Son** : la narration. Le contrôle **Enregistrer le son** choisit entre **Pendant que j'écris** (au départ) et
+  **Pendant une relecture** ; voir le chapitre 9. Pendant une relecture, c'est là qu'on enregistre en relisant ; en dehors
+  d'une relecture, dans le mode **Pendant une relecture**, l'onglet propose **Lancer la relecture**.
+- **Projection** : le **Vidéoprojecteur** (l'écran de projection, **Projeter**, **Arrêter la projection**), la **Zone
+  projetée** (zoom, **Page entière**, **Largeur**) et **Partager sur le réseau** (le bouton n'est plus dans la barre
+  d'outils ; voir la fin du chapitre 6). Voir **Projeter la note au vidéoprojecteur** plus bas.
 - **Aide** : les raccourcis clavier de l'éditeur (voir le chapitre 17).
 
 Ardoise retient l'onglet ouvert et l'état replié de l'éditeur, sur ce PC, et les retrouve quand vous ouvrez une autre
@@ -882,7 +939,7 @@ note ou rouvrez l'éditeur. Les modifications de l'onglet **Page** s'annulent av
 
 **Les pastilles** se voient aussi panneau replié : le *nombre de calques* sur **Calques** ; un *point orange* quand le
 calque choisi est masqué ; un *point rouge* sur **Son** pendant un enregistrement ; un *point bleu* sur **Projection**
-pendant un partage.
+pendant une projection ou un partage.
 
 **Au-dessus de l'onglet ouvert**, quel qu'il soit, s'affichent la découpe (quand elle est ouverte) et la sélection :
 « Traits sélectionnés : 3 », **Copier**, **Couper**, **Coller**, **Dupliquer**, **Redresser les formes**,
@@ -1015,6 +1072,37 @@ une feuille transparente superposée aux autres : l'écriture d'une tablette, vo
 Ajouter, masquer, renommer, déplacer et fusionner s'annulent avec `Ctrl + Z`. Pour les calques pendant le mode direct,
 voir **Corriger pendant le direct** (chapitre 6).
 
+### Projeter la note au vidéoprojecteur
+
+*Ne demande pas la tablette.* Pour montrer à la classe la note que vous corrigez ou complétez, sans passer par le mode
+direct : dans l'onglet **Projection** du panneau de côté, bloc **Vidéoprojecteur**, choisissez l'**Écran de projection**
+(**Actualiser la liste des écrans** la remet à jour) et cliquez sur **Projeter**. Comme pour le direct, branchez le
+projecteur et choisissez *Étendre* dans Windows (`Win + P`) avant. La page de l'éditeur s'affiche en plein écran sur le
+vidéoprojecteur, avec son papier, son image de fond et ses calques affichés, et elle est **mise à jour à chaque trait** :
+ce que vous écrivez au stylet, à la souris ou au doigt apparaît pendant que vous l'écrivez.
+
+- **Ce que la classe voit.** Le trait en cours, puis le résultat de chaque action : annuler, rétablir, gommer, déplacer,
+  redimensionner, recolorer, coller, redresser, changer le papier, l'image, le format ou l'orientation de la feuille,
+  **Revenir à l'original**. Une gomme ou un déplacement en cours de glissement n'apparaît qu'une fois lâché. La classe ne
+  voit *jamais* la sélection, le lasso, le cercle de la gomme, ni l'aperçu d'un redressement, d'une découpe ou d'un
+  recadrage. Un calque masqué n'est pas projeté.
+- **La zone projetée.** Le bloc **Zone projetée** règle le zoom : **Page entière** (au départ), **Largeur** (la page sur
+  toute la largeur du vidéoprojecteur), **Agrandir** et **Réduire**. La zone est *centrée sur ce que l'éditeur montre*, et
+  un **cadre en pointillés**, dans l'éditeur, la montre sur la page. Vous pouvez donc agrandir l'éditeur pour écrire petit :
+  la classe garde son zoom ; faire défiler l'éditeur déplace la zone projetée.
+- **Une fenêtre qui n'affiche que la page** : ni tableau noir, ni pointeur laser, ni annotations par-dessus (c'est l'éditeur
+  qui sert à écrire).
+- **La relecture** (chapitre 9) est projetée aussi, comme l'éditeur la montre.
+- **Une autre note** (`Alt + ←` et `Alt + →`) : la projection reste ouverte et montre l'autre note. Elle s'arrête quand
+  vous quittez l'éditeur (retour à la bibliothèque, reprise du mode direct, fermeture de la fenêtre).
+- **Arrêter** : **Arrêter la projection**, ou `Échap` dans la fenêtre projetée (`Ctrl + W`, `Ctrl + F4` et `Ctrl + Q` la
+  ferment aussi). L'onglet et le point bleu de **Projection** le suivent. Avec un seul écran, la fenêtre recouvre l'éditeur :
+  `Échap` la ferme.
+- **Une seule fenêtre projetée à la fois** : projeter l'éditeur ferme la projection du direct, et inversement.
+- Le **partage sur le réseau** (bloc **Partage sur le réseau**, même onglet) peut tourner en même temps : l'autre ordinateur
+  montre la note entière, pas la zone agrandie, avec un léger retard.
+- L'assistant ne pilote pas cette projection, et aucune touche ne la lance.
+
 ### Découper une note
 
 **Découper** détache une partie de la note dans une nouvelle note, au choix :
@@ -1080,13 +1168,52 @@ Les écrans tactiles marchent comme dans l'éditeur : un doigt fait défiler, de
 
 ### Narration
 
-Pendant une relecture, **Enregistrer une narration** (dans l'onglet **Son** du panneau de côté, qui s'ouvre tout seul avec la relecture) vous laisse raconter pendant que le
-tracé défile ; le son est rangé *dans la note*. La narration suit la vitesse et les temps morts de la relecture
-au moment où vous la démarrez. Choisissez le **Micro** (la liste mémorise votre choix sur ce PC ; **Actualiser la liste
-des micros** si vous venez de le brancher) et regardez le **Niveau du micro** avant de lancer : **Démarrer**, puis
-**Arrêter et enregistrer**. Un nouvel enregistrement remplace le précédent. **Lire avec la narration** rejoue tracé et
-son ensemble ; **Supprimer la narration** l'enlève. *Enregistrez la note (`Ctrl + S`) avant* : le son est ajouté à la
-note telle qu'elle est sur le disque.
+Une note a *une seule narration*, un son rangé *dans la note*. L'onglet **Son** du panneau de côté dit ce que la note
+contient (« Narration enregistrée dans la note (…) » ou « Cette note n'a pas de narration. ») et, en dehors d'une
+relecture, propose deux façons de l'enregistrer, au choix par le contrôle **Enregistrer le son** (le choix est retenu sur
+ce PC) : **Pendant que j'écris**, au départ, et **Pendant une relecture**. Dans les deux cas, choisissez le **Micro** (la
+liste mémorise votre choix sur ce PC ; **Actualiser la liste des micros** si vous venez de le brancher) et regardez le
+**Niveau du micro** avant de lancer : **Démarrer**, puis **Arrêter et enregistrer**.
+
+**Pendant que j'écris** (*Ne demande pas la tablette.*). Vous parlez *en écrivant dans l'éditeur*, au stylet, à la souris
+ou au doigt (si **Dessiner au doigt** est activé dans les **Réglages**). Les traits écrits pendant l'enregistrement
+prennent l'heure du son et se rejouent avec lui, au rythme où vous les avez écrits, silences compris, **après** les traits
+que la note contient déjà.
+
+1. Dans l'onglet **Son**, choisissez **Pendant que j'écris**, ouvrez **Enregistrer en écrivant**, choisissez le micro.
+2. **Démarrer**. Si la note a déjà une narration, Ardoise demande d'abord : « Cette note a déjà une narration (…). La
+   remplacer par ce nouvel enregistrement ? » avec **Remplacer** ou **Garder l'ancienne** (rien n'est alors enregistré).
+   La même question est posée dans le mode **Pendant une relecture** (qui remplaçait jusqu'ici en le disant seulement).
+3. Parlez et écrivez : « Écrivez : vos traits suivent le son. » Un point rouge marque l'onglet **Son**.
+4. **Arrêter et enregistrer** : la note est *enregistrée aussitôt*, avec le son et ce que vous avez écrit (« Son enregistré
+   (…) avec vos traits. »). **Annuler** jette le son et *garde les traits*. Si l'enregistrement de la note échoue (elle a
+   changé sur un autre PC), le son reste en mémoire (« Le son est gardé en mémoire… »), le bandeau habituel propose de
+   recharger ou d'**Enregistrer comme copie**, et la copie reçoit le son aussi. Recharger la note, ou choisir de ne pas
+   l'enregistrer, abandonne ce son.
+
+Ce qui se passe pendant l'enregistrement :
+
+- `Ctrl + Z` et `Ctrl + Y` font disparaître et revenir un trait avec son heure, sans toucher au son ; la gomme, le
+  déplacement, le changement de couleur et la suppression ne changent pas les heures des traits. Un trait *collé* paraît à
+  l'instant où vous l'avez collé, avec le rythme qu'il avait.
+- Quitter l'éditeur, changer de note, reprendre le mode direct, fermer la fenêtre, lancer une relecture, **Revenir à
+  l'original**, découper et exporter la vidéo sont refusés avec « Arrêtez ou annulez d'abord l'enregistrement de la
+  narration. » Tout le reste se fait comme d'habitude.
+- Si rien n'est écrit, le son est enregistré seul, après l'encre : un commentaire. Si Windows bloque le micro (silence),
+  Ardoise le dit et ne garde aucun son ; les traits restent.
+- Après l'enregistrement, un trait écrit plus tard est placé *après la fin du son*, pour ne pas paraître pendant la
+  narration.
+
+*Un point à connaître.* **Lire avec la narration** rejoue ce son à la vitesse normale, sans couper les temps morts : si la
+note contenait déjà de l'écriture faite en classe, ses pauses réelles sont rejouées avant que la voix commence, dans la
+relecture et dans la vidéo. Sans la narration, la relecture est inchangée.
+
+**Pendant une relecture.** **Enregistrer une narration** (dans l'onglet **Son**, qui s'ouvre tout seul avec la relecture)
+vous laisse raconter pendant que le tracé défile. La narration suit la vitesse et les temps morts de la relecture au moment
+où vous la démarrez. **Lancer la relecture** (dans l'onglet **Son**, hors relecture) la démarre. *Enregistrez la note
+(`Ctrl + S`) avant* : le son est ajouté à la note telle qu'elle est sur le disque.
+
+Dans les deux modes, **Lire avec la narration** rejoue tracé et son ensemble, et **Supprimer la narration** l'enlève.
 
 Si Windows bloque le micro, vous obtenez du silence et Ardoise le détecte : ouvrez *Paramètres > Confidentialité et
 sécurité > Microphone* et activez *Autoriser les applications de bureau à accéder à votre microphone* (un interrupteur
@@ -1205,7 +1332,9 @@ moins juste. *Relisez toujours le texte* : la reconnaissance peut se tromper.
 ### Montrer la feuille en direct
 
 Pour que la feuille (ou la note ouverte) s'affiche dans le navigateur d'un autre ordinateur du réseau, sans fichier à
-envoyer : **Partager sur le réseau** (onglet **Projection** du panneau de côté), voir la fin du chapitre 6.
+envoyer : **Partager sur le réseau** (onglet **Projection** du panneau de côté), voir la fin du chapitre 6. Pour montrer
+la note ouverte sur un vidéoprojecteur branché à l'ordinateur, c'est **Projeter** dans le même onglet (chapitre 8,
+**Projeter la note au vidéoprojecteur**).
 
 ## 11. Importer les notes d'Inkspace
 
@@ -1458,6 +1587,9 @@ comparent aux touches que la fenêtre traite vraiment.
 | Molette | Zoom autour du curseur |
 | Bouton du milieu (glisser) | Déplacer la page |
 
+Dans la fenêtre de **projection de l'éditeur** (chapitre 8), `Échap`, `Ctrl + W`, `Ctrl + F4` et `Ctrl + Q` ferment la
+projection ; la fenêtre n'a pas d'autre touche.
+
 ### Relecture
 
 | Touches | Action |
@@ -1472,8 +1604,8 @@ comparent aux touches que la fenêtre traite vraiment.
 
 | Touches | Action |
 |---|---|
-| `→`, `Pg suiv`, `Espace` | Page suivante (`Espace` aussi quand un bouton a le focus) |
-| `←`, `Pg préc` | Page précédente |
+| `→`, `Pg suiv`, `Espace` | Page suivante (`Espace` aussi quand un bouton a le focus ; `Pg suiv` aussi quand une liste ou un curseur des onglets **Page** et **Fond** a le focus) |
+| `←`, `Pg préc` | Page précédente (`Pg préc` aussi quand une liste ou un curseur des onglets **Page** et **Fond** a le focus) |
 | `Ctrl + Suppr` (ou `Ctrl + Retour arrière`) | Effacer la page (**Annuler l'effacement** pendant 8 secondes) |
 | `B` | **Tableau noir** |
 | `L` | **Pointeur laser** |

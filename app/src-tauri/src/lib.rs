@@ -14,6 +14,8 @@ mod clipboard;
 mod codec;
 mod commands;
 mod console;
+#[cfg(test)]
+mod contract_tests;
 mod demo;
 mod diagnostic;
 mod drafts;
@@ -37,6 +39,7 @@ mod presentation;
 mod print;
 #[cfg(windows)]
 mod print_windows;
+mod projection;
 mod revision;
 mod selftest;
 mod session_end;
@@ -86,6 +89,9 @@ pub struct Cli {
     /// `--mcp [--read-only]`: serve the MCP protocol on standard input/output, without a
     /// window, until stdin closes.
     pub mcp: Option<mcp::McpArgs>,
+    /// `--simulated-microphone`: the narration records a simulated voice instead of opening the PC's
+    /// microphone (for the journeys: they never switch the real one on).
+    pub simulated_microphone: bool,
 }
 
 impl Cli {
@@ -102,6 +108,7 @@ impl Cli {
                 "--diagnostic" => cli.diagnostic = true,
                 "--simulated" => cli.simulated = true,
                 "--simulated-tablet" => cli.simulated_tablet = true,
+                "--simulated-microphone" => cli.simulated_microphone = true,
                 "--import-inkspace" => import_inkspace = true,
                 "--mcp" => mcp = true,
                 "--read-only" => read_only = true,
@@ -246,7 +253,9 @@ pub fn run() {
         .manage(tablet::TabletRuntime::default())
         .manage(live::LiveRuntime::default())
         .manage(video::VideoCancel::default())
-        .manage(narration::NarrationRuntime::default())
+        .manage(narration::NarrationRuntime::with_simulated_microphone(
+            cli.simulated_microphone,
+        ))
         .manage(codec::CodecDownload::default())
         .manage(handwriting::HandwritingRuntime::default())
         .manage(textdoc::Structures::default())
@@ -254,6 +263,7 @@ pub fn run() {
         .manage(import::InkspaceImport::default())
         .manage(drafts)
         .manage(share)
+        .manage(projection::ProjectionRuntime::default())
         // The presentation window closing, and the main one taking it along.
         .on_window_event(presentation::on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -314,12 +324,19 @@ pub fn run() {
             live::live_redo_edit,
             live::live_computer_pen,
             live::live_layers,
+            live::live_page_paper,
+            live::live_page_image,
             live::live_page_background,
             live::live_set_view,
             live::live_set_marks,
             presentation::list_monitors,
             presentation::open_presentation,
             presentation::close_presentation,
+            projection::projection_open,
+            projection::projection_close,
+            projection::projection_watch,
+            projection::projection_subscribe,
+            projection::projection_update,
             commands::set_auto_export,
             commands::set_shapes,
             export::export_notes,
@@ -345,6 +362,7 @@ pub fn run() {
             narration::narration_stop,
             narration::narration_retry,
             narration::narration_discard,
+            narration::narration_drop_staged,
             narration::narration_info,
             narration::narration_audio,
             narration::delete_narration,
@@ -479,6 +497,18 @@ mod tests {
         assert_eq!(parse(&["--unknown"]), Cli::default());
         let tablet = parse(&["--simulated-tablet"]);
         assert!(tablet.simulated_tablet && !tablet.simulated && !tablet.diagnostic);
+        assert!(!tablet.simulated_microphone);
+        let microphone = parse(&["--simulated-microphone"]);
+        assert!(microphone.simulated_microphone && !microphone.simulated_tablet);
+        assert_eq!(
+            microphone,
+            Cli {
+                simulated_microphone: true,
+                ..Cli::default()
+            }
+        );
+        let both = parse(&["--simulated-tablet", "--simulated-microphone"]);
+        assert!(both.simulated_tablet && both.simulated_microphone);
         assert_eq!(parse(&["C:\\somewhere"]).import_inkspace, None);
     }
 

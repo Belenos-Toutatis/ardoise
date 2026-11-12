@@ -361,17 +361,23 @@ Choix faits en suivant les recommandations de la conception (`docs/design/side-p
 
 Ajouté avec M16 (SPEC §4.2, §4.4 et §4.5, `docs/questions.md` Q13). Les blocs marqués « nouveau » dans la maquette.
 
-- [ ] Direct, onglets Page et Fond : changer le papier (couleur, modèle, texture) de la page en cours et mettre une image ou une page de PDF dessous ; au vidéoprojecteur, sur le partage et dans la note ; une nouvelle page garde le papier de la précédente, pas l'image de fond.
-- [ ] Éditeur, onglet Projection : la page de l'éditeur en plein écran sur le vidéoprojecteur (papier, fond, calques visibles), mise à jour à chaque trait, avec le zoom et « Page entière » / « Largeur » ; arrêt par son bouton ou en quittant l'éditeur.
-- [ ] Éditeur, onglet Son, « Pendant que j'écris » : les traits écrits pendant l'enregistrement (stylet, souris, doigt) prennent l'heure du son et se rejouent avec lui, après les traits déjà présents, à l'écran et dans les exports vidéo ; enregistrer un nouveau son sur une note qui en a un demande d'abord.
-- [ ] Guides FR et EN, `CHANGELOG.md` ; procédure H7 dans `docs/hardware-tests.md`.
-- [ ] Relecture indépendante, remarques corrigées.
+- [x] Direct, onglets Page et Fond : changer le papier (couleur, modèle, texture) de la page en cours et mettre une image ou une page de PDF dessous ; au vidéoprojecteur, sur le partage et dans la note ; une nouvelle page garde le papier de la précédente, pas l'image de fond.
+- [x] Éditeur, onglet Projection : la page de l'éditeur en plein écran sur le vidéoprojecteur (papier, fond, calques visibles), mise à jour à chaque trait, avec le zoom et « Page entière » / « Largeur » ; arrêt par son bouton ou en quittant l'éditeur.
+- [x] Éditeur, onglet Son, « Pendant que j'écris » : les traits écrits pendant l'enregistrement (stylet, souris, doigt) prennent l'heure du son et se rejouent avec lui, après les traits déjà présents, à l'écran et dans les exports vidéo ; enregistrer un nouveau son sur une note qui en a un demande d'abord.
+- [x] Guides FR et EN, `CHANGELOG.md` ; procédure H7 dans `docs/hardware-tests.md`.
+- [x] Relecture indépendante, remarques corrigées.
 
 **Critères de fin** :
 - `CHECK OK` et `E2E OK` ;
 - un parcours de bout en bout du direct : le papier et une image de fond changés sur la page en cours apparaissent au vidéoprojecteur, sur le partage et dans le fichier de la note ; la page suivante garde le papier, pas l'image ;
 - un parcours de bout en bout de l'éditeur projeté : un trait tracé dans l'éditeur apparaît dans la fenêtre de présentation ;
 - des tests du son pendant qu'on écrit : les heures des traits suivent celles du son, la relecture et l'export vidéo les rejouent ensemble, un son existant n'est jamais remplacé sans le demander.
+
+Vérifié sous Windows le 2026-11-12 : `CHECK OK`, `E2E OK` (100 parcours, FR et EN, dont ceux de M17 — papier et fond de la page du direct vus au vidéoprojecteur, sur le partage et dans le fichier de la note, la page suivante gardant le papier sans l'image, la télécommande tournant les pages menu ou curseur au focus ; l'éditeur projeté, un trait vu au vidéoprojecteur avant d'être levé, Ctrl+Z, calques, zoom, relecture, note suivante ; le son pendant qu'on écrit, sur le micro simulé, avec les heures des traits lues dans le fichier, la relecture, l'estimation de la vidéo et la question avant de remplacer), `SELFTEST OK`, `PRIVACY OK`, mesure des performances écrite (`docs/performance.md` : projection de l'éditeur à 46 ms, dans les 50 ms acceptés). Le micro du PC n'a jamais été allumé : les parcours qui enregistrent utilisent `--simulated-microphone`.
+
+Trouvé par la relecture indépendante et corrigé : un son gardé en mémoire après un enregistrement de la note manqué était effacé dès « Remplacer », et perdu si le nouvel enregistrement ne démarrait pas ; il reste maintenant jusqu'à ce que le nouveau son soit gardé, et la copie de secours d'un son remplacé n'est plus effacée. Trouvé par les parcours et corrigé : dans l'onglet Page du direct, des choix faits vite les uns après les autres se perdaient (chaque choix repartait du papier connu avant le précédent).
+
+Choix faits en suivant les recommandations de la conception (`docs/design/paper-projection-narration.md`, §11), à confirmer à l'usage. Le paquet G (la barre de relecture d'une narration enregistrée en écrivant) est laissé de côté : une telle narration se rejoue à vitesse 1, avec les pauses réelles de l'encre d'avant le son (guides et notes de version, « Limites connues »). Deux tests déjà fragiles avant M17 sont notés : un test de reprise d'une feuille (dossier rendu inaccessible puis remis) échoue environ une fois sur cent, et les tests de `ardoise-media` se sont arrêtés une fois sur une violation d'accès sous charge.
 
 ### Point de contrôle H7 [matériel]
 

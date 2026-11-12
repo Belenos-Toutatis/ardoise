@@ -7,7 +7,8 @@
  * - reactive ones (`$state`) for the interface: session state, page number, style, view,
  *   presentation, saved notes, pages that failed to save, stroke count, whether the page turns
  *   with the tablet and the resumed sheets that went on in a new note (M12: the control window
- *   only; the share's viewers are never sent either, and keep the defaults);
+ *   only; the share's viewers are never sent either, and keep the defaults), the page's own paper and the key of its
+ *   image's pixels (M17: `pagePaper`, `imagePixels`; a viewer reads them as the background's paper and no image);
  * - plain ones for the canvases, which are told of every change through `subscribe` and draw
  *   on the next animation frame: the finished strokes of the page (`strokes`, appended in
  *   place; `generation` changes when they are replaced or edited), the strokes in progress, one per
@@ -38,6 +39,7 @@
 import type { InkPoint } from './ink';
 import { wallClock, type PendingSample } from './latency';
 import type {
+  ImagePixels,
   LiveBatch,
   LiveEvent,
   LivePoint,
@@ -53,7 +55,7 @@ import { applyStrokeEdit, type StrokeEdit } from './live-edits';
 import { marksFromWire, reuseMarks } from './live-marks';
 import { roundView, sameView } from './live-view';
 import type { Orientation } from './orientation';
-import type { Background, BackgroundImage, Layer, PageSize, Rgba, Stroke } from './note';
+import type { Background, BackgroundImage, Layer, PageSize, Paper, Rgba, Stroke } from './note';
 
 /** A page Rust failed to write into the library. */
 export interface SaveError {
@@ -143,6 +145,13 @@ export class LiveState {
   background = $state.raw<Background>(DEFAULT_BACKGROUND);
   /** The background image of a resumed sheet: where it goes (its pixels are Rust's). Null elsewhere. */
   pageImage = $state.raw<BackgroundImage | null>(null);
+  /**
+   * M17: the page's own paper, what it has without the blackboard (the Page tab shows it; `background.paper` is slate
+   * while the board is on). The share's viewers do not get it: `background.paper`.
+   */
+  pagePaper = $state.raw<Paper>('white');
+  /** M17: the key and size of the pixels of the page's image (the windows key their paper on it); null without an image. */
+  imagePixels = $state.raw<ImagePixels | null>(null);
   /** The share's viewers: the picture of the paper this page wants (`LiveSnapshot.paperKey`). */
   paperKey = $state<string | null>(null);
   layers = $state.raw<Layer[]>([]);
@@ -155,7 +164,7 @@ export class LiveState {
   /** The page has an edit to undo (`api.liveUndoEdit`), or to redo (`api.liveRedoEdit`). */
   canUndo = $state(false);
   canRedo = $state(false);
-  /** The current page turns with the tablet; false on a resumed sheet, which is never turned. */
+  /** The current page turns with the tablet; false on a resumed sheet, which is never turned, and on a page written over an image. */
   canTurnPage = $state(true);
   /** The sheets that went on in a new note, in the order they were told; each stays until dismissed. */
   forks = $state.raw<SheetFork[]>([]);
@@ -460,6 +469,10 @@ export class LiveState {
     if (JSON.stringify(this.background) !== JSON.stringify(s.page.background)) this.background = s.page.background;
     const image = s.page.backgroundImage ?? null;
     if (JSON.stringify(this.pageImage) !== JSON.stringify(image)) this.pageImage = image;
+    const ownPaper = s.pagePaper ?? s.page.background.paper;
+    if (JSON.stringify(this.pagePaper) !== JSON.stringify(ownPaper)) this.pagePaper = ownPaper;
+    const pixels = s.imagePixels ?? null;
+    if (JSON.stringify(this.imagePixels) !== JSON.stringify(pixels)) this.imagePixels = pixels;
     this.paperKey = s.paperKey ?? null;
     if (JSON.stringify(this.layers) !== JSON.stringify(s.page.layers)) this.layers = s.page.layers;
     this.incomingStyle(s.style);

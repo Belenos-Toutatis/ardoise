@@ -47,14 +47,15 @@ export async function collapsePanel(app) {
  * The red dot of the Sound tab while recording (§4, O12): opens the tab, starts a recording from the narration panel,
  * checks the dot and the tab's hidden text, then cancels (nothing is kept). The journeys have no microphone, so a PC
  * without one cannot record: a log line says so and the function returns false (vitest checks the dot with
- * `mock-narration`). `l`: the journey's catalog lookup.
+ * `mock-narration`). `l`: the journey's catalog lookup. `simulated` (M17): the journey runs with
+ * `--simulated-microphone`, so the recording is made for real, on the simulated voice (the PC's own microphone stays off).
  *
  * The journeys run on the user's own PC, which has a microphone: a test must not switch it on behind their back. So
- * nothing is recorded unless `ARDOISE_E2E_MICROPHONE=1` asks for it; otherwise a log line says the check was left to
+ * nothing is recorded unless `ARDOISE_E2E_MICROPHONE=1` asks for it (or `simulated`); otherwise a log line says the check was left to
  * vitest.
  */
-export async function checkRecordingDot(app, l) {
-  if (process.env.ARDOISE_E2E_MICROPHONE !== '1') {
+export async function checkRecordingDot(app, l, { simulated = false } = {}) {
+  if (!simulated && process.env.ARDOISE_E2E_MICROPHONE !== '1') {
     console.log('    skipped: pas d’enregistrement réel sans ARDOISE_E2E_MICROPHONE=1 (le micro de ce PC reste éteint) ; pastille rouge vérifiée par vitest (O12)');
     return false;
   }
@@ -82,8 +83,12 @@ export async function checkRecordingDot(app, l) {
     return false;
   }
   await app.waitFor(`${dot} === 'rec'`, 'the red dot on the Sound tab');
-  const said = await app.evaluate(`(document.querySelector(${JSON.stringify(tabButton('sound'))})?.textContent ?? '').replace(/\s+/g, ' ')`);
-  if (!said.includes(l('side.dot.rec'))) throw new Error('the Sound tab does not say that it is recording');
+  const said = `(document.querySelector(${JSON.stringify(tabButton('sound'))})?.textContent ?? '').replace(/\\s+/g, ' ')`;
+  await app
+    .waitFor(`${said}.includes(${JSON.stringify(l('side.dot.rec'))})`, 'the Sound tab saying that it is recording', 5000)
+    .catch(async () => {
+      throw new Error(`the Sound tab does not say that it is recording: ${JSON.stringify(await app.evaluate(said))}`);
+    });
   await app.click(`${panel} [data-action="narration-cancel"]`);
   await app.waitFor(`${dot} === null`, 'the red dot to go');
   return true;

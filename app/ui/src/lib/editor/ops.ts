@@ -212,12 +212,16 @@ export function pasteOffset(note: Note, strokes: readonly Stroke[]): Vec {
 /**
  * Copies of `strokes` for pasting into `note` (the clipboard may come from another note): the
  * sample times shifted so that the first one comes `PASTE_GAP_MS` after the last sample of the
- * note, keeping the rhythm of the copied strokes: the replay draws them last, as written.
+ * note, keeping the rhythm of the copied strokes: the replay draws them last, as written. With
+ * `at` (M17: a paste during a writing recording takes the sound's current time, O15; after a
+ * note-time narration, its end), the first sample comes at that note time instead (whole
+ * milliseconds, never below 0).
  */
-export function retimedForPaste(note: Note, strokes: readonly Stroke[]): Stroke[] {
+export function retimedForPaste(note: Note, strokes: readonly Stroke[], at?: number): Stroke[] {
   let first = Infinity;
   for (const stroke of strokes) for (const p of stroke.points) if (p.t < first) first = p.t;
-  const shift = Number.isFinite(first) ? noteEnd(note) + PASTE_GAP_MS - first : 0;
+  const start = at !== undefined && Number.isFinite(at) ? Math.max(0, Math.round(at)) : noteEnd(note) + PASTE_GAP_MS;
+  const shift = Number.isFinite(first) ? start - first : 0;
   return strokes.map((stroke) => ({ ...stroke, points: stroke.points.map((p) => ({ ...p, t: p.t + shift })) }));
 }
 

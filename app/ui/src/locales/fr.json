@@ -729,7 +729,10 @@
     "shareNoFreePort": "aucun port libre dans la plage {detail} pour le partage : d'autres programmes les utilisent tous ; choisissez un autre port dans les réglages d'Ardoise (« Port du partage »), puis relancez le partage",
     "sharePortInvalid": "le port du partage doit être un nombre entier de 1024 à 65535",
     "shareUnavailable": "cette version d'Ardoise ne peut pas partager sur le réseau : la page destinée aux autres écrans n'est pas incluse",
-    "shareFailed": "le partage n'a pas pu démarrer ({detail})"
+    "shareFailed": "le partage n'a pas pu démarrer ({detail})",
+    "noStagedNarration": "le son enregistré n'est plus en mémoire ; une copie est dans le dossier de secours des narrations",
+    "projectionStale": "la projection a pris du retard ; elle se remet à jour",
+    "projectionInvalid": "la projection a reçu une mise à jour incorrecte ; elle se remet à jour"
   },
   "editor": {
     "back": "Bibliothèque",
@@ -1101,7 +1104,23 @@
     },
     "sound": {
       "replayFirst": "La narration s'écoute et s'enregistre pendant une relecture.",
-      "startReplay": "Lancer la relecture"
+      "startReplay": "Lancer la relecture",
+      "mode": "Enregistrer le son",
+      "modeWriting": "Pendant que j'écris",
+      "modeReplay": "Pendant une relecture",
+      "writingHelp": "Le son et ce que vous écrivez sur l'ordinateur (stylet, souris, ou doigt si « Dessiner au doigt » est activé) sont enregistrés ensemble : la relecture les rejoue en même temps, après ce que la note contient déjà.",
+      "recordWriting": "Enregistrer en écrivant",
+      "recordWritingHint": "Parler en écrivant : les traits prennent l'heure du son",
+      "writingInfo": "Les traits écrits pendant l'enregistrement prennent l'heure du son.",
+      "writingSave": "À l'arrêt, la note est enregistrée avec le son et ce que vous avez écrit.",
+      "writingDuring": "Écrivez : vos traits suivent le son.",
+      "saved": "Son enregistré ({duration}) avec vos traits.",
+      "notSaved": "Le son est gardé en mémoire : il ira dans la note à son prochain enregistrement."
+    },
+    "projection": {
+      "help": "La page de l'éditeur en plein écran sur le vidéoprojecteur, mise à jour à chaque trait. Elle s'arrête quand vous quittez l'éditeur.",
+      "zoneHint": "La zone projetée suit ce que montre l'éditeur ; un cadre en pointillés la montre sur la page.",
+      "widthTitle": "Afficher la page sur toute la largeur du vidéoprojecteur"
     }
   },
   "side": {
@@ -1239,7 +1258,10 @@
       "saved": "Narration enregistrée ({duration}).",
       "failed": "L'enregistrement a échoué : {message}",
       "saveNote": "Le son est ajouté à la note telle qu'elle est enregistrée sur le disque : les modifications non enregistrées n'en font pas partie.",
-      "unsavedWarning": "Cette note a des modifications non enregistrées. Enregistrez-la d'abord (Ctrl+S), sinon elles ne seront pas conservées avec la narration."
+      "unsavedWarning": "Cette note a des modifications non enregistrées. Enregistrez-la d'abord (Ctrl+S), sinon elles ne seront pas conservées avec la narration.",
+      "replaceQuestion": "Cette note a déjà une narration ({duration}). La remplacer par ce nouvel enregistrement ?",
+      "replaceYes": "Remplacer",
+      "replaceNo": "Garder l'ancienne"
     },
     "pending": {
       "title": "Enregistrement en attente",
@@ -1592,7 +1614,7 @@
       "severalSelected": "Sélectionnez une seule note pour reprendre le mode direct.",
       "failed": "Le mode direct n'a pas pu reprendre cette feuille.",
       "back": "Retour à la bibliothèque",
-      "cannotTurn": "Une feuille reprise ne se tourne jamais : la page suivante suivra de nouveau la position de la tablette.",
+      "cannotTurn": "Cette page ne se tourne pas avec la tablette : c'est une feuille reprise, ou une page écrite sur une image. Une nouvelle page suivra de nouveau la position de la tablette.",
       "hold": "Pour écrire sur cette feuille, tenez la tablette ainsi : {position}.",
       "forked": {
         "sheet": "Feuille « {title} »",
@@ -1785,7 +1807,10 @@
     "failed": {
       "layersStale": "La page a changé entre-temps : refaites l'opération sur les calques.",
       "pen": "Ce trait n'a pas pu être écrit.",
-      "eraser": "Ce coup de gomme n'a pas pu être fait."
+      "eraser": "Ce coup de gomme n'a pas pu être fait.",
+      "paper": "Le papier de la page n'a pas pu être changé.",
+      "image": "L'image de fond n'a pas pu être changée.",
+      "pageStale": "La page a changé entre-temps : refaites le choix."
     },
     "leave": {
       "title": "Terminer le mode direct ?",
@@ -1797,12 +1822,23 @@
       "title": "Quitter Ardoise ?",
       "message": "Le mode direct s'arrête et chaque page écrite est enregistrée comme une note de la bibliothèque.",
       "confirm": "Quitter Ardoise"
+    },
+    "page": {
+      "help": "Pour la page en cours, au vidéoprojecteur et sur le partage aussi. Une nouvelle page garde ce papier.",
+      "board": "Tableau noir : la couleur du papier reviendra quand il sera éteint (B). Le modèle et la texture s'appliquent tout de suite.",
+      "slate": "Pour écrire à la craie, allumez plutôt le tableau noir (B).",
+      "back": "Pour revenir en arrière, rechoisissez l'ancien réglage : Ctrl+Z n'annule que ce qu'écrit l'ordinateur."
+    },
+    "background": {
+      "help": "Sous l'écriture de la page en cours : une fiche ou un document à compléter devant la classe. La page suivante n'a pas d'image."
     }
   },
   "presentation": {
     "title": "Présentation",
     "canvas": "Page projetée {page}",
-    "clearMarks": "Effacer les annotations"
+    "clearMarks": "Effacer les annotations",
+    "editorTitle": "Projection de l'éditeur",
+    "editorCanvas": "Page projetée de l'éditeur"
   },
   "share": {
     "button": "Partager sur le réseau",

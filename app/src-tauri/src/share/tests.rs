@@ -450,15 +450,25 @@ fn snapshot_of(note: Note) -> LiveSnapshot {
         revision: 7 << 32,
         can_undo: true,
         can_redo: true,
+        page_paper: ardoise_core::note::Paper::White,
+        image_pixels: None,
     }
 }
 
 #[test]
 fn a_viewer_never_gets_library_paths_titles_tags_nor_the_screen() {
+    // What only the live windows need (M17) stays out too.
+    let mut snapshot = snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]));
+    snapshot.page_paper = Paper::Kraft;
+    snapshot.image_pixels = Some(crate::live::model::ImagePixels {
+        key: "00000000deadbeef-4242".into(),
+        width: 4096,
+        height: 2048,
+    });
     let batch = LiveBatch {
         events: vec![
             LiveEvent::Snapshot {
-                snapshot: Arc::new(snapshot_of(note_with(vec![pen_stroke(1000.0, 4)]))),
+                snapshot: Arc::new(snapshot),
             },
             LiveEvent::Saved {
                 paths: vec!["C:\\Users\\Prof\\Nextcloud\\Notes\\page.ardoise".into()],
@@ -485,6 +495,10 @@ fn a_viewer_never_gets_library_paths_titles_tags_nor_the_screen() {
         "élèves",
         "VIDEOPROJECTEUR",
         "access denied",
+        "deadbeef",
+        "imagePixels",
+        "pagePaper",
+        "kraft",
     ] {
         assert!(!text.contains(secret), "{secret} in {text}");
     }
@@ -2004,6 +2018,13 @@ fn a_resumed_sheet_lets_each_viewer_fetch_its_paper() {
         .unwrap();
     let (port, code) = (status.port, status.code.clone().unwrap());
     let mut sink = resume_sheet(&hub, &library, &path);
+    // A new page keeps the sheet's paper (M17): the page this test goes to is made plain first,
+    // before any viewer joins.
+    hub.command(crate::live::model::LiveCommandKind::NextPage)
+        .unwrap();
+    hub.set_page_paper(1, Background::default()).unwrap();
+    hub.command(crate::live::model::LiveCommandKind::PreviousPage)
+        .unwrap();
     let cookie = join(port, &code);
 
     // The first viewer: its snapshot says which paper the page wants; the picture follows.
@@ -2077,8 +2098,8 @@ fn a_resumed_sheet_lets_each_viewer_fetch_its_paper() {
     b.stroke_written();
     assert_eq!((a.papers(), b.papers()), (1, 1));
 
-    // The next page is plain: its snapshot wants no picture, which hides it at once, a viewer
-    // joining there is told of none, and the picture cannot be fetched any more.
+    // The next page is plain (made so above): its snapshot wants no picture, which hides it at
+    // once, a viewer joining there is told of none, and the picture cannot be fetched any more.
     hub.command(crate::live::model::LiveCommandKind::NextPage)
         .unwrap();
     assert!(a.snapshot_of_page(1).get("paperKey").is_none());
@@ -2575,6 +2596,133 @@ fn the_windows_get_the_image_of_the_resumed_sheet_and_no_other_page_does() {
     let url = crate::live::page_background_url(None, A5, background, 512).unwrap();
     let plain = decode_png(&png_of(&url)).unwrap();
     assert!(near(rgb(&plain, 100, 100), SLATE));
+}
+
+/// A `width × height` image of [`halves`] with its red and blue channels swapped: blue on the
+/// left, red on the right.
+fn mirrored_halves(width: u32, height: u32) -> Image {
+    let mut image = halves(width, height);
+    for pixel in image.pixels.as_chunks_mut::<4>().0 {
+        pixel.swap(0, 2);
+    }
+    image
+}
+
+fn staged_png(staging: &crate::background::Staging, image: &Image) -> String {
+    staging.put(crate::background::Staged {
+        file: BackgroundFile {
+            extension: "png".to_owned(),
+            bytes: encode_png(image).unwrap(),
+        },
+        width: image.width,
+        height: image.height,
+    })
+}
+
+/// M17: a page of the session with a template or an image chosen in the live window gets a paper
+/// like a resumed sheet's; another file under the same name and in the same place is another paper.
+#[test]
+fn a_page_of_the_session_gets_the_paper_and_the_image_chosen_for_it() {
+    let (_dir, library) = library();
+    let hub = Arc::new(LiveHub::new(hub_config()));
+    let _sink = start_session(&hub, &library);
+    let papers = LivePapers::new(hub.clone());
+    let sent: Arc<Mutex<Vec<Option<LivePaper>>>> = Arc::default();
+    let log = sent.clone();
+    papers.attach(Box::new(move |paper| {
+        log.lock().unwrap().push(paper);
+    }));
+
+    // White and blank: no key, nothing to make.
+    let white = hub.snapshot();
+    assert_eq!(paper_key(&white), None);
+    papers.saw(&white);
+    assert!(papers.idle());
+
+    // Seyès: a key of its own.
+    let seyes = Background {
+        paper: Paper::White,
+        template: Template::Seyes,
+        texture: false,
+    };
+    hub.set_page_paper(0, seyes).unwrap();
+    let lined_key = paper_key(&hub.snapshot()).unwrap();
+
+    // An image under it: another key, and a picture holding the image where the page says.
+    let staging = crate::background::Staging::default();
+    let image = BackgroundImage {
+        name: "fiche.png".to_owned(),
+        pdf_page: None,
+        rect: IMAGE_RECT,
+        quarter_turns: 0,
+        opacity: 1.0,
+    };
+    let key = staged_png(&staging, &halves(40, 20));
+    hub.change_page_image(
+        0,
+        crate::live::LivePageImageOp::Set {
+            key,
+            image: image.clone(),
+        },
+        &staging,
+    )
+    .unwrap();
+    let first = hub.snapshot();
+    let first_key = paper_key(&first).unwrap();
+    assert_ne!(first_key, lined_key);
+    papers.saw(&first);
+    settled(&papers);
+    let paper = sent.lock().unwrap().last().cloned().flatten().unwrap();
+    assert_eq!(paper.key, first_key);
+    let drawn = decode_png(&paper.png).unwrap();
+    let (x, y) = at(7_000, 4_000);
+    assert!(near(rgb(&drawn, x, y), RED), "{:?}", rgb(&drawn, x, y));
+    let (x, y) = at(13_000, 4_000);
+    assert!(near(rgb(&drawn, x, y), BLUE), "{:?}", rgb(&drawn, x, y));
+
+    // Another file of the same name in the same place: another key, another picture.
+    let key = staged_png(&staging, &mirrored_halves(40, 20));
+    hub.change_page_image(
+        0,
+        crate::live::LivePageImageOp::Set {
+            key,
+            image: image.clone(),
+        },
+        &staging,
+    )
+    .unwrap();
+    let second = hub.snapshot();
+    assert_eq!(second.page.background_image, first.page.background_image);
+    let second_key = paper_key(&second).unwrap();
+    assert_ne!(second_key, first_key);
+    papers.saw(&second);
+    settled(&papers);
+    let paper = sent.lock().unwrap().last().cloned().flatten().unwrap();
+    assert_eq!(paper.key, second_key);
+    let drawn = decode_png(&paper.png).unwrap();
+    // The left half: red with its red and blue swapped.
+    let (x, y) = at(7_000, 4_000);
+    assert!(
+        near(rgb(&drawn, x, y), [30, 30, 220]),
+        "{:?}",
+        rgb(&drawn, x, y)
+    );
+    assert_eq!(papers.renders(), 2);
+
+    // A snapshot of the pixels before, asked for again: its picture is not made with the new
+    // pixels under the old key (the snapshot after it asks for the right one).
+    let count = sent.lock().unwrap().len();
+    papers.subscribed(&first);
+    settled(&papers);
+    assert_eq!(sent.lock().unwrap().len(), count);
+    assert_eq!(papers.renders(), 2);
+    papers.subscribed(&second);
+    settled(&papers);
+    assert_eq!(
+        sent.lock().unwrap().last().cloned().flatten().unwrap().key,
+        second_key
+    );
+    hub.stop().unwrap();
 }
 
 // --- The computer's pen and hidden layers (M14) ----------------------------------------------------

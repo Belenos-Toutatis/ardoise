@@ -21,6 +21,15 @@
 //!   stop the clip is cut per page ([`split_live_recording`]), each piece placed from its
 //!   page's first stroke, merged with the page's narration and handed to the live hub, which
 //!   writes it with the page (the hub is the only writer of live pages).
+//! - A recording while writing in the editor (M17, `docs/design/paper-projection-narration.md`
+//!   §3.2–3.3) is in note time: its first sample is placed from the wall clock at which note time
+//!   was 0, the editor's clock given at stop ([`replay_start_ms`]). Its sound waits for the note:
+//!   at stop it is encoded and **staged** in the runtime under a key (one at a time, a newer one
+//!   replacing it), with a backup copy in [`backup_dir`], until `save_note` writes it with the
+//!   note in one save (`notes::save_note_in`) or the editor drops it (`narration_drop_staged`).
+//!   A crash before the save leaves the backup copy.
+//! - With `--simulated-microphone` ([`simulated`]) every capture records a synthetic voice: the
+//!   PC's own microphones are neither opened nor listed.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -31,6 +40,7 @@ use std::time::Duration;
 
 use ardoise_core::fsutil;
 use ardoise_core::library::{FileStamp, Library, LibraryError};
+use ardoise_core::note::Note;
 use ardoise_media::microphone::{CaptureStatus, Level, Recorder, list_input_devices};
 use ardoise_media::replay::{MAX_SPEED, MIN_SPEED, ReplayOptions};
 use ardoise_media::{
@@ -46,6 +56,8 @@ use crate::library::{library_error, library_of, now_ms};
 use crate::live::model::wall_now_ms;
 use crate::live::{LiveHub, LiveRuntime, PagePosition};
 use crate::video::{INVALID_VIDEO_SETTINGS, duration_ms};
+
+pub mod simulated;
 
 /// No microphone matches the one asked for (unplugged).
 pub const MICROPHONE_NOT_FOUND: &str = "microphoneNotFound";
@@ -66,6 +78,13 @@ pub const EMPTY_RECORDING: &str = "emptyRecording";
 pub const NO_NARRATION: &str = "noNarration";
 /// No replay narration waits to be saved again.
 pub const NO_PENDING_NARRATION: &str = "noPendingNarration";
+/// The sound of a writing recording is no longer kept under that key (dropped, replaced by a
+/// newer one, or the app was restarted): its backup copy may remain.
+pub const NO_STAGED_NARRATION: &str = "noStagedNarration";
+
+/// Note time left between what a note holds and a writing recording (§3.2: `WRITING_GAP_MS` of
+/// `lib/editor/writing-clock.ts`), the value of live mode's resume gap.
+pub const WRITING_GAP_MS: u32 = crate::live::resume::RESUME_GAP_MS;
 
 /// How often the watcher of a recording looks at the audio received and the page shown.
 pub const WATCH_INTERVAL: Duration = Duration::from_millis(50);
@@ -99,6 +118,9 @@ pub enum NarrationTarget {
     },
     /// The pages of live mode.
     Live,
+    /// Narration recorded while writing in the editor, in note time (M17), for the note at `path`
+    /// (which must exist): staged at stop, written by the note's next save.
+    Writing { path: String },
 }
 
 /// `NarrationStatus.state` in `video.ts`.
@@ -161,11 +183,15 @@ impl NarrationStatus {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NarrationSaved {
-    /// Replay target: the note's new stamp. Live target: `None`.
+    /// Replay target: the note's new stamp. Live and writing targets: `None`.
     pub stamp: Option<FileStamp>,
     pub duration_ms: u64,
     /// Notes or pages that got the narration.
     pub pages: usize,
+    /// Writing target (M17): the key of the sound kept in memory until the note is saved
+    /// (`save_note`'s `narration_key`); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staged: Option<String>,
 }
 
 /// `NarrationInfo.base` in `video.ts`.
@@ -555,6 +581,22 @@ impl Source for Recorder {
 /// level is measured.
 pub type Opener = dyn Fn(Option<&str>, bool) -> CommandResult<Box<dyn Source>> + Send + Sync;
 
+/// Lists the microphones an [`Opener`] can open.
+pub type Lister = dyn Fn() -> CommandResult<Vec<Microphone>> + Send + Sync;
+
+/// The microphones of this PC, the system's default marked.
+fn system_microphones() -> CommandResult<Vec<Microphone>> {
+    let devices = list_input_devices().map_err(narration_error)?;
+    Ok(devices
+        .into_iter()
+        .map(|device| Microphone {
+            id: device.id,
+            name: device.name,
+            is_default: device.is_default,
+        })
+        .collect())
+}
+
 /// Opens a microphone of this PC.
 fn open_microphone(device: Option<&str>, record: bool) -> CommandResult<Box<dyn Source>> {
     let opened = if record {
@@ -577,10 +619,18 @@ struct ReplayTarget {
     start_ms: i64,
 }
 
+/// The note a writing recording is made for (its sound is staged at stop, not written).
+#[derive(Debug, Clone)]
+struct WritingTarget {
+    library: Library,
+    path: PathBuf,
+}
+
 enum Purpose {
     Monitor,
     Replay { target: ReplayTarget, watch: Watch },
     Live { session: u64, watch: Watch },
+    Writing { target: WritingTarget, watch: Watch },
 }
 
 struct Capture {
@@ -599,6 +649,10 @@ enum Stopped {
     Live {
         session: u64,
         log: PageLog,
+        wall_start_ms: f64,
+    },
+    Writing {
+        target: WritingTarget,
         wall_start_ms: f64,
     },
 }
@@ -629,6 +683,10 @@ impl Capture {
                     wall_start_ms,
                 }
             }
+            Purpose::Writing { target, mut watch } => Stopped::Writing {
+                target,
+                wall_start_ms: watch.finish().1,
+            },
         };
         // The watcher has ended: this is the last reference.
         let clip = match Arc::try_unwrap(recorder) {
@@ -653,32 +711,76 @@ struct Pending {
     backup: Option<PathBuf>,
 }
 
-/// The microphone capture of the running app (one at a time), and the replay narration that
-/// waits to be saved again.
+/// The sound of a writing recording, waiting for the save of its note (`save_note`'s
+/// `narration_key`): dropped once saved, when the editor drops it, or when a newer one replaces it
+/// (its backup copy then stays).
+struct Staged {
+    key: String,
+    /// Its `audio.opus` (also what the backup copy holds).
+    audio: Arc<[u8]>,
+    /// The backup copy; `None` when it could not be written.
+    backup: Option<PathBuf>,
+}
+
+impl Staged {
+    /// Removes the backup copy (best effort: an orphan copy only takes a little room).
+    fn remove_backup(self) {
+        if let Some(backup) = &self.backup {
+            let _ = fsutil::remove_file_with_retry(backup);
+        }
+    }
+}
+
+/// The microphone capture of the running app (one at a time), the replay narration that waits
+/// to be saved again, and the sound of a writing recording that waits for its note's save.
 pub struct NarrationRuntime {
     capture: Mutex<Option<Capture>>,
     pending: Mutex<Option<Pending>>,
+    staged: Mutex<Option<Staged>>,
     open: Box<Opener>,
-    /// Where the copies of pending narrations go.
+    list: Box<Lister>,
+    /// Where the copies of pending and staged narrations go.
     backup_dir: PathBuf,
 }
 
 impl Default for NarrationRuntime {
     fn default() -> Self {
-        Self::new(Box::new(open_microphone), backup_dir())
+        Self::with_simulated_microphone(false)
     }
 }
 
 impl NarrationRuntime {
-    /// A runtime opening its microphones with `open` and backing up pending narrations in
-    /// `backup_dir`.
+    /// The runtime of the app: with `simulated` (`--simulated-microphone`, for the journeys) it
+    /// opens and lists only the simulated microphone ([`simulated::runtime`]), never the PC's.
+    pub fn with_simulated_microphone(simulated: bool) -> Self {
+        if simulated {
+            simulated::runtime(backup_dir())
+        } else {
+            Self::new(Box::new(open_microphone), backup_dir())
+        }
+    }
+
+    /// A runtime opening its microphones with `open` (listing those of this PC) and backing up
+    /// pending and staged narrations in `backup_dir`.
     pub fn new(open: Box<Opener>, backup_dir: PathBuf) -> Self {
+        Self::with_microphones(open, Box::new(system_microphones), backup_dir)
+    }
+
+    /// A runtime opening its microphones with `open` and listing them with `list`.
+    pub fn with_microphones(open: Box<Opener>, list: Box<Lister>, backup_dir: PathBuf) -> Self {
         Self {
             capture: Mutex::new(None),
             pending: Mutex::new(None),
+            staged: Mutex::new(None),
             open,
+            list,
             backup_dir,
         }
+    }
+
+    /// The microphones this runtime can open.
+    pub fn microphones(&self) -> CommandResult<Vec<Microphone>> {
+        (self.list)()
     }
 
     fn lock(&self) -> MutexGuard<'_, Option<Capture>> {
@@ -687,6 +789,83 @@ impl NarrationRuntime {
 
     fn lock_pending(&self) -> MutexGuard<'_, Option<Pending>> {
         self.pending.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn lock_staged(&self) -> MutexGuard<'_, Option<Staged>> {
+        self.staged.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Stages `audio`, the sound of a writing recording made for the note at `note`, after
+    /// writing its backup copy (named after the note). A sound staged before goes from memory, its
+    /// copy kept as a last resort: the editor may not know it (closed during a recording, then
+    /// opened again), and only saving it with its note or the editor's `narration_drop_staged`
+    /// removes a copy. Returns its key.
+    pub(crate) fn stage(&self, note: &Path, audio: Vec<u8>) -> String {
+        let backup = match write_narration_backup(&self.backup_dir, note, &audio) {
+            Ok(path) => {
+                eprintln!(
+                    "narration: sound kept until its note is saved, copy in {}",
+                    path.display()
+                );
+                Some(path)
+            }
+            Err(error) => {
+                eprintln!(
+                    "narration: sound kept until its note is saved, no copy could be written: {error}"
+                );
+                None
+            }
+        };
+        let key = uuid::Uuid::new_v4().to_string();
+        let older = self.lock_staged().replace(Staged {
+            key: key.clone(),
+            audio: Arc::from(audio),
+            backup,
+        });
+        if let Some(backup) = older.and_then(|older| older.backup) {
+            eprintln!(
+                "narration: an unsaved sound is no longer in memory, copy in {}",
+                backup.display()
+            );
+        }
+        key
+    }
+
+    /// The `audio.opus` staged under `key` (`noStagedNarration` when it is not, or no longer,
+    /// there).
+    pub fn staged_audio(&self, key: &str) -> CommandResult<Arc<[u8]>> {
+        self.lock_staged()
+            .as_ref()
+            .filter(|staged| staged.key == key)
+            .map(|staged| Arc::clone(&staged.audio))
+            .ok_or_else(|| {
+                CommandError::new(
+                    NO_STAGED_NARRATION,
+                    "the recorded sound is no longer in memory",
+                )
+            })
+    }
+
+    /// Forgets the sound staged under `key` (saved with its note, or dropped by the editor) and
+    /// removes its backup copy; another key leaves the staged sound as it is.
+    pub fn drop_staged(&self, key: &str) {
+        let staged = {
+            let mut slot = self.lock_staged();
+            if slot.as_ref().is_some_and(|staged| staged.key == key) {
+                slot.take()
+            } else {
+                None
+            }
+        };
+        if let Some(staged) = staged {
+            staged.remove_backup();
+        }
+    }
+
+    /// Whether a sound is staged.
+    #[cfg(test)]
+    pub fn has_staged(&self) -> bool {
+        self.lock_staged().is_some()
     }
 
     /// Takes the capture under way (`only_live`: only a live recording).
@@ -860,7 +1039,9 @@ fn replay_clock(started_at_ms: f64) -> CommandResult<f64> {
 /// Replay instant (ms) of the first sample of a replay recording: its wall clock less the wall
 /// clock at which the replay was at instant 0 and playing (replay time runs at wall-clock
 /// speed, whatever the replay's speed). Both are Unix milliseconds checked by
-/// [`replay_clock`]: the difference fits in `i64`.
+/// [`replay_clock`]: the difference fits in `i64`. A writing recording is placed in note time
+/// the same way, from the wall clock at which note time was 0 (§3.2): note time runs at wall-clock
+/// speed while the editor's strokes follow the sound.
 pub fn replay_start_ms(first_sample_wall_ms: f64, replay_started_at_ms: f64) -> i64 {
     (first_sample_wall_ms - replay_started_at_ms).round() as i64
 }
@@ -875,10 +1056,7 @@ fn replay_target(
 ) -> CommandResult<ReplayTarget> {
     let options = target_options(speed, max_pause_ms)?;
     let start_ms = target_start(start_ms)?;
-    let path = library.note_path(Path::new(path)).map_err(library_error)?;
-    if !path.is_file() {
-        return Err(library_error(LibraryError::NotFound { path }));
-    }
+    let path = existing_note(&library, path)?;
     Ok(ReplayTarget {
         library,
         path,
@@ -887,9 +1065,44 @@ fn replay_target(
     })
 }
 
+/// The file of the note at `path`, a note of `library` that exists.
+fn existing_note(library: &Library, path: &str) -> CommandResult<PathBuf> {
+    let path = library.note_path(Path::new(path)).map_err(library_error)?;
+    if !path.is_file() {
+        return Err(library_error(LibraryError::NotFound { path }));
+    }
+    Ok(path)
+}
+
+/// The note a writing recording is made for: a note of `library` that exists.
+fn writing_target(library: Library, path: &str) -> CommandResult<WritingTarget> {
+    let path = existing_note(&library, path)?;
+    Ok(WritingTarget { library, path })
+}
+
+/// Note time at which a writing recording on `note` begins (§3.2, `writingOrigin` of the
+/// editor): its last sample, hidden layers included, plus [`WRITING_GAP_MS`]; 0 without ink.
+fn writing_origin(note: &Note) -> i64 {
+    note.strokes
+        .iter()
+        .flat_map(|stroke| stroke.points.iter())
+        .map(|point| point.t)
+        .max()
+        .map_or(0, |last| i64::from(last) + i64::from(WRITING_GAP_MS))
+}
+
+/// Where the sound of a writing recording stopped without the editor's clock goes: after the
+/// ink of its note as on disk ([`writing_origin`]; 0 when it cannot be read), as a commentary.
+/// The editor always gives its clock; this only keeps such a sound from covering the old ink.
+fn unclocked_writing_start(library: &Library, note: &Path) -> i64 {
+    library
+        .read(note)
+        .map_or(0, |loaded| writing_origin(&loaded.file.note))
+}
+
 /// Starts recording for `target` (a monitor under way stops first; refused while recording).
-/// `library` is asked for only by a replay target; `hub` and `position` (how the watcher reads
-/// the page shown) only by a live one.
+/// `library` is asked for only by a replay or writing target; `hub` and `position` (how the
+/// watcher reads the page shown) only by a live one.
 pub fn start_in(
     runtime: &NarrationRuntime,
     device: Option<&str>,
@@ -905,6 +1118,7 @@ pub fn start_in(
     enum Planned {
         Replay(ReplayTarget),
         Live(PagePosition),
+        Writing(WritingTarget),
     }
     let planned = match target {
         NarrationTarget::Replay {
@@ -928,17 +1142,24 @@ pub fn start_in(
                 ));
             }
         },
+        NarrationTarget::Writing { path } => Planned::Writing(writing_target(library()?, &path)?),
     };
     *slot = None;
     let recorder = Arc::new((runtime.open)(device_of(device), true)?);
+    // Outside live mode, the watcher only notes the clock of the first sample.
+    let no_page = || -> PositionFn { Arc::new(|| None) };
     let purpose = match planned {
         Planned::Replay(target) => Purpose::Replay {
             target,
-            watch: Watch::spawn(&recorder, 0, 0, Arc::new(|| None::<PagePosition>))?,
+            watch: Watch::spawn(&recorder, 0, 0, no_page())?,
         },
         Planned::Live(start) => Purpose::Live {
             session: start.session,
             watch: Watch::spawn(&recorder, start.session, start.page, position)?,
+        },
+        Planned::Writing(target) => Purpose::Writing {
+            target,
+            watch: Watch::spawn(&recorder, 0, 0, no_page())?,
         },
     };
     *slot = Some(Capture { recorder, purpose });
@@ -1126,10 +1347,12 @@ pub struct StopRequest {
     /// read).
     pub stamp: Option<FileStamp>,
     /// Replay target: the note's path now, instead of the one given at the start (the editor
-    /// may have renamed the note meanwhile).
+    /// may have renamed the note meanwhile). Writing target: names the backup copy only.
     pub path: Option<String>,
     /// Replay target: Unix time (ms) at which the replay was at instant 0 and playing; without
-    /// it, the narration starts at the target's `startMs`.
+    /// it, the narration starts at the target's `startMs`. Writing target: Unix time (ms) at
+    /// which note time was 0 (the editor's `noteZeroWallMs`); without it, the sound goes after
+    /// the note's ink on disk.
     pub replay_started_at_ms: Option<f64>,
 }
 
@@ -1177,12 +1400,40 @@ fn save_replay(
             stamp: Some(stamp),
             duration_ms: duration,
             pages: 1,
+            staged: None,
         }),
         Err(error) => {
             runtime.keep_pending(&note, audio, duration);
             Err(error)
         }
     }
+}
+
+/// Keeps what a stopped writing recording captured until its note is saved: in note time from
+/// `start_ms` (speed 1, no trimming, as live mode), encoded once, staged in `runtime` with its
+/// backup copy named after the note at `note`.
+fn stage_writing(
+    runtime: &NarrationRuntime,
+    note: &Path,
+    clip: AudioClip,
+    start_ms: i64,
+) -> CommandResult<NarrationSaved> {
+    let duration = duration_ms(clip.duration());
+    let narration = Narration {
+        clip,
+        base: NarrationBase::Note,
+        options: ReplayOptions::default(),
+        start_ms,
+    };
+    let audio = encode_narration(&narration).map_err(narration_error)?;
+    drop(narration);
+    let key = runtime.stage(note, audio);
+    Ok(NarrationSaved {
+        stamp: None,
+        duration_ms: duration,
+        pages: 1,
+        staged: Some(key),
+    })
 }
 
 /// Saves (or, without `request.save`, discards) what a stopped capture recorded;
@@ -1223,7 +1474,24 @@ fn save_stopped(
                 stamp: None,
                 duration_ms: duration,
                 pages,
+                staged: None,
             }))
+        }
+        Stopped::Writing {
+            target,
+            wall_start_ms,
+        } => {
+            // The note's path now (renamed meanwhile) only names the backup copy.
+            let note = request
+                .path
+                .as_deref()
+                .and_then(|path| target.library.note_path(Path::new(path)).ok())
+                .unwrap_or_else(|| target.path.clone());
+            let start_ms = match replay_started_at {
+                Some(note_zero) => replay_start_ms(wall_start_ms, note_zero),
+                None => unclocked_writing_start(&target.library, &note),
+            };
+            stage_writing(runtime, &note, clip, start_ms).map(Some)
         }
     }
 }
@@ -1357,6 +1625,7 @@ pub fn retry_in(
                 stamp: Some(stamp),
                 duration_ms: pending.duration_ms,
                 pages: 1,
+                staged: None,
             })
         }
         Err(error) => {
@@ -1373,17 +1642,12 @@ pub fn discard_in(runtime: &NarrationRuntime) {
 
 // --- Commands -----------------------------------------------------------------------------------
 
+/// The microphones the runtime can open (with `--simulated-microphone`, only the simulated one).
 #[tauri::command]
-pub async fn list_microphones() -> CommandResult<Vec<Microphone>> {
-    let devices = list_input_devices().map_err(narration_error)?;
-    Ok(devices
-        .into_iter()
-        .map(|device| Microphone {
-            id: device.id,
-            name: device.name,
-            is_default: device.is_default,
-        })
-        .collect())
+pub async fn list_microphones(
+    runtime: State<'_, NarrationRuntime>,
+) -> CommandResult<Vec<Microphone>> {
+    runtime.microphones()
 }
 
 /// Remembers the microphone on this PC (`None`: the system's default).
@@ -1511,6 +1775,18 @@ pub async fn narration_audio(
     let library = library_of(&context)?;
     let opus = crate::notes::blocking(move || narration_opus(&library, Path::new(&path))).await?;
     Ok(tauri::ipc::Response::new(opus))
+}
+
+/// Drops the writing narration kept in memory under `key` (the user chose « Ne pas enregistrer » or
+/// reloaded the note), with its backup copy (M17); another key, or none staged, changes nothing.
+#[tauri::command]
+pub async fn narration_drop_staged(app: AppHandle, key: String) -> CommandResult<()> {
+    // Removing the backup copy may wait for the disk: off the async runtime's threads.
+    crate::notes::blocking(move || {
+        app.state::<NarrationRuntime>().drop_staged(&key);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]

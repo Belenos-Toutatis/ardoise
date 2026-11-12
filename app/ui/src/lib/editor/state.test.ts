@@ -26,6 +26,7 @@ import {
   mergeDown,
   moveLayer,
   paste,
+  pasteStrokes,
   rotate,
   select,
   selectAll,
@@ -311,5 +312,22 @@ describe('custom colours', () => {
     const storage = memoryStorage();
     storage.setItem(CUSTOM_COLORS_KEY, '{"not":"a list"}');
     expect(loadCustomColors(storage)).toEqual([]);
+  });
+});
+
+describe('pasteStrokes at a time (M17)', () => {
+  it('puts the copies at the given note time on the active layer, selected, as one step (O15)', () => {
+    const doc = docFromNote(note([hline(1000, 3000, 2000)]));
+    const copied = [hline(5000, 6000, 8000)];
+    const next = pasteStrokes(doc, copied, 9000);
+    expect(next.note.strokes).toHaveLength(2);
+    expect(next.note.strokes[1].points[0].t).toBe(9000);
+    expect(next.note.strokes[1].points.at(-1)!.t - next.note.strokes[1].points[0].t).toBe(
+      copied[0].points.at(-1)!.t - copied[0].points[0].t,
+    );
+    expect(next.selection).toEqual([1]);
+    // Without a time: after the note's ink, as before.
+    const after = pasteStrokes(doc, copied);
+    expect(after.note.strokes[1].points[0].t).toBe(doc.note.strokes[0].points.at(-1)!.t + 500);
   });
 });

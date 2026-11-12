@@ -305,8 +305,10 @@ The button is greyed out while the tablet is not registered or is busy (sync und
 - **The orientation**: the sheet is never turned. If it is landscape and the tablet is set to portrait (or the other
   way round), a notice tells you how to hold the tablet: "To write on this sheet, hold the tablet like this: …". The
   four position buttons are greyed out for this sheet.
-- **The next page** creates a new note, at the root of the library, and follows the position set for the tablet again:
-  the position buttons then work.
+- **The next page** creates a new note, at the root of the library, with the sheet's paper (colour, template, texture, not
+  its image), and follows the position set for the tablet again: the position buttons then work. The **Page** and
+  **Background** tabs change the paper and the image of the current sheet (see **The paper and the image of the current
+  page**).
 - **The narration**: if you record, the sound is added after the old one without covering it, and the replay stays
   right despite the time between the two sessions. If the sound cannot be added (more than 4 hours in all, or an old
   narration that cannot be read), it goes into a new note next to the sheet, and Ardoise tells you when you finish.
@@ -366,13 +368,14 @@ opens its tab to the left of the rail. A click on the tab that is already open, 
 *collapses* it: the preview takes the whole width and the rail stays. The tabs, from top to bottom:
 
 - **Layers**: the **Layers** zone (see **Correcting during live mode**). This is the tab that is open at the start.
+- **Page**: the **Paper** of the current page (colour, template, texture); see **The paper and the image of the current
+  page** below.
+- **Background**: the **Background image or PDF** of the current page; see the same section.
 - **Sound**: **Record the narration** during the session.
 - **Projection**: the **Projector** (the projection screen, **Project**, **Stop projecting**), the **Projected area**
   (zoom, **Whole page**, **Width**, the **Blackboard** and **Laser pointer** switches) and **Network sharing**: the
   **Share on the network** button is no longer in the toolbar.
 - **Help**: the live mode shortcuts (see chapter 17).
-
-*Page* and *Background* (paper and an image under the page in live mode) are not offered in this window yet.
 
 Ardoise remembers the open tab and the collapsed state of this window, on this PC, and finds them again at the next
 live mode.
@@ -387,7 +390,10 @@ was collapsed.
 
 **With the keyboard.** `↓` and `↑` move from one icon to the next, `Home` and `End` go to the first and the last,
 without opening anything; `Enter` opens the tab or collapses it. `Space` does not do that here: in live mode it always
-means "next page", even when an icon has the focus.
+means "next page", even when an icon has the focus. The same goes for `Page Down` and `Page Up` when a list
+(**Template**, **Placement**) or a slider (**Opacity**) of the **Page** and **Background** tabs has the focus: they
+always turn the page, so that the room's remote works after a choice made with the mouse; those lists and that slider give
+the focus back after each choice anyway.
 
 ### Touching up during live mode
 
@@ -514,6 +520,51 @@ each of the computer's strokes next to the pupil's. In replay (chapter 9), the c
 wrote them, mixed with the pupil's. The annotations drawn over the presentation (see below) do not change: they are
 never saved.
 
+### The paper and the image of the current page
+
+*Needs the tablet. Checked with the simulated tablet, not yet with the real one (trial H7).* During live mode you can
+change the paper of the page on screen and put a worksheet or a document *under* the writing, without stopping the
+tablet: a pupil is writing, you go from white to Seyès, or you put an exercise's text down for the class to complete. The
+change appears at once on the projector and on the share's screen, and it is saved with the page. The **Page** and
+**Background** tabs are greyed out until live mode is running.
+
+**The paper** (**Page** tab, **Paper** block): the same settings as in the editor, the colour as swatches (**White**,
+**Cream**, **Kraft**, **Black slate**), the **Template** (**Blank**, **Lined**, **Seyès**, **5 mm squares**, **Graph paper
+(mm)**, **Dotted**, **Music staves**) and the **Paper texture** switch.
+
+- **A new page keeps the paper** (colour, template, texture) of the page that was on screen when you created it, but
+  *never its image*. A page that already exists keeps its own: changing the paper of page 3 does not touch page 2. A new
+  session starts again on plain white.
+- **The blackboard**: while it is on (`B`), the colour swatches are greyed out and a sentence says so: the chosen colour
+  *comes back when the blackboard is turned off*. The template and the texture apply at once. Choosing **Black slate** with
+  the blackboard off gives a black paper on which the tablet's writing stays black: to write in chalk, turn the blackboard
+  on instead.
+- **You cannot go back with `Ctrl + Z`**, which only undoes what the computer writes: choose the previous setting again.
+- A page that has neither writing nor image is not saved, even if you changed its paper.
+
+**The image** (**Background** tab, **Background image or PDF** block): **Choose a PDF or an image…**, the PDF page if there
+are several, then **Put in the background**. The image (PNG or JPEG) or the PDF page goes *under* the writing of the
+current page, **Whole** (all of it visible, without distortion); **Placement** (**Whole**, **Fill the page**,
+**Stretched**), **Opacity**, **Turn the image alone**, **Replace…** and **Remove the image** then set it, as in the editor
+(chapter 8). Importing a PDF page can take a few seconds: the tablet goes on writing meanwhile.
+
+- **A new page has no image.** Going back to the previous page finds its own: the worksheet can be on page 2 and a photo
+  on page 3.
+- **The image is saved with the page**, as the note's background image. A page that has only the image, with nothing
+  written yet, still becomes a note, so that a worksheet shown in class is kept. If you then remove the image, the note
+  stays in the library, empty: move it to the trash if you no longer need it.
+- **Ardoise does not offer to switch the sheet to portrait or landscape** (a live page follows the tablet): the worksheet
+  is placed as it is, and a portrait worksheet on a landscape page is shrunk. Hold the tablet in portrait *before* writing
+  for it to fill the page: as long as the page has no writing, it follows the tablet and the image is placed again with
+  the same placement.
+- **A page that has an image and writing no longer turns with the tablet**, like a resumed sheet: the position buttons are
+  greyed out, Ardoise says how to hold the tablet, and the next page follows the set position again. If you remove the
+  image, the page follows the tablet again: it turns at once, writing included.
+- On a **resumed sheet** (see above), changing the paper or the image is a deliberate change: it is saved in the note even
+  with no new writing. **Back to the original** (chapter 8) gives back the earlier writing, not the paper nor the image.
+- **On the share's screen**, the paper and the image are sent once as a picture; the other computer shows the paper's
+  colour until it has received it.
+
 ### Projecting on a video projector
 
 1. Plug in the projector and, in Windows, press `Win + P` and choose *Extend*: each screen has its own desktop.
@@ -524,7 +575,9 @@ never saved.
    write appears on both.
 4. **Stop projecting** closes the presentation. Ardoise remembers the chosen screen on this PC.
 
-With a single screen, the presentation covers the control window: press `Esc` in the presentation to close it.
+With a single screen, the presentation covers the control window: press `Esc` in the presentation to close it. There
+are never two projected windows at once: projecting live mode closes the projection of an editor note (chapter 8), and
+the other way round.
 
 *What `Esc` does.* In the control window as in the presentation, while the projection is shown, `Esc` closes it (as in
 a slideshow); when nothing is projected, `Esc` asks whether to end live mode. *`Space` always means "next page"*, even
@@ -820,16 +873,19 @@ panel, *collapses* it: the page takes the whole width and the rail stays. The ta
 - **Page**: the **Paper** (colour as swatches, template, texture), the **Sheet format** and its orientation, **Turn and
   crop**, and **Back to the original** (see below).
 - **Background**: the **Background image or PDF**.
-- **Sound**: the narration. During a replay, this is where you record; outside a replay, the tab offers **Start the
-  replay**.
-- **Projection**: **Share on the network** (the button is no longer in the toolbar; see the end of chapter 6).
+- **Sound**: the narration. The **Record the sound** control chooses between **While I write** (the default) and
+  **During a replay**; see chapter 9. During a replay, this is where you record while replaying; outside a replay, in the
+  **During a replay** mode, the tab offers **Start the replay**.
+- **Projection**: the **Projector** (the projection screen, **Project**, **Stop projecting**), the **Projected area**
+  (zoom, **Whole page**, **Width**) and **Share on the network** (the button is no longer in the toolbar; see the end of
+  chapter 6). See **Projecting the note on a video projector** below.
 - **Help**: the editor's keyboard shortcuts (see chapter 17).
 
 Ardoise remembers the open tab and the collapsed state of the editor, on this PC, and finds them again when you open
 another note or open the editor again. The changes made in the **Page** tab are undone with `Ctrl + Z`, as before.
 
 **The badges** show when the panel is collapsed too: the *number of layers* on **Layers**; an *orange dot* when the
-chosen layer is hidden; a *red dot* on **Sound** during a recording; a *blue dot* on **Projection** during a share.
+chosen layer is hidden; a *red dot* on **Sound** during a recording; a *blue dot* on **Projection** during a projection or a share.
 
 **Above the open tab**, whichever it is, come the split (when it is open) and the selection: "Selected strokes: 3",
 **Copy**, **Cut**, **Paste**, **Duplicate**, **Straighten shapes**, **Delete**, and the **Deselect** cross. As soon as
@@ -950,6 +1006,35 @@ transparent sheet laid over the others: a tablet's writing, your annotations, a 
 Adding, hiding, renaming, moving and merging are undone with `Ctrl + Z`. For layers during live mode, see **Correcting
 during live mode** (chapter 6).
 
+### Projecting the note on a video projector
+
+*Does not need the tablet.* To show the class the note you are correcting or completing, without going through live mode:
+in the **Projection** tab of the side panel, **Projector** block, choose the **Projection screen** (**Refresh the list of
+screens** updates it) and click **Project**. As for live mode, plug in the projector and choose *Extend* in Windows
+(`Win + P`) first. The editor's page appears full screen on the projector, with its paper, its background image and its
+shown layers, and it is **updated at every stroke**: what you write with the pen, the mouse or a finger appears as you
+write it.
+
+- **What the class sees.** The stroke under way, then the result of each action: undo, redo, erase, move, resize, recolour,
+  paste, straighten, a change of paper, image, sheet size or orientation, **Back to the original**. An eraser or a move
+  being dragged only appears once released. The class *never* sees the selection, the lasso, the eraser's ring, nor the
+  preview of a straightening, a split or a crop. A hidden layer is not projected.
+- **The projected area.** The **Projected area** block sets the zoom: **Whole page** (the default), **Width** (the page
+  across the whole width of the projector), **Zoom in** and **Zoom out**. The area is *centred on what the editor shows*,
+  and a **dashed frame** in the editor shows it on the page. So you can zoom the editor in to write small while the class
+  keeps its zoom; scrolling the editor moves the projected area.
+- **A window that shows only the page**: no blackboard, no laser pointer, no marks over it (the editor is where you
+  write).
+- **The replay** (chapter 9) is projected too, as the editor shows it.
+- **Another note** (`Alt + ←` and `Alt + →`): the projection stays open and shows the other note. It stops when you leave the
+  editor (back to the library, resuming live mode, closing the window).
+- **Stopping**: **Stop projecting**, or `Esc` in the projected window (`Ctrl + W`, `Ctrl + F4` and `Ctrl + Q` close it too).
+  The tab and the blue dot of **Projection** follow. With a single screen, the window covers the editor: `Esc` closes it.
+- **One projected window at a time**: projecting the editor closes the projection of live mode, and the other way round.
+- **Network sharing** (the **Network sharing** block, same tab) can run at the same time: the other computer shows the
+  whole note, not the zoomed area, with a slight delay.
+- The assistant does not drive this projection, and no key starts it.
+
 ### Splitting a note
 
 **Split** detaches part of the note into a new note, either:
@@ -1011,12 +1096,51 @@ Touch screens work as in the editor: one finger scrolls, two fingers zoom.
 
 ### Narration
 
-During a replay, **Record a narration** (in the **Sound** tab of the side panel, which opens by itself with the replay) lets you talk while the stroke is drawn; the sound
-is stored *in the note*. The narration follows the replay's speed and dead-time setting at the moment you start it.
-Choose the **Microphone** (the list remembers your choice on this PC; **Refresh the list of microphones** if you have
-just plugged one in) and look at the **Microphone level** before starting: **Start**, then **Stop and save**. A new
-recording replaces the previous one. **Play with narration** replays stroke and sound together; **Delete the narration**
-removes it. *Save the note (`Ctrl + S`) first*: the sound is added to the note as it is on disk.
+A note has *a single narration*, a sound stored *in the note*. The **Sound** tab of the side panel says what the note holds
+("Narration saved in the note (…)" or "This note has no narration.") and, outside a replay, offers two ways to record
+it, chosen with the **Record the sound** control (the choice is remembered on this PC): **While I write**, the default, and
+**During a replay**. In both, choose the **Microphone** (the list remembers your choice on this PC; **Refresh the list of
+microphones** if you have just plugged one in) and look at the **Microphone level** before starting: **Start**, then
+**Stop and save**.
+
+**While I write** (*does not need the tablet*). You talk *while writing in the editor*, with the pen, the mouse or a
+finger (if **Draw with a finger** is on in **Settings**). The strokes written during the recording take the time of the
+sound and are replayed with it, at the rhythm you wrote them, silences included, **after** the strokes the note already
+holds.
+
+1. In the **Sound** tab, choose **While I write**, open **Record while writing**, choose the microphone.
+2. **Start**. If the note already has a narration, Ardoise first asks: "This note already has a narration (…). Replace it
+   with this new recording?" with **Replace** or **Keep the old one** (nothing is then recorded). The same question is
+   asked in the **During a replay** mode (which used to replace by merely saying so).
+3. Talk and write: "Write: your strokes follow the sound." A red dot marks the **Sound** tab.
+4. **Stop and save**: the note is *saved at once*, with the sound and what you wrote ("Sound saved (…) with your
+   strokes."). **Cancel** throws the sound away and *keeps the strokes*. If saving the note fails (it changed on another
+   PC), the sound stays in memory ("The sound is kept in memory…"), the usual banner offers to reload or to **Save as a
+   copy**, and the copy gets the sound too. Reloading the note, or choosing not to save it, drops that sound.
+
+What happens during the recording:
+
+- `Ctrl + Z` and `Ctrl + Y` make a stroke go and come back with its time, without touching the sound; the eraser, a move,
+  a change of colour and deleting do not change the strokes' times. A *pasted* stroke appears at the instant you pasted
+  it, with the rhythm it had.
+- Leaving the editor, switching notes, resuming live mode, closing the window, starting a replay, **Back to the
+  original**, splitting and exporting the video are refused with "Stop or cancel the narration recording first." Everything
+  else works as usual.
+- If nothing is written, the sound is saved alone, after the ink: a commentary. If Windows blocks the microphone
+  (silence), Ardoise says so and keeps no sound; the strokes stay.
+- After the recording, a stroke written later is placed *after the end of the sound*, so that it does not appear during the
+  narration.
+
+*One thing to know.* **Play with narration** replays this sound at normal speed, without cutting dead time: if the note
+already held writing done in class, its real pauses are replayed before the voice starts, in the replay and in the video.
+Without the narration, the replay is unchanged.
+
+**During a replay.** **Record a narration** (in the **Sound** tab, which opens by itself with the replay) lets you talk
+while the stroke is drawn. The narration follows the replay's speed and dead-time setting at the moment you start it.
+**Start the replay** (in the **Sound** tab, outside a replay) starts it. *Save the note (`Ctrl + S`) first*: the sound is
+added to the note as it is on disk.
+
+In both modes, **Play with narration** replays stroke and sound together, and **Delete the narration** removes it.
 
 If Windows blocks the microphone you get silence and Ardoise detects it: open *Settings > Privacy & security >
 Microphone* and turn on *Let desktop apps access your microphone* (a microphone mute switch, on some PCs, gives the
@@ -1132,7 +1256,9 @@ could not analyse the layout, Ardoise says so: the structure is then guessed fro
 ### Showing the live sheet
 
 To have the sheet (or the open note) appear in the browser of another computer of the network, with no file to send:
-**Share on the network** (**Projection** tab of the side panel), see the end of chapter 6.
+**Share on the network** (**Projection** tab of the side panel), see the end of chapter 6. To show the open note on a
+video projector plugged into the computer, use **Project** in the same tab (chapter 8, **Projecting the note on a video
+projector**).
 
 ## 11. Importing your Inkspace notes
 
@@ -1375,6 +1501,9 @@ These shortcuts do nothing while you are typing in a text field, except those of
 | Wheel | Zoom around the cursor |
 | Middle button (drag) | Move the page |
 
+In the **editor's projection** window (chapter 8), `Esc`, `Ctrl + W`, `Ctrl + F4` and `Ctrl + Q` close the projection; the
+window has no other key.
+
 ### Replay
 
 | Keys | Action |
@@ -1389,8 +1518,8 @@ These shortcuts do nothing while you are typing in a text field, except those of
 
 | Keys | Action |
 |---|---|
-| `→`, `Page Down`, `Space` | Next page (`Space` also when a button has the focus) |
-| `←`, `Page Up` | Previous page |
+| `→`, `Page Down`, `Space` | Next page (`Space` also when a button has the focus; `Page Down` also when a list or a slider of the **Page** and **Background** tabs has the focus) |
+| `←`, `Page Up` | Previous page (`Page Up` also when a list or a slider of the **Page** and **Background** tabs has the focus) |
 | `Ctrl + Delete` (or `Ctrl + Backspace`) | Clear the page (**Undo clearing** for 8 seconds) |
 | `B` | **Blackboard** |
 | `L` | **Laser pointer** |

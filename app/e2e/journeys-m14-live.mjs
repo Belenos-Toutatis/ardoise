@@ -34,7 +34,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const wallMs = () => performance.timeOrigin + performance.now();
 const PREVIEW_MARGIN = 12;
 /** The presentation window covers the control window: without these flags the control window would stop painting. */
-const BROWSER_ARGS = '--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding';
+export const BROWSER_ARGS = '--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding';
 /** Where the control window keeps the computer's ink (`lib/live-computer-style.ts`): removed, the default applies. */
 const STYLE_KEY = 'ardoise.live.computerStyle';
 /** The computer's default ink: felt tip (tool code 2 of docs/file-format.md), Inkspace red, width 120. */

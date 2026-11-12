@@ -729,7 +729,10 @@
     "shareNoFreePort": "no free port in the range {detail} for the share: other programs use all of them; choose another port in the Ardoise settings (\"Share port\"), then start the share again",
     "sharePortInvalid": "the share's port must be a whole number from 1024 to 65535",
     "shareUnavailable": "this build of Ardoise cannot share on the network: the page for the other screens is not included",
-    "shareFailed": "the share could not start ({detail})"
+    "shareFailed": "the share could not start ({detail})",
+    "noStagedNarration": "the recorded sound is no longer in memory; a copy is in the narrations' backup folder",
+    "projectionStale": "the projection fell behind; it catches up",
+    "projectionInvalid": "the projection got a wrong update; it catches up"
   },
   "editor": {
     "back": "Library",
@@ -1101,7 +1104,23 @@
     },
     "sound": {
       "replayFirst": "A narration is heard and recorded during a replay.",
-      "startReplay": "Start the replay"
+      "startReplay": "Start the replay",
+      "mode": "Record the sound",
+      "modeWriting": "While I write",
+      "modeReplay": "During a replay",
+      "writingHelp": "The sound and what you write on the computer (pen, mouse, or finger when “Draw with a finger” is on) are recorded together: the replay plays them back together, after what the note already holds.",
+      "recordWriting": "Record while writing",
+      "recordWritingHint": "Talk while writing: the strokes take the time of the sound",
+      "writingInfo": "The strokes written during the recording take the time of the sound.",
+      "writingSave": "When you stop, the note is saved with the sound and what you wrote.",
+      "writingDuring": "Write: your strokes follow the sound.",
+      "saved": "Sound saved ({duration}) with your strokes.",
+      "notSaved": "The sound is kept in memory: it goes into the note the next time it is saved."
+    },
+    "projection": {
+      "help": "The editor's page full screen on the projector, updated at every stroke. It stops when you leave the editor.",
+      "zoneHint": "The projected area follows what the editor shows; a dashed frame shows it on the page.",
+      "widthTitle": "Show the page across the projector's width"
     }
   },
   "side": {
@@ -1239,7 +1258,10 @@
       "saved": "Narration saved ({duration}).",
       "failed": "The recording failed: {message}",
       "saveNote": "The sound is added to the note as it is saved on disk: unsaved changes are not part of it.",
-      "unsavedWarning": "This note has unsaved changes. Save it first (Ctrl+S), otherwise they will not be kept with the narration."
+      "unsavedWarning": "This note has unsaved changes. Save it first (Ctrl+S), otherwise they will not be kept with the narration.",
+      "replaceQuestion": "This note already has a narration ({duration}). Replace it with this new recording?",
+      "replaceYes": "Replace",
+      "replaceNo": "Keep the old one"
     },
     "pending": {
       "title": "Recording on hold",
@@ -1592,7 +1614,7 @@
       "severalSelected": "Select a single note to resume in live mode.",
       "failed": "Live mode could not resume this sheet.",
       "back": "Back to the library",
-      "cannotTurn": "A resumed sheet is never turned: the next page follows the tablet's position again.",
+      "cannotTurn": "This page does not turn with the tablet: it is a resumed sheet, or a page written over an image. A new page follows the tablet's position again.",
       "hold": "To write on this sheet, hold the tablet like this: {position}.",
       "forked": {
         "sheet": "Sheet “{title}”",
@@ -1785,7 +1807,10 @@
     "failed": {
       "layersStale": "The page changed in the meantime: do the layer operation again.",
       "pen": "This stroke could not be written.",
-      "eraser": "This erasing could not be done."
+      "eraser": "This erasing could not be done.",
+      "paper": "The page's paper could not be changed.",
+      "image": "The background image could not be changed.",
+      "pageStale": "The page changed in the meantime: choose again."
     },
     "leave": {
       "title": "End live mode?",
@@ -1797,12 +1822,23 @@
       "title": "Quit Ardoise?",
       "message": "Live mode stops and every page you wrote is saved as a note in the library.",
       "confirm": "Quit Ardoise"
+    },
+    "page": {
+      "help": "For the current page, on the projector and on the share too. A new page keeps this paper.",
+      "board": "Blackboard on: the paper's colour comes back when it is turned off (B). The template and the texture apply at once.",
+      "slate": "To write in chalk, turn the blackboard on instead (B).",
+      "back": "To go back, choose the previous setting again: Ctrl+Z only undoes what the computer writes."
+    },
+    "background": {
+      "help": "Under the writing of the current page: a worksheet or a document to fill in front of the class. The next page has no image."
     }
   },
   "presentation": {
     "title": "Presentation",
     "canvas": "Projected page {page}",
-    "clearMarks": "Clear the marks"
+    "clearMarks": "Clear the marks",
+    "editorTitle": "Editor projection",
+    "editorCanvas": "The editor's projected page"
   },
   "share": {
     "button": "Share on the network",

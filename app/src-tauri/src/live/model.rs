@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ardoise_core::note::{Note, PageSize};
+use ardoise_core::note::{Note, PageSize, Paper};
 use ardoise_core::settings::Orientation;
 use ardoise_device::pages::TABLET_PEN_WIDTH;
 use ardoise_ink::{Rgba, Stroke, Tool};
@@ -265,11 +265,11 @@ pub struct LiveSnapshot {
     /// 0-based.
     pub page_index: usize,
     pub page_count: usize,
-    /// How the tablet is held (the live window's quick switch shows it). On a resumed sheet held
-    /// the other way round than the setting, how it is to be held for that page.
+    /// How the tablet is held (the live window's quick switch shows it). On a page that does not
+    /// turn held the other way round than the setting, how it is to be held for that page.
     pub orientation: Orientation,
-    /// Whether the current page turns with the tablet. A resumed sheet never does: the interface
-    /// disables the quick switch on it.
+    /// Whether the current page turns with the tablet. A resumed sheet never does, nor a page
+    /// whose background image was written on (M17): the interface disables the quick switch there.
     pub can_turn_page: bool,
     /// The tablet's layer of the current page: where its ink goes (M14: it may be hidden).
     pub layer: u32,
@@ -291,6 +291,22 @@ pub struct LiveSnapshot {
     /// The current page has an edit to undo, or to redo. Absent on the share's viewers.
     pub can_undo: bool,
     pub can_redo: bool,
+    /// The current page's own paper (what it has without the blackboard): the live window's Page tab
+    /// shows it (M17). Not in the share's allow list (`SharedSnapshot`).
+    pub page_paper: Paper,
+    /// The key and size of the pixels of the page's image; `None` without one. The windows key their
+    /// paper on it, the Fond tab places the image with it (M17). Not in the share's allow list.
+    pub image_pixels: Option<ImagePixels>,
+}
+
+/// The key and size of the pixels of a page's background image (`LiveSnapshot::image_pixels`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImagePixels {
+    /// `background::key_of` the member's bytes: tells two files of the same name apart.
+    pub key: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// A point of the stroke in progress.

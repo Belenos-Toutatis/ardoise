@@ -4,6 +4,7 @@
  * 29700 × 21600. Times are milliseconds since `created`.
  */
 import type { InkPoint, Tool } from './ink';
+import type { NarrationInfo } from './video';
 
 export interface Rgba {
   r: number;
@@ -185,6 +186,8 @@ export interface OpenedNote {
   stamp: FileStamp;
   /** Set when the note is a revision. */
   revision?: RevisionOfNote | null;
+  /** The narration the note holds (M17: read when it opens, not only in a replay); null without one. */
+  narration?: NarrationInfo | null;
 }
 
 /** The registered tablet (`_ardoise/device.json`), shared by every PC. */
