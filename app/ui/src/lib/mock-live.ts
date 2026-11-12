@@ -1209,7 +1209,22 @@ function pageImage(s: Session, pageIndex: number, op: LivePageImageOp): void {
   }
   const sheet = s.resumed.get(page.id);
   if (sheet) sheet.imageEdited = true;
-  broadcastSnapshot();
+  const events: LiveEvent[] = [];
+  if (op.kind === 'remove' && !sheet) {
+    // As Rust: a page held fixed only by its image follows the tablet again at once, ink and all, and the view is
+    // fitted to it (otherwise the pen's points would land wrongly until the next page change).
+    const before = page.page;
+    followTablet(page);
+    if (page.page.width !== before.width || page.page.height !== before.height) {
+      const { width, height } = page.page;
+      s.view =
+        s.view.zoom <= 1
+          ? { ...s.view, zoom: 1, x: width / 2, y: height / 2 }
+          : { ...s.view, x: Math.min(width, Math.max(0, s.view.x)), y: Math.min(height, Math.max(0, s.view.y)) };
+      if (s.saved.has(page.id)) events.push(...savePage(s, page));
+    }
+  }
+  broadcast([...events, { type: 'snapshot', snapshot: snapshot() }]);
 }
 
 /** Three records of the pen: one batch. */
@@ -1672,7 +1687,8 @@ export function setMockLiveOrientation(orientation: Orientation): void {
       const pixels = s.images.get(page.id);
       if (image && pixels) {
         const fit = currentFit(image, old, pixels) ?? 'contain';
-        page.backgroundImage = refit({ ...image, quarterTurns: 0 }, page.page, pixels, fit);
+        // As Rust: the image keeps its own quarter turns (a sideways scan turned in the Fond tab stays turned).
+        page.backgroundImage = refit(image, page.page, pixels, fit);
       }
       if (s.saved.has(page.id)) events.push(...savePage(s, page));
     } else if (index === s.pageIndex) {

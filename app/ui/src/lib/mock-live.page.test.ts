@@ -302,8 +302,26 @@ describe('browser stand-in: the tablet and a page with an image', () => {
     expect(sub.last().page.page).toEqual(size);
     // The tablet is to be held for the page (landscape), not the page turned for the tablet.
     expect(sub.last().orientation).toBe('landscape');
-    // The image removed: the page turns again with the tablet (the next change of position).
+    // The image removed: the page follows the tablet at once, ink and all, and the view is fitted to it (as Rust).
+    const strokes = sub.last().page.strokes.length;
     image({ kind: 'remove' });
-    expect(sub.last().canTurnPage).toBe(true);
+    const turned = sub.last();
+    expect(turned.canTurnPage).toBe(true);
+    expect(turned.page.page).toEqual({ width: 21600, height: 29700 });
+    expect(turned.page.strokes).toHaveLength(strokes);
+    expect(turned.orientation).toBe('portraitLeft');
+    expect(turned.view).toMatchObject({ x: 10800, y: 14850 });
+  });
+
+  it('keeps the quarter turns the user gave the image when the tablet turns (as Rust)', async () => {
+    const sub = await subscribe();
+    start();
+    // A sideways scan (1600 × 1200 px) turned once in the Fond tab: shown 1200 × 1600, contained on the landscape page.
+    image({ kind: 'set', key: 'mock-9', image: { ...PHOTO, rect: { x: 6750, y: 0, width: 16200, height: 21600 }, quarterTurns: 1 } });
+    setMockLiveOrientation('portraitLeft');
+    const placed = sub.last().page.backgroundImage!;
+    expect(placed.quarterTurns).toBe(1);
+    expect(placed.rect.width).toBeCloseTo(21600, 0);
+    expect(placed.rect.height).toBeCloseTo(28800, 0);
   });
 });
