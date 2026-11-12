@@ -38,7 +38,7 @@ export interface LiveCommand {
  * steps of one group are undone and redone together, in one command.
  * `transform` moves or resizes them: each point (px, py) becomes (px·`scale` + `x`, py·`scale` + `y`) in page units,
  * the width is multiplied by `scale`; the rest of the stroke is unchanged. `scale` is in [0.05, 20], `x` and `y` at most
- * 1e6 in absolute value, else `liveEditInvalid`; one that changes nothing (1, 0, 0) is no step and keeps the revision.
+ * 1e9 in absolute value, else `liveEditInvalid`; one that changes nothing (1, 0, 0) is no step and keeps the revision.
  * The strokes stay at the same places of the list, and the revision moves on (the selection goes on at once).
  */
 export type LiveStrokesEdit =

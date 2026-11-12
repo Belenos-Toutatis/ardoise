@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LiveBatch, LiveStrokesEdit, LiveStrokesEdited } from './live';
 import { LiveState } from './live-state.svelte';
 import { resetMockLibrary } from './mock-data';
-import { mockLiveConfig, mockLiveInvoke, mockLiveSubscribe, mockLiveTick, resetMockLive } from './mock-live';
+import { mockLiveConfig, mockLiveInvoke, mockLiveSubscribe, mockLiveTick, resetMockLive, setMockLiveOrientation } from './mock-live';
 import type { Stroke } from './note';
 
 const invoke = (command: string, args: Record<string, unknown> = {}) => mockLiveInvoke(command, args);
@@ -125,13 +125,13 @@ describe('browser stand-in: moving and resizing strokes', () => {
     refused(20.01, 0, 0);
     refused(Number.NaN, 0, 0);
     refused(Number.POSITIVE_INFINITY, 0, 0);
-    refused(1, 1_000_001, 0);
-    refused(1, 0, -1_000_001);
+    refused(1, 1_000_000_001, 0);
+    refused(1, 0, -1_000_000_001);
     refused(1, Number.NaN, 0);
     expect(live.strokes).toEqual(before);
     expect(live.canUndo).toBe(false);
     // The limits themselves are allowed.
-    expect(() => transform([0], 0.05, 1e6, -1e6)).not.toThrow();
+    expect(() => transform([0], 0.05, 1e9, -1e9)).not.toThrow();
     expect(() => transform([1], 20, 0, 0)).not.toThrow();
   });
 
@@ -209,5 +209,57 @@ describe('browser stand-in: moving and resizing strokes', () => {
     expect(late.revision).toBe(answer);
     expect(late.canUndo).toBe(true);
     expect(late.strokes).toEqual(live.strokes);
+  });
+
+  it('the steps keep strokes of their own: a layer moved renumbers the page and the history once each', async () => {
+    const { live, transform, undo, redo, writeUntil } = await open();
+    writeUntil(2);
+    invoke('live_layers', { pageIndex: live.pageIndex, op: { kind: 'add' } });
+    expect(live.layers).toHaveLength(2);
+    transform([0], 2, 10, 10);
+    expect(live.strokes[0].layer).toBe(0);
+    // Layer 0 goes above layer 1: its strokes are on layer 1 now, those of the page and those the steps hold.
+    invoke('live_layers', { pageIndex: live.pageIndex, op: { kind: 'move', from: 0, to: 1 } });
+    expect(live.strokes.map((s) => s.layer)).toEqual([1, 1]);
+    expect(undo()).toBe(true);
+    expect(live.strokes.map((s) => s.layer)).toEqual([1, 1]);
+    expect(redo()).toBe(true);
+    expect(live.strokes.map((s) => s.layer)).toEqual([1, 1]);
+  });
+
+  it('a page that turns moves its revision on, so a selection chosen before is dropped and its edit is refused as stale', async () => {
+    const { live, transform, writeUntil } = await open();
+    writeUntil(2);
+    const before = live.revision;
+    setMockLiveOrientation('portraitLeft');
+    expect(live.revision).not.toBe(before);
+    let error: unknown;
+    try {
+      transform([0], 1, 5, 5, before);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toEqual(expect.objectContaining({ code: 'liveEditStale' }));
+    // At the new revision it goes through.
+    expect(() => transform([0], 1, 5, 5)).not.toThrow();
+  });
+
+  it('a page that turns turns what can come back: an undone move returns turned, where it would be had the page stayed', async () => {
+    const { live, transform, undo, redo, writeUntil } = await open();
+    writeUntil(2);
+    const first = structuredClone(live.strokes[0].points[0]);
+    transform([0], 2, 100, 50);
+    expect(undo()).toBe(true);
+    setMockLiveOrientation('portraitLeft');
+    // A quarter turn clockwise: (x, y) -> (height - y, x), the page being 21600 high before it.
+    expect(live.strokes[0].points[0].x).toBeCloseTo(21600 - first.y, 6);
+    expect(redo()).toBe(true);
+    const moved = { x: first.x * 2 + 100, y: first.y * 2 + 50 };
+    expect(live.strokes[0].points[0].x).toBeCloseTo(21600 - moved.y, 6);
+    expect(live.strokes[0].points[0].y).toBeCloseTo(moved.x, 6);
+    // And the undo turned too.
+    expect(undo()).toBe(true);
+    expect(live.strokes[0].points[0].x).toBeCloseTo(21600 - first.y, 6);
+    expect(live.strokes[0].points[0].y).toBeCloseTo(first.x, 6);
   });
 });

@@ -207,7 +207,11 @@
   /** The selection taken hold of: what it took (`grab`), where the press was, and the map the drag has made so far. */
   let grabDrag: {
     id: number;
+    /** Whose it is: a finger's (or a palm's) grab is dropped when the pen comes near. */
+    kind: PointerKind;
     grab: Grab;
+    /** The selection's frame when it was taken hold of (page units). */
+    box: Rect;
     start: Vec;
     startScreen: Vec;
     indices: readonly number[];
@@ -651,14 +655,17 @@
 
   /** Selecting: a press on the selection's frame or one of its handles takes hold of it; false when it is neither. */
   function startGrab(e: PointerEvent, kind: PointerKind, id: number): boolean {
-    if (e.button !== 0) return false;
+    if (e.button !== 0 || grabDrag) return false;
     const grab = grabFor(e, kind);
-    if (!grab) return false;
+    const box = grab ? frame() : null;
+    if (!grab || !box) return false;
     e.preventDefault();
     capture(id);
     grabDrag = {
       id,
+      kind,
       grab,
+      box,
       start: pagePoint(e),
       startScreen: localPoint(e),
       indices: selection,
@@ -679,10 +686,25 @@
       g.moved = true;
     }
     const p = pagePoint(e);
-    g.transform =
-      g.grab.kind === 'move'
-        ? moveTransform(p.x - g.start.x, p.y - g.start.y)
-        : scaleTransform(g.grab.anchor, resizeFactor(g.grab.anchor, g.start, p, MAX_SCALE));
+    if (g.grab.kind === 'move') {
+      // The frame's centre stays on the page: a fast drag to the window's edge does not fling the strokes away.
+      const centre = { x: g.box.x + g.box.width / 2, y: g.box.y + g.box.height / 2 };
+      const dx = Math.min(live.pageSize.width, Math.max(0, centre.x + p.x - g.start.x)) - centre.x;
+      const dy = Math.min(live.pageSize.height, Math.max(0, centre.y + p.y - g.start.y)) - centre.y;
+      g.transform = moveTransform(dx, dy);
+    } else {
+      g.transform = scaleTransform(g.grab.anchor, resizeFactor(g.grab.anchor, g.start, p, MAX_SCALE));
+    }
+    schedule();
+  }
+
+  /**
+   * A finger's (or palm's) grab goes when the pen comes into range: the strokes go back, nothing is committed (the
+   * pen's own gesture, a lasso or a grab, is what the user means).
+   */
+  function dropTouchGrab() {
+    if (grabDrag?.kind !== 'touch') return;
+    grabDrag = null;
     schedule();
   }
 
@@ -783,6 +805,7 @@
     if (kind === 'pen' || kind === 'eraser') {
       presence.seen(id, e.timeStamp, 'down');
       fingers.reset();
+      dropTouchGrab();
     } else if (kind === 'touch') {
       if (presence.blocksTouch(e.timeStamp)) return;
       const second = fingers.down(id, localPoint(e), e.timeStamp);
@@ -817,7 +840,7 @@
     if (tool === 'select' && onselect && kind === 'touch' && startGrab(e, kind, id)) return;
     if (tool === 'select' && onselect && (kind === 'mouse' || kind === 'pen')) {
       // While an edit of the selection waits for the session, its strokes are where they were: nothing is taken.
-      if (held) return;
+      if (held || grabDrag) return;
       if (!startGrab(e, kind, id)) startLasso(e, id);
       return;
     }
@@ -847,8 +870,11 @@
     const id = pointerId(e);
     if (kind === 'pen' || kind === 'eraser') {
       presence.seen(id, e.timeStamp, ((e.buttons ?? 0) & 33) !== 0 ? 'down' : 'hover');
+      // Any pen event: a finger or palm that had taken hold of the selection lets go of it.
+      dropTouchGrab();
     } else if (kind === 'touch') {
       if (!fingers.has(id)) return;
+      if (presence.blocksTouch(e.timeStamp)) dropTouchGrab();
       const action = fingers.move(id, localPoint(e), touchOptions());
       if (action) applyTouch(action);
       if (fingers.count > 1) return;
@@ -902,11 +928,12 @@
       computer.eraser.hover(null);
       schedule();
     }
-    if (grabDrag) {
-      if (id === grabDrag.id) dragGrab(e, grabDrag);
+    // The pointer that took hold of the selection moves it; the events of the others are theirs.
+    if (grabDrag && id === grabDrag.id) {
+      dragGrab(e, grabDrag);
       return;
     }
-    if (kind === 'mouse' && !lassoDrag && !drag) {
+    if (kind === 'mouse' && !lassoDrag && !drag && !grabDrag) {
       // Over the selection's frame the mouse shows what a press would take hold of.
       const over = cursorOf(grabFor(e, kind));
       if (over !== grabCursor) grabCursor = over;

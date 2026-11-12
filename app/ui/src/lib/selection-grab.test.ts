@@ -33,7 +33,11 @@ describe('the reach of each pointer', () => {
   it('takes a handle within the handle reach of its corner, square, the mouse at 8 pixels', () => {
     const near = (dx: number, dy: number) => grabAt(FRAME, { x: 1000 + dx, y: 2000 + dy }, 1, 'mouse');
     expect(near(0, 0)).toMatchObject({ kind: 'scale', corner: 0 });
-    expect(near(-8, 8)).toMatchObject({ kind: 'scale', corner: 0 });
+    // Outside the frame, in the corner's quadrant, within the full reach.
+    expect(near(-8, -8)).toMatchObject({ kind: 'scale', corner: 0 });
+    // Beside the frame (past one edge only): the margin, 4 pixels, not the handle.
+    expect(near(-8, 8)).toBeNull();
+    expect(near(-3, 8)).toEqual({ kind: 'move' });
     expect(near(8, 8)).toMatchObject({ kind: 'scale', corner: 0 });
     // Past it: inside the frame it moves.
     expect(near(9, 9)).toEqual({ kind: 'move' });
@@ -90,14 +94,26 @@ describe('what a press takes hold of', () => {
     expect(grabAt(narrow, { x: 10, y: 5 }, 1, 'touch')).toMatchObject({ kind: 'scale', corner: 0 });
   });
 
-  it('a small frame is not all handle: its handles reach a third of its shorter side, so that it can still be moved', () => {
+  it('a small frame is not all handle: from inside, a corner reaches a third of the shorter side, so that it can still be moved', () => {
     const tiny: Rect = { x: 0, y: 0, width: 30, height: 30 };
     // 10 pixels from each corner of a 30-pixel frame: the finger's 22 would cover everything.
     expect(grabAt(tiny, { x: 15, y: 15 }, 1, 'touch')).toEqual({ kind: 'move' });
     expect(grabAt(tiny, { x: 9, y: 9 }, 1, 'touch')).toMatchObject({ kind: 'scale', corner: 0 });
-    // Never below a few pixels.
-    const dot: Rect = { x: 0, y: 0, width: 4, height: 4 };
-    expect(grabAt(dot, { x: 2, y: 2 }, 1, 'mouse')).not.toBeNull();
+  });
+
+  it('the centre of a dot (a 4 × 4 frame) moves it, and just outside a corner resizes, for every pointer', () => {
+    const dot: Rect = { x: 100, y: 100, width: 4, height: 4 };
+    for (const kind of ['mouse', 'pen', 'touch', 'eraser'] as const) {
+      expect(grabAt(dot, { x: 102, y: 102 }, 1, kind), kind).toEqual({ kind: 'move' });
+      // Just outside each corner, in its quadrant.
+      expect(grabAt(dot, { x: 99, y: 99 }, 1, kind), kind).toMatchObject({ kind: 'scale', corner: 0 });
+      expect(grabAt(dot, { x: 105, y: 99 }, 1, kind), kind).toMatchObject({ kind: 'scale', corner: 1 });
+      expect(grabAt(dot, { x: 105, y: 105 }, 1, kind), kind).toMatchObject({ kind: 'scale', corner: 2 });
+      expect(grabAt(dot, { x: 99, y: 105 }, 1, kind), kind).toMatchObject({ kind: 'scale', corner: 3 });
+    }
+    // The outer quadrant reaches as far as the pointer's handle reach, and no farther.
+    expect(grabAt(dot, { x: 100 - 16, y: 100 - 16 }, 1, 'pen')).toMatchObject({ kind: 'scale', corner: 0 });
+    expect(grabAt(dot, { x: 100 - 17, y: 100 - 17 }, 1, 'pen')).toBeNull();
   });
 
   it('the resize cursor is the diagonal the handle lies on', () => {
