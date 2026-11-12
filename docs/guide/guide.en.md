@@ -409,13 +409,32 @@ touch up in the control window, and **the tablet keeps writing meanwhile**.
 - **Click**: click a stroke to choose it alone. Click on the ink itself, not next to it.
 - `Shift` + lasso or click adds strokes to the ones already chosen. `Ctrl` + lasso or click removes some.
 - A gesture on empty paper, or `Esc`, clears the selection. While strokes are chosen, `Esc` does nothing else.
-- A finger and the wheel still move and zoom the preview.
+- A finger outside the selection's frame and the wheel still move and zoom the preview.
 - The chosen strokes are outlined in blue in the preview. The selection bar, above the open tab of the side panel, says
   "Selected strokes: 3" (see **The control window's side panel**).
 - **Only the strokes of the chosen layer are picked** (the **Layers** zone, see below); choosing another layer clears
   the selection. You cannot choose the stroke the tablet is writing right now, nor the strokes of a hidden layer;
   hiding a layer takes its strokes out of the selection. On a resumed sheet, you can choose the sheet's old strokes, by
   choosing their layer.
+
+**Moving and resizing**: the chosen strokes are surrounded by a dashed frame, with a small square at each of its four
+corners.
+
+- **Move**: put the pen, a finger or the mouse **inside the frame** (or very near its edge: about 4 pixels for the mouse,
+  12 for the pen, 16 for a finger) and drag. The strokes follow, and land where you let go.
+- **Resize**: take a **corner** (the pen and a finger do not have to aim exactly: 16 and 22 pixels around the square, 8
+  for the mouse) and drag along the diagonal. The opposite corner stays where it is; the thickness of the line follows
+  the size. You cannot go below a twentieth of the size, nor above twenty times.
+- A plain press in the frame, without dragging, changes nothing: it does not make a new selection. With `Shift` or
+  `Ctrl`, a gesture is always a lasso, even on the frame. Outside the frame, the mouse and the pen draw a lasso as
+  before and a finger moves the preview.
+- During the gesture the strokes are shown lifted, where you are taking them, and the place they leave is empty. `Esc`
+  (or a second finger, which turns the gesture into a zoom) drops the gesture: the strokes stay where they were and
+  nothing is sent.
+- **The projector and the other screen on the network only move on release**: they show the result, all at once, never
+  the frame or the squares. The selection stays, to move again or resize. `Ctrl + Z` puts the strokes back (one step per
+  move or resize).
+- In the editor, the frame and its corners are taken the same way.
 
 **Deleting**: click **Delete** in the selection bar, or press `Delete` or `Backspace`.
 
@@ -426,7 +445,7 @@ chosen, a swatch sets the pen's colour, as before.
 **Undo and redo**
 
 - `Ctrl + Z` (or **Undo**) undoes the computer's last action: a stroke or an erasing (see **Correcting during live
-  mode**), a deletion, a change of colour, or **Clear the page**. Deleted strokes come back to their place.
+  mode**), a deletion, a change of colour, a move or a resize, or **Clear the page**. Deleted strokes come back to their place.
 - `Ctrl + Y` or `Ctrl + Shift + Z` (or **Redo**) does again what was just undone. A new touch-up empties what could be
   redone.
 - **What is never undone**: what the tablet wrote. A stroke written in the meantime stays, whatever order you undo and
@@ -436,7 +455,7 @@ chosen, a swatch sets the pen's colour, as before.
 - The **Undo** and **Redo** buttons are greyed out when there is nothing to do.
 
 **The projector and the other screen on the network only see the result.** Never the blue outline or the lasso: a
-deleted stroke disappears, a recoloured stroke changes colour. The annotations drawn over the presentation are not
+deleted stroke disappears, a recoloured stroke changes colour, a moved or resized stroke appears at its new place. The annotations drawn over the presentation are not
 strokes of the page: they cannot be chosen.
 
 **In the note.** When you finish, the note holds what was on screen: deleted strokes gone, colours changed. On a resumed

@@ -1683,8 +1683,8 @@
     },
     "select": {
       "toggle": "Select",
-      "hint": "Pick strokes with a lasso or a click to delete them or change their colour (V)",
-      "help": "Lasso: select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect. The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked.",
+      "hint": "Pick strokes with a lasso or a click to delete them, change their colour, move them or resize them (V)",
+      "help": "Lasso: select · click: one stroke · Shift: add · Ctrl: remove · Esc: deselect. Drag inside the frame to move the selection, or by a corner to resize it (pen, finger or mouse). The colour swatches change the colour of the selection. Only strokes of the chosen layer are picked.",
       "bar": "Touch up the selection",
       "count": "Selected strokes: {count}",
       "delete": "Delete",
@@ -1775,7 +1775,7 @@
           "action": "Pen tool: write with the computer's pen or mouse"
         },
         "select": {
-          "action": "Select tool (lasso or click on a stroke)"
+          "action": "Select tool (lasso or click on a stroke; drag inside the frame to move, by a corner to resize)"
         },
         "delete": {
           "action": "Delete the selection"

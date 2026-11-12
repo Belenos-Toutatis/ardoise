@@ -1683,8 +1683,8 @@
     },
     "select": {
       "toggle": "Sélection",
-      "hint": "Sélectionner des traits au lasso ou d'un clic pour les supprimer ou changer leur couleur (V)",
-      "help": "Lasso : sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner. Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris.",
+      "hint": "Sélectionner des traits au lasso ou d'un clic pour les supprimer, changer leur couleur, les déplacer ou les redimensionner (V)",
+      "help": "Lasso : sélectionner · clic : un trait · Maj : ajouter · Ctrl : retirer · Échap : désélectionner. Glissez dans le cadre pour déplacer la sélection, par un coin pour la redimensionner (stylet, doigt ou souris). Les pastilles de couleur changent la couleur de la sélection. Seuls les traits du calque choisi sont pris.",
       "bar": "Retoucher la sélection",
       "count": "Traits sélectionnés : {count}",
       "delete": "Supprimer",
@@ -1775,7 +1775,7 @@
           "action": "Outil Stylo : écrire avec le stylet ou la souris de l'ordinateur"
         },
         "select": {
-          "action": "Outil Sélection (lasso ou clic sur un trait)"
+          "action": "Outil Sélection (lasso ou clic sur un trait ; glisser dans le cadre pour déplacer, par un coin pour redimensionner)"
         },
         "delete": {
           "action": "Supprimer la sélection"
