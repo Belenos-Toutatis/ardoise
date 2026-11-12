@@ -1,6 +1,6 @@
 # Ardoise — cahier des charges
 
-> « Ardoise » est un nom de travail (*slate* en anglais). Il peut changer avant la publication.
+> « Ardoise » (*slate* en anglais) est le nom de l'application, gardé pour la publication (décision de l'utilisateur, 2026-11-12).
 > Ce document décrit **quoi** construire. L'ordre de construction et les critères de fin de chaque étape sont dans [ROADMAP.md](ROADMAP.md).
 > Les documents de recherche qui justifient les choix techniques sont dans [docs/research/](docs/research/).
 

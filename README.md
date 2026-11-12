@@ -7,8 +7,6 @@ rejouer et de les exporter.
 
 *English summary at the end of this file.*
 
-> « Ardoise » est un nom de travail ; il peut changer avant la publication.
-
 ## Fonctions principales
 
 - **Tablette** : enregistrement de la Bamboo Slate en Bluetooth LE, connexion automatique, synchronisation des pages
@@ -34,7 +32,7 @@ rejouer et de les exporter.
 
 ## État du projet
 
-Première version (0.1.0) en préparation. Le dépôt est **privé** et rien n'est encore publié. Toutes les fonctions
+Première version (0.1.0) en préparation. Le code est public ; aucune version n'est encore proposée en téléchargement. Toutes les fonctions
 qui ne demandent pas la tablette sont vérifiées sous Windows par des tests automatiques ; quelques essais à la main
 restent à faire (fermeture de session de Windows, import avec Inkspace ouvert, impression…). Les fonctions qui parlent
 à la **vraie tablette** (enregistrement, synchronisation, mode direct) ont été vérifiées avec une tablette simulée et
@@ -143,7 +141,7 @@ replay, and export them (PNG, JPG, WebP, SVG, PDF, text, Markdown, Word, MP4, GI
 notes (from the application or the command line) and can be driven by an assistant such as Claude Code or Claude
 Desktop through MCP. The interface is in French and English.
 
-- **Status**: first version (0.1.0) in preparation; the repository is private. Everything that does not need the tablet
+- **Status**: first version (0.1.0) in preparation; the source is public; no release is offered for download yet. Everything that does not need the tablet
   is checked on Windows by automated tests; the parts that talk to the real tablet have been checked with a simulated
   tablet only.
 - **Requirements**: Windows 11 (Windows 10 not tried), WebView2, and Bluetooth LE for the tablet. No administrator

@@ -155,7 +155,6 @@ direct à 60 images/s, export MP4 1080p d'une relecture de 2 min en 15 s, exécu
 - Les notes d'une même bibliothèque ne doivent pas être modifiées sur deux PC en même temps (Ardoise refuse d'écraser
   l'autre version et propose une copie). Pour mettre à jour `ardoise.exe` dans un dossier synchronisé, fermer Ardoise
   sur tous les PC.
-- Le nom « Ardoise » est un nom de travail ; il peut changer avant la publication.
 
 ---
 
@@ -299,4 +298,3 @@ replay in 15 s, a 21 MB executable). Details: [performance](performance.md) (in 
 - No text box typed on the keyboard in a note, no PSD export, no WILL / Universal Ink Model ink formats.
 - Notes of a library must not be edited on two PCs at the same time (Ardoise refuses to overwrite the other version and
   offers a copy). To update `ardoise.exe` in a synced folder, close Ardoise on all PCs.
-- The name "Ardoise" is a working name; it may change before publication.
