@@ -160,7 +160,9 @@ Vérifié sous Windows le 2026-10-29 : `CHECK OK`, `E2E OK` (58 parcours, FR et 
 ### Point de contrôle H3 [matériel]
 
 - [ ] [matériel] Test complet au travail et en classe (procédure H3).
-- [ ] Publication sur GitHub **après accord explicite de l'utilisateur**.
+- [x] Publication sur GitHub **après accord explicite de l'utilisateur**.
+
+Publié le 2026-11-12 avec l'accord de l'utilisateur : le code source sur https://github.com/Belenos-Toutatis/ardoise, sans version proposée en téléchargement. Avant la publication, l'historique a été réécrit pour ne garder aucune donnée personnelle (commits signés avec l'adresse no-reply de GitHub, exemples neutres à la place du prénom et du nom d'utilisateur de Windows) et placé dans un dépôt neuf ; l'ancien dépôt reste privé sous le nom . Le nom « Ardoise » est gardé.
 
 ## M11 — Partage de la feuille sur le réseau local
 
