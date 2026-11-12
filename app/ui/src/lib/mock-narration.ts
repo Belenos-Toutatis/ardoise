@@ -6,6 +6,11 @@
  * id, so that a rename keeps them) whose saving and deletion change the note's stamp like the
  * Rust commands do. A replay recording that cannot be saved stays pending, as in Rust, until it is
  * retried or discarded.
+ *
+ * M17 (docs/design/paper-projection-narration.md §3.3): a writing recording (target `writing`) is not written at the
+ * stop: its sound is kept in one slot (`staged`, a key) until `save_note` takes it with the note (`takeStagedNarration`,
+ * called by `mock-notes.ts`) or `narration_drop_staged` lets it go; a newer one replaces it. Its narration is in note
+ * time (`base: 'note'`, speed 1, no trimming), placed from `replayStartedAtMs`, the wall clock at note time 0.
  */
 import { UNHANDLED, freshStamp, mockLibrary, notifyLibraryChanged, sameStamp } from './mock-data';
 import type { FileStamp } from './note';
@@ -61,10 +66,20 @@ interface Pending {
 
 let pending: Pending | null = null;
 
+/** The sound of a writing recording kept until the note is saved with it (one slot, as Rust's). */
+interface Staged {
+  key: string;
+  info: NarrationInfo;
+}
+
+let staged: Staged | null = null;
+let stagedCount = 0;
+
 /** Forgets the capture and the stored narrations, and restores the switches (tests). */
 export function resetMockNarration(): void {
   capture = null;
   pending = null;
+  staged = null;
   stored.clear();
   mockNarration.silent = false;
   mockNarration.noData = false;
@@ -90,6 +105,27 @@ export function setMockNarration(path: string, info: NarrationInfo | null): void
 /** The narration of the note at `path`, as the commands see it. */
 export function mockNarrationOf(path: string): NarrationInfo | null {
   return stored.get(noteOf(path).note.id)?.info ?? null;
+}
+
+/** The key of the writing recording kept in memory, or null (tests). */
+export function mockStagedNarration(): { key: string; info: NarrationInfo } | null {
+  return staged ? { key: staged.key, info: { ...staged.info } } : null;
+}
+
+/**
+ * `save_note` with a narration key (`mock-notes.ts`): the sound kept under `key`, or `noStagedNarration` (nothing is
+ * written then). The slot stays until `commitStagedNarration`: a save that fails afterwards (a conflict) leaves it.
+ */
+export function stagedNarrationFor(key: string): NarrationInfo {
+  if (!staged || staged.key !== key) failure('noStagedNarration', key);
+  return { ...staged.info };
+}
+
+/** The note at `path` was saved with the sound kept under `key`: it is that note's narration now, the slot is empty. */
+export function commitStagedNarration(path: string, key: string): void {
+  const info = stagedNarrationFor(key);
+  stored.set(noteOf(path).note.id, { info });
+  staged = null;
 }
 
 function failure(code: string, message: string): never {
@@ -214,7 +250,7 @@ export function mockNarrationInvoke(command: string, args: Record<string, unknow
       return undefined;
     case 'narration_start': {
       const target = args.target as NarrationTarget;
-      if (target.kind === 'replay') noteOf(target.path);
+      if (target.kind === 'replay' || target.kind === 'writing') noteOf(target.path);
       if (pending) failure('narrationBusy', 'a recording is waiting to be saved or discarded');
       // A monitor gives way to the recording.
       if (capture?.kind === 'monitoring') capture = null;
@@ -234,6 +270,20 @@ export function mockNarrationInvoke(command: string, args: Record<string, unknow
       if (mockNarration.empty) failure('emptyRecording', 'nothing was recorded');
       const durationMs = Math.max(0, Date.now() - current.startedAt);
       const target = current.target;
+      if (target?.kind === 'writing') {
+        // Exact silence all along: Windows kept the microphone from the app; nothing is kept (the strokes stay).
+        if (mockNarration.silent) failure('microphoneSilent', 'the microphone gave only silence');
+        // In note time: the first sample comes this long after note time 0.
+        const at = args.replayStartedAtMs as number | null | undefined;
+        const startMs = typeof at === 'number' ? Math.round(current.startedAt - at) : 0;
+        // A newer sound replaces the one kept (and, in Rust, its backup copy).
+        stagedCount += 1;
+        staged = {
+          key: `staged-${stagedCount}`,
+          info: { durationMs, base: 'note', speed: 1, maxPauseMs: null, startMs },
+        };
+        return { stamp: null, durationMs, pages: 1, staged: staged.key } satisfies NarrationSaved;
+      }
       if (target?.kind === 'replay') {
         // The replay instant of the first sample: the recording started this long after the
         // replay was at instant 0 (negative when it started before).
@@ -265,6 +315,10 @@ export function mockNarrationInvoke(command: string, args: Record<string, unknow
     case 'narration_discard':
       if (!pending) failure('noPendingNarration', 'no recording is waiting');
       pending = null;
+      return undefined;
+    case 'narration_drop_staged':
+      // Only the sound kept under this key: another (newer) one stays.
+      if (staged?.key === args.key) staged = null;
       return undefined;
     case 'narration_info':
       return mockNarrationOf(args.path as string);

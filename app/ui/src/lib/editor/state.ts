@@ -159,13 +159,14 @@ export function paste(doc: Doc, strokes: readonly Stroke[], offset: Vec = { x: P
 
 /**
  * Pastes strokes from the clipboard (copied in this note or another one) on the active layer:
- * placed by `ops.pasteOffset`, retimed to follow the note's ink (`ops.retimedForPaste`), and
+ * placed by `ops.pasteOffset`, retimed to follow the note's ink (`ops.retimedForPaste`; from note
+ * time `at` when given: during a writing recording, the sound's current time, M17 O15), and
  * selected afterwards. One undoable step. Nothing happens while the active layer is hidden.
  */
-export function pasteStrokes(doc: Doc, strokes: readonly Stroke[]): Doc {
+export function pasteStrokes(doc: Doc, strokes: readonly Stroke[], at?: number): Doc {
   if (!canDraw(doc) || strokes.length === 0) return doc;
   const offset = ops.pasteOffset(doc.note, strokes);
-  const { note, indices } = ops.insertCopies(doc.note, ops.retimedForPaste(doc.note, strokes), offset, doc.activeLayer);
+  const { note, indices } = ops.insertCopies(doc.note, ops.retimedForPaste(doc.note, strokes, at), offset, doc.activeLayer);
   return withNote(doc, note, indices);
 }
 

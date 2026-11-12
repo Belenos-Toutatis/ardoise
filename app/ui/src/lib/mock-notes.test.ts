@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { UNHANDLED, freshStamp, mockLibrary, mockOnLibraryChanged, resetMockLibrary, sameStamp } from './mock-data';
+import { mockNarrationInvoke, mockNarrationOf, resetMockNarration, setMockNarration } from './mock-narration';
 import { backgroundDataUrl, mockNotesInvoke } from './mock-notes';
 import type { FileStamp, OpenedNote } from './note';
 import type { NoteOriginal } from './original';
+import type { NarrationSaved } from './video';
 
 const path = () => [...mockLibrary().notes.keys()].find((p) => p.includes('Liste de courses'))!;
 
@@ -113,3 +115,35 @@ describe('editor commands in the browser stand-in', () => {
   });
 });
 
+
+describe('the narration of a note in the editor commands (M17)', () => {
+  beforeEach(() => {
+    resetMockLibrary();
+    resetMockNarration();
+  });
+
+  it('tells the narration when the note opens (null without one)', () => {
+    expect((mockNotesInvoke('open_note', { path: path() }) as OpenedNote).narration).toBeNull();
+    const info = { durationMs: 2000, base: 'note', speed: 1, maxPauseMs: null, startMs: 4100 } as const;
+    setMockNarration(path(), info);
+    expect((mockNotesInvoke('open_note', { path: path() }) as OpenedNote).narration).toEqual(info);
+  });
+
+  it('saves the sound kept under `narrationKey` with the note, and refuses an unknown key before writing', () => {
+    const target = path();
+    mockNarrationInvoke('narration_start', { device: null, target: { kind: 'writing', path: target } });
+    const saved = mockNarrationInvoke('narration_stop', { save: true, stamp: null, path: null, replayStartedAtMs: Date.now() - 3000 }) as NarrationSaved;
+    const key = saved.staged!;
+    const { note, stamp } = mockNotesInvoke('open_note', { path: target }) as OpenedNote;
+    expect(() => mockNotesInvoke('save_note', { path: target, note, stamp, narrationKey: 'other' })).toThrow(
+      expect.objectContaining({ code: 'noStagedNarration' }),
+    );
+    expect(sameStamp(mockLibrary().notes.get(target)!.stamp, stamp)).toBe(true);
+    mockNotesInvoke('save_note', { path: target, note, stamp, narrationKey: key });
+    expect(mockNarrationOf(target)?.base).toBe('note');
+    // Without a key the narration stays as it is.
+    const again = mockNotesInvoke('open_note', { path: target }) as OpenedNote;
+    mockNotesInvoke('save_note', { path: target, note: again.note, stamp: again.stamp });
+    expect(mockNarrationOf(target)?.base).toBe('note');
+  });
+});

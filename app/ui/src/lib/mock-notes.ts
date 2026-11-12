@@ -1,7 +1,11 @@
 /**
  * Browser stand-in for the editor commands (`open_note`, `save_note`, `note_original`,
- * `render_background`), over the demo library of `mock-data.ts`.
+ * `render_background`), over the demo library of `mock-data.ts`. M17: `open_note` tells the note's
+ * narration, and `save_note` with a `narrationKey` writes the sound of a writing recording kept by
+ * `mock-narration.ts` in the same save (`noStagedNarration` for an unknown key, nothing written; a
+ * conflict leaves the sound kept).
  */
+import { commitStagedNarration, mockNarrationOf, stagedNarrationFor } from './mock-narration';
 import type { Background, BackgroundImage, FileStamp, Note, OpenedNote, PageSize, Paper, Rgba, RevisionSource } from './note';
 import type { NoteOriginal } from './original';
 import {
@@ -98,9 +102,10 @@ function pictureDataUrl(note: Note, maxWidth: number, maxHeight: number): string
 export function mockNotesInvoke(command: string, args: Record<string, unknown>): unknown {
   switch (command) {
     case 'open_note': {
-      const entry = stored(args.path as string);
+      const path = args.path as string;
+      const entry = stored(path);
       const revision = entry.revision ? { ...entry.revision, source: sourceOf(entry.revision.of) } : null;
-      return copy({ note: entry.note, stamp: entry.stamp, revision }) satisfies OpenedNote;
+      return copy({ note: entry.note, stamp: entry.stamp, revision, narration: mockNarrationOf(path) }) satisfies OpenedNote;
     }
     case 'revision_source':
       return sourceOf(args.id as string);
@@ -110,6 +115,9 @@ export function mockNotesInvoke(command: string, args: Record<string, unknown>):
       const path = args.path as string;
       const entry = stored(path);
       checkNote(args.note as Note);
+      // The sound of a writing recording: it must still be kept, or nothing is written.
+      const narrationKey = typeof args.narrationKey === 'string' ? args.narrationKey : null;
+      if (narrationKey !== null) stagedNarrationFor(narrationKey);
       if (!sameStamp(entry.stamp, args.stamp as FileStamp)) throw { code: 'noteConflict', message: path };
       const note = copy(args.note as Note);
       keepOriginal(entry, note);
@@ -117,7 +125,9 @@ export function mockNotesInvoke(command: string, args: Record<string, unknown>):
       note.id = entry.note.id;
       note.modified = Date.now();
       entry.note = note;
-      entry.stamp = freshStamp(JSON.stringify(note).length);
+      // Note and sound in one write: the narration it had is replaced.
+      if (narrationKey !== null) commitStagedNarration(path, narrationKey);
+      entry.stamp = freshStamp(JSON.stringify(note).length + (narrationKey !== null ? 1 : 0));
       notifyLibraryChanged();
       return copy(entry.stamp);
     }
