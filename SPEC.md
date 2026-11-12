@@ -9,6 +9,7 @@
 Remplacer complètement Wacom Inkspace par une application **portable** pour Windows, qui :
 
 - récupère en Bluetooth les pages écrites sur une **Wacom Bamboo Slate** (modèle testé : Slate Large, A4) ;
+- fait de même avec une **Xiaomi Mijia « petit tableau noir », version mémoire** (13,5 pouces, Bluetooth) : pages enregistrées et mode direct (ajout demandé par l'utilisateur le 2026-11-12, `docs/questions.md` Q14) ;
 - permet d'écrire **en direct** à l'écran avec la tablette, y compris au vidéoprojecteur en classe ;
 - range les notes dans un **dossier choisi par l'utilisateur** (en pratique un dossier synchronisé par Nextcloud), pour les retrouver sur tous ses ordinateurs ;
 - permet de modifier, découper, assembler, tourner, rejouer, exporter les notes (images, PDF, SVG, vidéos) ;
@@ -25,7 +26,7 @@ Remplacer complètement Wacom Inkspace par une application **portable** pour Win
 | Code non signé | L'exécutable n'est pas signé : un avertissement SmartScreen au premier lancement est acceptable, il doit être documenté. |
 | Langues | Interface en **français et en anglais**, langue choisie automatiquement d'après Windows, modifiable dans les réglages. |
 | Technologie | Cœur en **Rust**, interface **Tauri 2** (page web affichée par WebView2, présent dans Windows 11). |
-| Tablettes | Bamboo Slate (A4 et A5) visées et testées sur la Slate Large. Spark, Folio et Intuos Pro Paper : prises en charge si le protocole le permet sans effort particulier, marquées « non testées ». |
+| Tablettes | Bamboo Slate (A4 et A5) visées et testées sur la Slate Large. Spark, Folio et Intuos Pro Paper : prises en charge si le protocole le permet sans effort particulier, marquées « non testées ». Xiaomi Mijia « petit tableau noir », version mémoire, 13,5 pouces (米家液晶小黑板 存储版, modèle Mi Home `jiqid.sxb.v1`) : visée et testée sur celle de l'utilisateur ; les tableaux LCD sans mémoire ni Bluetooth ne sont pas concernés. |
 | Licence | Compatible avec les sources utilisées (Tuhi est sous GPL) : voir §9. |
 | Publication | Sur GitHub, seulement quand l'application est testée et finalisée, et avec l'accord de l'utilisateur. |
 
@@ -49,7 +50,7 @@ Remplacer complètement Wacom Inkspace par une application **portable** pour Win
 - Un dossier ordinaire, lisible sans l'application. **Une note = un fichier `.ardoise`**, rangé dans des sous-dossiers qui servent de classeurs.
 - Nom de fichier lisible : `2026-10-24 Titre de la note.ardoise`. Renommer une note renomme le fichier.
 - Dossier `_ardoise/` à la racine de la bibliothèque, volontairement **non caché** : avec ses réglages par défaut, le client Nextcloud ne synchronise pas les dossiers cachés (nom commençant par un point). Une bibliothèque qui a encore l'ancien dossier `.ardoise/` est migrée automatiquement à l'ouverture. Contenu :
-  - `device.json` : identifiant d'enregistrement de la tablette, **partagé par tous les PC** (enregistrer la tablette une seule fois suffit) ;
+  - `device.json` : identifiant d'enregistrement de la tablette, **partagé par tous les PC** (enregistrer la tablette une seule fois suffit) ; la tablette Xiaomi a son propre fichier à côté, partagé de la même façon, et une version d'Ardoise qui ne la connaît pas continue de fonctionner avec la Bamboo ;
   - `diagnostics/` : journaux Bluetooth détaillés (§4.8) ;
   - `trash/` : corbeille (notes supprimées, vidée après 30 jours ou à la demande).
 - Exports automatiques optionnels (PDF ou PNG) dans un sous-dossier configurable, pour consulter les notes depuis le téléphone via l'appli Nextcloud.
@@ -83,12 +84,20 @@ Priorités : **P1** = indispensable pour remplacer Inkspace, **P2** = proposé e
 - **Synchronisation** des pages stockées : à la connexion (automatique, désactivable) ou à la demande ; chaque page devient une note ; option « effacer de la tablette après import réussi » (activée par défaut, l'effacement n'a lieu qu'après écriture vérifiée du fichier).
 - Informations : nom, batterie et charge, version du firmware, nombre de pages en mémoire, modèle et taille.
 - Réglages : renommer la tablette, mettre à l'heure, orientation (droitier / gaucher), oublier la tablette.
+- **Tablette Xiaomi** (ajout demandé par l'utilisateur le 2026-11-12, `docs/questions.md` Q14 ; protocole dans `docs/research/xiaomi-blackboard.md`) :
+  - « Ajouter une tablette » la trouve quand elle est allumée et que Mi Home ne l'occupe pas. Il n'y a ni appui long ni enregistrement : elle reste liée à Mi Home, et Ardoise n'utilise ni le compte ni le service Xiaomi.
+  - Ardoise retient les deux tablettes (la Bamboo et la Xiaomi) et se connecte à celle qui est allumée ; chacune s'oublie séparément.
+  - Synchronisation comme pour la Bamboo : à la connexion ou à la demande, chaque page devient une note, datée du moment où elle a été enregistrée sur la tablette. Cette tablette ne donne que sa page la plus ancienne : la suivante ne se lit qu'une fois celle-ci effacée. Ardoise efface donc chaque page après l'écriture vérifiée de sa note (comme le fait Mi Home). Si l'option « effacer de la tablette après import réussi » est désactivée, Ardoise n'importe les pages de cette tablette qu'à la demande, après avoir dit qu'elles seront effacées.
+  - Informations : batterie, mémoire libre, nombre de pages en mémoire, modèle. La tablette est mise à l'heure à chaque connexion. Elle n'a ni nom à changer, ni orientation, ni version de firmware lisible.
+  - Limites, dites dans le guide : la tablette ne parle qu'à une application à la fois (fermer Mi Home ou couper le Bluetooth du téléphone) ; les pages vont à l'application qui les importe la première (Mi Home les efface aussi après import) ; la tablette ne donne pas l'heure de chaque point, donc la relecture et la vidéo d'une page récupérée rejouent les traits à vitesse régulière ; la page fait environ 20 × 27 cm, en hauteur.
+  - Ardoise n'envoie à cette tablette que des commandes observées dans les échanges de Mi Home ; ce qu'elle ne comprend pas est ignoré et consigné dans le journal de diagnostic.
 
 ### 4.2 Mode direct (P1)
 
 - La tablette envoie le tracé en temps réel ; il s'affiche avec l'outil, la couleur et la texture choisis.
 - Latence cible : affichage moins de 30 ms après réception du point.
 - Chaque session directe est enregistrée comme une note. Le bouton de la tablette crée une nouvelle page (ou un nouveau calque, au choix).
+- Avec la tablette Xiaomi (§4.1), le mode direct fonctionne de la même façon : outil, couleur, texture, pression, pointeur laser au survol, autre écran, partage, retouches. Enregistrer la page avec le bouton de la tablette n'interrompt pas le direct. Quand on efface l'écran de la tablette avec son bouton, le direct passe à une nouvelle page si la tablette le signale ; sinon on change de page depuis l'ordinateur.
 - **Classe et vidéoprojecteur** (bureau étendu) :
   - fenêtre de présentation **plein écran sur l'écran choisi** (le projecteur), sans aucun élément d'interface ;
   - fenêtre de commande sur l'écran de l'ordinateur : outils, couleurs, pages, aperçu de ce qui est projeté ;
@@ -161,6 +170,8 @@ La tablette est au travail alors que le développement se fait à la maison. L'a
 - **outil de test guidé** : une suite d'étapes (rechercher, enregistrer, lire les infos, télécharger les pages, mode direct pendant 30 s, dessins de référence à reproduire) qui produit un rapport ;
 - ces captures servent ensuite de **données de test** rejouées par le simulateur de tablette.
 
+Le journal détaillé couvre aussi la tablette Xiaomi, qui a sa tablette simulée. L'outil de test guidé reste propre à la Bamboo : la Xiaomi est sur le poste de développement.
+
 ### 4.9 Pilotage par un assistant (MCP)
 
 Ajouté à la demande de l'utilisateur le 2026-10-28. Ardoise peut être commandée par un assistant comme Claude Code ou Claude Desktop, grâce au protocole MCP (Model Context Protocol). Ardoise ne contient aucune IA et reste utilisable hors ligne : c'est l'assistant de l'utilisateur qui analyse les notes, par exemple pour reconnaître les schémas et mettre une note au propre.
@@ -193,6 +204,7 @@ Ajouté à la demande de l'utilisateur le 2026-11-02. Un autre ordinateur du mê
 ### 4.11 Hors périmètre de la version 1
 
 - Le cloud Wacom et la collaboration en temps réel d'Inkspace.
+- Le compte, le cloud et l'identification Xiaomi (Mi Home) : Ardoise ne s'y connecte pas.
 - macOS et Linux (l'architecture ne doit pas les empêcher plus tard).
 - Applications mobiles.
 
@@ -207,14 +219,14 @@ Ajouté à la demande de l'utilisateur le 2026-11-02. Un autre ordinateur du mê
 
 ## 6. Architecture technique
 
-Sources : [protocol.md](docs/research/protocol.md), [windows-platform.md](docs/research/windows-platform.md), [media-stack.md](docs/research/media-stack.md), [inkspace-format.md](docs/research/inkspace-format.md), [inkspace-features.md](docs/research/inkspace-features.md).
+Sources : [protocol.md](docs/research/protocol.md), [xiaomi-blackboard.md](docs/research/xiaomi-blackboard.md), [windows-platform.md](docs/research/windows-platform.md), [media-stack.md](docs/research/media-stack.md), [inkspace-format.md](docs/research/inkspace-format.md), [inkspace-features.md](docs/research/inkspace-features.md).
 
 ### 6.1 Découpage du code
 
 ```
 crates/
-  ardoise-proto     protocole des tablettes Wacom, sans aucune entrée/sortie : messages, enregistrement,
-                    décodage des pages stockées et des paquets du mode direct
+  ardoise-proto     protocole des tablettes Wacom et de la tablette Xiaomi, sans aucune entrée/sortie :
+                    messages, enregistrement, décodage des pages stockées et des paquets du mode direct
   ardoise-device    gestion de la tablette : connexion, synchro, mode direct, journal de diagnostic ;
                     dépend d'un « transport » abstrait
   ardoise-ble       transport Bluetooth LE Windows
@@ -274,6 +286,7 @@ testdata/private/   copies de notes personnelles pour les tests locaux — ignor
 | Le PC du travail peut bloquer un exe non signé (Smart App Control, AppLocker) sans possibilité de passer outre. | À vérifier dès H1 avec un exe minimal. |
 | Stratégie d'entreprise bloquant le Bluetooth ou le dongle. | Idem. |
 | Exe lancé depuis Nextcloud : verrouillé pendant l'exécution, la mise à jour par synchro échoue. | Documenter : mettre à jour l'exe quand il est fermé sur tous les PC. |
+| Protocole de la Xiaomi appris par des captures de Mi Home, sans documentation : une mise à jour de son micrologiciel peut le changer. | Journal de diagnostic ; trames inconnues ignorées et consignées ; jamais de commande non observée ; tablette simulée et captures rejouées. |
 | Bibliothèques vidéo jeunes (`shiguredo_mp4`, `webm`, `ropus`). | Isolées dans `ardoise-media` ; solutions de repli listées dans media-stack.md. |
 
 ## 7. Qualité et tests

@@ -189,7 +189,7 @@ L'utilisateur trouve que la barre latérale droite pourrait être modernisée, �
 
 SPEC §4.2, §4.4, §4.5 et §5 sont mis à jour ; les jalons M16 et M17 sont ajoutés à ROADMAP.md.
 
-## Q14 — Une seconde tablette : la Xiaomi Mijia « petit tableau noir, version mémoire » (2026-11-12) — **ouverte**
+## Q14 — Une seconde tablette : la Xiaomi Mijia « petit tableau noir, version mémoire » (2026-11-12) — **tranchée**
 
 L'utilisateur possède aussi une tablette Xiaomi 13,5 pouces Bluetooth (米家液晶小黑板 存储版, modèle Mi Home `jiqid.sxb.v1`) et voudrait qu'Ardoise récupère ses pages et fasse du direct avec elle. SPEC.md ne prévoit que la Bamboo Slate, et le protocole de cette tablette n'est documenté nulle part.
 
@@ -201,7 +201,7 @@ L'utilisateur possède aussi une tablette Xiaomi 13,5 pouces Bluetooth (米家�
 - Les pages enregistrées se téléchargent une par une, de la plus ancienne à la plus récente, puis s'effacent une par une ; une page a le même format que le direct. Vu dans une capture de Mi Home ; pas encore rejoué depuis le PC.
 - Les neuf pages que la tablette contenait ont été importées par Mi Home pendant la capture (qui les a effacées de la tablette, comme il le fait toujours) ; leurs données brutes sont gardées dans `testdata/private/xiaomi/pages/`.
 
-**Proposition, à accepter par l'utilisateur avant de toucher à SPEC.md** (un jalon M18 dans ROADMAP.md) :
+**Proposition, acceptée par l'utilisateur le 2026-11-12** (« Oui, ajoute-la ») ; SPEC §1, §2, §3.2, §4.1, §4.2, §4.8, §4.11 et §6 sont mis à jour et le jalon M18 est ajouté à ROADMAP.md :
 - *Ajouter la tablette* : « Ajouter une tablette » trouve aussi la Xiaomi quand elle est allumée et que Mi Home est fermé. Pas d'appui long ni d'enregistrement. Ardoise retient les deux tablettes et se connecte à celle qui est allumée.
 - *Récupérer les pages* : comme pour la Bamboo, à la connexion ou à la demande ; chaque page devient une note datée du moment où elle a été enregistrée sur la tablette ; même option « effacer de la tablette après import réussi ».
 - *Mode direct* : comme pour la Bamboo (outil, couleur, texture, pression, autre écran, partage, retouches).
@@ -209,5 +209,7 @@ L'utilisateur possède aussi une tablette Xiaomi 13,5 pouces Bluetooth (米家�
 - *Les neuf pages déjà récupérées* deviennent des notes de la bibliothèque, par un import fait une fois.
 - *Limites à écrire dans le guide* : la tablette ne parle qu'à une application à la fois (fermer Mi Home, ou couper le Bluetooth du téléphone) ; les pages vont à l'application qui les importe la première ; la tablette ne donne pas l'heure de chaque point, donc la relecture et la vidéo d'une page rejouent les traits à vitesse régulière ; la page fait environ 20 × 27 cm, en hauteur.
 - *Tests* : une tablette Xiaomi simulée dans `ardoise-sim` et les captures rejouées, comme pour la Bamboo ; essais réels dans `docs/hardware-tests.md`.
+
+**Précision ajoutée en écrivant le SPEC, à confirmer par l'utilisateur** : la tablette ne donne que sa page la plus ancienne, donc lire la suivante oblige à effacer la première. Ardoise efface chaque page après l'écriture vérifiée de sa note, comme Mi Home ; si l'option « effacer de la tablette après import réussi » est désactivée, les pages de cette tablette ne sont importées qu'à la demande, après l'avoir dit.
 
 **Reste à mesurer avant ou pendant M18** : le téléchargement et l'effacement d'une page d'essai depuis le PC ; ce qu'envoie le bouton d'effacement de l'écran (pour savoir si le direct doit passer à une nouvelle page) ; l'unité exacte des coordonnées, à la règle.

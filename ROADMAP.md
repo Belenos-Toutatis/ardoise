@@ -392,6 +392,31 @@ H2, H3, H6 et H7 faits par l'utilisateur (signalé le 2026-11-12). Retour reçu 
 
 ---
 
+## M18 — Une seconde tablette : la Xiaomi Mijia « petit tableau noir », version mémoire
+
+Ajouté le 2026-11-12 à la demande de l'utilisateur, après une étude de faisabilité (SPEC §1, §2, §4.1, §4.2, `docs/questions.md` Q14). Protocole : `docs/research/xiaomi-blackboard.md`. La tablette est sur le poste de développement.
+
+- [ ] Protocole de la Xiaomi dans `ardoise-proto` (trames, points du direct, pages) et ses échanges dans `ardoise-device` (connexion sans enregistrement, informations, mise à l'heure, téléchargement puis effacement des pages, mode direct, reconnexion), d'après la note de recherche et nos captures seulement ; jamais une commande non observée.
+- [ ] Transport Bluetooth : la Xiaomi reconnue à son annonce, ses canaux, sans rien écrire sur le service Xiaomi (`fe95`).
+- [ ] Tablette Xiaomi simulée dans `ardoise-sim`.
+- [ ] Application : ajouter la Xiaomi sans enregistrement ; deux tablettes retenues, connexion à celle qui est allumée ; synchronisation en notes datées ; mode direct ; informations (batterie, mémoire, pages) ; oublier la tablette ; textes FR et EN.
+- [ ] Import, fait une fois, des neuf pages récupérées pendant l'étude (données privées, hors de git).
+- [ ] Guides FR et EN (ajouter la tablette, limites), `CHANGELOG.md`, procédure H8 dans `docs/hardware-tests.md`.
+- [ ] Relecture indépendante, remarques corrigées.
+
+**Critères de fin** :
+- `CHECK OK` et `E2E OK` ;
+- des tests du protocole : chaque trame observée se décode et se réencode à l'identique ; une page se décode en traits ; ce qui est inconnu est ignoré sans erreur ;
+- des tests contre la tablette simulée : une synchronisation n'efface une page qu'après l'écriture vérifiée de la note ; une session de direct rend les traits « écrits » ; une coupure pendant le direct se rattrape ;
+- les pages privées récupérées pendant l'étude, quand elles sont là, se décodent en entier ;
+- un parcours de bout en bout avec la Xiaomi simulée : l'ajouter, récupérer ses pages, faire du direct.
+
+### Point de contrôle H8 [matériel]
+
+- [ ] [matériel] Avec la vraie Xiaomi : l'ajouter, lire ses informations, récupérer puis effacer une page d'essai, trente secondes de direct ; dire ce que fait le bouton d'effacement de l'écran pendant le direct.
+
+---
+
 ## Lancer une étape avec `/goal`
 
 Exemple pour M1 (remplacer `M1` par l'étape voulue) :
