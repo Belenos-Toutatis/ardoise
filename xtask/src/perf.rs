@@ -1,9 +1,10 @@
-//! `cargo xtask perf [--write] [--only start,library,live,touchup,pen,export,size]`: measures the targets of
-//! SPEC §8 on the production executable (`target/release/ardoise.exe`, built by `cargo xtask
-//! check`), prints a table (target, measured value, verdict) and, with `--write`, puts it in
-//! `docs/performance.md`.
+//! `cargo xtask perf [--write] [--only start,library,live,touchup,pen,paper,projection,export,size]`:
+//! measures the targets of SPEC §8 on the production executable (`target/release/ardoise.exe`,
+//! built by `cargo xtask check`), prints a table (target, measured value, verdict) and, with
+//! `--write`, puts it in `docs/performance.md`.
 //!
-//! - start, library of 1,000 notes, live mode, live mode touched up (M12), live mode with the computer's pen (M14):
+//! - start, library of 1,000 notes, live mode, live mode touched up (M12), live mode with the computer's pen (M14),
+//!   live mode on a page of a PDF and the editor's projection (M17, docs/design/paper-projection-narration.md §8):
 //!   `app/e2e/perf.mjs` drives a portable copy of the
 //!   executable through WebView2's DevTools protocol and returns raw measures (times, frame
 //!   intervals); the statistics and the verdicts are computed here, where they are unit-tested.
@@ -38,13 +39,35 @@ const LIVE_DROPPED_MAX_PERCENT: f64 = 1.0;
 /// SPEC §4.2's figure for the tablet's ink, held for the computer's pen too (docs/design/tablet-live-classroom.md, M14,
 /// "Latency targets"): a median under 30 ms from the pen's sample to the presentation's frame.
 const COMPUTER_PEN_LATENCY_MS: f64 = 30.0;
+/// The editor's stroke to the projector (M17, docs/design/paper-projection-narration.md §2.8): the same target as the
+/// computer's pen in live mode, a median under 30 ms; 50 ms accepted (M14 measured 40 ms on the same kind of path).
+const EDITOR_PROJECTION_LATENCY_MS: f64 = 30.0;
+const EDITOR_PROJECTION_ACCEPTED_MS: f64 = 50.0;
 /// SPEC §8: MP4 1080p of a 2-minute replay in under 2 minutes.
 const EXPORT_SECONDS: f64 = 120.0;
 /// SPEC §8: executable under 30 MB (the same bound as `cargo xtask selftest`).
 const MAX_EXE_BYTES: u64 = 30 * 1024 * 1024;
 
-const PARTS: [&str; 7] = [
-    "start", "library", "live", "touchup", "pen", "export", "size",
+const PARTS: [&str; 9] = [
+    "start",
+    "library",
+    "live",
+    "touchup",
+    "pen",
+    "paper",
+    "projection",
+    "export",
+    "size",
+];
+/// The parts `perf.mjs` measures (the others are the export benchmark and the file's size).
+const HARNESS_PARTS: [&str; 7] = [
+    "start",
+    "library",
+    "live",
+    "touchup",
+    "pen",
+    "paper",
+    "projection",
 ];
 const START_MARK: &str = "<!-- perf:start -->";
 const END_MARK: &str = "<!-- perf:end -->";
@@ -202,6 +225,51 @@ impl LivePen {
     }
 }
 
+/// Live mode on a page of a PDF with the Seyès template, the presentation window open (M17, part `paper`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LivePaper {
+    /// The frames of the control window and of the presentation window during the measure.
+    pub control: Option<FrameStats>,
+    pub presentation: Option<FrameStats>,
+    /// Strokes on the control window's preview before and after the measure.
+    pub strokes: (i64, i64),
+    /// Both windows drew the PDF under the page from the start to the end of the measure.
+    pub image_shown: bool,
+}
+
+impl LivePaper {
+    /// The tablet wrote on the page of the PDF during the measure; otherwise the measure says nothing.
+    fn valid(&self) -> bool {
+        self.image_shown && self.strokes.1 > self.strokes.0
+    }
+}
+
+/// The editor's page projected while its pen writes, then while it replays (M17, part `projection`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorProjection {
+    /// The projector's frames while the pen writes in the editor.
+    pub projector: Option<FrameStats>,
+    /// Strokes the script wrote in the editor during the measure.
+    pub pen_strokes: u64,
+    /// Strokes the projector drew before and after the measure.
+    pub drawn: (i64, i64),
+    /// Latency of the editor's points to the projector (`__ardoiseLatency.computer`), ms, one per point.
+    pub latency: Vec<f64>,
+    /// The projector's frames during the replay of the note, and its strokes.
+    pub replay: Option<FrameStats>,
+    pub replay_strokes: u64,
+    /// The projector showed fewer strokes than the note's during the replay (it followed it).
+    pub replay_followed: bool,
+}
+
+impl EditorProjection {
+    /// The pen's strokes reached the projector during the measure; otherwise the measure says nothing.
+    fn pen_wrote(&self) -> bool {
+        let pen = i64::try_from(self.pen_strokes).unwrap_or(i64::MAX);
+        self.pen_strokes > 0 && self.drawn.1 - self.drawn.0 >= pen && !self.latency.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Export {
     pub frames: u64,
@@ -218,6 +286,8 @@ pub struct Measures {
     pub live: Option<Live>,
     pub touch_up: Option<TouchUp>,
     pub live_pen: Option<LivePen>,
+    pub live_paper: Option<LivePaper>,
+    pub projection: Option<EditorProjection>,
     pub export: Option<Export>,
     pub exe_bytes: Option<u64>,
 }
@@ -310,6 +380,34 @@ pub fn parse_harness(json: &str, into: &mut Measures) -> Result<(), String> {
                 .into_iter()
                 .filter(|ms| ms.is_finite())
                 .collect(),
+        });
+    }
+    if let Some(paper) = value.get("livePaper") {
+        into.live_paper = Some(LivePaper {
+            control: FrameStats::of(&numbers(&paper["controlIntervals"])),
+            presentation: FrameStats::of(&numbers(&paper["presentationIntervals"])),
+            strokes: (
+                paper["strokesBefore"].as_i64().unwrap_or(-1),
+                paper["strokesAfter"].as_i64().unwrap_or(-1),
+            ),
+            image_shown: paper["imageShown"].as_bool().unwrap_or(false),
+        });
+    }
+    if let Some(projection) = value.get("editorProjection") {
+        into.projection = Some(EditorProjection {
+            projector: FrameStats::of(&numbers(&projection["projectorIntervals"])),
+            pen_strokes: projection["penStrokes"].as_u64().unwrap_or(0),
+            drawn: (
+                projection["drawnBefore"].as_i64().unwrap_or(-1),
+                projection["drawnAfter"].as_i64().unwrap_or(-1),
+            ),
+            latency: numbers(&projection["computerLatency"])
+                .into_iter()
+                .filter(|ms| ms.is_finite())
+                .collect(),
+            replay: FrameStats::of(&numbers(&projection["replayIntervals"])),
+            replay_strokes: projection["replayStrokes"].as_u64().unwrap_or(0),
+            replay_followed: projection["replayFollowed"].as_bool().unwrap_or(false),
         });
     }
     Ok(())
@@ -656,6 +754,12 @@ fn build_rows(m: &Measures, lang: Lang) -> Vec<Row> {
     if let Some(pen) = &m.live_pen {
         rows.extend(live_pen_rows(pen, lang));
     }
+    if let Some(paper) = &m.live_paper {
+        rows.extend(live_paper_rows(paper, lang));
+    }
+    if let Some(projection) = &m.projection {
+        rows.extend(projection_rows(projection, lang));
+    }
     if let Some(export) = &m.export {
         rows.push(Row {
             target: t(
@@ -770,6 +874,154 @@ fn live_pen_rows(pen: &LivePen, lang: Lang) -> Vec<Row> {
         ),
         measured,
         verdict,
+    });
+    rows
+}
+
+/// Live mode on a page of a PDF: one row of frames per window, judged like live mode. Unless the tablet wrote on the page
+/// of the PDF during the measure, both rows say so and are missed.
+fn live_paper_rows(paper: &LivePaper, lang: Lang) -> Vec<Row> {
+    let fr = lang == Lang::Fr;
+    let t = |en: &str, fr_text: &str| (if fr { fr_text } else { en }).to_owned();
+    let mut rows = Vec::new();
+    for (stats, window_en, window_fr) in [
+        (&paper.control, "control window", "fenêtre de commande"),
+        (&paper.presentation, "projector", "vidéoprojecteur"),
+    ] {
+        let (measured, verdict) = match stats {
+            Some(stats) if paper.valid() => (
+                frames_text(stats, lang),
+                judge(
+                    stats.mean_fps >= LIVE_MIN_FPS
+                        && stats.percent(stats.dropped) <= LIVE_DROPPED_MAX_PERCENT,
+                ),
+            ),
+            Some(_) => (
+                t(
+                    "invalid: no stroke arrived or the PDF was not drawn during the measure",
+                    "invalide : aucun trait reçu ou le PDF n'était pas dessiné pendant la mesure",
+                ),
+                Verdict::Missed,
+            ),
+            None => (
+                t("no frame measured", "aucune image mesurée"),
+                Verdict::Missed,
+            ),
+        };
+        rows.push(Row {
+            target: t(
+                &format!(
+                    "Live mode on a page of a PDF, {window_en} (>= 60 fps, <= 1 % late frames)"
+                ),
+                &format!(
+                    "Mode direct sur une page de PDF, {window_fr} (>= 60 images/s, <= 1 % d'images en retard)"
+                ),
+            ),
+            measured,
+            verdict,
+        });
+    }
+    rows
+}
+
+/// The editor's projection: the latency of its stroke to the projector (a median under 30 ms; up to 50 ms accepted, the
+/// row says so), the projector's frame rate while the pen writes, and, not judged, the projector's frames during the
+/// replay of the note (R2). Unless the pen's strokes reached the projector, the first two rows say so and are missed.
+fn projection_rows(projection: &EditorProjection, lang: Lang) -> Vec<Row> {
+    let fr = lang == Lang::Fr;
+    let t = |en: &str, fr_text: &str| (if fr { fr_text } else { en }).to_owned();
+    let invalid = || {
+        t(
+            "invalid: the editor's strokes did not reach the projector during the measure",
+            "invalide : les traits de l'éditeur n'ont pas atteint le vidéoprojecteur pendant la mesure",
+        )
+    };
+    let mut rows = Vec::new();
+    let (measured, verdict) = if projection.latency.is_empty() {
+        (
+            t(
+                "no point of the editor reached the projector",
+                "aucun point de l'éditeur n'a atteint le vidéoprojecteur",
+            ),
+            Verdict::Missed,
+        )
+    } else if !projection.pen_wrote() {
+        (invalid(), Verdict::Missed)
+    } else {
+        let mut sorted = projection.latency.clone();
+        sorted.sort_by(f64::total_cmp);
+        let middle = percentile(&sorted, 0.5);
+        let mut text = format!(
+            "{} ms (p95 {} ms, {} points)",
+            num(middle, 1, lang),
+            num(percentile(&sorted, 0.95), 1, lang),
+            sorted.len()
+        );
+        if (EDITOR_PROJECTION_LATENCY_MS..EDITOR_PROJECTION_ACCEPTED_MS).contains(&middle) {
+            text.push_str(&t(
+                "; accepted, over the 30 ms target",
+                "; accepté, au-dessus de l'objectif de 30 ms",
+            ));
+        }
+        (text, judge(middle < EDITOR_PROJECTION_ACCEPTED_MS))
+    };
+    rows.push(Row {
+        target: t(
+            "Editor projection: latency of the stroke (median < 30 ms, 50 ms accepted)",
+            "Projection de l'éditeur : latence du trait (médiane < 30 ms, 50 ms acceptés)",
+        ),
+        measured,
+        verdict,
+    });
+    let (measured, verdict) = match &projection.projector {
+        Some(stats) if projection.pen_wrote() => (
+            format!(
+                "{}; {} {}",
+                frames_text(stats, lang),
+                projection.pen_strokes,
+                t("strokes in the editor", "traits dans l'éditeur")
+            ),
+            judge(stats.mean_fps >= LIVE_MIN_FPS),
+        ),
+        Some(_) => (invalid(), Verdict::Missed),
+        None => (
+            t("no frame measured", "aucune image mesurée"),
+            Verdict::Missed,
+        ),
+    };
+    rows.push(Row {
+        target: t(
+            "Editor projection: frames per second on the projector (>= 60 fps)",
+            "Projection de l'éditeur : images par seconde au vidéoprojecteur (>= 60 images/s)",
+        ),
+        measured,
+        verdict,
+    });
+    let measured = match &projection.replay {
+        Some(stats) if projection.replay_followed => frames_text(stats, lang),
+        Some(stats) => format!(
+            "{}; {}",
+            frames_text(stats, lang),
+            t(
+                "the projector did not follow the replay",
+                "le vidéoprojecteur n'a pas suivi la relecture"
+            )
+        ),
+        None => t("no frame measured", "aucune image mesurée"),
+    };
+    rows.push(Row {
+        target: t(
+            &format!(
+                "Editor projection: replay of a note of {} strokes, projector (late frames, R2)",
+                projection.replay_strokes
+            ),
+            &format!(
+                "Projection de l'éditeur : relecture d'une note de {} traits, vidéoprojecteur (images en retard, R2)",
+                projection.replay_strokes
+            ),
+        ),
+        measured,
+        verdict: Verdict::Info,
     });
     rows
 }
@@ -975,7 +1227,7 @@ pub fn command(args: &[&str], root: &Path) -> ExitCode {
         measures.exe_bytes = fs::metadata(&exe).ok().map(|m| m.len());
     }
 
-    let harness: Vec<&str> = ["start", "library", "live", "touchup", "pen"]
+    let harness: Vec<&str> = HARNESS_PARTS
         .into_iter()
         .filter(|p| wanted(&only, p))
         .collect();
@@ -1176,6 +1428,8 @@ mod tests {
                 edit_cost: None,
             }),
             live_pen: None,
+            live_paper: None,
+            projection: None,
             export: Some(Export {
                 frames: 3600,
                 seconds: 47.3,
@@ -1400,6 +1654,246 @@ mod tests {
         parse_harness(r#"{"live":{"intervals":[16]}}"#, &mut m).unwrap();
         assert!(m.live_pen.is_none());
         assert!(PARTS.contains(&"pen"));
+    }
+
+    fn paper() -> LivePaper {
+        LivePaper {
+            control: Some(steady(16.7, 480)),
+            presentation: Some(steady(16.7, 480)),
+            strokes: (40, 300),
+            image_shown: true,
+        }
+    }
+
+    fn paper_rows(paper: LivePaper, lang: Lang) -> Vec<Row> {
+        let m = Measures {
+            live_paper: Some(paper),
+            ..Measures::default()
+        };
+        rows(&m, lang)
+    }
+
+    #[test]
+    fn live_mode_on_a_page_of_a_pdf_is_judged_per_window_like_live_mode() {
+        use Verdict::*;
+        let table = paper_rows(paper(), Lang::En);
+        assert_eq!(table.len(), 2);
+        assert!(
+            table[0]
+                .target
+                .starts_with("Live mode on a page of a PDF, control window")
+        );
+        assert!(
+            table[1]
+                .target
+                .starts_with("Live mode on a page of a PDF, projector")
+        );
+        assert_eq!(
+            table.iter().map(|r| r.verdict).collect::<Vec<_>>(),
+            [Ok, Ok]
+        );
+
+        // The projector drops frames: its row only.
+        let mut jerky = paper();
+        let mut intervals = vec![16.7; 95];
+        intervals.extend([40.0; 5]);
+        jerky.presentation = FrameStats::of(&intervals);
+        let verdicts: Vec<Verdict> = paper_rows(jerky, Lang::En)
+            .iter()
+            .map(|r| r.verdict)
+            .collect();
+        assert_eq!(verdicts, [Ok, Missed]);
+
+        // The tablet wrote nothing, or the PDF was not under the page: the measure says nothing.
+        for broken in [
+            LivePaper {
+                strokes: (40, 40),
+                ..paper()
+            },
+            LivePaper {
+                image_shown: false,
+                ..paper()
+            },
+        ] {
+            let rows = paper_rows(broken, Lang::En);
+            assert!(rows.iter().all(|r| r.verdict == Missed));
+            assert!(rows[0].measured.starts_with("invalid"));
+        }
+        let rows = paper_rows(
+            LivePaper {
+                control: None,
+                ..paper()
+            },
+            Lang::En,
+        );
+        assert!(rows[0].measured.starts_with("no frame"));
+
+        let french = paper_rows(paper(), Lang::Fr);
+        assert_eq!(
+            french[1].target,
+            "Mode direct sur une page de PDF, vidéoprojecteur (>= 60 images/s, <= 1 % d'images en retard)"
+        );
+        assert!(french[0].measured.starts_with("59,9 fps, p95 16,7 ms"));
+    }
+
+    fn projection() -> EditorProjection {
+        EditorProjection {
+            projector: Some(steady(16.7, 480)),
+            pen_strokes: 4,
+            drawn: (1001, 1005),
+            latency: vec![12.0, 14.0, 18.0, 16.0, 40.0],
+            replay: Some(steady(16.7, 480)),
+            replay_strokes: 1005,
+            replay_followed: true,
+        }
+    }
+
+    fn projection_rows_of(projection: EditorProjection, lang: Lang) -> Vec<Row> {
+        let m = Measures {
+            projection: Some(projection),
+            ..Measures::default()
+        };
+        rows(&m, lang)
+    }
+
+    #[test]
+    fn the_editor_s_projection_is_judged_by_its_latency_and_its_frame_rate_and_the_replay_is_told()
+    {
+        use Verdict::*;
+        let table = projection_rows_of(projection(), Lang::En);
+        assert_eq!(table.len(), 3);
+        assert!(
+            table[0]
+                .target
+                .starts_with("Editor projection: latency of the stroke")
+        );
+        assert!(
+            table[1]
+                .target
+                .starts_with("Editor projection: frames per second")
+        );
+        assert_eq!(
+            table[2].target,
+            "Editor projection: replay of a note of 1005 strokes, projector (late frames, R2)"
+        );
+        assert_eq!(
+            table.iter().map(|r| r.verdict).collect::<Vec<_>>(),
+            [Ok, Ok, Info]
+        );
+        assert_eq!(table[0].measured, "16.0 ms (p95 35.6 ms, 5 points)");
+        assert!(table[1].measured.ends_with("; 4 strokes in the editor"));
+
+        // Between 30 and 50 ms: accepted, and said so; from 50 ms: missed.
+        let mut accepted = projection();
+        accepted.latency = vec![35.0, 38.0, 41.0];
+        let rows = projection_rows_of(accepted, Lang::En);
+        assert_eq!(rows[0].verdict, Ok);
+        assert!(
+            rows[0]
+                .measured
+                .ends_with("; accepted, over the 30 ms target")
+        );
+        let mut slow = projection();
+        slow.latency = vec![45.0, 52.0, 60.0];
+        assert_eq!(projection_rows_of(slow, Lang::En)[0].verdict, Missed);
+
+        // The frame rate only is judged (late frames are told): 2 % late, still 58 frames a second.
+        let mut jerky = projection();
+        let mut intervals = vec![16.7; 98];
+        intervals.extend([40.0; 2]);
+        jerky.projector = FrameStats::of(&intervals);
+        assert_eq!(projection_rows_of(jerky, Lang::En)[1].verdict, Ok);
+        let mut slow_frames = projection();
+        slow_frames.projector = Some(steady(25.0, 320));
+        assert_eq!(projection_rows_of(slow_frames, Lang::En)[1].verdict, Missed);
+
+        // The pen's strokes did not reach the projector: the two judged rows say so; the replay stays told.
+        let mut unseen = projection();
+        unseen.drawn = (1001, 1002);
+        let rows = projection_rows_of(unseen, Lang::En);
+        assert_eq!(
+            rows.iter().map(|r| r.verdict).collect::<Vec<_>>(),
+            [Missed, Missed, Info]
+        );
+        assert!(rows[0].measured.starts_with("invalid"));
+        let mut silent = projection();
+        silent.latency.clear();
+        assert!(
+            projection_rows_of(silent, Lang::En)[0]
+                .measured
+                .starts_with("no point")
+        );
+        let mut lost = projection();
+        lost.replay_followed = false;
+        assert!(
+            projection_rows_of(lost.clone(), Lang::En)[2]
+                .measured
+                .ends_with("the projector did not follow the replay")
+        );
+        lost.replay = None;
+        assert!(
+            projection_rows_of(lost, Lang::En)[2]
+                .measured
+                .starts_with("no frame")
+        );
+
+        let french = projection_rows_of(projection(), Lang::Fr);
+        assert_eq!(
+            french[0].target,
+            "Projection de l'éditeur : latence du trait (médiane < 30 ms, 50 ms acceptés)"
+        );
+        assert_eq!(french[0].measured, "16,0 ms (p95 35,6 ms, 5 points)");
+        assert!(french[1].measured.ends_with(" ; 4 traits dans l'éditeur"));
+        assert!(
+            french[2]
+                .target
+                .contains("relecture d'une note de 1005 traits")
+        );
+        let mut accepted = projection();
+        accepted.latency = vec![35.0];
+        assert!(
+            projection_rows_of(accepted, Lang::Fr)[0]
+                .measured
+                .ends_with(" ; accepté, au-dessus de l'objectif de 30 ms")
+        );
+    }
+
+    #[test]
+    fn the_harness_output_of_m17_is_read() {
+        let json = r#"{"livePaper":{"controlIntervals":[16,17,16],"presentationIntervals":[16,16],
+            "strokesBefore":40,"strokesAfter":90,"imageShown":true,"measuredMs":8000},
+            "editorProjection":{"projectorIntervals":[16,17],"penStrokes":3,"drawnBefore":1001,"drawnAfter":1004,
+            "computerLatency":[11.5,null,13],"replayIntervals":[16,16,40],"replayEditorIntervals":[16],
+            "replayStrokes":1004,"replayFollowed":true,"measuredMs":8000,"replayMeasuredMs":8000}}"#;
+        let mut m = Measures::default();
+        parse_harness(json, &mut m).unwrap();
+        let paper = m.live_paper.unwrap();
+        assert_eq!(paper.control.unwrap().frames, 3);
+        assert_eq!(paper.presentation.unwrap().frames, 2);
+        assert_eq!((paper.strokes, paper.image_shown), ((40, 90), true));
+        let projection = m.projection.unwrap();
+        assert_eq!(projection.projector.unwrap().frames, 2);
+        assert_eq!(
+            (projection.pen_strokes, projection.drawn),
+            (3, (1001, 1004))
+        );
+        assert_eq!(projection.latency, vec![11.5, 13.0]);
+        assert_eq!(projection.replay.unwrap().dropped, 1);
+        assert_eq!(
+            (projection.replay_strokes, projection.replay_followed),
+            (1004, true)
+        );
+        // Missing fields: nothing shown, nothing followed.
+        let mut m = Measures::default();
+        parse_harness(r#"{"livePaper":{},"editorProjection":{}}"#, &mut m).unwrap();
+        assert!(!m.live_paper.unwrap().image_shown);
+        assert!(!m.projection.unwrap().replay_followed);
+        // `--only paper,projection` names parts of the harness.
+        for part in ["paper", "projection"] {
+            assert!(PARTS.contains(&part));
+            assert!(HARNESS_PARTS.contains(&part));
+        }
+        assert!(HARNESS_PARTS.iter().all(|part| PARTS.contains(part)));
     }
 
     #[test]

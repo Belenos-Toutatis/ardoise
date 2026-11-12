@@ -4,8 +4,9 @@
    * docs/design/side-panel.md, §8). The screen to use, « Project » / « Stop projecting » and the list's refresh, and
    * what is projected now. The window owns the state and does the acts (`openPresentation`, `closePresentation`,
    * `listMonitors`): this block only shows them and calls back, so that the live control window and, from M17, the
-   * editor use the same block. The screen list is the first `select` of the live side panel (the layers zone has none,
-   * the narration's microphone picker shows only once its panel is open).
+   * editor use the same block (with a sentence of its own under the title, `help`). The screen list is the first
+   * `select` of the live side panel (the layers zone has none, the narration's microphone picker shows only once its
+   * panel is open).
    */
   import { t } from '../../lib/i18n.svelte';
   import type { MonitorInfo } from '../../lib/live';
@@ -20,6 +21,7 @@
     onproject,
     onstop,
     onrefresh,
+    help,
   }: {
     monitors: readonly MonitorInfo[];
     /** The screen chosen (`MonitorInfo.key`). */
@@ -35,6 +37,8 @@
     onproject: () => void;
     onstop: () => void;
     onrefresh: () => void;
+    /** A sentence under the title, what projecting does here (M17, the editor: `editor.projection.help`); none in live. */
+    help?: string;
   } = $props();
 
   /** `\\.\DISPLAY2` → "Screen 2"; other names as they are. */
@@ -47,6 +51,9 @@
 
 <section class="pane-block" data-section="projector" aria-labelledby="projector-title">
   <h3 class="pane-title" id="projector-title">{t('live.projection.projector')}</h3>
+  {#if help}
+    <p class="pane-help">{help}</p>
+  {/if}
   {#if loaded && monitors.length === 0}
     <p class="pane-help">{t('live.projection.none')}</p>
   {:else}

@@ -4,7 +4,7 @@
    * M16; docs/design/side-panel.md, §8): the zoom as − / value / + (O9: no slider), « whole page » and « page width »,
    * then what the window adds (`children`: live's blackboard and laser switches), then a hint. The window does the
    * acts (`zoomStep`, `showWholePage`, `showPageWidth`): this block only shows the zoom and calls back, so that the
-   * live control window and, from M17, the editor use the same block.
+   * live control window and, from M17, the editor use the same block (with its own title for « Largeur », `widthTitle`).
    */
   import type { Snippet } from 'svelte';
   import { currentLocale, t } from '../../lib/i18n.svelte';
@@ -18,6 +18,7 @@
     onwidth,
     children,
     hint,
+    widthTitle,
   }: {
     zoom: number;
     /** The smallest and the largest zoom: − and + are disabled at the ends. */
@@ -31,6 +32,8 @@
     children?: Snippet;
     /** A sentence under the block's controls. */
     hint?: string;
+    /** The title of « Largeur » (M17): live's names its key (W), the editor's has none (`editor.projection.widthTitle`). */
+    widthTitle?: string;
   } = $props();
 
   const decimal = $derived(new Intl.NumberFormat(currentLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
@@ -61,7 +64,7 @@
     <button type="button" class="button small-button" data-action="whole-page" onclick={onwhole}>
       {t('live.zoom.fit')}
     </button>
-    <button type="button" class="button small-button" data-action="page-width" title={t('live.zoom.fitWidthTitle')} onclick={onwidth}>
+    <button type="button" class="button small-button" data-action="page-width" title={widthTitle ?? t('live.zoom.fitWidthTitle')} onclick={onwidth}>
       {t('live.zoom.fitWidth')}
     </button>
   </div>

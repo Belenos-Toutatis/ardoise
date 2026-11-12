@@ -2,7 +2,7 @@
 // production executable, a portable copy of it in a temporary folder, driven through WebView2's DevTools protocol like
 // the end-to-end journeys (`run.mjs`).
 //
-// Usage: node app/e2e/perf.mjs <path to ardoise.exe> [--only start,library,live,touchup,pen] [--notes 1000]
+// Usage: node app/e2e/perf.mjs <path to ardoise.exe> [--only start,library,live,touchup,pen,paper,projection] [--notes 1000]
 //
 // Progress goes to stderr; the last line of stdout is `PERF-JSON {...}`: the raw measures (times in milliseconds, frame
 // intervals one by one). `xtask/src/perf.rs` computes the statistics, judges them against SPEC §8 and prints the table.
@@ -23,6 +23,12 @@
 //   script writes with the computer's pen through the DevTools protocol (a move every 8 ms, strokes of 1.5 s, 0.3 s
 //   apart, at the foot of the page): the frame intervals of both windows, the strokes of both pens, and the latency of
 //   the computer's points to the projector (`window.__ardoiseLatency.computer` of the presentation window).
+// - paper (M17): as live, with the presentation window open and the page on screen given the Seyès template and a page of
+//   a two-page PDF under it: the frame intervals of both windows while the simulated tablet streams.
+// - projection (M17): a note of 1 000 strokes open in the editor, projected (« Projeter » of its Projection tab): the
+//   projector's frame intervals while the script writes in the editor with the pen (as `pen`), the latency of the
+//   editor's points to the projector (`window.__ardoiseLatency.computer` of the projection window), then the projector's
+//   frame intervals during the replay of the note.
 import { execFileSync, spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,7 +38,7 @@ const argv = process.argv.slice(2);
 const exe = argv[0]?.startsWith('--') ? undefined : argv[0];
 const option = (name, fallback) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : fallback);
 if (!exe) {
-  console.error('usage: node app/e2e/perf.mjs <ardoise.exe> [--only start,library,live,touchup,pen] [--notes 1000]');
+  console.error('usage: node app/e2e/perf.mjs <ardoise.exe> [--only start,library,live,touchup,pen,paper,projection] [--notes 1000]');
   process.exit(2);
 }
 const only = option('--only', '').split(',').filter(Boolean);
@@ -63,6 +69,12 @@ const PEN_STROKE_MS = 1500;
 const PEN_GAP_MS = 300;
 /** Where its strokes go: the foot of the page, below the lines of the simulated pen (its last baseline is at 19 600). */
 const PEN_Y = 20_700;
+/** The PDF under the live page (M17, part `paper`). */
+const PAPER_PDF = 'fiche-perf.pdf';
+/** The note of the editor's projection (M17): its strokes, this far apart in time (a replay of some 12 s), and the time of the replay measured. */
+const REPLAY_STROKES = 1000;
+const REPLAY_STROKE_GAP_MS = 12;
+const REPLAY_MEASURE_MS = 8000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (...parts) => console.error(...parts);
@@ -110,7 +122,7 @@ async function startOnce({ appExe, local, args = [] }) {
     await sleep(50);
     try {
       const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-      target = list.find((t) => t.type === 'page' && !t.url.includes('view=presentation'));
+      target = list.find((t) => t.type === 'page' && !t.url.includes('view=presentation') && !t.url.includes('view=projection'));
     } catch {
       // Not listening yet.
     }
@@ -725,6 +737,214 @@ async function measureLivePen(local) {
   }
 }
 
+/**
+ * Live mode on a page of a PDF (M17, docs/design/paper-projection-narration.md §8, part `paper`). As `measureLive`, with
+ * the presentation window open, the page on screen given the Seyès template and the first page of a two-page PDF under
+ * it, through live mode's own commands (`live_page_paper`, `stage_background_image`, `live_page_image`: what the Page and
+ * Fond tabs call); once both windows draw the PDF, the frame intervals of both while the simulated tablet streams.
+ */
+async function measurePaper(local) {
+  const { attach } = await import('./journeys-m12-resume.mjs');
+  const { twoPagePdf } = await import('./journeys-m7-background.mjs');
+  const j = JSON.stringify;
+  const library = makeLibrary('paper-library', 0);
+  const appExe = portableCopy('paper', library);
+  const pdf = join(root, PAPER_PDF);
+  writeFileSync(pdf, twoPagePdf());
+  const app = await start({ appExe, local, args: ['--simulated-tablet'] });
+  const strokes = `Number(document.querySelector('canvas.live-canvas')?.dataset.strokes ?? -1)`;
+  const showsPdf = `(() => {
+    const d = document.querySelector('canvas.live-canvas')?.dataset;
+    return d?.image === ${j(PAPER_PDF)} && d.template === 'seyes' && d.paperReady === 'true';
+  })()`;
+  const invoke = (command, args) => app.evaluate(`window.__TAURI_INTERNALS__.invoke(${j(command)}, ${j(args)})`);
+  let presentation = null;
+  try {
+    await app.waitFor(`document.querySelectorAll('.note-card').length === 8`, 'the demo notes');
+    await registerAndSync(app, 11);
+    await app.click('.tablet-panel button[data-action="live"]');
+    await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
+    await app.waitFor(`${strokes} > 0`, 'strokes on the live canvas', 15_000);
+    await app.evaluate(`window.__TAURI_INTERNALS__.invoke('open_presentation', { monitor: null }).then(() => true)`);
+    presentation = await attach(app.port, (t) => t.url.includes('view=presentation'), 'the presentation window', 30_000);
+    await presentation.waitFor(`document.querySelector('canvas.live-canvas') !== null`, 'the presentation canvas', 20_000);
+
+    const pageIndex = await app.evaluate(`Number((document.querySelector('canvas.live-canvas')?.dataset.page ?? '1/1').split('/')[0]) - 1`);
+    await invoke('live_page_paper', { pageIndex, background: { paper: 'white', template: 'seyes', texture: false } });
+    const staged = await invoke('stage_background_image', { path: pdf, pdfPage: 1 });
+    // Contained on the tablet's landscape page, as « Ajuster » places it.
+    const page = { width: 29700, height: 21600 };
+    const scale = Math.min(page.width / staged.width, page.height / staged.height);
+    const rect = {
+      x: (page.width - staged.width * scale) / 2,
+      y: (page.height - staged.height * scale) / 2,
+      width: staged.width * scale,
+      height: staged.height * scale,
+    };
+    await invoke('live_page_image', { pageIndex, op: { kind: 'set', key: staged.key, image: { name: staged.name, pdfPage: 1, rect, quarterTurns: 0, opacity: 1 } } });
+    await app.waitFor(showsPdf, 'the PDF under the live page', 60_000);
+    await presentation.waitFor(showsPdf, 'the PDF under the projected page', 60_000);
+
+    await sleep(LIVE_WARMUP_MS);
+    const before = await app.evaluate(strokes);
+    const [controlIntervals, presentationIntervals] = await Promise.all([
+      app.evaluate(FRAMES(LIVE_MEASURE_MS)),
+      presentation.evaluate(FRAMES(LIVE_MEASURE_MS)),
+    ]);
+    const after = await app.evaluate(strokes);
+    // The tablet stayed on that page (the next one has no image): the frames were those of a page of a PDF.
+    const imageShown = (await app.evaluate(showsPdf)) === true && (await presentation.evaluate(showsPdf)) === true;
+    return { controlIntervals, presentationIntervals, strokesBefore: before, strokesAfter: after, imageShown, measuredMs: LIVE_MEASURE_MS };
+  } finally {
+    presentation?.close();
+    await app.close();
+  }
+}
+
+/**
+ * The editor's projection (M17, docs/design/paper-projection-narration.md §2.8 and §8, part `projection`). A note of
+ * `REPLAY_STROKES` strokes is put in the library and opened in the editor, the Projection tab's « Projeter » opens the
+ * projection window (the browser flags of `startOnce` keep the covered editor painting). While the projector's frame
+ * intervals are recorded, this script writes in the editor with the pen through the DevTools protocol as `measureLivePen`
+ * does (a move every `PEN_MOVE_MS`, strokes of `PEN_STROKE_MS`, `PEN_GAP_MS` apart, at the foot of the page): the latency
+ * of the editor's points to the projector is its `__ardoiseLatency.computer`, the samples of the measure only. Then the
+ * replay (R) of the note, projected: the projector's frame intervals while it plays (the late frames tell whether the
+ * replay's partial stroke must go as a stroke in progress, R2).
+ */
+async function measureProjection(local) {
+  const { attach, strokesBin, writeZip } = await import('./journeys-m12-resume.mjs');
+  const j = JSON.stringify;
+  const library = makeLibrary('projection-library', 0);
+  const page = { width: 29700, height: 21600 };
+  const ink = Array.from({ length: REPLAY_STROKES }, (_, i) => {
+    const x0 = 1200 + (i % 40) * 680;
+    const y0 = 1500 + Math.floor(i / 40) * 720;
+    const start = i * REPLAY_STROKE_GAP_MS;
+    return { points: Array.from({ length: 12 }, (_, k) => ({ x: x0 + k * 40, y: y0 + 150 * Math.sin(k / 2), p: 0.6, t: start + k * 4 })) };
+  });
+  const title = 'Note projetée perf';
+  const created = Date.UTC(2026, 10, 1, 9, 0, 0);
+  const noteJson = {
+    format: { version: 1, minor: 2, writer: 'Ardoise 0.1.0' },
+    background: { paper: 'white', template: 'blank', texture: false },
+    created,
+    id: '00000000-0000-4000-8000-000000000917',
+    layers: [{ name: 'Calque 1', visible: true }],
+    modified: created,
+    origin: { kind: 'ardoise' },
+    page,
+    tags: [],
+    timing: 'recorded',
+    title,
+  };
+  writeFileSync(
+    join(library, `${title}.ardoise`),
+    writeZip([
+      ['note.json', Buffer.from(j(noteJson, null, 2))],
+      ['strokes.bin', strokesBin(ink)],
+    ]),
+  );
+  const appExe = portableCopy('projection', library);
+  const app = await start({ appExe, local });
+  const editorStrokes = `document.querySelectorAll('.editor g.ink path[data-stroke]').length`;
+  const drawn = `Number(document.querySelector('canvas.live-canvas')?.dataset.drawn ?? -1)`;
+  const computerSamples = `window.__ardoiseLatency.computer.samples().length`;
+  const tab = (name) => `[data-side-panel] .side-rail [role="tab"][data-tab="${name}"]`;
+  let projection = null;
+  try {
+    await app.waitFor(`document.querySelectorAll('.note-card').length === 9`, 'the demo notes and the note of the measure');
+    await app.click(`.note-card[data-path*=${j(title)}] .card-open`);
+    await app.waitFor(`${editorStrokes} === ${REPLAY_STROKES}`, `the ${REPLAY_STROKES} strokes in the editor`, 30_000);
+    // The page is fitted once the editor has measured its stage.
+    await sleep(500);
+    await app.click(tab('projection'));
+    await app.waitFor(`document.querySelector('[data-tab-panel="projection"] button[data-action="project"]:not([disabled])') !== null`, 'the Project button');
+    await app.click('[data-tab-panel="projection"] button[data-action="project"]');
+    projection = await attach(app.port, (t) => t.url.includes('view=projection'), 'the projection window', 30_000);
+    await projection.waitFor(`${drawn} === ${REPLAY_STROKES}`, 'the note on the projector', 30_000);
+    await projection.waitFor(`typeof window.__ardoiseLatency?.computer?.samples === 'function'`, 'the latency of the editor’s points in the projection', 20_000);
+    await app.click(tab('layers'));
+    await app.click('.toolbar button[title="Stylo"]');
+
+    const geometry = await app.evaluate(`(() => {
+      const r = document.querySelector('.editor svg.canvas').getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    })()`);
+    const moves = Math.round(PEN_STROKE_MS / PEN_MOVE_MS);
+    /** Stroke `n`: a wave across a seventh of the canvas, one of four places along its foot. */
+    const strokeAt = (n) => {
+      const x0 = geometry.left + geometry.width * (0.15 + (n % 4) * 0.18);
+      const y0 = geometry.top + geometry.height * 0.82;
+      return Array.from({ length: moves + 1 }, (_, i) => ({
+        x: x0 + (geometry.width * 0.15 * i) / moves,
+        y: y0 + geometry.height * 0.02 * Math.sin((i / moves) * 4 * Math.PI),
+      }));
+    };
+    /** One stroke of the pen, its moves on a fixed beat (a slow DevTools call is caught up, not added). */
+    const write = async (points) => {
+      await app.pen('mouseMoved', points[0].x, points[0].y);
+      await app.pen('mousePressed', points[0].x, points[0].y, { buttons: 1 });
+      const t0 = Date.now();
+      for (let i = 1; i < points.length; i++) {
+        const wait = t0 + i * PEN_MOVE_MS - Date.now();
+        if (wait > 0) await sleep(wait);
+        await app.pen('mouseMoved', points[i].x, points[i].y, { buttons: 1, force: 0.6 });
+      }
+      const last = points[points.length - 1];
+      await app.pen('mouseReleased', last.x, last.y);
+    };
+
+    // A first stroke out of the measure: the first outlines and the first IPC calls are not what is measured.
+    await write(strokeAt(3));
+    await sleep(LIVE_WARMUP_MS);
+    const drawnBefore = await projection.evaluate(drawn);
+    const samplesBefore = await projection.evaluate(computerSamples);
+    let finished = false;
+    const frames = projection.evaluate(FRAMES(LIVE_MEASURE_MS)).then((intervals) => {
+      finished = true;
+      return intervals;
+    });
+    let penStrokes = 0;
+    // Whole strokes only: the last one ends after the frames, as in `measureLivePen`.
+    while (!finished) {
+      await write(strokeAt(penStrokes));
+      penStrokes += 1;
+      if (!finished) await sleep(PEN_GAP_MS);
+    }
+    const projectorIntervals = await frames;
+    await sleep(500);
+    const drawnAfter = await projection.evaluate(drawn);
+    const latency = await projection.evaluate(`window.__ardoiseLatency.computer.samples().slice(${samplesBefore})`);
+
+    // The replay of the whole note, projected.
+    const replayStrokes = await app.evaluate(editorStrokes);
+    await app.key('r');
+    await app.waitFor(`document.querySelector('button[data-action="replay-toggle"]')?.getAttribute('aria-pressed') === 'true'`, 'the replay');
+    const [replayIntervals, replayEditorIntervals] = await Promise.all([
+      projection.evaluate(FRAMES(REPLAY_MEASURE_MS)),
+      app.evaluate(FRAMES(REPLAY_MEASURE_MS)),
+    ]);
+    // The projector followed the replay: fewer strokes than the note's while it plays.
+    const replayDrawn = await projection.evaluate(drawn);
+    return {
+      projectorIntervals,
+      penStrokes,
+      drawnBefore,
+      drawnAfter,
+      computerLatency: latency ?? [],
+      replayIntervals,
+      replayEditorIntervals,
+      replayStrokes,
+      replayFollowed: replayDrawn >= 0 && replayDrawn < replayStrokes,
+      measuredMs: LIVE_MEASURE_MS,
+      replayMeasuredMs: REPLAY_MEASURE_MS,
+    };
+  } finally {
+    projection?.close();
+    await app.close();
+  }
+}
+
 const result = {};
 let failed = false;
 try {
@@ -764,6 +984,14 @@ try {
   if (wants('pen')) {
     log('live mode, the tablet and the computer’s pen together');
     result.livePen = await measureLivePen(local);
+  }
+  if (wants('paper')) {
+    log('live mode on a page of a PDF');
+    result.livePaper = await measurePaper(local);
+  }
+  if (wants('projection')) {
+    log('the editor’s projection: the pen, then the replay');
+    result.editorProjection = await measureProjection(local);
   }
 } catch (error) {
   failed = true;
