@@ -1187,7 +1187,34 @@ even with a `select` or a range input focused, and the focus given back after a 
 - Limits: 4096 points a call, 2^20 strokes, 100,000 points for the stroke in progress. A `strokeBegin` while a stroke is in
   progress cancels it first.
 
-**Package D (projection window and feed, interface).** D: (to be filled by the lead)
+**Package D (projection window and feed, interface).**
+- The feed (`projectionDiff`) sends the whole page when nothing was sent yet or when the note id, page size,
+  background, image placement, layers or image key change; otherwise the common prefix of strokes (by `===`) gives
+  `strokes {keep, tail}`. A tail of more than half the strokes goes as a page, but only when it holds more than one
+  stroke (so a single new stroke on a tiny note goes as a tail, not as a page and a cancel).
+- One call in flight; inputs only record state and schedule one pump. Order: page, ending the stroke Rust shows
+  (`ended` if the editor kept it, else `strokeCancel`), `strokeBegin`/`strokePoints`, strokes, view. A kept stroke waits
+  up to 1 s (`END_WAIT_MS`) for the document to bring it, then is cancelled.
+- A refusal sends the page next, cancels the held stroke and restarts the stroke being drawn from its first point. A
+  refused page is tried again after 250 ms, doubling up to 8 s, or at once when another note is shown. Refusals are
+  counted, never shown.
+- `EditorProjection` takes `show` and `visible` at any time and forwards them only while open. The projected area is
+  centred on the editor's visible centre, kept on the page, in the projector's aspect; « Largeur » uses the
+  `fitWidthView` zoom (at least 1). The view goes at most once a frame. `frame` (the dashed rectangle) is set only at a
+  zoom above 1.
+- The window (`EditorPresentation`) draws with `LiveCanvas mode="presentation" interactive={false}`; its paper is
+  rendered with the staged pixels when there are some, otherwise the paper alone. Esc, Ctrl+W, Ctrl+F4 and Ctrl+Q close
+  it; no other key does anything.
+- `ProjectorBlock` gets `help`, `ZoneBlock` gets `widthTitle`; live's use of both is unchanged.
+- The browser stand-in relays batches between tabs over a `BroadcastChannel` (not in the tests), so a tab at
+  `?view=projection` draws the editor's page; live's presentation opening closes the stand-in's projection (added by
+  the lead).
+- `cargo xtask perf` gains the parts `paper` (live mode with the presentation, Seyès and a PDF page set through the
+  commands) and `projection` (a 1,000-stroke note projected while the editor's pen writes; then the replay). The
+  latency row is met under 30 ms, accepted from 30 to 50 ms, missed from 50 ms; the projector's frame rate needs 57 fps;
+  the replay row is information only (R2 is decided from it).
+- Not done: a second `strokeCancel` refused by Rust can leave a stale stroke on the projector until the next stroke
+  begins (rare; closing clears it).
 
 **Package E (the editor's sound UI and the wiring).**
 - `noteZeroWallMs` is `Date.now()` at `P0` minus `T0`, not `performance.timeOrigin + P0 − T0` (`timeOrigin` drifts
