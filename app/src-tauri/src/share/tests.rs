@@ -3041,3 +3041,169 @@ fn over_the_network_the_computer_s_ink_arrives_as_it_is_drawn_and_no_hidden_stro
     runtime.stop();
     hub.stop().unwrap();
 }
+
+// --- Moving and resizing the selection during live mode -------------------------------------------
+
+/// A move and resize of the strokes at `indices` (`live_edit_strokes`' `transform`).
+fn transform_strokes(indices: &[u32], scale: f64, x: f64, y: f64) -> StrokesEdit {
+    serde_json::from_value(json!({
+        "kind": "transform", "indices": indices, "scale": scale, "x": x, "y": y,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_viewer_gets_a_move_as_strokes_that_leave_and_come_back_in_its_numbering() {
+    // What the session sends for a move of strokes 1 and 3 of [h a h b]: they leave and come back
+    // at the same places; [a b] for the viewers.
+    let event = |viewers: Option<ViewerIndices>| LiveEvent::StrokesEdited {
+        page_index: 0,
+        revision: 9,
+        removed: vec![1, 3],
+        inserted: Arc::new(vec![
+            PlacedStroke {
+                index: 1,
+                stroke: pen_stroke(1500.0, 2),
+            },
+            PlacedStroke {
+                index: 3,
+                stroke: pen_stroke(2500.0, 2),
+            },
+        ]),
+        recoloured: Vec::new(),
+        can_undo: true,
+        can_redo: false,
+        viewers: viewers.map(Box::new),
+    };
+    let sent = |event: LiveEvent| -> Value {
+        let batch = LiveBatch {
+            events: vec![event],
+            sent_at: 1.0,
+        };
+        let value: Value = serde_json::from_str(&batch_json(&batch).unwrap()).unwrap();
+        value["events"][0].clone()
+    };
+    let edit = sent(event(Some(ViewerIndices {
+        removed: vec![0, 1],
+        inserted: vec![Some(0), Some(1)],
+        recoloured: Vec::new(),
+    })));
+    assert_eq!(
+        keys(&edit),
+        ["inserted", "pageIndex", "recoloured", "removed", "type"]
+    );
+    assert_eq!(edit["removed"], json!([0, 1]));
+    let places: Vec<&Value> = edit["inserted"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|placed| &placed["index"])
+        .collect();
+    assert_eq!(places, [&json!(0), &json!(1)]);
+    assert_eq!(edit["inserted"][1]["stroke"]["points"][0]["x"], 2500.0);
+    assert_eq!(edit["recoloured"], json!([]));
+    // No hidden layer: the page's numbering.
+    let edit = sent(event(None));
+    assert_eq!(edit["removed"], json!([1, 3]));
+    assert_eq!(edit["inserted"][0]["index"], 1);
+}
+
+#[test]
+fn over_the_network_a_viewer_sees_the_selection_moved_and_resized_and_never_the_hidden_ink() {
+    let (_dir, library) = library();
+    // The ink hidden on the sheet is at x = 111 and 333: neither may ever be on the wire.
+    let hidden_x = [111.0, 333.0];
+    let at = |x: f32, layer: u32| Stroke {
+        layer,
+        ..pen_stroke(x, 2)
+    };
+    let mut note = note_with(vec![
+        at(hidden_x[0], 1),
+        at(1000.0, 0),
+        at(hidden_x[1], 1),
+        at(2000.0, 0),
+    ]);
+    note.layers.push(Layer {
+        name: "Réponses".into(),
+        visible: false,
+    });
+    note.page = A5;
+    let saved = library
+        .create(
+            std::path::Path::new(""),
+            &ardoise_core::format::NoteFile::new(note),
+        )
+        .unwrap();
+    let (runtime, hub) = sharing_runtime();
+    runtime.inner.show(ShareContent::Live);
+    let status = runtime
+        .start(Ipv4Addr::LOCALHOST, 0, hub.clone(), None)
+        .unwrap();
+    let options = StartOptions {
+        library: library.clone(),
+        french: true,
+        size: A5,
+        orientation: Orientation::Landscape,
+        button: Arc::new(|| LiveButton::NewPage),
+    };
+    let Start::New { mut sink, .. } = hub.resume(options, &saved.path).unwrap() else {
+        panic!("a session is already running");
+    };
+    sink.input(LiveInput::Started {
+        width: A5.width,
+        height: A5.height,
+        orientation: Orientation::Landscape,
+    });
+    let cookie = join(status.port, &status.code.unwrap());
+    let mut viewer = Viewer::open(status.port, &cookie);
+    let mut list = ViewerList::default();
+    let first = viewer.until("the first batch", Duration::from_secs(5), |m| {
+        m["type"] == "live" && m["reset"] == true
+    });
+    list.apply(&first);
+    assert_eq!(list.starts(), [1000.0, 2000.0]);
+
+    // For the page, strokes 1 and 3; for the viewer, its two strokes, which leave and come back
+    // moved, in the same places.
+    let revision = hub.snapshot().revision;
+    let revision = hub
+        .edit_strokes(0, revision, transform_strokes(&[3, 1], 1.0, 500.0, 0.0))
+        .unwrap();
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(edit["removed"], json!([0, 1]));
+    assert_eq!(edit["inserted"][1]["index"], 1);
+    assert_eq!(list.starts(), [1500.0, 2500.0]);
+    // Twice the size: the points spread from the page's corner, the width doubles.
+    hub.edit_strokes(0, revision, transform_strokes(&[3], 2.0, 0.0, 0.0))
+        .unwrap();
+    let edit = next_edit(&mut viewer, &mut list);
+    assert_eq!(edit["removed"], json!([1]));
+    let stroke = &edit["inserted"][0]["stroke"];
+    assert_eq!(edit["inserted"][0]["index"], 1);
+    assert_eq!(stroke["points"][1]["x"], 5200.0);
+    assert_eq!(stroke["width"], 120.0);
+    assert_eq!(list.starts(), [1500.0, 5000.0]);
+    // Undone, then done again.
+    assert!(hub.undo_edit(0).unwrap());
+    next_edit(&mut viewer, &mut list);
+    assert_eq!(list.starts(), [1500.0, 2500.0]);
+    assert!(hub.undo_edit(0).unwrap());
+    next_edit(&mut viewer, &mut list);
+    assert_eq!(list.starts(), [1000.0, 2000.0]);
+    assert!(hub.redo_edit(0).unwrap());
+    next_edit(&mut viewer, &mut list);
+    assert_eq!(list.starts(), [1500.0, 2500.0]);
+    // The hidden strokes stayed where they were, on the page.
+    let page = hub.snapshot().page;
+    assert_eq!(page.strokes[0].points[0].x, hidden_x[0]);
+    assert_eq!(page.strokes[2].points[0].x, hidden_x[1]);
+
+    for text in &viewer.texts {
+        for x in hidden_x {
+            assert!(!text.contains(&format!("\"x\":{x:.1}")), "{x} in {text}");
+        }
+        assert!(!text.contains("Réponses"), "{text}");
+    }
+    runtime.stop();
+    hub.stop().unwrap();
+}

@@ -23,7 +23,7 @@ use ardoise_render::encode_png;
 use serde_json::json;
 
 use super::super::edits::LiveEditError;
-use super::super::edits::tests::{delete, recolour};
+use super::super::edits::tests::{delete, recolour, transform};
 use super::super::hub::{
     HubConfig, HubSink, LiveError, LiveHub, NarrationApart, Start, StartOptions, file_fingerprint,
 };
@@ -2334,6 +2334,64 @@ fn a_change_of_colour_alone_is_a_change_of_the_sheet() {
 }
 
 #[test]
+fn a_move_of_the_old_ink_of_a_sheet_is_a_change_of_the_sheet_and_its_undo_gives_it_back() {
+    let (_dir, library) = library();
+    let path = filed(&library, "", &full_file(A5));
+    let before = library.read(&path).unwrap();
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    let revision = hub.snapshot().revision;
+    // The note's second stroke, bigger and further right: as for a change of colour, the moved
+    // old ink is written into the note itself.
+    let was = before.file.note.strokes[1].clone();
+    hub.edit_strokes(0, revision, transform(&[1], 1.5, 250.0, -125.0))
+        .unwrap();
+    let expected = (
+        f64::from(was.points[0].x) * 1.5 + 250.0,
+        f64::from(was.width) * 1.5,
+    );
+    let near = |a: f32, b: f64| (f64::from(a) - b).abs() < 0.01;
+    let moved_in_file = |loaded: &LoadedNote| {
+        let stroke = &loaded.file.note.strokes[1];
+        near(stroke.points[0].x, expected.0) && near(stroke.width, expected.1)
+    };
+    wait_until("the move in the file", || {
+        library
+            .read(&path)
+            .is_ok_and(|loaded| moved_in_file(&loaded))
+    });
+    let written = library.read(&path).unwrap();
+    assert_eq!(written.file.note.strokes[0], before.file.note.strokes[0]);
+    let stroke = &written.file.note.strokes[1];
+    assert_eq!(
+        (stroke.tool, stroke.color, stroke.layer, stroke.points.len()),
+        (was.tool, was.color, was.layer, was.points.len())
+    );
+    let times = |stroke: &Stroke| stroke.points.iter().map(|p| p.t).collect::<Vec<u32>>();
+    assert_eq!(times(stroke), times(&was));
+    assert_keeps_all_but_ink(&written.file, &before.file);
+    assert_ne!(
+        file_fingerprint(&written.file),
+        file_fingerprint(&before.file)
+    );
+    assert!(written.file.original_note.is_some(), "an original is kept");
+    assert_eq!(hub.snapshot().saved, [path_text(&path)]);
+
+    // Undone: the sheet as it was read, with nothing to go back to.
+    assert!(hub.undo_edit(0).unwrap());
+    wait_until("the ink back in the file", || {
+        library
+            .read(&path)
+            .is_ok_and(|loaded| loaded.file.note.strokes == before.file.note.strokes)
+    });
+    assert_eq!(hub.stop().unwrap(), [path_text(&path)]);
+    let written = library.read(&path).unwrap().file;
+    assert_keeps_all_but_ink(&written, &before.file);
+    assert_eq!(written.original_note, None);
+    assert_eq!(file_fingerprint(&written), file_fingerprint(&before.file));
+}
+
+#[test]
 fn a_sheet_whose_only_change_was_undone_before_a_write_is_not_written() {
     let (_dir, library) = library();
     let path = filed(&library, "", &full_file(A5));
@@ -2345,7 +2403,10 @@ fn a_sheet_whose_only_change_was_undone_before_a_write_is_not_written() {
         let first = delete(&[0]).checked().unwrap();
         let revision = session.edit_strokes(0, revision, first, out).unwrap();
         let second = recolour(&[0], RED).checked().unwrap();
-        session.edit_strokes(0, revision, second, out).unwrap();
+        let revision = session.edit_strokes(0, revision, second, out).unwrap();
+        let third = transform(&[0], 2.0, -30.0, 40.0).checked().unwrap();
+        session.edit_strokes(0, revision, third, out).unwrap();
+        assert!(session.undo_edit(0, None, out).unwrap());
         assert!(session.undo_edit(0, None, out).unwrap());
         assert!(session.undo_edit(0, None, out).unwrap());
     });
