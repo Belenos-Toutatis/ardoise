@@ -1,8 +1,12 @@
 //! The tablet in the interface (SPEC §4.1): the registered tablet (`_ardoise/device.json`,
 //! shared by every computer of the library), and the commands of the tablet service
 //! (`ardoise_device::service`): status, registration, sync, settings, the simulated tablet.
+//! The Xiaomi blackboard (`_ardoise/blackboard.json`) is added, synced, used in live mode and
+//! forgotten through the same service ([`tablet_find_blackboards`], [`tablet_add_blackboard`],
+//! [`tablet_forget_blackboard`]).
 //!
-//! Contract: docs/design/tablet-live-classroom.md (work package A).
+//! Contract: docs/design/tablet-live-classroom.md (work package A), docs/design/blackboard.md
+//! (the blackboard's commands and status fields).
 //!
 //! - [`TabletRuntime`] holds the service of the running app, the windows subscribed to its
 //!   status, and the simulated tablet of `--simulated-tablet`. The guided test of the real
@@ -27,8 +31,8 @@ use ardoise_device::service::{
 };
 use ardoise_device::session::{DeviceError, DownloadedPage, valid_name};
 use ardoise_device::transport::{Connector, TransportError};
-use ardoise_sim::SimTablet;
-use ardoise_sim::realtime::{APP_HOOK_DELAY, SimFactory, SimHooks, app_tablet};
+use ardoise_sim::realtime::{APP_HOOK_DELAY, SimFactory, SimHooks, app_board, app_tablet};
+use ardoise_sim::{SimBoard, SimDevice, SimTablet};
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager as _, State, Webview};
@@ -104,20 +108,26 @@ fn not_running() -> CommandError {
     CommandError::new("tablet", "the tablet service is not running")
 }
 
-/// The simulated tablet replacing Bluetooth (`--simulated-tablet`).
+/// The simulated tablets replacing Bluetooth (`--simulated-tablet`, `--simulated-blackboard`).
 pub struct Simulation {
-    pub tablet: SimTablet,
-    /// Holds the simulated registration: never the library (a throwaway folder).
+    /// The simulated Bamboo Slate, if any.
+    pub tablet: Option<SimTablet>,
+    /// The simulated Xiaomi blackboard, if any.
+    pub board: Option<SimBoard>,
+    /// Holds the simulated registration and the simulated blackboard's file: never the library
+    /// (a throwaway folder).
     pub identity_root: Option<PathBuf>,
     /// Delay of the simulated user's actions (holding and pressing the button).
     pub hook_delay: Duration,
 }
 
 impl Simulation {
-    /// The simulated tablet of `ardoise.exe --simulated-tablet`: a Bamboo Slate Large in real
-    /// time holding the three reference pages, the user acting after 1 s, the registration in
+    /// The simulated tablets of `ardoise.exe --simulated-tablet` (`slate`: a Bamboo Slate Large
+    /// in real time holding the three reference pages) and `--simulated-blackboard` (`board`: the
+    /// Xiaomi blackboard in real time holding the three reference pages, on the Slate's clock
+    /// when both are simulated), the user acting after 1 s, the registration in
     /// `%TEMP%\ardoise-simulation-*` (like `--diagnostic --simulated`).
-    pub fn app() -> Simulation {
+    pub fn app(slate: bool, board: bool) -> Simulation {
         let identity_root = match crate::diagnostic::simulation_library() {
             Ok(dir) => Some(dir),
             Err(error) => {
@@ -125,10 +135,33 @@ impl Simulation {
                 None
             }
         };
+        let tablet = slate.then(app_tablet);
+        let board = board.then(|| app_board(tablet.as_ref().map(SimTablet::clock)));
         Simulation {
-            tablet: app_tablet(),
+            tablet,
+            board,
             identity_root,
             hook_delay: APP_HOOK_DELAY,
+        }
+    }
+
+    /// The simulated devices in range.
+    fn devices(&self) -> Vec<SimDevice> {
+        let slate = self.tablet.clone().map(SimDevice::Slate);
+        let board = self.board.clone().map(SimDevice::Board);
+        slate.into_iter().chain(board).collect()
+    }
+
+    /// The person in front of them.
+    fn hooks(&self) -> SimHooks {
+        let hooks = match (&self.tablet, &self.board) {
+            (Some(tablet), _) => SimHooks::with_delay(tablet.clone(), self.hook_delay),
+            (None, Some(board)) => SimHooks::for_board(board.clone()),
+            (None, None) => SimHooks::with_delay(app_tablet(), self.hook_delay),
+        };
+        match (&self.tablet, &self.board) {
+            (Some(_), Some(board)) => hooks.with_board(board.clone()),
+            _ => hooks,
         }
     }
 }
@@ -233,6 +266,8 @@ pub struct TabletRuntime {
     subscribers: Subscribers,
     /// The simulated tablet, with `--simulated-tablet`.
     simulated: Mutex<Option<SimTablet>>,
+    /// The simulated blackboard, with `--simulated-blackboard`.
+    simulated_board: Mutex<Option<SimBoard>>,
     /// The simulated tablet's registration folder, which replaces the library's.
     identity_override: Mutex<Option<PathBuf>>,
     /// The status shown while the guided test holds the real tablet (the service is stopped
@@ -260,9 +295,9 @@ impl TabletRuntime {
         }
     }
 
-    /// Started with `--simulated-tablet`.
+    /// Started with `--simulated-tablet` or `--simulated-blackboard`.
     fn is_simulated(&self) -> bool {
-        lock(&self.simulated).is_some()
+        lock(&self.simulated).is_some() || lock(&self.simulated_board).is_some()
     }
 
     /// Starts the service for this PC's library and `[tablet]` settings: Bluetooth, or the
@@ -284,17 +319,15 @@ impl TabletRuntime {
             Option<PathBuf>,
         ) = match &simulation {
             Some(simulation) => (
-                Box::new(SimFactory::real_time(simulation.tablet.clone())),
-                Arc::new(SimHooks::with_delay(
-                    simulation.tablet.clone(),
-                    simulation.hook_delay,
-                )),
+                Box::new(SimFactory::of(simulation.devices(), true)),
+                Arc::new(simulation.hooks()),
                 simulation.identity_root.clone(),
             ),
             None => (Box::new(BleFactory), Arc::new(NoHooks), library.clone()),
         };
         let simulated = simulation.is_some();
-        *lock(&self.simulated) = simulation.as_ref().map(|s| s.tablet.clone());
+        *lock(&self.simulated) = simulation.as_ref().and_then(|s| s.tablet.clone());
+        *lock(&self.simulated_board) = simulation.as_ref().and_then(|s| s.board.clone());
         *lock(&self.identity_override) = simulation.and_then(|s| s.identity_root);
         let config = ServiceConfig {
             library,
@@ -318,7 +351,7 @@ impl TabletRuntime {
         let library = current_state(context).library().map(PathBuf::from);
         let identity_root = match lock(&self.identity_override).clone() {
             Some(root) => Some(root),
-            None if lock(&self.simulated).is_some() => None,
+            None if self.is_simulated() => None,
             None => library.clone(),
         };
         self.with_service(|service| service.set_library(library, identity_root))
@@ -372,6 +405,8 @@ impl TabletRuntime {
         service.shutdown();
         let mut status = service.status();
         status.connection = Connection::Unavailable;
+        status.active = None;
+        status.board_search = None;
         status.register_step = None;
         status.sync = None;
         status.pending = None;
@@ -427,10 +462,11 @@ impl Drop for TabletPause {
     }
 }
 
-/// Starts the tablet service for this PC's library (once, from `setup`). With `simulated`, the
-/// simulated tablet in real time replaces Bluetooth.
-pub fn start_service(app: &AppHandle, simulated: bool) {
-    let simulation = simulated.then(Simulation::app);
+/// Starts the tablet service for this PC's library (once, from `setup`). With `slate` or
+/// `board`, the simulated Slate, the simulated blackboard or both, in real time, replace
+/// Bluetooth.
+pub fn start_service(app: &AppHandle, slate: bool, board: bool) {
+    let simulation = (slate || board).then(|| Simulation::app(slate, board));
     let context = app.state::<AppContext>();
     app.state::<TabletRuntime>().start_in(&context, simulation);
 }
@@ -530,6 +566,49 @@ pub fn sim_press_button_in(runtime: &TabletRuntime) -> CommandResult<()> {
     }
 }
 
+/// Adds the blackboard heard at `address` by the search under way (`tablet_find_blackboards`):
+/// `blackboard.json` is written, then the service connects to it. Returns the status.
+pub fn tablet_add_blackboard_in(
+    runtime: &TabletRuntime,
+    address: &str,
+) -> CommandResult<TabletStatus> {
+    runtime
+        .with_service(|service| service.add_blackboard(address))?
+        .map_err(device_error)?;
+    runtime.with_service(TabletService::status)
+}
+
+/// Forgets the blackboard (`blackboard.json`) as [`forget_tablet_through`] forgets the Slate:
+/// through the service when it runs, else in the library; with the simulated tablets, only in
+/// their throwaway folder.
+pub fn forget_blackboard_through(
+    runtime: &TabletRuntime,
+    context: &AppContext,
+) -> CommandResult<()> {
+    match runtime.with_service(TabletService::forget_blackboard) {
+        Ok(result) => result.map_err(device_error),
+        Err(_) if runtime.is_simulated() => match lock(&runtime.identity_override).clone() {
+            Some(root) => identity::forget_blackboard(&root).map_err(identity_error),
+            None => Ok(()),
+        },
+        Err(_) => identity::forget_blackboard(library_of(context)?.root()).map_err(identity_error),
+    }
+}
+
+/// Presses the simulated blackboard's store button (`--simulated-blackboard` only).
+pub fn sim_blackboard_store_page_in(runtime: &TabletRuntime) -> CommandResult<()> {
+    match lock(&runtime.simulated_board).as_ref() {
+        Some(board) => {
+            board.press_store();
+            Ok(())
+        }
+        None => Err(CommandError::new(
+            "simulationOnly",
+            "no simulated blackboard",
+        )),
+    }
+}
+
 /// Forgets the registered tablet: through the service when it runs (it also closes the link;
 /// with the simulated tablet only its throwaway registration is forgotten), else in the
 /// library. With the simulated tablet the library's registration (the real tablet's) is never
@@ -613,6 +692,36 @@ pub async fn tablet_set_orientation(
 #[tauri::command]
 pub async fn sim_press_button(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
     sim_press_button_in(&runtime)
+}
+
+/// Starts the search for Xiaomi blackboards nearby (`connection: adding`, what is heard in
+/// `boardSearch`).
+#[tauri::command]
+pub async fn tablet_find_blackboards(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
+    runtime.with_service(TabletService::find_blackboards)
+}
+
+#[tauri::command]
+pub async fn tablet_add_blackboard(app: AppHandle, address: String) -> CommandResult<TabletStatus> {
+    blocking(app, move |app| {
+        tablet_add_blackboard_in(&app.state::<TabletRuntime>(), &address)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn tablet_forget_blackboard(app: AppHandle) -> CommandResult<()> {
+    blocking(app, |app| {
+        forget_blackboard_through(&app.state::<TabletRuntime>(), &app.state::<AppContext>())
+    })
+    .await
+}
+
+/// Presses the simulated blackboard's store button (`--simulated-blackboard` only, for the e2e
+/// journeys).
+#[tauri::command]
+pub async fn sim_blackboard_store_page(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
+    sim_blackboard_store_page_in(&runtime)
 }
 
 #[tauri::command]
@@ -740,6 +849,7 @@ mod tests {
             bytes: stored.bytes.clone(),
             timestamp: Some(stored.timestamp),
             announced_size: u32::try_from(stored.bytes.len()).unwrap(),
+            kind: ardoise_device::transport::TabletKind::Slate,
         }
     }
 
@@ -824,12 +934,13 @@ mod tests {
 
         let runtime = TabletRuntime::default();
         let simulation = Simulation {
-            tablet: app_tablet(),
+            tablet: Some(app_tablet()),
+            board: None,
             identity_root: Some(throwaway.path().to_owned()),
             // The app waits 1 s; a shorter wait keeps the test quick on the same path.
             hook_delay: Duration::from_millis(50),
         };
-        let tablet = simulation.tablet.clone();
+        let tablet = simulation.tablet.clone().unwrap();
         runtime.start_in(&context, Some(simulation));
 
         let (sender, events) = mpsc::channel();
@@ -961,6 +1072,111 @@ mod tests {
             registered: "2026-10-24T14:03:12+02:00".into(),
             extra: Default::default(),
         }
+    }
+
+    /// The blackboard through the app's commands, with the simulated one of
+    /// `--simulated-blackboard` (real time, three reference pages): found, added, its pages
+    /// synced into three dated notes and deleted from it, forgotten; the library's own files are
+    /// never touched by the simulation.
+    #[test]
+    fn app_commands_add_the_simulated_blackboard_and_sync_it() {
+        use ardoise_device::service::BLACKBOARD_NAME;
+        use ardoise_device::transport::TabletKind;
+        let settings = tempfile::tempdir().unwrap();
+        let notes_dir = tempfile::tempdir().unwrap();
+        let throwaway = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(throwaway.path()).unwrap();
+        let context = context(settings.path());
+        crate::commands::choose_library(&context, &notes_dir.path().display().to_string()).unwrap();
+        let runtime = TabletRuntime::default();
+        let board = app_board(None);
+        let simulation = Simulation {
+            tablet: None,
+            board: Some(board.clone()),
+            identity_root: Some(throwaway.path().to_owned()),
+            hook_delay: Duration::from_millis(50),
+        };
+        runtime.start_in(&context, Some(simulation));
+        let (sender, events) = mpsc::channel();
+        let sender = Mutex::new(sender);
+        let first = tablet_subscribe_in(
+            &runtime,
+            "main",
+            Box::new(move |TabletEvent::Status { status }| {
+                lock(&sender).send(status.clone()).is_ok()
+            }),
+        )
+        .unwrap();
+        assert!(first.simulated);
+        wait_for(&events, |s| s.connection == Connection::NotRegistered);
+        runtime
+            .with_service(TabletService::find_blackboards)
+            .unwrap();
+        let heard = wait_for(&events, |s| {
+            s.board_search
+                .as_ref()
+                .is_some_and(|search| !search.found.is_empty())
+        });
+        let address = heard.board_search.unwrap().found[0].address.clone();
+        assert_eq!(
+            tablet_add_blackboard_in(&runtime, "00:00:5E:00:53:00")
+                .unwrap_err()
+                .code(),
+            "blackboardNotFound"
+        );
+        let added = tablet_add_blackboard_in(&runtime, &address).unwrap();
+        assert_eq!(added.known[0].kind, TabletKind::Blackboard);
+        assert_eq!(added.known[0].name, BLACKBOARD_NAME);
+        let status = wait_for(&events, |s| s.last_sync.is_some());
+        let last = status.last_sync.clone().unwrap();
+        assert_eq!((last.saved.len(), last.deleted), (3, 3));
+        assert_eq!(board.stored_page_count(), 0);
+        let library = Library::open(notes_dir.path()).unwrap();
+        for note in &library.list().notes {
+            let read = library.read(&note.path).unwrap().file;
+            assert!(read.thumbnail.is_some());
+            assert_eq!(read.note.page, ardoise_device::pages::BLACKBOARD_PAGE);
+            assert_eq!(read.note.layers[0].name, "Calque 1");
+        }
+        // The blackboard has no name to change; its clock is set again.
+        assert_eq!(
+            tablet_rename_in(&runtime, "Classe").unwrap_err().code(),
+            "notSupported"
+        );
+        assert_eq!(tablet_set_time_in(&runtime).unwrap(), 0);
+        sim_blackboard_store_page_in(&runtime).unwrap();
+        assert_eq!(
+            sim_press_button_in(&runtime).unwrap_err().code(),
+            "simulationOnly",
+            "no simulated Slate"
+        );
+        // Kept in the simulation's folder, never in the library.
+        assert!(
+            identity::load_blackboard(notes_dir.path())
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            identity::load_blackboard(throwaway.path())
+                .unwrap()
+                .is_some()
+        );
+        forget_blackboard_through(&runtime, &context).unwrap();
+        assert!(
+            identity::load_blackboard(throwaway.path())
+                .unwrap()
+                .is_none()
+        );
+        wait_for(&events, |s| {
+            s.connection == Connection::NotRegistered && s.known.is_empty()
+        });
+        runtime.stop();
+        assert_eq!(
+            sim_blackboard_store_page_in(&TabletRuntime::default())
+                .unwrap_err()
+                .code(),
+            "simulationOnly"
+        );
     }
 
     /// The guided test of the real tablet: the service stops while it runs (the windows are told
