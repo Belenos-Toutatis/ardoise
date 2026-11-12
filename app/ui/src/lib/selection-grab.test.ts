@@ -35,9 +35,14 @@ describe('the reach of each pointer', () => {
     expect(near(0, 0)).toMatchObject({ kind: 'scale', corner: 0 });
     // Outside the frame, in the corner's quadrant, within the full reach.
     expect(near(-8, -8)).toMatchObject({ kind: 'scale', corner: 0 });
-    // Beside the frame (past one edge only): the margin, 4 pixels, not the handle.
-    expect(near(-8, 8)).toBeNull();
-    expect(near(-3, 8)).toEqual({ kind: 'move' });
+    // On the handle's square, outside on one axis and inside on the other: the corner still (a press on the corner
+    // itself, rounded to the pixel, lands on either side of each edge).
+    expect(near(-8, 8)).toMatchObject({ kind: 'scale', corner: 0 });
+    expect(near(8, -8)).toMatchObject({ kind: 'scale', corner: 0 });
+    expect(near(-0.4, 0.3)).toMatchObject({ kind: 'scale', corner: 0 });
+    // Beside the frame, past the handle's square: the margin, 4 pixels, then nothing.
+    expect(near(-3, 9)).toEqual({ kind: 'move' });
+    expect(near(-9, 8)).toBeNull();
     expect(near(8, 8)).toMatchObject({ kind: 'scale', corner: 0 });
     // Past it: inside the frame it moves.
     expect(near(9, 9)).toEqual({ kind: 'move' });
@@ -110,6 +115,8 @@ describe('what a press takes hold of', () => {
       expect(grabAt(dot, { x: 105, y: 99 }, 1, kind), kind).toMatchObject({ kind: 'scale', corner: 1 });
       expect(grabAt(dot, { x: 105, y: 105 }, 1, kind), kind).toMatchObject({ kind: 'scale', corner: 2 });
       expect(grabAt(dot, { x: 99, y: 105 }, 1, kind), kind).toMatchObject({ kind: 'scale', corner: 3 });
+      // On a corner, half a pixel outside on one axis and inside on the other.
+      expect(grabAt(dot, { x: 104.4, y: 103.7 }, 1, kind), kind).toMatchObject({ kind: 'scale', corner: 2 });
     }
     // The outer quadrant reaches as far as the pointer's handle reach, and no farther.
     expect(grabAt(dot, { x: 100 - 16, y: 100 - 16 }, 1, 'pen')).toMatchObject({ kind: 'scale', corner: 0 });

@@ -309,6 +309,22 @@ function planLasso(strokes, page, { starts, length = 3, accept = () => true }) {
   throw new Error(`no lasso picks strokes the way the step needs (${strokes.length} strokes, ${starts.length} places tried)`);
 }
 
+/**
+ * Moves that put `frame` (page units) right beside where it is, without overlapping it, and keep it on `page` with a
+ * margin: left or right (shifted `off` down), up or down (shifted `off` right). Empty when the frame is too big for any.
+ */
+function moveRoom(frame, page, off) {
+  const width = frame.x1 - frame.x0;
+  const height = frame.y1 - frame.y0;
+  const fits = (c) => frame.x0 + c.dx > 150 && frame.x1 + c.dx < page.width - 150 && frame.y0 + c.dy > 150 && frame.y1 + c.dy < page.height - 150;
+  return [
+    { dx: width + 600, dy: off },
+    { dx: -(width + 600), dy: off },
+    { dx: off, dy: height + 600 },
+    { dx: off, dy: -(height + 600) },
+  ].filter(fits);
+}
+
 function distanceToSegment(p, a, b) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -565,14 +581,22 @@ class Places {
 
   /**
    * Each canvas against a full redraw of the state it shows: the same pixels, or an error. With `after` (what an earlier
-   * call answered), each canvas must also have repainted an area since: that is what was tested.
+   * call answered), each canvas must also have repainted an area since: that is what was tested. `edgeFactor`: how many
+   * times the faint edge pixels allowed for one repaint (`EDGE_PIXELS`) an edit may leave: a move or a resize repaints
+   * two areas, where the strokes were and where they are, and each cuts strokes of its own (seen: 253 pixels by up to
+   * 15/255 for one move on a full-screen presentation).
    */
-  async samePixels(what, { after = null } = {}) {
+  async samePixels(what, { after = null, edgeFactor = 1 } = {}) {
     at(`comparing the pixels with a full redraw: ${what}`);
     const once = async (place, selector, name) => {
       if (!place) return null;
       const result = await within(place.evaluate(pixelsAgainstFullRedraw(selector)), 20_000, `the ${name}`);
       if (result.missing) throw new Error(`${what}: the ${name} has no repaint for the tests`);
+      const edgesOnly = result.differ > 0 && !result.picture && result.edgeWorst <= EDGE_DELTA;
+      if (edgesOnly && result.edges <= EDGE_PIXELS * Math.max(1, result.repaints) * edgeFactor) {
+        console.log(`    ${what} : ${result.edges} pixels de bord à ${result.edgeWorst}/255 au plus d’un dessin complet, pour ${result.repaints} retouches (${name}, marge × ${edgeFactor})`);
+        return result;
+      }
       if (result.differ > 0) {
         const saved = await this.save().catch(() => '');
         const dir = process.env.ARDOISE_E2E_SHOTS ?? this.app.dir;
@@ -1698,7 +1722,7 @@ export const touchUpJourneys = [
         return (rect) => {
           const top = ahead(rect.y0);
           const bottom = ahead(rect.y1);
-          return top >= 2400 && bottom <= 18_800 && bottom >= top;
+          return top >= 2400 && bottom <= 18_800 && bottom >= top && moveRoom(rect, model.page, 0).length > 0;
         };
       };
 
@@ -1837,23 +1861,24 @@ export const touchUpJourneys = [
         await check('au stylet : glisser dans le cadre déplace les traits choisis, la sélection reste, rien d’autre ne bouge', async () => {
           await replan();
           const { frame } = stages.start;
-          const width = frame.x1 - frame.x0;
           const page = model.page;
-          // To the side where the window holds the least ink (the destination must be empty to see the ink arrive), and a little down.
-          const dyPx = 16;
-          const dxUnits = width + 600;
-          const candidates = [dxUnits, -dxUnits].filter((d) => frame.x0 + d > 150 && frame.x1 + d < page.width - 150);
-          if (candidates.length === 0) throw new Error(`no room to move a frame ${Math.round(width)} wide on a page ${page.width} wide`);
-          const destination = (d) => ({ x0: frame.x0 + d, x1: frame.x1 + d, y0: frame.y0 + dyPx / map.scale, y1: frame.y1 + dyPx / map.scale });
-          const dark = await Promise.all(candidates.map((d) => inkIn(destination(d))));
+          // Beside the frame, on the side where the windows hold the least ink (the destination must be empty to see the ink
+          // arrive), and a little off that axis.
+          const candidates = moveRoom(frame, page, 16 / map.scale);
+          if (candidates.length === 0) {
+            throw new Error(`no room to move a frame ${Math.round(frame.x1 - frame.x0)} x ${Math.round(frame.y1 - frame.y0)} on a page ${page.width} x ${page.height}`);
+          }
+          const shifted = (c) => ({ x0: frame.x0 + c.dx, x1: frame.x1 + c.dx, y0: frame.y0 + c.dy, y1: frame.y1 + c.dy });
+          const dark = await Promise.all(candidates.map((c) => inkIn(shifted(c))));
           const pick = dark.map((d, k) => [d.control + d.presented, k]).sort((a, b) => a[0] - b[0])[0][1];
-          const dx = candidates[pick];
           const from = rounded(map.at({ x: (frame.x0 + frame.x1) / 2, y: (frame.y0 + frame.y1) / 2 }));
-          const dxPx = Math.round(dx * map.scale);
+          const dxPx = Math.round(candidates[pick].dx * map.scale);
+          const dyPx = Math.round(candidates[pick].dy * map.scale);
           const to = { x: from.x + dxPx, y: from.y + dyPx };
+          const target = shifted({ dx: dxPx / map.scale, dy: dyPx / map.scale });
           const gone = frame;
           const before = await inkIn(gone);
-          const there = await inkIn(destination(dx));
+          const there = await inkIn(target);
           const own = { control: before.control - there.control, presented: before.presented - there.presented };
           if (own.control < 40 || own.presented < 40) throw new Error(`the chosen strokes leave too little ink to see them move (control ${own.control}, presentation ${own.presented})`);
           const mark = stream.mark();
@@ -1871,7 +1896,7 @@ export const touchUpJourneys = [
           model.check('after the move');
           await places.agree('after the move');
           const after = await inkIn(gone);
-          const arrived = await inkIn(destination(dx));
+          const arrived = await inkIn(target);
           console.log(`    encre sombre : départ ${before.control} -> ${after.control}, arrivée ${there.control} -> ${arrived.control} (commande) ; départ ${before.presented} -> ${after.presented}, arrivée ${there.presented} -> ${arrived.presented} (présentation)`);
           for (const place of ['control', 'presented']) {
             if (before[place] - after[place] < 0.3 * own[place]) throw new Error(`the ${place} window still shows the strokes at their old place (${before[place]} -> ${after[place]} dark pixels, they own about ${own[place]})`);
@@ -1879,7 +1904,7 @@ export const touchUpJourneys = [
           }
           // The selection is still there, ready for another gesture.
           await app.waitFor(selectionIs(chosen.prints.length), 'the selection to stay after the move');
-          await places.samePixels('the move');
+          await places.samePixels('the move', { edgeFactor: 3 });
           stages.moved = moved;
         });
 
@@ -1919,7 +1944,7 @@ export const touchUpJourneys = [
           model.check('after the resize');
           await places.agree('after the resize');
           await app.waitFor(selectionIs(chosen.prints.length), 'the selection to stay after the resize');
-          await places.samePixels('the resize');
+          await places.samePixels('the resize', { edgeFactor: 3 });
           stages.resized = resized;
         });
 
@@ -1935,7 +1960,7 @@ export const touchUpJourneys = [
           expectStrokes('Ctrl+Z (the resize)', stages.moved, {}, 1);
           model.check('after the first Ctrl+Z');
           await places.agree('after the first Ctrl+Z');
-          await places.samePixels('the undo of the resize');
+          await places.samePixels('the undo of the resize', { edgeFactor: 3 });
 
           mark = stream.mark();
           await pressUntil(app, 'z', { ctrl: true }, () => model.editsSince(mark).length >= 1, 'the undo event of the move');
@@ -1945,7 +1970,7 @@ export const touchUpJourneys = [
           expectStrokes('Ctrl+Z (the move)', stages.start, {}, 1);
           model.check('after the second Ctrl+Z');
           await places.agree('after the second Ctrl+Z');
-          await places.samePixels('the undo of the move');
+          await places.samePixels('the undo of the move', { edgeFactor: 3 });
 
           mark = stream.mark();
           await pressUntil(app, 'y', { ctrl: true }, () => model.editsSince(mark).length >= 1, 'the redo event of the move');
@@ -1955,7 +1980,7 @@ export const touchUpJourneys = [
           expectStrokes('Ctrl+Y (the move)', stages.moved, {}, 1);
           model.check('after Ctrl+Y');
           await places.agree('after Ctrl+Y');
-          await places.samePixels('the redo of the move');
+          await places.samePixels('the redo of the move', { edgeFactor: 3 });
           if (browser) assertNoBrowserProblem(browser);
         });
 

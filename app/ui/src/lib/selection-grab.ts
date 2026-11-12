@@ -51,10 +51,12 @@ export function corners(r: Rect): Vec[] {
 /**
  * What a press at `p` (page units) takes hold of on `frame`, or null. `scale`: screen pixels per page unit.
  *
- * A corner (a handle) is taken from outside the frame, in the corner's own quadrant, within the pointer's full handle
- * reach; and from inside, within a third of the frame's shorter side at most (and the handle reach), so that the
- * inside of even a very small frame (a dot, an accent) is mostly the frame, which moves. Elsewhere, within the pointer's
- * margin around the frame, it moves. Of two corners in reach (a very small frame), the nearer one.
+ * A corner (a handle) is taken within a square around it: on each axis, up to the pointer's full handle reach outwards,
+ * and inwards up to a third of the frame's shorter side at most (and the handle reach), so that the inside of even a
+ * very small frame (a dot, an accent) is mostly the frame, which moves. Each axis on its own: a press on the handle that
+ * is just outside the frame on one axis and just inside on the other (a press on the corner itself, rounded to the
+ * pixel) takes the corner. Elsewhere, within the pointer's margin around the frame, it moves. Of two corners in reach
+ * (a very small frame), the nearer one.
  */
 export function grabAt(frame: Rect, p: Vec, scale: number, kind: PointerKind): Grab | null {
   if (!(scale > 0)) return null;
@@ -68,8 +70,7 @@ export function grabAt(frame: Rect, p: Vec, scale: number, kind: PointerKind): G
     // How far past the corner, outwards, on each axis (screen pixels): negative inside the frame.
     const ox = (k === 0 || k === 3 ? cs[k].x - p.x : p.x - cs[k].x) * scale;
     const oy = (k === 0 || k === 1 ? cs[k].y - p.y : p.y - cs[k].y) * scale;
-    const reached =
-      ox >= 0 && oy >= 0 ? ox <= tolerance.handle && oy <= tolerance.handle : ox <= 0 && oy <= 0 && -ox <= inside && -oy <= inside;
+    const reached = ox >= -inside && oy >= -inside && ox <= tolerance.handle && oy <= tolerance.handle;
     if (reached && Math.abs(ox) + Math.abs(oy) < best) {
       best = Math.abs(ox) + Math.abs(oy);
       nearest = k;
