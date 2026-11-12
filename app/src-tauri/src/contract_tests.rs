@@ -7,7 +7,8 @@
 use serde_json::json;
 
 use ardoise_device::service::{
-    BoardSearch, Connection, DeviceDetails, DeviceMemory, FoundTablet, KnownTablet, TabletOptions, TabletStatus,
+    BoardSearch, Connection, DeviceDetails, DeviceMemory, FoundTablet, KnownTablet, TabletOptions,
+    TabletStatus,
 };
 use ardoise_device::transport::TabletKind;
 
@@ -137,8 +138,12 @@ fn the_tablet_status_carries_the_second_tablet() {
             "until": 1_794_000_000_000_i64 })
     );
     // The fields of the other states are there too, empty.
-    assert_eq!(TabletStatus::initial(false, TabletOptions::default()).board_search, None);
-    let idle = serde_json::to_value(TabletStatus::initial(false, TabletOptions::default())).unwrap();
+    assert_eq!(
+        TabletStatus::initial(false, TabletOptions::default()).board_search,
+        None
+    );
+    let idle =
+        serde_json::to_value(TabletStatus::initial(false, TabletOptions::default())).unwrap();
     assert_eq!(idle["known"], json!([]));
     assert_eq!(idle["boardSearch"], json!(null));
 }
@@ -164,7 +169,10 @@ fn the_details_of_the_blackboard_have_a_kind_and_a_memory() {
     };
     let value = serde_json::to_value(&details).unwrap();
     assert_eq!(value["kind"], "blackboard");
-    assert_eq!(value["memory"], json!({ "total": 8_000_000, "free": 7_460_000 }));
+    assert_eq!(
+        value["memory"],
+        json!({ "total": 8_000_000, "free": 7_460_000 })
+    );
     assert_eq!(value["firmware"], "");
     assert_eq!(value["batteryPercent"], 90);
     assert_eq!(value["storedPages"], 3);

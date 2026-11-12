@@ -8,7 +8,7 @@ import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { FakeContext } from '../../lib/live-fake-canvas';
 import { resetMockLibrary } from '../../lib/mock-data';
-import { mockLiveConfig, resetMockLive } from '../../lib/mock-live';
+import { mockLiveConfig, resetMockLive, setMockLiveOrientation } from '../../lib/mock-live';
 import { resetMockNarration } from '../../lib/mock-narration';
 import { mockTablet, resetMockTablet } from '../../lib/mock-tablet';
 import { tablet } from '../../lib/tablet-state.svelte';
@@ -99,6 +99,16 @@ describe('live mode with the Xiaomi blackboard', () => {
     expect(note.textContent).toContain('Tablette Xiaomi : page en hauteur');
     expect(note.getAttribute('title')).toContain('sans arrêter le direct');
     expect(note.getAttribute('title')).toContain('« Page suivante » se fait depuis l\'ordinateur');
+  });
+
+  it('shows a portrait page (the blackboard writes 20 500 × 27 200)', async () => {
+    await knowBoard();
+    // A portrait page is a page like another for the live window: its size comes with the snapshot.
+    setMockLiveOrientation('portraitLeft');
+    const view = render();
+    await vi.waitFor(() => expect(view.root().dataset.state).toBe('live'));
+    const [width, height] = view.target.querySelector<HTMLElement>('canvas.live-canvas')!.dataset.pageSize!.split('x').map(Number);
+    expect(height).toBeGreaterThan(width);
   });
 
   it('keeps the position switch of the Slate when the Slate is the connected tablet', async () => {
