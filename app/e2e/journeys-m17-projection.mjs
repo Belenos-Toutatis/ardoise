@@ -251,6 +251,8 @@ export const editorProjectionJourneys = [
         await app.key('r');
         await app.waitFor(`document.querySelector('button[data-action="replay-toggle"]')?.getAttribute('aria-pressed') === 'true'`, 'the replay');
         await projection.waitFor(`Number(document.querySelector('canvas.live-canvas').dataset.drawn) < ${strokes}`, 'the replay to start on the projector', 10_000);
+        // R opens the replay paused at its start: « Lecture » plays it to its end.
+        await app.click('button[data-action="replay-play"]');
         await drawnIs(strokes, 'the replay to show every stroke on the projector');
         await app.key('r');
         await app.waitFor(`document.querySelector('button[data-action="replay-toggle"]')?.getAttribute('aria-pressed') === 'false'`, 'the replay to end');

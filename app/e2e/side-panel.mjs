@@ -83,8 +83,12 @@ export async function checkRecordingDot(app, l, { simulated = false } = {}) {
     return false;
   }
   await app.waitFor(`${dot} === 'rec'`, 'the red dot on the Sound tab');
-  const said = await app.evaluate(`(document.querySelector(${JSON.stringify(tabButton('sound'))})?.textContent ?? '').replace(/\s+/g, ' ')`);
-  if (!said.includes(l('side.dot.rec'))) throw new Error('the Sound tab does not say that it is recording');
+  const said = `(document.querySelector(${JSON.stringify(tabButton('sound'))})?.textContent ?? '').replace(/\\s+/g, ' ')`;
+  await app
+    .waitFor(`${said}.includes(${JSON.stringify(l('side.dot.rec'))})`, 'the Sound tab saying that it is recording', 5000)
+    .catch(async () => {
+      throw new Error(`the Sound tab does not say that it is recording: ${JSON.stringify(await app.evaluate(said))}`);
+    });
   await app.click(`${panel} [data-action="narration-cancel"]`);
   await app.waitFor(`${dot} === null`, 'the red dot to go');
   return true;

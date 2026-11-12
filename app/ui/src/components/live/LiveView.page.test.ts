@@ -164,6 +164,30 @@ describe('the live window Page tab', () => {
     expect(view.q('.live-view')!.querySelector('.banner.error')).toBeNull();
   });
 
+  it('keeps every choice made before the session answers: each one builds on the one before', async () => {
+    const answer = api.livePagePaper;
+    // The session answers a little later (its snapshot comes after the next click).
+    const paper = vi.spyOn(api, 'livePagePaper').mockImplementation(async (pageIndex, background) => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return answer(pageIndex, background);
+    });
+    const view = render();
+    await live(view);
+    // Three choices in a row, without waiting for the snapshots (a fast hand, or a loaded PC).
+    view.swatch('cream').click();
+    choose(view.template(), 'seyes');
+    view.texture().click();
+    expect(paper.mock.calls.map((call) => call[1])).toEqual([
+      { paper: 'cream', template: 'blank', texture: false },
+      { paper: 'cream', template: 'seyes', texture: false },
+      { paper: 'cream', template: 'seyes', texture: true },
+    ]);
+    await vi.waitFor(() => expect(view.canvas().dataset.template).toBe('seyes'));
+    expect(view.canvas().dataset.paper).toBe('cream');
+    expect(view.swatch('cream').getAttribute('aria-pressed')).toBe('true');
+    expect(view.texture().checked).toBe(true);
+  });
+
   it('reads the page index when the click is made: the next page gets its own, and the new page keeps the paper', async () => {
     const paper = vi.spyOn(api, 'livePagePaper');
     const view = render();

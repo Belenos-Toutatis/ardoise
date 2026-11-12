@@ -69,7 +69,10 @@ export const editorLayersJourneys = [
         if ((await app.evaluate(`document.querySelector(${JSON.stringify(`${ZONE}[data-where="editor"]`)}) !== null`)) !== true) {
           throw new Error('the zone is not the editor’s');
         }
-        if ((await app.evaluate(`document.querySelector('.editor-side input[type="radio"]')`)) !== null) throw new Error('the old radio buttons are still there');
+        // The Son tab's own switch (« Pendant que j'écris » / « Pendant une relecture », M17) is not a layer.
+        if ((await app.evaluate(`document.querySelector('.editor-side input[type="radio"]:not([name="editor-narration-mode"])')`)) !== null) {
+          throw new Error('the old radio buttons are still there');
+        }
         layers0 = (await app.evaluate(rows)).length;
         if (layers0 < 1) throw new Error('a note has no layer');
         if ((await app.evaluate(chosen)) !== layers0 - 1) throw new Error('the chosen layer is not the top one');

@@ -59,8 +59,23 @@ async function recordingStartWall(app) {
 }
 
 /** Presses « Arrêter », then waits for the note and its sound to be saved (the notice, no unsaved marker). */
-async function stopAndSave(app, l) {
+async function stopAndSave(app, l, path) {
+  const before = noteOnDisk(path).audio;
   await app.click(`${SOUND} [data-action="narration-stop"]`);
+  // The file itself first: the notice of an earlier recording may still be on screen, and the header says « Enregistré »
+  // before the save that follows the stop has begun.
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    let audio = null;
+    try {
+      audio = noteOnDisk(path).audio;
+    } catch {
+      // Being replaced (an atomic rename): read again.
+    }
+    if (audio && !(before && audio.equals(before))) break;
+    if (Date.now() > deadline) throw new Error('timed out waiting for the new sound in the file');
+    await sleep(100);
+  }
   await app.waitFor(
     `(document.querySelector('.editor-notice')?.textContent ?? '').startsWith(${j(lead(l('editor.sound.saved')))})`,
     'the notice that the sound is saved with the strokes',
@@ -136,7 +151,7 @@ export const writingSoundJourneys = [
         await penStroke(app, across(box, 0.88));
         await app.waitFor(`${strokeCount} === ${before.strokes.length + 2}`, 'the two strokes in the editor');
         await sleep(1000);
-        await stopAndSave(app, l);
+        await stopAndSave(app, l, path);
       });
 
       await check('le fichier : audio.opus en temps de la note, après l’encre ; les traits sur l’horloge du son, après l’ancienne encre', async () => {
@@ -236,7 +251,7 @@ export const writingSoundJourneys = [
         await app.click(`${SOUND} [data-action="narration-replace-yes"]`);
         await app.waitFor(`${phase} === 'recording'`, 'the new recording', 15_000);
         await sleep(1500);
-        await stopAndSave(app, l);
+        await stopAndSave(app, l, path);
         const saved = noteOnDisk(path);
         const tags = opusTags(saved.audio);
         const start = Number(tags.START_MS);

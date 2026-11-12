@@ -18,7 +18,7 @@
 // first note holds the paper, the image's description and a `background.png` member, the second the paper alone.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { EventStream, request, until } from './journeys-m11-share.mjs';
+import { closePanel, EventStream, request, until } from './journeys-m11-share.mjs';
 import { attach, canvasData, notesOf, registerTablet, STATUS, stopLive, text } from './journeys-m12-resume.mjs';
 import { twoPagePdf, readPng } from './journeys-m7-background.mjs';
 import { BROWSER_ARGS, canvasFacts } from './m17-helpers.mjs';
@@ -176,6 +176,8 @@ export const livePaperJourneys = [
         await openLive(app);
         const code = await startShare(app);
         ({ stream, cookie } = await joinStream(app, code));
+        // The share panel is a dialog over the window: closed, the share goes on and the tabs can be clicked.
+        await closePanel(app, l('common.close'));
         await app.evaluate(`window.__TAURI_INTERNALS__.invoke('open_presentation', { monitor: null }).then(() => true)`);
         presentation = await attach(app.port, (t) => t.url.includes('view=presentation'), 'the presentation window');
         await presentation.waitFor(`document.querySelector('canvas.live-canvas') !== null`, 'the presentation canvas');

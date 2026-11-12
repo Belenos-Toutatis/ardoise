@@ -249,8 +249,22 @@
       ? live.orientation
       : null,
   );
-  /** The page's paper as the Page tab shows it: its own colour (the blackboard's slate is not a choice), its template, its texture. */
-  const pageBackground = $derived<Background>({ ...live.background, paper: live.pagePaper });
+  /** The page's paper as the snapshot gives it: its own colour (the blackboard's slate is not a choice), its template, its texture. */
+  const shownBackground = $derived<Background>({ ...live.background, paper: live.pagePaper });
+  /**
+   * The paper last asked for in the Page tab, until a snapshot gives it back (or it is refused, or the page changes):
+   * a second choice made before then builds on the first instead of on the snapshot before it.
+   */
+  let askedPaper = $state.raw<{ pageIndex: number; background: Background } | null>(null);
+  /** The page's paper as the Page tab shows it. */
+  const pageBackground = $derived<Background>(
+    askedPaper !== null && askedPaper.pageIndex === live.pageIndex ? askedPaper.background : shownBackground,
+  );
+  $effect(() => {
+    const asked = askedPaper;
+    if (asked === null) return;
+    if (asked.pageIndex !== live.pageIndex || sameBackground(asked.background, shownBackground)) askedPaper = null;
+  });
   const savedCount = $derived(live.saved.length);
   const savedText = $derived(
     savedCount === 0 ? t('live.saved.none') : savedCount === 1 ? t('live.saved.one') : t('live.saved.many', { count: savedCount }),
@@ -673,11 +687,20 @@
     notice = t('layers.warn.chosenHidden', { name });
   }
 
+  function sameBackground(a: Background, b: Background): boolean {
+    return JSON.stringify(a.paper) === JSON.stringify(b.paper) && a.template === b.template && a.texture === b.texture;
+  }
+
   /** The Page tab: the paper of the page on screen (`pageIndex` is read now, at the click). */
   function setPaper(background: Background) {
     notice = null;
     const pageIndex = live.pageIndex;
-    api.livePagePaper(pageIndex, background).catch((error: unknown) => (notice = pageErrorText(error, 'paper')));
+    const asked = { pageIndex, background };
+    askedPaper = asked;
+    api.livePagePaper(pageIndex, background).catch((error: unknown) => {
+      if (askedPaper === asked) askedPaper = null;
+      notice = pageErrorText(error, 'paper');
+    });
   }
 
   /** The page on screen when the last click in the Fond tab was made (the choice of a file, which takes a while). */
