@@ -351,7 +351,7 @@ window carries on as a second app), a named mutex and a window class:
 - Without a settings location or a SID (non-Windows builds), no guard.
 
 Checked on the development PC (Windows 11, a debug build with the interface embedded; window messages sent with
-`SendMessageTimeout` as Windows does at logoff): before the fix (the exe of main 26da011), a dirty note let
+`SendMessageTimeout` as Windows does at logoff): before the fix (the exe of main a388a95), a dirty note let
 `WM_QUERYENDSESSION` through (answer 1, no reason) and `WM_ENDSESSION` ended the process with 0, the change lost after a
 restart. After it: a clean note answers 1; a dirty one answers 0, `ShutdownBlockReasonQuery` returns the French reason,
 the draft holds the latest change 166 ms after the query (the periodic write would come 2 s later), `WM_ENDSESSION`
