@@ -188,3 +188,13 @@ L'utilisateur trouve que la barre latérale droite pourrait être modernisée, �
 - Son pendant qu'on écrit dans l'éditeur : pendant l'enregistrement, les traits écrits dans l'éditeur (stylet, souris ou doigt) prennent l'heure du son et se rejouent avec lui, après les traits déjà présents. Une note n'a qu'un seul son, comme aujourd'hui : en enregistrer un autre demande d'abord si l'on remplace le premier.
 
 SPEC §4.2, §4.4, §4.5 et §5 sont mis à jour ; les jalons M16 et M17 sont ajoutés à ROADMAP.md.
+
+## Q14 — Une seconde tablette : la Xiaomi Mijia « petit tableau noir, version mémoire » (2026-11-12) — **ouverte**
+
+L'utilisateur possède aussi une tablette Xiaomi 13,5 pouces Bluetooth (米家液晶小黑板 存储版, modèle Mi Home `jiqid.sxb.v1`) et voudrait qu'Ardoise récupère ses pages et fasse du direct avec elle. SPEC.md ne prévoit que la Bamboo Slate, et le protocole de cette tablette n'est documenté nulle part.
+
+**En attendant** : une étude de faisabilité, acceptée par l'utilisateur le 2026-11-12 (« Oui, lance-la »), sans rien changer à l'application ni à SPEC.md. Ses résultats sont dans `docs/research/xiaomi-blackboard.md` ; l'outil de relevé est `cargo run -p ardoise-ble --example survey`. Premiers relevés sur la vraie tablette : elle se laisse connecter depuis le PC sans identification Mi Home et envoie des messages en clair sur un canal à part ; ses commandes restent à apprendre, par une capture de ce que Mi Home lui envoie depuis le téléphone Android de l'utilisateur. Aucune commande devinée n'est écrite sur la tablette.
+
+**À trancher une fois l'étude finie** :
+- Si c'est faisable : ajouter cette tablette à SPEC.md (quelles fonctions, quel nom dans l'interface, une ou deux tablettes par bibliothèque), et un jalon dans ROADMAP.md.
+- Si la tablette n'obéit qu'à une application identifiée auprès de Xiaomi : accepter ou non qu'Ardoise prenne la place de Mi Home pour cette tablette (il faudrait la relier de nouveau à Mi Home pour y revenir).
