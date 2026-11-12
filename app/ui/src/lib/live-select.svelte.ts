@@ -7,8 +7,11 @@
  * The indices are those of `LiveState.strokes` (the finished strokes of the page, hidden layers
  * included). They stay valid while the tablet writes (it only appends) and are dropped as soon as
  * the page or its revision changes (`follow`): a delete or an undo moves the indices; a change of
- * colour does not, so it keeps the selection. The stroke in progress cannot be chosen: it is not in
- * the list yet.
+ * colour does not, so it keeps the selection; neither does a move or a resize (`transform`), which puts
+ * the strokes back at the same places of the list but moves the revision on: the selection survives its
+ * own edit (`hold`, then `adopt` the revision the call returns; one whose revision is ahead of the
+ * session's waits for the event that brings the session there). The stroke in progress cannot be chosen:
+ * it is not in the list yet.
  */
 import { boundsOfPoints, type Vec } from './editor/geometry';
 import { hitStroke, selectInLasso, type Hittable } from './editor/hit';
@@ -63,6 +66,8 @@ export class LiveSelection {
   revision = 0;
   noteId = '';
   pageIndex = -1;
+  /** Edits of the selection under way that keep it (`hold`): the revision may move meanwhile, the page may not. */
+  private holds = 0;
 
   get count(): number {
     return this.indices.length;
@@ -80,6 +85,20 @@ export class LiveSelection {
 
   clear(): void {
     if (this.indices.length > 0) this.indices = [];
+  }
+
+  /**
+   * An edit that keeps the selection is under way (a move, a resize): the revision the session reports may move
+   * before the call is answered, and that is not a reason to drop it. Ends with `release`.
+   */
+  hold(): void {
+    this.holds += 1;
+  }
+
+  /** The edit begun with `hold` is over; `revision`, when it went through, is the page's revision after it. */
+  release(revision?: number): void {
+    this.holds = Math.max(0, this.holds - 1);
+    if (revision !== undefined && this.indices.length > 0 && revision > this.revision) this.revision = revision;
   }
 
   /** Chooses the strokes a gesture picked, combined with the current selection, on the page as it is now. */
@@ -102,7 +121,7 @@ export class LiveSelection {
    */
   follow(source: SelectionSource): void {
     if (this.indices.length === 0) return;
-    if (!this.stillValid(source)) {
+    if (!this.stillValid(source) && !this.waiting(source)) {
       this.clear();
       return;
     }
@@ -111,6 +130,16 @@ export class LiveSelection {
       return stroke === undefined || source.layers[stroke.layer]?.visible !== false;
     });
     if (shown.length !== this.indices.length) this.indices = shown;
+  }
+
+  /**
+   * The selection is ahead of the session, on the same page and note: the edit that moved the revision on went
+   * through, and its event has not reached this window yet (revisions only grow on a page). It waits for it.
+   * Under `hold`, the revision is not compared at all.
+   */
+  private waiting(source: SelectionSource): boolean {
+    if (source.noteId !== this.noteId || source.pageIndex !== this.pageIndex) return false;
+    return this.holds > 0 || this.revision > source.revision;
   }
 
   private stillValid(source: SelectionSource): boolean {
