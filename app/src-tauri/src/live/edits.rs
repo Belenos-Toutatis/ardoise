@@ -51,9 +51,12 @@ pub const MAX_EDIT_STROKES: usize = 1 << 20;
 /// opposite corner), and a few of them in a row would take the ink out of what a note holds.
 pub const MIN_TRANSFORM_SCALE: f64 = 0.05;
 pub const MAX_TRANSFORM_SCALE: f64 = 20.0;
-/// Largest shift of one move, along each axis, in page units (the units of the strokes' points:
-/// 10 m of a page whose unit is 10 µm, the tablet's).
-pub const MAX_TRANSFORM_SHIFT: f64 = 1e6;
+/// Largest shift of one move, along each axis, in page units (the units of the strokes' points):
+/// what a note's file holds, ±[`MAX_COORD`] (10 km at the tablet's 10 µm). A resize about a corner
+/// shifts the strokes by that corner's position times (1 − scale), so a ×20 resize about a far
+/// corner of a large page needs far more than the page's size; whether the strokes stay within
+/// what a note holds is checked point by point under the lock ([`StrokeTransform::apply`]).
+pub const MAX_TRANSFORM_SHIFT: f64 = MAX_COORD as f64;
 /// Most steps a page keeps to undo; the oldest goes first.
 pub const MAX_UNDO_STEPS: usize = 100;
 /// Most memory the undo steps of a page may keep, in bytes; the oldest goes first, except the last

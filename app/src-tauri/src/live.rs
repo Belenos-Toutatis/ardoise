@@ -534,8 +534,9 @@ pub async fn live_restore_cleared(runtime: State<'_, LiveRuntime>) -> CommandRes
 }
 
 /// Deletes, recolours, moves or resizes strokes the window chose on page `page_index` at
-/// `revision` (the snapshot's and the events'): refused as `liveEditStale` once that page is left
-/// or its strokes moved, `liveEditInvalid` when the list, the colour or the move makes no sense.
+/// `revision` (the snapshot's and the events'): refused as `liveEditStale` once that page is left,
+/// its strokes moved or its ink turned, `liveEditInvalid` when the list, the colour or the move
+/// makes no sense.
 /// Returns the page's revision after the edit; every window hears of it through a `strokesEdited`
 /// event.
 #[tauri::command]
