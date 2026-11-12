@@ -274,11 +274,27 @@ export const livePaperJourneys = [
         const before = withImage;
         await app.evaluate(choose(OPACITY, 50));
         withImage = await paperKeyChanged(before, 'another paperKey with the image at half opacity');
-        await presentation.waitFor(`document.querySelector('canvas.live-canvas').dataset.paperReady === 'true'`, 'the picture of the paper at half opacity', 30_000);
-        await sleep(200);
-        const pixels = await drawn(presentation);
-        const square = await pixels.pdf(SQUARE_CENTRE.x, SQUARE_CENTRE.y);
-        if (!square.every((v) => v > 80 && v < 190)) throw new Error(`the square is not grey at half opacity: ${j(square)}`);
+        // `paperReady` may still be the full-opacity picture's for a moment (the window has not had the snapshot yet): the
+        // pixels themselves are waited for.
+        // The simulated pen keeps writing across the page: a point may be under its ink (black). Most of a grid of points
+        // in the square (200 pt wide) are between the strokes.
+        let square = null;
+        await until(
+          async () => {
+            const pixels = await drawn(presentation);
+            const samples = [];
+            for (const dx of [-60, -30, 0, 30, 60]) {
+              for (const dy of [-60, -30, 0, 30, 60]) samples.push(await pixels.pdf(SQUARE_CENTRE.x + dx, SQUARE_CENTRE.y + dy));
+            }
+            const grey = samples.filter((v) => v.every((c) => c > 80 && c < 190));
+            square = grey.length > 0 ? grey[0] : samples[12];
+            return grey.length >= samples.length / 2;
+          },
+          'the square to turn grey on the projector',
+          30_000,
+        ).catch(() => {
+          throw new Error(`the square is not grey at half opacity: ${j(square)}`);
+        });
         const label = await app.evaluate(`document.querySelector(${j(`${FOND} .pane-value`)}).textContent.trim()`);
         if (!label.startsWith('50')) throw new Error(`the slider says ${j(label)}`);
       });
