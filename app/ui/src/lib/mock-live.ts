@@ -1495,6 +1495,12 @@ function monitors(): MonitorInfo[] {
   return MONITORS.slice(0, Math.max(0, mockLiveConfig.monitors)).map((m) => ({ ...m, chosen: m.key === savedMonitor }));
 }
 
+/** Called as live's presentation opens: the projection's stand-in closes the editor's projection (M17). */
+let presentationOpening: () => void = () => {};
+export function onMockPresentationOpening(handler: () => void): void {
+  presentationOpening = handler;
+}
+
 /** The screen of `open_presentation`, chosen like `presentation.rs`. */
 function chooseMonitor(requested: string | null): MonitorInfo {
   const list = monitors();
@@ -1567,6 +1573,8 @@ export function mockLiveInvoke(command: string, args: Record<string, unknown>): 
       return monitors();
     case 'open_presentation': {
       const monitor = chooseMonitor((args.monitor as string | null) ?? null);
+      // The editor's projection window and live's presentation never coexist (`open_presentation` closes it first).
+      presentationOpening();
       // The assistant's bridge (`remember: false`) changes no setting.
       if (args.remember !== false) savedMonitor = monitor.key;
       presentation = { ...monitor, chosen: true };

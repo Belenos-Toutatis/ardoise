@@ -25,7 +25,7 @@
  * `BroadcastChannel`, so that a tab opened at `?view=projection` draws them (and its Esc closes the projection of the
  * editor's tab). Not in the tests (`import.meta.env.VITEST`), whose files run side by side.
  */
-import { mockLiveInvoke } from './mock-live';
+import { mockLiveInvoke, onMockPresentationOpening } from './mock-live';
 import { UNHANDLED } from './mock-data';
 import type { LiveBatch, LiveEvent, LivePoint, LiveSnapshot, LiveStroke, MonitorInfo } from './live';
 import type { Note, Stroke } from './note';
@@ -180,6 +180,13 @@ function closed(): void {
   subscriber = null;
   if (was) tell();
 }
+
+// Live's presentation opening closes the projection first, as `open_presentation` in presentation.rs.
+onMockPresentationOpening(() => {
+  if (!open) return;
+  relay?.postMessage({ kind: 'close' });
+  closed();
+});
 
 // --- The checks -----------------------------------------------------------------------------------
 

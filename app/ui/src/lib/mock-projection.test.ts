@@ -89,6 +89,16 @@ describe('the screen', () => {
     expect((mockProjectionInvoke('projection_open', { monitor: list[0].key }) as { key: string }).key).toBe(list[0].key);
   });
 
+  it('is closed by live’s presentation opening, and the watcher hears it', async () => {
+    const statuses: ProjectionStatus[] = [];
+    await mockProjectionWatch((s) => statuses.push(s));
+    mockProjectionInvoke('projection_open', { monitor: null });
+    mockLiveInvoke('open_presentation', { monitor: null });
+    expect(mockProjectionState().open).toBeNull();
+    expect(statuses.map((s) => s.open === null)).toEqual([false, true]);
+    expect((await mockLiveSubscribe(() => {})).presentation).not.toBeNull();
+  });
+
   it('refuses without any screen', () => {
     mockLiveConfig.monitors = 0;
     expect(refusal(() => mockProjectionInvoke('projection_open', { monitor: null }))).toBe('noMonitor');
