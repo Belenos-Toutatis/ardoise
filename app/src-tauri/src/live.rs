@@ -60,7 +60,7 @@ pub use model::{
 pub use paper::LivePageImageOp;
 pub use pen::ComputerPenInput;
 
-use self::resume::ResumeBase;
+use self::paper::PageImage;
 use crate::narration::{self, NarrationRuntime};
 use crate::notes::background_png;
 use crate::thumbnails::png_data_url;
@@ -104,6 +104,7 @@ impl LiveError {
                 CommandError::new(NARRATION_NOT_KEPT, detail)
             }
             LiveError::Edit(error) => CommandError::new(error.code(), error),
+            LiveError::Paper(error) => CommandError::new(error.code(), error),
         }
     }
 }
@@ -484,10 +485,11 @@ pub async fn live_command(
 }
 
 /// The paper of page `page_index` of the session as a PNG data URL, like `render_background`, with
-/// the background image of a resumed sheet: its pixels are the session's (`ResumeBase`), not in the
-/// editor's staging area, which the editor empties when it closes. The page's strokes and the
-/// tablet's input never wait for it: the hub's lock is held only to find the file, and the windows
-/// load the picture apart from the strokes.
+/// the page's background image: a resumed sheet's or one the Fond tab set (M17). Its pixels are the
+/// page's (`paper::PageImage`), not in the editor's staging area, which the editor empties when it
+/// closes. The page's strokes and the tablet's input never wait for it: the hub's lock is held only
+/// to find the pixels, and the windows load the picture apart from the strokes (they ask again when
+/// the snapshot's `imagePixels.key` changes).
 #[tauri::command]
 pub async fn live_page_background(
     runtime: State<'_, LiveRuntime>,
@@ -504,17 +506,18 @@ pub async fn live_page_background(
     .map_err(|error| CommandError::new("render", error))?
 }
 
-/// The paper as a PNG data URL, with the image of `source` ([`LiveHub::page_image`]). Slow: the first
-/// time decodes the sheet's image.
+/// The paper as a PNG data URL, with the image of `source` ([`LiveHub::page_image`]). Slow: decoding
+/// the image, when it is not among the pictures kept decoded.
 pub(crate) fn page_background_url(
-    source: Option<(BackgroundImage, Arc<ResumeBase>)>,
+    source: Option<(BackgroundImage, Arc<PageImage>)>,
     page: PageSize,
     background: Background,
     width_px: u32,
 ) -> CommandResult<String> {
-    let image = source
+    let image = source.and_then(|(image, pixels)| Some((image, pixels.picture()?)));
+    let image = image
         .as_ref()
-        .and_then(|(image, base)| Some((image.clone(), base.picture()?)));
+        .map(|(image, picture)| (image.clone(), picture.as_ref()));
     background_png(page, background, width_px, image).map(|png| png_data_url(&png))
 }
 
@@ -605,34 +608,40 @@ pub async fn live_layers(
 }
 
 /// Changes the paper (colour, template, texture) of page `page_index` of the session, the one on
-/// screen (M17; docs/design/paper-projection-narration.md §1.3): refused as `liveEditStale` once
-/// that page is left, `liveNotRunning` once the session is stopped. Every window hears of it through
-/// a snapshot. Not undone by Ctrl+Z.
-///
-/// Package 0: a stub, nothing calls it yet.
+/// screen (M17; docs/design/paper-projection-narration.md §1.3): with the blackboard on, the template
+/// and the texture at once and the colour when it is turned off. Refused as `liveEditStale` once
+/// that page is left, `liveNotRunning` before the first start and once the session is stopped.
+/// Every window hears of it through a snapshot (none when nothing changed); a new page takes this
+/// paper. Not undone by Ctrl+Z.
 #[tauri::command]
 pub async fn live_page_paper(
-    _runtime: State<'_, LiveRuntime>,
+    runtime: State<'_, LiveRuntime>,
     page_index: usize,
     background: Background,
 ) -> CommandResult<()> {
-    let _ = (page_index, background);
-    Err(CommandError::new("unexpected", "not built yet"))
+    runtime
+        .hub
+        .set_page_paper(page_index, background)
+        .map_err(LiveError::command_error)
 }
 
 /// Sets, places again or removes the background image of page `page_index`, the one on screen (M17;
-/// `LivePageImageOp`): refused as `liveEditStale`, `liveNotRunning`, `liveEditInvalid` or
-/// `backgroundMissing` (a `set` whose key is not staged). Not undone by Ctrl+Z.
-///
-/// Package 0: a stub, nothing calls it yet.
+/// `LivePageImageOp`): a `set` takes the image staged under its key (`stage_background_image`) out
+/// of the staging area, for the page to keep. Refused as `liveEditStale` once that page is left,
+/// `liveNotRunning` before the first start and once the session is stopped, `liveEditInvalid` for a
+/// description that makes no sense (or a `place` of another image than the page's),
+/// `backgroundMissing` for a `set` whose key is not staged; a refused `set` leaves the image staged.
+/// Every window hears of it through a snapshot (none when nothing changed). Not undone by Ctrl+Z.
 #[tauri::command]
 pub async fn live_page_image(
-    _runtime: State<'_, LiveRuntime>,
+    runtime: State<'_, LiveRuntime>,
     page_index: usize,
     op: LivePageImageOp,
 ) -> CommandResult<()> {
-    let _ = (page_index, op);
-    Err(CommandError::new("unexpected", "not built yet"))
+    runtime
+        .hub
+        .change_page_image(page_index, op, crate::background::staging())
+        .map_err(LiveError::command_error)
 }
 
 #[tauri::command]

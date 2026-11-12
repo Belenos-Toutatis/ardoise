@@ -31,6 +31,7 @@ use super::super::model::{
     ForkReason, LiveCommandKind, LiveEvent, LiveMark, LiveSessionState, LiveStyle, LiveViewState,
     MarkPoint,
 };
+use super::super::paper::LivePageImageOp;
 use super::super::session::LiveSession;
 use super::super::tests::{
     A5, Window, audio_of, break_folder, change, config, fixed, keys, note_narration, notes_in,
@@ -41,6 +42,7 @@ use super::{
     time_base,
 };
 use crate::background::tests::halves;
+use crate::background::{Staged, Staging, key_of};
 use crate::drafts::{DRAFT_VERSION, DraftRecord, restore_copy_in};
 use crate::library::tests::library;
 use crate::library::{blank_note, now_ms, path_text};
@@ -680,7 +682,8 @@ fn a_slate_sheet_stays_a_slate_sheet_and_the_next_page_follows_the_blackboard() 
     set_board(&mut session, true);
     set_board(&mut session, false);
     assert_eq!(session.pages()[0].note.background.paper, Paper::Slate);
-    // A new page made while the blackboard is on goes back to white, as any page of a session.
+    // A new page made while the blackboard is on keeps the sheet's own paper (M17: a new page
+    // takes the paper of the page shown), slate here, with the blackboard on or off.
     set_board(&mut session, true);
     let mut out = Vec::new();
     session.command(
@@ -691,7 +694,28 @@ fn a_slate_sheet_stays_a_slate_sheet_and_the_next_page_follows_the_blackboard() 
     );
     assert_eq!(session.pages()[1].note.background.paper, Paper::Slate);
     set_board(&mut session, false);
-    assert_eq!(session.pages()[1].note.background.paper, Paper::White);
+    assert_eq!(session.pages()[1].note.background.paper, Paper::Slate);
+    assert!(session.pages()[1].note.background_image.is_none());
+}
+
+#[test]
+fn a_new_page_takes_the_sheets_paper_but_not_its_image() {
+    let file = full_file(A5);
+    let background = file.note.background;
+    let mut session = resumed_file(file, Orientation::Landscape);
+    assert!(session.snapshot().image_pixels.is_some());
+    let mut out = Vec::new();
+    session.command(
+        LiveCommandKind::NextPage,
+        LiveButton::NewPage,
+        RESUMED_AT,
+        &mut out,
+    );
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.page.background, background);
+    assert_eq!(snapshot.page.background_image, None);
+    assert_eq!(snapshot.image_pixels, None);
+    assert!(snapshot.can_turn_page);
 }
 
 // --- The hub, with a real library ----------------------------------------------------------------
@@ -2649,4 +2673,243 @@ fn a_deliberate_change_of_its_layers_is_a_change_of_the_sheet() {
     assert_eq!(written.layers, [layer("Cours", true)]);
     let starts: Vec<f32> = written.strokes.iter().map(|s| s.points[0].x).collect();
     assert_eq!(starts, [200.0, 100.0], "the merged ink above");
+}
+
+// --- The paper and the image of a resumed sheet (M17) ---------------------------------------------
+
+/// `width × height` pixels staged as the live window does: their key and member.
+fn staged_image(staging: &Staging, width: u32, height: u32) -> (String, BackgroundFile) {
+    let member = BackgroundFile {
+        extension: "png".to_owned(),
+        bytes: encode_png(&halves(width, height)).unwrap(),
+    };
+    let key = staging.put(Staged {
+        file: member.clone(),
+        width,
+        height,
+    });
+    (key, member)
+}
+
+fn worksheet(page: PageSize, pixels: (u32, u32)) -> BackgroundImage {
+    BackgroundImage {
+        name: "exercices.pdf".to_owned(),
+        pdf_page: Some(4),
+        rect: ImageRect::fit(page, pixels, ImageFit::Contain),
+        quarter_turns: 0,
+        opacity: 1.0,
+    }
+}
+
+fn seyes_white() -> Background {
+    Background {
+        paper: Paper::White,
+        template: Template::Seyes,
+        texture: false,
+    }
+}
+
+#[test]
+fn the_pixels_of_a_resumed_sheet_are_its_files() {
+    let file = full_file(A5);
+    let member = file.background.clone().unwrap();
+    let mut session = resumed_file(file, Orientation::Landscape);
+    let snapshot = session.snapshot();
+    let pixels = snapshot.image_pixels.clone().unwrap();
+    assert_eq!(pixels.key, key_of(&member.bytes));
+    assert_eq!((pixels.width, pixels.height), (40, 20));
+    assert!(!snapshot.can_turn_page);
+    // Its own paper is its paper, under the blackboard too.
+    assert_eq!(snapshot.page_paper, Paper::Cream);
+    set_board(&mut session, true);
+    assert_eq!(session.snapshot().page_paper, Paper::Cream);
+    // A member that cannot be read: described, nothing drawn, nothing to key.
+    let mut file = full_file(A5);
+    file.background = Some(BackgroundFile {
+        extension: "png".to_owned(),
+        bytes: vec![0; 16],
+    });
+    let session = resumed_file(file, Orientation::Landscape);
+    assert!(session.snapshot().page.background_image.is_some());
+    assert_eq!(session.snapshot().image_pixels, None);
+}
+
+#[test]
+fn a_sheet_whose_paper_alone_changed_is_written_with_it_and_keeps_no_original() {
+    let (_dir, library) = library();
+    let path = filed(&library, "Classe", &full_file(A5));
+    let before = library.read(&path).unwrap().file;
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    let lined = Background {
+        paper: Paper::Kraft,
+        template: Template::Lined,
+        texture: false,
+    };
+    hub.set_page_paper(0, lined).unwrap();
+    assert_eq!(hub.stop().unwrap(), [path_text(&path)]);
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.background, lined);
+    assert_eq!(written.note.strokes, before.note.strokes);
+    // Not a change of ink: nothing to go back to; the image stays as it was.
+    assert_eq!(written.original_note, None);
+    assert_eq!(written.original, before.original);
+    assert_eq!(written.background, before.background);
+    assert_eq!(written.note.background_image, before.note.background_image);
+    // Chosen, then chosen back before a write: the sheet as read, not written again.
+    let (bytes, stamp) = (std::fs::read(&path).unwrap(), FileStamp::of(&path).unwrap());
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    hub.change_at_once(|session, out| {
+        session
+            .set_page_paper(0, before.note.background, out)
+            .unwrap();
+        session.set_page_paper(0, lined, out).unwrap();
+    });
+    std::thread::sleep(config().save_interval * 2);
+    assert_untouched(&hub, &path, &bytes, &stamp);
+}
+
+#[test]
+fn a_paper_chosen_under_the_blackboard_reaches_the_file_and_chalk_still_wants_slate() {
+    let (_dir, library) = library();
+    // Chosen while the blackboard is on, nothing written: the sheet gets the colour chosen, not
+    // the slate shown.
+    let (path, _, _) = kraft_sheet(&library);
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    press_board(&hub, true);
+    hub.set_page_paper(0, seyes_white()).unwrap();
+    assert_eq!(hub.snapshot().page.background.paper, Paper::Slate);
+    assert_eq!(hub.snapshot().page_paper, Paper::White);
+    hub.stop().unwrap();
+    assert_eq!(
+        library.read(&path).unwrap().file.note.background,
+        seyes_white()
+    );
+
+    // Chalk written under it: the slate it needs, whatever was chosen.
+    let (path, _, _) = kraft_sheet(&library);
+    let hub = LiveHub::new(config());
+    let mut sink = resume(&hub, &library, &path, A5);
+    hub.set_page_paper(0, seyes_white()).unwrap();
+    press_board(&hub, true);
+    stroke(&mut sink, 3000, 5);
+    hub.stop().unwrap();
+    let written = library.read(&path).unwrap().file.note;
+    assert_eq!(written.background.paper, Paper::Slate);
+    assert_eq!(written.background.template, Template::Seyes);
+}
+
+#[test]
+fn a_sheet_whose_image_changed_is_written_with_the_new_pixels_or_without_any() {
+    let (_dir, library) = library();
+    let staging = Staging::default();
+
+    // Placed otherwise: the description changes, the pixels stay the file's.
+    let path = filed(&library, "Classe", &full_file(A5));
+    let before = library.read(&path).unwrap().file;
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    let faint = BackgroundImage {
+        opacity: 0.3,
+        ..before.note.background_image.clone().unwrap()
+    };
+    hub.change_page_image(
+        0,
+        LivePageImageOp::Place {
+            image: faint.clone(),
+        },
+        &staging,
+    )
+    .unwrap();
+    hub.stop().unwrap();
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.background_image.as_ref(), Some(&faint));
+    assert_eq!(written.background, before.background);
+    assert_eq!(written.original_note, None, "not a change of ink");
+
+    // Another image: its pixels and its description, ink or not.
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    let (key, member) = staged_image(&staging, 20, 40);
+    let image = worksheet(A5, (20, 40));
+    hub.change_page_image(
+        0,
+        LivePageImageOp::Set {
+            key: key.clone(),
+            image: image.clone(),
+        },
+        &staging,
+    )
+    .unwrap();
+    assert_eq!(hub.snapshot().image_pixels.unwrap().key, key);
+    hub.stop().unwrap();
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.background_image.as_ref(), Some(&image));
+    assert_eq!(written.background.as_ref(), Some(&member));
+    assert_eq!(written.note.strokes, before.note.strokes);
+    assert_eq!(written.text, before.text, "the rest of the file kept");
+    assert_eq!(written.unknown_members, before.unknown_members);
+
+    // Removed: neither the description nor the member any more.
+    let hub = LiveHub::new(config());
+    let _sink = resume(&hub, &library, &path, A5);
+    hub.change_page_image(0, LivePageImageOp::Remove, &staging)
+        .unwrap();
+    assert!(!hub.snapshot().can_turn_page, "a resumed sheet never turns");
+    hub.stop().unwrap();
+    let written = library.read(&path).unwrap().file;
+    assert_eq!(written.note.background_image, None);
+    assert_eq!(written.background, None);
+    assert_eq!(written.note.background, before.note.background);
+}
+
+#[test]
+fn a_sheet_changed_elsewhere_goes_on_in_a_new_note_with_its_paper_and_image() {
+    let (_dir, library) = library();
+    let staging = Staging::default();
+    let path = filed(&library, "Classe", &full_file(A5));
+    let hub = LiveHub::new(config());
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let mut sink = resume(&hub, &library, &path, A5);
+    let (key, member) = staged_image(&staging, 20, 40);
+    let image = worksheet(A5, (20, 40));
+    hub.change_page_image(
+        0,
+        LivePageImageOp::Set {
+            key,
+            image: image.clone(),
+        },
+        &staging,
+    )
+    .unwrap();
+    hub.set_page_paper(0, seyes_white()).unwrap();
+    // Written at once (a deliberate change of the sheet), then nothing until the next change.
+    wait_until("the sheet written", || {
+        library.read(&path).is_ok_and(|loaded| {
+            loaded.file.note.background_image.as_ref() == Some(&image)
+                && loaded.file.note.background == seyes_white()
+        })
+    });
+
+    // Another PC changes its ink: the next write finds it changed.
+    let mut elsewhere = library.read(&path).unwrap();
+    elsewhere.file.note.strokes.pop();
+    library
+        .save(&path, &elsewhere.file, &elsewhere.stamp)
+        .unwrap();
+    let kept = std::fs::read(&path).unwrap();
+    stroke(&mut sink, 3000, 5);
+    wait_until("the notice", || !forks(&window).is_empty());
+    let saved = hub.stop().unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), kept, "left alone");
+    let new_path = PathBuf::from(&saved[0]);
+    assert_ne!(new_path, path);
+    let written = library.read(&new_path).unwrap().file;
+    assert_eq!(written.note.background_image.as_ref(), Some(&image));
+    assert_eq!(written.background.as_ref(), Some(&member));
+    assert_eq!(written.note.background, seyes_white());
+    assert_eq!(written.note.strokes.len(), 3);
 }

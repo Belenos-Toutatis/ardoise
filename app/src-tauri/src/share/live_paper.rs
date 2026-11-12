@@ -1,17 +1,19 @@
 //! The paper of the live page, for the viewers of the share (docs/design/lan-share.md, "The paper
-//! of a live page"): a resumed sheet may have a template, a texture, a background image or a page
-//! of a PDF, which a browser cannot draw by itself. Ordinary live pages are plain paper: they get
-//! no key, no picture and no thread.
+//! of a live page"): a page may have a template, a texture, a background image or a page of a PDF
+//! (a resumed sheet's, or chosen in the live window's Page and Fond tabs: M17), which a browser
+//! cannot draw by itself. Plain paper (a white page of the session, any colour without template,
+//! texture or image) gets no key, no picture and no thread.
 //!
 //! - **The snapshots** sent to the viewers name the paper the page wants ([`paper_key`]), so a page
 //!   change shows or hides a picture at once, whatever the order in which things arrive.
 //! - **Watching** ([`LivePapers::saw`]) runs on the hub's flusher thread: it only compares a few
 //!   fields under a lock of its own, for the batches that hold a snapshot.
 //! - **Rendering** runs on a thread of its own ([`LivePapers::run`]), started when there is a paper
-//!   to make and ended when there is none: the hub's lock is held only to look up the sheet's file.
-//!   The picture is what `page.rs` makes for the editor's note, kept for when the teacher comes back
-//!   to the sheet; it reaches the share through [`ardoise_share::Share::show_live_paper`], which
-//!   holds it for the viewers to fetch, apart from the event stream.
+//!   to make and ended when there is none: the hub's lock is held only to look up the page's image
+//!   and pixels. The picture is what `page.rs` makes for the editor's note, kept for when the
+//!   teacher comes back to the page; it reaches the share through
+//!   [`ardoise_share::Share::show_live_paper`], which holds it for the viewers to fetch, apart from
+//!   the event stream.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -21,7 +23,6 @@ use ardoise_share::LivePaper;
 
 use super::page::{Paper, is_plain_paper};
 use super::render_paper_png;
-use crate::background::key_of;
 use crate::live::LiveHub;
 use crate::live::model::LiveSnapshot;
 
@@ -46,9 +47,10 @@ fn effective_background(background: Background, board: bool) -> Background {
 
 /// What the live page of `snapshot` wants drawn under its strokes, without the title, tags or
 /// anything else of the note: an opaque name, `None` on plain paper. It changes with the note, the
-/// page size, the paper, the template, the texture and the image (its file's name goes only into
-/// the digest). A fork does not change it: the snapshot carries the id the page started with
-/// (`Page::shown_id`), so the key stays and the picture is not sent again.
+/// page size, the paper, the template, the texture, the image (its file's name goes only into
+/// the digest) and its pixels (`imagePixels.key`: another file under the same name and in the same
+/// place is another picture). A fork does not change it: the snapshot carries the id the page
+/// started with (`Page::shown_id`), so the key stays and the picture is not sent again.
 pub fn paper_key(snapshot: &LiveSnapshot) -> Option<String> {
     let note = &snapshot.page;
     let background = effective_background(note.background, snapshot.view.board);
@@ -60,7 +62,16 @@ pub fn paper_key(snapshot: &LiveSnapshot) -> Option<String> {
         note.page,
         background,
         note.background_image.as_ref(),
+        pixels_key(snapshot),
     )
+}
+
+/// The key of the pixels of the snapshot's image.
+fn pixels_key(snapshot: &LiveSnapshot) -> Option<&str> {
+    snapshot
+        .image_pixels
+        .as_ref()
+        .map(|pixels| pixels.key.as_str())
 }
 
 fn key_for(
@@ -68,8 +79,9 @@ fn key_for(
     page: PageSize,
     background: Background,
     image: Option<&BackgroundImage>,
+    pixels: Option<&str>,
 ) -> Option<String> {
-    let bytes = serde_json::to_vec(&(id, page, background, image)).ok()?;
+    let bytes = serde_json::to_vec(&(id, page, background, image, pixels)).ok()?;
     let mut hasher = DefaultHasher::new();
     bytes.hash(&mut hasher);
     Some(format!("{:016x}", hasher.finish()))
@@ -82,6 +94,9 @@ struct Sheet {
     page_index: usize,
     page: PageSize,
     background: Background,
+    /// The image and the key of its pixels, as the snapshot has them: what the hub has when the
+    /// picture is made may be newer (a snapshot on its way), and is then left to that snapshot.
+    image: Option<(BackgroundImage, Option<String>)>,
 }
 
 impl Sheet {
@@ -92,8 +107,22 @@ impl Sheet {
             page_index: snapshot.page_index,
             page: snapshot.page.page,
             background: effective_background(snapshot.page.background, snapshot.view.board),
+            image: snapshot
+                .page
+                .background_image
+                .clone()
+                .map(|image| (image, pixels_key(snapshot).map(str::to_owned))),
         })
     }
+}
+
+/// What a pass made of the paper wanted.
+enum Made {
+    /// The picture, `None` when the paper turns out plain or the picture cannot be made: the viewer
+    /// shows the paper colour.
+    Picture(Option<LivePaper>),
+    /// The page's image changed since the snapshot asked for it: the next snapshot asks again.
+    Overtaken,
 }
 
 #[derive(Default)]
@@ -195,31 +224,43 @@ impl LivePapers {
                 work.dirty = false;
                 work.wanted.clone()
             };
-            let picture = wanted.as_ref().and_then(|sheet| self.picture(sheet));
+            let made = match &wanted {
+                Some(sheet) => self.picture(sheet),
+                None => Made::Picture(None),
+            };
             if lock(&self.work).dirty {
                 continue;
             }
-            if let Some(deliver) = self.deliver.get() {
+            if let (Made::Picture(picture), Some(deliver)) = (made, self.deliver.get()) {
                 deliver(picture);
             }
         }
     }
 
-    /// The picture for `sheet`, rendered unless it is among those kept; `None` when it turns out
-    /// plain (the image's pixels are gone) or cannot be made: the viewer shows the paper colour.
-    fn picture(&self, sheet: &Sheet) -> Option<LivePaper> {
+    /// The picture for `sheet`, rendered unless it is among those kept ([`Made`]).
+    fn picture(&self, sheet: &Sheet) -> Made {
         let source = self.hub.page_image(sheet.page_index);
+        // The image described without pixels (a member that cannot be read) draws nothing either
+        // way; any other difference is a change on its way to the viewers.
+        let wanted = sheet.image.as_ref().and_then(|(_, key)| key.as_deref());
+        let found = source.as_ref().map(|(_, pixels)| pixels.key.as_str());
+        let same_place = match (&source, &sheet.image) {
+            (Some((image, _)), Some((asked, _))) => image == asked,
+            _ => true,
+        };
+        if wanted != found || !same_place {
+            return Made::Overtaken;
+        }
         let paper = Paper {
             page: sheet.page,
             background: sheet.background,
             // The key of the pixels themselves: another file under the same name is another paper.
-            image: source.as_ref().and_then(|(image, base)| {
-                let member = base.file.background.as_ref()?;
-                Some((image.clone(), key_of(&member.bytes)))
-            }),
+            image: source
+                .as_ref()
+                .map(|(image, pixels)| (image.clone(), pixels.key.clone())),
         };
         if paper.is_plain() {
-            return None;
+            return Made::Picture(None);
         }
         let mut pictures = lock(&self.pictures);
         let entry = match pictures.iter().position(|(known, _)| *known == paper) {
@@ -228,18 +269,20 @@ impl LivePapers {
                 #[cfg(test)]
                 self.renders
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let pixels = source.as_ref().and_then(|(_, base)| base.picture());
-                let png = render_paper_png(&paper, pixels)?;
+                let pixels = source.as_ref().and_then(|(_, pixels)| pixels.picture());
+                let Some(png) = render_paper_png(&paper, pixels.as_deref()) else {
+                    return Made::Picture(None);
+                };
                 (paper, Arc::from(png))
             }
         };
         let png = Arc::clone(&entry.1);
         pictures.insert(0, entry);
         pictures.truncate(PICTURES_KEPT);
-        Some(LivePaper {
+        Made::Picture(Some(LivePaper {
             key: sheet.key.clone(),
             png,
-        })
+        }))
     }
 
     /// Pictures rendered so far.
