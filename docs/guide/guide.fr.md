@@ -442,10 +442,10 @@ ni d'ouvrir l'éditeur. Vous retouchez dans la fenêtre de commande, et **la tab
 **Déplacer et redimensionner** : les traits choisis sont entourés d'un cadre en pointillés, avec un petit carré à chacun
 de ses quatre coins.
 
-- **Déplacer** : posez le stylet, le doigt ou la souris **dans le cadre** (ou tout près de son bord : environ 4 pixels
-  pour la souris, 12 pour le stylet, 16 pour le doigt) et glissez. Les traits suivent, et se posent là où vous relâchez.
-- **Redimensionner** : saisissez un **coin** (le stylet et le doigt n'ont pas besoin de viser pile : 16 et 22 pixels
-  autour du carré, 8 pour la souris) et glissez le long de la diagonale. Le coin opposé ne bouge pas ; l'épaisseur du trait
+- **Déplacer** : posez le stylet, le doigt ou la souris **dans le cadre** (ou tout près de son bord : le stylet et le
+  doigt n'ont pas besoin de viser pile) et glissez. Les traits suivent, et se posent là où vous relâchez.
+- **Redimensionner** : saisissez un **coin** : près du carré, un peu en dehors du cadre fonctionne aussi, surtout au stylet
+  et au doigt. Glissez le long de la diagonale. Le coin opposé ne bouge pas ; l'épaisseur du trait
   suit la taille. On ne peut pas descendre sous un vingtième de la taille, ni dépasser vingt fois.
 - Un simple appui dans le cadre, sans glisser, ne change rien : il ne refait pas de sélection. Avec `Maj` ou `Ctrl`,
   un geste est toujours un lasso, même sur le cadre. Hors du cadre, la souris et le stylet entourent comme avant et un doigt

@@ -28,12 +28,6 @@ export const GRAB_TOLERANCE: Readonly<Record<PointerKind, GrabTolerance>> = {
 
 /** The handles drawn at the corners of the frame, in screen pixels (the side of the square). */
 export const HANDLE_SIZE_PX = 10;
-/**
- * A frame this small (screen pixels, its shorter side) would be all handle: its handles' reach is limited to a
- * third of that side, but never below this, so that a small selection can still be moved.
- */
-const MIN_HANDLE_REACH_PX = 6;
-
 /** A resize cannot make the strokes smaller than this share of their size, nor larger than this many times. */
 export const MIN_SCALE = 0.05;
 export const MAX_SCALE = 20;
@@ -56,21 +50,28 @@ export function corners(r: Rect): Vec[] {
 
 /**
  * What a press at `p` (page units) takes hold of on `frame`, or null. `scale`: screen pixels per page unit.
- * A handle wins over the frame; of two handles within reach (a very small frame), the nearer one.
+ *
+ * A corner (a handle) is taken from outside the frame, in the corner's own quadrant, within the pointer's full handle
+ * reach; and from inside, within a third of the frame's shorter side at most (and the handle reach), so that the
+ * inside of even a very small frame (a dot, an accent) is mostly the frame, which moves. Elsewhere, within the pointer's
+ * margin around the frame, it moves. Of two corners in reach (a very small frame), the nearer one.
  */
 export function grabAt(frame: Rect, p: Vec, scale: number, kind: PointerKind): Grab | null {
   if (!(scale > 0)) return null;
   const tolerance = GRAB_TOLERANCE[kind];
   const smaller = Math.min(frame.width, frame.height) * scale;
-  const reach = Math.min(tolerance.handle, Math.max(MIN_HANDLE_REACH_PX, smaller / 3));
+  const inside = Math.min(tolerance.handle, smaller / 3);
   const cs = corners(frame);
   let nearest = -1;
   let best = Infinity;
   for (let k = 0; k < 4; k++) {
-    const dx = Math.abs(cs[k].x - p.x) * scale;
-    const dy = Math.abs(cs[k].y - p.y) * scale;
-    if (dx <= reach && dy <= reach && dx + dy < best) {
-      best = dx + dy;
+    // How far past the corner, outwards, on each axis (screen pixels): negative inside the frame.
+    const ox = (k === 0 || k === 3 ? cs[k].x - p.x : p.x - cs[k].x) * scale;
+    const oy = (k === 0 || k === 1 ? cs[k].y - p.y : p.y - cs[k].y) * scale;
+    const reached =
+      ox >= 0 && oy >= 0 ? ox <= tolerance.handle && oy <= tolerance.handle : ox <= 0 && oy <= 0 && -ox <= inside && -oy <= inside;
+    if (reached && Math.abs(ox) + Math.abs(oy) < best) {
+      best = Math.abs(ox) + Math.abs(oy);
       nearest = k;
     }
   }

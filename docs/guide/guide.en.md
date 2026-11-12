@@ -420,10 +420,10 @@ touch up in the control window, and **the tablet keeps writing meanwhile**.
 **Moving and resizing**: the chosen strokes are surrounded by a dashed frame, with a small square at each of its four
 corners.
 
-- **Move**: put the pen, a finger or the mouse **inside the frame** (or very near its edge: about 4 pixels for the mouse,
-  12 for the pen, 16 for a finger) and drag. The strokes follow, and land where you let go.
-- **Resize**: take a **corner** (the pen and a finger do not have to aim exactly: 16 and 22 pixels around the square, 8
-  for the mouse) and drag along the diagonal. The opposite corner stays where it is; the thickness of the line follows
+- **Move**: put the pen, a finger or the mouse **inside the frame** (or very near its edge: the pen and a finger do not
+  have to aim exactly) and drag. The strokes follow, and land where you let go.
+- **Resize**: take a **corner**: near the square, a little outside the frame works too, especially with the pen and a
+  finger. Drag along the diagonal. The opposite corner stays where it is; the thickness of the line follows
   the size. You cannot go below a twentieth of the size, nor above twenty times.
 - A plain press in the frame, without dragging, changes nothing: it does not make a new selection. With `Shift` or
   `Ctrl`, a gesture is always a lasso, even on the frame. Outside the frame, the mouse and the pen draw a lasso as

@@ -451,7 +451,7 @@ function checkedColor(color: Rgba): Rgba {
 /** Scales a transform may have, offsets it may reach (`live/edits.rs`). */
 const MIN_TRANSFORM_SCALE = 0.05;
 const MAX_TRANSFORM_SCALE = 20;
-const MAX_TRANSFORM_OFFSET = 1e6;
+const MAX_TRANSFORM_OFFSET = 1e9;
 
 /** A `transform` of the edit, checked: finite, a scale in range, offsets not out of reach. */
 function checkedTransform(edit: Extract<LiveStrokesEdit, { kind: 'transform' }>): { scale: number; x: number; y: number } {
@@ -460,6 +460,11 @@ function checkedTransform(edit: Extract<LiveStrokesEdit, { kind: 'transform' }>)
   if (scale < MIN_TRANSFORM_SCALE || scale > MAX_TRANSFORM_SCALE) throw invalid(`a scale of ${scale} is out of range`);
   if (Math.abs(x) > MAX_TRANSFORM_OFFSET || Math.abs(y) > MAX_TRANSFORM_OFFSET) throw invalid('this move is out of range');
   return { scale, x, y };
+}
+
+/** Strokes of a step as objects of their own (a step must not share objects with the page). */
+function copiesOf(placed: readonly PlacedStroke[]): PlacedStroke[] {
+  return placed.map(({ index, stroke }) => ({ index, stroke: { ...stroke } }));
 }
 
 /** `stroke` moved and scaled: its points and its width; the rest is the same. */
@@ -556,7 +561,8 @@ function editStrokes(s: Session, pageIndex: number, revision: number, edit: Live
     const before = indices.map((index) => ({ index, stroke: page.strokes[index] }));
     const after = before.map(({ index, stroke }) => ({ index, stroke: transformedStroke(stroke, transform) }));
     for (const { index, stroke } of after) page.strokes[index] = stroke;
-    record(history, { kind: 'transformed', before, after });
+    // The step keeps copies of its own: the strokes of the page are renumbered (layers) and recoloured in place.
+    record(history, { kind: 'transformed', before: copiesOf(before), after: copiesOf(after) });
     history.revision = lastRevision += 1;
     broadcast([edited(s, page, { removed: indices, inserted: after })]);
   } else {
@@ -601,10 +607,11 @@ function undoOne(s: Session, page: Note, history: PageHistory, step: UndoStep): 
       return edited(s, page, { removed: step.indices });
     }
     case 'transformed': {
-      for (const { index, stroke } of step.before) page.strokes[index] = stroke;
+      const back = copiesOf(step.before);
+      for (const { index, stroke } of back) page.strokes[index] = stroke;
       history.redo.push({ kind: 'transform', before: step.before, after: step.after, ...grouped(step.group) });
       history.revision = lastRevision += 1;
-      return edited(s, page, { removed: step.before.map((placed) => placed.index), inserted: step.before });
+      return edited(s, page, { removed: back.map((placed) => placed.index), inserted: back });
     }
     case 'recoloured': {
       const recoloured = groupedColours(step.changes, (change) => change.before);
@@ -630,10 +637,11 @@ function redoOne(s: Session, page: Note, history: PageHistory, step: RedoStep): 
       history.revision = lastRevision += 1;
       return edited(s, page, { inserted: step.strokes });
     case 'transform': {
-      for (const { index, stroke } of step.after) page.strokes[index] = stroke;
+      const again = copiesOf(step.after);
+      for (const { index, stroke } of again) page.strokes[index] = stroke;
       pushUndo(history, { kind: 'transformed', before: step.before, after: step.after, ...grouped(step.group) });
       history.revision = lastRevision += 1;
-      return edited(s, page, { removed: step.after.map((placed) => placed.index), inserted: step.after });
+      return edited(s, page, { removed: again.map((placed) => placed.index), inserted: again });
     }
     case 'recolour': {
       const recoloured = groupedColours(step.changes, (change) => change.after);
@@ -1714,20 +1722,29 @@ function followTablet(page: Note): void {
   if (turns === 0) return;
   const { width, height } = page.page;
   page.strokes = turnStrokes(page.strokes, width, height, turns);
+  // The page turned: the indices of its strokes mean the same, but a selection or an edit chosen before the turn is not
+  // for this page any more (the revision moves on, as in Rust).
+  if (session) historyOf(session, page).revision = lastRevision += 1;
   // What can come back turns with it, so that it returns where it would be had it stayed.
-  for (const step of (session && session.histories.get(page.id)?.undo) ?? []) {
+  const turn = (placed: PlacedStroke[]) => {
+    const turned = turnStrokes(placed.map((p) => p.stroke), width, height, turns);
+    return placed.map((p, i) => ({ index: p.index, stroke: turned[i] }));
+  };
+  const history = session?.histories.get(page.id);
+  for (const step of history?.undo ?? []) {
     if (step.kind === 'transformed') {
-      const turn = (placed: PlacedStroke[]) => {
-        const turned = turnStrokes(placed.map((p) => p.stroke), width, height, turns);
-        return placed.map((p, i) => ({ index: p.index, stroke: turned[i] }));
-      };
       step.before = turn(step.before);
       step.after = turn(step.after);
       continue;
     }
     if (step.kind !== 'removed') continue;
-    const turned = turnStrokes(step.strokes.map((placed) => placed.stroke), width, height, turns);
-    step.strokes = step.strokes.map((placed, i) => ({ index: placed.index, stroke: turned[i] }));
+    step.strokes = turn(step.strokes);
+  }
+  // A move or a resize that was undone comes back turned too (`History::turn`).
+  for (const step of history?.redo ?? []) {
+    if (step.kind !== 'transform') continue;
+    step.before = turn(step.before);
+    step.after = turn(step.after);
   }
   if (turns % 2 === 1) page.page = { width: height, height: width };
 }

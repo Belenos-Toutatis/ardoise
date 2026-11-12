@@ -1738,14 +1738,21 @@ export const touchUpJourneys = [
        * A gesture made again when nothing came of it: a press while the previous edit is still being applied is ignored (the
        * strokes are held where the drag left them until its event is applied), and a teacher drags again.
        */
-      const gestureUntil = async (gesture, done, what, { tries = 3, wait = 4000 } = {}) => {
-        for (let k = 0; k < tries; k++) {
-          await gesture();
-          const end = Date.now() + wait;
+      const gestureUntil = async (gesture, done, what, { tries = 3, wait = 4000, grace = 3000 } = {}) => {
+        // A gesture whose event merely arrived late is not made again (a second move, or a lasso over the moved strokes):
+        // before each new try, a longer wait for the event of the last one, and a look at whether it came.
+        const waitFor = async (ms) => {
+          const end = Date.now() + ms;
           while (Date.now() < end) {
-            if (done()) return;
+            if (done()) return true;
             await sleep(25);
           }
+          return done();
+        };
+        for (let k = 0; k < tries; k++) {
+          if (k > 0 && (await waitFor(grace))) return;
+          await gesture();
+          if (await waitFor(wait)) return;
         }
         throw new Error(`timed out waiting for ${what} (${tries} gestures; edits so far: ${describeEdits(model)})`);
       };
@@ -1943,6 +1950,7 @@ export const touchUpJourneys = [
           mark = stream.mark();
           await pressUntil(app, 'y', { ctrl: true }, () => model.editsSince(mark).length >= 1, 'the redo event of the move');
           edits = model.editsSince(mark);
+          if (edits.length !== 1) throw new Error(`${edits.length} events for the redo (${describeEdits(model)})`);
           justOne(edits[0], 'the redo of the move');
           expectStrokes('Ctrl+Y (the move)', stages.moved, {}, 1);
           model.check('after Ctrl+Y');

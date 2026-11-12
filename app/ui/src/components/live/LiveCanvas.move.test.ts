@@ -654,3 +654,83 @@ describe('the tablet keeps writing', () => {
     expect(view.ontransform.mock.calls[0][0].x).toBeCloseTo(units(60), 6);
   });
 });
+
+describe('the pen comes in while a finger or a palm holds the selection', () => {
+  const inside = { x: SCREEN.cx, y: SCREEN.cy };
+  const to = { x: SCREEN.cx + 60, y: SCREEN.cy + 40 };
+  const touch = (t: number): Init => ({ pointerType: 'touch', pointerId: 3, t });
+  const pen = (t: number, buttons = 1): Init => ({ pointerType: 'pen', pointerId: 7, t, buttons });
+
+  it('a pen down lets go of it: the strokes go back, nothing is committed, and the pen\'s lasso is its own', async () => {
+    const view = await render();
+    view.fire('pointerdown', inside, touch(0));
+    view.fire('pointermove', to, touch(20));
+    expect(view.frame().lifted).toHaveLength(1);
+    // The pen comes down away from the frame and draws a lasso; the palm goes on moving, then lifts.
+    const away = { x: SCREEN.r + 120, y: SCREEN.t };
+    view.fire('pointerdown', away, pen(30));
+    expect(view.frame().lifted).toEqual([]);
+    view.fire('pointermove', { x: away.x + 40, y: away.y }, pen(40));
+    view.fire('pointermove', { x: to.x + 10, y: to.y }, touch(45));
+    view.fire('pointermove', { x: away.x + 40, y: away.y + 40 }, pen(50));
+    view.fire('pointerup', { x: away.x + 40, y: away.y + 40 }, pen(60));
+    view.fire('pointerup', to, touch(70));
+    expect(view.ontransform).not.toHaveBeenCalled();
+    expect(view.onselect).toHaveBeenCalledOnce();
+    expect(view.frame().lifted).toEqual([]);
+  });
+
+  it('so does any pen event, a hover included, while the palm is down', async () => {
+    const view = await render();
+    view.fire('pointerdown', inside, touch(0));
+    view.fire('pointermove', to, touch(20));
+    expect(view.frame().lifted).toHaveLength(1);
+    view.fire('pointermove', { x: SCREEN.r + 200, y: SCREEN.b + 100 }, pen(30, 0));
+    expect(view.frame().lifted).toEqual([]);
+    view.fire('pointermove', { x: to.x + 20, y: to.y }, touch(40));
+    view.fire('pointerup', to, touch(50));
+    expect(view.ontransform).not.toHaveBeenCalled();
+  });
+
+  it('a grab of the pen\'s own is not let go by its own hover or moves', async () => {
+    const view = await render();
+    view.drag(inside, to, { pointerType: 'pen', pointerId: 7 });
+    expect(view.ontransform).toHaveBeenCalledOnce();
+  });
+
+  it('a grab owned by one pointer never swallows the events of another: a mouse lasso goes on beside a finger\'s grab', async () => {
+    const view = await render();
+    const away = { x: SCREEN.r + 120, y: SCREEN.t };
+    view.fire('pointerdown', away, { pointerId: 1 });
+    view.fire('pointermove', { x: away.x + 40, y: away.y }, { pointerId: 1 });
+    view.fire('pointerdown', inside, touch(5000));
+    view.fire('pointermove', to, touch(5020));
+    view.fire('pointermove', { x: away.x + 40, y: away.y + 40 }, { pointerId: 1 });
+    view.fire('pointermove', { x: away.x, y: away.y + 40 }, { pointerId: 1 });
+    view.fire('pointerup', { x: away.x, y: away.y + 40 }, { pointerId: 1 });
+    expect(view.onselect).toHaveBeenCalledOnce();
+    view.fire('pointerup', to, touch(5040));
+    expect(view.ontransform).toHaveBeenCalledOnce();
+  });
+});
+
+describe('the frame stays on the page during a move', () => {
+  it('a drag far past the window\'s edge puts the frame\'s centre on the page\'s edge, not beyond', async () => {
+    const view = await render();
+    const inside = { x: SCREEN.cx, y: SCREEN.cy };
+    view.drag(inside, { x: inside.x + 5000, y: inside.y - 5000 });
+    const sent = view.ontransform.mock.calls[0][0];
+    expect(sent.scale).toBe(1);
+    expect(sent.x).toBeCloseTo(A4.width - (FRAME.x + FRAME.width / 2), 6);
+    expect(sent.y).toBeCloseTo(-(FRAME.y + FRAME.height / 2), 6);
+  });
+
+  it('and the other two edges', async () => {
+    const view = await render();
+    const inside = { x: SCREEN.cx, y: SCREEN.cy };
+    view.drag(inside, { x: inside.x - 5000, y: inside.y + 5000 });
+    const sent = view.ontransform.mock.calls[0][0];
+    expect(sent.x).toBeCloseTo(-(FRAME.x + FRAME.width / 2), 6);
+    expect(sent.y).toBeCloseTo(A4.height - (FRAME.y + FRAME.height / 2), 6);
+  });
+});
