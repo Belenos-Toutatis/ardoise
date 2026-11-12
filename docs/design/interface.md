@@ -389,6 +389,10 @@ checked: a real shutdown or logoff (Windows' own "apps preventing shutdown" scre
 
 The editor's side panel and the live control window's are one rail of tabs (Layers, Page, Background, Sound, Projection, Help) with its badges, its block above the open tab and its list of shortcuts: see `docs/design/side-panel.md`.
 
+## M17: live paper and background, editor projection, sound while writing
+
+Live's Page and Fond tabs, the editor's Projection tab (projector, projected area, share) and the Son tab's « Pendant que j'écris » mode are described in `docs/design/paper-projection-narration.md`.
+
 ## Closing and quitting
 
 `Ctrl + W` and `Ctrl + F4` close what is open, `Ctrl + Q` quits (`lib/close-keys.ts`). They work from a text field too.

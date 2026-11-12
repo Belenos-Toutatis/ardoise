@@ -64,6 +64,10 @@ computer's group `[data-slot="touch-up"]`, `[data-slot="orientation"]`.
 
 ### What each window lacks until M17
 
+(Built since: [paper-projection-narration.md](paper-projection-narration.md), milestone M17: live's Page and Fond tabs
+§1, the editor's Projection §2, Son « Pendant que j'écris » §3. Its "As built" section tells what differs from the plan
+below.)
+
 - Live: **Page** (colour, template and texture of the current page's paper) and **Fond** (an image or a PDF page under
   the current page). No tab at all in M16.
 - Editor: **Projection** holds the share only (the projector block is M17); **Son** records only during a replay
@@ -868,6 +872,9 @@ Registered in `run.mjs` by package 0 (`export const sidePanelEditorJourneys = []
 by D.
 
 ## 11. M17 fit
+
+*Built: see [paper-projection-narration.md](paper-projection-narration.md) (live's Page and Fond §1.6, the editor's
+Projection §2.6, the editor's Son §3.4) and its "As built". What follows is what M16 prepared for it.*
 
 - **Live, Page and Fond**: `LiveView` adds `{#snippet page()}` and `{#snippet background()}`; the rail shows them in
   `SIDE_TABS`' order with no change to `SidePanel`, `SidePanelState` or the storage (a `page` remembered since then is
