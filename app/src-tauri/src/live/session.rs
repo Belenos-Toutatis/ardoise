@@ -142,8 +142,10 @@ pub struct Page {
     /// session's [`first_revision`], so that a command meant for a session that has ended cannot
     /// pass for one of the next. Changes when strokes leave the list or come back: a delete, a
     /// clearing that removed something, a move or resize (its strokes replaced at their places),
-    /// the undo or redo of any. Not when the tablet appends a stroke (no index moves), nor for a
-    /// change of colour, a page turn, a new layer.
+    /// the undo or redo of any; and when the page turns its ink ([`Page::turn`]): no index moves,
+    /// but a move worked out on the strokes before the turn would apply to strokes that are
+    /// elsewhere now. Not when the tablet appends a stroke (no index moves), nor for a change of
+    /// colour, a new layer.
     revision: u64,
     /// Its edits and the computer's strokes, to undo and redo: kept when the page is left and when
     /// it turns, dropped when the session stops and by a merge of layers.
@@ -434,7 +436,8 @@ impl Page {
     /// (a resumed sheet would be rewritten for how the tablet happens to be held; the ink of a
     /// worksheet would leave the image it was written on): the tablet follows it, as near to
     /// `orientation` as the page allows. A page with an image and no ink has its image placed again
-    /// upright ([`refitted`]).
+    /// upright ([`refitted`]). Ink turned is a new revision: every edit chosen before is stale (a
+    /// move names positions, and a selection's frame no longer stands where it was drawn).
     fn turn(&mut self, turns: u8, orientation: Orientation) {
         if self.held_fixed() {
             self.orientation = hold_for(self.note.page, orientation);
@@ -455,6 +458,7 @@ impl Page {
                     height: before.width,
                 });
             }
+            self.revision += 1;
             self.touch();
         }
         self.orientation = orientation;

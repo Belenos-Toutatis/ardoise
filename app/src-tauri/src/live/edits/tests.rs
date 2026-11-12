@@ -518,18 +518,71 @@ fn bad_lists_and_colours_are_refused_before_anything_changes() {
 fn the_tablets_writing_keeps_the_revision_so_a_selection_stays_valid() {
     let mut session = with_strokes(3);
     let chosen_at = revision(&session);
-    // The window chose stroke 1. The tablet goes on writing; a new layer, a page turn change no
-    // index either.
+    // The window chose stroke 1. The tablet goes on writing; a new layer changes no index either.
+    // (A page that turns its ink does change the revision: see the next test.)
     write(&mut session, 7000);
     write(&mut session, 8000);
     let mut out = Vec::new();
     session.command(LiveCommandKind::NewLayer, LiveButton::NewPage, 0, &mut out);
-    session.reorient(29_700, 21_600, Orientation::LandscapeFlipped, &mut out);
     assert_eq!(revision(&session), chosen_at);
-    session.reorient(29_700, 21_600, Orientation::Landscape, &mut out);
     let edit = delete(&[1]).checked().unwrap();
     session.edit_strokes(0, chosen_at, edit, &mut out).unwrap();
     assert_eq!(starts(&session), [1000.0, 3000.0, 7000.0, 8000.0]);
+}
+
+#[test]
+fn a_page_that_turns_its_ink_makes_every_edit_chosen_before_stale() {
+    let mut session = with_strokes(3);
+    let chosen_at = revision(&session);
+    let mut out = Vec::new();
+    // Held the other way round (the quick switch of the orientation): the ink turns half a turn.
+    // No index moves, but a move worked out on the strokes as they stood would apply to strokes
+    // that are elsewhere now.
+    session.reorient(29_700, 21_600, Orientation::LandscapeFlipped, &mut out);
+    let Some(LiveEvent::Snapshot { snapshot }) = out.last() else {
+        panic!("{out:?}");
+    };
+    assert_eq!(snapshot.revision, chosen_at + 1, "the windows hear of it");
+    let turned = page_strokes(&session);
+    out.clear();
+    let move_by_hand = transform(&[1], 2.0, -2000.0, 0.0);
+    for edit in [move_by_hand, delete(&[1]), recolour(&[1], RED)] {
+        let edit = edit.checked().unwrap();
+        assert_eq!(
+            session.edit_strokes(0, chosen_at, edit, &mut out),
+            Err(LiveEditError::Stale)
+        );
+    }
+    assert!(out.is_empty());
+    assert_eq!(page_strokes(&session), turned);
+    assert!(!session.snapshot().can_undo);
+    // Chosen again on the turned page: it moves.
+    let now = revision(&session);
+    let edit = transform(&[1], 1.0, 100.0, 0.0).checked().unwrap();
+    assert_eq!(session.edit_strokes(0, now, edit, &mut out), Ok(now + 1));
+    // A quarter turn too.
+    let now = revision(&session);
+    session.reorient(29_700, 21_600, Orientation::PortraitLeft, &mut out);
+    assert_eq!(revision(&session), now + 1);
+    // Held as it already is: nothing turns, nothing is stale.
+    let now = revision(&session);
+    session.reorient(29_700, 21_600, Orientation::PortraitLeft, &mut out);
+    assert_eq!(revision(&session), now);
+    let edit = delete(&[0]).checked().unwrap();
+    assert!(session.edit_strokes(0, now, edit, &mut out).is_ok());
+
+    // A page left and shown again after the tablet turned turns then, and is a new revision too.
+    let mut session = with_strokes(2);
+    session.command(LiveCommandKind::NewPage, LiveButton::NewPage, 0, &mut out);
+    session.reorient(29_700, 21_600, Orientation::PortraitRight, &mut out);
+    session.command(
+        LiveCommandKind::PreviousPage,
+        LiveButton::NewPage,
+        0,
+        &mut out,
+    );
+    assert_eq!(session.current(), 0);
+    assert_eq!(revision(&session), chosen_at + 1);
 }
 
 #[test]
@@ -2374,12 +2427,13 @@ fn a_move_is_read_from_its_json_and_refused_as_a_whole_when_it_makes_no_sense() 
             "{scale}"
         );
     }
-    // A shift too far, along either axis.
+    // A shift beyond what a note holds, along either axis.
+    assert_eq!(MAX_TRANSFORM_SHIFT, 1e9);
     for (dx, dy) in [
-        (1e6 + 1.0, 0.0),
-        (-1e6 - 1.0, 0.0),
-        (0.0, 1e6 + 1.0),
-        (0.0, -2e6),
+        (1e9 + 1.0, 0.0),
+        (-1e9 - 1.0, 0.0),
+        (0.0, 1e9 + 1.0),
+        (0.0, -1e300),
     ] {
         assert_eq!(
             refused(transform(&[0], 1.0, dx, dy)),
@@ -2500,6 +2554,36 @@ fn a_move_is_read_from_its_json_and_refused_as_a_whole_when_it_makes_no_sense() 
     assert_eq!(double.apply(&wide), None);
     let half = StrokeTransform::checked(0.5, 0.0, 0.0).unwrap();
     assert_eq!(half.apply(&wide).map(|s| s.width), Some(f32::MAX / 2.0));
+}
+
+#[test]
+fn a_resize_about_a_far_corner_of_a_long_page_is_not_refused() {
+    // A stroke far down a long page (pages put end to end), made twenty times bigger about the
+    // corner of its frame: the shift is that corner times (1 − 20), far more than any page, and
+    // the points end up near where they were. Where they end up is what is checked.
+    let mut session = with_strokes(1);
+    for (i, point) in session.page_mut(0).unwrap().note.strokes[0]
+        .points
+        .iter_mut()
+        .enumerate()
+    {
+        (point.x, point.y) = (59_990.0 + i as f32, 399_990.0);
+    }
+    let before = page_strokes(&session);
+    let (scale, corner): (f64, (f64, f64)) = (20.0, (60_000.0, 400_000.0));
+    let (dx, dy) = (corner.0 * (1.0 - scale), corner.1 * (1.0 - scale));
+    assert!(dx.abs() > 1e6 && dy.abs() > 7e6);
+    let mut out = Vec::new();
+    session
+        .edit(transform(&[0], scale, dx, dy), &mut out)
+        .unwrap();
+    let after = page_strokes(&session);
+    assert_eq!(after[0], moved(&before[0], scale, dx, dy));
+    assert_eq!(
+        (after[0].points[0].x, after[0].points[0].y),
+        (59_800.0, 399_800.0)
+    );
+    assert_eq!(after[0].width, before[0].width * 20.0);
 }
 
 #[test]

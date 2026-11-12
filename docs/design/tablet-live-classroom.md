@@ -603,9 +603,14 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   a delete. No format change: a revision says what the places mean.
 - **Revision.** Per page, in the snapshot (`revision`) and in every `strokesEdited`. It changes when strokes leave the list or
   come back: a delete, a clearing that removed something, a move or resize (its strokes replaced, below), the undo or redo of
-  any. Not when the tablet appends (a selection stays valid while it writes), not for a change of colour or its undo (a second
-  click on a swatch is not stale), not for a page turn or a new layer (no place moves). Two sessions never share one (`session id << 32`, plus the changes of the page):
-  a command meant for a session that ended is stale, though the page number is the same.
+  any; and when the page turns its ink (`Page::turn`: a quarter or half turn of a page that is not held fixed, at the tablet's
+  turn or when a page left meanwhile is shown again). No place moves then, but a move worked out on the strokes before the turn
+  (the orientation's quick switch can come between the drag and the command) would apply to strokes that are elsewhere, and the
+  selection's frame no longer stands where it was drawn: every edit chosen before is stale, and the interface drops its
+  selection (2026-11-12; before, a turn kept the revision). Not when the tablet appends (a selection stays valid while it
+  writes), not for a change of colour or its undo (a second click on a swatch is not stale), not for a new layer (no place
+  moves), not for a resumed sheet held in another way (it does not turn). Two sessions never share one (`session id << 32`,
+  plus the changes of the page): a command meant for a session that ended is stale, though the page number is the same.
 - **Commands.** `live_edit_strokes(pageIndex, revision, edit)`, `live_undo_edit(pageIndex)`, `live_redo_edit(pageIndex)`; a stopped
   session refuses them (`liveNotRunning`, as `clearPage`). `liveEditStale`: another page on screen, or another revision; the
   interface drops its selection. `liveEditInvalid`, refused as a whole: an empty list, more than `MAX_EDIT_STROKES` (2^20), a
@@ -629,7 +634,9 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   pressure, times, tool, colour and layer stay. Worked out in `f64`, stored in `f32` (`StrokeTransform::apply`).
   - *Checks.* The list's, as above (empty, too many, not an index, duplicate, out of range, hidden layer, stale page or revision),
     plus `LiveEditError::BadTransform` (`liveEditInvalid`): `scale` not finite or outside `MIN_TRANSFORM_SCALE` ..=
-    `MAX_TRANSFORM_SCALE` (0.05 ..= 20), `x` or `y` not finite or beyond ±`MAX_TRANSFORM_SHIFT` (10^6, 10 m). JSON has no NaN:
+    `MAX_TRANSFORM_SCALE` (0.05 ..= 20), `x` or `y` not finite or beyond ±`MAX_TRANSFORM_SHIFT`, which is `MAX_COORD` (10^9,
+    what a note holds: a ×20 resize about a far corner of a long page shifts by that corner times −19, far more than the page's
+    size; where the points end up is the check that matters, below). JSON has no NaN:
     `JSON.stringify` makes `null` of NaN and Infinity (a resize of a selection with no width), so `null` is read as NaN and gets
     this code rather than the rejection of the arguments; a missing number is still a rejection. Under the lock, a move whose
     result would put a point beyond ±`MAX_COORD` (10^9, what `strokes.bin` stores) or make a width that is not finite is refused
@@ -664,7 +671,8 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   M12 it went too). `live_restore_cleared` undoes down to and including the page's last clearing: the button keeps working, and
   edits made after the clearing can still be redone. On another page: `false`, and the clearing stays on its page.
 - **Page turn.** The strokes kept turn with the page (`History::turn`, called from `Page::turn`): they come back where they would
-  be had they stayed. Places and colours do not change, so nothing else does. A page emptied by a delete and never written is not a
+  be had they stayed. Places and colours do not change; the revision does (above), so that no edit chosen on the strokes before
+  the turn applies to them after. A page emptied by a delete and never written is not a
   "blank" page for `hold` while its history is not empty. A resumed sheet is never turned, nor what can come back to it.
 - **Page change.** A page keeps its history when it is left: Ctrl+Z on it again undoes what was done on it. `pageIndex` says which
   page the key was pressed on. A stop drops every history (`set_state(Idle)`).
@@ -721,7 +729,8 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   `LiveState.strokes`, so it cannot be.
 - **Selection.** `LiveSelection` (control window only): `active` (the Select toggle), `indices` (a new array at each change) and the
   `revision`, `noteId`, `pageIndex` they were chosen at. `follow(live)` (an effect of `LiveView`) drops them when the page or the
-  revision changes (a delete, an undo, « Clear the page »); the tablet's strokes and a recolour keep them. Turning the tool off clears.
+  revision changes (a delete, an undo, « Clear the page », a move, a turn of the page's ink); the tablet's strokes and a recolour
+  keep them. Turning the tool off clears.
   Nothing of it is sent to Rust, the projector or the share.
 - **Drawing.** `Scene.selection` and `Scene.lasso` (always empty for `presentation`). The renderer draws the highlight on a surface
   of its own, redrawn only when the selection, the strokes' generation, the layers, the view or the size change; a frame copies it.
