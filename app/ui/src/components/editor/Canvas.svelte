@@ -26,7 +26,6 @@
   import {
     applyAffine,
     boundsOfPoints,
-    containsPoint,
     intersection,
     rectFromCorners,
     scalingAround,
@@ -46,6 +45,7 @@
     pointerKind,
     type TouchAction,
   } from '../../lib/gestures';
+  import { corners, grabAt as grabOnFrame } from '../../lib/selection-grab';
   import { touchPrefs } from '../../lib/touch-prefs.svelte';
   import { placedImage } from '../../lib/editor/image';
   import { MIN_CROP } from '../../lib/editor/ops';
@@ -248,15 +248,6 @@
     );
   });
 
-  function corners(r: Rect): Vec[] {
-    return [
-      { x: r.x, y: r.y },
-      { x: r.x + r.width, y: r.y },
-      { x: r.x + r.width, y: r.y + r.height },
-      { x: r.x, y: r.y + r.height },
-    ];
-  }
-
   function measure() {
     const width = stage?.clientWidth ?? 0;
     const height = stage?.clientHeight ?? 0;
@@ -393,18 +384,6 @@
     });
   }
 
-  function handleAt(screen: Vec): Vec | null {
-    if (!selectionBox) return null;
-    const cs = corners(selectionBox);
-    for (let k = 0; k < 4; k++) {
-      const c = cs[k];
-      const sx = c.x * view.scale + view.x;
-      const sy = c.y * view.scale + view.y;
-      if (Math.abs(sx - screen.x) <= HANDLE_PX && Math.abs(sy - screen.y) <= HANDLE_PX) return cs[(k + 2) % 4];
-    }
-    return null;
-  }
-
   function begin(next: Drag) {
     drag = next;
     dragKind = next.kind;
@@ -450,14 +429,23 @@
     !readonly && !split && doc.selection.length > 0 && (tools.mode === 'select' || (barrelActive && (tools.mode === 'pen' || tools.mode === 'eraser'))),
   );
 
-  /** A press on a handle of the selection (resize) or inside its frame (move), or null. */
+  /**
+   * A press on a handle of the selection (resize) or on its frame (move) as a drag, or null. How near it must be depends
+   * on the pointer: a pen and a finger reach farther than the mouse (`lib/selection-grab.ts`).
+   */
+  function frameGrab(e: PointerEvent): Drag | null {
+    if (!selectionBox) return null;
+    const p = pagePoint(e);
+    const grab = grabOnFrame(selectionBox, p, view.scale, pointerKind(e));
+    if (!grab) return null;
+    const id = pointerId(e);
+    return grab.kind === 'scale' ? { kind: 'scale', id, anchor: grab.anchor, start: p } : { kind: 'move', id, start: p };
+  }
+
+  /** The same, for a press that may take hold of the selection at all: with the tool for it, and no Shift, Ctrl or Meta. */
   function grabAt(e: PointerEvent): Drag | null {
     if (!grabbable || e.ctrlKey || e.metaKey || e.shiftKey) return null;
-    const id = pointerId(e);
-    const p = pagePoint(e);
-    const anchor = handleAt(local(e));
-    if (anchor) return { kind: 'scale', id, anchor, start: p };
-    return selectionBox && containsPoint(selectionBox, p) ? { kind: 'move', id, start: p } : null;
+    return frameGrab(e);
   }
 
   function applyTouch(action: TouchAction) {
@@ -579,9 +567,8 @@
       case 'select': {
         // With Shift or Ctrl the gesture is always a lasso, even on the selection's frame.
         const combine: Combine = e.ctrlKey || e.metaKey ? 'remove' : e.shiftKey ? 'add' : 'replace';
-        const anchor = combine === 'replace' ? handleAt(local(e)) : null;
-        if (anchor) begin({ kind: 'scale', id, anchor, start: p });
-        else if (combine === 'replace' && selectionBox && containsPoint(selectionBox, p)) begin({ kind: 'move', id, start: p });
+        const grab = combine === 'replace' ? frameGrab(e) : null;
+        if (grab) begin(grab);
         else {
           begin({ kind: 'lasso', id, points: [p], combine });
           lasso = [p];
