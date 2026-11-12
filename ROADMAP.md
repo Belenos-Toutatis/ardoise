@@ -90,7 +90,7 @@ Tout est corrigé (`docs/research/protocol.md` §5.3 et §12). Le test guidé su
 
 ### Point de contrôle H2 [matériel]
 
-- [ ] [matériel] Au travail : synchro réelle, mode direct, projecteur en bureau étendu (procédure H2).
+- [x] [matériel] Au travail : synchro réelle, mode direct, projecteur en bureau étendu (procédure H2).
 - [ ] Corrections issues du retour de l'utilisateur.
 
 Confirmé avec la vraie tablette le 2026-11-05 : le bouton crée une nouvelle page en mode direct. Le signal est `cb 01 00` (`docs/research/protocol.md` §12) ; Ardoise attendait jusque-là un signal inventé pour la tablette simulée.
@@ -159,7 +159,7 @@ Vérifié sous Windows le 2026-10-29 : `CHECK OK`, `E2E OK` (58 parcours, FR et 
 
 ### Point de contrôle H3 [matériel]
 
-- [ ] [matériel] Test complet au travail et en classe (procédure H3).
+- [x] [matériel] Test complet au travail et en classe (procédure H3).
 - [x] Publication sur GitHub **après accord explicite de l'utilisateur**.
 
 Publié le 2026-11-12 avec l'accord de l'utilisateur : le code source sur https://github.com/Belenos-Toutatis/ardoise, sans version proposée en téléchargement. Avant la publication, l'historique a été réécrit pour ne garder aucune donnée personnelle (commits signés avec l'adresse no-reply de GitHub, exemples neutres à la place du prénom et du nom d'utilisateur de Windows) et placé dans un dépôt neuf ; l'ancien dépôt reste privé sous le nom `ardoise-archive`. Le nom « Ardoise » est gardé.
@@ -311,7 +311,7 @@ Pendant ces vérifications, deux défauts des tests sont corrigés : un parcours
 
 ### Point de contrôle H6 [matériel]
 
-- [ ] [matériel] En classe, avec la vraie tablette et le partage vers le PC du vidéoprojecteur : un élève écrit pendant que l'enseignant corrige au stylet de la Surface sur un calque « Correction », gomme et annule ; puis un export PDF à calques séparés, ouvert dans Acrobat Reader ou Firefox.
+- [x] [matériel] En classe, avec la vraie tablette et le partage vers le PC du vidéoprojecteur : un élève écrit pendant que l'enseignant corrige au stylet de la Surface sur un calque « Correction », gomme et annule ; puis un export PDF à calques séparés, ouvert dans Acrobat Reader ou Firefox.
 
 ## M15 — Régler « Redresser les formes »
 
@@ -383,7 +383,9 @@ Choix faits en suivant les recommandations de la conception (`docs/design/paper-
 
 ### Point de contrôle H7 [matériel]
 
-- [ ] [matériel] En classe : changer le papier et poser une fiche en PDF sous la page pendant le direct ; projeter une note de l'éditeur et y écrire ; enregistrer le son en écrivant au stylet de la Surface, puis relire la note et exporter sa vidéo.
+- [x] [matériel] En classe : changer le papier et poser une fiche en PDF sous la page pendant le direct ; projeter une note de l'éditeur et y écrire ; enregistrer le son en écrivant au stylet de la Surface, puis relire la note et exporter sa vidéo.
+
+H2, H3, H6 et H7 faits par l'utilisateur (signalé le 2026-11-12). Retour reçu : dans l'éditeur, une sélection faite au stylet, clavier détaché, ne se déplace ni ne se redimensionne au stylet (la souris le fait) ; à corriger (case « Corrections issues du retour de l'utilisateur » de H2).
 
 ---
 
