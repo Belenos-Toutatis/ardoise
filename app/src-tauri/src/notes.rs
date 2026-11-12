@@ -8,9 +8,10 @@ use std::path::Path;
 use ardoise_core::library::{FileStamp, Library, LibraryError};
 use ardoise_core::note::{Background, BackgroundImage, Note, PageSize};
 use ardoise_ink::{Tool, outline};
+use ardoise_media::narration_header;
 use ardoise_render::{NoteView, Picture, RenderError, RenderOptions, encode_png, render_note};
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use crate::AppContext;
 use crate::background::{self, PlacedImage};
@@ -91,12 +92,19 @@ pub struct OpenedNote {
     /// where its source is now.
     pub revision: Option<RevisionView>,
     /// The narration the note holds, read from the header of its audio member (M17); `None` without
-    /// one, or when it is damaged. Package 0: always `None`; package F fills it.
+    /// one, or when it is damaged (the replay says why: `narration_info`).
     pub narration: Option<NarrationInfo>,
 }
 
 pub fn open_in(library: &Library, path: &Path) -> Result<OpenedNote, LibraryError> {
     let loaded = library.read(path)?;
+    // The member is already read: only its headers are parsed, nothing is decoded.
+    let narration = loaded
+        .file
+        .audio
+        .as_deref()
+        .and_then(|bytes| narration_header(bytes).ok())
+        .map(|header| NarrationInfo::of(&header));
     Ok(OpenedNote {
         revision: loaded
             .file
@@ -105,7 +113,7 @@ pub fn open_in(library: &Library, path: &Path) -> Result<OpenedNote, LibraryErro
             .map(|info| revision::view_of(library, info)),
         note: loaded.file.note,
         stamp: loaded.stamp,
-        narration: None,
+        narration,
     })
 }
 
@@ -128,9 +136,22 @@ pub fn save_in(
 pub fn save_in_with_account(
     library: &Library,
     path: &Path,
+    note: Note,
+    stamp: &FileStamp,
+    account: Option<&str>,
+) -> Result<FileStamp, LibraryError> {
+    save_file(library, path, note, stamp, account, None)
+}
+
+/// [`save_in_with_account`] that, with `audio` (an `audio.opus` member), also makes it the note's
+/// narration, replacing any, in the same write.
+fn save_file(
+    library: &Library,
+    path: &Path,
     mut note: Note,
     stamp: &FileStamp,
     account: Option<&str>,
+    audio: Option<&[u8]>,
 ) -> Result<FileStamp, LibraryError> {
     let loaded = library.read(path)?;
     if loaded.stamp != *stamp {
@@ -146,6 +167,9 @@ pub fn save_in_with_account(
     })?;
     if let Some(account) = account {
         file.add_revision_entry(note.modified, account);
+    }
+    if let Some(audio) = audio {
+        file.audio = Some(audio.to_vec());
     }
     file.thumbnail = background::settle(&mut file, &note);
     file.note = note;
@@ -213,32 +237,69 @@ pub async fn open_note(context: State<'_, AppContext>, path: String) -> CommandR
 /// (`background::Staging`); without it the file's own image member is kept, which must show
 /// the image the note describes (`background::check_keyless`). `narration_key` names the sound of
 /// a recording made while writing, kept in memory until now (`NarrationSaved::staged`): it is
-/// written in the same save as the note (M17; ignored until package F).
+/// written in the same save as the note (M17, [`save_note_in`]).
 #[tauri::command]
 pub async fn save_note(
+    app: AppHandle,
     context: State<'_, AppContext>,
-    _narration: State<'_, NarrationRuntime>,
     path: String,
     note: Note,
     stamp: FileStamp,
     image_key: Option<String>,
     narration_key: Option<String>,
 ) -> CommandResult<FileStamp> {
-    let _ = narration_key;
     let library = library_of(&context)?;
     blocking(move || {
-        save_with_key(
+        save_note_in(
             &library,
+            &app.state::<NarrationRuntime>(),
             Path::new(&path),
             note,
             &stamp,
             image_key.as_deref(),
+            narration_key.as_deref(),
         )
     })
     .await
 }
 
-/// [`save_in`] with the background pixels staged under `key` (`save_note`).
+/// What `save_note` does: the note saved with the background pixels staged under `image_key`
+/// ([`save_with_key_and_account`]) and, with `narration_key`, the sound staged under it
+/// in `narration` written as the note's narration (replacing any) in the same atomic write, so the
+/// strokes timed on it are never in the file without it. A key that is not staged is
+/// `noStagedNarration` and nothing is written. Once saved, the staged sound and its backup copy
+/// go; a failed save (`noteConflict`, a disk error) keeps both for the next save (a copy saved
+/// elsewhere, or a retry).
+pub fn save_note_in(
+    library: &Library,
+    narration: &NarrationRuntime,
+    path: &Path,
+    note: Note,
+    stamp: &FileStamp,
+    image_key: Option<&str>,
+    narration_key: Option<&str>,
+) -> CommandResult<FileStamp> {
+    let audio = narration_key
+        .map(|key| narration.staged_audio(key))
+        .transpose()?;
+    let saved = save_with_keys(
+        library,
+        path,
+        note,
+        stamp,
+        image_key,
+        None,
+        audio.as_deref(),
+    )?;
+    if let Some(key) = narration_key {
+        narration.drop_staged(key);
+    }
+    Ok(saved)
+}
+
+/// [`save_in`] with the background pixels staged under `key`: [`save_note_in`] without a
+/// narration, for the tests of the background images.
+#[cfg(test)]
 pub fn save_with_key(
     library: &Library,
     path: &Path,
@@ -259,6 +320,20 @@ pub fn save_with_key_and_account(
     key: Option<&str>,
     account: Option<&str>,
 ) -> CommandResult<FileStamp> {
+    save_with_keys(library, path, note, stamp, key, account, None)
+}
+
+/// [`save_with_key_and_account`] that, with `audio` (an `audio.opus` member), also makes it the
+/// note's narration in the same write.
+fn save_with_keys(
+    library: &Library,
+    path: &Path,
+    note: Note,
+    stamp: &FileStamp,
+    key: Option<&str>,
+    account: Option<&str>,
+    audio: Option<&[u8]>,
+) -> CommandResult<FileStamp> {
     let chosen = background::chosen_for_save(background::staging(), &note, key)?;
     if key.is_none() && note.background_image.is_some() {
         let on_disk = library.read(path).map_err(library_error)?;
@@ -267,7 +342,7 @@ pub fn save_with_key_and_account(
         }
     }
     background::with_staged(chosen, || {
-        save_in_with_account(library, path, note, stamp, account)
+        save_file(library, path, note, stamp, account, audio)
     })
     .map_err(library_error)
 }
@@ -296,13 +371,19 @@ pub async fn render_background(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::library::tests::{library, write_sample};
+    use crate::narration::{BaseName, Source};
     use crate::thumbnails::tests::png_of;
     use ardoise_core::format::{BackgroundFile, Member, NoteFile, write_note};
     use ardoise_core::note::{A4_LANDSCAPE, Background, Layer, Origin, Timing};
     use ardoise_core::note::{A4_PORTRAIT, Paper, Template};
     use ardoise_ink::{Point, Rgba, Stroke};
+    use ardoise_media::microphone::simulated_narration;
+    use ardoise_media::replay::ReplayOptions;
+    use ardoise_media::{Narration, NarrationBase, encode_narration};
 
     fn stroke(layer: u32, color: Rgba) -> Stroke {
         Stroke {
@@ -516,5 +597,205 @@ mod tests {
 
     fn render_background_url(page: PageSize, background: Background, width: u32) -> String {
         tauri::async_runtime::block_on(render_background(page, background, width, None)).unwrap()
+    }
+
+    // --- The sound of a recording made while writing (M17) ---
+
+    /// An `audio.opus` of `ms` of the simulated voice, in `base` time from `start_ms`.
+    fn narration_audio(ms: u64, base: NarrationBase, start_ms: i64) -> Vec<u8> {
+        encode_narration(&Narration {
+            clip: simulated_narration(Duration::from_millis(ms), 1),
+            base,
+            options: ReplayOptions::default(),
+            start_ms,
+        })
+        .unwrap()
+    }
+
+    /// A runtime that never records (the sounds are staged by hand), its copies in `backup`.
+    fn narration_runtime(backup: &Path) -> NarrationRuntime {
+        NarrationRuntime::new(
+            Box::new(
+                |_: Option<&str>, _: bool| -> CommandResult<Box<dyn Source>> {
+                    Err(CommandError::new("microphoneFailed", "not in these tests"))
+                },
+            ),
+            backup.to_path_buf(),
+        )
+    }
+
+    /// How many files `dir` holds.
+    fn files_in(dir: &Path) -> usize {
+        std::fs::read_dir(dir).map_or(0, |entries| entries.count())
+    }
+
+    #[test]
+    fn a_staged_narration_is_written_with_the_note_in_one_save() {
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Essai");
+        let backup = tempfile::tempdir().unwrap();
+        let runtime = narration_runtime(backup.path());
+        let opened = open_in(&library, &saved.path).unwrap();
+        assert_eq!(opened.narration, None);
+        assert_eq!(
+            serde_json::to_value(&opened).unwrap()["narration"],
+            serde_json::Value::Null
+        );
+
+        // Stopped: the sound waits, with its copy.
+        let audio = narration_audio(500, NarrationBase::Note, 1_232);
+        let key = runtime.stage(&saved.path, audio.clone());
+        assert_eq!(files_in(backup.path()), 1);
+        // The strokes written meanwhile and the sound go in the same save.
+        let mut edited = opened.note.clone();
+        edited.strokes.push(stroke(0, Rgba::BLACK));
+        let stamp = save_note_in(
+            &library,
+            &runtime,
+            &saved.path,
+            edited.clone(),
+            &opened.stamp,
+            None,
+            Some(&key),
+        )
+        .unwrap();
+        let after = library.read(&saved.path).unwrap();
+        assert_eq!(after.stamp, stamp);
+        // (The file rounds the samples: compare the strokes, not their exact values.)
+        assert_eq!(after.file.note.strokes.len(), 2);
+        assert_eq!(after.file.note.strokes[1].tool, Tool::FountainPen);
+        assert_eq!(after.file.audio.as_deref(), Some(&audio[..]));
+        // Saved: the sound and its copy go.
+        assert!(!runtime.has_staged());
+        assert_eq!(files_in(backup.path()), 0);
+
+        // Opening the note says what narration it holds, from the member's header.
+        let reopened = open_in(&library, &saved.path).unwrap();
+        let info = reopened.narration.clone().unwrap();
+        assert_eq!(
+            (info.base, info.speed, info.max_pause_ms, info.start_ms),
+            (BaseName::Note, 1.0, None, 1_232)
+        );
+        assert!((490..=510).contains(&info.duration_ms), "{info:?}");
+        let json = serde_json::to_value(&reopened).unwrap();
+        assert_eq!(json["narration"]["base"], "note");
+        assert_eq!(json["narration"]["startMs"], 1_232);
+
+        // The key is used up: a save with it is refused and writes nothing.
+        let before = std::fs::read(&saved.path).unwrap();
+        let error = save_note_in(
+            &library,
+            &runtime,
+            &saved.path,
+            edited.clone(),
+            &stamp,
+            None,
+            Some(&key),
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "noStagedNarration");
+        assert_eq!(std::fs::read(&saved.path).unwrap(), before);
+        // Without a key, the note's narration is kept as it is.
+        let mut retitled = edited;
+        retitled.title = "Renommée".into();
+        save_note_in(
+            &library,
+            &runtime,
+            &saved.path,
+            retitled,
+            &stamp,
+            None,
+            None,
+        )
+        .unwrap();
+        let after = library.read(&saved.path).unwrap().file;
+        assert_eq!(after.note.title, "Renommée");
+        assert_eq!(after.audio.as_deref(), Some(&audio[..]));
+    }
+
+    #[test]
+    fn a_staged_narration_survives_a_failed_save_and_replaces_the_old_one() {
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Essai");
+        // The note already has a narration, recorded during a replay.
+        let mut file = library.read(&saved.path).unwrap().file;
+        file.audio = Some(narration_audio(300, NarrationBase::Replay, 0));
+        let stamp = library.save(&saved.path, &file, &saved.stamp).unwrap();
+        let backup = tempfile::tempdir().unwrap();
+        let runtime = narration_runtime(backup.path());
+        let audio = narration_audio(400, NarrationBase::Note, 1_232);
+        let key = runtime.stage(&saved.path, audio.clone());
+
+        // The note changed on disk meanwhile: a conflict, nothing written, the sound kept.
+        let mut elsewhere = file.clone();
+        elsewhere.note.title = "Changée ailleurs".into();
+        let newer = library.save(&saved.path, &elsewhere, &stamp).unwrap();
+        let before = std::fs::read(&saved.path).unwrap();
+        let error = save_note_in(
+            &library,
+            &runtime,
+            &saved.path,
+            file.note.clone(),
+            &stamp,
+            None,
+            Some(&key),
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "noteConflict");
+        assert_eq!(std::fs::read(&saved.path).unwrap(), before);
+        assert!(runtime.has_staged());
+        assert_eq!(files_in(backup.path()), 1);
+
+        // « Enregistrer une copie »: the copy gets the strokes and the sound.
+        let copy = write_sample(&library, "", "Copie");
+        save_note_in(
+            &library,
+            &runtime,
+            &copy.path,
+            file.note.clone(),
+            &copy.stamp,
+            None,
+            Some(&key),
+        )
+        .unwrap();
+        let copied = library.read(&copy.path).unwrap().file;
+        assert_eq!(copied.audio.as_deref(), Some(&audio[..]));
+        assert!(!runtime.has_staged());
+        assert_eq!(files_in(backup.path()), 0);
+        // The note itself kept its own narration.
+        let kept = library.read(&saved.path).unwrap();
+        assert_eq!(kept.stamp, newer);
+        assert_eq!(kept.file.audio, elsewhere.audio);
+
+        // A save at the right stamp replaces the old narration by the staged one.
+        let again = narration_audio(200, NarrationBase::Note, 1_500);
+        let key = runtime.stage(&saved.path, again.clone());
+        save_note_in(
+            &library,
+            &runtime,
+            &saved.path,
+            kept.file.note.clone(),
+            &newer,
+            None,
+            Some(&key),
+        )
+        .unwrap();
+        let after = library.read(&saved.path).unwrap().file;
+        assert_eq!(after.audio.as_deref(), Some(&again[..]));
+        assert_eq!(after.note.title, "Changée ailleurs");
+        let info = open_in(&library, &saved.path).unwrap().narration.unwrap();
+        assert_eq!((info.base, info.start_ms), (BaseName::Note, 1_500));
+    }
+
+    #[test]
+    fn a_damaged_narration_is_not_said_when_opening() {
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "", "Essai");
+        let mut file = library.read(&saved.path).unwrap().file;
+        file.audio = Some(b"OggS but not really".to_vec());
+        library.save(&saved.path, &file, &saved.stamp).unwrap();
+        let opened = open_in(&library, &saved.path).unwrap();
+        assert_eq!(opened.narration, None);
+        assert_eq!(opened.note, file.note);
     }
 }
