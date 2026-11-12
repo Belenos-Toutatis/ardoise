@@ -1614,7 +1614,7 @@
       "severalSelected": "Select a single note to resume in live mode.",
       "failed": "Live mode could not resume this sheet.",
       "back": "Back to the library",
-      "cannotTurn": "A resumed sheet is never turned: the next page follows the tablet's position again.",
+      "cannotTurn": "This page does not turn with the tablet: it is a resumed sheet, or a page written over an image. A new page follows the tablet's position again.",
       "hold": "To write on this sheet, hold the tablet like this: {position}.",
       "forked": {
         "sheet": "Sheet “{title}”",

@@ -164,7 +164,7 @@ export class LiveState {
   /** The page has an edit to undo (`api.liveUndoEdit`), or to redo (`api.liveRedoEdit`). */
   canUndo = $state(false);
   canRedo = $state(false);
-  /** The current page turns with the tablet; false on a resumed sheet, which is never turned. */
+  /** The current page turns with the tablet; false on a resumed sheet, which is never turned, and on a page written over an image. */
   canTurnPage = $state(true);
   /** The sheets that went on in a new note, in the order they were told; each stays until dismissed. */
   forks = $state.raw<SheetFork[]>([]);

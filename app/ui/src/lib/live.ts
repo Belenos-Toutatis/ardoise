@@ -141,8 +141,8 @@ export interface LiveSnapshot {
    */
   orientation: Orientation;
   /**
-   * Whether the current page turns with the tablet: false on a resumed sheet, which is never turned
-   * (the quick switch is disabled there). Absent on the share's viewers, which do not need it.
+   * Whether the current page turns with the tablet: false on a resumed sheet, which is never turned, and on a page
+   * written over an image (M17) (the quick switch is disabled there). Absent on the share's viewers, which do not need it.
    */
   canTurnPage?: boolean;
   /**

@@ -1614,7 +1614,7 @@
       "severalSelected": "Sélectionnez une seule note pour reprendre le mode direct.",
       "failed": "Le mode direct n'a pas pu reprendre cette feuille.",
       "back": "Retour à la bibliothèque",
-      "cannotTurn": "Une feuille reprise ne se tourne jamais : la page suivante suivra de nouveau la position de la tablette.",
+      "cannotTurn": "Cette page ne se tourne pas avec la tablette : c'est une feuille reprise, ou une page écrite sur une image. Une nouvelle page suivra de nouveau la position de la tablette.",
       "hold": "Pour écrire sur cette feuille, tenez la tablette ainsi : {position}.",
       "forked": {
         "sheet": "Feuille « {title} »",
