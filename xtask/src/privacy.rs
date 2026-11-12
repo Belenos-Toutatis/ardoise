@@ -118,6 +118,19 @@ const SYNTHETIC_ADDRESSES: &[&str] = &[
 /// Prefixes of synthetic addresses (see [`SYNTHETIC_ADDRESSES`]).
 const SYNTHETIC_ADDRESS_PREFIXES: &[&str] = &["00:00:5E:00:53:"];
 
+/// UUIDs that are public constants of a Bluetooth protocol, not private markers, although the
+/// private captures hold them (a survey of a device lists its services), lower case:
+///
+/// * `6e40000x-b5a3-f393-e0a9-e50e24dcca9e`: the Nordic UART service and its characteristics
+///   (1 to 3, published by Nordic Semiconductor and used by the Slate, `ardoise-ble/src/gatt.rs`),
+///   and the fourth characteristic some tablets add to it (`docs/research/xiaomi-blackboard.md`).
+const PUBLIC_UUIDS: &[&str] = &[
+    "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+    "6e400002-b5a3-f393-e0a9-e50e24dcca9e",
+    "6e400003-b5a3-f393-e0a9-e50e24dcca9e",
+    "6e400004-b5a3-f393-e0a9-e50e24dcca9e",
+];
+
 // ---------------------------------------------------------------------------------------------
 // Path rules
 // ---------------------------------------------------------------------------------------------
@@ -502,8 +515,8 @@ fn private_dir(root: &Path) -> Option<PathBuf> {
 }
 
 /// The UUIDs of the private folder: in every file and folder name, and in the content of the
-/// files we may open. Returns them with the number of files whose content was read. The values
-/// are never printed.
+/// files we may open, without the public constants of [`PUBLIC_UUIDS`]. Returns them with the
+/// number of files whose content was read. The values are never printed.
 fn collect_markers(dir: &Path) -> io::Result<(BTreeSet<String>, usize)> {
     fn walk(
         dir: &Path,
@@ -535,6 +548,7 @@ fn collect_markers(dir: &Path) -> io::Result<(BTreeSet<String>, usize)> {
     let mut markers = BTreeSet::new();
     let mut opened = 0;
     walk(dir, &mut Vec::new(), &mut markers, &mut opened)?;
+    markers.retain(|uuid| !PUBLIC_UUIDS.contains(&uuid.as_str()));
     Ok((markers, opened))
 }
 
@@ -1263,8 +1277,18 @@ mod tests {
         fs::write(dir.join("x/db/profile"), from_profile).unwrap();
         fs::write(dir.join("x/db/000001.ldb"), from_other_db).unwrap();
         fs::write(dir.join("x").join(format!("{from_profile_name}.txt")), "").unwrap();
+        // A survey of a device lists its services: the Nordic UART ones are public constants.
+        fs::write(
+            dir.join("x/survey.jsonl"),
+            format!("{{\"uuid\":\"{}\"}}", PUBLIC_UUIDS[2].to_uppercase()),
+        )
+        .unwrap();
 
         let (markers, opened) = collect_markers(&dir).unwrap();
+        assert!(
+            PUBLIC_UUIDS.iter().all(|uuid| !markers.contains(*uuid)),
+            "public protocol constants are not private markers"
+        );
         assert!(markers.contains(from_name));
         assert!(markers.contains(from_content));
         assert!(markers.contains(from_profile_name), "names are listed");
@@ -1276,7 +1300,7 @@ mod tests {
             !markers.contains(from_other_db),
             "only db/notes may be opened"
         );
-        assert_eq!(opened, 2);
+        assert_eq!(opened, 3);
     }
 
     fn git_ok(dir: &Path, args: &[&str]) -> bool {
