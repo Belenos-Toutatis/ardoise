@@ -296,6 +296,23 @@ impl Staging {
             .cloned()
     }
 
+    /// Takes the image staged under `key` out of the staging area, its decoded copy with it: live
+    /// mode keeps it with its page from then on (`live::paper`), and the staging area does not keep
+    /// a lesson's worksheets (the editor, which empties it, is not open meanwhile). `None` when
+    /// nothing is staged under `key`; [`put`](Self::put) gives it back.
+    pub fn take(&self, key: &str) -> Option<Arc<Staged>> {
+        let staged = self
+            .images
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(key);
+        self.decoded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(decoded, _)| decoded != key);
+        staged
+    }
+
     /// The decoded pixels of the image staged under `key`; `None` when there is none or it
     /// cannot be decoded.
     pub fn picture(&self, key: &str) -> Option<Arc<Picture>> {
@@ -960,6 +977,49 @@ pub(crate) mod tests {
         assert_eq!(staging.len(), 0);
         assert!(staging.picture(&staged.key).is_none());
         assert_eq!(staged_code(&staging, &staged.key), "backgroundMissing");
+    }
+
+    #[test]
+    fn an_image_taken_for_live_mode_leaves_the_staging_area_with_its_decoded_copy() {
+        let staging = Staging::default();
+        let (_dir, path) = user_file("fiche.png", &encode_png(&halves(40, 20)).unwrap());
+        let staged = stage_file(&staging, &path, None).unwrap();
+        let other = staging.put(Staged {
+            file: BackgroundFile {
+                extension: "png".to_owned(),
+                bytes: encode_png(&halves(20, 10)).unwrap(),
+            },
+            width: 20,
+            height: 10,
+        });
+        assert!(staging.picture(&staged.key).is_some());
+        assert!(staging.picture(&other).is_some());
+
+        let taken = staging.take(&staged.key).unwrap();
+        assert_eq!((taken.width, taken.height), (40, 20));
+        assert_eq!(key_of(&taken.file.bytes), staged.key);
+        // Gone, its decoded pixels with it; the other image stays, decoded.
+        assert!(staging.get(&staged.key).is_none());
+        assert_eq!(staging.len(), 1);
+        let decoded: Vec<String> = staging
+            .decoded
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect();
+        assert_eq!(decoded, std::slice::from_ref(&other));
+        assert_eq!(staged_code(&staging, &staged.key), "backgroundMissing");
+        assert!(staging.take(&staged.key).is_none());
+        assert!(staging.take("nothing-0").is_none());
+
+        // Given back (live mode refused it): under the same key, nothing copied.
+        let bytes = taken.file.bytes.as_ptr();
+        let back = Arc::unwrap_or_clone(taken);
+        assert_eq!(back.file.bytes.as_ptr(), bytes);
+        assert_eq!(staging.put(back), staged.key);
+        assert_eq!(staging.len(), 2);
+        assert!(staging.picture(&staged.key).is_some());
     }
 
     /// CRC-32 of PNG chunks (ISO 3309).

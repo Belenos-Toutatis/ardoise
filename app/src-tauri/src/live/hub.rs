@@ -9,7 +9,8 @@
 //!   ends, then is rewritten atomically at most every 5 s while it changes (less often when a write
 //!   takes long: [`save_wait`]), and at once when it is left or when live mode stops. A page's
 //!   narration (recorded in live mode, cut per page
-//!   by `narration.rs`) is attached to it here and written with it, as its `audio.opus`. A
+//!   by `narration.rs`) is attached to it here and written with it, as its `audio.opus`; the
+//!   pixels of its background image (M17, `paper.rs`) as its `background.*` member. A
 //!   resumed sheet ([`LiveHub::resume`], `resume.rs`) is written through the file it came from.
 //!
 //! Neither thread does its slow work (sending, writing files) while holding the session lock,
@@ -22,7 +23,7 @@ use std::time::{Duration, Instant};
 use ardoise_core::format::{FormatError, NoteFile};
 use ardoise_core::fsutil::write_atomic_new;
 use ardoise_core::library::{Library, LibraryError};
-use ardoise_core::note::{BackgroundImage, Note, PageSize};
+use ardoise_core::note::{Background, BackgroundImage, Note, PageSize, Paper};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::pages::oriented_size;
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
@@ -38,14 +39,16 @@ use super::model::{
     ForkReason, ForkedSheet, LiveBatch, LiveCommandKind, LiveEvent, LiveMark, LivePen,
     LiveSessionState, LiveSnapshot, LiveStyle, LiveViewState, PlacedStroke, wall_ms, wall_now_ms,
 };
+use super::paper::{ImageChange, LivePageImageOp, PageImage, PaperError, checked_image};
 use super::pen::ComputerPenInput;
 use super::resume::{ResumeBase, ResumeSeed, merged_keeping_both, placed_for_merge};
 use super::session::{LiveSession, Page, SavedFile, SheetFork};
+use crate::background::Staging;
 use crate::library::{now_ms, path_text};
 use crate::narration::{backup_dir, write_narration_backup};
 use crate::original::keep_resumed_original;
 use crate::presentation::MonitorInfo;
-use crate::thumbnails::{thumbnail_png, thumbnail_view};
+use crate::thumbnails::thumbnail_view;
 
 /// Timing of the hub (shortened by the tests).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,6 +135,9 @@ pub enum LiveError {
     /// An edit of strokes was refused (nothing was changed).
     #[error(transparent)]
     Edit(#[from] LiveEditError),
+    /// A change of the page's paper or image was refused (nothing was changed).
+    #[error(transparent)]
+    Paper(#[from] PaperError),
 }
 
 /// What a new session needs.
@@ -181,22 +187,35 @@ struct SaveJob {
     base: Option<Arc<ResumeBase>>,
     /// A resumed sheet: what of the session's changes its file hears of ([`written_sheet`]).
     sheet: SheetChanges,
+    /// The pixels of the page's image (M17), written as its `background.*` member: shared with
+    /// the page, nothing copied under the lock.
+    image: Option<Arc<PageImage>>,
 }
 
-/// What a resumed sheet's file hears of, beyond its ink ([`written_sheet`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// What a resumed sheet's file hears of, beyond its ink ([`written_sheet`], [`page_file`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SheetChanges {
     /// Ink was added under the blackboard.
     on_board: bool,
     /// Its layers were changed on purpose in the live window (M14).
     layers_edited: bool,
+    /// Its paper was changed on purpose in the Page tab (M17): it is written with `own_paper`.
+    paper_edited: bool,
+    /// Its image was changed on purpose in the Fond tab (M17): it is written with the page's.
+    image_edited: bool,
+    /// The page's own paper, what it has without the blackboard ([`Page::own_paper`]).
+    own_paper: Paper,
 }
 
 impl SheetChanges {
-    fn of(page: &Page) -> SheetChanges {
+    /// What `page` holds, the blackboard being on (`board`) or not.
+    fn of(page: &Page, board: bool) -> SheetChanges {
         SheetChanges {
             on_board: page.ink_on_board(),
             layers_edited: page.layers_edited(),
+            paper_edited: page.paper_edited(),
+            image_edited: page.image_edited(),
+            own_paper: page.own_paper(board),
         }
     }
 }
@@ -486,9 +505,12 @@ pub(super) fn file_fingerprint(file: &NoteFile) -> Option<u64> {
 /// that received no ink is the sheet it was: what the session did around it stays out of the file
 /// (the blackboard turned on in front of it, a layer added to write on, an edit undone), except a
 /// deliberate change of its layers in the live window (`layers_edited`, M14: then they are written
-/// as they are, new ink or not, as in the editor). Slate paper reaches the file only with ink
-/// written under the blackboard (`on_board`), which white chalk needs, and only as long as that
-/// ink makes a difference.
+/// as they are, new ink or not, as in the editor). Its paper is, in order: the slate that ink
+/// written under the blackboard needs (`on_board`, white chalk being invisible on most paper, and
+/// only as long as that ink makes a difference); else its own paper when the Page tab changed it
+/// (`paper_edited`, M17: not the slate of a blackboard merely pressed in front of it); else the
+/// paper read. Its template, texture and image are written as the page has them: only the Page
+/// and Fond tabs change them, on purpose.
 fn written_sheet(note: &Note, before: &Note, sheet: SheetChanges) -> Note {
     let mut written = note.clone();
     let same_ink = note.strokes == before.strokes;
@@ -496,24 +518,37 @@ fn written_sheet(note: &Note, before: &Note, sheet: SheetChanges) -> Note {
         written.layers.clone_from(&before.layers);
     }
     if same_ink || !sheet.on_board {
-        written.background.paper = before.background.paper;
+        written.background.paper = if sheet.paper_edited {
+            sheet.own_paper
+        } else {
+            before.background.paper
+        };
     }
     written
 }
 
-/// What is written for a page, its thumbnail apart. A page of the session holds only its note and
-/// its narration. A resumed sheet is the file it came from with the note ([`written_sheet`]) and
-/// the narration replaced, so that nothing else of it is lost; the version before the resume is
-/// kept for "back to the original" as soon as the ink differs from it, blank or not
-/// (`original::keep_resumed_original`: never over an original the file already has). Recomputed from
-/// that file at each write: the first write may change only the narration, and a fork needs it as
-/// much as the note's own file does.
+/// What is written for a page, its thumbnail apart. A page of the session holds its note, its
+/// narration and the pixels of its image (`image`, M17). A resumed sheet is the file it came from
+/// with the note ([`written_sheet`]) and the narration replaced, so that nothing else of it is lost:
+/// its `background.*` member too, unless the Fond tab changed the image (`image_edited`: then the
+/// page's pixels, none once removed); the version before the resume is kept for "back to the
+/// original" as soon as the ink differs from it, blank or not (`original::keep_resumed_original`:
+/// never over an original the file already has). Recomputed from that file at each write: the
+/// first write may change only the narration, and a fork needs it as much as the note's own file
+/// does. The member is copied here, outside the hub's lock.
 fn page_file(
     note: &Note,
     audio: Option<&Arc<Vec<u8>>>,
     base: Option<&ResumeBase>,
     sheet: SheetChanges,
+    image: Option<&PageImage>,
 ) -> Result<NoteFile, FormatError> {
+    let pixels = || {
+        note.background_image
+            .as_ref()
+            .and(image)
+            .map(|image| image.member.clone())
+    };
     let mut file = match base {
         Some(base) => {
             let written = written_sheet(note, &base.file.note, sheet);
@@ -521,22 +556,33 @@ fn page_file(
             keep_resumed_original(&mut file, &written)?;
             file.note = written;
             file.note.modified = base.file.note.modified;
+            // An image described without pixels (its member unreadable) keeps the file's member.
+            if sheet.image_edited && (image.is_some() || note.background_image.is_none()) {
+                file.background = pixels();
+            }
             file
         }
-        None => NoteFile::new(note.clone()),
+        None => {
+            let mut file = NoteFile::new(note.clone());
+            file.background = pixels();
+            file
+        }
     };
     file.note.modified = now_ms().max(file.note.modified).max(file.note.created);
     file.audio = audio.map(|audio| audio.as_ref().clone());
     Ok(file)
 }
 
-/// The thumbnail of a page: with its background image on a resumed sheet (a page of the session has
-/// none); the one the file had when it cannot be drawn.
-fn page_thumbnail(file: &mut NoteFile, base: Option<&ResumeBase>) {
-    let drawn = match base {
-        Some(base) => thumbnail_view(NoteView::new(&file.note, base.picture())),
-        None => thumbnail_png(&file.note),
-    };
+/// The thumbnail of a page, with the pixels of its image (decoded outside the hub's lock, or kept
+/// decoded: `paper::DecodedPictures`); the one the file had when it cannot be drawn.
+fn page_thumbnail(file: &mut NoteFile, image: Option<&PageImage>) {
+    let picture = file
+        .note
+        .background_image
+        .as_ref()
+        .and(image)
+        .and_then(PageImage::picture);
+    let drawn = thumbnail_view(NoteView::new(&file.note, picture.as_deref()));
     if drawn.is_some() {
         file.thumbnail = drawn;
     }
@@ -551,15 +597,17 @@ fn page_thumbnail(file: &mut NoteFile, base: Option<&ResumeBase>) {
 /// holds what its file holds (the blackboard pressed, nothing written) is not written at all.
 fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError> {
     let base = job.base.as_deref();
-    let mut file = page_file(&job.note, job.audio.as_ref(), base, job.sheet).map_err(|source| {
-        LibraryError::Format {
-            path: job
-                .file
-                .as_ref()
-                .map_or_else(|| library.root().to_path_buf(), |file| file.path.clone()),
-            source,
-        }
-    })?;
+    let image = job.image.as_deref();
+    let mut file =
+        page_file(&job.note, job.audio.as_ref(), base, job.sheet, image).map_err(|source| {
+            LibraryError::Format {
+                path: job
+                    .file
+                    .as_ref()
+                    .map_or_else(|| library.root().to_path_buf(), |file| file.path.clone()),
+                source,
+            }
+        })?;
     let content = file_fingerprint(&file);
     if let (Some(_), Some(previous)) = (base, &job.file)
         && content.is_some()
@@ -573,7 +621,7 @@ fn write_page(library: &Library, job: &SaveJob) -> Result<Written, LibraryError>
             fork: None,
         });
     }
-    page_thumbnail(&mut file, base);
+    page_thumbnail(&mut file, image);
     let Some(previous) = &job.file else {
         let saved = library.create(Path::new(""), &file)?;
         return Ok(Written {
@@ -685,6 +733,9 @@ fn merge_outside(
     note.origin = file.note.origin.clone();
     merged.thumbnail = file.thumbnail.clone();
     merged.audio = file.audio.clone();
+    // The pixels go with the description of the image (M17: the Fond tab changes both): the file's
+    // own would show another image where the page's is described.
+    merged.background = file.background.clone();
     // The version before a resume, kept by this very write when it is the first to change the ink.
     merged.original_note = file.original_note.clone();
     let stamp = library.save(&loaded.path, &merged, &loaded.stamp).ok()?;
@@ -946,6 +997,7 @@ impl Shared {
                 return Ok(());
             };
             let session_id = state.session.id();
+            let board = state.session.view().board;
             let mut jobs = Vec::new();
             for index in 0..state.session.pages().len() {
                 let Some(page) = state.session.page_mut(index) else {
@@ -967,7 +1019,8 @@ impl Shared {
                     audio: page.audio.clone(),
                     file: page.file.clone(),
                     base: page.base().cloned(),
-                    sheet: SheetChanges::of(page),
+                    sheet: SheetChanges::of(page, board),
+                    image: page.image().cloned(),
                 });
             }
             (library, jobs)
@@ -1071,14 +1124,16 @@ fn write_sound_apart(
     base: Option<&ResumeBase>,
     from: Option<&Path>,
     sheet: SheetChanges,
+    image: Option<&PageImage>,
     audio: &Arc<Vec<u8>>,
 ) -> Result<PathBuf, LibraryError> {
-    let mut file =
-        page_file(note, Some(audio), base, sheet).map_err(|source| LibraryError::Format {
+    let mut file = page_file(note, Some(audio), base, sheet, image).map_err(|source| {
+        LibraryError::Format {
             path: from.map_or_else(|| library.root().to_path_buf(), Path::to_path_buf),
             source,
-        })?;
-    page_thumbnail(&mut file, base);
+        }
+    })?;
+    page_thumbnail(&mut file, image);
     let written = match from {
         Some(from) => write_beside(library, file, None, from, ForkReason::Changed)?,
         None => write_as_new(library, file, None)?,
@@ -1184,13 +1239,13 @@ impl LiveHub {
         events
     }
 
-    /// The background image of page `index` and the file holding its pixels: a resumed sheet is
-    /// the only page with one. Only a look under the lock: decoding and rendering are the caller's,
-    /// after it (`share::live_paper`, `live_page_background`).
-    pub fn page_image(&self, index: usize) -> Option<(BackgroundImage, Arc<ResumeBase>)> {
+    /// The background image of page `index` and its pixels (a resumed sheet's from its file, any
+    /// page's from the Fond tab: M17). Only a look under the lock: decoding and rendering are the
+    /// caller's, after it (`share::live_paper`, `live_page_background`).
+    pub fn page_image(&self, index: usize) -> Option<(BackgroundImage, Arc<PageImage>)> {
         let state = self.shared.lock();
         let page = state.session.pages().get(index)?;
-        Some((page.note.background_image.clone()?, page.base()?.clone()))
+        Some((page.note.background_image.clone()?, page.image()?.clone()))
     }
 
     /// Sends the session's batches to `sink` from now on, replacing the window's previous
@@ -1552,6 +1607,71 @@ impl LiveHub {
         Ok(outcome?)
     }
 
+    /// The Page tab's paper for page `page_index` (the one on screen): see
+    /// [`LiveSession::set_page_paper`]. Refused once the session is stopped (its notes are in the
+    /// library) and before the first start.
+    pub fn set_page_paper(
+        &self,
+        page_index: usize,
+        background: Background,
+    ) -> Result<(), LiveError> {
+        let mut outcome = Ok(());
+        self.change(
+            |_| true,
+            |session, out| outcome = session.set_page_paper(page_index, background, out),
+        )?;
+        Ok(outcome?)
+    }
+
+    /// The Fond tab's change of the image of page `page_index` (the one on screen): see
+    /// [`LiveSession::set_page_image`]. Before the lock, the description is checked
+    /// ([`checked_image`]) and the pixels of a `set` are taken out of `staging` (the process's,
+    /// `background::staging`, where the window staged them): under it, only an `Arc` changes hands.
+    /// A refused `set` gives them back to `staging`, under the same key. Refused once the session
+    /// is stopped and before the first start; `backgroundMissing` when nothing is staged under the
+    /// key of a `set`.
+    pub fn change_page_image(
+        &self,
+        page_index: usize,
+        op: LivePageImageOp,
+        staging: &Staging,
+    ) -> Result<(), LiveError> {
+        let (change, taken) = match op {
+            LivePageImageOp::Set { key, image } => {
+                let image = checked_image(image)?;
+                let Some(staged) = staging.take(&key) else {
+                    return Err(PaperError::Missing(key).into());
+                };
+                let pixels = Arc::new(PageImage::staged(key, Arc::unwrap_or_clone(staged)));
+                let change = ImageChange::Set {
+                    image,
+                    pixels: pixels.clone(),
+                };
+                (change, Some(pixels))
+            }
+            LivePageImageOp::Place { image } => (
+                ImageChange::Place {
+                    image: checked_image(image)?,
+                },
+                None,
+            ),
+            LivePageImageOp::Remove => (ImageChange::Remove, None),
+        };
+        let mut outcome = Ok(());
+        let changed = self.change(
+            |_| true,
+            |session, out| outcome = session.set_page_image(page_index, change, out),
+        );
+        let result = changed.and(outcome.map_err(LiveError::from));
+        // Refused: the session did not keep them, nothing is copied back.
+        if result.is_err()
+            && let Some(pixels) = taken
+        {
+            staging.put(Arc::unwrap_or_clone(pixels).into_staged());
+        }
+        result
+    }
+
     pub fn set_style(&self, style: LiveStyle) -> Result<(), LiveError> {
         self.change(|_| false, |session, out| session.set_style(style, out))
     }
@@ -1584,9 +1704,11 @@ impl LiveHub {
             Option<Arc<Vec<u8>>>,
             Option<Arc<ResumeBase>>,
             SheetChanges,
+            Option<Arc<PageImage>>,
         );
         let pages: Vec<Unsaved> = {
             let state = self.shared.lock();
+            let board = state.session.view().board;
             state
                 .session
                 .pages()
@@ -1599,18 +1721,20 @@ impl LiveHub {
                         page.note.clone(),
                         page.audio.clone(),
                         page.base().cloned(),
-                        SheetChanges::of(page),
+                        SheetChanges::of(page, board),
+                        page.image().cloned(),
                     )
                 })
                 .collect()
         };
         pages
             .into_iter()
-            .map(|(index, note, audio, base, sheet)| {
-                let copy = page_file(&note, audio.as_ref(), base.as_deref(), sheet)
+            .map(|(index, note, audio, base, sheet, image)| {
+                let image = image.as_deref();
+                let copy = page_file(&note, audio.as_ref(), base.as_deref(), sheet, image)
                     .and_then(|mut file| {
                         file.note.id = uuid::Uuid::new_v4().to_string();
-                        page_thumbnail(&mut file, base.as_deref());
+                        page_thumbnail(&mut file, image);
                         ardoise_core::format::to_bytes(&file)
                     })
                     .map_err(std::io::Error::other)
@@ -1786,6 +1910,7 @@ impl LiveHub {
         };
         let (library, source) = {
             let state = self.shared.lock();
+            let board = state.session.view().board;
             let source = (state.session.id() == session)
                 .then(|| state.session.pages().get(page))
                 .flatten()
@@ -1794,19 +1919,21 @@ impl LiveHub {
                         page.note.clone(),
                         page.base().cloned(),
                         page.file.as_ref().map(|file| file.path.clone()),
-                        SheetChanges::of(page),
+                        SheetChanges::of(page, board),
+                        page.image().cloned(),
                     )
                 });
             (state.library.clone(), source)
         };
-        let from = source.as_ref().and_then(|(_, _, from, _)| from.clone());
-        if let (Some(library), Some((note, base, from, sheet))) = (&library, &source) {
+        let from = source.as_ref().and_then(|(_, _, from, _, _)| from.clone());
+        if let (Some(library), Some((note, base, from, sheet, image))) = (&library, &source) {
             match write_sound_apart(
                 library,
                 note,
                 base.as_deref(),
                 from.as_deref(),
                 *sheet,
+                image.as_deref(),
                 &audio,
             ) {
                 Ok(kept) => return LiveError::NarrationKeptApart { why, kept },

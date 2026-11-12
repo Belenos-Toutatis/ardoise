@@ -265,11 +265,11 @@ pub struct LiveSnapshot {
     /// 0-based.
     pub page_index: usize,
     pub page_count: usize,
-    /// How the tablet is held (the live window's quick switch shows it). On a resumed sheet held
-    /// the other way round than the setting, how it is to be held for that page.
+    /// How the tablet is held (the live window's quick switch shows it). On a page that does not
+    /// turn held the other way round than the setting, how it is to be held for that page.
     pub orientation: Orientation,
-    /// Whether the current page turns with the tablet. A resumed sheet never does: the interface
-    /// disables the quick switch on it.
+    /// Whether the current page turns with the tablet. A resumed sheet never does, nor a page
+    /// whose background image was written on (M17): the interface disables the quick switch there.
     pub can_turn_page: bool,
     /// The tablet's layer of the current page: where its ink goes (M14: it may be hidden).
     pub layer: u32,
