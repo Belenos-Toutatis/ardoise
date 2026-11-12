@@ -61,6 +61,8 @@ beforeEach(() => {
   setLocale('fr');
   resetMockLive();
   resetMockProjection();
+  // The window exists once the editor opened the projection (Rust refuses every update while it is closed).
+  mockProjectionInvoke('projection_open', { monitor: null });
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => new FakeContext() as unknown as RenderingContext);
 });
 

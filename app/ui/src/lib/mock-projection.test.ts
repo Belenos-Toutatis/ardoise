@@ -110,7 +110,25 @@ describe('the screen', () => {
   });
 });
 
+describe('while closed', () => {
+  it('refuses every update and keeps nothing', () => {
+    const page = note([stroke()]);
+    expect(refusal(() => update({ kind: 'page', note: page, imageKey: null, view: VIEW }))).toBe('projectionStale');
+    expect(refusal(() => update({ kind: 'strokeCancel', id: 1 }))).toBe('projectionStale');
+    expect(mockProjectionState().note).toBeNull();
+    mockProjectionInvoke('projection_open', { monitor: null });
+    update({ kind: 'page', note: page, imageKey: null, view: VIEW });
+    mockProjectionInvoke('projection_close', {});
+    expect(refusal(() => update({ kind: 'strokes', keep: 1, tail: [], ended: null }))).toBe('projectionStale');
+    expect(mockProjectionState().note).toBeNull();
+  });
+});
+
 describe('the scene and its events', () => {
+  beforeEach(() => {
+    mockProjectionInvoke('projection_open', { monitor: null });
+  });
+
   it('answers an idle empty page before any page, then the snapshot of a one-page session', async () => {
     const w = await subscribed();
     expect(w.snapshot.state).toBe('idle');
@@ -178,6 +196,13 @@ describe('the scene and its events', () => {
 
   it('refuses stale and invalid updates', () => {
     expect(refusal(() => update({ kind: 'strokes', keep: 0, tail: [], ended: null }))).toBe('projectionStale');
+    expect(refusal(() => update({ kind: 'view', view: VIEW }))).toBe('projectionStale');
+    expect(refusal(() => update({ kind: 'strokeBegin', id: 1, tool: 'ballpoint', color: BLACK, width: 60, layer: 0, points: [] }))).toBe('projectionStale');
+    expect(refusal(() => update({ kind: 'strokePoints', id: 1, points: [] }))).toBe('projectionStale');
+    // A cancel without a page does nothing.
+    expect(refusal(() => update({ kind: 'strokeCancel', id: 1 }))).toBeNull();
+    expect(refusal(() => update({ kind: 'page', note: note([], { page: { width: 0, height: 100 } }), imageKey: null, view: VIEW }))).toBe('projectionInvalid');
+    expect(refusal(() => update({ kind: 'page', note: note([], { layers: [] }), imageKey: null, view: VIEW }))).toBe('projectionInvalid');
     update({ kind: 'page', note: note([stroke()]), imageKey: null, view: VIEW });
     expect(refusal(() => update({ kind: 'strokes', keep: 2, tail: [], ended: null }))).toBe('projectionStale');
     expect(refusal(() => update({ kind: 'strokes', keep: 0.5, tail: [], ended: null }))).toBe('projectionInvalid');
@@ -186,11 +211,59 @@ describe('the scene and its events', () => {
     expect(
       refusal(() => update({ kind: 'strokeBegin', id: 1, tool: 'ballpoint', color: BLACK, width: 60, layer: 0, points: [{ x: Number.NaN, y: 0, p: 0, t: 0, wall: 0 }] })),
     ).toBe('projectionInvalid');
-    expect(refusal(() => update({ kind: 'view', view: { zoom: Number.POSITIVE_INFINITY, x: 0, y: 0 } }))).toBe('projectionInvalid');
+    expect(refusal(() => update({ kind: 'strokeBegin', id: 1, tool: 'ballpoint', color: BLACK, width: 60, layer: -1, points: [] }))).toBe('projectionInvalid');
+    expect(refusal(() => update({ kind: 'strokePoints', id: 1, points: Array.from({ length: 4097 }, () => ({ x: 0, y: 0, p: 0, t: 0, wall: 0 })) }))).toBe('projectionInvalid');
+    // A view is kept on the page, never refused.
+    update({ kind: 'view', view: { zoom: 20, x: -500, y: 1e9 } });
+    expect(mockProjectionState().view).toEqual({ zoom: 8, x: 0, y: 21600 });
+  });
+
+  it('sends nothing for the same view again, nor for a strokes update that changes nothing', async () => {
+    update({ kind: 'page', note: note([stroke()]), imageKey: null, view: VIEW });
+    const w = await subscribed();
+    w.batches.length = 0;
+    update({ kind: 'view', view: { zoom: 2, x: 10000, y: 9000 } });
+    update({ kind: 'view', view: { zoom: 2, x: 10000, y: 9000 } });
+    update({ kind: 'strokes', keep: 1, tail: [], ended: null });
+    expect(w.types()).toEqual(['view']);
+  });
+
+  it('a begin while a stroke is in progress cancels that one first; ended for another id is ignored', async () => {
+    update({ kind: 'page', note: note([]), imageKey: null, view: VIEW });
+    const w = await subscribed();
+    w.batches.length = 0;
+    update({ kind: 'strokeBegin', id: 1, tool: 'ballpoint', color: BLACK, width: 60, layer: 0, points: [] });
+    update({ kind: 'strokeBegin', id: 2, tool: 'ballpoint', color: BLACK, width: 60, layer: 0, points: [] });
+    expect(w.batches.at(-1)!.events).toEqual([
+      { type: 'strokeCancel', pageIndex: 0, pen: 'computer', id: 1 },
+      expect.objectContaining({ type: 'strokeStart', id: 2 }),
+    ]);
+    update({ kind: 'strokes', keep: 0, tail: [stroke()], ended: 1 });
+    expect(w.batches.at(-1)!.events.map((e) => e.type)).toEqual(['strokesEdited']);
+    expect(mockProjectionState().current?.id).toBe(2);
+  });
+
+  it('keeps and sends at most 100 000 points of the stroke in progress', async () => {
+    update({ kind: 'page', note: note([]), imageKey: null, view: VIEW });
+    update({ kind: 'strokeBegin', id: 1, tool: 'ballpoint', color: BLACK, width: 60, layer: 0, points: [] });
+    const batch = Array.from({ length: 4096 }, (_, i) => ({ x: i, y: 0, p: 0.5, t: i, wall: i }));
+    for (let n = 0; n < 24; n++) update({ kind: 'strokePoints', id: 1, points: batch });
+    expect(mockProjectionState().current?.points).toBe(24 * 4096);
+    const w = await subscribed();
+    w.batches.length = 0;
+    update({ kind: 'strokePoints', id: 1, points: batch });
+    update({ kind: 'strokePoints', id: 1, points: batch });
+    expect(mockProjectionState().current?.points).toBe(100_000);
+    const sent = w.events().flatMap((e) => (e.type === 'points' ? e.points : []));
+    expect(sent).toHaveLength(100_000 - 24 * 4096);
   });
 });
 
 describe('the feed, the stand-in and the window agree', () => {
+  beforeEach(() => {
+    mockProjectionInvoke('projection_open', { monitor: null });
+  });
+
   it('the window draws what the editor shows, the stroke in progress included', async () => {
     const live = new LiveState();
     live.initial(await mockProjectionSubscribe((batch) => live.receive(batch)));
@@ -250,6 +323,7 @@ describe('the feed, the stand-in and the window agree', () => {
     await flush();
     // The window was closed and opened again behind the feed's back: Rust has no scene.
     mockProjectionClosedByWindow();
+    mockProjectionInvoke('projection_open', { monitor: null });
     live.initial(await mockProjectionSubscribe((batch) => live.receive(batch)));
     feed.show(note([...strokes, stroke()]), null);
     await flush();

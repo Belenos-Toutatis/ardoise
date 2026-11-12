@@ -20,7 +20,8 @@
  *   instead, a `strokeCancel` follows. A stroke dropped (`committed: false`) is cancelled at once. The points of a stroke
  *   not yet sent when it ends are not sent: the finished stroke brings them.
  * - **A refused call** (`projectionStale`, `projectionInvalid`, an IPC failure) sends the whole page next, and cancels
- *   the stroke Rust may hold; a page refused is not sent again until the editor shows another note object (no loop).
+ *   the stroke Rust may hold; a page refused is sent again when the editor shows another note object, or after
+ *   `PAGE_RETRY_MS`, twice as long at each new refusal up to `PAGE_RETRY_MAX_MS` (no loop).
  *   Refusals are counted (`rejections`, `lastError`), never shown: the next page repairs.
  */
 import type { InkPoint, Tool } from './ink';
@@ -66,6 +67,9 @@ export interface SentPage {
 
 /** A committed stroke the projection still shows in progress waits this long for the strokes update that brings it. */
 export const END_WAIT_MS = 1000;
+/** A page Rust refused is tried again after this long, then twice as long each time it is refused again, up to the last. */
+export const PAGE_RETRY_MS = 250;
+export const PAGE_RETRY_MAX_MS = 8000;
 
 /** What `note` is, as `projectionDiff` remembers it once sent. */
 export function sentPageOf(note: Note, imageKey: string | null): SentPage {
@@ -169,8 +173,10 @@ export class ProjectionFeed {
   private viewSent: ProjectionView | null = null;
   private drawing: Drawing | null = null;
   private held: Held | null = null;
-  /** A page Rust refused: not sent again until another note object is shown. */
+  /** A page Rust refused: not sent again until another note object is shown, or its retry is due. */
   private refusedNote: Note | null = null;
+  private retryMs = PAGE_RETRY_MS;
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private inFlight = false;
   private queued = false;
   private disposed = false;
@@ -184,7 +190,7 @@ export class ProjectionFeed {
   show(note: Note, imageKey: string | null): void {
     if (this.latest?.note === note && this.latest.imageKey === imageKey) return;
     this.latest = { note, imageKey };
-    if (note !== this.refusedNote) this.refusedNote = null;
+    if (note !== this.refusedNote) this.clearRefused();
     this.schedule();
   }
 
@@ -221,7 +227,8 @@ export class ProjectionFeed {
   reset(): void {
     this.sent = null;
     this.viewSent = null;
-    this.refusedNote = null;
+    this.clearRefused();
+    this.retryMs = PAGE_RETRY_MS;
     this.latest = null;
     this.drawing = null;
     this.dropHeld();
@@ -230,6 +237,7 @@ export class ProjectionFeed {
   /** The feed goes (the editor closes the projection): nothing more is sent. */
   dispose(): void {
     this.disposed = true;
+    this.clearRefused();
     this.dropHeld();
     this.drawing = null;
     this.latest = null;
@@ -255,6 +263,12 @@ export class ProjectionFeed {
         this.schedule();
       }, END_WAIT_MS);
     }
+  }
+
+  private clearRefused(): void {
+    this.refusedNote = null;
+    if (this.retryTimer !== undefined) clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
   }
 
   private dropHeld(): void {
@@ -285,6 +299,7 @@ export class ProjectionFeed {
     sending.then(
       () => {
         this.inFlight = false;
+        if (update.kind === 'page') this.retryMs = PAGE_RETRY_MS;
         this.schedule();
       },
       (error: unknown) => {
@@ -365,7 +380,19 @@ export class ProjectionFeed {
   private refused(update: ProjectionUpdate, error: unknown): void {
     this.rejections += 1;
     this.lastError = error;
-    if (update.kind === 'page') this.refusedNote = update.note;
+    if (update.kind === 'page') {
+      // Not again at once (no loop): after a while, longer each time, or as soon as the editor shows another note.
+      this.clearRefused();
+      const refusedNote = update.note;
+      this.refusedNote = refusedNote;
+      this.retryTimer = setTimeout(() => {
+        this.retryTimer = undefined;
+        if (this.refusedNote !== refusedNote) return;
+        this.refusedNote = null;
+        this.schedule();
+      }, this.retryMs);
+      this.retryMs = Math.min(PAGE_RETRY_MAX_MS, this.retryMs * 2);
+    }
     this.sent = null;
     this.viewSent = null;
     if (this.held) {

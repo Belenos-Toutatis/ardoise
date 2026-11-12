@@ -13,9 +13,13 @@
  *   batch), `view` → `view`, `strokeBegin` / `strokePoints` / `strokeCancel` → the computer's `strokeStart` / `points`
  *   / `strokeCancel`, each point's `recv` its pointer sample's wall time. Updates while nobody subscribes are applied,
  *   not sent.
- * - Refusals: `projectionStale` for `strokes` without a page or whose `keep` exceeds the page's strokes;
- *   `projectionInvalid` for indices or ids that are not whole numbers, points that are not finite and more points or
- *   strokes than the limits.
+ * - Refusals (as package C's `projection.rs`): `projectionStale` for every update while the projection is closed
+ *   (nothing kept), for `strokes`, `view`, `strokeBegin` and `strokePoints` before any page, and for a `keep` beyond the
+ *   page's strokes (a `strokeCancel` without a page does nothing); `projectionInvalid` for a `keep`, an id, an `ended` or
+ *   a layer that is not a whole number from 0, a point that is not finite, more than `MAX_PROJECTION_POINTS` points in
+ *   one call, a page without a size or a layer. A view is kept on the page (live's `sanitized`); the same view again,
+ *   or a `strokes` update that changes nothing, sends nothing; a `strokeBegin` while a stroke is in progress cancels it
+ *   first; `ended` drops only the stroke in progress; points beyond `MAX_PROJECTED_STROKE_POINTS` are not kept.
  *
  * Several tabs of a browser (`npm run dev`): the tab that gets the updates also posts its batches on a
  * `BroadcastChannel`, so that a tab opened at `?view=projection` draws them (and its Esc closes the projection of the
@@ -128,7 +132,8 @@ function snapshot(): LiveSnapshot {
     page: copy(note),
     pageIndex: 0,
     pageCount: 1,
-    orientation: note.page.width >= note.page.height ? 'landscape' : 'portraitLeft',
+    // As Rust: the default orientation (nothing turns a projected page).
+    orientation: 'landscape',
     canTurnPage: false,
     layer: 0,
     computerLayer: 0,
@@ -178,41 +183,87 @@ function closed(): void {
 
 // --- The checks -----------------------------------------------------------------------------------
 
-const whole = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0;
+/** Points of the stroke in progress kept and sent at most (Rust's `MAX_PROJECTED_STROKE_POINTS`, live's computer pen's). */
+export const MAX_PROJECTED_STROKE_POINTS = 100_000;
 
-function checkView(view: ProjectionView): ProjectionView {
-  if (![view?.zoom, view?.x, view?.y].every(Number.isFinite)) throw refused('projectionInvalid', 'the view is not finite');
-  return { zoom: Math.min(8, Math.max(1, view.zoom)), x: view.x, y: view.y };
+/** An index, an id or a layer: a whole number from 0 (Rust's `whole`), else `projectionInvalid`. */
+function whole(value: unknown, what: string): number {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff) return value;
+  throw refused('projectionInvalid', `${what} is not a whole number: ${String(value)}`);
 }
 
-function checkPoints(points: readonly ProjectionPoint[]): LivePoint[] {
+/** The page size of the scene, or `projectionStale` without one. */
+function pageSize(): { width: number; height: number } {
+  if (!scene) throw refused('projectionStale', 'no page is projected');
+  return scene.note.page;
+}
+
+/** Live's `LiveViewState::sanitized`: the zoom within 1..8 (1 when not finite), the centre on the page. */
+function sanitizedView(view: ProjectionView, page: { width: number; height: number }): ProjectionView {
+  const within = (value: number, max: number) => (Number.isFinite(value) ? Math.min(max, Math.max(0, value)) : max / 2);
+  return {
+    zoom: Number.isFinite(view?.zoom) ? Math.min(8, Math.max(1, view.zoom)) : 1,
+    x: within(view?.x, page.width),
+    y: within(view?.y, page.height),
+  };
+}
+
+/** The points as the window draws them (Rust's `live_points`): finite, at most `MAX_PROJECTION_POINTS`, kept near the page. */
+function checkPoints(points: readonly ProjectionPoint[], page: { width: number; height: number }): LivePoint[] {
   if (points.length > MAX_PROJECTION_POINTS) throw refused('projectionInvalid', `${points.length} points in one update`);
-  return points.map((p) => {
-    if (![p.x, p.y, p.p, p.t, p.wall].every(Number.isFinite)) throw refused('projectionInvalid', 'a point is not finite');
-    return { x: p.x, y: p.y, p: p.p, t: p.t, recv: p.wall };
+  const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
+  return points.map((point) => {
+    const { x, y, p, t, wall } = point;
+    if (![x, y, p, t, wall].every(Number.isFinite)) throw refused('projectionInvalid', 'a point is not finite');
+    return {
+      x: clamp(x, -page.width, 2 * page.width),
+      y: clamp(y, -page.height, 2 * page.height),
+      p: clamp(p, 0, 1),
+      t: clamp(Math.floor(t), 0, 0xffff_ffff),
+      recv: wall,
+    };
   });
 }
 
+function strokeCount(count: number, what: string): void {
+  if (count > MAX_PROJECTION_STROKES) throw refused('projectionInvalid', `${count} strokes ${what}`);
+}
+
+const strokeCancel = (id: number): LiveEvent => ({ type: 'strokeCancel', pageIndex: 0, pen: 'computer', id });
+
+/** The stroke in progress `id` leaves the window; nothing for another stroke. */
+function dropCurrent(id: number): LiveEvent[] {
+  if (current?.id !== id) return [];
+  current = null;
+  return [strokeCancel(id)];
+}
+
 function apply(update: ProjectionUpdate): LiveEvent[] {
+  if (!open) throw refused('projectionStale', 'the projection is closed');
   switch (update.kind) {
     case 'page': {
+      const note = update.note;
+      if (!(note.page.width > 0) || !(note.page.height > 0)) throw refused('projectionInvalid', 'the page has no size');
+      if (note.layers.length === 0) throw refused('projectionInvalid', 'the page has no layer');
+      strokeCount(note.strokes.length, 'on the page');
       revision += 1;
-      scene = { note: copy(update.note), imageKey: update.imageKey ?? null, view: checkView(update.view), revision };
+      scene = { note: copy(note), imageKey: update.imageKey ?? null, view: sanitizedView(update.view, note.page), revision };
       return opening();
     }
     case 'strokes': {
-      const { keep, tail, ended } = update;
-      if (!whole(keep) || (ended !== null && !whole(ended))) throw refused('projectionInvalid', 'keep and ended are whole numbers');
-      if (tail.length > MAX_PROJECTION_STROKES) throw refused('projectionInvalid', `${tail.length} strokes in one tail`);
-      if (!scene) throw refused('projectionStale', 'no page yet');
+      const keep = whole(update.keep, 'keep');
+      const ended = update.ended === null ? null : whole(update.ended, 'ended');
+      strokeCount(update.tail.length, 'in one tail');
+      if (!scene) throw refused('projectionStale', 'no page is projected');
       const strokes = scene.note.strokes;
-      if (keep > strokes.length) throw refused('projectionStale', `keep ${keep} of ${strokes.length} strokes`);
-      const removed = Array.from({ length: strokes.length - keep }, (_, i) => keep + i);
-      const added = copy(tail) as Stroke[];
-      scene.note = { ...scene.note, strokes: [...strokes.slice(0, keep), ...added] };
-      scene.revision = ++revision;
-      const events: LiveEvent[] = [
-        {
+      if (keep > strokes.length) throw refused('projectionStale', `${keep} strokes kept, the page has ${strokes.length}`);
+      const events: LiveEvent[] = [];
+      if (keep < strokes.length || update.tail.length > 0) {
+        const removed = Array.from({ length: strokes.length - keep }, (_, i) => keep + i);
+        const added = copy(update.tail) as Stroke[];
+        scene.note = { ...scene.note, strokes: [...strokes.slice(0, keep), ...added] };
+        scene.revision = ++revision;
+        events.push({
           type: 'strokesEdited',
           pageIndex: 0,
           revision: scene.revision,
@@ -221,40 +272,39 @@ function apply(update: ProjectionUpdate): LiveEvent[] {
           recoloured: [],
           canUndo: false,
           canRedo: false,
-        },
-      ];
-      if (ended !== null && current?.id === ended) {
-        current = null;
-        events.push({ type: 'strokeCancel', pageIndex: 0, pen: 'computer', id: ended });
+        });
       }
+      // In the same batch: the stroke is on the page when it leaves the pen.
+      if (ended !== null) events.push(...dropCurrent(ended));
       return events;
     }
     case 'view': {
-      const view = checkView(update.view);
-      if (scene) scene.view = view;
+      const view = sanitizedView(update.view, pageSize());
+      if (!scene || (view.zoom === scene.view.zoom && view.x === scene.view.x && view.y === scene.view.y)) return [];
+      scene.view = view;
       return [{ type: 'view', view: { ...view, board: false, laser: false } }];
     }
     case 'strokeBegin': {
-      const { id, tool, color, width, layer } = update;
-      if (!whole(id) || !whole(layer) || !Number.isFinite(width)) throw refused('projectionInvalid', 'id, layer and width');
-      const points = checkPoints(update.points);
-      // A begin replaces the stroke in progress.
+      const id = whole(update.id, 'id');
+      const layer = whole(update.layer, 'layer');
+      const points = checkPoints(update.points, pageSize()).slice(0, MAX_PROJECTED_STROKE_POINTS);
+      const { tool, color, width } = update;
+      // A begin replaces the stroke in progress, which the window drops first (kept, it would be among its strokes).
+      const events: LiveEvent[] = current ? [strokeCancel(current.id)] : [];
       current = { id, stroke: { tool, color: { ...color }, width, layer, points } };
-      return startEvent();
+      return [...events, ...startEvent()];
     }
     case 'strokePoints': {
-      if (!whole(update.id)) throw refused('projectionInvalid', 'the id is a whole number');
-      const points = checkPoints(update.points);
-      if (current?.id !== update.id) return [];
-      current.stroke.points.push(...points);
-      return [{ type: 'points', pageIndex: 0, points: copy(points), pen: 'computer', id: update.id }];
+      const id = whole(update.id, 'id');
+      const points = checkPoints(update.points, pageSize());
+      if (current?.id !== id) return [];
+      const kept = points.slice(0, Math.max(0, MAX_PROJECTED_STROKE_POINTS - current.stroke.points.length));
+      if (kept.length === 0) return [];
+      current.stroke.points.push(...kept);
+      return [{ type: 'points', pageIndex: 0, points: copy(kept), pen: 'computer', id }];
     }
-    case 'strokeCancel': {
-      if (!whole(update.id)) throw refused('projectionInvalid', 'the id is a whole number');
-      if (current?.id !== update.id) return [];
-      current = null;
-      return [{ type: 'strokeCancel', pageIndex: 0, pen: 'computer', id: update.id }];
-    }
+    case 'strokeCancel':
+      return dropCurrent(whole(update.id, 'id'));
   }
 }
 

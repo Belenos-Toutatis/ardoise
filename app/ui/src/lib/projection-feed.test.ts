@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { InkPoint } from './ink';
 import type { Note, Stroke } from './note';
 import { MAX_PROJECTION_POINTS, type ProjectionUpdate, type ProjectionView } from './projection';
-import { END_WAIT_MS, ProjectionFeed, projectionDiff, sentPageOf, type InProgress } from './projection-feed';
+import { END_WAIT_MS, PAGE_RETRY_MAX_MS, PAGE_RETRY_MS, ProjectionFeed, projectionDiff, sentPageOf, type InProgress } from './projection-feed';
 import { ReplayTimeline } from './replay';
 
 const BLACK = { r: 0, g: 0, b: 0, a: 255 };
@@ -417,6 +417,34 @@ describe('ProjectionFeed', () => {
     h.feed.show(note(shown.strokes), null);
     await flush();
     expect(kinds(h.sent)).toEqual(['page', 'page', 'strokeBegin']);
+  });
+
+  it('tries a refused page again after a while, longer at each refusal', async () => {
+    vi.useFakeTimers();
+    const refusals: number[] = [];
+    let refuse = 3;
+    const feed = new ProjectionFeed(() => {
+      refusals.push(Date.now());
+      if (refuse-- > 0) return Promise.reject({ code: 'projectionStale', message: 'the projection is closed' });
+      return Promise.resolve();
+    });
+    const started = Date.now();
+    feed.show(note([stroke()]), null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refusals).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(PAGE_RETRY_MS - 1);
+    expect(refusals).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refusals).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(2 * PAGE_RETRY_MS);
+    expect(refusals).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(4 * PAGE_RETRY_MS);
+    // The fourth is taken; nothing more is sent.
+    expect(refusals).toHaveLength(4);
+    expect(refusals.map((at) => at - started)).toEqual([0, PAGE_RETRY_MS, 3 * PAGE_RETRY_MS, 7 * PAGE_RETRY_MS]);
+    await vi.advanceTimersByTimeAsync(PAGE_RETRY_MAX_MS * 2);
+    expect(refusals).toHaveLength(4);
+    expect(feed.rejections).toBe(3);
   });
 
   it('after reset, waits for the next show and sends the whole page', async () => {
