@@ -1,6 +1,6 @@
 [package]
 name = "ardoise-proto"
-description = "Wacom smartpad protocol: message encoding/decoding, stored-page and live-mode data decoding. No I/O."
+description = "Tablet protocols (Wacom smartpads, Xiaomi blackboard): message encoding/decoding, stored-page and live-mode data decoding. No I/O."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
