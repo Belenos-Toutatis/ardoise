@@ -4,9 +4,10 @@ Feasibility study, started 2026-11-12 at the user's request: can Ardoise fetch t
 tablet and receive its pen strokes live, as it does with the Bamboo Slate? Nothing in the application depends on
 this document yet. SPEC.md covers the Bamboo Slate only (see `docs/questions.md`, Q14).
 
-State on 2026-11-12: the tablet's own commands and its live pen samples are decoded (section 3), and the tablet
-obeys a client that skips the Xiaomi login: **the live mode works from the PC** (section 3, last part). How stored
-pages are downloaded is not known yet (section 5).
+State on 2026-11-12: the tablet's own commands, its live pen samples and its stored pages are decoded
+(section 3). The tablet obeys a client that skips the Xiaomi login: **the live mode works from the PC**. The
+download of stored pages is known from a capture of Mi Home and has not been replayed from the PC yet
+(section 5).
 
 Conventions: hex bytes are written `12 01 09`. "(measured)" was observed on the user's own tablet with
 `cargo run -p ardoise-ble --example survey`. "(reported)" comes from a public source and was not verified by us.
@@ -70,10 +71,11 @@ third characteristic, `6e400004`, that the Nordic service does not have.
   `12 01 09` (the "page stored" event of section 3).
 - Nothing arrived on `6e400004` nor on the `fe95` characteristics: pen strokes are not sent unasked.
 
-## 3. A session of Mi Home (measured, capture of 2026-11-12)
+## 3. Two sessions of Mi Home (measured, captures of 2026-11-12)
 
-From a Bluetooth HCI log of the user's Android phone (section 6) while Mi Home connected to the tablet, mirrored
-the writing, and the user stored the page with the tablet's button. The tablet asks for an ATT MTU of 247.
+From Bluetooth HCI logs of the user's Android phone (section 6). In the first, Mi Home connected to the tablet
+and mirrored the writing, and the user stored the page with the tablet's button. In the second, Mi Home imported
+the nine pages stored in the tablet. The tablet asks for an ATT MTU of 247.
 
 ### Sequence
 
@@ -97,13 +99,34 @@ A frame is `group, length, code, payload`: `length` counts the code and the payl
 | host to tablet | `11 01 02` | Read the memory. Reply `11 09 02` + total bytes (u32) + free bytes (u32): 126 909 952 (the advertised 121 MB) and 126 794 240. |
 | host to tablet | `11 05 07` + u32 | Set the clock: Unix seconds (the value was the time of the capture, UTC). No reply. |
 | host to tablet | `12 01 04` | Count the stored pages. Reply `12 07 04` + count (u16) + bytes (u32): 8 pages and 111 608 bytes, then 9 pages and 118 111 bytes after the user stored one. |
-| host to tablet | `12 01 05` | Describe one stored page (the oldest one, inferred). Reply `12 09 05` + Unix seconds (u32, a date in June 2025) + bytes (u32, 21 280). |
+| host to tablet | `12 01 05` | Describe the oldest stored page. Reply `12 09 05` + the page's time (u32, Unix seconds: when it was stored, by the tablet's clock) + its size in bytes (u32). The time identifies the page in the next two commands. |
+| host to tablet | `12 06 03 01` + time (u32) | Download that page. No reply on `6e400003`; its bytes follow on `6e400004`. The meaning of the `01` is not known. |
+| host to tablet | `12 05 06` + time (u32) | Delete that page. No reply. The next `12 01 05` describes the following page. |
 | host to tablet | `12 02 08 01` | Start the live stream. No reply; samples follow on `6e400004`. |
 | host to tablet | `12 02 08 02` | Stop the live stream. No reply. |
 | tablet to host | `12 01 09` | Event: a page was stored with the tablet's button (inferred: it came when the user pressed it, and the count went from 8 to 9). Also sent to a client that has not logged in. |
 
-Mi Home sent, in order: `11 01 01`, `11 01 02`, `11 05 07 …`, `12 01 04`, `12 02 08 01`, `12 01 05`, then,
-when the user left the mirror, `12 02 08 02` and `12 01 04`.
+In the first session Mi Home sent, in order: `11 01 01`, `11 01 02`, `11 05 07 …`, `12 01 04`,
+`12 02 08 01`, `12 01 05`, then, when the user left the mirror, `12 02 08 02` and `12 01 04`.
+
+### Import of the stored pages (second session)
+
+After `11 01 01`, `11 01 02`, `11 05 07 …` and `12 01 04` (9 pages, 144 123 bytes), Mi Home repeated nine times:
+`12 01 05` (time and size of the oldest page), `12 06 03 01 <time>` (download), then, once all the bytes had
+arrived, `12 05 06 <time>` (delete). It did not ask for a tenth page: what `12 01 05` answers when the tablet is
+empty is not known.
+
+- The bytes of a page arrive on `6e400004` as a plain stream cut into notifications of at most 244 bytes; the
+  host counts them against the size announced. No header, no end mark, no checksum. A page of 52 185 bytes took
+  2.1 s; the nine pages took 13 s in all.
+- **A stored page is the same 7-byte records as the live stream**, in the order they were written, hovering
+  records included: every size is a multiple of 7. Checked on the test page: it contains, byte for byte, the 886
+  records Mi Home received live in the first session and the 3 176 records the PC received live afterwards.
+- A page has no times inside either: only the moment it was stored. The oldest pages were dated June 2025.
+- Storing again without erasing the screen replaces the stored page by a longer one (the count stayed at 9, the
+  size went from 6 503 to 32 515 bytes, with a new time): a stored page is the whole content of the screen.
+- **Mi Home deletes each page from the tablet once it has it.** The pages go to whichever application imports
+  them first.
 
 ### Live samples (`6e400004`)
 
@@ -131,10 +154,10 @@ enabled and nothing is written to `fe95`:
 
 So the Xiaomi layer can be ignored altogether for these commands.
 
-### Not in this capture
+### Not seen yet
 
-Mi Home did not fetch any stored page and deleted none: the commands to download and delete a page, and the
-format of a stored page, are still unknown.
+What the tablet's erase button sends (if anything), what `12 01 05` answers on an empty tablet, whether a
+download can be interrupted, and the codes of groups `11` and `12` that Mi Home did not use.
 
 ## 4. The Xiaomi layer (`fe95`), from public sources (reported)
 
@@ -155,17 +178,17 @@ format of a stored page, are still unknown.
 
 ## 5. Open questions, in the order that decides feasibility
 
-1. What are the commands to download a stored page and to delete one, and what is the format of a stored page
-   (is it the 7-byte records of the live stream, with or without times)? A second capture, where Mi Home imports
-   pages written while the phone was away, should show them. Do they also work without the Xiaomi login?
-2. Which page does `12 01 05` describe, and are there codes `06` and `07`? (Not to be tried blindly.)
-3. The exact unit of the coordinates, what the tablet's erase button sends, and whether the live stream goes on
-   when a page is stored.
+1. Do the download and the deletion of a page work from the PC without the Xiaomi login, as the other commands
+   do? To be tried on a test page: download first, compare with the live records, delete only with the user's
+   agreement.
+2. What does the tablet's erase button send, and what does `12 01 05` answer on an empty tablet?
+3. The exact unit of the coordinates (a ruler), and whether the live stream goes on when a page is stored.
 4. Does the tablet accept two clients, or does a PC connection keep Mi Home out (and the reverse)? While the
    phone was connected, the PC did not hear the tablet.
 
-Answered: the commands and the live samples are in clear, and the tablet accepts them from a client that has not
-logged in on `fe95` (section 3). The live mode is feasible; the download of stored pages depends on question 1.
+Answered: the commands, the live samples and the stored pages are in clear; the tablet accepts the commands
+tried so far from a client that has not logged in on `fe95`; a stored page is a run of live records (section 3).
+Both the live mode and the import of stored pages are feasible, the second subject to question 1.
 
 ## 6. Method
 
