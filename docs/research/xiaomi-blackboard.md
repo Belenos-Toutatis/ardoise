@@ -4,6 +4,10 @@ Feasibility study, started 2026-11-12 at the user's request: can Ardoise fetch t
 tablet and receive its pen strokes live, as it does with the Bamboo Slate? Nothing in the application depends on
 this document yet. SPEC.md covers the Bamboo Slate only (see `docs/questions.md`, Q14).
 
+State on 2026-11-12: the tablet's own commands and its live pen samples are decoded (section 3), and the tablet
+obeys a client that skips the Xiaomi login: **the live mode works from the PC** (section 3, last part). How stored
+pages are downloaded is not known yet (section 5).
+
 Conventions: hex bytes are written `12 01 09`. "(measured)" was observed on the user's own tablet with
 `cargo run -p ardoise-ble --example survey`. "(reported)" comes from a public source and was not verified by us.
 The raw captures hold the tablet's Bluetooth address and stay in `testdata/private/xiaomi/` (never in git); the
@@ -63,12 +67,76 @@ third characteristic, `6e400004`, that the Nordic service does not have.
 - Windows connects without pairing. With every notification enabled and nothing written, the tablet kept the
   connection open for 80 s (it does not drop a client that has not logged in).
 - While the user wrote on the tablet and pressed its buttons, four notifications arrived on `6e400003`, all
-  `12 01 09`. Their cause is not identified. The shape (one byte, a length of 1, one byte) suggests frames of the
-  form opcode, length, payload, sent in clear.
-- Nothing arrived on `6e400004` nor on the `fe95` characteristics. Pen strokes are not sent unasked: something
-  must be written first (a login, a "live" command, or both).
+  `12 01 09` (the "page stored" event of section 3).
+- Nothing arrived on `6e400004` nor on the `fe95` characteristics: pen strokes are not sent unasked.
 
-## 3. The Xiaomi layer (`fe95`), from public sources (reported)
+## 3. A session of Mi Home (measured, capture of 2026-11-12)
+
+From a Bluetooth HCI log of the user's Android phone (section 6) while Mi Home connected to the tablet, mirrored
+the writing, and the user stored the page with the tablet's button. The tablet asks for an ATT MTU of 247.
+
+### Sequence
+
+1. Service discovery, then on `fe95`: notifications of `001c` enabled and five one-byte queries on it (`00`,
+   `02` to `05`), answered with short texts, among them `nRF52832.DK.1` (the tablet is built on a Nordic
+   nRF52832); then `a4` on `0010` and an exchange of filler frames on `0019`.
+2. The Xiaomi login: `24 00 00 00` on `0010`, random numbers and proofs exchanged in fragments on `0019`, and
+   the tablet's `21 00 00 00` on `0010` (success). It matches the "standard" login of section 4.
+3. Notifications of `6e400004` and `6e400003` enabled, then **everything else in clear** on the Nordic-UART
+   service: commands written (with response) to `6e400002`, replies and events on `6e400003`, pen samples on
+   `6e400004`. Nothing more on `fe95`.
+
+### Frames of the vendor channel
+
+A frame is `group, length, code, payload`: `length` counts the code and the payload. Integers in frames are
+**big-endian**.
+
+| Direction | Frame | Meaning |
+|---|---|---|
+| host to tablet | `11 01 01` | Read the battery. Reply `11 02 01 64`: 100 (per cent, inferred). |
+| host to tablet | `11 01 02` | Read the memory. Reply `11 09 02` + total bytes (u32) + free bytes (u32): 126 909 952 (the advertised 121 MB) and 126 794 240. |
+| host to tablet | `11 05 07` + u32 | Set the clock: Unix seconds (the value was the time of the capture, UTC). No reply. |
+| host to tablet | `12 01 04` | Count the stored pages. Reply `12 07 04` + count (u16) + bytes (u32): 8 pages and 111 608 bytes, then 9 pages and 118 111 bytes after the user stored one. |
+| host to tablet | `12 01 05` | Describe one stored page (the oldest one, inferred). Reply `12 09 05` + Unix seconds (u32, a date in June 2025) + bytes (u32, 21 280). |
+| host to tablet | `12 02 08 01` | Start the live stream. No reply; samples follow on `6e400004`. |
+| host to tablet | `12 02 08 02` | Stop the live stream. No reply. |
+| tablet to host | `12 01 09` | Event: a page was stored with the tablet's button (inferred: it came when the user pressed it, and the count went from 8 to 9). Also sent to a client that has not logged in. |
+
+Mi Home sent, in order: `11 01 01`, `11 01 02`, `11 05 07 …`, `12 01 04`, `12 02 08 01`, `12 01 05`, then,
+when the user left the mirror, `12 02 08 02` and `12 01 04`.
+
+### Live samples (`6e400004`)
+
+- A notification holds one to six records of 7 bytes: `status, x (u16), y (u16), pressure (u16)`, here
+  **little-endian**.
+- `status`: `a1` the pen touches (pressure 1 to 2047), `a0` the pen hovers (pressure 0), `c0` the last record
+  before the pen leaves the tablet's range (pressure 0). A stroke is a run of `a1` records.
+- Coordinates: the diagonal the user drew from the top left corner to the bottom right one runs from (136, 349)
+  to (20350, 27024); all samples lie within 117..20401 by 250..27067. So the origin is the top left corner of the
+  tablet held upright, x to the right, y downwards, over about 20 400 by 27 100 units. With a 13.5" panel of
+  3:4 (about 206 by 274 mm) one unit is close to 0.01 mm, the Slate's unit (inferred; to be calibrated with a
+  ruler).
+- No time in a record: about 120 records per second by their arrival (886 records in the capture, 7 strokes).
+
+### The same commands from the PC, without the Xiaomi login (measured, 2026-11-12)
+
+With `survey -- send`, on a fresh connection where only the notifications of `6e400003` and `6e400004` are
+enabled and nothing is written to `fe95`:
+
+- `11 01 01`, `11 01 02`, `12 01 04` and `12 01 05` are answered at once, in the same form as to Mi Home
+  (battery `5a`, 90; 9 pages; the same page description).
+- `12 02 08 01` starts the live stream: 3 176 records in 75 s while the user wrote, which redraw the handwriting;
+  `12 02 08 02` stops it. With nobody writing, nothing is sent (40 s without a record).
+- The tablet stays bound to Mi Home: nothing was registered, nothing changed on the Xiaomi side.
+
+So the Xiaomi layer can be ignored altogether for these commands.
+
+### Not in this capture
+
+Mi Home did not fetch any stored page and deleted none: the commands to download and delete a page, and the
+format of a stored page, are still unknown.
+
+## 4. The Xiaomi layer (`fe95`), from public sources (reported)
 
 - Mi Home devices authenticate the application on the `fe95` service. Mode 2 ("standard") is an ECDH P-256
   registration that creates a long-term token, then, at each connection, a login that derives session keys
@@ -85,20 +153,21 @@ third characteristic, `6e400004`, that the Nordic service does not have.
 - A new registration from another client would replace the token: Mi Home would have to bind the tablet again.
   To be avoided unless the user accepts it.
 
-## 4. Open questions, in the order that decides feasibility
+## 5. Open questions, in the order that decides feasibility
 
-1. Does the tablet accept commands on `6e400002` from a client that has not logged in on `fe95`?
-2. Are the commands and the data (stored pages, live samples) in clear, as the `12 01 09` events are?
-3. What are the commands: list the pages, download one, delete one, start and stop the live stream, read the
-   battery and the time?
-4. What is the format of a stored page and of a live sample (coordinates, pressure, timing, pen up and down,
-   erasing with the button)? What are the units and the size of the writing area?
-5. What do `12 01 09` and the characteristic `6e400004` mean?
+1. What are the commands to download a stored page and to delete one, and what is the format of a stored page
+   (is it the 7-byte records of the live stream, with or without times)? A second capture, where Mi Home imports
+   pages written while the phone was away, should show them. Do they also work without the Xiaomi login?
+2. Which page does `12 01 05` describe, and are there codes `06` and `07`? (Not to be tried blindly.)
+3. The exact unit of the coordinates, what the tablet's erase button sends, and whether the live stream goes on
+   when a page is stored.
+4. Does the tablet accept two clients, or does a PC connection keep Mi Home out (and the reverse)? While the
+   phone was connected, the PC did not hear the tablet.
 
-If the answer to 1 is no and the session keys cannot be obtained without unbinding the tablet from Mi Home, the
-study stops there, unless the user accepts that Ardoise replaces Mi Home for this tablet.
+Answered: the commands and the live samples are in clear, and the tablet accepts them from a client that has not
+logged in on `fe95` (section 3). The live mode is feasible; the download of stored pages depends on question 1.
 
-## 5. Method
+## 6. Method
 
 - **Never write a guessed command.** An unknown opcode could erase the stored pages or start a firmware update.
   Only commands seen in a capture of Mi Home are replayed, and the destructive ones (delete, format, reset,
@@ -112,10 +181,12 @@ study stops there, unless the user accepts that Ardoise replaces Mi Home for thi
 - **From the PC**: `cargo run -p ardoise-ble --example survey -- scan [SECONDS]` lists what every nearby device
   advertises (MiBeacon headers decoded); `… survey -- gatt ADDRESS [SECONDS] [--out FILE]` connects, lists the
   GATT table, reads what is readable and prints the notifications. It never writes a characteristic value.
+  `… survey -- send ADDRESS CHARACTERISTIC STEP...` writes the frames given on its command line, one by one,
+  and prints the replies.
 - The tablet is with the user at the development PC, unlike the Bamboo Slate: experiments can be run directly,
   and whatever is learnt must still end up in `ardoise-sim` and in replayable captures.
 
-## 6. What Ardoise would need
+## 7. What Ardoise would need
 
 - A second protocol next to the Slate's (`ardoise-proto`), its flows in `ardoise-device` (`device.json` already
   records a `protocol`), its simulated tablet in `ardoise-sim`, and in `ardoise-ble` a GATT layout chosen by the
