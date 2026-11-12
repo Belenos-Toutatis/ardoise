@@ -122,6 +122,62 @@ fn start_replay(runtime: &NarrationRuntime, library: &Library, path: &Path, hub:
     .unwrap();
 }
 
+/// A microphone that Windows keeps silent (the privacy setting): its recording is refused.
+struct Blocked;
+
+impl Source for Blocked {
+    fn device_name(&self) -> &str {
+        "Blocked microphone"
+    }
+
+    fn level(&self) -> Level {
+        Level::default()
+    }
+
+    fn elapsed(&self) -> Duration {
+        Duration::from_secs(2)
+    }
+
+    fn status(&self) -> CaptureStatus {
+        CaptureStatus::Silent
+    }
+
+    fn stop(self: Box<Self>) -> Result<AudioClip, MediaError> {
+        Err(MediaError::MicrophoneSilent)
+    }
+}
+
+/// Starts recording while writing in the note at `path`.
+fn start_writing(runtime: &NarrationRuntime, library: &Library, path: &Path, hub: &LiveHub) {
+    let target = NarrationTarget::Writing {
+        path: path_text(path),
+    };
+    start_in(
+        runtime,
+        None,
+        target,
+        || Ok(library.clone()),
+        hub,
+        Arc::new(|| None),
+    )
+    .unwrap();
+}
+
+/// `narration_stop(true, null, null, noteZeroWallMs)`: the editor's stop of a writing recording.
+fn keep_on_clock(note_zero_wall_ms: f64) -> StopRequest {
+    StopRequest {
+        replay_started_at_ms: Some(note_zero_wall_ms),
+        ..keep()
+    }
+}
+
+/// The latest instant at which the first sample of a stand-in recording of 1 s, stopped just
+/// now, can be placed on a clock at instant 0 at `clock_ms` (Unix ms): the watcher's first look,
+/// when the stand-in had already received its second, came before now, however busy the PC.
+fn latest_first_sample(clock_ms: f64) -> i64 {
+    (wall_now_ms() - 1_000.0 - clock_ms).ceil() as i64 + 1
+}
+
 /// The names in `dir`, sorted (none when it does not exist).
 fn names(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(dir)
@@ -758,8 +814,12 @@ fn a_replay_recording_is_placed_by_the_replay_clock() {
         ..keep()
     };
     stop_in(&runtime, &request, &hub).unwrap().unwrap();
+    let latest = latest_first_sample(replay_started_at);
     let info = narration_info_in(&library, &saved.path).unwrap().unwrap();
-    assert!((3_990..=4_500).contains(&info.start_ms), "{info:?}");
+    assert!(
+        (3_990..=latest).contains(&info.start_ms),
+        "{info:?}, at most {latest}"
+    );
     assert_eq!(info.speed, 2.0);
     assert!(!runtime.has_pending());
     assert!(names(backup.path()).is_empty());
@@ -1088,6 +1148,315 @@ fn a_recording_on_one_page_keeps_its_buffer() {
     assert_eq!(pieces[0].1.clip.samples.len(), 48_000);
     let merged = merge_by_page(pieces);
     assert_eq!(merged[0].1.clip.samples.as_ptr(), buffer);
+}
+
+// --- Recording while writing in the editor (M17) ---
+
+#[test]
+fn a_writing_recording_is_staged_in_note_time_with_a_backup_copy() {
+    let (_dir, library) = library();
+    let saved = write_sample(&library, "", "Essai");
+    let before = fs::read(&saved.path).unwrap();
+    let backup = tempfile::tempdir().unwrap();
+    let runtime = fake_runtime(vec![tone(48_000, 1)], backup.path());
+    let hub = LiveHub::new(HubConfig::default());
+
+    // Note time was 0 five seconds before the start (the editor's clock: `noteZeroWallMs`).
+    let note_zero = wall_now_ms() - 5_000.0;
+    start_writing(&runtime, &library, &saved.path, &hub);
+    let status = runtime.status();
+    assert_eq!(status.state, NarrationState::Recording);
+    assert_eq!(status.device.as_deref(), Some("Fake microphone"));
+    let result = stop_in(&runtime, &keep_on_clock(note_zero), &hub)
+        .unwrap()
+        .unwrap();
+    let latest = latest_first_sample(note_zero);
+    assert_eq!(
+        (result.stamp, result.duration_ms, result.pages),
+        (None, 1000, 1)
+    );
+    let key = result.staged.clone().unwrap();
+    assert_eq!(serde_json::to_value(&result).unwrap()["staged"], json!(key));
+    // Nothing is written: the sound waits for the note's save.
+    assert_eq!(fs::read(&saved.path).unwrap(), before);
+    assert_eq!(runtime.status(), NarrationStatus::idle());
+    assert!(!runtime.has_pending());
+
+    // In note time, speed 1, no trimming; its first sample from the watcher's anchor (the
+    // stand-in had received its second of sound at the first look) less note time 0's clock.
+    let audio = runtime.staged_audio(&key).unwrap();
+    let narration = decode_narration(&audio).unwrap();
+    assert_eq!(narration.base, NarrationBase::Note);
+    assert_eq!(narration.options, ReplayOptions::default());
+    assert!(
+        (3_990..=latest).contains(&narration.start_ms),
+        "{}, at most {latest}",
+        narration.start_ms
+    );
+    assert_eq!(narration.clip.samples.len(), 48_000);
+
+    // Its backup copy, named after the note, outside the library, holds the same.
+    let copies = names(backup.path());
+    assert_eq!(copies.len(), 1);
+    let stem = saved.path.file_stem().unwrap().to_string_lossy();
+    assert!(copies[0].starts_with(&format!("{stem} 2")), "{copies:?}");
+    assert_eq!(
+        fs::read(backup.path().join(&copies[0])).unwrap(),
+        &audio[..]
+    );
+}
+
+#[test]
+fn a_writing_recording_needs_a_note_of_the_library() {
+    let (dir, library) = library();
+    let backup = tempfile::tempdir().unwrap();
+    let runtime = fake_runtime(vec![tone(4_800, 1)], backup.path());
+    let hub = LiveHub::new(HubConfig::default());
+    let writing = |path: &Path| NarrationTarget::Writing {
+        path: path_text(path),
+    };
+    let start = |target: NarrationTarget, library: CommandResult<Library>| {
+        start_in(
+            &runtime,
+            None,
+            target,
+            move || library,
+            &hub,
+            Arc::new(|| None),
+        )
+        .unwrap_err()
+        .code()
+    };
+    let missing = dir.path().join("2026-10-24 Absente.ardoise");
+    assert_eq!(
+        start(writing(&missing), Ok(library.clone())),
+        "noteNotFound"
+    );
+    let elsewhere = tempfile::tempdir().unwrap();
+    let outside = elsewhere.path().join("2026-10-24 X.ardoise");
+    fs::write(&outside, "x").unwrap();
+    assert_eq!(
+        start(writing(&outside), Ok(library.clone())),
+        "notInLibrary"
+    );
+    assert_eq!(
+        start(
+            writing(&missing),
+            Err(CommandError::new("noLibrary", "none"))
+        ),
+        "noLibrary"
+    );
+    // Nothing was opened.
+    assert_eq!(runtime.status(), NarrationStatus::idle());
+
+    // One recording at a time.
+    let saved = write_sample(&library, "", "Essai");
+    start_writing(&runtime, &library, &saved.path, &hub);
+    assert_eq!(
+        start(writing(&saved.path), Ok(library.clone())),
+        NARRATION_BUSY
+    );
+    assert_eq!(
+        start_in(
+            &runtime,
+            None,
+            NarrationTarget::Replay {
+                path: path_text(&saved.path),
+                speed: 1.0,
+                max_pause_ms: None,
+                start_ms: 0.0,
+            },
+            || Ok(library.clone()),
+            &hub,
+            Arc::new(|| None),
+        )
+        .unwrap_err()
+        .code(),
+        NARRATION_BUSY
+    );
+    assert_eq!(stop_in(&runtime, &discard(), &hub).unwrap(), None);
+}
+
+#[test]
+fn a_newer_writing_recording_replaces_the_staged_one_and_its_copy() {
+    let (_dir, library) = library();
+    let saved = write_sample(&library, "", "Essai");
+    let backup = tempfile::tempdir().unwrap();
+    let runtime = fake_runtime(vec![tone(4_800, 1), tone(9_600, 1)], backup.path());
+    let hub = LiveHub::new(HubConfig::default());
+    let clock = wall_now_ms();
+
+    start_writing(&runtime, &library, &saved.path, &hub);
+    let first = stop_in(&runtime, &keep_on_clock(clock), &hub)
+        .unwrap()
+        .unwrap()
+        .staged
+        .unwrap();
+    start_writing(&runtime, &library, &saved.path, &hub);
+    let second = stop_in(&runtime, &keep_on_clock(clock), &hub)
+        .unwrap()
+        .unwrap();
+    assert_eq!(second.duration_ms, 200);
+    let second = second.staged.unwrap();
+    assert_ne!(first, second);
+    // One narration per note: the older sound is gone, with its copy.
+    assert_eq!(
+        runtime.staged_audio(&first).unwrap_err().code(),
+        NO_STAGED_NARRATION
+    );
+    assert_eq!(
+        decode_narration(&runtime.staged_audio(&second).unwrap())
+            .unwrap()
+            .clip
+            .samples
+            .len(),
+        9_600
+    );
+    assert_eq!(names(backup.path()).len(), 1);
+
+    // Dropping another key changes nothing; dropping its own removes it and its copy.
+    runtime.drop_staged(&first);
+    runtime.drop_staged("not a key");
+    assert!(runtime.has_staged());
+    assert_eq!(names(backup.path()).len(), 1);
+    runtime.drop_staged(&second);
+    assert!(!runtime.has_staged());
+    assert!(names(backup.path()).is_empty());
+    assert_eq!(
+        runtime.staged_audio(&second).unwrap_err().code(),
+        NO_STAGED_NARRATION
+    );
+    // Dropping it again is harmless.
+    runtime.drop_staged(&second);
+    assert_eq!(library.read(&saved.path).unwrap().file.audio, None);
+
+    // A sound left unsaved for another note (its editor was closed) gives way too, but its copy
+    // stays, as a last resort.
+    let other = write_sample(&library, "", "Autre");
+    start_writing(&runtime, &library, &other.path, &hub);
+    let left = stop_in(&runtime, &keep_on_clock(clock), &hub)
+        .unwrap()
+        .unwrap()
+        .staged
+        .unwrap();
+    start_writing(&runtime, &library, &saved.path, &hub);
+    stop_in(&runtime, &keep_on_clock(clock), &hub).unwrap();
+    assert_eq!(
+        runtime.staged_audio(&left).unwrap_err().code(),
+        NO_STAGED_NARRATION
+    );
+    assert_eq!(names(backup.path()).len(), 2);
+}
+
+#[test]
+fn a_cancelled_empty_or_silent_writing_recording_stages_nothing() {
+    let (_dir, library) = library();
+    let saved = write_sample(&library, "", "Essai");
+    let before = fs::read(&saved.path).unwrap();
+    let backup = tempfile::tempdir().unwrap();
+    let hub = LiveHub::new(HubConfig::default());
+    let clock = wall_now_ms();
+
+    // Cancelled (« Annuler »): nothing is kept.
+    let runtime = fake_runtime(vec![tone(4_800, 1)], backup.path());
+    start_writing(&runtime, &library, &saved.path, &hub);
+    assert_eq!(stop_in(&runtime, &discard(), &hub).unwrap(), None);
+    assert!(!runtime.has_staged());
+
+    // Nothing captured.
+    let runtime = fake_runtime(vec![AudioClip::default()], backup.path());
+    start_writing(&runtime, &library, &saved.path, &hub);
+    assert_eq!(
+        stop_in(&runtime, &keep_on_clock(clock), &hub)
+            .unwrap_err()
+            .code(),
+        EMPTY_RECORDING
+    );
+    assert!(!runtime.has_staged());
+
+    // The microphone is blocked by Windows.
+    let runtime = NarrationRuntime::new(
+        Box::new(|_, _| Ok(Box::new(Blocked) as Box<dyn Source>)),
+        backup.path().to_path_buf(),
+    );
+    start_writing(&runtime, &library, &saved.path, &hub);
+    assert_eq!(runtime.status().capture, Some(CaptureState::Silent));
+    assert_eq!(
+        stop_in(&runtime, &keep_on_clock(clock), &hub)
+            .unwrap_err()
+            .code(),
+        MICROPHONE_SILENT
+    );
+    assert!(!runtime.has_staged());
+    assert_eq!(runtime.status(), NarrationStatus::idle());
+
+    assert!(names(backup.path()).is_empty());
+    assert_eq!(fs::read(&saved.path).unwrap(), before);
+}
+
+#[test]
+fn the_writing_origin_comes_after_every_sample_of_the_note() {
+    let mut note = crate::library::tests::sample_note("Essai");
+    // The sample's last point is at 8 × 29 ms.
+    assert_eq!(writing_origin(&note), 232 + 1_000);
+    // A stroke on a hidden layer counts, wherever it is in the list.
+    let mut hidden = note.strokes[0].clone();
+    hidden.layer = 1;
+    for (i, point) in hidden.points.iter_mut().enumerate() {
+        point.t = 5_000 + i as u32;
+    }
+    note.strokes.insert(0, hidden);
+    assert_eq!(writing_origin(&note), 5_029 + 1_000);
+    note.strokes.clear();
+    assert_eq!(writing_origin(&note), 0);
+}
+
+#[test]
+fn without_the_editor_s_clock_the_sound_goes_after_the_ink_on_disk() {
+    let (_dir, library) = library();
+    let saved = write_sample(&library, "", "Essai");
+    let backup = tempfile::tempdir().unwrap();
+    let runtime = fake_runtime(vec![tone(4_800, 1)], backup.path());
+    let hub = LiveHub::new(HubConfig::default());
+
+    // The editor renamed the note while recording: the path at stop names the copy.
+    start_writing(&runtime, &library, &saved.path, &hub);
+    let renamed = saved.path.with_file_name("2026-10-24 Renommée.ardoise");
+    fs::rename(&saved.path, &renamed).unwrap();
+    let request = StopRequest {
+        path: Some(path_text(&renamed)),
+        ..keep()
+    };
+    let key = stop_in(&runtime, &request, &hub)
+        .unwrap()
+        .unwrap()
+        .staged
+        .unwrap();
+    let narration = decode_narration(&runtime.staged_audio(&key).unwrap()).unwrap();
+    // After the sample's last point (232 ms) and the gap.
+    assert_eq!(narration.start_ms, 1_232);
+    let copies = names(backup.path());
+    assert!(copies[0].starts_with("2026-10-24 Renommée 2"), "{copies:?}");
+
+    // A path outside the library is ignored (the copy keeps the name of the note recorded for),
+    // and a note that cannot be read puts the sound at 0.
+    start_writing(&runtime, &library, &renamed, &hub);
+    fs::remove_file(&renamed).unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let request = StopRequest {
+        path: Some(path_text(&elsewhere.path().join("2026-10-24 X.ardoise"))),
+        ..keep()
+    };
+    let key = stop_in(&runtime, &request, &hub)
+        .unwrap()
+        .unwrap()
+        .staged
+        .unwrap();
+    let narration = decode_narration(&runtime.staged_audio(&key).unwrap()).unwrap();
+    assert_eq!(narration.start_ms, 0);
+    let copies = names(backup.path());
+    assert_eq!(copies.len(), 1);
+    assert!(copies[0].starts_with("2026-10-24 Renommée 2"), "{copies:?}");
 }
 
 /// Not a test: puts a long synthetic narration into an existing note, for the manual check of
