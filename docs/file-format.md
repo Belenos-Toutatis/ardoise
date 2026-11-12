@@ -241,7 +241,7 @@ length and thousands of random corruptions).
   archive; they take only its placement (`rect`, `quarterTurns`), for the image of the outer file when it is the
   same image (same `name` and `pdfPage`).
 - `thumb.png`: thumbnail, any size (the app decides).
-- `audio.opus`: narration recorded during a replay or in live mode (§4.1).
+- `audio.opus`: narration recorded during a replay, in live mode or while writing in the editor (§4.1).
 - `background.<ext>`: pixels of `backgroundImage` (Ardoise writes `png` or `jpg`; a PDF page is turned into an image
   when it is imported; files of 1.0/1.1 may hold any extension). At most one is recognised (the first in the central
   directory); further `background.*` members are kept as unknown members. When a note is written, an unknown member
@@ -266,7 +266,7 @@ browser) plays the member once extracted. Ardoise writes 48 kHz mono (readers al
 
 | Comment | Values | Default | Meaning |
 |---|---|---|---|
-| `ARDOISE_BASE` | `replay` or `note` | `replay` | recorded during a replay (replay time) or in live mode (note time) |
+| `ARDOISE_BASE` | `replay` or `note` | `replay` | recorded during a replay (replay time), or in live mode or while writing in the editor (note time) |
 | `ARDOISE_SPEED` | decimal number, 0.25 to 16 | 1 | speed of the replay it was recorded with (`note`: 1) |
 | `ARDOISE_MAX_PAUSE_MS` | integer, or `none` | `none` | pauses cut after this many milliseconds ("supprimer les temps morts") |
 | `ARDOISE_START_MS` | signed integer | 0 | replay instant, in that time base, of the first sample; negative when the recording began before the note's time origin (`created`) |
@@ -275,6 +275,13 @@ The time base is the one of the replay: note time (`Point::t`) mapped through th
 (`crates/ardoise-media/src/replay/timeline.rs`). A video export that includes the narration replays the note with the
 narration's speed and pauses, so that voice and drawing stay together; when the note is edited afterwards, the sound
 keeps its instants.
+
+A narration recorded while writing in the editor (M17, `docs/design/paper-projection-narration.md` §3) is a note-time
+narration like live mode's: `ARDOISE_BASE=note`, speed 1, no cut pauses, and `ARDOISE_START_MS` the note time of its
+first sample. The strokes written during the recording get their `Point::t` from the sound's clock, after the strokes the
+note already held (and a stroke written later goes after the end of the sound), so a replay that plays the narration
+shows strokes and sound together. A replay of a note-time narration is the note's time at speed 1 with its real pauses (no
+playback rule is stored). Nothing in the file tells the two note-time cases apart, and nothing needs to.
 
 The member has been listed since version 1.0 as opaque bytes, and readers of 1.0 and 1.1 keep it verbatim when they
 rewrite a note: specifying its content changes neither the major nor the minor version. Like the rest of the note,

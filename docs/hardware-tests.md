@@ -613,3 +613,92 @@ Ce qui ne revient pas tout seul :
 | Si le SVG séparé et le SVG fusionné s'ouvrent comme prévu dans **Inkscape** | G6 |
 | Si un calque masqué est bien absent des fichiers exportés | G7 |
 | Si l'encre de l'ordinateur est retenue d'une séance à l'autre | G8 |
+
+---
+
+## H7 — Papier et fond en direct, projection de l'éditeur, son pendant qu'on écrit
+
+**Durée** : 50 à 60 minutes. **Matériel** : le PC d'Ardoise (**la Surface et son stylet**), la vraie tablette (chargée, dongle branché, téléphone Bluetooth **coupé**), le **vidéoprojecteur** de la salle en bureau étendu, le **PC du vidéoprojecteur sur le même réseau** (celui du partage, voir H4), **un élève ou un collègue** qui écrit sur la tablette, le **micro de la Surface**, et sur la Surface une **fiche en PDF de deux pages** et une **photo**. Ce test suppose que H1 à H6 ont réussi.
+
+Ce test vérifie SPEC §4.2 « Papier et fond pendant le direct », §4.4 « Projeter la note de l'éditeur » et §4.5 « Narration au micro » (« pendant qu'on écrit dans l'éditeur ») (`docs/questions.md` Q13) avec la vraie tablette, le vrai vidéoprojecteur et le vrai micro : changer le papier et poser une fiche sous la page pendant que l'élève écrit, projeter une note de l'éditeur et y écrire, enregistrer le son en écrivant puis relire et exporter la vidéo. Les libellés ci-dessous sont ceux de la fenêtre ; les parties A à C demandent la tablette, D et E non.
+
+### À la maison, avant
+
+1. Fermer Ardoise sur tous les PC, puis remplacer `ardoise.exe` dans le dossier Nextcloud par la nouvelle version.
+2. Ne **pas** utiliser `--simulated-tablet` ni `--simulated-microphone`.
+3. Copier la fiche PDF (deux pages) et la photo dans un dossier de la Surface (pas dans la bibliothèque).
+4. Noter la version d'Ardoise et celle de Windows. Vérifier que Windows laisse Ardoise utiliser le micro (*Paramètres > Confidentialité et sécurité > Microphone*).
+
+### Au travail
+
+#### A. Le papier en direct
+
+1. Ouvrir le **Mode direct**, **Projeter** (onglet **Projection**), **Partager sur le réseau** vers le PC du vidéoprojecteur. L'élève écrit.
+2. Onglet **Page** : **Crème**, modèle **Seyès**, **Texture du papier**. Noter si le vidéoprojecteur et l'écran du partage changent, en combien de temps, et si l'écriture de l'élève continue **sans à-coup** pendant le changement (regarder un mot long, sans lever la tablette).
+3. Appuyer sur `B` (tableau noir) : les pastilles de couleur sont **grisées** et une phrase le dit ; choisir le modèle **Ligné** : il apparaît sur l'ardoise. `B` à nouveau : le crème revient, lignée. Noter le texte exact de la phrase.
+4. Choisir **Ardoise noire** tableau éteint : le papier devient noir, une phrase propose le tableau noir ; l'écriture de l'élève est noire sur noir (c'est voulu). Remettre **Crème**. Noter le texte exact de la phrase.
+5. Faire passer la page avec le **bouton de la tablette** (réglé sur « nouvelle page ») ou **Page suivante** : la nouvelle page est crème lignée, avec la texture. Revenir en arrière : la page d'avant a gardé le sien. Essayer `Ctrl + Z` : le papier ne change pas (c'est voulu).
+
+#### B. Une fiche sous la page
+
+1. Onglet **Fond** : **Choisir un PDF ou une image…**, la fiche, **page 2**, **Mettre en fond**. Noter le temps avant qu'elle s'affiche au vidéoprojecteur et sur le partage, et si l'élève peut écrire pendant ce temps.
+2. L'élève complète la fiche : l'écriture tombe-t-elle **au bon endroit** sur la fiche, au vidéoprojecteur et sur le partage, aussi en agrandissant la zone projetée ? Essayer **Opacité** 50 %, **Pleine page**, **Entière**, **Tourner l'image seule**.
+3. Cliquer dans la liste **Modèle** (onglet **Page**), puis appuyer sur la **télécommande** (Page suivante) : la page doit tourner, le modèle ne doit pas changer. Même essai après un choix de **Placement** et un réglage de l'**Opacité** à la souris.
+4. Page suivante : pas de fiche, le papier est gardé. Page précédente : la fiche est là. Mettre la photo sur une autre page.
+5. Tenir la tablette dans l'autre sens **avant** d'écrire sur une page qui a la fiche : la page suit-elle la tablette, la fiche est-elle replacée ? Écrire un mot, puis essayer de tourner la tablette : la page ne doit plus tourner, les boutons de position sont grisés, une phrase dit comment tenir la tablette. **Retirer l'image** : la page se tourne-t-elle avec la tablette, écriture comprise ? Noter le texte exact de la phrase.
+6. **Terminer.** Dans la bibliothèque, ouvrir les notes : la fiche sous la première, la photo sous la sienne, le papier sur toutes. Noter le temps d'import d'une page de PDF (à l'œil) et si l'ordinateur a ralenti.
+
+#### C. Une feuille reprise
+
+1. Reprendre en direct une note qui a déjà une image de fond. Remplacer l'image par la fiche page 1, changer le papier, écrire, **Terminer**.
+2. Ouvrir la note : la nouvelle image, le nouveau papier. **Revenir à l'original** : l'encre d'avant revient, l'image et le papier restent (c'est voulu).
+
+#### D. Projeter une note de l'éditeur
+
+1. Ouvrir une note, onglet **Projection**, **Projeter**. Écrire au stylet de la Surface : le trait apparaît-il au vidéoprojecteur **pendant qu'on écrit** ? Noter le retard ressenti.
+2. `Ctrl + Z`, `Ctrl + Y`, masquer un calque, changer le papier : le vidéoprojecteur suit-il à chaque fois ? Vérifier que la sélection et le lasso n'y apparaissent **jamais**.
+3. **Agrandir** deux fois, puis faire défiler et zoomer l'éditeur : la zone projetée suit-elle ? Le cadre en pointillés montre-t-il ce que voit la classe ? **Page entière**, **Largeur**.
+4. **Relecture** (`R`) : la relecture passe-t-elle au vidéoprojecteur sans saccade ?
+5. Note suivante (`Alt + →`) : le vidéoprojecteur montre la nouvelle note. **Partager sur le réseau** en même temps : les deux marchent, et le point bleu de **Projection** reste.
+6. `Échap` sur le vidéoprojecteur : il se ferme, l'onglet le dit. Projeter à nouveau, puis revenir à la bibliothèque : la projection se ferme.
+7. Avec **un seul écran** (débrancher le projecteur, ou choisir l'écran de la Surface) : la projection recouvre l'éditeur ; que fait Windows de l'éditeur dessous (le trait suit-il toujours ?), et `Échap` la ferme-t-il ?
+8. Projeter la note, puis revenir à la bibliothèque et ouvrir le **Mode direct** et **Projeter** : une seule fenêtre projetée à la fois.
+
+#### E. Le son pendant qu'on écrit
+
+1. Ouvrir une note déjà écrite en classe. Onglet **Son**, **Pendant que j'écris**, **Enregistrer en écrivant**, choisir le micro de la Surface (regarder le **Niveau du micro**), **Démarrer**. Parler une minute en écrivant au stylet, avec des moments où l'on parle sans écrire et où l'on écrit sans parler. **Arrêter et enregistrer** : « Son enregistré … avec vos traits ». Noter combien de temps passe avant que la note soit enregistrée.
+2. **Relecture**, puis **Lire avec la narration** : les traits apparaissent-ils avec la voix ? Noter un décalage, en secondes, **au début et à la fin** de l'enregistrement. Combien de temps passe avant la voix (l'encre déjà là défile-t-elle en temps réel : c'est une limite connue) ?
+3. **Vidéo**, exporter en MP4 avec **Inclure la narration**, la lire dans le lecteur de Windows (et dans VLC si possible) : même vérification.
+4. **Enregistrer en écrivant** à nouveau, **Démarrer** : Ardoise demande s'il faut **remplacer** ; essayer **Garder l'ancienne** (rien ne s'enregistre), puis **Remplacer**.
+5. Pendant un enregistrement, écrire un mot puis `Ctrl + Z`, et coller des traits (`Ctrl + V`) : le trait annulé revient à son heure avec `Ctrl + Y`, le trait collé paraît à l'instant où on l'a collé.
+6. Avec **Dessiner au doigt** activé dans les **Réglages**, écrire au doigt pendant un enregistrement : le trait au doigt suit le son comme celui du stylet.
+7. Pendant un enregistrement, essayer de quitter l'éditeur, de lancer la **Relecture**, de **Revenir à l'original** : refusés avec « Arrêtez ou annulez d'abord l'enregistrement de la narration. »
+
+### Ce qui revient par Nextcloud
+
+- Les notes de la séance (A à C) et celles de D et E, dans la bibliothèque (le son est dans la note).
+- Dans `<bibliothèque>\_ardoise\diagnostics\` : les journaux du partage, et un journal seulement en cas d'erreur de la tablette ou d'une session de mode direct anormale.
+- La vidéo exportée en E3 et les mesures de décalage sont à déposer à la main avec le compte rendu.
+
+### À me signaler
+
+Ce qui ne revient pas tout seul :
+
+| Quoi | Où |
+|---|---|
+| Tout **à-coup** de l'écriture de l'élève pendant un changement de papier ou de fond, et le **temps d'apparition** de la fiche au vidéoprojecteur et sur le partage | A2, B1 |
+| Le texte exact des phrases sur le tableau noir (couleur grisée) et sur l'ardoise noire | A3, A4 |
+| Un **décalage de l'écriture sur la fiche**, au vidéoprojecteur ou sur le partage, aussi en zoom | B2 |
+| Si la télécommande tourne bien la page après un choix dans une liste ou sur un curseur | B3 |
+| Ce que fait la page avec une fiche quand on tourne la tablette, avant puis après avoir écrit, et le texte de la phrase | B5 |
+| Le temps d'import d'une page de PDF et si l'ordinateur a ralenti | B6 |
+| Ce que contiennent les notes après **Terminer** (papier, fiche, photo), et ce que rend **Revenir à l'original** | B6, C |
+| Le **retard du trait de l'éditeur** au vidéoprojecteur, et si la sélection n'y apparaît jamais | D1, D2 |
+| La **zone projetée** et le cadre en pointillés : suivent-ils l'éditeur, montrent-ils ce que voit la classe | D3 |
+| La relecture projetée (saccades) | D4 |
+| Avec un seul écran : ce que fait Windows de l'éditeur sous la projection | D7 |
+| Le **décalage entre la voix et l'écriture**, en secondes, au début et à la fin, dans Ardoise et dans la vidéo (lecteur de Windows et VLC) | E2, E3 |
+| Le temps avant la voix quand la note contenait déjà de l'écriture | E2 |
+| Si la question **Remplacer** / **Garder l'ancienne** apparaît et si chaque réponse fait ce qu'elle dit | E4 |
+| Si le trait collé, le trait annulé puis rétabli et le trait au doigt suivent le son | E5, E6 |
+| Toute phrase incompréhensible, et ce que **Windows Ink** affiche par-dessus la page | tout le test |
