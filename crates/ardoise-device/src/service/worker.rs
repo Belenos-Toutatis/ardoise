@@ -3,7 +3,11 @@
 //! wait) and handles the requests of the handle between steps.
 //!
 //! What it owns: the connector (inside the `Manager`), the `Manager` of the current identity
-//! root, the session with the connected tablet, the sync under way, the live sink.
+//! root, the session with the connected tablet (a Slate's [`Session`] or the blackboard's
+//! [`BoardSession`], never both), the sync under way, the live sink. The blackboard's steps are in
+//! [`board`] (docs/design/blackboard.md).
+
+mod board;
 
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
@@ -14,22 +18,26 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use ardoise_core::library::Library;
 use ardoise_core::note::PageSize;
+use ardoise_core::settings::Orientation;
 use ardoise_proto::live::{self, LivePacket};
 use ardoise_proto::sysevent::{self, SysEvent};
 
 use super::journal::Journal;
 use super::{
-    ADAPTER_RECHECK, BUTTON_TIMEOUT, Connection, ConnectorFactory, DeviceDetails, Interrupts,
-    LastSync, LiveInput, LiveSink, LiveState, PageContext, PageStore, Pending, REGISTER_SEARCH,
-    RETRY_DELAY, RegisterStep, RegisteredTablet, Request, SEARCH_SLICE, Sent, ServiceConfig,
-    ServiceHooks, StatusCallback, StatusError, SyncProgress, TabletOptions, TabletStatus,
-    model_name, sync_error,
+    ADAPTER_RECHECK, BLACKBOARD_MODEL_NAME, BUTTON_TIMEOUT, Connection, ConnectorFactory,
+    DeviceDetails, Interrupts, KnownTablet, LastSync, LiveInput, LiveSink, LiveState, PageContext,
+    PageStore, Pending, REGISTER_SEARCH, RETRY_DELAY, RegisterStep, RegisteredTablet, Request,
+    SEARCH_SLICE, Sent, ServiceConfig, ServiceHooks, StatusCallback, StatusError, SyncProgress,
+    TabletOptions, TabletStatus, model_name, sync_error,
 };
-use crate::identity::{self, DeviceRecord};
+use crate::blackboard::BoardSession;
+use crate::identity::{self, BlackboardRecord, DeviceRecord};
 use crate::manager::Manager;
 use crate::pages::{ImportedPages, orient_record, page_note_id};
-use crate::session::{DeviceError, DeviceInfo, LiveNotification, Session, unix_seconds};
-use crate::transport::{Advertisement, Channel};
+use crate::session::{
+    DeviceError, DeviceInfo, DownloadedPage, LiveNotification, Session, unix_seconds,
+};
+use crate::transport::{Advertisement, Channel, TabletKind};
 
 /// While connected and idle: how often the link is checked (a lost link is noticed this fast,
 /// and requests wait at most this long).
@@ -70,6 +78,16 @@ impl Publisher {
             let mut status = self.status.lock().unwrap_or_else(PoisonError::into_inner);
             let before = status.clone();
             change(&mut status);
+            // `active` names the tablet of a connection only while there is one.
+            if !matches!(
+                status.connection,
+                Connection::Connecting
+                    | Connection::Connected
+                    | Connection::Syncing
+                    | Connection::Live
+            ) {
+                status.active = None;
+            }
             (*status != before).then(|| status.clone())
         };
         if let Some(status) = changed {
@@ -99,6 +117,8 @@ struct SyncRun {
     saved: Vec<String>,
     deleted: u16,
     context: PageContext,
+    /// Time of the blackboard page deleted last: the tablet must not describe it again.
+    last_deleted: Option<u32>,
 }
 
 /// Live mode asked by the hub.
@@ -131,11 +151,24 @@ pub(super) struct Worker {
     interrupt: Arc<AtomicBool>,
     manager: Option<Manager>,
     journal: Option<Journal>,
+    /// The Slate (`device.json`).
     record: Option<DeviceRecord>,
+    /// The blackboard (`blackboard.json`).
+    board_record: Option<BlackboardRecord>,
+    /// The link to a Slate.
     session: Option<Session>,
+    /// The link to the blackboard (never at the same time as `session`).
+    board: Option<BoardSession>,
+    /// The search for a blackboard to add, while it runs.
+    adding: Option<board::AddSearch>,
     sync: Option<SyncRun>,
     /// A sync waits (asked, automatic, or interrupted by a lost link).
     want_sync: bool,
+    /// The sync that waits was asked by the user (the blackboard's pages are imported without
+    /// that only when "delete after import" is on).
+    asked_sync: bool,
+    /// When the worker last looked for the Slate while the blackboard held the link.
+    slate_checked_at: Option<Duration>,
     live: Option<LiveRun>,
     /// When the page count was last read on this connection (the session clock's monotonic
     /// time), `None` without a connection.
@@ -167,9 +200,14 @@ impl Worker {
             manager: None,
             journal: None,
             record: None,
+            board_record: None,
             session: None,
+            board: None,
+            adding: None,
             sync: None,
             want_sync: false,
+            asked_sync: false,
+            slate_checked_at: None,
             live: None,
             counted_at: None,
             count_now: false,
@@ -247,6 +285,15 @@ impl Worker {
             Request::SetLibrary(library, root) => self.set_library(library, root),
             Request::StartLive(sink) => self.start_live(sink),
             Request::StopLive => self.stop_live(),
+            Request::FindBlackboards => self.find_blackboards(),
+            Request::AddBlackboard(address, answer) => {
+                let result = self.add_blackboard(&address);
+                let _ = answer.send(result);
+            }
+            Request::ForgetBlackboard(answer) => {
+                let result = self.forget_blackboard();
+                let _ = answer.send(result);
+            }
             Request::Shutdown => self.stop = true,
         }
     }
@@ -256,6 +303,14 @@ impl Worker {
     fn step(&mut self) {
         if self.session.is_some() {
             self.connected_step();
+            return;
+        }
+        if self.board.is_some() {
+            self.board_step();
+            return;
+        }
+        if self.adding.is_some() {
+            self.add_step();
             return;
         }
         if self.config.library.is_none() || self.config.identity_root.is_none() {
@@ -268,12 +323,15 @@ impl Worker {
             return;
         }
         self.load_record();
-        let Some(record) = self.record.clone() else {
-            self.publish(Connection::NotRegistered);
-            self.wait(Some(REGISTRATION_RECHECK));
-            return;
-        };
-        self.search(&record);
+        match (self.record.clone(), self.board_record.clone()) {
+            (None, None) => {
+                self.publish(Connection::NotRegistered);
+                self.wait(Some(REGISTRATION_RECHECK));
+            }
+            // A library that only knows a Slate: as before the blackboard existed.
+            (Some(record), None) => self.search(&record),
+            (slate, Some(board)) => self.search_known(slate.as_ref(), &board),
+        }
     }
 
     /// Checks the adapter and makes the `Manager` of the identity root if needed. `false`
@@ -333,7 +391,12 @@ impl Worker {
 
     /// Connects (auth, clock), reads the tablet's information and its page count.
     fn connect(&mut self, record: &DeviceRecord, tablet: &Advertisement) {
-        self.publish(Connection::Connecting);
+        let pending = self.pending();
+        self.publisher.update(|status| {
+            status.connection = Connection::Connecting;
+            status.active = Some(TabletKind::Slate);
+            status.pending = pending;
+        });
         let Some(manager) = self.manager.as_mut() else {
             return;
         };
@@ -373,11 +436,14 @@ impl Worker {
         }
         let details = self.details(info, pages);
         let registered = self.record.as_ref().map(registered_tablet);
+        let known = self.known_tablets();
         let pending = self.pending();
         self.publisher.update(|status| {
             status.connection = Connection::Connected;
+            status.active = Some(TabletKind::Slate);
             status.device = Some(details);
             status.registered = registered;
+            status.known = known;
             status.pending = pending;
             status.error = None;
         });
@@ -436,7 +502,7 @@ impl Worker {
     /// Whether the page count is due again (connected and idle, [`PAGE_COUNT_INTERVAL`] after
     /// the last time it was read).
     fn page_count_due(&self) -> bool {
-        if self.count_now && self.session.is_some() {
+        if self.count_now && (self.session.is_some() || self.board.is_some()) {
             return true;
         }
         match (self.counted_at, self.session_time()) {
@@ -495,12 +561,16 @@ impl Worker {
     /// The tablet dropped the link (switched off, out of range, idle): back to searching.
     fn link_lost(&mut self) {
         self.note("the tablet disconnected");
+        let on_board = self.board.is_some();
         self.session = None;
+        self.board = None;
         self.counted_at = None;
         self.count_now = false;
         if let Some(run) = self.sync.take() {
-            // The page in transfer stays on the tablet; the sync goes on at the next connection.
+            // The page in transfer stays on the tablet; the sync goes on at the next connection
+            // (on the blackboard as if asked: it was running).
             self.want_sync = true;
+            self.asked_sync |= on_board;
             self.keep("the link was lost during a sync");
             self.finish_sync(run, Some(&DeviceError::Disconnected));
         }
@@ -527,17 +597,19 @@ impl Worker {
         if self.sync.is_some() {
             return;
         }
-        if self.record.is_none() {
+        if self.record.is_none() && self.board_record.is_none() {
             self.show_error(&DeviceError::NoTabletRegistered);
             return;
         }
         self.want_sync = true;
+        self.asked_sync = true;
         let pending = self.pending();
         self.publisher.update(|status| status.pending = pending);
     }
 
     fn start_sync(&mut self) {
         self.want_sync = false;
+        self.asked_sync = false;
         let Some(root) = self.config.library.clone() else {
             self.show_error(&DeviceError::NoLibrary);
             return;
@@ -599,6 +671,7 @@ impl Worker {
             saved: Vec::new(),
             deleted: 0,
             context,
+            last_deleted: None,
         };
         if to_read == 0 {
             self.finish_sync(run, None);
@@ -664,35 +737,10 @@ impl Worker {
             Ok(page) => page,
             Err(error) => return self.sync_failed(error),
         };
-        let known = match run.imported.find(&run.library, &page) {
-            Some(path) => Some(Known::InLibrary(path)),
-            None if !run.delete && run.imported.in_trash(&page) => Some(Known::InTrash),
-            None => None,
-        };
-        let message = match known {
-            Some(Known::InLibrary(path)) => {
-                format!("page {index} already imported as {}", path.display())
-            }
-            Some(Known::InTrash) => format!("page {index} already imported, its note deleted"),
-            None => {
-                let id = page_note_id(&page);
-                // The store is the app's code (thumbnail, export): a panic there must not
-                // end the service; the page then stays on the tablet.
-                let stored = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                    (self.store_page)(&run.root, page, &run.context)
-                }))
-                .unwrap_or_else(|_| Err("the page store failed unexpectedly".into()));
-                match stored {
-                    Ok(path) => {
-                        let message = format!("page {index} saved as {}", path.display());
-                        run.imported.add(id, &path);
-                        run.saved.push(path.display().to_string());
-                        message
-                    }
-                    // The page stays on the tablet.
-                    Err(message) => return self.sync_failed(DeviceError::Storage(message)),
-                }
-            }
+        let message = match keep_page(&mut self.store_page, run, page, index) {
+            Ok(message) => message,
+            // The page stays on the tablet.
+            Err(error) => return self.sync_failed(error),
         };
         // Only now, the page safe in the library, may it leave the tablet; a cancellation
         // arriving meanwhile takes effect after it (cancel stops between pages).
@@ -791,8 +839,13 @@ impl Worker {
             self.note("sync cancelled");
             self.finish_sync(run, None);
         }
+        if self.adding.is_some() {
+            self.note("search for a blackboard cancelled");
+            self.end_search(None);
+        }
         if self.want_sync {
             self.want_sync = false;
+            self.asked_sync = false;
             let pending = self.pending();
             self.publisher.update(|status| status.pending = pending);
         }
@@ -808,7 +861,7 @@ impl Worker {
         }
         let refused = if self.config.library.is_none() || self.config.identity_root.is_none() {
             Some(DeviceError::NoLibrary)
-        } else if self.record.is_none() {
+        } else if self.record.is_none() && self.board_record.is_none() {
             Some(DeviceError::NoTabletRegistered)
         } else {
             None
@@ -827,7 +880,7 @@ impl Worker {
         if active {
             // Live mode already streams (another sink before): the new one starts at once.
             self.started(&mut run);
-        } else if self.session.is_none() || self.sync.is_some() {
+        } else if (self.session.is_none() && self.board.is_none()) || self.sync.is_some() {
             run.sink.input(LiveInput::State(LiveState::Waiting));
         }
         self.live = Some(run);
@@ -842,7 +895,7 @@ impl Worker {
             run.sink.input(LiveInput::Started {
                 width,
                 height,
-                orientation: self.config.options.orientation,
+                orientation: self.holding(),
             });
             run.started = true;
         }
@@ -855,6 +908,11 @@ impl Worker {
     /// turn again. Done on this thread between two notifications: the records before are
     /// oriented the old way, the ones after the new way.
     fn reoriented(&mut self) {
+        if self.board.is_some() {
+            // The blackboard has no orientation: its page stays upright.
+            self.note("orientation changed: not used by the blackboard");
+            return;
+        }
         let (width, height) = self.tablet_size();
         let orientation = self.config.options.orientation;
         if let Some(run) = self.live.as_mut() {
@@ -936,7 +994,7 @@ impl Worker {
             Channel::Command if live::is_button_command(&notification.data) => {
                 Some(LiveInput::Button)
             }
-            Channel::Command | Channel::PageData => None,
+            Channel::Command | Channel::PageData | Channel::BoardData => None,
         };
         match input {
             Some(input) => {
@@ -959,6 +1017,11 @@ impl Worker {
                 self.keep("unclassified notification during live mode");
             }
         }
+        self.count_live_notification();
+    }
+
+    /// Counts a live notification; every [`ROLL_CHECK`] the log's length is looked at.
+    fn count_live_notification(&mut self) {
         let roll = self.live.as_mut().is_some_and(|run| {
             run.notifications = run.notifications.wrapping_add(1);
             run.notifications % ROLL_CHECK == 0
@@ -982,14 +1045,22 @@ impl Worker {
         {
             self.forward(notification);
         }
+        while let Some(board) = self.board.as_mut()
+            && board.in_live_mode()
+            && let Ok(Some(notification)) = board.next_live_event(Duration::ZERO)
+        {
+            self.board_forward(notification);
+        }
         let Some(mut run) = self.live.take() else {
             return;
         };
         let mut lost = false;
-        if let Some(session) = self.session.as_mut()
-            && session.in_live_mode()
-            && let Err(error) = session.stop_live()
-        {
+        let stopped = match (self.session.as_mut(), self.board.as_mut()) {
+            (Some(session), _) if session.in_live_mode() => session.stop_live(),
+            (_, Some(board)) if board.in_live_mode() => board.stop_live(),
+            _ => Ok(()),
+        };
+        if let Err(error) = stopped {
             lost = error == DeviceError::Disconnected;
             self.note(format!("could not leave live mode: {error}"));
         }
@@ -998,7 +1069,7 @@ impl Worker {
         self.write_journal();
         if lost {
             self.link_lost();
-        } else if self.session.is_some() {
+        } else if self.session.is_some() || self.board.is_some() {
             self.counted_at = self.session_time();
             self.publish(Connection::Connected);
         } else {
@@ -1021,7 +1092,11 @@ impl Worker {
         if !self.ensure_manager() {
             return;
         }
-        // Registering takes the tablet over: a link open to it is closed.
+        // Registering takes the tablet over: a link open to it is closed (to the blackboard too:
+        // one link at a time), and a search for a blackboard ends.
+        if self.adding.is_some() {
+            self.end_search(None);
+        }
         self.close_session("registering takes the tablet over");
         if let Some(journal) = self.journal.as_mut() {
             journal.begin();
@@ -1088,11 +1163,7 @@ impl Worker {
             self.keep(error.to_string());
             self.end_journal("the registration failed");
         }
-        let connection = if self.record.is_some() {
-            Connection::Searching
-        } else {
-            Connection::NotRegistered
-        };
+        let connection = self.waiting_connection();
         let error = (!cancelled).then(|| StatusError::from(error));
         let pending = self.pending();
         self.publisher.update(|status| {
@@ -1117,6 +1188,11 @@ impl Worker {
     }
 
     fn rename(&mut self, name: &str) -> Result<(), DeviceError> {
+        if self.board.is_some() {
+            return Err(DeviceError::NotSupported(
+                "the blackboard has no name to change",
+            ));
+        }
         let session = self.idle_session()?;
         let result = session.set_name(name).and_then(|()| session.name());
         let actual = match result {
@@ -1149,6 +1225,9 @@ impl Worker {
     }
 
     fn set_time(&mut self) -> Result<i64, DeviceError> {
+        if self.board.is_some() {
+            return self.board_set_time();
+        }
         let session = self.idle_session()?;
         let clock = session.clock().clone();
         let result = session
@@ -1170,11 +1249,10 @@ impl Worker {
         if options.orientation != before.orientation {
             self.reoriented();
         }
-        if options.auto_sync
-            && !before.auto_sync
-            && self.session.is_some()
-            && self.stored_pages() > 0
-        {
+        // The blackboard's pages are imported automatically only when they may be deleted.
+        let may_sync =
+            self.session.is_some() || (self.board.is_some() && options.delete_after_import);
+        if options.auto_sync && !before.auto_sync && may_sync && self.stored_pages() > 0 {
             self.want_sync = true;
         }
         self.publisher.update(|status| status.options = options);
@@ -1186,23 +1264,40 @@ impl Worker {
             .identity_root
             .clone()
             .ok_or(DeviceError::NoLibrary)?;
-        if let Some(run) = self.sync.take() {
-            self.finish_sync(run, None);
+        // Only the Slate's link: a blackboard connected meanwhile stays connected.
+        if self.session.is_some() {
+            if let Some(run) = self.sync.take() {
+                self.finish_sync(run, None);
+            }
+            self.stop_live();
+            self.close_session("the registration is forgotten");
+            self.want_sync = false;
+            self.asked_sync = false;
         }
-        self.stop_live();
-        self.close_session("the registration is forgotten");
-        self.want_sync = false;
         identity::forget(&root).map_err(|e| DeviceError::Storage(e.to_string()))?;
         self.record = None;
         self.note("registration forgotten");
+        let connection = self.waiting_connection();
+        let board_connected = self.board.is_some();
+        let known = self.known_tablets();
+        let pending = self.pending();
         self.publisher.update(|status| {
-            status.connection = Connection::NotRegistered;
+            if !board_connected {
+                status.connection = connection;
+                status.sync = None;
+                status.error = None;
+            }
+            if status
+                .device
+                .as_ref()
+                .is_some_and(|d| d.kind == TabletKind::Slate)
+            {
+                status.device = None;
+            }
             status.registered = None;
-            status.device = None;
+            status.known = known;
             status.register_step = None;
-            status.sync = None;
-            status.pending = None;
-            status.error = None;
+            status.pending = pending;
         });
         Ok(())
     }
@@ -1227,12 +1322,17 @@ impl Worker {
         self.manager = None;
         self.journal = None;
         self.want_sync = false;
+        self.asked_sync = false;
+        self.adding = None;
         self.config.identity_root = root;
         self.record = None;
+        self.board_record = None;
         self.publisher.update(|status| {
             status.registered = None;
+            status.known = Vec::new();
             status.device = None;
             status.register_step = None;
+            status.board_search = None;
             status.sync = None;
             status.pending = None;
             status.error = None;
@@ -1256,10 +1356,13 @@ impl Worker {
     fn close_session(&mut self, why: &str) {
         self.counted_at = None;
         self.count_now = false;
-        let Some(session) = self.session.take() else {
-            return;
+        self.slate_checked_at = None;
+        let closed = match (self.session.take(), self.board.take()) {
+            (Some(session), _) => session.disconnect(),
+            (None, Some(board)) => board.disconnect(),
+            (None, None) => return,
         };
-        if let Err(error) = session.disconnect() {
+        if let Err(error) = closed {
             self.note(format!("disconnect failed: {error}"));
         }
         self.end_journal(why);
@@ -1287,30 +1390,79 @@ impl Worker {
 
     // --- helpers ----------------------------------------------------------------------------
 
-    /// Reads `device.json` of the identity root.
+    /// Reads `device.json` and `blackboard.json` of the identity root.
     fn load_record(&mut self) {
         let Some(root) = self.config.identity_root.clone() else {
             self.record = None;
+            self.board_record = None;
             return;
         };
-        let loaded = identity::load(&root);
-        let error = match loaded {
-            Ok(record) => {
-                self.record = record;
-                None
-            }
-            Err(error) => {
+        let mut error = None;
+        match identity::load(&root) {
+            Ok(record) => self.record = record,
+            Err(failure) => {
                 self.record = None;
-                Some(StatusError::new("libraryAccess", error))
+                error = Some(StatusError::new("libraryAccess", failure));
             }
-        };
+        }
+        match identity::load_blackboard(&root) {
+            Ok(record) => self.board_record = record,
+            Err(failure) => {
+                self.board_record = None;
+                error = Some(StatusError::new("libraryAccess", failure));
+            }
+        }
         let registered = self.record.as_ref().map(registered_tablet);
+        let known = self.known_tablets();
         self.publisher.update(|status| {
             status.registered = registered;
+            status.known = known;
             if error.is_some() {
                 status.error = error;
             }
         });
+    }
+
+    /// The tablets the library knows, the Slate first.
+    fn known_tablets(&self) -> Vec<KnownTablet> {
+        let slate = self.record.as_ref().map(|record| KnownTablet {
+            kind: TabletKind::Slate,
+            name: record.name.clone(),
+            address: record.address.clone(),
+            added: record.registered.clone(),
+            width: record.width,
+            height: record.height,
+            model: model_name(record.width, record.height),
+        });
+        let board = self.board_record.as_ref().map(|record| KnownTablet {
+            kind: TabletKind::Blackboard,
+            name: record.name.clone(),
+            address: record.address.clone(),
+            added: record.added.clone(),
+            width: ardoise_proto::blackboard::BOARD_WIDTH,
+            height: ardoise_proto::blackboard::BOARD_HEIGHT,
+            model: BLACKBOARD_MODEL_NAME.to_owned(),
+        });
+        slate.into_iter().chain(board).collect()
+    }
+
+    /// The state while no tablet is connected: searching when one is known.
+    fn waiting_connection(&self) -> Connection {
+        if self.record.is_some() || self.board_record.is_some() {
+            Connection::Searching
+        } else {
+            Connection::NotRegistered
+        }
+    }
+
+    /// How the tablet of the link is held: as the settings say for a Slate; the blackboard has
+    /// no orientation (its page is upright, never turned).
+    fn holding(&self) -> Orientation {
+        if self.board.is_some() {
+            Orientation::Landscape
+        } else {
+            self.config.options.orientation
+        }
     }
 
     /// Keeps `device.json` in step with the tablet (renamed elsewhere, other size).
@@ -1333,6 +1485,7 @@ impl Worker {
 
     fn details(&self, info: &DeviceInfo, stored_pages: u16) -> DeviceDetails {
         DeviceDetails {
+            kind: TabletKind::Slate,
             name: info.name.clone(),
             firmware: info.firmware.clone(),
             battery_percent: info.battery_percent,
@@ -1342,6 +1495,7 @@ impl Worker {
             stored_pages,
             model: model_name(info.width, info.height),
             read_at: self.now_ms(),
+            memory: None,
         }
     }
 
@@ -1373,9 +1527,11 @@ impl Worker {
 
     /// Monotonic time of the session's clock, `None` without a connection.
     fn session_time(&self) -> Option<Duration> {
-        self.session
-            .as_ref()
-            .map(|session| session.clock().monotonic())
+        match (&self.session, &self.board) {
+            (Some(session), _) => Some(session.clock().monotonic()),
+            (None, Some(board)) => Some(board.clock().monotonic()),
+            (None, None) => None,
+        }
     }
 
     /// Unix milliseconds on the connector's clock (the system clock without connector).
@@ -1446,6 +1602,41 @@ impl Worker {
     }
 }
 
+/// Stores `page` (the `index`-th of the sync) unless the library already has it: the line for
+/// the log, or why it could not be stored (the page then stays on the tablet).
+fn keep_page(
+    store_page: &mut PageStore,
+    run: &mut SyncRun,
+    page: DownloadedPage,
+    index: u16,
+) -> Result<String, DeviceError> {
+    let known = match run.imported.find(&run.library, &page) {
+        Some(path) => Some(Known::InLibrary(path)),
+        None if !run.delete && run.imported.in_trash(&page) => Some(Known::InTrash),
+        None => None,
+    };
+    match known {
+        Some(Known::InLibrary(path)) => Ok(format!(
+            "page {index} already imported as {}",
+            path.display()
+        )),
+        Some(Known::InTrash) => Ok(format!("page {index} already imported, its note deleted")),
+        None => {
+            let id = page_note_id(&page);
+            // The store is the app's code (thumbnail, export): a panic there must not end the
+            // service; the page then stays on the tablet.
+            let stored = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                store_page(&run.root, page, &run.context)
+            }))
+            .unwrap_or_else(|_| Err("the page store failed unexpectedly".into()));
+            let path = stored.map_err(DeviceError::Storage)?;
+            run.imported.add(id, &path);
+            run.saved.push(path.display().to_string());
+            Ok(format!("page {index} saved as {}", path.display()))
+        }
+    }
+}
+
 /// `1 page`, `3 pages`.
 fn pages_text(count: u16) -> String {
     if count == 1 {
@@ -1476,5 +1667,6 @@ fn channel_name(channel: Channel) -> &'static str {
         Channel::PageData => "page_data",
         Channel::Live => "live",
         Channel::SysEvent => "sys_event",
+        Channel::BoardData => "board_data",
     }
 }

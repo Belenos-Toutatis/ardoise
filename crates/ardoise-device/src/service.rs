@@ -13,6 +13,12 @@
 //! scan, a download or the registration when a request cannot wait (cancel, forget, another
 //! library, shutdown), or while the worker only searches for the tablet. The flag stays raised
 //! as long as such a request waits in the channel ([`Interrupts`]).
+//!
+//! Two tablets can be known at once (docs/design/blackboard.md): the Bamboo Slate
+//! (`device.json`, registered with the wizard) and the Xiaomi blackboard (`blackboard.json`,
+//! added by choosing it among the blackboards found nearby). The worker connects to whichever
+//! is on, one at a time; [`TabletStatus::active`] says which one `connection` and `device` are
+//! about, [`TabletStatus::known`] lists both. A library that only knows a Slate behaves as before.
 
 mod journal;
 mod worker;
@@ -30,7 +36,7 @@ use ardoise_proto::live::LiveRecord;
 use serde::{Deserialize, Serialize};
 
 use crate::session::{DeviceError, DownloadedPage, valid_name};
-use crate::transport::{Connector, TransportError};
+use crate::transport::{Connector, TabletKind, TransportError};
 
 /// What the service is doing with the tablet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -49,6 +55,9 @@ pub enum Connection {
     Connected,
     Syncing,
     Live,
+    /// Looking for a Xiaomi blackboard to add (see [`TabletStatus::board_search`]); no tablet
+    /// is connected meanwhile.
+    Adding,
 }
 
 /// Steps of the registration, as the wizard shows them.
@@ -85,10 +94,57 @@ pub struct RegisteredTablet {
     pub height: u32,
 }
 
+/// A tablet the library knows: the Slate of `device.json`, the blackboard of `blackboard.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnownTablet {
+    pub kind: TabletKind,
+    pub name: String,
+    pub address: String,
+    /// When it was registered (Slate) or added (blackboard), RFC 3339.
+    pub added: String,
+    /// Drawing area in device units (10 µm).
+    pub width: u32,
+    pub height: u32,
+    /// `Bamboo Slate A4`, `Bamboo Slate A5`, `Wacom (W × H)`, or [`BLACKBOARD_MODEL_NAME`].
+    pub model: String,
+}
+
+/// A blackboard heard by the search for tablets to add.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundTablet {
+    pub address: String,
+    /// As advertised (`xiaomi.dev.ble` on the real tablet).
+    pub name: Option<String>,
+    /// Signal strength in dBm, when known.
+    pub rssi: Option<i16>,
+}
+
+/// The search for a blackboard to add, while it runs (`connection` is `adding`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardSearch {
+    /// Blackboards heard so far, in the order they were first heard.
+    pub found: Vec<FoundTablet>,
+    /// When the search gives up, unix milliseconds.
+    pub until: i64,
+}
+
+/// The memory of the blackboard, in bytes (the Slate does not say).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceMemory {
+    pub total: u32,
+    pub free: u32,
+}
+
 /// What the tablet said about itself at the last connection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceDetails {
+    /// The tablet these details are about.
+    pub kind: TabletKind,
     pub name: String,
     pub firmware: String,
     pub battery_percent: u8,
@@ -98,10 +154,13 @@ pub struct DeviceDetails {
     pub height: u32,
     /// Pages waiting in the tablet's memory.
     pub stored_pages: u16,
-    /// `Bamboo Slate A4`, `Bamboo Slate A5`, or `Wacom (W × H)` (see [`model_name`]).
+    /// `Bamboo Slate A4`, `Bamboo Slate A5`, or `Wacom (W × H)` (see [`model_name`]), or
+    /// [`BLACKBOARD_MODEL_NAME`].
     pub model: String,
     /// When this was read, unix milliseconds.
     pub read_at: i64,
+    /// Total and free memory: the blackboard only (`null` for the Slate).
+    pub memory: Option<DeviceMemory>,
 }
 
 /// Progress of the sync under way.
@@ -189,6 +248,13 @@ pub struct TabletStatus {
     pub error: Option<StatusError>,
     pub simulated: bool,
     pub options: TabletOptions,
+    /// The tablet `connection` is about while it is `connecting`, `connected`, `syncing` or
+    /// `live`; `null` in every other state.
+    pub active: Option<TabletKind>,
+    /// Every tablet the library knows, the Slate first.
+    pub known: Vec<KnownTablet>,
+    /// The search for a blackboard to add, while `connection` is `adding`.
+    pub board_search: Option<BoardSearch>,
 }
 
 impl TabletStatus {
@@ -205,9 +271,17 @@ impl TabletStatus {
             error: None,
             simulated,
             options,
+            active: None,
+            known: Vec::new(),
+            board_search: None,
         }
     }
 }
+
+/// The model shown for the Xiaomi blackboard.
+pub const BLACKBOARD_MODEL_NAME: &str = "Xiaomi Mijia LCD blackboard";
+/// The name a blackboard gets when it is added (it advertises a generic `xiaomi.dev.ble`).
+pub const BLACKBOARD_NAME: &str = "Mijia LCD blackboard";
 
 /// The display name of a tablet model from its drawing area.
 pub fn model_name(width: u32, height: u32) -> String {
@@ -252,6 +326,8 @@ pub trait ServiceHooks: Send + Sync {
     fn waiting_for_button(&self) {}
     /// Live mode streams: the pen may move.
     fn live_started(&self) {}
+    /// Live mode streams from the blackboard: its pen may move.
+    fn blackboard_live_started(&self) {}
 }
 
 /// No physical action (real tablet).
@@ -332,6 +408,16 @@ pub const SEARCH_SLICE: Duration = Duration::from_secs(5);
 pub const REGISTER_SEARCH: Duration = Duration::from_secs(60);
 /// How long the wizard waits for the button press that confirms the registration.
 pub const BUTTON_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long the search for a blackboard to add lasts.
+pub const BOARD_SEARCH: Duration = Duration::from_secs(60);
+/// One scan of that search: the blackboards heard are published after each.
+pub const BOARD_SEARCH_SLICE: Duration = Duration::from_secs(1);
+/// While the blackboard holds the link and nothing happens, how often the worker looks for a
+/// known Slate asking to connect (its button pressed): the Slate then goes first, since it only
+/// advertises when it wants to connect, while the blackboard is always on.
+pub const SLATE_CHECK_INTERVAL: Duration = Duration::from_secs(10);
+/// How long that look lasts.
+pub const SLATE_CHECK_SCAN: Duration = Duration::from_secs(1);
 /// Wait before trying again after a failed connection.
 pub const RETRY_DELAY: Duration = Duration::from_secs(5);
 /// How often a missing or switched-off Bluetooth adapter is checked again.
@@ -364,6 +450,10 @@ pub fn error_code(error: &DeviceError) -> &'static str {
         DeviceError::NoLibrary => "noLibrary",
         DeviceError::InvalidName(_) => "invalidName",
         DeviceError::Storage(_) => "libraryAccess",
+        DeviceError::TransferIncomplete { .. } => "transferIncomplete",
+        DeviceError::PageNotDeleted(_) => "pageNotDeleted",
+        DeviceError::NotSupported(_) => "notSupported",
+        DeviceError::TabletNotFound(_) => "blackboardNotFound",
         DeviceError::Transport(_)
         | DeviceError::Unexpected(_)
         | DeviceError::CrcMismatch { .. }
@@ -438,6 +528,9 @@ enum Request {
     SetLibrary(Option<PathBuf>, Option<PathBuf>),
     StartLive(Box<dyn LiveSink>),
     StopLive,
+    FindBlackboards,
+    AddBlackboard(String, Answer<()>),
+    ForgetBlackboard(Answer<()>),
     Shutdown,
 }
 
@@ -510,7 +603,11 @@ impl TabletService {
     /// Sends a request; `urgent` ones (and any request while the worker only searches for the
     /// tablet) interrupt what the worker waits for, until it takes them ([`Interrupts`]).
     fn send(&self, request: Request, urgent: bool) -> Result<(), DeviceError> {
-        let interrupting = urgent || self.status().connection == Connection::Searching;
+        let interrupting = urgent
+            || matches!(
+                self.status().connection,
+                Connection::Searching | Connection::Adding
+            );
         if interrupting {
             self.interrupts.raise();
         }
@@ -544,9 +641,10 @@ impl TabletService {
     fn check_connected(&self) -> Result<(), DeviceError> {
         match self.status().connection {
             Connection::Connected => Ok(()),
-            Connection::Syncing | Connection::Live | Connection::Registering => {
-                Err(DeviceError::Busy)
-            }
+            Connection::Syncing
+            | Connection::Live
+            | Connection::Registering
+            | Connection::Adding => Err(DeviceError::Busy),
             Connection::NotRegistered => Err(DeviceError::NoTabletRegistered),
             Connection::Unavailable | Connection::Searching | Connection::Connecting => {
                 Err(DeviceError::NotConnected)
@@ -588,9 +686,32 @@ impl TabletService {
         let _ = self.send(Request::SetOptions(options), false);
     }
 
-    /// Disconnects and forgets the registration (`device.json`).
+    /// Disconnects and forgets the registration (`device.json`): the Slate only.
     pub fn forget(&self) -> Result<(), DeviceError> {
         self.ask(Request::Forget, true)
+    }
+
+    /// Looks for Xiaomi blackboards nearby for [`BOARD_SEARCH`] (`connection` `adding`, what is
+    /// heard in [`TabletStatus::board_search`]); a link open to a tablet is closed first. Ends
+    /// with [`TabletService::add_blackboard`], [`TabletService::cancel`], or after the time
+    /// (`blackboardNotFound` when nothing was heard).
+    pub fn find_blackboards(&self) {
+        let _ = self.send(Request::FindBlackboards, false);
+    }
+
+    /// Adds the blackboard at `address`, which the search under way must have heard: saves
+    /// `blackboard.json` and ends the search; the worker then connects to it. No registration:
+    /// nothing is written to the tablet.
+    pub fn add_blackboard(&self, address: &str) -> Result<(), DeviceError> {
+        self.ask(
+            |answer| Request::AddBlackboard(address.to_owned(), answer),
+            true,
+        )
+    }
+
+    /// Disconnects the blackboard if it is connected and forgets it (`blackboard.json`).
+    pub fn forget_blackboard(&self) -> Result<(), DeviceError> {
+        self.ask(Request::ForgetBlackboard, true)
     }
 
     /// Follows another library (or none).

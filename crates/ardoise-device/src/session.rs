@@ -17,7 +17,9 @@ use ardoise_proto::{
 };
 
 use crate::identity::HostId;
-use crate::transport::{Advertisement, Channel, Clock, Transport, TransportError, TransportEvent};
+use crate::transport::{
+    Advertisement, Channel, Clock, TabletKind, Transport, TransportError, TransportEvent,
+};
 
 /// Default wait for the reply to a command (protocol.md §2.3).
 pub const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -80,6 +82,21 @@ pub enum DeviceError {
     /// A tablet name must be 1 to 15 printable ASCII characters.
     #[error("invalid tablet name {0:?}: 1 to 15 printable ASCII characters")]
     InvalidName(String),
+    /// A page download of the blackboard stopped before the size it announced (no byte for
+    /// [`crate::blackboard::DATA_IDLE_TIMEOUT`]), or brought more bytes; the page stays on the
+    /// tablet.
+    #[error("page transfer stopped after {received} of {expected} bytes")]
+    TransferIncomplete { expected: u32, received: usize },
+    /// The blackboard still describes the page it was just asked to delete (Unix seconds of its
+    /// time): the sync stops rather than import it again and again.
+    #[error("the tablet did not delete the page stored at {0}")]
+    PageNotDeleted(u32),
+    /// The connected tablet cannot do this (renaming the blackboard...).
+    #[error("this tablet cannot do it: {0}")]
+    NotSupported(&'static str),
+    /// No blackboard with this address was found by the search for tablets to add.
+    #[error("no blackboard {0} was found nearby")]
+    TabletNotFound(String),
 }
 
 /// What the tablet says about itself.
@@ -104,6 +121,9 @@ pub struct DownloadedPage {
     pub timestamp: Option<i64>,
     /// Size announced by the tablet before the transfer (informative only).
     pub announced_size: u32,
+    /// The tablet it comes from, which says how to read `bytes` (Slate stroke file, or the
+    /// blackboard's 7-byte records).
+    pub kind: TabletKind,
 }
 
 /// A notification received during live mode, stamped when it came out of the transport.
@@ -473,6 +493,7 @@ impl Session {
             bytes: std::mem::take(&mut self.page_data),
             timestamp,
             announced_size,
+            kind: TabletKind::Slate,
         })
     }
 
@@ -767,7 +788,8 @@ impl Session {
                             self.battery_event = Some(percent);
                         }
                     }
-                    Channel::Live => {}
+                    // Not a channel of the Slate's layout; dropped (the log has it).
+                    Channel::Live | Channel::BoardData => {}
                 }
                 if channel == Channel::Live || self.live_mode {
                     if self.live.len() >= MAX_LIVE_QUEUE {

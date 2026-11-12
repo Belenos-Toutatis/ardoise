@@ -1,0 +1,1007 @@
+//! The simulated Xiaomi blackboard (docs/design/blackboard.md): what it stores, what it
+//! answers, its "store" and "erase" buttons and its pen.
+//!
+//! [`SimBoard`] is a cheap handle (clone it freely) to one simulated blackboard. Connectors
+//! reach it like the simulated Slate ([`SimConnector::over`](crate::SimConnector::over)); the
+//! test or [`SimHooks`](crate::SimHooks) performs the physical actions (write, store, erase)
+//! and injects faults.
+//!
+//! # Behaviour
+//!
+//! Facts from docs/research/xiaomi-blackboard.md §3, plus the assumptions marked below:
+//!
+//! - No login: every known request is answered at once, on [`Channel::Command`]; the frames
+//!   are those of [`ardoise_proto::blackboard`]. `11 05 07` sets the clock, `12 05 06`
+//!   deletes, `12 02 08` starts or stops the stream: no reply. `12 01 05` describes the oldest
+//!   page, or answers the bare `12 01 05` when none is stored (measured on the real tablet).
+//! - `12 06 03 01 <time>`: the page's bytes on [`Channel::BoardData`] in chunks of at most 244
+//!   bytes, nothing else. **Assumption:** a time that names no page gets no answer; so does a
+//!   delete of a time that names no page.
+//! - **Assumption:** unknown or malformed requests get no answer (counted in
+//!   [`BoardStats::unknown_requests`]).
+//! - The pen writes on the screen whether a host listens or not. While a host streams
+//!   (`12 02 08 01`), the records follow on [`Channel::BoardData`], up to six per notification,
+//!   [`RECORDS_PER_SECOND`] of them per second: `a0` hovering, `a1` touching, `c0` when the pen
+//!   leaves. Movement is timed from when it is given ([`SimBoard::draw_live`]), as a hand
+//!   writes: what happens while nobody streams is only on the screen.
+//! - The store button ([`SimBoard::press_store`]) stores the screen as a page dated by the
+//!   tablet's clock and sends `12 01 09` to a connected host, streaming or not. Storing again
+//!   without erasing replaces that page by the longer one, with a new time (measured). Two pages
+//!   never share a time (**assumption**: one second apart at least). **Assumption:** an empty
+//!   screen stores nothing and sends nothing.
+//! - **Assumption:** the erase button ([`SimBoard::erase`]) clears the screen and sends nothing
+//!   (not measured yet).
+//! - One connection at a time; no advertisement while connected (the PC did not hear the
+//!   tablet while the phone held it).
+
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
+
+use ardoise_device::transport::{Advertisement, Channel, TransportError, TransportEvent};
+use ardoise_proto::blackboard::beacon::blackboard_service_data;
+use ardoise_proto::blackboard::record::{RECORDS_PER_SECOND, encode_live, split_chunks};
+use ardoise_proto::blackboard::{
+    BOARD_HEIGHT, BOARD_WIDTH, BoardReply, BoardRequest, MAX_LIVE_RECORDS, PageInfo, Record,
+    RecordStatus, record::encode_records,
+};
+use ardoise_proto::stroke::Stroke;
+
+use crate::clock::{VirtualClock, unix_seconds};
+use crate::pen::{PenScript, PenSegment};
+
+/// Time between two records of the pen.
+pub const BOARD_RECORD_INTERVAL: Duration =
+    Duration::from_nanos(1_000_000_000 / RECORDS_PER_SECOND as u64);
+
+/// What the simulated blackboard is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimBoardConfig {
+    /// Advertised name (the real tablet's is generic).
+    pub name: String,
+    /// Bluetooth address, in the range reserved for documentation (RFC 7042).
+    pub address: String,
+    pub battery_percent: u8,
+    /// Memory in bytes (the real tablet's: about 121 MB).
+    pub memory_total: u32,
+    /// Signal strength while scanning, in dBm.
+    pub rssi: i16,
+    /// Tablet clock minus the virtual wall clock before the host sets it, in seconds.
+    pub clock_offset: i64,
+    /// The tablet drops a link on which the host wrote nothing for this long, if set
+    /// (**assumption**: the real one kept a silent link 80 s; unknown beyond).
+    pub idle_timeout: Option<Duration>,
+}
+
+impl SimBoardConfig {
+    /// The blackboard of the research note, battery 90 %.
+    pub fn blackboard() -> Self {
+        Self {
+            name: "xiaomi.dev.ble".into(),
+            address: "00:00:5E:00:53:B1".into(),
+            battery_percent: 90,
+            memory_total: 126_909_952,
+            rssi: -55,
+            clock_offset: 0,
+            idle_timeout: None,
+        }
+    }
+}
+
+/// A page stored on the simulated blackboard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardStoredPage {
+    /// When it was stored, on the tablet's clock (Unix seconds).
+    pub time: u32,
+    /// Its records, as the tablet sends them.
+    pub bytes: Vec<u8>,
+}
+
+/// Counters of what happened on the simulated blackboard.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BoardStats {
+    pub connections: u32,
+    pub links_lost: u32,
+    /// Frames written by hosts.
+    pub requests: u32,
+    /// Frames that are not a known request (no answer).
+    pub unknown_requests: u32,
+    /// Downloads of a stored page started.
+    pub downloads: u32,
+    /// Pages deleted by a host.
+    pub deletes: u32,
+    /// Records streamed in live mode.
+    pub live_records: u64,
+    /// `12 01 09` events sent.
+    pub page_stored_events: u32,
+}
+
+/// Handle to one simulated blackboard. Clones share the same tablet.
+#[derive(Debug, Clone)]
+pub struct SimBoard {
+    shared: Arc<Shared>,
+}
+
+#[derive(Debug)]
+struct Shared {
+    clock: Arc<VirtualClock>,
+    state: Mutex<State>,
+}
+
+#[derive(Debug)]
+struct State {
+    config: SimBoardConfig,
+    powered: bool,
+    clock_offset: i64,
+    pages: VecDeque<BoardStoredPage>,
+    /// What the screen shows: every record written since the last erase.
+    screen: Vec<Record>,
+    /// The time of the page that holds the screen as stored last, until the screen is erased.
+    stored_screen: Option<u32>,
+    /// Pen movement, anchored on the virtual clock.
+    pen: Vec<Timed>,
+    /// End of the anchored movement.
+    pen_end: Duration,
+    /// Records of `pen` already on the screen.
+    on_screen: usize,
+    link: Option<Link>,
+    next_link_id: u64,
+    drop_at: Option<Duration>,
+    /// The next downloads send only these many bytes each, then stall.
+    stalls: VecDeque<usize>,
+    /// The next delete does nothing.
+    ignore_next_delete: bool,
+    stats: BoardStats,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Timed {
+    due: Duration,
+    record: Record,
+}
+
+#[derive(Debug)]
+struct Link {
+    id: u64,
+    queue: VecDeque<Outgoing>,
+    /// Next record of `pen` to stream, while the host streams.
+    stream: Option<usize>,
+    last_write: Duration,
+}
+
+#[derive(Debug)]
+struct Outgoing {
+    due: Duration,
+    channel: Channel,
+    data: Vec<u8>,
+}
+
+/// The next notification of a stream.
+struct LiveItem {
+    due: Duration,
+    data: Vec<u8>,
+    consumed: usize,
+}
+
+impl SimBoard {
+    /// A blackboard with its own virtual clock, switched on, empty.
+    pub fn new(config: SimBoardConfig) -> Self {
+        Self::with_clock(config, Arc::new(VirtualClock::new()))
+    }
+
+    /// A blackboard on an existing clock (the simulated Slate's, so one connector reaches both).
+    pub fn with_clock(config: SimBoardConfig, clock: Arc<VirtualClock>) -> Self {
+        let clock_offset = config.clock_offset;
+        Self {
+            shared: Arc::new(Shared {
+                clock,
+                state: Mutex::new(State {
+                    config,
+                    powered: true,
+                    clock_offset,
+                    pages: VecDeque::new(),
+                    screen: Vec::new(),
+                    stored_screen: None,
+                    pen: Vec::new(),
+                    pen_end: Duration::ZERO,
+                    on_screen: 0,
+                    link: None,
+                    next_link_id: 1,
+                    drop_at: None,
+                    stalls: VecDeque::new(),
+                    ignore_next_delete: false,
+                    stats: BoardStats::default(),
+                }),
+            }),
+        }
+    }
+
+    /// A blackboard whose clock follows the computer's, for the real-time connector.
+    pub fn real_time(config: SimBoardConfig) -> Self {
+        Self::with_clock(config, Arc::new(VirtualClock::following_real_time()))
+    }
+
+    /// The default simulated blackboard ([`SimBoardConfig::blackboard`]).
+    pub fn blackboard() -> Self {
+        Self::new(SimBoardConfig::blackboard())
+    }
+
+    /// A [`Connector`](ardoise_device::transport::Connector) over this blackboard alone.
+    pub fn connector(&self) -> crate::SimConnector {
+        crate::SimConnector::over(vec![crate::SimDevice::Board(self.clone())])
+    }
+
+    pub fn clock(&self) -> Arc<VirtualClock> {
+        self.shared.clock.clone()
+    }
+
+    fn state(&self) -> MutexGuard<'_, State> {
+        self.shared
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn now(&self) -> Duration {
+        self.shared.clock.monotonic()
+    }
+
+    fn wall_seconds(&self) -> i64 {
+        unix_seconds(self.shared.clock.now())
+    }
+
+    // --- physical actions -----------------------------------------------------------------
+
+    /// The pen moves as `script` says, from now (after the movement given before): on the
+    /// screen, and to a host that streams. Points 5 ms apart in the script are played at the
+    /// blackboard's rate ([`BOARD_RECORD_INTERVAL`]).
+    pub fn draw_live(&self, script: PenScript) {
+        let now = self.now();
+        let mut state = self.state();
+        let start = state.pen_end.max(now);
+        let (records, end) = timeline(&script, start);
+        state.pen.extend(records);
+        state.pen_end = end;
+    }
+
+    /// Writes `strokes` on the screen at once (hovering to each stroke, touching along it,
+    /// leaving after it), stores the screen as a page, and erases it: one call, one page.
+    pub fn draw_page(&self, strokes: &[Stroke]) {
+        let now = self.now();
+        let wall = self.wall_seconds();
+        let mut state = self.state();
+        state.catch_up(now);
+        state.screen.extend(records_of(strokes));
+        state.store(now, wall);
+        state.erase();
+    }
+
+    /// Presses the store button: the screen becomes a page (see the module documentation).
+    pub fn press_store(&self) {
+        let now = self.now();
+        let wall = self.wall_seconds();
+        let mut state = self.state();
+        state.catch_up(now);
+        state.store(now, wall);
+    }
+
+    /// Presses the erase button: the screen is cleared (nothing is sent, **assumption**).
+    pub fn erase(&self) {
+        let now = self.now();
+        let mut state = self.state();
+        state.catch_up(now);
+        state.erase();
+    }
+
+    pub fn set_battery(&self, percent: u8) {
+        self.state().config.battery_percent = percent;
+    }
+
+    pub fn power_off(&self) {
+        let now = self.now();
+        let mut state = self.state();
+        state.powered = false;
+        if state.link.is_some() {
+            state.lose_link(now);
+        }
+    }
+
+    pub fn power_on(&self) {
+        self.state().powered = true;
+    }
+
+    /// The link connected at that moment is lost `after` from now (fault injection).
+    pub fn disconnect_after(&self, after: Duration) {
+        let at = self.now() + after;
+        self.state().drop_at = Some(at);
+    }
+
+    /// The next download (after those already stalled) sends only `bytes` bytes of the page,
+    /// then nothing.
+    pub fn stall_next_download(&self, bytes: usize) {
+        self.state().stalls.push_back(bytes);
+    }
+
+    /// The next delete request does nothing.
+    pub fn ignore_next_delete(&self) {
+        self.state().ignore_next_delete = true;
+    }
+
+    // --- inspection -------------------------------------------------------------------------
+
+    pub fn stored_pages(&self) -> Vec<BoardStoredPage> {
+        self.state().pages.iter().cloned().collect()
+    }
+
+    pub fn stored_page_count(&self) -> usize {
+        self.state().pages.len()
+    }
+
+    /// What the screen shows now.
+    pub fn screen(&self) -> Vec<Record> {
+        let now = self.now();
+        let mut state = self.state();
+        state.catch_up(now);
+        state.screen.clone()
+    }
+
+    pub fn is_streaming(&self) -> bool {
+        let now = self.now();
+        let state = self.state();
+        state.alive(now) && state.link.as_ref().is_some_and(|l| l.stream.is_some())
+    }
+
+    pub fn is_connected(&self) -> bool {
+        let now = self.now();
+        self.state().alive(now)
+    }
+
+    /// The tablet's clock, Unix seconds.
+    pub fn tablet_time(&self) -> i64 {
+        self.wall_seconds() + self.state().clock_offset
+    }
+
+    pub fn stats(&self) -> BoardStats {
+        self.state().stats
+    }
+
+    pub fn config(&self) -> SimBoardConfig {
+        self.state().config.clone()
+    }
+
+    /// What a scan sees now: `None` while switched off or connected.
+    pub fn advertisement(&self) -> Option<Advertisement> {
+        let now = self.now();
+        let state = self.state();
+        (state.powered && !state.alive(now)).then(|| state.advertisement())
+    }
+
+    // --- link (used by the connectors and their transports) ---------------------------------
+
+    pub(crate) fn open_link(
+        &self,
+        address: &str,
+        timeout: Duration,
+    ) -> Result<(u64, Advertisement), TransportError> {
+        let clock = &self.shared.clock;
+        let now = clock.monotonic();
+        let mut state = self.state();
+        if !address.eq_ignore_ascii_case(&state.config.address) {
+            return Err(TransportError::NotFound(address.to_owned()));
+        }
+        if !state.powered || state.alive(now) {
+            clock.advance(timeout);
+            return Err(TransportError::Timeout);
+        }
+        if state.link.is_some() {
+            state.lose_link(now);
+        }
+        if state.drop_at.is_some_and(|at| at <= now) {
+            state.drop_at = None;
+        }
+        let id = state.next_link_id;
+        state.next_link_id += 1;
+        state.link = Some(Link {
+            id,
+            queue: VecDeque::new(),
+            stream: None,
+            last_write: now,
+        });
+        state.stats.connections += 1;
+        Ok((id, state.advertisement()))
+    }
+
+    pub(crate) fn link_write(&self, id: u64, bytes: &[u8]) -> Result<(), TransportError> {
+        let now = self.now();
+        let wall = self.wall_seconds();
+        let mut state = self.state();
+        if !state.link.as_ref().is_some_and(|l| l.id == id) || !state.alive(now) {
+            return Err(TransportError::NotConnected);
+        }
+        state.stats.requests += 1;
+        if let Some(link) = state.link.as_mut() {
+            link.last_write = now;
+        }
+        // Records already due travel before the reply.
+        state.materialize_live(now);
+        let replies = state.handle(bytes, now, wall);
+        if let Some(link) = state.link.as_mut() {
+            link.queue
+                .extend(replies.into_iter().map(|(channel, data)| Outgoing {
+                    due: now,
+                    channel,
+                    data,
+                }));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn link_recv(
+        &self,
+        id: u64,
+        timeout: Duration,
+    ) -> Result<Option<TransportEvent>, TransportError> {
+        let clock = &self.shared.clock;
+        let now = clock.monotonic();
+        let horizon = now.saturating_add(timeout);
+        let mut guard = self.state();
+        let state = &mut *guard;
+        let Some(link) = state.link.as_ref().filter(|l| l.id == id) else {
+            return Ok(Some(TransportEvent::Disconnected));
+        };
+        let end = state.link_end(link);
+        let queued = link.queue.front().map(|o| o.due);
+        let live = link.stream.and_then(|cursor| peek_live(&state.pen, cursor));
+        let next = match (queued, live.as_ref().map(|l| l.due)) {
+            (Some(q), Some(l)) => Some(q.min(l)),
+            (q, l) => q.or(l),
+        };
+        if let Some(end) = end
+            && end <= horizon
+            && next.is_none_or(|due| due >= end)
+        {
+            clock.advance_to(end);
+            state.lose_link(end);
+            return Ok(Some(TransportEvent::Disconnected));
+        }
+        match next {
+            Some(due) if due <= horizon => {
+                clock.advance_to(due);
+                let from_queue = queued.is_some_and(|q| live.as_ref().is_none_or(|l| q <= l.due));
+                if from_queue {
+                    let outgoing = state.link.as_mut().and_then(|l| l.queue.pop_front());
+                    Ok(outgoing.map(|o| TransportEvent::Notification {
+                        channel: o.channel,
+                        data: o.data,
+                    }))
+                } else {
+                    Ok(live.map(|item| {
+                        state.consume_live(&item);
+                        TransportEvent::Notification {
+                            channel: Channel::BoardData,
+                            data: item.data,
+                        }
+                    }))
+                }
+            }
+            _ => {
+                clock.advance_to(horizon);
+                Ok(None)
+            }
+        }
+    }
+
+    pub(crate) fn link_next_due(&self, id: u64) -> Option<Duration> {
+        let state = self.state();
+        let Some(link) = state.link.as_ref().filter(|l| l.id == id) else {
+            return Some(Duration::ZERO);
+        };
+        let queued = link.queue.front().map(|o| o.due);
+        let live = link
+            .stream
+            .and_then(|cursor| peek_live(&state.pen, cursor))
+            .map(|item| item.due);
+        [queued, live, state.link_end(link)]
+            .into_iter()
+            .flatten()
+            .min()
+    }
+
+    pub(crate) fn close_link(&self, id: u64) {
+        let mut state = self.state();
+        if state.link.as_ref().is_some_and(|l| l.id == id) {
+            state.link = None;
+        }
+    }
+}
+
+impl State {
+    fn link_end(&self, link: &Link) -> Option<Duration> {
+        let idle = self.config.idle_timeout.map(|t| link.last_write + t);
+        match (self.drop_at, idle) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    fn alive(&self, now: Duration) -> bool {
+        self.link
+            .as_ref()
+            .is_some_and(|link| self.link_end(link).is_none_or(|end| end > now))
+    }
+
+    fn lose_link(&mut self, at: Duration) {
+        self.link = None;
+        if self.drop_at.is_some_and(|drop| drop <= at) {
+            self.drop_at = None;
+        }
+        self.stats.links_lost += 1;
+    }
+
+    fn advertisement(&self) -> Advertisement {
+        Advertisement {
+            address: self.config.address.clone(),
+            name: Some(self.config.name.clone()),
+            rssi: Some(self.config.rssi),
+            company_id: None,
+            manufacturer_data: Vec::new(),
+            xiaomi_service_data: blackboard_service_data(address_bytes(&self.config.address), 0),
+        }
+    }
+
+    /// Puts the pen records due by `now` on the screen.
+    fn catch_up(&mut self, now: Duration) {
+        while let Some(timed) = self.pen.get(self.on_screen)
+            && timed.due <= now
+        {
+            self.screen.push(timed.record);
+            self.on_screen += 1;
+        }
+    }
+
+    fn tablet_seconds(&self, wall: i64) -> u32 {
+        u32::try_from((wall + self.clock_offset).max(0)).unwrap_or(u32::MAX)
+    }
+
+    /// The store button.
+    fn store(&mut self, now: Duration, wall: i64) {
+        if self.screen.is_empty() {
+            return;
+        }
+        if let Some(time) = self.stored_screen.take() {
+            self.pages.retain(|page| page.time != time);
+        }
+        let mut time = self.tablet_seconds(wall);
+        if let Some(last) = self.pages.iter().map(|page| page.time).max() {
+            time = time.max(last.saturating_add(1));
+        }
+        self.pages.push_back(BoardStoredPage {
+            time,
+            bytes: encode_records(&self.screen),
+        });
+        self.stored_screen = Some(time);
+        if self.alive(now)
+            && let Some(link) = self.link.as_mut()
+        {
+            link.queue.push_back(Outgoing {
+                due: now,
+                channel: Channel::Command,
+                data: encode(&BoardReply::PageStored),
+            });
+            self.stats.page_stored_events += 1;
+        }
+    }
+
+    fn erase(&mut self) {
+        self.screen.clear();
+        self.stored_screen = None;
+    }
+
+    fn materialize_live(&mut self, now: Duration) {
+        loop {
+            let Some(cursor) = self.link.as_ref().and_then(|l| l.stream) else {
+                return;
+            };
+            let Some(item) = peek_live(&self.pen, cursor) else {
+                return;
+            };
+            if item.due > now {
+                return;
+            }
+            self.consume_live(&item);
+            if let Some(link) = self.link.as_mut() {
+                link.queue.push_back(Outgoing {
+                    due: item.due,
+                    channel: Channel::BoardData,
+                    data: item.data,
+                });
+            }
+        }
+    }
+
+    fn consume_live(&mut self, item: &LiveItem) {
+        if let Some(cursor) = self.link.as_mut().and_then(|l| l.stream.as_mut()) {
+            *cursor += item.consumed;
+        }
+        self.stats.live_records += item.consumed as u64;
+    }
+
+    fn handle(&mut self, bytes: &[u8], now: Duration, wall: i64) -> Vec<(Channel, Vec<u8>)> {
+        let Ok(request) = BoardRequest::decode(bytes) else {
+            self.stats.unknown_requests += 1;
+            return Vec::new();
+        };
+        let reply = |reply: BoardReply| vec![(Channel::Command, encode(&reply))];
+        match request {
+            BoardRequest::Battery => reply(BoardReply::Battery {
+                percent: self.config.battery_percent,
+            }),
+            BoardRequest::Memory => {
+                let used: usize = self.pages.iter().map(|page| page.bytes.len()).sum();
+                let used = u32::try_from(used).unwrap_or(u32::MAX);
+                reply(BoardReply::Memory {
+                    total: self.config.memory_total,
+                    free: self.config.memory_total.saturating_sub(used),
+                })
+            }
+            BoardRequest::SetTime { unix } => {
+                self.clock_offset = i64::from(unix) - wall;
+                Vec::new()
+            }
+            BoardRequest::PageCount => {
+                let bytes: usize = self.pages.iter().map(|page| page.bytes.len()).sum();
+                reply(BoardReply::PageCount {
+                    count: u16::try_from(self.pages.len()).unwrap_or(u16::MAX),
+                    bytes: u32::try_from(bytes).unwrap_or(u32::MAX),
+                })
+            }
+            BoardRequest::OldestPage => {
+                reply(BoardReply::OldestPage(self.pages.front().map(|page| {
+                    PageInfo {
+                        time: page.time,
+                        size: u32::try_from(page.bytes.len()).unwrap_or(u32::MAX),
+                    }
+                })))
+            }
+            BoardRequest::Download { time } => {
+                let Some(page) = self.pages.iter().find(|page| page.time == time) else {
+                    return Vec::new();
+                };
+                self.stats.downloads += 1;
+                let mut bytes = page.bytes.clone();
+                if let Some(limit) = self.stalls.pop_front() {
+                    bytes.truncate(limit);
+                }
+                split_chunks(&bytes)
+                    .into_iter()
+                    .map(|chunk| (Channel::BoardData, chunk))
+                    .collect()
+            }
+            BoardRequest::Delete { time } => {
+                if std::mem::take(&mut self.ignore_next_delete) {
+                    return Vec::new();
+                }
+                let before = self.pages.len();
+                self.pages.retain(|page| page.time != time);
+                if self.pages.len() < before {
+                    self.stats.deletes += 1;
+                    if self.stored_screen == Some(time) {
+                        self.stored_screen = None;
+                    }
+                }
+                Vec::new()
+            }
+            BoardRequest::StartLive => {
+                let cursor = self.pen.partition_point(|timed| timed.due < now);
+                if let Some(link) = self.link.as_mut() {
+                    link.stream = Some(cursor);
+                }
+                Vec::new()
+            }
+            BoardRequest::StopLive => {
+                if let Some(link) = self.link.as_mut() {
+                    link.stream = None;
+                }
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// Up to [`MAX_LIVE_RECORDS`] records from `cursor`, the group ending at a `c0`; due with its
+/// last record.
+fn peek_live(pen: &[Timed], cursor: usize) -> Option<LiveItem> {
+    let rest = pen.get(cursor..)?;
+    rest.first()?;
+    let mut records = Vec::with_capacity(MAX_LIVE_RECORDS);
+    let mut due = Duration::ZERO;
+    for timed in rest.iter().take(MAX_LIVE_RECORDS) {
+        records.push(timed.record);
+        due = timed.due;
+        if timed.record.status == RecordStatus::Out {
+            break;
+        }
+    }
+    Some(LiveItem {
+        due,
+        data: encode_live(&records).into_iter().next()?,
+        consumed: records.len(),
+    })
+}
+
+/// The records of `script` from `start`, one every [`BOARD_RECORD_INTERVAL`] while the pen is
+/// near (hovering with pressure 0, touching otherwise), a `c0` after each approach; and when
+/// the movement ends.
+fn timeline(script: &PenScript, start: Duration) -> (Vec<Timed>, Duration) {
+    let mut records = Vec::with_capacity(script.sample_count() + script.approach_count());
+    let mut at = start;
+    for segment in script.segments() {
+        match segment {
+            PenSegment::Near(points) if !points.is_empty() => {
+                for point in points {
+                    let status = if point.pressure > 0 {
+                        RecordStatus::Touch
+                    } else {
+                        RecordStatus::Hover
+                    };
+                    records.push(Timed {
+                        due: at,
+                        record: Record {
+                            status,
+                            x: point.x,
+                            y: point.y,
+                            pressure: point.pressure,
+                        },
+                    });
+                    at += BOARD_RECORD_INTERVAL;
+                }
+                if let Some(last) = points.last() {
+                    records.push(Timed {
+                        due: at,
+                        record: Record {
+                            status: RecordStatus::Out,
+                            x: last.x,
+                            y: last.y,
+                            pressure: 0,
+                        },
+                    });
+                    at += BOARD_RECORD_INTERVAL;
+                }
+            }
+            PenSegment::Near(_) => {}
+            PenSegment::Away(duration) => at += *duration,
+        }
+    }
+    (records, at)
+}
+
+/// The records a hand writing `strokes` leaves: hovering to each stroke's first point, its
+/// points touching, leaving after its last.
+fn records_of(strokes: &[Stroke]) -> Vec<Record> {
+    let mut records = Vec::new();
+    for stroke in strokes {
+        let (Some(first), Some(last)) = (stroke.points.first(), stroke.points.last()) else {
+            continue;
+        };
+        records.push(Record {
+            status: RecordStatus::Hover,
+            x: first.x,
+            y: first.y,
+            pressure: 0,
+        });
+        records.extend(stroke.points.iter().map(|point| Record {
+            status: RecordStatus::Touch,
+            x: point.x,
+            y: point.y,
+            pressure: point.pressure.max(1),
+        }));
+        records.push(Record {
+            status: RecordStatus::Out,
+            x: last.x,
+            y: last.y,
+            pressure: 0,
+        });
+    }
+    records
+}
+
+/// `00:00:5E:00:53:B1` as bytes (zeros for what does not parse).
+fn address_bytes(address: &str) -> [u8; 6] {
+    let mut bytes = [0u8; 6];
+    for (byte, part) in bytes.iter_mut().zip(address.split(':')) {
+        *byte = u8::from_str_radix(part, 16).unwrap_or(0);
+    }
+    bytes
+}
+
+/// Encodes a reply; the replies built here always fit a frame.
+fn encode(reply: &BoardReply) -> Vec<u8> {
+    reply.encode().unwrap_or_default()
+}
+
+/// The pages of `ardoise.exe --simulated-blackboard`: the three reference drawings, sized for
+/// the blackboard's page.
+pub fn reference_board_pages() -> Vec<Vec<Stroke>> {
+    crate::drawings::reference_pages(BOARD_WIDTH, BOARD_HEIGHT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ardoise_proto::blackboard::decode_page;
+    use ardoise_proto::stroke::Point;
+
+    fn write(board: &SimBoard, link: u64, request: BoardRequest) {
+        board.link_write(link, &request.encode()).unwrap();
+    }
+
+    fn next(board: &SimBoard, link: u64) -> Option<(Channel, Vec<u8>)> {
+        match board.link_recv(link, Duration::from_millis(100)).unwrap() {
+            Some(TransportEvent::Notification { channel, data }) => Some((channel, data)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn it_answers_the_observed_requests() {
+        let board = SimBoard::blackboard();
+        let ad = board.advertisement().unwrap();
+        assert!(ad.is_blackboard());
+        let (link, _) = board
+            .open_link("00:00:5e:00:53:b1", Duration::ZERO)
+            .unwrap();
+        assert!(
+            board.advertisement().is_none(),
+            "not advertised while connected"
+        );
+        write(&board, link, BoardRequest::Battery);
+        assert_eq!(next(&board, link).unwrap().1, [0x11, 0x02, 0x01, 90]);
+        write(&board, link, BoardRequest::PageCount);
+        assert_eq!(
+            next(&board, link).unwrap().1,
+            [0x12, 0x07, 0x04, 0, 0, 0, 0, 0, 0]
+        );
+        write(&board, link, BoardRequest::OldestPage);
+        assert_eq!(next(&board, link).unwrap().1, [0x12, 0x01, 0x05]);
+        // Unknown requests get no answer.
+        board.link_write(link, &[0x12, 0x01, 0x0b]).unwrap();
+        assert_eq!(next(&board, link), None);
+        assert_eq!(board.stats().unknown_requests, 1);
+        // The clock follows SET_TIME.
+        let now = board.tablet_time();
+        let unix = u32::try_from(now + 3600).unwrap();
+        write(&board, link, BoardRequest::SetTime { unix });
+        assert_eq!(board.tablet_time(), now + 3600);
+    }
+
+    #[test]
+    fn pages_are_stored_downloaded_and_deleted_by_time() {
+        let board = SimBoard::blackboard();
+        let stroke = |x: u16| Stroke {
+            points: (0..50u16)
+                .map(|i| Point {
+                    x: x + i,
+                    y: 100,
+                    pressure: 900,
+                })
+                .collect(),
+            ..Stroke::default()
+        };
+        board.draw_page(&[stroke(10)]);
+        board.draw_page(&[stroke(20), stroke(30)]);
+        let pages = board.stored_pages();
+        assert_eq!(pages.len(), 2);
+        assert!(pages[1].time > pages[0].time, "one second apart at least");
+        assert_eq!(decode_page(&pages[1].bytes).strokes.len(), 2);
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        write(
+            &board,
+            link,
+            BoardRequest::Download {
+                time: pages[1].time,
+            },
+        );
+        let mut bytes = Vec::new();
+        while let Some((channel, chunk)) = next(&board, link) {
+            assert_eq!(channel, Channel::BoardData);
+            assert!(chunk.len() <= 244);
+            bytes.extend(chunk);
+        }
+        assert_eq!(bytes, pages[1].bytes);
+        write(
+            &board,
+            link,
+            BoardRequest::Delete {
+                time: pages[0].time,
+            },
+        );
+        assert_eq!(board.stored_page_count(), 1);
+        board.ignore_next_delete();
+        write(
+            &board,
+            link,
+            BoardRequest::Delete {
+                time: pages[1].time,
+            },
+        );
+        assert_eq!(board.stored_page_count(), 1);
+    }
+
+    #[test]
+    fn storing_again_without_erasing_replaces_the_page() {
+        let board = SimBoard::blackboard();
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        board.press_store();
+        assert_eq!(
+            board.stored_page_count(),
+            0,
+            "an empty screen stores nothing"
+        );
+        board.draw_live(PenScript::new().near(vec![
+            Point {
+                x: 1,
+                y: 2,
+                pressure: 5
+            };
+            10
+        ]));
+        board.clock().advance(Duration::from_secs(1));
+        board.press_store();
+        assert_eq!(next(&board, link).unwrap().1, [0x12, 0x01, 0x09]);
+        let first = board.stored_pages()[0].clone();
+        assert_eq!(first.bytes.len(), 11 * 7);
+        board.draw_live(PenScript::new().near(vec![
+            Point {
+                x: 3,
+                y: 4,
+                pressure: 5
+            };
+            4
+        ]));
+        board.clock().advance(Duration::from_secs(1));
+        board.press_store();
+        let pages = board.stored_pages();
+        assert_eq!(pages.len(), 1, "replaced");
+        assert_eq!(pages[0].bytes.len(), 16 * 7);
+        assert!(pages[0].time > first.time);
+        board.erase();
+        assert!(board.screen().is_empty());
+    }
+
+    #[test]
+    fn live_records_stream_at_the_boards_rate() {
+        let board = SimBoard::blackboard();
+        let (link, _) = board
+            .open_link(&board.config().address, Duration::ZERO)
+            .unwrap();
+        write(&board, link, BoardRequest::StartLive);
+        let points: Vec<Point> = (0..20)
+            .map(|i| Point {
+                x: i,
+                y: i,
+                pressure: if i < 5 { 0 } else { 700 },
+            })
+            .collect();
+        board.draw_live(PenScript::new().near(points));
+        let start = board.clock().monotonic();
+        let mut records = Vec::new();
+        while let Some((channel, data)) = next(&board, link) {
+            assert_eq!(channel, Channel::BoardData);
+            assert!(data.len() <= 42);
+            records.extend(ardoise_proto::blackboard::decode_records(&data).records);
+        }
+        assert_eq!(records.len(), 21);
+        assert_eq!(records[0].status, RecordStatus::Hover);
+        assert_eq!(records[5].status, RecordStatus::Touch);
+        assert_eq!(records[20].status, RecordStatus::Out);
+        let elapsed = board.clock().monotonic() - start;
+        assert!(elapsed >= BOARD_RECORD_INTERVAL * 20, "{elapsed:?}");
+        write(&board, link, BoardRequest::StopLive);
+        assert!(!board.is_streaming());
+        assert_eq!(board.screen().len(), 21, "written on the screen too");
+    }
+}

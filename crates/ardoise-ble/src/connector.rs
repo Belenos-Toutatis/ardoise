@@ -226,6 +226,7 @@ impl Connector for BleConnector {
                 rssi: None,
                 company_id: None,
                 manufacturer_data: Vec::new(),
+                xiaomi_service_data: Vec::new(),
             },
         };
 

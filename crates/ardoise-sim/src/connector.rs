@@ -1,4 +1,4 @@
-//! The device stack's view of the simulated tablet: a [`Connector`] and its [`Transport`]s.
+//! The device stack's view of the simulated tablets: a [`Connector`] and its [`Transport`]s.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,32 +7,146 @@ use ardoise_device::transport::{
     Advertisement, Clock, Connector, Transport, TransportError, TransportEvent,
 };
 
+use crate::board::SimBoard;
+use crate::clock::VirtualClock;
 use crate::tablet::SimTablet;
 
-/// Finds and connects to one simulated tablet, on its virtual clock.
+/// One simulated peripheral a connector can reach: a Bamboo Slate or the Xiaomi blackboard.
+#[derive(Debug, Clone)]
+pub enum SimDevice {
+    Slate(SimTablet),
+    Board(SimBoard),
+}
+
+impl SimDevice {
+    pub fn clock(&self) -> Arc<VirtualClock> {
+        match self {
+            SimDevice::Slate(tablet) => tablet.clock(),
+            SimDevice::Board(board) => board.clock(),
+        }
+    }
+
+    pub fn address(&self) -> String {
+        match self {
+            SimDevice::Slate(tablet) => tablet.config().address,
+            SimDevice::Board(board) => board.config().address,
+        }
+    }
+
+    pub fn advertisement(&self) -> Option<Advertisement> {
+        match self {
+            SimDevice::Slate(tablet) => tablet.advertisement(),
+            SimDevice::Board(board) => board.advertisement(),
+        }
+    }
+
+    pub(crate) fn open_link(
+        &self,
+        address: &str,
+        timeout: Duration,
+    ) -> Result<(u64, Advertisement), TransportError> {
+        match self {
+            SimDevice::Slate(tablet) => tablet.open_link(address, timeout),
+            SimDevice::Board(board) => board.open_link(address, timeout),
+        }
+    }
+
+    pub(crate) fn link_write(&self, id: u64, bytes: &[u8]) -> Result<(), TransportError> {
+        match self {
+            SimDevice::Slate(tablet) => tablet.link_write(id, bytes),
+            SimDevice::Board(board) => board.link_write(id, bytes),
+        }
+    }
+
+    pub(crate) fn link_recv(
+        &self,
+        id: u64,
+        timeout: Duration,
+    ) -> Result<Option<TransportEvent>, TransportError> {
+        match self {
+            SimDevice::Slate(tablet) => tablet.link_recv(id, timeout),
+            SimDevice::Board(board) => board.link_recv(id, timeout),
+        }
+    }
+
+    pub(crate) fn link_next_due(&self, id: u64) -> Option<Duration> {
+        match self {
+            SimDevice::Slate(tablet) => tablet.link_next_due(id),
+            SimDevice::Board(board) => board.link_next_due(id),
+        }
+    }
+
+    pub(crate) fn close_link(&self, id: u64) {
+        match self {
+            SimDevice::Slate(tablet) => tablet.close_link(id),
+            SimDevice::Board(board) => board.close_link(id),
+        }
+    }
+}
+
+/// The distinct clocks of `devices` (devices made on one clock share it).
+pub(crate) fn clocks(devices: &[SimDevice]) -> Vec<Arc<VirtualClock>> {
+    let mut clocks: Vec<Arc<VirtualClock>> = Vec::new();
+    for device in devices {
+        let clock = device.clock();
+        if !clocks.iter().any(|known| Arc::ptr_eq(known, &clock)) {
+            clocks.push(clock);
+        }
+    }
+    clocks
+}
+
+/// Finds and connects to simulated tablets, on their virtual clock (one clock for all of them:
+/// make the blackboard with [`SimBoard::with_clock`] on the Slate's).
 ///
-/// `find` returns at once when the tablet is visible and accepted by the filter (the
+/// `find` returns at once when a tablet is visible and accepted by the filter (the
 /// registration-mode filter only after [`SimTablet::hold_button`]); otherwise the virtual
 /// clock jumps by the timeout and nothing is found.
 #[derive(Debug, Clone)]
 pub struct SimConnector {
-    tablet: SimTablet,
+    devices: Vec<SimDevice>,
 }
 
 impl SimConnector {
     pub(crate) fn new(tablet: SimTablet) -> Self {
-        Self { tablet }
+        Self::over(vec![SimDevice::Slate(tablet)])
     }
 
-    /// The tablet behind this connector.
-    pub fn tablet(&self) -> &SimTablet {
-        &self.tablet
+    /// A connector reaching every device of `devices` (the first one's clock is the
+    /// connector's).
+    pub fn over(devices: Vec<SimDevice>) -> Self {
+        Self { devices }
+    }
+
+    /// The simulated Slate behind this connector, if any.
+    pub fn tablet(&self) -> Option<&SimTablet> {
+        self.devices.iter().find_map(|device| match device {
+            SimDevice::Slate(tablet) => Some(tablet),
+            SimDevice::Board(_) => None,
+        })
+    }
+
+    /// The simulated blackboard behind this connector, if any.
+    pub fn board(&self) -> Option<&SimBoard> {
+        self.devices.iter().find_map(|device| match device {
+            SimDevice::Board(board) => Some(board),
+            SimDevice::Slate(_) => None,
+        })
+    }
+
+    fn device(&self, address: &str) -> Option<&SimDevice> {
+        self.devices
+            .iter()
+            .find(|device| device.address().eq_ignore_ascii_case(address))
     }
 }
 
 impl Connector for SimConnector {
     fn clock(&self) -> Arc<dyn Clock> {
-        self.tablet.clock()
+        match self.devices.first() {
+            Some(device) => device.clock(),
+            None => Arc::new(VirtualClock::new()),
+        }
     }
 
     fn find(
@@ -40,12 +154,16 @@ impl Connector for SimConnector {
         timeout: Duration,
         filter: &mut dyn FnMut(&Advertisement) -> bool,
     ) -> Result<Option<Advertisement>, TransportError> {
-        if let Some(advertisement) = self.tablet.advertisement()
-            && filter(&advertisement)
-        {
-            return Ok(Some(advertisement));
+        for device in &self.devices {
+            if let Some(advertisement) = device.advertisement()
+                && filter(&advertisement)
+            {
+                return Ok(Some(advertisement));
+            }
         }
-        self.tablet.clock().advance(timeout);
+        for clock in clocks(&self.devices) {
+            clock.advance(timeout);
+        }
         Ok(None)
     }
 
@@ -54,9 +172,13 @@ impl Connector for SimConnector {
         address: &str,
         timeout: Duration,
     ) -> Result<Box<dyn Transport>, TransportError> {
-        let (id, peer) = self.tablet.open_link(address, timeout)?;
+        let device = self
+            .device(address)
+            .cloned()
+            .ok_or_else(|| TransportError::NotFound(address.to_owned()))?;
+        let (id, peer) = device.open_link(address, timeout)?;
         Ok(Box::new(SimTransport {
-            tablet: self.tablet.clone(),
+            device,
             id,
             peer,
             closed: false,
@@ -64,11 +186,11 @@ impl Connector for SimConnector {
     }
 }
 
-/// One open link to the simulated tablet. Dropping it frees the tablet, like a host that
-/// goes away.
+/// One open link to a simulated tablet. Dropping it frees the tablet, like a host that goes
+/// away.
 #[derive(Debug)]
 pub struct SimTransport {
-    tablet: SimTablet,
+    device: SimDevice,
     id: u64,
     peer: Advertisement,
     /// Closed by the host, or lost (the `Disconnected` event was delivered).
@@ -84,14 +206,14 @@ impl Transport for SimTransport {
         if self.closed {
             return Err(TransportError::NotConnected);
         }
-        self.tablet.link_write(self.id, frame)
+        self.device.link_write(self.id, frame)
     }
 
     fn recv(&mut self, timeout: Duration) -> Result<Option<TransportEvent>, TransportError> {
         if self.closed {
             return Err(TransportError::NotConnected);
         }
-        let event = self.tablet.link_recv(self.id, timeout)?;
+        let event = self.device.link_recv(self.id, timeout)?;
         if event == Some(TransportEvent::Disconnected) {
             self.closed = true;
         }
@@ -101,7 +223,7 @@ impl Transport for SimTransport {
     fn disconnect(&mut self) -> Result<(), TransportError> {
         if !self.closed {
             self.closed = true;
-            self.tablet.close_link(self.id);
+            self.device.close_link(self.id);
         }
         Ok(())
     }
@@ -110,7 +232,7 @@ impl Transport for SimTransport {
 impl Drop for SimTransport {
     fn drop(&mut self) {
         if !self.closed {
-            self.tablet.close_link(self.id);
+            self.device.close_link(self.id);
         }
     }
 }

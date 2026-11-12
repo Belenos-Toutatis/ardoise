@@ -3,6 +3,11 @@
 //! A Wacom smartpad remembers a single 6-byte identifier chosen by the host at registration
 //! and refuses any other one. Storing it in the synced library lets the work PC and the
 //! laptop use the tablet after registering it only once.
+//!
+//! The Xiaomi blackboard has no registration: "adding" it saves its address in its own file,
+//! `<library>/_ardoise/blackboard.json` ([`BlackboardRecord`]), shared the same way. An older
+//! Ardoise ignores that file and keeps working with the Slate's `device.json`, whose meaning
+//! does not change.
 
 use std::fmt;
 use std::fs;
@@ -16,6 +21,12 @@ use ardoise_core::library::META_DIR;
 pub const DEVICE_FILE: &str = "device.json";
 /// Version of the file format.
 pub const DEVICE_FORMAT: u32 = 1;
+/// File name of the known Xiaomi blackboard inside `_ardoise/`.
+pub const BLACKBOARD_FILE: &str = "blackboard.json";
+/// Version of the blackboard file's format.
+pub const BLACKBOARD_FORMAT: u32 = 1;
+/// The protocol written in the blackboard file.
+pub const BLACKBOARD_PROTOCOL: &str = "xiaomi-blackboard";
 
 /// The 6-byte identifier the tablet accepts (Tuhi calls it a "UUID"), shown as 12 hex digits.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -90,6 +101,27 @@ pub struct DeviceRecord {
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
+/// Content of `blackboard.json`: the Xiaomi blackboard this library knows. No secret: the
+/// tablet accepts any client (docs/research/xiaomi-blackboard.md §3).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlackboardRecord {
+    pub format: u32,
+    /// Bluetooth address of the tablet.
+    pub address: String,
+    /// The name shown for it (the tablet's advertised name is a generic `xiaomi.dev.ble`).
+    pub name: String,
+    /// Always [`BLACKBOARD_PROTOCOL`].
+    pub protocol: String,
+    /// Mi Home's model name (`jiqid.sxb.v1`).
+    pub model: String,
+    /// When the tablet was added, RFC 3339.
+    pub added: String,
+    /// Fields written by a newer version, kept on rewrite.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
 /// Errors loading or saving the registration.
 #[derive(Debug, thiserror::Error)]
 pub enum IdentityError {
@@ -112,45 +144,82 @@ pub fn device_file(library: &Path) -> PathBuf {
 
 /// The registered tablet, or `None` if no tablet was registered from this library.
 pub fn load(library: &Path) -> Result<Option<DeviceRecord>, IdentityError> {
-    let path = device_file(library);
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => return Err(IdentityError::Io { path, source }),
-    };
-    serde_json::from_str(&text)
-        .map(Some)
-        .map_err(|e| IdentityError::Parse {
-            path,
-            message: e.to_string(),
-        })
+    load_json(&device_file(library))
 }
 
 /// Saves the registration (atomic write).
 pub fn save(library: &Path, record: &DeviceRecord) -> Result<(), IdentityError> {
-    let path = device_file(library);
+    save_json(&device_file(library), record)
+}
+
+/// Path of `blackboard.json` in a library.
+pub fn blackboard_file(library: &Path) -> PathBuf {
+    library.join(META_DIR).join(BLACKBOARD_FILE)
+}
+
+/// The known blackboard, or `None` if none was added from this library.
+pub fn load_blackboard(library: &Path) -> Result<Option<BlackboardRecord>, IdentityError> {
+    load_json(&blackboard_file(library))
+}
+
+/// Saves the known blackboard (atomic write).
+pub fn save_blackboard(library: &Path, record: &BlackboardRecord) -> Result<(), IdentityError> {
+    save_json(&blackboard_file(library), record)
+}
+
+/// Forgets the blackboard. Not an error if none was added.
+pub fn forget_blackboard(library: &Path) -> Result<(), IdentityError> {
+    remove(&blackboard_file(library))
+}
+
+fn load_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>, IdentityError> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(IdentityError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    serde_json::from_str(&text)
+        .map(Some)
+        .map_err(|e| IdentityError::Parse {
+            path: path.to_path_buf(),
+            message: e.to_string(),
+        })
+}
+
+fn save_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), IdentityError> {
     let io_error = |source| IdentityError::Io {
-        path: path.clone(),
+        path: path.to_path_buf(),
         source,
     };
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(io_error)?;
     }
-    let mut text = serde_json::to_string_pretty(record).map_err(|e| IdentityError::Parse {
-        path: path.clone(),
+    let mut text = serde_json::to_string_pretty(value).map_err(|e| IdentityError::Parse {
+        path: path.to_path_buf(),
         message: e.to_string(),
     })?;
     text.push('\n');
-    write_atomic(&path, text.as_bytes()).map_err(io_error)
+    write_atomic(path, text.as_bytes()).map_err(io_error)
+}
+
+fn remove(path: &Path) -> Result<(), IdentityError> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(IdentityError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        }),
+        _ => Ok(()),
+    }
 }
 
 /// Forgets the registered tablet. Not an error if none was registered.
 pub fn forget(library: &Path) -> Result<(), IdentityError> {
-    let path = device_file(library);
-    match fs::remove_file(&path) {
-        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(IdentityError::Io { path, source: e }),
-        _ => Ok(()),
-    }
+    remove(&device_file(library))
 }
 
 #[cfg(test)]
@@ -225,6 +294,52 @@ mod tests {
         save(library.path(), &loaded).unwrap();
         let again = load(library.path()).unwrap().unwrap();
         assert_eq!(again.extra["orientation"], "left-handed");
+    }
+
+    fn blackboard() -> BlackboardRecord {
+        BlackboardRecord {
+            format: BLACKBOARD_FORMAT,
+            address: "00:00:5E:00:53:B1".into(),
+            name: "Mijia LCD blackboard".into(),
+            protocol: BLACKBOARD_PROTOCOL.into(),
+            model: "jiqid.sxb.v1".into(),
+            added: "2026-11-12T20:00:00+01:00".into(),
+            extra: Default::default(),
+        }
+    }
+
+    #[test]
+    fn the_blackboard_has_its_own_file_next_to_the_slates() {
+        let library = tempfile::tempdir().unwrap();
+        assert!(load_blackboard(library.path()).unwrap().is_none());
+        forget_blackboard(library.path()).unwrap();
+        save(library.path(), &record()).unwrap();
+        save_blackboard(library.path(), &blackboard()).unwrap();
+        assert_eq!(load_blackboard(library.path()).unwrap(), Some(blackboard()));
+        // `device.json` is untouched: an older Ardoise still finds the Slate.
+        assert_eq!(load(library.path()).unwrap(), Some(record()));
+        let text = fs::read_to_string(blackboard_file(library.path())).unwrap();
+        assert!(
+            text.contains(r#""protocol": "xiaomi-blackboard""#),
+            "{text}"
+        );
+        // Forgetting one keeps the other.
+        forget_blackboard(library.path()).unwrap();
+        assert!(load_blackboard(library.path()).unwrap().is_none());
+        assert_eq!(load(library.path()).unwrap(), Some(record()));
+        // Fields of a newer version survive a rewrite; a damaged file is reported.
+        let mut newer = serde_json::to_value(blackboard()).unwrap();
+        newer["calibration"] = 1.02.into();
+        fs::write(blackboard_file(library.path()), newer.to_string()).unwrap();
+        let loaded = load_blackboard(library.path()).unwrap().unwrap();
+        save_blackboard(library.path(), &loaded).unwrap();
+        let again = load_blackboard(library.path()).unwrap().unwrap();
+        assert_eq!(again.extra["calibration"], 1.02);
+        fs::write(blackboard_file(library.path()), "{").unwrap();
+        assert!(matches!(
+            load_blackboard(library.path()),
+            Err(IdentityError::Parse { .. })
+        ));
     }
 
     #[test]

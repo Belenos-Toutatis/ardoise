@@ -15,7 +15,11 @@
 //! - [`pen`]: pen movement for live mode.
 //! - [`realtime`]: the simulated tablet in real time (`ardoise.exe --simulated-tablet`, latency
 //!   tests), the connector factory and the simulated user of the tablet service.
+//! - [`SimBoard`]: the simulated Xiaomi blackboard (docs/design/blackboard.md): stored pages,
+//!   live writing, its store and erase buttons, faults. A connector reaches it alone or next to
+//!   the simulated Slate ([`SimConnector::over`], [`SimFactory::with_board`]).
 
+mod board;
 pub mod clock;
 mod connector;
 pub mod drawings;
@@ -25,10 +29,14 @@ pub mod replay;
 mod tablet;
 mod user;
 
+pub use board::{
+    BOARD_RECORD_INTERVAL, BoardStats, BoardStoredPage, SimBoard, SimBoardConfig,
+    reference_board_pages,
+};
 pub use clock::{SIM_EPOCH_UNIX, VirtualClock};
-pub use connector::{SimConnector, SimTransport};
+pub use connector::{SimConnector, SimDevice, SimTransport};
 pub use pen::{PenScript, PenSegment};
-pub use realtime::{RealTimeConnector, SimFactory, SimHooks};
+pub use realtime::{RealTimeConnector, SimFactory, SimHooks, app_board};
 pub use replay::{ReplayConnector, ReplayError, ReplayOptions};
 pub use tablet::{
     CONNECTION_MODE, LIVE_BUTTON_COMMAND, SimConfig, SimStats, SimTablet, StoredPage,

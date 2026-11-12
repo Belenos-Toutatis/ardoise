@@ -461,6 +461,7 @@ fn channel_name(channel: Channel) -> &'static str {
         Channel::PageData => "page_data",
         Channel::Live => "live",
         Channel::SysEvent => "sys_event",
+        Channel::BoardData => "board_data",
     }
 }
 
@@ -491,6 +492,7 @@ fn peer_from_notes(entries: &[LogEntry]) -> Advertisement {
         rssi: None,
         company_id: Some(WACOM_COMPANY_IDS[0]),
         manufacturer_data: vec![0; NORMAL_MODE_DATA_LEN],
+        xiaomi_service_data: Vec::new(),
     };
     let notes = entries.iter().filter(|e| e.dir == Direction::Note);
     for note in notes {

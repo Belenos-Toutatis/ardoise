@@ -11,7 +11,10 @@
 //! - [`SimHooks`]: the person in front of the simulated tablet for the service: holds the
 //!   button when the wizard asks, presses it to confirm, writes when live mode starts.
 //! - [`app_tablet`]: the tablet of `--simulated-tablet`: a Bamboo Slate Large holding the three
-//!   reference pages.
+//!   reference pages. [`app_board`]: the blackboard of `--simulated-blackboard`, likewise.
+//!
+//! The connectors and the factory reach one or several simulated devices ([`SimDevice`]): the
+//! Slate, the blackboard, or both (the service then connects to whichever it hears first).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,7 +25,9 @@ use ardoise_device::transport::{
     Advertisement, Clock, Connector, Transport, TransportError, TransportEvent,
 };
 
+use crate::board::{SimBoard, SimBoardConfig, reference_board_pages};
 use crate::clock::VirtualClock;
+use crate::connector::{SimDevice, clocks};
 use crate::drawings;
 use crate::tablet::{SimConfig, SimTablet};
 
@@ -50,6 +55,21 @@ pub fn app_tablet() -> SimTablet {
     tablet
 }
 
+/// The blackboard of `ardoise.exe --simulated-blackboard`: in real time (on `clock` when
+/// given, the simulated Slate's when both are simulated), battery 90 %, with the three reference
+/// pages stored, a second apart.
+pub fn app_board(clock: Option<Arc<VirtualClock>>) -> SimBoard {
+    let config = SimBoardConfig::blackboard();
+    let board = match clock {
+        Some(clock) => SimBoard::with_clock(config, clock),
+        None => SimBoard::real_time(config),
+    };
+    for page in reference_board_pages() {
+        board.draw_page(&page);
+    }
+    board
+}
+
 /// `now + duration`, or a far future when it does not fit.
 fn deadline(duration: Duration) -> Instant {
     let now = Instant::now();
@@ -57,7 +77,7 @@ fn deadline(duration: Duration) -> Instant {
         .unwrap_or_else(|| now + Duration::from_secs(365 * 24 * 3600))
 }
 
-/// Keeps the tablet's clock at least at the real time elapsed since the connector was made
+/// Keeps the tablets' clocks at least at the real time elapsed since the connector was made
 /// (nothing to do for a [`SimTablet::real_time`] clock, which follows by itself).
 #[derive(Debug, Clone)]
 struct Pace {
@@ -83,29 +103,57 @@ impl Pace {
     }
 }
 
-/// Finds and connects to one simulated tablet, its clock following the real time.
+/// Every clock of a connector kept in pace.
+#[derive(Debug, Clone)]
+struct Paces(Vec<Pace>);
+
+impl Paces {
+    fn new(devices: &[SimDevice]) -> Self {
+        Self(clocks(devices).into_iter().map(Pace::new).collect())
+    }
+
+    fn sync(&self) {
+        for pace in &self.0 {
+            pace.sync();
+        }
+    }
+}
+
+/// Finds and connects to simulated tablets, their clocks following the real time.
 #[derive(Debug, Clone)]
 pub struct RealTimeConnector {
-    tablet: SimTablet,
-    pace: Pace,
+    devices: Vec<SimDevice>,
+    pace: Paces,
 }
 
 impl RealTimeConnector {
     /// A connector over `tablet`, preferably made with [`SimTablet::real_time`] (a virtual
     /// clock is moved forward only while the connector or one of its links is used).
     pub fn new(tablet: SimTablet) -> Self {
-        let pace = Pace::new(tablet.clock());
-        Self { tablet, pace }
+        Self::over(vec![SimDevice::Slate(tablet)])
     }
 
-    pub fn tablet(&self) -> &SimTablet {
-        &self.tablet
+    /// A connector over every device of `devices`.
+    pub fn over(devices: Vec<SimDevice>) -> Self {
+        let pace = Paces::new(&devices);
+        Self { devices, pace }
+    }
+
+    /// The simulated Slate, if any.
+    pub fn tablet(&self) -> Option<&SimTablet> {
+        self.devices.iter().find_map(|device| match device {
+            SimDevice::Slate(tablet) => Some(tablet),
+            SimDevice::Board(_) => None,
+        })
     }
 }
 
 impl Connector for RealTimeConnector {
     fn clock(&self) -> Arc<dyn Clock> {
-        self.tablet.clock()
+        match self.devices.first() {
+            Some(device) => device.clock(),
+            None => Arc::new(VirtualClock::following_real_time()),
+        }
     }
 
     fn find(
@@ -116,10 +164,12 @@ impl Connector for RealTimeConnector {
         let deadline = deadline(timeout);
         loop {
             self.pace.sync();
-            if let Some(advertisement) = self.tablet.advertisement()
-                && filter(&advertisement)
-            {
-                return Ok(Some(advertisement));
+            for device in &self.devices {
+                if let Some(advertisement) = device.advertisement()
+                    && filter(&advertisement)
+                {
+                    return Ok(Some(advertisement));
+                }
             }
             let now = Instant::now();
             if now >= deadline {
@@ -134,13 +184,18 @@ impl Connector for RealTimeConnector {
         address: &str,
         timeout: Duration,
     ) -> Result<Box<dyn Transport>, TransportError> {
-        if !address.eq_ignore_ascii_case(&self.tablet.config().address) {
+        let Some(device) = self
+            .devices
+            .iter()
+            .find(|device| device.address().eq_ignore_ascii_case(address))
+            .cloned()
+        else {
             return Err(TransportError::NotFound(address.to_owned()));
-        }
+        };
         // Switched off or busy: nothing answers until the timeout, waited for real.
         let deadline = deadline(timeout);
         self.pace.sync();
-        while self.tablet.advertisement().is_none() {
+        while device.advertisement().is_none() {
             self.pace.sync();
             let now = Instant::now();
             if now >= deadline {
@@ -149,9 +204,9 @@ impl Connector for RealTimeConnector {
             std::thread::sleep((deadline - now).min(SCAN_POLL));
         }
         // A zero timeout: opening the link never moves the clock ahead of the real time.
-        let (id, peer) = self.tablet.open_link(address, Duration::ZERO)?;
+        let (id, peer) = device.open_link(address, Duration::ZERO)?;
         Ok(Box::new(RealTimeTransport {
-            tablet: self.tablet.clone(),
+            device,
             pace: self.pace.clone(),
             id,
             peer,
@@ -160,11 +215,11 @@ impl Connector for RealTimeConnector {
     }
 }
 
-/// One open link to the simulated tablet in real time. Dropping it frees the tablet.
+/// One open link to a simulated tablet in real time. Dropping it frees the tablet.
 #[derive(Debug)]
 pub struct RealTimeTransport {
-    tablet: SimTablet,
-    pace: Pace,
+    device: SimDevice,
+    pace: Paces,
     id: u64,
     peer: Advertisement,
     closed: bool,
@@ -180,7 +235,7 @@ impl Transport for RealTimeTransport {
             return Err(TransportError::NotConnected);
         }
         self.pace.sync();
-        self.tablet.link_write(self.id, frame)
+        self.device.link_write(self.id, frame)
     }
 
     /// Delivers what is due now on the real clock, else sleeps until the next planned event
@@ -193,7 +248,7 @@ impl Transport for RealTimeTransport {
         loop {
             self.pace.sync();
             // A zero timeout delivers only what is due and never moves the clock.
-            if let Some(event) = self.tablet.link_recv(self.id, Duration::ZERO)? {
+            if let Some(event) = self.device.link_recv(self.id, Duration::ZERO)? {
                 if event == TransportEvent::Disconnected {
                     self.closed = true;
                 }
@@ -204,8 +259,8 @@ impl Transport for RealTimeTransport {
                 return Ok(None);
             }
             let mut wait = (deadline - now).min(RECV_POLL);
-            if let Some(due) = self.tablet.link_next_due(self.id) {
-                wait = wait.min(due.saturating_sub(self.tablet.clock().monotonic()));
+            if let Some(due) = self.device.link_next_due(self.id) {
+                wait = wait.min(due.saturating_sub(self.device.clock().monotonic()));
             }
             std::thread::sleep(wait.max(RECV_MIN_SLEEP).min(deadline - now));
         }
@@ -214,7 +269,7 @@ impl Transport for RealTimeTransport {
     fn disconnect(&mut self) -> Result<(), TransportError> {
         if !self.closed {
             self.closed = true;
-            self.tablet.close_link(self.id);
+            self.device.close_link(self.id);
         }
         Ok(())
     }
@@ -223,58 +278,68 @@ impl Transport for RealTimeTransport {
 impl Drop for RealTimeTransport {
     fn drop(&mut self) {
         if !self.closed {
-            self.tablet.close_link(self.id);
+            self.device.close_link(self.id);
         }
     }
 }
 
-/// Connectors over one simulated tablet for the tablet service. The adapter check always
-/// passes.
+/// Connectors over simulated tablets for the tablet service. The adapter check always passes.
 #[derive(Debug, Clone)]
 pub struct SimFactory {
-    tablet: SimTablet,
+    devices: Vec<SimDevice>,
     real_time: bool,
 }
 
 impl SimFactory {
     /// [`RealTimeConnector`]s (the app's simulated tablet, latency tests).
     pub fn real_time(tablet: SimTablet) -> Self {
-        Self {
-            tablet,
-            real_time: true,
-        }
+        Self::of(vec![SimDevice::Slate(tablet)], true)
     }
 
     /// [`SimConnector`](crate::SimConnector)s on the tablet's virtual clock (fast tests).
     pub fn virtual_time(tablet: SimTablet) -> Self {
-        Self {
-            tablet,
-            real_time: false,
-        }
+        Self::of(vec![SimDevice::Slate(tablet)], false)
     }
 
-    pub fn tablet(&self) -> &SimTablet {
-        &self.tablet
+    /// Connectors over `devices` (in real time or on their virtual clock, which they must
+    /// share).
+    pub fn of(devices: Vec<SimDevice>, real_time: bool) -> Self {
+        Self { devices, real_time }
+    }
+
+    /// The same factory with the blackboard `board` in range too.
+    pub fn with_board(mut self, board: SimBoard) -> Self {
+        self.devices.push(SimDevice::Board(board));
+        self
+    }
+
+    /// The simulated Slate, if any.
+    pub fn tablet(&self) -> Option<&SimTablet> {
+        self.devices.iter().find_map(|device| match device {
+            SimDevice::Slate(tablet) => Some(tablet),
+            SimDevice::Board(_) => None,
+        })
     }
 }
 
 impl ConnectorFactory for SimFactory {
     fn connector(&mut self) -> Result<Box<dyn Connector>, TransportError> {
         Ok(if self.real_time {
-            Box::new(RealTimeConnector::new(self.tablet.clone()))
+            Box::new(RealTimeConnector::over(self.devices.clone()))
         } else {
-            Box::new(self.tablet.connector())
+            Box::new(crate::SimConnector::over(self.devices.clone()))
         })
     }
 }
 
-/// The person in front of the simulated tablet, for the tablet service: holds the button
-/// [`APP_HOOK_DELAY`] after the wizard asks, presses it [`APP_HOOK_DELAY`] after the wizard
-/// asks to confirm, and queues [`LIVE_SCRIPT_SECONDS`] of handwriting (hovering included)
-/// when live mode starts.
+/// The person in front of the simulated tablets, for the tablet service: holds the Slate's
+/// button [`APP_HOOK_DELAY`] after the wizard asks, presses it [`APP_HOOK_DELAY`] after the
+/// wizard asks to confirm, and queues [`LIVE_SCRIPT_SECONDS`] of handwriting (hovering
+/// included) on the tablet whose live mode starts.
 #[derive(Debug)]
 pub struct SimHooks {
-    tablet: SimTablet,
+    tablet: Option<SimTablet>,
+    board: Option<SimBoard>,
     delay: Duration,
     /// Seed of the next live handwriting, so that each live session writes something new.
     seed: AtomicU64,
@@ -290,18 +355,38 @@ impl SimHooks {
     /// (the right choice with a virtual clock, which a sleeping thread would not follow).
     pub fn with_delay(tablet: SimTablet, delay: Duration) -> Self {
         Self {
-            tablet,
+            tablet: Some(tablet),
+            board: None,
             delay,
             seed: AtomicU64::new(0x5eed_a2d0_1520_2026),
         }
     }
 
+    /// The user of a simulated blackboard alone (it has no registration to act on).
+    pub fn for_board(board: SimBoard) -> Self {
+        Self {
+            tablet: None,
+            board: Some(board),
+            delay: APP_HOOK_DELAY,
+            seed: AtomicU64::new(0x5eed_a2d0_1520_2026),
+        }
+    }
+
+    /// The same user, with the blackboard `board` too.
+    pub fn with_board(mut self, board: SimBoard) -> Self {
+        self.board = Some(board);
+        self
+    }
+
     fn later(&self, action: fn(&SimTablet)) {
+        let Some(tablet) = &self.tablet else {
+            return;
+        };
         if self.delay.is_zero() {
-            action(&self.tablet);
+            action(tablet);
             return;
         }
-        let tablet = self.tablet.clone();
+        let tablet = tablet.clone();
         let delay = self.delay;
         let spawned = std::thread::Builder::new()
             .name("simulated-user".into())
@@ -309,10 +394,16 @@ impl SimHooks {
                 std::thread::sleep(delay);
                 action(&tablet);
             });
-        if spawned.is_err() {
+        if spawned.is_err()
+            && let Some(tablet) = &self.tablet
+        {
             // No thread: act at once rather than never.
-            action(&self.tablet);
+            action(tablet);
         }
+    }
+
+    fn next_seed(&self) -> u64 {
+        self.seed.fetch_add(1, Ordering::SeqCst)
     }
 }
 
@@ -326,13 +417,27 @@ impl ServiceHooks for SimHooks {
     }
 
     fn live_started(&self) {
-        let config = self.tablet.config();
-        let seed = self.seed.fetch_add(1, Ordering::SeqCst);
-        self.tablet.draw_live(drawings::live_script_seeded(
+        let Some(tablet) = &self.tablet else {
+            return;
+        };
+        let config = tablet.config();
+        tablet.draw_live(drawings::live_script_seeded(
             LIVE_SCRIPT_SECONDS,
             config.width,
             config.height,
-            seed,
+            self.next_seed(),
+        ));
+    }
+
+    fn blackboard_live_started(&self) {
+        let Some(board) = &self.board else {
+            return;
+        };
+        board.draw_live(drawings::live_script_seeded(
+            LIVE_SCRIPT_SECONDS,
+            ardoise_proto::blackboard::BOARD_WIDTH,
+            ardoise_proto::blackboard::BOARD_HEIGHT,
+            self.next_seed(),
         ));
     }
 }
