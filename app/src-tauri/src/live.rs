@@ -533,10 +533,12 @@ pub async fn live_restore_cleared(runtime: State<'_, LiveRuntime>) -> CommandRes
         .map_err(LiveError::command_error)
 }
 
-/// Deletes or recolours strokes the window chose on page `page_index` at `revision` (the snapshot's
-/// and the events'): refused as `liveEditStale` once that page is left or its strokes moved,
-/// `liveEditInvalid` when the list or the colour makes no sense. Returns the page's revision after
-/// the edit; every window hears of it through a `strokesEdited` event.
+/// Deletes, recolours, moves or resizes strokes the window chose on page `page_index` at
+/// `revision` (the snapshot's and the events'): refused as `liveEditStale` once that page is left,
+/// its strokes moved or its ink turned, `liveEditInvalid` when the list, the colour or the move
+/// makes no sense.
+/// Returns the page's revision after the edit; every window hears of it through a `strokesEdited`
+/// event.
 #[tauri::command]
 pub async fn live_edit_strokes(
     runtime: State<'_, LiveRuntime>,
@@ -550,9 +552,9 @@ pub async fn live_edit_strokes(
         .map_err(LiveError::command_error)
 }
 
-/// Undoes the last edit of page `page_index` (delete, change of colour, « Clear the page », a stroke
-/// of the computer, a gesture of its eraser as a whole; never what the tablet wrote): true when
-/// there was one. Refused as `liveEditStale` when another page is on screen.
+/// Undoes the last edit of page `page_index` (delete, change of colour, move or resize, « Clear the
+/// page », a stroke of the computer, a gesture of its eraser as a whole; never what the tablet
+/// wrote): true when there was one. Refused as `liveEditStale` when another page is on screen.
 #[tauri::command]
 pub async fn live_undo_edit(
     runtime: State<'_, LiveRuntime>,

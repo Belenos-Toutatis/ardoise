@@ -25,11 +25,18 @@
  *   where the ink is: the page below shows there, so that the strokes keep their real colour. The lasso
  *   being drawn is a few lines per frame. The presentation and the share's viewers never get a selection.
  *
+ * - A selection being moved or resized (`Scene.lift`, control window only): the chosen strokes are taken out of
+ *   the cache (the partial repaint of the area they leave, drawn without them: `exclusionFlips`), rendered once with
+ *   their highlight on a third surface (the lift), and each frame copies that surface scaled and moved to where the
+ *   drag has them (a bitmap: nothing per frame walks the strokes or rebuilds an outline), with the frame and the
+ *   four handles drawn crisp over it. A drag that ends without an edit puts the strokes back on the cache the same
+ *   way. The handles (`Scene.handles`) are drawn on the selection's frame the rest of the time too.
+ *
  * Strokes are filled with the non-zero rule. Looks follow `ardoise-render/src/look.rs` where a
  * flat fill can: felt-tip core at 0.9, chalk at 0.95, highlighter multiplied on light paper and
  * screened on dark paper; the pencil and chalk grains are not drawn on screen (as in the editor).
  */
-import { strokeBounds, union, type Rect, type Vec } from './editor/geometry';
+import { type Rect, type Vec } from './editor/geometry';
 import { backgroundWidth } from './editor/view';
 import type { Ink, Tool } from './ink';
 import type { LiveViewState } from './live';
@@ -44,6 +51,7 @@ import {
   type Transform,
 } from './live-view';
 import type { Background, Layer, PageSize, Paper, Rgba, Stroke } from './note';
+import { HANDLE_SIZE_PX, corners, selectionFrame, transformRect, type PageTransform } from './selection-grab';
 
 /** The part of `CanvasRenderingContext2D` the drawing uses. */
 export interface Ctx2D {
@@ -110,6 +118,7 @@ const SELECTION_GAP_PX = 3;
 /** The hole left for the ink goes half of this past its outline: antialiased edges keep their real colour too. */
 const SELECTION_HOLE_PX = 1;
 const NO_SELECTION: readonly number[] = [];
+const NO_STROKE_SET: ReadonlySet<Stroke> = new Set();
 
 /**
  * Device pixels added around the strokes an edit touched, and around the strokes tried against that area:
@@ -173,6 +182,11 @@ export function drawingOrder(strokes: readonly Stroke[], layers: readonly Layer[
   return out.concat(orphans);
 }
 
+/** A selection lifted off the page by a drag: which strokes, and the map the drag has made so far. */
+export interface Lift extends PageTransform {
+  indices: readonly number[];
+}
+
 /** Everything one frame shows. */
 export interface Scene {
   page: PageSize;
@@ -195,6 +209,13 @@ export interface Scene {
   /** The control window's selection: indices into `strokes` (a new array when it changes), and the lasso being drawn (page units). */
   selection: readonly number[];
   lasso: readonly Vec[] | null;
+  /**
+   * The control window's selection being moved or resized: `indices` (those of `selection`) are drawn lifted, where
+   * `scale` and (`x`, `y`) of `PageTransform` put them, and left off the page where they were; null: not lifted.
+   */
+  lift: Lift | null;
+  /** The selection's frame carries its four handles. */
+  handles: boolean;
   /** The control window: where the pen's eraser end is (page units), drawn as a ring of its size; never projected. */
   eraser: Vec | null;
   hover: Vec | null;
@@ -242,6 +263,9 @@ export interface SceneOptions {
   /** Preview: the selection (indices into the finished strokes) and the lasso being drawn. */
   selection?: readonly number[];
   lasso?: readonly Vec[] | null;
+  /** Preview: the selection is being moved or resized (`Scene.lift`), and whether its frame has handles. */
+  lift?: Lift | null;
+  handles?: boolean;
   /**
    * Control window: its own computer strokes in progress (drawn from its pointer events, no round trip),
    * drawn instead of `LiveSource.computerCurrent` when given; an empty list draws none of them.
@@ -275,6 +299,8 @@ export function buildScene(live: LiveSource, options: SceneOptions): Scene {
     markCurrent: options.markCurrent ?? null,
     selection: preview ? (options.selection ?? NO_SELECTION) : NO_SELECTION,
     lasso: preview ? (options.lasso ?? null) : null,
+    lift: preview ? (options.lift ?? null) : null,
+    handles: preview ? (options.handles ?? false) : false,
     eraser: preview ? (options.eraser ?? null) : null,
     hover: live.hover,
     laser: live.view.laser,
@@ -307,6 +333,8 @@ export interface PaintReport {
   computerPoints: number;
   /** Set when the selection's highlight was drawn again (it is copied from its own surface otherwise). */
   selectionDrawn?: true;
+  /** Set when the lifted selection was rendered again on its surface (it is copied, scaled, otherwise). */
+  liftDrawn?: true;
 }
 
 function addContours(ctx: Ctx2D, contours: readonly Float32Array[]): void {
@@ -398,6 +426,18 @@ export class LiveRenderer {
   private selectionKey = '';
   private selectionSize = '';
   private selectionFor: readonly number[] | null = null;
+  /** The strokes the cache is drawn without (a lifted selection), and the ones the frame being painted wants left off. */
+  private cacheExcluded: ReadonlySet<Stroke> = NO_STROKE_SET;
+  private excluded: ReadonlySet<Stroke> = NO_STROKE_SET;
+  private liftSet: { indices: readonly number[]; strokes: readonly Stroke[]; generation: number; set: ReadonlySet<Stroke> } | null = null;
+  /** The lifted selection's surface (the chosen strokes and their highlight), and what it was drawn for. */
+  private liftLayer: Surface | null = null;
+  private liftKey = '';
+  private liftFor: readonly number[] | null = null;
+  /** The device pixels the lift's surface covers, which `drawImage` maps back with the drag's transform. */
+  private liftBox: PixelBox | null = null;
+  /** The selection's frame (page units, as it is drawn now), cached for the selection, strokes and layers it was found for. */
+  private frame: { selection: readonly number[]; strokes: readonly Stroke[]; generation: number; layers: readonly Layer[]; box: Rect | null } | null = null;
 
   constructor(createSurface: () => Surface | null, ink: Ink | null = null) {
     this.createSurface = createSurface;
@@ -415,6 +455,7 @@ export class LiveRenderer {
   invalidate(): void {
     this.cacheKey = '';
     this.selectionKey = '';
+    this.liftKey = '';
   }
 
   private outline(stroke: Stroke): Outline | null {
@@ -491,7 +532,10 @@ export class LiveRenderer {
     this.cacheRedraw += 1;
     this.drawBackground(ctx, scene, width, height);
     const dark = isDarkPaper(scene.background.paper);
-    for (const stroke of drawingOrder(scene.strokes, scene.layers)) this.drawOnCache(ctx, stroke, dark);
+    for (const stroke of drawingOrder(scene.strokes, scene.layers)) {
+      if (!this.excluded.has(stroke)) this.drawOnCache(ctx, stroke, dark);
+    }
+    this.cacheExcluded = this.excluded;
     this.noteDrawn(scene);
   }
 
@@ -511,10 +555,14 @@ export class LiveRenderer {
    * come within `REPAINT_MARGIN_PX`). Strokes finished meanwhile stay out of the area and are appended
    * after it, which is right only if they come last in the drawing order: that is checked here.
    */
-  private planRepaint(scene: Scene, width: number, height: number): Repaint | null {
+  private planRepaint(scene: Scene, width: number, height: number, flips: readonly Stroke[]): Repaint | null {
     if (!this.ink) return null;
-    const edits = this.editsSince(scene);
-    if (!edits) return null;
+    let edits: StrokeEdit[] = [];
+    if (scene.generation !== this.cacheGeneration) {
+      const found = this.editsSince(scene);
+      if (!found) return null;
+      edits = found;
+    }
     const scale = scene.transform.scale * scene.pixelRatio;
     const originX = scene.transform.x * scene.pixelRatio;
     const originY = scene.transform.y * scene.pixelRatio;
@@ -522,20 +570,21 @@ export class LiveRenderer {
     let y0 = Infinity;
     let x1 = -Infinity;
     let y1 = -Infinity;
-    for (const edit of edits) {
-      for (const stroke of edit.touched) {
-        const outline = this.outline(stroke);
-        if (!outline) continue;
-        // The area covers it: it needs no drawing of its own, even if it was finished just now.
-        outline.onCache = this.cacheRedraw;
-        const b = outline.bounds;
-        if (!b || !this.visible(stroke, scene.layers)) continue;
-        x0 = Math.min(x0, b.x);
-        y0 = Math.min(y0, b.y);
-        x1 = Math.max(x1, b.x + b.width);
-        y1 = Math.max(y1, b.y + b.height);
-      }
-    }
+    // The strokes an edit touched, and those a lift takes off the cache or puts back on it (`flips`).
+    const touched = (stroke: Stroke) => {
+      const outline = this.outline(stroke);
+      if (!outline) return;
+      // The area covers it: it needs no drawing of its own, even if it was finished just now.
+      outline.onCache = this.cacheRedraw;
+      const b = outline.bounds;
+      if (!b || !this.visible(stroke, scene.layers)) return;
+      x0 = Math.min(x0, b.x);
+      y0 = Math.min(y0, b.y);
+      x1 = Math.max(x1, b.x + b.width);
+      y1 = Math.max(y1, b.y + b.height);
+    };
+    for (const edit of edits) edit.touched.forEach(touched);
+    flips.forEach(touched);
     let area: PixelBox | null = null;
     if (x1 >= x0) {
       const box = {
@@ -552,6 +601,8 @@ export class LiveRenderer {
     const added: Stroke[] = [];
     const order = drawingOrder(scene.strokes, scene.layers);
     for (const stroke of order) {
+      // A lifted stroke is on no part of the cache, and in none of the lists: it is on the lift's surface.
+      if (this.excluded.has(stroke)) continue;
       const outline = this.outline(stroke);
       if (!outline) continue;
       if (outline.onCache !== this.cacheRedraw) {
@@ -613,17 +664,20 @@ export class LiveRenderer {
     if (!this.cache) this.cache = this.createSurface();
     const cache = this.cache;
     const surface = cache?.ctx ?? target;
+    this.excluded = this.lifted(scene);
     const stale = !cache || key !== this.cacheKey || scene.backgroundImage !== this.cacheImage || scene.strokes !== this.cacheStrokes;
     const edited = !stale && scene.generation !== this.cacheGeneration;
-    const repaint = edited ? this.planRepaint(scene, width, height) : null;
+    const flips = stale ? NO_STROKES : this.exclusionFlips();
+    const repaint = edited || flips.length > 0 ? this.planRepaint(scene, width, height, flips) : null;
     if (repaint) {
       if (repaint.area) this.repaintArea(surface, scene, width, height, repaint.area, repaint.crossing);
       if (repaint.added.length > 0) this.pageTransform(surface, scene);
       for (const s of repaint.added) this.drawOnCache(surface, s, dark);
+      this.cacheExcluded = this.excluded;
       this.noteDrawn(scene);
       report.repainted = repaint.area ? repaint.crossing.length : 0;
       report.appended = repaint.added.length;
-    } else if (stale || edited || scene.strokes.length < this.drawn) {
+    } else if (stale || edited || flips.length > 0 || scene.strokes.length < this.drawn) {
       if (cache && this.cacheSize !== `${width}x${height}`) {
         cache.resize(width, height);
         this.cacheSize = `${width}x${height}`;
@@ -642,7 +696,7 @@ export class LiveRenderer {
       } else {
         this.pageTransform(surface, scene);
         for (const s of added) {
-          if (this.visible(s, scene.layers)) this.drawOnCache(surface, s, dark);
+          if (this.visible(s, scene.layers) && !this.excluded.has(s)) this.drawOnCache(surface, s, dark);
           this.topRank = Math.max(this.topRank, this.rank(s, scene.layers));
         }
         this.drawn = scene.strokes.length;
@@ -655,7 +709,8 @@ export class LiveRenderer {
       target.clearRect(0, 0, width, height);
       target.drawImage(cache.image, 0, 0);
     }
-    this.paintSelection(target, scene, `${key}|${scene.generation}`, report);
+    if (scene.lift && this.excluded.size > 0) this.paintLift(target, scene, `${key}|${scene.generation}`, report);
+    else this.paintSelection(target, scene, `${key}|${scene.generation}`, report);
     this.paintInProgress(target, scene, dark, report);
     if (scene.marks.length > 0 || scene.markCurrent) {
       this.pageTransform(target, scene);
@@ -667,6 +722,41 @@ export class LiveRenderer {
     }
     this.overlay(target, scene);
     return report;
+  }
+
+  /** The strokes `scene.lift` takes off the page (those of visible layers), the same set while nothing changes. */
+  private lifted(scene: Scene): ReadonlySet<Stroke> {
+    const lift = scene.lift;
+    if (!lift) return NO_STROKE_SET;
+    const known = this.liftSet;
+    if (known && known.indices === lift.indices && known.strokes === scene.strokes && known.generation === scene.generation) return known.set;
+    const set = new Set<Stroke>();
+    for (const i of lift.indices) {
+      const stroke = scene.strokes[i];
+      if (stroke && this.visible(stroke, scene.layers)) set.add(stroke);
+    }
+    this.liftSet = { indices: lift.indices, strokes: scene.strokes, generation: scene.generation, set };
+    return set;
+  }
+
+  /** The strokes whose place on the cache changes because the lift began, moved on to others, or ended. */
+  private exclusionFlips(): readonly Stroke[] {
+    if (this.excluded === this.cacheExcluded) return NO_STROKES;
+    const flips: Stroke[] = [];
+    for (const stroke of this.excluded) if (!this.cacheExcluded.has(stroke)) flips.push(stroke);
+    for (const stroke of this.cacheExcluded) if (!this.excluded.has(stroke)) flips.push(stroke);
+    return flips;
+  }
+
+  /** The frame of the selection in page units, found again only when the selection or the strokes change. */
+  private selectionBox(scene: Scene): Rect | null {
+    const known = this.frame;
+    if (known && known.selection === scene.selection && known.strokes === scene.strokes && known.generation === scene.generation && known.layers === scene.layers) {
+      return known.box;
+    }
+    const box = selectionFrame(scene.strokes, scene.layers, scene.selection);
+    this.frame = { selection: scene.selection, strokes: scene.strokes, generation: scene.generation, layers: scene.layers, box };
+    return box;
   }
 
   /**
@@ -703,6 +793,7 @@ export class LiveRenderer {
       this.selectionFor = null;
       return;
     }
+    this.liftKey = '';
     const width = Math.max(1, Math.round(scene.viewport.width * scene.pixelRatio));
     const height = Math.max(1, Math.round(scene.viewport.height * scene.pixelRatio));
     const dark = isDarkPaper(scene.background.paper);
@@ -712,7 +803,7 @@ export class LiveRenderer {
     if (!layer) {
       // No surface (a stand-in): drawn on the frame itself, where no hole can be made: the ink goes back over the ring.
       this.pageTransform(target, scene);
-      this.drawSelection(target, scene, dark, false);
+      this.drawSelection(target, scene, dark, scene.selection, { hole: false, box: true });
       for (const i of scene.selection) {
         const stroke = scene.strokes[i];
         if (stroke && this.visible(stroke, scene.layers)) this.drawStroke(target, stroke, this.contours(stroke), dark);
@@ -728,7 +819,7 @@ export class LiveRenderer {
       layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
       layer.ctx.clearRect(0, 0, width, height);
       this.pageTransform(layer.ctx, scene);
-      this.drawSelection(layer.ctx, scene, dark, true);
+      this.drawSelection(layer.ctx, scene, dark, scene.selection, { hole: true, box: true });
       this.selectionKey = wanted;
       this.selectionFor = scene.selection;
       report.selectionDrawn = true;
@@ -759,21 +850,28 @@ export class LiveRenderer {
    * whole selection takes 70 to 90 ms of calls and two frames are late, and `stroke()` makes one frame very late
    * (some 90 ms in the graphics process) on strokes it has not seen yet.
    */
-  private drawSelection(ctx: Ctx2D, scene: Scene, dark: boolean, hole: boolean): void {
+  private drawSelection(
+    ctx: Ctx2D,
+    scene: Scene,
+    dark: boolean,
+    indices: readonly number[],
+    { hole, box: framed }: { hole: boolean; box: boolean },
+  ): void {
     const colors = dark ? SELECTION_COLORS.dark : SELECTION_COLORS.light;
     const scale = scene.transform.scale || 1;
-    let box: Rect | null = null;
+    const box = selectionFrame(scene.strokes, scene.layers, indices);
     const rings: Rings[] = [];
-    for (const i of scene.selection) {
+    for (const i of indices) {
       const stroke = scene.strokes[i];
       if (!stroke || !this.visible(stroke, scene.layers)) continue;
       const ring = this.rings(stroke, scale);
       if (ring) rings.push(ring);
-      box = union(box, strokeBounds(stroke));
     }
     if (!box) return;
-    ctx.fillStyle = colors.box;
-    ctx.fillRect(box.x, box.y, box.width, box.height);
+    if (framed) {
+      ctx.fillStyle = colors.box;
+      ctx.fillRect(box.x, box.y, box.width, box.height);
+    }
     ctx.fillStyle = colors.halo;
     for (const ring of rings) fillContours(ctx, ring.halo);
     const [r, g, b] = paperRgb(scene.background.paper);
@@ -785,11 +883,119 @@ export class LiveRenderer {
       for (const ring of rings) fillContours(ctx, ring.hole);
       ctx.globalCompositeOperation = 'source-over';
     }
+    if (!framed) return;
     ctx.strokeStyle = colors.line;
     ctx.setLineDash?.([6 / scale, 4 / scale]);
     ctx.lineWidth = 1.5 / scale;
     ctx.strokeRect(box.x, box.y, box.width, box.height);
     ctx.setLineDash?.([]);
+  }
+
+  /**
+   * The selection lifted off the page by a drag: the chosen strokes in their colours inside their highlight, rendered
+   * once on a surface that covers them (and goes unchanged while the drag goes on), then copied each frame to where
+   * the drag has them: that is a bitmap scaled and moved, whatever the number of strokes. The page below was
+   * repainted without them (`exclusionFlips`). The frame and the handles go over it in screen pixels (`overlay`).
+   */
+  private paintLift(target: Ctx2D, scene: Scene, key: string, report: PaintReport): void {
+    const lift = scene.lift;
+    const box = this.selectionBox(scene);
+    if (!lift || !box) return;
+    this.selectionFor = null;
+    const dark = isDarkPaper(scene.background.paper);
+    const k = scene.pixelRatio;
+    const t = scene.transform;
+    const unit = t.scale * k;
+    const originX = t.x * k;
+    const originY = t.y * k;
+    const layer = this.liftLayer ?? (this.liftLayer = this.createSurface());
+    if (!layer) {
+      // No surface (a stand-in): the strokes themselves, where the drag has them (the page units go to device pixels).
+      target.setTransform(unit * lift.scale, 0, 0, unit * lift.scale, unit * lift.x + originX, unit * lift.y + originY);
+      this.drawSelection(target, scene, dark, lift.indices, { hole: false, box: false });
+      this.drawLifted(target, scene, lift.indices, dark);
+      report.liftDrawn = true;
+      return;
+    }
+    const width = Math.max(1, Math.round(scene.viewport.width * k));
+    const height = Math.max(1, Math.round(scene.viewport.height * k));
+    // The surface covers the strokes and their ring, no more.
+    const reach = Math.ceil((SELECTION_HALO_PX / 2 + 1) * k) + 1;
+    const x0 = Math.max(0, Math.floor(box.x * unit + originX) - reach);
+    const y0 = Math.max(0, Math.floor(box.y * unit + originY) - reach);
+    const x1 = Math.min(width, Math.ceil((box.x + box.width) * unit + originX) + reach);
+    const y1 = Math.min(height, Math.ceil((box.y + box.height) * unit + originY) + reach);
+    if (x1 <= x0 || y1 <= y0) return;
+    const wanted = `${key}|${dark}|${x0},${y0},${x1},${y1}|${lift.indices.length}`;
+    if (wanted !== this.liftKey || this.liftFor !== lift.indices) {
+      layer.resize(x1 - x0, y1 - y0);
+      layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      layer.ctx.clearRect(0, 0, x1 - x0, y1 - y0);
+      layer.ctx.setTransform(unit, 0, 0, unit, originX - x0, originY - y0);
+      this.drawSelection(layer.ctx, scene, dark, lift.indices, { hole: false, box: false });
+      this.drawLifted(layer.ctx, scene, lift.indices, dark);
+      this.liftKey = wanted;
+      this.liftFor = lift.indices;
+      this.liftBox = { x0, y0, x1, y1 };
+      report.liftDrawn = true;
+    }
+    const at = this.liftBox;
+    if (!at) return;
+    // A device point d goes to s * (d - origin) + origin + unit * (x, y): the surface's corner and size follow.
+    const s = lift.scale;
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.drawImage(
+      layer.image,
+      s * (at.x0 - originX) + originX + unit * lift.x,
+      s * (at.y0 - originY) + originY + unit * lift.y,
+      (at.x1 - at.x0) * s,
+      (at.y1 - at.y0) * s,
+    );
+  }
+
+  /** The lifted strokes' ink, in index order, over their ring. */
+  private drawLifted(ctx: Ctx2D, scene: Scene, indices: readonly number[], dark: boolean): void {
+    for (const i of indices) {
+      const stroke = scene.strokes[i];
+      if (stroke && this.visible(stroke, scene.layers)) this.drawStroke(ctx, stroke, this.contours(stroke), dark);
+    }
+  }
+
+  /** The four handles of the selection's frame `box` (page units): squares of `HANDLE_SIZE_PX` screen pixels. */
+  private drawHandles(ctx: Ctx2D, scene: Scene, box: Rect): void {
+    const dark = isDarkPaper(scene.background.paper);
+    const colors = dark ? SELECTION_COLORS.dark : SELECTION_COLORS.light;
+    ctx.fillStyle = dark ? '#1b2120' : '#ffffff';
+    ctx.strokeStyle = colors.line;
+    ctx.lineWidth = 1.5;
+    for (const corner of corners(box)) {
+      const at = pageToScreen(scene.transform, corner);
+      ctx.fillRect(at.x - HANDLE_SIZE_PX / 2, at.y - HANDLE_SIZE_PX / 2, HANDLE_SIZE_PX, HANDLE_SIZE_PX);
+      ctx.strokeRect(at.x - HANDLE_SIZE_PX / 2, at.y - HANDLE_SIZE_PX / 2, HANDLE_SIZE_PX, HANDLE_SIZE_PX);
+    }
+  }
+
+  /** The frame of a lifted selection where the drag has it (the surface holds the strokes, not the frame), and the handles. */
+  private drawFrame(ctx: Ctx2D, scene: Scene): void {
+    const box = this.selectionBox(scene);
+    if (!box) return;
+    const lift = scene.lift;
+    const lifted = lift !== null && this.excluded.size > 0;
+    const shown = lifted ? transformRect(box, lift) : box;
+    if (lifted) {
+      const colors = isDarkPaper(scene.background.paper) ? SELECTION_COLORS.dark : SELECTION_COLORS.light;
+      const a = pageToScreen(scene.transform, { x: shown.x, y: shown.y });
+      const w = shown.width * scene.transform.scale;
+      const h = shown.height * scene.transform.scale;
+      ctx.fillStyle = colors.box;
+      ctx.fillRect(a.x, a.y, w, h);
+      ctx.strokeStyle = colors.line;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash?.([6, 4]);
+      ctx.strokeRect(a.x, a.y, w, h);
+      ctx.setLineDash?.([]);
+    }
+    if (scene.handles) this.drawHandles(ctx, scene, shown);
   }
 
   /** The lasso being drawn, in screen pixels. */
@@ -814,6 +1020,7 @@ export class LiveRenderer {
   private overlay(ctx: Ctx2D, scene: Scene): void {
     const k = scene.pixelRatio;
     ctx.setTransform(k, 0, 0, k, 0, 0);
+    if (scene.selection.length > 0 && (scene.handles || scene.lift)) this.drawFrame(ctx, scene);
     if (scene.lasso && scene.lasso.length > 1) this.drawLasso(ctx, scene, scene.lasso);
     if (scene.projected) {
       const t = scene.transform;

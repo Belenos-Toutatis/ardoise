@@ -484,6 +484,13 @@ La tablette est tenue comme d'habitude, le **vidéoprojecteur** et le **second o
 7. **Sur la feuille reprise**, retoucher un trait **d'avant la reprise** (supprimer l'un, recolorer l'autre), puis **Terminer** : dans l'éditeur, les deux retouches y sont, l'**image de fond** aussi, et **Revenir à l'original** rend la première version de la feuille (sans les retouches).
 8. **Pendant que la tablette écrit vite** (un mot long, sans lever le stylet) : retoucher à la souris au même moment. Noter si l'écriture reste fluide au vidéoprojecteur, sans à-coup ni trait qui saute, et si la latence affichée reste proche de ce qu'elle était.
 9. **Quitter la page puis y revenir** (Page suivante, Page précédente), puis `Ctrl + Z` : la retouche faite sur cette page est annulée (une page garde son historique) ; sur la page suivante, rien à annuler.
+10. **Déplacer et redimensionner, au stylet et au doigt** (sur la **Surface, clavier détaché** : ni souris ni clavier, c'est le cas de l'enseignant en classe). Avec le stylet, **entourer** deux ou trois traits : le cadre en pointillés porte **quatre petits carrés** aux coins.
+    - **Stylet, déplacer** : poser la pointe **dans le cadre**, puis une autre fois **juste à côté de son bord, à deux ou trois millimètres** (le stylet « accroche » le cadre à cette distance ; un doigt, à quatre ou cinq millimètres), et glisser : les traits suivent la pointe, **soulevés**, avec leur halo, et l'endroit qu'ils quittent se vide. **Le vidéoprojecteur et l'autre écran ne bougent pas pendant le glissement**, puis montrent les traits à leur nouvelle place **d'un coup au relâchement**, sans cadre ni carrés. La sélection reste.
+    - **Stylet, redimensionner** : prendre un **coin** sans viser pile (sur le carré, un peu dedans, ou un peu **dehors, à deux ou trois millimètres** en diagonale ; pour un doigt, jusqu'à quatre ou cinq millimètres), glisser vers le coin opposé puis en s'éloignant : les traits rétrécissent puis grandissent autour du coin opposé, **l'épaisseur du trait avec eux**. Noter s'ils se voient flous pendant le glissement (c'est une image agrandie : le trait redevient net au relâchement).
+    - **Doigt** : poser un doigt **dans le cadre** et glisser : les traits se déplacent et **l'aperçu ne bouge pas** ; un doigt **hors du cadre** déplace toujours l'aperçu ; la même chose avec un coin. Poser un **deuxième doigt** pendant le glissement : le geste est abandonné (les traits restent où ils étaient) et les deux doigts zooment. Un simple appui dans le cadre ne change rien.
+    - `Échap` (clavier tactile ou clavier branché) pendant un glissement : les traits **reviennent à leur place** et rien n'est envoyé au vidéoprojecteur.
+    - `Ctrl + Z` (clavier tactile ou bouton **Annuler**) remet les traits **à leur place en un pas par déplacement ou redimensionnement**, `Ctrl + Y` les y remet ; vérifier le **vidéoprojecteur**, l'**autre écran**, puis **Terminer** : la note contient les traits tels qu'ils étaient à l'écran.
+    - Noter si la prise est **facile** (le stylet « accroche » le cadre sans viser, un doigt n'attrape pas le cadre quand on veut déplacer l'aperçu), si l'aperçu suit **sans à-coup** (aucun trait qui disparaît puis réapparaît au relâchement) et si la tablette peut écrire pendant tout cela sans rien perdre.
 
 ### Ce qui revient par Nextcloud
 
@@ -507,6 +514,7 @@ Ce qui ne revient pas tout seul :
 | Si le contour bleu de la sélection **n'apparaît jamais** au vidéoprojecteur ni sur l'autre écran, et le délai d'une recoloration ou d'une suppression sur les deux | H1, H3, H4 |
 | Si l'écriture reste **fluide** pendant qu'on retouche, la latence affichée, et si choisir un trait fin à la souris ou au stylet de l'ordinateur est facile | H2, H8 |
 | Si la couleur du stylo est restée la même après une recoloration, et si les traits écrits entre deux `Ctrl + Z` sont tous restés | H3, H5 |
+| Si le cadre et les coins se prennent **facilement** au stylet et au doigt sur la Surface, sans souris, si l'aperçu suit sans à-coup, et si le vidéoprojecteur ne montre le résultat qu'au relâchement | H10 |
 | Ce que contient la feuille reprise après **Terminer** (retouches, image, original) | H7 |
 
 ---

@@ -39,6 +39,17 @@
    * finished strokes) and the lasso being drawn are painted over the page in this window only
    * (`LiveRenderer`, apart from its cache).
    *
+   * Moving and resizing the selection (control window, `tool` = `select`, `ontransform`): with strokes chosen, a press
+   * on a corner handle of their frame resizes them around the opposite corner, a press inside the frame (or a margin
+   * around it) moves them, with the pen, a finger or the mouse (`lib/selection-grab.ts`: the reach of a handle and of the
+   * margin grows from the mouse to the pen to the finger); anywhere else the mouse and the pen draw a lasso and a finger
+   * navigates; with Shift, Ctrl or Meta it is always a lasso. A press that does not go `CLICK_PX` changes nothing. While
+   * it moves, the strokes are drawn lifted, where the drag has them (`Scene.lift`), the page below without them; the
+   * projector and the share see nothing until the release, which asks `ontransform` for the edit. The preview then stays
+   * where the drag left it until the session's event for it is applied (or the call failed), so that the strokes never
+   * show at their old place for a frame. Esc, `pointercancel`, a lost capture, a second finger, a change of page or of
+   * tool drop the gesture: the strokes stay where they were and nothing is sent.
+   *
    * The computer's hand (M14, control window only, `computer`: `lib/live-computer.ts`). With `tool` = `pen`
    * the pen's tip and the mouse's left button write on the chosen layer (the computer's): the window draws
    * its own stroke at once (`LiveComputer.locals`) and sends the samples, coalesced events included, those
@@ -51,7 +62,7 @@
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api';
-  import type { Vec } from '../../lib/editor/geometry';
+  import type { Rect, Vec } from '../../lib/editor/geometry';
   import { onLayer } from '../../lib/editor/hit';
   import { PenPresence, TouchGestures, inkPressure, pointerKind, type PointerKind, type TouchAction } from '../../lib/gestures';
   import type { Ink, InkPoint } from '../../lib/ink';
@@ -70,8 +81,20 @@
   } from '../../lib/live-render';
   import type { LiveState } from '../../lib/live-state.svelte';
   import { MARK_ERASER_PX, eraseMarks, markStyle, newMark } from '../../lib/live-marks';
-  import { pickStrokes, type Combine } from '../../lib/live-select.svelte';
+  import { CLICK_PX, pickStrokes, type Combine } from '../../lib/live-select.svelte';
   import { exposeRepaints, noteLiveRedraw } from '../../lib/perf';
+  import {
+    MAX_SCALE,
+    grabAt,
+    isNoTransform,
+    moveTransform,
+    resizeCursor,
+    resizeFactor,
+    scaleTransform,
+    selectionFrame,
+    type Grab,
+    type PageTransform,
+  } from '../../lib/selection-grab';
   import {
     DEFAULT_ASPECT,
     moveViewTo,
@@ -83,7 +106,7 @@
     zoomView,
     type Size,
   } from '../../lib/live-view';
-  import type { Background, PageSize, Stroke } from '../../lib/note';
+  import type { Background, Layer, PageSize, Stroke } from '../../lib/note';
 
   let {
     live,
@@ -98,6 +121,7 @@
     tool = 'none',
     selection = [],
     onselect,
+    ontransform,
     computer,
     onblocked,
     computerLatency = null,
@@ -130,6 +154,11 @@
     selection?: readonly number[];
     /** Preview: a lasso or a click ended; `picked` is empty when it found nothing. */
     onselect?: (picked: number[], combine: Combine) => void;
+    /**
+     * Preview: the selection was moved or resized (released after a real change): asks for the edit and answers
+     * whether it went through. Absent: the selection cannot be taken hold of.
+     */
+    ontransform?: (transform: PageTransform) => Promise<boolean> | boolean;
     /** Preview: the control window's queue, pen and eraser (absent in the presentation). */
     computer?: LiveComputer;
     /** Preview: the pen came down while the chosen layer is hidden (nothing is written). */
@@ -175,6 +204,32 @@
   let markDrag: { id: number; kind: 'write' | 'erase'; t0: number } | null = null;
   /** The lasso being drawn with the mouse or the pen (page units; the points grow in place). */
   let lassoDrag: { id: number; points: Vec[]; combine: Combine } | null = null;
+  /** The selection taken hold of: what it took (`grab`), where the press was, and the map the drag has made so far. */
+  let grabDrag: {
+    id: number;
+    /** Whose it is: a finger's (or a palm's) grab is dropped when the pen comes near. */
+    kind: PointerKind;
+    grab: Grab;
+    /** The selection's frame when it was taken hold of (page units). */
+    box: Rect;
+    start: Vec;
+    startScreen: Vec;
+    indices: readonly number[];
+    /** What the drag was made against: another selection or another edit of the page drops it. */
+    selection: readonly number[];
+    generation: number;
+    moved: boolean;
+    transform: PageTransform;
+  } | null = null;
+  /**
+   * A move or a resize asked for and not yet applied by the session: the strokes stay drawn where the drag left them
+   * until the page's edit (a new `generation`) is applied, the call fails, or `HELD_MS` pass.
+   */
+  let held: { indices: readonly number[]; selection: readonly number[]; transform: PageTransform; generation: number; timer?: ReturnType<typeof setTimeout> } | null = null;
+  /** The cursor over the selection's frame (the mouse): where a press would take hold of it. */
+  let grabCursor = $state<'move' | 'nwse-resize' | 'nesw-resize' | null>(null);
+  /** The selection's frame as the hit tests use it, found again when the selection or the strokes change. */
+  let frameFor: { selection: readonly number[]; generation: number; layers: readonly Layer[]; box: Rect | null } | null = null;
   /** The computer's pen writing (its last sample, page units), and its eraser end erasing. */
   let penDrag: { id: number; kind: PointerKind; last: Vec } | null = null;
   let eraseDrag: { id: number } | null = null;
@@ -184,6 +239,8 @@
   let visibilityEpoch = 0;
 
   const renderer = new LiveRenderer(createSurface);
+  /** The preview of a move is kept at most this long (ms) once the call is answered, waiting for the page's event. */
+  const HELD_MS = 2000;
 
   /** The paper shown: the page's own, slate under the blackboard. */
   const shown = $derived(effectiveBackground(live.background, live.view.board));
@@ -252,6 +309,7 @@
     if (el.width !== width) el.width = width;
     if (el.height !== height) el.height = height;
     const startedAt = performance.now();
+    settleGrab();
     const report = renderer.paint(
       context,
       buildScene(live, {
@@ -264,6 +322,8 @@
         markCurrent,
         selection,
         lasso: lassoDrag?.points ?? null,
+        lift: liftNow(),
+        handles: tool === 'select' && !!ontransform,
         localComputer: computer?.locals(),
         eraser: computer?.eraser.ring ?? null,
       }),
@@ -325,14 +385,18 @@
     schedule();
   });
 
-  // Turning the tool off, or turning the page, drops the lasso being drawn.
+  // Turning the tool off, or turning the page, drops the lasso being drawn, and the selection taken hold of.
   $effect(() => {
     void live.pageIndex;
+    void live.noteId;
     void tool;
-    if (lassoDrag) {
-      lassoDrag = null;
+    untrack(() => {
+      if (lassoDrag) lassoDrag = null;
+      grabDrag = null;
+      clearHeld();
+      grabCursor = null;
       schedule();
-    }
+    });
   });
 
   // The computer's local strokes and its eraser's ring are drawn here: their changes ask for a frame.
@@ -524,7 +588,8 @@
     }
   }
 
-  const touchOptions = () => ({ mode: mode === 'presentation' ? ('draw' as const) : ('navigate' as const) });
+  // A finger that took hold of the selection is not navigating: no double tap from it.
+  const touchOptions = () => ({ mode: mode === 'presentation' || grabDrag ? ('draw' as const) : ('navigate' as const) });
 
   function sample(e: PointerEvent, kind: PointerKind, p: Vec, t0: number): InkPoint {
     return { x: p.x, y: p.y, pressure: inkPressure(kind, e.pressure), t: Math.max(0, Math.round(e.timeStamp - t0)) };
@@ -563,6 +628,135 @@
     const { scale } = sceneTransform(live, { mode, viewport: size });
     const page = onLayer({ strokes: live.strokes, layers: live.layers }, live.computerLayer);
     onselect?.(pickStrokes(page, drag.points, scale), drag.combine);
+  }
+
+  /** The selection's frame (page units), or null when none of the chosen strokes shows. */
+  function frame(): Rect | null {
+    const known = frameFor;
+    if (known && known.selection === selection && known.generation === live.generation && known.layers === live.layers) return known.box;
+    const box = selectionFrame(live.strokes, live.layers, selection);
+    frameFor = { selection, generation: live.generation, layers: live.layers, box };
+    return box;
+  }
+
+  /** What a press of `e` would take hold of on the selection's frame: nothing with a modifier (a lasso then), or with the tool off. */
+  function grabFor(e: PointerEvent, kind: PointerKind): Grab | null {
+    if (mode !== 'preview' || tool !== 'select' || !ontransform || selection.length === 0 || held) return null;
+    if (e.shiftKey || e.ctrlKey || e.metaKey) return null;
+    const box = frame();
+    if (!box) return null;
+    const { scale } = sceneTransform(live, { mode, viewport: size });
+    return grabAt(box, pagePoint(e), scale, kind);
+  }
+
+  function cursorOf(grab: Grab | null): typeof grabCursor {
+    return grab === null ? null : grab.kind === 'move' ? 'move' : resizeCursor(grab.corner);
+  }
+
+  /** Selecting: a press on the selection's frame or one of its handles takes hold of it; false when it is neither. */
+  function startGrab(e: PointerEvent, kind: PointerKind, id: number): boolean {
+    if (e.button !== 0 || grabDrag) return false;
+    const grab = grabFor(e, kind);
+    const box = grab ? frame() : null;
+    if (!grab || !box) return false;
+    e.preventDefault();
+    capture(id);
+    grabDrag = {
+      id,
+      kind,
+      grab,
+      box,
+      start: pagePoint(e),
+      startScreen: localPoint(e),
+      indices: selection,
+      selection,
+      generation: live.generation,
+      moved: false,
+      transform: { scale: 1, x: 0, y: 0 },
+    };
+    grabCursor = cursorOf(grab);
+    return true;
+  }
+
+  /** The drag grows: once past a click, the strokes follow the pointer (a move), or the diagonal (a resize). */
+  function dragGrab(e: PointerEvent, g: NonNullable<typeof grabDrag>) {
+    if (!g.moved) {
+      const at = localPoint(e);
+      if (Math.hypot(at.x - g.startScreen.x, at.y - g.startScreen.y) < CLICK_PX) return;
+      g.moved = true;
+    }
+    const p = pagePoint(e);
+    if (g.grab.kind === 'move') {
+      // The frame's centre stays on the page: a fast drag to the window's edge does not fling the strokes away.
+      const centre = { x: g.box.x + g.box.width / 2, y: g.box.y + g.box.height / 2 };
+      const dx = Math.min(live.pageSize.width, Math.max(0, centre.x + p.x - g.start.x)) - centre.x;
+      const dy = Math.min(live.pageSize.height, Math.max(0, centre.y + p.y - g.start.y)) - centre.y;
+      g.transform = moveTransform(dx, dy);
+    } else {
+      g.transform = scaleTransform(g.grab.anchor, resizeFactor(g.grab.anchor, g.start, p, MAX_SCALE));
+    }
+    schedule();
+  }
+
+  /**
+   * A finger's (or palm's) grab goes when the pen comes into range: the strokes go back, nothing is committed (the
+   * pen's own gesture, a lasso or a grab, is what the user means).
+   */
+  function dropTouchGrab() {
+    if (grabDrag?.kind !== 'touch') return;
+    grabDrag = null;
+    schedule();
+  }
+
+  /** The press is up after a real drag: the edit is asked for, and the preview stays until the session has applied it. */
+  function endGrab(g: NonNullable<typeof grabDrag>) {
+    const { scale } = sceneTransform(live, { mode, viewport: size });
+    if (!ontransform || isNoTransform(g.transform, scale)) {
+      schedule();
+      return;
+    }
+    clearHeld();
+    const mine = { indices: g.indices, selection: g.selection, transform: g.transform, generation: g.generation };
+    held = mine;
+    schedule();
+    let answer: Promise<boolean>;
+    try {
+      answer = Promise.resolve(ontransform(g.transform));
+    } catch {
+      answer = Promise.resolve(false);
+    }
+    const settled = (went: boolean) => {
+      if (held !== mine) return;
+      // Refused: the strokes go back. Done: the event may be on its way, or may have been applied already.
+      if (!went || live.generation !== mine.generation) clearHeld();
+      else held.timer = setTimeout(clearHeld, HELD_MS);
+    };
+    answer.then(settled, () => settled(false));
+  }
+
+  function clearHeld() {
+    if (!held) return;
+    clearTimeout(held.timer);
+    held = null;
+    schedule();
+  }
+
+  /**
+   * Before each frame: a gesture made against strokes that are no longer those of the page (another selection, an
+   * edit applied meanwhile) is dropped, and the preview of an edit the session has applied is over (the strokes are
+   * where the edit put them, in this very frame).
+   */
+  function settleGrab() {
+    if (grabDrag && (grabDrag.selection !== selection || grabDrag.generation !== live.generation)) grabDrag = null;
+    if (held && (held.selection !== selection || held.generation !== live.generation)) clearHeld();
+  }
+
+  /** The selection as lifted off the page now: being dragged past a click, or waiting for the session. */
+  function liftNow() {
+    if (mode !== 'preview') return null;
+    if (grabDrag?.moved) return { indices: grabDrag.indices, ...grabDrag.transform };
+    if (held) return { indices: held.indices, ...held.transform };
+    return null;
   }
 
   /** The session runs: the computer may write (the tablet connected or not). */
@@ -611,6 +805,7 @@
     if (kind === 'pen' || kind === 'eraser') {
       presence.seen(id, e.timeStamp, 'down');
       fingers.reset();
+      dropTouchGrab();
     } else if (kind === 'touch') {
       if (presence.blocksTouch(e.timeStamp)) return;
       const second = fingers.down(id, localPoint(e), e.timeStamp);
@@ -622,6 +817,10 @@
         markDrag = null;
         drag = null;
         dragging = false;
+        if (grabDrag) {
+          grabDrag = null;
+          schedule();
+        }
         if (penDrag) computer?.pen.cancel();
         penDrag = null;
         if (dropped) onmarkschange?.(marks, null);
@@ -638,8 +837,11 @@
       if (computer) startErase(e, id, computer);
       return;
     }
+    if (tool === 'select' && onselect && kind === 'touch' && startGrab(e, kind, id)) return;
     if (tool === 'select' && onselect && (kind === 'mouse' || kind === 'pen')) {
-      startLasso(e, id);
+      // While an edit of the selection waits for the session, its strokes are where they were: nothing is taken.
+      if (held || grabDrag) return;
+      if (!startGrab(e, kind, id)) startLasso(e, id);
       return;
     }
     if (tool === 'pen' && computer && (kind === 'mouse' || kind === 'pen')) {
@@ -668,8 +870,11 @@
     const id = pointerId(e);
     if (kind === 'pen' || kind === 'eraser') {
       presence.seen(id, e.timeStamp, ((e.buttons ?? 0) & 33) !== 0 ? 'down' : 'hover');
+      // Any pen event: a finger or palm that had taken hold of the selection lets go of it.
+      dropTouchGrab();
     } else if (kind === 'touch') {
       if (!fingers.has(id)) return;
+      if (presence.blocksTouch(e.timeStamp)) dropTouchGrab();
       const action = fingers.move(id, localPoint(e), touchOptions());
       if (action) applyTouch(action);
       if (fingers.count > 1) return;
@@ -723,6 +928,16 @@
       computer.eraser.hover(null);
       schedule();
     }
+    // The pointer that took hold of the selection moves it; the events of the others are theirs.
+    if (grabDrag && id === grabDrag.id) {
+      dragGrab(e, grabDrag);
+      return;
+    }
+    if (kind === 'mouse' && !lassoDrag && !drag && !grabDrag) {
+      // Over the selection's frame the mouse shows what a press would take hold of.
+      const over = cursorOf(grabFor(e, kind));
+      if (over !== grabCursor) grabCursor = over;
+    }
     if (lassoDrag) {
       if (id !== lassoDrag.id) return;
       const { scale } = sceneTransform(live, { mode, viewport: size });
@@ -764,6 +979,12 @@
       if (!cancelled) endLasso(done);
       schedule();
     }
+    if (grabDrag && grabDrag.id === id) {
+      const done = grabDrag;
+      grabDrag = null;
+      if (!cancelled && done.moved) endGrab(done);
+      else schedule();
+    }
     if (penDrag && penDrag.id === id) {
       penDrag = null;
       if (cancelled) computer?.pen.cancel();
@@ -784,21 +1005,28 @@
   function onpointerleave(e: PointerEvent) {
     const kind = pointerKind(e);
     if (kind === 'pen' || kind === 'eraser') presence.gone(pointerId(e));
+    if (!grabDrag && grabCursor !== null) grabCursor = null;
     if (computer?.eraser.ring && !eraseDrag) {
       computer.eraser.hover(null);
       schedule();
     }
   }
 
-  /** Esc: drops the pen's or the eraser's gesture under way; true if there was one. */
+  /** Esc: drops the gesture under way (the pen, the eraser, the selection taken hold of); true if there was one. */
   export function cancelGesture(): boolean {
-    const was = penDrag !== null || eraseDrag !== null;
+    const was = penDrag !== null || eraseDrag !== null || grabDrag !== null;
     if (penDrag) computer?.pen.cancel();
     if (eraseDrag) computer?.eraser.cancel();
     penDrag = null;
     eraseDrag = null;
+    grabDrag = null;
     if (was) schedule();
     return was;
+  }
+
+  /** The selection is being moved or resized: Ctrl + Z waits for the gesture to end, as for the computer's pen. */
+  export function gripping(): boolean {
+    return grabDrag !== null;
   }
 </script>
 
@@ -811,6 +1039,7 @@
     class:zoomed={live.view.zoom > 1.001 && tool === 'none'}
     class:selecting={tool === 'select' && mode === 'preview'}
     class:pen={tool === 'pen' && mode === 'preview'}
+    style:cursor={grabCursor}
     class:writable={mode === 'presentation' && interactive}
     data-tool={mode === 'preview' ? tool : undefined}
     data-strokes={live.strokeCount}

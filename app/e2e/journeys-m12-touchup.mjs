@@ -26,11 +26,16 @@
 //    strokes and a hidden layer, every edit is drawn by repainting an area of the cache: the canvases of the three places
 //    (a real WebView2 and a real Edge) must be, pixel for pixel, what a full redraw of the same state makes
 //    (`Places.samePixels`), on the paper and on the blackboard. The selection's highlight leaves the ink its new colour.
+// 4. The fourth journey (moving and resizing the selection, SPEC §4.2): with the tablet writing, a group of strokes is chosen
+//    with the mouse's lasso, moved with the PEN (`pointerType: 'pen'`) and resized with the MOUSE by a corner; the control
+//    window and the presentation window hold the strokes at their new place, the selection stays, every canvas is what a
+//    full redraw of its state makes, Ctrl+Z undoes each step, Ctrl+Y redoes the move, and the note holds the moved strokes.
 //
 // Limits: the narration is not recorded (no microphone); the pen's back, the finger and the touch gestures are
 // covered by the interface tests (the lasso here is the mouse's); how the highlight looks is for the eye (H5).
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { penStroke } from './journeys-m8-input.mjs';
 import { openTab } from './side-panel.mjs';
 import { assertNoBrowserProblem, closePanel, EventStream, findEdge, request, startBrowser, until } from './journeys-m11-share.mjs';
 import {
@@ -304,6 +309,22 @@ function planLasso(strokes, page, { starts, length = 3, accept = () => true }) {
   throw new Error(`no lasso picks strokes the way the step needs (${strokes.length} strokes, ${starts.length} places tried)`);
 }
 
+/**
+ * Moves that put `frame` (page units) right beside where it is, without overlapping it, and keep it on `page` with a
+ * margin: left or right (shifted `off` down), up or down (shifted `off` right). Empty when the frame is too big for any.
+ */
+function moveRoom(frame, page, off) {
+  const width = frame.x1 - frame.x0;
+  const height = frame.y1 - frame.y0;
+  const fits = (c) => frame.x0 + c.dx > 150 && frame.x1 + c.dx < page.width - 150 && frame.y0 + c.dy > 150 && frame.y1 + c.dy < page.height - 150;
+  return [
+    { dx: width + 600, dy: off },
+    { dx: -(width + 600), dy: off },
+    { dx: off, dy: height + 600 },
+    { dx: off, dy: -(height + 600) },
+  ].filter(fits);
+}
+
 function distanceToSegment(p, a, b) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -560,14 +581,22 @@ class Places {
 
   /**
    * Each canvas against a full redraw of the state it shows: the same pixels, or an error. With `after` (what an earlier
-   * call answered), each canvas must also have repainted an area since: that is what was tested.
+   * call answered), each canvas must also have repainted an area since: that is what was tested. `edgeFactor`: how many
+   * times the faint edge pixels allowed for one repaint (`EDGE_PIXELS`) an edit may leave: a move or a resize repaints
+   * two areas, where the strokes were and where they are, and each cuts strokes of its own (seen: 253 pixels by up to
+   * 15/255 for one move on a full-screen presentation).
    */
-  async samePixels(what, { after = null } = {}) {
+  async samePixels(what, { after = null, edgeFactor = 1 } = {}) {
     at(`comparing the pixels with a full redraw: ${what}`);
     const once = async (place, selector, name) => {
       if (!place) return null;
       const result = await within(place.evaluate(pixelsAgainstFullRedraw(selector)), 20_000, `the ${name}`);
       if (result.missing) throw new Error(`${what}: the ${name} has no repaint for the tests`);
+      const edgesOnly = result.differ > 0 && !result.picture && result.edgeWorst <= EDGE_DELTA;
+      if (edgesOnly && result.edges <= EDGE_PIXELS * Math.max(1, result.repaints) * edgeFactor) {
+        console.log(`    ${what} : ${result.edges} pixels de bord à ${result.edgeWorst}/255 au plus d’un dessin complet, pour ${result.repaints} retouches (${name}, marge × ${edgeFactor})`);
+        return result;
+      }
       if (result.differ > 0) {
         const saved = await this.save().catch(() => '');
         const dir = process.env.ARDOISE_E2E_SHOTS ?? this.app.dir;
@@ -846,6 +875,48 @@ const PIXEL_SHEET = (() => {
     marker: { x: 18900, y: 21000 },
   };
 })();
+
+// --- Moving and resizing the selection -----------------------------------------------------------------------------
+
+/** The frame of strokes as the control window draws it round the chosen ones: the box of their samples grown by half their width. */
+function frameOf(strokes) {
+  let frame = null;
+  for (const stroke of strokes) {
+    const box = boxOf(stroke);
+    const half = stroke.width / 2;
+    const grown = { x0: box.x0 - half, x1: box.x1 + half, y0: box.y0 - half, y1: box.y1 + half };
+    frame = frame ? { x0: Math.min(frame.x0, grown.x0), x1: Math.max(frame.x1, grown.x1), y0: Math.min(frame.y0, grown.y0), y1: Math.max(frame.y1, grown.y1) } : grown;
+  }
+  if (!frame) throw new Error('no stroke to frame');
+  return frame;
+}
+
+const rounded = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+
+/** The points of a straight drag from `from` to `to`: whole pixels, one about every 10 pixels. */
+function straight(from, to) {
+  const steps = Math.max(4, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / 10));
+  return Array.from({ length: steps + 1 }, (_, k) => rounded({ x: from.x + ((to.x - from.x) * k) / steps, y: from.y + ((to.y - from.y) * k) / steps }));
+}
+
+/**
+ * Page expression: the pixels of dark ink (r + g + b under 300) of a canvas inside `rect` (page units), the page being fitted
+ * in the canvas with `margin` CSS pixels around it, as the control window (12) and the presentation window (0) draw it.
+ */
+const darkIn = (selector, page, margin, rect) => `(() => {
+  const c = document.querySelector(${j(selector)});
+  if (!c || c.width === 0) return -1;
+  const w = c.clientWidth, h = c.clientHeight, k = c.width / w;
+  const s = Math.min((w - 2 * ${margin}) / ${page.width}, (h - 2 * ${margin}) / ${page.height});
+  const ox = (w - ${page.width} * s) / 2, oy = (h - ${page.height} * s) / 2;
+  const x0 = Math.max(0, Math.floor((ox + ${rect.x0} * s) * k)), y0 = Math.max(0, Math.floor((oy + ${rect.y0} * s) * k));
+  const x1 = Math.min(c.width, Math.ceil((ox + ${rect.x1} * s) * k)), y1 = Math.min(c.height, Math.ceil((oy + ${rect.y1} * s) * k));
+  if (x1 <= x0 || y1 <= y0) return 0;
+  const d = c.getContext('2d').getImageData(x0, y0, x1 - x0, y1 - y0).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 0 && d[i] + d[i + 1] + d[i + 2] < 300) n++;
+  return n;
+})()`;
 
 const BROWSER_ARGS = '--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding';
 
@@ -1590,6 +1661,351 @@ export const touchUpJourneys = [
           await places.samePixels('the blackboard off');
           model.check('at the end');
           if (browser) assertNoBrowserProblem(browser);
+        });
+      } finally {
+        presentation?.close();
+        stream?.close();
+        await browser?.close();
+      }
+    },
+  },
+
+  // The fourth journey (SPEC §4.2 « Retoucher pendant le direct », moving and resizing): with the tablet writing, a group of
+  // strokes is chosen with the mouse's lasso, moved with the PEN (`Input.dispatchMouseEvent` with `pointerType: 'pen'`), then
+  // resized with the MOUSE by a corner; the control window and the presentation window hold the strokes at their new place
+  // (pixels of their canvases, and the events of the stream, which the share's viewers get), the selection stays, every
+  // canvas is what a full redraw of its state makes, Ctrl+Z puts the strokes back in one step each, and the note holds them.
+  {
+    name: 'retouches en direct : déplacer et redimensionner la sélection, au stylet puis à la souris, annuler, pendant que la tablette écrit',
+    args: ['--simulated-tablet'],
+    settings: (ctx) => `[share]\nport = ${ctx.sharePort}\n`,
+    env: { ARDOISE_SHARE_LOOPBACK: '1' },
+    browserArgs: BROWSER_ARGS,
+    async run(app, rawCheck) {
+      const check = limited(rawCheck);
+      let browser = null;
+      let presentation = null;
+      let stream = null;
+      let model = null;
+      let places = null;
+      let map = null;
+      let notesBefore = [];
+      /** The strokes taken hold of (prints), and where they were at each stage (first sample, width, frame). */
+      let chosen = null;
+      const stages = {};
+      const l = (key) => text(app.language, key);
+
+      const replan = async () => {
+        map = await previewMap(app, model.page);
+        return map;
+      };
+      const strokesNow = () => model.sync().strokes;
+      // The simulated pen writes line after line down the page and starts again at the top (see the first journey): a lasso
+      // must be where the pen will not be for a while.
+      const CYCLE = 19_200;
+      const penY = () => {
+        model.sync();
+        const point = model.current?.points.at(-1) ?? model.strokes.at(-1)?.points.at(-1);
+        return point ? point.y : 0;
+      };
+      const aheadOf = () => {
+        const pen = penY();
+        return (y) => (((y - pen) % CYCLE) + CYCLE) % CYCLE;
+      };
+      const starts = (strokes) => {
+        const ahead = aheadOf();
+        const mid = (st) => st.points.reduce((sum, p) => sum + p.y, 0) / st.points.length;
+        return strokes.map((_, i) => i).filter((i) => i < strokes.length - 1).sort((a, b) => ahead(mid(strokes[b])) - ahead(mid(strokes[a])));
+      };
+      const safe = () => {
+        const ahead = aheadOf();
+        return (rect) => {
+          const top = ahead(rect.y0);
+          const bottom = ahead(rect.y1);
+          return top >= 2400 && bottom <= 18_800 && bottom >= top && moveRoom(rect, model.page, 0).length > 0;
+        };
+      };
+
+      /** The chosen strokes as the model holds them now: first sample, width, and the frame the control window draws round them. */
+      const stageNow = () => {
+        const list = strokesNow();
+        const found = chosen.prints.map((print) => {
+          const stroke = list.find((s) => printOf(s) === print);
+          if (!stroke) throw new Error(`stroke ${print} is not on the page any more (edits so far: ${describeEdits(model)})`);
+          return stroke;
+        });
+        return {
+          first: found.map((s) => ({ x: s.points[0].x, y: s.points[0].y })),
+          width: found.map((s) => s.width),
+          frame: frameOf(found),
+        };
+      };
+      /** Where the strokes are, against `stage`, moved by (`dx`, `dy`) and scaled by `factor` around `anchor`, within `tolerance` page units. */
+      const expectStrokes = (what, from, { dx = 0, dy = 0, factor = 1, anchor = { x: 0, y: 0 } }, tolerance) => {
+        const now = stageNow();
+        now.first.forEach((p, k) => {
+          const want = { x: anchor.x + (from.first[k].x - anchor.x) * factor + dx, y: anchor.y + (from.first[k].y - anchor.y) * factor + dy };
+          if (Math.abs(p.x - want.x) > tolerance || Math.abs(p.y - want.y) > tolerance) {
+            throw new Error(`${what}: stroke ${chosen.prints[k]} starts at (${p.x.toFixed(1)}, ${p.y.toFixed(1)}), expected (${want.x.toFixed(1)}, ${want.y.toFixed(1)}) within ${tolerance.toFixed(1)}`);
+          }
+          const width = from.width[k] * factor;
+          if (Math.abs(now.width[k] - width) > Math.max(1, width * 0.03)) throw new Error(`${what}: stroke ${chosen.prints[k]} is ${now.width[k]} wide, expected ${width.toFixed(1)}`);
+        });
+        return now;
+      };
+      /** The dark ink in `rect` (page units) of the control window and of the presentation window. */
+      const inkIn = async (rect) => ({
+        control: await within(app.evaluate(darkIn(LIVE_CANVAS, model.page, PREVIEW_MARGIN, rect)), 10_000, 'the control window'),
+        presented: await within(presentation.evaluate(darkIn(LIVE_CANVAS, model.page, 0, rect)), 10_000, 'the presentation window'),
+      });
+      /**
+       * A gesture made again when nothing came of it: a press while the previous edit is still being applied is ignored (the
+       * strokes are held where the drag left them until its event is applied), and a teacher drags again.
+       */
+      const gestureUntil = async (gesture, done, what, { tries = 3, wait = 4000, grace = 3000 } = {}) => {
+        // A gesture whose event merely arrived late is not made again (a second move, or a lasso over the moved strokes):
+        // before each new try, a longer wait for the event of the last one, and a look at whether it came.
+        const waitFor = async (ms) => {
+          const end = Date.now() + ms;
+          while (Date.now() < end) {
+            if (done()) return true;
+            await sleep(25);
+          }
+          return done();
+        };
+        for (let k = 0; k < tries; k++) {
+          if (k > 0 && (await waitFor(grace))) return;
+          await gesture();
+          if (await waitFor(wait)) return;
+        }
+        throw new Error(`timed out waiting for ${what} (${tries} gestures; edits so far: ${describeEdits(model)})`);
+      };
+      const justOne = (edit, what) => {
+        if (!sameSet(edit.removed, chosen.prints) || !sameSet(edit.inserted, chosen.prints) || edit.recoloured.length > 0) {
+          throw new Error(`${what}: the event removed ${edit.removed}, inserted ${edit.inserted}, recoloured ${edit.recoloured.length} (expected the chosen strokes replaced, nothing else)`);
+        }
+        if (j(edit.removedIndices) !== j(edit.insertedIndices)) throw new Error(`${what}: the strokes came back at other places (${edit.removedIndices} then ${edit.insertedIndices})`);
+      };
+
+      try {
+        await registerTablet(app, check);
+        await check('le dossier avant le direct : les pages synchronisées sont déjà des notes', async () => {
+          notesBefore = notesOf(app.library).map((n) => n.path);
+        });
+
+        await check('ouvrir le mode direct (tablette simulée)', async () => {
+          await openLive(app);
+        });
+
+        await check('fenêtre de présentation ouverte', async () => {
+          await app.evaluate(`window.__TAURI_INTERNALS__.invoke('open_presentation', { monitor: null }).then(() => true)`);
+          presentation = await attach(app.port, (t) => t.url.includes('view=presentation'), 'the presentation window');
+          await presentation.waitFor(`Number(${canvasData('strokes')}) >= 1`, 'the strokes in the presentation');
+        });
+
+        await check('partage : un vrai navigateur (Edge sans fenêtre) et un client Node du flux ont rejoint', async () => {
+          const code = await startShare(app);
+          const edge = findEdge();
+          if (edge) {
+            browser = await startBrowser(edge, BROWSER_ARGS.split(' '));
+            await browser.navigate(`http://127.0.0.1:${app.sharePort}/`);
+            await browser.waitFor(`document.querySelector('main.viewer')?.dataset.screen === 'code'`, 'the code form', 30_000);
+            await browser.click('#viewer-code');
+            await browser.type(code);
+            await browser.waitFor(`document.querySelector('form button[type="submit"]')?.disabled === false`, 'the join button');
+            await browser.click('form button[type="submit"]');
+            await browser.waitFor(`document.querySelector('main.viewer')?.dataset.screen === 'live'`, 'the live sheet', 20_000);
+            await browser.waitFor(`Number(document.querySelector(${j(VIEWER_CANVAS)})?.dataset.strokes) > 0`, 'strokes on the page', 20_000);
+            await browser.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+            await browser.send('Page.bringToFront');
+            await browser.evaluate(`window.__frames = 0; (function tick() { window.__frames++; requestAnimationFrame(tick); })(); true`);
+          } else {
+            console.log('    skipped: Edge not found, the share is followed by the stream only');
+          }
+          stream = await joinStream(app, code);
+          model = new StreamModel(stream).sync();
+          places = new Places({ app, model, presentation, browser });
+          await closePanel(app, l('common.close'));
+          if (await app.evaluate(`document.querySelector('.share-panel') !== null`)) throw new Error('the share panel stays open and would take the keys');
+        });
+
+        await check('la tablette écrit : au moins 12 traits finis dans la liste du flux', async () => {
+          await until(() => model.sync().strokes.length >= 12, 'twelve finished strokes in the stream (is the simulated pen writing?)', 60_000);
+          model.check('before touching up');
+          await places.agree('before touching up');
+        });
+
+        await check('« Sélection » : l’outil est actif, lasso à la souris autour de trois traits (la barre en annonce le nombre)', async () => {
+          await app.click(SELECT_BUTTON);
+          await app.waitFor(`document.querySelector(${j(SELECT_BUTTON)}).getAttribute('aria-pressed') === 'true'`, 'the Select tool on');
+          let strokes;
+          const plan = await until(() => {
+            strokes = [...strokesNow()];
+            try {
+              return planLasso(strokes, model.page, { starts: starts(strokes), length: 3, accept: safe() });
+            } catch {
+              return null;
+            }
+          }, 'a group of strokes the pen is far from', 40_000);
+          chosen = { prints: plan.hits.map((i) => printOf(strokes[i])), indices: plan.hits };
+          await replan();
+          await drawLasso(app, map, plan.rect);
+          await app.waitFor(selectionIs(plan.hits.length), `the bar to show ${plan.hits.length} strokes`);
+          stages.start = stageNow();
+          console.log(`    lasso : ${plan.hits.length} traits pris (indices ${plan.hits.join(', ')})`);
+        });
+
+        // --- Moving, with the pen -----------------------------------------------------------------------------------------
+
+        let moved = null;
+        await check('au stylet : glisser dans le cadre déplace les traits choisis, la sélection reste, rien d’autre ne bouge', async () => {
+          await replan();
+          const { frame } = stages.start;
+          const page = model.page;
+          // Beside the frame, on the side where the windows hold the least ink (the destination must be empty to see the ink
+          // arrive), and a little off that axis.
+          const candidates = moveRoom(frame, page, 16 / map.scale);
+          if (candidates.length === 0) {
+            throw new Error(`no room to move a frame ${Math.round(frame.x1 - frame.x0)} x ${Math.round(frame.y1 - frame.y0)} on a page ${page.width} x ${page.height}`);
+          }
+          const shifted = (c) => ({ x0: frame.x0 + c.dx, x1: frame.x1 + c.dx, y0: frame.y0 + c.dy, y1: frame.y1 + c.dy });
+          const dark = await Promise.all(candidates.map((c) => inkIn(shifted(c))));
+          const pick = dark.map((d, k) => [d.control + d.presented, k]).sort((a, b) => a[0] - b[0])[0][1];
+          const from = rounded(map.at({ x: (frame.x0 + frame.x1) / 2, y: (frame.y0 + frame.y1) / 2 }));
+          const dxPx = Math.round(candidates[pick].dx * map.scale);
+          const dyPx = Math.round(candidates[pick].dy * map.scale);
+          const to = { x: from.x + dxPx, y: from.y + dyPx };
+          const target = shifted({ dx: dxPx / map.scale, dy: dyPx / map.scale });
+          const gone = frame;
+          const before = await inkIn(gone);
+          const there = await inkIn(target);
+          const own = { control: before.control - there.control, presented: before.presented - there.presented };
+          if (own.control < 40 || own.presented < 40) throw new Error(`the chosen strokes leave too little ink to see them move (control ${own.control}, presentation ${own.presented})`);
+          const mark = stream.mark();
+          await gestureUntil(
+            () => penStroke(app, straight(from, to), { buttons: 1, force: () => 0.5 }),
+            () => model.editsSince(mark).length >= 1,
+            'the strokesEdited event of the move with the pen',
+          );
+          const edits = model.editsSince(mark);
+          if (edits.length !== 1) throw new Error(`${edits.length} events for one move (${describeEdits(model)})`);
+          justOne(edits[0], 'the move');
+          // The pixel delta is exact: the drag's offset in page units is the pixels over the scale, each pixel being about 1 / scale units.
+          const tolerance = 3 / map.scale;
+          moved = expectStrokes('the move', stages.start, { dx: dxPx / map.scale, dy: dyPx / map.scale }, tolerance);
+          model.check('after the move');
+          await places.agree('after the move');
+          const after = await inkIn(gone);
+          const arrived = await inkIn(target);
+          console.log(`    encre sombre : départ ${before.control} -> ${after.control}, arrivée ${there.control} -> ${arrived.control} (commande) ; départ ${before.presented} -> ${after.presented}, arrivée ${there.presented} -> ${arrived.presented} (présentation)`);
+          for (const place of ['control', 'presented']) {
+            if (before[place] - after[place] < 0.3 * own[place]) throw new Error(`the ${place} window still shows the strokes at their old place (${before[place]} -> ${after[place]} dark pixels, they own about ${own[place]})`);
+            if (arrived[place] - there[place] < 0.3 * own[place]) throw new Error(`the ${place} window does not show the strokes at their new place (${there[place]} -> ${arrived[place]} dark pixels, they own about ${own[place]})`);
+          }
+          // The selection is still there, ready for another gesture.
+          await app.waitFor(selectionIs(chosen.prints.length), 'the selection to stay after the move');
+          await places.samePixels('the move', { edgeFactor: 3 });
+          stages.moved = moved;
+        });
+
+        // --- Resizing, with the mouse ---------------------------------------------------------------------------------------
+
+        await check('à la souris : glisser un coin redimensionne autour du coin opposé (épaisseur comprise), la sélection reste', async () => {
+          // The strokes are held where the drag left them until the event is applied everywhere: a moment, then the press is taken.
+          await sleep(600);
+          await replan();
+          const { frame } = stages.moved;
+          const anchor = { x: frame.x0, y: frame.y0 };
+          const corner = { x: frame.x1, y: frame.y1 };
+          const start = rounded(map.at(corner));
+          const anchorPx = map.at(anchor);
+          const end = rounded({ x: (start.x + anchorPx.x) / 2, y: (start.y + anchorPx.y) / 2 });
+          // The factor the drag makes: the pointer projected on the diagonal, from where it was pressed (`resizeFactor`).
+          const ax = start.x - anchorPx.x;
+          const ay = start.y - anchorPx.y;
+          const factor = ((end.x - anchorPx.x) * ax + (end.y - anchorPx.y) * ay) / (ax * ax + ay * ay);
+          if (!(factor > 0.3 && factor < 0.7)) throw new Error(`the drag is meant to make about half the size, not ${factor}`);
+          const mark = stream.mark();
+          await gestureUntil(
+            () => app.drag(straight(start, end)),
+            () => model.editsSince(mark).length >= 1,
+            'the strokesEdited event of the resize with the mouse',
+          );
+          const edits = model.editsSince(mark);
+          if (edits.length !== 1) throw new Error(`${edits.length} events for one resize (${describeEdits(model)})`);
+          justOne(edits[0], 'the resize');
+          // The anchor (the top left corner of the frame) does not move: the strokes are at anchor + factor * (before - anchor).
+          const resized = expectStrokes('the resize', stages.moved, { factor, anchor }, 4 / map.scale);
+          const grown = resized.frame;
+          if (Math.abs(grown.x0 - anchor.x) > 4 / map.scale || Math.abs(grown.y0 - anchor.y) > 4 / map.scale) {
+            throw new Error(`the frame's top left corner moved: (${grown.x0.toFixed(1)}, ${grown.y0.toFixed(1)}) instead of (${anchor.x.toFixed(1)}, ${anchor.y.toFixed(1)})`);
+          }
+          console.log(`    redimensionnement : facteur ${factor.toFixed(3)}, cadre ${Math.round(frame.x1 - frame.x0)} x ${Math.round(frame.y1 - frame.y0)} -> ${Math.round(grown.x1 - grown.x0)} x ${Math.round(grown.y1 - grown.y0)} unités`);
+          model.check('after the resize');
+          await places.agree('after the resize');
+          await app.waitFor(selectionIs(chosen.prints.length), 'the selection to stay after the resize');
+          await places.samePixels('the resize', { edgeFactor: 3 });
+          stages.resized = resized;
+        });
+
+        // --- Undo ----------------------------------------------------------------------------------------------------------
+
+        await check('Ctrl+Z défait le redimensionnement, puis le déplacement (un pas chacun, dans les trois endroits) ; Ctrl+Y refait le déplacement', async () => {
+          await app.waitFor(`document.querySelector('button[data-action="undo-edit"]').disabled === false`, 'the Undo button to be available');
+          let mark = stream.mark();
+          await pressUntil(app, 'z', { ctrl: true }, () => model.editsSince(mark).length >= 1, 'the undo event of the resize');
+          let edits = model.editsSince(mark);
+          if (edits.length !== 1) throw new Error(`${edits.length} events for one undo (${describeEdits(model)})`);
+          justOne(edits[0], 'the undo of the resize');
+          expectStrokes('Ctrl+Z (the resize)', stages.moved, {}, 1);
+          model.check('after the first Ctrl+Z');
+          await places.agree('after the first Ctrl+Z');
+          await places.samePixels('the undo of the resize', { edgeFactor: 3 });
+
+          mark = stream.mark();
+          await pressUntil(app, 'z', { ctrl: true }, () => model.editsSince(mark).length >= 1, 'the undo event of the move');
+          edits = model.editsSince(mark);
+          if (edits.length !== 1) throw new Error(`${edits.length} events for the second undo (${describeEdits(model)})`);
+          justOne(edits[0], 'the undo of the move');
+          expectStrokes('Ctrl+Z (the move)', stages.start, {}, 1);
+          model.check('after the second Ctrl+Z');
+          await places.agree('after the second Ctrl+Z');
+          await places.samePixels('the undo of the move', { edgeFactor: 3 });
+
+          mark = stream.mark();
+          await pressUntil(app, 'y', { ctrl: true }, () => model.editsSince(mark).length >= 1, 'the redo event of the move');
+          edits = model.editsSince(mark);
+          if (edits.length !== 1) throw new Error(`${edits.length} events for the redo (${describeEdits(model)})`);
+          justOne(edits[0], 'the redo of the move');
+          expectStrokes('Ctrl+Y (the move)', stages.moved, {}, 1);
+          model.check('after Ctrl+Y');
+          await places.agree('after Ctrl+Y');
+          await places.samePixels('the redo of the move', { edgeFactor: 3 });
+          if (browser) assertNoBrowserProblem(browser);
+        });
+
+        // --- The note ---------------------------------------------------------------------------------------------------------
+
+        await check('Terminer : la note de la bibliothèque a les traits déplacés (la sélection n’y est pas)', async () => {
+          presentation.close();
+          presentation = null;
+          await app.evaluate(`window.__TAURI_INTERNALS__.invoke('close_presentation').then(() => true)`);
+          model.sync();
+          await stopLive(app);
+          await sleep(300);
+          model.sync();
+          const added = notesOf(app.library).filter((n) => !notesBefore.includes(n.path));
+          if (added.length !== 1) throw new Error(`${added.length} new notes after the live session: ${added.map((n) => n.path).join(', ')}`);
+          const file = decodeStrokes(added[0].members.get('strokes.bin'));
+          chosen.prints.forEach((print, k) => {
+            const stroke = file.find((s) => String(s.points[0].t) === print);
+            if (!stroke) throw new Error(`stroke ${print} is not in the note`);
+            const want = stages.moved.first[k];
+            if (Math.abs(stroke.points[0].x - want.x) > 2 || Math.abs(stroke.points[0].y - want.y) > 2) {
+              throw new Error(`the note has stroke ${print} at (${stroke.points[0].x}, ${stroke.points[0].y}), the screen had it at (${want.x.toFixed(1)}, ${want.y.toFixed(1)})`);
+            }
+            if (Math.abs(stroke.width - stages.moved.width[k]) > 1) throw new Error(`the note has stroke ${print} ${stroke.width} wide, the screen ${stages.moved.width[k]}`);
+          });
         });
       } finally {
         presentation?.close();

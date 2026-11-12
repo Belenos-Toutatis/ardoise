@@ -150,7 +150,7 @@ Live and classroom (`live.rs`, `presentation.rs`, package B):
 | `live_set_style` | `style: LiveStyle` | – (broadcast as a snapshot) |
 | `live_command` | `command: LiveCommand` | – |
 | `live_restore_cleared` | – | whether the ink of the page's last clearing came back (through its history, M12) |
-| `live_edit_strokes` | `pageIndex`, `revision`, `edit: { kind: 'delete', indices } \| { kind: 'recolour', indices, color }` | the page's revision after the edit; `liveEditStale`, `liveEditInvalid` (M12) |
+| `live_edit_strokes` | `pageIndex`, `revision`, `edit: { kind: 'delete', indices, group? } \| { kind: 'recolour', indices, color } \| { kind: 'transform', indices, scale, x, y }` | the page's revision after the edit; `liveEditStale`, `liveEditInvalid` (M12; `group` M14, `transform` 2026-11-12) |
 | `live_undo_edit` / `live_redo_edit` | `pageIndex` | whether there was a step; `liveEditStale` when that page is not on screen (M12) |
 | `live_set_view` | `view: LiveViewState` | – (broadcast as `view`) |
 | `list_monitors` | – | `MonitorInfo[]` (the saved choice, if still present, has `chosen: true`) |
@@ -602,10 +602,15 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
 - **Identity.** Strokes have no ids, only their place in the page's list of finished strokes, stable under appends, shifted by
   a delete. No format change: a revision says what the places mean.
 - **Revision.** Per page, in the snapshot (`revision`) and in every `strokesEdited`. It changes when strokes leave the list or
-  come back: a delete, a clearing that removed something, the undo or redo of either. Not when the tablet appends (a selection
-  stays valid while it writes), not for a change of colour or its undo (a second click on a swatch is not stale), not for a
-  page turn or a new layer (no place moves). Two sessions never share one (`session id << 32`, plus the changes of the page):
-  a command meant for a session that ended is stale, though the page number is the same.
+  come back: a delete, a clearing that removed something, a move or resize (its strokes replaced, below), the undo or redo of
+  any; and when the page turns its ink (`Page::turn`: a quarter or half turn of a page that is not held fixed, at the tablet's
+  turn or when a page left meanwhile is shown again). No place moves then, but a move worked out on the strokes before the turn
+  (the orientation's quick switch can come between the drag and the command) would apply to strokes that are elsewhere, and the
+  selection's frame no longer stands where it was drawn: every edit chosen before is stale, and the interface drops its
+  selection (2026-11-12; before, a turn kept the revision). Not when the tablet appends (a selection stays valid while it
+  writes), not for a change of colour or its undo (a second click on a swatch is not stale), not for a new layer (no place
+  moves), not for a resumed sheet held in another way (it does not turn). Two sessions never share one (`session id << 32`,
+  plus the changes of the page): a command meant for a session that ended is stale, though the page number is the same.
 - **Commands.** `live_edit_strokes(pageIndex, revision, edit)`, `live_undo_edit(pageIndex)`, `live_redo_edit(pageIndex)`; a stopped
   session refuses them (`liveNotRunning`, as `clearPage`). `liveEditStale`: another page on screen, or another revision; the
   interface drops its selection. `liveEditInvalid`, refused as a whole: an empty list, more than `MAX_EDIT_STROKES` (2^20), a
@@ -622,6 +627,39 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   the structs after the first place (`extract_if`), no point is copied, and the strokes go to the history. An undo gives them back
   through a copy made before the lock is taken (`Prepared`: the hub peeks at the top step, copies, then applies; another command
   in between just means a copy under the lock), and each window gets the stored strokes behind one `Arc` instead of its own copy.
+- **Move and resize** (SPEC §4.2 « Retoucher pendant le direct », added 2026-11-12: the control window drags the selection's
+  frame or a corner). `edit: { kind: 'transform', indices, scale, x, y }`, plain numbers as the others
+  (`StrokesEdit::Transform`, checked into `EditAction::Transform(StrokeTransform)`). Each point (px, py) of each chosen stroke
+  becomes (px·scale + x, py·scale + y) in page units, the units of the points; the stroke's `width` is multiplied by `scale`;
+  pressure, times, tool, colour and layer stay. Worked out in `f64`, stored in `f32` (`StrokeTransform::apply`).
+  - *Checks.* The list's, as above (empty, too many, not an index, duplicate, out of range, hidden layer, stale page or revision),
+    plus `LiveEditError::BadTransform` (`liveEditInvalid`): `scale` not finite or outside `MIN_TRANSFORM_SCALE` ..=
+    `MAX_TRANSFORM_SCALE` (0.05 ..= 20), `x` or `y` not finite or beyond ±`MAX_TRANSFORM_SHIFT`, which is `MAX_COORD` (10^9,
+    what a note holds: a ×20 resize about a far corner of a long page shifts by that corner times −19, far more than the page's
+    size; where the points end up is the check that matters, below). JSON has no NaN:
+    `JSON.stringify` makes `null` of NaN and Infinity (a resize of a selection with no width), so `null` is read as NaN and gets
+    this code rather than the rejection of the arguments; a missing number is still a rejection. Under the lock, a move whose
+    result would put a point beyond ±`MAX_COORD` (10^9, what `strokes.bin` stores) or make a width that is not finite is refused
+    the same way, as a whole: a page its file cannot store would no longer be written. Refused before anything changes.
+  - *No change.* `scale == 1`, `x == 0`, `y == 0` (after the page's checks): the current revision, no step, no event, as a
+    colour the strokes already have.
+  - *Event.* One `strokesEdited`: `removed` the chosen places (ascending), `inserted` the moved strokes at the **same** places,
+    `recoloured` empty, the revision + 1. Removed-then-inserted at the same places is a replacement of those objects: the windows
+    and the viewers need nothing new (`applyStrokesEdited`, `feed.rs` unchanged). Viewers: `ViewerIndices` worked out on the
+    list before for `removed`, after for `inserted` (`Page::replace_strokes`); a stroke keeps its layer, so they agree.
+  - *Under the lock.* The moved strokes are made there, from the chosen ones, which only the page holds: one pass over their
+    points, and a second for the page's copy (the windows get the other behind the event's `Arc`). The page's old strokes go to
+    the step by move (`std::mem::replace`), no place of the list moves. The page is touched and written like a recolour; on a
+    resumed sheet the moved old ink is written into the note itself (`written_sheet` sees other ink), with `original.ardoise`
+    kept, and a move undone before the write leaves the file as it was.
+  - *History.* One step per move, without a group: `UndoStep::Replaced { strokes, bytes }`, the strokes as they were before (with
+    their places), counted by `stored_size` toward `MAX_UNDO_BYTES` and dropped by the limits like any group. The undo swaps
+    them with what the page holds at those places (`Page::replace_strokes`): the page gets the copy `Prepared` made before the
+    lock (`next_restored` gives `Replaced` strokes), the windows the stored `Arc`, and what the page held moves into
+    `RedoStep::Replace { strokes }`. The redo swaps back the same way (`next_redone` gives `Replace` strokes) into a new
+    `Replaced`. Both events have the shape above. Both facts about places hold: nothing moves a place, and the tablet's ink
+    written in between stays after, untouched. `History::turn` and `remap_layers` reach `Replaced` and `Replace` strokes
+    (`kept_strokes`); « Undo the clearing » moves a `Replaced` step's places as a `Recoloured` one's (`Unclearing::follow`).
 - **In progress.** The tablet's stroke in progress is untouched by an edit, undo or redo: it joins at the tail at `end_stroke`. It
   cannot be named: it is not in the list.
 - **History** (`edits::History`, per page). `MAX_UNDO_STEPS` (100) and `MAX_UNDO_BYTES` (64 MB of kept strokes per page); the oldest
@@ -633,7 +671,8 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   M12 it went too). `live_restore_cleared` undoes down to and including the page's last clearing: the button keeps working, and
   edits made after the clearing can still be redone. On another page: `false`, and the clearing stays on its page.
 - **Page turn.** The strokes kept turn with the page (`History::turn`, called from `Page::turn`): they come back where they would
-  be had they stayed. Places and colours do not change, so nothing else does. A page emptied by a delete and never written is not a
+  be had they stayed. Places and colours do not change; the revision does (above), so that no edit chosen on the strokes before
+  the turn applies to them after. A page emptied by a delete and never written is not a
   "blank" page for `hold` while its history is not empty. A resumed sheet is never turned, nor what can come back to it.
 - **Page change.** A page keeps its history when it is left: Ctrl+Z on it again undoes what was done on it. `pageIndex` says which
   page the key was pressed on. A stop drops every history (`set_state(Idle)`).
@@ -690,7 +729,8 @@ tests in `edits/tests.rs`, `resume/tests.rs`, `share/tests.rs`, `live-state.edit
   `LiveState.strokes`, so it cannot be.
 - **Selection.** `LiveSelection` (control window only): `active` (the Select toggle), `indices` (a new array at each change) and the
   `revision`, `noteId`, `pageIndex` they were chosen at. `follow(live)` (an effect of `LiveView`) drops them when the page or the
-  revision changes (a delete, an undo, « Clear the page »); the tablet's strokes and a recolour keep them. Turning the tool off clears.
+  revision changes (a delete, an undo, « Clear the page », a move, a turn of the page's ink); the tablet's strokes and a recolour
+  keep them. Turning the tool off clears.
   Nothing of it is sent to Rust, the projector or the share.
 - **Drawing.** `Scene.selection` and `Scene.lasso` (always empty for `presentation`). The renderer draws the highlight on a surface
   of its own, redrawn only when the selection, the strokes' generation, the layers, the view or the size change; a frame copies it.
@@ -995,6 +1035,7 @@ the redo steps (`History::record`), the tablet's writing does not (M12).
 | a stroke ended | `Added { indices: [place] }` | takes it off (`take_strokes`), pushes `RedoStep::Add { strokes }` | gives it back at its place (`give_back`), pushes `Added` |
 | an eraser gesture | one `Removed` per delete, tagged with the gesture's group | every step of the group, top down, in one command | the whole group again |
 | delete or recolour of a selection, « Clear the page » | unchanged (M12) | | |
+| move or resize of a selection (2026-11-12) | `Replaced { strokes, bytes }`: the strokes as they were | swaps them in (`replace_strokes`), pushes `RedoStep::Replace { strokes }` with what the page held | swaps those in, pushes `Replaced` |
 
 - What the tablet wrote is taken or given back only by the computer's eraser, delete or clear (on whichever layer the
   computer chose), and an undo gives back exactly what they took. M12's argument still holds once "the tablet only

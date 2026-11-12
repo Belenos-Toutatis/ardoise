@@ -36,10 +36,15 @@ export interface LiveCommand {
  * `LiveState.strokes` (the finished strokes of the page, in any order, without duplicates).
  * `group`: the number of an eraser gesture (any number the window picks, one per gesture); the
  * steps of one group are undone and redone together, in one command.
+ * `transform` moves or resizes them: each point (px, py) becomes (px·`scale` + `x`, py·`scale` + `y`) in page units,
+ * the width is multiplied by `scale`; the rest of the stroke is unchanged. `scale` is in [0.05, 20], `x` and `y` at most
+ * 1e9 in absolute value, else `liveEditInvalid`; one that changes nothing (1, 0, 0) is no step and keeps the revision.
+ * The strokes stay at the same places of the list, and the revision moves on (the selection goes on at once).
  */
 export type LiveStrokesEdit =
   | { kind: 'delete'; indices: number[]; group?: number }
-  | { kind: 'recolour'; indices: number[]; color: Rgba };
+  | { kind: 'recolour'; indices: number[]; color: Rgba }
+  | { kind: 'transform'; indices: number[]; scale: number; x: number; y: number };
 
 export interface MonitorInfo {
   /** `name@x,y`: stable when screens are unplugged. */

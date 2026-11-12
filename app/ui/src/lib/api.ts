@@ -375,10 +375,12 @@ export const api = {
   /** « Undo the clearing »: gives the current page the ink of the last « Clear the page » back. */
   liveRestoreCleared: () => call<boolean>('live_restore_cleared'),
   /**
-   * Deletes or recolours strokes chosen on page `pageIndex` at `revision` (`LiveState.revision`):
-   * refused with `liveEditStale` once that page is left or its strokes moved, `liveEditInvalid`
-   * when the list or the colour makes no sense. Returns the page's revision after the edit (a change
-   * of colour keeps it, so that the selection goes on); every window gets a `strokesEdited` event.
+   * Deletes, recolours, moves or resizes (`transform`) strokes chosen on page `pageIndex` at `revision`
+   * (`LiveState.revision`): refused with `liveEditStale` once that page is left or its strokes moved,
+   * `liveEditInvalid` when the list, the colour or the transform makes no sense. Returns the page's revision
+   * after the edit (a change of colour keeps it, so that the selection goes on; a transform moves it on, and
+   * the strokes keep their places in the list: the selection is still right once the revision is adopted);
+   * every window gets one `strokesEdited` event, before or after this answer.
    */
   liveEditStrokes: (pageIndex: number, revision: number, edit: LiveStrokesEdit) =>
     call<number>('live_edit_strokes', { pageIndex, revision, edit }),

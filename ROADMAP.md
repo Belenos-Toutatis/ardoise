@@ -91,7 +91,10 @@ Tout est corrigé (`docs/research/protocol.md` §5.3 et §12). Le test guidé su
 ### Point de contrôle H2 [matériel]
 
 - [x] [matériel] Au travail : synchro réelle, mode direct, projecteur en bureau étendu (procédure H2).
-- [ ] Corrections issues du retour de l'utilisateur.
+- [x] Corrections issues du retour de l'utilisateur.
+  - [x] Mode direct : déplacer et redimensionner la sélection au stylet, au doigt ou à la souris (on saisit le cadre ou un coin), annulable par Ctrl+Z, montré au vidéoprojecteur et sur le partage (retour du 2026-11-12, SPEC §4.2).
+
+Vérifié sous Windows le 2026-11-12 : `CHECK OK`, `E2E OK` (102 parcours, FR et EN, dont le nouveau : la tablette simulée écrit pendant qu'on déplace trois traits au stylet, qu'on les redimensionne par un coin à la souris, puis Ctrl+Z et Ctrl+Y ; la fenêtre de commande, la présentation et un écran du partage dans un vrai Edge montrent la même chose), après une relecture indépendante dont les remarques sont corrigées. Le geste au vrai stylet et au doigt de la Surface reste à essayer par l'utilisateur (`docs/hardware-tests.md`, H5, étape 10).
 
 Confirmé avec la vraie tablette le 2026-11-05 : le bouton crée une nouvelle page en mode direct. Le signal est `cb 01 00` (`docs/research/protocol.md` §12) ; Ardoise attendait jusque-là un signal inventé pour la tablette simulée.
 
@@ -385,7 +388,7 @@ Choix faits en suivant les recommandations de la conception (`docs/design/paper-
 
 - [x] [matériel] En classe : changer le papier et poser une fiche en PDF sous la page pendant le direct ; projeter une note de l'éditeur et y écrire ; enregistrer le son en écrivant au stylet de la Surface, puis relire la note et exporter sa vidéo.
 
-H2, H3, H6 et H7 faits par l'utilisateur (signalé le 2026-11-12). Retour reçu : dans l'éditeur, une sélection faite au stylet, clavier détaché, ne se déplace ni ne se redimensionne au stylet (la souris le fait) ; à corriger (case « Corrections issues du retour de l'utilisateur » de H2).
+H2, H3, H6 et H7 faits par l'utilisateur (signalé le 2026-11-12). Retour reçu : en mode direct, une sélection ne se déplace ni ne se redimensionne (un appui dans le cadre relance un lasso) : l'outil Sélection du direct ne savait que supprimer et recolorer. Déplacer et redimensionner y sont ajoutés, avec l'accord de l'utilisateur pour la SPEC (case « Corrections issues du retour de l'utilisateur » de H2).
 
 ---
 

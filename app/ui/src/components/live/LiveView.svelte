@@ -15,7 +15,8 @@
    * Touching up (M12, this window only): the Select tool (V) lets the mouse and the pen choose strokes of
    * the preview with a lasso or a click; a bar then deletes them (Delete, Backspace), the colour swatches
    * recolour them (and only them: with a selection a swatch does not change the pen's colour), Esc
-   * deselects first. Undo and Redo (Ctrl+Z, Ctrl+Y) go through the page's history: a delete, a change
+   * deselects first. Dragging inside the selection's frame moves it and dragging a corner resizes it, with the pen, a finger or the mouse
+   * (`transformSelected`, one edit and one step of the history; the selection stays). Undo and Redo (Ctrl+Z, Ctrl+Y) go through the page's history: a delete, a change
    * of colour, « Clear the page », never what the tablet wrote. The selection is dropped when the page
    * or its revision changes, and with the Select tool when the session is over.
    *
@@ -82,7 +83,7 @@
   import { LiveSelection } from '../../lib/live-select.svelte';
   import { LIVE_SHORTCUTS } from '../../lib/live-shortcuts';
   import { LiveState, subscribeLive } from '../../lib/live-state.svelte';
-  import { deleteSelected, recolourSelected, stepHistory, type TouchUp } from '../../lib/live-touch-up';
+  import { deleteSelected, recolourSelected, stepHistory, transformSelected, type TouchUp } from '../../lib/live-touch-up';
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
   import { INKSPACE_COLORS, cssColor, type Background, type BackgroundImage, type Rgba } from '../../lib/note';
   import { ORIENTATIONS, type Orientation } from '../../lib/orientation';
@@ -627,7 +628,7 @@
 
   function undoEdit(again = false) {
     // A gesture under way commits after the step it would undo: Ctrl+Z waits for it to end.
-    if (computer.busy) return;
+    if (computer.busy || canvas?.gripping()) return;
     // The stroke just written is a step once its `end` is recorded: the undo goes after it in the queue.
     if (again ? !live.canRedo : !live.canUndo && !computer.strokeEnding) return;
     computer.historyQueued();
@@ -1144,6 +1145,7 @@
         {tool}
         selection={selection.indices}
         onselect={(picked, combine) => selection.choose(live, picked, combine)}
+        ontransform={(transform) => transformSelected(touchUp, transform)}
         {computer}
         onblocked={penBlocked}
       />

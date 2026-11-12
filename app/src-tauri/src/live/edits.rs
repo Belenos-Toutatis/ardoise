@@ -13,6 +13,11 @@
 //!   the pens added at the tail since. The same goes for redo. So a place in a step is simply
 //!   the place the stroke had, and is never translated.
 //!
+//! An edit moves no place but by taking strokes out of the list or putting them back: a change of
+//! colour, and a move or resize of the selection, change strokes where they stand (a move or resize
+//! replaces each chosen stroke by its moved copy at the same place, `Replaced`), so both facts hold
+//! for them as they are.
+//!
 //! The computer's strokes are steps (`Added`); the tablet's never are. Steps of one gesture of the
 //! computer's eraser share a group, undone and redone together (M14).
 //!
@@ -22,16 +27,18 @@
 //!
 //! No lock here and no I/O: [`LiveSession`](super::session::LiveSession) applies all this to its
 //! pages under the hub's lock, which is why nothing below costs more than a pass over the page's
-//! list (moves, no copy of points).
+//! list (moves, no copy of points), with one exception: a move or resize makes its moved strokes
+//! from the chosen ones there ([`StrokeTransform::apply`]), a pass over their points.
 
 use std::collections::{HashMap, VecDeque};
 use std::mem::size_of;
 use std::sync::Arc;
 
+use ardoise_core::format::strokes::MAX_COORD;
 use ardoise_core::note::Layer;
 use ardoise_device::pages::turn_point;
 use ardoise_ink::{Point, Rgba, Stroke};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use super::model::{PlacedStroke, RecolouredStrokes};
 use crate::share::page::is_drawn;
@@ -39,6 +46,17 @@ use crate::share::page::is_drawn;
 /// Most strokes one edit may name. Far more than a page holds (at one stroke per second, twelve
 /// days of writing); it bounds what is sorted and checked for a list that makes no sense.
 pub const MAX_EDIT_STROKES: usize = 1 << 20;
+/// Smallest and largest scale of one move or resize ([`StrokesEdit::Transform`]): a twentieth of
+/// the size, twenty times it. Beyond, a drag of a corner has gone wrong (a frame dragged onto its
+/// opposite corner), and a few of them in a row would take the ink out of what a note holds.
+pub const MIN_TRANSFORM_SCALE: f64 = 0.05;
+pub const MAX_TRANSFORM_SCALE: f64 = 20.0;
+/// Largest shift of one move, along each axis, in page units (the units of the strokes' points):
+/// what a note's file holds, ±[`MAX_COORD`] (10 km at the tablet's 10 µm). A resize about a corner
+/// shifts the strokes by that corner's position times (1 − scale), so a ×20 resize about a far
+/// corner of a large page needs far more than the page's size; whether the strokes stay within
+/// what a note holds is checked point by point under the lock ([`StrokeTransform::apply`]).
+pub const MAX_TRANSFORM_SHIFT: f64 = MAX_COORD as f64;
 /// Most steps a page keeps to undo; the oldest goes first.
 pub const MAX_UNDO_STEPS: usize = 100;
 /// Most memory the undo steps of a page may keep, in bytes; the oldest goes first, except the last
@@ -68,6 +86,12 @@ pub enum LiveEditError {
     /// Channels out of 0..=255, or fully transparent (the ink would vanish without being deleted).
     #[error("this colour is not valid")]
     BadColor,
+    /// A move or resize whose scale is not finite or outside [`MIN_TRANSFORM_SCALE`] ..=
+    /// [`MAX_TRANSFORM_SCALE`], whose shift is not finite or beyond [`MAX_TRANSFORM_SHIFT`], or
+    /// that would take a point of the chosen strokes beyond what a note holds
+    /// ([`StrokeTransform::apply`]).
+    #[error("this move or resize is not valid")]
+    BadTransform,
     /// The group of an eraser's gesture is not a whole number that fits.
     #[error("the group of the edit is not valid")]
     BadGroup,
@@ -138,6 +162,14 @@ impl EditColor {
     }
 }
 
+/// A number of the interface where `null` stands for one that is not finite: what JSON makes of
+/// `NaN` and `Infinity` (`JSON.stringify`), as a resize of a selection with no width can give. Taken
+/// as NaN, so that it gets the coded refusal of an edit rather than the rejection of the command's
+/// arguments. A missing number is still a rejection.
+fn number_or_null<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
+    Ok(Option::<f64>::deserialize(deserializer)?.unwrap_or(f64::NAN))
+}
+
 /// What the interface asks of strokes it chose (`LiveStrokesEdit` in `live.ts`). The indices are
 /// places in the list the window has, in any order; plain numbers for the same reason as
 /// [`EditColor`].
@@ -159,6 +191,82 @@ pub enum StrokesEdit {
         indices: Vec<f64>,
         color: EditColor,
     },
+    /// The selection moved or resized (SPEC §4.2, « Retoucher pendant le direct »): each point
+    /// (px, py) of each stroke becomes (px·scale + x, py·scale + y), in page units; see
+    /// [`StrokeTransform`].
+    Transform {
+        indices: Vec<f64>,
+        #[serde(deserialize_with = "number_or_null")]
+        scale: f64,
+        #[serde(deserialize_with = "number_or_null")]
+        x: f64,
+        #[serde(deserialize_with = "number_or_null")]
+        y: f64,
+    },
+}
+
+/// A move and resize of strokes, checked ([`StrokesEdit::Transform`]): each point (px, py) becomes
+/// (px·`scale` + `x`, py·`scale` + `y`), in the units of the points, and the width is multiplied by
+/// `scale`; pressures, times, tool, colour and layer stay. Worked out in `f64`, stored in `f32`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StrokeTransform {
+    scale: f64,
+    x: f64,
+    y: f64,
+}
+
+// Checked finite: no NaN, so `==` is an equivalence.
+impl Eq for StrokeTransform {}
+
+impl StrokeTransform {
+    /// The transform the interface asked for, if it makes sense whatever the strokes.
+    pub fn checked(scale: f64, x: f64, y: f64) -> Result<StrokeTransform, LiveEditError> {
+        let shift = |value: f64| value.is_finite() && value.abs() <= MAX_TRANSFORM_SHIFT;
+        // `contains` is false for NaN, and the bounds are finite.
+        if !(MIN_TRANSFORM_SCALE..=MAX_TRANSFORM_SCALE).contains(&scale) || !shift(x) || !shift(y) {
+            return Err(LiveEditError::BadTransform);
+        }
+        Ok(StrokeTransform { scale, x, y })
+    }
+
+    /// Moves nothing: no step, no event.
+    pub fn is_identity(self) -> bool {
+        self.scale == 1.0 && self.x == 0.0 && self.y == 0.0
+    }
+
+    /// `stroke` moved and resized: a new stroke, a pass over its points. `None` when a point would
+    /// go beyond ±[`MAX_COORD`] or the width would not be finite: the note's file could no longer
+    /// store it (`strokes::encode`), and a page that cannot be written loses everything after.
+    pub fn apply(self, stroke: &Stroke) -> Option<Stroke> {
+        let limit = f64::from(MAX_COORD);
+        let coordinate = |value: f32, shift: f64| {
+            let moved = f64::from(value) * self.scale + shift;
+            // `<=` is false for NaN.
+            (moved.abs() <= limit).then_some(moved as f32)
+        };
+        let width = (f64::from(stroke.width) * self.scale) as f32;
+        if !width.is_finite() {
+            return None;
+        }
+        let points = stroke
+            .points
+            .iter()
+            .map(|point| {
+                Some(Point {
+                    x: coordinate(point.x, self.x)?,
+                    y: coordinate(point.y, self.y)?,
+                    ..*point
+                })
+            })
+            .collect::<Option<Vec<Point>>>()?;
+        Some(Stroke {
+            tool: stroke.tool,
+            color: stroke.color,
+            width,
+            layer: stroke.layer,
+            points,
+        })
+    }
 }
 
 /// What an edit does.
@@ -166,6 +274,7 @@ pub enum StrokesEdit {
 pub enum EditAction {
     Delete,
     Recolour(Rgba),
+    Transform(StrokeTransform),
 }
 
 /// A [`StrokesEdit`] that makes sense whatever the page holds: at least one stroke, ascending, no
@@ -197,6 +306,16 @@ impl StrokesEdit {
             StrokesEdit::Recolour { indices, color } => {
                 (indices, EditAction::Recolour(color.checked()?), None)
             }
+            StrokesEdit::Transform {
+                indices,
+                scale,
+                x,
+                y,
+            } => (
+                indices,
+                EditAction::Transform(StrokeTransform::checked(scale, x, y)?),
+                None,
+            ),
         };
         if indices.is_empty() {
             return Err(LiveEditError::Empty);
@@ -257,6 +376,14 @@ pub enum UndoStep {
     Added {
         indices: Vec<u32>,
     },
+    /// Strokes as they were before a move or resize, each with its place (ascending): the page
+    /// holds their moved copies there. An undo swaps them back ([`RedoStep::Replace`] gets what
+    /// the page held); shared with the event that gives them back, as `Removed`'s.
+    Replaced {
+        strokes: Arc<Vec<PlacedStroke>>,
+        /// Memory the strokes hold, worked out once.
+        bytes: usize,
+    },
 }
 
 /// Memory `strokes` hold, as the undo steps count it.
@@ -279,9 +406,18 @@ impl UndoStep {
         }
     }
 
+    /// A move or resize of strokes that were `strokes` before.
+    pub fn replaced(strokes: Vec<PlacedStroke>) -> UndoStep {
+        let bytes = stored_size(&strokes);
+        UndoStep::Replaced {
+            strokes: Arc::new(strokes),
+            bytes,
+        }
+    }
+
     fn bytes(&self) -> usize {
         match self {
-            UndoStep::Removed { bytes, .. } => *bytes,
+            UndoStep::Removed { bytes, .. } | UndoStep::Replaced { bytes, .. } => *bytes,
             UndoStep::Recoloured(changes) => changes.len() * size_of::<ColourChange>(),
             UndoStep::Added { indices } => indices.len() * size_of::<u32>(),
         }
@@ -304,6 +440,11 @@ pub enum RedoStep {
     /// Shared with the event that took them, as [`UndoStep::Removed`] is with the one that gives
     /// them back.
     Add {
+        strokes: Arc<Vec<PlacedStroke>>,
+    },
+    /// Strokes as a move or resize left them, each with its place, which the undo of that move
+    /// took off the page and replaced: a redo swaps them in again.
+    Replace {
         strokes: Arc<Vec<PlacedStroke>>,
     },
 }
@@ -444,8 +585,8 @@ impl History {
         self.groups
     }
 
-    /// The strokes the next undo gives back (all the steps of the group on top), to copy before
-    /// the lock is taken.
+    /// The strokes the next undo gives back (all the steps of the group on top: removed, or as
+    /// they were before a move), to copy before the lock is taken.
     pub fn next_restored(&self) -> Vec<Arc<Vec<PlacedStroke>>> {
         let Some(top) = self.undo.back() else {
             return Vec::new();
@@ -455,13 +596,16 @@ impl History {
             .rev()
             .take_while(|entry| std::ptr::eq(*entry, top) || same_group(entry.group, top.group))
             .filter_map(|entry| match &entry.step {
-                UndoStep::Removed { strokes, .. } => Some(strokes.clone()),
+                UndoStep::Removed { strokes, .. } | UndoStep::Replaced { strokes, .. } => {
+                    Some(strokes.clone())
+                }
                 _ => None,
             })
             .collect()
     }
 
-    /// The strokes the next redo gives back (the computer's strokes of the group on top).
+    /// The strokes the next redo gives back (the computer's strokes of the group on top, and
+    /// strokes as a move left them).
     pub fn next_redone(&self) -> Vec<Arc<Vec<PlacedStroke>>> {
         let Some(top) = self.redo.last() else {
             return Vec::new();
@@ -471,7 +615,7 @@ impl History {
             .rev()
             .take_while(|entry| std::ptr::eq(*entry, top) || same_group(entry.group, top.group))
             .filter_map(|entry| match &entry.step {
-                RedoStep::Add { strokes } => Some(strokes.clone()),
+                RedoStep::Add { strokes } | RedoStep::Replace { strokes } => Some(strokes.clone()),
                 _ => None,
             })
             .collect()
@@ -537,14 +681,16 @@ impl History {
             .undo
             .iter_mut()
             .filter_map(|entry| match &mut entry.step {
-                UndoStep::Removed { strokes, .. } => Some(strokes),
+                UndoStep::Removed { strokes, .. } | UndoStep::Replaced { strokes, .. } => {
+                    Some(strokes)
+                }
                 _ => None,
             });
         let redone = self
             .redo
             .iter_mut()
             .filter_map(|entry| match &mut entry.step {
-                RedoStep::Add { strokes } => Some(strokes),
+                RedoStep::Add { strokes } | RedoStep::Replace { strokes } => Some(strokes),
                 _ => None,
             });
         for strokes in undone.chain(redone) {
@@ -619,9 +765,9 @@ impl Prepared {
 ///
 /// After a clearing the list is the strokes it left (`kept`: those of hidden layers, and any written
 /// while it was undone), in their order, then the strokes written since, in theirs: a pen only
-/// appends, an edit only takes strokes out, its undo puts them back where they were, and a step
-/// done since never gives back a stroke from before the clearing (that would undo the clearing
-/// first). So a place below the number of kept strokes still there is a kept stroke, whose rank
+/// appends, an edit only takes strokes out or changes them where they stand (a colour, a move), its
+/// undo puts them back where they were, and a step done since never gives back a stroke from
+/// before the clearing (that would undo the clearing first). So a place below the number of kept strokes still there is a kept stroke, whose rank
 /// among them says which cleared strokes stood before it; any other place is a stroke written
 /// since, which comes after all of them. Which kept strokes are still there changes only when a
 /// step takes one out (its layer shown since): followed step by step, in order.
@@ -705,6 +851,23 @@ impl Unclearing {
             UndoStep::Recoloured(changes) => {
                 for change in changes {
                     change.index = self.moved(change.index);
+                }
+            }
+            // As for a recolour: the strokes stay in the list, so which kept strokes are there
+            // does not change.
+            UndoStep::Replaced { strokes, .. } => {
+                let moved: Vec<u32> = strokes
+                    .iter()
+                    .map(|placed| self.moved(placed.index))
+                    .collect();
+                if strokes
+                    .iter()
+                    .map(|placed| placed.index)
+                    .ne(moved.iter().copied())
+                {
+                    for (placed, place) in Arc::make_mut(strokes).iter_mut().zip(moved) {
+                        placed.index = place;
+                    }
                 }
             }
             // A stroke written since: after every stroke that comes back.

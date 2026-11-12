@@ -1,6 +1,6 @@
 /**
  * What the control window does with the selection (docs/design/tablet-live-classroom.md, "M12"):
- * delete it, recolour it, and undo or redo the last edit of the page (a delete, a change of colour,
+ * delete it, recolour it, move or resize it, and undo or redo the last edit of the page (a delete, a change of colour,
  * « Clear the page »: never what the tablet wrote). Rust does the edit and every window gets a
  * `strokesEdited` event (`LiveState` applies it); this only asks, with the revision the selection was
  * chosen at, and looks after the selection afterwards. M14: the calls go through the window's queue
@@ -13,12 +13,13 @@ import type { ComputerQueue } from './live-computer';
 import type { LiveSelection } from './live-select.svelte';
 import type { LiveState } from './live-state.svelte';
 import type { Rgba } from './note';
+import type { PageTransform } from './selection-grab';
 
 /** The commands used (the real `api`, or a stand-in in tests). */
 export type TouchUpCommands = Pick<typeof Api, 'liveEditStrokes' | 'liveUndoEdit' | 'liveRedoEdit'>;
 
 export interface TouchUp {
-  live: Pick<LiveState, 'pageIndex'>;
+  live: Pick<LiveState, 'pageIndex' | 'noteId' | 'revision' | 'strokes' | 'layers'>;
   selection: LiveSelection;
   commands: TouchUpCommands;
   /** The window's queue of computer commands (M14); absent: each call leaves at once. */
@@ -36,12 +37,12 @@ function codeOf(error: unknown): unknown {
 /** The controls with an edit under way. */
 const editing = new WeakSet<TouchUp>();
 
-/** Runs `edit` unless another is under way for `touch`. */
-async function alone(touch: TouchUp, edit: () => Promise<void>): Promise<void> {
-  if (editing.has(touch)) return;
+/** Runs `edit` unless another is under way for `touch`; what it answers, or undefined when it did not run. */
+async function alone<T>(touch: TouchUp, edit: () => Promise<T>): Promise<T | undefined> {
+  if (editing.has(touch)) return undefined;
   editing.add(touch);
   try {
-    await edit();
+    return await edit();
   } finally {
     editing.delete(touch);
   }
@@ -85,6 +86,36 @@ export function recolourSelected(touch: TouchUp, color: Rgba): Promise<void> {
       refused(touch, error);
     }
   });
+}
+
+/**
+ * Moves or resizes the selected strokes (`transform`, SPEC §4.2): the selection stays, ready for another move or a
+ * resize. The strokes keep their places in the list, but the revision moves on, and the call's answer and the
+ * `strokesEdited` event may come in either order: the selection is held while the call is under way (the revision
+ * the session reports meanwhile does not drop it) and then takes the revision the call returns; one ahead of the
+ * session's waits for the event (`LiveSelection.follow`). True when the edit went through; false when it was
+ * refused (a stale page clears the selection, the error is told) or another edit was under way.
+ */
+export async function transformSelected(touch: TouchUp, transform: PageTransform): Promise<boolean> {
+  const done = await alone(touch, async () => {
+    const { selection } = touch;
+    if (!selection.any) return false;
+    const indices = [...selection.indices];
+    const { scale, x, y } = transform;
+    selection.hold();
+    let revision: number | undefined;
+    try {
+      revision = await queued(touch, () => touch.commands.liveEditStrokes(selection.pageIndex, selection.revision, { kind: 'transform', indices, scale, x, y }));
+      return true;
+    } catch (error) {
+      refused(touch, error);
+      return false;
+    } finally {
+      selection.release(revision);
+      selection.follow(touch.live);
+    }
+  });
+  return done === true;
 }
 
 /** Undoes (or, with `again`, redoes) the last edit of the page on screen. */

@@ -285,8 +285,10 @@ pub struct LiveSnapshot {
     pub saved: Vec<String>,
     /// What the indices of the current page's strokes mean: a command that names strokes
     /// (`live_edit_strokes`) gives it back and is refused once it changed. It changes only when
-    /// strokes leave or come back ([`LiveEvent::StrokesEdited`], « Clear the page »), never when
-    /// the tablet appends a stroke. Absent on the share's viewers.
+    /// strokes leave or come back ([`LiveEvent::StrokesEdited`], « Clear the page ») and when the
+    /// page turns its ink (a quarter or half turn of the tablet: a move worked out before would
+    /// apply to strokes that are elsewhere), never when the tablet appends a stroke. Absent on the
+    /// share's viewers.
     pub revision: u64,
     /// The current page has an edit to undo, or to redo. Absent on the share's viewers.
     pub can_undo: bool,
