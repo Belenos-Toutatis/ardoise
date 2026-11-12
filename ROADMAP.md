@@ -91,8 +91,10 @@ Tout est corrigé (`docs/research/protocol.md` §5.3 et §12). Le test guidé su
 ### Point de contrôle H2 [matériel]
 
 - [x] [matériel] Au travail : synchro réelle, mode direct, projecteur en bureau étendu (procédure H2).
-- [ ] Corrections issues du retour de l'utilisateur.
-  - [ ] Mode direct : déplacer et redimensionner la sélection au stylet, au doigt ou à la souris (on saisit le cadre ou un coin), annulable par Ctrl+Z, montré au vidéoprojecteur et sur le partage (retour du 2026-11-12, SPEC §4.2).
+- [x] Corrections issues du retour de l'utilisateur.
+  - [x] Mode direct : déplacer et redimensionner la sélection au stylet, au doigt ou à la souris (on saisit le cadre ou un coin), annulable par Ctrl+Z, montré au vidéoprojecteur et sur le partage (retour du 2026-11-12, SPEC §4.2).
+
+Vérifié sous Windows le 2026-11-12 : `CHECK OK`, `E2E OK` (102 parcours, FR et EN, dont le nouveau : la tablette simulée écrit pendant qu'on déplace trois traits au stylet, qu'on les redimensionne par un coin à la souris, puis Ctrl+Z et Ctrl+Y ; la fenêtre de commande, la présentation et un écran du partage dans un vrai Edge montrent la même chose), après une relecture indépendante dont les remarques sont corrigées. Le geste au vrai stylet et au doigt de la Surface reste à essayer par l'utilisateur (`docs/hardware-tests.md`, H5, étape 10).
 
 Confirmé avec la vraie tablette le 2026-11-05 : le bouton crée une nouvelle page en mode direct. Le signal est `cb 01 00` (`docs/research/protocol.md` §12) ; Ardoise attendait jusque-là un signal inventé pour la tablette simulée.
 
