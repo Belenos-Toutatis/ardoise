@@ -141,8 +141,9 @@ pub struct Page {
     /// What the indices of its strokes mean ([`LiveSnapshot::revision`]). Starts from the
     /// session's [`first_revision`], so that a command meant for a session that has ended cannot
     /// pass for one of the next. Changes when strokes leave the list or come back: a delete, a
-    /// clearing that removed something, the undo or redo of either. Not when the tablet appends a
-    /// stroke (no index moves), nor for a change of colour, a page turn, a new layer.
+    /// clearing that removed something, a move or resize (its strokes replaced at their places),
+    /// the undo or redo of any. Not when the tablet appends a stroke (no index moves), nor for a
+    /// change of colour, a page turn, a new layer.
     revision: u64,
     /// Its edits and the computer's strokes, to undo and redo: kept when the page is left and when
     /// it turns, dropped when the session stops and by a merge of layers.
@@ -514,6 +515,62 @@ impl Page {
             viewers,
             ..Edited::default()
         }
+    }
+
+    /// Puts `stored` at their places (ascending, all on the page), through `copy`, in place of the
+    /// strokes there, which it returns with those places: moved out, not copied, and no place of
+    /// the list changes (a move or resize of strokes, its undo, its redo). The windows get `stored`
+    /// and are told that the strokes at those places leave and come back (`removed` and `inserted`
+    /// name the same places: a replacement of those objects), a viewer of the visible ones only, in
+    /// its numbering, before for `removed` and after for `inserted`. The places are not checked
+    /// again: they come from a step, or from a list just checked.
+    fn replace_strokes(
+        &mut self,
+        stored: Arc<Vec<PlacedStroke>>,
+        copy: Vec<Stroke>,
+    ) -> (Vec<PlacedStroke>, Edited) {
+        let removed: Vec<u32> = stored.iter().map(|placed| placed.index).collect();
+        let (layers, list) = (&self.note.layers, &self.note.strokes);
+        let viewers_removed: Option<Vec<u32>> = hidden_before(layers, list).map(|hidden| {
+            removed
+                .iter()
+                .filter_map(|&place| viewer_place(&hidden, layers, list, place))
+                .collect()
+        });
+        let mut replaced = Vec::with_capacity(removed.len());
+        for (&index, stroke) in removed.iter().zip(copy) {
+            if let Some(slot) = self.note.strokes.get_mut(index as usize) {
+                let before = std::mem::replace(slot, stroke);
+                replaced.push(PlacedStroke {
+                    index,
+                    stroke: before,
+                });
+            }
+        }
+        self.revision += 1;
+        self.touch();
+        // A stroke keeps its layer through a move, and its step's copy follows the page's layers
+        // (`History::remap_layers`), so the same strokes show on both sides; worked out again all
+        // the same, as `give_back` does, rather than assumed.
+        let (layers, list) = (&self.note.layers, &self.note.strokes);
+        let viewers = viewers_removed.and_then(|removed| {
+            let hidden = hidden_before(layers, list)?;
+            Some(Box::new(ViewerIndices {
+                removed,
+                inserted: stored
+                    .iter()
+                    .map(|placed| viewer_place(&hidden, layers, list, placed.index))
+                    .collect(),
+                recoloured: Vec::new(),
+            }))
+        });
+        let edited = Edited {
+            removed,
+            inserted: stored,
+            viewers,
+            ..Edited::default()
+        };
+        (replaced, edited)
     }
 
     /// Gives strokes their colours (the indices are not checked again: they come from a step, or
@@ -1941,11 +1998,12 @@ impl LiveSession {
         }
     }
 
-    /// Deletes or recolours strokes of the page on screen (`docs/design/tablet-live-classroom.md`,
-    /// "M12"), for a window that chose them on page `page_index` at `revision`. Refused as a whole
-    /// when anything is wrong. The stroke in progress is not concerned: it is not in the list yet,
-    /// and joins at the tail when it ends. Returns the page's revision: a change of colour keeps
-    /// it, as does an edit that changes nothing (no step, no event).
+    /// Deletes, recolours, moves or resizes strokes of the page on screen
+    /// (`docs/design/tablet-live-classroom.md`, "M12"), for a window that chose them on page
+    /// `page_index` at `revision`. Refused as a whole when anything is wrong. The stroke in progress
+    /// is not concerned: it is not in the list yet, and joins at the tail when it ends. Returns the
+    /// page's revision: a change of colour keeps it, as does an edit that changes nothing (no step,
+    /// no event); a move or resize changes it, its strokes being replaced.
     pub fn edit_strokes(
         &mut self,
         page_index: usize,
@@ -2001,6 +2059,31 @@ impl LiveSession {
                 page.history.record(UndoStep::Recoloured(changes), None);
                 edited
             }
+            EditAction::Transform(transform) => {
+                if transform.is_identity() {
+                    return Ok(page.revision);
+                }
+                // Made here, under the hub's lock: the moved strokes come from the chosen ones,
+                // which only the page holds, so this is a pass over their points (and a second one
+                // for the page's copy, the windows getting the other). An undo or redo of it has
+                // its copy made before the lock instead ([`Prepared`]). Refused as a whole, nothing
+                // changed yet, when a point would leave what a note holds.
+                let moved = edit
+                    .indices
+                    .iter()
+                    .map(|&index| {
+                        let stroke = strokes
+                            .get(index as usize)
+                            .and_then(|stroke| transform.apply(stroke))
+                            .ok_or(LiveEditError::BadTransform)?;
+                        Ok(PlacedStroke { index, stroke })
+                    })
+                    .collect::<Result<Vec<PlacedStroke>, LiveEditError>>()?;
+                let copy = moved.iter().map(|placed| placed.stroke.clone()).collect();
+                let (before, edited) = page.replace_strokes(Arc::new(moved), copy);
+                page.history.record(UndoStep::replaced(before), None);
+                edited
+            }
         };
         out.push(page.event(page_index, edited));
         Ok(page.revision)
@@ -2012,7 +2095,8 @@ impl LiveSession {
         self.current_page().history.next_restored()
     }
 
-    /// The computer's strokes the next redo on the page on screen gives back, likewise.
+    /// The computer's strokes and moved strokes the next redo on the page on screen gives back,
+    /// likewise.
     pub fn next_redone(&self) -> Vec<Arc<Vec<PlacedStroke>>> {
         self.current_page().history.next_redone()
     }
@@ -2028,8 +2112,9 @@ impl LiveSession {
 
     /// Undoes the last step of page `page_index` (the one on screen, or the call is stale), with
     /// every step of its group: a stroke comes back at its place, whatever the pens wrote since,
-    /// which stays after it; a computer stroke goes. Returns whether there was anything to undo.
-    /// `prepared`: see [`next_restored`](Self::next_restored).
+    /// which stays after it; a computer stroke goes; moved strokes are as they were, at their
+    /// places. Returns whether there was anything to undo. `prepared`: see
+    /// [`next_restored`](Self::next_restored).
     pub fn undo_edit(
         &mut self,
         page_index: usize,
@@ -2075,6 +2160,13 @@ impl LiveSession {
                     page.history.push_redo(RedoStep::Add { strokes }, group);
                     edited
                 }
+                UndoStep::Replaced { strokes, .. } => {
+                    let copy = Prepared::copy_of(&mut prepared, &strokes);
+                    let (moved, edited) = page.replace_strokes(strokes, copy);
+                    let strokes = Arc::new(moved);
+                    page.history.push_redo(RedoStep::Replace { strokes }, group);
+                    edited
+                }
             };
             out.push(page.event(index, edited));
             if !page.history.undo_joins(group) {
@@ -2089,7 +2181,8 @@ impl LiveSession {
 
     /// Does again the last group undone on page `page_index` (the one on screen, or the call is
     /// stale), in the order it was done. Returns whether there was anything to redo. `prepared`:
-    /// a copy of the computer's strokes it gives back ([`next_redone`](Self::next_redone)).
+    /// a copy of the computer's strokes and of the moved strokes it gives back
+    /// ([`next_redone`](Self::next_redone)).
     pub fn redo_edit(
         &mut self,
         page_index: usize,
@@ -2126,6 +2219,12 @@ impl LiveSession {
                     let indices = strokes.iter().map(|placed| placed.index).collect();
                     let edited = page.give_back(strokes, copy);
                     page.history.push_undo(UndoStep::Added { indices }, group);
+                    edited
+                }
+                RedoStep::Replace { strokes } => {
+                    let copy = Prepared::copy_of(&mut prepared, &strokes);
+                    let (before, edited) = page.replace_strokes(strokes, copy);
+                    page.history.push_undo(UndoStep::replaced(before), group);
                     edited
                 }
             };

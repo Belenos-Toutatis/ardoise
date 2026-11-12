@@ -1521,8 +1521,9 @@ impl LiveHub {
         Ok(restored)
     }
 
-    /// Deletes or recolours strokes a window chose on page `page_index` at `revision` (see
-    /// [`LiveSession::edit_strokes`]). The list is checked and sorted before the lock is taken.
+    /// Deletes, recolours, moves or resizes strokes a window chose on page `page_index` at
+    /// `revision` (see [`LiveSession::edit_strokes`]). The list, the colour and the move are
+    /// checked, the list sorted, before the lock is taken; a move's strokes are made under it.
     /// Returns the page's revision after the edit.
     pub fn edit_strokes(
         &self,
@@ -1553,8 +1554,9 @@ impl LiveHub {
     }
 
     /// Does again the last group undone on page `page_index` (the one on screen): the strokes an
-    /// edit takes move from the page to its history, nothing is copied; a computer stroke given back
-    /// is copied before the lock. Returns whether there was anything to redo.
+    /// edit takes move from the page to its history, nothing is copied; a computer stroke given back,
+    /// and strokes moved again, are copied before the lock. Returns whether there was anything to
+    /// redo.
     pub fn redo_edit(&self, page_index: usize) -> Result<bool, LiveError> {
         let prepared = self.prepared(LiveSession::next_redone);
         let mut outcome = Ok(false);
