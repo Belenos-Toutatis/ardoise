@@ -537,21 +537,32 @@ describe('a sound whose save failed', () => {
     expect(mockStagedNarration()).toBeNull();
   });
 
-  it('counts as the note’s narration for a new recording: the question, then « Remplacer » lets it go', async () => {
+  it('counts as the note’s narration for a new recording: « Remplacer » keeps it until the new sound is kept', async () => {
     const drop = vi.spyOn(api, 'narrationDropStaged');
-    const start = vi.spyOn(api, 'narrationStart');
     const view = await failedSave();
     const key = mockStagedNarration()!.key;
-    start.mockClear();
     await view.pressStart();
     expect(view.q('[data-slot="replace-question"]')?.textContent).toContain('(0:02)');
     view.action('narration-replace-yes')!.click();
     await vi.waitFor(() => expect(view.phase()).toBe('recording'));
-    expect(drop).toHaveBeenCalledWith(key);
-    expect(drop.mock.invocationCallOrder[0]).toBeLessThan(start.mock.invocationCallOrder[0]);
-    expect(view.sound().querySelector('[data-slot="narration-staged"]')).toBeNull();
+    // Kept while the new recording runs: one cancelled (or one that could not start) loses nothing.
+    expect(drop).not.toHaveBeenCalled();
+    expect(mockStagedNarration()?.key).toBe(key);
     view.action('narration-cancel')!.click();
     await vi.waitFor(() => expect(view.phase()).toBe('idle'));
+    expect(mockStagedNarration()?.key).toBe(key);
+    expect(view.sound().querySelector('[data-slot="narration-staged"]')).toBeTruthy();
+
+    // Recorded again and stopped: the new sound takes its place (kept too here: the file still changed on disk).
+    await view.pressStart();
+    view.action('narration-replace-yes')!.click();
+    await vi.waitFor(() => expect(view.phase()).toBe('recording'));
+    await vi.advanceTimersByTimeAsync(1000);
+    view.action('narration-stop')!.click();
+    await vi.waitFor(() => expect(mockStagedNarration()?.key).not.toBe(key));
+    expect(mockStagedNarration()).not.toBeNull();
+    await vi.waitFor(() => expect(view.notice()?.textContent).toBe('Le son est gardé en mémoire : il ira dans la note à son prochain enregistrement.'));
+    expect(drop).not.toHaveBeenCalled();
   });
 
   it('goes with the note at its next save (Ctrl+S): note and sound together again', async () => {

@@ -455,6 +455,9 @@ pub async fn live_stop(app: AppHandle) -> CommandResult<LiveStopped> {
         // Without a running service there is nothing to stop on the tablet's side.
         let _ = tablet.with_service(TabletService::stop_live);
         let answer = stopped(&runtime.hub, recording)?;
+        // Images staged in the Fond tab and never set (an import left, a refused `set`) are let go:
+        // the pages hold their own pixels, and the editor is never open with live mode.
+        crate::background::staging().clear();
         // The assistant's `last_live_note` finds the session after a restart too.
         crate::app_bridge::remember_live_session(&context, &runtime.hub);
         Ok(answer)

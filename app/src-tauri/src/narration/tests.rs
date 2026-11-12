@@ -1278,7 +1278,7 @@ fn a_writing_recording_needs_a_note_of_the_library() {
 }
 
 #[test]
-fn a_newer_writing_recording_replaces_the_staged_one_and_its_copy() {
+fn a_newer_writing_recording_replaces_the_staged_one_and_keeps_its_copy() {
     let (_dir, library) = library();
     let saved = write_sample(&library, "", "Essai");
     let backup = tempfile::tempdir().unwrap();
@@ -1299,7 +1299,8 @@ fn a_newer_writing_recording_replaces_the_staged_one_and_its_copy() {
     assert_eq!(second.duration_ms, 200);
     let second = second.staged.unwrap();
     assert_ne!(first, second);
-    // One narration per note: the older sound is gone, with its copy.
+    // One narration per note: the older sound is gone from memory; its copy stays, as a last resort
+    // (the editor may not have known it).
     assert_eq!(
         runtime.staged_audio(&first).unwrap_err().code(),
         NO_STAGED_NARRATION
@@ -1312,16 +1313,16 @@ fn a_newer_writing_recording_replaces_the_staged_one_and_its_copy() {
             .len(),
         9_600
     );
-    assert_eq!(names(backup.path()).len(), 1);
+    assert_eq!(names(backup.path()).len(), 2);
 
     // Dropping another key changes nothing; dropping its own removes it and its copy.
     runtime.drop_staged(&first);
     runtime.drop_staged("not a key");
     assert!(runtime.has_staged());
-    assert_eq!(names(backup.path()).len(), 1);
+    assert_eq!(names(backup.path()).len(), 2);
     runtime.drop_staged(&second);
     assert!(!runtime.has_staged());
-    assert!(names(backup.path()).is_empty());
+    assert_eq!(names(backup.path()).len(), 1);
     assert_eq!(
         runtime.staged_audio(&second).unwrap_err().code(),
         NO_STAGED_NARRATION
@@ -1330,8 +1331,7 @@ fn a_newer_writing_recording_replaces_the_staged_one_and_its_copy() {
     runtime.drop_staged(&second);
     assert_eq!(library.read(&saved.path).unwrap().file.audio, None);
 
-    // A sound left unsaved for another note (its editor was closed) gives way too, but its copy
-    // stays, as a last resort.
+    // A sound left unsaved for another note (its editor was closed) gives way too, its copy kept.
     let other = write_sample(&library, "", "Autre");
     start_writing(&runtime, &library, &other.path, &hub);
     let left = stop_in(&runtime, &keep_on_clock(clock), &hub)
@@ -1345,7 +1345,7 @@ fn a_newer_writing_recording_replaces_the_staged_one_and_its_copy() {
         runtime.staged_audio(&left).unwrap_err().code(),
         NO_STAGED_NARRATION
     );
-    assert_eq!(names(backup.path()).len(), 2);
+    assert_eq!(names(backup.path()).len(), 3);
 }
 
 #[test]
@@ -1454,8 +1454,11 @@ fn without_the_editor_s_clock_the_sound_goes_after_the_ink_on_disk() {
         .unwrap();
     let narration = decode_narration(&runtime.staged_audio(&key).unwrap()).unwrap();
     assert_eq!(narration.start_ms, 0);
+    // The first sound's copy stays (the newer sound replaced it in memory only); both are named
+    // after the note recorded for.
     let copies = names(backup.path());
-    assert_eq!(copies.len(), 1);
+    assert_eq!(copies.len(), 2);
+    assert!(copies[1].starts_with("2026-10-24 Renommée 2"), "{copies:?}");
     assert!(copies[0].starts_with("2026-10-24 Renommée 2"), "{copies:?}");
 }
 

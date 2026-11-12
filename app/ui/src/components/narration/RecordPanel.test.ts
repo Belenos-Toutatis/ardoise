@@ -68,9 +68,9 @@ describe('the replace question', () => {
     const question = q('[data-slot="replace-question"]')!;
     expect(question.getAttribute('role')).toBe('alert');
     expect(question.textContent).toContain('Cette note a déjà une narration (1:23). La remplacer par ce nouvel enregistrement ?');
-    // The start button gives way to the two answers; the focus is on the one that goes on.
+    // The start button gives way to the two answers; the focus is on the one that keeps the narration.
     expect(action('narration-start')).toBeNull();
-    await vi.waitFor(() => expect(document.activeElement).toBe(action('narration-replace-yes')));
+    await vi.waitFor(() => expect(document.activeElement).toBe(action('narration-replace-no')));
     expect(action('narration-replace-yes')!.textContent?.trim()).toBe('Remplacer');
     expect(action('narration-replace-no')!.textContent?.trim()).toBe("Garder l'ancienne");
 
@@ -89,6 +89,7 @@ describe('the replace question', () => {
     expect(onstart).not.toHaveBeenCalled();
     expect(q('[data-slot="replace-question"]')).toBeNull();
     expect(action('narration-start')).toBeTruthy();
+    await vi.waitFor(() => expect(document.activeElement).toBe(action('narration-start')));
     // Asked again the next time.
     action('narration-start')!.click();
     await tick();

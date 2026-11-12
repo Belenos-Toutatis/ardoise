@@ -712,11 +712,10 @@ struct Pending {
 }
 
 /// The sound of a writing recording, waiting for the save of its note (`save_note`'s
-/// `narration_key`): dropped once saved, when the editor drops it, or when a newer one replaces it.
+/// `narration_key`): dropped once saved, when the editor drops it, or when a newer one replaces it
+/// (its backup copy then stays).
 struct Staged {
     key: String,
-    /// The note it was recorded for.
-    note: PathBuf,
     /// Its `audio.opus` (also what the backup copy holds).
     audio: Arc<[u8]>,
     /// The backup copy; `None` when it could not be written.
@@ -797,10 +796,10 @@ impl NarrationRuntime {
     }
 
     /// Stages `audio`, the sound of a writing recording made for the note at `note`, after
-    /// writing its backup copy (named after the note). A sound staged before goes: with its copy
-    /// when it was for the same note (one narration per note: the editor asked before recording
-    /// again), its copy kept as a last resort when it was for another one (the editor was closed
-    /// before it could be saved). Returns its key.
+    /// writing its backup copy (named after the note). A sound staged before goes from memory, its
+    /// copy kept as a last resort: the editor may not know it (closed during a recording, then
+    /// opened again), and only saving it with its note or the editor's `narration_drop_staged`
+    /// removes a copy. Returns its key.
     pub(crate) fn stage(&self, note: &Path, audio: Vec<u8>) -> String {
         let backup = match write_narration_backup(&self.backup_dir, note, &audio) {
             Ok(path) => {
@@ -820,21 +819,14 @@ impl NarrationRuntime {
         let key = uuid::Uuid::new_v4().to_string();
         let older = self.lock_staged().replace(Staged {
             key: key.clone(),
-            note: note.to_path_buf(),
             audio: Arc::from(audio),
             backup,
         });
-        match older {
-            Some(older) if older.note == note => older.remove_backup(),
-            Some(older) => {
-                if let Some(backup) = &older.backup {
-                    eprintln!(
-                        "narration: an unsaved sound of another note is no longer in memory, copy in {}",
-                        backup.display()
-                    );
-                }
-            }
-            None => {}
+        if let Some(backup) = older.and_then(|older| older.backup) {
+            eprintln!(
+                "narration: an unsaved sound is no longer in memory, copy in {}",
+                backup.display()
+            );
         }
         key
     }

@@ -1226,8 +1226,9 @@ even with a `select` or a range input focused, and the focus given back after a 
 
 **Package F (narration, Rust).**
 - A stop without a clock places the sound after the note's ink on disk plus the writing gap.
-- A newer recording replaces the staged sound and deletes the old backup copy only if it was for the same note; otherwise
-  the copy stays, so a sound is never lost silently.
+- A newer recording replaces the staged sound in memory; the older one's backup copy always stays (changed after the
+  review: the editor may not know that sound, after it was closed during a recording). Only a save with the note and
+  `narration_drop_staged` remove a copy.
 - `save_note` writes the note and the sound in one atomic save.
 - `--simulated-microphone` lists only « Simulated microphone » (the journeys use it; the real microphone is never used
   in tests).
@@ -1241,6 +1242,21 @@ chapters: FR and EN « Le papier et l'image de la page en cours » (ch. 6), « P
 recording's stop « Arrêter et enregistrer » (« Arrêter »). What a user is told of what G would have changed: the replay and
 the video of a note-time narration keep the real pauses of the ink that was there before the sound (guide ch. 9, release
 notes « Limites connues »).
+
+**After the independent review (lead).**
+- A sound kept after a failed save is no longer dropped when « Remplacer » starts a new recording: Rust replaces it only
+  once the new sound is stopped and kept, so a recording that cannot start (microphone unplugged) or is cancelled loses
+  nothing. A replay narration saved in its place drops it after its save.
+- The replace question puts the focus on « Garder l'ancienne » (a held Enter replaces nothing); keeping gives the focus back
+  to « Démarrer ».
+- The « kept in memory » line no longer shows during the save that follows « Arrêter et enregistrer ».
+- `live_stop` clears the background staging area (images imported in the Fond tab and never set).
+- The live mock keeps an image's quarter turns when the tablet turns, turns a page at once when its image is removed,
+  and live's presentation opening closes the editor's projection in the browser stand-in.
+- The tooltip of a page that does not turn names a page written over an image too (`live.resume.cannotTurn`).
+- Left as they are: a live page whose image is removed after it was written stays as an empty note (as a page whose ink
+  is all erased; the guide says so); no way to drop only a kept sound and keep the strokes; the editor's projection shows
+  the paper colour if its image key is no longer staged, until the layout or the key changes.
 
 **To check on Windows, as listed above** (and H7 in `docs/hardware-tests.md`): the two presentation windows with the real
 projector and Windows' full screen; the projection's latency with the Surface's pen; WebView2 throttling the editor while the

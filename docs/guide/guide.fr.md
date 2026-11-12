@@ -583,7 +583,8 @@ cours, **Entière** (toute visible, sans déformation) ; **Placement** (**Entiè
 - **Une nouvelle page n'a pas d'image.** Revenir à la page d'avant retrouve la sienne : la fiche peut être sur la page 2 et
   une photo sur la page 3.
 - **L'image est enregistrée avec la page**, comme image de fond de la note. Une page qui n'a que l'image, sans rien
-  d'écrit, devient quand même une note, pour qu'une fiche montrée en classe soit gardée.
+  d'écrit, devient quand même une note, pour qu'une fiche montrée en classe soit gardée. Si vous retirez ensuite l'image,
+  la note reste dans la bibliothèque, vide : mettez-la à la corbeille si elle ne sert plus.
 - **Ardoise ne propose pas de passer la feuille en portrait ou en paysage** (une page du direct suit la tablette) : la
   fiche est placée telle qu'elle est, et une fiche en portrait sur une page en paysage est rétrécie. Tenez la tablette en
   portrait *avant* d'écrire pour qu'elle remplisse la page : tant que la page n'a pas d'écriture, elle suit la tablette et

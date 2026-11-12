@@ -303,6 +303,8 @@
    * lies in note time (an estimate until the note's narration is read again), so that new strokes go after it.
    */
   let stagedNarration = $state.raw<{ key: string; durationMs: number; info: NarrationInfo } | null>(null);
+  /** The save that follows « Arrêter et enregistrer » runs: the kept sound is not yet one that waits. */
+  let savingSound = $state(false);
   /** The narration's sound (a Blob URL) while it plays along. */
   let narrationUrl = $state<string | null>(null);
   let narrationLoading = $state(false);
@@ -815,7 +817,11 @@
     if (code === 'noStagedNarration' && stagedNarration?.key === staged.key) stagedNarration = null;
   }
 
-  /** The sound kept in memory is let go (« Ne pas enregistrer », « Recharger », or replaced by a new recording). */
+  /**
+   * The sound kept in memory is let go (« Ne pas enregistrer », « Recharger », or a replay narration saved in its place).
+   * A new writing recording does not let it go: Rust replaces it only once the new sound is stopped and kept, so a
+   * recording that cannot start, or is cancelled, loses nothing.
+   */
   async function dropStaged(): Promise<void> {
     const staged = stagedNarration;
     if (!staged) return;
@@ -1754,8 +1760,6 @@
     if (!replaying || recorder.busy) return;
     dropNarrationSound();
     player.pause();
-    // « Remplacer » was answered: a sound kept for the next save would overwrite this one, it goes.
-    await dropStaged();
     const { speed, maxPauseMs } = player.options;
     const started = await recorder.start(microphone, { kind: 'replay', path: currentPath, speed, maxPauseMs, startMs: 0 });
     if (!started) return;
@@ -1787,6 +1791,8 @@
       { ok: false, saved: null },
     );
     if (!result.ok || !result.saved) return;
+    // « Remplacer » was answered: a sound kept for the next save would overwrite this one, it goes now that this one is in.
+    await dropStaged();
     showNotice(t('narration.record.saved', { duration: clock(result.saved.durationMs) }));
     await loadNarration();
   }
@@ -1797,8 +1803,7 @@
    */
   async function startWriting() {
     if (replaying || recorder.busy || !history) return;
-    // « Remplacer » was answered: a sound kept for the next save is replaced by this one.
-    await dropStaged();
+    // « Remplacer » was answered: a sound kept for the next save stays until this one is stopped and kept.
     const started = await recorder.start(microphone, { kind: 'writing', path: currentPath });
     if (!started || !alive || !history) return;
     writingClock = new WritingClock(writingOrigin(history.present.note), performance.now(), Date.now());
@@ -1826,7 +1831,13 @@
       // The sound ended when « Arrêter » was pressed: it lies before that in note time (Rust's own start is read back).
       info: { durationMs, base: 'note', speed: 1, maxPauseMs: null, startMs: Math.round(end - durationMs) },
     };
-    const saved = await save();
+    savingSound = true;
+    let saved: boolean;
+    try {
+      saved = await save();
+    } finally {
+      savingSound = false;
+    }
     if (!alive || gen !== generation) return;
     if (saved) showNotice(t('editor.sound.saved', { duration: clock(durationMs) }));
     else showNotice(t('editor.sound.notSaved'), true);
@@ -2299,7 +2310,7 @@
             <EditorSound
               {replaying}
               {narration}
-              staged={stagedNarration?.durationMs ?? null}
+              staged={stagedNarration && !savingSound ? stagedNarration.durationMs : null}
               {recorder}
               bind:open={recordOpen}
               bind:confirmDelete

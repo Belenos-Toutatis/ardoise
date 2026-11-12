@@ -68,7 +68,8 @@
   let confirmDiscard = $state(false);
   /** « Démarrer » asked whether to replace the stored narration: the answer waits. */
   let askingReplace = $state(false);
-  let replaceYes = $state<HTMLButtonElement>();
+  let replaceNo = $state<HTMLButtonElement>();
+  let startButton = $state<HTMLButtonElement>();
 
   // A recording kept by an earlier failure (this screen, or one left before) is offered again.
   onMount(() => {
@@ -89,9 +90,15 @@
   async function start() {
     if (!replaces) return onstart();
     askingReplace = true;
-    // The button pressed went: the focus goes to the answer that goes on with it.
+    // The button pressed went: the focus goes to the answer that keeps the narration (a held Enter replaces nothing).
     await tick();
-    replaceYes?.focus();
+    replaceNo?.focus();
+  }
+
+  async function keep() {
+    askingReplace = false;
+    await tick();
+    startButton?.focus();
   }
 
   function replace() {
@@ -165,7 +172,6 @@
           <p class="small">{t('narration.record.replaceQuestion', { duration: clock(replacedMs ?? 0) })}</p>
           <div class="buttons">
             <button
-              bind:this={replaceYes}
               type="button"
               class="button small-button danger"
               data-action="narration-replace-yes"
@@ -173,14 +179,26 @@
             >
               {t('narration.record.replaceYes')}
             </button>
-            <button type="button" class="button small-button" data-action="narration-replace-no" onclick={() => (askingReplace = false)}>
+            <button
+              bind:this={replaceNo}
+              type="button"
+              class="button small-button"
+              data-action="narration-replace-no"
+              onclick={() => void keep()}
+            >
               {t('narration.record.replaceNo')}
             </button>
           </div>
         </div>
       {:else}
         <div class="buttons">
-          <button type="button" class="button small-button primary" data-action="narration-start" onclick={() => void start()}>
+          <button
+            bind:this={startButton}
+            type="button"
+            class="button small-button primary"
+            data-action="narration-start"
+            onclick={() => void start()}
+          >
             {t('narration.record.start')}
           </button>
           <button type="button" class="button small-button" data-action="narration-close" onclick={() => (open = false)}>

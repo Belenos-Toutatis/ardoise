@@ -551,7 +551,8 @@ current page, **Whole** (all of it visible, without distortion); **Placement** (
 - **A new page has no image.** Going back to the previous page finds its own: the worksheet can be on page 2 and a photo
   on page 3.
 - **The image is saved with the page**, as the note's background image. A page that has only the image, with nothing
-  written yet, still becomes a note, so that a worksheet shown in class is kept.
+  written yet, still becomes a note, so that a worksheet shown in class is kept. If you then remove the image, the note
+  stays in the library, empty: move it to the trash if you no longer need it.
 - **Ardoise does not offer to switch the sheet to portrait or landscape** (a live page follows the tablet): the worksheet
   is placed as it is, and a portrait worksheet on a landscape page is shrunk. Hold the tablet in portrait *before* writing
   for it to fill the page: as long as the page has no writing, it follows the tablet and the image is placed again with
