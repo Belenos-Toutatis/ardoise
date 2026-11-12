@@ -36,6 +36,7 @@ interface Init {
   presentation?: MonitorInfo | null;
   busy?: boolean;
   error?: string | null;
+  help?: string;
 }
 
 function render(init: Init = {}) {
@@ -60,6 +61,7 @@ function render(init: Init = {}) {
       onproject: calls.project,
       onstop: calls.stop,
       onrefresh: calls.refresh,
+      help: init.help,
     },
   });
   cleanup = () => {
@@ -134,6 +136,16 @@ describe('the projector block', () => {
     expect(view.q('[role="alert"]')!.textContent).toBe('Écran introuvable');
     cleanup?.();
     expect(render().q('[role="alert"]')).toBeNull();
+  });
+
+  it('shows the window’s sentence under the title (M17, the editor), none without it (live)', () => {
+    const view = render({ help: 'La page de l’éditeur en plein écran.' });
+    const help = view.q('h3 + p.pane-help');
+    expect(help?.textContent).toBe('La page de l’éditeur en plein écran.');
+    cleanup?.();
+    const live = render();
+    // Live's block starts with the screen list.
+    expect(live.q('h3')!.nextElementSibling?.matches('label.screen-field')).toBe(true);
   });
 
   it('speaks English', () => {
