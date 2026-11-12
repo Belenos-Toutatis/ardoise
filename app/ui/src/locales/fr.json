@@ -329,7 +329,9 @@
       "hint": "Ardoise affichera aussitôt les notes de ce dossier, sur ce PC seulement ({machine}). Les notes de la bibliothèque actuelle restent dans leur dossier.",
       "confirm": "Utiliser ce dossier",
       "current": "C'est déjà la bibliothèque de ce PC : rien ne change."
-    }
+    },
+    "tabletAdded": "Ajoutée le",
+    "boardForgetConfirm": "Oublier la tablette Xiaomi ? Ardoise ne la cherchera plus et elle devra être ajoutée de nouveau, sur tous vos ordinateurs. Elle reste liée à Mi Home."
   },
   "assistant": {
     "title": "Assistant (MCP)",
@@ -417,12 +419,16 @@
       "connecting": "Connexion…",
       "connected": "Connectée",
       "syncing": "Synchronisation…",
-      "live": "Mode direct"
+      "live": "Mode direct",
+      "adding": "Recherche d'une tablette Xiaomi…"
     },
     "hint": {
       "searching": "Appuyez brièvement sur le bouton de la tablette pour la connecter, et gardez-la près de l'ordinateur.",
       "pendingSync": "La synchronisation démarrera dès que la tablette sera connectée.",
-      "pendingLive": "Le mode direct démarrera dès que la tablette sera connectée."
+      "pendingLive": "Le mode direct démarrera dès que la tablette sera connectée.",
+      "searchingBoard": "Allumez la tablette Xiaomi et gardez-la près de l'ordinateur. Fermez Mi Home (ou coupez le Bluetooth du téléphone) : elle ne parle qu'à une application à la fois.",
+      "searchingBoth": "Allumez la tablette Xiaomi, ou appuyez brièvement sur le bouton de la Bamboo Slate. Fermez Mi Home (ou coupez le Bluetooth du téléphone) : la tablette Xiaomi ne parle qu'à une application à la fois.",
+      "adding": "Ardoise cherche une tablette Xiaomi à ajouter."
     },
     "battery": "Batterie {percent} %",
     "batteryCharging": "Batterie {percent} %, en charge",
@@ -436,7 +442,10 @@
       "model": "Modèle",
       "size": "Zone de dessin",
       "readAt": "Lue le",
-      "notRead": "La tablette n'a pas encore été lue : ses informations apparaîtront à la première connexion."
+      "notRead": "La tablette n'a pas encore été lue : ses informations apparaîtront à la première connexion.",
+      "memory": "Mémoire libre",
+      "memoryValue": "{free} sur {total}",
+      "clockAuto": "L'horloge de la tablette Xiaomi est mise à l'heure à chaque connexion ; elle n'a ni nom à changer ni version à lire."
     },
     "sync": {
       "title": "Synchronisation",
@@ -453,7 +462,12 @@
       "deletedOne": "1 page effacée de la tablette.",
       "deletedMany": "{count} pages effacées de la tablette.",
       "never": "Aucune synchronisation depuis le lancement d'Ardoise.",
-      "pagesWaiting": "{count} pages attendent sur la tablette : seule la plus ancienne peut être lue tant qu'elle n'est pas effacée. Activez « {option} » pour les récupérer."
+      "pagesWaiting": "{count} pages attendent sur la tablette : seule la plus ancienne peut être lue tant qu'elle n'est pas effacée. Activez « {option} » pour les récupérer.",
+      "boardTitle": "Les pages seront effacées de la tablette",
+      "boardConfirm": "La tablette Xiaomi ne donne que sa page la plus ancienne : pour atteindre la suivante, Ardoise doit effacer chaque page de la tablette une fois sa note écrite et vérifiée. Synchroniser maintenant et effacer les pages ?",
+      "boardConfirmYes": "Synchroniser et effacer",
+      "boardWaitingOne": "1 page attend sur la tablette Xiaomi : elle n'est importée qu'à votre demande, avec « Synchroniser maintenant », et sera effacée de la tablette une fois sa note écrite.",
+      "boardWaitingMany": "{count} pages attendent sur la tablette Xiaomi : elles ne sont importées qu'à votre demande, avec « Synchroniser maintenant », et seront effacées de la tablette une fois leurs notes écrites."
     },
     "live": {
       "open": "Mode direct",
@@ -469,7 +483,8 @@
       "buttonNewPage": "Nouvelle page",
       "buttonNewLayer": "Nouveau calque",
       "orientation": "Position de la tablette",
-      "orientationHint": "Choisissez comment vous tenez la tablette : Ardoise redresse ce que vous dessinez pour qu'il apparaisse à l'endroit. À l'envers convient aux gauchers ; en portrait, les notes sont des pages en portrait. Le bouton est celui qui est à côté du voyant de la tablette."
+      "orientationHint": "Choisissez comment vous tenez la tablette : Ardoise redresse ce que vous dessinez pour qu'il apparaisse à l'endroit. À l'envers convient aux gauchers ; en portrait, les notes sont des pages en portrait. Le bouton est celui qui est à côté du voyant de la tablette.",
+      "deleteAfterImportBoard": "Tablette Xiaomi : sans cette option, ses pages ne sont importées qu'à la demande (« Synchroniser maintenant »), après confirmation, et elles sont effacées de la tablette quand même : c'est le seul moyen d'atteindre la page suivante."
     },
     "orientation": {
       "landscape": "Paysage, bouton en bas",
@@ -489,9 +504,9 @@
       "timeHint": "Règle l'horloge de la tablette sur celle de l'ordinateur."
     },
     "register": {
-      "open": "Enregistrer la tablette",
+      "open": "Enregistrer la Bamboo Slate",
       "none": "Aucune tablette n'est enregistrée.",
-      "intro": "Enregistrez votre Bamboo Slate pour recevoir ses pages automatiquement et dessiner en direct.",
+      "intro": "Enregistrez votre Bamboo Slate, ou ajoutez votre tablette Xiaomi, pour recevoir ses pages automatiquement et dessiner en direct.",
       "title": "Enregistrer la tablette",
       "warningTitle": "Avant de commencer",
       "warning": "Une fois enregistrée dans Ardoise, la tablette ne fonctionnera plus avec l'application Wacom du téléphone ni avec Inkspace, jusqu'à ce que vous l'y enregistriez de nouveau.",
@@ -526,7 +541,48 @@
         "title": "L'enregistrement n'a pas abouti",
         "hint": "Vérifiez que le Bluetooth est activé, que la tablette est chargée et proche de l'ordinateur, puis recommencez : maintenez le bouton jusqu'au clignotement bleu."
       }
-    }
+    },
+    "kind": {
+      "slate": "Bamboo Slate",
+      "blackboard": "Tablette Xiaomi"
+    },
+    "known": {
+      "title": "Tablettes",
+      "notConnected": "Pas connectée",
+      "forgetLabel": "Oublier la tablette « {name} »"
+    },
+    "board": {
+      "title": "Ajouter la tablette Xiaomi",
+      "introTitle": "Avant de commencer",
+      "intro": "Allumez la tablette Xiaomi et gardez-la près de l'ordinateur.",
+      "introMiHome": "Fermez Mi Home, ou coupez le Bluetooth de votre téléphone : la tablette ne parle qu'à une application à la fois.",
+      "introLinked": "Il n'y a ni bouton à maintenir ni enregistrement : la tablette reste liée à Mi Home, et Ardoise n'utilise ni votre compte Xiaomi ni son service en ligne.",
+      "search": "Chercher la tablette",
+      "cancel": "Annuler",
+      "searching": {
+        "title": "Recherche de la tablette Xiaomi",
+        "text": "Cela prend quelques secondes ; la recherche s'arrête au bout d'une minute."
+      },
+      "found": {
+        "one": "Une tablette Xiaomi a été trouvée.",
+        "many": "{count} tablettes Xiaomi ont été trouvées : choisissez la vôtre. Plus le signal est fort, plus la tablette est proche.",
+        "unnamed": "Tablette Xiaomi",
+        "signal": "Signal : {rssi} dBm",
+        "add": "Ajouter cette tablette",
+        "addLabel": "Ajouter la tablette {address}"
+      },
+      "added": {
+        "title": "Tablette Xiaomi ajoutée",
+        "text": "Ardoise se connecte à la tablette dès qu'elle est allumée et que rien d'autre ne l'occupe. Ses pages deviennent des notes ; chacune est effacée de la tablette une fois sa note écrite."
+      },
+      "error": {
+        "title": "La tablette Xiaomi n'a pas été ajoutée"
+      },
+      "retry": "Chercher de nouveau",
+      "finish": "Terminer",
+      "open": "Ajouter la tablette Xiaomi"
+    },
+    "simulatedBoardButton": "Appuyer sur le bouton de la tablette Xiaomi simulée (enregistre la page)"
   },
   "diagnostic": {
     "open": "Tester la tablette",
@@ -732,7 +788,13 @@
     "shareFailed": "le partage n'a pas pu démarrer ({detail})",
     "noStagedNarration": "le son enregistré n'est plus en mémoire ; une copie est dans le dossier de secours des narrations",
     "projectionStale": "la projection a pris du retard ; elle se remet à jour",
-    "projectionInvalid": "la projection a reçu une mise à jour incorrecte ; elle se remet à jour"
+    "projectionInvalid": "la projection a reçu une mise à jour incorrecte ; elle se remet à jour",
+    "blackboardNotFound": "Aucune tablette Xiaomi trouvée : allumez-la, rapprochez-la de l'ordinateur et fermez Mi Home (ou coupez le Bluetooth du téléphone), car elle ne parle qu'à une application à la fois.",
+    "transferIncomplete": "Une page de la tablette Xiaomi n'a pas été reçue en entier ; elle reste sur la tablette. Rapprochez la tablette de l'ordinateur puis synchronisez de nouveau.",
+    "pageNotDeleted": "La tablette Xiaomi garde une page qu'Ardoise vient de lui demander d'effacer : la synchronisation s'est arrêtée. La note de cette page est déjà dans la bibliothèque.",
+    "notSupported": "Cette tablette ne permet pas cela (la tablette Xiaomi n'a pas de nom à changer).",
+    "blackboardConfirmDelete": "Les pages de la tablette Xiaomi ne sont importées qu'après votre accord : elles sont effacées de la tablette une fois importées, car elle ne donne que sa page la plus ancienne. Confirmez la synchronisation pour continuer.",
+    "pageUnreadable": "La tablette Xiaomi a envoyé une page qu'Ardoise ne sait pas lire : rien n'a été importé et la page reste sur la tablette."
   },
   "editor": {
     "back": "Bibliothèque",
@@ -1625,7 +1687,10 @@
     "starting": "Démarrage du mode direct…",
     "waiting": {
       "title": "Appuyez brièvement sur le bouton de la tablette pour la connecter.",
-      "hint": "Le mode direct démarre dès que la tablette est connectée : ce que vous écrivez s'affiche ici et sur l'écran projeté."
+      "hint": "Le mode direct démarre dès que la tablette est connectée : ce que vous écrivez s'affiche ici et sur l'écran projeté.",
+      "titleBoard": "Allumez la tablette Xiaomi pour la connecter.",
+      "titleBoth": "Allumez la tablette Xiaomi, ou appuyez brièvement sur le bouton de la Bamboo Slate.",
+      "hintBoard": "Fermez Mi Home (ou coupez le Bluetooth du téléphone). Le mode direct démarre dès que la tablette est connectée : ce que vous écrivez s'affiche ici et sur l'écran projeté."
     },
     "reconnecting": "La liaison avec la tablette est perdue : reconnexion en cours…",
     "startFailed": "Le mode direct n'a pas pu démarrer.",
@@ -1831,6 +1896,10 @@
     },
     "background": {
       "help": "Sous l'écriture de la page en cours : une fiche ou un document à compléter devant la classe. La page suivante n'a pas d'image."
+    },
+    "xiaomi": {
+      "label": "Tablette Xiaomi : page en hauteur",
+      "note": "Tablette Xiaomi : la page est en hauteur, sans position à choisir. Son bouton enregistre la page sur la tablette sans arrêter le direct ; « Page suivante » se fait depuis l'ordinateur."
     }
   },
   "presentation": {

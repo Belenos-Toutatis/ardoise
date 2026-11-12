@@ -1,16 +1,25 @@
 <script lang="ts">
   /**
-   * Side panel of the tablet (SPEC §4.1): connection and information, sync now (with progress and
-   * cancel), live mode, the options, the tablet's own settings (name, clock, forget) and the
-   * registration wizard when no tablet is registered. Follows the window's shared status
-   * (`tablet-state.svelte.ts`).
+   * Side panel of the tablet (SPEC §4.1): the known tablets (the Bamboo Slate and the Xiaomi
+   * blackboard, each with its own « Forget »), connection and information, sync now (with progress
+   * and cancel; for the blackboard with the warning that its pages are deleted), live mode, the
+   * options, the Slate's own settings (name, clock) and the way to add a tablet when none is
+   * known. Follows the window's shared status (`tablet-state.svelte.ts`).
    */
   import { onMount, untrack } from 'svelte';
   import { errorMessage } from '../../lib/api';
   import { currentLocale, t } from '../../lib/i18n.svelte';
   import { formatDate } from '../../lib/library-logic';
-  import { sizeInMillimetres, tablet, validTabletName } from '../../lib/tablet-state.svelte';
+  import {
+    formatBytes,
+    sizeInMillimetres,
+    blackboardNeedsConfirmation,
+    tablet,
+    validTabletName,
+  } from '../../lib/tablet-state.svelte';
+  import AddBlackboard from './AddBlackboard.svelte';
   import Battery from './Battery.svelte';
+  import KnownTablets from './KnownTablets.svelte';
   import RegisterWizard from './RegisterWizard.svelte';
   import TabletOptions from './TabletOptions.svelte';
 
@@ -18,8 +27,10 @@
 
   onMount(() => tablet.start());
 
-  let wizardOpen = $state(false);
-  let confirmingForget = $state(false);
+  /** The flow open to add the first tablet. */
+  let wizardOpen = $state<'slate' | 'blackboard' | null>(null);
+  /** An explicit sync of the blackboard waits for the user's word: it deletes the pages. */
+  let confirmingSync = $state(false);
   /** The name as being edited. */
   let draft = $state(untrack(() => tablet.status?.registered?.name ?? ''));
   /** The name was submitted and refused for its form. */
@@ -27,9 +38,22 @@
 
   const status = $derived(tablet.status);
   const connection = $derived(status?.connection ?? 'unavailable');
+  /** The Slate, when one is registered (null when only the blackboard is known). */
   const registered = $derived(status?.registered ?? null);
   const registeredName = $derived(registered?.name ?? '');
   const device = $derived(status?.device ?? null);
+  /** What the tablet read last is the blackboard's. */
+  const boardDevice = $derived(device?.kind === 'blackboard');
+  const hasTablet = $derived(tablet.known.length > 0);
+  /** The tablet whose size is shown until one is read. */
+  const firstKnown = $derived(tablet.known[0] ?? null);
+  /**
+   * The Xiaomi is the connected tablet and « Delete after import » is off: its pages are imported only on request, after
+   * the user accepted that they are deleted from the tablet. Nothing is said while the Slate or no tablet is connected.
+   */
+  const warnBoard = $derived(blackboardNeedsConfirmation(status));
+  /** Pages the blackboard keeps until the user imports them. */
+  const boardWaiting = $derived(warnBoard && connection === 'connected' ? (device?.storedPages ?? 0) : 0);
   const sync = $derived(status?.sync ?? null);
   const lastSync = $derived(status?.lastSync ?? null);
   /**
@@ -37,21 +61,35 @@
    * oldest page, the next one is reachable once that one is deleted.
    */
   const pagesWaiting = $derived(
-    lastSync && lastSync.deleted === 0 && status?.options.deleteAfterImport === false && connection !== 'syncing'
+    lastSync &&
+    lastSync.deleted === 0 &&
+    status?.options.deleteAfterImport === false &&
+    connection !== 'syncing' &&
+    !boardDevice
       ? (device?.storedPages ?? 0)
       : 0,
   );
   const name = $derived(device?.name ?? registered?.name ?? '');
   const canSync = $derived(connection === 'connected' || connection === 'searching' || connection === 'connecting');
-  const canLive = $derived(connection !== 'syncing' && connection !== 'registering');
+  const canLive = $derived(connection !== 'syncing' && connection !== 'registering' && connection !== 'adding');
+  /** What to do to connect the tablet that is waited for. */
+  const searchingHint = $derived(
+    tablet.slate && tablet.board
+      ? 'tablet.hint.searchingBoth'
+      : tablet.board
+        ? 'tablet.hint.searchingBoard'
+        : 'tablet.hint.searching',
+  );
   const hint = $derived(
     status?.pending === 'sync'
       ? 'tablet.hint.pendingSync'
       : status?.pending === 'live'
         ? 'tablet.hint.pendingLive'
         : connection === 'searching'
-          ? 'tablet.hint.searching'
-          : null,
+          ? searchingHint
+          : connection === 'adding'
+            ? 'tablet.hint.adding'
+            : null,
   );
   const drift = $derived(
     tablet.drift === null
@@ -65,8 +103,9 @@
     nameRefused = false;
   });
 
+  // The question has no meaning once the sync cannot start.
   $effect(() => {
-    if (!registered) confirmingForget = false;
+    if (!canSync) confirmingSync = false;
   });
 
   async function rename(event: SubmitEvent) {
@@ -75,9 +114,23 @@
     if (!nameRefused) await tablet.rename(draft);
   }
 
-  async function forget() {
-    confirmingForget = false;
-    await tablet.forget();
+  /** The blackboard always deletes the pages it hands over: say so first when the option is off. */
+  async function syncNow() {
+    if (warnBoard) {
+      confirmingSync = true;
+      return;
+    }
+    // The Xiaomi connected meanwhile: the service asks for the confirmation itself.
+    if (!(await tablet.sync()) && tablet.actionCode === 'blackboardConfirmDelete') {
+      tablet.dismissError();
+      confirmingSync = true;
+    }
+  }
+
+  async function syncConfirmed() {
+    confirmingSync = false;
+    // The flag is for the Xiaomi only, and only after this confirmation.
+    await tablet.sync(blackboardNeedsConfirmation(tablet.status));
   }
 
   function savedText(count: number): string {
@@ -111,7 +164,7 @@
 
   {#if status === null}
     <p class="muted" data-slot="loading">{tablet.unavailable ? t('tablet.unavailableStatus') : t('tablet.loading')}</p>
-  {:else if !registered}
+  {:else if !hasTablet}
     <section class="block" aria-labelledby="tablet-register">
       <h3 id="tablet-register">{t('tablet.register.none')}</h3>
       <p class="muted">{t('tablet.register.intro')}</p>
@@ -120,14 +173,36 @@
           type="button"
           class="button primary"
           data-action="register"
-          disabled={connection === 'unavailable' && status.error?.code === 'noLibrary'}
-          onclick={() => (wizardOpen = true)}
+          disabled={(connection === 'unavailable' && status.error?.code === 'noLibrary') || connection === 'adding'}
+          onclick={() => (wizardOpen = 'slate')}
         >
           {t('tablet.register.open')}
         </button>
+        <button
+          type="button"
+          class="button primary"
+          data-action="add-blackboard"
+          disabled={(connection === 'unavailable' && status.error?.code === 'noLibrary') || connection === 'adding'}
+          onclick={() => (wizardOpen = 'blackboard')}
+        >
+          {t('tablet.board.open')}
+        </button>
       </div>
+      {#if connection === 'adding'}
+        <p class="muted small" data-slot="hint">{t('tablet.hint.adding')}</p>
+        <div class="actions">
+          <button type="button" class="button" data-action="cancel-search" onclick={() => tablet.cancel()}>
+            {t('tablet.board.cancel')}
+          </button>
+        </div>
+      {/if}
     </section>
   {:else}
+    <section class="block" aria-labelledby="tablet-known">
+      <h3 id="tablet-known">{t('tablet.known.title')}</h3>
+      <KnownTablets />
+    </section>
+
     <section class="block" aria-labelledby="tablet-info">
       <h3 id="tablet-info">{t('tablet.info.title')}</h3>
       <p class="state" data-slot="state">
@@ -137,14 +212,34 @@
       {#if hint}
         <p class="muted small" data-slot="hint">{t(hint)}</p>
       {/if}
-      <dl class="facts">
-        <dt>{t('tablet.info.name')}</dt>
-        <dd data-slot="name">{name}</dd>
+      {#if connection === 'adding'}
+        <div class="actions">
+          <button type="button" class="button" data-action="cancel-search" onclick={() => tablet.cancel()}>
+            {t('tablet.board.cancel')}
+          </button>
+        </div>
+      {/if}
+      <dl class="facts" data-kind={device?.kind ?? null}>
         {#if device}
+          {#if !boardDevice}
+            <dt>{t('tablet.info.name')}</dt>
+            <dd data-slot="name">{name}</dd>
+          {/if}
           <dt>{t('tablet.info.battery')}</dt>
-          <dd><Battery percent={device.batteryPercent} charging={device.charging} /></dd>
-          <dt>{t('tablet.info.firmware')}</dt>
-          <dd>{device.firmware}</dd>
+          <dd><Battery percent={device.batteryPercent} charging={boardDevice ? false : device.charging} /></dd>
+          {#if boardDevice && device.memory}
+            <dt>{t('tablet.info.memory')}</dt>
+            <dd data-slot="memory">
+              {t('tablet.info.memoryValue', {
+                free: formatBytes(device.memory.free, currentLocale()),
+                total: formatBytes(device.memory.total, currentLocale()),
+              })}
+            </dd>
+          {/if}
+          {#if !boardDevice}
+            <dt>{t('tablet.info.firmware')}</dt>
+            <dd>{device.firmware}</dd>
+          {/if}
           <dt>{t('tablet.info.pages')}</dt>
           <dd data-slot="stored-pages">{device.storedPages}</dd>
           <dt>{t('tablet.info.model')}</dt>
@@ -154,12 +249,20 @@
           <dt>{t('tablet.info.readAt')}</dt>
           <dd>{formatDate(device.readAt, currentLocale())}</dd>
         {:else}
-          <dt>{t('tablet.info.size')}</dt>
-          <dd>{sizeInMillimetres(registered.width, registered.height)}</dd>
+          {#if registered}
+            <dt>{t('tablet.info.name')}</dt>
+            <dd data-slot="name">{name}</dd>
+          {/if}
+          {#if firstKnown}
+            <dt>{t('tablet.info.size')}</dt>
+            <dd>{sizeInMillimetres(firstKnown.width, firstKnown.height)}</dd>
+          {/if}
         {/if}
       </dl>
       {#if !device}
         <p class="muted small">{t('tablet.info.notRead')}</p>
+      {:else if boardDevice}
+        <p class="muted small" data-slot="board-clock">{t('tablet.info.clockAuto')}</p>
       {/if}
     </section>
 
@@ -182,9 +285,22 @@
             {t('tablet.sync.cancel')}
           </button>
         </div>
+      {:else if confirmingSync}
+        <div class="confirm" role="alertdialog" aria-label={t('tablet.sync.boardTitle')} data-slot="sync-confirm">
+          <p><strong>{t('tablet.sync.boardTitle')}</strong></p>
+          <p>{t('tablet.sync.boardConfirm')}</p>
+          <div class="actions">
+            <button type="button" class="button primary" data-action="sync-confirm" data-autofocus onclick={syncConfirmed}>
+              {t('tablet.sync.boardConfirmYes')}
+            </button>
+            <button type="button" class="button" data-action="sync-cancel" onclick={() => (confirmingSync = false)}>
+              {t('settings.cancel')}
+            </button>
+          </div>
+        </div>
       {:else}
         <div class="actions">
-          <button type="button" class="button primary" data-action="sync" disabled={!canSync} onclick={() => tablet.sync()}>
+          <button type="button" class="button primary" data-action="sync" disabled={!canSync} onclick={syncNow}>
             {t('tablet.sync.now')}
           </button>
         </div>
@@ -212,6 +328,11 @@
           {/if}
         </p>
       {/if}
+      {#if boardWaiting > 0}
+        <p class="banner notice" role="status" data-slot="board-waiting">
+          {boardWaiting === 1 ? t('tablet.sync.boardWaitingOne') : t('tablet.sync.boardWaitingMany', { count: boardWaiting })}
+        </p>
+      {/if}
       {#if pagesWaiting > 1}
         <p class="banner notice" role="status" data-slot="pages-waiting">
           {t('tablet.sync.pagesWaiting', { count: pagesWaiting, option: t('tablet.options.deleteAfterImport') })}
@@ -234,84 +355,82 @@
       <TabletOptions />
     </section>
 
-    <section class="block" aria-labelledby="tablet-manage">
-      <h3 id="tablet-manage">{t('tablet.manage.title')}</h3>
-      <form class="field" onsubmit={rename}>
-        <label for="tablet-name"><span>{t('tablet.manage.name')}</span></label>
-        <div class="inline">
-          <input
-            id="tablet-name"
-            class="text-input"
-            type="text"
-            bind:value={draft}
-            maxlength="40"
-            aria-invalid={nameRefused}
-            aria-describedby="tablet-name-hint"
-            oninput={() => (nameRefused = false)}
-          />
-          <button
-            type="submit"
-            class="button"
-            data-action="rename"
-            disabled={tablet.working || draft.trim() === registered.name}
-          >
-            {t('tablet.manage.rename')}
-          </button>
-        </div>
-        <span id="tablet-name-hint" class="muted small field-hint">{t('tablet.manage.nameHint')}</span>
-        {#if nameRefused}
-          <span class="error small" role="alert">{t('tablet.manage.nameInvalid')}</span>
-        {:else if tablet.renamed}
-          <span class="muted small" role="status">{t('tablet.manage.renamed')}</span>
-        {/if}
-      </form>
-
-      <div class="field">
-        <span class="muted small">{t('tablet.manage.timeHint')}</span>
-        <button type="button" class="button" data-action="set-time" disabled={tablet.working} onclick={() => tablet.setTime()}>
-          {t('tablet.manage.setTime')}
-        </button>
-        {#if drift !== null}
-          <span class="muted small" role="status" data-slot="time-result">{t('tablet.manage.timeSet', { seconds: drift })}</span>
-        {/if}
-      </div>
-
-      {#if confirmingForget}
-        <div class="confirm" role="alertdialog" aria-label={t('settings.tabletForget')}>
-          <p>{t('settings.tabletForgetConfirm', { name: registered.name })}</p>
-          <div class="actions">
-            <button type="button" class="button danger" data-action="forget-yes" onclick={forget}>
-              {t('settings.tabletForgetYes')}
+    {#if registered && !boardDevice}
+      <!-- The Slate's own settings: the blackboard has no name to change, and its clock is set at each connection. -->
+      <section class="block" aria-labelledby="tablet-manage">
+        <h3 id="tablet-manage">{t('tablet.manage.title')}</h3>
+        <form class="field" onsubmit={rename}>
+          <label for="tablet-name"><span>{t('tablet.manage.name')}</span></label>
+          <div class="inline">
+            <input
+              id="tablet-name"
+              class="text-input"
+              type="text"
+              bind:value={draft}
+              maxlength="40"
+              aria-invalid={nameRefused}
+              aria-describedby="tablet-name-hint"
+              oninput={() => (nameRefused = false)}
+            />
+            <button
+              type="submit"
+              class="button"
+              data-action="rename"
+              disabled={tablet.working || draft.trim() === registered.name}
+            >
+              {t('tablet.manage.rename')}
             </button>
-            <button type="button" class="button" onclick={() => (confirmingForget = false)}>{t('settings.cancel')}</button>
           </div>
-        </div>
-      {:else}
-        <div class="actions">
-          <button type="button" class="button danger" data-action="forget" onclick={() => (confirmingForget = true)}>
-            {t('settings.tabletForget')}
+          <span id="tablet-name-hint" class="muted small field-hint">{t('tablet.manage.nameHint')}</span>
+          {#if nameRefused}
+            <span class="error small" role="alert">{t('tablet.manage.nameInvalid')}</span>
+          {:else if tablet.renamed}
+            <span class="muted small" role="status">{t('tablet.manage.renamed')}</span>
+          {/if}
+        </form>
+
+        <div class="field">
+          <span class="muted small">{t('tablet.manage.timeHint')}</span>
+          <button type="button" class="button" data-action="set-time" disabled={tablet.working} onclick={() => tablet.setTime()}>
+            {t('tablet.manage.setTime')}
           </button>
+          {#if drift !== null}
+            <span class="muted small" role="status" data-slot="time-result">{t('tablet.manage.timeSet', { seconds: drift })}</span>
+          {/if}
         </div>
-      {/if}
-    </section>
+      </section>
+    {/if}
 
     {#if status.simulated}
       <section class="block" aria-label={t('tablet.simulated')}>
         <!-- The simulated tablet has a button too: used by the wizard and by live mode. -->
-        <button type="button" class="button ghost small" data-action="sim-press" onclick={() => tablet.pressButton()}>
-          {t('tablet.simulatedButton')}
-        </button>
+        {#if tablet.slate}
+          <button type="button" class="button ghost small" data-action="sim-press" onclick={() => tablet.pressButton()}>
+            {t('tablet.simulatedButton')}
+          </button>
+        {/if}
+        {#if tablet.board}
+          <!-- The simulated blackboard's own button stores the page on its screen. -->
+          <button type="button" class="button ghost small" data-action="sim-store" onclick={() => tablet.storeBlackboardPage()}>
+            {t('tablet.simulatedBoardButton')}
+          </button>
+        {/if}
       </section>
     {/if}
   {/if}
 
-  <div class="actions foot">
-    <button type="button" class="button" data-action="test" onclick={ontest}>{t('settings.tabletTest')}</button>
-  </div>
+  {#if !tablet.board || tablet.slate}
+    <!-- The guided test is the Slate's: the blackboard has none. -->
+    <div class="actions foot">
+      <button type="button" class="button" data-action="test" onclick={ontest}>{t('settings.tabletTest')}</button>
+    </div>
+  {/if}
 </aside>
 
-{#if wizardOpen}
-  <RegisterWizard onclose={() => (wizardOpen = false)} />
+{#if wizardOpen === 'slate'}
+  <RegisterWizard onclose={() => (wizardOpen = null)} />
+{:else if wizardOpen === 'blackboard'}
+  <AddBlackboard onclose={() => (wizardOpen = null)} />
 {/if}
 
 <style>

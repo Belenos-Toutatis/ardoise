@@ -244,9 +244,20 @@
   });
   /** The sheet is resumed and cannot be turned: the quick position buttons wait for the next page. */
   const locked = $derived(!live.canTurnPage);
+  /**
+   * The Xiaomi blackboard writes the live page: it is held one way only (its portrait page is never turned), so the
+   * position switch and the hint about the Slate's button do not apply.
+   */
+  const onBoard = $derived(tablet.active === 'blackboard');
+  /** What the waiting screen asks for: depends on which tablets are known. */
+  const waitingKey = $derived(tablet.board ? (tablet.slate ? 'titleBoth' : 'titleBoard') : 'title');
   /** How to hold the tablet for the resumed sheet, when that is not how the setting says. */
   const hold = $derived(
-    locked && sessionState !== 'idle' && tablet.status && tablet.status.options.orientation !== live.orientation
+    !onBoard &&
+      locked &&
+      sessionState !== 'idle' &&
+      tablet.status &&
+      tablet.status.options.orientation !== live.orientation
       ? live.orientation
       : null,
   );
@@ -1106,29 +1117,33 @@
       </button>
     </div>
 
-    <div
-      class="group"
-      role="group"
-      aria-label={t('live.orientation.label')}
-      title={locked ? t('live.resume.cannotTurn') : t('live.orientation.hint')}
-      data-slot="orientation"
-    >
-      {#each ORIENTATIONS as orientation (orientation)}
-        <button
-          type="button"
-          class="button small-button toggle orientation"
-          class:active={live.orientation === orientation}
-          data-orientation={orientation}
-          aria-pressed={live.orientation === orientation}
-          aria-label={t(`tablet.orientation.${orientation}`)}
-          title={locked ? t('live.resume.cannotTurn') : t(`tablet.orientation.${orientation}`)}
-          disabled={locked}
-          onclick={() => setOrientation(orientation)}
-        >
-          <OrientationIcon {orientation} size={26} />
-        </button>
-      {/each}
-    </div>
+    {#if onBoard}
+      <span class="group-label muted" data-slot="xiaomi-note" title={t('live.xiaomi.note')}>{t('live.xiaomi.label')}</span>
+    {:else}
+      <div
+        class="group"
+        role="group"
+        aria-label={t('live.orientation.label')}
+        title={locked ? t('live.resume.cannotTurn') : t('live.orientation.hint')}
+        data-slot="orientation"
+      >
+        {#each ORIENTATIONS as orientation (orientation)}
+          <button
+            type="button"
+            class="button small-button toggle orientation"
+            class:active={live.orientation === orientation}
+            data-orientation={orientation}
+            aria-pressed={live.orientation === orientation}
+            aria-label={t(`tablet.orientation.${orientation}`)}
+            title={locked ? t('live.resume.cannotTurn') : t(`tablet.orientation.${orientation}`)}
+            disabled={locked}
+            onclick={() => setOrientation(orientation)}
+          >
+            <OrientationIcon {orientation} size={26} />
+          </button>
+        {/each}
+      </div>
+    {/if}
   </div>
 
   <div class="live-main">
@@ -1152,8 +1167,8 @@
       {#if sessionState === 'waiting'}
         <div class="live-overlay" role="status">
           <span class="pulse" aria-hidden="true"></span>
-          <strong>{t('live.waiting.title')}</strong>
-          <p>{t('live.waiting.hint')}</p>
+          <strong>{t(`live.waiting.${waitingKey}`)}</strong>
+          <p>{t(waitingKey === 'title' ? 'live.waiting.hint' : 'live.waiting.hintBoard')}</p>
         </div>
       {:else if sessionState === 'reconnecting'}
         <p class="live-reconnecting" role="status">{t('live.reconnecting')}</p>

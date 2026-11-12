@@ -5,7 +5,8 @@
  * translated sentences (`errorMessage`). Contract: docs/design/tablet-live-classroom.md.
  */
 import { api, errorMessage } from './api';
-import type { Connection, TabletOptions, TabletStatus } from './tablet';
+import { t } from './i18n.svelte';
+import type { Connection, KnownTablet, TabletKind, TabletOptions, TabletStatus } from './tablet';
 
 /** Longest tablet name the tablet accepts. */
 export const TABLET_NAME_MAX = 15;
@@ -26,11 +27,37 @@ export function isBusy(connection: Connection): boolean {
   return connection === 'registering' || connection === 'syncing' || connection === 'live';
 }
 
+/** The name a tablet goes by in the interface: the Slate's own, « Xiaomi tablet » for the blackboard. */
+export function tabletName(known: KnownTablet): string {
+  return known.kind === 'blackboard' ? t('tablet.kind.blackboard') : known.name;
+}
+
+/** A size in bytes in a readable unit: whole kilobytes, or megabytes with one decimal from one megabyte. */
+export function formatBytes(bytes: number, locale: string): string {
+  const megabytes = bytes >= 1_000_000;
+  return new Intl.NumberFormat(locale, {
+    style: 'unit',
+    unit: megabytes ? 'megabyte' : 'kilobyte',
+    unitDisplay: 'short',
+    maximumFractionDigits: megabytes ? 1 : 0,
+  }).format(megabytes ? bytes / 1_000_000 : bytes / 1_000);
+}
+
+/**
+ * The Xiaomi is the connected tablet and « Delete after import » is off: its pages are imported only after the user
+ * accepted that they are deleted from the tablet (`tablet_sync` with `confirmBlackboardDelete`).
+ */
+export function blackboardNeedsConfirmation(status: TabletStatus | null): boolean {
+  return status !== null && status.active === 'blackboard' && !status.options.deleteAfterImport;
+}
+
 export class TabletState {
   /** Last status received; null until the first answer of the service. */
   status = $state<TabletStatus | null>(null);
   /** Translated message of the last action that failed. */
   actionError = $state<string | null>(null);
+  /** The code of that failure (`errorCodes.*`), null when it had none. */
+  actionCode = $state<string | null>(null);
   /** The subscription itself failed (no service). */
   unavailable = $state(false);
   /** Drift left in seconds after the last "set the clock"; null when not done since the status changed. */
@@ -48,7 +75,14 @@ export class TabletState {
   readonly statusError = $derived(this.status?.error ? errorMessage(this.status.error) : null);
   /** What to show as the failure: the last action's, else the service's. */
   readonly error = $derived(this.actionError ?? this.statusError);
+  /** A Slate is registered. */
   readonly registered = $derived(this.status?.registered != null);
+  /** Every known tablet, the Slate first. */
+  readonly known = $derived<KnownTablet[]>(this.status?.known ?? []);
+  readonly slate = $derived(this.known.find((tablet) => tablet.kind === 'slate') ?? null);
+  readonly board = $derived(this.known.find((tablet) => tablet.kind === 'blackboard') ?? null);
+  /** The tablet of the connection (null when none is connected). */
+  readonly active = $derived<TabletKind | null>(this.status?.active ?? null);
 
   /** Starts following the service (once for the whole window). */
   start(): void {
@@ -76,6 +110,7 @@ export class TabletState {
     this.received = false;
     this.status = null;
     this.actionError = null;
+    this.actionCode = null;
     this.unavailable = false;
     this.drift = null;
     this.renamed = false;
@@ -91,15 +126,19 @@ export class TabletState {
 
   dismissError(): void {
     this.actionError = null;
+    this.actionCode = null;
   }
 
   /** Runs a request, keeping the failure as a message; resolves `undefined` when it failed. */
   private async run<T>(action: () => Promise<T>): Promise<{ value: T } | undefined> {
     this.actionError = null;
+    this.actionCode = null;
     try {
       return { value: await action() };
     } catch (error) {
       this.actionError = errorMessage(error);
+      const code = (error as { code?: unknown } | null)?.code;
+      this.actionCode = typeof code === 'string' ? code : null;
       return undefined;
     }
   }
@@ -120,8 +159,9 @@ export class TabletState {
     return (await this.run(() => api.tabletCancel())) !== undefined;
   }
 
-  async sync(): Promise<boolean> {
-    return (await this.run(() => api.tabletSync())) !== undefined;
+  /** Syncs now; `confirmBlackboardDelete` only after the user accepted the deletion of the Xiaomi's pages. */
+  async sync(confirmBlackboardDelete = false): Promise<boolean> {
+    return (await this.run(() => api.tabletSync(confirmBlackboardDelete))) !== undefined;
   }
 
   /** Renames the tablet; false when the name is not acceptable or the tablet refused. */
@@ -172,6 +212,37 @@ export class TabletState {
     if (!done) return false;
     await this.refresh();
     return true;
+  }
+
+  /** Starts the search for a blackboard to add (its progress arrives in `status.boardSearch`). */
+  async findBlackboards(): Promise<boolean> {
+    return (await this.run(() => api.tabletFindBlackboards())) !== undefined;
+  }
+
+  /** Adds the blackboard heard at `address`; false when it was not heard or the library refused. */
+  async addBlackboard(address: string): Promise<boolean> {
+    const done = await this.run(() => api.tabletAddBlackboard(address));
+    if (!done) return false;
+    this.apply(done.value);
+    return true;
+  }
+
+  /** Forgets the blackboard (the Slate, if any, stays), then reads the new status. */
+  async forgetBlackboard(): Promise<boolean> {
+    const done = await this.run(() => api.tabletForgetBlackboard());
+    if (!done) return false;
+    await this.refresh();
+    return true;
+  }
+
+  /** Forgets one tablet. */
+  forgetKind(kind: TabletKind): Promise<boolean> {
+    return kind === 'blackboard' ? this.forgetBlackboard() : this.forget();
+  }
+
+  /** Presses the simulated blackboard's store button (`--simulated-blackboard`). */
+  async storeBlackboardPage(): Promise<boolean> {
+    return (await this.run(() => api.simBlackboardStorePage())) !== undefined;
   }
 
   /** Presses the simulated tablet's button (`--simulated-tablet`). */
