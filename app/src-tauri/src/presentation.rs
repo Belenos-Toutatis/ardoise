@@ -1,10 +1,12 @@
-//! The presentation window (SPEC §4.2, classroom): full screen on the chosen screen (the
-//! projector), no interface, showing the live session; the screens and the choice of one.
+//! The windows full screen on the projector (SPEC §4.2, classroom; §4.4, the editor's projection):
+//! live's presentation window, showing the live session, and the editor's projection window
+//! (`projection.rs`), never both at once; the screens and the choice of one, shared by both.
 //!
-//! Contract: docs/design/tablet-live-classroom.md (work package B), "Presentation window".
+//! Contract: docs/design/tablet-live-classroom.md (work package B), "Presentation window";
+//! docs/design/paper-projection-narration.md §2.3 (M17, the projection window).
 //! Screens are placed in physical pixels: with screens of different scale factors, logical
 //! positions would be relative to the primary screen's scale (docs/research/windows-platform.md
-//! §3). The window is created from an async command (SPEC §6.2: a window created from a
+//! §3). The windows are created from async commands (SPEC §6.2: a window created from a
 //! synchronous command can deadlock on Windows).
 
 use serde::Serialize;
@@ -16,13 +18,45 @@ use tauri::{
 use crate::AppContext;
 use crate::commands::{CommandError, CommandResult, store, update};
 use crate::live::{Activity, LiveRuntime};
+use crate::projection::{self, ProjectionRuntime};
 
 /// Label of the presentation window.
 pub const PRESENTATION: &str = "presentation";
+/// Label of the editor's projection window.
+pub const PROJECTION: &str = "projection";
 /// Label of the main (control) window, made in `lib.rs`.
 const MAIN: &str = "main";
-/// What the presentation window loads (`main.ts` mounts `Presentation.svelte` for it).
-const PRESENTATION_URL: &str = "index.html?view=presentation";
+
+/// A window full screen on the projector. Each one's opening destroys the other
+/// (docs/design/paper-projection-narration.md, R1): they share the projector, the screen saved for
+/// this PC and the flag that holds the handwriting indexer (`Activity`, one token at a time).
+/// `capabilities/presentation.json` names both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenWindow {
+    /// Live's presentation window (`Presentation.svelte`).
+    Presentation,
+    /// The editor's projection window (`EditorPresentation.svelte`, `projection.rs`).
+    Projection,
+}
+
+impl ScreenWindow {
+    pub const ALL: [ScreenWindow; 2] = [ScreenWindow::Presentation, ScreenWindow::Projection];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ScreenWindow::Presentation => PRESENTATION,
+            ScreenWindow::Projection => PROJECTION,
+        }
+    }
+
+    /// What the window loads (`main.ts` mounts its root for the `view`).
+    pub fn url(self) -> &'static str {
+        match self {
+            ScreenWindow::Presentation => "index.html?view=presentation",
+            ScreenWindow::Projection => "index.html?view=projection",
+        }
+    }
+}
 
 /// A screen, as the interface lists them (`MonitorInfo` in `live.ts`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -139,30 +173,80 @@ fn unexpected(error: tauri::Error) -> CommandError {
     CommandError::new("unexpected", error)
 }
 
-/// Creates the presentation window on `monitor`, or moves it there, full screen. A window
-/// created here that cannot be placed is destroyed (it would stay hidden, and the indexing
-/// would wait for it).
-fn show_on(app: &AppHandle, monitor: &MonitorInfo, activity: &Activity) -> tauri::Result<()> {
-    let window = match app.get_webview_window(PRESENTATION) {
+/// The screen a window full screen goes on: `requested` if it is connected, else the one saved
+/// for this PC, else a secondary one, else the primary one (marked `chosen`); `noMonitor` without
+/// any screen.
+pub fn screen_for(
+    app: &AppHandle,
+    context: &AppContext,
+    requested: Option<&str>,
+) -> CommandResult<MonitorInfo> {
+    let saved = saved_projector(context);
+    let monitors = monitors(app, saved.as_deref())?;
+    let chosen = choose_monitor(&monitors, requested, saved.as_deref())
+        .ok_or_else(|| CommandError::new("noMonitor", "no screen is connected"))?;
+    Ok(MonitorInfo {
+        chosen: true,
+        ..chosen.clone()
+    })
+}
+
+/// Saves `key` as this PC's projector; the window is shown even if the settings cannot be
+/// written.
+pub fn remember_screen(context: &AppContext, key: &str) {
+    if let Err(error) = save_projector(context, key) {
+        eprintln!("presentation: cannot save the screen chosen: {error:?}");
+    }
+}
+
+/// Destroys `which` if it is open. Its destruction is reported later, on the main thread
+/// (`WindowEvent::Destroyed`).
+pub fn destroy(app: &AppHandle, which: ScreenWindow) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(which.label()) {
+        window.destroy()?;
+    }
+    Ok(())
+}
+
+/// What a window's owner hears when that very window is destroyed, however that happens.
+pub type OnDestroyed = Box<dyn Fn() + Send + 'static>;
+
+/// Creates the window `which` on `monitor`, or moves it there, full screen. `on_destroyed` is
+/// called when the window shown this way is destroyed (also when it was moved: an older call's
+/// is called too, and its owner tells them apart). A window created here that cannot be placed is
+/// destroyed (it would stay hidden, and the indexing would wait for it).
+pub fn show_on(
+    app: &AppHandle,
+    which: ScreenWindow,
+    monitor: &MonitorInfo,
+    activity: &Activity,
+    on_destroyed: Option<OnDestroyed>,
+) -> tauri::Result<()> {
+    let window = match app.get_webview_window(which.label()) {
         Some(window) => {
             window.set_fullscreen(false)?;
-            return place(&window, monitor);
+            place(&window, monitor)?;
+            if let Some(on_destroyed) = on_destroyed {
+                window.on_window_event(move |event| {
+                    if matches!(event, WindowEvent::Destroyed) {
+                        on_destroyed();
+                    }
+                });
+            }
+            return Ok(());
         }
         None => {
-            let mut builder = WebviewWindowBuilder::new(
-                app,
-                PRESENTATION,
-                WebviewUrl::App(PRESENTATION_URL.into()),
-            )
-            .title("Ardoise")
-            .decorations(false)
-            .skip_taskbar(true)
-            // On Windows 11 the shadow of an undecorated window draws a 1 px border.
-            .shadow(false)
-            // The teacher keeps working in the control window.
-            .focused(false)
-            // Shown once in place, without a flash on the laptop's screen.
-            .visible(false);
+            let mut builder =
+                WebviewWindowBuilder::new(app, which.label(), WebviewUrl::App(which.url().into()))
+                    .title("Ardoise")
+                    .decorations(false)
+                    .skip_taskbar(true)
+                    // On Windows 11 the shadow of an undecorated window draws a 1 px border.
+                    .shadow(false)
+                    // The teacher keeps working in the control window.
+                    .focused(false)
+                    // Shown once in place, without a flash on the laptop's screen.
+                    .visible(false);
             // Same WebView2 data folder as the main window (one WebView2 session).
             if let Some(dir) = crate::webview_data_dir() {
                 builder = builder.data_directory(dir);
@@ -176,6 +260,9 @@ fn show_on(app: &AppHandle, monitor: &MonitorInfo, activity: &Activity) -> tauri
             window.on_window_event(move |event| {
                 if matches!(event, WindowEvent::Destroyed) {
                     closed.presentation_closed(token);
+                    if let Some(on_destroyed) = &on_destroyed {
+                        on_destroyed();
+                    }
                 }
             });
             window
@@ -202,8 +289,9 @@ fn place(window: &WebviewWindow, monitor: &MonitorInfo) -> tauri::Result<()> {
 
 /// The windows' events that matter here (registered in `lib.rs`): when the presentation
 /// window goes away (Esc, Alt+F4, `close_presentation`) every window learns it; when the main
-/// window goes away the live session is written and the presentation window goes too, so that
-/// the app ends.
+/// window goes away the live session is written and both windows full screen go too, so that the
+/// app ends. The projection window's destruction is told by its own handler (`show_on`'s
+/// `on_destroyed`, numbered by `projection.rs`: a late report of an older window is ignored).
 pub fn on_window_event(window: &Window, event: &WindowEvent) {
     if !matches!(event, WindowEvent::Destroyed) {
         return;
@@ -216,8 +304,8 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         }
         MAIN => {
             crate::live::main_window_closed(window.app_handle());
-            if let Some(presentation) = window.app_handle().get_webview_window(PRESENTATION) {
-                let _ = presentation.destroy();
+            for which in ScreenWindow::ALL {
+                let _ = destroy(window.app_handle(), which);
             }
         }
         _ => {}
@@ -234,29 +322,29 @@ pub async fn list_monitors(
 
 /// Opens the presentation window on `monitor` (else the saved screen, else a secondary one) and,
 /// unless `remember` is `false`, saves that choice for this PC. The assistant's bridge passes
-/// `false`: no bridge request changes a setting (docs/design/mcp.md).
+/// `false`: no bridge request changes a setting (docs/design/mcp.md). The editor's projection
+/// window is closed first (one window full screen at a time), and the editor's watch told.
 #[tauri::command]
 pub async fn open_presentation(
     app: AppHandle,
     context: State<'_, AppContext>,
     runtime: State<'_, LiveRuntime>,
+    projection: State<'_, ProjectionRuntime>,
     monitor: Option<String>,
     remember: Option<bool>,
 ) -> CommandResult<MonitorInfo> {
-    let saved = saved_projector(&context);
-    let monitors = monitors(&app, saved.as_deref())?;
-    let chosen = choose_monitor(&monitors, monitor.as_deref(), saved.as_deref())
-        .ok_or_else(|| CommandError::new("noMonitor", "no screen is connected"))?;
-    let chosen = MonitorInfo {
-        chosen: true,
-        ..chosen.clone()
-    };
-    show_on(&app, &chosen, &runtime.hub().activity()).map_err(unexpected)?;
-    // The window is shown even if the settings cannot be written.
-    if remember != Some(false)
-        && let Err(error) = save_projector(&context, &chosen.key)
-    {
-        eprintln!("presentation: cannot save the screen chosen: {error:?}");
+    let chosen = screen_for(&app, &context, monitor.as_deref())?;
+    projection::close(&app, &projection)?;
+    show_on(
+        &app,
+        ScreenWindow::Presentation,
+        &chosen,
+        &runtime.hub().activity(),
+        None,
+    )
+    .map_err(unexpected)?;
+    if remember != Some(false) {
+        remember_screen(&context, &chosen.key);
     }
     runtime.hub().set_presentation(Some(chosen.clone()));
     Ok(chosen)
@@ -267,9 +355,7 @@ pub async fn close_presentation(
     app: AppHandle,
     runtime: State<'_, LiveRuntime>,
 ) -> CommandResult<()> {
-    if let Some(window) = app.get_webview_window(PRESENTATION) {
-        window.destroy().map_err(unexpected)?;
-    }
+    destroy(&app, ScreenWindow::Presentation).map_err(unexpected)?;
     runtime.hub().presentation_closed(PRESENTATION);
     Ok(())
 }
@@ -367,6 +453,36 @@ mod tests {
                 "chosen": true,
             })
         );
+    }
+
+    #[test]
+    fn the_two_windows_have_their_own_label_and_view() {
+        assert_eq!(ScreenWindow::Presentation.label(), "presentation");
+        assert_eq!(
+            ScreenWindow::Presentation.url(),
+            "index.html?view=presentation"
+        );
+        assert_eq!(ScreenWindow::Projection.label(), "projection");
+        assert_eq!(ScreenWindow::Projection.url(), "index.html?view=projection");
+        // Neither is the main window, and each names its own view.
+        for which in ScreenWindow::ALL {
+            assert_ne!(which.label(), MAIN);
+            assert!(which.url().ends_with(&format!("?view={}", which.label())));
+        }
+    }
+
+    #[test]
+    fn the_capability_of_the_windows_names_both() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/presentation.json")).unwrap();
+        let windows: Vec<&str> = capability["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w.as_str().unwrap())
+            .collect();
+        let labels: Vec<&str> = ScreenWindow::ALL.iter().map(|w| w.label()).collect();
+        assert_eq!(windows, labels);
     }
 
     #[test]
