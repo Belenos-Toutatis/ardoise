@@ -135,6 +135,22 @@ struct SyncRun {
     permission: Option<BoardPermission>,
     /// Where the blackboard's sync stands (its shared per-page step).
     board: BoardSync,
+    /// A failure that did not stop the sync (a rescue copy that could not be imported): said at
+    /// its end when nothing else is.
+    deferred: Option<DeviceError>,
+}
+
+/// Where a live run that has not streamed yet stands with the blackboard's stored pages (SPEC
+/// §4.2, docs/design/blackboard.md §9.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreLive {
+    /// Not looked at yet.
+    Unchecked,
+    /// A sync of its pages was started for it: once no sync runs or waits, they are counted
+    /// again.
+    Syncing,
+    /// Nothing to fetch (the tablet held no page), or the run already streams: it may start.
+    Checked,
 }
 
 /// Live mode asked by the hub.
@@ -149,9 +165,9 @@ struct LiveRun {
     /// accepted (its page has that tablet's size and way of holding). `None` until a tablet
     /// streams.
     kind: Option<TabletKind>,
-    /// The blackboard's stored pages were looked at before this run first streams (SPEC §4.2:
-    /// fetched first, or the run refused).
-    pages_checked: bool,
+    /// The blackboard's stored pages before this run first streams (SPEC §4.2: fetched first,
+    /// or the run refused).
+    pre_live: PreLive,
 }
 
 /// Why a synced page is not stored.
@@ -816,6 +832,7 @@ impl Worker {
             context,
             permission: None,
             board: BoardSync::default(),
+            deferred: None,
         };
         if to_read == 0 {
             self.finish_sync(run, None);
@@ -977,31 +994,43 @@ impl Worker {
                 .collect();
             doubtful.retain(|time| kept.contains(time));
         }
-        let doubtful_error = doubtful
-            .first()
-            .map(|time| DeviceError::PageDoubtful { time: *time });
-        let error = match (error, &doubtful_error) {
-            (Some(DeviceError::Disconnected), _) => {
+        // A failure that did not stop the sync is said when nothing else is.
+        let deferred = run.deferred.clone();
+        let error = match (error, deferred.as_ref()) {
+            (None, deferred) => deferred,
+            (error, Some(deferred)) => {
+                self.note(format!("also during this sync: {deferred}"));
+                error
+            }
+            (error, None) => error,
+        };
+        if !doubtful.is_empty() && !matches!(error, Some(DeviceError::Disconnected)) {
+            self.note(format!(
+                "{} kept apart as doubtful (not made into notes): {}",
+                pages_text(u16::try_from(doubtful.len()).unwrap_or(u16::MAX)),
+                doubtful
+                    .iter()
+                    .map(|time| ardoise_proto::blackboard::utc(*time))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        // The doubtful page is what the user is told only when nothing else stopped the sync, or
+        // when what stopped it was that very page (its error would say it stayed on the tablet).
+        let told = match error {
+            None => doubtful.first().copied(),
+            Some(DeviceError::PageUnreadable { time, .. }) => {
+                doubtful.iter().copied().find(|doubtful| doubtful == time)
+            }
+            Some(_) => None,
+        }
+        .map(|time| DeviceError::PageDoubtful { time });
+        let error = match error {
+            Some(DeviceError::Disconnected) => {
                 self.doubtful_untold = doubtful;
                 error
             }
-            (
-                None
-                | Some(DeviceError::TransferIncomplete { .. } | DeviceError::PageUnreadable { .. }),
-                Some(told),
-            ) => {
-                self.note(format!(
-                    "{} kept apart as doubtful (not made into notes): {}",
-                    pages_text(u16::try_from(doubtful.len()).unwrap_or(u16::MAX)),
-                    doubtful
-                        .iter()
-                        .map(|time| ardoise_proto::blackboard::utc(*time))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-                Some(told)
-            }
-            (error, _) => error,
+            _ => told.as_ref().or(error),
         };
         match error {
             None => self.note(format!(
@@ -1096,7 +1125,11 @@ impl Worker {
             active,
             notifications: 0,
             kind,
-            pages_checked: active,
+            pre_live: if active {
+                PreLive::Checked
+            } else {
+                PreLive::Unchecked
+            },
         };
         if active {
             // Live mode already streams (another sink before): the new one starts at once.

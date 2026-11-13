@@ -9,7 +9,9 @@
 //!   (the files `--import-blackboard-pages` reads), with `page-<time>.json` beside them when the
 //!   page replaces an earlier store of its screen (`{"previous": <time>}`). When that folder
 //!   cannot be written, the same under the fallback folder (the app's local data,
-//!   `%LOCALAPPDATA%\Ardoise\blackboard-rescue`).
+//!   `%LOCALAPPDATA%\Ardoise\blackboard-rescue`), in a subfolder of the library
+//!   (`library-<hash>`, a hash of its root: never the path in clear), so that a copy is only ever
+//!   imported into the library it was taken for.
 //! - *Clean* copies are imported at the next sync. *Doubtful* copies (a transfer that did not end
 //!   cleanly) go to the `doubtful` subfolder and are never made into notes on their own.
 //! - Every write is atomic (SPEC §3.4).
@@ -73,7 +75,10 @@ impl RescueStore {
             );
         }
         if let Some(fallback) = fallback {
-            folders.push(fallback.to_path_buf());
+            folders.push(match library {
+                Some(library) => fallback.join(library_folder(library)),
+                None => fallback.to_path_buf(),
+            });
         }
         Self { folders }
     }
@@ -176,6 +181,19 @@ impl RescueStore {
     pub fn remove(&self, file: &RescuedFile) {
         remove_copy(&file.path);
     }
+}
+
+/// The subfolder of the fallback folder for the library at `root`: `library-` and a 64-bit
+/// FNV-1a hash of its path (letters in lower case, separators as `/`, no trailing one), so that
+/// the same library gives the same folder however its path is spelt on Windows.
+fn library_folder(root: &Path) -> String {
+    let text = root.to_string_lossy().to_lowercase().replace('\\', "/");
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.trim_end_matches('/').bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("library-{hash:016x}")
 }
 
 /// The page's time as the copy's name has it (0 for a page without a time, never expected).
@@ -341,8 +359,36 @@ mod tests {
         let path = store
             .save(&page(1_800_000_003, &[0xa1; 7], None), RescueKind::Clean)
             .unwrap();
-        assert_eq!(path, local.path().join("page-1800000003.bin"));
+        assert_eq!(
+            path,
+            local
+                .path()
+                .join(library_folder(library.path()))
+                .join("page-1800000003.bin")
+        );
+        assert!(
+            !path.to_string_lossy().contains(
+                library
+                    .path()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .as_ref()
+            ),
+            "never the library's path in clear"
+        );
         assert_eq!(store.pages(RescueKind::Clean).len(), 1);
+        // Another library sharing the fallback folder never sees it.
+        let other = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(other.path()).unwrap();
+        let elsewhere = RescueStore::new(Some(other.path()), Some(local.path()));
+        assert!(!elsewhere.has(RescueKind::Clean));
+        // The same library however its path is spelt.
+        let spelt = library.path().to_string_lossy().to_uppercase();
+        assert_eq!(
+            library_folder(Path::new(&format!("{spelt}/"))),
+            library_folder(library.path())
+        );
         // Nowhere at all: an error that names the folders tried.
         let nowhere = RescueStore::new(Some(library.path()), None);
         let error = nowhere

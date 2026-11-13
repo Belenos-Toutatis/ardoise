@@ -99,10 +99,15 @@ pub const MAX_SYNC_PAGES: u32 = 1000;
 /// In live mode, a notification of more bytes than this is not the pen (six records at most:
 /// research note §3): it is a page the tablet pushed (§6, the erase button).
 pub const MAX_LIVE_BYTES: usize = MAX_LIVE_RECORDS * RECORD_LEN;
-/// A push goes on with a notification that comes this soon after its previous one, whatever its
-/// size. **Supposed**: the chunks of a page came about 10 ms apart in Mi Home's capture, live
-/// notifications 40 to 45 ms apart (docs/design/blackboard.md §2.2).
-pub const PUSH_GAP: Duration = Duration::from_millis(25);
+/// A push stays open this long after its last notification: whatever comes within it belongs to
+/// the push, and only a short chunk, or this much quiet, ends it. Time cannot tell a page from
+/// the pen (on the PC's own sessions both came a few tens of milliseconds apart, sometimes in
+/// bursts of a millisecond): this only bounds a push that ends on a full chunk. **Supposed**:
+/// the gaps seen between the chunks of a page stayed well under it. The price: a pen
+/// notification right after a push that ends on a full chunk of whole records is set aside too
+/// (six records at most, about 50 ms of ink), rather than six records of the page drawn as ink
+/// (docs/design/blackboard.md §9.4).
+pub const PUSH_GAP: Duration = Duration::from_millis(100);
 /// Granularity of the waits, so that cancellation is noticed quickly.
 const WAIT_SLICE: Duration = Duration::from_millis(250);
 /// Live notifications kept while nobody reads them (oldest dropped first).
@@ -1109,6 +1114,9 @@ mod tests {
         /// Events that come once the test clock reaches their time (ms), whatever is written.
         late: VecDeque<(u64, TransportEvent)>,
         writes: Arc<Mutex<Vec<Vec<u8>>>>,
+        /// A request that cuts short what the session waits for, raised once the test clock
+        /// reaches this time (ms).
+        cancel_at: Option<(u64, Arc<AtomicBool>)>,
     }
 
     impl Transport for Board {
@@ -1130,6 +1138,11 @@ mod tests {
                 return Ok(Some(event));
             }
             let now = self.clock.0.load(Ordering::SeqCst);
+            if let Some((at, flag)) = &self.cancel_at
+                && *at <= now
+            {
+                flag.store(true, Ordering::SeqCst);
+            }
             if self.late.front().is_some_and(|(due, _)| *due <= now) {
                 return Ok(self.late.pop_front().map(|(_, event)| event));
             }
@@ -1165,6 +1178,17 @@ mod tests {
         steps: Vec<(&str, Vec<TransportEvent>)>,
         late: Vec<(u64, TransportEvent)>,
     ) -> (BoardSession, Writes, Arc<TestClock>) {
+        session_cancelled(steps, late, None)
+    }
+
+    /// [`session_with`], a request cutting short what the session waits for once the test clock
+    /// reaches `cancel_at` (ms).
+    fn session_cancelled(
+        steps: Vec<(&str, Vec<TransportEvent>)>,
+        late: Vec<(u64, TransportEvent)>,
+        cancel_at: Option<u64>,
+    ) -> (BoardSession, Writes, Arc<TestClock>) {
+        let flag = Arc::new(AtomicBool::new(false));
         let clock = Arc::new(TestClock(AtomicU64::new(0)));
         let writes = Arc::new(Mutex::new(Vec::new()));
         let board = Board {
@@ -1181,12 +1205,11 @@ mod tests {
             pending: VecDeque::new(),
             late: late.into(),
             writes: writes.clone(),
+            cancel_at: cancel_at.map(|at| (at, flag.clone())),
         };
-        (
-            BoardSession::open(Box::new(board), clock.clone()),
-            writes,
-            clock,
-        )
+        let mut session = BoardSession::open(Box::new(board), clock.clone());
+        session.set_cancel_flag(flag);
+        (session, writes, clock)
     }
 
     /// A page of `n` records (7 bytes each).
@@ -1953,5 +1976,70 @@ mod tests {
         assert_eq!(board.take_set_aside(), 518 + 1743);
         assert_eq!(board.take_set_aside(), 0);
         board.stop_live().unwrap();
+    }
+
+    /// The chunks of a push and the pen's notifications are not told apart by time (both come
+    /// a few tens of milliseconds apart): a push of seven full chunks (whole records) whose last,
+    /// short, chunk comes 40 ms late is set aside whole; the pen after a pause is not (checked
+    /// with the gap of 25 ms first used: the last chunk then became ink).
+    #[test]
+    fn a_push_whose_last_chunk_comes_late_is_set_aside_whole() {
+        let pushed = page_bytes(249); // seven full chunks of 244 bytes (1 708, whole), then 35
+        let pen = page_bytes(6);
+        let mut late = Vec::new();
+        let mut at = 1_000;
+        for chunk in pushed.chunks(244) {
+            late.push((at, data(chunk)));
+            at += if chunk.len() == 244 { 30 } else { 0 };
+        }
+        // The last chunk: 40 ms after the seventh.
+        let tail = late.pop().unwrap().1;
+        late.push((at + 10, tail));
+        late.push((at + 400, data(&pen[..42])));
+        let (mut board, _, _) =
+            session_with(vec![("12 02 08 01", vec![]), ("12 02 08 02", vec![])], late);
+        board.start_live().unwrap();
+        // Short waits: each notification is taken in within 5 ms of when it is due.
+        let mut seen = Vec::new();
+        for _ in 0..400 {
+            if let Some(n) = board.next_live_event(Duration::from_millis(5)).unwrap() {
+                seen.push(n.data.len());
+            }
+        }
+        assert_eq!(seen, [42], "only the pen");
+        assert_eq!(board.take_set_aside(), 1743);
+        board.stop_live().unwrap();
+    }
+
+    /// A download of an open page cut short by a request (a cancel): what came is copied apart as
+    /// doubtful and the sync remembers it, to say so when it ends.
+    #[test]
+    fn a_cancelled_download_of_an_open_page_is_copied_apart() {
+        let page = page_bytes(80);
+        let late: Vec<(u64, TransportEvent)> = page
+            .chunks(244)
+            .enumerate()
+            .map(|(i, chunk)| (400 + 10 * i as u64, data(chunk)))
+            .collect();
+        let (mut board, writes, _) = session_cancelled(
+            vec![
+                ("12 01 04", vec![counted()]),
+                (
+                    "12 01 05",
+                    vec![reply("12 0d 05 68 00 00 02 00 00 02 30 00 00 00 00")],
+                ),
+                ("12 06 03 01 68 00 00 02", vec![]),
+            ],
+            late,
+            Some(415),
+        );
+        let mut keeper = keeping(|_| panic!("never a note"));
+        let mut sync = BoardSync::default();
+        let step = board.sync_page(&mut sync, &mut keeper);
+        assert_eq!(step, Err(DeviceError::Cancelled));
+        // The first chunk came before the cancel was seen.
+        assert_eq!(keeper.copies, [(0x6800_0002, RescueKind::Doubtful, 244)]);
+        assert_eq!(sync.doubtful(), [0x6800_0002]);
+        assert_eq!(deletes(&writes), 0);
     }
 }
