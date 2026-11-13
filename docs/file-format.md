@@ -1,10 +1,12 @@
 # The `.ardoise` file format
 
 > Developer document, written in English (the planning documents are in French). It describes format
-> **version 1.3** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
-> `backgroundImage` field and `original.ardoise` member; 1.3 = 1.2 plus the optional `revision.json` member). Requirements: SPEC §3.3 and §3.4. Code: `crates/ardoise-core/src/format.rs`
-> (container, `note.json`) and `crates/ardoise-core/src/format/strokes.rs` (`strokes.bin`). Model: `note.rs`
-> (`ardoise-core`) and `model.rs` (`ardoise-ink`). Committed sample files: `testdata/format/v1/`.
+> **version 1.4** byte by byte (1.1 = 1.0 plus the optional `favorite` field; 1.2 = 1.1 plus the optional
+> `backgroundImage` field and `original.ardoise` member; 1.3 = 1.2 plus the optional `revision.json` member; 1.4 = 1.3
+> plus the optional `objects` field, the page objects such as text frames, §2.2). Requirements: SPEC §3.3 and §3.4. Code:
+> `crates/ardoise-core/src/format.rs` (container, `note.json`), `crates/ardoise-core/src/objects.rs` (page objects) and
+> `crates/ardoise-core/src/format/strokes.rs` (`strokes.bin`). Model: `note.rs` (`ardoise-core`) and `model.rs`
+> (`ardoise-ink`). Committed sample files: `testdata/format/v1/`.
 
 One note = one file `YYYY-MM-DD Title.ardoise`. The file is an ordinary ZIP archive, so it can be inspected with any
 unzip tool:
@@ -58,7 +60,7 @@ A member that crosses a limit, its own or what is left of the total, makes the f
 
 ## 2. `note.json`
 
-A UTF-8 JSON object. Version 1.2 and 1.3 write it indented with two spaces, `format` first and the other keys in
+A UTF-8 JSON object. Versions 1.2 to 1.4 write it indented with two spaces, `format` first and the other keys in
 alphabetical order; **key order and whitespace are not significant**.
 
 ```json
@@ -94,11 +96,12 @@ alphabetical order; **key order and whitespace are not significant**.
 | `tags` | array of strings | tags, in the user's order. |
 | `favorite` | boolean, optional (1.1) | `true` when the note is a favourite; absent otherwise. Absent in 1.0 files: not a favourite. |
 | `layers` | array of `{"name": string, "visible": boolean}` | at least one; strokes refer to layers by index (0 = first). |
+| `objects` | array, optional (1.4) | what the page holds besides its strokes: text frames today (§2.2); absent when there is none. |
 | `timing` | `"recorded"` or `"synthesized"` | whether point times were measured or made up (imported notes without timing). |
 | `origin` | `{"kind": "tablet"}`, `{"kind": "live"}`, `{"kind": "ardoise"}` or `{"kind": "inkspace", "id": string}` | where the note comes from (`id` = Inkspace's note UUID). |
 | `boardPosition` | `"buttonsBottom"`, `"buttonsTop"`, `"buttonsRight"` or `"buttonsLeft"`, optional | for a note made from a page of the Xiaomi blackboard (its `original.bin`): how the blackboard was held, i.e. how the page's points were turned to make the note (docs/design/blackboard.md, « Positions, the Rust side »). Absent: `buttonsBottom` (notes made before 2026-11). Not a key of the format's model: `ardoise-device` writes and reads it, and every reader, of any 1.x version, keeps it verbatim as an unknown key; it describes `original.bin`, which no edit changes, so it stays true after an older version edited the note. |
 
-`backgroundImage` (1.2):
+### 2.1 `backgroundImage` (1.2)
 
 | Key | Type | Meaning |
 |---|---|---|
@@ -115,10 +118,80 @@ background image rotated or cropped by Ardoise 1.1 has its image misplaced.)
 
 Strokes are not in `note.json` (a `strokes` key, if present, is ignored). Any other top-level key is **unknown**: a
 reader keeps it with its value and writes it back unchanged when it saves the note (a key it knows always takes the
-value of its own model). Unknown keys *inside* known objects are not kept (see §5).
+value of its own model). Unknown keys *inside* known objects are not kept (see §5), except inside page objects (§2.2).
 
 A reader refuses the file ("invalid note") if there is no layer, the page size is zero, or a stroke refers to a layer
 that does not exist. Writers refuse to write such a note.
+
+### 2.2 Page objects (`objects`, 1.4)
+
+What a page holds besides its strokes: **text frames** (SPEC §4.4, « Texte tapé au clavier »), and later other kinds
+(equations, bookmarks: `docs/design/page-objects.md`, which also says how to add a kind). Each element of the array is one
+flat JSON object: the **placement**, the same for every kind, and the keys of its **kind**.
+
+```json
+"objects": [
+  {
+    "kind": "text", "id": "5c1e…", "layer": 0, "t": 61250,
+    "x": 2500.0, "y": 16000.0, "scale": 1.0, "quarterTurns": 0, "width": 7350.9, "height": 750.0,
+    "text": "Cadeaux\nDes chocolats", "font": "andika", "bold": false, "size": 600.0,
+    "color": { "r": 26, "g": 58, "b": 138, "a": 255 }
+  }
+]
+```
+
+Placement (every kind):
+
+| Key | Type | Meaning |
+|---|---|---|
+| `kind` | string, not empty | the kind: `"text"` in 1.4. |
+| `id` | string | unique within the note, kept by every operation that keeps the object (a reader gives a new one to an object without id, or with the id of an earlier one: `<id>-2`, `object-2`…). |
+| `layer` | integer ≥ 0 | index into `layers`: the object is drawn with its layer, **above the strokes of that layer**, objects in array order. A reader puts an object on a missing layer on the last one (a reader before 1.4 may have merged layers without knowing objects). |
+| `t` | integer ≥ 0 | milliseconds since `created` (like a point's `t`): when the replay shows the object, all at once. |
+| `x`, `y` | number | where the content's origin (the top-left corner of its content before turning) is on the page, device units. |
+| `scale` | number > 0, optional (default 1) | page units per unit of the content. |
+| `quarterTurns` | integer, optional (default 0) | clockwise quarter turns of the content about its origin (taken modulo 4). |
+| `width`, `height` | number ≥ 0, optional (default 0) | size of the content, in its own units (before scale and turns). |
+
+The content's point `(u, v)` (its units, y down) is on the page at `(x, y) + turn(scale × (u, v))`, where one clockwise
+quarter turn maps `(u, v)` to `(−v, u)`; the content fills `[0, width] × [0, height]`. **Page operations move objects through
+the placement alone**, whatever their kind: a move adds to `x`, `y`; a uniform change of scale about a point maps `x`, `y` and
+multiplies `scale`; a quarter turn of the page maps `x`, `y` like a point and adds 1 (clockwise) or 3 (counter-clockwise) to
+`quarterTurns`; a crop shifts `x`, `y` and drops a visible object whose box is wholly outside; a split by zone moves an object
+of a visible layer whose box centre is inside the zone; a split at an instant moves the objects with `t` at or after it; a
+merge maps layers, positions and times as for strokes.
+
+Text frame (`"kind": "text"`):
+
+| Key | Type | Meaning |
+|---|---|---|
+| `text` | string | the text; only `\n` (or `\r\n`, or a lone `\r`) starts a new line: nothing wraps. |
+| `font` | `"latinModern"` or `"andika"` | the family: Latin Modern Roman 10 or Andika, shipped with Ardoise (`crates/ardoise-text/fonts/`). |
+| `bold` | boolean | the bold face of the family. |
+| `size` | number > 0 | size of the font (its em), in the content's units: device units at scale 1 (the tool offers 400, 600 and 900: 4, 6 and 9 mm). |
+| `color` | `{"r", "g", "b", "a"}` (u8 each) | colour, straight alpha. |
+
+The layout of a frame is `ardoise-text`'s (`crates/ardoise-text/src/layout.rs`): glyphs placed by their advance widths, no
+kerning nor ligature, a character missing from the family taken from the other one, a tab to the next multiple of four spaces,
+lines `1.25 × size` apart. Writers write `width` and `height` as this layout measures them (the widest line, the lines'
+height), and a reader measures them again: they are there for readers that do not know the kind.
+
+Rules for readers and writers:
+
+- A list that cannot be read (not an array, an element that is not an object, a missing `kind`, a placement key of the wrong
+  type, a `scale` that is not positive) makes the note read **without objects**, and the whole `objects` value is kept as an
+  unknown key (§5), written back as it was until the note is given objects of its own.
+- An object of a kind this version does not know, or of a known kind with a value it does not know or a wrong type (a font of a
+  later version), is kept with all its keys, moved with the page by its placement, and drawn nowhere. So a new kind, or a new
+  value of a kind, is a **minor** version: a reader of 1.4 keeps it and does not lose it when it rotates or crops the page.
+- Keys of an object this version does not know are kept with the object and written back.
+- Writers refuse (the note is not written, "invalid note") an object on a layer that does not exist, a placement that is not a
+  finite number, a `scale` or a text `size` that is not positive.
+- `objects` is written only when there is at least one object, numbers with the fewest digits that read back the same.
+
+A reader of 1.3 or older keeps `objects` verbatim (an unknown top-level key) but neither draws nor moves the objects: a note
+whose page such a version turned or cropped has its objects misplaced, and one whose layers it merged may have them on the
+wrong layer (a 1.4 reader moves an object of a missing layer to the last one).
 
 ## 3. `strokes.bin`
 
@@ -348,7 +421,8 @@ The version is `format.version` (major) and `format.minor` in `note.json`.
   Ardoise" (code `noteNewerVersion`), and is never rewritten. Readers look at `format.version` before anything else,
   so a newer major version may change everything else, including the rest of `note.json` and `strokes.bin`.
 - **Minor version** (old readers keep working): only additions that an older reader can carry along unchanged —
-  new **top-level** keys of `note.json`, new optional members. Older readers keep them verbatim, and write the file
+  new **top-level** keys of `note.json`, new optional members, and (from 1.4) new kinds of page objects, new keys of a page
+  object and new values of a page object's keys (§2.2: a reader keeps an object it cannot read). Older readers keep them verbatim, and write the file
   back with *their* version number. So new data must stay meaningful when the rest of the note has been edited by
   a version that ignores it (or the new version must re-check it when reading an older minor version).
 - **Major version** (old readers refuse the file): anything an older reader would misread or lose on save — a change
@@ -367,6 +441,7 @@ Sample files of version 1 (regenerate only when adding one:
 | `testdata/format/v1/future-minor.ardoise` | an unknown top-level key and unknown members (it was written when "1.3" stood for a later version, hence its number; it is only read, never rewritten) |
 | `testdata/format/v1/full-1.2.ardoise` | format 1.2: a turned, translucent background image from a PDF page, and `original.ardoise` |
 | `testdata/format/v1/revision-1.3.ardoise` | format 1.3: a revision with an account of two entries |
+| `testdata/format/v1/objects-1.4.ardoise` | format 1.4: text frames in both families, one bold, turned and scaled with a key of a later version, on two layers; a text frame in a font this version does not know and an object of an unknown kind (`equation`), both kept |
 
 ## 6. Library conventions (not part of the file)
 

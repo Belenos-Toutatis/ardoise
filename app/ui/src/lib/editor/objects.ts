@@ -282,22 +282,30 @@ export function objectDrawingOrder(note: Pick<Note, 'layers' | 'objects'>, only?
   return order;
 }
 
-/** The objects a lasso `polygon` takes: those of visible layers (of `only` alone when given) whose centre is inside. */
+/**
+ * Whether the editor can select and change an object: a kind it draws (text frames). An object of a kind this version does
+ * not know is drawn nowhere, so it is not selectable either: it only moves with the page.
+ */
+export function selectable(object: PageObject): boolean {
+  return isTextObject(object);
+}
+
+/** The objects a lasso `polygon` takes: selectable ones of visible layers (of `only` alone when given) whose centre is inside. */
 export function objectsInLasso(note: Pick<Note, 'layers' | 'objects'>, polygon: readonly Vec[], only?: number): number[] {
   if (polygon.length < 3) return [];
   const picked: number[] = [];
   objectsOf(note).forEach((o, i) => {
-    if (reachable(note, o.layer, only) && pointInPolygon(objectCentre(o), polygon)) picked.push(i);
+    if (selectable(o) && reachable(note, o.layer, only) && pointInPolygon(objectCentre(o), polygon)) picked.push(i);
   });
   return picked;
 }
 
-/** The topmost object (of visible layers, of `only` alone when given) whose box, grown by `tolerance`, holds `p`. */
+/** The topmost selectable object (of visible layers, of `only` alone when given) whose box, grown by `tolerance`, holds `p`. */
 export function hitObject(note: Pick<Note, 'layers' | 'objects'>, p: Vec, tolerance: number, only?: number): number | null {
   const order = objectDrawingOrder(note, only);
   for (let k = order.length - 1; k >= 0; k--) {
     const object = objectsOf(note)[order[k]];
-    if (containsPoint(inflate(objectBounds(object), tolerance), p)) return order[k];
+    if (selectable(object) && containsPoint(inflate(objectBounds(object), tolerance), p)) return order[k];
   }
   return null;
 }

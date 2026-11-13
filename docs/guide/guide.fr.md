@@ -1090,8 +1090,8 @@ de la première note est gardée.
 
 ### Chercher une note
 
-Tapez dans **Rechercher une note** : Ardoise cherche dans les *titres*, les *étiquettes* et l'*écriture
-manuscrite*, sans tenir compte des accents ni des majuscules. Les notes trouvées grâce à l'écriture sont regroupées
+Tapez dans **Rechercher une note** : Ardoise cherche dans les *titres*, les *étiquettes*, les *textes tapés* (outil
+**Texte**, sur les calques affichés) et l'*écriture manuscrite*, sans tenir compte des accents ni des majuscules. Les notes trouvées grâce à l'écriture sont regroupées
 sous **Trouvé dans l'écriture manuscrite**. `Ctrl + F` place le curseur dans le champ, `Échap` l'efface.
 
 La recherche dans l'écriture utilise la *reconnaissance d'écriture manuscrite de Windows*, hors connexion, sur ce PC.
@@ -1231,9 +1231,11 @@ La barre d'outils propose les outils suivants (**Outil**) :
   traits d'un coup.
 - **Ligne**, **Rectangle**, **Ellipse** : des formes nettes, tracées d'un glissé (voir **Tracer une ligne, un rectangle,
   une ellipse**, plus bas).
+- **Texte** : un cadre où l'on tape au clavier (voir **Taper du texte**, plus bas).
 - **Gomme** : **Traits entiers** ou **Partielle**, avec sa **Taille**. Elle n'efface que sur le calque choisi (voir
   **Calques**).
-- **Sélection** (le lasso) : entourez des traits du calque choisi pour les sélectionner ; `Maj` + lasso ajoute, `Ctrl` + lasso retire. Le
+- **Sélection** (le lasso) : entourez des traits et des textes du calque choisi pour les sélectionner (un texte est pris quand
+  son milieu est dans le lasso ; un clic sur un texte le prend seul) ; `Maj` + lasso ajoute, `Ctrl` + lasso retire. Le
   bloc **Sélection**, au-dessus de l'onglet ouvert du panneau de côté, propose **Copier**, **Couper**, **Coller**,
   **Dupliquer**, **Redresser les formes**, **Supprimer**.
   Les changements de couleur, d'encre et d'épaisseur s'appliquent alors à la sélection ; on la déplace (en la saisissant
@@ -1279,6 +1281,38 @@ Une forme est un trait ordinaire : un rectangle ou une ellipse est un seul trait
 gomme, le lasso, **Annuler**, les calques, la relecture et tous les exports la traitent comme n'importe quel trait. Ces outils ne
 sont pas dans le mode direct avec une tablette.
 
+### Taper du texte
+
+L'outil **Texte** (la touche `T`) pose sur la page un cadre où l'on tape au clavier : touchez ou cliquez la page à l'endroit
+voulu (au stylet, à la souris ou au doigt ; sur un écran tactile, Windows propose son clavier à l'écran), puis tapez. Le texte
+se dessine au fur et à mesure, tel qu'il sera exporté. `Entrée` commence une nouvelle ligne ; une ligne ne passe jamais toute
+seule à la suivante : le cadre s'élargit avec ce que vous tapez. `Échap` (ou un clic ailleurs, ou un autre outil) termine la
+saisie : le texte reste, et le cadre est sélectionné. Un cadre laissé vide disparaît. Toute la saisie s'annule d'un seul
+`Ctrl + Z`. Pendant la saisie, les touches tapées vont au texte, jamais aux raccourcis de l'éditeur.
+
+Pour modifier un texte, touchez-le avec l'outil **Texte**, ou double-cliquez dessus avec l'outil **Sélection** : le curseur se
+place à l'endroit touché.
+
+Sous la barre d'outils, avec l'outil **Texte** ou quand des textes sont sélectionnés :
+
+- **Police** : **Latin Modern** (la police de LaTeX) ou **Andika** (une police dessinée pour l'apprentissage de la lecture).
+  Les deux sont fournies avec Ardoise : le texte est le même sur tous les ordinateurs, dans tous les exports. Les lettres
+  grecques qui manquent à Latin Modern sont prises dans Andika (pas toutes : α, β, γ, δ, θ, λ, μ, π, ρ, σ, φ, χ, ω, Δ, Ω, entre
+  autres).
+- **Taille** : **Petit** (4 mm), **Moyen** (6 mm) ou **Grand** (9 mm).
+- **Gras**.
+- La couleur est celle de l'outil : choisissez-la dans les couleurs de la barre.
+
+Ces réglages s'appliquent à tout le cadre (pas de mise en forme à l'intérieur d'un cadre) : au cadre que vous tapez, sinon aux
+textes sélectionnés, et aux prochains cadres. Un clic sur ces boutons ne fait pas quitter la saisie.
+
+Un texte vit avec les traits : il se sélectionne au lasso, se déplace, se redimensionne (il grandit ou rapetisse avec les
+traits ; choisir une taille lui rend cette taille), se duplique, se copie et se colle, se supprime, tourne avec la page, va sur
+le calque choisi et suit son calque. La gomme ne l'efface pas : sélectionnez-le et supprimez-le. Il apparaît d'un coup dans la
+relecture et dans les vidéos, au moment où il a été posé, et figure dans tous les exports (images, SVG, PDF, presse-papiers,
+impression, projection, partage sur le réseau ; dans le PDF, il peut être cherché et copié). La recherche de la bibliothèque le
+trouve. L'outil **Texte** n'est pas dans le mode direct, mais une feuille reprise en direct garde ses textes.
+
 ### Redresser les formes
 
 Sélectionnez des traits, puis **Redresser les formes** (ou la touche `F`) : les droites, cercles, ellipses, rectangles
@@ -1313,9 +1347,10 @@ visibles en bas. Un petit ovale debout (un « O », un « 0 ») n'est jamais red
 
 ### Copier et coller
 
-`Ctrl + C`, `Ctrl + X` et `Ctrl + V` (ou les boutons du bloc **Sélection**) copient, coupent et collent des traits
-*d'une note à l'autre*, d'une fenêtre à l'autre, par le presse-papiers de Windows. Les traits collés gardent leur
-couleur, leur outil et leur épaisseur ; ils sont rejoués en dernier. Ce qui ne vient pas d'Ardoise est ignoré.
+`Ctrl + C`, `Ctrl + X` et `Ctrl + V` (ou les boutons du bloc **Sélection**) copient, coupent et collent des traits et des
+textes *d'une note à l'autre*, d'une fenêtre à l'autre, par le presse-papiers de Windows. Les traits collés gardent leur
+couleur, leur outil et leur épaisseur, les textes leur police, leur taille et leur couleur ; ils sont rejoués en dernier. Ce
+qui ne vient pas d'Ardoise est ignoré.
 
 ### La feuille : papier, modèle, format, orientation
 
@@ -1903,13 +1938,13 @@ comparent aux touches que la fenêtre traite vraiment.
 | `Ctrl + S` | Enregistrer |
 | `Ctrl + Z` | Annuler |
 | `Ctrl + Y`, `Ctrl + Maj + Z` | Rétablir |
-| `Ctrl + A` | Tout sélectionner (les traits du calque choisi) |
-| `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copier, couper, coller des traits |
+| `Ctrl + A` | Tout sélectionner (les traits et les textes du calque choisi) |
+| `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copier, couper, coller des traits et des textes |
 | `Suppr` ou `Retour arrière` | Supprimer la sélection |
-| `Échap` | Par étapes, un appui par étape : abandonner le geste en cours ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; enregistrer la note et revenir à la bibliothèque (jamais pendant l'enregistrement d'une narration) |
+| `Échap` | Par étapes, un appui par étape : abandonner le geste en cours ou terminer la saisie d'un texte (le texte reste) ; fermer la découpe, la relecture, le recadrage ou le réglage de **Redresser les formes** ; désélectionner ; enregistrer la note et revenir à la bibliothèque (jamais pendant l'enregistrement d'une narration) |
 | `Maj`, `Alt` (tenues pendant le tracé d'une forme) | Inverser **Forme régulière** (`Maj`) ou **Depuis le centre** (`Alt`) pour ce tracé |
 | `Alt + ←`, `Alt + →` | **Page précédente**, **Page suivante** (la note d'avant, la note d'après dans la bibliothèque) |
-| `V`, `P`, `E`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Déplacer la page** |
+| `V`, `P`, `E`, `T`, `H` | Outils **Sélection**, **Stylo**, **Gomme**, **Texte**, **Déplacer la page** |
 | `Espace` (maintenu) | Déplacer la page (sauf si un bouton a le focus : `Espace` agit alors sur ce bouton, y compris une icône du rail) |
 | `F` | **Redresser les formes** |
 | `R` | **Relecture** |

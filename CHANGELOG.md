@@ -2,6 +2,15 @@
 
 ## Non publié
 
+### Ajouté (outil Texte ; demande de l'utilisateur du 2026-11-13, Q20 point 6)
+
+- **Outil Texte** dans l'éditeur (SPEC §4.4, touche `T`) : un toucher ou un clic sur la page pose un cadre où l'on tape au clavier (au stylet, à la souris ou au doigt ; le clavier à l'écran de Windows sur un écran tactile). `Entrée` commence une ligne, rien ne passe seul à la ligne ; `Échap`, un clic ailleurs ou un autre outil termine la saisie, le texte gardé et le cadre sélectionné ; un cadre vide disparaît ; toute la saisie s'annule d'un seul `Ctrl + Z` ; les touches tapées ne déclenchent jamais les raccourcis de l'éditeur. Toucher un texte avec l'outil, ou le double-cliquer avec la sélection, le rouvre.
+- **Deux polices fournies avec Ardoise**, en normal et en gras : **Latin Modern Roman** (GUST, version 2.004, licence GUST Font License) et **Andika** (SIL, version 6.200, SIL Open Font License 1.1), fichiers d'origine non modifiés, téléchargés sur les sites officiels avec l'accord de l'utilisateur (`crates/ardoise-text/fonts/README.md`, `THIRD-PARTY-NOTICES`, et la fenêtre **À propos**). Les lettres grecques absentes de Latin Modern viennent d'Andika. Trois tailles (4, 6 et 9 mm), la couleur de l'outil, gras ou non, une seule mise en forme par cadre ; les boutons s'appliquent au cadre tapé, sinon aux textes sélectionnés.
+- **Un texte vit avec les traits** : sélection au lasso (son milieu dans le lasso) ou d'un clic, `Ctrl + A`, déplacement, redimensionnement, duplication, copier-coller (aussi d'une note à l'autre), suppression, couleur, calques, rotation et recadrage de la page, « Adapter l'écriture à la feuille », découpe (à un instant ou par zone) et assemblage, « Revenir à l'original ». La gomme ne l'efface pas.
+- **Partout où la page se voit** : dessiné avec les mêmes contours de lettres à l'écran et dans tous les exports (PNG, JPEG, WebP, SVG, PDF vectoriel où le texte se cherche et se copie, MP4, WebM, GIF, presse-papiers, impression, vignettes), à la projection, sur les écrans du partage (calques affichés seulement) et en direct sur une feuille reprise ; il apparaît d'un coup dans la relecture et les vidéos, au moment où il a été posé. La recherche de la bibliothèque trouve les textes tapés (calques affichés), l'assistant (MCP) les lit (`get_note`, `get_note_text`, `search_notes`) et ne les perd dans aucune de ses opérations.
+- **Format des notes 1.4** : la clé `objects` de `note.json` (`docs/file-format.md` §2.2), prévue aussi pour les équations et les signets à venir ; une version plus ancienne d'Ardoise garde ces objets tels quels mais ne les dessine pas. Conception : `docs/design/page-objects.md`.
+- La note de démonstration « Idées pour Noël » contient trois textes.
+
 ### Ajouté (retour de l'utilisateur du 2026-11-13, après la première version Q20)
 
 - **Glisser des notes sur Favoris ou sur une étiquette** de la barre latérale : elles deviennent des favoris, ou reçoivent cette étiquette, sans changer de classeur (une carte seule, ou toute la sélection).

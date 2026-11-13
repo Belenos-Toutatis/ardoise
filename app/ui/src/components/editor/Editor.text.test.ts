@@ -261,6 +261,26 @@ describe('the text tool', () => {
     expect(objects.map((o) => o.text)).toEqual(['Bonjour à tous']);
   });
 
+  it('goes to the frame tapped even when the one left behind was emptied (and goes)', async () => {
+    const v = await render();
+    v.tool('Texte').click();
+    await tick();
+    await v.tap(6000, 9000);
+    await v.type('Un');
+    await v.tap(6000, 14_000);
+    await v.type('Deux');
+    await v.key('Escape', {}, v.field()!);
+    // Type in the first, empty it, then tap the second: the first goes, the second is typed in.
+    await v.tap(6050, 9000);
+    expect(v.field()!.value).toBe('Un');
+    await v.type('');
+    await v.tap(6050, 14_000);
+    expect(v.field()!.value).toBe('Deux');
+    await v.key('Escape', {}, v.field()!);
+    const objects = await v.saved();
+    expect(objects.map((o) => o.text)).toEqual(['Deux']);
+  });
+
   it('gives the family, the size, bold and the colour to the frame being typed and to selected frames', async () => {
     const v = await render();
     v.tool('Texte').click();

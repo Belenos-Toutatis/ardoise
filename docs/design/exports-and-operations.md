@@ -21,6 +21,9 @@ app/ui          export dialog, split panel in the editor, merge in the library s
 
 ## Shared rules
 
+Page objects (text frames, format 1.4) are drawn by every format and carried by split and merge: `docs/design/page-objects.md`
+(§2 for the operations, §3 for the drawing).
+
 - One drawing of the strokes: every format fills `ardoise_ink::outline(stroke)` with the non-zero rule. What
   a tool paints (felt-tip halo, highlighter blending, pencil and chalk grain, opacities) is described once, in
   `ardoise-render` (`look`), and consumed by the raster painter, the SVG writer and the PDF writer. Vector

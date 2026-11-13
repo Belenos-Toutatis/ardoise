@@ -1355,17 +1355,21 @@
   /** A tap of the text tool: typing in a frame of the chosen layer, or in a new frame put there. */
   function startText(request: { kind: 'new'; at: { x: number; y: number } } | { kind: 'edit'; index: number; caret: number }) {
     if (!doc || !history || !ink || replaying || split) return;
+    // The frame asked for, by its id: ending the typing of another one may remove that one (left empty) and move indices.
+    const wanted = request.kind === 'edit' ? objectsOf(history.present.note)[request.index]?.id : undefined;
     endText();
     const current = history.present;
     if (tools.mode !== 'text') tools = { ...tools, mode: 'text' };
     textSessions += 1;
     if (request.kind === 'edit') {
       const base = current;
+      const index = objectsOf(base.note).findIndex((o) => o.id === wanted);
+      const frame = objectsOf(base.note)[index];
+      if (!frame || !isTextObject(frame)) return;
       // The tool shows the frame's family, size and bold (what its buttons then change).
-      const frame = objectsOf(base.note)[request.index];
-      if (frame && isTextObject(frame)) tools = { ...tools, text: { font: frame.font, bold: frame.bold, size: frame.size } };
+      tools = { ...tools, text: { font: frame.font, bold: frame.bold, size: frame.size } };
       history = replacePresent(history, selectItems(base, []));
-      textEdit = { index: request.index, base, caret: request.caret, session: textSessions };
+      textEdit = { index, base, caret: request.caret, session: textSessions };
       return;
     }
     if (!canDraw(current)) return hiddenLayerNotice();

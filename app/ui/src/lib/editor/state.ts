@@ -19,6 +19,7 @@ import {
   objectsOf,
   remapObjectLayers,
   removeObjects,
+  selectable,
   transformObjects,
   withObjects,
   type TextChange,
@@ -184,7 +185,7 @@ export function clearSelection(doc: Doc): Doc {
 export function selectAll(doc: Doc): Doc {
   const only = onLayer(doc.note, doc.activeLayer);
   const objects = doc.note.layers[doc.activeLayer]?.visible
-    ? objectsOf(doc.note).flatMap((o, i) => (o.layer === doc.activeLayer ? [i] : []))
+    ? objectsOf(doc.note).flatMap((o, i) => (o.layer === doc.activeLayer && selectable(o) ? [i] : []))
     : [];
   return select(
     doc,

@@ -1025,8 +1025,8 @@ Give the **Title of the new note** and click **Assemble**. Only the first note's
 
 ### Searching for a note
 
-Type in **Search notes**: Ardoise searches the *titles*, the *tags* and the *handwriting*, ignoring accents and
-capital letters. Notes found through the handwriting are grouped under **Found in the handwriting**. `Ctrl + F` puts
+Type in **Search notes**: Ardoise searches the *titles*, the *tags*, the *typed texts* (**Text** tool, on the layers
+shown) and the *handwriting*, ignoring accents and capital letters. Notes found through the handwriting are grouped under **Found in the handwriting**. `Ctrl + F` puts
 the cursor in the field, `Esc` clears it.
 
 Searching the handwriting uses *Windows' handwriting recognition*, offline, on this PC. The language module must be
@@ -1157,8 +1157,10 @@ The toolbar offers these tools (**Tool**):
   pressure. **Apply to the whole note:** **Colour**, **Ink** or **Width** changes all the strokes at once.
 - **Line**, **Rectangle**, **Ellipse**: clean shapes drawn with a drag (see **Drawing a line, a rectangle, an ellipse**,
   below).
+- **Text**: a frame where you type with the keyboard (see **Typing text**, below).
 - **Eraser**: **Whole strokes** or **Partial**, with its **Size**. It erases only on the chosen layer (see **Layers**).
-- **Select** (the lasso): draw around strokes of the chosen layer to select them; `Shift` + lasso adds, `Ctrl` + lasso removes. The
+- **Select** (the lasso): draw around strokes and texts of the chosen layer to select them (a text is taken when its middle
+  is in the lasso; a click on a text takes it alone); `Shift` + lasso adds, `Ctrl` + lasso removes. The
   **Selection** block, above the open tab of the side panel, offers **Copy**, **Cut**, **Paste**, **Duplicate**,
   **Straighten shapes**, **Delete**. Changes of
   colour, ink and width then apply to the selection; you move it (by grabbing it inside its frame) and resize it (by the
@@ -1200,6 +1202,36 @@ is an ordinary stroke: a rectangle or an ellipse is one closed stroke (the parti
 lasso, **Undo**, the layers, the replay and every export treat it like any other stroke. These tools are not in live mode
 with a tablet.
 
+### Typing text
+
+The **Text** tool (the `T` key) puts on the page a frame where you type with the keyboard: tap or click the page where you want
+it (with the pen, the mouse or a finger; on a touch screen, Windows offers its on-screen keyboard), then type. The text is drawn
+as you type, as it will be exported. `Enter` starts a new line; a line never runs on to the next by itself: the frame widens
+with what you type. `Esc` (or a click elsewhere, or another tool) ends the typing: the text stays, and the frame is selected.
+A frame left empty goes away. The whole typing is undone by one `Ctrl + Z`. While you type, the keys go to the text, never to
+the editor's shortcuts.
+
+To change a text, tap it with the **Text** tool, or double-click it with the **Select** tool: the cursor goes where you tapped.
+
+Under the toolbar, with the **Text** tool or when texts are selected:
+
+- **Font**: **Latin Modern** (the font of LaTeX) or **Andika** (a font designed for learning to read). Both come with
+  Ardoise: the text is the same on every computer and in every export. The Greek letters Latin Modern lacks are taken from
+  Andika (not all of them: α, β, γ, δ, θ, λ, μ, π, ρ, σ, φ, χ, ω, Δ, Ω, among others).
+- **Size**: **Small** (4 mm), **Medium** (6 mm) or **Large** (9 mm).
+- **Bold**.
+- The colour is the tool's: choose it among the toolbar's colours.
+
+These settings apply to the whole frame (no formatting inside a frame): to the frame you are typing, else to the selected
+texts, and to the next frames. Clicking these buttons does not end the typing.
+
+A text lives with the strokes: it is selected with the lasso, moved, resized (it grows or shrinks with the strokes; choosing a
+size gives it that size again), duplicated, copied and pasted, deleted, turned with the page, put on the chosen layer and
+follows its layer. The eraser does not erase it: select it and delete it. It appears at once in the replay and in videos, at
+the moment it was put down, and is in every export (images, SVG, PDF, clipboard, printing, projection, network share; in the
+PDF it can be searched and copied). The library's search finds it. The **Text** tool is not in live mode, but a sheet resumed
+in live mode keeps its texts.
+
 ### Straightening shapes
 
 Select strokes, then **Straighten shapes** (or the `F` key): lines, circles, ellipses, rectangles (even rotated) and
@@ -1231,9 +1263,9 @@ bottom. A small upright oval (an "O", a "0") is never straightened, whatever the
 
 ### Copy and paste
 
-`Ctrl + C`, `Ctrl + X` and `Ctrl + V` (or the buttons of the **Selection** block) copy, cut and paste strokes *from one
-note to another*, from one window to another, through Windows' clipboard. Pasted strokes keep their colour, tool and
-width; they are replayed last. Anything that does not come from Ardoise is ignored.
+`Ctrl + C`, `Ctrl + X` and `Ctrl + V` (or the buttons of the **Selection** block) copy, cut and paste strokes and texts
+*from one note to another*, from one window to another, through Windows' clipboard. Pasted strokes keep their colour, tool
+and width, texts their font, size and colour; they are replayed last. Anything that does not come from Ardoise is ignored.
 
 ### The sheet: paper, template, format, orientation
 
@@ -1797,13 +1829,13 @@ These shortcuts do nothing while you are typing in a text field, except those of
 | `Ctrl + S` | Save |
 | `Ctrl + Z` | Undo |
 | `Ctrl + Y`, `Ctrl + Shift + Z` | Redo |
-| `Ctrl + A` | Select everything (the chosen layer's strokes) |
-| `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copy, cut, paste strokes |
+| `Ctrl + A` | Select everything (the chosen layer's strokes and texts) |
+| `Ctrl + C`, `Ctrl + X`, `Ctrl + V` | Copy, cut, paste strokes and texts |
 | `Delete` or `Backspace` | Delete the selection |
-| `Esc` | In steps, one press per step: drop the gesture under way; close the split, the replay, the crop or the **Straighten shapes** setting; deselect; save the note and go back to the library (never while a narration is being recorded) |
+| `Esc` | In steps, one press per step: drop the gesture under way or end the typing of a text (the text stays); close the split, the replay, the crop or the **Straighten shapes** setting; deselect; save the note and go back to the library (never while a narration is being recorded) |
 | `Shift`, `Alt` (held while drawing a shape) | Invert **Regular shape** (`Shift`) or **From the centre** (`Alt`) for that stroke |
 | `Alt + ←`, `Alt + →` | **Previous page**, **Next page** (the note before, the note after in the library) |
-| `V`, `P`, `E`, `H` | Tools **Select**, **Pen**, **Eraser**, **Move the page** |
+| `V`, `P`, `E`, `T`, `H` | Tools **Select**, **Pen**, **Eraser**, **Text**, **Move the page** |
 | `Space` (held) | Move the page (unless a button has the focus: `Space` then works that button, a rail icon included) |
 | `F` | **Straighten shapes** |
 | `R` | **Replay** |

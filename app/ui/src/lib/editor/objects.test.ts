@@ -159,6 +159,15 @@ describe('selection', () => {
     expect(hitObject(p, inside, 10, 0)).toBe(0);
     expect(hitObject(p, { x: 15_000, y: 15_000 }, 10)).toBeNull();
   });
+
+  it('leaves out an object of a kind this version does not draw: it only moves with the page', () => {
+    const equation: PageObject = { kind: 'equation', id: 'e', layer: 0, t: 0, x: 1000, y: 1000, scale: 1, quarterTurns: 0, width: 500, height: 200, latex: 'x^2' };
+    const p = withFrames(note([]), [equation]);
+    expect(objectsInLasso(p, square)).toEqual([]);
+    expect(hitObject(p, objectCentre(equation), 10)).toBeNull();
+    const turned = objectsOf(rotateQuarter(p, 'cw'))[0];
+    expect(turned).toMatchObject({ kind: 'equation', latex: 'x^2', quarterTurns: 1 });
+  });
 });
 
 describe('page operations carry the objects', () => {
