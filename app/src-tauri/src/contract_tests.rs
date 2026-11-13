@@ -212,6 +212,10 @@ fn the_errors_of_the_blackboard_are_a_code_and_a_message() {
         "blackboardConfirmDelete",
         "pageUnreadable",
         "sheetOtherTablet",
+        "blackboardPagesFirst",
+        "pageRescued",
+        "pageDoubtful",
+        "pageNotSaved",
     ] {
         let value = serde_json::to_value(CommandError::new(code, "detail")).unwrap();
         assert_eq!(value, json!({ "code": code, "message": "detail" }));
@@ -306,6 +310,10 @@ fn every_error_code_of_the_tablet_paths_has_a_text_in_both_languages() {
         "sheetOtherTablet",
         "simulationOnly",
         "syncRefused",
+        "blackboardPagesFirst",
+        "pageRescued",
+        "pageDoubtful",
+        "pageNotSaved",
     ] {
         assert!(codes.contains(code), "{code} not found in {codes:?}");
     }

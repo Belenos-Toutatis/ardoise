@@ -904,6 +904,39 @@ fn erasing_the_tablets_screen_goes_to_a_new_page_once_the_page_has_ink() {
     assert_eq!(hub.stop().unwrap().len(), 2, "the two pages with ink");
 }
 
+/// SPEC §4.2: the blackboard holds stored pages that must be imported first: the service ends the
+/// run with `PagesFirst`, which reaches the windows as the `refused` event (`blackboardPagesFirst`)
+/// and leaves the session idle; nothing is written, and the sink takes nothing more.
+#[test]
+fn a_run_ended_for_the_blackboards_pages_is_refused_with_its_code() {
+    let (_dir, library) = library();
+    let hub = LiveHub::new(config());
+    let window = Arc::new(Window::default());
+    hub.subscribe("main", window.clone());
+    let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
+    sink.input(LiveInput::PagesFirst { pages: 2 });
+    assert!(!sink.active());
+    wait_until("the refusal", || {
+        window
+            .events()
+            .iter()
+            .any(|event| matches!(event, LiveEvent::Refused { .. }))
+    });
+    let refused: Vec<String> = window
+        .events()
+        .into_iter()
+        .filter_map(|event| match event {
+            LiveEvent::Refused { code, .. } => Some(code),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(refused, ["blackboardPagesFirst"]);
+    assert_eq!(hub.snapshot().state, LiveSessionState::Idle);
+    stroke(&mut sink, 3000, 5);
+    assert!(hub.snapshot().page.strokes.is_empty(), "nothing written");
+    assert!(hub.stop().unwrap().is_empty());
+}
+
 #[test]
 fn the_tablet_states_are_shown() {
     let (_dir, library) = library();
@@ -1578,6 +1611,7 @@ pub(super) fn stream_simulated_start(
             identity_root: Some(identity.path().to_path_buf()),
             options: TabletOptions::default(),
             simulated: true,
+            rescue_fallback: None,
         },
         Box::new(Factory(tablet.clone())),
         Arc::new(Hands(tablet.clone(), seconds)),

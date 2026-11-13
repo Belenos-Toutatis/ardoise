@@ -190,6 +190,9 @@ pub fn orient_record(
 #[derive(Debug, Default)]
 pub struct ImportedPages {
     listed: HashMap<String, PathBuf>,
+    /// Notes by creation time (Unix ms): a blackboard note updated by a later store of its
+    /// screen keeps the creation time of its first page ([`LibrarySink::store_page`]).
+    created: HashMap<i64, Vec<PathBuf>>,
     /// Files of the trash by note id (a note may have been trashed more than once).
     trashed: HashMap<String, Vec<PathBuf>>,
 }
@@ -197,27 +200,50 @@ pub struct ImportedPages {
 impl ImportedPages {
     /// Reads the ids of every note of `library` and of its trash (once per sync).
     pub fn scan(library: &Library) -> Self {
-        let listed = library
-            .list()
-            .notes
-            .into_iter()
-            .map(|entry| (entry.id, entry.path))
-            .collect();
+        let mut listed = HashMap::new();
+        let mut created: HashMap<i64, Vec<PathBuf>> = HashMap::new();
+        for entry in library.list().notes {
+            created
+                .entry(entry.created)
+                .or_default()
+                .push(entry.path.clone());
+            listed.insert(entry.id, entry.path);
+        }
         let mut trashed: HashMap<String, Vec<PathBuf>> = HashMap::new();
         for item in library.trash_items().unwrap_or_default() {
             if let Some(id) = item.note_id {
                 trashed.entry(id).or_default().push(item.path);
             }
         }
-        Self { listed, trashed }
+        Self {
+            listed,
+            created,
+            trashed,
+        }
     }
 
     /// The note `page` was already saved as: a note of the library with its id that holds
-    /// exactly its bytes (`original.bin`), so the page is safe in the library.
+    /// exactly its bytes (`original.bin`), so the page is safe in the library. For a page of
+    /// the blackboard, also a note created at the page's time whose `original.bin` starts with
+    /// the page's bytes: the note of its screen, updated since by a later store that holds it
+    /// whole (docs/design/blackboard.md §9.6).
     pub fn find(&self, library: &Library, page: &DownloadedPage) -> Option<PathBuf> {
-        let path = self.listed.get(&page_note_id(page))?;
-        let loaded = library.read(path).ok()?;
-        (loaded.file.original.as_deref() == Some(page.bytes.as_slice())).then_some(loaded.path)
+        if let Some(path) = self.listed.get(&page_note_id(page))
+            && let Ok(loaded) = library.read(path)
+            && loaded.file.original.as_deref() == Some(page.bytes.as_slice())
+        {
+            return Some(loaded.path);
+        }
+        if page.kind != TabletKind::Blackboard || page.bytes.is_empty() {
+            return None;
+        }
+        let created = page.timestamp?.checked_mul(1000)?;
+        self.created.get(&created)?.iter().find_map(|path| {
+            let loaded = library.read(path).ok()?;
+            let original = loaded.file.original.as_deref()?;
+            (loaded.file.note.page == BLACKBOARD_PAGE && original.starts_with(&page.bytes))
+                .then_some(loaded.path)
+        })
     }
 
     /// Whether the note of `page` is in the trash: the user deleted it, so a page kept on the
@@ -241,6 +267,16 @@ impl ImportedPages {
     /// Records the note just saved at `path` from the page whose [`page_note_id`] is `id`.
     pub fn add(&mut self, id: String, path: &Path) {
         self.listed.insert(id, path.to_path_buf());
+    }
+
+    /// Records the note just saved (or updated) at `path` from `page`: by its id, and by its
+    /// creation time.
+    pub fn record(&mut self, page: &DownloadedPage, path: &Path, created: i64) {
+        self.add(page_note_id(page), path);
+        let paths = self.created.entry(created).or_default();
+        if !paths.iter().any(|p| p == path) {
+            paths.push(path.to_path_buf());
+        }
     }
 }
 
@@ -458,6 +494,130 @@ pub type ThumbnailMaker<'a> = Box<dyn Fn(&Note) -> Option<Vec<u8>> + 'a>;
 #[cfg(test)]
 type TamperHook<'a> = Box<dyn Fn(&std::path::Path) + 'a>;
 
+/// How far around the time of an earlier page the notes made from it are looked for
+/// ([`LibrarySink::store_page`]): a note is modified (imported) after its page was stored, give or
+/// take the drift between the tablet's clock and the computer's (**supposed** at most a day; the
+/// clock is set at each connection and was right an hour later: research note §6).
+pub const CANDIDATE_MARGIN_MS: i64 = 86_400_000;
+
+/// What an update of an earlier note came to ([`LibrarySink::store_page`]).
+enum Update {
+    /// Updated: its place, its creation time (kept).
+    Done(SavedNote, i64),
+    /// Not to be updated (why): a new note is added.
+    Refused(String),
+    /// Written, but it does not read back: the page is not safe.
+    Failed(String),
+}
+
+/// What the page store did with a page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stored {
+    /// A new note.
+    New,
+    /// A new note, although the page replaces an earlier store of its screen: why the note of
+    /// that store was not updated (for the log).
+    NewNotUpdated(String),
+    /// The note of the earlier store of the screen (the page of time `replaced`) was updated.
+    Updated { replaced: u32 },
+}
+
+/// The note a page became ([`LibrarySink::store_page`], the service's page store).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredPage {
+    pub path: PathBuf,
+    /// The note's creation time (Unix ms), for [`ImportedPages::record`].
+    pub created: i64,
+    pub how: Stored,
+}
+
+impl StoredPage {
+    /// A new note at `path`.
+    pub fn new(path: PathBuf, created: i64) -> Self {
+        Self {
+            path,
+            created,
+            how: Stored::New,
+        }
+    }
+}
+
+/// The one note of the library made from the page of time `previous` (its id is that page's,
+/// its `original.bin` that page), read; `Err` says why there is none to update.
+fn earlier_note(library: &Library, previous: u32) -> Result<LoadedNote, String> {
+    let time_ms = i64::from(previous) * 1000;
+    let mut found = Vec::new();
+    for entry in library.list().notes {
+        if entry.created > time_ms || entry.modified < time_ms - CANDIDATE_MARGIN_MS {
+            continue;
+        }
+        let Ok(loaded) = library.read(&entry.path) else {
+            continue;
+        };
+        let Some(original) = loaded.file.original.clone() else {
+            continue;
+        };
+        let page = DownloadedPage {
+            announced_size: u32::try_from(original.len()).unwrap_or(u32::MAX),
+            bytes: original,
+            timestamp: Some(i64::from(previous)),
+            kind: TabletKind::Blackboard,
+            previous: None,
+        };
+        if page_note_id(&page) == loaded.file.note.id {
+            found.push(loaded);
+        }
+    }
+    match found.len() {
+        0 => Err("no note of it in the library (deleted, in the trash or not imported)".into()),
+        1 => Ok(found.remove(0)),
+        n => Err(format!("{n} notes of it in the library")),
+    }
+}
+
+/// Whether `file` is still what importing its own `original.bin` gives (`layer_name` for its
+/// layer), after the format's rounding: its ink, layers, paper, background and image, timing
+/// and origin, and nothing added (narration, background file, text, revision, original note).
+/// Title, tags, favourite mark, thumbnail and `modified` do not count.
+fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<(), String> {
+    let Some(original) = file.original.clone() else {
+        return Err("it keeps no page".into());
+    };
+    if file.audio.is_some()
+        || file.background.is_some()
+        || file.text.is_some()
+        || file.revision.is_some()
+        || file.original_note.is_some()
+    {
+        return Err("something was added to it since its import".into());
+    }
+    let page = DownloadedPage {
+        announced_size: u32::try_from(original.len()).unwrap_or(u32::MAX),
+        bytes: original,
+        timestamp: Some(file.note.created / 1000),
+        kind: TabletKind::Blackboard,
+        previous: None,
+    };
+    let again = blackboard_note(&page, file.note.id.clone(), layer_name, file.note.created);
+    let again = format::to_bytes(&again)
+        .and_then(|bytes| format::read_from_bytes(&bytes))
+        .map_err(|e| e.to_string())?
+        .note;
+    let note = &file.note;
+    let same = note.page == again.page
+        && note.background == again.background
+        && note.background_image == again.background_image
+        && note.layers == again.layers
+        && note.strokes == again.strokes
+        && note.timing == again.timing
+        && note.origin == again.origin;
+    if same {
+        Ok(())
+    } else {
+        Err("it was edited since its import".into())
+    }
+}
+
 /// Stores synced pages as new notes of a library binder.
 pub struct LibrarySink<'a> {
     library: &'a Library,
@@ -524,12 +684,124 @@ impl<'a> LibrarySink<'a> {
         self
     }
 
-    /// Saves `page` as a new note (id: [`page_note_id`]) and checks it reads back identical.
-    /// An `Err` keeps the page on the tablet (the session does not delete it) and puts the copy
-    /// just written aside ([`discard`](Self::discard)) so that it never counts as imported: the
-    /// next sync writes the page again. Fits `Session::sync`'s sink:
-    /// `&mut |page, _, _| sink.store(page).map(|_| ())`.
+    /// [`store_page`](Self::store_page), the note's place and stamp.
     pub fn store(&mut self, page: DownloadedPage) -> Result<SavedNote, String> {
+        self.store_page(page)?;
+        self.saved
+            .last()
+            .cloned()
+            .ok_or_else(|| "the page store wrote nothing".to_owned())
+    }
+
+    /// Saves `page` as a note and checks it reads back identical: the one page store of the
+    /// sync, of the rescue copies and of `--import-blackboard-pages`.
+    ///
+    /// A page of the blackboard that replaces an earlier store of its screen
+    /// ([`DownloadedPage::previous`]) updates the note of that store when there is exactly one,
+    /// unedited since its import, and the new page holds it whole (SPEC §4.1,
+    /// docs/design/blackboard.md §9.6); otherwise, and for every other page, a new note (id:
+    /// [`page_note_id`]). An `Err` keeps the page on the tablet (the session does not delete
+    /// it); a new note that failed its check is put aside ([`discard`](Self::discard)) so that
+    /// it never counts as imported: the next sync writes the page again.
+    pub fn store_page(&mut self, page: DownloadedPage) -> Result<StoredPage, String> {
+        let not_updated = match page.previous {
+            Some(previous) if page.kind == TabletKind::Blackboard => {
+                match self.update(&page, previous) {
+                    Update::Done(saved, created) => {
+                        return Ok(StoredPage {
+                            path: saved.path,
+                            created,
+                            how: Stored::Updated { replaced: previous },
+                        });
+                    }
+                    Update::Refused(why) => Some(why),
+                    Update::Failed(error) => return Err(error),
+                }
+            }
+            _ => None,
+        };
+        let (saved, created) = self.create(page)?;
+        let how = match not_updated {
+            Some(why) => Stored::NewNotUpdated(why),
+            None => Stored::New,
+        };
+        Ok(StoredPage {
+            path: saved.path,
+            created,
+            how,
+        })
+    }
+
+    /// Updates the note of the page of time `previous` with `page` (docs/design/blackboard.md
+    /// §9.6).
+    fn update(&mut self, page: &DownloadedPage, previous: u32) -> Update {
+        let why =
+            |reason: String| Update::Refused(format!("its earlier store ({previous}): {reason}"));
+        let loaded = match earlier_note(self.library, previous) {
+            Ok(loaded) => loaded,
+            Err(reason) => return why(reason),
+        };
+        if let Err(reason) = unedited_since_import(&loaded.file, &self.layer_name) {
+            return why(reason);
+        }
+        let earlier = loaded.file.original.as_deref().unwrap_or_default();
+        if !page.bytes.starts_with(earlier) {
+            return why("the new page does not hold it whole".into());
+        }
+        let made = blackboard_note(page, page_note_id(page), &self.layer_name, (self.now_ms)());
+        let mut file = loaded.file.clone();
+        file.note.id = made.note.id;
+        file.note.page = made.note.page;
+        file.note.layers = made.note.layers;
+        file.note.strokes = made.note.strokes;
+        file.note.timing = made.note.timing;
+        file.note.modified = made.note.modified.max(file.note.modified);
+        file.original = made.original;
+        file.thumbnail = self.thumbnail.as_ref().and_then(|maker| maker(&file.note));
+        let expected = match format::to_bytes(&file).and_then(|b| format::read_from_bytes(&b)) {
+            Ok(expected) => expected,
+            Err(error) => return why(error.to_string()),
+        };
+        // The library's checked save: a file changed since it was read is never overwritten.
+        let stamp = match self.library.save(&loaded.path, &file, &loaded.stamp) {
+            Ok(stamp) => stamp,
+            Err(error @ ardoise_core::library::LibraryError::Conflict { .. }) => {
+                return why(error.to_string());
+            }
+            Err(error) => return Update::Failed(error.to_string()),
+        };
+        let saved = SavedNote {
+            path: loaded.path,
+            stamp,
+        };
+        #[cfg(test)]
+        if let Some(tamper) = &self.tamper {
+            tamper(&saved.path);
+        }
+        // Never discarded: the file is the note the user had (the new page holds it whole).
+        let back = match self.read_back(&saved.path) {
+            Ok(back) => back,
+            Err(error) => return Update::Failed(error),
+        };
+        if back.file.note != expected.note
+            || back.file.original != file.original
+            || back.file.thumbnail != file.thumbnail
+        {
+            return Update::Failed(format!(
+                "{} does not read back as written",
+                saved.path.display()
+            ));
+        }
+        if let Some(hook) = self.after_save.as_mut() {
+            hook(&saved, &back.file.note);
+        }
+        self.saved.push(saved.clone());
+        Update::Done(saved, back.file.note.created)
+    }
+
+    /// Saves `page` as a new note and checks it reads back identical; its place and its
+    /// creation time.
+    fn create(&mut self, page: DownloadedPage) -> Result<(SavedNote, i64), String> {
         let id = page_note_id(&page);
         let mut file = note_from_page(
             &page,
@@ -578,7 +850,7 @@ impl<'a> LibrarySink<'a> {
             hook(&saved, &back.file.note);
         }
         self.saved.push(saved.clone());
-        Ok(saved)
+        Ok((saved, back.file.note.created))
     }
 
     /// Reads back the note just written.
@@ -659,6 +931,7 @@ mod tests {
             // 2026-10-24 09:30:00 UTC.
             timestamp: Some(1_792_834_200),
             kind: TabletKind::Slate,
+            previous: None,
         }
     }
 
@@ -722,6 +995,7 @@ mod tests {
             timestamp: None,
             announced_size: 3,
             kind: TabletKind::Slate,
+            previous: None,
         };
         assert!(sink.store(bad).is_err());
         assert_eq!(library.list().notes.len(), 2);
@@ -1052,6 +1326,7 @@ mod tests {
             timestamp: Some(0),
             announced_size,
             kind: TabletKind::Slate,
+            previous: None,
         };
         assert_eq!(
             page_note_id(&small(3)),
@@ -1082,6 +1357,7 @@ mod tests {
             bytes,
             timestamp: Some(1_792_834_200),
             kind: TabletKind::Blackboard,
+            previous: None,
         }
     }
 
@@ -1200,5 +1476,188 @@ mod tests {
         assert_eq!(imported.find(&library, &first), None);
         assert!(imported.in_trash(&first));
         assert!(!imported.in_trash(&second));
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    //! A screen of the blackboard stored again updates the note of its earlier store (SPEC
+    //! §4.1, docs/design/blackboard.md §9.6).
+    use super::*;
+    use ardoise_proto::blackboard::record::encode_records;
+    use ardoise_proto::blackboard::{Record, RecordStatus};
+
+    /// The records of a screen: `n` touching points along a line.
+    fn screen(n: u16) -> Vec<u8> {
+        let mut records = vec![Record {
+            status: RecordStatus::Hover,
+            x: 100,
+            y: 200,
+            pressure: 0,
+        }];
+        records.extend((0..n).map(|i| Record {
+            status: RecordStatus::Touch,
+            x: 100 + i * 30,
+            y: 200 + i * 7,
+            pressure: 900,
+        }));
+        records.push(Record {
+            status: RecordStatus::Out,
+            x: 100,
+            y: 200,
+            pressure: 0,
+        });
+        encode_records(&records)
+    }
+
+    fn page(time: i64, bytes: Vec<u8>, previous: Option<u32>) -> DownloadedPage {
+        DownloadedPage {
+            announced_size: bytes.len() as u32,
+            bytes,
+            timestamp: Some(time),
+            kind: TabletKind::Blackboard,
+            previous,
+        }
+    }
+
+    /// 2026-10-24 09:30:00 UTC, and the second store a minute later.
+    const FIRST: i64 = 1_792_834_200;
+    const SECOND: i64 = FIRST + 60;
+    const NOW: i64 = 1_792_843_200_000;
+
+    fn library() -> (tempfile::TempDir, Library) {
+        let dir = tempfile::tempdir().unwrap();
+        ardoise_core::library::init(dir.path()).unwrap();
+        let library = Library::open(dir.path()).unwrap();
+        (dir, library)
+    }
+
+    fn store(library: &Library, page: DownloadedPage) -> StoredPage {
+        LibrarySink::new(library, "", BLACKBOARD_PAGE, "Calque 1", || NOW)
+            .store_page(page)
+            .unwrap()
+    }
+
+    /// The second store holding the first whole updates its note in place: path, title, tags,
+    /// favourite, creation date kept; ink, kept page and id become the new page's; both pages
+    /// count as imported.
+    #[test]
+    fn the_note_of_the_earlier_store_is_updated() {
+        let (_dir, library) = library();
+        let first = page(FIRST, screen(5), None);
+        let stored = store(&library, first.clone());
+        assert_eq!(stored.how, Stored::New);
+        let path = library.retitle(&stored.path, "Leçon", None).unwrap().path;
+        library.set_tags(&path, &["classe".into()], None).unwrap();
+        let mut more = screen(5);
+        more.extend(screen(8));
+        let second = page(SECOND, more.clone(), Some(FIRST as u32));
+        let updated = store(&library, second.clone());
+        assert_eq!(
+            updated.how,
+            Stored::Updated {
+                replaced: FIRST as u32
+            }
+        );
+        assert_eq!(updated.path, path);
+        assert_eq!(updated.created, FIRST * 1000);
+        let file = library.read(&path).unwrap().file;
+        assert_eq!(file.note.title, "Leçon");
+        assert_eq!(file.note.tags, ["classe"]);
+        assert_eq!(file.note.created, FIRST * 1000);
+        assert!(file.note.modified >= NOW);
+        assert_eq!(file.note.id, page_note_id(&second));
+        assert_eq!(file.original, Some(more));
+        assert_eq!(file.note.strokes.len(), 2);
+        assert_eq!(library.list().notes.len(), 1);
+        // Both pages count as imported (a rescue copy of either does not come back).
+        let mut imported = ImportedPages::scan(&library);
+        assert_eq!(imported.find(&library, &second), Some(path.clone()));
+        assert_eq!(imported.find(&library, &first), Some(path.clone()));
+        imported.record(&second, &path, updated.created);
+        assert_eq!(imported.find(&library, &first), Some(path));
+        // A third store of the same screen finds the updated note (its id is the second page's).
+        let mut most = second.bytes.clone();
+        most.extend(screen(3));
+        let third = store(&library, page(SECOND + 60, most, Some(SECOND as u32)));
+        assert_eq!(
+            third.how,
+            Stored::Updated {
+                replaced: SECOND as u32
+            }
+        );
+        assert_eq!(library.list().notes.len(), 1);
+    }
+
+    /// The guards: an edited note, a note in the trash or none, a page that does not hold the
+    /// earlier one whole, a layer named in another language: a new note, and why.
+    #[test]
+    fn otherwise_a_new_note_is_added_and_the_earlier_one_left_as_it_is() {
+        let refused = |prepare: &dyn Fn(&Library, &Path), second: Vec<u8>| -> (Stored, usize) {
+            let (_dir, library) = library();
+            let stored = store(&library, page(FIRST, screen(5), None));
+            prepare(&library, &stored.path);
+            let before = library.read(&stored.path).ok().map(|l| l.file);
+            let added = store(&library, page(SECOND, second, Some(FIRST as u32)));
+            if let Some(before) = before {
+                assert_eq!(
+                    library.read(&stored.path).unwrap().file,
+                    before,
+                    "untouched"
+                );
+            }
+            (added.how, library.list().notes.len())
+        };
+        let mut whole = screen(5);
+        whole.extend(screen(8));
+        let reason = |how: &Stored| match how {
+            Stored::NewNotUpdated(why) => why.clone(),
+            other => panic!("{other:?}"),
+        };
+        // Edited ink.
+        let (how, notes) = refused(
+            &|library, path| {
+                let loaded = library.read(path).unwrap();
+                let mut file = loaded.file;
+                file.note.strokes[0].points.pop();
+                library.save(path, &file, &loaded.stamp).unwrap();
+            },
+            whole.clone(),
+        );
+        assert!(reason(&how).contains("edited"), "{how:?}");
+        assert_eq!(notes, 2);
+        // A renamed layer.
+        let (how, _) = refused(
+            &|library, path| {
+                let loaded = library.read(path).unwrap();
+                let mut file = loaded.file;
+                file.note.layers[0].name = "Mon calque".into();
+                library.save(path, &file, &loaded.stamp).unwrap();
+            },
+            whole.clone(),
+        );
+        assert!(reason(&how).contains("edited"), "{how:?}");
+        // In the trash.
+        let (how, notes) = refused(
+            &|library, path| {
+                library.trash(path).unwrap();
+            },
+            whole.clone(),
+        );
+        assert!(reason(&how).contains("no note"), "{how:?}");
+        assert_eq!(notes, 1);
+        // Not held whole: the new page does not start with the earlier one.
+        let mut other = screen(8);
+        other.extend(screen(5));
+        let (how, notes) = refused(&|_, _| {}, other);
+        assert!(reason(&how).contains("does not hold it whole"), "{how:?}");
+        assert_eq!(notes, 2);
+        // Title, tags and favourite do not count: updated.
+        let (_dir, library) = library();
+        let stored = store(&library, page(FIRST, screen(5), None));
+        library.set_favorite(&stored.path, true, None).unwrap();
+        let updated = store(&library, page(SECOND, whole, Some(FIRST as u32)));
+        assert!(matches!(updated.how, Stored::Updated { .. }));
+        assert!(library.read(&updated.path).unwrap().file.note.favorite);
     }
 }

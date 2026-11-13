@@ -14,6 +14,12 @@
 //! - **Dirty stream**: a transfer that did not end cleanly leaves the session dirty; the link is
 //!   then closed and opened again before anything else ([`Worker::board_reopen`]), the sync or
 //!   live mode under way carrying on over the new link.
+//! - **Open pages** (docs/design/blackboard.md §9.2): the tablet removes the page of a screen not
+//!   erased once it is downloaded; [`BoardKeeper`] keeps rescue copies of such pages
+//!   ([`RescueStore`]), imported at the start of the next sync, before the tablet's pages.
+//! - **Live mode only after the pages** (SPEC §4.2, §9.5): asked while the blackboard holds
+//!   stored pages, live mode syncs them first (automatic sync and delete after import on) or does
+//!   not start ([`LiveInput::PagesFirst`]).
 //! - **Live mode**: `a1` records are pen-down samples, `a0` hovering (the laser pointer), `c0`
 //!   the pen leaving the range. The "page stored" event does not interrupt it. A lost link is
 //!   reconnected by the normal search, as for the Slate, which then looks for the blackboard
@@ -29,24 +35,29 @@ use std::time::Duration;
 use ardoise_core::library::Library;
 use ardoise_core::settings::Orientation;
 use ardoise_proto::blackboard::beacon::BLACKBOARD_MODEL;
-use ardoise_proto::blackboard::{BOARD_HEIGHT, BOARD_WIDTH, BoardReply, Record, decode_records};
+use ardoise_proto::blackboard::{
+    BOARD_HEIGHT, BOARD_WIDTH, BoardReply, Record, check_page, decode_records, utc,
+};
 use ardoise_proto::live::LiveRecord;
 
 use super::{
-    BoardPermission, Connection, IDLE_POLL, ImportedPages, LIVE_POLL, LiveInput, PageContext,
-    SEARCH_PAUSE, SEARCH_SLICE, StatusError, SyncProgress, SyncRun, Worker, keep_page, pages_text,
-    saved_count,
+    BoardPermission, Connection, IDLE_POLL, ImportedPages, LIVE_POLL, LiveInput, LiveState,
+    PageContext, PageStore, SEARCH_PAUSE, SEARCH_SLICE, StatusError, SyncProgress, SyncRun, Worker,
+    keep_page, keep_page_as, pages_text, saved_count,
 };
-use crate::blackboard::{BoardInfo, BoardSession, BoardSync, Oddities, PageStep};
+use crate::blackboard::{
+    BoardInfo, BoardSession, BoardSync, Oddities, PageKeeper, PageStep, Rescued,
+};
 use crate::identity::{
     self, BLACKBOARD_FORMAT, BLACKBOARD_PROTOCOL, BlackboardRecord, DeviceRecord,
 };
 use crate::pages::BLACKBOARD_PAGE;
+use crate::rescue::{self, RescueKind, RescueStore};
 use crate::service::{
     BLACKBOARD_MODEL_NAME, BLACKBOARD_NAME, BOARD_SEARCH, BOARD_SEARCH_SLICE, BoardSearch,
     DeviceDetails, DeviceMemory, FoundTablet, SLATE_CHECK_INTERVAL, SLATE_CHECK_SCAN,
 };
-use crate::session::{DeviceError, LiveNotification};
+use crate::session::{DeviceError, DownloadedPage, LiveNotification};
 use crate::transport::{Advertisement, Channel, TabletKind};
 
 /// The search for a blackboard to add.
@@ -356,8 +367,10 @@ impl Worker {
         self.slate_checked_at = self.session_time();
         let options = self.config.options;
         // Its pages are imported automatically only when they may be deleted; otherwise only by
-        // a sync that has the permission (confirmed on the blackboard, or resumed).
-        if options.auto_sync && options.delete_after_import && info.stored_pages > 0 {
+        // a sync that has the permission (confirmed on the blackboard, or resumed). Rescue copies
+        // waiting are imported by that sync too.
+        let rescued = !self.held.is_empty() || self.rescue_store().has(RescueKind::Clean);
+        if options.auto_sync && options.delete_after_import && (info.stored_pages > 0 || rescued) {
             self.want_sync = true;
             self.board_permission = self.board_permission.max(Some(BoardPermission::Option));
         }
@@ -406,7 +419,11 @@ impl Worker {
     /// One bounded step while the blackboard holds the link.
     pub(super) fn board_step(&mut self) {
         self.board_events();
-        if self.board.as_ref().is_some_and(BoardSession::is_dirty) {
+        // A dirty stream is opened again before it is needed (a sync step, live mode, a sync
+        // waiting), not while nothing waits: a page the erase button pushed after a sync then
+        // costs nothing (docs/design/blackboard.md §9.4).
+        let needed = self.sync.is_some() || self.live.is_some() || self.want_sync;
+        if needed && self.board.as_ref().is_some_and(BoardSession::is_dirty) {
             self.board_reopen();
         } else if self.sync.is_some() {
             self.board_sync_step();
@@ -441,6 +458,14 @@ impl Worker {
         };
         let oddities = board.take_oddities();
         let stored = board.take_page_stored();
+        let set_aside = board.take_set_aside();
+        if set_aside > 0 {
+            self.note(format!(
+                "live mode: {set_aside} bytes the tablet pushed at once (a page, after its screen \
+                 was erased) set aside: they are not pen records"
+            ));
+            self.keep("a page pushed by the blackboard during live mode");
+        }
         if !oddities.is_empty() {
             self.note(describe_oddities(&oddities));
             self.keep("input of the blackboard ignored");
@@ -576,7 +601,9 @@ impl Worker {
             Ok(counted) => counted,
             Err(error) => return self.sync_not_started(error, permission),
         };
-        let imported = if total > 0 {
+        let rescue = self.rescue_store();
+        let rescued = rescue.has(RescueKind::Clean) || !self.held.is_empty();
+        let imported = if total > 0 || rescued {
             ImportedPages::scan(&library)
         } else {
             ImportedPages::default()
@@ -623,11 +650,107 @@ impl Worker {
             permission,
             board: BoardSync::default(),
         };
+        let mut run = run;
+        // Rescued pages first (docs/design/blackboard.md §9.2).
+        if rescued && let Err(error) = self.import_rescued(&mut run, &rescue) {
+            self.problem(&error);
+            self.finish_sync(run, Some(&error));
+            return;
+        }
         if total == 0 {
             self.finish_sync(run, None);
         } else {
             self.sync = Some(run);
         }
+    }
+
+    /// The rescue folders of the library ([`RescueStore`]).
+    pub(super) fn rescue_store(&self) -> RescueStore {
+        RescueStore::new(
+            self.config.library.as_deref(),
+            self.config.rescue_fallback.as_deref(),
+        )
+    }
+
+    /// Writes out the pages held in memory, then imports every clean rescue copy, oldest first,
+    /// through the store of any page; each copy goes once its note is read back. A copy that is
+    /// not whole records moves apart as doubtful. The first page that cannot be written ends the
+    /// sync (`PageRescued`, its copy kept; `PageNotSaved` for a page still held).
+    fn import_rescued(
+        &mut self,
+        run: &mut SyncRun,
+        rescue: &RescueStore,
+    ) -> Result<(), DeviceError> {
+        let held = std::mem::take(&mut self.held);
+        for (page, kind) in held {
+            match rescue.save(&page, kind) {
+                Ok(path) => self.note(format!(
+                    "a page held in memory is now kept as a {} in {}",
+                    rescue::describe(kind),
+                    path.display()
+                )),
+                Err(cause) if kind == RescueKind::Clean => {
+                    // Still nowhere to write it: straight into the library, or held again.
+                    let time = page_time(&page);
+                    match keep_page_as(
+                        &mut self.store_page,
+                        run,
+                        page.clone(),
+                        "a page held in memory",
+                    ) {
+                        Ok(message) => self.note(message),
+                        Err(error) => {
+                            self.held.push((page, kind));
+                            return Err(DeviceError::PageNotSaved {
+                                time,
+                                cause: format!("{error}; {cause}"),
+                            });
+                        }
+                    }
+                }
+                Err(cause) => {
+                    self.note(format!("a doubtful page is still held in memory: {cause}"));
+                    self.held.push((page, kind));
+                }
+            }
+        }
+        for file in rescue.pages(RescueKind::Clean) {
+            let page = match rescue.read(&file) {
+                Ok(page) => page,
+                Err(error) => {
+                    self.note(format!(
+                        "a rescue copy cannot be read, left as it is: {error}"
+                    ));
+                    continue;
+                }
+            };
+            let shape = check_page(&page.bytes);
+            if !shape.is_whole() {
+                self.note(format!(
+                    "the rescue copy {} is not whole records ({shape}): kept apart as doubtful",
+                    file.path.display()
+                ));
+                if let Err(error) = rescue.doubt(file.time) {
+                    self.note(format!("it could not be moved: {error}"));
+                }
+                run.board.note_doubtful(file.time);
+                continue;
+            }
+            let name = format!("the page of {} kept aside", utc(file.time));
+            match keep_page_as(&mut self.store_page, run, page, &name) {
+                Ok(message) => {
+                    self.note(message);
+                    rescue.remove(&file);
+                }
+                Err(error) => {
+                    return Err(DeviceError::PageRescued {
+                        time: file.time,
+                        cause: error.to_string(),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// One step of the sync ([`BoardSession::sync_page`], the only per-page code): describes,
@@ -645,10 +768,28 @@ impl Worker {
                 saved,
             });
         });
-        let store = &mut self.store_page;
+        let rescue = RescueStore::new(
+            self.config.library.as_deref(),
+            self.config.rescue_fallback.as_deref(),
+        );
         let mut state = std::mem::take(&mut run.board);
-        let step = board.sync_page(&mut state, |page| keep_page(store, run, page, index));
+        let mut keeper = BoardKeeper {
+            store: &mut self.store_page,
+            run,
+            index,
+            rescue: &rescue,
+            held: &mut self.held,
+            lines: Vec::new(),
+        };
+        let step = board.sync_page(&mut state, &mut keeper);
+        let lines = std::mem::take(&mut keeper.lines);
         run.board = state;
+        for line in lines {
+            self.note(line);
+        }
+        let Some(run) = self.sync.as_mut() else {
+            return;
+        };
         match step {
             Ok(PageStep::Kept { kept: message, .. }) => {
                 run.deleted += 1;
@@ -681,8 +822,8 @@ impl Worker {
             Ok(PageStep::Reopen) => {
                 self.note(
                     "a page transfer did not end cleanly (stopped, too long, more bytes after it, \
-                     or a stream that never went quiet before it was asked): the page stays on \
-                     the blackboard and is read again on a fresh link",
+                     or a stream that never went quiet before it was asked): it is read again on \
+                     a fresh link if the blackboard still holds it",
                 );
                 self.keep("a page transfer of the blackboard did not end cleanly");
             }
@@ -766,6 +907,9 @@ impl Worker {
         if self.live_belongs_elsewhere(TabletKind::Blackboard) {
             return;
         }
+        if self.live.as_ref().is_some_and(|run| !run.pages_checked) {
+            return self.board_pages_before_live();
+        }
         let Some(board) = self.board.as_mut() else {
             return;
         };
@@ -804,6 +948,57 @@ impl Worker {
             Ok(None) | Err(DeviceError::Cancelled) => {}
             Err(error) => self.live_failed(error),
         }
+    }
+
+    /// Live mode asked while the blackboard holds stored pages (SPEC §4.2,
+    /// docs/design/blackboard.md §9.5): with the automatic sync and "delete after import" on,
+    /// they are synced first and live mode starts after the sync, whatever its outcome; otherwise
+    /// the run ends at once ([`LiveInput::PagesFirst`]), nothing asked of the tablet's stream.
+    /// Looked at once per run, before it first streams.
+    fn board_pages_before_live(&mut self) {
+        let counted = match self.board.as_mut() {
+            Some(board) => board.page_count(),
+            None => return,
+        };
+        let pages = match counted {
+            Ok((pages, _)) => pages,
+            Err(error) => return self.live_failed(error),
+        };
+        self.publisher.update(|status| {
+            if let Some(device) = status.device.as_mut() {
+                device.stored_pages = pages;
+            }
+        });
+        if let Some(run) = self.live.as_mut() {
+            run.pages_checked = true;
+        }
+        if pages == 0 {
+            return;
+        }
+        let options = self.config.options;
+        if options.auto_sync && options.delete_after_import {
+            self.note(format!(
+                "live mode asked: {} on the blackboard are imported first",
+                pages_text(pages)
+            ));
+            if let Some(run) = self.live.as_mut() {
+                run.sink.input(LiveInput::State(LiveState::Waiting));
+            }
+            self.want_sync = true;
+            self.board_permission = self.board_permission.max(Some(BoardPermission::Option));
+            self.board_start_sync();
+            return;
+        }
+        self.note(format!(
+            "live mode refused: {} on the blackboard, and the automatic sync or delete after \
+             import is off: they must be imported first",
+            pages_text(pages)
+        ));
+        if let Some(mut run) = self.live.take() {
+            run.sink.input(LiveInput::PagesFirst { pages });
+        }
+        let pending = self.pending();
+        self.publisher.update(|status| status.pending = pending);
     }
 
     /// Hands the records of a notification to the sink (the blackboard's page is never turned).
@@ -849,6 +1044,82 @@ impl Worker {
         }
         self.count_live_notification();
     }
+}
+
+/// The worker's side of the per-page step ([`PageKeeper`]): notes through the app's page store,
+/// rescue copies in the library's `_ardoise` (else the local fallback), in memory when nothing
+/// can be written. What it did is said in `lines`, for the log.
+struct BoardKeeper<'a> {
+    store: &'a mut PageStore,
+    run: &'a mut SyncRun,
+    index: u16,
+    rescue: &'a RescueStore,
+    held: &'a mut Vec<(DownloadedPage, RescueKind)>,
+    lines: Vec<String>,
+}
+
+impl PageKeeper for BoardKeeper<'_> {
+    type Kept = String;
+
+    fn keep(&mut self, page: DownloadedPage) -> Result<String, DeviceError> {
+        keep_page(self.store, self.run, page, self.index)
+    }
+
+    fn rescue(&mut self, page: &DownloadedPage, kind: RescueKind) -> Rescued {
+        let time = page_time(page);
+        match self.rescue.save(page, kind) {
+            Ok(path) => {
+                self.lines.push(format!(
+                    "the page of {} may no longer be on the blackboard: {} of {} bytes kept in {}",
+                    utc(time),
+                    rescue::describe(kind),
+                    page.bytes.len(),
+                    path.display()
+                ));
+                Rescued::Written
+            }
+            Err(cause) => {
+                self.lines.push(format!(
+                    "the page of {} may no longer be on the blackboard and no {} could be \
+                     written ({cause}): held in memory until the next sync",
+                    utc(time),
+                    rescue::describe(kind)
+                ));
+                self.held.retain(|(held, _)| page_time(held) != time);
+                self.held.push((page.clone(), kind));
+                Rescued::Held { cause }
+            }
+        }
+    }
+
+    fn doubt(&mut self, time: u32) {
+        self.lines.push(format!(
+            "stream bytes came while the note of the page of {} was written, and the blackboard \
+             no longer holds it: the note stays, its copy is kept apart as doubtful",
+            utc(time)
+        ));
+        if let Err(error) = self.rescue.doubt(time) {
+            self.lines
+                .push(format!("its copy could not be moved apart: {error}"));
+        }
+        for (held, kind) in self.held.iter_mut() {
+            if page_time(held) == time {
+                *kind = RescueKind::Doubtful;
+            }
+        }
+    }
+
+    fn release(&mut self, time: u32) {
+        self.rescue.release(time);
+        self.held.retain(|(held, _)| page_time(held) != time);
+    }
+}
+
+/// A page's time (Unix seconds).
+fn page_time(page: &DownloadedPage) -> u32 {
+    page.timestamp
+        .and_then(|t| u32::try_from(t).ok())
+        .unwrap_or(0)
 }
 
 /// What a frame of the reply characteristic does to live mode: the erase button (`11 01 0c`,

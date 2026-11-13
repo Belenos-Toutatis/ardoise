@@ -39,6 +39,20 @@
 //! tablet that always misbehaves ends the sync with [`DeviceError::TransferIncomplete`], never in
 //! a loop of fresh links.
 //!
+//! # Open pages
+//!
+//! The tablet removes the page of a screen not erased since it was stored (the *open* page,
+//! [`PageInfo::is_open`]) by itself once it has been downloaded (research note §6). So the
+//! per-page step never assumes such a page is still on the tablet: its bytes are copied aside
+//! ([`PageKeeper::rescue`]) before its note is written, and the bytes of a transfer that did not
+//! end cleanly are kept apart rather than thrown away (docs/design/blackboard.md §9.2).
+//!
+//! # Live mode
+//!
+//! A stream notification of more than six records during live mode is not the pen: it is a page
+//! the erase button made the tablet send. It is set aside, never handed to live mode
+//! ([`BoardSession::take_set_aside`], docs/design/blackboard.md §9.4).
+//!
 //! # Sync
 //!
 //! The tablet only describes its oldest page, so reading the next one needs the deletion of the
@@ -51,8 +65,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
-use ardoise_proto::blackboard::{BoardReply, BoardRequest, PageInfo, check_page};
+use ardoise_proto::blackboard::record::RECORD_LEN;
+use ardoise_proto::blackboard::{
+    BoardReply, BoardRequest, MAX_CHUNK, MAX_LIVE_RECORDS, PageInfo, check_page,
+};
 
+pub use crate::rescue::RescueKind;
 use crate::session::{DeviceError, DownloadedPage, LiveNotification, unix_seconds};
 use crate::transport::{
     Advertisement, Channel, Clock, TabletKind, Transport, TransportError, TransportEvent,
@@ -78,6 +96,13 @@ pub const MAX_PAGE_BYTES: u32 = 128 * 1024 * 1024;
 /// Most pages one sync reads, whatever the tablet says: about 400 fit in its memory (research
 /// note §1). Guards against a tablet that never runs out of pages.
 pub const MAX_SYNC_PAGES: u32 = 1000;
+/// In live mode, a notification of more bytes than this is not the pen (six records at most:
+/// research note §3): it is a page the tablet pushed (§6, the erase button).
+pub const MAX_LIVE_BYTES: usize = MAX_LIVE_RECORDS * RECORD_LEN;
+/// A push goes on with a notification that comes this soon after its previous one, whatever its
+/// size. **Supposed**: the chunks of a page came about 10 ms apart in Mi Home's capture, live
+/// notifications 40 to 45 ms apart (docs/design/blackboard.md §2.2).
+pub const PUSH_GAP: Duration = Duration::from_millis(25);
 /// Granularity of the waits, so that cancellation is noticed quickly.
 const WAIT_SLICE: Duration = Duration::from_millis(250);
 /// Live notifications kept while nobody reads them (oldest dropped first).
@@ -123,6 +148,13 @@ pub struct BoardSync {
     last_deleted: Option<u32>,
     /// Time of the page whose transfer already failed once: its one retry is used.
     retried: Option<u32>,
+    /// What came of a transfer that did not end cleanly, until the next link says whether the
+    /// tablet still holds the page (it is then read again) or not (then this is all there is,
+    /// copied apart).
+    unsettled: Option<DownloadedPage>,
+    /// Pages whose bytes were copied apart as doubtful during this sync, and not received
+    /// cleanly since.
+    doubtful: Vec<u32>,
 }
 
 impl BoardSync {
@@ -130,6 +162,80 @@ impl BoardSync {
     pub fn pages(&self) -> u32 {
         self.pages
     }
+
+    /// Pages set apart as doubtful during this sync (their times), in that order.
+    pub fn doubtful(&self) -> &[u32] {
+        &self.doubtful
+    }
+
+    /// Page `time` was set apart as doubtful during this sync (a rescue copy found not whole
+    /// records, say): the sync says so at its end.
+    pub fn note_doubtful(&mut self, time: u32) {
+        self.set_doubtful(time);
+    }
+
+    fn set_doubtful(&mut self, time: u32) {
+        if !self.doubtful.contains(&time) {
+            self.doubtful.push(time);
+        }
+    }
+
+    /// Page `time` was received cleanly and its note written: nothing of it is doubtful.
+    fn settled(&mut self, time: u32) {
+        self.doubtful.retain(|t| *t != time);
+        if self
+            .unsettled
+            .as_ref()
+            .is_some_and(|page| page_time(page) == time)
+        {
+            self.unsettled = None;
+        }
+    }
+}
+
+/// Where a rescue copy went ([`PageKeeper::rescue`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rescued {
+    /// Written in a rescue folder.
+    Written,
+    /// No folder could be written (`cause`): the keeper holds the bytes in memory.
+    Held { cause: String },
+}
+
+/// What a sync does with the pages of the blackboard ([`BoardSession::sync_page`]): the app's
+/// page store and the rescue copies in the tablet service, a recorder in the tests.
+pub trait PageKeeper {
+    /// What `keep` returns for a page.
+    type Kept;
+
+    /// Writes the page as a note and reads it back; `Err` when it is not safe in the library.
+    fn keep(&mut self, page: DownloadedPage) -> Result<Self::Kept, DeviceError>;
+
+    /// Copies the bytes of a page the tablet may no longer hold (atomically), as `kind`. Never
+    /// loses them: when no folder can be written, the keeper holds them in memory.
+    fn rescue(&mut self, page: &DownloadedPage, kind: RescueKind) -> Rescued;
+
+    /// The clean copy of page `time` is doubtful after all (stream bytes came while its note was
+    /// written): kept apart.
+    fn doubt(&mut self, time: u32);
+
+    /// The note of page `time` is written and read back: its copies, clean or doubtful, go.
+    fn release(&mut self, time: u32);
+}
+
+/// A page's time (Unix seconds), 0 for a page without one (never from the blackboard).
+fn page_time(page: &DownloadedPage) -> u32 {
+    page.timestamp
+        .and_then(|t| u32::try_from(t).ok())
+        .unwrap_or(0)
+}
+
+/// A page pushed by the tablet in live mode, being set aside ([`MAX_LIVE_BYTES`]).
+#[derive(Debug, Clone, Copy)]
+struct Push {
+    bytes: usize,
+    /// When its last notification came (session clock).
+    last: Duration,
 }
 
 /// What one step of a sync did ([`BoardSession::sync_page`]).
@@ -169,6 +275,16 @@ pub struct BoardSession {
     connected: bool,
     /// The tablet's memory as it said (`11 01 02`): no page can be larger.
     memory_total: Option<u32>,
+    /// `12 01 04` was answered on this link (`12 01 05` asked before it answered the bare
+    /// frame although a page was stored: research note §6).
+    counted: bool,
+    /// The bytes of the last download that did not end cleanly ([`Self::take_received`]).
+    received: Vec<u8>,
+    /// A page pushed by the tablet in live mode, being set aside.
+    push: Option<Push>,
+    /// Bytes of pages pushed in live mode set aside since [`Self::take_set_aside`] was last
+    /// called.
+    set_aside: usize,
     /// A transfer did not end cleanly: the stream may still carry its bytes.
     dirty: bool,
     /// A download ended and nothing took the stream since: stream bytes now are more of that
@@ -200,6 +316,10 @@ impl BoardSession {
             oddities: Oddities::default(),
             connected: true,
             memory_total: None,
+            counted: false,
+            received: Vec::new(),
+            push: None,
+            set_aside: 0,
             dirty: false,
             after_download: false,
             extra: 0,
@@ -275,7 +395,10 @@ impl BoardSession {
         match self.exchange(BoardRequest::PageCount, "page count", |r| {
             matches!(r, BoardReply::PageCount { .. })
         })? {
-            BoardReply::PageCount { count, bytes } => Ok((count, bytes)),
+            BoardReply::PageCount { count, bytes } => {
+                self.counted = true;
+                Ok((count, bytes))
+            }
             other => Err(unexpected(&other)),
         }
     }
@@ -295,8 +418,13 @@ impl BoardSession {
     }
 
     /// The oldest stored page (`12 01 05`), `None` when the tablet holds none: it only ever
-    /// describes its oldest page.
+    /// describes its oldest page. Asked before any `12 01 04` on a link, the real tablet answered
+    /// the bare frame although a page was stored (research note §6): the count is asked first
+    /// when it was not yet on this link.
     pub fn oldest_page(&mut self) -> Result<Option<PageInfo>, DeviceError> {
+        if !self.counted {
+            self.page_count()?;
+        }
         match self.exchange(BoardRequest::OldestPage, "oldest page", |r| {
             matches!(r, BoardReply::OldestPage(_))
         })? {
@@ -327,6 +455,7 @@ impl BoardSession {
         // an earlier reply pass for anything; late bytes of the last page make the stream dirty.
         self.drain()?;
         self.commands.clear();
+        self.received.clear();
         if self.dirty {
             return Err(DeviceError::StreamDirty);
         }
@@ -381,17 +510,24 @@ impl BoardSession {
             last: self.clock.monotonic(),
         });
         let counted = self.count_page(BoardRequest::Download { time: info.time }, info.size);
-        let download = self.download.take();
-        counted?;
-        let bytes = download.map(|d| d.bytes).unwrap_or_default();
+        let bytes = self.download.take().map(|d| d.bytes).unwrap_or_default();
+        // Whatever goes wrong, what came is kept for the caller: the tablet may no longer hold
+        // the page ([`Self::take_received`]).
+        if let Err(error) = counted {
+            self.received = bytes;
+            return Err(error);
+        }
         if bytes.len() != expected {
+            let received = bytes.len();
+            self.received = bytes;
             return Err(DeviceError::TransferIncomplete {
                 expected: info.size,
-                received: bytes.len(),
+                received,
             });
         }
         let shape = check_page(&bytes);
         if !shape.is_whole() {
+            self.received = bytes;
             return Err(DeviceError::PageUnreadable {
                 time: info.time,
                 reason: shape.to_string(),
@@ -402,6 +538,7 @@ impl BoardSession {
             timestamp: Some(i64::from(info.time)),
             announced_size: info.size,
             kind: TabletKind::Blackboard,
+            previous: info.previous(),
         })
     }
 
@@ -469,85 +606,201 @@ impl BoardSession {
         self.send(BoardRequest::Delete { time })
     }
 
-    /// One step of a sync: describes the oldest page, downloads it, hands it to `keep`, and only
-    /// once `keep` returned `Ok` (the note written and read back) deletes it from the tablet;
+    /// One step of a sync: describes the oldest page, downloads it, hands it to the keeper, and
+    /// only once the keeper kept it (the note written and read back) deletes it from the tablet;
     /// the cancellation flag is ignored for that one write. The tablet only describes its oldest
     /// page, so reading the next one needs this deletion: a sync always deletes.
+    ///
+    /// An *open* page ([`PageInfo::is_open`]) leaves the tablet by itself once downloaded, so its
+    /// bytes are never thrown away (docs/design/blackboard.md §9.2): copied clean
+    /// ([`PageKeeper::rescue`]) before the keeper writes its note, released once the note is
+    /// written; copied apart as doubtful when its transfer did not end cleanly. Any page whose
+    /// fresh link no longer describes it after an unclean transfer has what came copied apart.
     ///
     /// - [`PageStep::Done`] when the tablet holds no page, or after [`MAX_SYNC_PAGES`].
     /// - [`PageStep::Reopen`] on a dirty stream, or when the page's transfer did not end cleanly
     ///   for the first time: stopped, too long, a stream that never went quiet before the
-    ///   request, or more stream bytes while `keep` ran (the page, kept, is then not deleted).
-    ///   The caller opens a fresh link and steps again with the same `sync`, so that the page's
-    ///   one retry happens on the new link, never on this one.
-    /// - [`DeviceError::TransferIncomplete`] when the retry is unclean too, whichever way; the
-    ///   page stays (its note too, when it was kept: a second note may come if the page is read
-    ///   differently next time).
+    ///   request, not whole records for an open page, or more stream bytes while it was kept
+    ///   (then not deleted). The caller opens a fresh link and steps again with the same `sync`,
+    ///   so that the page's one retry happens on the new link, never on this one.
+    /// - [`DeviceError::TransferIncomplete`] when the retry is unclean too, whichever way; a
+    ///   short-form page stays (its note too, when it was kept: a second note may come if the
+    ///   page is read differently next time). For an open page with bytes copied apart:
+    ///   [`DeviceError::PageDoubtful`].
     /// - [`DeviceError::PageNotDeleted`] when the tablet still describes the page just deleted
     ///   after [`DELETE_SETTLE`] (rather than import it again and again).
-    /// - Any error of `keep` is returned as it is: the page stays on the tablet.
-    pub fn sync_page<T>(
+    /// - An error of the keeper is returned as it is for a short-form page (it stays on the
+    ///   tablet); for an open page it is [`DeviceError::PageRescued`] (its clean copy waits for
+    ///   the next sync), or [`DeviceError::PageNotSaved`] when even the copy could not be written
+    ///   (the keeper holds it).
+    pub fn sync_page<K: PageKeeper>(
         &mut self,
         sync: &mut BoardSync,
-        keep: impl FnOnce(DownloadedPage) -> Result<T, DeviceError>,
-    ) -> Result<PageStep<T>, DeviceError> {
+        keeper: &mut K,
+    ) -> Result<PageStep<K::Kept>, DeviceError> {
         if self.dirty {
             return Ok(PageStep::Reopen);
         }
         if sync.pages >= MAX_SYNC_PAGES {
             return Ok(PageStep::Done);
         }
-        let Some(mut info) = self.oldest_page()? else {
-            return Ok(PageStep::Done);
-        };
-        if sync.last_deleted == Some(info.time) {
+        let mut described = self.oldest_page()?;
+        if let (Some(last), Some(info)) = (sync.last_deleted, described)
+            && info.time == last
+        {
             // The tablet may take a moment to erase: once more, a little later.
             self.idle(DELETE_SETTLE)?;
-            match self.oldest_page()? {
-                None => return Ok(PageStep::Done),
-                Some(again) if again.time == info.time => {
-                    return Err(DeviceError::PageNotDeleted(info.time));
-                }
-                Some(again) => info = again,
+            described = self.oldest_page()?;
+            if described.is_some_and(|again| again.time == last) {
+                return Err(DeviceError::PageNotDeleted(last));
             }
         }
+        // A transfer that did not end cleanly on the link before: when this link no longer
+        // describes its page, what came is all there is.
+        if let Some(unsettled) = sync.unsettled.take() {
+            if described.is_some_and(|info| info.time == page_time(&unsettled)) {
+                sync.unsettled = Some(unsettled);
+            } else {
+                set_aside(sync, keeper, &unsettled);
+            }
+        }
+        let Some(info) = described else {
+            return Ok(PageStep::Done);
+        };
+        let open = info.is_open();
+        let time = info.time;
         let page = match self.download(info) {
             Ok(page) => page,
             Err(DeviceError::StreamDirty) => return Ok(PageStep::Reopen),
-            // Notifications can be lost on the way (BLE stack buffers), or the tablet can stall:
-            // once more, on a fresh link.
-            Err(DeviceError::TransferIncomplete { .. }) if sync.retried != Some(info.time) => {
-                sync.retried = Some(info.time);
-                return Ok(PageStep::Reopen);
+            Err(error) => return self.unclean(sync, keeper, info, error),
+        };
+        let size = page.bytes.len();
+        // Once downloaded, the tablet no longer holds an open page: copied before anything can
+        // fail.
+        let held = match open {
+            true => match keeper.rescue(&page, RescueKind::Clean) {
+                Rescued::Written => None,
+                Rescued::Held { cause } => Some(cause),
+            },
+            false => None,
+        };
+        let kept = match keeper.keep(page) {
+            Ok(kept) => kept,
+            Err(error) if open => {
+                return Err(match held {
+                    None => DeviceError::PageRescued {
+                        time,
+                        cause: error.to_string(),
+                    },
+                    Some(cause) => DeviceError::PageNotSaved {
+                        time,
+                        cause: format!("{error}; {cause}"),
+                    },
+                });
             }
             Err(error) => return Err(error),
         };
-        let size = page.bytes.len();
-        let kept = keep(page)?;
         // Bytes that came while the page was kept are more of a transfer that was thought
         // complete: the page may be wrong, so it stays on the tablet (its note too, in the
-        // library) and is read again on a fresh link, with the page's one retry.
-        self.drain()?;
+        // library) and is read again on a fresh link, with the page's one retry. An open page
+        // will not come again: its note stays, its copy is kept apart.
+        if let Err(error) = self.drain() {
+            keeper.release(time);
+            sync.settled(time);
+            return Err(error);
+        }
         if self.dirty {
-            if sync.retried == Some(info.time) {
-                return Err(DeviceError::TransferIncomplete {
-                    expected: info.size,
-                    received: size.saturating_add(self.extra),
+            if open {
+                keeper.doubt(time);
+                sync.set_doubtful(time);
+                sync.unsettled = None;
+            }
+            if sync.retried == Some(time) {
+                return Err(match open {
+                    true => DeviceError::PageDoubtful { time },
+                    false => DeviceError::TransferIncomplete {
+                        expected: info.size,
+                        received: size.saturating_add(self.extra),
+                    },
                 });
             }
-            sync.retried = Some(info.time);
+            sync.retried = Some(time);
             return Ok(PageStep::Reopen);
         }
-        // Only now, the page safe in the library, may it leave the tablet; a cancellation
-        // arriving meanwhile takes effect after it.
+        // The note is safe: its copies go.
+        keeper.release(time);
+        sync.settled(time);
+        // Only now may the page leave the tablet (an open page already did: the delete is then
+        // harmless); a cancellation arriving meanwhile takes effect after it.
         let cancel = self.cancel.take();
-        let deleted = self.delete(info.time);
+        let deleted = self.delete(time);
         self.cancel = cancel;
         deleted?;
         sync.pages = sync.pages.saturating_add(1);
-        sync.last_deleted = Some(info.time);
+        sync.last_deleted = Some(time);
         sync.retried = None;
         Ok(PageStep::Kept { info, kept })
+    }
+
+    /// A download of the page `info` describes failed with `error`: what came is copied apart
+    /// when the tablet may no longer hold the page (an open page), and kept for the next link
+    /// otherwise. `Ok` is the step to return ([`PageStep::Reopen`] for the page's one retry),
+    /// `Err` the error.
+    fn unclean<K: PageKeeper>(
+        &mut self,
+        sync: &mut BoardSync,
+        keeper: &mut K,
+        info: PageInfo,
+        error: DeviceError,
+    ) -> Result<PageStep<K::Kept>, DeviceError> {
+        let open = info.is_open();
+        let received = std::mem::take(&mut self.received);
+        let mut held = None;
+        let had_bytes = !received.is_empty();
+        if had_bytes {
+            let partial = DownloadedPage {
+                announced_size: info.size,
+                bytes: received,
+                timestamp: Some(i64::from(info.time)),
+                kind: crate::transport::TabletKind::Blackboard,
+                previous: info.previous(),
+            };
+            if open && let Rescued::Held { cause } = set_aside(sync, keeper, &partial) {
+                held = Some(cause);
+            }
+            sync.unsettled = Some(partial);
+        }
+        // Notifications can be lost on the way (BLE stack buffers), or the tablet can stall:
+        // once more, on a fresh link. An open page that is not whole records too: it may be
+        // read whole there, if the tablet still holds it.
+        let retry = match &error {
+            DeviceError::TransferIncomplete { .. } => true,
+            DeviceError::PageUnreadable { .. } => open && had_bytes,
+            _ => false,
+        };
+        if retry && sync.retried != Some(info.time) {
+            sync.retried = Some(info.time);
+            return Ok(PageStep::Reopen);
+        }
+        // What these errors say ("the page stays on the tablet") is not known of an open page.
+        let doubtful = matches!(
+            error,
+            DeviceError::TransferIncomplete { .. } | DeviceError::PageUnreadable { .. }
+        ) && open
+            && sync.doubtful.contains(&info.time);
+        Err(match (doubtful, held) {
+            (true, Some(cause)) => DeviceError::PageNotSaved {
+                time: info.time,
+                cause,
+            },
+            (true, None) => DeviceError::PageDoubtful { time: info.time },
+            (false, _) => error,
+        })
+    }
+
+    /// The bytes of the last download that did not end cleanly (empty when none came), taken.
+    pub fn take_received(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.received)
     }
 
     /// Starts the live stream (`12 02 08 01`, no reply): records follow on the stream
@@ -571,6 +824,7 @@ impl BoardSession {
         let result = self.send(BoardRequest::StopLive);
         self.live_mode = false;
         self.live.clear();
+        self.end_push();
         result
     }
 
@@ -736,7 +990,9 @@ impl BoardSession {
                     download.bytes.extend_from_slice(&data);
                     download.last = now;
                 } else if self.live_mode {
-                    self.push_live(channel, data, received);
+                    if !self.pushed(data.len(), now) {
+                        self.push_live(channel, data, received);
+                    }
                 } else {
                     self.oddities.stray_bytes += data.len();
                     // More of the page just downloaded than it announced: its transfer did not
@@ -751,6 +1007,57 @@ impl BoardSession {
                 self.oddities.other_channels += 1;
             }
         }
+    }
+
+    /// In live mode: whether a stream notification of `len` bytes, come at `now`, belongs to a
+    /// page the tablet pushed (then it is counted and set aside, never the pen). A notification
+    /// of more than [`MAX_LIVE_BYTES`] starts a push (the pen sends six records at most). A push
+    /// goes on with a full chunk ([`MAX_CHUNK`]), with anything while the bytes pushed so far are
+    /// not whole records (a page always is), or with anything that comes within [`PUSH_GAP`] of
+    /// its previous notification; its first notification shorter than a full chunk is its last.
+    /// Limit: a page of six records or fewer pushed alone passes for the pen.
+    fn pushed(&mut self, len: usize, now: Duration) -> bool {
+        match self.push.as_mut() {
+            Some(push) => {
+                let whole = push.bytes.is_multiple_of(RECORD_LEN);
+                let soon = now.saturating_sub(push.last) <= PUSH_GAP;
+                if len > MAX_LIVE_BYTES || !whole || soon {
+                    push.bytes = push.bytes.saturating_add(len);
+                    push.last = now;
+                    if len < MAX_CHUNK {
+                        self.end_push();
+                    }
+                    true
+                } else {
+                    // The push ended on a whole chunk; this is the pen.
+                    self.end_push();
+                    false
+                }
+            }
+            None if len > MAX_LIVE_BYTES => {
+                self.push = Some(Push {
+                    bytes: len,
+                    last: now,
+                });
+                if len < MAX_CHUNK {
+                    self.end_push();
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn end_push(&mut self) {
+        if let Some(push) = self.push.take() {
+            self.set_aside = self.set_aside.saturating_add(push.bytes);
+        }
+    }
+
+    /// Bytes of pages the tablet pushed during live mode (the erase button) that were set aside
+    /// since the last call, once each push ended: they were not pen records.
+    pub fn take_set_aside(&mut self) -> usize {
+        std::mem::take(&mut self.set_aside)
     }
 
     fn push_live(&mut self, channel: Channel, data: Vec<u8>, received: SystemTime) {
@@ -774,6 +1081,16 @@ impl BoardSession {
 
 fn unexpected(reply: &BoardReply) -> DeviceError {
     DeviceError::Unexpected(format!("{reply:?}"))
+}
+
+/// Copies what came of a page apart, as doubtful (the sync remembers it, to say so).
+fn set_aside<K: PageKeeper>(
+    sync: &mut BoardSync,
+    keeper: &mut K,
+    page: &DownloadedPage,
+) -> Rescued {
+    sync.set_doubtful(page_time(page));
+    keeper.rescue(page, RescueKind::Doubtful)
 }
 
 #[cfg(test)]
@@ -903,6 +1220,53 @@ mod tests {
         assert_eq!(writes.lock().unwrap().len(), 4);
     }
 
+    /// The answer to the count every link asks before its first description.
+    fn counted() -> TransportEvent {
+        reply("12 07 04 00 01 00 00 00 15")
+    }
+
+    /// The tests' keeper: `keep` decides, every copy is recorded (`(time, kind, bytes)`).
+    struct Keeper<F> {
+        keep: F,
+        copies: Vec<(u32, RescueKind, usize)>,
+        doubted: Vec<u32>,
+        released: Vec<u32>,
+        /// No folder can be written: every copy is held.
+        nowhere: bool,
+    }
+
+    fn keeping<F: FnMut(DownloadedPage) -> Result<(), DeviceError>>(keep: F) -> Keeper<F> {
+        Keeper {
+            keep,
+            copies: Vec::new(),
+            doubted: Vec::new(),
+            released: Vec::new(),
+            nowhere: false,
+        }
+    }
+
+    impl<F: FnMut(DownloadedPage) -> Result<(), DeviceError>> PageKeeper for Keeper<F> {
+        type Kept = ();
+        fn keep(&mut self, page: DownloadedPage) -> Result<(), DeviceError> {
+            (self.keep)(page)
+        }
+        fn rescue(&mut self, page: &DownloadedPage, kind: RescueKind) -> Rescued {
+            self.copies.push((page_time(page), kind, page.bytes.len()));
+            match self.nowhere {
+                true => Rescued::Held {
+                    cause: "no folder".into(),
+                },
+                false => Rescued::Written,
+            }
+        }
+        fn doubt(&mut self, time: u32) {
+            self.doubted.push(time);
+        }
+        fn release(&mut self, time: u32) {
+            self.released.push(time);
+        }
+    }
+
     /// The pages a sync keeps, step after step as the tablet service runs them, until the
     /// tablet holds no page (`Ok`) or a step asks for a fresh link (`Err(StreamDirty)`).
     fn sync_all(
@@ -910,9 +1274,18 @@ mod tests {
         sync: &mut BoardSync,
         keep: &mut dyn FnMut(DownloadedPage) -> Result<(), DeviceError>,
     ) -> Result<Vec<u32>, DeviceError> {
+        sync_with(board, sync, &mut keeping(keep))
+    }
+
+    /// [`sync_all`] with a keeper of the test's.
+    fn sync_with<K: PageKeeper<Kept = ()>>(
+        board: &mut BoardSession,
+        sync: &mut BoardSync,
+        keeper: &mut K,
+    ) -> Result<Vec<u32>, DeviceError> {
         let mut kept = Vec::new();
         loop {
-            match board.sync_page(sync, &mut *keep)? {
+            match board.sync_page(sync, keeper)? {
                 PageStep::Kept { info, kept: () } => kept.push(info.time),
                 PageStep::Done => return Ok(kept),
                 PageStep::Reopen => return Err(DeviceError::StreamDirty),
@@ -934,6 +1307,7 @@ mod tests {
         let first = page_bytes(3);
         let second = page_bytes(40);
         let (mut board, writes) = session(vec![
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
             ("12 06 03 01 68 00 00 01", vec![data(&first)]),
             ("12 05 06 68 00 00 01", vec![]),
@@ -957,7 +1331,7 @@ mod tests {
         assert_eq!(times, [0x6800_0001, 0x6800_0002]);
         assert_eq!(kept, [(Some(0x6800_0001), 21), (Some(0x6800_0002), 280)]);
         assert_eq!(sync.pages(), 2);
-        assert_eq!(writes.lock().unwrap().len(), 7);
+        assert_eq!(writes.lock().unwrap().len(), 8);
         assert!(!board.is_dirty());
     }
 
@@ -1039,6 +1413,7 @@ mod tests {
     #[test]
     fn a_page_that_cannot_be_kept_is_not_deleted() {
         let (mut board, writes) = session(vec![
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
             ("12 06 03 01 68 00 00 01", vec![data(&page_bytes(3))]),
         ]);
@@ -1054,14 +1429,13 @@ mod tests {
         let page = page_bytes(10);
         // The first link: the transfer stalls, the step asks for a fresh link.
         let (board, writes) = session(vec![
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 46")]),
             ("12 06 03 01 68 00 00 01", vec![data(&page[..30])]),
         ]);
         let mut board = board.with_timeouts(REPLY_TIMEOUT, Duration::from_secs(2));
         let mut sync = BoardSync::default();
-        let step = board.sync_page(&mut sync, |_| -> Result<(), DeviceError> {
-            panic!("nothing to keep")
-        });
+        let step = board.sync_page(&mut sync, &mut keeping(|_| panic!("nothing to keep")));
         assert_eq!(step, Ok(PageStep::Reopen));
         assert!(board.is_dirty());
         // This link refuses to download or to stream again, without writing anything.
@@ -1069,13 +1443,14 @@ mod tests {
         assert_eq!(board.download(info), Err(DeviceError::StreamDirty));
         assert_eq!(board.start_live(), Err(DeviceError::StreamDirty));
         assert_eq!(
-            board.sync_page(&mut sync, |_| -> Result<(), DeviceError> { panic!() }),
+            board.sync_page(&mut sync, &mut keeping(|_| panic!())),
             Ok(PageStep::Reopen)
         );
-        assert_eq!(writes.lock().unwrap().len(), 2);
+        assert_eq!(writes.lock().unwrap().len(), 3);
 
         // The fresh link: the retry stalls again, a typed error, nothing deleted.
         let (board, writes) = session(vec![
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 46")]),
             ("12 06 03 01 68 00 00 01", vec![data(&page[..44])]),
         ]);
@@ -1093,6 +1468,7 @@ mod tests {
 
         // Once more on a third link, the page completes: the retry was this page's only.
         let (mut board, _) = session(vec![
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 46")]),
             ("12 06 03 01 68 00 00 01", vec![data(&page)]),
             ("12 05 06 68 00 00 01", vec![]),
@@ -1109,16 +1485,20 @@ mod tests {
         // may be wrong, it stays on the tablet.
         let (mut board, writes, clock) = session_with(
             vec![
+                ("12 01 04", vec![counted()]),
                 ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
                 ("12 06 03 01 68 00 00 01", vec![data(&page)]),
             ],
             vec![(1_000, data(&page[..14]))],
         );
         let mut sync = BoardSync::default();
-        let step = board.sync_page(&mut sync, |_| {
-            clock.0.fetch_add(2_000, Ordering::SeqCst);
-            Ok(())
-        });
+        let step = board.sync_page(
+            &mut sync,
+            &mut keeping(|_| {
+                clock.0.fetch_add(2_000, Ordering::SeqCst);
+                Ok(())
+            }),
+        );
         assert_eq!(step, Ok(PageStep::Reopen));
         assert_eq!(deletes(&writes), 0);
         assert!(board.is_dirty());
@@ -1127,15 +1507,19 @@ mod tests {
         // than reopen the link again and again (the page and its note stay).
         let (mut board, writes, clock) = session_with(
             vec![
+                ("12 01 04", vec![counted()]),
                 ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
                 ("12 06 03 01 68 00 00 01", vec![data(&page)]),
             ],
             vec![(1_000, data(&page[..14]))],
         );
-        let step = board.sync_page(&mut sync, |_| {
-            clock.0.fetch_add(2_000, Ordering::SeqCst);
-            Ok(())
-        });
+        let step = board.sync_page(
+            &mut sync,
+            &mut keeping(|_| {
+                clock.0.fetch_add(2_000, Ordering::SeqCst);
+                Ok(())
+            }),
+        );
         assert_eq!(
             step,
             Err(DeviceError::TransferIncomplete {
@@ -1146,6 +1530,7 @@ mod tests {
         assert_eq!(deletes(&writes), 0);
         // A stall after bytes during the keep: the retry is used up the same way.
         let (board, writes) = session(vec![
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
             ("12 06 03 01 68 00 00 01", vec![data(&page[..7])]),
         ]);
@@ -1154,7 +1539,7 @@ mod tests {
             retried: Some(0x6800_0001),
             ..BoardSync::default()
         };
-        let step = board.sync_page(&mut sync, |_| -> Result<(), DeviceError> { panic!() });
+        let step = board.sync_page(&mut sync, &mut keeping(|_| panic!()));
         assert!(
             matches!(step, Err(DeviceError::TransferIncomplete { .. })),
             "{step:?}"
@@ -1163,6 +1548,7 @@ mod tests {
 
         // Bytes after the delete of page 1: the next page is not downloaded on this link.
         let (mut board, writes) = session(vec![
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
             ("12 06 03 01 68 00 00 01", vec![data(&page)]),
             ("12 05 06 68 00 00 01", vec![data(&page[..14])]),
@@ -1172,7 +1558,7 @@ mod tests {
         assert_eq!(result, Err(DeviceError::StreamDirty));
         assert!(board.is_dirty());
         assert_eq!(board.take_oddities().stray_bytes, 14);
-        assert_eq!(writes.lock().unwrap().len(), 4, "no second download");
+        assert_eq!(writes.lock().unwrap().len(), 5, "no second download");
 
         // Stray bytes outside any download (the end of a live stream) are only counted.
         let (mut board, _) = session(vec![("11 01 01", vec![data(&page), reply("11 02 01 64")])]);
@@ -1186,6 +1572,7 @@ mod tests {
         let mut page = page_bytes(3);
         page.rotate_left(3);
         let (mut board, writes) = session(vec![
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
             ("12 06 03 01 68 00 00 01", vec![data(&page)]),
         ]);
@@ -1205,6 +1592,7 @@ mod tests {
         // A size larger than the tablet's memory: refused before anything is sent.
         let (mut board, writes) = session(vec![
             ("11 01 02", vec![reply("11 09 02 07 90 7e 00 07 8e ba 00")]),
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 10 00 00 00")]),
         ]);
         assert_eq!(board.memory(), Ok((126_909_952, 126_794_240)));
@@ -1213,7 +1601,7 @@ mod tests {
             matches!(result, Err(DeviceError::PageUnreadable { .. })),
             "{result:?}"
         );
-        assert_eq!(writes.lock().unwrap().len(), 2, "no download asked");
+        assert_eq!(writes.lock().unwrap().len(), 3, "no download asked");
         assert!(!board.is_dirty());
     }
 
@@ -1221,6 +1609,7 @@ mod tests {
     fn a_page_still_described_after_its_deletion_is_asked_once_more_then_stops_the_sync() {
         // The tablet took a moment to erase: described again a little later, the next page.
         let (mut board, writes) = session(vec![
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
             ("12 06 03 01 68 00 00 01", vec![data(&page_bytes(3))]),
             ("12 05 06 68 00 00 01", vec![]),
@@ -1238,6 +1627,7 @@ mod tests {
 
         // Still there the second time: the sync stops rather than import it again.
         let (mut board, _) = session(vec![
+            ("12 01 04", vec![counted()]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
             ("12 06 03 01 68 00 00 01", vec![data(&page_bytes(3))]),
             ("12 05 06 68 00 00 01", vec![]),
@@ -1255,7 +1645,10 @@ mod tests {
 
     #[test]
     fn an_empty_tablet_or_a_full_sync_reads_nothing_more() {
-        let (mut board, _) = session(vec![("12 01 05", vec![reply("12 01 05")])]);
+        let (mut board, _) = session(vec![
+            ("12 01 04", vec![reply("12 07 04 00 00 00 00 00 00")]),
+            ("12 01 05", vec![reply("12 01 05")]),
+        ]);
         assert_eq!(
             sync_all(&mut board, &mut BoardSync::default(), &mut |_| panic!(
                 "no page"
@@ -1269,7 +1662,7 @@ mod tests {
             ..BoardSync::default()
         };
         assert_eq!(
-            board.sync_page(&mut sync, |_| -> Result<(), DeviceError> { panic!() }),
+            board.sync_page(&mut sync, &mut keeping(|_| panic!())),
             Ok(PageStep::Done)
         );
         assert!(writes.lock().unwrap().is_empty());
@@ -1353,5 +1746,212 @@ mod tests {
         assert_eq!(board.page_count(), Err(DeviceError::Disconnected));
         assert!(!board.is_connected());
         assert_eq!(board.battery(), Err(DeviceError::Disconnected));
+    }
+
+    /// The open page (long description, research note §6): copied clean before its note,
+    /// released once the note is kept, then deleted all the same (harmless).
+    #[test]
+    fn an_open_page_is_copied_before_its_note_and_released_after() {
+        let (mut board, writes) = session(vec![
+            ("12 01 04", vec![counted()]),
+            (
+                "12 01 05",
+                vec![reply("12 0d 05 68 00 00 02 00 00 00 15 68 00 00 01")],
+            ),
+            ("12 06 03 01 68 00 00 02", vec![data(&page_bytes(3))]),
+            ("12 05 06 68 00 00 02", vec![]),
+            ("12 01 05", vec![reply("12 01 05")]),
+        ]);
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let seen = order.clone();
+        let mut keeper = keeping(move |page| {
+            assert_eq!(page.previous, Some(0x6800_0001));
+            seen.lock().unwrap().push("kept");
+            Ok(())
+        });
+        let times = sync_with(&mut board, &mut BoardSync::default(), &mut keeper).unwrap();
+        assert_eq!(times, [0x6800_0002]);
+        assert_eq!(keeper.copies, [(0x6800_0002, RescueKind::Clean, 21)]);
+        assert_eq!(keeper.released, [0x6800_0002]);
+        assert_eq!(deletes(&writes), 1);
+
+        // Its note cannot be written: the copy stays, the error says the page is kept aside;
+        // with no folder to write it in either, held (by the keeper) and said so.
+        for nowhere in [false, true] {
+            let (mut board, writes) = session(vec![
+                ("12 01 04", vec![counted()]),
+                (
+                    "12 01 05",
+                    vec![reply("12 0d 05 68 00 00 02 00 00 00 15 00 00 00 00")],
+                ),
+                ("12 06 03 01 68 00 00 02", vec![data(&page_bytes(3))]),
+            ]);
+            let mut keeper = keeping(|_| Err(DeviceError::Storage("disk full".into())));
+            keeper.nowhere = nowhere;
+            let result = sync_with(&mut board, &mut BoardSync::default(), &mut keeper);
+            let error = result.unwrap_err();
+            match nowhere {
+                false => assert_eq!(
+                    error,
+                    DeviceError::PageRescued {
+                        time: 0x6800_0002,
+                        cause: "cannot save the page: disk full".into()
+                    }
+                ),
+                true => assert!(
+                    matches!(
+                        error,
+                        DeviceError::PageNotSaved {
+                            time: 0x6800_0002,
+                            ..
+                        }
+                    ),
+                    "{error:?}"
+                ),
+            }
+            assert_eq!(keeper.copies, [(0x6800_0002, RescueKind::Clean, 21)]);
+            assert!(keeper.released.is_empty());
+            assert_eq!(deletes(&writes), 0);
+        }
+        // A short-form page is not copied: it stays on the tablet until deleted.
+        let (mut board, _) = session(vec![
+            ("12 01 04", vec![counted()]),
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page_bytes(3))]),
+        ]);
+        let mut keeper = keeping(|_| Err(DeviceError::Storage("disk full".into())));
+        let result = sync_with(&mut board, &mut BoardSync::default(), &mut keeper);
+        assert_eq!(result, Err(DeviceError::Storage("disk full".into())));
+        assert!(keeper.copies.is_empty());
+    }
+
+    /// An open page with more bytes than announced: what came is copied apart as doubtful, the
+    /// page's one retry asks for a fresh link; there the tablet no longer describes it (all its
+    /// bytes were sent), so the sync goes on and remembers the page as doubtful.
+    #[test]
+    fn an_open_page_with_more_bytes_is_copied_apart_and_the_sync_goes_on() {
+        let page = page_bytes(3);
+        let (mut board, _) = session(vec![
+            ("12 01 04", vec![counted()]),
+            (
+                "12 01 05",
+                vec![reply("12 0d 05 68 00 00 02 00 00 00 15 00 00 00 00")],
+            ),
+            (
+                "12 06 03 01 68 00 00 02",
+                vec![data(&page), data(&page[..7])],
+            ),
+        ]);
+        let mut keeper = keeping(|_| panic!("never a note"));
+        let mut sync = BoardSync::default();
+        let step = board.sync_page(&mut sync, &mut keeper);
+        assert_eq!(step, Ok(PageStep::Reopen));
+        assert_eq!(keeper.copies, [(0x6800_0002, RescueKind::Doubtful, 28)]);
+        assert_eq!(sync.doubtful(), [0x6800_0002]);
+        // The fresh link describes the next page: the copy stays, the sync goes on.
+        let (mut board, _) = session(vec![
+            ("12 01 04", vec![counted()]),
+            ("12 01 05", vec![reply("12 09 05 68 00 00 03 00 00 00 15")]),
+            ("12 06 03 01 68 00 00 03", vec![data(&page)]),
+            ("12 05 06 68 00 00 03", vec![]),
+            ("12 01 05", vec![reply("12 01 05")]),
+        ]);
+        let mut keeper = keeping(|_| Ok(()));
+        let times = sync_with(&mut board, &mut sync, &mut keeper).unwrap();
+        assert_eq!(times, [0x6800_0003]);
+        assert_eq!(sync.doubtful(), [0x6800_0002]);
+        assert!(!keeper.released.contains(&0x6800_0002));
+    }
+
+    /// A short-form page whose transfer stalls is read again on the fresh link; when that link no
+    /// longer describes it, what came is all there is: copied apart, never dropped (checked by
+    /// dropping it: no copy then).
+    #[test]
+    fn what_came_of_a_page_no_longer_described_is_copied_apart() {
+        let page = page_bytes(10);
+        let (board, _) = session(vec![
+            ("12 01 04", vec![counted()]),
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 46")]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page[..30])]),
+        ]);
+        let mut board = board.with_timeouts(REPLY_TIMEOUT, Duration::from_secs(1));
+        let mut sync = BoardSync::default();
+        let mut keeper = keeping(|_| panic!("nothing to keep"));
+        assert_eq!(
+            board.sync_page(&mut sync, &mut keeper),
+            Ok(PageStep::Reopen)
+        );
+        assert!(
+            keeper.copies.is_empty(),
+            "a short-form page stays on the tablet"
+        );
+        let (mut board, _) = session(vec![
+            ("12 01 04", vec![counted()]),
+            ("12 01 05", vec![reply("12 01 05")]),
+        ]);
+        assert_eq!(
+            sync_with(&mut board, &mut sync, &mut keeper),
+            Ok(Vec::new())
+        );
+        assert_eq!(keeper.copies, [(0x6800_0001, RescueKind::Doubtful, 30)]);
+        assert_eq!(sync.doubtful(), [0x6800_0001]);
+
+        // Described again there: read again, and once it comes whole, nothing is doubtful.
+        let (board, _) = session(vec![
+            ("12 01 04", vec![counted()]),
+            (
+                "12 01 05",
+                vec![reply("12 0d 05 68 00 00 01 00 00 00 46 00 00 00 00")],
+            ),
+            ("12 06 03 01 68 00 00 01", vec![data(&page[..30])]),
+        ]);
+        let mut board = board.with_timeouts(REPLY_TIMEOUT, Duration::from_secs(1));
+        let mut sync = BoardSync::default();
+        let mut keeper = keeping(|_| Ok(()));
+        assert_eq!(
+            board.sync_page(&mut sync, &mut keeper),
+            Ok(PageStep::Reopen)
+        );
+        assert_eq!(keeper.copies, [(0x6800_0001, RescueKind::Doubtful, 30)]);
+        let (mut board, _) = session(vec![
+            ("12 01 04", vec![counted()]),
+            (
+                "12 01 05",
+                vec![reply("12 0d 05 68 00 00 01 00 00 00 46 00 00 00 00")],
+            ),
+            ("12 06 03 01 68 00 00 01", vec![data(&page)]),
+            ("12 05 06 68 00 00 01", vec![]),
+            ("12 01 05", vec![reply("12 01 05")]),
+        ]);
+        assert_eq!(
+            sync_with(&mut board, &mut sync, &mut keeper),
+            Ok(vec![0x6800_0001])
+        );
+        assert!(sync.doubtful().is_empty());
+        assert_eq!(keeper.released, [0x6800_0001]);
+    }
+
+    /// In live mode, a notification of more than six records starts a push of the tablet (the
+    /// erase button), set aside with its last, short, chunk; the pen around it goes on.
+    #[test]
+    fn pushes_in_live_mode_are_set_aside_and_the_pen_goes_on() {
+        let pen = page_bytes(6);
+        let pushed = page_bytes(74); // 518 bytes: 244, 244 and 30 (cut inside records)
+        let whole = page_bytes(249); // 1 743 bytes: seven full chunks of whole records, then 35
+        let mut events = vec![data(&pen[..42])];
+        for chunk in pushed.chunks(244).chain(whole.chunks(244)) {
+            events.push(data(chunk));
+        }
+        events.push(data(&pen[..21]));
+        let (mut board, _) = session(vec![("12 02 08 01", events), ("12 02 08 02", vec![])]);
+        board.start_live().unwrap();
+        let mut seen = Vec::new();
+        while let Some(n) = board.next_live_event(Duration::from_millis(100)).unwrap() {
+            seen.push(n.data.len());
+        }
+        assert_eq!(seen, [42, 21], "only the pen");
+        assert_eq!(board.take_set_aside(), 518 + 1743);
+        assert_eq!(board.take_set_aside(), 0);
+        board.stop_live().unwrap();
     }
 }

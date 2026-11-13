@@ -30,6 +30,7 @@ fn sim_page() -> DownloadedPage {
         timestamp: Some(stored.timestamp),
         announced_size: u32::try_from(stored.bytes.len()).unwrap(),
         kind: ardoise_device::transport::TabletKind::Slate,
+        previous: None,
     }
 }
 
@@ -559,6 +560,7 @@ fn a_blackboard_note_goes_back_to_what_the_blackboard_sent() {
         timestamp: Some(i64::from(stored.time)),
         announced_size: u32::try_from(stored.bytes.len()).unwrap(),
         kind: TabletKind::Blackboard,
+        previous: None,
     };
     let settings_dir = tempfile::tempdir().unwrap();
     let store = SettingsStore::locate(settings_dir.path(), settings_dir.path(), "PC-TEST");

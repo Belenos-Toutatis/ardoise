@@ -33,7 +33,8 @@ use super::{
 use crate::blackboard::{BoardSession, BoardSync};
 use crate::identity::{self, BlackboardRecord, DeviceRecord};
 use crate::manager::Manager;
-use crate::pages::{ImportedPages, orient_record, page_note_id};
+use crate::pages::{ImportedPages, Stored, orient_record};
+use crate::rescue::RescueKind;
 use crate::session::{
     DeviceError, DeviceInfo, DownloadedPage, LiveNotification, Session, unix_seconds,
 };
@@ -148,6 +149,9 @@ struct LiveRun {
     /// accepted (its page has that tablet's size and way of holding). `None` until a tablet
     /// streams.
     kind: Option<TabletKind>,
+    /// The blackboard's stored pages were looked at before this run first streams (SPEC §4.2:
+    /// fetched first, or the run refused).
+    pages_checked: bool,
 }
 
 /// Why a synced page is not stored.
@@ -200,6 +204,12 @@ pub(super) struct Worker {
     /// `blackboard.json` could not be read (noted once): no blackboard is known until one is
     /// added, which replaces the file.
     board_record_unreadable: bool,
+    /// Pages of the blackboard the tablet may no longer hold whose rescue copy could be written
+    /// nowhere: written out (or imported) at the next sync of the blackboard.
+    held: Vec<(DownloadedPage, RescueKind)>,
+    /// Pages set apart as doubtful by a sync cut short by a lost link: said at the end of the
+    /// sync that resumes it.
+    doubtful_untold: Vec<u32>,
     stop: bool,
 }
 
@@ -238,6 +248,8 @@ impl Worker {
             count_now: false,
             stored_event: false,
             board_record_unreadable: false,
+            held: Vec::new(),
+            doubtful_untold: Vec::new(),
             stop: false,
         }
     }
@@ -940,6 +952,57 @@ impl Worker {
     /// pages the count is read again at once: a page finished meanwhile (the tablet stays
     /// connected) is synced on the same connection.
     fn finish_sync(&mut self, run: SyncRun, error: Option<&DeviceError>) {
+        // Pages set apart as doubtful are said (docs/design/blackboard.md §9.2): when nothing
+        // else stopped the sync, or instead of an error that would say the page stayed on the
+        // tablet; after a lost link, by the sync that resumes.
+        let mut doubtful = std::mem::take(&mut self.doubtful_untold);
+        for time in run.board.doubtful() {
+            if !doubtful.contains(time) {
+                doubtful.push(*time);
+            }
+        }
+        // Only what is still kept apart (a page that came cleanly since lost its copy).
+        if !doubtful.is_empty() {
+            let kept: Vec<u32> = self
+                .rescue_store()
+                .pages(RescueKind::Doubtful)
+                .iter()
+                .map(|file| file.time)
+                .chain(
+                    self.held
+                        .iter()
+                        .filter(|(_, kind)| *kind == RescueKind::Doubtful)
+                        .filter_map(|(page, _)| page.timestamp.and_then(|t| u32::try_from(t).ok())),
+                )
+                .collect();
+            doubtful.retain(|time| kept.contains(time));
+        }
+        let doubtful_error = doubtful
+            .first()
+            .map(|time| DeviceError::PageDoubtful { time: *time });
+        let error = match (error, &doubtful_error) {
+            (Some(DeviceError::Disconnected), _) => {
+                self.doubtful_untold = doubtful;
+                error
+            }
+            (
+                None
+                | Some(DeviceError::TransferIncomplete { .. } | DeviceError::PageUnreadable { .. }),
+                Some(told),
+            ) => {
+                self.note(format!(
+                    "{} kept apart as doubtful (not made into notes): {}",
+                    pages_text(u16::try_from(doubtful.len()).unwrap_or(u16::MAX)),
+                    doubtful
+                        .iter()
+                        .map(|time| ardoise_proto::blackboard::utc(*time))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+                Some(told)
+            }
+            (error, _) => error,
+        };
         match error {
             None => self.note(format!(
                 "sync finished: {} of {} pages saved, {} deleted",
@@ -1033,6 +1096,7 @@ impl Worker {
             active,
             notifications: 0,
             kind,
+            pages_checked: active,
         };
         if active {
             // Live mode already streams (another sink before): the new one starts at once.
@@ -1826,29 +1890,53 @@ fn keep_page(
     page: DownloadedPage,
     index: u16,
 ) -> Result<String, DeviceError> {
+    keep_page_as(store_page, run, page, &format!("page {index}"))
+}
+
+/// [`keep_page`], the page named `name` in the log line.
+fn keep_page_as(
+    store_page: &mut PageStore,
+    run: &mut SyncRun,
+    page: DownloadedPage,
+    name: &str,
+) -> Result<String, DeviceError> {
     let known = match run.imported.find(&run.library, &page) {
         Some(path) => Some(Known::InLibrary(path)),
         None if !run.delete && run.imported.in_trash(&page) => Some(Known::InTrash),
         None => None,
     };
     match known {
-        Some(Known::InLibrary(path)) => Ok(format!(
-            "page {index} already imported as {}",
-            path.display()
-        )),
-        Some(Known::InTrash) => Ok(format!("page {index} already imported, its note deleted")),
+        Some(Known::InLibrary(path)) => {
+            Ok(format!("{name} already imported as {}", path.display()))
+        }
+        Some(Known::InTrash) => Ok(format!("{name} already imported, its note deleted")),
         None => {
-            let id = page_note_id(&page);
+            let recorded = page.clone();
             // The store is the app's code (thumbnail, export): a panic there must not end the
             // service; the page then stays on the tablet.
             let stored = std::panic::catch_unwind(AssertUnwindSafe(|| {
                 store_page(&run.root, page, &run.context)
             }))
             .unwrap_or_else(|_| Err("the page store failed unexpectedly".into()));
-            let path = stored.map_err(DeviceError::Storage)?;
-            run.imported.add(id, &path);
-            run.saved.push(path.display().to_string());
-            Ok(format!("page {index} saved as {}", path.display()))
+            let stored = stored.map_err(DeviceError::Storage)?;
+            run.imported.record(&recorded, &stored.path, stored.created);
+            let shown = stored.path.display().to_string();
+            if !run.saved.contains(&shown) {
+                run.saved.push(shown);
+            }
+            Ok(match stored.how {
+                Stored::New => format!("{name} saved as {}", stored.path.display()),
+                Stored::NewNotUpdated(why) => format!(
+                    "{name} saved as {} (a later store of a screen; the note of the earlier \
+                     store was not updated: {why})",
+                    stored.path.display()
+                ),
+                Stored::Updated { replaced } => format!(
+                    "{name}, a later store of its screen, updated the note of the store of {}: {}",
+                    ardoise_proto::blackboard::utc(replaced),
+                    stored.path.display()
+                ),
+            })
         }
     }
 }

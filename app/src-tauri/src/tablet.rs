@@ -27,7 +27,8 @@ use ardoise_device::identity::{self, IdentityError};
 use ardoise_device::pages::LibrarySink;
 use ardoise_device::service::{
     self, Connection, ConnectorFactory, NoHooks, PageContext, PageStore, ServiceConfig,
-    ServiceHooks, StatusCallback, StatusError, TabletOptions, TabletService, TabletStatus,
+    ServiceHooks, StatusCallback, StatusError, StoredPage, TabletOptions, TabletService,
+    TabletStatus,
 };
 use ardoise_device::session::{DeviceError, DownloadedPage, valid_name};
 use ardoise_device::transport::{Connector, TransportError};
@@ -210,10 +211,7 @@ pub(crate) fn interface_language(settings: &Settings, system_locale: Option<&str
     if french { "fr" } else { "en" }
 }
 
-/// Writes a synced page as a new note in the library root (`root`): the points turned for
-/// the orientation of `context`, a thumbnail, the note read back to check it (`LibrarySink::store`).
-/// Then the automatic export, with the settings read now: a failed export is logged and never
-/// fails the sync (the note is safe). An `Err` keeps the page on the tablet.
+/// [`store_stored_page_in`], the note's path only.
 pub fn store_page_in(
     settings: Option<&SettingsStore>,
     system_locale: Option<&str>,
@@ -221,6 +219,34 @@ pub fn store_page_in(
     page: DownloadedPage,
     context: &PageContext,
 ) -> Result<PathBuf, String> {
+    store_stored_page_in(settings, system_locale, root, page, context).map(|stored| stored.path)
+}
+
+/// Where the rescue copies of the blackboard's pages go when the library's `_ardoise` folder
+/// cannot be written: `%LOCALAPPDATA%\Ardoise\blackboard-rescue` (local to this PC, outside the
+/// library); under the temporary folder when `LOCALAPPDATA` is not set (Linux).
+pub fn rescue_fallback_dir() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .filter(|dir| !dir.is_empty())
+        .map_or_else(std::env::temp_dir, PathBuf::from)
+        .join("Ardoise")
+        .join("blackboard-rescue")
+}
+
+/// Writes a synced page as a note in the library root (`root`): the points turned for the
+/// orientation of `context`, a thumbnail, the note read back to check it
+/// (`LibrarySink::store_page`: a new note, or the note of an earlier store of the same screen
+/// of the blackboard updated, docs/design/blackboard.md §9.6). Then the automatic export, with
+/// the settings read now: a failed export is logged and never fails the sync (the note is safe).
+/// An `Err` keeps the page on the tablet. The one page store of the sync, of the blackboard's
+/// rescue copies and of `--import-blackboard-pages`.
+pub fn store_stored_page_in(
+    settings: Option<&SettingsStore>,
+    system_locale: Option<&str>,
+    root: &Path,
+    page: DownloadedPage,
+    context: &PageContext,
+) -> Result<StoredPage, String> {
     let settings = match settings.map(SettingsStore::load) {
         Some(Ok(settings)) => settings,
         Some(Err(error)) => {
@@ -241,7 +267,7 @@ pub fn store_page_in(
                 &library,
                 |saved, outcome| report.record(saved, outcome),
             ));
-        sink.store(page)?
+        sink.store_page(page)?
     };
     for (path, error) in &report.failures {
         eprintln!(
@@ -255,7 +281,7 @@ pub fn store_page_in(
             path.display()
         );
     }
-    Ok(saved.path)
+    Ok(saved)
 }
 
 /// The tablet service of the running app (see [`start_service`]).
@@ -334,12 +360,13 @@ impl TabletRuntime {
             identity_root,
             options,
             simulated,
+            rescue_fallback: Some(rescue_fallback_dir()),
         };
         let subscribers = self.subscribers.clone();
         let on_status: StatusCallback = Box::new(move |status| broadcast(&subscribers, status));
         let locale = context.system_locale.clone();
         let store_page: PageStore = Box::new(move |root, page, context| {
-            store_page_in(store.as_ref(), locale.as_deref(), root, page, context)
+            store_stored_page_in(store.as_ref(), locale.as_deref(), root, page, context)
         });
         let service = TabletService::start(config, factory, hooks, on_status, store_page);
         *lock(&self.service) = Some(Arc::new(service));
@@ -868,6 +895,7 @@ mod tests {
             timestamp: Some(stored.timestamp),
             announced_size: u32::try_from(stored.bytes.len()).unwrap(),
             kind: ardoise_device::transport::TabletKind::Slate,
+            previous: None,
         }
     }
 

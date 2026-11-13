@@ -85,7 +85,7 @@ fn library_store(refuse: Option<u16>, before: Option<Box<dyn Fn(u16) + Send>>) -
             let library = Library::open(root).map_err(|e| e.to_string())?;
             let mut sink = LibrarySink::new(&library, "", context.size, "Calque 1", || NOW_MS)
                 .with_orientation(context.orientation);
-            sink.store(page).map(|saved| saved.path)
+            sink.store_page(page)
         },
     )
 }
@@ -112,6 +112,7 @@ impl Running {
             identity_root: Some(root.to_owned()),
             options,
             simulated: true,
+            rescue_fallback: None,
         };
         let service = TabletService::start(
             config,
@@ -287,6 +288,7 @@ fn the_registration_can_be_cancelled_while_searching() {
             identity_root: Some(library.path().to_owned()),
             options: TabletOptions::default(),
             simulated: true,
+            rescue_fallback: None,
         },
         Box::new(SimFactory::real_time(tablet.clone())),
         Arc::new(ardoise_device::service::NoHooks),

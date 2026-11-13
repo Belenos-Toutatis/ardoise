@@ -21,8 +21,12 @@ use std::time::{Duration, Instant};
 use ardoise_core::library::Library;
 use ardoise_core::note::Timing;
 use ardoise_core::settings::Orientation;
+use ardoise_device::blackboard::{BoardSync, PageKeeper, PageStep, Rescued};
 use ardoise_device::identity::{self, DEVICE_FORMAT, DeviceRecord, HostId};
-use ardoise_device::pages::{BLACKBOARD_PAGE, LibrarySink};
+use ardoise_device::log::DiagnosticLog;
+use ardoise_device::manager::Manager;
+use ardoise_device::pages::{BLACKBOARD_PAGE, LibrarySink, page_note_id};
+use ardoise_device::rescue::{RescueKind, RescueStore};
 use ardoise_device::service::{
     Connection, LastSync, LiveInput, LiveSink, LiveState, PageContext, PageStore, ServiceConfig,
     ServiceHooks, TabletOptions, TabletService, TabletStatus,
@@ -94,7 +98,7 @@ fn library_store(
             let library = Library::open(root).map_err(|e| e.to_string())?;
             let mut sink = LibrarySink::new(&library, "", context.size, "Calque 1", || NOW_MS)
                 .with_orientation(context.orientation);
-            sink.store(page).map(|saved| saved.path)
+            sink.store_page(page)
         },
     )
 }
@@ -125,6 +129,18 @@ impl Running {
         hooks: Arc<dyn ServiceHooks>,
         store: PageStore,
     ) -> Running {
+        Self::start_with(devices, root, options, hooks, store, None)
+    }
+
+    /// [`Running::start`] with a fallback folder for the rescue copies.
+    fn start_with(
+        devices: Vec<SimDevice>,
+        root: &Path,
+        options: TabletOptions,
+        hooks: Arc<dyn ServiceHooks>,
+        store: PageStore,
+        rescue_fallback: Option<PathBuf>,
+    ) -> Running {
         let (sender, statuses) = mpsc::channel();
         let sender = Mutex::new(sender);
         let config = ServiceConfig {
@@ -132,6 +148,7 @@ impl Running {
             identity_root: Some(root.to_owned()),
             options,
             simulated: true,
+            rescue_fallback,
         };
         let service = TabletService::start(
             config,
@@ -639,7 +656,7 @@ fn store_with(before: impl Fn(u16) -> Result<(), String> + Send + 'static) -> Pa
             let library = Library::open(root).map_err(|e| e.to_string())?;
             let mut sink = LibrarySink::new(&library, "", context.size, "Calque 1", || NOW_MS)
                 .with_orientation(context.orientation);
-            sink.store(page).map(|saved| saved.path)
+            sink.store_page(page)
         },
     )
 }
@@ -719,10 +736,19 @@ fn a_stalled_transfer_is_retried_on_a_fresh_link_and_a_second_stall_keeps_the_pa
     assert_eq!((last.saved.len(), last.deleted), (0, 0));
     assert_eq!(board.stored_page_count(), 1);
     assert_eq!(notes(library.path()).len(), 3);
-    // The stream was dirty: the link is opened again, the blackboard stays connected.
-    let status =
-        run.wait(|s| s.connection == Connection::Connected && board.stats().connections >= 4);
+    // The stream was dirty: the blackboard stays connected; the link is opened again only when
+    // the stream is next needed (docs/design/blackboard.md §9.4), here the next sync.
+    std::thread::sleep(Duration::from_millis(300));
+    let status = run.service.status();
+    assert_eq!(status.connection, Connection::Connected);
     assert_eq!(status.active, Some(TabletKind::Blackboard));
+    assert_eq!(board.stats().connections, 3);
+    let before = last_at(&status);
+    run.service.sync_now(false).unwrap();
+    let status = run.wait(|s| synced_after(s, &before));
+    assert_eq!(status.last_sync.unwrap().error, None);
+    assert_eq!(board.stats().connections, 4, "a fresh link first");
+    assert_eq!(notes(library.path()).len(), 4);
     run.service.shutdown();
 }
 
@@ -836,10 +862,12 @@ fn a_cancelled_download_leaves_no_phantom_record_in_live_mode() {
             assert!(written.contains(&(point.x, point.y)), "a phantom record");
         }
     }
+    // Live mode asked while the tablet holds pages, the sync allowed: they are fetched first
+    // (SPEC §4.2), on the fresh link, then live mode starts.
     let status = run.service.status();
     let last = status.last_sync.unwrap();
-    assert_eq!((last.saved.len(), last.deleted, last.error), (0, 0, None));
-    assert_eq!(board.stored_page_count(), 3, "nothing deleted");
+    assert_eq!((last.saved.len(), last.deleted, last.error), (3, 3, None));
+    assert_eq!(board.stored_page_count(), 0);
     assert_eq!(
         board.stats().connections,
         2,
@@ -924,7 +952,7 @@ fn an_unreadable_page_is_refused_and_stays_on_the_tablet() {
     );
     assert_eq!(notes(library.path()).len(), 1);
     // The diagnostic log has the reason, in counts.
-    run.wait(|s| s.connection == Connection::Connected);
+    assert_eq!(run.service.status().connection, Connection::Connected);
     run.service.shutdown();
     let diagnostics = library.path().join("_ardoise").join("diagnostics");
     let logs: String = std::fs::read_dir(&diagnostics)
@@ -989,7 +1017,8 @@ fn the_status_names_the_blackboard_after_each_kind_of_sync() {
     assert_eq!(status.last_sync.as_ref().unwrap().deleted, 2);
     assert!(connected(&status), "{status:?}");
 
-    // A cancelled sync: still connected, then the link opened again (its stream was dirty).
+    // A cancelled sync: still connected; its stream was dirty, so the next sync opens the link
+    // again first.
     for page in reference_board_pages().iter().take(2) {
         board.draw_page(page);
     }
@@ -1003,9 +1032,19 @@ fn the_status_names_the_blackboard_after_each_kind_of_sync() {
     let last = status.last_sync.clone().unwrap();
     assert_eq!((last.deleted, last.error), (0, None));
     assert!(connected(&status), "{status:?}");
-    let status = run.wait(|s| connected(s) && board.stats().connections > links);
-    assert_eq!(status.device.unwrap().stored_pages, 2);
+    assert_eq!(status.device.as_ref().unwrap().stored_pages, 2);
     assert_eq!(board.stored_page_count(), 2);
+    assert_eq!(
+        board.stats().connections,
+        links,
+        "not while nothing needs the stream"
+    );
+    let before = last_at(&status);
+    run.service.sync_now(true).unwrap();
+    let status = run.wait(|s| synced_after(s, &before));
+    assert_eq!(status.last_sync.as_ref().unwrap().deleted, 2);
+    assert!(connected(&status), "{status:?}");
+    assert_eq!(board.stats().connections, links + 1);
     run.service.shutdown();
 }
 
@@ -1666,13 +1705,13 @@ fn bytes_after_a_page_use_up_its_retry_and_the_sync_ends() {
     assert_eq!((last.saved.len(), last.deleted), (1, 0));
     assert_eq!(board.stored_page_count(), 3);
     assert_eq!(notes(library.path()).len(), 1);
-    // The stream was dirty: one more fresh link, then nothing more.
-    run.wait(|s| s.connection == Connection::Connected && board.stats().connections == 3);
+    // The stream was dirty: no fresh link while nothing needs the stream, and no loop.
     std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.service.status().connection, Connection::Connected);
     let stats = board.stats();
     assert_eq!(
         (stats.connections, stats.downloads, stats.deletes),
-        (3, 2, 0)
+        (2, 2, 0)
     );
     assert_eq!(run.service.status().last_sync, Some(last));
     run.service.shutdown();
@@ -1718,10 +1757,11 @@ fn a_tablet_streaming_unasked_never_gives_a_page_and_the_sync_ends() {
     assert_eq!(board.stats().downloads, 0);
     assert_eq!(offered.load(Ordering::SeqCst), 0);
     assert_eq!(board.stored_page_count(), 3);
-    // One fresh link for the page's retry, one after the sync failed; no loop.
-    run.wait(|s| s.connection == Connection::Connected && board.stats().connections == 3);
+    // One fresh link for the page's retry, none after the sync failed while nothing needs the
+    // stream; no loop.
     std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(board.stats().connections, 3);
+    assert_eq!(run.service.status().connection, Connection::Connected);
+    assert_eq!(board.stats().connections, 2);
     assert_eq!(run.service.status().last_sync, Some(last));
     run.service.shutdown();
 }
@@ -1941,13 +1981,14 @@ fn a_live_run_whose_tablet_is_forgotten_elsewhere_ends_and_the_other_tablet_writ
     run.service.shutdown();
 }
 
-/// What the real tablet did on 2026-11-13 (research note §6): a page stored with the button
-/// while the host is connected outside live mode is described in the long form (`12 0d 05`, 12
-/// bytes instead of 8). The sync took that description for a malformed frame and failed every
-/// time; the page is a page like any other.
+/// What the real tablet does (research note §6): the page of a screen not erased since it was
+/// stored (here with the host connected and idle) is described in the long form (`12 0d 05`, 12
+/// bytes instead of 8), and leaves the tablet by itself once downloaded. The sync once took that
+/// description for a malformed frame; now the page comes like any other, its rescue copy is
+/// written before its note and removed once the note is read back.
 #[test]
 fn a_page_stored_while_the_host_is_connected_is_imported_despite_its_long_description() {
-    let _report = common::report("blackboard: a page stored while connected (long description)");
+    let _report = common::report("blackboard: an open page (long description)");
     let library = new_library();
     let board = SimBoard::blackboard();
     added_beforehand(&board, library.path());
@@ -1962,10 +2003,13 @@ fn a_page_stored_while_the_host_is_connected_is_imported_despite_its_long_descri
     run.wait(|s| s.connection == Connection::Connected);
     assert_eq!(board.stored_page_count(), 0);
 
-    // The hand writes and presses the store button, the host connected and idle.
-    board.draw_page(&reference_board_pages()[0]);
+    // The hand writes and presses the store button, the host connected and idle; the screen is
+    // not erased.
+    board.write(&reference_board_pages()[0]);
+    board.press_store();
     let stored = board.stored_pages();
     assert_eq!(stored.len(), 1);
+    assert_eq!(board.open_page(), Some(stored[0].time));
     let status = run.wait(|s| {
         s.last_sync.as_ref().is_some_and(|l| !l.saved.is_empty())
             && s.device.as_ref().is_some_and(|d| d.stored_pages == 0)
@@ -1973,11 +2017,17 @@ fn a_page_stored_while_the_host_is_connected_is_imported_despite_its_long_descri
     let last = status.last_sync.unwrap();
     assert_eq!(last.error, None, "{last:?}");
     assert_eq!((last.saved.len(), last.deleted), (1, 1));
-    // Its note was written while the tablet still held it, then it was deleted.
-    assert_eq!(*offered.lock().unwrap(), [(stored[0].time, true)]);
+    // By the time its note was written the tablet no longer held it (measured): the delete
+    // after it was harmless.
+    assert_eq!(*offered.lock().unwrap(), [(stored[0].time, false)]);
     assert_eq!(board.stored_page_count(), 0);
     assert_eq!(kept_bytes(library.path()), [stored[0].bytes.clone()]);
-    assert!(board.stats().long_descriptions >= 1, "the long form");
+    let stats = board.stats();
+    assert!(stats.long_descriptions >= 1, "the long form");
+    assert_eq!((stats.removed_after_download, stats.deletes), (1, 0));
+    // Its rescue copy went once the note was read back.
+    assert!(rescued(library.path(), RescueKind::Clean).is_empty());
+    assert!(rescued(library.path(), RescueKind::Doubtful).is_empty());
     run.service.shutdown();
     // Nothing odd happened: no diagnostic log was kept (a malformed frame keeps one).
     assert!(!library.path().join("_ardoise").join("diagnostics").exists());
@@ -2045,9 +2095,11 @@ fn erasing_the_screen_during_live_mode_tells_the_sink_and_only_then() {
     assert!(!library.path().join("_ardoise").join("diagnostics").exists());
 }
 
-/// The store button pressed again on a screen that was not erased replaces its page by a longer
-/// one (measured): the count stays the same with another page behind it. With the automatic sync
-/// on, the "page stored" event is enough to sync, whatever the count was.
+/// The store button pressed again on a screen that was not erased gives a page holding the whole
+/// screen (measured). With the automatic sync on, the "page stored" event is enough to sync,
+/// whatever the count was. Here the first page's note cannot be written: the tablet removed the
+/// page all the same once downloaded (measured), so its rescue copy is all there is; it comes at
+/// the next sync, and the second store then updates its note (SPEC §4.1).
 #[test]
 fn a_screen_stored_again_is_synced_though_the_page_count_did_not_change() {
     let _report = common::report("blackboard: a screen stored again, the count unchanged");
@@ -2060,7 +2112,7 @@ fn a_screen_stored_again_is_synced_though_the_page_count_did_not_change() {
         library.path(),
         TabletOptions::default(),
         Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
-        // The first page offered cannot be saved: it stays on the tablet.
+        // The first page offered cannot be saved.
         store_with(|n| match n {
             1 => Err("the disk is full".into()),
             _ => Ok(()),
@@ -2069,12 +2121,24 @@ fn a_screen_stored_again_is_synced_though_the_page_count_did_not_change() {
     run.wait(|s| s.connection == Connection::Connected);
     board.write(&pages[0]);
     board.press_store();
+    let first = board.stored_pages()[0].clone();
     let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error.is_some()));
     let failed = status.last_sync;
-    assert_eq!(board.stored_page_count(), 1);
-    let first = board.stored_pages()[0].clone();
+    assert_eq!(
+        failed.as_ref().unwrap().error.as_ref().unwrap().code,
+        "pageRescued"
+    );
+    assert_eq!(
+        board.stored_page_count(),
+        0,
+        "the tablet no longer holds it"
+    );
+    assert_eq!(
+        rescued(library.path(), RescueKind::Clean),
+        [(first.time, first.bytes.clone())]
+    );
 
-    // The hand writes on, the screen not erased, and stores again: one page still, a longer one.
+    // The hand writes on, the screen not erased, and stores again: a page holding the screen.
     board.write(&pages[1]);
     board.press_store();
     let stored = board.stored_pages();
@@ -2086,8 +2150,721 @@ fn a_screen_stored_again_is_synced_though_the_page_count_did_not_change() {
     });
     let last = status.last_sync.unwrap();
     assert_eq!(last.error, None, "{last:?}");
+    // The rescued page became a note, then the second store updated it: one note.
     assert_eq!((last.saved.len(), last.deleted), (1, 1));
     assert_eq!(board.stored_page_count(), 0);
     assert_eq!(kept_bytes(library.path()), [stored[0].bytes.clone()]);
+    assert!(rescued(library.path(), RescueKind::Clean).is_empty());
     run.service.shutdown();
+}
+
+// --- open pages, rescue copies, live mode after the pages (H8, docs/design/blackboard.md §9) ----
+
+/// The rescue copies of `kind` in the library: `(time, bytes)`, oldest first.
+fn rescued(root: &Path, kind: RescueKind) -> Vec<(u32, Vec<u8>)> {
+    let store = RescueStore::new(Some(root), None);
+    store
+        .pages(kind)
+        .iter()
+        .map(|file| (file.time, store.read(file).unwrap().bytes))
+        .collect()
+}
+
+/// The diagnostic logs of the library, as one text.
+fn logs(root: &Path) -> String {
+    let diagnostics = root.join("_ardoise").join("diagnostics");
+    match std::fs::read_dir(&diagnostics) {
+        Ok(entries) => entries
+            .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap_or_default())
+            .collect(),
+        Err(_) => String::new(),
+    }
+}
+
+/// A store whose `n`-th page fails ("the disk is full"), the others written as the app does.
+fn failing_at(failing: u16) -> PageStore {
+    store_with(move |n| match n == failing {
+        true => Err("the disk is full".into()),
+        false => Ok(()),
+    })
+}
+
+/// An open page whose note cannot be written: the tablet removed it once downloaded, its rescue
+/// copy was written before the note was tried (checked by removing that copy: the bytes are
+/// then gone), it comes at the next sync and goes once its note is read back.
+#[test]
+fn an_open_page_whose_note_cannot_be_written_is_kept_aside_and_comes_at_the_next_sync() {
+    let _report = common::report("blackboard: an open page rescued");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        failing_at(1),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    board.write(&reference_board_pages()[0]);
+    board.press_store();
+    let page = board.stored_pages()[0].clone();
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error.is_some()));
+    let failed = status.last_sync.clone();
+    let error = failed.as_ref().unwrap().error.clone().unwrap();
+    say!("{error:?}");
+    assert_eq!(error.code, "pageRescued");
+    assert!(
+        error.message.contains("the disk is full"),
+        "{}",
+        error.message
+    );
+    assert_eq!(board.stored_page_count(), 0);
+    assert!(notes(library.path()).is_empty());
+    assert_eq!(
+        rescued(library.path(), RescueKind::Clean),
+        [(page.time, page.bytes.clone())]
+    );
+
+    // The next sync (asked: the tablet holds nothing) imports it, then the copy goes.
+    run.service.sync_now(false).unwrap();
+    let status = run.wait(|s| synced_after(s, &failed));
+    let last = status.last_sync.clone().unwrap();
+    assert_eq!(
+        (last.saved.len(), last.error.clone()),
+        (1, None),
+        "{last:?}"
+    );
+    assert_eq!(
+        kept_bytes(library.path()),
+        std::slice::from_ref(&page.bytes)
+    );
+    assert!(rescued(library.path(), RescueKind::Clean).is_empty());
+    // Once more: nothing new.
+    run.service.sync_now(false).unwrap();
+    let again = run.wait(|s| synced_after(s, &status.last_sync));
+    assert_eq!(again.last_sync.unwrap().saved.len(), 0);
+    assert_eq!(notes(library.path()).len(), 1);
+    run.service.shutdown();
+    assert!(logs(library.path()).contains("clean copy"));
+}
+
+/// When the library's `_ardoise` folder cannot take the copy, the local fallback does; when
+/// nothing can, the page is held in memory (`pageNotSaved`) and written out at the next sync.
+#[test]
+fn a_rescue_copy_goes_to_the_local_folder_or_stays_in_memory() {
+    let _report = common::report("blackboard: rescue copies elsewhere");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    // A file where the library's rescue folder would be.
+    let blocked = library.path().join("_ardoise").join("rescued-pages");
+    std::fs::write(&blocked, b"not a folder").unwrap();
+    let local = tempfile::tempdir().unwrap();
+    let mut run = Running::start_with(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        failing_at(1),
+        Some(local.path().to_owned()),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    board.write(&reference_board_pages()[0]);
+    board.press_store();
+    let page = board.stored_pages()[0].clone();
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error.is_some()));
+    assert_eq!(
+        status
+            .last_sync
+            .as_ref()
+            .unwrap()
+            .error
+            .as_ref()
+            .unwrap()
+            .code,
+        "pageRescued"
+    );
+    let local_copies = RescueStore::new(None, Some(local.path())).pages(RescueKind::Clean);
+    assert_eq!(local_copies.len(), 1);
+    assert_eq!(std::fs::read(&local_copies[0].path).unwrap(), page.bytes);
+    run.service.sync_now(false).unwrap();
+    let done = run.wait(|s| synced_after(s, &status.last_sync));
+    assert_eq!(done.last_sync.as_ref().unwrap().error, None);
+    assert_eq!(
+        kept_bytes(library.path()),
+        std::slice::from_ref(&page.bytes)
+    );
+    assert!(
+        RescueStore::new(None, Some(local.path()))
+            .pages(RescueKind::Clean)
+            .is_empty()
+    );
+    run.service.shutdown();
+
+    // Nowhere to write: held in memory, then written out and imported once the folder can be.
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let blocked = library.path().join("_ardoise").join("rescued-pages");
+    std::fs::write(&blocked, b"not a folder").unwrap();
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        failing_at(1),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    board.write(&reference_board_pages()[1]);
+    board.press_store();
+    let page = board.stored_pages()[0].clone();
+    let status = run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error.is_some()));
+    assert_eq!(
+        status
+            .last_sync
+            .as_ref()
+            .unwrap()
+            .error
+            .as_ref()
+            .unwrap()
+            .code,
+        "pageNotSaved"
+    );
+    assert_eq!(board.stored_page_count(), 0);
+    std::fs::remove_file(&blocked).unwrap();
+    run.service.sync_now(false).unwrap();
+    let done = run.wait(|s| synced_after(s, &status.last_sync));
+    assert_eq!(done.last_sync.as_ref().unwrap().error, None, "{done:?}");
+    assert_eq!(
+        kept_bytes(library.path()),
+        std::slice::from_ref(&page.bytes)
+    );
+    assert!(rescued(library.path(), RescueKind::Clean).is_empty());
+    run.service.shutdown();
+}
+
+/// An open page that comes with more bytes than it announced: the tablet sent all of it, so it
+/// no longer holds it; what came is kept apart as doubtful, never made into a note, and the sync
+/// says so (`pageDoubtful`). Checked by removing the doubtful copy: the bytes are then lost.
+#[test]
+fn an_open_page_received_with_more_bytes_is_kept_apart_and_never_a_note() {
+    let _report = common::report("blackboard: an open page received with more bytes");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_with(|_| Ok(())),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    board.write(&reference_board_pages()[0]);
+    let more = board.clone();
+    let extra = vec![0xa1, 1, 2, 3, 4, 1, 0, 0xa1, 1, 2, 3, 4, 1, 0];
+    let sent = extra.clone();
+    board.on_next_download(move || more.send_stream(&sent));
+    board.press_store();
+    let page = board.stored_pages()[0].clone();
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.clone().unwrap();
+    say!("{last:?}, {:?}", board.stats());
+    assert_eq!(last.error.as_ref().unwrap().code, "pageDoubtful");
+    assert_eq!(last.saved.len(), 0);
+    assert!(notes(library.path()).is_empty(), "never a note on its own");
+    assert_eq!(board.stored_page_count(), 0);
+    let mut whole = page.bytes.clone();
+    whole.extend(&extra);
+    assert_eq!(
+        rescued(library.path(), RescueKind::Doubtful),
+        [(page.time, whole)]
+    );
+    assert!(rescued(library.path(), RescueKind::Clean).is_empty());
+    run.service.shutdown();
+}
+
+/// An open page whose download stalls (supposed to stay on the tablet, not measured): what came
+/// is copied apart at once, then the page comes whole on the fresh link and the doubtful copy
+/// goes with its note written.
+#[test]
+fn an_open_page_that_stalls_comes_whole_on_a_fresh_link_and_its_doubtful_copy_goes() {
+    let _report = common::report("blackboard: an open page that stalls");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_with(|_| Ok(())),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    board.stall_next_download(70);
+    board.write(&reference_board_pages()[0]);
+    board.press_store();
+    let page = board.stored_pages()[0].clone();
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.clone().unwrap();
+    assert_eq!(
+        (last.saved.len(), last.error.clone()),
+        (1, None),
+        "{last:?}"
+    );
+    assert_eq!(
+        kept_bytes(library.path()),
+        std::slice::from_ref(&page.bytes)
+    );
+    assert_eq!(board.stats().connections, 2, "the retry on a fresh link");
+    assert!(rescued(library.path(), RescueKind::Doubtful).is_empty());
+    assert!(rescued(library.path(), RescueKind::Clean).is_empty());
+    run.service.shutdown();
+    assert!(logs(library.path()).contains("doubtful copy of 70 bytes"));
+}
+
+/// More stream bytes while the note of an open page is written: the note stays (the tablet no
+/// longer holds the page), its copy is kept apart, and the sync says so.
+#[test]
+fn bytes_after_an_open_page_keep_its_note_and_its_copy_apart() {
+    let _report = common::report("blackboard: bytes after an open page");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let more = board.clone();
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_with(move |n| {
+            if n == 1 {
+                more.send_stream(&[0xa1, 9, 9, 9, 9, 1, 0]);
+            }
+            Ok(())
+        }),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    board.write(&reference_board_pages()[0]);
+    board.press_store();
+    let page = board.stored_pages()[0].clone();
+    let status = run.wait(|s| s.last_sync.is_some());
+    let last = status.last_sync.clone().unwrap();
+    assert_eq!(last.error.as_ref().unwrap().code, "pageDoubtful");
+    assert_eq!(
+        kept_bytes(library.path()),
+        std::slice::from_ref(&page.bytes),
+        "the note stays"
+    );
+    assert_eq!(
+        rescued(library.path(), RescueKind::Doubtful),
+        [(page.time, page.bytes.clone())]
+    );
+    assert!(rescued(library.path(), RescueKind::Clean).is_empty());
+    run.service.shutdown();
+}
+
+/// Research note §6: `12 01 05` asked before any `12 01 04` on a link answered the bare frame
+/// although a page was stored. The per-page step counts first on a link that did not (checked by
+/// removing the count: the page is then never seen).
+#[test]
+fn the_count_comes_before_the_first_description_on_a_link() {
+    struct Keep(Vec<u32>);
+    impl PageKeeper for Keep {
+        type Kept = ();
+        fn keep(&mut self, page: DownloadedPage) -> Result<(), DeviceError> {
+            self.0.push(u32::try_from(page.timestamp.unwrap()).unwrap());
+            Ok(())
+        }
+        fn rescue(&mut self, _: &DownloadedPage, _: RescueKind) -> Rescued {
+            Rescued::Written
+        }
+        fn doubt(&mut self, _: u32) {}
+        fn release(&mut self, _: u32) {}
+    }
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    board.draw_page(&reference_board_pages()[0]);
+    let time = board.stored_pages()[0].time;
+    let log = DiagnosticLog::in_memory("sim", board.clock()).shared();
+    let mut manager = Manager::new(Box::new(board.connector()), library.path().to_owned(), log);
+    // Only the clock is set on this link before the step.
+    let mut session = manager.connect_blackboard(&board.config().address).unwrap();
+    let mut keeper = Keep(Vec::new());
+    let mut sync = BoardSync::default();
+    let step = session.sync_page(&mut sync, &mut keeper).unwrap();
+    assert!(matches!(step, PageStep::Kept { .. }), "{step:?}");
+    assert_eq!(keeper.0, [time]);
+    assert_eq!(board.stats().uncounted_descriptions, 0);
+}
+
+/// Pushes of a page (the erase button) during live mode: notifications of more than six records,
+/// and the last, short, chunk of each, never reach the sink; the pen around them does, and the
+/// log says how many bytes were set aside. Checked by removing the filter: phantom records.
+#[test]
+fn a_page_pushed_during_live_mode_never_reaches_the_sink() {
+    let _report = common::report("blackboard: a page pushed during live mode");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let script = handwriting();
+    let written: Vec<(u16, u16)> = script.points().map(|p| (p.x, p.y)).collect();
+    let expected = script.points().filter(|p| p.pressure > 0).count();
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(Writer {
+            board: board.clone(),
+            script,
+        }),
+        store_with(|_| Ok(())),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    let (sender, inputs) = mpsc::channel();
+    run.service.start_live(Box::new(ChannelSink(sender)));
+    run.wait(|s| s.connection == Connection::Live);
+    // Records of a page drawn elsewhere on the board (never under the pen of the script).
+    let far = |n: usize| -> Vec<u8> {
+        (0..n)
+            .flat_map(|i| {
+                let x = 15_000u16 + u16::try_from(i % 500).unwrap();
+                let [x0, x1] = x.to_le_bytes();
+                [0xa1, x0, x1, 0x20, 0x4e, 0x00, 0x04]
+            })
+            .collect()
+    };
+    // 518 bytes: chunks of 244, 244 and 30 (cut inside records); 1 743 bytes: seven full chunks
+    // (1 708 bytes, whole records) and a last one of 35 bytes, whole records too.
+    board.send_stream(&far(74));
+    board.send_stream(&far(249));
+    let mut received = Vec::new();
+    while touching(&received).len() < expected {
+        match inputs.recv_timeout(WAIT).expect("records in time") {
+            LiveInput::Records { records, .. } => received.extend(records),
+            LiveInput::State(LiveState::Stopped) => panic!("live mode stopped"),
+            _ => {}
+        }
+    }
+    assert_no_phantom(&received, &written);
+    run.service.stop_live();
+    records_until(&inputs, |i| *i == LiveInput::State(LiveState::Stopped));
+    run.service.shutdown();
+    let log = logs(library.path());
+    // Both pushes, set aside in one go or two.
+    assert!(
+        log.contains("live mode: 2261 bytes")
+            || (log.contains("live mode: 518 bytes") && log.contains("live mode: 1743 bytes")),
+        "{log}"
+    );
+}
+
+/// A page the erase button pushes outside live mode after a sync (here sent as such) costs
+/// nothing: the link is not opened again while nothing needs it, and the next page comes clean
+/// (checked by reopening at once: one more connection).
+#[test]
+fn a_page_pushed_after_a_sync_does_not_reopen_the_link_for_nothing() {
+    let _report = common::report("blackboard: a push after a sync");
+    let library = new_library();
+    let board = board_with_pages(None);
+    let first = board.stored_pages();
+    added_beforehand(&board, library.path());
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_with(|_| Ok(())),
+    );
+    let status = run.wait(|s| s.last_sync.is_some());
+    assert_eq!(status.last_sync.as_ref().unwrap().error, None);
+    assert_eq!(board.stats().connections, 1);
+    board.send_stream(&first[0].bytes);
+    // The worker idles in real time while the virtual clock stands still.
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(board.stats().connections, 1, "not reopened while idle");
+    assert_eq!(run.service.status().connection, Connection::Connected);
+    run.service.shutdown();
+}
+
+/// SPEC §4.2: live mode asked while the blackboard holds pages, the automatic sync and "delete
+/// after import" on: the pages are imported first, nothing asked of the stream before they are
+/// in the library, then live mode starts. Both orders: connected then asked, asked then
+/// connected (checked by removing the step: live mode then streams with the pages on the
+/// tablet).
+#[test]
+fn live_mode_asked_with_pages_on_the_blackboard_imports_them_first() {
+    let _report = common::report("blackboard: the pages before live mode");
+    for asked_first in [false, true] {
+        let library = new_library();
+        let board = board_with_pages(None);
+        added_beforehand(&board, library.path());
+        // The pages stay at the connection: the first one offered cannot be written.
+        let streaming = Arc::new(Mutex::new(Vec::new()));
+        let seen = streaming.clone();
+        let watched = board.clone();
+        let store = store_with(move |n| {
+            seen.lock().unwrap().push(watched.is_streaming());
+            match n {
+                1 if !asked_first => Err("the disk is full".into()),
+                _ => Ok(()),
+            }
+        });
+        if asked_first {
+            board.power_off();
+        }
+        let mut run = Running::start(
+            vec![SimDevice::Board(board.clone())],
+            library.path(),
+            TabletOptions::default(),
+            Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+            store,
+        );
+        if !asked_first {
+            run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.error.is_some()));
+            assert_eq!(board.stored_page_count(), 3);
+            assert_eq!(run.service.live_pages_first(), Ok(()));
+        }
+        let (sender, inputs) = mpsc::channel();
+        run.service.start_live(Box::new(ChannelSink(sender)));
+        if asked_first {
+            board.power_on();
+        }
+        let (started, _) = records_until(&inputs, |i| matches!(i, LiveInput::Started { .. }));
+        assert!(matches!(
+            started,
+            LiveInput::Started {
+                kind: TabletKind::Blackboard,
+                ..
+            }
+        ));
+        let status = run.wait(|s| s.connection == Connection::Live);
+        say!("asked first: {asked_first}, {:?}", status.last_sync);
+        assert_eq!(
+            board.stored_page_count(),
+            0,
+            "every page in the library first"
+        );
+        assert_eq!(notes(library.path()).len(), 3);
+        assert!(
+            streaming.lock().unwrap().iter().all(|s| !s),
+            "nothing asked of the stream before the pages were kept"
+        );
+        let syncing = run
+            .seen
+            .iter()
+            .position(|s| s.connection == Connection::Syncing && s.pending.is_some());
+        assert!(syncing.is_some(), "the sync shown while live mode waits");
+        run.service.stop_live();
+        run.service.shutdown();
+    }
+}
+
+/// SPEC §4.2: without the automatic sync or without "delete after import", live mode does not
+/// start while the blackboard holds pages: refused at once while it is connected, or as soon as
+/// it connects; nothing asked of the tablet; once the user's confirmed sync imported them, live
+/// mode starts (checked by removing the refusal: live mode then streams).
+#[test]
+fn without_the_permission_live_mode_waits_for_the_pages_to_be_imported() {
+    let _report = common::report("blackboard: the pages first, asked");
+    for (options, asked_first) in [
+        (options(true, false), false),
+        (options(false, true), false),
+        (options(true, false), true),
+    ] {
+        let library = new_library();
+        let board = board_with_pages(None);
+        added_beforehand(&board, library.path());
+        if asked_first {
+            board.power_off();
+        }
+        let mut run = Running::start(
+            vec![SimDevice::Board(board.clone())],
+            library.path(),
+            options,
+            Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+            store_with(|_| Ok(())),
+        );
+        if !asked_first {
+            run.wait(|s| s.connection == Connection::Connected);
+            assert_eq!(
+                run.service.live_pages_first(),
+                Err(DeviceError::BlackboardPagesFirst { pages: 3 })
+            );
+        }
+        // Asked anyway (a race with the connection, or before it): refused by the service.
+        let (sender, inputs) = mpsc::channel();
+        run.service.start_live(Box::new(ChannelSink(sender)));
+        if asked_first {
+            board.power_on();
+        }
+        let input = inputs.recv_timeout(WAIT).unwrap();
+        let input = match input {
+            LiveInput::State(LiveState::Waiting) => inputs.recv_timeout(WAIT).unwrap(),
+            other => other,
+        };
+        assert_eq!(input, LiveInput::PagesFirst { pages: 3 });
+        let status = run.wait(|s| s.connection == Connection::Connected && s.pending.is_none());
+        assert_eq!(status.device.unwrap().stored_pages, 3);
+        assert!(!board.is_streaming());
+        assert_eq!(board.stats().live_records, 0);
+        assert_eq!((board.stats().downloads, board.stored_page_count()), (0, 3));
+        // The user confirms the import; then live mode starts.
+        run.service.sync_now(true).unwrap();
+        run.wait(|s| s.last_sync.as_ref().is_some_and(|l| l.deleted == 3));
+        assert_eq!(run.service.live_pages_first(), Ok(()));
+        let (sender, inputs) = mpsc::channel();
+        run.service.start_live(Box::new(ChannelSink(sender)));
+        records_until(&inputs, |i| matches!(i, LiveInput::Started { .. }));
+        run.wait(|s| s.connection == Connection::Live);
+        run.service.stop_live();
+        run.service.shutdown();
+    }
+}
+
+/// The note made from a page of the blackboard, and the library.
+fn the_note(root: &Path) -> (PathBuf, ardoise_core::format::NoteFile) {
+    let paths = notes(root);
+    assert_eq!(paths.len(), 1, "{paths:?}");
+    let file = Library::open(root).unwrap().read(&paths[0]).unwrap().file;
+    (paths[0].clone(), file)
+}
+
+/// SPEC §4.1: a screen stored, synced, written on, stored again, synced: one note, holding all
+/// of it, at the same path with its title, tags and favourite mark (after a retitle), its
+/// creation date kept; a sync run again imports nothing.
+#[test]
+fn a_screen_stored_again_updates_its_note() {
+    let _report = common::report("blackboard: a screen stored again updates its note");
+    let library = new_library();
+    let board = SimBoard::blackboard();
+    added_beforehand(&board, library.path());
+    let pages = reference_board_pages();
+    let mut run = Running::start(
+        vec![SimDevice::Board(board.clone())],
+        library.path(),
+        TabletOptions::default(),
+        Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+        store_with(|_| Ok(())),
+    );
+    run.wait(|s| s.connection == Connection::Connected);
+    board.write(&pages[0]);
+    board.press_store();
+    let first = board.stored_pages()[0].clone();
+    let status = run.wait(|s| s.last_sync.is_some());
+    let (path, _) = the_note(library.path());
+    let opened = Library::open(library.path()).unwrap();
+    let retitled = opened.retitle(&path, "Leçon du jour", None).unwrap().path;
+    opened
+        .set_tags(&retitled, &["classe".to_owned()], None)
+        .unwrap();
+    opened.set_favorite(&retitled, true, None).unwrap();
+
+    board.write(&pages[1]);
+    board.press_store();
+    let second = board.stored_pages()[0].clone();
+    assert!(second.bytes.starts_with(&first.bytes));
+    let status = run.wait(|s| synced_after(s, &status.last_sync));
+    let last = status.last_sync.clone().unwrap();
+    assert_eq!(last.error, None);
+    let (path, file) = the_note(library.path());
+    assert_eq!(path, retitled, "the same file");
+    assert_eq!(last.saved, [path.display().to_string()]);
+    assert_eq!(file.note.title, "Leçon du jour");
+    assert_eq!(file.note.tags, ["classe"]);
+    assert!(file.note.favorite);
+    assert_eq!(file.note.created, i64::from(first.time) * 1000);
+    assert_eq!(file.original.as_deref(), Some(second.bytes.as_slice()));
+    let page = DownloadedPage {
+        announced_size: 0,
+        bytes: second.bytes.clone(),
+        timestamp: Some(i64::from(second.time)),
+        kind: TabletKind::Blackboard,
+        previous: None,
+    };
+    assert_eq!(
+        file.note.id,
+        page_note_id(&page),
+        "the id of the page it holds"
+    );
+    // Nothing new afterwards, however often it syncs.
+    run.service.sync_now(false).unwrap();
+    let again = run.wait(|s| synced_after(s, &status.last_sync));
+    assert_eq!(again.last_sync.unwrap().saved.len(), 0);
+    assert_eq!(notes(library.path()).len(), 1);
+    run.service.shutdown();
+}
+
+/// SPEC §4.1: the earlier note is updated only when it was not edited since its import and the
+/// new page holds it whole; otherwise a new note, as for any page. Edited ink, the note in the
+/// trash, a page that does not start with the earlier one: two notes (each guard checked by
+/// removing it: one note then).
+#[test]
+fn a_screen_stored_again_adds_a_note_when_its_earlier_note_was_edited_or_is_not_held_whole() {
+    let _report = common::report("blackboard: a screen stored again, a second note");
+    for case in ["edited", "trash", "not held whole"] {
+        let library = new_library();
+        let board = SimBoard::blackboard();
+        added_beforehand(&board, library.path());
+        let pages = reference_board_pages();
+        let mut run = Running::start(
+            vec![SimDevice::Board(board.clone())],
+            library.path(),
+            TabletOptions::default(),
+            Arc::new(ardoise_sim::SimHooks::for_board(board.clone())),
+            store_with(|_| Ok(())),
+        );
+        run.wait(|s| s.connection == Connection::Connected);
+        board.write(&pages[0]);
+        board.press_store();
+        let first = board.stored_pages()[0].clone();
+        let status = run.wait(|s| s.last_sync.is_some());
+        let (path, file) = the_note(library.path());
+        let opened = Library::open(library.path()).unwrap();
+        match case {
+            "edited" => {
+                let loaded = opened.read(&path).unwrap();
+                let mut edited = loaded.file.clone();
+                edited.note.strokes.pop();
+                opened.save(&path, &edited, &loaded.stamp).unwrap();
+            }
+            "trash" => {
+                opened.trash(&path).unwrap();
+            }
+            _ => {}
+        }
+        if case == "not held whole" {
+            board.store_raw_screen(second_screen(&first.bytes));
+        } else {
+            board.write(&pages[1]);
+            board.press_store();
+        }
+        let second = board.stored_pages()[0].clone();
+        let status = run.wait(|s| synced_after(s, &status.last_sync));
+        let last = status.last_sync.clone().unwrap();
+        say!("{case}: {last:?}");
+        assert_eq!(last.error, None);
+        let expected = match case {
+            "trash" => 1,
+            _ => 2,
+        };
+        assert_eq!(notes(library.path()).len(), expected, "{case}");
+        let kept = kept_bytes(library.path());
+        assert!(kept.contains(&second.bytes), "{case}");
+        if case != "trash" {
+            // The earlier note is as it was.
+            let back = opened.read(&path).unwrap().file;
+            assert_eq!(back.original, file.original, "{case}");
+        }
+        run.service.shutdown();
+    }
+}
+
+/// Records that do not start with `earlier`: the same screen's records shifted by one record.
+fn second_screen(earlier: &[u8]) -> Vec<u8> {
+    let mut bytes = earlier[7..].to_vec();
+    bytes.extend_from_slice(&earlier[..7]);
+    bytes.extend_from_slice(earlier);
+    bytes
 }

@@ -139,6 +139,7 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
             timestamp: None,
             announced_size: u32::try_from(bytes.len()).unwrap_or(u32::MAX),
             kind: page_kind(bytes),
+            previous: None,
         };
         let decoded = note_from_page(
             &page,

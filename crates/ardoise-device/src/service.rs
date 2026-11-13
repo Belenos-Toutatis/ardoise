@@ -35,6 +35,7 @@ use ardoise_core::settings::{LiveButton, Orientation, TabletSettings};
 use ardoise_proto::live::LiveRecord;
 use serde::{Deserialize, Serialize};
 
+pub use crate::pages::{Stored, StoredPage};
 use crate::session::{DeviceError, DownloadedPage, valid_name};
 use crate::transport::{Connector, TabletKind, TransportError};
 
@@ -306,6 +307,10 @@ pub struct ServiceConfig {
     pub identity_root: Option<PathBuf>,
     pub options: TabletOptions,
     pub simulated: bool,
+    /// Where rescue copies of the blackboard's pages go when the library's `_ardoise` folder
+    /// cannot be written (the app's local data, `%LOCALAPPDATA%Ardoiselackboard-rescue`):
+    /// `crate::rescue`.
+    pub rescue_fallback: Option<PathBuf>,
 }
 
 /// Makes the connector (Bluetooth, or the simulated tablet in real time).
@@ -348,9 +353,10 @@ pub struct PageContext {
 }
 
 /// Writes a downloaded page as a note of the library (`&Path`, its root) and checks it reads back
-/// (`pages::LibrarySink::store`); returns the note's path. `Err` keeps the page on the tablet.
+/// (`pages::LibrarySink::store_page`: a new note, or the note of an earlier store of the same
+/// screen updated); returns the note. `Err` keeps the page on the tablet.
 pub type PageStore =
-    Box<dyn FnMut(&Path, DownloadedPage, &PageContext) -> Result<PathBuf, String> + Send>;
+    Box<dyn FnMut(&Path, DownloadedPage, &PageContext) -> Result<StoredPage, String> + Send>;
 
 /// State of live mode, as the hub reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -399,6 +405,12 @@ pub enum LiveInput {
     /// The blackboard's screen was erased with its button: what is written next is written on a
     /// clean screen.
     ScreenErased,
+    /// Live mode does not start: the blackboard holds `pages` stored pages, and the automatic
+    /// sync or "delete after import" is off (SPEC §4.2): they must be imported first. Nothing was
+    /// asked of the tablet; live mode is over for this sink (`blackboardPagesFirst`).
+    PagesFirst {
+        pages: u16,
+    },
     State(LiveState),
 }
 
@@ -470,6 +482,10 @@ pub fn error_code(error: &DeviceError) -> &'static str {
         DeviceError::PageUnreadable { .. } => "pageUnreadable",
         DeviceError::BlackboardConfirmDelete => "blackboardConfirmDelete",
         DeviceError::LiveOnOtherTablet { .. } => "sheetOtherTablet",
+        DeviceError::BlackboardPagesFirst { .. } => "blackboardPagesFirst",
+        DeviceError::PageRescued { .. } => "pageRescued",
+        DeviceError::PageDoubtful { .. } => "pageDoubtful",
+        DeviceError::PageNotSaved { .. } => "pageNotSaved",
         DeviceError::Transport(_)
         | DeviceError::Unexpected(_)
         | DeviceError::CrcMismatch { .. }
@@ -759,6 +775,25 @@ impl TabletService {
     /// Follows another library (or none).
     pub fn set_library(&self, library: Option<PathBuf>, identity_root: Option<PathBuf>) {
         let _ = self.send(Request::SetLibrary(library, identity_root), true);
+    }
+
+    /// Whether live mode may be asked now (SPEC §4.2): with the blackboard connected and stored
+    /// pages on it, only when the automatic sync and "delete after import" are both on (the
+    /// sync then runs first); otherwise [`DeviceError::BlackboardPagesFirst`], and the pages
+    /// must be imported first (`sync_now(true)`). A run asked anyway, or waiting when the
+    /// blackboard connects, ends with [`LiveInput::PagesFirst`].
+    pub fn live_pages_first(&self) -> Result<(), DeviceError> {
+        let status = self.status();
+        let pages = status
+            .device
+            .as_ref()
+            .filter(|device| device.kind == TabletKind::Blackboard)
+            .map_or(0, |device| device.stored_pages);
+        let allowed = status.options.auto_sync && status.options.delete_after_import;
+        if status.active == Some(TabletKind::Blackboard) && pages > 0 && !allowed {
+            return Err(DeviceError::BlackboardPagesFirst { pages });
+        }
+        Ok(())
     }
 
     /// Enters live mode now or as soon as the tablet connects; `sink` receives it.

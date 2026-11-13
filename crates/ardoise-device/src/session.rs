@@ -118,6 +118,24 @@ pub enum DeviceError {
     /// ended and nothing of the other tablet was written.
     #[error("this live session was written with the {}: the other tablet cannot continue it", owner.name())]
     LiveOnOtherTablet { owner: TabletKind },
+    /// Live mode with the blackboard while it holds stored pages, and the automatic sync or
+    /// "delete after import" off: erasing its screen during live mode could lose the page of the
+    /// screen in progress, so its pages must be imported first (SPEC §4.2).
+    #[error("the blackboard holds {pages} stored pages: import them before live mode")]
+    BlackboardPagesFirst { pages: u16 },
+    /// A page of the blackboard that the tablet may no longer hold (an open page, Unix seconds of
+    /// its time) could not become a note (`cause`); its bytes are kept in a rescue copy and
+    /// imported at the next sync.
+    #[error("the page stored at {time} was kept aside and comes at the next sync: {cause}")]
+    PageRescued { time: u32, cause: String },
+    /// A page of the blackboard that the tablet may no longer hold was not received cleanly: what
+    /// came is kept apart (a doubtful copy), never made into a note on its own.
+    #[error("the page stored at {time} was not received cleanly: what came is kept apart")]
+    PageDoubtful { time: u32 },
+    /// A page of the blackboard that the tablet may no longer hold could be written neither as a
+    /// note nor as a rescue copy (`cause`): it stays in memory until the next sync.
+    #[error("the page stored at {time} could be written nowhere and is held in memory: {cause}")]
+    PageNotSaved { time: u32, cause: String },
 }
 
 /// What the tablet says about itself.
@@ -145,6 +163,10 @@ pub struct DownloadedPage {
     /// The tablet it comes from, which says how to read `bytes` (Slate stroke file, or the
     /// blackboard's 7-byte records).
     pub kind: TabletKind,
+    /// The blackboard's page that this one replaces (the time of an earlier store of the same
+    /// screen, which this page holds whole: `PageInfo::previous`); `None` otherwise, and always
+    /// for the Slate.
+    pub previous: Option<u32>,
 }
 
 /// A notification received during live mode, stamped when it came out of the transport.
@@ -515,6 +537,7 @@ impl Session {
             timestamp,
             announced_size,
             kind: TabletKind::Slate,
+            previous: None,
         })
     }
 

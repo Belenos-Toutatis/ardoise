@@ -42,6 +42,7 @@ fn start(
         library,
         options: TabletOptions::default(),
         simulated: true,
+        rescue_fallback: None,
     };
     let service = TabletService::start(
         config,
@@ -484,6 +485,7 @@ fn the_page_count_is_read_again_while_the_tablet_stays_connected() {
         identity_root: Some(library.path().to_owned()),
         options: TabletOptions::default(),
         simulated: false,
+        rescue_fallback: None,
     };
     let service = TabletService::start(
         config,
@@ -576,6 +578,7 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
             ..TabletOptions::default()
         },
         simulated: false,
+        rescue_fallback: None,
     };
     let service = TabletService::start(
         config,

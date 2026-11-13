@@ -90,6 +90,21 @@ fn packets(path: &Path) -> Vec<Packet> {
         .collect()
 }
 
+/// The captures of the study of research note §3 (Mi Home's sessions and the first sessions
+/// from the PC), by name: the measurements of §6 (`h8-*`, sessions of the survey tool with
+/// test pages that were not kept) are left out of the comparisons with the kept pages.
+fn study_captures(dir: &Path) -> Vec<PathBuf> {
+    captures(dir)
+        .into_iter()
+        .filter(|path| {
+            !path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("h8-"))
+        })
+        .collect()
+}
+
 /// Every capture of the folder (`.jsonl`), by name.
 fn captures(dir: &Path) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -218,7 +233,7 @@ fn the_downloads_of_the_import_are_the_stored_pages() {
     };
     let pages = pages(&dir);
     let mut checked = 0;
-    for path in captures(&dir) {
+    for path in study_captures(&dir) {
         let mut announced: Vec<(u32, u32)> = Vec::new();
         let mut current: Option<(u32, Vec<u8>)> = None;
         let mut downloads: Vec<(u32, Vec<u8>)> = Vec::new();
@@ -319,6 +334,7 @@ fn every_stored_page_decodes_completely_and_becomes_a_note() {
             timestamp: Some(i64::from(*time)),
             announced_size: u32::try_from(bytes.len()).unwrap(),
             kind: TabletKind::Blackboard,
+            previous: None,
         };
         let file = note_from_page(
             &downloaded,
@@ -361,7 +377,7 @@ fn the_page_stored_during_the_captures_holds_the_live_records() {
     };
     let pages = pages(&dir);
     let mut found = 0;
-    for (rank, path) in captures(&dir).iter().enumerate() {
+    for (rank, path) in study_captures(&dir).iter().enumerate() {
         let packets = packets(path);
         let live: Vec<u8> = packets
             .iter()

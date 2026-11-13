@@ -374,12 +374,28 @@ pub async fn live_start(
     if !runtime.hub.page_position().is_some_and(|p| p.running) {
         finish_live_narration(&narration, &runtime.hub);
     }
+    pages_first_now(&tablet)?;
     let options = start_options(&context, &tablet, library);
     let start = runtime
         .hub
         .start(options)
         .map_err(LiveError::command_error)?;
     start_streaming(start, &tablet, &runtime.hub)
+}
+
+/// The blackboard connected holds stored pages and may not sync them first (the automatic sync
+/// or "delete after import" is off): live mode is refused at once (`blackboardPagesFirst`,
+/// SPEC §4.2), before any session starts. The interface imports them
+/// (`tablet_sync({ confirmBlackboardDelete: true })`), then asks again
+/// (docs/design/blackboard.md §9.5). Without a running service, nothing to refuse.
+pub(crate) fn pages_first_now(tablet: &TabletRuntime) -> CommandResult<()> {
+    match tablet.with_service(TabletService::live_pages_first) {
+        Ok(Err(error)) => Err(CommandError::new(
+            ardoise_device::service::error_code(&error),
+            error,
+        )),
+        Ok(Ok(())) | Err(_) => Ok(()),
+    }
 }
 
 /// A tablet connected now (`active`) that cannot write on a sheet of size `sheet`
@@ -416,6 +432,7 @@ pub async fn live_resume(app: AppHandle, path: String) -> CommandResult<LiveSnap
             .ok()
             .flatten();
         refused_now(active, sheet)?;
+        pages_first_now(&tablet)?;
         finish_live_narration(&narration, &runtime.hub);
         if runtime.hub.page_position().is_some_and(|p| p.running) {
             // Without a running service there is nothing to stop on the tablet's side.

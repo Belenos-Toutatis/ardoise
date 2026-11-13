@@ -7,6 +7,7 @@
 //! - [`log`] and [`logging`]: the `.jsonl` diagnostic log and the transport that feeds it.
 //! - [`diagnostic`]: the guided tablet test and its report.
 //! - [`pages`]: synced pages become notes of the library (then the automatic export).
+//! - [`rescue`]: rescue copies of the blackboard's pages that the tablet no longer holds.
 //! - [`service`]: the tablet as the application sees it (auto-connect, sync, registration, live).
 
 pub mod blackboard;
@@ -18,6 +19,7 @@ pub mod manager;
 pub mod pages;
 mod preview;
 mod report;
+pub mod rescue;
 mod runner;
 pub mod service;
 pub mod session;

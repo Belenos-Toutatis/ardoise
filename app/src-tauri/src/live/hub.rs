@@ -902,6 +902,18 @@ impl Shared {
                 &mut out,
             ),
             LiveInput::ScreenErased => session.screen_erased(now_ms(), &mut out),
+            LiveInput::PagesFirst { pages } => {
+                // The blackboard holds stored pages that must be imported first (SPEC §4.2): the
+                // run ends at once, nothing written, nothing asked of the tablet.
+                state.accepting = None;
+                state.session.set_state(LiveSessionState::Idle, &mut out);
+                out.push(LiveEvent::Refused {
+                    code: "blackboardPagesFirst".to_owned(),
+                    message: format!(
+                        "the Xiaomi tablet holds {pages} stored pages: import them before live mode"
+                    ),
+                });
+            }
             LiveInput::State(LiveState::Waiting) => {
                 session.set_state(LiveSessionState::Waiting, &mut out);
             }
