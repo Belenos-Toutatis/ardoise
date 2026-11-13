@@ -493,8 +493,10 @@ A live session never changes tablets. What the interface receives when one canno
   first tablet wrote is saved). Not the `refused` event below: that one is for a resumed sheet that never started,
   and opens the start banner (try again, back to the library).
 
-Resuming a note (`live_resume`, M12): the blackboard writes only on a blackboard page (20 500 × 27 200: its synced
-pages and its live notes), the Slate on every other note, never on a blackboard page (§2.20).
+Resuming a note (`live_resume`, M12): the blackboard writes only on a blackboard page (20 500 × 27 200, or turned a
+quarter turn, 27 200 × 20 500: its synced pages and its live notes), the Slate on every other note, never on a
+blackboard page (§2.20). A blackboard page must also be the way round of the blackboard's position, or it is refused
+with `sheetBoardPosition` (§10, §11), after `sheetOtherTablet`.
 
 - The tablet that does not fit is connected when `live_resume({ path })` is called: the command fails with
   `{ code: 'sheetOtherTablet', message }`, nothing started, the session shown before left as it is.
@@ -523,7 +525,8 @@ computer stays. The orientation switch has no effect on the blackboard.
 - Forget: one "forget" per known tablet (`forget_tablet` for the Slate, `tablet_forget_blackboard` for the blackboard).
 - Resume in live mode: a blackboard note with the blackboard only, any other note with the Slate only (§5.5).
 - Limits for the guide (SPEC §4.1): one application at a time; pages go to whichever application imports them first;
-  replay and video of a synced page run at a regular pace (no time per point); the page is about 20 × 27 cm, portrait.
+  replay and video of a synced page run at a regular pace (no time per point); the page is about 20 × 27 cm, portrait
+  (landscape when it is held on its side, §10).
 
 ## 6. The simulated blackboard in the app and the journeys
 
@@ -746,37 +749,47 @@ of three stores found again later (a duplicate note, nothing lost).
 ## 10. The four positions of the blackboard: the interface (Q17; the Rust side is §11)
 
 The user may hold the blackboard in any of four positions, and Ardoise turns what it writes so that the page is upright
-(SPEC §4.1; `docs/questions.md` Q17). The interface (`TabletOptions.svelte`, `BoardDrawing.svelte`, `lib/board-position.ts`,
-the mock in `lib/mock-tablet.ts`) is done; this section is the contract for the Rust side.
+(SPEC §4.1; `docs/questions.md` Q17). This section describes what the interface does and what it expects from the Rust
+side; §11 describes what Rust does, and is the truth where the two differ. The interface (`TabletOptions.svelte`,
+`BoardDrawing.svelte`, `lib/board-position.ts`, the stand-ins in `lib/mock-tablet.ts` and `lib/mock-live.ts`) and the
+Rust side agree since the merge of both.
 
 | | |
 |---|---|
-| Name | `boardPosition` in the options the interface sends and reads (`tablet_set_options({ options })`, `TabletStatus.options`); `TabletSettings::board_position` on the Rust side, stored next to `orientation` in `[tablet]` of `ardoise.toml` |
+| Name | `boardPosition` on the wire (`tablet_set_options({ options })`, `TabletStatus.options`); `[tablet] board_position` in `ardoise.toml` (snake_case like every key of the file; `TabletSettings::board_position` on the Rust side), stored next to `orientation` |
 | Values (strings, as `Orientation`'s) | `"buttonsBottom"` (default: held upright, the erase and store buttons on the bottom band), `"buttonsTop"` (half a turn), `"buttonsRight"` (the bottom edge is on the right), `"buttonsLeft"` (the bottom edge is on the left) |
-| Default | `buttonsBottom`; any other value loads as the default; an `ardoise.toml` without the key loads as the default (older files, older Ardoise) |
+| Default | `buttonsBottom`; an `ardoise.toml` without the key loads as the default (older files, older Ardoise) |
 | Independent of | `orientation`, which stays the Slate's: a Slate and a blackboard known together each keep their own position. `autoSync` and `deleteAfterImport` stay shared |
 
-- **`TabletOptions`** (`ardoise-device::service`, `tablet.ts`): add `board_position: BoardPosition` (`boardPosition` on the
-  wire, `rename_all = "camelCase"`), kept by `tablet_set_options_in` with the other fields, and in `From<&TabletSettings>`.
-  The interface already sends it; until the Rust side has the field serde drops it and the status answers without it
-  (the interface then reads `buttonsBottom`, `boardPositionOf` in `lib/board-position.ts`), so a position chosen today
-  does not stay.
-- **Where it is read**: the pages of the blackboard, imported by the sync (`pages::` for blackboard notes) and the live
-  page of the blackboard, so that both come out upright. The page of a blackboard note is portrait, 20 500 × 27 200 in
-  the tablet's own frame; held with the buttons at the right or at the left, the pen writes in that frame turned a
-  quarter turn, and the note is turned back (the page of a note held that way is landscape: `pageSizeFor`-like swap,
-  as for the Slate's `portraitLeft` / `portraitRight`). Which way each quarter turn goes has to be measured with the
-  real blackboard (H8): in the pictures, `buttonsLeft` is the upright picture turned a quarter turn clockwise,
-  `buttonsRight` a quarter turn anticlockwise.
-- **Live window**: it keeps today's behaviour for the blackboard (no position switch, portrait page, the Xiaomi
-  note `live.xiaomi.label`) until the Rust side applies the position to the live page; then
-  `LiveView.svelte` shows the same switch as for the Slate (`data-slot="orientation"`, four buttons) with the
-  blackboard's own four values, through a command like `tablet_set_orientation` (`tablet_set_board_position`, to be
-  added with the field). Not done here.
-- **Resuming** a note in live mode (§5.5) must compare the note's page with the position the way it does for the
-  Slate (the `live.resume.hold` notice), once the position is applied.
-- **Tests to add on the Rust side**: the default and an unknown value in `settings.rs`; `tablet_set_options` keeping the
-  field; a blackboard page imported in each position (golden strokes turned back); the file without the key.
+- **`TabletOptions`** (`tablet.ts`) has `boardPosition: BoardPosition`, sent with the other options by
+  `tablet_set_options`. The interface reads the status through `boardPositionOf` (`lib/board-position.ts`), which gives
+  `buttonsBottom` for a status without the field (an older Rust side); Rust itself refuses options without it (§11).
+- **Directions**: `drawingTurns` (`lib/board-position.ts`) counts the clockwise quarter turns that bring the picture of
+  the upright blackboard to the position (`buttonsLeft` 1, `buttonsTop` 2, `buttonsRight` 3). It is the same table as
+  `BoardPosition::quarter_turns` in Rust, and a contract test (`app/src-tauri/src/contract_tests.rs`) reads it from that
+  file: keep its `case 'buttonsX': return N;` shape. The stand-ins use it to turn the pages they write.
+  « Upright » is the tablet with its buttons at the bottom: supposed, to check with the real tablet (H8, §11).
+- **Stored pages** are made upright for the position set when the sync starts: portrait for `buttonsBottom` and
+  `buttonsTop`, landscape (27 200 × 20 500) for `buttonsRight` and `buttonsLeft`. `mock-tablet.ts` does the same
+  (`boardPage`, `boardStrokes`), and the interface shows whatever page size the note has.
+- **Live window**: the run has the position set when it starts (§11); `mock-live.ts` takes it when the tablet connects
+  and ignores later changes, as Rust does. `LiveView.svelte` shows no position switch for the blackboard, only the note
+  `live.xiaomi.label` (the position comes from the settings, one place only). `LiveSnapshot.orientation` of such a run
+  is the Slate's word for the quarter turns (`portraitLeft` for `buttonsLeft`: `boardRunOrientation`), so that the hub
+  can turn the page: the interface never shows it or offers it as the Slate's switch during a blackboard run, and shows
+  no "hold the tablet so" notice for it. A quick switch of the position in the live window (a command
+  `tablet_set_board_position`) was considered and decided against (§11): a run keeps its position.
+- **Resuming** a sheet (§5.5): a page of the blackboard is accepted when it is the way round of the position (a landscape
+  sheet with `buttonsRight` or `buttonsLeft`, a portrait sheet with `buttonsBottom` or `buttonsTop`), refused with
+  `sheetBoardPosition` otherwise, after `sheetOtherTablet` (the other tablet's sheet) and before `blackboardPagesFirst`.
+  It is refused at once by `live_resume` when the blackboard is connected, or by the `refused` live event when it
+  connects later (`lib/live.ts`); `LiveView.svelte` shows both in the same banner as `sheetOtherTablet`
+  (`errorCodes.sheetBoardPosition`, which says to choose a matching position in the tablet's settings, or to resume on
+  another sheet). `mock-live.ts` has the same rule and order.
+- **Tests on the interface side**: `board-position.test.ts`, `mock-tablet.board.test.ts` (notes per position),
+  `mock-live.board.test.ts` (run pages, the eight pairs of position and sheet, the order of the refusals, a later
+  connection), `LiveView.board.test.ts` (page size per position, the Slate's names never shown), `LiveView.resume.test.ts`
+  (the banner), `tablet-state.board.test.ts` and the options tests.
 
 ## 11. Positions, the Rust side (Q17)
 
