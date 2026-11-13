@@ -246,9 +246,10 @@
   const locked = $derived(!live.canTurnPage);
   /**
    * The Xiaomi blackboard writes the live page: it is held one way only (its portrait page is never turned), so the
-   * position switch and the hint about the Slate's button do not apply.
+   * position switch and the hint about the Slate's button do not apply. The session says which tablet it writes with
+   * (kept while it reconnects, when no tablet is connected); until it does, the tablet that is connected.
    */
-  const onBoard = $derived(tablet.active === 'blackboard');
+  const onBoard = $derived((live.tablet ?? tablet.active) === 'blackboard');
   /** What the waiting screen asks for: depends on which tablets are known. */
   const waitingKey = $derived(tablet.board ? (tablet.slate ? 'titleBoth' : 'titleBoard') : 'title');
   /** How to hold the tablet for the resumed sheet, when that is not how the setting says. */

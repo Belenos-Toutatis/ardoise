@@ -14,6 +14,7 @@
     formatBytes,
     sizeInMillimetres,
     blackboardNeedsConfirmation,
+    blackboardWaitsForRequest,
     tablet,
     validTabletName,
   } from '../../lib/tablet-state.svelte';
@@ -52,6 +53,8 @@
    * the user accepted that they are deleted from the tablet. Nothing is said while the Slate or no tablet is connected.
    */
   const warnBoard = $derived(blackboardNeedsConfirmation(status));
+  /** Only the Xiaomi is known, it is not connected and its pages are imported on request: nothing to sync yet. */
+  const boardOnRequest = $derived(blackboardWaitsForRequest(status));
   /** Pages the blackboard keeps until the user imports them. */
   const boardWaiting = $derived(warnBoard && connection === 'connected' ? (device?.storedPages ?? 0) : 0);
   const sync = $derived(status?.sync ?? null);
@@ -103,9 +106,15 @@
     nameRefused = false;
   });
 
-  // The question has no meaning once the sync cannot start.
+  // The question has no meaning once the sync cannot start, or once the Xiaomi is no longer the connected tablet (the
+  // « Sync and delete » that followed would send no flag and wait for nothing).
   $effect(() => {
-    if (!canSync) confirmingSync = false;
+    if (!canSync || !warnBoard) confirmingSync = false;
+  });
+
+  // The worker asked for the confirmation itself (the Xiaomi connected between the click and the request).
+  $effect(() => {
+    if (tablet.confirmDeleteAsked && warnBoard && canSync) confirmingSync = true;
   });
 
   async function rename(event: SubmitEvent) {
@@ -300,10 +309,13 @@
         </div>
       {:else}
         <div class="actions">
-          <button type="button" class="button primary" data-action="sync" disabled={!canSync} onclick={syncNow}>
+          <button type="button" class="button primary" data-action="sync" disabled={!canSync || boardOnRequest} onclick={syncNow}>
             {t('tablet.sync.now')}
           </button>
         </div>
+        {#if boardOnRequest}
+          <p class="muted small" data-slot="board-on-request">{t('tablet.sync.boardOnRequest')}</p>
+        {/if}
       {/if}
       {#if lastSync?.error}
         <p class="small last-sync failed error" role="alert" data-slot="last-sync" data-failed="true">

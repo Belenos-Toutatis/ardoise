@@ -44,6 +44,15 @@ export function formatBytes(bytes: number, locale: string): string {
 }
 
 /**
+ * Only the Xiaomi is known, it is not the connected tablet and « Delete after import » is off: a sync asked now would
+ * wait for it and bring nothing (its pages are imported on request, once it is connected).
+ */
+export function blackboardWaitsForRequest(status: TabletStatus | null): boolean {
+  if (status === null || status.options.deleteAfterImport) return false;
+  return status.known.length > 0 && status.known.every((tablet) => tablet.kind === 'blackboard') && status.active !== 'blackboard';
+}
+
+/**
  * The Xiaomi is the connected tablet and « Delete after import » is off: its pages are imported only after the user
  * accepted that they are deleted from the tablet (`tablet_sync` with `confirmBlackboardDelete`).
  */
@@ -71,8 +80,15 @@ export class TabletState {
   /** An event arrived: the answer to the subscription call is then older than the status. */
   private received = false;
 
-  /** The service's own failure, translated. */
-  readonly statusError = $derived(this.status?.error ? errorMessage(this.status.error) : null);
+  /**
+   * The worker refused an explicit sync of the Xiaomi's pages for want of the user's word (`blackboardConfirmDelete`, a
+   * race with the connection): not a failure to show, the confirmation to ask.
+   */
+  readonly confirmDeleteAsked = $derived(this.status?.error?.code === 'blackboardConfirmDelete');
+  /** The service's own failure, translated (the request for the confirmation is not one). */
+  readonly statusError = $derived(
+    this.status?.error && !this.confirmDeleteAsked ? errorMessage(this.status.error) : null,
+  );
   /** What to show as the failure: the last action's, else the service's. */
   readonly error = $derived(this.actionError ?? this.statusError);
   /** A Slate is registered. */

@@ -30,6 +30,8 @@
   let sawSearch = underWay;
   let startError: TabletStatus['error'] = null;
   let leaving = false;
+  /** The status held when the search was asked: any later one is news, even one that repeats the error shown before. */
+  let askedAt: TabletStatus | null = null;
 
   const status = $derived(tablet.status);
   const found = $derived(status?.boardSearch?.found ?? []);
@@ -44,7 +46,7 @@
     if (phase !== 'running' || !status || leaving) return;
     if (status.connection === 'adding') {
       sawSearch = true;
-    } else if (status.error && (sawSearch || !sameError(status.error, startError))) {
+    } else if (status.error && (sawSearch || (askedAt === null ? !sameError(status.error, startError) : status !== askedAt))) {
       // The search ended with nothing heard (or Bluetooth is off…).
       failure = errorMessage(status.error);
       phase = 'error';
@@ -65,10 +67,13 @@
     sawSearch = false;
     startError = status?.error ?? null;
     failure = null;
+    askedAt = null;
     phase = 'running';
     if (!(await tablet.findBlackboards())) {
       failure = tablet.actionError;
       phase = 'error';
+    } else {
+      askedAt = tablet.status;
     }
   }
 

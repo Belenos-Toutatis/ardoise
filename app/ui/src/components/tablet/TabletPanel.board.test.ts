@@ -153,7 +153,7 @@ describe('tablet panel: the blackboard\'s details', () => {
     const { q, target } = await render();
     const info = q('[aria-labelledby="tablet-info"]')!;
     expect(info.querySelector('.battery')!.textContent).toContain('90 %');
-    expect(info.querySelector('[data-slot="memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('7,5 Mo sur 8 Mo');
+    expect(info.querySelector('[data-slot="memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('126,4 Mo sur 126,9 Mo');
     expect(info.querySelector('[data-slot="stored-pages"]')!.textContent).toBe('3');
     expect(info.textContent).toContain('Xiaomi Mijia LCD blackboard');
     expect(info.textContent).toContain('205 × 272 mm');
@@ -169,7 +169,7 @@ describe('tablet panel: the blackboard\'s details', () => {
 
   it('shows the memory in English too', async () => {
     const { q } = await render({ locale: 'en' });
-    expect(q('[data-slot="memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('7.5 MB of 8 MB');
+    expect(q('[data-slot="memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('126.4 MB of 126.9 MB');
     expect(q('[aria-labelledby="tablet-info"]')!.textContent).toContain('Free memory');
   });
 
@@ -180,7 +180,7 @@ describe('tablet panel: the blackboard\'s details', () => {
     expect(q('[data-slot="stored-pages"]')!.textContent).toBe('2');
     await beat(3);
     expect(q('[data-slot="stored-pages"]')!.textContent).toBe('0');
-    expect(q('[data-slot="memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('8 Mo sur 8 Mo');
+    expect(q('[data-slot="memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('126,9 Mo sur 126,9 Mo');
     expect(q('[data-slot="last-sync"]')!.textContent).toContain('3 notes enregistrées.');
     expect(q('[data-slot="last-sync"]')!.textContent).toContain('3 pages effacées de la tablette.');
   });
@@ -266,6 +266,72 @@ describe('tablet panel: syncing the blackboard', () => {
     // ...which refuses and the question appears, without an error banner.
     expect(q('[data-slot="sync-confirm"]')).not.toBeNull();
     expect(q('[data-slot="tablet-error"]')).toBeNull();
+  });
+
+  it('opens the confirmation when the worker asks for it, instead of a red banner', async () => {
+    const { q, action } = await render({ options: { deleteAfterImport: false } });
+    mockTabletPatch({ error: { code: 'blackboardConfirmDelete', message: '' } });
+    await settle();
+    expect(q('[data-slot="sync-confirm"]')).not.toBeNull();
+    expect(q('[data-slot="tablet-error"]')).toBeNull();
+    // Accepting goes on with the flag, as from the button.
+    const sync = vi.spyOn(api, 'tabletSync');
+    action('sync-confirm')!.click();
+    await settle();
+    expect(sync).toHaveBeenCalledWith(true);
+  });
+
+  it('shows no red banner for that request even when the Xiaomi is not connected', async () => {
+    const { q } = await render({ options: { deleteAfterImport: false }, connect: false });
+    mockTabletPatch({ error: { code: 'blackboardConfirmDelete', message: '' } });
+    await settle();
+    expect(q('[data-slot="tablet-error"]')).toBeNull();
+    expect(q('[data-slot="sync-confirm"]')).toBeNull();
+  });
+
+  it('closes the confirmation by itself when the Xiaomi is no longer the connected tablet', async () => {
+    const { q, action, click } = await render({ options: { deleteAfterImport: false } });
+    await click(action('sync'));
+    expect(q('[data-slot="sync-confirm"]')).not.toBeNull();
+    // The link is lost: waiting again, nothing is connected.
+    mockTabletPatch({ connection: 'searching' });
+    await settle();
+    expect(q('[data-slot="sync-confirm"]')).toBeNull();
+    expect(action('sync-confirm')).toBeNull();
+    // It does not come back by itself when the Xiaomi reconnects.
+    mockTabletPatch({ connection: 'connected', active: 'blackboard' });
+    await settle();
+    expect(q('[data-slot="sync-confirm"]')).toBeNull();
+  });
+
+  it('disables the sync when only the Xiaomi is known, not connected, with its pages imported on request', async () => {
+    const sync = vi.spyOn(api, 'tabletSync');
+    const { q, action } = await render({ boardOnly: true, options: { deleteAfterImport: false }, connect: false });
+    expect(action('sync')!.disabled).toBe(true);
+    expect(q('[data-slot="board-on-request"]')!.textContent).toContain("n'importe ses pages qu'à votre demande");
+    expect(sync).not.toHaveBeenCalled();
+    // Connected: the button works (through the confirmation) and the sentence goes.
+    mockTablet.boardInRange = true;
+    await api.tabletCancel();
+    mockTabletPatch({ connection: 'connected', active: 'blackboard' });
+    await settle();
+    expect(action('sync')!.disabled).toBe(false);
+    expect(q('[data-slot="board-on-request"]')).toBeNull();
+  });
+
+  it('keeps the sync enabled when deletion is on, or when the Slate is known too', async () => {
+    const on = await render({ boardOnly: true, connect: false });
+    expect(on.action('sync')!.disabled).toBe(false);
+    expect(on.q('[data-slot="board-on-request"]')).toBeNull();
+    cleanup?.();
+    cleanup = null;
+    tablet.reset();
+    resetMockLibrary();
+    resetMockTablet();
+    mockTablet.inRange = false;
+    const both = await render({ options: { deleteAfterImport: false }, connect: false });
+    expect(both.action('sync')!.disabled).toBe(false);
+    expect(both.q('[data-slot="board-on-request"]')).toBeNull();
   });
 
   it('does not warn, with the option off, while the Slate is the connected tablet or none is', async () => {

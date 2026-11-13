@@ -4,9 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from './api';
 import { setLocale } from './i18n.svelte';
 import { resetMockLibrary } from './mock-data';
-import { mockTablet, resetMockTablet } from './mock-tablet';
+import { mockTablet, mockTabletPatch, resetMockTablet } from './mock-tablet';
 import type { TabletStatus } from './tablet';
-import { TabletState, blackboardNeedsConfirmation, formatBytes, tabletName } from './tablet-state.svelte';
+import {
+  TabletState,
+  blackboardNeedsConfirmation,
+  blackboardWaitsForRequest,
+  formatBytes,
+  tabletName,
+} from './tablet-state.svelte';
 
 let state: TabletState;
 
@@ -95,8 +101,37 @@ describe('sizes in bytes', () => {
   it('uses kilobytes below a megabyte and megabytes with a decimal above, in the language', () => {
     const clean = (text: string) => text.replace(/\s/g, ' ');
     expect(clean(formatBytes(900_000, 'fr'))).toBe('900 ko');
-    expect(clean(formatBytes(7_460_000, 'fr'))).toBe('7,5 Mo');
-    expect(clean(formatBytes(8_000_000, 'en'))).toBe('8 MB');
+    // What the real tablet reports in total, and a plausible free value.
+    expect(clean(formatBytes(126_909_952, 'fr'))).toBe('126,9 Mo');
+    expect(clean(formatBytes(126_369_952, 'fr'))).toBe('126,4 Mo');
+    expect(clean(formatBytes(126_909_952, 'en'))).toBe('126.9 MB');
     expect(clean(formatBytes(500, 'en'))).toBe('1 kB');
+  });
+});
+
+describe('a sync that would wait for the Xiaomi', () => {
+  const known = (...kinds: string[]) => kinds.map((kind) => ({ kind }));
+  const status = (change: Partial<TabletStatus>, deleteAfterImport = false) =>
+    ({ active: null, known: known('blackboard'), options: { deleteAfterImport }, ...change }) as unknown as TabletStatus;
+
+  it('brings nothing only when the Xiaomi is the only tablet known, is not connected and the option is off', () => {
+    expect(blackboardWaitsForRequest(null)).toBe(false);
+    expect(blackboardWaitsForRequest(status({}))).toBe(true);
+    expect(blackboardWaitsForRequest(status({ active: 'blackboard' }))).toBe(false);
+    expect(blackboardWaitsForRequest(status({}, true))).toBe(false);
+    expect(blackboardWaitsForRequest(status({ known: known('slate', 'blackboard') } as Partial<TabletStatus>))).toBe(false);
+    expect(blackboardWaitsForRequest(status({ known: [] }))).toBe(false);
+  });
+
+  it('is told apart from a failure: the request for the confirmation is no error to show', async () => {
+    vi.spyOn(api, 'tabletSync').mockRejectedValue({ code: 'blackboardConfirmDelete', message: '' });
+    state.start();
+    await beat(0);
+    mockTabletPatch({ error: { code: 'blackboardConfirmDelete', message: '' } });
+    expect(state.confirmDeleteAsked).toBe(true);
+    expect(state.statusError).toBeNull();
+    mockTabletPatch({ error: { code: 'tabletBusy', message: '' } });
+    expect(state.confirmDeleteAsked).toBe(false);
+    expect(state.statusError).toContain('occupée');
   });
 });
