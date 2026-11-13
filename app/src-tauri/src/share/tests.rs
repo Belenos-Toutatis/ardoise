@@ -18,6 +18,7 @@ use ardoise_core::note::{
 };
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{LiveInput, LiveSink};
+use ardoise_device::transport::TabletKind;
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_proto::live::LiveRecord;
 use ardoise_proto::stroke::Point as PenPoint;
@@ -1045,6 +1046,7 @@ fn start_session(hub: &LiveHub, library: &ardoise_core::library::Library) -> Hub
         width: A5.width,
         height: A5.height,
         orientation: Orientation::Landscape,
+        kind: TabletKind::Slate,
     });
     sink
 }
@@ -1715,6 +1717,7 @@ fn over_the_network_a_page_with_a_hidden_layer_keeps_viewers_right_and_its_secre
         width: A5.width,
         height: A5.height,
         orientation: Orientation::Landscape,
+        kind: TabletKind::Slate,
     });
     let cookie = join(status.port, &status.code.unwrap());
     let mut viewer = Viewer::open(status.port, &cookie);
@@ -1847,6 +1850,7 @@ fn resume_sheet(hub: &LiveHub, library: &Library, path: &Path) -> HubSink {
         width: A5.width,
         height: A5.height,
         orientation: Orientation::Landscape,
+        kind: TabletKind::Slate,
     });
     sink
 }
@@ -3153,6 +3157,7 @@ fn over_the_network_a_viewer_sees_the_selection_moved_and_resized_and_never_the_
         width: A5.width,
         height: A5.height,
         orientation: Orientation::Landscape,
+        kind: TabletKind::Slate,
     });
     let cookie = join(status.port, &status.code.unwrap());
     let mut viewer = Viewer::open(status.port, &cookie);

@@ -34,6 +34,10 @@ pub const BLACKBOARD_PAGE: PageSize = PageSize {
     width: BOARD_WIDTH,
     height: BOARD_HEIGHT,
 };
+/// A blackboard page dated before this (2020-01-01 00:00:00 UTC, Unix seconds) has a clock that
+/// was never set: its note is dated by the import ([`blackboard_note`]). The tablet was sold from
+/// December 2021 (research note §1).
+pub const EARLIEST_BOARD_PAGE: i64 = 1_577_836_800;
 
 /// Nominal diameter of the tablet's pen, in device units (0.6 mm, the editor's default pen).
 pub const TABLET_PEN_WIDTH: f32 = 60.0;
@@ -370,8 +374,9 @@ pub fn note_from_page(
 /// blackboard has no orientation, and its x and y are the notes' units 1:1); each record one
 /// period of [`blackboard::record::RECORDS_PER_SECOND`] after the previous one, half a second
 /// more after the pen left the range (`Timing::Synthesized`: the tablet keeps no time per
-/// point); `created` at the page's time (when it was stored, by the tablet's clock), else
-/// `now_ms`; `original.bin` = the bytes received. Never fails: unknown records are skipped.
+/// point); `created` at the page's time (when it was stored, by the tablet's clock), else (no
+/// time, or one before [`EARLIEST_BOARD_PAGE`]) `now_ms`; `original.bin` = the bytes received.
+/// Never fails: unknown records are skipped.
 pub fn blackboard_note(
     page: &DownloadedPage,
     id: String,
@@ -401,8 +406,12 @@ pub fn blackboard_note(
                 .collect(),
         })
         .collect();
+    // A tablet whose clock was never set (after its battery ran out, say) dates its pages near
+    // 1970: such a note is dated by the import instead. Its id still comes from the page's time
+    // and bytes (`page_note_id`), so the page is recognised all the same.
     let created = page
         .timestamp
+        .filter(|seconds| *seconds >= EARLIEST_BOARD_PAGE)
         .and_then(|seconds| seconds.checked_mul(1000))
         .unwrap_or(now_ms);
     let note = Note {
@@ -1106,6 +1115,37 @@ mod tests {
         assert_eq!(page_kind(&[]), TabletKind::Slate);
         assert_eq!(page_kind(&[0xa1; 6]), TabletKind::Slate);
         assert_eq!(page_kind(&[0x07; 7]), TabletKind::Slate);
+    }
+
+    #[test]
+    fn a_blackboard_page_of_a_clock_never_set_is_dated_by_the_import() {
+        let mut page = board_page();
+        for seconds in [0, EARLIEST_BOARD_PAGE - 1] {
+            page.timestamp = Some(seconds);
+            let file = note_from_page(
+                &page,
+                A4_LANDSCAPE,
+                Orientation::Landscape,
+                page_note_id(&page),
+                "Calque 1",
+                1_792_834_200_123,
+            )
+            .unwrap();
+            assert_eq!(file.note.created, 1_792_834_200_123);
+            // The id still comes from the time and the bytes: the page is recognised again.
+            assert_eq!(file.note.id, page_note_id(&page));
+        }
+        page.timestamp = Some(EARLIEST_BOARD_PAGE);
+        let file = note_from_page(
+            &page,
+            A4_LANDSCAPE,
+            Orientation::Landscape,
+            "id".into(),
+            "L",
+            9,
+        )
+        .unwrap();
+        assert_eq!(file.note.created, EARLIEST_BOARD_PAGE * 1000);
     }
 
     #[test]

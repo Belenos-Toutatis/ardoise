@@ -652,9 +652,27 @@ pub async fn tablet_cancel(runtime: State<'_, TabletRuntime>) -> CommandResult<(
     runtime.with_service(TabletService::cancel)
 }
 
+/// Syncs the connected (or next connected) tablet. A sync of the Xiaomi blackboard deletes its
+/// pages: with "delete after import" off, it runs only when asked with
+/// `confirmBlackboardDelete: true` while the blackboard is connected; without it, the error
+/// `blackboardConfirmDelete` (nothing done) tells the interface to ask the user first
+/// (docs/design/blackboard.md §5).
 #[tauri::command]
-pub async fn tablet_sync(runtime: State<'_, TabletRuntime>) -> CommandResult<()> {
-    runtime.with_service(TabletService::sync_now)
+pub async fn tablet_sync(
+    runtime: State<'_, TabletRuntime>,
+    confirm_blackboard_delete: Option<bool>,
+) -> CommandResult<()> {
+    tablet_sync_in(&runtime, confirm_blackboard_delete.unwrap_or(false))
+}
+
+/// [`tablet_sync`] without Tauri.
+pub fn tablet_sync_in(
+    runtime: &TabletRuntime,
+    confirm_blackboard_delete: bool,
+) -> CommandResult<()> {
+    runtime
+        .with_service(|service| service.sync_now(confirm_blackboard_delete))?
+        .map_err(device_error)
 }
 
 #[tauri::command]

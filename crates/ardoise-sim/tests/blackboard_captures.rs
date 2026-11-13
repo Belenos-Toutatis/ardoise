@@ -4,7 +4,9 @@
 //! The captures are the user's private data: every test below skips itself when the folder is
 //! absent (cloud sessions, other PCs), and nothing taken from a capture is written in this file
 //! (no address, no time, no page content): the tests compare the captures with each other and
-//! with the study's own renderings, and only bare counts are printed.
+//! with the study's own renderings, and only bare counts are printed. Failure messages too: they
+//! name a capture or a page by its rank, never by its file name, and print counts only, never
+//! bytes, frames, times or values (`assert!(a == b, "...")` where `assert_eq!` would).
 //!
 //! - Every frame of the vendor channel (`6e400002`, `6e400003`) in every capture decodes with
 //!   `ardoise_proto::blackboard` and encodes back to the same bytes; none is unknown.
@@ -12,8 +14,8 @@
 //!   known status.
 //! - The bytes each download of Mi Home's import received are, byte for byte, the stored page
 //!   kept from it, of the size the tablet announced.
-//! - Every stored page decodes completely (whole records, known statuses, inside the page
-//!   size), into as many strokes and points as the study's renderings (`page-*.svg`) show, and
+//! - Every stored page passes the sync's record check and decodes completely (whole records,
+//!   known statuses, inside the page size), into as many strokes and points as the study's renderings (`page-*.svg`) show, and
 //!   becomes a note.
 //! - The page stored during the captures holds the records received live, byte for byte.
 //!
@@ -32,8 +34,8 @@ use ardoise_device::pages::{BLACKBOARD_PAGE, note_from_page, page_kind};
 use ardoise_device::session::DownloadedPage;
 use ardoise_device::transport::TabletKind;
 use ardoise_proto::blackboard::{
-    BOARD_HEIGHT, BOARD_WIDTH, BoardReply, BoardRequest, RecordStatus, decode_page, decode_records,
-    record::RECORD_LEN,
+    BOARD_HEIGHT, BOARD_WIDTH, BoardReply, BoardRequest, RecordStatus, check_page, decode_page,
+    decode_records, record::RECORD_LEN,
 };
 
 const COMMAND: &str = "6e400002";
@@ -127,24 +129,31 @@ fn every_frame_of_the_captures_decodes_and_encodes_back() {
         return;
     };
     let (mut requests, mut replies) = (0, 0);
-    for path in captures(&dir) {
-        for packet in packets(&path) {
-            let name = path.file_name().unwrap().to_string_lossy();
+    for (rank, path) in captures(&dir).iter().enumerate() {
+        for packet in packets(path) {
             match (packet.uuid.as_str(), packet.tx) {
                 (COMMAND, true) => {
-                    let request = BoardRequest::decode(&packet.bytes)
-                        .unwrap_or_else(|e| panic!("{name}: a request does not decode: {e}"));
-                    assert_eq!(request.encode(), packet.bytes, "{name}: {request:?}");
+                    let Ok(request) = BoardRequest::decode(&packet.bytes) else {
+                        panic!("capture {rank}: a request does not decode");
+                    };
+                    assert!(
+                        request.encode() == packet.bytes,
+                        "capture {rank}: a request does not encode back"
+                    );
                     requests += 1;
                 }
                 (REPLY, false) => {
-                    let reply = BoardReply::decode(&packet.bytes)
-                        .unwrap_or_else(|e| panic!("{name}: a reply does not decode: {e}"));
+                    let Ok(reply) = BoardReply::decode(&packet.bytes) else {
+                        panic!("capture {rank}: a reply does not decode");
+                    };
                     assert!(
                         !matches!(reply, BoardReply::Unknown(_)),
-                        "{name}: unknown reply {reply}"
+                        "capture {rank}: an unknown reply"
                     );
-                    assert_eq!(reply.encode().unwrap(), packet.bytes, "{name}: {reply:?}");
+                    assert!(
+                        reply.encode().ok() == Some(packet.bytes.clone()),
+                        "capture {rank}: a reply does not encode back"
+                    );
                     replies += 1;
                 }
                 _ => {}
@@ -188,8 +197,7 @@ fn every_live_notification_is_whole_records_of_a_known_status() {
             for record in &decoded.records {
                 assert!(
                     !matches!(record.status, RecordStatus::Unknown(_)),
-                    "{:?}",
-                    record.status
+                    "a live record of an unknown status"
                 );
                 assert!(u32::from(record.x) < BOARD_WIDTH && u32::from(record.y) < BOARD_HEIGHT);
                 assert!(record.to_live().is_some());
@@ -245,7 +253,10 @@ fn the_downloads_of_the_import_are_the_stored_pages() {
                 .iter()
                 .find(|(t, _, _)| *t == time)
                 .expect("each page downloaded was kept");
-            assert_eq!(&bytes, kept, "byte for byte");
+            assert!(
+                &bytes == kept,
+                "download {checked}: not the stored page, byte for byte"
+            );
             checked += 1;
         }
     }
@@ -270,9 +281,14 @@ fn every_stored_page_decodes_completely_and_becomes_a_note() {
         "no page in testdata/private/xiaomi/pages"
     );
     let mut counts = Vec::new();
-    for (time, bytes, svg) in &pages {
+    for (rank, (time, bytes, svg)) in pages.iter().enumerate() {
         assert_eq!(bytes.len() % RECORD_LEN, 0, "a multiple of 7");
         assert_eq!(page_kind(bytes), TabletKind::Blackboard);
+        // The check every page passes before it is kept, then deleted from the tablet.
+        assert!(
+            check_page(bytes).is_whole(),
+            "page {rank}: refused by the sync's check"
+        );
         let page = decode_page(bytes);
         assert_eq!(page.trailing_bytes, 0);
         assert_eq!(page.unknown_records, 0, "every status is known");
@@ -281,7 +297,10 @@ fn every_stored_page_decodes_completely_and_becomes_a_note() {
         for point in page.strokes.iter().flat_map(|s| &s.points) {
             assert!(u32::from(point.x) < BLACKBOARD_PAGE.width);
             assert!(u32::from(point.y) < BLACKBOARD_PAGE.height);
-            assert!((1..=2047).contains(&point.pressure), "{}", point.pressure);
+            assert!(
+                (1..=2047).contains(&point.pressure),
+                "page {rank}: a pressure out of range"
+            );
         }
         // As many strokes and points as the study's rendering (one polyline per stroke).
         if let Some(svg) = svg {
@@ -311,7 +330,10 @@ fn every_stored_page_decodes_completely_and_becomes_a_note() {
         )
         .unwrap();
         assert_eq!(file.note.strokes.len(), page.strokes.len());
-        assert_eq!(file.note.created, i64::from(*time) * 1000);
+        assert!(
+            file.note.created == i64::from(*time) * 1000,
+            "page {rank}: not dated by its time"
+        );
         assert_eq!(file.note.timing, Timing::Synthesized);
         let last = file
             .note
@@ -339,8 +361,8 @@ fn the_page_stored_during_the_captures_holds_the_live_records() {
     };
     let pages = pages(&dir);
     let mut found = 0;
-    for path in captures(&dir) {
-        let packets = packets(&path);
+    for (rank, path) in captures(&dir).iter().enumerate() {
+        let packets = packets(path);
         let live: Vec<u8> = packets
             .iter()
             .filter(|p| p.uuid == STREAM)
@@ -357,8 +379,7 @@ fn the_page_stored_during_the_captures_holds_the_live_records() {
             .find(|(_, bytes, _)| bytes.windows(live.len()).any(|w| w == live.as_slice()));
         assert!(
             holder.is_some(),
-            "{}: the live records are in no stored page",
-            path.file_name().unwrap().to_string_lossy()
+            "capture {rank}: the live records are in no stored page"
         );
         found += 1;
     }

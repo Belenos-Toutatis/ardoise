@@ -6,18 +6,24 @@
 //!   to the tablet, and nothing ever to its Xiaomi service.
 //! - **Sync**: the tablet only describes its oldest page, so reading the next one needs the
 //!   deletion of the first. Each page is deleted (`12 05 06`) only once its note is written and
-//!   read back ([`keep_page`], the store of the app). The automatic sync at connection runs only
-//!   when "delete after import" is on; otherwise the pages are imported on request only (SPEC
-//!   §4.1), and still deleted.
+//!   read back ([`keep_page`], the store of the app), by the one per-page step
+//!   [`BoardSession::sync_page`]. A sync deletes the blackboard's pages only with a permission
+//!   ([`BoardPermission`]): "delete after import" on (checked again at each start), or a request
+//!   confirmed while the blackboard was the connected tablet (SPEC §4.1). Without one, a sync
+//!   does nothing for the blackboard.
+//! - **Dirty stream**: a transfer that did not end cleanly leaves the session dirty; the link is
+//!   then closed and opened again before anything else ([`Worker::board_reopen`]), the sync or
+//!   live mode under way carrying on over the new link.
 //! - **Live mode**: `a1` records are pen-down samples, `a0` hovering (the laser pointer), `c0`
 //!   the pen leaving the range. The "page stored" event does not interrupt it. A lost link is
-//!   reconnected by the normal search, as for the Slate.
+//!   reconnected by the normal search, as for the Slate, which then looks for the blackboard
+//!   only: a live run belongs to the tablet it started on.
 //! - **The Slate goes first**: while the blackboard holds the link and nothing happens, a known
 //!   Slate advertising (its button pressed) gets the link.
 //! - Unknown or malformed frames, stray stream bytes: noted, the log kept, never an error.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ardoise_core::library::Library;
@@ -27,10 +33,11 @@ use ardoise_proto::blackboard::{BOARD_HEIGHT, BOARD_WIDTH, BoardReply, Record, d
 use ardoise_proto::live::LiveRecord;
 
 use super::{
-    Connection, IDLE_POLL, ImportedPages, LIVE_POLL, LiveInput, PageContext, SEARCH_PAUSE,
-    SEARCH_SLICE, StatusError, SyncProgress, SyncRun, Worker, keep_page, pages_text, saved_count,
+    BoardPermission, Connection, IDLE_POLL, ImportedPages, LIVE_POLL, LiveInput, PageContext,
+    SEARCH_PAUSE, SEARCH_SLICE, StatusError, SyncProgress, SyncRun, Worker, keep_page, pages_text,
+    saved_count,
 };
-use crate::blackboard::{BoardInfo, Oddities};
+use crate::blackboard::{BoardInfo, BoardSession, BoardSync, Oddities, PageStep};
 use crate::identity::{
     self, BLACKBOARD_FORMAT, BLACKBOARD_PROTOCOL, BlackboardRecord, DeviceRecord,
 };
@@ -243,15 +250,17 @@ impl Worker {
             .identity_root
             .clone()
             .ok_or(DeviceError::NoLibrary)?;
-        if self.board.is_some() {
+        // Live mode waiting stopped, nothing left pending, unless the Slate holds the link: its
+        // sync, live mode and what waits for it stay.
+        if self.session.is_none() {
             if let Some(run) = self.sync.take() {
                 self.finish_sync(run, None);
             }
             self.stop_live();
             self.close_session("the blackboard is forgotten");
             self.want_sync = false;
-            self.asked_sync = false;
         }
+        self.board_permission = None;
         identity::forget_blackboard(&root).map_err(|e| DeviceError::Storage(e.to_string()))?;
         self.board_record = None;
         self.note("blackboard forgotten");
@@ -344,16 +353,19 @@ impl Worker {
         self.counted_at = self.session_time();
         self.slate_checked_at = self.session_time();
         let options = self.config.options;
-        // Its pages are imported automatically only when they may be deleted; on request always.
-        let wanted = self.asked_sync
-            || (options.auto_sync && options.delete_after_import && info.stored_pages > 0);
-        if self.want_sync && !wanted {
-            self.note(
-                "a sync was waiting, not asked for the blackboard: its pages are imported on \
-                 request only while delete after import is off",
-            );
+        // Its pages are imported automatically only when they may be deleted; otherwise only by
+        // a sync that has the permission (confirmed on the blackboard, or resumed).
+        if options.auto_sync && options.delete_after_import && info.stored_pages > 0 {
+            self.want_sync = true;
+            self.board_permission = self.board_permission.max(Some(BoardPermission::Option));
         }
-        self.want_sync = wanted;
+        if self.want_sync && self.board_permission.is_none() {
+            self.note(
+                "a sync was waiting without the permission to delete the blackboard's pages: \
+                 nothing for the blackboard (delete after import is off, no deletion confirmed)",
+            );
+            self.want_sync = false;
+        }
         let details = self.board_details(info);
         let known = self.known_tablets();
         let pending = self.pending();
@@ -392,7 +404,9 @@ impl Worker {
     /// One bounded step while the blackboard holds the link.
     pub(super) fn board_step(&mut self) {
         self.board_events();
-        if self.sync.is_some() {
+        if self.board.as_ref().is_some_and(BoardSession::is_dirty) {
+            self.board_reopen();
+        } else if self.sync.is_some() {
             self.board_sync_step();
         } else if self.live.is_some() {
             self.board_live_step();
@@ -431,7 +445,7 @@ impl Worker {
         }
         if stored {
             self.note("a page was stored with the tablet's button");
-            self.count_now = true;
+            self.stored_event = true;
         }
     }
 
@@ -469,6 +483,7 @@ impl Worker {
     fn board_count_pages(&mut self) {
         self.counted_at = self.session_time();
         self.count_now = false;
+        self.stored_event = false;
         let counted = match self.board.as_mut() {
             Some(board) => board.page_count(),
             None => return,
@@ -488,6 +503,7 @@ impl Worker {
         let options = self.config.options;
         if options.auto_sync && options.delete_after_import && pages > before {
             self.want_sync = true;
+            self.board_permission = self.board_permission.max(Some(BoardPermission::Option));
         }
         let pending = self.pending();
         self.publisher.update(|status| {
@@ -517,12 +533,21 @@ impl Worker {
 
     // --- sync -------------------------------------------------------------------------------
 
+    /// Starts the sync that waits, if its permission allows it to delete the blackboard's pages:
+    /// confirmed, or "delete after import" still on. Otherwise nothing for the blackboard.
     fn board_start_sync(&mut self) {
-        let asked = self.asked_sync;
+        let permission = self.board_permission.take();
         self.want_sync = false;
-        self.asked_sync = false;
-        if !asked && !self.config.options.delete_after_import {
-            self.note("the blackboard's pages are imported on request only");
+        let allowed = match permission {
+            Some(BoardPermission::Confirmed) => true,
+            Some(BoardPermission::Option) => self.config.options.delete_after_import,
+            None => false,
+        };
+        if !allowed {
+            self.note(
+                "the blackboard's pages are imported only with delete after import on, or when \
+                 the deletion is confirmed",
+            );
             let pending = self.pending();
             self.publisher.update(|status| status.pending = pending);
             return;
@@ -544,7 +569,7 @@ impl Worker {
         };
         let (total, bytes) = match counted {
             Ok(counted) => counted,
-            Err(error) => return self.sync_not_started(error),
+            Err(error) => return self.sync_not_started(error, permission),
         };
         let imported = if total > 0 {
             ImportedPages::scan(&library)
@@ -553,12 +578,17 @@ impl Worker {
         };
         self.note(format!(
             "sync: {} on the blackboard ({bytes} bytes); each is deleted from it once its note \
-             is written and checked",
-            pages_text(total)
+             is written and checked ({})",
+            pages_text(total),
+            match permission {
+                Some(BoardPermission::Confirmed) => "deletion confirmed",
+                _ => "delete after import on",
+            }
         ));
         let pending = self.pending();
         self.publisher.update(|status| {
             status.connection = Connection::Syncing;
+            status.active = Some(TabletKind::Blackboard);
             status.pending = pending;
             status.sync = Some(SyncProgress {
                 current: 0,
@@ -570,6 +600,7 @@ impl Worker {
             }
         });
         let run = SyncRun {
+            kind: TabletKind::Blackboard,
             library,
             root,
             imported,
@@ -584,7 +615,8 @@ impl Worker {
                 size: BLACKBOARD_PAGE,
                 orientation: Orientation::Landscape,
             },
-            last_deleted: None,
+            permission,
+            board: BoardSync::default(),
         };
         if total == 0 {
             self.finish_sync(run, None);
@@ -593,7 +625,8 @@ impl Worker {
         }
     }
 
-    /// Describes, downloads, stores and only then deletes one page.
+    /// One step of the sync ([`BoardSession::sync_page`], the only per-page code): describes,
+    /// downloads, stores and only then deletes one page; `device.storedPages` follows.
     fn board_sync_step(&mut self) {
         let (Some(run), Some(board)) = (self.sync.as_mut(), self.board.as_mut()) else {
             return;
@@ -607,57 +640,116 @@ impl Worker {
                 saved,
             });
         });
-        let info = match board.oldest_page() {
-            Ok(Some(info)) => info,
-            // Fewer pages than counted (one deleted elsewhere): done.
-            Ok(None) => {
+        let store = &mut self.store_page;
+        let mut state = std::mem::take(&mut run.board);
+        let step = board.sync_page(&mut state, |page| keep_page(store, run, page, index));
+        run.board = state;
+        match step {
+            Ok(PageStep::Kept { kept: message, .. }) => {
+                run.deleted += 1;
+                run.done = index;
+                let finished = run.done >= run.to_read;
+                let saved = saved_count(run);
+                let left = run.total.saturating_sub(run.deleted);
+                self.note(message);
+                self.publisher.update(|status| {
+                    status.sync = Some(SyncProgress {
+                        current: index,
+                        total: to_read,
+                        saved,
+                    });
+                    if let Some(device) = status.device.as_mut() {
+                        device.stored_pages = left;
+                    }
+                });
+                if finished && let Some(run) = self.sync.take() {
+                    self.finish_sync(run, None);
+                }
+            }
+            // Fewer pages than counted (one deleted elsewhere), or the most a sync reads.
+            Ok(PageStep::Done) => {
                 if let Some(run) = self.sync.take() {
                     self.finish_sync(run, None);
                 }
-                return;
             }
-            Err(error) => return self.sync_failed(error),
-        };
-        if run.last_deleted == Some(info.time) {
-            return self.sync_failed(DeviceError::PageNotDeleted(info.time));
-        }
-        let page = match board.download(info) {
-            // Notifications can be lost on the way (BLE stack buffers): try once more.
-            Err(DeviceError::TransferIncomplete { .. }) => board.download(info),
-            other => other,
-        };
-        let page = match page {
-            Ok(page) => page,
-            Err(error) => return self.sync_failed(error),
-        };
-        let message = match keep_page(&mut self.store_page, run, page, index) {
-            Ok(message) => message,
+            // The link is opened again at the next step; the sync carries on there.
+            Ok(PageStep::Reopen) => {
+                self.note(
+                    "a page transfer did not end cleanly (stopped, too long, or more bytes after \
+                     it): the page stays on the blackboard and is read again on a fresh link",
+                );
+                self.keep("a page transfer of the blackboard did not end cleanly");
+            }
+            // The tablet still holds the page deleted last: it was not deleted after all.
+            Err(error @ DeviceError::PageNotDeleted(_)) => {
+                run.deleted = run.deleted.saturating_sub(1);
+                self.sync_failed(error);
+            }
             // The page stays on the tablet.
-            Err(error) => return self.sync_failed(error),
-        };
-        // Only now, the page safe in the library, may it leave the tablet; a cancellation
-        // arriving meanwhile takes effect after it.
-        board.set_cancel_flag(Arc::new(AtomicBool::new(false)));
-        let deleted = board.delete(info.time);
-        board.set_cancel_flag(self.interrupt.clone());
-        if let Err(error) = deleted {
-            return self.sync_failed(error);
+            Err(error) => self.sync_failed(error),
         }
-        run.deleted += 1;
-        run.last_deleted = Some(info.time);
-        run.done = index;
-        let finished = run.done >= run.to_read;
-        let saved = saved_count(run);
-        self.note(message);
-        self.publisher.update(|status| {
-            status.sync = Some(SyncProgress {
-                current: index,
-                total: to_read,
-                saved,
-            });
-        });
-        if finished && let Some(run) = self.sync.take() {
-            self.finish_sync(run, None);
+    }
+
+    /// Closes the blackboard's link and opens a fresh one at once: its stream may still carry
+    /// a transfer that did not end cleanly (`blackboard.rs`, "A page has nothing but its
+    /// count"). The sync and live mode under way carry on over the new link. The reopening is
+    /// not cut short by requests (it is bounded by the connection's own timeouts), but a request
+    /// that cannot wait is taken first. A tablet that cannot be reached again is a lost link.
+    fn board_reopen(&mut self) {
+        if self.interrupt.load(Ordering::SeqCst) {
+            // It may end the sync, forget the tablet, change the library...
+            self.wait(Some(IDLE_POLL));
+            return;
+        }
+        let Some(address) = self
+            .board_record
+            .as_ref()
+            .map(|record| record.address.clone())
+        else {
+            self.close_session("the blackboard's stream is dirty");
+            self.publish(Connection::Searching);
+            return;
+        };
+        self.note(
+            "the blackboard's stream may still carry an earlier transfer: its link is closed and \
+             opened again",
+        );
+        if let Some(board) = self.board.take()
+            && let Err(error) = board.disconnect()
+        {
+            self.note(format!("disconnect failed: {error}"));
+        }
+        let interrupt = self.interrupt.clone();
+        let reopened = match self.manager.as_mut() {
+            Some(manager) => manager.connect_blackboard(&address).and_then(|mut board| {
+                board.set_cancel_flag(Arc::new(AtomicBool::new(false)));
+                let info = board.info()?;
+                board.set_cancel_flag(interrupt);
+                Ok((board, info))
+            }),
+            None => Err(DeviceError::NotConnected),
+        };
+        match reopened {
+            Ok((board, info)) => {
+                self.board = Some(board);
+                self.counted_at = self.session_time();
+                self.slate_checked_at = self.session_time();
+                self.note(format!(
+                    "the blackboard's link is open again: {} stored",
+                    pages_text(info.stored_pages)
+                ));
+                let details = self.board_details(&info);
+                self.publisher.update(|status| {
+                    status.active = Some(TabletKind::Blackboard);
+                    status.device = Some(details);
+                });
+            }
+            Err(error) => {
+                self.note(format!(
+                    "the blackboard's link could not be opened again: {error}"
+                ));
+                self.link_lost();
+            }
         }
     }
 
@@ -675,9 +767,13 @@ impl Worker {
             let Some(mut run) = self.live.take() else {
                 return;
             };
-            self.started(&mut run);
+            let accepted = self.started(&mut run);
             run.active = true;
+            run.kind = Some(TabletKind::Blackboard);
             self.live = Some(run);
+            if !accepted {
+                return self.live_refused();
+            }
             self.note("live mode started on the blackboard");
             self.publish(Connection::Live);
             self.hooks.blackboard_live_started();

@@ -97,6 +97,20 @@ pub enum DeviceError {
     /// No blackboard with this address was found by the search for tablets to add.
     #[error("no blackboard {0} was found nearby")]
     TabletNotFound(String),
+    /// A page of the blackboard (Unix seconds of its time) is not whole 7-byte records of a
+    /// known status, or is announced larger than the tablet's memory: nothing is kept, nothing
+    /// deleted, the page stays on the tablet. `reason` holds counts only, never page bytes.
+    #[error("the page stored at {time} cannot be read: {reason}")]
+    PageUnreadable { time: u32, reason: String },
+    /// The blackboard's stream may still carry the bytes of an earlier transfer that did not end
+    /// cleanly: no download or live mode on this link, which must be opened again.
+    #[error("the tablet may still be sending an earlier page: the link must be opened again")]
+    StreamDirty,
+    /// A sync of the blackboard deletes each page from it (the only way to its next page) and
+    /// "delete after import" is off: the user must confirm first (`tablet_sync` with
+    /// `confirmBlackboardDelete`).
+    #[error("syncing the blackboard deletes its pages: confirm first")]
+    BlackboardConfirmDelete,
 }
 
 /// What the tablet says about itself.

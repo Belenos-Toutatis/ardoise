@@ -30,7 +30,7 @@ use super::{
     SEARCH_SLICE, Sent, ServiceConfig, ServiceHooks, StatusCallback, StatusError, SyncProgress,
     TabletOptions, TabletStatus, model_name, sync_error,
 };
-use crate::blackboard::BoardSession;
+use crate::blackboard::{BoardSession, BoardSync};
 use crate::identity::{self, BlackboardRecord, DeviceRecord};
 use crate::manager::Manager;
 use crate::pages::{ImportedPages, orient_record, page_note_id};
@@ -103,8 +103,21 @@ impl Publisher {
     }
 }
 
+/// Why a sync may delete the blackboard's pages: it must, to read the next one (SPEC §4.1).
+/// The permission of a sync stays with it when it resumes (lost link, fresh link, other library).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum BoardPermission {
+    /// "Delete after import" was on: checked again whenever the sync starts or resumes.
+    Option,
+    /// The user confirmed the deletion while the blackboard was the connected tablet
+    /// (`tablet_sync` with `confirmBlackboardDelete`).
+    Confirmed,
+}
+
 /// A sync under way.
 struct SyncRun {
+    /// The tablet it reads.
+    kind: TabletKind,
     library: Library,
     root: PathBuf,
     imported: ImportedPages,
@@ -117,8 +130,10 @@ struct SyncRun {
     saved: Vec<String>,
     deleted: u16,
     context: PageContext,
-    /// Time of the blackboard page deleted last: the tablet must not describe it again.
-    last_deleted: Option<u32>,
+    /// What allowed a sync of the blackboard to delete its pages (`None` for the Slate's).
+    permission: Option<BoardPermission>,
+    /// Where the blackboard's sync stands (its shared per-page step).
+    board: BoardSync,
 }
 
 /// Live mode asked by the hub.
@@ -129,6 +144,10 @@ struct LiveRun {
     /// The session is in live mode for this sink.
     active: bool,
     notifications: u32,
+    /// The tablet live mode streamed from: after a lost link only that one is looked for and
+    /// accepted (its page has that tablet's size and way of holding). `None` until a tablet
+    /// streams.
+    kind: Option<TabletKind>,
 }
 
 /// Why a synced page is not stored.
@@ -164,9 +183,9 @@ pub(super) struct Worker {
     sync: Option<SyncRun>,
     /// A sync waits (asked, automatic, or interrupted by a lost link).
     want_sync: bool,
-    /// The sync that waits was asked by the user (the blackboard's pages are imported without
-    /// that only when "delete after import" is on).
-    asked_sync: bool,
+    /// What allows the sync that waits to delete the blackboard's pages; without it, that sync
+    /// does nothing for the blackboard.
+    board_permission: Option<BoardPermission>,
     /// When the worker last looked for the Slate while the blackboard held the link.
     slate_checked_at: Option<Duration>,
     live: Option<LiveRun>,
@@ -175,6 +194,12 @@ pub(super) struct Worker {
     counted_at: Option<Duration>,
     /// The page count is due now (after a sync that deleted pages), whatever `counted_at`.
     count_now: bool,
+    /// The blackboard said a page was stored with its button: its pages are counted again as
+    /// soon as nothing else runs.
+    stored_event: bool,
+    /// `blackboard.json` could not be read (noted once): no blackboard is known until one is
+    /// added, which replaces the file.
+    board_record_unreadable: bool,
     stop: bool,
 }
 
@@ -206,11 +231,13 @@ impl Worker {
             adding: None,
             sync: None,
             want_sync: false,
-            asked_sync: false,
+            board_permission: None,
             slate_checked_at: None,
             live: None,
             counted_at: None,
             count_now: false,
+            stored_event: false,
+            board_record_unreadable: false,
             stop: false,
         }
     }
@@ -267,7 +294,7 @@ impl Worker {
     fn handle(&mut self, request: Request) {
         match request {
             Request::Register => self.register(),
-            Request::SyncNow => self.sync_now(),
+            Request::SyncNow { board_confirmed } => self.sync_now(board_confirmed),
             Request::Cancel => self.cancel(),
             Request::Rename(name, answer) => {
                 let result = self.rename(&name);
@@ -323,6 +350,8 @@ impl Worker {
             return;
         }
         self.load_record();
+        // Live mode waiting for its tablet after a lost link: only that one is looked for.
+        let live_kind = self.live_kind();
         match (self.record.clone(), self.board_record.clone()) {
             (None, None) => {
                 self.publish(Connection::NotRegistered);
@@ -330,7 +359,34 @@ impl Worker {
             }
             // A library that only knows a Slate: as before the blackboard existed.
             (Some(record), None) => self.search(&record),
+            (Some(record), Some(_)) if live_kind == Some(TabletKind::Slate) => {
+                self.search(&record);
+            }
+            (_, Some(board)) if live_kind == Some(TabletKind::Blackboard) => {
+                self.search_known(None, &board);
+            }
             (slate, Some(board)) => self.search_known(slate.as_ref(), &board),
+        }
+    }
+
+    /// The tablet a live run streamed from, while that tablet is still known.
+    fn live_kind(&self) -> Option<TabletKind> {
+        let kind = self.live.as_ref().and_then(|run| run.kind)?;
+        let known = match kind {
+            TabletKind::Slate => self.record.is_some(),
+            TabletKind::Blackboard => self.board_record.is_some(),
+        };
+        known.then_some(kind)
+    }
+
+    /// The tablet holding the link, if any.
+    fn link_kind(&self) -> Option<TabletKind> {
+        if self.session.is_some() {
+            Some(TabletKind::Slate)
+        } else if self.board.is_some() {
+            Some(TabletKind::Blackboard)
+        } else {
+            None
         }
     }
 
@@ -505,6 +561,9 @@ impl Worker {
         if self.count_now && (self.session.is_some() || self.board.is_some()) {
             return true;
         }
+        if self.stored_event && self.board.is_some() {
+            return true;
+        }
         match (self.counted_at, self.session_time()) {
             (Some(counted), Some(now)) => now.saturating_sub(counted) >= PAGE_COUNT_INTERVAL,
             _ => false,
@@ -561,16 +620,16 @@ impl Worker {
     /// The tablet dropped the link (switched off, out of range, idle): back to searching.
     fn link_lost(&mut self) {
         self.note("the tablet disconnected");
-        let on_board = self.board.is_some();
         self.session = None;
         self.board = None;
         self.counted_at = None;
         self.count_now = false;
+        self.stored_event = false;
         if let Some(run) = self.sync.take() {
-            // The page in transfer stays on the tablet; the sync goes on at the next connection
-            // (on the blackboard as if asked: it was running).
+            // The page in transfer stays on the tablet; the sync goes on at the next connection,
+            // with exactly the permission it had to delete the blackboard's pages.
             self.want_sync = true;
-            self.asked_sync |= on_board;
+            self.board_permission = self.board_permission.max(run.permission);
             self.keep("the link was lost during a sync");
             self.finish_sync(run, Some(&DeviceError::Disconnected));
         }
@@ -593,7 +652,10 @@ impl Worker {
 
     // --- sync -------------------------------------------------------------------------------
 
-    fn sync_now(&mut self) {
+    /// A sync asked by the user; `board_confirmed`: with the deletion of the blackboard's pages
+    /// confirmed while the blackboard was the connected tablet. Without that, or "delete after
+    /// import" on, the sync does nothing for the blackboard.
+    fn sync_now(&mut self, board_confirmed: bool) {
         if self.sync.is_some() {
             return;
         }
@@ -601,15 +663,29 @@ impl Worker {
             self.show_error(&DeviceError::NoTabletRegistered);
             return;
         }
+        let permission = if board_confirmed {
+            Some(BoardPermission::Confirmed)
+        } else if self.config.options.delete_after_import {
+            Some(BoardPermission::Option)
+        } else {
+            None
+        };
+        if self.board.is_some() && permission.is_none() {
+            // The blackboard connected after the request left (the handle checks the status
+            // first): the interface must ask before its pages are deleted.
+            self.note("a sync was asked without confirming the deletion of the blackboard's pages");
+            self.show_error(&DeviceError::BlackboardConfirmDelete);
+            return;
+        }
         self.want_sync = true;
-        self.asked_sync = true;
+        self.board_permission = self.board_permission.max(permission);
         let pending = self.pending();
         self.publisher.update(|status| status.pending = pending);
     }
 
     fn start_sync(&mut self) {
         self.want_sync = false;
-        self.asked_sync = false;
+        self.board_permission = None;
         let Some(root) = self.config.library.clone() else {
             self.show_error(&DeviceError::NoLibrary);
             return;
@@ -630,7 +706,7 @@ impl Worker {
         };
         let total = match counted {
             Ok(total) => total,
-            Err(error) => return self.sync_not_started(error),
+            Err(error) => return self.sync_not_started(error, None),
         };
         let delete = self.config.options.delete_after_import;
         // Without deletion the tablet only lets us read its oldest page.
@@ -661,6 +737,7 @@ impl Worker {
             }
         });
         let run = SyncRun {
+            kind: TabletKind::Slate,
             library,
             root,
             imported,
@@ -671,7 +748,8 @@ impl Worker {
             saved: Vec::new(),
             deleted: 0,
             context,
-            last_deleted: None,
+            permission: None,
+            board: BoardSync::default(),
         };
         if to_read == 0 {
             self.finish_sync(run, None);
@@ -683,12 +761,20 @@ impl Worker {
     /// The sync could not even count the pages (the tablet refused `ec` or paper mode...): a
     /// failed sync, shown as such (`last_sync` with its error) and logged; the pages stay on the
     /// tablet. The link is closed (its state is unknown) and the next connection tries again.
-    fn sync_not_started(&mut self, error: DeviceError) {
+    /// `permission`: what allowed it to delete the blackboard's pages, kept for that next try.
+    fn sync_not_started(&mut self, error: DeviceError, permission: Option<BoardPermission>) {
         match error {
+            // The blackboard's sync waits again: the request that cut it short decides (cancel
+            // drops it, forgetting the Slate does not).
+            DeviceError::Cancelled if permission.is_some() => {
+                self.want_sync = true;
+                self.board_permission = self.board_permission.max(permission);
+            }
             DeviceError::Cancelled => {}
             DeviceError::Disconnected => {
                 // Tried again at the next connection.
                 self.want_sync = true;
+                self.board_permission = self.board_permission.max(permission);
                 self.link_lost();
             }
             other => {
@@ -774,6 +860,15 @@ impl Worker {
             return;
         };
         match error {
+            // The blackboard's sync, cut short by a request (its stream left dirty, reopened
+            // before anything else): the request decides. Cancelling ends the sync; forgetting
+            // the Slate, for one, does not.
+            DeviceError::Cancelled
+                if run.kind == TabletKind::Blackboard && self.board.is_some() =>
+            {
+                self.note("the sync step was interrupted by a request");
+                self.sync = Some(run);
+            }
             // Cancelled by a request: the pages already saved stay saved (and deleted).
             DeviceError::Cancelled => self.finish_sync(run, None),
             DeviceError::Disconnected => {
@@ -811,7 +906,9 @@ impl Worker {
         self.counted_at = self.session_time();
         self.count_now = error.is_none() && run.deleted > 0;
         let error = error.map(sync_error);
-        let connection = if self.session.is_some() {
+        // Whichever tablet still holds the link: the blackboard too.
+        let active = self.link_kind();
+        let connection = if active.is_some() {
             Connection::Connected
         } else {
             Connection::Searching
@@ -819,6 +916,7 @@ impl Worker {
         let pending = self.pending();
         self.publisher.update(|status| {
             status.connection = connection;
+            status.active = active;
             status.pending = pending;
             status.sync = None;
             status.last_sync = Some(LastSync {
@@ -845,7 +943,7 @@ impl Worker {
         }
         if self.want_sync {
             self.want_sync = false;
-            self.asked_sync = false;
+            self.board_permission = None;
             let pending = self.pending();
             self.publisher.update(|status| status.pending = pending);
         }
@@ -855,9 +953,13 @@ impl Worker {
 
     fn start_live(&mut self, mut sink: Box<dyn LiveSink>) {
         let mut active = false;
+        let mut kind = None;
         if let Some(mut old) = self.live.take() {
             old.sink.input(LiveInput::State(LiveState::Stopped));
             active = old.active;
+            // Still the same stream: the same tablet. Otherwise the new sink is told the size
+            // of whichever tablet streams first (its own `Started`).
+            kind = old.kind.filter(|_| active);
         }
         let refused = if self.config.library.is_none() || self.config.identity_root.is_none() {
             Some(DeviceError::NoLibrary)
@@ -876,10 +978,14 @@ impl Worker {
             started: false,
             active,
             notifications: 0,
+            kind,
         };
         if active {
             // Live mode already streams (another sink before): the new one starts at once.
-            self.started(&mut run);
+            if !self.started(&mut run) {
+                self.live = Some(run);
+                return self.live_refused();
+            }
         } else if (self.session.is_none() && self.board.is_none()) || self.sync.is_some() {
             run.sink.input(LiveInput::State(LiveState::Waiting));
         }
@@ -888,18 +994,31 @@ impl Worker {
         self.publisher.update(|status| status.pending = pending);
     }
 
-    /// Tells a sink that live mode streams.
-    fn started(&self, run: &mut LiveRun) {
+    /// Tells a sink that live mode streams. `false` when the sink refuses it after `Started`
+    /// ([`LiveSink::active`]): live mode is then left ([`Self::live_refused`]).
+    fn started(&self, run: &mut LiveRun) -> bool {
         if !run.started {
             let (width, height) = self.tablet_size();
             run.sink.input(LiveInput::Started {
                 width,
                 height,
                 orientation: self.holding(),
+                kind: self.link_kind().unwrap_or(TabletKind::Slate),
             });
             run.started = true;
+            if !run.sink.active() {
+                return false;
+            }
         }
         run.sink.input(LiveInput::State(LiveState::Live));
+        true
+    }
+
+    /// The sink refused the tablet that streams (a sheet it cannot write on): live mode is left,
+    /// the link stays.
+    fn live_refused(&mut self) {
+        self.note("live mode refused by its sink: this tablet cannot write on the sheet resumed");
+        self.stop_live();
     }
 
     /// Tells the live sink that the tablet is held another way, whether live mode streams or
@@ -908,8 +1027,9 @@ impl Worker {
     /// turn again. Done on this thread between two notifications: the records before are
     /// oriented the old way, the ones after the new way.
     fn reoriented(&mut self) {
-        if self.board.is_some() {
-            // The blackboard has no orientation: its page stays upright.
+        if self.board.is_some() || self.live_kind() == Some(TabletKind::Blackboard) {
+            // The blackboard has no orientation: its page stays upright (also while its live
+            // mode waits for it).
             self.note("orientation changed: not used by the blackboard");
             return;
         }
@@ -937,9 +1057,13 @@ impl Worker {
             let Some(mut run) = self.live.take() else {
                 return;
             };
-            self.started(&mut run);
+            let accepted = self.started(&mut run);
             run.active = true;
+            run.kind = Some(TabletKind::Slate);
             self.live = Some(run);
+            if !accepted {
+                return self.live_refused();
+            }
             self.note("live mode started");
             self.publish(Connection::Live);
             self.hooks.live_started();
@@ -1254,6 +1378,9 @@ impl Worker {
             self.session.is_some() || (self.board.is_some() && options.delete_after_import);
         if options.auto_sync && !before.auto_sync && may_sync && self.stored_pages() > 0 {
             self.want_sync = true;
+            if self.board.is_some() {
+                self.board_permission = self.board_permission.max(Some(BoardPermission::Option));
+            }
         }
         self.publisher.update(|status| status.options = options);
     }
@@ -1264,15 +1391,16 @@ impl Worker {
             .identity_root
             .clone()
             .ok_or(DeviceError::NoLibrary)?;
-        // Only the Slate's link: a blackboard connected meanwhile stays connected.
-        if self.session.is_some() {
+        // As before the blackboard existed (live mode waiting stopped, nothing left pending),
+        // unless the blackboard holds the link: its sync, live mode and what waits for it stay.
+        if self.board.is_none() {
             if let Some(run) = self.sync.take() {
                 self.finish_sync(run, None);
             }
             self.stop_live();
             self.close_session("the registration is forgotten");
             self.want_sync = false;
-            self.asked_sync = false;
+            self.board_permission = None;
         }
         identity::forget(&root).map_err(|e| DeviceError::Storage(e.to_string()))?;
         self.record = None;
@@ -1307,9 +1435,12 @@ impl Worker {
             return;
         }
         if let Some(run) = self.sync.take() {
-            // The pages left go to the new library.
+            // The pages left go to the new library, with the same permission to delete the
+            // blackboard's.
+            let permission = run.permission;
             self.finish_sync(run, None);
             self.want_sync = true;
+            self.board_permission = self.board_permission.max(permission);
         }
         let reset = root != self.config.identity_root || library.is_none();
         self.config.library = library;
@@ -1322,7 +1453,8 @@ impl Worker {
         self.manager = None;
         self.journal = None;
         self.want_sync = false;
-        self.asked_sync = false;
+        self.board_permission = None;
+        self.board_record_unreadable = false;
         self.adding = None;
         self.config.identity_root = root;
         self.record = None;
@@ -1356,6 +1488,7 @@ impl Worker {
     fn close_session(&mut self, why: &str) {
         self.counted_at = None;
         self.count_now = false;
+        self.stored_event = false;
         self.slate_checked_at = None;
         let closed = match (self.session.take(), self.board.take()) {
             (Some(session), _) => session.disconnect(),
@@ -1406,10 +1539,24 @@ impl Worker {
             }
         }
         match identity::load_blackboard(&root) {
-            Ok(record) => self.board_record = record,
+            Ok(record) => {
+                self.board_record = record;
+                self.board_record_unreadable = false;
+            }
+            // No blackboard known (a Slate goes on working), nothing shown: noted once in the
+            // diagnostic log, the file left as it is until a blackboard is added again (which
+            // replaces it).
             Err(failure) => {
                 self.board_record = None;
-                error = Some(StatusError::new("libraryAccess", failure));
+                if !self.board_record_unreadable && self.journal.is_some() {
+                    self.board_record_unreadable = true;
+                    self.note(format!(
+                        "blackboard.json cannot be read ({failure}): no blackboard is known until \
+                         one is added"
+                    ));
+                    self.keep("blackboard.json cannot be read");
+                    self.write_journal();
+                }
             }
         }
         let registered = self.record.as_ref().map(registered_tablet);
@@ -1557,9 +1704,15 @@ impl Worker {
 
     fn publish(&self, connection: Connection) {
         let pending = self.pending();
+        // The tablet holding the link, whichever it is (`active` is cleared by the publisher
+        // in the states without a connection).
+        let active = self.link_kind();
         self.publisher.update(|status| {
             status.connection = connection;
             status.pending = pending;
+            if active.is_some() {
+                status.active = active;
+            }
         });
     }
 

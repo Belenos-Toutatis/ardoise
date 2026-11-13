@@ -515,6 +515,15 @@ pub enum LiveEvent {
         /// The new note.
         path: String,
     },
+    /// The tablet that connected cannot write on the sheet this session resumes (`notSupported`:
+    /// a Slate sheet with the blackboard, a blackboard page with the Slate): the session ended at
+    /// once, `idle`, nothing written on the sheet; the tablet leaves live mode. Sent once, to the
+    /// windows subscribed then; never to the viewers of the share.
+    Refused {
+        /// `errorCodes.*`.
+        code: String,
+        message: String,
+    },
     /// Finished strokes of page `page_index` were deleted, came back or changed colour (an edit,
     /// its undo or redo). Applied to the list in this order: `removed`, then `inserted`, then
     /// `recoloured`; the stroke in progress is not concerned. Strokes that are not named keep

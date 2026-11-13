@@ -11,6 +11,7 @@ use ardoise_core::library::Library;
 use ardoise_core::note::{Origin, PageSize, Paper};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
+use ardoise_device::transport::TabletKind;
 use ardoise_ink::{Rgba, Tool};
 use ardoise_media::microphone::{CaptureStatus, Level, simulated_narration};
 use ardoise_media::replay::ReplayOptions;
@@ -124,6 +125,7 @@ pub(super) fn start(hub: &LiveHub, options: StartOptions) -> HubSink {
         width: A5.width,
         height: A5.height,
         orientation: Orientation::Landscape,
+        kind: TabletKind::Slate,
     });
     sink
 }
@@ -241,6 +243,7 @@ fn a_portrait_session_has_portrait_pages_and_switching_turns_the_page_in_progres
         width: A5.width,
         height: A5.height,
         orientation: Orientation::PortraitLeft,
+        kind: TabletKind::Slate,
     });
     // The service hands over points that are already page coordinates.
     stroke(&mut sink, 3000, 20);
@@ -1783,6 +1786,7 @@ fn a_fork_at_the_last_write_is_in_what_live_stop_answers() {
         width: A5.width,
         height: A5.height,
         orientation: Orientation::Landscape,
+        kind: TabletKind::Slate,
     });
     let strokes = file.note.strokes.len();
     stroke(&mut sink, 3000, 5);
@@ -2541,4 +2545,24 @@ fn the_tablet_is_never_slowed_by_the_paper_and_the_image_of_the_page() {
     assert!(tablet[0] >= 0.0);
     assert!(median < 10.0, "median {median} ms");
     assert!(p99 < NEVER_SLOWED_P99_MS, "99th percentile {p99} ms");
+}
+
+#[test]
+fn a_resume_is_refused_at_once_when_the_tablet_connected_cannot_write_on_the_sheet() {
+    use ardoise_core::note::A4_PORTRAIT;
+    use ardoise_device::pages::BLACKBOARD_PAGE;
+    let refused = |active, sheet| super::refused_now(active, sheet).err().map(|e| e.code());
+    assert_eq!(
+        refused(Some(TabletKind::Blackboard), A4_PORTRAIT),
+        Some("notSupported")
+    );
+    assert_eq!(
+        refused(Some(TabletKind::Slate), BLACKBOARD_PAGE),
+        Some("notSupported")
+    );
+    assert_eq!(refused(Some(TabletKind::Blackboard), BLACKBOARD_PAGE), None);
+    assert_eq!(refused(Some(TabletKind::Slate), A5), None);
+    // Nothing connected yet: the tablet that connects decides.
+    assert_eq!(refused(None, BLACKBOARD_PAGE), None);
+    assert_eq!(refused(None, A4_PORTRAIT), None);
 }

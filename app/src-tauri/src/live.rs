@@ -37,6 +37,7 @@ use ardoise_core::library::Library;
 use ardoise_core::note::{Background, BackgroundImage, PageSize};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::service::{TabletService, TabletStatus};
+use ardoise_device::transport::TabletKind;
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State, Webview};
@@ -381,6 +382,19 @@ pub async fn live_start(
     start_streaming(start, &tablet, &runtime.hub)
 }
 
+/// A tablet connected now (`active`) that cannot write on a sheet of size `sheet`
+/// ([`resume::tablet_fits`]): the resume is refused at once (`notSupported`), nothing changed. One
+/// that connects later ends the resumed run the same way (the `refused` event).
+fn refused_now(active: Option<TabletKind>, sheet: PageSize) -> CommandResult<()> {
+    match active {
+        Some(kind) if !resume::tablet_fits(kind, sheet) => Err(CommandError::new(
+            "notSupported",
+            format!("the {} cannot write on this sheet", kind.name()),
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Resumes live mode on the note at `path` (SPEC §4.2, `docs/questions.md` Q9): its first page is
 /// that note, whose file receives what is written. A session still running goes first, as
 /// `live_stop` would end it (its narration, its pages, what the assistant remembers of it); a
@@ -396,7 +410,12 @@ pub async fn live_resume(app: AppHandle, path: String) -> CommandResult<LiveSnap
         let narration = app.state::<NarrationRuntime>();
         let library = library_of(&context)?;
         let path = Path::new(&path);
-        library.read(path).map_err(library_error)?;
+        let sheet = library.read(path).map_err(library_error)?.file.note.page;
+        let active = tablet
+            .with_service(|service| service.status().active)
+            .ok()
+            .flatten();
+        refused_now(active, sheet)?;
         finish_live_narration(&narration, &runtime.hub);
         if runtime.hub.page_position().is_some_and(|p| p.running) {
             // Without a running service there is nothing to stop on the tablet's side.

@@ -13,7 +13,8 @@ use ardoise_core::format::NoteFile;
 use ardoise_core::library::LoadedNote;
 use ardoise_core::note::{Note, PageSize};
 use ardoise_core::settings::Orientation;
-use ardoise_device::pages::turn_point;
+use ardoise_device::pages::{BLACKBOARD_PAGE, turn_point};
+use ardoise_device::transport::TabletKind;
 use ardoise_media::replay::{ReplayOptions, Timeline};
 use ardoise_media::{Narration, NarrationHeader, narration_header};
 
@@ -121,6 +122,30 @@ pub fn hold_for(sheet: PageSize, setting: Orientation) -> Orientation {
         Orientation::LandscapeFlipped => Orientation::PortraitRight,
         Orientation::PortraitLeft => Orientation::Landscape,
         Orientation::PortraitRight => Orientation::LandscapeFlipped,
+    }
+}
+
+/// Whether a tablet of `kind` may write on a resumed sheet of size `sheet`, without its ink being
+/// shrunk, turned or lost: the blackboard only on its own page ([`BLACKBOARD_PAGE`]), which it
+/// covers exactly at its own scale (it is never turned, nor are its records); the Slate on every
+/// other sheet, as before the blackboard (turned to how the sheet is held and fitted in it), never
+/// on the blackboard's page (its ink would be shrunk to the narrower portrait page). Any other pair
+/// ends the resumed run (`notSupported`), nothing written on the sheet.
+pub fn tablet_fits(kind: TabletKind, sheet: PageSize) -> bool {
+    let board_page = sheet == BLACKBOARD_PAGE;
+    match kind {
+        TabletKind::Blackboard => board_page,
+        TabletKind::Slate => !board_page,
+    }
+}
+
+/// How the tablet is held to write on a page held fixed (a resumed sheet, a worksheet): the Slate
+/// follows the sheet ([`hold_for`]); the blackboard cannot (its records are never turned): it is
+/// held as it is, `setting` being its own way.
+pub fn held_for(sheet: PageSize, setting: Orientation, kind: TabletKind) -> Orientation {
+    match kind {
+        TabletKind::Slate => hold_for(sheet, setting),
+        TabletKind::Blackboard => setting,
     }
 }
 

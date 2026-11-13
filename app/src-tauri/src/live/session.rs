@@ -12,6 +12,7 @@ use ardoise_core::library::FileStamp;
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Timing};
 use ardoise_core::settings::{LiveButton, Orientation};
 use ardoise_device::pages::{oriented_size, turn_point};
+use ardoise_device::transport::TabletKind;
 use ardoise_ink::{Point, Rgba, Stroke};
 use ardoise_proto::SLATE_MAX_PRESSURE;
 use ardoise_proto::live::LiveRecord;
@@ -31,7 +32,7 @@ use super::model::{
 };
 use super::paper::{ImageChange, PageImage, PaperError, refitted, within_reach};
 use super::pen::{CheckedPen, MAX_COMPUTER_POINTS, PenAction, PenSample, note_time, sample_wall};
-use super::resume::{PenMapping, ResumeBase, ResumeSeed, hold_for};
+use super::resume::{PenMapping, ResumeBase, ResumeSeed, held_for, hold_for, tablet_fits};
 use crate::library::path_text;
 use crate::presentation::MonitorInfo;
 use crate::share::page::is_drawn;
@@ -438,9 +439,9 @@ impl Page {
     /// `orientation` as the page allows. A page with an image and no ink has its image placed again
     /// upright ([`refitted`]). Ink turned is a new revision: every edit chosen before is stale (a
     /// move names positions, and a selection's frame no longer stands where it was drawn).
-    fn turn(&mut self, turns: u8, orientation: Orientation) {
+    fn turn(&mut self, turns: u8, orientation: Orientation, kind: TabletKind) {
         if self.held_fixed() {
-            self.orientation = hold_for(self.note.page, orientation);
+            self.orientation = held_for(self.note.page, orientation, kind);
             return;
         }
         if !turns.is_multiple_of(4) {
@@ -803,6 +804,9 @@ pub struct LiveSession {
     size: PageSize,
     /// How the tablet is held: the orientation of new pages.
     orientation: Orientation,
+    /// The tablet that streams (the Slate until one says otherwise): the blackboard cannot be
+    /// turned to follow a sheet held fixed.
+    kind: TabletKind,
     style: LiveStyle,
     /// Style before the blackboard was turned on, given back when it is turned off.
     style_before_board: Option<LiveStyle>,
@@ -842,6 +846,7 @@ impl LiveSession {
             current: 0,
             size,
             orientation: Orientation::Landscape,
+            kind: TabletKind::Slate,
             style: style.sanitized(),
             style_before_board: None,
             board_imposed: false,
@@ -1210,6 +1215,30 @@ impl LiveSession {
         self.push_snapshot(out);
     }
 
+    /// Whether a tablet of `kind` may write on this session: on a resumed sheet only the tablet
+    /// that fits it ([`tablet_fits`]); any tablet otherwise.
+    pub fn accepts(&self, kind: TabletKind) -> bool {
+        self.pages
+            .iter()
+            .filter(|page| page.is_resumed())
+            .all(|page| tablet_fits(kind, page.note.page))
+    }
+
+    /// The tablet that streams is of `kind` (said before [`started`](Self::started)): the pages
+    /// held fixed are held as that tablet can be.
+    pub fn set_tablet(&mut self, kind: TabletKind) {
+        if kind == self.kind {
+            return;
+        }
+        self.kind = kind;
+        let orientation = self.orientation;
+        for page in &mut self.pages {
+            if page.held_fixed() {
+                page.orientation = held_for(page.note.page, orientation, kind);
+            }
+        }
+    }
+
     /// The tablet streams; its drawing area is `width` × `height` and it is held as
     /// `orientation`. Pages not drawn on yet take the page size that implies.
     pub fn started(
@@ -1283,6 +1312,7 @@ impl LiveSession {
         } else {
             orientation.turns_from(shown.orientation)
         };
+        let kind = self.kind;
         for index in 0..self.pages.len() {
             let page = &mut self.pages[index];
             let follows = !page.is_resumed()
@@ -1292,7 +1322,7 @@ impl LiveSession {
                 page.resize(size);
                 page.orientation = orientation;
             } else if index == self.current {
-                page.turn(turns, orientation);
+                page.turn(turns, orientation, kind);
                 self.leave(index);
             }
         }
@@ -1326,9 +1356,10 @@ impl LiveSession {
     fn follow(&mut self) {
         let orientation = self.orientation;
         let index = self.current;
+        let kind = self.kind;
         let page = &mut self.pages[index];
         if page.orientation != orientation {
-            page.turn(orientation.turns_from(page.orientation), orientation);
+            page.turn(orientation.turns_from(page.orientation), orientation, kind);
             self.leave(index);
         }
     }

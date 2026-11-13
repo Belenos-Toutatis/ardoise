@@ -366,11 +366,14 @@ pub enum LiveState {
 /// What live mode delivers, in order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiveInput {
-    /// Live mode starts on a tablet of this size (always before the first records).
+    /// Live mode starts on a tablet of this size (always before the first records). `kind`:
+    /// which tablet; a live run never changes tablet (after a lost link only that one is
+    /// accepted), so it is said once.
     Started {
         width: u32,
         height: u32,
         orientation: Orientation,
+        kind: TabletKind,
     },
     /// The tablet is held another way (the quick switch of the live window), while live mode
     /// streams or while it still waits for the tablet (then before `Started`, which repeats the
@@ -399,6 +402,13 @@ pub enum LiveInput {
 /// Receives live mode (the app's live hub). Called on the worker thread: keep it short.
 pub trait LiveSink: Send {
     fn input(&mut self, input: LiveInput);
+
+    /// Whether the sink still takes live mode, asked right after `Started`: `false` (the tablet
+    /// that connected cannot write on the sheet the sink resumes) ends live mode, as
+    /// [`TabletService::stop_live`] would.
+    fn active(&self) -> bool {
+        true
+    }
 }
 
 /// Longest scan for the registered tablet before the worker looks at its requests again
@@ -454,9 +464,12 @@ pub fn error_code(error: &DeviceError) -> &'static str {
         DeviceError::PageNotDeleted(_) => "pageNotDeleted",
         DeviceError::NotSupported(_) => "notSupported",
         DeviceError::TabletNotFound(_) => "blackboardNotFound",
+        DeviceError::PageUnreadable { .. } => "pageUnreadable",
+        DeviceError::BlackboardConfirmDelete => "blackboardConfirmDelete",
         DeviceError::Transport(_)
         | DeviceError::Unexpected(_)
         | DeviceError::CrcMismatch { .. }
+        | DeviceError::StreamDirty
         | DeviceError::Cancelled => "tablet",
     }
 }
@@ -519,7 +532,11 @@ struct Sent {
 /// What the handle asks the worker.
 enum Request {
     Register,
-    SyncNow,
+    /// `board_confirmed`: the deletion of the blackboard's pages was confirmed while the
+    /// blackboard was the connected tablet.
+    SyncNow {
+        board_confirmed: bool,
+    },
     Cancel,
     Rename(String, Answer<()>),
     SetTime(Answer<i64>),
@@ -658,8 +675,25 @@ impl TabletService {
     }
 
     /// Syncs now, or as soon as the tablet connects.
-    pub fn sync_now(&self) {
-        let _ = self.send(Request::SyncNow, false);
+    ///
+    /// A sync of the Xiaomi blackboard deletes each of its pages once the page's note is written
+    /// (the only way to its next page). With "delete after import" off, the blackboard's pages
+    /// are synced only by a request made with `confirm_blackboard_delete` while the blackboard
+    /// is the connected tablet; such a request without it is refused
+    /// ([`DeviceError::BlackboardConfirmDelete`], nothing done), and a request made while
+    /// nothing or the Slate is connected does nothing for the blackboard.
+    pub fn sync_now(&self, confirm_blackboard_delete: bool) -> Result<(), DeviceError> {
+        let status = self.status();
+        let on_board = status.active == Some(TabletKind::Blackboard);
+        if on_board && !status.options.delete_after_import && !confirm_blackboard_delete {
+            return Err(DeviceError::BlackboardConfirmDelete);
+        }
+        self.send(
+            Request::SyncNow {
+                board_confirmed: on_board && confirm_blackboard_delete,
+            },
+            false,
+        )
     }
 
     /// Cancels the registration or the sync under way.
@@ -686,9 +720,11 @@ impl TabletService {
         let _ = self.send(Request::SetOptions(options), false);
     }
 
-    /// Disconnects and forgets the registration (`device.json`): the Slate only.
+    /// Disconnects and forgets the registration (`device.json`): the Slate only. While the
+    /// blackboard holds the link, it does not cut short what the worker does with it.
     pub fn forget(&self) -> Result<(), DeviceError> {
-        self.ask(Request::Forget, true)
+        let urgent = self.status().active != Some(TabletKind::Blackboard);
+        self.ask(Request::Forget, urgent)
     }
 
     /// Looks for Xiaomi blackboards nearby for [`BOARD_SEARCH`] (`connection` `adding`, what is
@@ -709,9 +745,11 @@ impl TabletService {
         )
     }
 
-    /// Disconnects the blackboard if it is connected and forgets it (`blackboard.json`).
+    /// Disconnects the blackboard if it is connected and forgets it (`blackboard.json`). While
+    /// the Slate holds the link, it does not cut short what the worker does with it.
     pub fn forget_blackboard(&self) -> Result<(), DeviceError> {
-        self.ask(Request::ForgetBlackboard, true)
+        let urgent = self.status().active != Some(TabletKind::Slate);
+        self.ask(Request::ForgetBlackboard, urgent)
     }
 
     /// Follows another library (or none).

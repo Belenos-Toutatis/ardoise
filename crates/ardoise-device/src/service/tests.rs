@@ -102,7 +102,7 @@ fn a_library_without_registration_waits_for_the_wizard() {
         ))
     );
     // Sync without a registered tablet: an error, nothing pending.
-    service.sync_now();
+    service.sync_now(false).unwrap();
     let status = wait_for(&statuses, |s| s.error.is_some());
     assert_eq!(status.error.unwrap().code, "tabletNotRegistered");
     assert_eq!(service.status().pending, None);
@@ -329,6 +329,18 @@ fn device_errors_map_to_translated_codes() {
             DeviceError::TabletNotFound("x".into()),
             "blackboardNotFound",
         ),
+        (
+            DeviceError::PageUnreadable {
+                time: 5,
+                reason: "3 records".into(),
+            },
+            "pageUnreadable",
+        ),
+        (
+            DeviceError::BlackboardConfirmDelete,
+            "blackboardConfirmDelete",
+        ),
+        (DeviceError::StreamDirty, "tablet"),
         (
             DeviceError::Transport(TransportError::Backend("x".into())),
             "tablet",
@@ -587,7 +599,8 @@ fn live_mode_forwards_oriented_pen_data_and_the_button_and_logs_the_rest() {
         LiveInput::Started {
             width: 29_700,
             height: 21_600,
-            orientation: Orientation::LandscapeFlipped
+            orientation: Orientation::LandscapeFlipped,
+            kind: TabletKind::Slate
         }
     );
     assert_eq!(next(), LiveInput::State(LiveState::Live));

@@ -11,15 +11,41 @@
 //! else (stream bytes nobody asked for, unknown or malformed frames) is dropped and counted
 //! ([`BoardSession::take_oddities`]), never an error. The diagnostic log has every frame
 //! anyway (the [`LoggingTransport`](crate::logging::LoggingTransport)).
+//!
+//! # A page has nothing but its count
+//!
+//! A page arrives on the stream characteristic with no header, no end mark and no checksum
+//! (research note §3): only the size announced by `12 01 05` says where it ends. So bytes of an
+//! earlier transfer that is still running would join the next page unnoticed. Three layers keep
+//! a wrong page out of the library (and so off the deletion that follows):
+//!
+//! 1. **Dirty stream.** A download that does not end cleanly (no byte for
+//!    [`DATA_IDLE_TIMEOUT`], more bytes than announced, cancelled, a page that fails the record
+//!    check, any error but a lost link), or stream bytes arriving after a download ended, mark
+//!    the stream as dirty ([`BoardSession::is_dirty`]): this link then refuses downloads and live
+//!    mode ([`DeviceError::StreamDirty`]), and its owner must close it and open a fresh one.
+//!    Only a fresh link is known to carry nothing of the old transfer (**supposed**: that the
+//!    tablet ends a transfer with its link is to check at the hardware checkpoint).
+//! 2. **Quiet window.** Once the count reaches the announced size, the stream must stay quiet
+//!    for [`QUIET_WINDOW`] before the page is returned; any byte more makes it incomplete.
+//! 3. **Record check.** The page must be whole 7-byte records of a known status
+//!    ([`ardoise_proto::blackboard::check_page`]), else [`DeviceError::PageUnreadable`].
+//!
+//! # Sync
+//!
+//! The tablet only describes its oldest page, so reading the next one needs the deletion of the
+//! first. [`BoardSession::sync_page`] is the one step of a sync (describe, download, keep, and
+//! only once kept delete), used by the tablet service between its other work; the service
+//! closes and reopens the link when the step asks ([`PageStep::Reopen`]).
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
-use ardoise_proto::blackboard::{BoardReply, BoardRequest, PageInfo};
+use ardoise_proto::blackboard::{BoardReply, BoardRequest, PageInfo, check_page};
 
-use crate::session::{DeviceError, DownloadedPage, LiveNotification, SyncSummary, unix_seconds};
+use crate::session::{DeviceError, DownloadedPage, LiveNotification, unix_seconds};
 use crate::transport::{
     Advertisement, Channel, Clock, TabletKind, Transport, TransportError, TransportEvent,
 };
@@ -29,6 +55,18 @@ pub const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 /// A download is abandoned when no byte of the page arrived for this long. A page of 52 185
 /// bytes took 2.1 s in Mi Home's capture (research note §3).
 pub const DATA_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+/// After the last byte of a page, how long the stream must stay quiet before the page is
+/// accepted: one byte more means the count was reached with bytes of another transfer.
+/// **Supposed**: the page notifications came about every 10 ms in Mi Home's capture (52 185
+/// bytes, 214 notifications of at most 244 bytes, in 2.1 s: research note §3).
+pub const QUIET_WINDOW: Duration = Duration::from_millis(300);
+/// When the tablet still describes the page it was just asked to delete, it is described once
+/// more after this long before the sync gives up ([`DeviceError::PageNotDeleted`]): the delete
+/// has no reply, and how long the tablet takes to erase is not measured (**supposed**).
+pub const DELETE_SETTLE: Duration = Duration::from_millis(300);
+/// Largest page accepted while the tablet's memory is not known yet (`11 01 02` not asked):
+/// its measured memory (126 909 952 bytes, research note §3), rounded up (**supposed** bound).
+pub const MAX_PAGE_BYTES: u32 = 128 * 1024 * 1024;
 /// Most pages one sync reads, whatever the tablet says: about 400 fit in its memory (research
 /// note §1). Guards against a tablet that never runs out of pages.
 pub const MAX_SYNC_PAGES: u32 = 1000;
@@ -67,6 +105,38 @@ impl Oddities {
     }
 }
 
+/// Where a sync of the blackboard stands between two of its steps
+/// ([`BoardSession::sync_page`]); it outlives a link reopened in the middle of the sync.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BoardSync {
+    /// Pages kept and deleted so far.
+    pages: u32,
+    /// Time of the page deleted last: the tablet must not describe it again.
+    last_deleted: Option<u32>,
+    /// Time of the page whose transfer already failed once: its one retry is used.
+    retried: Option<u32>,
+}
+
+impl BoardSync {
+    /// Pages kept and deleted so far.
+    pub fn pages(&self) -> u32 {
+        self.pages
+    }
+}
+
+/// What one step of a sync did ([`BoardSession::sync_page`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PageStep<T> {
+    /// The page `info` describes was kept (`kept`: what the keeper returned), then deleted from
+    /// the tablet.
+    Kept { info: PageInfo, kept: T },
+    /// Nothing more to read: the tablet holds no page, or [`MAX_SYNC_PAGES`] were read.
+    Done,
+    /// The stream is dirty (a transfer did not end cleanly, the first time for this page, or
+    /// bytes came after the last one): close this link, open a fresh one and step again there.
+    Reopen,
+}
+
 /// A page being downloaded.
 struct Download {
     expected: usize,
@@ -88,6 +158,13 @@ pub struct BoardSession {
     page_stored: bool,
     oddities: Oddities,
     connected: bool,
+    /// The tablet's memory as it said (`11 01 02`): no page can be larger.
+    memory_total: Option<u32>,
+    /// A transfer did not end cleanly: the stream may still carry its bytes.
+    dirty: bool,
+    /// A download ended and nothing took the stream since: stream bytes now are more of that
+    /// page than announced.
+    after_download: bool,
     reply_timeout: Duration,
     data_timeout: Duration,
 }
@@ -106,6 +183,9 @@ impl BoardSession {
             page_stored: false,
             oddities: Oddities::default(),
             connected: true,
+            memory_total: None,
+            dirty: false,
+            after_download: false,
             reply_timeout: REPLY_TIMEOUT,
             data_timeout: DATA_IDLE_TIMEOUT,
         }
@@ -131,6 +211,12 @@ impl BoardSession {
         self.connected
     }
 
+    /// The stream may still carry bytes of a transfer that did not end cleanly: this link
+    /// refuses downloads and live mode; close it and open a fresh one.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
     pub fn clock(&self) -> &Arc<dyn Clock> {
         &self.clock
     }
@@ -153,12 +239,15 @@ impl BoardSession {
         }
     }
 
-    /// Total and free memory in bytes (`11 01 02`).
+    /// Total and free memory in bytes (`11 01 02`). The total bounds the size of a page.
     pub fn memory(&mut self) -> Result<(u32, u32), DeviceError> {
         match self.exchange(BoardRequest::Memory, "memory", |r| {
             matches!(r, BoardReply::Memory { .. })
         })? {
-            BoardReply::Memory { total, free } => Ok((total, free)),
+            BoardReply::Memory { total, free } => {
+                self.memory_total = Some(total);
+                Ok((total, free))
+            }
             other => Err(unexpected(&other)),
         }
     }
@@ -200,29 +289,69 @@ impl BoardSession {
 
     /// Downloads the page `info` describes (`12 06 03 01 <time>`): its bytes come on the stream
     /// characteristic, with no header, no end mark and no checksum, so they are counted against
-    /// the size announced. No byte for [`DATA_IDLE_TIMEOUT`], or more bytes than announced, is
-    /// [`DeviceError::TransferIncomplete`]. Nothing is deleted here.
+    /// the size announced, then the stream must stay quiet for [`QUIET_WINDOW`], then the page
+    /// must be whole records of a known status. Nothing is deleted here.
+    ///
+    /// - No byte for [`DATA_IDLE_TIMEOUT`], or more bytes than announced:
+    ///   [`DeviceError::TransferIncomplete`].
+    /// - Not whole records of a known status, or announced larger than the tablet's memory
+    ///   (then nothing is sent): [`DeviceError::PageUnreadable`].
+    /// - On a dirty stream: [`DeviceError::StreamDirty`], nothing sent.
+    ///
+    /// Any failure but a lost link, the oversized announcement excepted, leaves the stream
+    /// dirty.
     pub fn download(&mut self, info: PageInfo) -> Result<DownloadedPage, DeviceError> {
-        let expected = usize::try_from(info.size).unwrap_or(usize::MAX);
-        let incomplete = |received| DeviceError::TransferIncomplete {
-            expected: info.size,
-            received,
-        };
         // Stream bytes still in flight (the end of a live stream) must not join the page, nor
-        // an earlier reply pass for anything.
+        // an earlier reply pass for anything; late bytes of the last page make the stream dirty.
         self.drain()?;
         self.commands.clear();
+        if self.dirty {
+            return Err(DeviceError::StreamDirty);
+        }
+        let limit = self.memory_total.unwrap_or(MAX_PAGE_BYTES);
+        if info.size > limit {
+            return Err(DeviceError::PageUnreadable {
+                time: info.time,
+                reason: format!(
+                    "{} bytes announced, more than the {limit} bytes of the tablet's memory",
+                    info.size
+                ),
+            });
+        }
+        self.after_download = false;
+        let result = self.receive_page(info);
+        match &result {
+            Ok(_) => self.after_download = true,
+            Err(DeviceError::Disconnected) => {}
+            Err(_) => self.dirty = true,
+        }
+        result
+    }
+
+    fn receive_page(&mut self, info: PageInfo) -> Result<DownloadedPage, DeviceError> {
+        // At most the tablet's memory (checked by the caller).
+        let expected = usize::try_from(info.size).unwrap_or(usize::MAX);
         self.download = Some(Download {
             expected,
             bytes: Vec::with_capacity(expected.min(1 << 20)),
             last: self.clock.monotonic(),
         });
-        let result = self.receive_page(BoardRequest::Download { time: info.time }, &incomplete);
+        let counted = self.count_page(BoardRequest::Download { time: info.time }, info.size);
         let download = self.download.take();
-        result?;
+        counted?;
         let bytes = download.map(|d| d.bytes).unwrap_or_default();
         if bytes.len() != expected {
-            return Err(incomplete(bytes.len()));
+            return Err(DeviceError::TransferIncomplete {
+                expected: info.size,
+                received: bytes.len(),
+            });
+        }
+        let shape = check_page(&bytes);
+        if !shape.is_whole() {
+            return Err(DeviceError::PageUnreadable {
+                time: info.time,
+                reason: shape.to_string(),
+            });
         }
         Ok(DownloadedPage {
             bytes,
@@ -232,11 +361,12 @@ impl BoardSession {
         })
     }
 
-    fn receive_page(
-        &mut self,
-        request: BoardRequest,
-        incomplete: &dyn Fn(usize) -> DeviceError,
-    ) -> Result<(), DeviceError> {
+    /// Writes `request`, then counts the bytes until the announced size and a quiet window.
+    fn count_page(&mut self, request: BoardRequest, size: u32) -> Result<(), DeviceError> {
+        let incomplete = |received| DeviceError::TransferIncomplete {
+            expected: size,
+            received,
+        };
         self.write(request)?;
         loop {
             let (received, expected, last) = match &self.download {
@@ -246,68 +376,111 @@ impl BoardSession {
             if received > expected {
                 return Err(incomplete(received));
             }
-            if received == expected {
-                return Ok(());
-            }
             self.check_cancel()?;
-            let now = self.clock.monotonic();
-            let idle = now.saturating_sub(last);
-            if idle >= self.data_timeout {
-                return Err(incomplete(received));
-            }
-            self.pump((self.data_timeout - idle).min(WAIT_SLICE))?;
+            let idle = self.clock.monotonic().saturating_sub(last);
+            let wait = if received == expected {
+                // Complete: accepted once the stream stayed quiet long enough.
+                if idle >= QUIET_WINDOW {
+                    return Ok(());
+                }
+                QUIET_WINDOW - idle
+            } else {
+                if idle >= self.data_timeout {
+                    return Err(incomplete(received));
+                }
+                self.data_timeout - idle
+            };
+            self.pump(wait.min(WAIT_SLICE))?;
         }
     }
 
     /// Deletes the page stored at `time` (`12 05 06 <time>`): no reply. Only ever called once
-    /// the page is safe in the library (see [`BoardSession::sync`]).
+    /// the page is safe in the library (see [`BoardSession::sync_page`]).
     pub fn delete(&mut self, time: u32) -> Result<(), DeviceError> {
         self.send(BoardRequest::Delete { time })
     }
 
-    /// Reads every stored page, oldest first: describe, download, hand it to `sink`, and only
-    /// once the sink returned `Ok` (the note written and verified) delete it, then describe the
-    /// next one. The tablet only describes its oldest page, so reading the next one needs the
-    /// deletion: a sync always deletes. Stops when the tablet holds no page, after
-    /// [`MAX_SYNC_PAGES`], or with [`DeviceError::PageNotDeleted`] when the tablet still
-    /// describes the page it was asked to delete.
-    pub fn sync(
+    /// One step of a sync: describes the oldest page, downloads it, hands it to `keep`, and only
+    /// once `keep` returned `Ok` (the note written and read back) deletes it from the tablet;
+    /// the cancellation flag is ignored for that one write. The tablet only describes its oldest
+    /// page, so reading the next one needs this deletion: a sync always deletes.
+    ///
+    /// - [`PageStep::Done`] when the tablet holds no page, or after [`MAX_SYNC_PAGES`].
+    /// - [`PageStep::Reopen`] on a dirty stream, when the page's transfer did not end cleanly
+    ///   for the first time, or when more stream bytes came while `keep` ran (the page, kept,
+    ///   is then not deleted): the caller opens a fresh link and steps again with the same
+    ///   `sync`, so that the page's one retry happens on the new link, never on this one.
+    /// - [`DeviceError::TransferIncomplete`] when the retry fails too; the page stays.
+    /// - [`DeviceError::PageNotDeleted`] when the tablet still describes the page just deleted
+    ///   after [`DELETE_SETTLE`] (rather than import it again and again).
+    /// - Any error of `keep` is returned as it is: the page stays on the tablet.
+    pub fn sync_page<T>(
         &mut self,
-        sink: &mut dyn FnMut(DownloadedPage, u16) -> Result<(), String>,
-    ) -> Result<SyncSummary, DeviceError> {
-        let (available, _) = self.page_count()?;
-        let mut summary = SyncSummary {
-            available,
-            ..SyncSummary::default()
-        };
-        let mut deleted: Option<u32> = None;
-        for index in 1..=MAX_SYNC_PAGES {
-            self.check_cancel()?;
-            let Some(info) = self.oldest_page()? else {
-                break;
-            };
-            if deleted == Some(info.time) {
-                return Err(DeviceError::PageNotDeleted(info.time));
-            }
-            let page = match self.download(info) {
-                // Notifications can be lost on the way (BLE stack buffers): try once more.
-                Err(DeviceError::TransferIncomplete { .. }) => self.download(info)?,
-                other => other?,
-            };
-            sink(page, u16::try_from(index).unwrap_or(u16::MAX)).map_err(DeviceError::Storage)?;
-            summary.downloaded = summary.downloaded.saturating_add(1);
-            self.delete(info.time)?;
-            summary.deleted = summary.deleted.saturating_add(1);
-            deleted = Some(info.time);
+        sync: &mut BoardSync,
+        keep: impl FnOnce(DownloadedPage) -> Result<T, DeviceError>,
+    ) -> Result<PageStep<T>, DeviceError> {
+        if self.dirty {
+            return Ok(PageStep::Reopen);
         }
-        Ok(summary)
+        if sync.pages >= MAX_SYNC_PAGES {
+            return Ok(PageStep::Done);
+        }
+        let Some(mut info) = self.oldest_page()? else {
+            return Ok(PageStep::Done);
+        };
+        if sync.last_deleted == Some(info.time) {
+            // The tablet may take a moment to erase: once more, a little later.
+            self.idle(DELETE_SETTLE)?;
+            match self.oldest_page()? {
+                None => return Ok(PageStep::Done),
+                Some(again) if again.time == info.time => {
+                    return Err(DeviceError::PageNotDeleted(info.time));
+                }
+                Some(again) => info = again,
+            }
+        }
+        let page = match self.download(info) {
+            Ok(page) => page,
+            Err(DeviceError::StreamDirty) => return Ok(PageStep::Reopen),
+            // Notifications can be lost on the way (BLE stack buffers), or the tablet can stall:
+            // once more, on a fresh link.
+            Err(DeviceError::TransferIncomplete { .. }) if sync.retried != Some(info.time) => {
+                sync.retried = Some(info.time);
+                return Ok(PageStep::Reopen);
+            }
+            Err(error) => return Err(error),
+        };
+        let kept = keep(page)?;
+        // Bytes that came while the page was kept are more of a transfer that was thought
+        // complete: the page may be wrong, so it stays on the tablet (its note too, in the
+        // library) and is read again on a fresh link.
+        self.drain()?;
+        if self.dirty {
+            return Ok(PageStep::Reopen);
+        }
+        // Only now, the page safe in the library, may it leave the tablet; a cancellation
+        // arriving meanwhile takes effect after it.
+        let cancel = self.cancel.take();
+        let deleted = self.delete(info.time);
+        self.cancel = cancel;
+        deleted?;
+        sync.pages = sync.pages.saturating_add(1);
+        sync.last_deleted = Some(info.time);
+        sync.retried = None;
+        Ok(PageStep::Kept { info, kept })
     }
 
     /// Starts the live stream (`12 02 08 01`, no reply): records follow on the stream
-    /// characteristic, see [`BoardSession::next_live_event`].
+    /// characteristic, see [`BoardSession::next_live_event`]. Refused on a dirty stream
+    /// ([`DeviceError::StreamDirty`]): the rest of a page would pass for pen records.
     pub fn start_live(&mut self) -> Result<(), DeviceError> {
+        self.drain()?;
+        if self.dirty {
+            return Err(DeviceError::StreamDirty);
+        }
         self.live.clear();
         self.live_mode = false;
+        self.after_download = false;
         self.send(BoardRequest::StartLive)?;
         self.live_mode = true;
         Ok(())
@@ -484,6 +657,11 @@ impl BoardSession {
                     self.push_live(channel, data, received);
                 } else {
                     self.oddities.stray_bytes += data.len();
+                    // More of the page just downloaded than it announced: its transfer did not
+                    // end cleanly after all.
+                    if self.after_download {
+                        self.dirty = true;
+                    }
                 }
             }
             Channel::PageData | Channel::Live | Channel::SysEvent => {
@@ -528,6 +706,8 @@ mod tests {
         clock: Arc<TestClock>,
         steps: VecDeque<(Vec<u8>, Vec<TransportEvent>)>,
         pending: VecDeque<TransportEvent>,
+        /// Events that come once the test clock reaches their time (ms), whatever is written.
+        late: VecDeque<(u64, TransportEvent)>,
         writes: Arc<Mutex<Vec<Vec<u8>>>>,
     }
 
@@ -549,6 +729,10 @@ mod tests {
             if let Some(event) = self.pending.pop_front() {
                 return Ok(Some(event));
             }
+            let now = self.clock.0.load(Ordering::SeqCst);
+            if self.late.front().is_some_and(|(due, _)| *due <= now) {
+                return Ok(self.late.pop_front().map(|(_, event)| event));
+            }
             let ms = u64::try_from(timeout.as_millis()).unwrap();
             self.clock
                 .0
@@ -568,9 +752,19 @@ mod tests {
         on(Channel::BoardData, bytes.to_vec())
     }
 
-    fn session(
+    /// Every frame the session wrote.
+    type Writes = Arc<Mutex<Vec<Vec<u8>>>>;
+
+    fn session(steps: Vec<(&str, Vec<TransportEvent>)>) -> (BoardSession, Writes) {
+        let (board, writes, _) = session_with(steps, Vec::new());
+        (board, writes)
+    }
+
+    /// A scripted session with events coming later (by the test clock, in ms), and the clock.
+    fn session_with(
         steps: Vec<(&str, Vec<TransportEvent>)>,
-    ) -> (BoardSession, Arc<Mutex<Vec<Vec<u8>>>>) {
+        late: Vec<(u64, TransportEvent)>,
+    ) -> (BoardSession, Writes, Arc<TestClock>) {
         let clock = Arc::new(TestClock(AtomicU64::new(0)));
         let writes = Arc::new(Mutex::new(Vec::new()));
         let board = Board {
@@ -585,9 +779,14 @@ mod tests {
             clock: clock.clone(),
             steps: steps.into_iter().map(|(w, a)| (hex(w), a)).collect(),
             pending: VecDeque::new(),
+            late: late.into(),
             writes: writes.clone(),
         };
-        (BoardSession::open(Box::new(board), clock), writes)
+        (
+            BoardSession::open(Box::new(board), clock.clone()),
+            writes,
+            clock,
+        )
     }
 
     /// A page of `n` records (7 bytes each).
@@ -621,12 +820,37 @@ mod tests {
         assert_eq!(writes.lock().unwrap().len(), 4);
     }
 
+    /// The pages a sync keeps, step after step as the tablet service runs them, until the
+    /// tablet holds no page (`Ok`) or a step asks for a fresh link (`Err(StreamDirty)`).
+    fn sync_all(
+        board: &mut BoardSession,
+        sync: &mut BoardSync,
+        keep: &mut dyn FnMut(DownloadedPage) -> Result<(), DeviceError>,
+    ) -> Result<Vec<u32>, DeviceError> {
+        let mut kept = Vec::new();
+        loop {
+            match board.sync_page(sync, &mut *keep)? {
+                PageStep::Kept { info, kept: () } => kept.push(info.time),
+                PageStep::Done => return Ok(kept),
+                PageStep::Reopen => return Err(DeviceError::StreamDirty),
+            }
+        }
+    }
+
+    fn deletes(writes: &Mutex<Vec<Vec<u8>>>) -> usize {
+        writes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|w| w[..3] == [0x12, 0x05, 0x06])
+            .count()
+    }
+
     #[test]
     fn a_sync_deletes_each_page_after_the_sink_kept_it() {
         let first = page_bytes(3);
         let second = page_bytes(40);
         let (mut board, writes) = session(vec![
-            ("12 01 04", vec![reply("12 07 04 00 02 00 00 01 2d")]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
             ("12 06 03 01 68 00 00 01", vec![data(&first)]),
             ("12 05 06 68 00 00 01", vec![]),
@@ -640,73 +864,37 @@ mod tests {
             ("12 01 05", vec![reply("12 01 05")]),
         ]);
         let mut kept = Vec::new();
-        let summary = board
-            .sync(&mut |page, index| {
-                assert_eq!(page.kind, TabletKind::Blackboard);
-                kept.push((index, page.timestamp, page.bytes.len()));
-                Ok(())
-            })
-            .unwrap();
-        assert_eq!(
-            kept,
-            [(1, Some(0x6800_0001), 21), (2, Some(0x6800_0002), 280)]
-        );
-        assert_eq!(
-            (summary.available, summary.downloaded, summary.deleted),
-            (2, 2, 2)
-        );
-        assert_eq!(writes.lock().unwrap().len(), 8);
+        let mut sync = BoardSync::default();
+        let times = sync_all(&mut board, &mut sync, &mut |page| {
+            assert_eq!(page.kind, TabletKind::Blackboard);
+            kept.push((page.timestamp, page.bytes.len()));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(times, [0x6800_0001, 0x6800_0002]);
+        assert_eq!(kept, [(Some(0x6800_0001), 21), (Some(0x6800_0002), 280)]);
+        assert_eq!(sync.pages(), 2);
+        assert_eq!(writes.lock().unwrap().len(), 7);
+        assert!(!board.is_dirty());
     }
 
     #[test]
-    fn a_page_that_cannot_be_kept_is_not_deleted() {
-        let (mut board, writes) = session(vec![
-            ("12 01 04", vec![reply("12 07 04 00 01 00 00 00 15")]),
-            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
-            ("12 06 03 01 68 00 00 01", vec![data(&page_bytes(3))]),
-        ]);
-        let result = board.sync(&mut |_, _| Err("disk full".into()));
-        assert_eq!(result, Err(DeviceError::Storage("disk full".into())));
-        // No `12 05 06` was written.
-        assert!(
-            writes
-                .lock()
-                .unwrap()
-                .iter()
-                .all(|w| w[..3] != [0x12, 0x05, 0x06])
-        );
-    }
-
-    #[test]
-    fn a_short_or_stalled_transfer_is_a_typed_error_and_nothing_is_deleted() {
-        let page = page_bytes(10);
-        let (board, writes) = session(vec![
-            ("12 01 04", vec![reply("12 07 04 00 01 00 00 00 46")]),
-            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 46")]),
-            ("12 06 03 01 68 00 00 01", vec![data(&page[..30])]),
-            // Tried once more, stalled again.
-            ("12 06 03 01 68 00 00 01", vec![data(&page[..44])]),
-        ]);
-        let mut board = board.with_timeouts(REPLY_TIMEOUT, Duration::from_secs(2));
-        let result = board.sync(&mut |_, _| panic!("nothing to keep"));
-        assert_eq!(
-            result,
-            Err(DeviceError::TransferIncomplete {
-                expected: 70,
-                received: 44
-            })
-        );
-        assert_eq!(writes.lock().unwrap().len(), 4);
-
-        // More bytes than announced: refused too.
-        let (mut board, _) = session(vec![(
-            "12 06 03 01 68 00 00 01",
-            vec![data(&page_bytes(4))],
-        )]);
+    fn a_page_is_returned_only_after_a_quiet_window() {
+        let page = page_bytes(3);
+        let (mut board, _) = session(vec![("12 06 03 01 68 00 00 01", vec![data(&page)])]);
         let info = PageInfo {
             time: 0x6800_0001,
             size: 21,
         };
+        let start = board.clock().monotonic();
+        assert_eq!(board.download(info).unwrap().bytes, page);
+        assert!(board.clock().monotonic() - start >= QUIET_WINDOW);
+
+        // A byte more within the window: the count was reached with bytes of another transfer.
+        let (mut board, _) = session(vec![(
+            "12 06 03 01 68 00 00 01",
+            vec![data(&page), data(&page[..7])],
+        )]);
         assert_eq!(
             board.download(info),
             Err(DeviceError::TransferIncomplete {
@@ -714,19 +902,184 @@ mod tests {
                 received: 28
             })
         );
+        assert!(board.is_dirty());
     }
 
     #[test]
-    fn a_page_still_described_after_its_deletion_stops_the_sync() {
+    fn a_page_that_cannot_be_kept_is_not_deleted() {
+        let (mut board, writes) = session(vec![
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page_bytes(3))]),
+        ]);
+        let result = sync_all(&mut board, &mut BoardSync::default(), &mut |_| {
+            Err(DeviceError::Storage("disk full".into()))
+        });
+        assert_eq!(result, Err(DeviceError::Storage("disk full".into())));
+        assert_eq!(deletes(&writes), 0);
+    }
+
+    #[test]
+    fn a_stalled_transfer_is_retried_once_on_a_fresh_link_only() {
+        let page = page_bytes(10);
+        // The first link: the transfer stalls, the step asks for a fresh link.
+        let (board, writes) = session(vec![
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 46")]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page[..30])]),
+        ]);
+        let mut board = board.with_timeouts(REPLY_TIMEOUT, Duration::from_secs(2));
+        let mut sync = BoardSync::default();
+        let step = board.sync_page(&mut sync, |_| -> Result<(), DeviceError> {
+            panic!("nothing to keep")
+        });
+        assert_eq!(step, Ok(PageStep::Reopen));
+        assert!(board.is_dirty());
+        // This link refuses to download or to stream again, without writing anything.
+        let info = PageInfo {
+            time: 0x6800_0001,
+            size: 70,
+        };
+        assert_eq!(board.download(info), Err(DeviceError::StreamDirty));
+        assert_eq!(board.start_live(), Err(DeviceError::StreamDirty));
+        assert_eq!(
+            board.sync_page(&mut sync, |_| -> Result<(), DeviceError> { panic!() }),
+            Ok(PageStep::Reopen)
+        );
+        assert_eq!(writes.lock().unwrap().len(), 2);
+
+        // The fresh link: the retry stalls again, a typed error, nothing deleted.
+        let (board, writes) = session(vec![
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 46")]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page[..44])]),
+        ]);
+        let mut board = board.with_timeouts(REPLY_TIMEOUT, Duration::from_secs(2));
+        let result = sync_all(&mut board, &mut sync, &mut |_| panic!("nothing to keep"));
+        assert_eq!(
+            result,
+            Err(DeviceError::TransferIncomplete {
+                expected: 70,
+                received: 44
+            })
+        );
+        assert_eq!(deletes(&writes), 0);
+        assert!(board.is_dirty());
+
+        // Once more on a third link, the page completes: the retry was this page's only.
         let (mut board, _) = session(vec![
-            ("12 01 04", vec![reply("12 07 04 00 01 00 00 00 15")]),
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 46")]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page)]),
+            ("12 05 06 68 00 00 01", vec![]),
+            ("12 01 05", vec![reply("12 01 05")]),
+        ]);
+        let times = sync_all(&mut board, &mut sync, &mut |_| Ok(())).unwrap();
+        assert_eq!(times, [0x6800_0001]);
+    }
+
+    #[test]
+    fn bytes_after_a_page_make_the_stream_dirty_and_keep_the_page_on_the_tablet() {
+        let page = page_bytes(3);
+        // More of the page comes after the quiet window, while its note is written: the page
+        // may be wrong, it stays on the tablet.
+        let (mut board, writes, clock) = session_with(
+            vec![
+                ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
+                ("12 06 03 01 68 00 00 01", vec![data(&page)]),
+            ],
+            vec![(1_000, data(&page[..14]))],
+        );
+        let mut sync = BoardSync::default();
+        let step = board.sync_page(&mut sync, |_| {
+            clock.0.fetch_add(2_000, Ordering::SeqCst);
+            Ok(())
+        });
+        assert_eq!(step, Ok(PageStep::Reopen));
+        assert_eq!(deletes(&writes), 0);
+        assert!(board.is_dirty());
+
+        // Bytes after the delete of page 1: the next page is not downloaded on this link.
+        let (mut board, writes) = session(vec![
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page)]),
+            ("12 05 06 68 00 00 01", vec![data(&page[..14])]),
+            ("12 01 05", vec![reply("12 09 05 68 00 00 02 00 00 00 15")]),
+        ]);
+        let result = sync_all(&mut board, &mut BoardSync::default(), &mut |_| Ok(()));
+        assert_eq!(result, Err(DeviceError::StreamDirty));
+        assert!(board.is_dirty());
+        assert_eq!(board.take_oddities().stray_bytes, 14);
+        assert_eq!(writes.lock().unwrap().len(), 4, "no second download");
+
+        // Stray bytes outside any download (the end of a live stream) are only counted.
+        let (mut board, _) = session(vec![("11 01 01", vec![data(&page), reply("11 02 01 64")])]);
+        assert_eq!(board.battery(), Ok(100));
+        assert!(!board.is_dirty());
+    }
+
+    #[test]
+    fn an_unreadable_page_is_refused_and_stays_on_the_tablet() {
+        // Seven bytes of a record cut at another offset: not a known status.
+        let mut page = page_bytes(3);
+        page.rotate_left(3);
+        let (mut board, writes) = session(vec![
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page)]),
+        ]);
+        let result = sync_all(&mut board, &mut BoardSync::default(), &mut |_| {
+            panic!("an unreadable page is never kept")
+        });
+        assert_eq!(
+            result,
+            Err(DeviceError::PageUnreadable {
+                time: 0x6800_0001,
+                reason: "3 records, 3 of an unknown status, 0 bytes of a partial record".into()
+            })
+        );
+        assert_eq!(deletes(&writes), 0);
+        assert!(board.is_dirty());
+
+        // A size larger than the tablet's memory: refused before anything is sent.
+        let (mut board, writes) = session(vec![
+            ("11 01 02", vec![reply("11 09 02 07 90 7e 00 07 8e ba 00")]),
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 10 00 00 00")]),
+        ]);
+        assert_eq!(board.memory(), Ok((126_909_952, 126_794_240)));
+        let result = sync_all(&mut board, &mut BoardSync::default(), &mut |_| panic!());
+        assert!(
+            matches!(result, Err(DeviceError::PageUnreadable { .. })),
+            "{result:?}"
+        );
+        assert_eq!(writes.lock().unwrap().len(), 2, "no download asked");
+        assert!(!board.is_dirty());
+    }
+
+    #[test]
+    fn a_page_still_described_after_its_deletion_is_asked_once_more_then_stops_the_sync() {
+        // The tablet took a moment to erase: described again a little later, the next page.
+        let (mut board, writes) = session(vec![
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
             ("12 06 03 01 68 00 00 01", vec![data(&page_bytes(3))]),
             ("12 05 06 68 00 00 01", vec![]),
             ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
+            ("12 01 05", vec![reply("12 09 05 68 00 00 02 00 00 00 15")]),
+            ("12 06 03 01 68 00 00 02", vec![data(&page_bytes(3))]),
+            ("12 05 06 68 00 00 02", vec![]),
+            ("12 01 05", vec![reply("12 01 05")]),
+        ]);
+        let before = board.clock().monotonic();
+        let times = sync_all(&mut board, &mut BoardSync::default(), &mut |_| Ok(())).unwrap();
+        assert_eq!(times, [0x6800_0001, 0x6800_0002]);
+        assert_eq!(deletes(&writes), 2);
+        assert!(board.clock().monotonic() - before >= DELETE_SETTLE);
+
+        // Still there the second time: the sync stops rather than import it again.
+        let (mut board, _) = session(vec![
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
+            ("12 06 03 01 68 00 00 01", vec![data(&page_bytes(3))]),
+            ("12 05 06 68 00 00 01", vec![]),
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
+            ("12 01 05", vec![reply("12 09 05 68 00 00 01 00 00 00 15")]),
         ]);
         let mut kept = 0;
-        let result = board.sync(&mut |_, _| {
+        let result = sync_all(&mut board, &mut BoardSync::default(), &mut |_| {
             kept += 1;
             Ok(())
         });
@@ -735,13 +1088,45 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_tablet_syncs_nothing() {
-        let (mut board, _) = session(vec![
-            ("12 01 04", vec![reply("12 07 04 00 00 00 00 00 00")]),
-            ("12 01 05", vec![reply("12 01 05")]),
-        ]);
-        let summary = board.sync(&mut |_, _| panic!("no page")).unwrap();
-        assert_eq!(summary, SyncSummary::default());
+    fn an_empty_tablet_or_a_full_sync_reads_nothing_more() {
+        let (mut board, _) = session(vec![("12 01 05", vec![reply("12 01 05")])]);
+        assert_eq!(
+            sync_all(&mut board, &mut BoardSync::default(), &mut |_| panic!(
+                "no page"
+            )),
+            Ok(Vec::new())
+        );
+        // After MAX_SYNC_PAGES the step writes nothing (the script has no step).
+        let (mut board, writes) = session(vec![]);
+        let mut sync = BoardSync {
+            pages: MAX_SYNC_PAGES,
+            ..BoardSync::default()
+        };
+        assert_eq!(
+            board.sync_page(&mut sync, |_| -> Result<(), DeviceError> { panic!() }),
+            Ok(PageStep::Done)
+        );
+        assert!(writes.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_cancelled_download_leaves_the_stream_dirty() {
+        let (mut board, _) = session(vec![(
+            "12 06 03 01 68 00 00 01",
+            vec![data(&page_bytes(1))],
+        )]);
+        let cancel = Arc::new(AtomicBool::new(true));
+        board.set_cancel_flag(cancel.clone());
+        let info = PageInfo {
+            time: 0x6800_0001,
+            size: 70,
+        };
+        assert_eq!(board.download(info), Err(DeviceError::Cancelled));
+        assert!(board.is_dirty());
+        cancel.store(false, Ordering::SeqCst);
+        // The rest of the page must not pass for pen records.
+        assert_eq!(board.start_live(), Err(DeviceError::StreamDirty));
+        assert!(!board.in_live_mode());
     }
 
     #[test]

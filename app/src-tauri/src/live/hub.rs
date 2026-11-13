@@ -324,6 +324,11 @@ impl LiveSink for HubSink {
     fn input(&mut self, input: LiveInput) {
         self.shared.input(self.session, input);
     }
+
+    /// `false` once the session it feeds is stopped or replaced, or refused its tablet.
+    fn active(&self) -> bool {
+        self.shared.lock().accepting == Some(self.session)
+    }
 }
 
 impl HubSink {
@@ -855,10 +860,32 @@ impl Shared {
         let session = &mut state.session;
         match input {
             LiveInput::Started {
+                kind,
                 width,
                 height,
                 orientation,
-            } => session.started(width, height, orientation, &mut out),
+            } if !session.accepts(kind) => {
+                // A sheet this tablet cannot write on without shrinking, turning or losing ink:
+                // the run ends at once, nothing written (the service leaves live mode).
+                state.accepting = None;
+                state.session.set_state(LiveSessionState::Idle, &mut out);
+                out.push(LiveEvent::Refused {
+                    code: "notSupported".to_owned(),
+                    message: format!(
+                        "the {} cannot write on this sheet ({width} × {height}, {orientation:?})",
+                        kind.name()
+                    ),
+                });
+            }
+            LiveInput::Started {
+                kind,
+                width,
+                height,
+                orientation,
+            } => {
+                session.set_tablet(kind);
+                session.started(width, height, orientation, &mut out);
+            }
             LiveInput::Reoriented {
                 width,
                 height,

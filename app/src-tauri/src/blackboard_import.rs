@@ -4,7 +4,8 @@
 //! like `--import-inkspace`'s.
 //!
 //! - Each `page-<unix time>.bin` of DIR is a page as the tablet sends it (7-byte records); the
-//!   time in its name is when it was stored. Other files are left alone.
+//!   time in its name is when it was stored. Other files are left alone; a `.bin` that is not
+//!   whole records of a known status (the sync's own check) is reported and not imported.
 //! - Each page goes through the sync's own path ([`store_page_in`]): the note is written
 //!   atomically, read back and checked, with its thumbnail, dated by the page's time, then the
 //!   automatic export runs as the settings say. Nothing is ever overwritten (`Library::create`
@@ -24,6 +25,7 @@ use ardoise_device::pages::{BLACKBOARD_PAGE, ImportedPages, page_kind, page_note
 use ardoise_device::service::PageContext;
 use ardoise_device::session::DownloadedPage;
 use ardoise_device::transport::TabletKind;
+use ardoise_proto::blackboard::check_page;
 
 use crate::AppContext;
 use crate::commands::current_state;
@@ -94,10 +96,12 @@ pub fn import_pages(
                 continue;
             }
         };
-        if page_kind(&bytes) != TabletKind::Blackboard {
+        // The sync's own check: whole records of a known status (counts only in the report).
+        let shape = check_page(&bytes);
+        if page_kind(&bytes) != TabletKind::Blackboard || !shape.is_whole() {
             summary.failed.push((
                 path,
-                "not a page of the blackboard (whole 7-byte records)".into(),
+                format!("not a page of the blackboard (whole 7-byte records): {shape}"),
             ));
             continue;
         }
@@ -201,6 +205,10 @@ mod tests {
         std::fs::write(pages.path().join("page-1.svg"), "<svg/>").unwrap();
         std::fs::write(pages.path().join("notes.bin"), [0xa1; 7]).unwrap();
         std::fs::write(pages.path().join("page-7.bin"), [1, 2, 3]).unwrap();
+        // Its first record is fine, the second is not of a known status.
+        let mut misaligned = vec![0xa1, 0, 0, 0, 0, 1, 0];
+        misaligned.extend([0x07, 0, 0, 0, 0, 0, 0]);
+        std::fs::write(pages.path().join("page-8.bin"), misaligned).unwrap();
         let mut store = |root: &Path, page: DownloadedPage, context: &PageContext| {
             store_page_in(None, Some("fr-FR"), root, page, context)
         };
@@ -208,7 +216,12 @@ mod tests {
         let first = import_pages(pages.path(), library.path(), &mut store).unwrap();
         assert_eq!(first.imported.len(), 2);
         assert_eq!(first.skipped, 0);
-        assert_eq!(first.failed.len(), 1);
+        assert_eq!(first.failed.len(), 2);
+        assert!(
+            first.failed[1]
+                .1
+                .ends_with("2 records, 1 of an unknown status, 0 bytes of a partial record")
+        );
         let opened = Library::open(library.path()).unwrap();
         let mut created = Vec::new();
         for path in &first.imported {
