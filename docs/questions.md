@@ -214,7 +214,7 @@ L'utilisateur possède aussi une tablette Xiaomi 13,5 pouces Bluetooth (米家�
 
 **Reste à mesurer avant ou pendant M18** : le téléchargement et l'effacement d'une page d'essai depuis le PC ; ce qu'envoie le bouton d'effacement de l'écran (pour savoir si le direct doit passer à une nouvelle page) ; l'unité exacte des coordonnées, à la règle.
 
-## Q15 — Trois choix faits en construisant la tablette Xiaomi (jalon M18, 2026-11-13) — **ouverte**
+## Q15 — Trois choix faits en construisant la tablette Xiaomi (jalon M18, 2026-11-13) — **tranchée le 2026-11-13**
 
 En construisant M18, trois comportements ont dû être fixés que le SPEC ne dit pas. Ils sont dans le code, les guides et les tests ; le SPEC n'est pas modifié tant que l'utilisateur ne les a pas confirmés.
 
@@ -222,7 +222,7 @@ En construisant M18, trois comportements ont dû être fixés que le SPEC ne dit
 2. **Un direct reste sur sa tablette** : si la liaison se perd, Ardoise attend la tablette avec laquelle le direct a commencé et ignore l'autre ; pour continuer avec l'autre, on termine le direct et on le relance. Pendant un direct, on ne peut pas ajouter la Xiaomi ; pendant un direct qui attend la Xiaomi, on ne peut pas enregistrer la Bamboo Slate. Raison : une page du direct a les dimensions de sa tablette.
 3. **Synchroniser avec « effacer de la tablette après import réussi » désactivé** (SPEC §4.1 : « Ardoise n'importe les pages de cette tablette qu'à la demande, après avoir dit qu'elles seront effacées ») : la demande ne vaut que si elle est confirmée pendant que la Xiaomi est la tablette connectée. « Synchroniser maintenant » cliqué alors qu'elle n'est pas connectée n'importe donc pas ses pages plus tard, quand elle se connecte : le panneau dit alors combien de pages attendent, et le bouton passe par la confirmation. Raison : sans cela, un clic destiné à la Bamboo Slate pouvait effacer les pages de la Xiaomi sans avertissement.
 
-**Proposition pour le SPEC, si l'utilisateur confirme** : une phrase en §4.2 pour 1 et 2 (« Une feuille se reprend avec la tablette qui l'a écrite ; un direct reste sur la tablette avec laquelle il a commencé. »), et la précision de 3 en §4.1.
+**Décision (2026-11-13)** : l'utilisateur confirme les trois choix, après une seconde explication avec des exemples (la première n'était pas claire). SPEC §4.2 (points 1 et 2) et §4.1 (point 3) mis à jour avec son accord.
 
 ## Q16 — Xiaomi : ce que les premiers essais sur la vraie tablette ont montré (2026-11-13) — **ouverte**
 
@@ -250,3 +250,13 @@ Premiers essais de l'utilisateur avec la vraie tablette, puis mesures faites ave
 **Pas encore mesuré** : une page dont le téléchargement est coupé en route est-elle retirée quand même ; un transfert s'arrête-t-il quand la liaison se ferme ; un appui sur le bouton d'enregistrement avec un écran vide ; ce que devient la page d'un écran non effacé quand on éteint la tablette ; l'unité (une règle).
 
 **Fait le 2026-11-13, à vérifier sur la vraie tablette (H8, « C quater »)** : a (copies de secours dans `_ardoise\rescued-pages`, ou sur le PC ; transferts douteux gardés à part, jamais transformés en note), b (ce que la tablette pousse pendant le direct est mis de côté), c et d (le direct récupère les pages d'abord, ou ne démarre pas : code `blackboardPagesFirst` ; la fenêtre qui pose la question reste à faire dans l'interface, `docs/design/blackboard.md` §9.5 dit quoi appeler), e (mise à jour de la note). Pour ce qui n'est pas mesuré, Ardoise prend le parti qui ne peut pas perdre de page : une page au transfert coupé est copiée à part, et le simulateur suppose le cas défavorable (une page enregistrée avant le direct et pas récupérée est perdue à l'effacement). Conception : `docs/design/blackboard.md` §9.
+
+## Q17 — Panneau « Tablette » à onglets et positions de la Xiaomi (2026-11-13) — **tranchée le 2026-11-13**
+
+Retour de l'utilisateur après ses premiers essais : le panneau de la tablette est trop long, il faut le faire défiler pour trouver une fonction ou une information ; et, la Xiaomi connectée, les dessins de « Position de la tablette » sont ceux de la Bamboo.
+
+**Décision** (maquette `target/maquettes/maquette-panneau-tablette.html`, validée par « Oui, construis-la ») :
+
+1. Le panneau devient étroit, avec trois onglets en icônes sur un rail, comme le panneau de côté de l'éditeur : **Utiliser** (la tablette connectée, son état, « Mode direct », « Synchroniser », les messages importants), **Réglages** (ceux de la tablette choisie dans une liste, la tablette connectée par défaut), **Tablettes** (les tablettes connues, leurs informations, « Oublier », « Ajouter une tablette »). Une pastille sur l'icône « Utiliser » dit combien de pages attendent.
+2. Les réglages sont ceux de la tablette choisie : pour la Bamboo, ses quatre positions avec ses dessins, le rôle de son bouton en direct, son nom, sa mise à l'heure ; pour la Xiaomi, ses quatre positions avec ses propres dessins (corbeille et disquette).
+3. **La Xiaomi se tient dans quatre positions** (boutons en bas, en haut, à droite, à gauche), l'utilisateur pouvant la tenir dans n'importe quel sens. Ardoise redresse l'écriture, pour les pages importées comme pour le direct. SPEC §4.1 mis à jour (il disait que cette tablette n'avait pas d'orientation).
