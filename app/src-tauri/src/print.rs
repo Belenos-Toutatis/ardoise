@@ -1,12 +1,16 @@
 //! Direct printing of notes (SPEC §4.6, milestone M8): the Windows print dialog, then each
 //! note on a page of its own, in its orientation (portrait or landscape), with the paper
-//! (colour, template, texture, background image) or without it, like the PDF export.
+//! (colour, template, texture, background image) or without it, like the PDF export. One note
+//! per sheet, or 2 or 4 notes per sheet (Q20): the cells of a sheet are cut by Ardoise itself,
+//! because the job draws the pages: the printer driver's own « pages per sheet » would act on
+//! a sheet that already is a page of ours, and the driver's setting is not read.
 //! Contract: `docs/design/exports-and-operations.md`, "M8: printing".
 //!
 //! The mechanism is GDI, through the system print dialog (`PrintDlgEx`): the dialog gives the
-//! printer, its settings and the page range; the job then draws one page per note, changing
-//! the orientation of the device context between two pages (`ResetDC`). Each note is rendered
-//! as an image at the printer's resolution (300 dpi at most) and stretched over the page.
+//! printer, its settings and the page range (in sheets); the job then draws one sheet at a time,
+//! changing the orientation of the device context between two sheets (`ResetDC`). Each note is
+//! rendered as an image at the printer's resolution (300 dpi at most) and stretched over its
+//! cell of the sheet.
 //! The Windows part is in [`windows`](crate::print_windows); what decides where and how big
 //! each page is drawn is platform-free and tested here.
 //! Off Windows nothing calls that logic but the tests (hence the `dead_code` allowances).
@@ -49,6 +53,26 @@ pub struct PrintOptions {
     /// Print the paper (colour, template, texture, background image); otherwise ink on white.
     pub background: bool,
     pub fit: PrintFit,
+    /// Notes per sheet: 1, 2 or 4 (anything else is taken for 1); absent in the choices an older
+    /// version remembered.
+    #[serde(default = "one_per_sheet")]
+    pub per_sheet: u8,
+}
+
+fn one_per_sheet() -> u8 {
+    1
+}
+
+impl PrintOptions {
+    /// How many notes share a sheet: 1, 2 or 4.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn notes_per_sheet(&self) -> usize {
+        match self.per_sheet {
+            2 => 2,
+            4 => 4,
+            _ => 1,
+        }
+    }
 }
 
 /// `PrintResult` in `note.ts`.
@@ -145,6 +169,64 @@ pub fn selected_notes(count: usize, ranges: &[(u32, u32)]) -> Vec<usize> {
         out.extend((low..=high.min(count)).map(|page| page - 1));
     }
     out
+}
+
+/// How many sheets `notes` notes take at `per_sheet` notes per sheet.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn sheet_count(notes: usize, per_sheet: usize) -> usize {
+    notes.div_ceil(per_sheet.max(1))
+}
+
+/// The sheets a print job prints, each as the notes (0-based) it holds, from the page ranges the
+/// print dialog returned: the pages of the dialog are the sheets ([`selected_notes`]'s rule, over
+/// the sheets), and the last sheet may hold fewer notes. The notes of a sheet are consecutive.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn selected_sheets(notes: usize, per_sheet: usize, ranges: &[(u32, u32)]) -> Vec<Vec<usize>> {
+    let per_sheet = per_sheet.max(1);
+    selected_notes(sheet_count(notes, per_sheet), ranges)
+        .into_iter()
+        .map(|sheet| (sheet * per_sheet..((sheet + 1) * per_sheet).min(notes)).collect())
+        .collect()
+}
+
+/// The orientation of a sheet whose first note is `first`: that note's own for one or four notes
+/// (a 2 x 2 sheet keeps the shape of its notes), and the other one for two (two portrait notes
+/// stand side by side on a landscape sheet, two landscape ones one above the other on a
+/// portrait sheet).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn sheet_orientation(first: PageSize, per_sheet: usize) -> Orientation {
+    match (Orientation::of(first), per_sheet) {
+        (Orientation::Portrait, 2) => Orientation::Landscape,
+        (Orientation::Landscape, 2) => Orientation::Portrait,
+        (orientation, _) => orientation,
+    }
+}
+
+/// The cells of `sheet` for `per_sheet` notes, in reading order, each a rectangle of the
+/// printable area: the whole sheet for one; two columns for two on a landscape sheet (two rows on
+/// a portrait one); two by two for four. About 4 mm separate the cells.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn cells(sheet: Sheet, per_sheet: usize) -> Vec<Placement> {
+    let (columns, rows) = match per_sheet {
+        4 => (2, 2),
+        2 if sheet.width >= sheet.height => (2, 1),
+        2 => (1, 2),
+        _ => (1, 1),
+    };
+    let gap_x = (sheet.dpi_x / 6).max(2);
+    let gap_y = (sheet.dpi_y / 6).max(2);
+    let width = ((sheet.width - gap_x * (columns - 1)) / columns).max(1);
+    let height = ((sheet.height - gap_y * (rows - 1)) / rows).max(1);
+    (0..rows)
+        .flat_map(|row| {
+            (0..columns).map(move |column| Placement {
+                x: column * (width + gap_x),
+                y: row * (height + gap_y),
+                width,
+                height,
+            })
+        })
+        .collect()
 }
 
 /// A rendered page in the order GDI wants it: top-down 32-bit BGRA rows.
@@ -346,6 +428,110 @@ mod tests {
     }
 
     #[test]
+    fn a_sheet_holds_one_two_or_four_notes_and_the_dialog_counts_sheets() {
+        let per = |n: u8| {
+            PrintOptions {
+                background: true,
+                fit: PrintFit::Fit,
+                per_sheet: n,
+            }
+            .notes_per_sheet()
+        };
+        assert_eq!(
+            [per(1), per(2), per(4), per(0), per(3), per(9)],
+            [1, 2, 4, 1, 1, 1]
+        );
+        assert_eq!(sheet_count(5, 1), 5);
+        assert_eq!(sheet_count(5, 2), 3);
+        assert_eq!(sheet_count(8, 4), 2);
+        assert_eq!(sheet_count(0, 4), 0);
+        // One per sheet: the notes themselves.
+        assert_eq!(selected_sheets(3, 1, &[]), [[0], [1], [2]]);
+        // Five notes, two per sheet: three sheets, the last with one note.
+        assert_eq!(
+            selected_sheets(5, 2, &[]),
+            [vec![0, 1], vec![2, 3], vec![4]]
+        );
+        // The page ranges of the dialog are sheets: "2" is notes 3 and 4.
+        assert_eq!(selected_sheets(5, 2, &[(2, 2)]), [vec![2, 3]]);
+        assert_eq!(
+            selected_sheets(9, 4, &[(3, 3), (1, 1)]),
+            [vec![8], vec![0, 1, 2, 3]]
+        );
+        assert!(selected_sheets(5, 2, &[(4, 9)]).is_empty());
+        assert!(selected_sheets(0, 2, &[]).is_empty());
+    }
+
+    #[test]
+    fn the_sheet_turns_so_that_notes_fit_side_by_side_when_two_share_it() {
+        assert_eq!(sheet_orientation(A4_PORTRAIT, 1), Orientation::Portrait);
+        assert_eq!(sheet_orientation(A4_LANDSCAPE, 1), Orientation::Landscape);
+        assert_eq!(sheet_orientation(A4_PORTRAIT, 2), Orientation::Landscape);
+        assert_eq!(sheet_orientation(A4_LANDSCAPE, 2), Orientation::Portrait);
+        assert_eq!(sheet_orientation(A4_PORTRAIT, 4), Orientation::Portrait);
+        assert_eq!(sheet_orientation(A4_LANDSCAPE, 4), Orientation::Landscape);
+    }
+
+    #[test]
+    fn a_sheet_is_cut_in_cells_that_do_not_touch_and_stay_inside_it() {
+        let portrait = sheet();
+        let landscape = Sheet {
+            width: portrait.height,
+            height: portrait.width,
+            ..portrait
+        };
+        // One note: the whole sheet, as before.
+        assert_eq!(
+            cells(portrait, 1),
+            [Placement {
+                x: 0,
+                y: 0,
+                width: portrait.width,
+                height: portrait.height
+            }]
+        );
+        // Two on a landscape sheet: side by side; on a portrait sheet: one above the other.
+        let side = cells(landscape, 2);
+        assert_eq!(side.len(), 2);
+        assert_eq!(side[0].y, side[1].y);
+        assert!(side[0].x + side[0].width < side[1].x);
+        let stacked = cells(portrait, 2);
+        assert_eq!(stacked[0].x, stacked[1].x);
+        assert!(stacked[0].y + stacked[0].height < stacked[1].y);
+        // Four: two by two, in reading order, the same size, all inside the sheet.
+        for sheet in [portrait, landscape] {
+            let four = cells(sheet, 4);
+            assert_eq!(four.len(), 4);
+            assert!(
+                four.iter()
+                    .all(|c| c.width == four[0].width && c.height == four[0].height)
+            );
+            assert_eq!((four[0].y, four[1].y, four[2].x), (0, 0, 0));
+            assert!(four[1].x > four[0].x && four[2].y > four[0].y);
+            for cell in &four {
+                assert!(cell.x >= 0 && cell.y >= 0);
+                assert!(cell.x + cell.width <= sheet.width && cell.y + cell.height <= sheet.height);
+            }
+            let (last_x, last_y) = (four[3].x + four[3].width, four[3].y + four[3].height);
+            assert!(
+                sheet.width - last_x < 2 && sheet.height - last_y < 2,
+                "the sheet is used up to its edge"
+            );
+        }
+        // A note fits its cell with its proportions kept.
+        let cell = cells(landscape, 2)[0];
+        let in_cell = Sheet {
+            width: cell.width,
+            height: cell.height,
+            ..landscape
+        };
+        let placed = place(A4_PORTRAIT, in_cell, PrintFit::Fit);
+        assert!(placed.width <= cell.width && placed.height <= cell.height);
+        let ratio = f64::from(placed.width) / f64::from(placed.height);
+        assert!((ratio - 21.0 / 29.7).abs() < 0.002, "{ratio}");
+    }
+
+    #[test]
     fn pixels_go_to_the_printer_as_opaque_bgra() {
         let image = Image {
             width: 2,
@@ -366,9 +552,15 @@ mod tests {
             options,
             PrintOptions {
                 background: false,
-                fit: PrintFit::Fit
+                fit: PrintFit::Fit,
+                per_sheet: 1
             }
         );
+        let options: PrintOptions = serde_json::from_value(
+            serde_json::json!({ "background": true, "fit": "actual", "perSheet": 4 }),
+        )
+        .unwrap();
+        assert_eq!(options.notes_per_sheet(), 4);
         let json = serde_json::to_value(PrintResult {
             printed: true,
             pages: 3,

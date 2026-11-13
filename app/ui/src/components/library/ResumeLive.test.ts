@@ -57,8 +57,8 @@ async function ready(locale: 'fr' | 'en' = 'fr') {
 
 describe('« Reprendre en mode direct » in the note card menu', () => {
   it.each([
-    ['fr', ['Renommer', 'Ajouter aux favoris', 'Reprendre en mode direct', 'Mettre à la corbeille']],
-    ['en', ['Rename', 'Add to favourites', 'Resume in live mode', 'Move to trash']],
+    ['fr', ['Renommer', 'Ajouter aux favoris', 'Reprendre en mode direct', 'Dupliquer', 'Changer la date…', 'Mettre à la corbeille']],
+    ['en', ['Rename', 'Add to favourites', 'Resume in live mode', 'Duplicate', 'Change the date…', 'Move to trash']],
   ] as const)('is offered between the card actions in %s, and enabled with a registered tablet', async (locale, labels) => {
     const home = await ready(locale);
     const items = await menuOf(home, 'Réunion parents');

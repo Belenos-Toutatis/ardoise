@@ -155,7 +155,18 @@
       {/if}
     </div>
   {:else}
-    <ul class="note-grid" class:selecting={lib.selected.length > 0} bind:this={grid} aria-label={t('library.notes')}>
+    {#if lib.canReorder}
+      <p class="muted small order-help" data-slot="order-help">{t('library.order.help')}</p>
+    {:else if lib.effectiveOrder === 'binder' && searching}
+      <p class="muted small order-help" data-slot="order-help">{t('library.order.searching')}</p>
+    {/if}
+    <ul
+      class="note-grid"
+      class:selecting={lib.selected.length > 0}
+      class:reordering={lib.canReorder}
+      bind:this={grid}
+      aria-label={t('library.notes')}
+    >
       {#each notes as note, index (note.path)}
         <NoteCard
           {note}
@@ -166,10 +177,13 @@
           onnavigate={navigate}
           onfocuscard={(i) => (activeIndex = i)}
           onrenamed={focusPath}
+          onmoved={focusPath}
           {onresume}
         />
       {/each}
     </ul>
   {/if}
 
+  <!-- What the keyboard's moves say to a screen reader. -->
+  <p class="visually-hidden" role="status" aria-live="polite" data-slot="order-announcement">{lib.announcement}</p>
 </section>

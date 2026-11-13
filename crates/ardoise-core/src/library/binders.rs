@@ -120,6 +120,8 @@ impl Library {
         let problems = walk::walk(&dir, |found| match found {
             Found::Note { path, .. } => notes.push(path),
             Found::Binder(folder) => folders.push(folder),
+            // The order files go with their folder, once it holds nothing else.
+            Found::Order { .. } => {}
         });
         notes.sort();
         let mut result = BinderTrashed::default();
@@ -140,6 +142,9 @@ impl Library {
         }
         folders.sort_by(|a, b| path_depth(b).cmp(&path_depth(a)).then_with(|| a.cmp(b)));
         for folder in folders {
+            // A binder's free order is of no use without its notes: a folder that holds nothing
+            // but its order file (and conflict copies of it) is emptied first.
+            super::order::remove_if_only_order_files(&dir.join(&folder));
             // `remove_dir` only removes an empty folder (or a link to one, never its target).
             match fs::remove_dir(dir.join(&folder)) {
                 Ok(()) => {}
@@ -402,6 +407,48 @@ mod tests {
             ));
         }
         assert!(outside.path().join("sub").exists());
+    }
+
+    /// The free order of a binder (and a conflict copy of it) is no reason to keep its folder:
+    /// the notes go to the trash, then the folder holding only the order files goes. A folder
+    /// that still holds a note (one that failed) or another file keeps its order.
+    #[test]
+    fn a_binder_with_an_order_file_is_removed_with_it() {
+        let (dir, library) = new_library();
+        note(&library, "Classe", "a", "Cours");
+        note(&library, "Classe/TP", "b", "TP");
+        library
+            .set_binder_order(Path::new("Classe"), &["a".to_owned()])
+            .unwrap();
+        library
+            .set_binder_order(Path::new("Classe/TP"), &["b".to_owned()])
+            .unwrap();
+        fs::write(
+            dir.path()
+                .join("Classe")
+                .join("_ardoise-order (conflicted copy 2026-11-13 101530).json"),
+            br#"{"version": 1, "notes": ["a"]}"#,
+        )
+        .unwrap();
+        let done = library.trash_binder(Path::new("Classe")).unwrap();
+        assert_eq!(done.trashed.len(), 2);
+        assert!(done.failed.is_empty() && done.kept.is_empty(), "{done:?}");
+        assert!(!dir.path().join("Classe").exists());
+
+        // Another file keeps the folder, and its order.
+        note(&library, "Autre", "c", "Cours");
+        library
+            .set_binder_order(Path::new("Autre"), &["c".to_owned()])
+            .unwrap();
+        fs::write(dir.path().join("Autre").join("lisez-moi.txt"), b"x").unwrap();
+        let done = library.trash_binder(Path::new("Autre")).unwrap();
+        assert_eq!(done.kept, [PathBuf::from("Autre")]);
+        assert!(
+            dir.path()
+                .join("Autre")
+                .join("_ardoise-order.json")
+                .is_file()
+        );
     }
 
     #[test]

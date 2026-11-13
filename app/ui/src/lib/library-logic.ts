@@ -10,9 +10,23 @@ export type LibraryView =
   | { kind: 'tag'; tag: string }
   | { kind: 'trash' };
 
-export type SortOrder = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc';
+/**
+ * `binder`: the free order of a binder (`_ardoise-order.json`), only in the view of a binder; the other
+ * views show the notes by date (`effectiveOrder` in `library-state.svelte.ts`).
+ */
+export type SortOrder = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'binder';
 
-export const SORT_ORDERS: SortOrder[] = ['date-desc', 'date-asc', 'title-asc', 'title-desc'];
+export const SORT_ORDERS: SortOrder[] = ['date-desc', 'date-asc', 'title-asc', 'title-desc', 'binder'];
+
+/** The orders offered in `view`: the binder's own order only when a binder is shown. */
+export function sortChoices(view: LibraryView): SortOrder[] {
+  return SORT_ORDERS.filter((order) => order !== 'binder' || view.kind === 'binder');
+}
+
+/** What `order` gives in `view`: the free order outside a binder falls back to the newest first. */
+export function orderIn(order: SortOrder, view: LibraryView): SortOrder {
+  return order === 'binder' && view.kind !== 'binder' ? 'date-desc' : order;
+}
 
 /** Lower case, without accents (`'Réunion'` → `'reunion'`), for case- and accent-blind matching. */
 export function normalize(text: string): string {
@@ -90,7 +104,16 @@ export function sortNotes(notes: NoteSummary[], order: SortOrder, locale: string
   return [...notes].sort((a, b) => sign * compare(a, b) || a.path.localeCompare(b.path));
 }
 
-/** The notes shown for a view, search (with what the handwriting search found) and order. */
+/** What the free order of a binder is made from: the binders in the sidebar's order, and each one's listed ids. */
+export interface BinderOrders {
+  tree: BinderNode[];
+  orders: Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * The notes shown for a view, search (with what the handwriting search found) and order. `binderOrders`
+ * (the tree of binders and the orders of the listing) serves the order `binder` of a binder's view.
+ */
 export function visibleNotes(
   notes: NoteSummary[],
   view: LibraryView,
@@ -98,12 +121,165 @@ export function visibleNotes(
   order: SortOrder,
   locale: string,
   hits: ReadonlyMap<string, HandwritingHit> = new Map(),
+  binderOrders?: BinderOrders,
 ): NoteSummary[] {
-  return sortNotes(
-    notesOfView(notes, view).filter((n) => matchesSearch(n, query, hits.get(n.path))),
-    order,
-    locale,
-  );
+  const shown = notesOfView(notes, view).filter((n) => matchesSearch(n, query, hits.get(n.path)));
+  if (order === 'binder' && view.kind === 'binder' && binderOrders) {
+    return arrangeByBinderOrder(shown, view.binder, binderOrders, locale);
+  }
+  return sortNotes(shown, orderIn(order, view), locale);
+}
+
+// --- The free order of a binder -----------------------------------------------------------------
+
+/** `binder` then every binder below it, in the order the sidebar shows them (a binder before its sub-binders). */
+export function binderChain(tree: BinderNode[], binder: string): string[] {
+  const find = (nodes: BinderNode[]): BinderNode | undefined => {
+    for (const node of nodes) {
+      const found = node.path === binder ? node : find(node.children);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  const chain: string[] = [];
+  const walk = (node: BinderNode) => {
+    chain.push(node.path);
+    node.children.forEach(walk);
+  };
+  const node = find(tree);
+  if (node) walk(node);
+  else chain.push(binder);
+  return chain;
+}
+
+/**
+ * The notes of one binder in its own order: the notes whose id the order lists, as it lists them, then the
+ * others (a note that arrived, a note the order does not know) oldest first, a copy after its original. An id of
+ * the order that is no note of the binder (deleted, moved) is ignored.
+ */
+export function inBinderOrder(notes: NoteSummary[], ids: readonly string[] | undefined, locale: string): NoteSummary[] {
+  const place = new Map<string, number>();
+  (ids ?? []).forEach((id, index) => {
+    if (!place.has(id)) place.set(id, index);
+  });
+  const listed = notes.filter((n) => place.has(n.id));
+  const others = notes.filter((n) => !place.has(n.id));
+  listed.sort((a, b) => (place.get(a.id) ?? 0) - (place.get(b.id) ?? 0) || a.path.localeCompare(b.path));
+  return [...listed, ...sortNotes(others, 'date-asc', locale)];
+}
+
+/**
+ * The notes of a binder's view in its free order: the notes of the binder itself in its order, then those of each
+ * sub-binder in that sub-binder's order (the sub-binders in the sidebar's order). `shown` is what the view shows.
+ */
+export function arrangeByBinderOrder(
+  shown: NoteSummary[],
+  binder: string,
+  { tree, orders }: BinderOrders,
+  locale: string,
+): NoteSummary[] {
+  const chain = binderChain(tree, binder);
+  const known = new Set(chain);
+  const out: NoteSummary[] = [];
+  for (const path of chain) {
+    out.push(...inBinderOrder(shown.filter((n) => n.binder === path), orders[path], locale));
+  }
+  // A note of a binder the tree does not know (cannot happen: the tree holds every note's binder): by date, last.
+  out.push(...sortNotes(shown.filter((n) => !known.has(n.binder)), 'date-asc', locale));
+  return out;
+}
+
+/** The binders a note is in below the exported binder `binder` (none for a note of that binder itself). */
+export function binderPathBelow(binder: string, noteBinder: string): string[] {
+  const below = noteBinder === binder ? '' : noteBinder.slice(binder === '' ? 0 : binder.length + 1);
+  return below.split('/').filter(Boolean);
+}
+
+/** A place between two cards of the grid: just before or just after the card at `path`. */
+export interface DropSpot {
+  path: string;
+  side: 'before' | 'after';
+}
+
+/** The new order of one binder: its notes' ids, first to last. */
+export interface OrderChange {
+  binder: string;
+  ids: string[];
+  /** Where the first moved note stands in the binder now (1 = first) and how many notes it holds, to say it aloud. */
+  position: number;
+  count: number;
+}
+
+/** Cards of one binder in `displayed`, as ids. */
+function idsOf(displayed: NoteSummary[], binder: string): string[] {
+  return displayed.filter((n) => n.binder === binder).map((n) => n.id);
+}
+
+/** The binder all of `moved` (paths) belong to, and those notes in the grid's order; null for none or several binders. */
+function movedOf(displayed: NoteSummary[], moved: readonly string[]): { binder: string; notes: NoteSummary[] } | null {
+  const wanted = new Set(moved);
+  const notes = displayed.filter((n) => wanted.has(n.path));
+  if (notes.length === 0 || notes.some((n) => n.binder !== notes[0].binder)) return null;
+  return { binder: notes[0].binder, notes };
+}
+
+function change(binder: string, ids: string[], before: string[], movedIds: string[]): OrderChange | null {
+  if (ids.length === before.length && ids.every((id, i) => id === before[i])) return null;
+  return { binder, ids, position: ids.indexOf(movedIds[0]) + 1, count: ids.length };
+}
+
+/**
+ * The new order when the cards `moved` are dropped at `spot` of the grid `displayed`: those of one binder move
+ * among the notes of that binder, keeping their relative order, next to the nearest card of their binder on
+ * the side of the spot (the grid of a parent binder shows its own notes, then each sub-binder's: a drop is
+ * refused where no card of the moved notes' binder is next to it). Null when it is refused or changes nothing.
+ */
+export function moveToSpot(displayed: NoteSummary[], moved: readonly string[], spot: DropSpot): OrderChange | null {
+  const group = movedOf(displayed, moved);
+  const at = displayed.findIndex((n) => n.path === spot.path);
+  if (!group || at < 0) return null;
+  const gap = spot.side === 'before' ? at : at + 1;
+  const wanted = new Set(group.notes.map((n) => n.path));
+  const usable = (note: NoteSummary | undefined) => (note && note.binder === group.binder && !wanted.has(note.path) ? note : undefined);
+  const next = usable(displayed[gap]);
+  const previous = usable(displayed[gap - 1]);
+  const anchor = next ?? previous;
+  if (!anchor) return null;
+  const before = idsOf(displayed, group.binder);
+  const movedIds = group.notes.map((n) => n.id);
+  const rest = before.filter((id) => !movedIds.includes(id));
+  const index = rest.indexOf(anchor.id) + (anchor === next ? 0 : 1);
+  const ids = [...rest.slice(0, index), ...movedIds, ...rest.slice(index)];
+  return change(group.binder, ids, before, movedIds);
+}
+
+/** How far a keyboard move goes: one place earlier or later, or to the start or the end of the binder. */
+export type MoveStep = 'earlier' | 'later' | 'start' | 'end';
+
+/**
+ * The new order when the cards `moved` go one place earlier or later among the notes of their binder, or to its
+ * start or end; they keep their relative order. Null when they are not all in one binder, or already there.
+ */
+export function moveByStep(displayed: NoteSummary[], moved: readonly string[], step: MoveStep): OrderChange | null {
+  const group = movedOf(displayed, moved);
+  if (!group) return null;
+  const before = idsOf(displayed, group.binder);
+  const movedIds = group.notes.map((n) => n.id);
+  const isMoved = new Set(movedIds);
+  let ids = [...before];
+  if (step === 'start' || step === 'end') {
+    const rest = before.filter((id) => !isMoved.has(id));
+    ids = step === 'start' ? [...movedIds, ...rest] : [...rest, ...movedIds];
+  } else if (step === 'earlier') {
+    for (let i = 1; i < ids.length; i++) {
+      if (isMoved.has(ids[i]) && !isMoved.has(ids[i - 1])) [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]];
+    }
+  } else {
+    for (let i = ids.length - 2; i >= 0; i--) {
+      if (isMoved.has(ids[i]) && !isMoved.has(ids[i + 1])) [ids[i + 1], ids[i]] = [ids[i], ids[i + 1]];
+    }
+  }
+  return change(group.binder, ids, before, movedIds);
 }
 
 export interface BinderNode {

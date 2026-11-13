@@ -6,7 +6,7 @@
   import { defaultWindowClose, type WindowClose } from '../lib/editor/window-close';
   import { currentLocale, t } from '../lib/i18n.svelte';
   import { inkspaceOffer } from '../lib/inkspace-offer.svelte';
-  import { SORT_ORDERS, displayTitle, type SortOrder } from '../lib/library-logic';
+  import { displayTitle, type SortOrder } from '../lib/library-logic';
   import { LibraryState } from '../lib/library-state.svelte';
   import { share } from '../lib/share-state.svelte';
   import { isBusy, tablet } from '../lib/tablet-state.svelte';
@@ -20,6 +20,7 @@
   import Editor from './editor/Editor.svelte';
   import ActivityBanner from './library/ActivityBanner.svelte';
   import AssembleDialog from './library/AssembleDialog.svelte';
+  import DateDialog from './library/DateDialog.svelte';
   import DraftsBanner from './library/DraftsBanner.svelte';
   import InkspaceImportDialog from './library/InkspaceImportDialog.svelte';
   import NewFromFileDialog from './library/NewFromFileDialog.svelte';
@@ -60,6 +61,16 @@
   let returnTo: { path: string | null; element: HTMLElement | null; scroll: number; moved?: boolean } | null = null;
 
   const inTrash = $derived(lib.view.kind === 'trash');
+
+  /** What the export and print dialogs of a binder need: its name, and its notes with or without the sub-binders. */
+  function binderMode(binder: string | undefined) {
+    if (binder === undefined) return undefined;
+    return {
+      name: binder.split('/').pop() || binder,
+      hasSub: lib.hasSubBinders(binder),
+      sourcesFor: (includeSub: boolean) => lib.binderSources(binder, includeSub),
+    };
+  }
   /** The notes as the library shows them now (binder, tag, search, sort): the editor's page buttons walk through them. */
   const pagePaths = $derived(lib.visible.map((n) => n.path));
 
@@ -375,10 +386,10 @@
       class="sort"
       aria-label={t('library.sort')}
       disabled={inTrash}
-      value={lib.order}
+      value={lib.effectiveOrder}
       onchange={(event) => (lib.order = event.currentTarget.value as SortOrder)}
     >
-      {#each SORT_ORDERS as order (order)}
+      {#each lib.sortChoices as order (order)}
         <option value={order}>{t(`library.sortOptions.${order}`)}</option>
       {/each}
     </select>
@@ -445,23 +456,34 @@
 </div>
 
 {#if lib.dialog?.kind === 'export'}
+  {@const binder = binderMode(lib.dialog.binder)}
   <ExportDialog
     sources={lib.dialog.notes.map((n) => ({ path: n.path }))}
-    subject={lib.dialog.notes.length === 1
-      ? t('export.subjectNote', { title: displayTitle(lib.dialog.notes[0], currentLocale()) })
-      : t('export.subjectMany', { count: lib.dialog.notes.length })}
+    {binder}
+    subject={binder
+      ? t('export.subjectBinder', { name: binder.name })
+      : lib.dialog.notes.length === 1
+        ? t('export.subjectNote', { title: displayTitle(lib.dialog.notes[0], currentLocale()) })
+        : t('export.subjectMany', { count: lib.dialog.notes.length })}
     onclose={() => lib.closeDialog()}
   />
 {:else if lib.dialog?.kind === 'print'}
+  {@const binder = binderMode(lib.dialog.binder)}
   <PrintDialog
     sources={lib.dialog.notes.map((n) => ({ path: n.path }))}
-    subject={lib.dialog.notes.length === 1
-      ? t('export.subjectNote', { title: displayTitle(lib.dialog.notes[0], currentLocale()) })
-      : t('export.subjectMany', { count: lib.dialog.notes.length })}
+    {binder}
+    subject={binder
+      ? t('export.subjectBinder', { name: binder.name })
+      : lib.dialog.notes.length === 1
+        ? t('export.subjectNote', { title: displayTitle(lib.dialog.notes[0], currentLocale()) })
+        : t('export.subjectMany', { count: lib.dialog.notes.length })}
     onclose={() => lib.closeDialog()}
   />
 {:else if lib.dialog?.kind === 'assemble'}
   <AssembleDialog {lib} notes={lib.dialog.notes} onclose={() => lib.closeDialog()} />
+{/if}
+{#if lib.dateNote}
+  <DateDialog {lib} note={lib.dateNote} onclose={() => lib.closeDate()} />
 {/if}
 {#if quitAsked}
   <Modal title={t('library.quitBusy.title')} role="alertdialog" onclose={() => (quitAsked = false)}>

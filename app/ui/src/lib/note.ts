@@ -127,6 +127,11 @@ export interface LibraryListing {
   tags: TagCount[];
   /** Files that could not be read (damaged, newer version…). */
   problems: { path: string; code: string; message: string }[];
+  /**
+   * The free order of the binders that have one (`_ardoise-order.json`): the ids of their notes, first to last,
+   * keyed by binder (`/`-separated). A binder without an entry has no order: its notes go by date.
+   */
+  orders: Record<string, string[]>;
 }
 
 export interface TrashEntry {
@@ -230,15 +235,26 @@ export interface ExportSource {
   path: string;
   note?: Note;
   imageKey?: string;
+  /**
+   * Where the note goes in the outline (the bookmarks) of a PDF that holds several notes: the binders it is in, below the
+   * exported one (none for a note of the exported binder itself), and the title its bookmark shows. Only « Exporter le
+   * classeur en PDF » gives it; an export without it has no outline.
+   */
+  outline?: { path: string[]; title: string };
 }
 
 /** How a printed note sits on the sheet: its real size (reduced if too large), or as large as fits. */
 export type PrintFit = 'actual' | 'fit';
 
+/** How many notes share a sheet of paper. */
+export type PrintPerSheet = 1 | 2 | 4;
+
 export interface PrintOptions {
   /** Print the paper (colour, template, texture, background image); otherwise ink on white. */
   background: boolean;
   fit: PrintFit;
+  /** Notes per sheet: 1, or 2 or 4 side by side on one sheet. */
+  perSheet: PrintPerSheet;
 }
 
 export interface PrintResult {

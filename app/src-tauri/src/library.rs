@@ -7,6 +7,7 @@
 //! Shapes sent to the interface mirror `app/ui/src/lib/note.ts`: camelCase, binders as
 //! `/`-separated relative paths.
 
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{LazyLock, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -167,6 +168,9 @@ pub struct LibraryListing {
     pub binders: Vec<String>,
     pub tags: Vec<TagCount>,
     pub problems: Vec<ListingProblem>,
+    /// The free order of the binders that have one (`_ardoise-order.json`): the ids of their
+    /// notes, first to last, keyed by binder (`/`-separated; empty for the root).
+    pub orders: BTreeMap<String, Vec<String>>,
 }
 
 /// The headers of the notes listed last, so that a listing reopens only the notes whose file
@@ -185,9 +189,15 @@ pub fn list(library: &Library) -> LibraryListing {
     let listing = library.list_with(&mut HEADERS.lock().unwrap_or_else(PoisonError::into_inner));
     let tags = listing.tags();
     let binders: Vec<String> = listing.binders.iter().map(|b| slash_path(b)).collect();
+    let orders = listing
+        .orders
+        .into_iter()
+        .map(|(binder, ids)| (slash_path(&binder), ids))
+        .collect();
     LibraryListing {
         tags,
         binders,
+        orders,
         problems: listing
             .problems
             .into_iter()
@@ -283,6 +293,30 @@ pub fn move_notes_in(
                 .map(|p| path_text(&p))
         })
         .collect()
+}
+
+/// Writes a copy of the note at `path` (`Library::duplicate`) and returns its summary. `copy_word`
+/// is the interface's translated word for « copie ».
+pub fn duplicate_note_in(
+    library: &Library,
+    path: &str,
+    copy_word: &str,
+) -> Result<NoteSummary, LibraryError> {
+    let (saved, note) = library.duplicate(
+        Path::new(path),
+        &uuid::Uuid::new_v4().to_string(),
+        copy_word,
+    )?;
+    Ok(summary_of(library, &saved.path, &note, saved.stamp))
+}
+
+/// Failure of the order of a binder: `_ardoise-order.json` changing under every attempt is not a
+/// note conflict, whatever the core calls it.
+fn order_error(error: LibraryError) -> CommandError {
+    match error {
+        LibraryError::Conflict { .. } => CommandError::new("orderConflict", error),
+        error => library_error(error),
+    }
 }
 
 /// A note in the trash (`TrashEntry` in `note.ts`).
@@ -478,6 +512,54 @@ pub async fn set_note_favorite(
 ) -> CommandResult<FileStamp> {
     with_library_blocking(&context, move |library| {
         library.set_favorite(Path::new(&path), favorite, Some(&stamp))
+    })
+    .await
+}
+
+/// Writes a copy of a note next to it (same binder, same date, `copy_word` after its title) and
+/// returns it; the interface calls it once per note so that it can show progress and stop.
+#[tauri::command]
+pub async fn duplicate_note(
+    context: State<'_, AppContext>,
+    path: String,
+    copy_word: String,
+) -> CommandResult<NoteSummary> {
+    with_library_blocking(&context, move |library| {
+        duplicate_note_in(library, &path, &copy_word)
+    })
+    .await
+}
+
+/// Sets the creation date of a note (Unix milliseconds), which renames its file to match.
+#[tauri::command]
+pub async fn set_note_created(
+    context: State<'_, AppContext>,
+    path: String,
+    created: i64,
+    stamp: FileStamp,
+) -> CommandResult<RetitledNote> {
+    with_library_blocking(&context, move |library| {
+        let saved = library.set_created(Path::new(&path), created, Some(&stamp))?;
+        Ok(RetitledNote {
+            path: path_text(&saved.path),
+            stamp: saved.stamp,
+        })
+    })
+    .await
+}
+
+/// Stores the free order of a binder: the ids of its notes as they are shown, first to last.
+#[tauri::command]
+pub async fn set_binder_order(
+    context: State<'_, AppContext>,
+    binder: String,
+    ids: Vec<String>,
+) -> CommandResult<()> {
+    let library = library_of(&context)?;
+    blocking(move || {
+        library
+            .set_binder_order(&binder_path(&binder), &ids)
+            .map_err(order_error)
     })
     .await
 }
@@ -836,6 +918,61 @@ pub(crate) mod tests {
 
         let error = retitle_in(&library, &retitled.path, "Encore", &saved.stamp).unwrap_err();
         assert_eq!(error.code(), "noteConflict");
+    }
+
+    #[test]
+    fn duplicating_a_note_answers_with_the_copy_summary() {
+        let (_dir, library) = library();
+        let saved = write_sample(&library, "Classe", "Essai");
+        library.set_favorite(&saved.path, true, None).unwrap();
+        let original = library.list().notes.remove(0);
+        let copy = duplicate_note_in(&library, &text(&saved.path), "copie").unwrap();
+        assert_eq!(copy.title, "Essai (copie)");
+        assert_eq!(copy.binder, "Classe");
+        assert_eq!(copy.created, original.created);
+        assert!(!copy.favorite);
+        assert_ne!(copy.id, original.id);
+        assert!(
+            copy.file_name.ends_with(" Essai (copie).ardoise"),
+            "{}",
+            copy.file_name
+        );
+        assert_eq!(FileStamp::of(Path::new(&copy.path)).unwrap(), copy.stamp);
+        // The copy has the thumbnail, the strokes and the id the summary says.
+        let file = library.read(Path::new(&copy.path)).unwrap().file;
+        assert_eq!(file.note.id, copy.id);
+        assert!(file.thumbnail.is_some());
+        assert_eq!(file.note.strokes.len(), 1);
+        assert_eq!(list(&library).notes.len(), 2);
+        // A missing note is the usual error.
+        let error = duplicate_note_in(
+            &library,
+            &text(&saved.path.with_file_name("x.ardoise")),
+            "copie",
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "noteNotFound");
+    }
+
+    #[test]
+    fn the_listing_carries_the_order_of_each_binder() {
+        let (_dir, library) = library();
+        write_sample(&library, "Classe/3e B", "Un");
+        assert!(list(&library).orders.is_empty());
+        library
+            .set_binder_order(
+                &binder_path("Classe/3e B"),
+                &["x".to_owned(), "y".to_owned()],
+            )
+            .unwrap();
+        let listing = list(&library);
+        assert_eq!(listing.orders.len(), 1);
+        assert_eq!(listing.orders["Classe/3e B"], ["x", "y"]);
+        let json = serde_json::to_value(&listing).unwrap();
+        assert_eq!(json["orders"]["Classe/3e B"], serde_json::json!(["x", "y"]));
+        // The order file is not a note.
+        assert_eq!(listing.notes.len(), 1);
+        assert!(listing.problems.is_empty());
     }
 
     #[test]

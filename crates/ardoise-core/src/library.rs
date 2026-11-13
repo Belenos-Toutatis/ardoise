@@ -11,7 +11,9 @@
 
 mod binders;
 mod conflicts;
+mod duplicate;
 mod names;
+mod order;
 mod tag_colors;
 mod trash;
 mod walk;
@@ -30,9 +32,11 @@ use crate::fsutil::{CheckedWriteError, rename_no_replace, write_atomic_checked, 
 
 pub use binders::BinderTrashed;
 pub use conflicts::{ConflictKind, ConflictName, parse_conflict_name};
+pub use duplicate::copy_title;
 pub use names::{
     MAX_NAME_CHARS, NOTE_EXTENSION, invalid_name_reason, local_date, note_file_stem, sanitize_name,
 };
+pub use order::{MAX_ORDERED_NOTES, ORDER_FILE, is_order_file_name};
 pub use tag_colors::{TAG_COLORS_FILE, tag_key};
 pub use trash::{TRASH_DIR, TRASH_RETENTION, TrashItem};
 pub use walk::{NoteCount, count_notes};
@@ -238,6 +242,19 @@ pub enum LibraryError {
         /// The file involved.
         path: PathBuf,
     },
+    /// A binder's order file (`_ardoise-order.json`, or a copy of it) was written by a newer
+    /// version of Ardoise; it is left untouched.
+    #[error("{} was written by a newer version of Ardoise; it was not changed", path.display())]
+    OrderNewer {
+        /// The file involved.
+        path: PathBuf,
+    },
+    /// A date that cannot be a note's creation date (before 1970 or after the year 9999).
+    #[error("{created} is not a possible creation date")]
+    InvalidDate {
+        /// The date given, Unix milliseconds.
+        created: i64,
+    },
     /// The folder cannot be watched.
     #[error("cannot watch {}: {message}", path.display())]
     Watch {
@@ -265,6 +282,8 @@ impl LibraryError {
             LibraryError::BinderExists { .. } => "binderExists",
             LibraryError::InvalidTagColor { .. } => "invalidTagColor",
             LibraryError::TagColorsNewer { .. } => "tagColorsNewer",
+            LibraryError::OrderNewer { .. } => "orderNewer",
+            LibraryError::InvalidDate { .. } => "invalidDate",
             LibraryError::Watch { .. } => "libraryWatch",
         }
     }
@@ -328,6 +347,10 @@ pub struct Listing {
     pub problems: Vec<ListProblem>,
     /// Every binder (sub-folder), relative to the root, sorted; empty ones included.
     pub binders: Vec<PathBuf>,
+    /// The free order of the binders that have one (`_ardoise-order.json`, [`order`]): the ids
+    /// of their notes, first to last, keyed by binder (relative to the root; empty for the
+    /// root). A file that is missing or cannot be read gives no entry.
+    pub orders: BTreeMap<PathBuf, Vec<String>>,
 }
 
 /// The notes of a past [`Listing`], to list again without reopening the files that did not
@@ -521,6 +544,7 @@ impl Library {
     pub fn list_with(&self, cache: &mut HeaderCache) -> Listing {
         let mut found = Vec::new();
         let mut binders = Vec::new();
+        let mut order_files: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
         let walk_problems = walk::walk(&self.root, |f| match f {
             walk::Found::Note {
                 path,
@@ -528,6 +552,11 @@ impl Library {
                 stamp,
             } => found.push((path, binder, stamp)),
             walk::Found::Binder(binder) => binders.push(binder),
+            walk::Found::Order { binder, path, .. } => {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    order_files.entry(binder).or_default().push(name.to_owned());
+                }
+            }
         });
         let mut listing = Listing::default();
         for (path, error) in walk_problems {
@@ -564,6 +593,11 @@ impl Library {
         cache.entries.extend(kept);
         binders.sort();
         listing.binders = binders;
+        for (binder, names) in order_files {
+            if let Some(order) = order::read_listed(&self.root.join(&binder), &names) {
+                listing.orders.insert(binder, order);
+            }
+        }
         listing.notes.sort_by(|a, b| a.path.cmp(&b.path));
         listing.problems.sort_by(|a, b| a.path.cmp(&b.path));
         listing
@@ -753,6 +787,18 @@ impl Library {
         let (file, stamp) = self.rewrite(&path, expected, |file| {
             file.note.title = title.to_owned();
         })?;
+        self.rename_to_match(path, &file, stamp)
+    }
+
+    /// Renames the file of a note just rewritten to `YYYY-MM-DD Title.ardoise` for its creation
+    /// date and title (with a ` (n)` suffix if taken), unless its name already says so. A rename
+    /// that fails leaves the file under its old name ([`renamed_or_kept`]).
+    fn rename_to_match(
+        &self,
+        path: PathBuf,
+        file: &NoteFile,
+        stamp: FileStamp,
+    ) -> Result<SavedNote, LibraryError> {
         let desired = note_file_stem(file.note.created, &file.note.title);
         let current_name = path
             .file_name()

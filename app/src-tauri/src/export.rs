@@ -20,9 +20,9 @@ use ardoise_core::fsutil;
 use ardoise_core::library::{Library, LibraryError, note_file_stem};
 use ardoise_core::note::Note;
 use ardoise_render::{
-    LayerMode, MAX_DPI, MIN_DPI, NoteView, PdfOptions, PdfPage, Picture, RenderError,
+    LayerMode, MAX_DPI, MIN_DPI, NoteView, OutlineEntry, PdfOptions, PdfPage, Picture, RenderError,
     RenderOptions, SvgOptions, encode_jpeg_at, encode_png_at, encode_webp, note_to_svg,
-    notes_to_pdf, render_note, render_note_transparent, scale_for_dpi,
+    notes_to_pdf, notes_to_pdf_with_outline, render_note, render_note_transparent, scale_for_dpi,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -132,6 +132,47 @@ pub struct ExportSource {
     pub note: Option<Note>,
     #[serde(default)]
     pub image_key: Option<String>,
+}
+
+/// Where a note goes in the outline (the bookmarks) of a PDF of several notes (`outline` of
+/// `ExportSource` in `note.ts`, sent beside the sources, one per source): the binders it is in below
+/// the exported one, and the title its bookmark shows. « Exporter le classeur en PDF » only.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct OutlineSpec {
+    pub path: Vec<String>,
+    pub title: String,
+}
+
+/// The outline of a PDF whose pages are the notes `specs` describe, in order: a bookmark per note,
+/// and, for a note below the exported binder, bookmarks for each binder it is in (a binder's
+/// bookmark goes to its first note, and holds those of the notes and sub-binders it contains).
+/// A binder that comes up again after another one (the sub-binders follow the sidebar's order, so
+/// the notes of one are together) is not repeated.
+pub fn outline_entries(specs: &[OutlineSpec]) -> Vec<OutlineEntry> {
+    let mut entries = Vec::new();
+    let mut open: Vec<&str> = Vec::new();
+    for (page, spec) in specs.iter().enumerate() {
+        let common = open
+            .iter()
+            .zip(&spec.path)
+            .take_while(|(open, wanted)| **open == wanted.as_str())
+            .count();
+        open.truncate(common);
+        for (level, name) in spec.path.iter().enumerate().skip(common) {
+            entries.push(OutlineEntry {
+                title: name.clone(),
+                level,
+                page,
+            });
+            open.push(name);
+        }
+        entries.push(OutlineEntry {
+            title: spec.title.clone(),
+            level: spec.path.len(),
+            page,
+        });
+    }
+    entries
 }
 
 /// A note ready to export, with the file name (without extension) its export takes and the
@@ -365,13 +406,32 @@ pub fn export(
     destination: &Path,
     cancel: &AtomicBool,
 ) -> CommandResult<Vec<PathBuf>> {
+    export_with_outline(sources, format, options, destination, cancel, &[])
+}
+
+/// [`export`], a PDF carrying the outline `outline` describes (one spec per source; none, or a
+/// number that is not the sources', gives a PDF without outline). Images ignore it.
+pub fn export_with_outline(
+    sources: &[LoadedSource],
+    format: ExportFormat,
+    options: &ExportOptions,
+    destination: &Path,
+    cancel: &AtomicBool,
+    outline: &[OutlineSpec],
+) -> CommandResult<Vec<PathBuf>> {
     check_options(format, options)?;
     check_cancelled(cancel)?;
     match sources {
         [] => Err(export_error("nothing to export")),
         _ if format == ExportFormat::Pdf => {
             let notes: Vec<NoteView<'_>> = sources.iter().map(LoadedSource::view).collect();
-            let pdf = notes_to_pdf(&notes, &pdf_options(options)).map_err(render_error)?;
+            let entries = if outline.len() == sources.len() {
+                outline_entries(outline)
+            } else {
+                Vec::new()
+            };
+            let pdf = notes_to_pdf_with_outline(&notes, &pdf_options(options), &entries)
+                .map_err(render_error)?;
             check_cancelled(cancel)?;
             fsutil::write_atomic(destination, &pdf).map_err(write_error(destination))?;
             Ok(vec![destination.to_path_buf()])
@@ -398,7 +458,9 @@ pub fn export(
     }
 }
 
-/// Loads and exports `sources` (the command's work, off the interface thread).
+/// Loads and exports `sources` without an outline (the tests' way; the command goes through
+/// [`export_sources_with_outline`]).
+#[cfg(test)]
 pub fn export_sources(
     library: Option<&Library>,
     sources: Vec<ExportSource>,
@@ -407,11 +469,24 @@ pub fn export_sources(
     destination: &Path,
     cancel: &AtomicBool,
 ) -> CommandResult<Vec<PathBuf>> {
+    export_sources_with_outline(library, sources, format, options, destination, cancel, &[])
+}
+
+/// [`export_sources`] with the outline of a PDF ([`export_with_outline`]).
+pub fn export_sources_with_outline(
+    library: Option<&Library>,
+    sources: Vec<ExportSource>,
+    format: ExportFormat,
+    options: &ExportOptions,
+    destination: &Path,
+    cancel: &AtomicBool,
+    outline: &[OutlineSpec],
+) -> CommandResult<Vec<PathBuf>> {
     // Refuse bad options before reading any note.
     check_options(format, options)?;
     check_cancelled(cancel)?;
     let loaded = load_sources(library, sources)?;
-    export(&loaded, format, options, destination, cancel)
+    export_with_outline(&loaded, format, options, destination, cancel, outline)
 }
 
 /// The library, if one of `sources` must be read from it (a note not given, or the pixels of a
@@ -448,19 +523,21 @@ pub async fn export_notes(
     format: ExportFormat,
     options: ExportOptions,
     destination: String,
+    outline: Option<Vec<OutlineSpec>>,
 ) -> CommandResult<Vec<String>> {
     let library = library_for(&context, &sources)?;
     let flag = Arc::clone(&cancel.0);
     flag.store(false, Ordering::Relaxed);
     // Rendering at 600 dpi takes seconds: keep it off the async runtime's threads.
     let written = tauri::async_runtime::spawn_blocking(move || {
-        export_sources(
+        export_sources_with_outline(
             library.as_ref(),
             sources,
             format,
             &options,
             Path::new(&destination),
             &flag,
+            &outline.unwrap_or_default(),
         )
     })
     .await
@@ -744,6 +821,122 @@ mod tests {
         // A4 landscape, then A4 portrait.
         assert!((boxes[0][2] - 841.89).abs() < 0.01 && (boxes[0][3] - 595.28).abs() < 0.01);
         assert!((boxes[1][2] - 595.28).abs() < 0.01 && (boxes[1][3] - 841.89).abs() < 0.01);
+    }
+
+    fn spec(path: &[&str], title: &str) -> OutlineSpec {
+        OutlineSpec {
+            path: path.iter().map(|s| (*s).to_owned()).collect(),
+            title: title.to_owned(),
+        }
+    }
+
+    fn entry(title: &str, level: usize, page: usize) -> OutlineEntry {
+        OutlineEntry {
+            title: title.to_owned(),
+            level,
+            page,
+        }
+    }
+
+    /// The bookmarks of a binder's PDF: one per note, and one per sub-binder holding the notes below it.
+    #[test]
+    fn the_outline_has_a_bookmark_per_note_and_a_level_per_sub_binder() {
+        assert!(outline_entries(&[]).is_empty());
+        // The binder's own notes only: a flat list.
+        assert_eq!(
+            outline_entries(&[spec(&[], "Un"), spec(&[], "Deux")]),
+            [entry("Un", 0, 0), entry("Deux", 0, 1)]
+        );
+        // Its notes, then each sub-binder's, nested sub-binders included.
+        let specs = [
+            spec(&[], "Cours"),
+            spec(&["3e B"], "TP 1"),
+            spec(&["3e B"], "TP 2"),
+            spec(&["3e B", "Devoirs"], "DM"),
+            spec(&["3e C"], "Contrôle"),
+        ];
+        assert_eq!(
+            outline_entries(&specs),
+            [
+                entry("Cours", 0, 0),
+                entry("3e B", 0, 1),
+                entry("TP 1", 1, 1),
+                entry("TP 2", 1, 2),
+                entry("Devoirs", 1, 3),
+                entry("DM", 2, 3),
+                entry("3e C", 0, 4),
+                entry("Contrôle", 1, 4),
+            ]
+        );
+        // A binder that has no note of its own but notes below it.
+        assert_eq!(
+            outline_entries(&[spec(&["A", "B"], "x")]),
+            [entry("A", 0, 0), entry("B", 1, 0), entry("x", 2, 0)]
+        );
+        let parsed: OutlineSpec =
+            serde_json::from_value(serde_json::json!({ "path": ["3e B"], "title": "TP" })).unwrap();
+        assert_eq!(parsed, spec(&["3e B"], "TP"));
+    }
+
+    #[test]
+    fn a_pdf_of_several_notes_carries_its_outline_only_when_asked_and_whole() {
+        let (_dir, library) = library();
+        let a = write_sample(&library, "Classe", "Cours");
+        let b = write_sample(&library, "Classe/3e B", "TP");
+        let out = tempfile::tempdir().unwrap();
+        let pdf = |name: &str, outline: &[OutlineSpec]| {
+            let destination = out.path().join(name);
+            export_sources_with_outline(
+                Some(&library),
+                vec![from_library(&a.path), from_library(&b.path)],
+                ExportFormat::Pdf,
+                &options(150, true),
+                &destination,
+                &NOT_CANCELLED,
+                outline,
+            )
+            .unwrap();
+            let bytes = fs::read(&destination).unwrap();
+            assert_eq!(pdf_pages(&bytes).len(), 2);
+            String::from_utf8_lossy(&bytes).into_owned()
+        };
+        let text = pdf("classeur.pdf", &[spec(&[], "Cours"), spec(&["3e B"], "TP")]);
+        for title in ["/Title (Cours)", "/Title (3e B)", "/Title (TP)"] {
+            assert!(text.contains(title), "{title}");
+        }
+        assert!(text.contains("/Outlines") && text.contains("/UseOutlines"));
+        // None, or a list that is not one per note: no outline, the PDF of before.
+        for outline in [&[][..], &[spec(&[], "Cours")][..]] {
+            let text = pdf("sans.pdf", outline);
+            assert!(!text.contains("/Outlines"), "{outline:?}");
+        }
+        let without = out.path().join("export.pdf");
+        export_sources(
+            Some(&library),
+            vec![from_library(&a.path), from_library(&b.path)],
+            ExportFormat::Pdf,
+            &options(150, true),
+            &without,
+            &NOT_CANCELLED,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(&without).unwrap(),
+            fs::read(out.path().join("sans.pdf")).unwrap()
+        );
+        // The images ignore it.
+        let folder = out.path().join("images");
+        let written = export_sources_with_outline(
+            Some(&library),
+            vec![from_library(&a.path), from_library(&b.path)],
+            ExportFormat::Png,
+            &options(72, true),
+            &folder,
+            &NOT_CANCELLED,
+            &[spec(&[], "Cours"), spec(&["3e B"], "TP")],
+        )
+        .unwrap();
+        assert_eq!(written.len(), 2);
     }
 
     /// The sample note with a second layer holding a stroke of its own, and a hidden one.

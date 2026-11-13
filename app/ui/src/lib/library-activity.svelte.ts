@@ -9,9 +9,10 @@
  * takes the place of another one still useful.
  */
 import { api, errorMessage, type BinderDeleted, type FailedNote, type TrashedNotes } from './api';
-import { t, tn } from './i18n.svelte';
+import { currentLocale, t, tn } from './i18n.svelte';
 import { opposite, runBatch, turnNote, type BatchFailure, type BatchOutcome, type BatchTarget, type TurnDirection } from './library-batch';
-import type { FileStamp } from './note';
+import { displayTitle } from './library-logic';
+import type { FileStamp, NoteSummary } from './note';
 
 /** How long a notice stays, in milliseconds (paused while the pointer or the focus is on it); tests change it. */
 export const undoNotice = { durationMs: 8000 };
@@ -130,6 +131,55 @@ export class LibraryActivity {
       turnNote(target.path, opposite(direction), stamps.get(target.path)),
     );
     if (outcome && outcome.done.length > 0) this.show(tn('library.turn.undone', outcome.done.length), null);
+  }
+
+  /**
+   * Writes a copy of each note (`copyWord`: the translated « copie »), then offers to delete the copies. They go to
+   * the trash like any deleted note, so that the undo itself can be undone.
+   */
+  async duplicate(targets: BatchTarget[], copyWord: string): Promise<NoteSummary[]> {
+    const outcome = await this.batch('library.duplicate.progress', 'library.duplicate.failed', targets, (target) =>
+      api.duplicateNote(target.path, copyWord),
+    );
+    if (!outcome || outcome.done.length === 0) return [];
+    const copies = outcome.done.map(({ result }) => result);
+    let message = tn('library.duplicate.done', copies.length, { title: displayTitle(copies[0], currentLocale()) });
+    const untouched = targets.length - outcome.done.length - outcome.failed.length;
+    if (outcome.stopped) message += ` ${tn('library.activity.stopped', untouched)}`;
+    this.show(message, () => this.removeCopies(copies));
+    return copies;
+  }
+
+  /** Puts the copies a duplication made in the trash. */
+  private async removeCopies(copies: NoteSummary[]): Promise<void> {
+    const targets = copies.map((copy) => ({ path: copy.path, title: displayTitle(copy, currentLocale()) }));
+    const outcome = await this.batch('library.duplicate.undoProgress', 'library.duplicate.undoFailed', targets, async (target) => {
+      const done = await api.trashNotes([target.path]);
+      if (done.failed.length > 0) throw done.failed[0].error;
+      return done.trashed[0]?.id;
+    });
+    if (outcome && outcome.done.length > 0) this.show(tn('library.duplicate.undone', outcome.done.length), null);
+  }
+
+  /**
+   * Sets the creation date of the note at `path` (`created`, Unix milliseconds; it had `was`, and `stamp` is its file's) and
+   * offers to put the old one back, if the note is still what this wrote. The error goes back to the caller (the dialog).
+   */
+  async setCreated(path: string, title: string, was: number, created: number, stamp: FileStamp): Promise<void> {
+    const done = await api.setNoteCreated(path, created, stamp);
+    await this.refresh();
+    this.show(t('library.date.done', { title }), () => this.restoreDate(done.path, title, was, done.stamp));
+  }
+
+  private async restoreDate(path: string, title: string, created: number, stamp: FileStamp): Promise<void> {
+    try {
+      await api.setNoteCreated(path, created, stamp);
+      this.show(t('library.date.undone', { title }), null);
+    } catch (error) {
+      this.failures = { heading: t('library.date.undoFailed'), items: [{ path, title, message: errorMessage(error) }] };
+    } finally {
+      await this.refresh();
+    }
   }
 
   /** After `trash_notes`: lists the notes that stayed, and offers to restore the others. */

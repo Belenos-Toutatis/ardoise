@@ -221,6 +221,22 @@ export const api = {
   /** Changes a note's title, which renames its file. */
   retitleNote: (path: string, title: string, stamp: FileStamp) =>
     call<{ path: string; stamp: FileStamp }>('retitle_note', { path, title, stamp }),
+  /**
+   * Writes a copy of the note at `path` next to it (same binder, same date, `copyWord` after its title, no favourite
+   * mark; the sound and the tablet's original come along) and returns its summary.
+   */
+  duplicateNote: (path: string, copyWord: string) => call<NoteSummary>('duplicate_note', { path, copyWord }),
+  /**
+   * Sets the creation date of a note (Unix milliseconds), which renames its file to match; `noteConflict` when the
+   * file changed since `stamp`, `invalidDate` for a date no file name can carry.
+   */
+  setNoteCreated: (path: string, created: number, stamp: FileStamp) =>
+    call<{ path: string; stamp: FileStamp }>('set_note_created', { path, created, stamp }),
+  /**
+   * Stores the free order of a binder (`''` is the root): the ids of its notes as they are shown, first to last, in
+   * the binder's own folder (it follows the sync). `orderConflict` when the file kept changing meanwhile.
+   */
+  setBinderOrder: (binder: string, ids: string[]) => call<void>('set_binder_order', { binder, ids }),
 
   // --- Library: organising (milestone M10; Rust side: app/src-tauri/src/organize.rs) -------
 
@@ -289,10 +305,19 @@ export const api = {
   /**
    * Exports notes. PDF: `destination` is one file holding every note, one page each. PNG, JPG,
    * SVG: a file for one note, a folder for several (one file per note, never overwriting).
-   * Returns the paths written.
+   * Returns the paths written. When every source has an `outline`, a PDF gets bookmarks (a binder's PDF).
    */
-  exportNotes: (sources: ExportSource[], format: ExportFormat, options: ExportOptions, destination: string) =>
-    call<string[]>('export_notes', { sources, format, options, destination }),
+  exportNotes: (sources: ExportSource[], format: ExportFormat, options: ExportOptions, destination: string) => {
+    // The outline travels beside the sources, one per source (Rust: `export_notes`, `outline`).
+    const outline = sources.length > 0 && sources.every((source) => source.outline) ? sources.map((source) => source.outline) : undefined;
+    return call<string[]>('export_notes', {
+      sources: sources.map(({ outline: _outline, ...source }) => source),
+      format,
+      options,
+      destination,
+      outline,
+    });
+  },
   /**
    * Cancels the export under way: it then rejects with `cancelled`. Does nothing when no export
    * is running.

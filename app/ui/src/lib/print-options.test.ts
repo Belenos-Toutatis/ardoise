@@ -13,8 +13,15 @@ beforeEach(() => {
 describe('print choices', () => {
   it('starts from the defaults and remembers what was chosen', () => {
     expect(loadPrintChoice()).toEqual(DEFAULT_PRINT);
-    savePrintChoice({ background: false, fit: 'fit' });
-    expect(loadPrintChoice()).toEqual({ background: false, fit: 'fit' });
+    savePrintChoice({ background: false, fit: 'fit', perSheet: 4 });
+    expect(loadPrintChoice()).toEqual({ background: false, fit: 'fit', perSheet: 4 });
+  });
+
+  it('reads the choice an older version stored, without the notes per sheet', () => {
+    localStorage.setItem('ardoise.print', JSON.stringify({ background: false, fit: 'fit' }));
+    expect(loadPrintChoice()).toEqual({ background: false, fit: 'fit', perSheet: 1 });
+    localStorage.setItem('ardoise.print', JSON.stringify({ background: true, fit: 'actual', perSheet: 3 }));
+    expect(loadPrintChoice().perSheet).toBe(1);
   });
 
   it('ignores a stored value that is not valid', () => {

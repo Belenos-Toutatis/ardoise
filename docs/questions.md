@@ -304,3 +304,13 @@ L'utilisateur a demandé ce qu'on pourrait ajouter à Ardoise, puis a tranché c
 **Écarté** : modèles de page (« Les modèles me conviennent très bien comme c'était maintenant »), liens entre notes, recherche dans le texte des PDF de fond, historique des versions, notes de plusieurs pages.
 
 **Corrigé au passage** (défauts qu'il a signalés) : Ctrl+A et Échap dans la bibliothèque où que soit le focus, Maj+clic sur les cases, et le glisser-déposer d'une note vers un classeur, refusé par la fenêtre.
+
+**Points laissés au développeur pour les points 1, 3 et 8 (bibliothèque), à confirmer** (conception : `docs/design/library-order.md`) :
+
+- *Copie d'une note sans titre* : son titre devient « (copie) » (et non « sans titre »), parce que le nom du fichier est fait de la date et du titre et qu'un titre est la seule marque visible qui distingue deux cartes de la même minute. Une copie de copie devient « (copie 2) ».
+- *Copie d'une copie retouchée par un assistant* : elle reste une copie retouchée de la même note (le compte rendu des changements décrit son tracé, qui est le même).
+- *Annuler après « Dupliquer »* : les copies vont à la corbeille (restaurables), elles ne sont pas détruites.
+- *« Aujourd'hui »* dans « Changer la date… » remplit le champ avec la date et l'heure de maintenant ; la date n'est changée qu'au clic sur « Changer la date ».
+- *Ordre du classeur* : proposé seulement quand un classeur est affiché ; ailleurs, tri par date (la plus récente d'abord) ; pendant une recherche, l'ordre est montré mais les cartes ne se déplacent pas. Une carte ne se déplace qu'entre les notes de son propre classeur (dans la vue d'un classeur parent, déposer une note d'un sous-classeur à côté d'une note du classeur parent est refusé : pour changer de classeur, on la dépose sur la barre latérale). Fichier `_ardoise-order.json` dans le dossier du classeur.
+- *Exporter ou imprimer un classeur avec ses sous-classeurs* : case décochée au départ (le choix « option » de l'utilisateur), absente d'un classeur sans sous-classeur.
+- *Impression, notes par feuille* : la découpe en cases est faite par Ardoise (le pilote de l'imprimante ne peut pas le faire pour un travail dessiné par Ardoise) ; la fenêtre de Windows compte les feuilles.

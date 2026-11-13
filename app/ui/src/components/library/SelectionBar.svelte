@@ -1,5 +1,5 @@
 <script lang="ts">
-  /** Actions on the selected notes: move to a binder, tags, export, assemble, turn, favourite, trash. */
+  /** Actions on the selected notes: move to a binder, tags, export, print, assemble, duplicate, turn, favourite, trash. */
   import { t } from '../../lib/i18n.svelte';
   import { flattenTree, tagsOfNotes } from '../../lib/library-logic';
   import type { LibraryState } from '../../lib/library-state.svelte';
@@ -73,6 +73,15 @@
     onclick={() => lib.openDialog('assemble')}
   >
     {t('library.selection.assemble')}
+  </button>
+  <button
+    type="button"
+    class="button"
+    data-action="duplicate"
+    disabled={lib.activity.busy}
+    onclick={() => lib.duplicateNotes(lib.selectedDisplayed)}
+  >
+    {t('library.selection.duplicate')}
   </button>
   <button
     type="button"

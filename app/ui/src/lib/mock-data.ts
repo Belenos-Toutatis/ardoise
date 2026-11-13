@@ -27,7 +27,8 @@ export interface MockLibrary {
   notes: Map<string, StoredNote>;
   binders: Set<string>;
   trash: Map<string, TrashEntry & { stored: StoredNote }>;
-  /** Thumbnails are generated SVG data URLs keyed by note id. */
+  /** The free order of the binders that have one (`_ardoise-order.json`): binder → note ids. */
+  orders: Map<string, string[]>;
 }
 
 let clock = 0;
@@ -141,7 +142,7 @@ export function notePath(root: string, binder: string, name: string): string {
 }
 
 function seed(root: string): MockLibrary {
-  const library: MockLibrary = { root, notes: new Map(), binders: new Set(['Classe', 'Classe/3e B', 'Perso']), trash: new Map() };
+  const library: MockLibrary = { root, notes: new Map(), binders: new Set(['Classe', 'Classe/3e B', 'Perso']), trash: new Map(), orders: new Map() };
   const add = (binder: string, note: Note) => {
     // A tablet note keeps the tablet's page (`original.bin`): its original from the start.
     const { page, layers, strokes } = JSON.parse(JSON.stringify(note)) as Note;

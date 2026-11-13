@@ -95,19 +95,20 @@ struct TagsFile {
     extra: Map<String, Value>,
 }
 
-/// One file as found on disk.
-enum Loaded {
+/// One file as found on disk (`T`: what it parses to; the order files of `order.rs` use the
+/// same reading).
+pub(super) enum Loaded<T> {
     Missing,
     /// Could not be read (permissions, a sync client holding it…).
     Unreadable(io::Error),
     /// Not a tags file, or too large.
     Damaged(FileStamp),
-    Readable(TagsFile, FileStamp),
+    Readable(T, FileStamp),
 }
 
 /// Reads and parses `path`; the stamp describes the bytes parsed (or the version just before
 /// them, if the file kept changing: a write then notices it).
-fn load(path: &Path) -> Loaded {
+pub(super) fn load<T: serde::de::DeserializeOwned>(path: &Path, max_bytes: u64) -> Loaded<T> {
     let stamp_of = |path: &Path| FileStamp::of(path);
     let mut attempt = 1;
     loop {
@@ -116,12 +117,11 @@ fn load(path: &Path) -> Loaded {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Loaded::Missing,
             Err(e) => return Loaded::Unreadable(e),
         };
-        if before.len > MAX_FILE_BYTES {
+        if before.len > max_bytes {
             return Loaded::Damaged(before);
         }
         let mut bytes = Vec::new();
-        let read =
-            fs::File::open(path).and_then(|f| f.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes));
+        let read = fs::File::open(path).and_then(|f| f.take(max_bytes + 1).read_to_end(&mut bytes));
         match read {
             Ok(_) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Loaded::Missing,
@@ -136,10 +136,10 @@ fn load(path: &Path) -> Loaded {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Loaded::Missing,
             Err(e) => return Loaded::Unreadable(e),
         }
-        if bytes.len() as u64 > MAX_FILE_BYTES {
+        if bytes.len() as u64 > max_bytes {
             return Loaded::Damaged(before);
         }
-        return match serde_json::from_slice::<TagsFile>(&bytes) {
+        return match serde_json::from_slice::<T>(&bytes) {
             Ok(file) => Loaded::Readable(file, before),
             Err(_) => Loaded::Damaged(before),
         };
@@ -233,7 +233,7 @@ impl Library {
             extra: Map::new(),
         };
         let main_path = state.path.clone();
-        state.main = match load(&main_path) {
+        state.main = match load(&main_path, MAX_FILE_BYTES) {
             Loaded::Missing => Main::Missing,
             Loaded::Unreadable(e) => Main::Unreadable(e),
             Loaded::Damaged(stamp) => Main::Damaged(stamp),
@@ -267,7 +267,7 @@ impl Library {
         for name in names {
             let path = dir.join(name);
             // A copy that cannot be understood is left alone: it is never deleted.
-            if let Loaded::Readable(file, stamp) = load(&path) {
+            if let Loaded::Readable(file, stamp) = load(&path, MAX_FILE_BYTES) {
                 state.merge(&path, file);
                 state.copies.push(MergedCopy { path, stamp });
             }

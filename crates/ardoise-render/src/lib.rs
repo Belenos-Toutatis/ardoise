@@ -42,7 +42,7 @@ pub use canvas::{Backdrop, PageCanvas, PixelRect, PreparedStroke, image_size};
 pub use clipboard::{ClipboardImage, clipboard_image, clipboard_image_at};
 pub use labels::{LABEL_HEIGHT_PX, LabelSpot, draw_labels};
 pub use look::{Blend, Fill, Grain, Look};
-pub use pdf::{PdfOptions, PdfPage, notes_to_pdf};
+pub use pdf::{OutlineEntry, PdfOptions, PdfPage, notes_to_pdf, notes_to_pdf_with_outline};
 pub use picture::{NoteView, Picture, PictureError, PictureFormat, StoredImage};
 pub use svg::{SvgOptions, note_to_svg};
 
@@ -973,6 +973,149 @@ pub(crate) mod tests {
             notes_to_pdf(&[&empty], &PdfOptions::default()),
             Err(RenderError::Size { .. })
         ));
+    }
+
+    /// A title as the PDF stores it: PDFDocEncoding (here ASCII), or UTF-16BE after a byte order mark.
+    fn pdf_text(bytes: &[u8]) -> String {
+        match bytes {
+            [0xFE, 0xFF, rest @ ..] => String::from_utf16_lossy(
+                &rest
+                    .chunks(2)
+                    .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+                    .collect::<Vec<_>>(),
+            ),
+            plain => String::from_utf8_lossy(plain).into_owned(),
+        }
+    }
+
+    /// The outline read back with an independent reader: titles, depth, the page each goes to, and
+    /// the counts, parents and sibling links a viewer relies on.
+    #[test]
+    fn a_pdf_carries_its_outline_as_a_tree_of_pages() {
+        use lopdf::{Document, Object, ObjectId};
+        let n = note(SMALL, bg(Paper::White, Template::Blank, false), Vec::new());
+        let outline = [
+            OutlineEntry {
+                title: "Classe".into(),
+                level: 0,
+                page: 0,
+            },
+            OutlineEntry {
+                title: "Cours d'électricité".into(),
+                level: 1,
+                page: 0,
+            },
+            OutlineEntry {
+                title: "TP".into(),
+                level: 1,
+                page: 1,
+            },
+            OutlineEntry {
+                title: "Autre".into(),
+                level: 0,
+                page: 2,
+            },
+        ];
+        let pdf =
+            notes_to_pdf_with_outline(&[&n, &n, &n], &PdfOptions::default(), &outline).unwrap();
+        let document = Document::load_mem(&pdf).unwrap();
+        let pages: Vec<ObjectId> = document.get_pages().values().copied().collect();
+        assert_eq!(pages.len(), 3);
+        let catalog = document.catalog().unwrap();
+        let root = catalog.get(b"Outlines").unwrap().as_reference().unwrap();
+        let root_dict = document.get_dictionary(root).unwrap();
+        assert_eq!(root_dict.get(b"Count").unwrap().as_i64().unwrap(), 4);
+        assert_eq!(
+            catalog.get(b"PageMode").unwrap().as_name().unwrap(),
+            b"UseOutlines"
+        );
+
+        // Walks `first`, `Next`, and the children, checking Parent and Prev on the way.
+        fn walk(
+            document: &Document,
+            first: ObjectId,
+            parent: ObjectId,
+            depth: usize,
+            pages: &[ObjectId],
+            out: &mut Vec<(usize, String, usize)>,
+        ) {
+            let mut current = Some(first);
+            let mut previous: Option<ObjectId> = None;
+            while let Some(id) = current {
+                let item = document.get_dictionary(id).unwrap();
+                assert_eq!(item.get(b"Parent").unwrap().as_reference().unwrap(), parent);
+                match (previous, item.get(b"Prev")) {
+                    (Some(p), Ok(prev)) => assert_eq!(prev.as_reference().unwrap(), p),
+                    (None, Err(_)) => {}
+                    other => panic!("Prev {other:?}"),
+                }
+                let Object::String(title, _) = item.get(b"Title").unwrap() else {
+                    panic!("title")
+                };
+                let Object::Array(dest) = item.get(b"Dest").unwrap() else {
+                    panic!("dest")
+                };
+                let page = pages
+                    .iter()
+                    .position(|p| *p == dest[0].as_reference().unwrap())
+                    .unwrap();
+                assert_eq!(dest[1].as_name().unwrap(), b"Fit");
+                out.push((depth, pdf_text(title), page));
+                if let Ok(child) = item.get(b"First") {
+                    let before = out.len();
+                    walk(
+                        document,
+                        child.as_reference().unwrap(),
+                        id,
+                        depth + 1,
+                        pages,
+                        out,
+                    );
+                    let below = out.len() - before;
+                    assert_eq!(item.get(b"Count").unwrap().as_i64().unwrap(), below as i64);
+                    let last = item.get(b"Last").unwrap().as_reference().unwrap();
+                    assert!(document.get_dictionary(last).is_ok());
+                }
+                previous = Some(id);
+                current = item.get(b"Next").ok().map(|n| n.as_reference().unwrap());
+            }
+        }
+        let mut seen = Vec::new();
+        let first = root_dict.get(b"First").unwrap().as_reference().unwrap();
+        walk(&document, first, root, 0, &pages, &mut seen);
+        assert_eq!(
+            seen,
+            [
+                (0, "Classe".to_owned(), 0),
+                (1, "Cours d'électricité".to_owned(), 0),
+                (1, "TP".to_owned(), 1),
+                (0, "Autre".to_owned(), 2),
+            ]
+        );
+        let last = root_dict.get(b"Last").unwrap().as_reference().unwrap();
+        let last = document.get_dictionary(last).unwrap();
+        assert_eq!(
+            pdf_text(match last.get(b"Title").unwrap() {
+                Object::String(t, _) => t,
+                _ => panic!(),
+            }),
+            "Autre"
+        );
+
+        // Without an outline the document has none, and is the one `notes_to_pdf` writes.
+        let plain = notes_to_pdf(&[&n, &n, &n], &PdfOptions::default()).unwrap();
+        assert_eq!(
+            plain,
+            notes_to_pdf_with_outline(&[&n, &n, &n], &PdfOptions::default(), &[]).unwrap()
+        );
+        assert!(
+            Document::load_mem(&plain)
+                .unwrap()
+                .catalog()
+                .unwrap()
+                .get(b"Outlines")
+                .is_err()
+        );
     }
 
     /// Decodes a WebP file with the independent reader of `image-webp`: size, whether it has an

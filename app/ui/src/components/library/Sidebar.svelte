@@ -40,6 +40,8 @@
   /** Drop target under the pointer: a binder path, or null. */
   let dropTarget = $state<string | null>(null);
   let nameInput = $state<HTMLInputElement | null>(null);
+  /** The menu of each binder row, to open it with the right click. */
+  const menus: Record<string, { show: () => void } | null | undefined> = {};
   /** The binder being renamed or whose deletion awaits confirmation. */
   let editing = $state<{ path: string; mode: 'rename' | 'delete' } | null>(null);
 
@@ -180,15 +182,34 @@
         ondragenter={(event) => dragover(event, node.path)}
         ondragleave={() => dragleave(node.path)}
         ondrop={(event) => drop(event, node.path)}
+        oncontextmenu={(event) => {
+          event.preventDefault();
+          menus[node.path]?.show();
+        }}
       >
         <span class="nav-label">{node.name}</span>
         <span class="count">{node.count}</span>
       </button>
       <span class="row-tool binder-menu">
         <Menu
+          bind:this={menus[node.path]}
           label={t('library.binder.menu', { name: node.name })}
           items={[
             { id: 'rename', label: t('library.binder.rename'), onselect: () => (editing = { path: node.path, mode: 'rename' }) },
+            {
+              id: 'export-pdf',
+              label: t('library.binder.exportPdf'),
+              disabled: node.count === 0,
+              hint: t('library.binder.emptyHint'),
+              onselect: () => lib.openBinderDialog('export', node.path),
+            },
+            {
+              id: 'print',
+              label: t('library.binder.print'),
+              disabled: node.count === 0,
+              hint: t('library.binder.emptyHint'),
+              onselect: () => lib.openBinderDialog('print', node.path),
+            },
             { id: 'delete', label: t('library.binder.delete'), danger: true, onselect: () => (editing = { path: node.path, mode: 'delete' }) },
           ]}
         />

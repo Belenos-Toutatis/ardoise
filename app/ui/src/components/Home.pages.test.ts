@@ -9,7 +9,7 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppState } from '../lib/api';
 import { setLocale } from '../lib/i18n.svelte';
-import { mockLibrary, resetMockLibrary } from '../lib/mock-data';
+import { fileName, freshStamp, mockLibrary, notePath, resetMockLibrary } from '../lib/mock-data';
 import { resetMockNarration } from '../lib/mock-narration';
 import { resetMockShare } from '../lib/mock-share';
 import { resetMockTablet } from '../lib/mock-tablet';
@@ -174,6 +174,33 @@ describe('the editor\'s page buttons in the main window', () => {
     await view.shown(PHYSICS);
     expect(view.position()).toBe('2 / 2');
     expect(view.next()?.disabled).toBe(true);
+  });
+
+  it('follow the free order of a binder, its sub-binders after its own notes (Q20)', async () => {
+    const lib = mockLibrary();
+    const first = [...lib.notes.values()][0];
+    // `Classe` holds nothing of its own in the demo: two notes join it, and the order puts the later one first.
+    const add = (title: string, created: number) => {
+      const note = { ...first.note, id: `id-${title}`, title, created, modified: created, tags: [] };
+      const path = notePath(lib.root, 'Classe', fileName(note));
+      lib.notes.set(path, { note, stamp: freshStamp(), binder: 'Classe' });
+      return path;
+    };
+    const earlier = add('Premier', Date.UTC(2026, 9, 1));
+    const later = add('Second', Date.UTC(2026, 9, 2));
+    lib.orders.set('Classe', ['id-Second', 'id-Premier']);
+    const view = await render();
+    view.target.querySelector<HTMLElement>('[data-binder="Classe"]')!.click();
+    await settle();
+    await view.sortBy('binder');
+    expect(view.cards().map((c) => c.dataset.path)).toEqual([later, earlier, pathOf(PHYSICS)]);
+    await view.open('Second');
+    expect(view.position()).toBe('1 / 3');
+    view.next()!.click();
+    await view.shown('Premier');
+    view.next()!.click();
+    await view.shown(PHYSICS);
+    expect(view.position()).toBe('3 / 3');
   });
 
   it('are hidden when the search leaves only the open note', async () => {
