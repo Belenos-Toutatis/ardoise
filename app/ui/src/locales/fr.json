@@ -1015,7 +1015,10 @@
     },
     "width": {
       "label": "Épaisseur",
-      "value": "{mm} mm"
+      "value": "{mm} mm",
+      "thinner": "{label} : plus fin",
+      "thicker": "{label} : plus épais",
+      "typed": "{label} en millimètres"
     },
     "applyAll": {
       "label": "Appliquer à toute la note :",

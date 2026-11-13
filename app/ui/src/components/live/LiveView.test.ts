@@ -184,7 +184,7 @@ describe('live view (control window)', () => {
     slider.dispatchEvent(new Event('input', { bubbles: true }));
     slider.dispatchEvent(new Event('change', { bubbles: true }));
     await tick();
-    expect(view.target.textContent).toContain('3.0 mm');
+    expect(view.target.querySelector<HTMLInputElement>('.live-toolbar input.typed')!.value).toBe('3.00');
     // The pen writes with it.
     mockLiveTick(120);
     const subscribed = await api.liveSubscribe(() => {});

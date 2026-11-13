@@ -117,22 +117,32 @@
     void focusEntry(path);
   }
 
-  function dragover(event: DragEvent, binder: string) {
+  /**
+   * Where dragged notes can be dropped in this column: a binder (they move there), « Favoris » (they become
+   * favourites) or a tag (they get it). The last two were asked by the user on 2026-11-13.
+   */
+  type DropPlace = { kind: 'binder'; path: string } | { kind: 'favorites' } | { kind: 'tag'; tag: string };
+  const placeKey = (place: DropPlace) => (place.kind === 'binder' ? `b:${place.path}` : place.kind === 'tag' ? `t:${place.tag}` : 'f');
+  const binderPlace = (path: string): DropPlace => ({ kind: 'binder', path });
+
+  function dragover(event: DragEvent, place: DropPlace) {
     if (!lib.dragging) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    dropTarget = binder;
+    dropTarget = placeKey(place);
   }
 
-  function drop(event: DragEvent, binder: string) {
+  function drop(event: DragEvent, place: DropPlace) {
     if (!lib.dragging) return;
     event.preventDefault();
     dropTarget = null;
-    void lib.dropOn(binder);
+    if (place.kind === 'binder') void lib.dropOn(place.path);
+    else if (place.kind === 'favorites') void lib.dropOnFavorites();
+    else void lib.dropOnTag(place.tag);
   }
 
-  function dragleave(binder: string) {
-    if (dropTarget === binder) dropTarget = null;
+  function dragleave(place: DropPlace) {
+    if (dropTarget === placeKey(place)) dropTarget = null;
   }
 </script>
 
@@ -174,14 +184,14 @@
       <button
         type="button"
         class="nav-item"
-        class:drop={dropTarget === node.path}
+        class:drop={dropTarget === placeKey(binderPlace(node.path))}
         data-binder={node.path}
         aria-current={current(view)}
         onclick={() => lib.setView(view)}
-        ondragover={(event) => dragover(event, node.path)}
-        ondragenter={(event) => dragover(event, node.path)}
-        ondragleave={() => dragleave(node.path)}
-        ondrop={(event) => drop(event, node.path)}
+        ondragover={(event) => dragover(event, binderPlace(node.path))}
+        ondragenter={(event) => dragover(event, binderPlace(node.path))}
+        ondragleave={() => dragleave(binderPlace(node.path))}
+        ondrop={(event) => drop(event, binderPlace(node.path))}
         oncontextmenu={(event) => {
           event.preventDefault();
           menus[node.path]?.show();
@@ -257,14 +267,14 @@
       <button
         type="button"
         class="nav-item"
-        class:drop={dropTarget === ''}
+        class:drop={dropTarget === placeKey(binderPlace(''))}
         data-view="all"
         aria-current={current({ kind: 'all' })}
         onclick={() => lib.setView({ kind: 'all' })}
-        ondragover={(event) => dragover(event, '')}
-        ondragenter={(event) => dragover(event, '')}
-        ondragleave={() => dragleave('')}
-        ondrop={(event) => drop(event, '')}
+        ondragover={(event) => dragover(event, binderPlace(''))}
+        ondragenter={(event) => dragover(event, binderPlace(''))}
+        ondragleave={() => dragleave(binderPlace(''))}
+        ondrop={(event) => drop(event, binderPlace(''))}
       >
         <span class="nav-label">{t('library.all')}</span>
         <span class="count">{notes.length}</span>
@@ -274,7 +284,12 @@
       <button
         type="button"
         class="nav-item"
+        class:drop={dropTarget === 'f'}
         data-view="favorites"
+        ondragover={(event) => dragover(event, { kind: 'favorites' })}
+        ondragenter={(event) => dragover(event, { kind: 'favorites' })}
+        ondragleave={() => dragleave({ kind: 'favorites' })}
+        ondrop={(event) => drop(event, { kind: 'favorites' })}
         aria-current={current({ kind: 'favorites' })}
         onclick={() => lib.setView({ kind: 'favorites' })}
       >
@@ -316,7 +331,12 @@
               <button
                 type="button"
                 class="nav-item"
+                class:drop={dropTarget === placeKey({ kind: 'tag', tag: entry.tag })}
                 data-tag={entry.tag}
+                ondragover={(event) => dragover(event, { kind: 'tag', tag: entry.tag })}
+                ondragenter={(event) => dragover(event, { kind: 'tag', tag: entry.tag })}
+                ondragleave={() => dragleave({ kind: 'tag', tag: entry.tag })}
+                ondrop={(event) => drop(event, { kind: 'tag', tag: entry.tag })}
                 data-tag-color={color}
                 aria-current={current({ kind: 'tag', tag: entry.tag })}
                 onclick={() => lib.setView({ kind: 'tag', tag: entry.tag })}

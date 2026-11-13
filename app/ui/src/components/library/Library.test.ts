@@ -481,6 +481,48 @@ describe('library: drag and drop', () => {
     expect(ui.q('[data-binder="Classe/3e B"] .count')?.textContent).toBe('2');
   });
 
+  it('makes favourites of the notes dropped on « Favoris », and tags those dropped on a tag', async () => {
+    const ui = await render();
+    const favorites = ui.q('[data-view="favorites"]')!;
+    const before = Number(favorites.querySelector('.count')!.textContent);
+    await ui.click(ui.open('Réunion parents'), { ctrlKey: true });
+    await ui.click(ui.open('Liste de courses'), { ctrlKey: true });
+    ui.open('Liste de courses').dispatchEvent(ui.drag('dragstart'));
+    await ui.settle();
+    const over = ui.drag('dragover');
+    favorites.dispatchEvent(over);
+    await ui.settle();
+    expect(over.defaultPrevented).toBe(true);
+    expect(favorites.classList.contains('drop')).toBe(true);
+    favorites.dispatchEvent(ui.drag('drop'));
+    await ui.settle();
+    expect(favorites.classList.contains('drop')).toBe(false);
+    const after = Number(favorites.querySelector('.count')!.textContent);
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBeGreaterThanOrEqual(2);
+    // Dropped again: nothing changes, a favourite stays one.
+    ui.open('Liste de courses').dispatchEvent(ui.drag('dragstart'));
+    await ui.settle();
+    favorites.dispatchEvent(ui.drag('drop'));
+    await ui.settle();
+    expect(Number(favorites.querySelector('.count')!.textContent)).toBe(after);
+
+    const tag = ui.q('[data-tag="physique"]')!;
+    expect(tag.querySelector('.count')!.textContent).toBe('1');
+    ui.open('Liste de courses').dispatchEvent(ui.drag('dragstart'));
+    await ui.settle();
+    const overTag = ui.drag('dragover');
+    tag.dispatchEvent(overTag);
+    await ui.settle();
+    expect(overTag.defaultPrevented).toBe(true);
+    expect(tag.classList.contains('drop')).toBe(true);
+    tag.dispatchEvent(ui.drag('drop'));
+    await ui.settle();
+    expect(ui.q('[data-tag="physique"] .count')!.textContent).toBe('3');
+    // The notes stay in their binder.
+    expect(ui.titles()).toContain('Liste de courses');
+  });
+
   it('drags the whole selection when the dragged card is part of it', async () => {
     const ui = await render();
     await ui.click(ui.open('Réunion parents'), { ctrlKey: true });

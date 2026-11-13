@@ -500,6 +500,24 @@ export class LibraryState {
     if (paths.length > 0) await this.moveNotes(paths, binder);
   }
 
+  /** The dragged notes are dropped on « Favoris »: they become favourites (those that are already stay so). */
+  async dropOnFavorites(): Promise<void> {
+    const notes = this.draggedNotes();
+    this.endDrag();
+    if (notes.length > 0) await this.setFavorite(notes, true);
+  }
+
+  /** The dragged notes are dropped on a tag of the sidebar: they get that tag (it is never taken off this way). */
+  async dropOnTag(tag: string): Promise<void> {
+    const notes = this.draggedNotes();
+    this.endDrag();
+    if (notes.length > 0) await this.addTags(notes, tag);
+  }
+
+  private draggedNotes(): NoteSummary[] {
+    return this.dragPaths.map((p) => this.notes.find((n) => n.path === p)).filter((n): n is NoteSummary => n !== undefined);
+  }
+
   // --- Thumbnails ----------------------------------------------------------------------------
 
   thumbnail(path: string, stamp: FileStamp): Promise<string | null> {

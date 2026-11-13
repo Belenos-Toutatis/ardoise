@@ -8,6 +8,7 @@
    */
   import { sameColor } from '../../lib/editor/colors';
   import { t } from '../../lib/i18n.svelte';
+  import WidthControl from '../WidthControl.svelte';
   import { TOOLS, type Tool } from '../../lib/ink';
   import type { LiveStyle } from '../../lib/live';
   import { MAX_LIVE_WIDTH, MIN_LIVE_WIDTH } from '../../lib/live-computer-style';
@@ -101,20 +102,18 @@
           ></button>
         {/each}
       </div>
-      <label class="field">
+      <div class="field" role="group" aria-label={t('live.width')}>
         <span class="label">{t('live.width')}</span>
         <span class="slider">
-          <input
-            type="range"
+          <WidthControl
+            value={style.width}
             min={MIN_LIVE_WIDTH}
             max={MAX_LIVE_WIDTH}
-            step="5"
-            value={style.width}
-            oninput={(e) => onchange({ ...style, width: Number(e.currentTarget.value) })}
+            label={t('live.width')}
+            onchange={(width) => onchange({ ...style, width })}
           />
-          <span class="value">{t('editor.width.value', { mm: mm(style.width) })}</span>
         </span>
-      </label>
+      </div>
     </div>
   {/if}
 </span>
@@ -197,8 +196,7 @@
     outline-offset: 2px;
   }
 
-  .swatch:focus-visible,
-  .slider input:focus-visible {
+  .swatch:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
@@ -207,16 +205,5 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-  }
-
-  .slider input {
-    width: 10rem;
-  }
-
-  .value {
-    min-width: 4.5rem;
-    color: var(--muted);
-    font-size: 0.875rem;
-    font-variant-numeric: tabular-nums;
   }
 </style>

@@ -1015,7 +1015,10 @@
     },
     "width": {
       "label": "Width",
-      "value": "{mm} mm"
+      "value": "{mm} mm",
+      "thinner": "{label}: thinner",
+      "thicker": "{label}: thicker",
+      "typed": "{label} in millimetres"
     },
     "applyAll": {
       "label": "Apply to the whole note:",

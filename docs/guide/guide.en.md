@@ -986,7 +986,9 @@ comes back as soon as you open a binder again.
 
 Select one or several notes, click **Tags…**, type a tag (several, separated by a comma) and click **Add**; an existing
 tag is removed with its cross. A click on a tag in the sidebar, or on a card's tag, shows only the notes that carry it.
-The star of a card (or **Add to favourites**) adds it to the **Favourites**.
+The star of a card (or **Add to favourites**) adds it to the **Favourites**. You can also drag a card (or the whole
+selection) onto **Favourites** or onto a tag of the sidebar: the notes become favourites, or get that tag, and stay in
+their binder.
 
 *Tag colours.* The small dot next to a tag, in the sidebar and in the **Tags…** panel (under **Existing tags**), opens a
 palette of eight colours, readable in the light theme as in the dark one: **Red**, **Orange**, **Yellow**, **Green**,
@@ -1149,7 +1151,9 @@ The toolbar offers these tools (**Tool**):
 
 - **Pen**: choose the **Ink** (**Ballpoint pen**, **Fountain pen**, **Felt-tip pen**, **Pencil**, **Brush**,
   **Highlighter**, **Chalk**), the **Colour** (**Black**, **Blue**, **Green**, **Purple**, **Red**, **Orange**, **Grey**,
-  or **Choose another colour**; custom colours are remembered) and the **Width**. The stroke's width follows the pen's
+  or **Choose another colour**; custom colours are remembered) and the **Width**. The width is set three
+  ways: the slider for speed, the **−** and **+** buttons for steps of 0.05 mm, or the value typed in millimetres in the
+  field (0.10 to 10 mm, with a comma or a point). The stroke's width follows the pen's
   pressure. **Apply to the whole note:** **Colour**, **Ink** or **Width** changes all the strokes at once.
 - **Line**, **Rectangle**, **Ellipse**: clean shapes drawn with a drag (see **Drawing a line, a rectangle, an ellipse**,
   below).

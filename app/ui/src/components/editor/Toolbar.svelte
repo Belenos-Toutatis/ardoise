@@ -5,6 +5,7 @@
    * the page's template (docs/design/shape-tools.md).
    */
   import { INKSPACE_COLOR_NAMES, sameColor, toHex, fromHex } from '../../lib/editor/colors';
+  import WidthControl from '../WidthControl.svelte';
   import { shapePrefs, type ShapeToggle } from '../../lib/editor/shape-prefs.svelte';
   import { isShapeKind } from '../../lib/editor/shape-tools';
   import type { EraserMode, Mode, ToolSettings } from '../../lib/editor/state';
@@ -276,20 +277,16 @@
       </label>
     </div>
 
-    <label class="group slider">
+    <div class="group slider" role="group" aria-label={t('editor.width.label')}>
       <span>{t('editor.width.label')}</span>
-      <input
-        type="range"
-        min="10"
-        max="1000"
-        step="5"
+      <WidthControl
         value={tools.width}
         disabled={locked}
-        oninput={(e) => onwidth(Number(e.currentTarget.value), false)}
-        onchange={(e) => onwidth(Number(e.currentTarget.value), true)}
+        label={t('editor.width.label')}
+        oninput={(width) => onwidth(width, false)}
+        onchange={(width) => onwidth(width, true)}
       />
-      <span class="value">{t('editor.width.value', { mm: mm(tools.width) })}</span>
-    </label>
+    </div>
 
     <div class="group apply" role="group" aria-label={t('editor.applyAll.label')}>
       <span class="label">{hasSelection ? t('editor.applyAll.selectionHint') : t('editor.applyAll.label')}</span>

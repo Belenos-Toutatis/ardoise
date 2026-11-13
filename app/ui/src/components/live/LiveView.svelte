@@ -55,6 +55,7 @@
   import { refit, turnImageAlone, type ImageFit } from '../../lib/background';
   import { INKSPACE_COLOR_NAMES, sameColor } from '../../lib/editor/colors';
   import { currentLocale, t } from '../../lib/i18n.svelte';
+  import WidthControl from '../WidthControl.svelte';
   import { TOOLS, loadInk, type Ink, type Tool } from '../../lib/ink';
   import { LatencyRecorder, exposeLatency } from '../../lib/latency';
   import type {
@@ -1057,19 +1058,15 @@
           ></button>
         {/each}
       </div>
-      <label class="group slider">
+      <div class="group slider" role="group" aria-label={t('live.width')}>
         <span class="label">{t('live.width')}</span>
-        <input
-          type="range"
-          min="10"
-          max="1000"
-          step="5"
+        <WidthControl
           value={live.style.width}
-          oninput={(e) => live.previewStyle({ ...live.style, width: Number(e.currentTarget.value) })}
-          onchange={(e) => setStyle({ ...live.style, width: Number(e.currentTarget.value) })}
+          label={t('live.width')}
+          oninput={(width) => live.previewStyle({ ...live.style, width })}
+          onchange={(width) => setStyle({ ...live.style, width })}
         />
-        <span class="value">{t('editor.width.value', { mm: mm(live.style.width) })}</span>
-      </label>
+      </div>
     </div>
 
     <div class="group" role="group" aria-label={t('live.pages.label')}>
@@ -1665,7 +1662,6 @@
     width: 8rem;
   }
 
-  .value,
   .page-position {
     min-width: 4.5rem;
     color: var(--muted);

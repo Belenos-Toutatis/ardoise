@@ -1047,7 +1047,9 @@ la plus récente d'abord ; votre choix revient dès que vous rouvrez un classeur
 Sélectionnez une ou plusieurs notes, cliquez sur **Étiquettes…**, tapez une étiquette (plusieurs, séparées par une
 virgule) et cliquez sur **Ajouter** ; une étiquette existante se retire avec sa croix. Un clic sur une étiquette de la
 barre latérale, ou sur celle d'une carte, n'affiche que les notes qui la portent. L'étoile d'une carte (ou
-**Mettre en favoris**) ajoute aux **Favoris**.
+**Mettre en favoris**) ajoute aux **Favoris**. Vous pouvez aussi faire glisser une carte (ou toute la sélection) sur
+**Favoris** ou sur une étiquette de la barre latérale : les notes deviennent des favoris, ou reçoivent cette étiquette,
+sans changer de classeur.
 
 *Couleurs des étiquettes.* Le petit rond à côté d'une étiquette, dans la barre latérale et dans le panneau
 **Étiquettes…** (sous **Étiquettes existantes**), ouvre une palette de huit couleurs, lisibles en thème clair comme en
@@ -1222,7 +1224,9 @@ La barre d'outils propose les outils suivants (**Outil**) :
 
 - **Stylo** : choisissez l'**Encre** (**Stylo à bille**, **Stylo plume**, **Feutre**, **Crayon**, **Pinceau**,
   **Surligneur**, **Craie**), la **Couleur** (**Noir**, **Bleu**, **Vert**, **Violet**, **Rouge**, **Orange**, **Gris**,
-  ou **Choisir une autre couleur** ; les couleurs personnalisées sont mémorisées) et l'**Épaisseur**. L'épaisseur du trait
+  ou **Choisir une autre couleur** ; les couleurs personnalisées sont mémorisées) et l'**Épaisseur**. L'épaisseur se règle de
+  trois façons : la glissière pour aller vite, les boutons **−** et **+** pour avancer de 0,05 mm, ou la valeur tapée en
+  millimètres dans le champ (de 0,10 à 10 mm, avec une virgule ou un point). L'épaisseur du trait
   suit la pression du stylet. **Appliquer à toute la note :** **Couleur**, **Encre** ou **Épaisseur** change tous les
   traits d'un coup.
 - **Ligne**, **Rectangle**, **Ellipse** : des formes nettes, tracées d'un glissé (voir **Tracer une ligne, un rectangle,
