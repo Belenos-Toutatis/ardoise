@@ -1253,6 +1253,17 @@ impl LiveHub {
         self.change(|_| true, change).unwrap();
     }
 
+    /// Holds the saver until the guard is dropped: a pass under way ends first, and none starts
+    /// meanwhile. For a test that changes the library folder in several steps, which no pass must
+    /// see half done.
+    #[cfg(test)]
+    pub fn hold_saves(&self) -> MutexGuard<'_, ()> {
+        self.shared
+            .saving
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// The session as it is now, as the first events of a subscription give it: the snapshot,
     /// then the stroke in progress and the marks written over the presentation. The frozen
     /// image of a paused share on the network.

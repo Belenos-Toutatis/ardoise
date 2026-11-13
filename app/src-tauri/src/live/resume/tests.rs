@@ -1770,7 +1770,7 @@ fn a_page_that_cannot_be_written_has_a_complete_backup_copy() {
     let before = library.read(&path).unwrap().file;
     let hub = LiveHub::new(config());
     let mut sink = resume(&hub, &library, &path, A5);
-    break_folder(&root, true);
+    break_folder(&hub, &root, true);
     stroke(&mut sink, 3000, 5);
     let copies = hub.back_up_unsaved(&dir.path().join("backup"));
     assert_eq!(copies.len(), 1);
@@ -1785,7 +1785,7 @@ fn a_page_that_cannot_be_written_has_a_complete_backup_copy() {
     assert_eq!(copy.note.background_image, before.note.background_image);
     assert!(copy.original_note.is_some());
     // Once the library is back the page goes to its note, which was not touched meanwhile.
-    break_folder(&root, false);
+    break_folder(&hub, &root, false);
     hub.stop().unwrap();
     assert_eq!(stroke_count(&library, &path), Some(3));
 }
@@ -2055,7 +2055,7 @@ fn a_sound_that_goes_in_no_note_is_kept_as_a_copy_and_the_error_says_where() {
     });
     let session = hub.page_position().unwrap().session;
 
-    break_folder(&root, true);
+    break_folder(&hub, &root, true);
     let error = hub
         .attach_narration(session, 0, note_narration(1.0, 8_000))
         .unwrap_err();
@@ -2073,7 +2073,7 @@ fn a_sound_that_goes_in_no_note_is_kept_as_a_copy_and_the_error_says_where() {
         .attach_narration(session, 0, note_narration(1.0, 8_000))
         .unwrap_err();
     assert!(matches!(error, LiveError::NarrationLost { .. }), "{error}");
-    break_folder(&root, false);
+    break_folder(&hub, &root, false);
     hub.stop().unwrap();
 }
 

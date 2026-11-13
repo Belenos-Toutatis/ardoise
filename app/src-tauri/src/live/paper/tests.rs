@@ -1047,14 +1047,14 @@ fn a_page_that_cannot_be_written_is_backed_up_with_its_image() {
     let hub = LiveHub::new(config());
     let staging = Staging::default();
     let _sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
-    break_folder(&root, true);
+    break_folder(&hub, &root, true);
     let (key, member) = stage(&staging, 40, 20);
     let image = placed("fiche.png", A5, (40, 20), ImageFit::Contain);
     hub.change_page_image(0, set_op(&key, &image), &staging)
         .unwrap();
     assert!(hub.stop().is_err());
     let copies = hub.back_up_unsaved(&dir.path().join("live-backup"));
-    break_folder(&root, false);
+    break_folder(&hub, &root, false);
     assert_eq!(copies.len(), 1);
     let path = copies[0].1.as_ref().unwrap();
     let file = ardoise_core::format::read_note(path).unwrap();

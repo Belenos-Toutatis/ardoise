@@ -673,30 +673,23 @@ fn a_stopped_session_no_longer_changes_its_notes() {
     assert_eq!(hub.snapshot().page_count, 2);
 }
 
-/// Makes the folder of `library` unusable (a file takes its place), or usable again.
-pub(super) fn break_folder(root: &Path, broken: bool) {
+/// Makes the folder of the library at `root` unusable (a file takes its place), or usable again.
+///
+/// The saver of `hub` is held meanwhile. Each way takes two steps, and the folder is absent
+/// between them: a pass of the saver at that moment takes the page's note for deleted and writes
+/// the page as a new note, in a folder it creates again. The page then never goes to its own note
+/// (`a_page_that_cannot_be_written_has_a_complete_backup_copy` failed that way about once in a
+/// hundred runs, more often on a busy PC), or the folder cannot be put back.
+pub(super) fn break_folder(hub: &LiveHub, root: &Path, broken: bool) {
+    let _held = hub.hold_saves();
     let away = root.with_extension("away");
     if broken {
         std::fs::rename(root, &away).unwrap();
         std::fs::write(root, b"not a folder").unwrap();
-        return;
+    } else {
+        std::fs::remove_file(root).unwrap();
+        std::fs::rename(&away, root).unwrap();
     }
-    std::fs::remove_file(root).unwrap();
-    // The live writer keeps retrying in the background and may recreate the folder (and write
-    // the page into it) between the two calls: move what it wrote into the real folder, retry.
-    for _ in 0..50 {
-        match std::fs::rename(&away, root) {
-            Ok(()) => return,
-            Err(_) if root.is_dir() => {
-                for entry in std::fs::read_dir(root).unwrap().flatten() {
-                    let _ = std::fs::rename(entry.path(), away.join(entry.file_name()));
-                }
-                let _ = std::fs::remove_dir(root);
-            }
-            Err(error) => panic!("cannot put the library folder back: {error}"),
-        }
-    }
-    panic!("the library folder kept being recreated");
 }
 
 fn save_failures(window: &Window) -> Vec<usize> {
@@ -723,7 +716,7 @@ fn a_page_that_cannot_be_written_is_shown_and_backed_up_when_the_app_closes() {
     let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
 
     // The library cannot be written: the windows are told once, however often it is retried.
-    break_folder(&root, true);
+    break_folder(&hub, &root, true);
     stroke(&mut sink, 3000, 5);
     wait_until("the failure", || !save_failures(&window).is_empty());
     std::thread::sleep(config().save_interval * 4);
@@ -745,14 +738,14 @@ fn a_page_that_cannot_be_written_is_shown_and_backed_up_when_the_app_closes() {
     });
 
     // It can be written again: `saved` follows, the failure is over.
-    break_folder(&root, false);
+    break_folder(&hub, &root, false);
     wait_until("the note", || notes_in(&library).len() == 1);
     wait_until("the saved event", || {
         window.has(|e| matches!(e, LiveEvent::Saved { paths } if paths.len() == 1))
     });
 
     // It fails again: told again (once); a page written meanwhile does not hide it.
-    break_folder(&root, true);
+    break_folder(&hub, &root, true);
     stroke(&mut sink, 4000, 5);
     wait_until("the second failure", || save_failures(&window) == [0, 0]);
     std::thread::sleep(config().save_interval * 3);
@@ -776,7 +769,7 @@ fn a_page_that_cannot_be_written_is_shown_and_backed_up_when_the_app_closes() {
     );
 
     // Nothing left to save: nothing backed up.
-    break_folder(&root, false);
+    break_folder(&hub, &root, false);
     assert_eq!(hub.stop().unwrap().len(), 1);
     assert!(super::close_session(&hub, &backup).is_empty());
     assert!(super::backup_dir().ends_with(Path::new("Ardoise").join("live-backup")));
@@ -824,10 +817,10 @@ fn the_activity_follows_every_start_and_end_of_live_mode() {
     // Stopped while the pages cannot be written: live mode has ended all the same.
     let mut sink = start(&hub, options(&library, fixed(LiveButton::NewPage)));
     stroke(&mut sink, 3000, 5);
-    break_folder(&root, true);
+    break_folder(&hub, &root, true);
     let _ = hub.stop();
     assert!(!activity.live());
-    break_folder(&root, false);
+    break_folder(&hub, &root, false);
 
     // The app closes while live mode runs.
     start(&hub, options(&library, fixed(LiveButton::NewPage)));
@@ -1710,7 +1703,7 @@ fn the_narration_of_a_page_is_written_with_it_and_kept_on_later_writes() {
     let broken = Library::open(&root).unwrap();
     let hub = LiveHub::new(config());
     let mut sink = start(&hub, options(&broken, fixed(LiveButton::NewPage)));
-    break_folder(&root, true);
+    break_folder(&hub, &root, true);
     stroke(&mut sink, 3000, 5);
     assert!(hub.set_page_audio(0, audio.clone()));
     let copies = hub.back_up_unsaved(&dir.path().join("backup"));
@@ -1721,7 +1714,7 @@ fn the_narration_of_a_page_is_written_with_it_and_kept_on_later_writes() {
         Some(audio.clone())
     );
     // Written once the library is back, with its narration.
-    break_folder(&root, false);
+    break_folder(&hub, &root, false);
     let saved = hub.stop().unwrap();
     assert_eq!(audio_of(&broken, Path::new(&saved[0])), Some(audio));
 }
