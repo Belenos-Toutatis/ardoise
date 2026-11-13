@@ -25,6 +25,13 @@
    * times from `strokeClock` (the sound's clock); otherwise it goes after the note's ink and the end of a note-time
    * narration (`nextStrokeBase`). The stroke in progress is told to `oninprogress` (the projection streams it), what
    * the canvas shows of the page to `onvisible`, and the projected area is drawn as a dashed frame (`projected`).
+   *
+   * Page objects (docs/design/page-objects.md): text frames are drawn with their layer, after its strokes
+   * (`drawItems`), from the glyphs of `ardoise-text` (`ink.text`), placed by their transform. The lasso and a click
+   * take them with the strokes (a frame whose centre is in the lasso; a click on its box, above the strokes of its
+   * layer), and a move or a resize carries them. With the text tool, a tap on the page (a pen, the mouse or a finger)
+   * asks for a new frame there, or to type in the frame under it (`ontext`); a double click on a frame with the
+   * selection tool asks the same. The frame being typed (`editing`) gets its field (`TextField`) over it.
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api';
@@ -41,6 +48,9 @@
     type Vec,
   } from '../../lib/editor/geometry';
   import { drawingOrder, hitStroke, onLayer, selectInLasso } from '../../lib/editor/hit';
+  import { contentPoint, drawItems, hitObject, objectTransform, objectsInLasso, objectsOf, textAt, textStyle } from '../../lib/editor/objects';
+  import { offsetAt } from '../../lib/text';
+  import TextField from './TextField.svelte';
   import {
     PenPresence,
     TouchGestures,
@@ -60,7 +70,9 @@
     canDraw,
     crop,
     erase,
+    hasSelection,
     inksNewStrokes,
+    objectSelection,
     select,
     selectionBounds,
     transformSelection,
@@ -90,7 +102,7 @@
   import { nextStrokeBase, type StrokeClock } from '../../lib/editor/writing-clock';
   import { t } from '../../lib/i18n.svelte';
   import type { Ink, InkPoint } from '../../lib/ink';
-  import { cssColor, type Stroke } from '../../lib/note';
+  import { cssColor, isTextObject, type Stroke, type TextObject } from '../../lib/note';
   import type { InProgress } from '../../lib/projection-feed';
   import type { NarrationInfo } from '../../lib/video';
 
@@ -113,6 +125,10 @@
     oninprogress,
     onvisible,
     projected = null,
+    editing = null,
+    ontext,
+    ontextinput,
+    ontextblur,
   }: {
     doc: Doc;
     tools: ToolSettings;
@@ -156,6 +172,17 @@
     onvisible?: (rect: Rect) => void;
     /** The area the projection shows (page units), drawn as a dashed frame; null: none. */
     projected?: Rect | null;
+    /**
+     * The text frame being typed: its index in the note's objects, where the caret starts, and a number that changes
+     * with each editing (a new field then); null: none.
+     */
+    editing?: { index: number; caret: number | null; session: number } | null;
+    /** A tap with the text tool (or a double click on a frame): a new frame at `at`, or typing in frame `index`. */
+    ontext?: (request: { kind: 'new'; at: Vec } | { kind: 'edit'; index: number; caret: number }) => void;
+    /** What the frame being typed now holds. */
+    ontextinput?: (text: string) => void;
+    /** The field of the frame being typed lost the focus. */
+    ontextblur?: () => void;
   } = $props();
 
   /** Screen pixels per device unit at real size (96 dpi, 10 µm units). */
@@ -164,6 +191,10 @@
 
   /** A shape shorter than this on screen, in pixels, is a click: nothing is drawn. */
   const MIN_SHAPE_PX = 4;
+  /** A press of the text tool that moves less than this, in screen pixels, is a tap. */
+  const TAP_PX = 8;
+  /** A finger's tap with the text tool lasts less than this, milliseconds (longer, it was meant to move the page). */
+  const TAP_MS = 600;
 
   /** What a lasso does to the selection: replace it, add to it (Shift), remove from it (Ctrl). */
   type Combine = 'replace' | 'add' | 'remove';
@@ -180,7 +211,9 @@
     | { kind: 'zone'; id: number; points: Vec[] }
     | { kind: 'move'; id: number; start: Vec }
     | { kind: 'scale'; id: number; anchor: Vec; start: Vec }
-    | { kind: 'crop'; id: number; start: Vec };
+    | { kind: 'crop'; id: number; start: Vec }
+    /** The text tool: a press that is a tap when it ends where it began (screen pixels). */
+    | { kind: 'text'; id: number; start: Vec; screen: Vec };
 
   let stage = $state<HTMLDivElement>();
   let svg = $state<SVGSVGElement>();
@@ -226,14 +259,55 @@
   /** Which note the stroke goes to while splitting; null when not splitting. */
   type Side = 'kept' | 'moved' | null;
 
+  /** The glyphs of a text frame, cached per frame object (an edit makes a new object). */
+  const glyphs = new WeakMap<TextObject, string>();
+  function glyphPath(object: TextObject): string {
+    let d = glyphs.get(object);
+    if (d === undefined) {
+      d = ink.text.path(object.text, textStyle(object));
+      glyphs.set(object, d);
+    }
+    return d;
+  }
+
+  type Item = {
+    i: number;
+    d: string;
+    fill: string;
+    highlighter: boolean;
+    selected: boolean;
+    side: Side;
+    faded: boolean;
+    /** A page object: its index and its transform; absent for a stroke. */
+    object?: { transform: string };
+  };
+
   const items = $derived.by(() => {
     const note = shown.note;
     const selected = new Set(shown.selection);
+    const selectedObjects = new Set(objectSelection(shown));
     // Nothing to highlight yet (no zone traced): the page stays as it is.
     const preview = split && split.preview.movedCount > 0 ? split.preview : null;
-    const out: { i: number; d: string; fill: string; highlighter: boolean; selected: boolean; side: Side; faded: boolean }[] = [];
+    const out: Item[] = [];
     const faded = new Set(straighten?.sources);
-    for (const i of drawingOrder(note)) {
+    const objects = objectsOf(note);
+    for (const item of drawItems(note, drawingOrder(note))) {
+      if (item.kind === 'object') {
+        const object = objects[item.index];
+        if (!object || !isTextObject(object)) continue;
+        out.push({
+          i: item.index,
+          d: glyphPath(object),
+          fill: cssColor(object.color),
+          highlighter: false,
+          selected: selectedObjects.has(item.index),
+          faded: false,
+          side: !preview ? null : preview.movedObjects.has(item.index) ? 'moved' : 'kept',
+          object: { transform: objectTransform(object) },
+        });
+        continue;
+      }
+      const i = item.index;
       const stroke = note.strokes[i];
       const base = {
         i,
@@ -252,6 +326,47 @@
     }
     return out;
   });
+
+  /** The frame being typed, while it is one. */
+  const editedObject = $derived.by(() => {
+    if (!editing) return null;
+    const object = objectsOf(shown.note)[editing.index];
+    return object && isTextObject(object) ? object : null;
+  });
+
+  /** The SVG transform of a drawn item: the drag's (a selection moved or resized), then the object's own. */
+  function itemTransform(item: Item): string | undefined {
+    const drag = item.selected && dragAffine ? svgMatrix(dragAffine) : '';
+    const own = item.object?.transform ?? '';
+    const both = [drag, own].filter(Boolean).join(' ');
+    return both || undefined;
+  }
+
+  /** A tap with the text tool at `p`: typing in the frame of the chosen layer under it, or a new frame there. */
+  function textTap(p: Vec) {
+    const note = doc.note;
+    const hit = textAt(note, p, 6 / view.scale, doc.activeLayer);
+    const object = hit === null ? null : objectsOf(note)[hit];
+    if (hit !== null && object && isTextObject(object)) {
+      const local = contentPoint(object, p);
+      ontext?.({ kind: 'edit', index: hit, caret: offsetAt(ink.text.layout(object.text, textStyle(object)), local.x, local.y) });
+    } else {
+      ontext?.({ kind: 'new', at: p });
+    }
+  }
+
+  /** A double click with the selection tool on a text frame of the chosen layer: typing in it. */
+  function ondblclick(e: MouseEvent) {
+    if (readonly || split || tools.mode !== 'select' || !ontext) return;
+    const p = pagePoint(e);
+    const hit = textAt(doc.note, p, 6 / view.scale, doc.activeLayer);
+    if (hit === null) return;
+    e.preventDefault();
+    textTap(p);
+  }
+
+  /** A finger that navigates, put down with the text tool: a tap if it is lifted soon, where it went down. */
+  let fingerTap: { id: number; start: Vec; screen: Vec; time: number } | null = null;
 
   /** The straightened shapes of the setting's preview, as centre lines (a few strokes at most, not cached). */
   const previewLines = $derived(
@@ -471,12 +586,12 @@
    */
   let barrelPicked = $state(false);
   $effect(() => {
-    if (doc.selection.length === 0) barrelPicked = false;
+    if (!hasSelection(doc)) barrelPicked = false;
   });
-  const barrelActive = $derived(barrelPicked && doc.selection.length > 0 && tools.mode !== 'select');
+  const barrelActive = $derived(barrelPicked && hasSelection(doc) && tools.mode !== 'select');
   /** The selection can be grabbed: with the selection tool, or after a barrel-button lasso. */
   const grabbable = $derived(
-    !readonly && !split && doc.selection.length > 0 && (tools.mode === 'select' || (barrelActive && (inksNewStrokes(tools.mode) || tools.mode === 'eraser'))),
+    !readonly && !split && hasSelection(doc) && (tools.mode === 'select' || (barrelActive && (inksNewStrokes(tools.mode) || tools.mode === 'eraser'))),
   );
 
   /**
@@ -539,6 +654,8 @@
       if (!fingerDraws()) {
         e.preventDefault();
         capture(id);
+        // The text tool: a finger's tap places a frame (or types in one), a drag moves the page.
+        fingerTap = tools.mode === 'text' && !readonly && !split ? { id, start: pagePoint(e), screen: local(e), time: e.timeStamp } : null;
         // A finger on the selection moves or resizes it instead of panning the page.
         const grab = e.button === 0 ? grabAt(e) : null;
         if (grab) {
@@ -634,6 +751,9 @@
       case 'crop':
         begin({ kind: 'crop', id, start: p });
         cropRect = rectFromCorners(p, p);
+        break;
+      case 'text':
+        begin({ kind: 'text', id, start: p, screen: local(e) });
         break;
       default:
         break;
@@ -732,6 +852,12 @@
       if (cancelled) fingers.cancel(pointerId(e));
       else action = fingers.up(pointerId(e), e.timeStamp, touchOptions());
       if (action) applyTouch(action);
+      const tap = fingerTap;
+      if (tap && tap.id === pointerId(e)) {
+        fingerTap = null;
+        const at = local(e);
+        if (!cancelled && Math.hypot(at.x - tap.screen.x, at.y - tap.screen.y) < TAP_PX && e.timeStamp - tap.time < TAP_MS) textTap(tap.start);
+      }
     }
     finish(e, cancelled);
   }
@@ -791,23 +917,26 @@
         lasso = null;
         if (cancelled) break;
         const bounds = boundsOfPoints(d.points);
-        // The selection takes strokes of the chosen layer only.
+        // The selection takes strokes and objects of the chosen layer only.
         const chosen = onLayer(doc.note, doc.activeLayer);
         let picked: number[];
+        let pickedObjects: number[];
         if (!bounds || Math.max(bounds.width, bounds.height) * view.scale < 4) {
-          const hit = hitStroke(chosen, d.points[0], 6 / view.scale);
+          // A click: a text frame is above the strokes of its layer.
+          const frame = hitObject(doc.note, d.points[0], 6 / view.scale, doc.activeLayer);
+          const hit = frame === null ? hitStroke(chosen, d.points[0], 6 / view.scale) : null;
           picked = hit === null ? [] : [hit];
+          pickedObjects = frame === null ? [] : [frame];
         } else {
           picked = selectInLasso(chosen, d.points);
+          pickedObjects = objectsInLasso(doc.note, d.points, doc.activeLayer);
         }
-        const next =
-          d.combine === 'add'
-            ? [...doc.selection, ...picked]
-            : d.combine === 'remove'
-              ? doc.selection.filter((i) => !picked.includes(i))
-              : picked;
-        onselect(select(doc, next));
-        barrelPicked = !!d.barrel && next.length > 0;
+        const combineWith = (current: readonly number[], found: number[]) =>
+          d.combine === 'add' ? [...current, ...found] : d.combine === 'remove' ? current.filter((i) => !found.includes(i)) : found;
+        const next = combineWith(doc.selection, picked);
+        const nextObjects = combineWith(objectSelection(doc), pickedObjects);
+        onselect(select(doc, next, nextObjects));
+        barrelPicked = !!d.barrel && next.length + nextObjects.length > 0;
         break;
       }
       case 'zone': {
@@ -830,6 +959,11 @@
           onchange(crop(doc, rect));
           oncropped?.();
         }
+        break;
+      }
+      case 'text': {
+        const at = local(e);
+        if (!cancelled && Math.hypot(at.x - d.screen.x, at.y - d.screen.y) < TAP_PX) textTap(d.start);
         break;
       }
       case 'pan':
@@ -864,6 +998,7 @@
     }}
     onpointerleave={leave}
     oncontextmenu={noPenMenu}
+    {ondblclick}
   >
     <rect class="sheet" x="0" y="0" width={page.width} height={page.height} />
     {#if background}
@@ -871,17 +1006,31 @@
     {/if}
     <g class="ink">
       {#each items as item}
-        <path
-          d={item.d}
-          fill={item.fill}
-          fill-rule="nonzero"
-          data-stroke={item.i}
-          class:highlighter={item.highlighter}
-          class:split-kept={item.side === 'kept'}
-          class:split-moved={item.side === 'moved'}
-          class:straighten-faded={item.faded}
-          transform={item.selected && dragAffine ? svgMatrix(dragAffine) : undefined}
-        />
+        {#if item.object}
+          <path
+            d={item.d}
+            fill={item.fill}
+            fill-rule="nonzero"
+            data-object={item.i}
+            class="text-frame"
+            class:editing={editing?.index === item.i}
+            class:split-kept={item.side === 'kept'}
+            class:split-moved={item.side === 'moved'}
+            transform={itemTransform(item)}
+          />
+        {:else}
+          <path
+            d={item.d}
+            fill={item.fill}
+            fill-rule="nonzero"
+            data-stroke={item.i}
+            class:highlighter={item.highlighter}
+            class:split-kept={item.side === 'kept'}
+            class:split-moved={item.side === 'moved'}
+            class:straighten-faded={item.faded}
+            transform={itemTransform(item)}
+          />
+        {/if}
       {/each}
       {#if livePath}
         <path
@@ -944,6 +1093,18 @@
       />
     {/if}
   </svg>
+  {#if editing && editedObject}
+    {#key editing.session}
+      <TextField
+        object={editedObject}
+        {view}
+        engine={ink.text}
+        caret={editing.caret}
+        oninput={(text) => ontextinput?.(text)}
+        onblur={() => ontextblur?.()}
+      />
+    {/key}
+  {/if}
   <div class="zoom" role="group" aria-label={t('editor.zoom.label')}>
     <button class="button ghost" type="button" title={t('editor.zoom.out')} aria-label={t('editor.zoom.out')} onclick={() => zoomBy(1 / 1.25)}>−</button>
     <span class="zoom-level" aria-live="polite">{t('editor.zoom.level', { percent: zoomPercent })}</span>
@@ -994,6 +1155,10 @@
   .mode-eraser,
   .eraser-end {
     cursor: none;
+  }
+
+  .mode-text {
+    cursor: text;
   }
 
   .mode-pan,

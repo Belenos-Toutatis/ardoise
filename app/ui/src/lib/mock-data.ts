@@ -4,7 +4,7 @@
  * (opening and saving notes).
  */
 import type { InkPoint, Tool } from './ink';
-import type { AutoExportSettings, FileStamp, Note, Rgba, RevisionEntry, Stroke, TrashEntry } from './note';
+import type { AutoExportSettings, FileStamp, Note, Rgba, RevisionEntry, Stroke, TextObject, TrashEntry } from './note';
 import type { NoteOriginal } from './original';
 
 /** Returned by a mock module for a command it does not handle. */
@@ -72,6 +72,34 @@ function demoNote(id: string, title: string, created: number, strokes: Stroke[],
     origin: { kind: 'tablet' },
     ...extra,
   };
+}
+
+/**
+ * The text frames of a demo note (as the Rust demo library has some): a bold Latin Modern title and an Andika list.
+ * Their boxes are measured when the editor opens the note (`measureTexts`), as Rust measures them when it reads one.
+ */
+function demoFrames(): TextObject[] {
+  const frame = (id: string, t: number, x: number, y: number, text: string, font: TextObject['font'], bold: boolean, size: number, color: Rgba): TextObject => ({
+    kind: 'text',
+    id,
+    layer: 0,
+    t,
+    x,
+    y,
+    scale: 1,
+    quarterTurns: 0,
+    width: 0,
+    height: 0,
+    text,
+    font,
+    bold,
+    size,
+    color,
+  });
+  return [
+    frame('texte-reunion-titre', 900, 2000, 9000, 'Ordre du jour', 'latinModern', true, 900, { r: 0x8a, g: 0x1c, b: 0x1c, a: 255 }),
+    frame('texte-reunion-liste', 1800, 2000, 11000, '« Résultats » du trimestre\nSortie au musée : 12 € par élève', 'andika', false, 600, { r: 0x1a, g: 0x3a, b: 0x8a, a: 255 }),
+  ];
 }
 
 const BLACK: Rgba = { r: 0, g: 0, b: 0, a: 255 };
@@ -176,7 +204,7 @@ function seed(root: string): MockLibrary {
       'Réunion parents',
       Date.UTC(2026, 9, 23, 17, 15),
       [wave(1500, 2500, 25000, 800, 'pencil', BLACK)],
-      { tags: ['réunion'] },
+      { tags: ['réunion'], objects: demoFrames() },
     ),
   );
   return library;

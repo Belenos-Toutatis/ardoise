@@ -88,8 +88,69 @@ export interface Note {
   favorite?: boolean;
   layers: Layer[];
   strokes: Stroke[];
+  /** What the page holds besides its strokes (format 1.4): text frames. Absent means none. */
+  objects?: PageObject[];
   timing: 'recorded' | 'synthesized';
   origin: Origin;
+}
+
+/**
+ * Something on the page that is not a stroke (format 1.4, `docs/design/page-objects.md`,
+ * `ardoise_core::objects::PageObject`). Every kind has this placement: the point (u, v) of the
+ * object's content (its own units, y down) is on the page at (x, y) + turn(scale × (u, v)), turn
+ * being `quarterTurns` clockwise quarter turns; the content fills [0, width] × [0, height]. The
+ * other keys belong to the kind; a kind this version does not know keeps them all (spread copies
+ * carry them), is moved with the page by its placement, and is drawn nowhere.
+ */
+export interface PageObject {
+  kind: string;
+  /** Unique within the note. */
+  id: string;
+  /** Index into `Note.layers`: drawn with its layer, above its strokes. */
+  layer: number;
+  /** Milliseconds since `created`: when the replay shows it, all at once. */
+  t: number;
+  x: number;
+  y: number;
+  /** Page units per unit of the content, > 0. */
+  scale: number;
+  /** 0 to 3. */
+  quarterTurns: number;
+  width: number;
+  height: number;
+  [key: string]: unknown;
+}
+
+/** The families of the text tool (`ardoise_text::FontFamily`). */
+export type FontFamily = 'latinModern' | 'andika';
+
+export const FONT_FAMILIES: readonly FontFamily[] = ['latinModern', 'andika'];
+
+/**
+ * A text frame (SPEC §4.4): one line of the page per line of `text` (nothing wraps), one style for
+ * the whole frame. `size` is the font's size (its em) in the object's units, device units at scale 1.
+ */
+export interface TextObject extends PageObject {
+  kind: 'text';
+  text: string;
+  font: FontFamily;
+  bold: boolean;
+  size: number;
+  color: Rgba;
+}
+
+/** A text frame this version can read and draw (a text frame of a font it does not know is kept but not drawn). */
+export function isTextObject(object: PageObject): object is TextObject {
+  return (
+    object.kind === 'text' &&
+    typeof object.text === 'string' &&
+    FONT_FAMILIES.includes(object.font as FontFamily) &&
+    typeof object.bold === 'boolean' &&
+    typeof object.size === 'number' &&
+    object.size > 0 &&
+    typeof object.color === 'object' &&
+    object.color !== null
+  );
 }
 
 /** Modification time and size of a note file, as last seen; passed back when saving. */
@@ -110,6 +171,8 @@ export interface NoteSummary {
   modified: number;
   tags: string[];
   favorite: boolean;
+  /** The text of its text frames on visible layers, in reading order, one per line; empty without any (format 1.4). */
+  typedText?: string;
   stamp: FileStamp;
   /** Set when the file is a Nextcloud conflict copy of `originalName`. */
   conflict: { originalName: string } | null;

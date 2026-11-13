@@ -4,7 +4,7 @@
  */
 import { mapImage, rotateImage, shiftImage, turnImageAlone } from '../background';
 import type { InkPoint, Tool } from '../ink';
-import type { Background, Layer, Note, PageSize, Rgba, Stroke } from '../note';
+import type { Background, Layer, Note, PageObject, PageSize, Rgba, Stroke } from '../note';
 import {
   affineScale,
   applyAffine,
@@ -23,6 +23,7 @@ import {
   type Vec,
 } from './geometry';
 import { layerVisible, onLayer, strokesTouched } from './hit';
+import { objectBounds, objectsBounds, objectsOf, remapObjectLayers, transformAllObjects, withObjects } from './objects';
 import { orientationOf, type Orientation } from './page-size';
 
 export interface StrokeStyle {
@@ -158,10 +159,11 @@ export const PASTE_GAP_MS = 500;
 /** Shift between a paste and an identical copy already lying there, device units (4 mm). */
 export const PASTE_STEP = 400;
 
-/** Time of the last sample of the note, milliseconds since it was created (0 without ink). */
+/** Time of the last sample (or object) of the note, milliseconds since it was created (0 without content). */
 function noteEnd(note: Note): number {
   let end = 0;
   for (const stroke of note.strokes) for (const p of stroke.points) if (p.t > end) end = p.t;
+  for (const object of objectsOf(note)) if (object.t > end) end = object.t;
   return end;
 }
 
@@ -172,13 +174,15 @@ function noteEnd(note: Note): number {
  * - otherwise where they were, but while a stroke with the same first and last sample already
  *   lies there (the source, or an earlier paste), diagonally further by `PASTE_STEP`.
  */
-export function pasteOffset(note: Note, strokes: readonly Stroke[]): Vec {
+export function pasteOffset(note: Note, strokes: readonly Stroke[], objects: readonly PageObject[] = []): Vec {
   let ink: Rect | null = null;
   for (const stroke of strokes) ink = union(ink, strokeBounds(stroke));
+  for (const object of objects) ink = union(ink, objectBounds(object));
   const lead = strokes[0]?.points;
   const first = lead?.[0];
   const last = lead?.[lead.length - 1];
-  if (!ink || !lead || !first || !last) return { x: 0, y: 0 };
+  if (!ink) return { x: 0, y: 0 };
+  if (!lead || !first || !last) return objectPasteOffset(note, objects, ink);
   const page: Rect = { x: 0, y: 0, width: note.page.width, height: note.page.height };
   let base: Vec = { x: 0, y: 0 };
   if (!overlaps(ink, page)) {
@@ -209,6 +213,28 @@ export function pasteOffset(note: Note, strokes: readonly Stroke[]): Vec {
   return offset;
 }
 
+/** `pasteOffset` for objects alone: the same rule, an object of the same kind at the same place standing for the copy. */
+function objectPasteOffset(note: Note, objects: readonly PageObject[], box: Rect): Vec {
+  const lead = objects[0];
+  if (!lead) return { x: 0, y: 0 };
+  const page: Rect = { x: 0, y: 0, width: note.page.width, height: note.page.height };
+  let base: Vec = { x: 0, y: 0 };
+  if (!overlaps(box, page)) {
+    base = {
+      x: Math.max(0, (page.width - box.width) / 2) - box.x,
+      y: Math.max(0, (page.height - box.height) / 2) - box.y,
+    };
+  }
+  const near = (a: number, b: number) => Math.abs(a - b) < 1;
+  const occupied = (o: Vec) =>
+    objectsOf(note).some((other) => other.kind === lead.kind && near(other.x, lead.x + o.x) && near(other.y, lead.y + o.y));
+  let offset = base;
+  for (let step = 0; step < 100 && occupied(offset); step++) {
+    offset = { x: base.x + (step + 1) * PASTE_STEP, y: base.y + (step + 1) * PASTE_STEP };
+  }
+  return offset;
+}
+
 /**
  * Copies of `strokes` for pasting into `note` (the clipboard may come from another note): the
  * sample times shifted so that the first one comes `PASTE_GAP_MS` after the last sample of the
@@ -218,11 +244,28 @@ export function pasteOffset(note: Note, strokes: readonly Stroke[]): Vec {
  * milliseconds, never below 0).
  */
 export function retimedForPaste(note: Note, strokes: readonly Stroke[], at?: number): Stroke[] {
+  return retimedPaste(note, strokes, at).strokes;
+}
+
+/**
+ * `retimedForPaste` for strokes and page objects pasted together: one shift for all, the first of them (sample or
+ * object) coming at the start; `objectTimes` are the objects' new times, in their order.
+ */
+export function retimedPaste(
+  note: Note,
+  strokes: readonly Stroke[],
+  at?: number,
+  objects: readonly PageObject[] = [],
+): { strokes: Stroke[]; objectTimes: number[] } {
   let first = Infinity;
   for (const stroke of strokes) for (const p of stroke.points) if (p.t < first) first = p.t;
+  for (const object of objects) if (object.t < first) first = object.t;
   const start = at !== undefined && Number.isFinite(at) ? Math.max(0, Math.round(at)) : noteEnd(note) + PASTE_GAP_MS;
   const shift = Number.isFinite(first) ? start - first : 0;
-  return strokes.map((stroke) => ({ ...stroke, points: stroke.points.map((p) => ({ ...p, t: p.t + shift })) }));
+  return {
+    strokes: strokes.map((stroke) => ({ ...stroke, points: stroke.points.map((p) => ({ ...p, t: p.t + shift })) })),
+    objectTimes: objects.map((o) => Math.max(0, o.t + shift)),
+  };
 }
 
 /** Ink bounds of the strokes at `indices` (or of every visible stroke if null). */
@@ -243,8 +286,9 @@ export function strokesBounds(note: Note, indices: Iterable<number> | null): Rec
 
 // --- Layers -------------------------------------------------------------------------------
 
-function withLayers(note: Note, layers: Layer[], strokes: Stroke[] = note.strokes): Note {
-  return { ...note, layers, strokes };
+function withLayers(note: Note, layers: Layer[], strokes: Stroke[] = note.strokes, objects?: PageObject[]): Note {
+  const next = { ...note, layers, strokes };
+  return objects ? withObjects(next, objects) : next;
 }
 
 /** Moves strokes to other layers through `map` (old index → new index). */
@@ -286,18 +330,15 @@ export function moveIndex(index: number, from: number, to: number): number {
   return index;
 }
 
-/** Moves layer `from` to position `to` (0 = bottom); strokes follow their layer. */
+/** Moves layer `from` to position `to` (0 = bottom); strokes and objects follow their layer. */
 export function moveLayer(note: Note, from: number, to: number): Note {
   const count = note.layers.length;
   if (from === to || from < 0 || to < 0 || from >= count || to >= count) return note;
   const layers = [...note.layers];
   const [moved] = layers.splice(from, 1);
   layers.splice(to, 0, moved);
-  return withLayers(
-    note,
-    layers,
-    remapLayers(note.strokes, (l) => (l < count ? moveIndex(l, from, to) : l)),
-  );
+  const map = (l: number) => (l < count ? moveIndex(l, from, to) : l);
+  return withLayers(note, layers, remapLayers(note.strokes, map), note.objects ? remapObjectLayers(note.objects, map) : undefined);
 }
 
 /**
@@ -316,7 +357,14 @@ export function mergeDown(note: Note, index: number): Note {
     if (stroke.layer === index) merged.push({ ...stroke, layer: index - 1 });
     else kept.push(stroke.layer > index ? { ...stroke, layer: stroke.layer - 1 } : stroke);
   }
-  return withLayers(note, layers, [...kept, ...merged]);
+  // The same for objects: those of the merged layer after the lower layer's, so that they stay above them.
+  const keptObjects: PageObject[] = [];
+  const mergedObjects: PageObject[] = [];
+  for (const object of objectsOf(note)) {
+    if (object.layer === index) mergedObjects.push({ ...object, layer: index - 1 });
+    else keptObjects.push(object.layer > index ? { ...object, layer: object.layer - 1 } : object);
+  }
+  return withLayers(note, layers, [...kept, ...merged], note.objects ? [...keptObjects, ...mergedObjects] : undefined);
 }
 
 // --- Page ---------------------------------------------------------------------------------
@@ -345,16 +393,20 @@ export function rotateQuarter(note: Note, direction: 'cw' | 'ccw'): Note {
     strokes: note.strokes.map((stroke) => ({ ...stroke, points: stroke.points.map(map) })),
   };
   if (note.backgroundImage) turned.backgroundImage = rotateImage(note.backgroundImage, note.page, direction);
-  return turned;
+  // Page objects turn with the strokes: (x, y) → (h − y, x) clockwise, (y, w − x) counter-clockwise.
+  const m: Affine =
+    direction === 'cw' ? { a: 0, b: 1, c: -1, d: 0, e: height, f: 0 } : { a: 0, b: -1, c: 1, d: 0, e: 0, f: width };
+  return transformAllObjects(turned, m);
 }
 
 /** Largest page side, device units (`MAX_PAGE_SIDE` in `ardoise_core::ops`). */
 export const MAX_PAGE_SIDE = 10_000_000;
 
-/** Bounds of the samples of every stroke of the note, hidden layers included (they move with the page). */
+/** Bounds of the samples of every stroke and of every object, hidden layers included (they move with the page). */
 function allInkBounds(note: Note): Rect | null {
   let bounds: Rect | null = null;
   for (const stroke of note.strokes) bounds = union(bounds, strokeCentreBounds(stroke));
+  for (const object of objectsOf(note)) bounds = union(bounds, objectBounds(object));
   return bounds;
 }
 
@@ -415,7 +467,7 @@ export function resizePage(note: Note, size: PageSize, scaleInk = false): Note {
     points: stroke.points.map((p) => ({ ...p, x: p.x * scale + shift.x, y: p.y * scale + shift.y })),
   }));
   if (note.backgroundImage) resized.backgroundImage = mapImage(note.backgroundImage, scale, shift.x, shift.y);
-  return resized;
+  return transformAllObjects(resized, { a: scale, b: 0, c: 0, d: scale, e: shift.x, f: shift.y });
 }
 
 /**
@@ -466,7 +518,12 @@ export function cropTo(note: Note, rect: Rect): Note {
   }
   const cropped: Note = { ...note, page: { width, height }, strokes };
   if (note.backgroundImage) cropped.backgroundImage = shiftImage(note.backgroundImage, x, y);
-  return cropped;
+  // Objects follow the strokes' rule: a visible one wholly outside goes, the others move with the page.
+  if (!note.objects) return cropped;
+  const objects = note.objects
+    .filter((o) => !(layerVisible(note, o.layer) && !overlaps(objectBounds(o), area)))
+    .map((o) => ({ ...o, x: o.x - x, y: o.y - y }));
+  return withObjects(cropped, objects);
 }
 
 /**
@@ -474,7 +531,7 @@ export function cropTo(note: Note, rect: Rect): Note {
  * null when there is no ink on the page.
  */
 export function autoCropRect(note: Note, margin = 500): Rect | null {
-  const ink = strokesBounds(note, null);
+  const ink = union(strokesBounds(note, null), objectsBounds(note, null));
   if (!ink) return null;
   const page = { x: 0, y: 0, width: note.page.width, height: note.page.height };
   const area = intersection(inflate(ink, margin), page);

@@ -967,6 +967,7 @@
       "line": "Line",
       "rectangle": "Rectangle",
       "ellipse": "Ellipse",
+      "text": "Text",
       "eraser": "Eraser",
       "pan": "Move the page"
     },
@@ -980,6 +981,26 @@
       "snapHint": "Points snap to the page's paper: intersections of squared, millimetre and dotted paper; the rules of ruled paper; the rules and large squares of Seyès.",
       "snapDisabled": "This paper has no lines to snap to: choose ruled, Seyès, squared, millimetre or dotted paper (Page tab).",
       "snapNone": "No grid on this paper"
+    },
+    "text": {
+      "label": "Text options",
+      "family": "Font",
+      "fonts": {
+        "latinModern": "Latin Modern",
+        "andika": "Andika"
+      },
+      "size": "Size",
+      "sizes": {
+        "small": "Small",
+        "smallHint": "Small: 4 mm",
+        "medium": "Medium",
+        "mediumHint": "Medium: 6 mm",
+        "large": "Large",
+        "largeHint": "Large: 9 mm"
+      },
+      "bold": "Bold",
+      "help": "Tap the page to type a text, or a text to change it · Enter: new line · Esc: finish",
+      "field": "Text of the frame"
     },
     "eraser": {
       "label": "Eraser mode",
@@ -1027,10 +1048,11 @@
       "tool": "Ink",
       "width": "Width"
     },
-    "selectHelp": "Lasso: select · Shift+lasso: add · Ctrl+lasso: remove · F: straighten shapes · Esc: deselect all",
+    "selectHelp": "Lasso: select · Shift+lasso: add · Ctrl+lasso: remove · Double-click a text: change it · F: straighten shapes · Esc: deselect all",
     "selection": {
       "label": "Selection",
       "count": "Selected strokes: {count}",
+      "countMixed": "Selected strokes: {strokes} — texts: {texts}",
       "duplicate": "Duplicate",
       "delete": "Delete",
       "clear": "Deselect",
@@ -1040,7 +1062,7 @@
     },
     "clipboard": {
       "failed": "The clipboard is not available.",
-      "nothing": "The clipboard holds no strokes copied in Ardoise."
+      "nothing": "The clipboard holds no strokes nor texts copied in Ardoise."
     },
     "straighten": {
       "button": "Straighten shapes",
@@ -1260,16 +1282,17 @@
         "select": "Select tool",
         "pen": "Pen tool",
         "eraser": "Eraser tool",
+        "text": "Text tool",
         "pan": "Move-the-page tool",
         "panHold": "Move the page while the key is held (unless a button has the focus)",
         "straighten": "Straighten the shapes of the selection",
         "replay": "Replay",
         "undo": "Undo",
         "redo": "Redo",
-        "selectAll": "Select all (the strokes of the chosen layer)",
-        "clipboard": "Copy, cut, paste strokes",
+        "selectAll": "Select all (the strokes and texts of the chosen layer)",
+        "clipboard": "Copy, cut, paste strokes and texts",
         "delete": "Delete the selection",
-        "escape": "Esc, in steps: cancels the gesture under way; else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else saves the note and goes back to the library (not while a sound is being recorded)",
+        "escape": "Esc, in steps: cancels the gesture under way or finishes typing a text (the text stays); else closes the open split, replay, crop or “Straighten shapes” setting; else deselects; else saves the note and goes back to the library (not while a sound is being recorded)",
         "fit": "Fit: the whole page",
         "fitWidth": "Width: the page across the window",
         "pages": "Previous page, next page (the note before, the note after)",

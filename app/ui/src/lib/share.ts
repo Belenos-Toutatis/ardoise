@@ -8,7 +8,7 @@
  *   `ShareMessage`s of the event stream `/events`. It never imports `api.ts` nor Tauri.
  */
 import type { LiveBatch } from './live';
-import type { Background, Layer, Note, PageSize, Stroke } from './note';
+import type { Background, Layer, Note, PageObject, PageSize, Stroke } from './note';
 
 // --- App side --------------------------------------------------------------------------------
 
@@ -92,6 +92,8 @@ export interface SharedPage {
   background: Background;
   layers: Layer[];
   strokes: Stroke[];
+  /** The text frames of the layers that show (`share/page.rs`); absent: none. */
+  objects?: PageObject[];
 }
 
 /** One message of `/events` (the `data:` of one Server-Sent Event, JSON). */

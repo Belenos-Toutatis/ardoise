@@ -46,7 +46,8 @@ export function queryWords(query: string): string[] {
 export function matchesSearch(note: NoteSummary, query: string, hit?: HandwritingHit | null): boolean {
   const words = queryWords(query);
   if (words.length === 0) return true;
-  const haystack = normalize([note.title, ...note.tags, note.binder].join('\n'));
+  // The typed text of the note's text frames (`typedText`, from `note.json`) is found like its title.
+  const haystack = normalize([note.title, ...note.tags, note.binder, note.typedText ?? ''].join('\n'));
   return words.every((word) => haystack.includes(word) || (hit?.words.includes(word) ?? false));
 }
 

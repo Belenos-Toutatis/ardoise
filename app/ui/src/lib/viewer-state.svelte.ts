@@ -47,6 +47,7 @@ export function noteSnapshot(shared: SharedPage): LiveSnapshot {
     tags: [],
     layers: shared.layers,
     strokes: shared.strokes,
+    ...(shared.objects && shared.objects.length > 0 ? { objects: shared.objects } : {}),
     timing: 'recorded',
     origin: { kind: 'ardoise' },
   };

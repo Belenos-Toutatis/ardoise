@@ -5,7 +5,9 @@
  * viewer sees:
  *
  * 1. only the strokes every export draws count (visible layers; a stroke on a layer without entry
- *    is drawn on top), so the time spent on hidden strokes is a pause like any other;
+ *    is drawn on top), so the time spent on hidden strokes is a pause like any other; a page object
+ *    the exports draw (a text frame of a visible layer) counts as a stroke of one sample at its time
+ *    `t`: it appears all at once then;
  * 2. with `maxPauseMs`, every pause longer than it is cut after its first `maxPauseMs` (the time
  *    before the first stroke and the time between busy spans; the pen standing still inside a
  *    stroke is not a pause);
@@ -16,7 +18,8 @@
  * shown, so `toReplay(toNote(r)) == r`.
  */
 import { drawingOrder } from './editor/hit';
-import type { Note, Stroke } from './note';
+import { objectDrawingOrder, objectsOf } from './editor/objects';
+import { isTextObject, type Note, type PageObject, type Stroke } from './note';
 import { MAX_SPEED, MIN_SPEED } from './video';
 
 /** How the note is replayed. */
@@ -50,8 +53,10 @@ interface Clock {
   times: number[][];
   /** The strokes drawn, in drawing order (indices into `note.strokes`), all with samples. */
   order: number[];
+  /** Per page object of the note: when it appears; null when it is not drawn (hidden layer, a kind not drawn). */
+  objectTimes: (number | null)[];
   segments: Segment[];
-  /** Note time of the last sample drawn (0 without any). */
+  /** Note time of the last sample or object drawn (0 without any). */
   end: number;
   /** Total note time kept. */
   kept: number;
@@ -75,8 +80,13 @@ function makeClock(note: Note, maxPauseMs: number | null): Clock {
     if (slot.length > 0) order.push(i);
   }
 
-  // When some stroke is being drawn: the union of the strokes' spans.
+  const objects = objectsOf(note);
+  const objectTimes: (number | null)[] = objects.map(() => null);
+  for (const i of objectDrawingOrder(note)) if (isTextObject(objects[i])) objectTimes[i] = Math.max(0, objects[i].t);
+
+  // When something is being drawn: the union of the strokes' spans and of the instants objects appear.
   const spans: [number, number][] = order.map((i) => [times[i][0], times[i][times[i].length - 1]]);
+  for (const t of objectTimes) if (t !== null) spans.push([t, t]);
   spans.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const busy: [number, number][] = [];
   for (const [start, end] of spans) {
@@ -106,7 +116,7 @@ function makeClock(note: Note, maxPauseMs: number | null): Clock {
   }
   segments.push({ noteStart, noteEnd: end, keptBefore: kept });
   kept += end - noteStart;
-  return { times, order, segments, end, kept };
+  return { times, order, objectTimes, segments, end, kept };
 }
 
 /** Index of the first element for which `keep` is false (the elements are partitioned). */
@@ -148,12 +158,12 @@ export function forDuration(note: Note, maxPauseMs: number | null, targetMs: num
 export class ReplayTimeline {
   readonly note: Note;
   readonly options: ReplayOptions;
-  /** Length of the replay, milliseconds: up to the moment the last sample appears (0 without any). */
+  /** Length of the replay, milliseconds: up to the moment the last sample or object appears (0 without any). */
   readonly duration: number;
   private readonly clock: Clock;
   /** Partial strokes already cut (by stroke index), so that a still frame reuses its objects. */
   private readonly partial = new Map<number, { shown: number; stroke: Stroke }>();
-  private last: { strokes: Stroke[]; note: Note } | null = null;
+  private last: { strokes: Stroke[]; objects: PageObject[]; note: Note } | null = null;
 
   /** Throws a `RangeError` when the speed is not within `MIN_SPEED` and `MAX_SPEED`. */
   constructor(note: Note, options: ReplayOptions = DEFAULT_REPLAY) {
@@ -210,6 +220,12 @@ export class ReplayTimeline {
     return times ? partitionPoint(times, (t) => t <= noteMs) : 0;
   }
 
+  /** True when page object `index` is drawn and shown at note time `noteMs` (all at once, at its time). */
+  objectShown(index: number, noteMs: number): boolean {
+    const t = this.clock.objectTimes[index];
+    return t !== null && t !== undefined && t <= noteMs;
+  }
+
   /** True when stroke `index` is drawn and all of it is shown at note time `noteMs`. */
   isComplete(index: number, noteMs: number): boolean {
     const times = this.clock.times[index];
@@ -220,7 +236,8 @@ export class ReplayTimeline {
    * The note as drawn at replay instant `replayMs`: the strokes of visible layers that have begun,
    * in note order, each cut after its last sample shown. A stroke shown in full is the note's own
    * object (the Canvas keeps its outline cached by object); only the strokes in progress are new,
-   * and a still frame gets the same objects again. Everything else (page, background, layers…) is
+   * and a still frame gets the same objects again. The page objects whose time has come are there,
+   * whole (every kind: only the drawn ones show). Everything else (page, background, layers…) is
    * the note's.
    */
   noteAt(replayMs: number): Note {
@@ -241,12 +258,22 @@ export class ReplayTimeline {
       }
       strokes.push(cut.stroke);
     });
+    const objects = objectsOf(this.note).filter((o) => o.t <= tau);
     const previous = this.last;
-    if (previous && previous.strokes.length === strokes.length && previous.strokes.every((s, k) => s === strokes[k])) {
+    if (
+      previous &&
+      previous.strokes.length === strokes.length &&
+      previous.strokes.every((s, k) => s === strokes[k]) &&
+      previous.objects.length === objects.length
+    ) {
       return previous.note;
     }
     const note: Note = { ...this.note, strokes };
-    this.last = { strokes, note };
+    if (this.note.objects) {
+      if (objects.length > 0) note.objects = objects;
+      else delete note.objects;
+    }
+    this.last = { strokes, objects, note };
     return note;
   }
 }

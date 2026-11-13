@@ -967,6 +967,7 @@
       "line": "Ligne",
       "rectangle": "Rectangle",
       "ellipse": "Ellipse",
+      "text": "Texte",
       "eraser": "Gomme",
       "pan": "Déplacer la page"
     },
@@ -980,6 +981,26 @@
       "snapHint": "Les points se calent sur le fond de la page : intersections du quadrillé, du millimétré et du pointillé ; lignes du ligné ; lignes et grands carreaux du Seyès.",
       "snapDisabled": "Ce fond n'a pas de lignes sur lesquelles aimanter : choisissez un fond ligné, Seyès, quadrillé, millimétré ou pointillé (onglet Page).",
       "snapNone": "Pas de quadrillage sur ce fond"
+    },
+    "text": {
+      "label": "Options du texte",
+      "family": "Police",
+      "fonts": {
+        "latinModern": "Latin Modern",
+        "andika": "Andika"
+      },
+      "size": "Taille",
+      "sizes": {
+        "small": "Petit",
+        "smallHint": "Petit : 4 mm",
+        "medium": "Moyen",
+        "mediumHint": "Moyen : 6 mm",
+        "large": "Grand",
+        "largeHint": "Grand : 9 mm"
+      },
+      "bold": "Gras",
+      "help": "Touchez la page pour taper un texte, ou un texte pour le modifier · Entrée : nouvelle ligne · Échap : terminer",
+      "field": "Texte du cadre"
     },
     "eraser": {
       "label": "Mode de la gomme",
@@ -1027,10 +1048,11 @@
       "tool": "Encre",
       "width": "Épaisseur"
     },
-    "selectHelp": "Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · F : redresser les formes · Échap : tout désélectionner",
+    "selectHelp": "Lasso : sélectionner · Maj+lasso : ajouter · Ctrl+lasso : retirer · Double-clic sur un texte : le modifier · F : redresser les formes · Échap : tout désélectionner",
     "selection": {
       "label": "Sélection",
       "count": "Traits sélectionnés : {count}",
+      "countMixed": "Traits sélectionnés : {strokes} — textes : {texts}",
       "duplicate": "Dupliquer",
       "delete": "Supprimer",
       "clear": "Désélectionner",
@@ -1040,7 +1062,7 @@
     },
     "clipboard": {
       "failed": "Le presse-papiers n'est pas accessible.",
-      "nothing": "Le presse-papiers ne contient pas de traits copiés dans Ardoise."
+      "nothing": "Le presse-papiers ne contient ni traits ni textes copiés dans Ardoise."
     },
     "straighten": {
       "button": "Redresser les formes",
@@ -1260,16 +1282,17 @@
         "select": "Outil Sélection",
         "pen": "Outil Stylo",
         "eraser": "Outil Gomme",
+        "text": "Outil Texte",
         "pan": "Outil Déplacer la page",
         "panHold": "Déplacer la page tant que la touche est enfoncée (sauf si un bouton a le focus)",
         "straighten": "Redresser les formes de la sélection",
         "replay": "Relecture",
         "undo": "Annuler",
         "redo": "Rétablir",
-        "selectAll": "Tout sélectionner (les traits du calque choisi)",
-        "clipboard": "Copier, couper, coller des traits",
+        "selectAll": "Tout sélectionner (les traits et les textes du calque choisi)",
+        "clipboard": "Copier, couper, coller des traits et des textes",
         "delete": "Supprimer la sélection",
-        "escape": "Échap, par étapes : annule le geste en cours ; sinon ferme la découpe, la relecture, le recadrage ou le réglage de « Redresser les formes » ouverts ; sinon désélectionne ; sinon enregistre la note et revient à la bibliothèque (pas pendant un enregistrement sonore)",
+        "escape": "Échap, par étapes : annule le geste en cours ou termine la saisie d’un texte (le texte reste) ; sinon ferme la découpe, la relecture, le recadrage ou le réglage de « Redresser les formes » ouverts ; sinon désélectionne ; sinon enregistre la note et revient à la bibliothèque (pas pendant un enregistrement sonore)",
         "fit": "Ajuster : la page entière",
         "fitWidth": "Largeur : la page sur toute la largeur",
         "pages": "Page précédente, page suivante (la note d'avant, celle d'après)",

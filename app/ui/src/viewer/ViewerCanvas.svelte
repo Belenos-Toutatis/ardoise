@@ -109,6 +109,7 @@
       layers: live.layers,
       strokes: live.strokes,
       generation: live.generation,
+      objects: live.objects,
       edits: live.edits,
       current: live.current,
       computerCurrent: live.computerCurrent,

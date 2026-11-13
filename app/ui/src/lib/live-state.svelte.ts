@@ -57,7 +57,7 @@ import { applyStrokeEdit, type StrokeEdit } from './live-edits';
 import { marksFromWire, reuseMarks } from './live-marks';
 import { roundView, sameView } from './live-view';
 import type { Orientation } from './orientation';
-import type { Background, BackgroundImage, Layer, PageSize, Paper, Rgba, Stroke } from './note';
+import type { Background, BackgroundImage, Layer, PageObject, PageSize, Paper, Rgba, Stroke } from './note';
 
 /** A page Rust failed to write into the library. */
 export interface SaveError {
@@ -168,6 +168,8 @@ export class LiveState {
   /** The share's viewers: the picture of the paper this page wants (`LiveSnapshot.paperKey`). */
   paperKey = $state<string | null>(null);
   layers = $state.raw<Layer[]>([]);
+  /** The page's objects (text frames of a resumed sheet or of a projected note), drawn with their layers; never edited here. */
+  objects = $state.raw<PageObject[]>([]);
   /**
    * What the indices of `strokes` mean: `api.liveEditStrokes` gives it back, and a selection made
    * at another revision is to be dropped. Not changed by the tablet's writing: a selection stays
@@ -500,6 +502,8 @@ export class LiveState {
     if (JSON.stringify(this.imagePixels) !== JSON.stringify(pixels)) this.imagePixels = pixels;
     this.paperKey = s.paperKey ?? null;
     if (JSON.stringify(this.layers) !== JSON.stringify(s.page.layers)) this.layers = s.page.layers;
+    const objects = s.page.objects ?? [];
+    if (JSON.stringify(this.objects) !== JSON.stringify(objects)) this.objects = objects;
     this.incomingStyle(s.style);
     this.incomingView(s.view);
     this.hover = s.hover;

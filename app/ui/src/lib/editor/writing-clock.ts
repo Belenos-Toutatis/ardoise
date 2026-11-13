@@ -2,8 +2,9 @@
  * The time of what is written in the editor while a narration is recorded (« Pendant que j'écris », milestone M17;
  * docs/design/paper-projection-narration.md §3.2): note time `Point::t`, milliseconds since `Note::created`.
  *
- * - The recording starts after the ink the note already holds: its origin `T0` is the last sample of the note (hidden
- *   layers included) plus `WRITING_GAP_MS`, or 0 for a note without ink (`writingOrigin`).
+ * - The recording starts after the ink the note already holds: its origin `T0` is the last sample of the note, or the
+ *   time of its last page object (a text frame), hidden layers included, plus `WRITING_GAP_MS`, or 0 for a note without
+ *   either (`writingOrigin`).
  * - Once `narration_start` has answered, a `WritingClock` maps a pointer event's `timeStamp` (the page's monotonic
  *   clock, the one of `performance.now()`) to note time: `T0 + (timeStamp − P0)`. Rust places the sound with
  *   `noteZeroWallMs`, the wall clock at which note time would be 0 (`narration_stop`'s fourth argument): a stroke drawn
@@ -23,10 +24,11 @@ export const WRITING_GAP_MS = 1000;
 /** Note time between the end of a note and a stroke drawn in the editor outside a recording, ms (the editor's rule). */
 export const STROKE_GAP_MS = 500;
 
-/** The time of the last sample of the note, every layer counted; -1 without any. */
+/** The time of the last sample of the note, or of its last page object (a text frame appears at its time), every layer counted; -1 without any. */
 export function lastSampleTime(note: Note): number {
   let last = -1;
   for (const stroke of note.strokes) for (const p of stroke.points) if (p.t > last) last = p.t;
+  for (const object of note.objects ?? []) if (object.t > last) last = object.t;
   return last;
 }
 

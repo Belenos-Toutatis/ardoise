@@ -4,6 +4,7 @@
  * must be filled with the non-zero rule.
  */
 import wasmUrl from '../assets/ardoise_ink.wasm?url';
+import { textEngine, type TextEngine, type TextExports } from './text';
 
 /** Ink tools, as serialised by Rust (`ardoise_ink::Tool`). */
 export type Tool = 'ballpoint' | 'fountainPen' | 'feltTip' | 'pencil' | 'brush' | 'highlighter' | 'chalk';
@@ -62,6 +63,8 @@ export interface Ink {
    * absent). Strokes that are no clear shape are in no result.
    */
   straighten(strokes: readonly ShapeStroke[], tuning?: ShapeTuning): Straightened[];
+  /** Text frames: layout, glyphs and font files of `ardoise-text`, from the same module (`lib/text.ts`). */
+  text: TextEngine;
 }
 
 /**
@@ -87,7 +90,7 @@ export const DEFAULT_SHAPE_TUNING: Readonly<ShapeTuning> = Object.freeze({
   snapRoundPercent: 10,
 });
 
-interface Exports {
+interface Exports extends TextExports {
   memory: WebAssembly.Memory;
   ink_alloc(words: number): number;
   ink_free(ptr: number, words: number): void;
@@ -218,6 +221,7 @@ export async function instantiateInk(bytes: BufferSource): Promise<Ink> {
   return {
     contours,
     straighten,
+    text: textEngine(wasm),
     path(stroke) {
       return contours(stroke)
         .map((c) => {

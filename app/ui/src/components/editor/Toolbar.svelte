@@ -2,13 +2,17 @@
   /**
    * Tools and style: mode (select, pen, the shape tools, eraser, move the page), ink tool, colour (Inkspace palette +
    * custom colours), width, eraser. With a shape tool, three toggles (`shapePrefs`): regular, from the centre, snap to
-   * the page's template (docs/design/shape-tools.md).
+   * the page's template (docs/design/shape-tools.md). With the text tool (or text frames selected), the family, the size
+   * and bold (docs/design/page-objects.md §5); their buttons and the colours do not take the focus from the frame being
+   * typed (`keepFocus`).
    */
   import { INKSPACE_COLOR_NAMES, sameColor, toHex, fromHex } from '../../lib/editor/colors';
   import WidthControl from '../WidthControl.svelte';
   import { shapePrefs, type ShapeToggle } from '../../lib/editor/shape-prefs.svelte';
   import { isShapeKind } from '../../lib/editor/shape-tools';
-  import type { EraserMode, Mode, ToolSettings } from '../../lib/editor/state';
+  import { textSettings, type EraserMode, type Mode, type TextSettings, type ToolSettings } from '../../lib/editor/state';
+  import { CSS_FAMILY, TEXT_SIZES, TEXT_SIZE_NAMES } from '../../lib/text';
+  import { FONT_FAMILIES } from '../../lib/note';
   import { t } from '../../lib/i18n.svelte';
   import { TOOLS, type Tool } from '../../lib/ink';
   import { INKSPACE_COLORS, cssColor, type Rgba, type ShapeSettings } from '../../lib/note';
@@ -24,6 +28,8 @@
     oncustomcolor,
     onwidth,
     oneraser,
+    ontext,
+    textTargets = 0,
     onapplyall,
     splitting = false,
     locked = false,
@@ -59,6 +65,10 @@
     /** `commit` is false while a slider moves, true when it is released. */
     onwidth: (width: number, commit: boolean) => void;
     oneraser: (change: { mode?: EraserMode; radius?: number }) => void;
+    /** The text tool's family, size or bold changed (the frame typed in, or the selected frames, take it too). */
+    ontext?: (change: Partial<TextSettings>) => void;
+    /** How many text frames the text options act on now (the one typed in, or the selected ones). */
+    textTargets?: number;
     onapplyall: (what: 'color' | 'tool' | 'width') => void;
     /** The split panel is open. */
     splitting?: boolean;
@@ -124,9 +134,19 @@
     { mode: 'line' },
     { mode: 'rectangle' },
     { mode: 'ellipse' },
+    { mode: 'text', icon: 'T' },
     { mode: 'eraser', icon: '⌫' },
     { mode: 'pan', icon: '✋' },
   ];
+
+  const text = $derived(textSettings(tools));
+  /** The text options show with the text tool, or when text frames are selected. */
+  const textOptions = $derived(tools.mode === 'text' || textTargets > 0);
+
+  /** A press on a text option or a colour keeps the focus where it is: in the frame being typed. */
+  function keepFocus(e: PointerEvent) {
+    if (e.button === 0) e.preventDefault();
+  }
 
   const SHAPE_TOGGLES: ShapeToggle[] = ['regular', 'centre', 'snap'];
 
@@ -206,6 +226,60 @@
     </div>
   {/if}
 
+  {#if textOptions && tools.mode !== 'eraser'}
+    <div class="group text-options" role="group" aria-label={t('editor.text.label')} data-slot="text-options">
+      <div class="segmented" role="group" aria-label={t('editor.text.family')}>
+        {#each FONT_FAMILIES as font}
+          <button
+            type="button"
+            class="button small-button toggle"
+            class:active={text.font === font}
+            aria-pressed={text.font === font}
+            disabled={locked}
+            data-action="text-font-{font}"
+            style:font-family={`"${CSS_FAMILY[font]}", sans-serif`}
+            onpointerdown={keepFocus}
+            onclick={() => ontext?.({ font })}
+          >
+            {t(`editor.text.fonts.${font}`)}
+          </button>
+        {/each}
+      </div>
+      <div class="segmented" role="group" aria-label={t('editor.text.size')}>
+        {#each TEXT_SIZE_NAMES as size}
+          <button
+            type="button"
+            class="button small-button toggle"
+            class:active={text.size === TEXT_SIZES[size]}
+            aria-pressed={text.size === TEXT_SIZES[size]}
+            disabled={locked}
+            data-action="text-size-{size}"
+            title={t(`editor.text.sizes.${size}Hint`)}
+            onpointerdown={keepFocus}
+            onclick={() => ontext?.({ size: TEXT_SIZES[size] })}
+          >
+            {t(`editor.text.sizes.${size}`)}
+          </button>
+        {/each}
+      </div>
+      <button
+        type="button"
+        class="button small-button toggle bold"
+        class:active={text.bold}
+        aria-pressed={text.bold}
+        disabled={locked}
+        data-action="text-bold"
+        onpointerdown={keepFocus}
+        onclick={() => ontext?.({ bold: !text.bold })}
+      >
+        {t('editor.text.bold')}
+      </button>
+      {#if tools.mode === 'text'}
+        <span class="label text-help" data-slot="text-help">{t('editor.text.help')}</span>
+      {/if}
+    </div>
+  {/if}
+
   {#if tools.mode === 'eraser'}
     <div class="group" role="radiogroup" aria-label={t('editor.eraser.label')}>
       {#each ['whole', 'partial'] as const as mode}
@@ -235,6 +309,7 @@
       <span class="value">{t('editor.width.value', { mm: mm(tools.eraserRadius * 2) })}</span>
     </label>
   {:else}
+    {#if tools.mode !== 'text'}
     <label class="group">
       <span class="label">{t('editor.ink.label')}</span>
       <select value={tools.tool} disabled={locked} onchange={(e) => ontool(e.currentTarget.value as Tool)}>
@@ -243,6 +318,7 @@
         {/each}
       </select>
     </label>
+    {/if}
 
     <div class="group swatches" role="group" aria-label={t('editor.color.label')}>
       {#each INKSPACE_COLORS as color, i}
@@ -255,6 +331,7 @@
           disabled={locked}
           aria-label={t(`editor.colors.${INKSPACE_COLOR_NAMES[i]}`)}
           title={t(`editor.colors.${INKSPACE_COLOR_NAMES[i]}`)}
+          onpointerdown={keepFocus}
           onclick={() => oncolor(color)}
         ></button>
       {/each}
@@ -268,6 +345,7 @@
           disabled={locked}
           aria-label={t('editor.color.customSwatch', { hex: toHex(color) })}
           title={t('editor.color.customSwatch', { hex: toHex(color) })}
+          onpointerdown={keepFocus}
           onclick={() => oncolor(color)}
         ></button>
       {/each}
@@ -277,6 +355,7 @@
       </label>
     </div>
 
+    {#if tools.mode !== 'text'}
     <div class="group slider" role="group" aria-label={t('editor.width.label')}>
       <span>{t('editor.width.label')}</span>
       <WidthControl
@@ -296,6 +375,7 @@
         <button type="button" class="button small-button" disabled={locked} onclick={() => onapplyall('width')}>{t('editor.applyAll.width')}</button>
       {/if}
     </div>
+    {/if}
     {#if tools.mode === 'select'}
       <div class="group">
         <!-- The split button: straighten on the left, its setting on the right (M15). -->
@@ -447,8 +527,32 @@
     vertical-align: -0.2em;
   }
 
-  .shape-options {
+  .shape-options,
+  .text-options {
     flex-wrap: wrap;
+  }
+
+  .segmented {
+    display: inline-flex;
+  }
+
+  .segmented > .button:not(:first-child) {
+    border-left: 0;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+
+  .segmented > .button:not(:last-child) {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .bold {
+    font-weight: 700;
+  }
+
+  .text-help {
+    font-size: 0.8rem;
   }
 
   .tool-label {

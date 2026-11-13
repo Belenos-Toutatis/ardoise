@@ -59,6 +59,12 @@
    * or the tool mode that is open, then the selection, then the note is saved and the editor goes back to the library
    * (`leaveSaving`, which refuses while a narration is recorded). The shape tools (`lib/editor/shape-tools.ts`) are the
    * canvas's; the editor only gives it the snap grid of the page's template (`SnapGridWatch`).
+   *
+   * The text tool (SPEC §4.4, docs/design/page-objects.md §5): a tap asks for a frame (`startText`); what is typed
+   * changes the present doc without a step (`typeText`), and the end of the typing (Escape, the field left, another tap,
+   * another tool) makes one undoable step of it, or none when nothing changed; an empty frame goes (`endText`). The
+   * family, the size and bold are the tool's (`tools.text`) and those of the frame typed in or of the selected frames;
+   * the colour is the tool's colour.
    */
   import { tick, untrack } from 'svelte';
   import { api, errorMessage, onLibraryChanged, onSessionEnding, type AppState } from '../../lib/api';
@@ -67,7 +73,9 @@
   import { binderOf, diskChange, type DiskChange } from '../../lib/editor/disk';
   import { DraftKeeper, findOffer, type Offer } from '../../lib/editor/drafts';
   import { withSourceIn } from '../../lib/editor/revision';
-  import { decodeStrokes, encodeStrokes } from '../../lib/editor/clipboard';
+  import { decodeClipboard, encodeClipboard } from '../../lib/editor/clipboard';
+  import { changeTexts, measureText, measureTexts, newObjectId, newTextObject, objectsOf } from '../../lib/editor/objects';
+  import { LINE_HEIGHT, registerTextFonts } from '../../lib/text';
   import type { PixelsRef } from '../../lib/background';
   import { pixelsOf, removeBackgroundImage, setBackgroundImage, setImageFit, setImageOpacity } from '../../lib/editor/image';
   import { strokesOutsidePage } from '../../lib/editor/ops';
@@ -89,29 +97,40 @@
   import {
     DEFAULT_TOOLS,
     addLayer,
+    addObjectToDoc,
     applyStyle,
+    applyTextStyle,
     autoCrop,
     canDraw,
     clearSelection,
     deleteSelection,
     docFromNote,
     duplicateSelection,
+    hasSelection as anySelected,
     mergeDown,
     moveLayer,
+    objectSelection,
     pasteStrokes,
+    removeObjectAt,
     renameLayer,
+    replaceObjectAt,
     resizePage,
     rotate,
     rotateBackgroundImage,
     selectAll,
+    select as selectItems,
+    selectedObjects,
     selectedStrokes,
+    selectionCount,
     setActiveLayer,
     setBackground,
     setLayerVisible,
     setOrientation,
+    textSettings,
     type Doc,
     type EraserMode,
     type Mode,
+    type TextSettings,
     type ToolSettings,
   } from '../../lib/editor/state';
   import {
@@ -134,7 +153,7 @@
   import { resumeBlock } from '../../lib/live-resume.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
   import { loadInk, type Ink, type Tool } from '../../lib/ink';
-  import type { BackgroundImage, ExportSource, FileStamp, Note, Rgba, RevisionOfNote, ShapeSettings, SplitSpec, Stroke } from '../../lib/note';
+  import { isTextObject, type BackgroundImage, type ExportSource, type FileStamp, type Note, type PageObject, type Rgba, type RevisionOfNote, type ShapeSettings, type SplitSpec, type Stroke } from '../../lib/note';
   import type { NoteOriginal } from '../../lib/original';
   import type { NarrationInfo } from '../../lib/video';
   import ExportDialog from '../ExportDialog.svelte';
@@ -349,7 +368,17 @@
   const dirty = $derived(noteDirty || (!!doc && stagedNarration !== null));
   /** What new strokes go after (O14): the sound waiting to be saved, else the stored narration. */
   const strokeNarration = $derived(stagedNarration?.info ?? narration);
-  const hasSelection = $derived((doc?.selection.length ?? 0) > 0);
+  const hasSelection = $derived(doc ? anySelected(doc) : false);
+  /** The text frame being typed: its index, the doc before the typing began, where the caret starts, and its number. */
+  let textEdit = $state.raw<{ index: number; base: Doc; caret: number | null; session: number } | null>(null);
+  let textSessions = 0;
+  /** The text frames the tool's family, size and bold apply to: the one typed in, else the selected ones. */
+  const textTargets = $derived.by((): number[] => {
+    if (!doc) return [];
+    if (textEdit) return [textEdit.index];
+    const objects = objectsOf(doc.note);
+    return objectSelection(doc).filter((i) => isTextObject(objects[i]));
+  });
   /** The split panel is open or a replay runs: the tabs that edit the note are disabled. */
   const locked = $derived(split !== null || replaying);
   /** The rail's badges (docs/design/side-panel.md, §4): layers, a layer in use hidden, recording, a share running. */
@@ -393,7 +422,7 @@
   /** The page as drawn at the playhead: nothing selected, nothing to edit. */
   const replayDoc = $derived.by((): Doc | null => {
     const shown = player.shown;
-    return replaying && doc && shown ? { ...doc, note: shown, selection: [] } : null;
+    return replaying && doc && shown ? { ...clearSelection(doc), note: shown } : null;
   });
   /** The pan tool: a drag moves the page and never draws. */
   const replayTools = $derived<ToolSettings>({ ...tools, mode: 'pan' });
@@ -695,9 +724,12 @@
           })
         : null;
       if (currentPath !== target) return;
-      const fresh = docFromNote(opened.note, t('editor.layers.defaultName', { n: 1 }));
+      // Text frames measured as this module lays them out (Rust measures them too when it reads a note: no change then).
+      const fresh = docFromNote(measureTexts(opened.note, module.text), t('editor.layers.defaultName', { n: 1 }));
       const start = staged ? { ...fresh, backgroundPixels: pixelsOf(staged) } : fresh;
       ink = module;
+      // The fonts of the text frames, for the field where one types and the toolbar's family buttons.
+      void registerTextFonts(module.text);
       noteId = opened.note.id;
       history = createHistory(start);
       savedNote = start.note;
@@ -1309,7 +1341,95 @@
   }
 
   function setMode(mode: Mode) {
+    if (mode !== 'text') endText();
     tools = { ...tools, mode };
+  }
+
+  // --- Text frames (the text tool) ------------------------------------------------------------
+
+  /** Where a new frame's time starts: as a stroke drawn now would (the sound's clock during a writing recording). */
+  function textTime(note: Note): number {
+    return writingClock ? Math.round(writingClock.noteTime(performance.now())) : nextStrokeBase(note, strokeNarration);
+  }
+
+  /** A tap of the text tool: typing in a frame of the chosen layer, or in a new frame put there. */
+  function startText(request: { kind: 'new'; at: { x: number; y: number } } | { kind: 'edit'; index: number; caret: number }) {
+    if (!doc || !history || !ink || replaying || split) return;
+    endText();
+    const current = history.present;
+    if (tools.mode !== 'text') tools = { ...tools, mode: 'text' };
+    textSessions += 1;
+    if (request.kind === 'edit') {
+      const base = current;
+      // The tool shows the frame's family, size and bold (what its buttons then change).
+      const frame = objectsOf(base.note)[request.index];
+      if (frame && isTextObject(frame)) tools = { ...tools, text: { font: frame.font, bold: frame.bold, size: frame.size } };
+      history = replacePresent(history, selectItems(base, []));
+      textEdit = { index: request.index, base, caret: request.caret, session: textSessions };
+      return;
+    }
+    if (!canDraw(current)) return hiddenLayerNotice();
+    const style = textSettings(tools);
+    // The tap is the middle of the first line, at its left end.
+    const object = newTextObject(ink.text, {
+      id: newObjectId(),
+      layer: current.activeLayer,
+      t: textTime(current.note),
+      x: request.at.x,
+      y: request.at.y - (style.size * LINE_HEIGHT) / 2,
+      text: '',
+      font: style.font,
+      bold: style.bold,
+      size: style.size,
+      color: tools.color,
+    });
+    const next = addObjectToDoc(current, object);
+    history = replacePresent(history, next);
+    textEdit = { index: objectsOf(next.note).length - 1, base: current, caret: 0, session: textSessions };
+  }
+
+  /** What the frame being typed holds now: the present doc changes, without a step. */
+  function typeText(text: string) {
+    if (!textEdit || !history || !ink) return;
+    const object = objectsOf(history.present.note)[textEdit.index];
+    if (!object || !isTextObject(object) || object.text === text) return;
+    history = replacePresent(history, replaceObjectAt(history.present, textEdit.index, measureText({ ...object, text }, ink.text)));
+  }
+
+  /**
+   * The end of the typing: one undoable step from the doc before it (none when nothing changed), the frame selected
+   * afterwards; a frame left empty (or blank) goes.
+   */
+  function endText() {
+    const edit = textEdit;
+    if (!edit || !history) return;
+    textEdit = null;
+    let present = history.present;
+    const object = objectsOf(present.note)[edit.index];
+    let kept = true;
+    if (object && isTextObject(object) && object.text.trim() === '') {
+      present = removeObjectAt(present, edit.index);
+      kept = false;
+    }
+    const before = JSON.stringify([edit.base.note.strokes.length, objectsOf(edit.base.note)]);
+    const after = JSON.stringify([present.note.strokes.length, objectsOf(present.note)]);
+    if (before === after && present.note.page === edit.base.note.page) {
+      history = replacePresent(history, kept && object ? selectItems(edit.base, [], [edit.index]) : edit.base);
+      return;
+    }
+    const selected = kept && object ? selectItems(present, [], [edit.index]) : present;
+    history = commit(replacePresent(history, edit.base), selected);
+  }
+
+  /** The tool's family, size or bold: the frame typed in or the selected frames take it too. */
+  function setTextStyle(style: Partial<TextSettings>) {
+    tools = { ...tools, text: { ...textSettings(tools), ...style } };
+    if (!doc || !history || !ink) return;
+    if (textEdit) {
+      history = replacePresent(history, { ...history.present, note: changeTexts(history.present.note, [textEdit.index], style, ink.text) });
+    } else if (textTargets.length > 0) {
+      change(applyTextStyle(doc, style, ink.text));
+    }
   }
 
   function setTool(tool: Tool) {
@@ -1320,6 +1440,10 @@
 
   function setColor(color: Rgba) {
     tools = { ...tools, color };
+    if (textEdit && history && ink) {
+      history = replacePresent(history, { ...history.present, note: changeTexts(history.present.note, [textEdit.index], { color }, ink.text) });
+      return;
+    }
     if (doc && hasSelection) change(applyStyle(doc, { color }));
   }
 
@@ -1348,16 +1472,21 @@
     if (history) history = commit(history, next);
   }
 
+  /** The frame typed in (the canvas shows its field), while one is. */
+  const editing = $derived(textEdit ? { index: textEdit.index, caret: textEdit.caret, session: textEdit.session } : null);
+
   /** A change of selection or active layer: not an undo step. */
   function reselect(next: Doc) {
     if (history) history = replacePresent(history, next);
   }
 
   function doUndo() {
+    endText();
     if (history && !split?.busy) history = undo(history);
   }
 
   function doRedo() {
+    endText();
     if (history && !split?.busy) history = redo(history);
   }
 
@@ -1374,11 +1503,13 @@
     return !!doc && !leaving && !offer && !exporting && !video && !split && !replaying && !share.panelOpen && !isTyping(target);
   }
 
-  /** Pastes strokes from the clipboard as one undoable step (the copies are then selected). */
-  function pasteDecoded(strokes: Stroke[]) {
+  /** Pastes strokes and text frames from the clipboard as one undoable step (the copies are then selected). */
+  function pasteDecoded(strokes: Stroke[], objects: PageObject[] = []) {
     if (!doc) return;
     if (!canDraw(doc)) return hiddenLayerNotice();
-    change(pasteStrokes(doc, strokes, pasteTime(doc.note)));
+    const engine = ink?.text;
+    const measured = engine ? objects.map((o) => (isTextObject(o) ? measureText(o, engine) : o)) : objects;
+    change(pasteStrokes(doc, strokes, pasteTime(doc.note), measured));
   }
 
   /**
@@ -1412,18 +1543,18 @@
     if (!canEditNow(e.target) || !doc || !hasSelection) return;
     e.preventDefault();
     if (canvas?.dragging()) return;
-    e.clipboardData?.setData('text/plain', encodeStrokes(selectedStrokes(doc)));
+    e.clipboardData?.setData('text/plain', encodeClipboard(selectedStrokes(doc), selectedObjects(doc)));
     if (cut) change(deleteSelection(doc));
   }
 
   function onpaste(e: ClipboardEvent) {
     clipboardEventSeen = true;
     if (!canEditNow(e.target)) return;
-    const strokes = decodeStrokes(e.clipboardData?.getData('text/plain') ?? '');
+    const content = decodeClipboard(e.clipboardData?.getData('text/plain') ?? '');
     // Foreign content (text, an image…) is left alone.
-    if (!strokes) return;
+    if (!content) return;
     e.preventDefault();
-    if (!canvas?.dragging()) pasteDecoded(strokes);
+    if (!canvas?.dragging()) pasteDecoded(content.strokes, content.objects);
   }
 
   /** The selection panel's Copy and Cut buttons. */
@@ -1431,7 +1562,7 @@
     const source = doc;
     if (!source || !hasSelection) return;
     try {
-      await navigator.clipboard.writeText(encodeStrokes(selectedStrokes(source)));
+      await navigator.clipboard.writeText(encodeClipboard(selectedStrokes(source), selectedObjects(source)));
     } catch {
       return showNotice(t('editor.clipboard.failed'), true);
     }
@@ -1447,8 +1578,8 @@
     } catch {
       return showNotice(t('editor.clipboard.failed'), true);
     }
-    const strokes = decodeStrokes(text);
-    if (strokes) pasteDecoded(strokes);
+    const content = decodeClipboard(text);
+    if (content) pasteDecoded(content.strokes, content.objects);
     else if (!quiet) showNotice(t('editor.clipboard.nothing'));
   }
 
@@ -2004,6 +2135,7 @@
       case 'select':
       case 'pen':
       case 'eraser':
+      case 'text':
       case 'pan':
         setMode(action.kind);
         break;
@@ -2033,13 +2165,14 @@
       leaving,
       owned: modalOpen() || !!exporting || !!printing || !!video || share.panelOpen || !!revisionDialog || !!offer,
       dragging: canvas?.dragging() ?? false,
+      editingText: textEdit !== null,
       split: split !== null,
       settings: shapesPanel,
       typing: isTyping(e.target),
       question: confirmDelete || (backgroundSection?.questionOpen() ?? false),
       replaying,
       cropping: tools.mode === 'crop',
-      selected: doc.selection.length,
+      selected: selectionCount(doc),
     });
     if (step === 'ignore') return;
     e.preventDefault();
@@ -2048,6 +2181,8 @@
         return stay();
       case 'cancelDrag':
         return canvas?.cancelGesture();
+      case 'endText':
+        return endText();
       case 'closeSplit':
         return cancelSplit();
       case 'closeSettings':
@@ -2276,6 +2411,8 @@
       oncustomcolor={addCustomColor}
       onwidth={setWidth}
       oneraser={setEraser}
+      ontext={setTextStyle}
+      textTargets={textTargets.length}
       onapplyall={applyAll}
       splitting={split !== null}
       locked={split !== null || replaying}
@@ -2335,6 +2472,10 @@
         }}
         strokeClock={writingClock}
         narration={strokeNarration}
+        {editing}
+        ontext={startText}
+        ontextinput={typeText}
+        ontextblur={endText}
         oninprogress={(event) => {
           if (pageProjection.presentation) pageProjection.stroke(event);
         }}
@@ -2449,7 +2590,13 @@
         <section class="pane-block" aria-labelledby="editor-selection-heading" data-section="selection">
           <h3 class="pane-title" id="editor-selection-heading">{t('editor.selection.label')}</h3>
           <div class="selection-head">
-            <p class="pane-help">{t('editor.selection.count', { count: doc?.selection.length ?? 0 })}</p>
+            <p class="pane-help">
+              {#if doc && objectSelection(doc).length > 0}
+                {t('editor.selection.countMixed', { strokes: doc.selection.length, texts: objectSelection(doc).length })}
+              {:else}
+                {t('editor.selection.count', { count: doc?.selection.length ?? 0 })}
+              {/if}
+            </p>
             <button
               type="button"
               class="button ghost selection-clear"

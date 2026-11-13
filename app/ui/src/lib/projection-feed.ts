@@ -63,6 +63,8 @@ export interface SentPage {
   imageKey: string | null;
   /** The stroke objects as sent: the common prefix is found by `===`. */
   strokes: readonly Stroke[];
+  /** The page objects (text frames) as sent: a change of them sends the whole page again. */
+  objects: Note['objects'];
 }
 
 /** A committed stroke the projection still shows in progress waits this long for the strokes update that brings it. */
@@ -81,6 +83,7 @@ export function sentPageOf(note: Note, imageKey: string | null): SentPage {
     layers: note.layers,
     imageKey,
     strokes: note.strokes,
+    objects: note.objects,
   };
 }
 
@@ -96,7 +99,7 @@ function sameValue(a: unknown, b: unknown): boolean {
   return ka.every((k) => sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
 }
 
-/** The page as Rust shows it is still `note`'s: same note, size, paper, image, layers and pixels. */
+/** The page as Rust shows it is still `note`'s: same note, size, paper, image, layers, pixels and page objects. */
 function sameLayout(sent: SentPage, note: Note, imageKey: string | null): boolean {
   return (
     sent.id === note.id &&
@@ -105,7 +108,8 @@ function sameLayout(sent: SentPage, note: Note, imageKey: string | null): boolea
     sent.page.height === note.page.height &&
     sameValue(sent.background, note.background) &&
     sameValue(sent.backgroundImage ?? null, note.backgroundImage ?? null) &&
-    sameValue(sent.layers, note.layers)
+    sameValue(sent.layers, note.layers) &&
+    (sent.objects === note.objects || sameValue(sent.objects ?? [], note.objects ?? []))
   );
 }
 

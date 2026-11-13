@@ -32,6 +32,12 @@
  *   four handles drawn crisp over it. A drag that ends without an edit puts the strokes back on the cache the same
  *   way. The handles (`Scene.handles`) are drawn on the selection's frame the rest of the time too.
  *
+ * - Page objects (text frames of a resumed sheet, of the note the editor projects or shares: `Scene.objects`) are drawn
+ *   on the cache with their layer, after its strokes, as every export draws them (`lib/editor/objects.ts` `drawItems`),
+ *   from the glyphs of `ardoise-text` (`ink.text`). Live mode never changes them: a new list (a snapshot, a page sent
+ *   by the editor) redraws the cache, and a partial repaint or an appended stroke that would have to pass under one
+ *   redraws it too.
+ *
  * Strokes are filled with the non-zero rule. Looks follow `ardoise-render/src/look.rs` where a
  * flat fill can: felt-tip core at 0.9, chalk at 0.95, highlighter multiplied on light paper and
  * screened on dark paper; the pencil and chalk grains are not drawn on screen (as in the editor).
@@ -50,7 +56,9 @@ import {
   type Size,
   type Transform,
 } from './live-view';
-import type { Background, Layer, PageSize, Paper, Rgba, Stroke } from './note';
+import { isTextObject, type Background, type Layer, type PageObject, type PageSize, type Paper, type Rgba, type Stroke } from './note';
+import { drawItems, objectBounds, objectMatrix, textStyle } from './editor/objects';
+import { parsePath, tracePath, type PathStep } from './text';
 import { HANDLE_SIZE_PX, corners, selectionFrame, transformRect, type PageTransform } from './selection-grab';
 
 /** The part of `CanvasRenderingContext2D` the drawing uses. */
@@ -76,6 +84,9 @@ export interface Ctx2D {
   arc(x: number, y: number, radius: number, startAngle: number, endAngle: number): void;
   fill(fillRule?: CanvasFillRule): void;
   stroke(): void;
+  /** Curves of the text frames' glyphs (absent on a stand-in: straight lines then). */
+  quadraticCurveTo?(cx: number, cy: number, x: number, y: number): void;
+  bezierCurveTo?(c1x: number, c1y: number, c2x: number, c2y: number, x: number, y: number): void;
   /** Dashes of the lines (absent on a stand-in that does not draw them). */
   setLineDash?(segments: number[]): void;
 }
@@ -102,6 +113,7 @@ export const ERASER_RING_PX = 18;
 const ERASER_RING = 'rgba(47, 111, 223, 0.85)';
 const ERASER_RING_DARK = 'rgba(143, 184, 255, 0.9)';
 const NO_STROKES: readonly Stroke[] = [];
+const NO_OBJECTS: readonly PageObject[] = [];
 
 /** The selection's colours on light paper and on dark paper (the editor's accent, then a lighter blue). */
 export const SELECTION_COLORS = {
@@ -197,6 +209,8 @@ export interface Scene {
   /** Finished strokes; `generation` changes when they are replaced or edited rather than appended to. */
   strokes: readonly Stroke[];
   generation: number;
+  /** The page's objects (text frames), drawn with their layers; a new list when they change. */
+  objects: readonly PageObject[];
   /** What the last edits touched: a change of `generation` found here repaints only that area. */
   edits: readonly StrokeEdit[];
   /** The tablet's stroke in progress. */
@@ -241,6 +255,8 @@ export interface LiveSource {
   layers: readonly Layer[];
   strokes: readonly Stroke[];
   generation: number;
+  /** The page's objects; absent: none. */
+  objects?: readonly PageObject[];
   edits?: readonly StrokeEdit[];
   current: Stroke | null;
   /** The computer's stroke in progress (M14); absent: none. */
@@ -292,6 +308,7 @@ export function buildScene(live: LiveSource, options: SceneOptions): Scene {
     layers: live.layers,
     strokes: live.strokes,
     generation: live.generation,
+    objects: live.objects ?? NO_OBJECTS,
     edits: live.edits ?? [],
     current: live.current,
     computer: options.localComputer ?? (live.computerCurrent ? [live.computerCurrent] : NO_STROKES),
@@ -413,6 +430,9 @@ export class LiveRenderer {
   private cacheSize = '';
   private cacheImage: CanvasImageSource | null = null;
   private cacheStrokes: readonly Stroke[] | null = null;
+  private cacheObjects: readonly PageObject[] | null = null;
+  /** The glyphs of the text frames, parsed once per frame object. */
+  private glyphs = new WeakMap<PageObject, PathStep[]>();
   private cacheGeneration = 0;
   /** Counts the full redraws of the cache, which say whether a stroke is on it (`Outline.onCache`). */
   private cacheRedraw = 0;
@@ -448,6 +468,7 @@ export class LiveRenderer {
     if (ink === this.ink) return;
     this.ink = ink;
     this.outlines = new WeakMap();
+    this.glyphs = new WeakMap();
     this.invalidate();
   }
 
@@ -492,6 +513,40 @@ export class LiveRenderer {
     ctx.globalCompositeOperation = 'source-over';
   }
 
+  /** Draws a text frame (the page transform is set; it is restored afterwards). */
+  private drawObject(ctx: Ctx2D, scene: Scene, object: PageObject): void {
+    if (!this.ink || !isTextObject(object)) return;
+    let steps = this.glyphs.get(object);
+    if (!steps) {
+      steps = parsePath(this.ink.text.path(object.text, textStyle(object)));
+      this.glyphs.set(object, steps);
+    }
+    if (steps.length === 0) return;
+    const k = scene.pixelRatio;
+    const t = scene.transform;
+    const m = objectMatrix(object);
+    const s = t.scale * k;
+    ctx.setTransform(s * m.a, s * m.b, s * m.c, s * m.d, s * m.e + t.x * k, s * m.f + t.y * k);
+    const { r, g, b, a } = object.color;
+    ctx.globalAlpha = Math.min(1, Math.max(0, a / 255));
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    ctx.beginPath();
+    tracePath(ctx, steps);
+    ctx.fill('nonzero');
+    ctx.globalAlpha = 1;
+    this.pageTransform(ctx, scene);
+  }
+
+  /** The rank of an object's layer: above the strokes of its layer (`rank` + ½), its layer must show. */
+  private objectRank(object: PageObject, layers: readonly Layer[]): number {
+    return (object.layer < layers.length ? object.layer : layers.length) + 0.5;
+  }
+
+  /** The objects the page draws (text frames of visible layers). */
+  private drawnObjects(scene: Scene): PageObject[] {
+    return scene.objects.filter((o) => isTextObject(o) && scene.layers[o.layer]?.visible !== false);
+  }
+
   private pageTransform(ctx: Ctx2D, scene: Scene): void {
     const k = scene.pixelRatio;
     const t = scene.transform;
@@ -523,7 +578,8 @@ export class LiveRenderer {
 
   private noteDrawn(scene: Scene): void {
     this.drawn = scene.strokes.length;
-    this.topRank = scene.strokes.reduce((top, s) => Math.max(top, this.rank(s, scene.layers)), -1);
+    const strokes = scene.strokes.reduce((top, s) => Math.max(top, this.rank(s, scene.layers)), -1);
+    this.topRank = this.drawnObjects(scene).reduce((top, o) => Math.max(top, this.objectRank(o, scene.layers)), strokes);
     this.cacheGeneration = scene.generation;
   }
 
@@ -532,8 +588,22 @@ export class LiveRenderer {
     this.cacheRedraw += 1;
     this.drawBackground(ctx, scene, width, height);
     const dark = isDarkPaper(scene.background.paper);
-    for (const stroke of drawingOrder(scene.strokes, scene.layers)) {
-      if (!this.excluded.has(stroke)) this.drawOnCache(ctx, stroke, dark);
+    if (scene.objects.length === 0) {
+      for (const stroke of drawingOrder(scene.strokes, scene.layers)) {
+        if (!this.excluded.has(stroke)) this.drawOnCache(ctx, stroke, dark);
+      }
+    } else {
+      // Each layer's strokes, then its objects (`drawItems`, the exports' order).
+      const order = drawingOrder(scene.strokes, scene.layers);
+      const index = new Map(scene.strokes.map((s, i) => [s, i] as const));
+      const note = { layers: scene.layers as Layer[], strokes: scene.strokes as Stroke[], objects: scene.objects as PageObject[] };
+      for (const item of drawItems(note, order.map((s) => index.get(s) ?? -1))) {
+        if (item.kind === 'object') this.drawObject(ctx, scene, scene.objects[item.index]);
+        else {
+          const stroke = scene.strokes[item.index];
+          if (stroke && !this.excluded.has(stroke)) this.drawOnCache(ctx, stroke, dark);
+        }
+      }
     }
     this.cacheExcluded = this.excluded;
     this.noteDrawn(scene);
@@ -596,6 +666,20 @@ export class LiveRenderer {
       if (box.x1 > box.x0 && box.y1 > box.y0) area = box;
     }
     if (area && (area.x1 - area.x0) * (area.y1 - area.y0) > REPAINT_MAX_AREA * width * height) return null;
+    // An object in the area would be lost by a repaint of strokes alone: the whole page is drawn again.
+    if (area) {
+      for (const object of this.drawnObjects(scene)) {
+        const b = objectBounds(object);
+        if (
+          b.x * scale + originX < area.x1 + REPAINT_MARGIN_PX &&
+          (b.x + b.width) * scale + originX > area.x0 - REPAINT_MARGIN_PX &&
+          b.y * scale + originY < area.y1 + REPAINT_MARGIN_PX &&
+          (b.y + b.height) * scale + originY > area.y0 - REPAINT_MARGIN_PX
+        ) {
+          return null;
+        }
+      }
+    }
 
     const crossing: Stroke[] = [];
     const added: Stroke[] = [];
@@ -665,7 +749,12 @@ export class LiveRenderer {
     const cache = this.cache;
     const surface = cache?.ctx ?? target;
     this.excluded = this.lifted(scene);
-    const stale = !cache || key !== this.cacheKey || scene.backgroundImage !== this.cacheImage || scene.strokes !== this.cacheStrokes;
+    const stale =
+      !cache ||
+      key !== this.cacheKey ||
+      scene.backgroundImage !== this.cacheImage ||
+      scene.strokes !== this.cacheStrokes ||
+      scene.objects !== this.cacheObjects;
     const edited = !stale && scene.generation !== this.cacheGeneration;
     const flips = stale ? NO_STROKES : this.exclusionFlips();
     const repaint = edited || flips.length > 0 ? this.planRepaint(scene, width, height, flips) : null;
@@ -686,6 +775,7 @@ export class LiveRenderer {
       this.cacheKey = key;
       this.cacheImage = scene.backgroundImage;
       this.cacheStrokes = scene.strokes;
+      this.cacheObjects = scene.objects;
       report.full = true;
     } else if (scene.strokes.length > this.drawn) {
       const added = scene.strokes.slice(this.drawn);
