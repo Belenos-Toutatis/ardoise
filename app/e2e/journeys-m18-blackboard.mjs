@@ -26,6 +26,10 @@ const cards = (condition) => `document.querySelectorAll('.note-card').length ${c
 const connection = (state) => `document.querySelector(${j(`${STATUS}[data-connection="${state}"]`)}) !== null`;
 const step = (name) => `document.querySelector(${j(`${ADD} [data-step="${name}"]`)}) !== null`;
 const invoke = (app, command) => app.evaluate(`window.__TAURI_INTERNALS__.invoke(${j(command)}).then(() => true)`);
+/** The paths of the notes of the library, and the size of a note's page (`27200x20500`): read through the commands, not the grid. */
+const notePaths = (app) => app.evaluate(`window.__TAURI_INTERNALS__.invoke('library_list').then((listing) => listing.notes.map((n) => n.path))`);
+const pageSizeOfNote = (app, path) =>
+  app.evaluate(`window.__TAURI_INTERNALS__.invoke('open_note', { path: ${j(path)} }).then((opened) => opened.note.page.width + 'x' + opened.note.page.height)`);
 
 /** A tab of the tablet panel (« use », « settings », « tablets »): the panel opens on « use ». */
 const showTab = (app, id) => app.click(`${PANEL} [role="tab"][data-tab="${id}"]`);
@@ -158,7 +162,7 @@ export const blackboardJourneys = [
         for (const key of ['tablet.boardPosition.buttonsLeft', 'tablet.options.boardPositionHint']) {
           if (!body.includes(l(key))) throw new Error(`the text ${key} is missing`);
         }
-        // Not clicked: the Rust side keeps the position only once it reads `boardPosition` (docs/design/blackboard.md §9).
+        // Chosen and used in a step of its own, further down (« boutons à gauche »).
         await showTab(app, 'use');
       });
 
@@ -243,6 +247,69 @@ export const blackboardJourneys = [
         await showTab(app, 'settings');
         await app.click(deleteOption);
         await app.waitFor(`document.querySelector(${j(deleteOption)})?.checked === true`, 'the option switched on again');
+        await showTab(app, 'use');
+      });
+
+      // Q17 (docs/design/blackboard.md §11): the position is kept, a page stored in it is turned upright (landscape on the
+      // side), and so is the live page, which keeps the position it started with. Put back at the end, for the next steps.
+      await check('position « boutons à gauche » : retenue, la page enregistrée devient une note en largeur, le direct aussi ; retour en position de départ', async () => {
+        const radios = `${PANEL} input[data-option="boardPosition"]`;
+        const chosen = `[...document.querySelectorAll(${j(radios)})].find((r) => r.checked)?.value`;
+        const saved = `window.__TAURI_INTERNALS__.invoke('tablet_status').then((status) => status.options.boardPosition)`;
+        const choose = async (value) => {
+          await openPanel(app);
+          await showTab(app, 'settings');
+          await app.click(`${radios}[value="${value}"]`);
+          await app.waitFor(`${chosen} === ${j(value)}`, `the position ${value} to be chosen`);
+          await app.waitFor(`${saved}.then((position) => position === ${j(value)})`, `the position ${value} to be saved`);
+        };
+        await openPanel(app);
+        await app.waitFor(connection('connected'), 'the blackboard idle again', 60_000);
+        await choose('buttonsLeft');
+
+        // Kept: the panel closed and opened again shows it, the Slate's position did not move.
+        await app.click(STATUS);
+        await app.waitFor(`document.querySelector(${j(PANEL)}) === null`, 'the panel to close');
+        await openPanel(app);
+        await showTab(app, 'settings');
+        await app.waitFor(`${chosen} === 'buttonsLeft'`, 'the position kept after reopening the panel');
+        if (await app.evaluate(`document.querySelector(${j(`${PANEL} input[data-option="orientation"]`)}) !== null`)) {
+          throw new Error('the position of the Slate is offered without a Slate');
+        }
+
+        // A page stored now: imported by itself (automatic sync, deletion on), as a landscape note.
+        await showTab(app, 'use');
+        const before = await notePaths(app);
+        await invoke(app, 'sim_blackboard_store_page');
+        try {
+          await app.waitFor(cards(`>= ${before.length + 1}`), 'the stored page as a note', 30_000);
+        } catch {
+          // Not imported by itself: asked for, which is the same import.
+          await app.click(`${PANEL} button[data-action="sync"]`);
+          await app.waitFor(cards(`>= ${before.length + 1}`), 'the stored page as a note after a sync', 60_000);
+        }
+        const added = (await notePaths(app)).filter((path) => !before.includes(path));
+        if (added.length !== 1) throw new Error(`${added.length} new notes for one stored page`);
+        const size = await pageSizeOfNote(app, added[0]);
+        if (size !== '27200x20500') throw new Error(`the page of the new note is ${size}, not landscape`);
+
+        // Live mode starts on the landscape page, still with no switch: the quarter turns are not the Slate's orientation.
+        await app.waitFor(connection('connected'), 'the blackboard idle after the import', 60_000);
+        await app.waitFor(`document.querySelector(${j(`${PANEL} button[data-action="live"]:not([disabled])`)}) !== null`, 'the live button');
+        await app.click(`${PANEL} button[data-action="live"]`);
+        await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
+        await app.waitFor(`${canvasData('pageSize')} === '27200x20500'`, 'the landscape page of the blackboard');
+        await app.waitFor(`Number(${canvasData('strokes')}) > 0`, 'strokes on the landscape live page', 20_000);
+        if (await app.evaluate(`document.querySelector('[data-slot="orientation"]') !== null || document.querySelector('[data-slot="resume-hold"]') !== null`)) {
+          throw new Error('the Slate position switch or its notice is shown for the blackboard');
+        }
+        await app.click('button[data-action="stop-live"]');
+        await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library', 30_000);
+
+        // Back to the starting position, so that the next steps are as before.
+        await openPanel(app);
+        await app.waitFor(connection('connected'), 'the blackboard idle again', 60_000);
+        await choose('buttonsBottom');
         await showTab(app, 'use');
       });
 

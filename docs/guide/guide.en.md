@@ -301,13 +301,17 @@ screen says so when you know two.
 - **Position of the tablet** (Xiaomi tablet): it can be held any way, and Ardoise turns what you write so that it appears
   upright, for the pages imported as for live mode. Four positions, drawn after the tablet (the bin erases the screen,
   the floppy disk stores the page): **Upright, buttons at the bottom** (the default), **Upright, buttons at the top**,
-  **Wide, buttons on the right**, **Wide, buttons on the left**.
+  **Wide, buttons on the right**, **Wide, buttons on the left**. The wide positions give wide notes (about 27 × 20 cm).
+  The position in force when a sync starts applies to all its pages; the one in force when live mode starts applies to
+  that whole live session (changing it during live mode applies to the next live session only). A note keeps the
+  position it was made in: changing the setting afterwards does not turn it.
 
 ### The Xiaomi tablet's pages
 
 Write on the Xiaomi tablet, then press its store button: the page is kept in its memory. Ardoise receives the pages like
 the Bamboo Slate's: when connecting, or with **Sync**. Each page becomes a note, **dated when it was stored on the
-tablet**, in portrait (about 20 × 27 cm).
+tablet**, upright (about 20 × 27 cm), or wide if the tablet is held with the buttons on the right or on the left (see
+"The options").
 
 This tablet hands over only its oldest page: the next one can be read only once that one is deleted. Ardoise therefore
 **deletes each page from the tablet once its note is written and checked** (Mi Home does the same). If the note cannot
@@ -363,7 +367,7 @@ it is in the trash or was deleted, or the new page does not contain it), a new n
   Mi Home imported is no longer on the tablet when Ardoise connects.
 - The tablet **does not give the time of each point**: replay and video of a fetched page draw the strokes at a regular
   pace. (In live mode, on the other hand, Ardoise stamps what it receives.)
-- The page is about **20 × 27 cm, portrait**.
+- The page is about **20 × 27 cm, portrait** (landscape when the tablet is held on its side).
 - Ardoise uses no Xiaomi account or online service: the tablet stays linked to Mi Home and that account.
 
 ### Automatic export for your phone
@@ -398,9 +402,12 @@ keep being written to it instead of being duplicated.
 
 Live mode works the same way with the Xiaomi tablet: tool, colour, texture, pressure, laser pointer on hover (the
 tablet also reports the pen's position when it is near the screen), other screen, sharing and touch-ups. The live page is
-**portrait** (about 20 × 27 cm) when the tablet is held upright: it follows the Xiaomi tablet's **Position of the
-tablet** chosen in the settings (see "The options"). The control window has no position buttons for it, it replaces them
-with a reminder, and the **Tablet button in live mode** setting applies to the Bamboo Slate only.
+**portrait** (about 20 × 27 cm) when the tablet is held with the buttons at the bottom or at the top, and **landscape**
+when it is held with the buttons on the right or on the left: it follows the Xiaomi tablet's **Position of the tablet**
+chosen in the settings (see "The options") **when live mode starts**, and keeps it until it stops. Changing the position
+during live mode applies to the next live session only: your writing is never turned under your hand. The control
+window has no position buttons for the Xiaomi tablet, it replaces them with a reminder, and the **Tablet button in live
+mode** setting applies to the Bamboo Slate only.
 
 - **Storing the page with the tablet's button** does not interrupt live mode. The page is imported afterwards, like a
   sync: its note is a harmless duplicate of the live one.
@@ -446,7 +453,7 @@ The button is greyed out while the tablet is not registered or is busy (sync und
   wrote on it in chalk, it is saved as slate so that the chalk stays readable.
 - **The format**: if the sheet is not the size of the tablet, what you write is scaled down or up to fit whole inside
   the sheet, centred, without distortion. The width of the stroke does not change.
-- **The orientation**: the sheet is never turned. If it is landscape and the tablet is set to portrait (or the other
+- **The orientation** (Bamboo Slate): the sheet is never turned. If it is landscape and the tablet is set to portrait (or the other
   way round), a notice tells you how to hold the tablet: "To write on this sheet, hold the tablet like this: …". The
   four position buttons are greyed out for this sheet.
 - **Which tablet**: the Xiaomi tablet writes only on a page of the Xiaomi tablet (about 20 × 27 cm: its fetched pages and
@@ -455,6 +462,14 @@ The button is greyed out while the tablet is not registered or is busy (sync und
   refuses, says why (**Live mode could not resume this sheet.**) and writes nothing on the note; if the tablet only
   connects afterwards, the message comes then. **Back to the library**, or **Try again** once the other tablet is
   switched on.
+- **The way round of the page** (Xiaomi tablet): an upright page of the Xiaomi tablet is continued with the tablet held
+  upright (buttons at the bottom or at the top), a wide page with the tablet held wide (buttons on the right or on the
+  left). If the page is not the same way round as the **Position of the tablet** set, Ardoise refuses, writes nothing on
+  the note, and says what to do (**This page of the Xiaomi tablet is not the same way round as the tablet is held…**):
+  choose a position of the same way round as the page in the settings, hold the tablet that way, then **Try again**, or
+  resume live mode on another sheet. The Xiaomi tablet has no "hold the tablet like this" notice: it always follows its
+  set position, and what you write is turned upright for that position (not for the one the page was made in, which is
+  not kept for live mode).
 - **The next page** creates a new note, at the root of the library, with the sheet's paper (colour, template, texture, not
   its image), and follows the position set for the tablet again: the position buttons then work. The **Page** and
   **Background** tabs change the paper and the image of the current sheet (see **The paper and the image of the current
@@ -1597,6 +1612,7 @@ of every component used, with its licence.
 | "No Bluetooth adapter found" | Plug in the Bluetooth dongle (4.0 or later), wait for Windows to recognise it, try again. |
 | "The tablet does not answer" / "is not connected" | Bring it closer to the computer and press its button briefly; check the charge. |
 | "The tablet refused the command" | The phone app or Inkspace may have registered it since: register it again in Ardoise (chapter 4). Turn off the phone's Bluetooth. |
+| "This page of the Xiaomi tablet is not the same way round as the tablet is held…" | The page is wide and the position set is "upright" (or the other way round). Choose a position of the same way round as the page in the Xiaomi tablet's settings, hold it that way, then **Try again**; or resume live mode on another sheet. The note was not touched (chapter 6). |
 | "This sheet cannot be continued with this tablet" | A Bamboo Slate sheet is continued with the Bamboo Slate, a page of the Xiaomi tablet with the Xiaomi tablet. Switch on the other tablet (the Xiaomi connects by itself, the Bamboo Slate needs a brief button press), then **Try again**; the note was not touched (chapter 6). |
 | "The Xiaomi tablet sent a page that Ardoise cannot read" | That page was not imported and stays on the tablet, with the pages stored after it (the tablet gives only its oldest page). Import them with Mi Home, and keep the diagnostic log (`_ardoise\diagnostics\` in the library, chapter 13). |
 | "The tablet is busy" | A sync or live mode is under way: try again when it is finished. |

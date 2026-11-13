@@ -259,8 +259,10 @@
   /** The sheet is resumed and cannot be turned: the quick position buttons wait for the next page. */
   const locked = $derived(!live.canTurnPage);
   /**
-   * The Xiaomi blackboard writes the live page: it is held one way only (its portrait page is never turned), so the
-   * position switch and the hint about the Slate's button do not apply. The session says which tablet it writes with
+   * The Xiaomi blackboard writes the live page: its position is the one of its settings, taken when the run starts and
+   * kept to its end, so the Slate's position switch and the hint about its button do not apply (and `live.orientation`,
+   * which counts the blackboard's quarter turns under the Slate's names, is never shown). The session says which tablet
+   * it writes with
    * (kept while it reconnects, when no tablet is connected); until it does, the tablet that is connected.
    */
   const onBoard = $derived((live.tablet ?? tablet.active) === 'blackboard');

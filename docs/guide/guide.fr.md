@@ -321,13 +321,18 @@ toutes vos tablettes, et l'écran le dit quand vous en connaissez deux.
 - **Position de la tablette** (tablette Xiaomi) : on peut la tenir dans n'importe quel sens, et Ardoise redresse ce que
   vous écrivez, pour les pages importées comme pour le direct. Quatre positions, dessinées d'après la tablette (la
   corbeille efface l'écran, la disquette enregistre la page) : **En hauteur, boutons en bas** (au départ), **En
-  hauteur, boutons en haut**, **En largeur, boutons à droite**, **En largeur, boutons à gauche**.
+  hauteur, boutons en haut**, **En largeur, boutons à droite**, **En largeur, boutons à gauche**. Les positions en
+  largeur donnent des notes en largeur (environ 27 × 20 cm). La position en vigueur au début d'une synchronisation vaut
+  pour toutes ses pages ; celle du début d'un direct vaut pour tout ce direct (la changer pendant le direct ne vaut que
+  pour le direct suivant). Une note garde la position avec laquelle elle a été faite : changer le réglage après coup ne
+  la retourne pas.
 
 ### Les pages de la tablette Xiaomi
 
 Écrivez sur la tablette Xiaomi, puis appuyez sur son bouton d'enregistrement : la page est gardée dans sa mémoire.
 Ardoise les reçoit comme celles de la Bamboo Slate : à la connexion, ou avec **Synchroniser**. Chaque page
-devient une note, **datée du moment où elle a été enregistrée sur la tablette**, en portrait (environ 20 × 27 cm).
+devient une note, **datée du moment où elle a été enregistrée sur la tablette**, en hauteur (environ 20 × 27 cm), ou en
+largeur si la tablette est tenue boutons à droite ou à gauche (voir « Les options »).
 
 Cette tablette ne donne que sa page la plus ancienne : la suivante ne se lit qu'une fois celle-ci effacée. Ardoise
 **efface donc chaque page de la tablette une fois sa note écrite et vérifiée** (c'est aussi ce que fait Mi Home). Si
@@ -386,7 +391,7 @@ page ne la contient pas), une nouvelle note est ajoutée, comme pour n'importe q
   importée par Mi Home n'est plus sur la tablette quand Ardoise s'y connecte.
 - La tablette **ne donne pas l'heure de chaque point** : la relecture et la vidéo d'une page récupérée rejouent les
   traits à vitesse régulière. (En mode direct, au contraire, Ardoise horodate ce qu'elle reçoit.)
-- La page fait environ **20 × 27 cm, en hauteur**.
+- La page fait environ **20 × 27 cm, en hauteur** (en largeur quand la tablette est tenue sur le côté).
 - Ardoise n'utilise ni compte Xiaomi ni service en ligne : la tablette reste liée à Mi Home et à ce compte.
 
 ### Export automatique pour le téléphone
@@ -425,10 +430,12 @@ continuent d'y être écrites au lieu d'être dupliquées.
 
 Le mode direct fonctionne de la même façon avec la tablette Xiaomi : outil, couleur, texture, pression, pointeur laser
 au survol (la tablette envoie aussi la position du stylo quand il est près de l'écran), autre écran, partage et
-retouches. La page du direct est **en hauteur** (environ 20 × 27 cm) quand la tablette est tenue droite : elle suit la
-**Position de la tablette** Xiaomi choisie dans les réglages (voir « Les options »). La fenêtre de commande n'a pas de
-boutons de position pour elle, elle les remplace par un rappel, et le réglage **Bouton de la tablette en mode direct** ne
-s'applique qu'à la Bamboo Slate.
+retouches. La page du direct est **en hauteur** (environ 20 × 27 cm) quand la tablette est tenue boutons en bas ou en
+haut, **en largeur** quand elle est tenue boutons à droite ou à gauche : elle suit la **Position de la tablette** Xiaomi
+choisie dans les réglages (voir « Les options ») **au moment où le direct commence**, et la garde jusqu'à son arrêt.
+Changer la position pendant le direct ne vaut que pour le direct suivant : l'écriture n'est jamais retournée sous votre
+main. La fenêtre de commande n'a pas de boutons de position pour la Xiaomi, elle les remplace par un rappel, et le
+réglage **Bouton de la tablette en mode direct** ne s'applique qu'à la Bamboo Slate.
 
 - **Enregistrer la page avec le bouton de la tablette** n'interrompt pas le direct. La page est importée ensuite, comme
   une synchronisation : sa note est un doublon de celle du direct, sans danger.
@@ -478,8 +485,8 @@ faut aussi ne choisir qu'une seule note.
   écrit à la craie, elle est enregistrée en ardoise pour que la craie reste lisible.
 - **Le format** : si la feuille n'a pas le format de la tablette, ce que vous écrivez est réduit ou agrandi pour tenir
   en entier dans la feuille, au milieu, sans déformation. L'épaisseur du trait ne change pas.
-- **L'orientation** : la feuille n'est jamais tournée. Si elle est en paysage et que la tablette est réglée en portrait
-  (ou l'inverse), un avis dit comment tenir la tablette : « Pour écrire sur cette feuille, tenez la tablette ainsi : … ».
+- **L'orientation** (Bamboo Slate) : la feuille n'est jamais tournée. Si elle est en paysage et que la tablette est
+  réglée en portrait (ou l'inverse), un avis dit comment tenir la tablette : « Pour écrire sur cette feuille, tenez la tablette ainsi : … ».
   Les quatre boutons de position sont grisés pour cette feuille.
 - **Quelle tablette** : la tablette Xiaomi n'écrit que sur une page de la tablette Xiaomi (environ 20 × 27 cm : ses pages
   récupérées et ses notes du direct), et la Bamboo Slate sur toutes les autres feuilles. Une feuille de la Bamboo Slate
@@ -487,6 +494,14 @@ faut aussi ne choisir qu'une seule note.
   connectée ne convient pas, Ardoise refuse, dit pourquoi (**Le mode direct n'a pas pu reprendre cette feuille.**) et
   n'écrit rien sur la note ; si la tablette ne se connecte qu'ensuite, le message arrive à ce moment-là. **Retour à la
   bibliothèque**, ou **Réessayer** une fois l'autre tablette allumée.
+- **Le sens de la page** (tablette Xiaomi) : une page de la Xiaomi en hauteur se continue avec la tablette tenue en
+  hauteur (boutons en bas ou en haut), une page en largeur avec la tablette tenue en largeur (boutons à droite ou à
+  gauche). Si la page n'est pas dans le sens de la **Position de la tablette** réglée, Ardoise refuse, sans rien écrire
+  sur la note, et dit quoi faire (**Cette page de la tablette Xiaomi n'est pas dans le même sens que la tablette telle
+  que vous la tenez…**) : choisissez dans les réglages une position du même sens que la page, tenez la tablette ainsi
+  puis **Réessayer**, ou reprenez le direct sur une autre feuille. La Xiaomi n'a pas d'avis « tenez la tablette ainsi » :
+  elle suit toujours sa position réglée, et ce que vous écrivez est redressé pour cette position (et non pour celle
+  avec laquelle la page avait été faite, qui n'est pas retenue pour le direct).
 - **La page suivante** crée une note neuve, à la racine de la bibliothèque, avec le papier de la feuille (couleur,
   modèle, texture, pas son image), et suit de nouveau la position réglée pour la tablette : les boutons de position
   fonctionnent alors. Les onglets **Page** et **Fond** changent le papier et l'image de la feuille en cours (voir
@@ -1694,6 +1709,7 @@ de tous les composants utilisés avec leur licence.
 | « La tablette ne répond pas » / « n'est pas connectée » | Rapprochez-la de l'ordinateur et appuyez brièvement sur son bouton ; vérifiez la charge. |
 | « La tablette refuse la commande » | L'application du téléphone ou Inkspace l'a peut-être enregistrée depuis : enregistrez-la de nouveau dans Ardoise (chapitre 4). Coupez le Bluetooth du téléphone. |
 | « Cette feuille ne peut pas être continuée avec cette tablette » | Une feuille de la Bamboo Slate se continue avec la Bamboo Slate, une page de la tablette Xiaomi avec la tablette Xiaomi. Allumez l'autre tablette (la Xiaomi se connecte, la Bamboo Slate demande un appui bref), puis **Réessayer** ; la note n'a pas été touchée (chapitre 6). |
+| « Cette page de la tablette Xiaomi n'est pas dans le même sens que la tablette telle que vous la tenez… » | La page est en largeur et la position réglée est « en hauteur » (ou l'inverse). Choisissez une position du même sens que la page dans les réglages de la tablette Xiaomi, tenez-la ainsi, puis **Réessayer** ; ou reprenez le direct sur une autre feuille. La note n'a pas été touchée (chapitre 6). |
 | « La tablette Xiaomi a envoyé une page qu'Ardoise ne sait pas lire » | Cette page n'a pas été importée et reste sur la tablette, avec celles enregistrées après elle (la tablette ne donne que sa page la plus ancienne). Importez-les avec Mi Home, et gardez le journal de diagnostic (`_ardoise\diagnostics\` dans la bibliothèque, chapitre 13). |
 | « La tablette est occupée » | Une synchronisation ou le mode direct est en cours : réessayez à la fin. |
 | « Aucune tablette Xiaomi trouvée » | Allumez-la, rapprochez-la de l'ordinateur, fermez Mi Home (ou coupez le Bluetooth du téléphone : elle ne parle qu'à une application à la fois), puis **Chercher de nouveau** (chapitre 4). |

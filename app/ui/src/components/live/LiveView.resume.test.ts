@@ -8,7 +8,7 @@ import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
 import { FakeContext } from '../../lib/live-fake-canvas';
 import { freshStamp, mockLibrary, resetMockLibrary } from '../../lib/mock-data';
-import { mockLiveConfig, mockLiveRefuse, mockLiveTick, resetMockLive, setMockLiveTablet } from '../../lib/mock-live';
+import { mockLiveConfig, mockLiveRefuse, mockLiveTick, resetMockLive, setMockLiveBoardPosition, setMockLiveTablet } from '../../lib/mock-live';
 import { resetMockNarration } from '../../lib/mock-narration';
 import { resetMockTablet } from '../../lib/mock-tablet';
 import { tablet } from '../../lib/tablet-state.svelte';
@@ -337,6 +337,58 @@ describe('live view: a sheet the connected tablet cannot write on', () => {
     const view = render();
     await live(view);
     expect(view.slot('resume-failed')).toBeNull();
+  });
+
+  describe('a page of the Xiaomi tablet the other way round than its position (sheetBoardPosition)', () => {
+    /** The demo sheet made a landscape page of the blackboard, the blackboard held upright. */
+    function wideSheetUpright() {
+      mockLibrary().notes.get(sheetPath())!.note.page = { width: 27200, height: 20500 };
+      setMockLiveBoardPosition('buttonsBottom');
+    }
+
+    it.each([
+      ['fr', 'choisissez dans les réglages de la tablette Xiaomi une position du même sens que la page', 'reprenez le direct sur une autre feuille'],
+      ['en', 'choose a position of the same way round as the page in the Xiaomi tablet', 'resume live mode on another sheet'],
+    ] as const)('shows what to do, at once, when the blackboard is connected (%s)', async (locale, choose, other) => {
+      setLocale(locale);
+      wideSheetUpright();
+      setMockLiveTablet('blackboard');
+      const stop = vi.spyOn(api, 'liveStop');
+      const view = render();
+      await vi.waitFor(() => expect(view.slot('resume-failed')).not.toBeNull());
+      const banner = view.slot('resume-failed')!;
+      expect(banner.getAttribute('role')).toBe('alert');
+      expect(banner.textContent).toContain(choose);
+      expect(banner.textContent).toContain(other);
+      // The other tablet's text is not the one shown, and nothing was started.
+      expect(banner.textContent).not.toContain(locale === 'fr' ? 'ne peut pas être continuée avec cette tablette' : 'cannot be continued with this tablet');
+      expect(view.root().dataset.state).toBe('idle');
+      expect(stop).not.toHaveBeenCalled();
+    });
+
+    it('shows it when the blackboard connects later, and goes on once the position fits the page', async () => {
+      mockLiveConfig.waitMs = 5000;
+      wideSheetUpright();
+      const view = render();
+      await vi.waitFor(() => expect(view.root().dataset.state).toBe('waiting'));
+      expect(view.slot('resume-failed')).toBeNull();
+
+      setMockLiveTablet('blackboard');
+      await vi.waitFor(() => expect(view.slot('resume-failed')).not.toBeNull());
+      const banner = view.slot('resume-failed')!;
+      expect(banner.textContent).toContain('choisissez dans les réglages de la tablette Xiaomi une position du même sens que la page');
+      expect(banner.textContent).toContain("Le mode direct n'a pas pu reprendre cette feuille.");
+      expect(view.root().dataset.state).toBe('idle');
+
+      // The position of the page is chosen, and the user tries again: the page is resumed.
+      mockLiveConfig.waitMs = 30;
+      setMockLiveBoardPosition('buttonsLeft');
+      view.button('Réessayer').click();
+      await live(view);
+      expect(view.slot('resume-failed')).toBeNull();
+      const [width, height] = view.canvas().dataset.pageSize!.split('x').map(Number);
+      expect(width).toBeGreaterThan(height);
+    });
   });
 
   it('shows the refusal that comes later, when the tablet connects, and lets the user try again', async () => {

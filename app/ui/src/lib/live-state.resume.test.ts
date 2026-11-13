@@ -118,6 +118,14 @@ describe('live state: a resume refused for the tablet that connected', () => {
     expect(live.state).toBe('idle');
   });
 
+  it('keeps the code of a page of the blackboard held the other way round, as it came', () => {
+    const live = new LiveState();
+    live.initial(snapshot({ state: 'waiting' }));
+    live.receive(batch(refused('sheetBoardPosition'), { type: 'snapshot', snapshot: snapshot({ state: 'idle' }) }));
+    expect(live.refused?.code).toBe('sheetBoardPosition');
+    expect(live.state).toBe('idle');
+  });
+
   it('forgets it when the view starts again, and keeps no strokes of the sheet it refused', () => {
     const live = new LiveState();
     live.initial(snapshot({ state: 'waiting' }));
