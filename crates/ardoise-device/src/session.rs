@@ -82,9 +82,11 @@ pub enum DeviceError {
     /// A tablet name must be 1 to 15 printable ASCII characters.
     #[error("invalid tablet name {0:?}: 1 to 15 printable ASCII characters")]
     InvalidName(String),
-    /// A page download of the blackboard stopped before the size it announced (no byte for
-    /// [`crate::blackboard::DATA_IDLE_TIMEOUT`]), or brought more bytes; the page stays on the
-    /// tablet.
+    /// A page download of the blackboard did not end cleanly twice (its retry included): it
+    /// stopped before the size it announced (no byte for
+    /// [`crate::blackboard::DATA_IDLE_TIMEOUT`]), brought more bytes (during the download or while
+    /// the page was kept), or could not be asked because the stream never went quiet (0 bytes
+    /// received); the page stays on the tablet.
     #[error("page transfer stopped after {received} of {expected} bytes")]
     TransferIncomplete { expected: u32, received: usize },
     /// The blackboard still describes the page it was just asked to delete (Unix seconds of its
