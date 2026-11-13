@@ -95,6 +95,12 @@ impl BleConnector {
     }
 
     /// Scans for up to `limit`, handing every advertisement received to `filter`.
+    ///
+    /// While a link this connector opened is still open (the blackboard's, while the worker
+    /// looks for the Slate), the scan is a gentle one ([`ScanKind::Gentle`]): Windows' list of
+    /// peripherals is left as it is, so the open link's peripheral and its events are not
+    /// disturbed. Before the blackboard the application never scanned with a link open, so every
+    /// scan of a library that only knows a Slate is still a fresh one.
     fn scan(
         &mut self,
         limit: Duration,
@@ -102,11 +108,12 @@ impl BleConnector {
     ) -> Result<Option<Advertisement>, TransportError> {
         let deadline = Instant::now() + limit.min(MAX_WAIT);
         let adapter = self.adapter()?;
+        let kind = ScanKind::for_links(self.has_open_link());
         let (found, received) = mpsc::channel();
         let (stop, stop_receiver) = oneshot::channel();
         let task = self
             .executor
-            .spawn(scan_task(adapter, found, stop_receiver))?;
+            .spawn(scan_task(adapter, kind, found, stop_receiver))?;
         let outcome = loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -149,6 +156,13 @@ impl BleConnector {
             Err(btleplug::Error::DeviceNotFound) => Ok(None),
             Err(error) => Err(map_error(error)),
         }
+    }
+
+    /// Whether a link this connector opened is still open.
+    fn has_open_link(&self) -> bool {
+        self.links
+            .iter()
+            .any(|weak| weak.upgrade().is_some_and(|link| link.is_open()))
     }
 
     /// Closes the links still open to `address`, so their notifications cannot be duplicated
@@ -241,13 +255,38 @@ impl Connector for BleConnector {
     }
 }
 
+/// How a scan treats Windows' list of peripherals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScanKind {
+    /// The list is emptied first, and every peripheral in it is reported again each second
+    /// ([`SWEEP_INTERVAL`]) in case btleplug's event buffer dropped advertisements: only
+    /// devices heard during this scan are reported (btleplug #405 keeps peripherals that
+    /// stopped advertising).
+    Fresh,
+    /// A link is open: the list is left as it is (emptying it would drop the open link's
+    /// peripheral from btleplug's map while Windows still holds its connection: whether that
+    /// loses the link's events is not known, so it is avoided), and only advertisements received
+    /// during the scan are reported, never the list (it still holds peripherals that stopped
+    /// advertising, a Slate among them: it would pass for one asking to connect). **Supposed**
+    /// harmless to the open link: to check at the hardware checkpoint (docs/design/blackboard.md
+    /// §8).
+    Gentle,
+}
+
+impl ScanKind {
+    fn for_links(open: bool) -> Self {
+        if open { Self::Gentle } else { Self::Fresh }
+    }
+}
+
 /// Restarts the scan, then reports every advertisement received until stopped.
 async fn scan_task(
     adapter: Adapter,
+    kind: ScanKind,
     found: Sender<Result<Advertisement, TransportError>>,
     mut stop: oneshot::Receiver<()>,
 ) {
-    if let Err(error) = scan_loop(&adapter, &found, &mut stop).await {
+    if let Err(error) = scan_loop(&adapter, kind, &found, &mut stop).await {
         let _ = found.send(Err(error));
     }
     let _ = adapter.stop_scan().await;
@@ -255,14 +294,15 @@ async fn scan_task(
 
 async fn scan_loop(
     adapter: &Adapter,
+    kind: ScanKind,
     found: &Sender<Result<Advertisement, TransportError>>,
     stop: &mut oneshot::Receiver<()>,
 ) -> Result<(), TransportError> {
     let mut events = adapter.events().await.map_err(map_error)?;
-    // A fresh scan with an empty peripheral list: peripherals that stopped advertising
-    // (btleplug #405) are forgotten, so only devices heard during this call are reported.
     let _ = adapter.stop_scan().await;
-    adapter.clear_peripherals().await.map_err(map_error)?;
+    if kind == ScanKind::Fresh {
+        adapter.clear_peripherals().await.map_err(map_error)?;
+    }
     adapter
         .start_scan(ScanFilter::default())
         .await
@@ -287,7 +327,7 @@ async fn scan_loop(
                     return Err(TransportError::Backend("the scan event stream ended".into()));
                 }
             },
-            _ = sweep.tick() => {
+            _ = sweep.tick(), if kind == ScanKind::Fresh => {
                 for peripheral in adapter.peripherals().await.map_err(map_error)? {
                     if !report(&peripheral, found).await {
                         return Ok(());
@@ -308,5 +348,16 @@ async fn report(
             .send(Ok(advertisement_from_properties(&properties)))
             .is_ok(),
         _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_scan_with_a_link_open_leaves_the_peripherals_alone() {
+        assert_eq!(ScanKind::for_links(false), ScanKind::Fresh);
+        assert_eq!(ScanKind::for_links(true), ScanKind::Gentle);
     }
 }
