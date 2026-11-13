@@ -7,8 +7,11 @@
 //! Replay time is what the viewer sees, from zero (the note's time origin) to
 //! [`Timeline::duration`] (its last sample shown):
 //!
-//! 1. Only the strokes every format draws count (visible layers: hidden strokes are not
-//!    there, so the time spent drawing them is a pause like any other).
+//! 1. Only the strokes and page objects every format draws count (visible layers: hidden
+//!    strokes are not there, so the time spent drawing them is a pause like any other). A page
+//!    object (a text frame) appears all at once at its time (`PageObject::t`): it counts as a
+//!    stroke of one sample, so a note whose last thing is a text frame replays until it
+//!    appears, and a long wait before it is a pause.
 //! 2. With [`ReplayOptions::max_pause`] ("supprimer les temps morts"), every pause longer
 //!    than it is cut after its first `max_pause`: the time before the first stroke and the
 //!    time between strokes (when several strokes overlap in time, such as strokes on two
@@ -26,10 +29,11 @@
 //! [`Timeline::note_at`]: every sample whose note time maps to `r` or earlier, so strokes
 //! appear in their recorded order of time, point by point; a stroke in progress is cut after
 //! its last sample shown (a sample never appears before the one it follows: its time counts
-//! as at least theirs). Notes with [`Timing::Synthesized`](ardoise_core::note::Timing) follow
-//! the same rules; their replay is approximate. Strokes are drawn in the order every export
-//! uses ([`ardoise_render::drawing_order`]), whatever the order they were written in, so the
-//! last frame is the exported image.
+//! as at least theirs); and every page object whose time maps to `r` or earlier, whole. Notes
+//! with [`Timing::Synthesized`](ardoise_core::note::Timing) follow the same rules; their
+//! replay is approximate. Strokes and objects are drawn in the order every export uses
+//! ([`ardoise_render::draw_items`]: a layer's objects over its strokes), whatever the order
+//! they were written in, so the last frame is the exported image.
 
 mod frames;
 mod timeline;

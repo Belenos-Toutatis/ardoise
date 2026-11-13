@@ -16,12 +16,19 @@
 //! exactly `render_note` of [`Timeline::note_at`], except that a grain stroke in progress
 //! (pencil, chalk) already has the grain position and opacity of the complete stroke
 //! ([`ardoise_render::Look::partial_fills`]) instead of shimmering as it grows.
+//!
+//! Page objects (text frames) take their place in that same order
+//! ([`ardoise_render::draw_items`]: a layer's objects over its strokes, under the layers above)
+//! as strokes of one sample would: an object appears whole at its time, waits outside the
+//! cache while something before it in drawing order is unfinished (a stroke of its layer still
+//! being written is drawn under it), and joins the cache once all before it have.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
 use ardoise_render::{
-    Backdrop, NoteView, PageCanvas, Picture, PixelRect, PreparedStroke, image_size, paper_color,
+    Backdrop, DrawItem, NoteView, PageCanvas, Picture, PixelRect, PreparedObject, PreparedStroke,
+    image_size, paper_color,
 };
 
 use super::timeline::{Timeline, frame_time};
@@ -72,15 +79,36 @@ pub struct PagePlacement {
     pub scale: f32,
 }
 
-/// A stroke on the picture beyond the cache.
+/// The geometry of a stroke or an object, to draw it again.
+#[derive(Debug, Clone)]
+enum Shape {
+    Stroke(PreparedStroke),
+    Object(PreparedObject),
+}
+
+impl Shape {
+    fn bounds(&self) -> Option<PixelRect> {
+        match self {
+            Shape::Stroke(stroke) => stroke.bounds(),
+            Shape::Object(object) => object.bounds(),
+        }
+    }
+
+    fn draw(&self, canvas: &mut PageCanvas) {
+        match self {
+            Shape::Stroke(stroke) => canvas.draw_prepared(stroke),
+            Shape::Object(object) => canvas.draw_prepared_object(object),
+        }
+    }
+}
+
+/// A stroke or an object on the picture beyond the cache.
 #[derive(Debug, Clone)]
 struct Drawn {
-    /// Index into `note.strokes`.
-    index: usize,
-    /// Samples drawn.
+    item: DrawItem,
+    /// Samples drawn (1 for an object).
     samples: usize,
-    /// Its geometry, to draw it again.
-    stroke: PreparedStroke,
+    shape: Shape,
 }
 
 /// Draws the frames of a replay, in RGBA.
@@ -93,12 +121,13 @@ pub struct FrameRenderer<'n> {
     placement: PagePlacement,
     /// The background alone.
     paper: PageCanvas,
-    /// The background and the first `cached` strokes of the drawing order, all finished.
+    /// The background and the first `cached` items of the drawing order
+    /// ([`Timeline::items`]), all finished.
     cache: PageCanvas,
     cached: usize,
-    /// The page of the current frame: the cache with the strokes of `drawn` on top.
+    /// The page of the current frame: the cache with the items of `drawn` on top.
     picture: PageCanvas,
-    /// The strokes begun beyond the cache, in drawing order.
+    /// The strokes begun and the objects shown beyond the cache, in drawing order.
     drawn: Vec<Drawn>,
     /// The current frame: the picture at its place, the bands around it.
     frame: Vec<u8>,
@@ -225,7 +254,7 @@ impl<'n> FrameRenderer<'n> {
         }
         self.last = replay;
         let note = self.timeline.note();
-        let order = self.timeline.drawing_order();
+        let order = self.timeline.items();
         let tau = self.timeline.to_note(replay);
         // Where the picture changes.
         let mut dirty = if self.up_to_date {
@@ -233,34 +262,38 @@ impl<'n> FrameRenderer<'n> {
         } else {
             self.picture.rect()
         };
-        let mut previous: HashMap<usize, Drawn> =
-            self.drawn.drain(..).map(|d| (d.index, d)).collect();
+        let mut previous: HashMap<DrawItem, Drawn> =
+            self.drawn.drain(..).map(|d| (d.item, d)).collect();
 
-        // Finished strokes at the front of the drawing order join the cache for good. The
-        // picture only changes where one was not already drawn whole. Strokes the picture
-        // already shows whole (those that waited for an earlier stroke) join a few at a time,
+        // Finished strokes and shown objects at the front of the drawing order join the cache
+        // for good. The picture only changes where one was not already drawn whole. Those the
+        // picture already shows whole (that waited for an earlier stroke) join a few at a time,
         // so that a long wait ending does not make one slow frame.
         let mut catch_up = CATCH_UP_PER_FRAME;
-        while let Some(&index) = order.get(self.cached) {
-            if !self.timeline.is_complete(index, tau) {
+        while let Some(&item) = order.get(self.cached) {
+            if !self.timeline.item_complete(item, tau) {
                 break;
             }
-            let Some(stroke) = note.strokes.get(index) else {
+            let whole = match item {
+                DrawItem::Stroke(i) => note.strokes.get(i).map(|s| s.points.len()),
+                DrawItem::Object(i) => note.objects.get(i).map(|_| 1),
+            };
+            let Some(whole) = whole else {
                 self.cached += 1;
                 continue;
             };
-            match previous.remove(&index) {
-                Some(d) if d.samples == stroke.points.len() => {
+            match previous.remove(&item) {
+                Some(d) if d.samples == whole => {
                     if catch_up == 0 {
-                        previous.insert(index, d);
+                        previous.insert(item, d);
                         break;
                     }
                     catch_up -= 1;
-                    self.cache.draw_prepared(&d.stroke);
+                    d.shape.draw(&mut self.cache);
                 }
                 old => {
-                    let bounds = self.cache.draw_stroke(stroke);
-                    let old = old.and_then(|d| d.stroke.bounds());
+                    let bounds = self.cache.draw_item(note, item);
+                    let old = old.and_then(|d| d.shape.bounds());
                     dirty = dirty.union(old.unwrap_or_default());
                     dirty = dirty.union(bounds.unwrap_or_default());
                 }
@@ -268,39 +301,51 @@ impl<'n> FrameRenderer<'n> {
             self.cached += 1;
         }
 
-        // The other strokes begun so far, in drawing order: those that grew are prepared
-        // again, the others keep their geometry.
+        // The other strokes begun and objects shown so far, in drawing order: strokes that
+        // grew and objects that appeared are prepared, the others keep their geometry.
         let mut drawn = Vec::with_capacity(previous.len() + 1);
-        for &index in order.get(self.cached..).unwrap_or_default() {
-            let samples = self.timeline.samples_shown(index, tau);
+        for &item in order.get(self.cached..).unwrap_or_default() {
+            let samples = self.timeline.item_shown(item, tau);
             if samples == 0 {
                 continue;
             }
-            let old = previous.remove(&index);
-            match (old, note.strokes.get(index)) {
-                (Some(d), _) if d.samples == samples => drawn.push(d),
-                (old, Some(stroke)) => {
-                    let prepared = self.picture.prepare_stroke(stroke, samples);
-                    let old = old.and_then(|d| d.stroke.bounds());
-                    dirty = dirty.union(old.unwrap_or_default());
-                    dirty = dirty.union(prepared.bounds().unwrap_or_default());
-                    drawn.push(Drawn {
-                        index,
-                        samples,
-                        stroke: prepared,
-                    });
+            let old = match previous.remove(&item) {
+                Some(d) if d.samples == samples => {
+                    drawn.push(d);
+                    continue;
                 }
-                (_, None) => {}
-            }
+                old => old,
+            };
+            let shape = match item {
+                DrawItem::Stroke(i) => note
+                    .strokes
+                    .get(i)
+                    .map(|stroke| Shape::Stroke(self.picture.prepare_stroke(stroke, samples))),
+                DrawItem::Object(i) => note
+                    .objects
+                    .get(i)
+                    .map(|object| Shape::Object(self.picture.prepare_object(object))),
+            };
+            let Some(shape) = shape else {
+                continue;
+            };
+            let old = old.and_then(|d| d.shape.bounds());
+            dirty = dirty.union(old.unwrap_or_default());
+            dirty = dirty.union(shape.bounds().unwrap_or_default());
+            drawn.push(Drawn {
+                item,
+                samples,
+                shape,
+            });
         }
 
         if !dirty.is_empty() {
-            // Grown until every stroke reaching into it is inside, so that drawing those
-            // strokes again changes nothing outside it.
+            // Grown until everything reaching into it is inside, so that drawing it again
+            // changes nothing outside it.
             loop {
                 let grown = drawn
                     .iter()
-                    .filter_map(|d| d.stroke.bounds())
+                    .filter_map(|d| d.shape.bounds())
                     .filter(|b| b.intersects(dirty))
                     .fold(dirty, PixelRect::union);
                 if grown == dirty {
@@ -310,8 +355,8 @@ impl<'n> FrameRenderer<'n> {
             }
             self.picture.copy_rect_from(&self.cache, dirty);
             for d in &drawn {
-                if d.stroke.bounds().is_some_and(|b| b.intersects(dirty)) {
-                    self.picture.draw_prepared(&d.stroke);
+                if d.shape.bounds().is_some_and(|b| b.intersects(dirty)) {
+                    d.shape.draw(&mut self.picture);
                 }
             }
             let (x, y) = (self.placement.x, self.placement.y);

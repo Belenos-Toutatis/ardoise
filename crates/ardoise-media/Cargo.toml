@@ -68,6 +68,8 @@ ureq = { version = "3.5", default-features = false, features = ["native-tls-no-d
 [dev-dependencies]
 # `tests/revise_replay.rs`: the time orders of the revisions against the real replay.
 ardoise-revise = { path = "../ardoise-revise" }
+# Text frames in the replay tests (their font family).
+ardoise-text = { path = "../ardoise-text" }
 tempfile = "3"
 
 [lints]

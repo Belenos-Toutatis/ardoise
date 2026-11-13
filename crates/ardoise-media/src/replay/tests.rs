@@ -3,12 +3,14 @@
 use std::time::{Duration, Instant};
 
 use ardoise_core::note::{
-    A4_LANDSCAPE, Background, Layer, Note, Origin, PageSize, Paper, Template, Timing,
+    A4_LANDSCAPE, Background, Layer, Note, ObjectBody, Origin, PageObject, PageSize, Paper,
+    Template, TextBody, Timing,
 };
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_render::{
-    Backdrop, Image, RenderOptions, paper_color, render_note, render_note_transparent,
+    Backdrop, DrawItem, Image, RenderOptions, paper_color, render_note, render_note_transparent,
 };
+use ardoise_text::FontFamily;
 
 use super::*;
 use crate::MediaError;
@@ -934,6 +936,236 @@ fn bad_frame_settings_are_refused() {
             backdrop: Backdrop::Paper,
         }
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// Text frames
+// ---------------------------------------------------------------------------------------
+
+const RED: Rgba = Rgba::rgb(220, 20, 20);
+
+/// A bold Andika text frame shown at `t` ms.
+fn text_at(layer: u32, t: u32, (x, y): (f32, f32), text: &str, color: Rgba) -> PageObject {
+    PageObject::text(
+        format!("{text}-{t}"),
+        layer,
+        t,
+        x,
+        y,
+        TextBody {
+            text: text.into(),
+            font: FontFamily::Andika,
+            bold: true,
+            size: 900.0,
+            color,
+        },
+    )
+}
+
+/// Pixels of a frame of the red of these tests' text frames (not the Seyès margin's pink).
+fn reds(frame: &[u8]) -> usize {
+    frame
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[0] > 150 && p[1] < 60 && p[2] < 60)
+        .count()
+}
+
+#[test]
+fn text_frames_appear_whole_at_their_time_in_drawing_order() {
+    let strokes = vec![
+        line(Tool::Ballpoint, 0, (300.0, 600.0), (5700.0, 700.0), 0, 1000),
+        // Same layer, written after the red frame appears, across it: drawn under it.
+        line(
+            Tool::FeltTip,
+            0,
+            (300.0, 1800.0),
+            (5700.0, 2000.0),
+            2000,
+            3000,
+        ),
+        // The layer above, across the red frame: over it.
+        line(
+            Tool::Highlighter,
+            1,
+            (1500.0, 300.0),
+            (1700.0, 3700.0),
+            1200,
+            1800,
+        ),
+    ];
+    let mut unknown = text_at(0, 9500, (800.0, 3000.0), "Inconnu", RED);
+    unknown.body = ObjectBody::Unknown {
+        kind: "equation".into(),
+        fields: Default::default(),
+    };
+    let mut n = note(strokes, &[true, true, false]);
+    n.objects = vec![
+        text_at(0, 1500, (800.0, 1300.0), "Texte", RED),
+        text_at(1, 2500, (3200.0, 2600.0), "Dessus", Rgba::rgb(20, 140, 20)),
+        // A hidden layer and a kind this version does not draw: never drawn, never waited for.
+        text_at(2, 9000, (800.0, 3000.0), "Caché", RED),
+        unknown,
+    ];
+    let t = Timeline::new(&n, &ReplayOptions::default()).unwrap();
+    assert_eq!(t.duration(), ms(3000));
+    assert_eq!(
+        t.items(),
+        [
+            DrawItem::Stroke(0),
+            DrawItem::Stroke(1),
+            DrawItem::Object(0),
+            DrawItem::Stroke(2),
+            DrawItem::Object(1)
+        ]
+    );
+    assert_eq!(t.drawing_order(), [0, 1, 2]);
+    assert!(!t.object_shown(0, 1499.0) && t.object_shown(0, 1500.0));
+    assert!(!t.object_shown(2, 1e9) && !t.object_shown(3, 1e9) && !t.object_shown(9, 1e9));
+    assert_eq!(t.item_shown(DrawItem::Object(1), 2500.0), 1);
+    assert!(t.note_at(ms(1499)).objects.is_empty());
+    assert_eq!(t.note_at(ms(1500)).objects, n.objects[..1]);
+    assert_eq!(t.note_at(t.duration()).objects, n.objects[..2]);
+
+    let mut frames = FrameRenderer::new(t, &settings(240, 160)).unwrap();
+    let mut in_order = Vec::new();
+    for k in 0..frames.frame_count() {
+        let at = frames.frame_time(k);
+        let expected = render_note(&frames.timeline().note_at(at), &opts(0.04)).unwrap();
+        let frame = frames.render_frame(k).unwrap();
+        assert_same_image(frame, &expected, &format!("frame {k} at {at:?}"));
+        if at < ms(1500) {
+            assert_eq!(reds(frame), 0, "frame {k} at {at:?}");
+        } else {
+            assert!(reds(frame) > 50, "frame {k} at {at:?}");
+        }
+        in_order.push(frame.to_vec());
+    }
+    let full = render_note(&n, &opts(0.04)).unwrap();
+    assert_same_image(in_order.last().unwrap(), &full, "last frame");
+    // Going back and forth gives the same frames.
+    let last = in_order.len() as u64 - 1;
+    for k in [last, 36, 35, 60, 2, 47, last] {
+        assert_eq!(
+            frames.render_frame(k).unwrap(),
+            in_order[k as usize],
+            "frame {k}"
+        );
+    }
+}
+
+#[test]
+fn a_note_ending_with_a_text_frame_replays_until_it_appears() {
+    let mut n = note(
+        vec![line(
+            Tool::Ballpoint,
+            0,
+            (300.0, 600.0),
+            (5700.0, 700.0),
+            0,
+            1000,
+        )],
+        &[true],
+    );
+    n.objects = vec![text_at(0, 4000, (800.0, 1500.0), "Fin", RED)];
+    let t = Timeline::new(&n, &ReplayOptions::default()).unwrap();
+    assert_eq!((t.duration(), t.note_end()), (ms(4000), 4000.0));
+    assert!(t.note_at(ms(3999)).objects.is_empty());
+    assert_eq!(t.note_at(ms(4000)).objects, n.objects);
+    // The pause before it is a pause like any other; a target duration counts it.
+    let cut = Timeline::new(&n, &options(1.0, Some(500))).unwrap();
+    assert_eq!(cut.duration(), ms(1500));
+    assert_eq!(cut.to_replay(4000.0), ms(1500));
+    assert_eq!(ReplayOptions::for_duration(&n, None, ms(2000)).speed, 2.0);
+    // The last frame holds it, the one before does not.
+    let mut frames = FrameRenderer::new(cut, &settings(150, 100)).unwrap();
+    let last = frames.frame_count() - 1;
+    assert_eq!(frames.frame_time(last), ms(1500));
+    let before = frames.render_frame(last - 1).unwrap().to_vec();
+    assert_eq!(reds(&before), 0);
+    let full = render_note(&n, &opts(0.025)).unwrap();
+    let frame = frames.render_frame(last).unwrap();
+    assert_same_image(frame, &full, "last frame");
+    assert!(reds(frame) > 20);
+
+    // A page holding only a text frame: a replay of its time; at time zero, one frame.
+    for (time, duration, count) in [(700, ms(700), 18), (0, Duration::ZERO, 1)] {
+        let mut only = note(vec![], &[true]);
+        only.objects = vec![text_at(0, time, (800.0, 1500.0), "Seul", RED)];
+        let t = Timeline::new(&only, &options(1.0, None)).unwrap();
+        assert_eq!((t.duration(), t.frame_count(24)), (duration, count));
+        let mut frames = FrameRenderer::new(t, &settings(150, 100)).unwrap();
+        let frame = frames.render_frame(count - 1).unwrap();
+        assert_same_image(frame, &render_note(&only, &opts(0.025)).unwrap(), "only");
+        assert!(reds(frame) > 20);
+    }
+}
+
+#[test]
+fn a_busy_note_with_text_frames_replays_exactly() {
+    // 40 strokes and 12 text frames (turned, scaled, translucent), criss-crossing on three
+    // layers (one hidden), unsorted and overlapping in time.
+    let smooth = [
+        Tool::Ballpoint,
+        Tool::FountainPen,
+        Tool::FeltTip,
+        Tool::Brush,
+        Tool::Highlighter,
+    ];
+    let mut random = Lcg(11);
+    let strokes: Vec<Stroke> = (0..40)
+        .map(|_| {
+            let tool = smooth[random.below(5) as usize];
+            let from = (random.below(6000) as f32, random.below(4000) as f32);
+            let to = (random.below(6000) as f32, random.below(4000) as f32);
+            let t0 = random.below(12_000);
+            line(tool, random.below(3), from, to, t0, t0 + random.below(900))
+        })
+        .collect();
+    let objects: Vec<PageObject> = (0..12)
+        .map(|i| {
+            let color = Rgba {
+                a: if i % 4 == 0 { 120 } else { 255 },
+                ..Rgba::rgb(
+                    random.below(200) as u8,
+                    random.below(200) as u8,
+                    random.below(200) as u8,
+                )
+            };
+            let mut object = text_at(
+                random.below(3),
+                random.below(12_500),
+                (random.below(5000) as f32, random.below(3500) as f32),
+                ["Mot", "Deux mots", "Ligne\nautre"][i % 3],
+                color,
+            );
+            object.quarter_turns = (random.below(4)) as u8;
+            object.scale = 0.5 + random.below(100) as f32 / 100.0;
+            object
+        })
+        .collect();
+    let mut n = note(strokes, &[true, true, false]);
+    n.objects = objects;
+    let t = Timeline::new(&n, &options(4.0, Some(400))).unwrap();
+    assert!(t.items().iter().any(|i| matches!(i, DrawItem::Object(_))));
+    let mut frames = FrameRenderer::new(t, &settings(200, 140)).unwrap();
+    let scale = frames.placement().scale;
+    let (y, h) = (
+        frames.placement().y as usize,
+        frames.placement().height as usize,
+    );
+    let mut with_text = 0;
+    for k in 0..frames.frame_count() {
+        let at = frames.frame_time(k);
+        let written = frames.timeline().note_at(at);
+        with_text += usize::from(!written.objects.is_empty());
+        let expected = render_note(&written, &opts(scale)).unwrap();
+        let frame = frames.render_frame(k).unwrap();
+        let page = &frame[y * 200 * 4..(y + h) * 200 * 4];
+        assert_same_image(page, &expected, &format!("frame {k} at {at:?}"));
+    }
+    assert!(with_text > 20, "{with_text} frames with text");
 }
 
 // ---------------------------------------------------------------------------------------

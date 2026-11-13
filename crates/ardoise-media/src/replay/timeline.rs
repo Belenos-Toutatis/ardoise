@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use ardoise_core::note::Note;
 use ardoise_ink::Stroke;
+use ardoise_render::DrawItem;
 
 use crate::MediaError;
 
@@ -66,18 +67,24 @@ struct Segment {
     kept_before: f64,
 }
 
-/// When the samples of each stroke appear, and what is kept of the note time (independent of
-/// the speed).
+/// When the samples of each stroke and each page object appear, and what is kept of the note
+/// time (independent of the speed).
 #[derive(Debug, Clone)]
 struct Clock {
     /// Per stroke of the note: when each of its samples appears, in note milliseconds (the
     /// running maximum of the sample times, so that no sample comes before the one it
     /// follows); empty for a stroke that is not drawn (hidden layer, no sample).
     times: Vec<Vec<u32>>,
-    /// The strokes drawn, in drawing order (indices into `note.strokes`), all with samples.
+    /// Per page object of the note: when it appears (all at once), in note milliseconds; `None`
+    /// for one that is not drawn (hidden layer, a kind this version does not draw).
+    object_times: Vec<Option<u32>>,
+    /// What is drawn, in drawing order ([`ardoise_render::draw_items`]): the strokes with
+    /// samples and the objects drawn.
+    items: Vec<DrawItem>,
+    /// The strokes of `items` (indices into `note.strokes`).
     order: Vec<usize>,
     segments: Vec<Segment>,
-    /// Note time of the last sample drawn, in milliseconds (0 without any).
+    /// Note time of the last sample or object drawn, in milliseconds (0 without any).
     end: f64,
     /// Total note time kept, in milliseconds.
     kept: f64,
@@ -85,26 +92,43 @@ struct Clock {
 
 impl Clock {
     fn new(note: &Note, max_pause: Option<Duration>) -> Self {
-        let drawn = ardoise_render::drawing_order(note);
+        let drawn = ardoise_render::draw_items(note);
         let mut times = vec![Vec::new(); note.strokes.len()];
+        let mut object_times = vec![None; note.objects.len()];
+        let mut items = Vec::with_capacity(drawn.len());
         let mut order = Vec::with_capacity(drawn.len());
-        for i in drawn {
-            let (Some(stroke), Some(slot)) = (note.strokes.get(i), times.get_mut(i)) else {
-                continue;
-            };
-            *slot = appearance_times(stroke);
-            if !slot.is_empty() {
-                order.push(i);
+        for item in drawn {
+            match item {
+                DrawItem::Stroke(i) => {
+                    let (Some(stroke), Some(slot)) = (note.strokes.get(i), times.get_mut(i)) else {
+                        continue;
+                    };
+                    *slot = appearance_times(stroke);
+                    if !slot.is_empty() {
+                        items.push(item);
+                        order.push(i);
+                    }
+                }
+                DrawItem::Object(i) => {
+                    let (Some(object), Some(slot)) = (note.objects.get(i), object_times.get_mut(i))
+                    else {
+                        continue;
+                    };
+                    *slot = Some(object.t);
+                    items.push(item);
+                }
             }
         }
 
-        // When some stroke is being drawn: the union of the strokes' spans.
+        // When something is being drawn: the union of the strokes' spans and of the instants
+        // the objects appear (an object is drawn like a stroke of one sample).
         let mut spans: Vec<(u32, u32)> = order
             .iter()
             .filter_map(|&i| {
                 let t = times.get(i)?;
                 Some((*t.first()?, *t.last()?))
             })
+            .chain(object_times.iter().flatten().map(|&t| (t, t)))
             .collect();
         spans.sort_unstable();
         let mut busy: Vec<(u32, u32)> = Vec::with_capacity(spans.len());
@@ -148,6 +172,8 @@ impl Clock {
         kept += end - note_start;
         Self {
             times,
+            object_times,
+            items,
             order,
             segments,
             end,
@@ -220,13 +246,13 @@ impl<'n> Timeline<'n> {
         self.options
     }
 
-    /// Length of the replay: from zero to the moment the last sample appears (zero for a note
-    /// without any sample drawn).
+    /// Length of the replay: from zero to the moment the last sample or page object appears
+    /// (zero for a note without anything drawn).
     pub fn duration(&self) -> Duration {
         self.duration
     }
 
-    /// Note time (milliseconds since `Note::created`) of the last sample drawn.
+    /// Note time (milliseconds since `Note::created`) of the last sample or page object drawn.
     pub fn note_end(&self) -> f64 {
         self.clock.end
     }
@@ -253,7 +279,7 @@ impl<'n> Timeline<'n> {
 
     /// The latest note time (milliseconds since `Note::created`) shown at replay instant
     /// `replay`: everything written up to it is on screen. From [`Timeline::duration`] on,
-    /// the time of the last sample.
+    /// the time of the last sample or object drawn.
     pub fn to_note(&self, replay: Duration) -> f64 {
         let clock = &self.clock;
         if replay >= self.duration {
@@ -276,6 +302,41 @@ impl<'n> Timeline<'n> {
         &self.clock.order
     }
 
+    /// Everything the replay draws, in drawing order ([`ardoise_render::draw_items`]): the
+    /// strokes of [`Timeline::drawing_order`] and the page objects drawn (visible layers, a
+    /// kind this version draws).
+    pub fn items(&self) -> &[DrawItem] {
+        &self.clock.items
+    }
+
+    /// True when page object `index` is drawn and shown at note time `note_ms` (an object
+    /// appears all at once, at its time).
+    pub fn object_shown(&self, index: usize, note_ms: f64) -> bool {
+        self.clock
+            .object_times
+            .get(index)
+            .copied()
+            .flatten()
+            .is_some_and(|t| f64::from(t) <= note_ms)
+    }
+
+    /// How much of `item` is shown at note time `note_ms`: the samples of a stroke
+    /// ([`Timeline::samples_shown`]), 1 for an object shown, 0 for one that is not.
+    pub fn item_shown(&self, item: DrawItem, note_ms: f64) -> usize {
+        match item {
+            DrawItem::Stroke(i) => self.samples_shown(i, note_ms),
+            DrawItem::Object(i) => usize::from(self.object_shown(i, note_ms)),
+        }
+    }
+
+    /// True when `item` is drawn and all of it is shown at note time `note_ms`.
+    pub fn item_complete(&self, item: DrawItem, note_ms: f64) -> bool {
+        match item {
+            DrawItem::Stroke(i) => self.is_complete(i, note_ms),
+            DrawItem::Object(i) => self.object_shown(i, note_ms),
+        }
+    }
+
     /// How many samples of stroke `index` are shown at note time `note_ms` (0 for a stroke
     /// that is not drawn or not begun).
     pub fn samples_shown(&self, index: usize, note_ms: f64) -> usize {
@@ -294,8 +355,9 @@ impl<'n> Timeline<'n> {
     }
 
     /// The note as drawn at replay instant `replay`: the strokes of visible layers that have
-    /// begun, in note order, each cut after its last sample shown. Everything else (page,
-    /// background, layers…) is the note's.
+    /// begun, in note order, each cut after its last sample shown, and the page objects whose
+    /// time is at or before the note time shown ([`Timeline::to_note`]), in note order.
+    /// Everything else (page, background, layers…) is the note's.
     pub fn note_at(&self, replay: Duration) -> Note {
         let note = self.note;
         let tau = self.to_note(replay);
@@ -327,7 +389,12 @@ impl<'n> Timeline<'n> {
             favorite: note.favorite,
             layers: note.layers.clone(),
             strokes,
-            objects: Vec::new(),
+            objects: note
+                .objects
+                .iter()
+                .filter(|object| f64::from(object.t) <= tau)
+                .cloned()
+                .collect(),
             timing: note.timing,
             origin: note.origin.clone(),
         }

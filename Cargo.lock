@@ -289,6 +289,7 @@ dependencies = [
  "ardoise-ink",
  "ardoise-render",
  "ardoise-revise",
+ "ardoise-text",
  "bzip2-rs",
  "color_quant",
  "cpal",

@@ -546,6 +546,105 @@ fn whole_frame_at(note: &Note, export: &AnimationExport) -> Vec<u8> {
     whole_note(note, export, &export.replay)
 }
 
+/// [`sample_note`] with a text frame shown at 3.5 s, a second after its last stroke.
+fn note_ending_with_text() -> Note {
+    let mut note = sample_note();
+    note.objects = vec![ardoise_core::note::PageObject::text(
+        "fin",
+        0,
+        3500,
+        1500.0,
+        1500.0,
+        ardoise_core::note::TextBody {
+            text: "FIN".into(),
+            font: ardoise_text::FontFamily::Andika,
+            bold: true,
+            size: 1500.0,
+            color: Rgba::rgb(220, 20, 20),
+        },
+    )];
+    note
+}
+
+/// The pixels of the frame (`width` wide) where `a` and `b` differ, as `(x, y)`.
+fn differing(a: &[u8], b: &[u8], width: u32) -> Vec<(u32, u32)> {
+    a.chunks(4)
+        .zip(b.chunks(4))
+        .enumerate()
+        .filter(|(_, (p, q))| p != q)
+        .map(|(i, _)| (i as u32 % width, i as u32 / width))
+        .collect()
+}
+
+/// The text frame's box in the frames of `export` `[x0, y0, x1, y1]` (pixels), one pixel
+/// larger all around.
+fn text_box(note: &Note, export: &AnimationExport) -> [f32; 4] {
+    let settings = FrameSettings {
+        width: export.width,
+        height: export.height,
+        frame_rate: export.frame_rate,
+        backdrop: export.backdrop,
+    };
+    let timeline = Timeline::new(note, &export.replay).unwrap();
+    let place = FrameRenderer::new(timeline, &settings).unwrap().placement();
+    let [x0, y0, x1, y1] = note.objects[0].page_bounds();
+    let (s, dx, dy) = (place.scale, place.x as f32, place.y as f32);
+    [
+        x0 * s + dx - 1.0,
+        y0 * s + dy - 1.0,
+        x1 * s + dx + 1.0,
+        y1 * s + dy + 1.0,
+    ]
+}
+
+#[test]
+fn the_last_frame_of_an_export_holds_the_text_frames() {
+    let note = note_ending_with_text();
+    let mut without = note.clone();
+    without.objects.clear();
+    let options = export(gif());
+    let (plan, recording) = record(&note, &options, None);
+    // The replay lasts until the frame appears: 35 frames, the last one at 3.4 s showing the
+    // whole note (3.5 s).
+    assert_eq!(plan.replay_duration, ms(3500));
+    assert_eq!(plan.frames, 35);
+    let whole = whole_note(&note, &options, &ReplayOptions::default());
+    assert_eq!(recording.frames.last().unwrap(), &whole);
+    // From the last stroke's end until then, the strokes alone; then the text, inside its box.
+    let strokes_only = whole_note(&without, &options, &ReplayOptions::default());
+    assert!(recording.frames[25..34].iter().all(|f| f == &strokes_only));
+    let changed = differing(&whole, &strokes_only, options.width);
+    assert!(changed.len() > 20, "{} pixels", changed.len());
+    let [x0, y0, x1, y1] = text_box(&note, &options);
+    for &(x, y) in &changed {
+        let (x, y) = (x as f32 + 0.5, y as f32 + 0.5);
+        assert!(x >= x0 && x <= x1 && y >= y0 && y <= y1, "({x}, {y})");
+    }
+
+    // The GIF file: its last frame is the text frame appearing, within its box.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fin.gif");
+    run_export(&note, &options, None, &path).unwrap();
+    let mut decode = gif::DecodeOptions::new();
+    decode.set_color_output(gif::ColorOutput::RGBA);
+    let mut decoder = decode
+        .read_info(BufReader::new(File::open(&path).unwrap()))
+        .unwrap();
+    let mut last = None;
+    while let Some(frame) = decoder.read_next_frame().unwrap() {
+        last = Some((frame.left, frame.top, frame.width, frame.height));
+    }
+    let (left, top, width, height) = last.unwrap();
+    assert!(width > 0 && height > 0);
+    assert!(
+        f32::from(left) >= x0
+            && f32::from(top) >= y0
+            && f32::from(left + width) <= x1 + 1.0
+            && f32::from(top + height) <= y1 + 1.0,
+        "last GIF frame at ({left}, {top}) {width} x {height}, text box {x0} {y0} {x1} {y1}"
+    );
+}
+
 #[test]
 fn progress_counts_every_frame_and_cancel_stops() {
     let note = sample_note();
