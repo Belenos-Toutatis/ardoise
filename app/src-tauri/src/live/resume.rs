@@ -280,29 +280,32 @@ impl PenMapping {
 }
 
 /// Note time at which the writing resumes on `note`, whose narration is `audio`: after its last
-/// stroke and after the end of its narration (a new narration placed there replaces no sound),
-/// plus [`RESUME_GAP_MS`]. Zero on a note with neither. A narration that cannot be read counts for
-/// nothing here: it stays in the file as it is.
+/// stroke, after the last of its page objects to appear (the replay shows a text frame at its time:
+/// the new ink comes after it, as it comes after the old ink) and after the end of its narration (a
+/// new narration placed there replaces no sound), plus [`RESUME_GAP_MS`]. Zero on a note with none
+/// of them. A narration that cannot be read counts for nothing here: it stays in the file as it is.
 pub fn time_base(note: &Note, audio: Option<&[u8]>) -> u32 {
-    let last_stroke = last_point_time(note);
+    let last_content = last_content_time(note);
     let narration_end = audio
         .and_then(|bytes| narration_header(bytes).ok())
         .map(|header| narration_end_in_note_time(note, &header));
-    match (last_stroke, narration_end) {
+    match (last_content, narration_end) {
         (None, None) => 0,
-        (stroke, narration) => stroke
+        (content, narration) => content
             .unwrap_or(0)
             .max(narration.unwrap_or(0))
             .saturating_add(RESUME_GAP_MS),
     }
 }
 
-/// Time of the note's last point, hidden layers included.
-fn last_point_time(note: &Note) -> Option<u32> {
+/// Time of the note's last point or page object, hidden layers included; `None` without either.
+/// From the note's own data (not the replay's end, which has rules of its own).
+fn last_content_time(note: &Note) -> Option<u32> {
     note.strokes
         .iter()
         .flat_map(|stroke| &stroke.points)
         .map(|point| point.t)
+        .chain(note.objects.iter().map(|object| object.t))
         .max()
 }
 

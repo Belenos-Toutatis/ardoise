@@ -9,7 +9,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ardoise_core::library::FileStamp;
-use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Timing};
+use ardoise_core::note::{Background, Layer, Note, Origin, PageObject, PageSize, Paper, Timing};
+use ardoise_core::objects::{Affine, transform_all};
 use ardoise_core::settings::{BoardPosition, LiveButton, Orientation};
 use ardoise_device::pages::{is_blackboard_page, oriented_size, turn_point};
 use ardoise_device::transport::TabletKind;
@@ -273,10 +274,11 @@ impl Page {
         self.image.as_ref()
     }
 
-    /// Something was written on the page: a stroke, or an edit that can bring one back (its
-    /// history).
+    /// Something is on the page: a stroke, a page object (the text frames of a resumed sheet: live
+    /// mode makes none), or an edit that can bring a stroke back (its history). Such a page is
+    /// turned with what it holds, never just resized under it.
     fn has_ink(&self) -> bool {
-        !self.note.strokes.is_empty() || !self.history.is_empty()
+        !self.note.strokes.is_empty() || !self.note.objects.is_empty() || !self.history.is_empty()
     }
 
     /// The page never turns with the tablet, which follows it ([`hold_for`], `pen_mapping`): a
@@ -318,7 +320,9 @@ impl Page {
     }
 
     /// The page becomes `size` (the tablet turned, before any ink): its image, if any, is placed
-    /// again on it with the fit it has ([`refitted`]).
+    /// again on it with the fit it has ([`refitted`]). Its strokes and page objects are left where
+    /// they are, alike: a page is resized alone only when it holds neither ([`Page::has_ink`]),
+    /// and [`turn`](Self::turn) turns both before it resizes the page.
     fn resize(&mut self, size: PageSize) {
         let before = self.note.page;
         if before == size {
@@ -434,8 +438,10 @@ impl Page {
     }
 
     /// Turns the page `turns` clockwise quarter turns, ink and all, so that it is held as
-    /// `orientation` (the page size is swapped for an odd number of turns). Times, pressures,
-    /// layers and narration are untouched. A page [`held_fixed`](Self::held_fixed) is never turned
+    /// `orientation` (the page size is swapped for an odd number of turns): its strokes, and its
+    /// page objects by their placement ([`turn_objects`]: the same turn, the content turned with
+    /// it). Times, pressures, layers and narration are untouched. A page
+    /// [`held_fixed`](Self::held_fixed) is never turned
     /// (a resumed sheet would be rewritten for how the tablet happens to be held; the ink of a
     /// worksheet would leave the image it was written on): the tablet follows it, as near to
     /// `orientation` as the page allows. A page with an image and no ink has its image placed again
@@ -454,6 +460,7 @@ impl Page {
                     (point.x, point.y) = turn_point(point.x, point.y, width, height, turns);
                 }
             }
+            turn_objects(&mut self.note.objects, width, height, turns);
             self.history.turn(width, height, turns);
             if turns % 2 == 1 {
                 self.resize(PageSize {
@@ -469,10 +476,15 @@ impl Page {
 
     /// Changed since it was written, and worth a file: a note is created only once a stroke
     /// ended on the page, or once it has an image (M17: a worksheet shown in class is kept, ink or
-    /// not; paper alone is not worth a note), then rewritten whenever it changes.
+    /// not; paper alone is not worth a note) or a page object, then rewritten whenever it changes.
+    /// A resumed sheet has its file from the start: written at its first change, whatever it
+    /// holds (strokes, text frames only, nothing).
     pub fn needs_write(&self) -> bool {
         self.version != self.saved_version
-            && (self.file.is_some() || !self.note.strokes.is_empty() || self.image.is_some())
+            && (self.file.is_some()
+                || !self.note.strokes.is_empty()
+                || !self.note.objects.is_empty()
+                || self.image.is_some())
     }
 
     /// Takes the strokes at `indices` (ascending, all on the page) off the page. A viewer is told of
@@ -780,6 +792,23 @@ fn drawn_hidden(pages: &[Page], drawing: &Drawing) -> bool {
     pages
         .get(drawing.page)
         .is_some_and(|page| layer_hidden(&page.note.layers, drawing.layer))
+}
+
+/// Turns `objects` with their page of `width` × `height`, turned `turns` clockwise quarter turns:
+/// the map [`turn_point`] makes of the strokes' points, applied to each object's placement
+/// (`PageObject::transform`: its origin follows, its content turns with the page), so that a text
+/// frame stays by the ink it was typed next to.
+fn turn_objects(objects: &mut [PageObject], width: f32, height: f32, turns: u8) {
+    match turns % 4 {
+        0 => {}
+        1 => transform_all(objects, &Affine::quarter_cw(height)),
+        // Two clockwise quarter turns: the second one of the page turned once, `width` high.
+        2 => {
+            transform_all(objects, &Affine::quarter_cw(height));
+            transform_all(objects, &Affine::quarter_cw(width));
+        }
+        _ => transform_all(objects, &Affine::quarter_ccw(width)),
+    }
 }
 
 /// Name of the `n`th layer (1-based) in the interface language, as the editor names them.
@@ -2071,6 +2100,11 @@ impl LiveSession {
                 self.drawing = None;
                 self.cancel_computer(out);
                 let page = &mut self.pages[self.current];
+                // The page objects stay, on every layer: the text frames of a resumed sheet are
+                // typed in the editor, part of the worksheet as its paper and its image are (the
+                // instructions, the question), not writing of the lesson; live mode can neither
+                // make them again nor undo their removal, and "Undo the clearing" gives back
+                // strokes only.
                 // What shows: nobody can tell that the ink of a hidden layer is going.
                 let shown: Vec<u32> = page
                     .note
@@ -2103,7 +2137,9 @@ impl LiveSession {
     /// The tablet's screen was erased with its button (the Xiaomi blackboard, SPEC §4.2): what
     /// is written next is written on a clean screen, so it goes to a new page, whatever the
     /// button's setting (a new layer would put it over ink the tablet no longer shows). A page
-    /// with no ink yet stays: erasing before the first stroke makes no blank page.
+    /// with no ink yet stays: erasing before the first stroke makes no blank page. Page objects do
+    /// not count (a resumed sheet that holds only text frames stays): they were never on the
+    /// tablet's screen.
     pub fn screen_erased(&mut self, now_ms: i64, out: &mut Vec<LiveEvent>) {
         let blank = self.current_page().note.strokes.is_empty()
             && self.drawing.is_none()
@@ -3021,6 +3057,105 @@ mod tests {
         session.command_for_test(LiveCommandKind::NewPage, &mut out);
         let newest = session.pages().last().unwrap();
         assert_eq!(newest.note.page, session.size());
+    }
+
+    /// Page objects turn with the page by their placement, as its strokes do (live mode makes none:
+    /// they come with a resumed sheet, which never turns; any page that holds some turns them with
+    /// its ink): a text frame typed by a stroke stays by it, its content turned with the page, and
+    /// switches that come back give it back exactly. A page that holds only a frame turns with it,
+    /// never just resized under it, and is worth a note.
+    #[test]
+    fn page_objects_turn_with_the_ink_of_the_page() {
+        use crate::live::tests::text_frame;
+        let mut session = running();
+        let mut out = Vec::new();
+        session.records(&[pen(1000, 2000, 400), pen(1100, 2000, 0)], T0, &mut out);
+        let frame = text_frame("cadre", 0, 0, 1000.0, 2000.0);
+        session.page_mut(0).unwrap().note.objects = vec![frame.clone()];
+        let far = |object: &PageObject| object.page_point([object.width, object.height]);
+
+        let before = far(&frame);
+        session.reorient(29_700, 21_600, Orientation::PortraitLeft, &mut out);
+        let turned = &session.pages()[0].note.objects[0];
+        // Its origin goes where the stroke's first point went: (21 600 - y, x).
+        assert_eq!((turned.x, turned.y), (19_600.0, 1000.0));
+        assert_eq!(first_point(&session, 0), (19_600.0, 1000.0));
+        assert_eq!((turned.quarter_turns, turned.scale), (1, 1.0));
+        // The far corner of its content goes where the same turn takes that point of the page.
+        let expected = turn_point(before[0], before[1], 29_700.0, 21_600.0, 1);
+        let got = far(turned);
+        assert!(
+            (got[0] - expected.0).abs() < 0.01 && (got[1] - expected.1).abs() < 0.01,
+            "{got:?} {expected:?}"
+        );
+        // Every switch: the frame's origin stays on the stroke's first point, its turns those of
+        // the page; back in landscape, exactly as it was.
+        for orientation in [
+            Orientation::LandscapeFlipped,
+            Orientation::PortraitRight,
+            Orientation::PortraitLeft,
+            Orientation::Landscape,
+        ] {
+            session.reorient(29_700, 21_600, orientation, &mut out);
+            let object = &session.pages()[0].note.objects[0];
+            assert_eq!(
+                (object.x, object.y),
+                first_point(&session, 0),
+                "{orientation:?}"
+            );
+            assert_eq!(
+                object.quarter_turns,
+                orientation.turns_from(Orientation::Landscape),
+                "{orientation:?}"
+            );
+        }
+        assert_eq!(
+            session.pages()[0].note.objects,
+            std::slice::from_ref(&frame)
+        );
+
+        // A new page holding only a frame (as a resumed sheet might): turned, not resized.
+        session.command_for_test(LiveCommandKind::NewPage, &mut out);
+        session.page_mut(1).unwrap().note.objects = vec![frame];
+        session.reorient(29_700, 21_600, Orientation::PortraitLeft, &mut out);
+        let page = &session.pages()[1];
+        assert_eq!(page.note.page, session.size());
+        let object = &page.note.objects[0];
+        assert_eq!(
+            (object.x, object.y, object.quarter_turns),
+            (19_600.0, 1000.0, 1)
+        );
+        assert!(
+            page.needs_write(),
+            "a page with a page object is worth a note"
+        );
+    }
+
+    /// « Clear the page » takes the strokes and leaves the page objects (on every layer); its undo
+    /// gives the strokes back under them as before.
+    #[test]
+    fn clearing_the_page_leaves_its_page_objects() {
+        use crate::live::tests::text_frame;
+        let mut session = running();
+        let mut out = Vec::new();
+        session.records(&[pen(1000, 2000, 400), pen(1100, 2000, 0)], T0, &mut out);
+        let page = session.page_mut(0).unwrap();
+        page.note.layers.push(Layer {
+            name: "Réponses".into(),
+            visible: false,
+        });
+        let frames = vec![
+            text_frame("a", 0, 0, 100.0, 200.0),
+            text_frame("b", 1, 0, 100.0, 9000.0),
+        ];
+        page.note.objects = frames.clone();
+        session.command_for_test(LiveCommandKind::ClearPage, &mut out);
+        assert!(session.pages()[0].note.strokes.is_empty());
+        assert_eq!(session.pages()[0].note.objects, frames);
+        assert_eq!(session.snapshot().page.objects, frames);
+        assert!(session.restore_cleared(&mut out));
+        assert_eq!(session.pages()[0].note.strokes.len(), 1);
+        assert_eq!(session.pages()[0].note.objects, frames);
     }
 
     #[test]

@@ -20,7 +20,7 @@ use crate::live::hub::{LiveError, LiveHub};
 use crate::live::model::{LiveCommandKind, LiveEvent, LiveSessionState};
 use crate::live::pen::tests::{T0, at_once, begin, end, points, running};
 use crate::live::session::LiveSession;
-use crate::live::tests::{config, fixed, options, pen, start, stroke};
+use crate::live::tests::{config, fixed, options, pen, start, stroke, text_frame};
 
 fn op(value: Value) -> LayerOp {
     serde_json::from_value(value).unwrap()
@@ -182,6 +182,46 @@ fn a_move_and_a_merge_change_the_page_as_the_editor_does() {
     merge_layer(&mut into_hidden, 1);
     assert!(into_hidden.layers[0].visible);
     assert_eq!(into_hidden.layers[0].name, "Réponses");
+}
+
+/// The page objects follow their layer as the strokes do, as the editor's `ops.moveLayer` and
+/// `ops.mergeDown` move them (`lib/editor/ops.ts`): a move keeps their order, a merge puts those of
+/// the merged layer after the others, the ones above go down; their placement never changes.
+#[test]
+fn a_move_and_a_merge_take_the_page_objects_with_their_layer() {
+    let mut note = blank_note("", "Calque 1", 0);
+    note.layers = vec![
+        layer("Cours", true),
+        layer("Réponses", false),
+        layer("Correction", true),
+    ];
+    note.strokes = vec![on(1, 1.0), on(2, 2.0)];
+    note.objects = ["a", "b", "c", "d"]
+        .iter()
+        .zip([1, 0, 2, 0])
+        .enumerate()
+        .map(|(i, (id, layer))| text_frame(id, layer, 0, 100.0 * i as f32, 50.0))
+        .collect();
+    fn objects(note: &Note) -> Vec<(&str, u32)> {
+        note.objects
+            .iter()
+            .map(|o| (o.id.as_str(), o.layer))
+            .collect()
+    }
+
+    let mut moved = note.clone();
+    move_layer(&mut moved, 2, 0);
+    assert_eq!(objects(&moved), [("a", 2), ("b", 1), ("c", 0), ("d", 1)]);
+    assert_eq!(ink(&moved), [(2, 1.0), (0, 2.0)]);
+
+    let mut merged = note.clone();
+    merge_layer(&mut merged, 1);
+    assert_eq!(objects(&merged), [("b", 0), ("c", 1), ("d", 0), ("a", 0)]);
+    assert_eq!(ink(&merged), [(1, 2.0), (0, 1.0)]);
+    for object in merged.objects.iter().chain(&moved.objects) {
+        let was = note.objects.iter().find(|o| o.id == object.id).unwrap();
+        assert_eq!((object.x, object.y), (was.x, was.y));
+    }
 }
 
 // --- The session's two layers ------------------------------------------------------------------

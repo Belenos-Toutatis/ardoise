@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use ardoise_core::format::{FormatError, NoteFile};
 use ardoise_core::fsutil::write_atomic_new;
 use ardoise_core::library::{Library, LibraryError};
-use ardoise_core::note::{Background, BackgroundImage, Note, PageSize, Paper};
+use ardoise_core::note::{Background, BackgroundImage, Note, PageObject, PageSize, Paper};
 use ardoise_core::settings::{BoardPosition, LiveButton, Orientation};
 use ardoise_device::pages::oriented_size;
 use ardoise_device::service::{LiveInput, LiveSink, LiveState};
@@ -452,19 +452,31 @@ fn may_need_save(events: &[LiveEvent]) -> bool {
     })
 }
 
-/// Fingerprint of what live mode writes into a note: the ink, the layers, the paper, the page
-/// (everything but the title, tags, favourite mark and modification time, which the library or
-/// an assistant change while the lesson goes on).
+/// Fingerprint of what live mode writes into a note: the ink, the page objects, the layers, the
+/// paper, the page (everything but the title, tags, favourite mark and modification time, which
+/// the library or an assistant change while the lesson goes on).
 fn content_fingerprint(note: &Note) -> Option<u64> {
     use std::hash::{DefaultHasher, Hash, Hasher};
-    // The ink as `strokes.bin` stores it, so that a note read back hashes as the page did.
+    // The ink as `strokes.bin` stores it, so that a note read back hashes as the page did; the page
+    // objects as `note.json` writes them: their boxes measured as the writer measures them, their
+    // numbers written so that they read back as they were.
     let strokes = ardoise_core::format::strokes::encode(&note.strokes).ok()?;
+    let objects: Vec<PageObject> = note
+        .objects
+        .iter()
+        .map(|object| {
+            let mut object = object.clone();
+            object.measure();
+            object
+        })
+        .collect();
     let layout = serde_json::to_vec(&(
         note.created,
         &note.page,
         &note.background,
         &note.background_image,
         &note.layers,
+        &objects,
         &note.timing,
         &note.origin,
     ))
@@ -510,7 +522,9 @@ pub(super) fn file_fingerprint(file: &NoteFile) -> Option<u64> {
 /// that received no ink is the sheet it was: what the session did around it stays out of the file
 /// (the blackboard turned on in front of it, a layer added to write on, an edit undone), except a
 /// deliberate change of its layers in the live window (`layers_edited`, M14: then they are written
-/// as they are, new ink or not, as in the editor). Its paper is, in order: the slate that ink
+/// as they are, new ink or not, as in the editor). Its page objects are always the page's (live
+/// mode moves them only with their layers): objects that differ from the sheet's keep the page's
+/// layers too, which they refer to. Its paper is, in order: the slate that ink
 /// written under the blackboard needs (`on_board`, white chalk being invisible on most paper, and
 /// only as long as that ink makes a difference); else its own paper when the Page tab changed it
 /// (`paper_edited`, M17: not the slate of a blackboard merely pressed in front of it); else the
@@ -519,7 +533,7 @@ pub(super) fn file_fingerprint(file: &NoteFile) -> Option<u64> {
 fn written_sheet(note: &Note, before: &Note, sheet: SheetChanges) -> Note {
     let mut written = note.clone();
     let same_ink = note.strokes == before.strokes;
-    if same_ink && !sheet.layers_edited {
+    if same_ink && note.objects == before.objects && !sheet.layers_edited {
         written.layers.clone_from(&before.layers);
     }
     if same_ink || !sheet.on_board {
@@ -726,16 +740,15 @@ fn merge_outside(
         tags: merged.note.tags.clone(),
         favorite: merged.note.favorite,
     };
-    let note = &mut merged.note;
-    note.created = file.note.created;
-    note.modified = file.note.modified.max(note.modified);
-    note.page = file.note.page;
-    note.background = file.note.background;
-    note.background_image = file.note.background_image.clone();
-    note.layers = file.note.layers.clone();
-    note.strokes = file.note.strokes.clone();
-    note.timing = file.note.timing;
-    note.origin = file.note.origin.clone();
+    // The page's note whole (ink, page objects, layers, paper, image, times: whatever the note
+    // holds now or gets later), but for what the library changed. Same id: checked above.
+    merged.note = Note {
+        title: outside.title.clone(),
+        tags: outside.tags.clone(),
+        favorite: outside.favorite,
+        modified: file.note.modified.max(merged.note.modified),
+        ..file.note.clone()
+    };
     merged.thumbnail = file.thumbnail.clone();
     merged.audio = file.audio.clone();
     // The pixels go with the description of the image (M17: the Fond tab changes both): the file's

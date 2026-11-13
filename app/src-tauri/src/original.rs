@@ -11,16 +11,20 @@
 //! - Any other note (live mode, Inkspace import, made in Ardoise) gets `original.ardoise` when
 //!   the editor first saves a change of its ink over it ([`keep_original`], called by
 //!   `notes::save_in`), or when live mode first writes new ink on it ([`keep_resumed_original`],
-//!   called by `live::hub`): the version on disk, note and strokes only. It is written once and
-//!   never changed afterwards.
+//!   called by `live::hub`): the version on disk, note and strokes only (its page objects are in
+//!   the note). It is written once and never changed afterwards. "The ink" is everything drawn on
+//!   the page: the page size, the layers, the strokes and the page objects (text frames, format
+//!   1.4): moving or retyping a text frame is a change of the ink, and a page holding only text
+//!   frames has something to go back to.
 //!
-//! Only the page size, the layers and the strokes come back; the title, tags, favourite,
-//! paper and narration stay as they are now. The first version also gives the placement of its
-//! background image (the `backgroundImage` of the `note.json` in `original.ardoise`, whose
-//! pixels are not in it): the editor puts the current image back where it was when it is the
-//! same image (`lib/editor/original.ts`). The tablet's pages have no image. It also gives its paper,
-//! for one case: a sheet whose slate comes from being written on under live mode's blackboard
-//! gets back the paper it had (same file).
+//! Only the page size, the layers, the strokes and the page objects come back (a tablet's page has
+//! no page object: going back to it removes the text frames added since); the title, tags,
+//! favourite, paper and narration stay as they are now. The first version also gives the
+//! placement of its background image (the `backgroundImage` of the `note.json` in
+//! `original.ardoise`, whose pixels are not in it): the editor puts the current image back where
+//! it was when it is the same image (`lib/editor/original.ts`). The tablet's pages have no image.
+//! It also gives its paper, for one case: a sheet whose slate comes from being written on under
+//! live mode's blackboard gets back the paper it had (same file).
 //!
 //! The tablet's bytes are decoded with today's settings (the orientation, the registered tablet's
 //! area): a note synced with the other orientation, or from another tablet model, comes back in the
@@ -30,7 +34,7 @@ use std::path::Path;
 
 use ardoise_core::format::{FormatError, NoteFile, read_from_bytes, to_bytes};
 use ardoise_core::library::Library;
-use ardoise_core::note::{BackgroundImage, Layer, Note, PageSize, Paper};
+use ardoise_core::note::{BackgroundImage, Layer, Note, PageObject, PageSize, Paper};
 use ardoise_core::settings::{Orientation, Settings};
 use ardoise_device::identity;
 use ardoise_device::pages::{board_position_of, note_from_page, page_kind};
@@ -55,6 +59,9 @@ pub enum NoteOriginal {
         page: PageSize,
         layers: Vec<Layer>,
         strokes: Vec<Stroke>,
+        /// Always empty (a tablet's page has none), given all the same: the note's page objects
+        /// are replaced by these, as its strokes are.
+        objects: Vec<PageObject>,
     },
     /// As it was before its first edit in Ardoise (`original.ardoise`), with the placement of
     /// the background image it had then (its pixels are the note file's, if it still has them).
@@ -62,6 +69,8 @@ pub enum NoteOriginal {
         page: PageSize,
         layers: Vec<Layer>,
         strokes: Vec<Stroke>,
+        /// Its page objects (text frames), as `note.json` writes them; empty when it had none.
+        objects: Vec<PageObject>,
         /// The paper it had.
         paper: Paper,
         #[serde(rename = "backgroundImage", skip_serializing_if = "Option::is_none")]
@@ -72,11 +81,12 @@ pub enum NoteOriginal {
 /// Before `edited` is saved over `file` (the version on disk): keeps that version as
 /// `original.ardoise` if the file has no original yet and the ink changes. Nothing is kept for a
 /// tablet note (it has `original.bin`), for an empty page (a note just created, or the blank
-/// file a "save as a copy" fills: there is nothing to go back to), or when only the title,
-/// tags, background or narration change (the original is taken at the first change of the
-/// ink, so it holds the ink before any edit).
+/// file a "save as a copy" fills: nothing drawn, neither a stroke with a sample nor a page
+/// object, so nothing to go back to), or when only the title, tags, background or narration
+/// change (the original is taken at the first change of the ink, so it holds the ink before any
+/// edit). A page that holds only text frames has something to go back to.
 pub fn keep_original(file: &mut NoteFile, edited: &Note) -> Result<(), FormatError> {
-    if file.note.strokes.is_empty() {
+    if !file.note.has_content() {
         return Ok(());
     }
     keep_first_version(file, edited)
@@ -98,8 +108,25 @@ fn keep_first_version(file: &mut NoteFile, edited: &Note) -> Result<(), FormatEr
     Ok(())
 }
 
+/// Whether `a` and `b` draw the same page: page size, layers, strokes and page objects. The
+/// objects are compared with their boxes as this version measures them, as the file stores them
+/// (the editor may send a box measured otherwise for a frame it did not change).
 fn same_ink(a: &Note, b: &Note) -> bool {
-    a.page == b.page && a.layers == b.layers && a.strokes == b.strokes
+    a.page == b.page
+        && a.layers == b.layers
+        && a.strokes == b.strokes
+        && a.objects.len() == b.objects.len()
+        && a.objects
+            .iter()
+            .zip(&b.objects)
+            .all(|(a, b)| measured(a) == measured(b))
+}
+
+/// `object` with its box as this version measures it (`PageObject::measure`).
+fn measured(object: &PageObject) -> PageObject {
+    let mut object = object.clone();
+    object.measure();
+    object
 }
 
 /// How this PC turns the tablet's pages into notes, as the synchronisation does.
@@ -166,6 +193,7 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
             page: note.page,
             layers: note.layers,
             strokes: note.strokes,
+            objects: note.objects,
         });
     }
     if let Some(bytes) = &file.original_note {
@@ -174,6 +202,7 @@ pub fn original_of(file: &NoteFile, tablet: &TabletContext) -> CommandResult<Not
             page: note.page,
             layers: note.layers,
             strokes: note.strokes,
+            objects: note.objects,
             paper: note.background.paper,
             background_image: note.background_image,
         });

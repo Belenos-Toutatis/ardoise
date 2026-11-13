@@ -155,17 +155,24 @@ pub fn follow_merge(index: u32, merged: u32) -> u32 {
     }
 }
 
-/// Moves layer `from` (an index of `note.layers`) to place `to` (another one): the strokes follow
-/// their layer and keep their places, so that the revision of the page and a selection stay. A
-/// stroke of a layer that does not exist keeps its number, as in the editor.
+/// Moves layer `from` (an index of `note.layers`) to place `to` (another one): the strokes and
+/// the page objects follow their layer and keep their places, so that the revision of the page and
+/// a selection stay. A stroke or an object of a layer that does not exist keeps its number, as in
+/// the editor.
 pub fn move_layer(note: &mut Note, from: u32, to: u32) {
     let count = note.layers.len();
     let layer = note.layers.remove(from as usize);
     note.layers.insert(to as usize, layer);
-    for stroke in &mut note.strokes {
-        if (stroke.layer as usize) < count {
-            stroke.layer = follow_move(stroke.layer, from, to);
+    let follow = |layer: &mut u32| {
+        if (*layer as usize) < count {
+            *layer = follow_move(*layer, from, to);
         }
+    };
+    for stroke in &mut note.strokes {
+        follow(&mut stroke.layer);
+    }
+    for object in &mut note.objects {
+        follow(&mut object.layer);
     }
 }
 
@@ -173,27 +180,38 @@ pub fn move_layer(note: &mut Note, from: u32, to: u32) {
 /// editor's `ops.mergeDown`: the lower layer keeps its name and shows if either did; the strokes
 /// of `merged` take its index and move after all the others in the list, so that they stay drawn
 /// above the lower layer's ink (drawing order is layer, then list); every stroke above shifts down.
-/// Moves the strokes, copies no point.
+/// The page objects do the same in their own list (those of `merged` after the lower layer's,
+/// which they stay drawn above). Moves the strokes and objects, copies no point.
 pub fn merge_layer(note: &mut Note, merged: u32) {
     let index = merged as usize;
     let upper = note.layers.remove(index);
     if let Some(lower) = note.layers.get_mut(index - 1) {
         lower.visible |= upper.visible;
     }
-    let strokes = std::mem::take(&mut note.strokes);
-    let (mut moved, mut kept): (Vec<_>, Vec<_>) = strokes
-        .into_iter()
-        .partition(|stroke| stroke.layer == merged);
-    for stroke in &mut kept {
-        if stroke.layer > merged {
-            stroke.layer -= 1;
+    note.strokes = merged_down(std::mem::take(&mut note.strokes), merged, |s| &mut s.layer);
+    note.objects = merged_down(std::mem::take(&mut note.objects), merged, |o| &mut o.layer);
+}
+
+/// `items` (strokes or page objects, each on the layer `layer` gives) once layer `merged` went
+/// into the one below it: its items take that layer and go after all the others, the items of
+/// the layers above go down by one, the order is kept otherwise.
+fn merged_down<T>(items: Vec<T>, merged: u32, layer: impl Fn(&mut T) -> &mut u32) -> Vec<T> {
+    let mut kept = Vec::with_capacity(items.len());
+    let mut moved = Vec::new();
+    for mut item in items {
+        let index = layer(&mut item);
+        if *index == merged {
+            *index = merged - 1;
+            moved.push(item);
+        } else {
+            if *index > merged {
+                *index -= 1;
+            }
+            kept.push(item);
         }
     }
-    for stroke in &mut moved {
-        stroke.layer = merged - 1;
-    }
     kept.append(&mut moved);
-    note.strokes = kept;
+    kept
 }
 
 #[cfg(test)]

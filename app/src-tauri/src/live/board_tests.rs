@@ -505,10 +505,12 @@ fn a_switch_while_the_pen_writes_leaves_every_point_once_and_upright() {
     assert_eq!(notes[0].page, board_page(ButtonsLeft));
 }
 
-/// A sheet of the blackboard in `page`, with one stroke, filed in the library.
+/// A sheet of the blackboard in `page`, with one stroke and a text frame typed in the editor,
+/// filed in the library.
 fn filed_sheet(library: &Library, page: PageSize) -> (PathBuf, Note) {
     let mut note = blank_note("Feuille", "Calque 1", 1_787_000_000_000);
     note.page = page;
+    note.objects = vec![super::tests::text_frame("consigne", 0, 5, 2_000.0, 6_000.0)];
     note.strokes = vec![Stroke {
         tool: ardoise_ink::Tool::Ballpoint,
         color: ardoise_ink::Rgba {
@@ -589,7 +591,9 @@ fn on_a_resumed_sheet_only_the_two_positions_of_its_way_round_are_taken() {
     tablet_set_options_in(&stack.runtime, &stack.context, &stack.hub, options).unwrap();
     assert_eq!(stack.hub.snapshot().board_position, Some(ButtonsRight));
 
-    // The other position of its way round: the sheet and its ink stay as they are.
+    // The other position of its way round: the sheet and its ink stay as they are, its text frame
+    // where it was typed.
+    assert_eq!(stack.hub.snapshot().page.objects, sheet.objects);
     stack.switch(ButtonsLeft);
     let snapshot = stack.hub.snapshot();
     assert_eq!(snapshot.page.page, sheet.page, "the sheet keeps its shape");
@@ -598,6 +602,7 @@ fn on_a_resumed_sheet_only_the_two_positions_of_its_way_round_are_taken() {
         points(&written),
         "nothing turned"
     );
+    assert_eq!(snapshot.page.objects, sheet.objects, "the frame in place");
     assert!(!snapshot.can_turn_page);
     // What is written now lands upright, 1:1.
     stack.board.draw_live(gamma_at(ButtonsLeft, (-20, 10)));
@@ -619,6 +624,10 @@ fn on_a_resumed_sheet_only_the_two_positions_of_its_way_round_are_taken() {
         "the sheet's own ink"
     );
     assert_eq!(written_file.strokes.len(), 5);
+    assert_eq!(
+        written_file.objects, sheet.objects,
+        "the frame written in place"
+    );
     // Live mode over: any position again.
     assert!(board_position_allowed(&stack.hub, ButtonsBottom).is_ok());
 }
