@@ -456,3 +456,51 @@ fn the_live_snapshot_names_its_tablet() {
         );
     }
 }
+
+/// The blackboard's position switch of the live window (`docs/questions.md` Q19): `lib/api.ts` calls
+/// `tablet_set_board_position({ position })` with one of the four words, which the command takes as
+/// `position: BoardPosition`; the snapshot gives the run's position (`boardPosition`, `null` for the
+/// Slate) and the positions the switch may take (`boardPositions`), in the words of `TabletOptions`.
+#[test]
+fn the_blackboard_switch_of_the_live_window_speaks_the_words_of_the_settings() {
+    use crate::live::session::LiveSession;
+    use crate::live::{LiveStyle, LiveViewState};
+    use ardoise_core::settings::{BoardPosition, Orientation};
+    let source = without_tests(include_str!("tablet.rs"));
+    let command = source
+        .split("pub async fn tablet_set_board_position(")
+        .nth(1)
+        .and_then(|rest| rest.split(')').next())
+        .expect("the command `tablet_set_board_position` in tablet.rs");
+    assert!(command.contains("position: BoardPosition"), "{command}");
+    let api = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui/src/lib/api.ts");
+    if let Ok(api) = std::fs::read_to_string(&api) {
+        assert!(
+            api.contains("call<void>('tablet_set_board_position', { position })"),
+            "lib/api.ts sends `{{ position }}`"
+        );
+    }
+    let mut session = LiveSession::new(
+        1,
+        ardoise_device::pages::BLACKBOARD_PAGE,
+        LiveStyle::default(),
+        LiveViewState::whole(ardoise_device::pages::BLACKBOARD_PAGE),
+        false,
+        0,
+    );
+    let wire = serde_json::to_value(session.snapshot()).unwrap();
+    assert_eq!(wire["boardPosition"], json!(null));
+    let words: Vec<&str> = BoardPosition::ALL.iter().map(|p| p.name()).collect();
+    assert_eq!(wire["boardPositions"], json!(words));
+    session.set_tablet(TabletKind::Blackboard);
+    session.started(20_500, 27_200, Orientation::PortraitRight, &mut Vec::new());
+    let wire = serde_json::to_value(session.snapshot()).unwrap();
+    assert_eq!(wire["boardPosition"], "buttonsRight");
+    for position in BoardPosition::ALL {
+        assert_eq!(
+            serde_json::to_value(position).unwrap(),
+            position.name(),
+            "{position:?}"
+        );
+    }
+}

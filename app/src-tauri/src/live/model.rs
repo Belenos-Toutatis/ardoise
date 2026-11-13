@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ardoise_core::note::{Note, PageSize, Paper};
-use ardoise_core::settings::Orientation;
+use ardoise_core::settings::{BoardPosition, Orientation};
 use ardoise_device::pages::TABLET_PEN_WIDTH;
 use ardoise_device::transport::TabletKind;
 use ardoise_ink::{Rgba, Stroke, Tool};
@@ -302,8 +302,22 @@ pub struct LiveSnapshot {
     pub image_pixels: Option<ImagePixels>,
     /// The tablet this session writes with (`slate`, `blackboard`; M18): set when its tablet first
     /// connects, kept while it reconnects (a live session never changes tablets), `None` before.
-    /// The live window shows the position switch for the Slate only. Not in the share's allow list.
+    /// The live window shows the Slate's position switch for the Slate, the blackboard's for the
+    /// blackboard. Not in the share's allow list.
     pub tablet: Option<TabletKind>,
+    /// How the Xiaomi blackboard is held, in a session it writes with (`tablet` is `blackboard`):
+    /// the position of its run, taken when it starts and changed by its position switch
+    /// (`tablet_set_board_position`, Q19); `None` for the Slate and before a tablet streams. The
+    /// live window's blackboard switch shows it (never `orientation`, which counts the same
+    /// quarter turns under the Slate's names). Not in the share's allow list.
+    pub board_position: Option<BoardPosition>,
+    /// The positions the blackboard may be switched to now ([`LiveSession::board_positions`]):
+    /// all four, or only the two of the way round of a page of the session that keeps its shape
+    /// (a resumed sheet of the blackboard, a page written over an image). Not in the share's allow
+    /// list.
+    ///
+    /// [`LiveSession::board_positions`]: super::session::LiveSession::board_positions
+    pub board_positions: Vec<BoardPosition>,
 }
 
 /// The key and size of the pixels of a page's background image (`LiveSnapshot::image_pixels`).

@@ -2,7 +2,7 @@
  * Live mode and the classroom (`app/src-tauri/src/live.rs`, `presentation.rs`).
  * Contract: docs/design/tablet-live-classroom.md.
  */
-import type { TabletKind } from './tablet';
+import type { BoardPosition, TabletKind } from './tablet';
 import type { Tool } from './ink';
 import type { BackgroundImage, Note, Paper, Rgba, Stroke } from './note';
 import type { Orientation } from './orientation';
@@ -148,10 +148,23 @@ export interface LiveSnapshot {
   orientation: Orientation;
   /**
    * The kind of tablet this live session writes with: set when its tablet first connects, kept while it reconnects, null
-   * before (and on the share's viewers, which do not need it). The window hides what is the Slate's (the position switch,
-   * the hints about its button) for `'blackboard'`.
+   * before (and on the share's viewers, which do not need it). The window hides what is the Slate's (its position switch,
+   * the hints about its button) for `'blackboard'`, and shows the blackboard's own position switch instead.
    */
   tablet?: TabletKind | null;
+  /**
+   * How the Xiaomi blackboard is held in a session it writes with (`tablet === 'blackboard'`): the position of its run,
+   * taken when it starts and changed by its switch (`tablet_set_board_position`, `docs/questions.md` Q19); null for the
+   * Slate and before a tablet streams (the window then shows the setting's). Never read `orientation` for it: that one
+   * counts the same quarter turns under the Slate's names. Absent on the share's viewers.
+   */
+  boardPosition?: BoardPosition | null;
+  /**
+   * The positions the blackboard may be switched to now: all four, or only the two of the way round of a page of the
+   * session that keeps its shape (a resumed sheet of the blackboard, a page written over an image); the switch disables
+   * the others and says why. Absent on the share's viewers (and from an older Rust side: read it as all four).
+   */
+  boardPositions?: BoardPosition[];
   /**
    * Whether the current page turns with the tablet: false on a resumed sheet, which is never turned, and on a page
    * written over an image (M17) (the quick switch is disabled there). Absent on the share's viewers, which do not need it.

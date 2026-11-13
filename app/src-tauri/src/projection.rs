@@ -352,6 +352,8 @@ impl Projection {
             page_paper: page.background.paper,
             image_pixels: image,
             tablet: None,
+            board_position: None,
+            board_positions: Vec::new(),
             page,
         }
     }

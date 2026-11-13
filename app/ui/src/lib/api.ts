@@ -31,7 +31,7 @@ import { mockTabletSubscribe } from './mock-tablet';
 import type { Orientation } from './orientation';
 import type { SharePortSetting, ShareContent, ShareStatus } from './share';
 import type { BridgeAnswer, BridgeEvent } from './app-bridge.svelte';
-import type { TabletEvent, TabletOptions, TabletStatus } from './tablet';
+import type { BoardPosition, TabletEvent, TabletOptions, TabletStatus } from './tablet';
 import type {
   DownloadProgress,
   Microphone,
@@ -359,6 +359,12 @@ export const api = {
   tabletSetOptions: (options: TabletOptions) => call<TabletStatus>('tablet_set_options', { options }),
   /** The live window's quick switch: how the tablet is held, applied at once to the live page. */
   tabletSetOrientation: (orientation: Orientation) => call<void>('tablet_set_orientation', { orientation }),
+  /**
+   * The live window's switch for the Xiaomi blackboard (`docs/questions.md` Q19): saves `[tablet] board_position` alone,
+   * and a blackboard run turns its page with its ink at once. Refused with `boardPositionFixed` (nothing saved) while live
+   * mode holds a page of the blackboard of the other way round (`LiveSnapshot.boardPositions`).
+   */
+  tabletSetBoardPosition: (position: BoardPosition) => call<void>('tablet_set_board_position', { position }),
   /** Presses the simulated tablet's button (`--simulated-tablet` only). */
   simPressButton: () => call<void>('sim_press_button'),
 

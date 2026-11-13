@@ -1034,8 +1034,8 @@ impl Worker {
 
     /// Hands the records of a notification to the sink, turned upright for the run's position
     /// ([`orient_board_record`]: the position set when the run started, which its `Started`
-    /// gave the hub). Records of an unknown status, or bytes of a partial record, are noted and
-    /// keep the log.
+    /// gave the hub, or the one set since, which `Reoriented` gave it). Records of an unknown
+    /// status, or bytes of a partial record, are noted and keep the log.
     pub(super) fn board_forward(&mut self, notification: LiveNotification) {
         match notification.channel {
             Channel::BoardData => {

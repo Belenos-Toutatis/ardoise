@@ -19,6 +19,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use ardoise_core::library::Library;
 use ardoise_core::note::PageSize;
 use ardoise_core::settings::{BoardPosition, Orientation};
+use ardoise_proto::blackboard::{BOARD_HEIGHT, BOARD_WIDTH};
 use ardoise_proto::live::{self, LivePacket};
 use ardoise_proto::sysevent::{self, SysEvent};
 
@@ -169,8 +170,10 @@ struct LiveRun {
     /// or the run refused).
     pre_live: PreLive,
     /// How the blackboard is held for this run: the position set when its `Started` was sent,
-    /// kept for the whole run, reconnections included (its page has that size and way up;
-    /// docs/design/blackboard.md, « Positions »). The Slate's runs follow their orientation
+    /// then each position set during the run (the live window's switch, or the settings: the
+    /// sink is told with `Reoriented`, [`Worker::board_repositioned`]); kept across
+    /// reconnections, so that the records are turned for the position in force when each is
+    /// read (docs/design/blackboard.md, « Positions »). The Slate's runs follow their orientation
     /// instead.
     board_position: BoardPosition,
 }
@@ -1157,7 +1160,8 @@ impl Worker {
     fn started(&self, run: &mut LiveRun) -> bool {
         if !run.started {
             let (width, height) = self.tablet_size();
-            // The blackboard's position holds for the whole run from here.
+            // The blackboard's position from here; a later change reaches the run through
+            // `board_repositioned`.
             run.board_position = self.config.options.board_position;
             run.sink.input(LiveInput::Started {
                 width,
@@ -1188,9 +1192,8 @@ impl Worker {
     /// oriented the old way, the ones after the new way.
     fn reoriented(&mut self) {
         if self.board.is_some() || self.live_kind() == Some(TabletKind::Blackboard) {
-            // The Slate's orientation is not the blackboard's (its own is `board_position`, set
-            // for a live run when it starts): nothing turns (also while its live mode waits for
-            // it).
+            // The Slate's orientation is not the blackboard's (its own is `board_position`,
+            // `board_repositioned`): nothing turns (also while its live mode waits for it).
             self.note("orientation changed: not used by the blackboard");
             return;
         }
@@ -1204,6 +1207,45 @@ impl Worker {
             });
         }
         self.note(format!("live orientation changed: {orientation:?}"));
+    }
+
+    /// The blackboard is held another way (the position switch of the live window, or its
+    /// settings). A run that has streamed from it (live, or reconnecting to it) takes the new
+    /// position at once, as the Slate's run takes its new orientation: the sink is told
+    /// (`Reoriented`, the position's quarter turns under the Slate's names, as `Started` gives
+    /// them), so that the page in progress turns with its ink, and the records read from here on
+    /// are turned for the new position ([`Self::board_forward`]). Done on this thread between two
+    /// notifications: every record read before was turned the old way and reached the sink
+    /// before `Reoriented` (the page turns it with the rest of its ink), every record read after
+    /// comes the new way; none is turned twice or missed. A run that has not streamed yet takes
+    /// the position its `Started` carries; the next sync takes it too.
+    fn board_repositioned(&mut self, position: BoardPosition) {
+        let run = self
+            .live
+            .as_mut()
+            .filter(|run| run.started && run.kind == Some(TabletKind::Blackboard));
+        let Some(run) = run else {
+            self.note(format!(
+                "blackboard position changed to {}",
+                position.name()
+            ));
+            return;
+        };
+        let before = run.board_position;
+        if before == position {
+            return;
+        }
+        run.board_position = position;
+        run.sink.input(LiveInput::Reoriented {
+            width: BOARD_WIDTH,
+            height: BOARD_HEIGHT,
+            orientation: Orientation::from_quarter_turns(position.quarter_turns()),
+        });
+        self.note(format!(
+            "live: the blackboard is held {} instead of {}: the page in progress turns with it",
+            position.name(),
+            before.name()
+        ));
     }
 
     /// Enters live mode if needed, then forwards one notification.
@@ -1544,24 +1586,7 @@ impl Worker {
             self.reoriented();
         }
         if options.board_position != before.board_position {
-            // A blackboard run keeps the position it started with (its page has that size and
-            // way up); the next run, and the next sync, take the new one.
-            let held = self
-                .live
-                .as_ref()
-                .filter(|run| run.started && run.kind == Some(TabletKind::Blackboard))
-                .map(|run| run.board_position);
-            match held {
-                Some(held) => self.note(format!(
-                    "blackboard position changed to {}: this live run keeps {}",
-                    options.board_position.name(),
-                    held.name()
-                )),
-                None => self.note(format!(
-                    "blackboard position changed to {}",
-                    options.board_position.name()
-                )),
-            }
+            self.board_repositioned(options.board_position);
         }
         // The blackboard's pages are imported automatically only when they may be deleted.
         let may_sync =
@@ -1776,8 +1801,8 @@ impl Worker {
             name: record.name.clone(),
             address: record.address.clone(),
             added: record.added.clone(),
-            width: ardoise_proto::blackboard::BOARD_WIDTH,
-            height: ardoise_proto::blackboard::BOARD_HEIGHT,
+            width: BOARD_WIDTH,
+            height: BOARD_HEIGHT,
             model: BLACKBOARD_MODEL_NAME.to_owned(),
         });
         slate.into_iter().chain(board).collect()

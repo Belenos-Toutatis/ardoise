@@ -454,6 +454,11 @@ fn snapshot_of(note: Note) -> LiveSnapshot {
         page_paper: ardoise_core::note::Paper::White,
         image_pixels: None,
         tablet: Some(TabletKind::Blackboard),
+        board_position: Some(ardoise_core::settings::BoardPosition::ButtonsLeft),
+        board_positions: vec![
+            ardoise_core::settings::BoardPosition::ButtonsRight,
+            ardoise_core::settings::BoardPosition::ButtonsLeft,
+        ],
     }
 }
 
@@ -503,6 +508,8 @@ fn a_viewer_never_gets_library_paths_titles_tags_nor_the_screen() {
         "kraft",
         "\"tablet\":",
         "blackboard",
+        "boardPosition",
+        "buttons",
     ] {
         assert!(!text.contains(secret), "{secret} in {text}");
     }

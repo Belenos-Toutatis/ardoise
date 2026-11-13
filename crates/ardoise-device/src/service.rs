@@ -394,7 +394,9 @@ pub enum LiveInput {
     /// The tablet is held another way (the quick switch of the live window), while live mode
     /// streams or while it still waits for the tablet (then before `Started`, which repeats the
     /// same way): the records that follow are turned for `orientation`; `width` × `height` is
-    /// the tablet's drawing area (the Slate Large's when none is known yet).
+    /// the tablet's drawing area (the Slate Large's when none is known yet). For the blackboard
+    /// (its position changed, `boardPosition`), only after its `Started`, while it streams or
+    /// reconnects: its own area, and the position's quarter turns as `Started` gives them.
     Reoriented {
         width: u32,
         height: u32,

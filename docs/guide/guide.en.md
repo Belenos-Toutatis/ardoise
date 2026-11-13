@@ -302,9 +302,10 @@ screen says so when you know two.
   upright, for the pages imported as for live mode. Four positions, drawn after the tablet (the bin erases the screen,
   the floppy disk stores the page): **Upright, buttons at the bottom** (the default), **Upright, buttons at the top**,
   **Wide, buttons on the right**, **Wide, buttons on the left**. The wide positions give wide notes (about 27 × 20 cm).
-  The position in force when a sync starts applies to all its pages; the one in force when live mode starts applies to
-  that whole live session (changing it during live mode applies to the next live session only). A note keeps the
-  position it was made in: changing the setting afterwards does not turn it.
+  The position in force when a sync starts applies to all its pages. During live mode, the four position buttons of the
+  control window change this same setting, and the live session under way follows it at once (see "Live mode with the
+  Xiaomi tablet"). An imported note keeps the position it was made in: changing the setting afterwards does not turn
+  it.
 
 ### The Xiaomi tablet's pages
 
@@ -404,10 +405,15 @@ Live mode works the same way with the Xiaomi tablet: tool, colour, texture, pres
 tablet also reports the pen's position when it is near the screen), other screen, sharing and touch-ups. The live page is
 **portrait** (about 20 × 27 cm) when the tablet is held with the buttons at the bottom or at the top, and **landscape**
 when it is held with the buttons on the right or on the left: it follows the Xiaomi tablet's **Position of the tablet**
-chosen in the settings (see "The options") **when live mode starts**, and keeps it until it stops. Changing the position
-during live mode applies to the next live session only: your writing is never turned under your hand. The control
-window has no position buttons for the Xiaomi tablet, it replaces them with a reminder, and the **Tablet button in live
-mode** setting applies to the Bamboo Slate only.
+chosen in the settings (see "The options").
+
+As with the Bamboo Slate, the top bar of the control window has **four position buttons**, with the Xiaomi tablet's
+drawings (the bin and the floppy disk show where its buttons are): if you forgot to set the position before starting,
+or got it wrong, click the right one. The page in progress turns at once with what is already written on it, and what
+you write next comes upright. Going from an upright position to a wide one (or the other way round) changes the shape
+of the page. The choice is kept in the Xiaomi tablet's settings, as for the Bamboo: the next live session and the next
+sync take it. Only the page in progress turns at once: a page already finished keeps its way round until you go back
+to it, and turns when you do. The **Tablet button in live mode** setting applies to the Bamboo Slate only.
 
 - **Storing the page with the tablet's button** does not interrupt live mode. The page is imported afterwards, like a
   sync: its note is a harmless duplicate of the live one.
@@ -469,9 +475,14 @@ The button is greyed out while the tablet is not registered or is busy (sync und
   choose a position of the same way round as the page in the settings, hold the tablet that way, then **Try again**, or
   resume live mode on another sheet. The Xiaomi tablet has no "hold the tablet like this" notice: it always follows its
   set position, and what you write is turned upright for that position (not for the one the page was made in, which is
-  not kept for live mode).
+  not kept for live mode). During this live session the sheet keeps its shape: of the four position buttons, only the
+  two of its way round stay active (a wide sheet: buttons on the right or on the left; an upright sheet: buttons at the
+  bottom or at the top), the other two are greyed out and a note next to them says why. Changing to the other position
+  of the same way round (half a turn) does not turn the sheet: what you write next comes upright, what was already
+  written stays as it is. The same holds while the live session keeps a page written over an image.
 - **The next page** creates a new note, at the root of the library, with the sheet's paper (colour, template, texture, not
-  its image), and follows the position set for the tablet again: the position buttons then work. The **Page** and
+  its image), and follows the position set for the tablet again: the position buttons then work (with the Xiaomi
+  tablet, only the two of the resumed sheet's way round, until live mode ends). The **Page** and
   **Background** tabs change the paper and the image of the current sheet (see **The paper and the image of the current
   page**).
 - **The narration**: if you record, the sound is added after the old one without covering it, and the replay stays
@@ -512,7 +523,8 @@ does not create a new note.
   shows a red dot on screen *without writing anything*; touching the tablet writes again. Both can also be set with
   switches, in the **Projection** tab (**Projected area** block); the toolbar buttons stay, within reach.
 - **Tablet position**: four buttons that change the position at once; the current page turns with what is already
-  drawn on it.
+  drawn on it. With the Xiaomi tablet, they are its four positions, with its drawings (see "Live mode with the Xiaomi
+  tablet").
 - The preview shows the whole page; a *blue rectangle* shows the projected area. Drag it to move the area, the wheel
   zooms. **Zoom in**, **Zoom out**, **Whole page** and **Width** (the page across the whole width of the projected area)
   are also offered, in the **Projection** tab, **Projected area** block.
@@ -1631,7 +1643,8 @@ of every component used, with its licence.
 | "The Xiaomi tablet still holds 2 stored pages…" (window) | Live mode does not start until those pages are imported: **Import and delete** imports them, then starts live mode (chapter 6). |
 | "The Xiaomi tablet still holds a page…" | Ardoise asked it to delete a page and it kept it: that page's note is already in the library. Sync again; if it repeats, keep the diagnostic log (chapter 13). |
 | Only one page is received, the next ones are "waiting" | Tick **Delete from the tablet after import** (chapter 5). |
-| The note shows upside down or on its side | Set the **Position of the tablet** to match how you hold it. |
+| The note shows upside down or on its side | Set the **Position of the tablet** to match how you hold it. In live mode, click the right position in the top bar: the page in progress turns upright with what is written on it (Bamboo Slate and Xiaomi tablet). |
+| "This live mode writes on a page of the Xiaomi tablet that keeps its shape…" | Live mode resumed a sheet (or writes over an image): only the two positions of the same way round as that page are possible until live mode ends. Choose one of them; for the other way round, finish live mode (chapter 6). |
 | "Your changes were not saved" | The note changed on another PC. **Save as a copy**, or go back to the library and open the note again. |
 | "This note was made by a newer version of Ardoise" | Replace `ardoise.exe` with the recent version (chapter 2). |
 | The library does not show a note that arrived from another PC | Wait for the Nextcloud sync to finish; temporary `.part` files are ignored. |

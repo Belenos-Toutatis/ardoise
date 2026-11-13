@@ -18,7 +18,14 @@ import type { InkPoint } from './ink';
 import { UNHANDLED, fileName, freshStamp, mockLibrary, notifyLibraryChanged } from './mock-data';
 import { failure, freePath, mockLibraryInvoke } from './mock-library';
 import type { Note, Stroke, TabletInfo } from './note';
-import { mockLiveBoardConnected, setMockLiveBoardPosition, setMockLiveGate, setMockLiveOrientation, setMockLiveTablet } from './mock-live';
+import {
+  mockLiveBoardConnected,
+  mockLiveBoardPositionRefusal,
+  setMockLiveBoardPosition,
+  setMockLiveGate,
+  setMockLiveOrientation,
+  setMockLiveTablet,
+} from './mock-live';
 import { boardPage, DEFAULT_BOARD_POSITION, drawingTurns, isBoardPosition, type BoardPosition } from './board-position';
 import { isOrientation, pageSizeFor, quarterTurns, turnStrokes, type Orientation } from './orientation';
 import type {
@@ -766,10 +773,27 @@ export function mockTabletInvoke(command: string, args: Record<string, unknown>)
       ) {
         failure('unexpected', 'invalid options');
       }
+      // A new position of the blackboard is refused as its switch refuses it (Rust: `board_position_allowed`).
+      if (options.boardPosition !== s.status.options.boardPosition) {
+        const refusal = mockLiveBoardPositionRefusal(options.boardPosition);
+        if (refusal) failure(refusal.code, refusal.message);
+      }
       update(s, { options: { ...options } });
       setMockLiveOrientation(options.orientation);
       setMockLiveBoardPosition(options.boardPosition);
       return structuredClone(s.status);
+    }
+
+    case 'tablet_set_board_position': {
+      // The blackboard's switch of the live window (Q19): its position alone, the live page turning with it.
+      const s = getSim();
+      const position = args.position as BoardPosition;
+      if (!isBoardPosition(position)) failure('unexpected', 'invalid position');
+      const refusal = mockLiveBoardPositionRefusal(position);
+      if (refusal) failure(refusal.code, refusal.message);
+      update(s, { options: { ...s.status.options, boardPosition: position } });
+      setMockLiveBoardPosition(position);
+      return undefined;
     }
 
     case 'tablet_set_orientation': {

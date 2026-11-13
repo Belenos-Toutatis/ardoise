@@ -219,7 +219,8 @@ fn every_window_gets_the_same_batches_and_a_closed_one_is_dropped() {
 }
 
 /// `LiveSnapshot.tablet` (M18): `null` until the service says which tablet streams, then that
-/// tablet, kept while it reconnects; a new session starts again from `null`.
+/// tablet, kept while it reconnects; a new session starts again from `null`. With the blackboard,
+/// `boardPosition` follows its run (`Started`, then `Reoriented`, Q19).
 #[test]
 fn the_snapshot_names_the_tablet_the_session_writes_with() {
     let (_dir, library) = library();
@@ -238,13 +239,31 @@ fn the_snapshot_names_the_tablet_the_session_writes_with() {
         kind: TabletKind::Blackboard,
     });
     assert_eq!(hub.snapshot().tablet, Some(TabletKind::Blackboard));
+    // The blackboard's position, from the quarter turns of its run (Q19): upright here.
+    assert_eq!(
+        hub.snapshot().board_position,
+        Some(ardoise_core::settings::BoardPosition::ButtonsBottom)
+    );
+    // Its switch: the run held with its buttons on the left from now.
+    sink.input(LiveInput::Reoriented {
+        width: 20_500,
+        height: 27_200,
+        orientation: Orientation::PortraitLeft,
+    });
+    assert_eq!(
+        hub.snapshot().board_position,
+        Some(ardoise_core::settings::BoardPosition::ButtonsLeft)
+    );
     sink.input(LiveInput::State(LiveState::Reconnecting));
     let reconnecting = hub.snapshot();
     assert_eq!(reconnecting.state, LiveSessionState::Reconnecting);
     assert_eq!(reconnecting.tablet, Some(TabletKind::Blackboard));
+    let wire = serde_json::to_value(&reconnecting).unwrap();
+    assert_eq!(wire["tablet"], "blackboard");
+    assert_eq!(wire["boardPosition"], "buttonsLeft");
     assert_eq!(
-        serde_json::to_value(&reconnecting).unwrap()["tablet"],
-        "blackboard"
+        reconnecting.page.page.width, 27_200,
+        "the page turned with it"
     );
     hub.stop().unwrap();
     let Start::New { snapshot, .. } = hub
@@ -1341,6 +1360,8 @@ fn the_json_has_the_shapes_of_live_ts() {
     assert_eq!(
         keys(snapshot),
         [
+            "boardPosition",
+            "boardPositions",
             "canRedo",
             "canTurnPage",
             "canUndo",
@@ -1363,8 +1384,14 @@ fn the_json_has_the_shapes_of_live_ts() {
         ]
     );
     assert_eq!(snapshot["state"], "live");
-    // No tablet said yet (a session the service has not started): `null`.
+    // No tablet said yet (a session the service has not started): `null`, and so is the
+    // blackboard's position; the four positions are open (Q19).
     assert_eq!(snapshot["tablet"], Value::Null);
+    assert_eq!(snapshot["boardPosition"], Value::Null);
+    assert_eq!(
+        snapshot["boardPositions"],
+        json!(["buttonsBottom", "buttonsTop", "buttonsRight", "buttonsLeft"])
+    );
     assert_eq!(
         (snapshot["pageIndex"].clone(), snapshot["pageCount"].clone()),
         (json!(0), json!(1))

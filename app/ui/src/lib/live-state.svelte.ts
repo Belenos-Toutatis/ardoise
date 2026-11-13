@@ -36,7 +36,8 @@
  * - Batches that arrive before the subscription's snapshot are kept and applied after it
  *   (Tauri may deliver a channel message before the command's answer).
  */
-import type { TabletKind } from './tablet';
+import { BOARD_POSITIONS as ALL_BOARD_POSITIONS } from './board-position';
+import type { BoardPosition, TabletKind } from './tablet';
 import type { InkPoint } from './ink';
 import { wallClock, type PendingSample } from './latency';
 import type {
@@ -128,6 +129,10 @@ export class LiveState {
   state = $state<LiveSessionState>('idle');
   /** The kind of tablet the session writes with (`LiveSnapshot.tablet`): null until its tablet first connects. */
   tablet = $state<TabletKind | null>(null);
+  /** How the Xiaomi blackboard is held in its run (`LiveSnapshot.boardPosition`): null for the Slate and before it streams. */
+  boardPosition = $state<BoardPosition | null>(null);
+  /** The positions the blackboard may be switched to now (`LiveSnapshot.boardPositions`; all four when absent). */
+  boardPositions = $state.raw<readonly BoardPosition[]>(ALL_BOARD_POSITIONS);
   pageIndex = $state(0);
   pageCount = $state(1);
   /** How the tablet is held now. */
@@ -474,6 +479,9 @@ export class LiveState {
     this.ready = true;
     this.state = s.state;
     this.tablet = s.tablet ?? null;
+    this.boardPosition = s.boardPosition ?? null;
+    const positions = s.boardPositions ?? ALL_BOARD_POSITIONS;
+    if (positions.join() !== this.boardPositions.join()) this.boardPositions = positions;
     this.pageIndex = s.pageIndex;
     this.pageCount = Math.max(1, s.pageCount);
     this.orientation = s.orientation;

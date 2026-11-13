@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 use ardoise_core::library::FileStamp;
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Paper, Timing};
-use ardoise_core::settings::{LiveButton, Orientation};
-use ardoise_device::pages::{oriented_size, turn_point};
+use ardoise_core::settings::{BoardPosition, LiveButton, Orientation};
+use ardoise_device::pages::{is_blackboard_page, oriented_size, turn_point};
 use ardoise_device::transport::TabletKind;
 use ardoise_ink::{Point, Rgba, Stroke};
 use ardoise_proto::SLATE_MAX_PRESSURE;
@@ -791,6 +791,16 @@ pub fn layer_name(french: bool, n: usize) -> String {
     }
 }
 
+/// The blackboard's position whose quarter turns a session of the blackboard holds under the
+/// Slate's name (`Started` and `Reoriented` give `Orientation::from_quarter_turns`).
+fn board_position_held(orientation: Orientation) -> BoardPosition {
+    let turns = orientation.quarter_turns();
+    BoardPosition::ALL
+        .into_iter()
+        .find(|position| position.quarter_turns() == turns)
+        .unwrap_or_default()
+}
+
 /// Pressure 0..=2047 as 0..=1 (SPEC §6.2).
 pub fn normalized_pressure(pressure: u16) -> f32 {
     (f32::from(pressure) / f32::from(SLATE_MAX_PRESSURE)).clamp(0.0, 1.0)
@@ -1123,7 +1133,33 @@ impl LiveSession {
             page_paper: shown.own_paper(self.view.board),
             image_pixels: shown.image.as_ref().map(|image| image.pixels()),
             tablet: self.tablet,
+            board_position: (self.tablet == Some(TabletKind::Blackboard))
+                .then(|| board_position_held(self.orientation)),
+            board_positions: self.board_positions(),
         }
+    }
+
+    /// The positions the blackboard may be switched to while this session runs (its position
+    /// switch, `docs/questions.md` Q19): every one, unless a page of the session keeps its shape
+    /// and is a page of the blackboard (a resumed sheet, or a page written over an image:
+    /// [`Page::held_fixed`]); then only the two of that page's way round, so that the points of
+    /// the blackboard go on landing on it as they come, never turned a quarter turn or shrunk
+    /// (docs/design/blackboard.md, « Positions »). That page need not be on screen: the session
+    /// comes back to it with the same position. Every one when the session does not run.
+    pub fn board_positions(&self) -> Vec<BoardPosition> {
+        let wide = |size: PageSize| size.width > size.height;
+        let fixed = if self.is_running() {
+            self.pages
+                .iter()
+                .find(|page| page.held_fixed() && is_blackboard_page(page.note.page))
+                .map(|page| wide(page.note.page))
+        } else {
+            None
+        };
+        BoardPosition::ALL
+            .into_iter()
+            .filter(|position| fixed.is_none_or(|wide| position.is_landscape() == wide))
+            .collect()
     }
 
     /// A snapshot, then the strokes in progress (they are not in the snapshot's page), each told
@@ -1286,8 +1322,11 @@ impl LiveSession {
     }
 
     /// The tablet is held another way while live mode runs (the quick switch of the live
-    /// window). The stroke in progress ends, then the page on screen is turned with its ink
-    /// (see [`hold`](Self::hold)) and every window gets a snapshot.
+    /// window: the Slate's orientation, or the blackboard's position, whose quarter turns come
+    /// under the Slate's names, Q19). The stroke in progress ends, then the page on screen is
+    /// turned with its ink (see [`hold`](Self::hold)) and every window gets a snapshot. The
+    /// records that follow come already turned the new way (the tablet service turns each one
+    /// as it reads it, and says `Reoriented` between the last old one and the first new one).
     pub fn reorient(
         &mut self,
         width: u32,

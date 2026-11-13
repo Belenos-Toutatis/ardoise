@@ -11,6 +11,9 @@
    * and "Finish" (the narration stops first, then `live_stop`, then `onclose`; what `live_stop` says
    * of the last write, a sheet that went on in a new note or a narration that could not join its
    * pages, keeps the view open until it is dismissed: the view is the only place that says it).
+   * The tablet's position switch is the Slate's (`tablet_set_orientation`) or, in a run of the Xiaomi
+   * blackboard, the blackboard's own, with its drawings (`tablet_set_board_position`, Q19: the page
+   * turns with its ink; on a page that keeps its shape only the two positions of its way round).
    *
    * Touching up (M12, this window only): the Select tool (V) lets the mouse and the pen choose strokes of
    * the preview with a lasso or a click; a bar then deletes them (Delete, Backspace), the colour swatches
@@ -88,6 +91,7 @@
   import { MAX_ZOOM, MIN_ZOOM, aspectOf, defaultMonitor } from '../../lib/live-view';
   import { INKSPACE_COLORS, cssColor, type Background, type BackgroundImage, type Rgba } from '../../lib/note';
   import { ORIENTATIONS, type Orientation } from '../../lib/orientation';
+  import { BOARD_POSITIONS, boardPositionOf, isLandscapePosition, type BoardPosition } from '../../lib/board-position';
   import { share } from '../../lib/share-state.svelte';
   import { SidePanelState, type SideBadges } from '../../lib/side-panel.svelte';
   import { tablet } from '../../lib/tablet-state.svelte';
@@ -101,6 +105,7 @@
   import ShortcutsHelp from '../side/ShortcutsHelp.svelte';
   import SidePanel from '../side/SidePanel.svelte';
   import OrientationIcon from '../tablet/OrientationIcon.svelte';
+  import BoardDrawing from '../tablet/BoardDrawing.svelte';
   import { NarrationRecorder } from '../narration/recorder.svelte';
   import LayersZone from '../layers/LayersZone.svelte';
   import BackgroundImageSection from '../editor/BackgroundImageSection.svelte';
@@ -259,13 +264,27 @@
   /** The sheet is resumed and cannot be turned: the quick position buttons wait for the next page. */
   const locked = $derived(!live.canTurnPage);
   /**
-   * The Xiaomi blackboard writes the live page: its position is the one of its settings, taken when the run starts and
-   * kept to its end, so the Slate's position switch and the hint about its button do not apply (and `live.orientation`,
-   * which counts the blackboard's quarter turns under the Slate's names, is never shown). The session says which tablet
-   * it writes with
-   * (kept while it reconnects, when no tablet is connected); until it does, the tablet that is connected.
+   * The Xiaomi blackboard writes the live page: the Slate's position switch and the hint about its button do not apply
+   * (and `live.orientation`, which counts the blackboard's quarter turns under the Slate's names, is never shown); the
+   * blackboard's own switch shows instead, with its four drawings (`docs/questions.md` Q19). The session says which
+   * tablet it writes with (kept while it reconnects, when no tablet is connected); until it does, the tablet that is
+   * connected.
    */
   const onBoard = $derived((live.tablet ?? tablet.active) === 'blackboard');
+  /** How the blackboard is held: its run's position; before the run streams, the setting it will take. */
+  const boardHeld = $derived<BoardPosition>(live.boardPosition ?? boardPositionOf(tablet.status?.options));
+  /**
+   * The way round a page of the session keeps (a resumed sheet of the blackboard, a page written over an image): only
+   * the two positions of that way round are offered while it runs, the other two are disabled and say why. Null: free.
+   */
+  const boardFixed = $derived<'portrait' | 'landscape' | null>(
+    sessionState === 'idle' || live.boardPositions.length === 0 || live.boardPositions.length === BOARD_POSITIONS.length
+      ? null
+      : isLandscapePosition(live.boardPositions[0])
+        ? 'landscape'
+        : 'portrait',
+  );
+  const boardOffered = (position: BoardPosition) => boardFixed === null || live.boardPositions.includes(position);
   /** What the waiting screen asks for: depends on which tablets are known. */
   const waitingKey = $derived(tablet.board ? (tablet.slate ? 'titleBoth' : 'titleBoard') : 'title');
   /** How to hold the tablet for the resumed sheet, when that is not how the setting says. */
@@ -645,6 +664,17 @@
     if (locked || orientation === live.orientation) return;
     notice = null;
     api.tabletSetOrientation(orientation).catch((error: unknown) => actions.onerror(error));
+  }
+
+  /**
+   * The blackboard's switch (Q19): saved in its settings, and a run under way turns its page with what is written on it at
+   * once; the snapshot that follows shows it. A position of the other way round than a page that keeps its shape is not
+   * offered (Rust refuses it with `boardPositionFixed` anyway).
+   */
+  function setBoardPosition(position: BoardPosition) {
+    if (position === boardHeld || !boardOffered(position)) return;
+    notice = null;
+    api.tabletSetBoardPosition(position).catch((error: unknown) => actions.onerror(error));
   }
 
   function setStyle(style: LiveStyle) {
@@ -1147,7 +1177,37 @@
     </div>
 
     {#if onBoard}
-      <span class="group-label muted" data-slot="xiaomi-note" title={t('live.xiaomi.note')}>{t('live.xiaomi.label')}</span>
+      <div
+        class="group"
+        role="group"
+        aria-label={t('live.xiaomi.label')}
+        aria-describedby={boardFixed ? 'live-board-fixed' : undefined}
+        title={t('live.xiaomi.note')}
+        data-slot="board-position"
+        data-fixed={boardFixed ?? undefined}
+      >
+        {#each BOARD_POSITIONS as position (position)}
+          {@const offered = boardOffered(position)}
+          <button
+            type="button"
+            class="button small-button toggle board-position"
+            class:active={boardHeld === position}
+            data-position={position}
+            aria-pressed={boardHeld === position}
+            aria-label={t(`tablet.boardPosition.${position}`)}
+            title={offered ? t(`tablet.boardPosition.${position}`) : t('live.xiaomi.fixedHint')}
+            disabled={!offered}
+            onclick={() => setBoardPosition(position)}
+          >
+            <BoardDrawing {position} size={26} />
+          </button>
+        {/each}
+        {#if boardFixed}
+          <span class="group-label muted" id="live-board-fixed" data-slot="board-fixed" title={t('live.xiaomi.fixedHint')}>
+            {t(boardFixed === 'landscape' ? 'live.xiaomi.fixedLandscape' : 'live.xiaomi.fixedPortrait')}
+          </span>
+        {/if}
+      </div>
     {:else}
       <div
         class="group"
@@ -1556,6 +1616,15 @@
 
   .button.orientation {
     padding: 0.1rem 0.25rem;
+  }
+
+  /* The blackboard's drawings (BoardDrawing) are 26 px on their long side: a square button for all four. */
+  .button.board-position {
+    display: inline-grid;
+    place-items: center;
+    width: 2.25rem;
+    height: 2.1rem;
+    padding: 0;
   }
 
   .button.toggle.active {
