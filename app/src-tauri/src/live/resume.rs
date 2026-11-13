@@ -129,11 +129,12 @@ pub fn hold_for(sheet: PageSize, setting: Orientation) -> Orientation {
 
 /// Whether a tablet of `kind` may write on a resumed sheet of size `sheet`, without its ink being
 /// shrunk, turned or lost: the blackboard only on its own page ([`BLACKBOARD_PAGE`], or a size it
-/// wrote with before a calibration: [`is_blackboard_page`]), which it covers at its own scale (it
-/// is never turned, nor are its records); the Slate on every other sheet, as before the blackboard
-/// (turned to how the sheet is held and fitted in it), never on a blackboard page (its ink would
-/// be shrunk to the narrower portrait page). Any other pair ends the resumed run
-/// (`sheetOtherTablet`), nothing written on the sheet.
+/// wrote with before a calibration, either way round: [`is_blackboard_page`]), which it covers at
+/// its own scale; the Slate on every other sheet, as before the blackboard (turned to how the
+/// sheet is held and fitted in it), never on a blackboard page (its ink would be shrunk to the
+/// blackboard's narrower page). Any other pair ends the resumed run (`sheetOtherTablet`), nothing
+/// written on the sheet. The blackboard must also be held the sheet's way round
+/// ([`sheet_refusal`]).
 pub fn tablet_fits(kind: TabletKind, sheet: PageSize) -> bool {
     let board_page = is_blackboard_page(sheet);
     match kind {
@@ -142,9 +143,48 @@ pub fn tablet_fits(kind: TabletKind, sheet: PageSize) -> bool {
     }
 }
 
+/// Why a resumed sheet cannot be written on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SheetRefusal {
+    /// The sheet is the other tablet's ([`tablet_fits`]): `sheetOtherTablet`.
+    OtherTablet,
+    /// A page of the blackboard held the other way round than the blackboard's position says (a
+    /// landscape page with the blackboard held upright, or a portrait page with it held on a
+    /// side): `sheetBoardPosition`. Its points would have to be turned a quarter turn or shrunk;
+    /// written as they come they would be sideways (docs/design/blackboard.md, « Positions »).
+    BoardPosition,
+}
+
+impl SheetRefusal {
+    /// The `errorCodes.*` key.
+    pub fn code(self) -> &'static str {
+        match self {
+            SheetRefusal::OtherTablet => "sheetOtherTablet",
+            SheetRefusal::BoardPosition => "sheetBoardPosition",
+        }
+    }
+}
+
+/// Why a tablet of `kind` whose points arrive on a page of `held` (its area as it is held: for
+/// the blackboard, its page in the run's position) cannot write on a resumed sheet of size
+/// `sheet`; `None` when it can. The blackboard writes on a page of its own held the same way round
+/// as the sheet: its points then land as they come, upright for the way it is held now, whatever
+/// position the sheet was made in (two positions of the same way round are half a turn apart, and
+/// the position set now is the one the user holds it in: the sheet's own would write upside
+/// down).
+pub fn sheet_refusal(kind: TabletKind, sheet: PageSize, held: PageSize) -> Option<SheetRefusal> {
+    if !tablet_fits(kind, sheet) {
+        return Some(SheetRefusal::OtherTablet);
+    }
+    let wide = |size: PageSize| size.width > size.height;
+    (kind == TabletKind::Blackboard && wide(sheet) != wide(held))
+        .then_some(SheetRefusal::BoardPosition)
+}
+
 /// How the tablet is held to write on a page held fixed (a resumed sheet, a worksheet): the Slate
-/// follows the sheet ([`hold_for`]); the blackboard cannot (its records are never turned): it is
-/// held as it is, `setting` being its own way.
+/// follows the sheet ([`hold_for`]); the blackboard does not (nothing would tell the user to turn
+/// it): it is held as its position says, `setting` (the quarter turns of the run's position), and
+/// a sheet the other way round is refused ([`sheet_refusal`]).
 pub fn held_for(sheet: PageSize, setting: Orientation, kind: TabletKind) -> Orientation {
     match kind {
         TabletKind::Slate => hold_for(sheet, setting),

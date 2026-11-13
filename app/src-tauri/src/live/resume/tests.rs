@@ -3001,12 +3001,14 @@ fn the_blackboard_writes_on_its_own_page_as_it_comes_and_only_there() {
         assert!(tablet_fits(TabletKind::Blackboard, page), "{page:?}");
         assert!(!tablet_fits(TabletKind::Slate, page), "{page:?}");
     }
-    // A turned blackboard note is a sheet like any other.
+    // A landscape page of the blackboard (held on a side, or turned in the editor) is the
+    // blackboard's too, never the Slate's.
     let turned = PageSize {
         width: BLACKBOARD_PAGE.height,
         height: BLACKBOARD_PAGE.width,
     };
-    assert!(!tablet_fits(TabletKind::Blackboard, turned));
+    assert!(tablet_fits(TabletKind::Blackboard, turned));
+    assert!(!tablet_fits(TabletKind::Slate, turned));
     assert_eq!(
         held_for(BLACKBOARD_PAGE, Landscape, TabletKind::Blackboard),
         Landscape
@@ -3053,6 +3055,48 @@ fn the_blackboard_writes_on_its_own_page_as_it_comes_and_only_there() {
         assert_eq!(session.pages()[0].note.page, board);
     }
 
+    // Its landscape page resumed with the blackboard held on a side (either: the service turns
+    // its records for the position, `Started` gives its quarter turns): every record lands as it
+    // came, on the sheet as it is. Held upright, the run is refused (the next test).
+    use ardoise_core::settings::BoardPosition;
+    use ardoise_device::pages::board_page;
+    for position in [BoardPosition::ButtonsLeft, BoardPosition::ButtonsRight] {
+        let held = Orientation::from_quarter_turns(position.quarter_turns());
+        let sheet_page = board_page(position);
+        let mut session = LiveSession::new(
+            1,
+            A4_LANDSCAPE,
+            LiveStyle::default(),
+            LiveViewState::whole(A4_LANDSCAPE),
+            true,
+            RESUMED_AT,
+        )
+        .with_orientation(Landscape)
+        .resuming(seed_of(NoteFile::new(sheet(sheet_page))), RESUMED_AT);
+        let mut out = Vec::new();
+        session.set_state(LiveSessionState::Waiting, &mut out);
+        assert_eq!(
+            session.refusal(TabletKind::Blackboard, board.width, board.height, held),
+            None,
+            "{position:?}"
+        );
+        session.set_tablet(TabletKind::Blackboard);
+        session.started(board.width, board.height, held, &mut out);
+        for (x, y) in [(0, 0), (20_000, 12_345), (27_199, 20_499)] {
+            let point = write_at(&mut session, x, y, RESUMED_AT + 1_000);
+            assert_eq!(
+                (point.x, point.y),
+                (f32::from(x), f32::from(y)),
+                "{position:?}"
+            );
+        }
+        assert_eq!(
+            session.pages()[0].note.page,
+            sheet_page,
+            "the sheet as it is"
+        );
+    }
+
     // A session that resumes nothing takes any tablet.
     let fresh = LiveSession::new(
         1,
@@ -3073,6 +3117,18 @@ fn resume_on(
     area: PageSize,
     kind: TabletKind,
 ) -> HubSink {
+    resume_held(hub, library, path, area, kind, Orientation::Landscape)
+}
+
+/// [`resume_on`], the tablet held as `held` (its quarter turns, as `Started` gives them).
+fn resume_held(
+    hub: &LiveHub,
+    library: &Library,
+    path: &Path,
+    area: PageSize,
+    kind: TabletKind,
+    held: Orientation,
+) -> HubSink {
     let start = StartOptions {
         size: area,
         ..options(library, fixed(LiveButton::NewPage))
@@ -3083,10 +3139,89 @@ fn resume_on(
     sink.input(LiveInput::Started {
         width: area.width,
         height: area.height,
-        orientation: Orientation::Landscape,
+        orientation: held,
         kind,
     });
     sink
+}
+
+/// Positions (docs/design/blackboard.md, « Positions »): a page of the blackboard is resumed with
+/// the blackboard held its way round only, in the position set when the run starts (whichever of
+/// the two of that way round, not necessarily the one it was made in: the user holds it as set
+/// now); held the other way round the run ends at once (`sheetBoardPosition`), the note untouched.
+#[test]
+fn a_page_of_the_blackboard_is_resumed_only_with_the_blackboard_held_its_way_round() {
+    use ardoise_core::settings::BoardPosition::{self, *};
+    use ardoise_device::pages::{BLACKBOARD_PAGE, board_page};
+    let held = |position: BoardPosition| Orientation::from_quarter_turns(position.quarter_turns());
+    for (made, now, accepted) in [
+        (ButtonsLeft, ButtonsLeft, true),
+        (ButtonsLeft, ButtonsRight, true),
+        (ButtonsRight, ButtonsLeft, true),
+        (ButtonsBottom, ButtonsTop, true),
+        (ButtonsLeft, ButtonsBottom, false),
+        (ButtonsRight, ButtonsTop, false),
+        (ButtonsBottom, ButtonsLeft, false),
+        (ButtonsTop, ButtonsRight, false),
+    ] {
+        let (_dir, library) = library();
+        let path = filed(&library, "Classe", &NoteFile::new(sheet(board_page(made))));
+        let before = std::fs::read(library.root().join(&path)).unwrap();
+        let hub = LiveHub::new(config());
+        let window = Arc::new(Window::default());
+        hub.subscribe("main", window.clone());
+        let mut sink = resume_held(
+            &hub,
+            &library,
+            &path,
+            BLACKBOARD_PAGE,
+            TabletKind::Blackboard,
+            held(now),
+        );
+        let case = format!("made {made:?}, held {now:?}");
+        assert_eq!(sink.active(), accepted, "{case}");
+        if accepted {
+            assert_eq!(hub.snapshot().state, LiveSessionState::Live, "{case}");
+            stroke(&mut sink, 3000, 5);
+            wait_until("the note rewritten", || {
+                stroke_count(&library, &path) == Some(3)
+            });
+            let written = library.read(&path).unwrap().file;
+            assert_eq!(
+                written.note.page,
+                board_page(made),
+                "{case}: the sheet as it is"
+            );
+            let point = written.note.strokes[2].points[0];
+            assert_eq!((point.x, point.y), (3000.0, 1000.0), "{case}: as it came");
+            hub.stop().unwrap();
+            continue;
+        }
+        wait_until("the refusal", || {
+            window
+                .events()
+                .iter()
+                .any(|event| matches!(event, LiveEvent::Refused { .. }))
+        });
+        let codes: Vec<String> = window
+            .events()
+            .into_iter()
+            .filter_map(|event| match event {
+                LiveEvent::Refused { code, .. } => Some(code),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(codes, ["sheetBoardPosition"], "{case}");
+        assert_eq!(hub.snapshot().state, LiveSessionState::Idle, "{case}");
+        stroke(&mut sink, 3000, 5);
+        hub.stop().unwrap();
+        assert_eq!(
+            std::fs::read(library.root().join(&path)).unwrap(),
+            before,
+            "{case}: the sheet untouched"
+        );
+        assert_eq!(notes_in(&library), std::slice::from_ref(&path), "{case}");
+    }
 }
 
 #[test]

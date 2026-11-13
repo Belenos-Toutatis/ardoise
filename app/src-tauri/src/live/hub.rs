@@ -41,7 +41,7 @@ use super::model::{
 };
 use super::paper::{ImageChange, LivePageImageOp, PageImage, PaperError, checked_image};
 use super::pen::ComputerPenInput;
-use super::resume::{ResumeBase, ResumeSeed, merged_keeping_both, placed_for_merge};
+use super::resume::{ResumeBase, ResumeSeed, SheetRefusal, merged_keeping_both, placed_for_merge};
 use super::session::{LiveSession, Page, SavedFile, SheetFork};
 use crate::background::Staging;
 use crate::library::{now_ms, path_text};
@@ -864,28 +864,37 @@ impl Shared {
                 width,
                 height,
                 orientation,
-            } if !session.accepts(kind) => {
-                // A sheet this tablet cannot write on without shrinking, turning or losing ink:
-                // the run ends at once, nothing written (the service leaves live mode).
-                state.accepting = None;
-                state.session.set_state(LiveSessionState::Idle, &mut out);
-                out.push(LiveEvent::Refused {
-                    code: "sheetOtherTablet".to_owned(),
-                    message: format!(
-                        "the {} cannot write on this sheet ({width} × {height}, {orientation:?})",
-                        kind.name()
-                    ),
-                });
-            }
-            LiveInput::Started {
-                kind,
-                width,
-                height,
-                orientation,
-            } => {
-                session.set_tablet(kind);
-                session.started(width, height, orientation, &mut out);
-            }
+            } => match session.refusal(kind, width, height, orientation) {
+                None => {
+                    session.set_tablet(kind);
+                    session.started(width, height, orientation, &mut out);
+                }
+                Some(refusal) => {
+                    // A sheet this tablet cannot write on without shrinking, turning or losing
+                    // ink: the run ends at once, nothing written (the service leaves live mode).
+                    state.accepting = None;
+                    state.session.set_state(LiveSessionState::Idle, &mut out);
+                    out.push(match refusal {
+                        SheetRefusal::OtherTablet => LiveEvent::Refused {
+                            code: "sheetOtherTablet".to_owned(),
+                            message: format!(
+                                "the {} cannot write on this sheet ({width} × {height}, \
+                                 {orientation:?})",
+                                kind.name()
+                            ),
+                        },
+                        SheetRefusal::BoardPosition => LiveEvent::Refused {
+                            code: "sheetBoardPosition".to_owned(),
+                            message: format!(
+                                "the {} is held the other way round than this sheet \
+                                 ({width} × {height} turned {} quarter turns)",
+                                kind.name(),
+                                orientation.quarter_turns()
+                            ),
+                        },
+                    });
+                }
+            },
             LiveInput::Reoriented {
                 width,
                 height,

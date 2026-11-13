@@ -216,6 +216,7 @@ fn the_errors_of_the_blackboard_are_a_code_and_a_message() {
         "pageRescued",
         "pageDoubtful",
         "pageNotSaved",
+        "sheetBoardPosition",
     ] {
         let value = serde_json::to_value(CommandError::new(code, "detail")).unwrap();
         assert_eq!(value, json!({ "code": code, "message": "detail" }));
@@ -314,8 +315,14 @@ fn every_error_code_of_the_tablet_paths_has_a_text_in_both_languages() {
         "pageRescued",
         "pageDoubtful",
         "pageNotSaved",
+        "sheetBoardPosition",
     ] {
         assert!(codes.contains(code), "{code} not found in {codes:?}");
+    }
+    // `live_resume`'s refusal at once names the same codes as the hub's.
+    use crate::live::resume::SheetRefusal;
+    for refusal in [SheetRefusal::OtherTablet, SheetRefusal::BoardPosition] {
+        assert!(codes.contains(refusal.code()), "{refusal:?}");
     }
     assert!(codes.len() >= 20, "{codes:?}");
     for (language, file) in [
@@ -330,6 +337,89 @@ fn every_error_code_of_the_tablet_paths_has_a_text_in_both_languages() {
                 "{language}: no text for the error code {code}"
             );
         }
+    }
+}
+
+// --- H8, Q17: the four positions of the blackboard (docs/design/blackboard.md, « Positions ») ---------------------------
+
+/// `TabletOptions` (`lib/tablet.ts`) carries `boardPosition`, one of four words, next to the Slate's `orientation`:
+/// `tablet_set_options` takes it and the status gives it back; a word it does not know is refused, as the interface's
+/// stand-in (`mock-tablet.ts`) refuses it, and so is an options object without it.
+#[test]
+fn the_tablet_options_carry_the_position_of_the_blackboard() {
+    use ardoise_core::settings::{BoardPosition, Orientation};
+    let shown = serde_json::to_value(TabletOptions::default()).unwrap();
+    assert_eq!(
+        shown,
+        json!({ "autoSync": true, "deleteAfterImport": true, "orientation": "landscape",
+                "boardPosition": "buttonsBottom", "button": "newPage" })
+    );
+    let sent = |position: serde_json::Value| {
+        serde_json::from_value::<TabletOptions>(
+            json!({ "autoSync": false, "deleteAfterImport": true,
+            "orientation": "portraitLeft", "boardPosition": position, "button": "newLayer" }),
+        )
+    };
+    for (word, position) in [
+        ("buttonsBottom", BoardPosition::ButtonsBottom),
+        ("buttonsTop", BoardPosition::ButtonsTop),
+        ("buttonsRight", BoardPosition::ButtonsRight),
+        ("buttonsLeft", BoardPosition::ButtonsLeft),
+    ] {
+        let options = sent(json!(word)).unwrap();
+        assert_eq!(options.board_position, position);
+        assert_eq!(
+            options.orientation,
+            Orientation::PortraitLeft,
+            "independent of the Slate's"
+        );
+        assert_eq!(
+            serde_json::to_value(options).unwrap()["boardPosition"],
+            word
+        );
+    }
+    for bad in [
+        json!("buttonsDiagonal"),
+        json!("landscape"),
+        json!(1),
+        json!(null),
+    ] {
+        assert!(sent(bad.clone()).is_err(), "{bad}");
+    }
+    let without = json!({ "autoSync": true, "deleteAfterImport": true, "orientation": "landscape",
+                          "button": "newPage" });
+    assert!(serde_json::from_value::<TabletOptions>(without).is_err());
+}
+
+/// The quarter turns of the four positions are those of the pictures of the settings (`drawingTurns` of
+/// `app/ui/src/lib/board-position.ts`), read from that file. Skipped (and said) while the interface's file is not there.
+#[test]
+fn the_positions_of_the_blackboard_turn_as_the_pictures_of_the_settings() {
+    use ardoise_core::settings::BoardPosition;
+    let file =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui/src/lib/board-position.ts");
+    let Ok(source) = std::fs::read_to_string(&file) else {
+        eprintln!(
+            "{} not found: the pictures' quarter turns are not compared",
+            file.display()
+        );
+        return;
+    };
+    let body = source
+        .split("export function drawingTurns")
+        .nth(1)
+        .and_then(|rest| rest.split("\n}").next())
+        .expect("`drawingTurns` in board-position.ts");
+    for position in BoardPosition::ALL {
+        let case = format!("case '{}':", position.name());
+        let turns: u8 = body
+            .split(&case)
+            .nth(1)
+            .and_then(|rest| rest.trim_start().strip_prefix("return "))
+            .and_then(|rest| rest.split(';').next())
+            .and_then(|turns| turns.trim().parse().ok())
+            .unwrap_or_else(|| panic!("{case} return N; in drawingTurns"));
+        assert_eq!(turns, position.quarter_turns(), "{position:?}");
     }
 }
 

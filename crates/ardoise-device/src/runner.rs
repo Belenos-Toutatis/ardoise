@@ -446,9 +446,11 @@ impl Run<'_> {
             Err(error) => return Flow::Failed(vec![detail("error", error.to_string())]),
         };
         let mut imported = ImportedPages::scan(&library);
+        // The Slate's guided test: the blackboard's position plays no part.
         let context = PageContext {
             size: PageSize { width, height },
             orientation: self.config.orientation,
+            board_position: Default::default(),
         };
         let delete = self.config.delete_after_sync;
         let mut strokes = 0usize;

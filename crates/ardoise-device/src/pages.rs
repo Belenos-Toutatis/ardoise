@@ -9,8 +9,12 @@
 //! or portrait, either way up), in synced pages and in live mode alike.
 //!
 //! A page of the Xiaomi blackboard ([`DownloadedPage::kind`]) is read as its 7-byte records
-//! ([`blackboard_note`]): its page is the blackboard's own, portrait, never turned, and its times
-//! are synthesised from the record rate (the tablet sends none).
+//! ([`blackboard_note`]): its page is the blackboard's own, turned upright for the way it is held
+//! ([`orient_board`], [`BoardPosition`]: portrait, or landscape held on a side), and its times
+//! are synthesised from the record rate (the tablet sends none). The position a note was made
+//! with is recorded in it ([`BOARD_POSITION_FIELD`]): its `original.bin` stays the tablet's raw
+//! bytes, and what is made of them again ("back to the original", the update of a screen stored
+//! again) is made in that position.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,7 +23,7 @@ use ardoise_core::format::{self, NoteFile};
 use ardoise_core::fsutil::remove_file_with_retry;
 use ardoise_core::library::{Library, LoadedNote, SavedNote};
 use ardoise_core::note::{Background, Layer, Note, Origin, PageSize, Timing};
-use ardoise_core::settings::Orientation;
+use ardoise_core::settings::{BoardPosition, Orientation};
 use ardoise_ink::{Point, Rgba, Stroke, Tool};
 use ardoise_proto::SLATE_MAX_PRESSURE;
 use ardoise_proto::blackboard::{self, BOARD_HEIGHT, BOARD_MAX_PRESSURE, BOARD_WIDTH};
@@ -35,16 +39,79 @@ pub const BLACKBOARD_PAGE: PageSize = PageSize {
     width: BOARD_WIDTH,
     height: BOARD_HEIGHT,
 };
-/// Every page size the blackboard has ever written with, [`BLACKBOARD_PAGE`] first. A
-/// calibration of `BOARD_WIDTH` and `BOARD_HEIGHT` (docs/design/blackboard.md §3) adds the new
-/// size here and keeps the old ones: the notes written before stay blackboard pages (resumed
-/// with the blackboard, never with the Slate).
+/// Every page size the blackboard has ever written with, [`BLACKBOARD_PAGE`] first, in its own
+/// portrait frame. A calibration of `BOARD_WIDTH` and `BOARD_HEIGHT` (docs/design/blackboard.md
+/// §3) adds the new size here and keeps the old ones: the notes written before stay blackboard
+/// pages (resumed with the blackboard, never with the Slate).
 pub const BLACKBOARD_PAGES: [PageSize; 1] = [BLACKBOARD_PAGE];
 
-/// Whether `size` is a page the blackboard wrote ([`BLACKBOARD_PAGES`]).
+/// Whether `size` is a page the blackboard wrote ([`BLACKBOARD_PAGES`]), held upright or on a
+/// side (a landscape position swaps its width and height: [`board_page`]).
 pub fn is_blackboard_page(size: PageSize) -> bool {
-    BLACKBOARD_PAGES.contains(&size)
+    BLACKBOARD_PAGES
+        .iter()
+        .any(|page| *page == size || (page.width == size.height && page.height == size.width))
 }
+
+/// The page of the blackboard held as `position`: [`BLACKBOARD_PAGE`], its width and height
+/// swapped in a landscape position.
+pub fn board_page(position: BoardPosition) -> PageSize {
+    let (width, height) = position.page_size(BLACKBOARD_PAGE.width, BLACKBOARD_PAGE.height);
+    PageSize { width, height }
+}
+
+/// A point of the blackboard on the page of the blackboard held as `position` ([`board_page`]),
+/// upright for the user: the one place where the blackboard's records are turned (stored pages
+/// and live mode alike; docs/design/blackboard.md, « Positions »).
+///
+/// `x`, `y` are in the tablet's own frame (portrait, origin at the top left of the screen when
+/// the buttons are at the bottom). Held with its buttons on the left, the tablet was turned a
+/// quarter turn clockwise: what the pen writes is turned a quarter turn clockwise for the user,
+/// so the point is turned a quarter turn clockwise, `(H - y, x)` on a page `H` × `W`; the tablet's
+/// bottom left corner (the erase button's end of the band) becomes the page's top left. With the
+/// buttons on the right, three quarter turns, `(y, W - x)`; at the top, half a turn,
+/// `(W - x, H - y)`. A coordinate beyond the tablet's area gives 0, never a negative one.
+pub fn orient_board(x: u16, y: u16, position: BoardPosition) -> (u16, u16) {
+    turn_area_point(x, y, BOARD_WIDTH, BOARD_HEIGHT, position.quarter_turns())
+}
+
+/// [`orient_board`] applied to a live record ("pen left" records stay as they are).
+pub fn orient_board_record(record: LiveRecord, position: BoardPosition) -> LiveRecord {
+    match record {
+        LiveRecord::Pen(mut point) => {
+            (point.x, point.y) = orient_board(point.x, point.y, position);
+            LiveRecord::Pen(point)
+        }
+        LiveRecord::ProximityOut => LiveRecord::ProximityOut,
+    }
+}
+
+/// The top-level field of `note.json` that records how the blackboard was held when the note was
+/// made from its page (`original.bin`): one of the words of [`BoardPosition`]. Absent from the
+/// notes made before the positions (2026-11), which were made upright (`buttonsBottom`). A field
+/// the format itself does not know, so every reader keeps it as it is (docs/file-format.md).
+pub const BOARD_POSITION_FIELD: &str = "boardPosition";
+
+/// How the blackboard was held when `file` was made from its page ([`BOARD_POSITION_FIELD`]):
+/// upright when the field is absent; `Err` (why) for a value this version does not know.
+pub fn board_position_of(file: &NoteFile) -> Result<BoardPosition, String> {
+    match file.unknown_fields.get(BOARD_POSITION_FIELD) {
+        None => Ok(BoardPosition::ButtonsBottom),
+        Some(value) => value
+            .as_str()
+            .and_then(BoardPosition::from_name)
+            .ok_or_else(|| format!("the position it was made in ({value}) is unknown")),
+    }
+}
+
+/// Records in `file` that its page was turned for `position` ([`BOARD_POSITION_FIELD`]).
+fn record_board_position(file: &mut NoteFile, position: BoardPosition) {
+    file.unknown_fields.insert(
+        BOARD_POSITION_FIELD.to_owned(),
+        serde_json::Value::String(position.name().to_owned()),
+    );
+}
+
 /// A blackboard page dated before this (2020-01-01 00:00:00 UTC, Unix seconds) has a clock that
 /// was never set: its note is dated by the import ([`blackboard_note`]). The tablet was sold from
 /// December 2021 (research note §1).
@@ -138,8 +205,17 @@ pub fn page_note_id(page: &DownloadedPage) -> String {
 /// (SPEC §4.1; docs/design/tablet-live-classroom.md, "Orientation"). Points beyond the area
 /// are clamped.
 pub fn orient(x: u16, y: u16, width: u32, height: u32, orientation: Orientation) -> (u16, u16) {
+    turn_area_point(x, y, width, height, orientation.quarter_turns())
+}
+
+/// A point of a tablet's area of `width` × `height`, turned `turns` clockwise quarter turns (the
+/// result lives on an area with `width` and `height` swapped when `turns` is odd): `(x, y)`,
+/// `(height - y, x)`, `(width - x, height - y)` or `(y, width - x)`; a coordinate beyond the area
+/// gives 0, never a negative one. The arithmetic of [`orient`] (the Slate) and [`orient_board`]
+/// (the blackboard).
+fn turn_area_point(x: u16, y: u16, width: u32, height: u32, turns: u8) -> (u16, u16) {
     let (x, y) = (u32::from(x), u32::from(y));
-    let (x, y) = match orientation.quarter_turns() {
+    let (x, y) = match turns % 4 {
         0 => (x, y),
         1 => (height.saturating_sub(y), x),
         2 => (width.saturating_sub(x), height.saturating_sub(y)),
@@ -241,7 +317,7 @@ impl ImportedPages {
         self.created.get(&created)?.iter().find_map(|path| {
             let loaded = library.read(path).ok()?;
             let original = loaded.file.original.as_deref()?;
-            (loaded.file.note.page == BLACKBOARD_PAGE && original.starts_with(&page.bytes))
+            (is_blackboard_page(loaded.file.note.page) && original.starts_with(&page.bytes))
                 .then_some(loaded.path)
         })
     }
@@ -347,18 +423,25 @@ pub fn page_kind(bytes: &[u8]) -> TabletKind {
 /// (`size`, swapped in portrait), turned to the way the tablet is held ([`orient`]), `created` at the page's timestamp (or `now_ms`),
 /// `original.bin` = the bytes received (untouched).
 ///
-/// A page of the blackboard (`page.kind`) ignores `size` and `orientation`: see
-/// [`blackboard_note`].
+/// A page of the blackboard (`page.kind`) ignores `size` and `orientation` and is turned for
+/// `board_position` instead: see [`blackboard_note`].
 pub fn note_from_page(
     page: &DownloadedPage,
     size: PageSize,
     orientation: Orientation,
+    board_position: BoardPosition,
     id: String,
     layer_name: &str,
     now_ms: i64,
 ) -> Result<NoteFile, PageError> {
     if page.kind == TabletKind::Blackboard {
-        return Ok(blackboard_note(page, id, layer_name, now_ms));
+        return Ok(blackboard_note(
+            page,
+            id,
+            layer_name,
+            now_ms,
+            board_position,
+        ));
     }
     let file = stroke::decode(&page.bytes)?;
     let starts = stroke_starts(&file);
@@ -416,19 +499,21 @@ pub fn note_from_page(
     Ok(note_file)
 }
 
-/// The note of a page of the Xiaomi blackboard: black ballpoint strokes, the runs of touching
-/// records, on the blackboard's page ([`BLACKBOARD_PAGE`], portrait, never turned: the
-/// blackboard has no orientation, and its x and y are the notes' units 1:1); each record one
-/// period of [`blackboard::record::RECORDS_PER_SECOND`] after the previous one, half a second
-/// more after the pen left the range (`Timing::Synthesized`: the tablet keeps no time per
-/// point); `created` at the page's time (when it was stored, by the tablet's clock), else (no
-/// time, or one before [`EARLIEST_BOARD_PAGE`]) `now_ms`; `original.bin` = the bytes received.
-/// Never fails: unknown records are skipped.
+/// The note of a page of the Xiaomi blackboard held as `position`: black ballpoint strokes, the
+/// runs of touching records, turned upright ([`orient_board`]) on the blackboard's page held that
+/// way ([`board_page`]: [`BLACKBOARD_PAGE`], landscape in a landscape position; its x and y are
+/// the notes' units 1:1); each record one period of [`blackboard::record::RECORDS_PER_SECOND`]
+/// after the previous one, half a second more after the pen left the range
+/// (`Timing::Synthesized`: the tablet keeps no time per point); `created` at the page's time
+/// (when it was stored, by the tablet's clock), else (no time, or one before
+/// [`EARLIEST_BOARD_PAGE`]) `now_ms`; `original.bin` = the bytes received, untouched, and the
+/// position in [`BOARD_POSITION_FIELD`]. Never fails: unknown records are skipped.
 pub fn blackboard_note(
     page: &DownloadedPage,
     id: String,
     layer_name: &str,
     now_ms: i64,
+    position: BoardPosition,
 ) -> NoteFile {
     let decoded = blackboard::decode_page(&page.bytes);
     let max_pressure = f32::from(BOARD_MAX_PRESSURE);
@@ -444,11 +529,14 @@ pub fn blackboard_note(
             points: s
                 .points
                 .iter()
-                .map(|p| Point {
-                    x: f32::from(p.x),
-                    y: f32::from(p.y),
-                    pressure: (f32::from(p.pressure) / max_pressure).clamp(0.0, 1.0),
-                    t: p.t,
+                .map(|p| {
+                    let (x, y) = orient_board(p.x, p.y, position);
+                    Point {
+                        x: f32::from(x),
+                        y: f32::from(y),
+                        pressure: (f32::from(p.pressure) / max_pressure).clamp(0.0, 1.0),
+                        t: p.t,
+                    }
                 })
                 .collect(),
         })
@@ -466,7 +554,7 @@ pub fn blackboard_note(
         title: String::new(),
         created,
         modified: now_ms.max(created),
-        page: BLACKBOARD_PAGE,
+        page: board_page(position),
         background: Background::default(),
         background_image: None,
         tags: Vec::new(),
@@ -481,6 +569,7 @@ pub fn blackboard_note(
     };
     let mut note_file = NoteFile::new(note);
     note_file.original = Some(page.bytes.clone());
+    record_board_position(&mut note_file, position);
     note_file
 }
 
@@ -578,8 +667,10 @@ fn earlier_note(library: &Library, previous: u32) -> Result<LoadedNote, String> 
 /// Whether `file` is still what importing its own `original.bin` gives (`layer_name` for its
 /// layer), after the format's rounding: its ink, layers, paper, background and image, timing
 /// and origin, and nothing added (narration, background file, text, revision, original note).
-/// Title, tags, favourite mark, thumbnail and `modified` do not count.
-fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<(), String> {
+/// Title, tags, favourite mark, thumbnail and `modified` do not count. Made again in the position
+/// the note was made in ([`board_position_of`]: upright for a note made before the positions),
+/// which is returned: the position the update keeps.
+fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<BoardPosition, String> {
     let Some(original) = file.original.clone() else {
         return Err("it keeps no page".into());
     };
@@ -591,6 +682,7 @@ fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<(), String
     {
         return Err("something was added to it since its import".into());
     }
+    let position = board_position_of(file)?;
     let page = DownloadedPage {
         announced_size: u32::try_from(original.len()).unwrap_or(u32::MAX),
         bytes: original,
@@ -598,7 +690,13 @@ fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<(), String
         kind: TabletKind::Blackboard,
         previous: None,
     };
-    let again = blackboard_note(&page, file.note.id.clone(), layer_name, file.note.created);
+    let again = blackboard_note(
+        &page,
+        file.note.id.clone(),
+        layer_name,
+        file.note.created,
+        position,
+    );
     let again = format::to_bytes(&again)
         .and_then(|bytes| format::read_from_bytes(&bytes))
         .map_err(|e| e.to_string())?
@@ -612,7 +710,7 @@ fn unedited_since_import(file: &NoteFile, layer_name: &str) -> Result<(), String
         && note.timing == again.timing
         && note.origin == again.origin;
     if same {
-        Ok(())
+        Ok(position)
     } else {
         Err("it was edited since its import".into())
     }
@@ -624,6 +722,7 @@ pub struct LibrarySink<'a> {
     binder: PathBuf,
     size: PageSize,
     orientation: Orientation,
+    board_position: BoardPosition,
     layer_name: String,
     now_ms: Box<dyn Fn() -> i64 + 'a>,
     after_save: Option<AfterSave<'a>>,
@@ -654,6 +753,7 @@ impl<'a> LibrarySink<'a> {
             binder: binder.into(),
             size,
             orientation: Orientation::Landscape,
+            board_position: BoardPosition::ButtonsBottom,
             layer_name: layer_name.into(),
             now_ms: Box::new(now_ms),
             after_save: None,
@@ -669,6 +769,13 @@ impl<'a> LibrarySink<'a> {
     /// Turns the points to the way the tablet is held ([`orient`]).
     pub fn with_orientation(mut self, orientation: Orientation) -> Self {
         self.orientation = orientation;
+        self
+    }
+
+    /// Turns the blackboard's points to the way it is held ([`orient_board`]), for its new notes
+    /// (a page that updates the note of an earlier store keeps that note's position).
+    pub fn with_board_position(mut self, position: BoardPosition) -> Self {
+        self.board_position = position;
         self
     }
 
@@ -741,15 +848,25 @@ impl<'a> LibrarySink<'a> {
             Ok(loaded) => loaded,
             Err(reason) => return why(reason),
         };
-        if let Err(reason) = unedited_since_import(&loaded.file, &self.layer_name) {
-            return why(reason);
-        }
+        // The same screen: its new page is turned as its first one was, whatever the position
+        // set now (docs/design/blackboard.md, « Positions »).
+        let position = match unedited_since_import(&loaded.file, &self.layer_name) {
+            Ok(position) => position,
+            Err(reason) => return why(reason),
+        };
         let earlier = loaded.file.original.as_deref().unwrap_or_default();
         if !page.bytes.starts_with(earlier) {
             return why("the new page does not hold it whole".into());
         }
-        let made = blackboard_note(page, page_note_id(page), &self.layer_name, (self.now_ms)());
+        let made = blackboard_note(
+            page,
+            page_note_id(page),
+            &self.layer_name,
+            (self.now_ms)(),
+            position,
+        );
         let mut file = loaded.file.clone();
+        record_board_position(&mut file, position);
         file.note.id = made.note.id;
         file.note.page = made.note.page;
         file.note.layers = made.note.layers;
@@ -807,6 +924,7 @@ impl<'a> LibrarySink<'a> {
             &page,
             self.size,
             self.orientation,
+            self.board_position,
             id,
             &self.layer_name,
             (self.now_ms)(),
@@ -943,6 +1061,7 @@ mod tests {
             &page,
             A4_LANDSCAPE,
             Orientation::Landscape,
+            BoardPosition::ButtonsBottom,
             "id".into(),
             "Calque 1",
             5,
@@ -1029,6 +1148,7 @@ mod tests {
                 &page(&[raw_stroke(0, 100, 5)]),
                 A4_LANDSCAPE,
                 Orientation::Landscape,
+                BoardPosition::ButtonsBottom,
                 "id".into(),
                 "L",
                 1,
@@ -1086,6 +1206,7 @@ mod tests {
                 &other,
                 A4_LANDSCAPE,
                 Orientation::Landscape,
+                BoardPosition::ButtonsBottom,
                 id.clone(),
                 "L",
                 1,
@@ -1170,6 +1291,7 @@ mod tests {
             &page,
             A4_LANDSCAPE,
             Orientation::LandscapeFlipped,
+            BoardPosition::ButtonsBottom,
             "id".into(),
             "Calque 1",
             5,
@@ -1289,8 +1411,16 @@ mod tests {
     fn a_portrait_position_makes_a_portrait_note() {
         let page = page(&[raw_stroke(0, 1000, 2)]);
         for orientation in [Orientation::PortraitLeft, Orientation::PortraitRight] {
-            let file = note_from_page(&page, A4_LANDSCAPE, orientation, "id".into(), "Calque 1", 5)
-                .unwrap();
+            let file = note_from_page(
+                &page,
+                A4_LANDSCAPE,
+                orientation,
+                BoardPosition::ButtonsBottom,
+                "id".into(),
+                "Calque 1",
+                5,
+            )
+            .unwrap();
             assert_eq!(file.note.page, A4_PORTRAIT, "{orientation:?}");
             for stroke in &file.note.strokes {
                 for p in &stroke.points {
@@ -1337,7 +1467,7 @@ mod tests {
         assert_eq!(&random[14..15], "4", "{random}");
     }
 
-    fn board_page() -> DownloadedPage {
+    fn a_board_page() -> DownloadedPage {
         use ardoise_proto::blackboard::{Record, RecordStatus, record::encode_records};
         let rec = |status, x, y, pressure| Record {
             status,
@@ -1363,12 +1493,13 @@ mod tests {
 
     #[test]
     fn a_blackboard_page_becomes_a_portrait_note_with_synthesised_times() {
-        let page = board_page();
+        let page = a_board_page();
         // The size and orientation given are the Slate's: a blackboard page ignores them.
         let file = note_from_page(
             &page,
             A4_LANDSCAPE,
             Orientation::PortraitLeft,
+            BoardPosition::ButtonsBottom,
             "id".into(),
             "Calque 1",
             5,
@@ -1406,13 +1537,14 @@ mod tests {
 
     #[test]
     fn a_blackboard_page_of_a_clock_never_set_is_dated_by_the_import() {
-        let mut page = board_page();
+        let mut page = a_board_page();
         for seconds in [0, EARLIEST_BOARD_PAGE - 1] {
             page.timestamp = Some(seconds);
             let file = note_from_page(
                 &page,
                 A4_LANDSCAPE,
                 Orientation::Landscape,
+                BoardPosition::ButtonsBottom,
                 page_note_id(&page),
                 "Calque 1",
                 1_792_834_200_123,
@@ -1427,6 +1559,7 @@ mod tests {
             &page,
             A4_LANDSCAPE,
             Orientation::Landscape,
+            BoardPosition::ButtonsBottom,
             "id".into(),
             "L",
             9,
@@ -1440,7 +1573,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         ardoise_core::library::init(dir.path()).unwrap();
         let library = Library::open(dir.path()).unwrap();
-        let page = board_page();
+        let page = a_board_page();
         let mut sink = LibrarySink::new(&library, "", A4_LANDSCAPE, "Layer 1", || 7);
         let saved = sink.store(page.clone()).unwrap();
         let back = library.read(&saved.path).unwrap().file;
@@ -1448,6 +1581,226 @@ mod tests {
         assert_eq!(back.note.id, page_note_id(&page));
         let imported = ImportedPages::scan(&library);
         assert_eq!(imported.find(&library, &page), Some(saved.path));
+    }
+
+    /// The blackboard's four positions, derived from where its buttons end up (docs/design/
+    /// blackboard.md, « Positions »): the images of the tablet's four corners for each, the
+    /// bottom band (the buttons) on the side the position names, the erase button's end of the
+    /// band where the turned tablet puts it, and a round trip back to the tablet's frame.
+    #[test]
+    fn the_blackboard_positions_turn_the_tablet_as_it_is_held() {
+        use BoardPosition::{ButtonsBottom, ButtonsLeft, ButtonsRight, ButtonsTop};
+        let (w, h) = (BOARD_WIDTH as u16, BOARD_HEIGHT as u16);
+        // (position, page, images of the tablet's top left, top right, bottom left and bottom
+        // right corners: its buttons are on the bottom band, erase at its left end, store at its
+        // right end)
+        let cases = [
+            (ButtonsBottom, (w, h), [(0, 0), (w, 0), (0, h), (w, h)]),
+            // A quarter turn clockwise: the bottom band on the left, erase at the top.
+            (ButtonsLeft, (h, w), [(h, 0), (h, w), (0, 0), (0, w)]),
+            // Half a turn: the band at the top, erase on the right.
+            (ButtonsTop, (w, h), [(w, h), (0, h), (w, 0), (0, 0)]),
+            // A quarter turn anticlockwise: the band on the right, erase at the bottom.
+            (ButtonsRight, (h, w), [(0, w), (0, 0), (h, w), (h, 0)]),
+        ];
+        let corners = [(0, 0), (w, 0), (0, h), (w, h)];
+        for (position, (page_w, page_h), images) in cases {
+            let page = board_page(position);
+            assert_eq!(
+                (page.width, page.height),
+                (u32::from(page_w), u32::from(page_h)),
+                "{position:?}"
+            );
+            assert_eq!(position.is_landscape(), page_w > page_h, "{position:?}");
+            for (corner, want) in corners.into_iter().zip(images) {
+                assert_eq!(
+                    orient_board(corner.0, corner.1, position),
+                    want,
+                    "{position:?} {corner:?}"
+                );
+            }
+            // Every point of the bottom band ends on the edge the position is named after.
+            for x in [0, 5_000, 20_500] {
+                let (px, py) = orient_board(x, h, position);
+                let on_edge = match position {
+                    ButtonsBottom => py == page_h,
+                    ButtonsTop => py == 0,
+                    ButtonsLeft => px == 0,
+                    ButtonsRight => px == page_w,
+                };
+                assert!(on_edge, "{position:?}: ({x}, {h}) -> ({px}, {py})");
+            }
+            // And back: the remaining quarter turns give the tablet's own point.
+            for (x, y) in [(0, 0), (123, 4_567), (20_400, 27_067), (w, h)] {
+                let (px, py) = orient_board(x, y, position);
+                let back = turn_point(
+                    f32::from(px),
+                    f32::from(py),
+                    f32::from(page_w),
+                    f32::from(page_h),
+                    4 - position.quarter_turns(),
+                );
+                assert_eq!(back, (f32::from(x), f32::from(y)), "{position:?}");
+            }
+            // A live record turns the same way; the pen leaving stays as it is.
+            let record = LiveRecord::Pen(ardoise_proto::stroke::Point {
+                x: 123,
+                y: 4_567,
+                pressure: 9,
+            });
+            let LiveRecord::Pen(turned) = orient_board_record(record, position) else {
+                panic!("a pen record");
+            };
+            assert_eq!(
+                (turned.x, turned.y, turned.pressure),
+                {
+                    let (x, y) = orient_board(123, 4_567, position);
+                    (x, y, 9)
+                },
+                "{position:?}"
+            );
+            assert_eq!(
+                orient_board_record(LiveRecord::ProximityOut, position),
+                LiveRecord::ProximityOut
+            );
+        }
+        // A point that is not a corner, by the formulas of the design.
+        let (x, y) = (5_000_u16, 3_000_u16);
+        assert_eq!(orient_board(x, y, ButtonsLeft), (h - y, x));
+        assert_eq!(orient_board(x, y, ButtonsTop), (w - x, h - y));
+        assert_eq!(orient_board(x, y, ButtonsRight), (y, w - x));
+        // Both ways round are pages of the blackboard; nothing else is.
+        assert!(is_blackboard_page(board_page(ButtonsBottom)));
+        assert!(is_blackboard_page(board_page(ButtonsLeft)));
+        assert!(!is_blackboard_page(A4_LANDSCAPE));
+        assert!(!is_blackboard_page(A4_PORTRAIT));
+    }
+
+    /// The asymmetric mark of a page (a stroke from the erase button's end of the band along it,
+    /// then away from it) lands, in each position, where the user holding the tablet sees it; the
+    /// page swaps for a landscape position, `original.bin` stays the tablet's bytes, the position
+    /// is recorded and read back.
+    #[test]
+    fn a_blackboard_page_is_turned_upright_for_its_position() {
+        use ardoise_proto::blackboard::record::encode_records;
+        use ardoise_proto::blackboard::{Record, RecordStatus};
+        let touch = |x, y| Record {
+            status: RecordStatus::Touch,
+            x,
+            y,
+            pressure: 1_000,
+        };
+        // Near the erase button (bottom left), along the band, then up the screen.
+        let bytes = encode_records(&[
+            touch(100, 27_100),
+            touch(5_000, 27_100),
+            touch(5_000, 20_000),
+        ]);
+        let page = DownloadedPage {
+            announced_size: bytes.len() as u32,
+            bytes: bytes.clone(),
+            timestamp: Some(1_792_834_200),
+            kind: TabletKind::Blackboard,
+            previous: None,
+        };
+        // (position, page, the stroke as the user sees it)
+        let cases = [
+            (
+                BoardPosition::ButtonsBottom,
+                BLACKBOARD_PAGE,
+                [(100.0, 27_100.0), (5_000.0, 27_100.0), (5_000.0, 20_000.0)],
+            ),
+            // Erase at the top left, the band down the left edge, then right.
+            (
+                BoardPosition::ButtonsLeft,
+                PageSize {
+                    width: 27_200,
+                    height: 20_500,
+                },
+                [(100.0, 100.0), (100.0, 5_000.0), (7_200.0, 5_000.0)],
+            ),
+            // Erase at the top right, the band along the top, then down.
+            (
+                BoardPosition::ButtonsTop,
+                BLACKBOARD_PAGE,
+                [(20_400.0, 100.0), (15_500.0, 100.0), (15_500.0, 7_200.0)],
+            ),
+            // Erase at the bottom right, the band up the right edge, then left.
+            (
+                BoardPosition::ButtonsRight,
+                PageSize {
+                    width: 27_200,
+                    height: 20_500,
+                },
+                [
+                    (27_100.0, 20_400.0),
+                    (27_100.0, 15_500.0),
+                    (20_000.0, 15_500.0),
+                ],
+            ),
+        ];
+        for (position, size, expected) in cases {
+            let file = note_from_page(
+                &page,
+                A4_LANDSCAPE,
+                Orientation::PortraitLeft,
+                position,
+                "id".into(),
+                "Calque 1",
+                5,
+            )
+            .unwrap();
+            assert_eq!(file.note.page, size, "{position:?}");
+            let points: Vec<(f32, f32)> = file.note.strokes[0]
+                .points
+                .iter()
+                .map(|p| (p.x, p.y))
+                .collect();
+            assert_eq!(points, expected, "{position:?}");
+            assert_eq!(file.original.as_deref(), Some(bytes.as_slice()));
+            assert_eq!(board_position_of(&file), Ok(position));
+            assert_eq!(
+                file.unknown_fields.get(BOARD_POSITION_FIELD),
+                Some(&serde_json::Value::String(position.name().into()))
+            );
+            // Written and read back, the field stays.
+            let back = format::read_from_bytes(&format::to_bytes(&file).unwrap()).unwrap();
+            assert_eq!(board_position_of(&back), Ok(position));
+        }
+        // A note made before the positions has no field: upright. A word of a newer version is
+        // not a position.
+        let mut file = blackboard_note(&page, "id".into(), "L", 5, BoardPosition::ButtonsLeft);
+        file.unknown_fields.remove(BOARD_POSITION_FIELD);
+        assert_eq!(board_position_of(&file), Ok(BoardPosition::ButtonsBottom));
+        file.unknown_fields
+            .insert(BOARD_POSITION_FIELD.into(), "buttonsDiagonal".into());
+        assert!(board_position_of(&file).is_err());
+        file.unknown_fields
+            .insert(BOARD_POSITION_FIELD.into(), serde_json::json!(1));
+        assert!(board_position_of(&file).is_err());
+    }
+
+    /// The sink turns the blackboard's new notes for the position it is given, and a note of any
+    /// position is recognised as imported, by its id and bytes.
+    #[test]
+    fn the_sink_turns_the_blackboards_notes_and_recognises_them_in_any_position() {
+        for position in BoardPosition::ALL {
+            let dir = tempfile::tempdir().unwrap();
+            ardoise_core::library::init(dir.path()).unwrap();
+            let library = Library::open(dir.path()).unwrap();
+            let page = a_board_page();
+            let mut sink = LibrarySink::new(&library, "", BLACKBOARD_PAGE, "Calque 1", || 7)
+                .with_board_position(position);
+            let saved = sink.store(page.clone()).unwrap();
+            let back = library.read(&saved.path).unwrap().file;
+            assert_eq!(back.note.page, board_page(position), "{position:?}");
+            assert_eq!(board_position_of(&back), Ok(position));
+            let first = back.note.strokes[0].points[0];
+            let (x, y) = orient_board(100, 200, position);
+            assert_eq!((first.x, first.y), (f32::from(x), f32::from(y)));
+            let imported = ImportedPages::scan(&library);
+            assert_eq!(imported.find(&library, &page), Some(saved.path));
+        }
     }
 
     #[test]
@@ -1659,5 +2012,151 @@ mod update_tests {
         let updated = store(&library, page(SECOND, whole, Some(FIRST as u32)));
         assert!(matches!(updated.how, Stored::Updated { .. }));
         assert!(library.read(&updated.path).unwrap().file.note.favorite);
+    }
+
+    fn store_held(library: &Library, page: DownloadedPage, position: BoardPosition) -> StoredPage {
+        LibrarySink::new(library, "", BLACKBOARD_PAGE, "Calque 1", || NOW)
+            .with_board_position(position)
+            .store_page(page)
+            .unwrap()
+    }
+
+    /// The note of `bytes` made in `position`, as the format stores it: what an update must give.
+    fn made_in(bytes: &[u8], position: BoardPosition) -> Note {
+        let made = blackboard_note(
+            &page(SECOND, bytes.to_vec(), None),
+            "id".into(),
+            "Calque 1",
+            NOW,
+            position,
+        );
+        format::read_from_bytes(&format::to_bytes(&made).unwrap())
+            .unwrap()
+            .note
+    }
+
+    /// Positions (docs/design/blackboard.md, « Positions »): a screen stored in one position,
+    /// the setting changed, the screen stored again: its note is updated and stays in the position
+    /// it was made in (the same screen, the same way up), whatever the position set now; both
+    /// pages count as imported. The guard against an edit still rebuilds in the note's own
+    /// position: a note made in a landscape position is not taken for edited.
+    #[test]
+    fn a_screen_stored_again_keeps_the_position_of_its_note() {
+        use BoardPosition::{ButtonsBottom, ButtonsLeft, ButtonsRight, ButtonsTop};
+        let mut whole = screen(5);
+        whole.extend(screen(8));
+        for (made, now) in [
+            (ButtonsLeft, ButtonsRight),
+            (ButtonsRight, ButtonsBottom),
+            (ButtonsTop, ButtonsTop),
+            (ButtonsBottom, ButtonsLeft),
+        ] {
+            let (_dir, library) = library();
+            let first = page(FIRST, screen(5), None);
+            let stored = store_held(&library, first.clone(), made);
+            let before = library.read(&stored.path).unwrap().file;
+            assert_eq!(before.note.page, board_page(made), "{made:?}");
+            let second = page(SECOND, whole.clone(), Some(FIRST as u32));
+            let updated = store_held(&library, second.clone(), now);
+            assert_eq!(
+                updated.how,
+                Stored::Updated {
+                    replaced: FIRST as u32
+                },
+                "made {made:?}, stored again {now:?}"
+            );
+            let file = library.read(&updated.path).unwrap().file;
+            assert_eq!(board_position_of(&file), Ok(made), "{made:?} {now:?}");
+            let expected = made_in(&whole, made);
+            assert_eq!(file.note.page, expected.page, "{made:?} {now:?}");
+            assert_eq!(file.note.strokes, expected.strokes, "{made:?} {now:?}");
+            assert_eq!(file.original.as_deref(), Some(whole.as_slice()));
+            assert_eq!(library.list().notes.len(), 1);
+            let imported = ImportedPages::scan(&library);
+            assert_eq!(imported.find(&library, &second), Some(updated.path.clone()));
+            assert_eq!(imported.find(&library, &first), Some(updated.path.clone()));
+            // A third store finds it again, still in its own position.
+            let mut most = whole.clone();
+            most.extend(screen(3));
+            let third = store_held(
+                &library,
+                page(SECOND + 60, most.clone(), Some(SECOND as u32)),
+                now,
+            );
+            assert!(
+                matches!(third.how, Stored::Updated { .. }),
+                "{made:?} {now:?}"
+            );
+            let file = library.read(&third.path).unwrap().file;
+            assert_eq!(board_position_of(&file), Ok(made));
+            assert_eq!(file.note.strokes, made_in(&most, made).strokes);
+        }
+    }
+
+    /// A note made before the positions (no field: upright) is updated as upright, whatever the
+    /// position set now, and says so from then on; a note whose position this version does not
+    /// know is not updated (a new note, the safe side).
+    #[test]
+    fn a_note_made_before_the_positions_is_updated_upright() {
+        let mut whole = screen(5);
+        whole.extend(screen(8));
+        let (_dir, library) = library();
+        let stored = store(&library, page(FIRST, screen(5), None));
+        let loaded = library.read(&stored.path).unwrap();
+        let mut older = loaded.file.clone();
+        older.unknown_fields.remove(BOARD_POSITION_FIELD);
+        library.save(&stored.path, &older, &loaded.stamp).unwrap();
+        assert!(
+            library
+                .read(&stored.path)
+                .unwrap()
+                .file
+                .unknown_fields
+                .get(BOARD_POSITION_FIELD)
+                .is_none()
+        );
+        let updated = store_held(
+            &library,
+            page(SECOND, whole.clone(), Some(FIRST as u32)),
+            BoardPosition::ButtonsLeft,
+        );
+        assert!(
+            matches!(updated.how, Stored::Updated { .. }),
+            "{:?}",
+            updated.how
+        );
+        let file = library.read(&updated.path).unwrap().file;
+        assert_eq!(file.note.page, BLACKBOARD_PAGE);
+        assert_eq!(
+            file.note.strokes,
+            made_in(&whole, BoardPosition::ButtonsBottom).strokes
+        );
+        assert_eq!(
+            file.unknown_fields.get(BOARD_POSITION_FIELD),
+            Some(&serde_json::Value::String("buttonsBottom".into()))
+        );
+
+        // A position of a newer version: a new note, in the position set now.
+        let (_other, library) = self::library();
+        let stored = store(&library, page(FIRST, screen(5), None));
+        let loaded = library.read(&stored.path).unwrap();
+        let mut newer = loaded.file.clone();
+        newer
+            .unknown_fields
+            .insert(BOARD_POSITION_FIELD.into(), "buttonsDiagonal".into());
+        library.save(&stored.path, &newer, &loaded.stamp).unwrap();
+        let added = store_held(
+            &library,
+            page(SECOND, whole.clone(), Some(FIRST as u32)),
+            BoardPosition::ButtonsRight,
+        );
+        match &added.how {
+            Stored::NewNotUpdated(why) => assert!(why.contains("position"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(library.list().notes.len(), 2);
+        let file = library.read(&added.path).unwrap().file;
+        assert_eq!(board_position_of(&file), Ok(BoardPosition::ButtonsRight));
+        assert_eq!(file.note.page, board_page(BoardPosition::ButtonsRight));
     }
 }

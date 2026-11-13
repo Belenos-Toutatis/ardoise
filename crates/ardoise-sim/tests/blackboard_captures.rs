@@ -340,6 +340,7 @@ fn every_stored_page_decodes_completely_and_becomes_a_note() {
             &downloaded,
             BLACKBOARD_PAGE,
             Orientation::Landscape,
+            ardoise_core::settings::BoardPosition::ButtonsBottom,
             "id".into(),
             "Calque 1",
             0,

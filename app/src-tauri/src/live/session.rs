@@ -32,7 +32,9 @@ use super::model::{
 };
 use super::paper::{ImageChange, PageImage, PaperError, refitted, within_reach};
 use super::pen::{CheckedPen, MAX_COMPUTER_POINTS, PenAction, PenSample, note_time, sample_wall};
-use super::resume::{PenMapping, ResumeBase, ResumeSeed, held_for, hold_for, tablet_fits};
+use super::resume::{
+    PenMapping, ResumeBase, ResumeSeed, SheetRefusal, held_for, hold_for, sheet_refusal,
+};
 use crate::library::path_text;
 use crate::presentation::MonitorInfo;
 use crate::share::page::is_drawn;
@@ -1220,12 +1222,32 @@ impl LiveSession {
     }
 
     /// Whether a tablet of `kind` may write on this session: on a resumed sheet only the tablet
-    /// that fits it ([`tablet_fits`]); any tablet otherwise.
+    /// that fits it ([`tablet_fits`](super::resume::tablet_fits)); any tablet otherwise. The hub
+    /// asks [`refusal`](Self::refusal), which also looks at how the blackboard is held.
+    #[cfg(test)]
     pub fn accepts(&self, kind: TabletKind) -> bool {
         self.pages
             .iter()
             .filter(|page| page.is_resumed())
-            .all(|page| tablet_fits(kind, page.note.page))
+            .all(|page| super::resume::tablet_fits(kind, page.note.page))
+    }
+
+    /// Why the tablet that starts streaming (of `kind`, its area `width` × `height` held as
+    /// `orientation`) cannot write on a resumed sheet of this session ([`sheet_refusal`]: the
+    /// other tablet's sheet, or a page of the blackboard the other way round than it is held);
+    /// `None` when it can, and for a session that resumes nothing.
+    pub fn refusal(
+        &self,
+        kind: TabletKind,
+        width: u32,
+        height: u32,
+        orientation: Orientation,
+    ) -> Option<SheetRefusal> {
+        let held = oriented_size(PageSize { width, height }, orientation);
+        self.pages
+            .iter()
+            .filter(|page| page.is_resumed())
+            .find_map(|page| sheet_refusal(kind, page.note.page, held))
     }
 
     /// The tablet that streams is of `kind` (said before [`started`](Self::started), which sends

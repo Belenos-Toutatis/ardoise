@@ -35,7 +35,8 @@ use std::sync::Arc;
 
 use ardoise_core::library::Library;
 use ardoise_core::note::{Background, BackgroundImage, PageSize};
-use ardoise_core::settings::{LiveButton, Orientation};
+use ardoise_core::settings::{BoardPosition, LiveButton, Orientation};
+use ardoise_device::pages::board_page;
 use ardoise_device::service::{TabletService, TabletStatus};
 use ardoise_device::transport::TabletKind;
 use serde::Serialize;
@@ -399,15 +400,32 @@ pub(crate) fn pages_first_now(tablet: &TabletRuntime) -> CommandResult<()> {
 }
 
 /// A tablet connected now (`active`) that cannot write on a sheet of size `sheet`
-/// ([`resume::tablet_fits`]): the resume is refused at once (`sheetOtherTablet`), nothing changed. One
-/// that connects later ends the resumed run the same way (the `refused` event).
-fn refused_now(active: Option<TabletKind>, sheet: PageSize) -> CommandResult<()> {
-    match active {
-        Some(kind) if !resume::tablet_fits(kind, sheet) => Err(CommandError::new(
-            "sheetOtherTablet",
-            format!("the {} cannot write on this sheet", kind.name()),
+/// ([`resume::sheet_refusal`]: the other tablet's sheet, `sheetOtherTablet`; a page of the
+/// blackboard the other way round than `board_position`, the blackboard's position set now,
+/// `sheetBoardPosition`): the resume is refused at once, nothing changed. One that connects later
+/// ends the resumed run the same way (the `refused` event), as does a blackboard whose position is
+/// changed before its run starts (the run takes the position set then).
+fn refused_now(
+    active: Option<TabletKind>,
+    board_position: BoardPosition,
+    sheet: PageSize,
+) -> CommandResult<()> {
+    let Some(kind) = active else {
+        return Ok(());
+    };
+    // The page the tablet's points arrive on: the Slate's is not looked at.
+    let held = board_page(board_position);
+    match resume::sheet_refusal(kind, sheet, held) {
+        Some(refusal) => Err(CommandError::new(
+            refusal.code(),
+            format!(
+                "the {} cannot write on this sheet ({} × {})",
+                kind.name(),
+                sheet.width,
+                sheet.height
+            ),
         )),
-        _ => Ok(()),
+        None => Ok(()),
     }
 }
 
@@ -427,11 +445,13 @@ pub async fn live_resume(app: AppHandle, path: String) -> CommandResult<LiveSnap
         let library = library_of(&context)?;
         let path = Path::new(&path);
         let sheet = library.read(path).map_err(library_error)?.file.note.page;
-        let active = tablet
-            .with_service(|service| service.status().active)
-            .ok()
-            .flatten();
-        refused_now(active, sheet)?;
+        let (active, board_position) = tablet
+            .with_service(|service| {
+                let status = service.status();
+                (status.active, status.options.board_position)
+            })
+            .unwrap_or_default();
+        refused_now(active, board_position, sheet)?;
         pages_first_now(&tablet)?;
         finish_live_narration(&narration, &runtime.hub);
         if runtime.hub.page_position().is_some_and(|p| p.running) {
