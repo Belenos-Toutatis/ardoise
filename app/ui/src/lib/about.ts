@@ -8,10 +8,10 @@ import { queryWords } from './library-logic';
 export interface AboutComponent {
   name: string;
   version: string;
-  /** SPDX expression, as the package declares it. */
+  /** SPDX expression, as the package declares it (for a font, its licence as the notices name it). */
   license: string;
-  /** `rust`: compiled into the executable; `npm`: bundled into the interface. */
-  kind: 'rust' | 'npm';
+  /** `rust`: compiled into the executable; `npm`: bundled into the interface; `font`: a font file of the text tool. */
+  kind: 'rust' | 'npm' | 'font';
 }
 
 /** `AboutInfo` in `about.rs`. */

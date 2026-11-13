@@ -26,21 +26,7 @@ itself, the user may have Ardoise download it from Cisco, whose binary is
 covered by Cisco's AVC/H.264 patent licence (its terms are shown in Settings). The
 openh264 Rust packages listed below are only the bindings, under BSD-2-Clause.
 
-3. Fonts: 4
-------------------------------------------------------------------------------
-
-The text tool draws with these font files, embedded unmodified (no subset) in
-Ardoise. Latin Modern: two files of the Latin Modern collection by GUST
-e-foundry; the complete work is at https://www.gust.org.pl/projects/e-foundry/latin-modern.
-
-file | font version | licence | source | SHA-256
-
-lmroman10-regular.otf | Latin Modern Roman 10 Regular 2.004 | GUST Font License 1.0 (LPPL-1.3c or later) | https://www.gust.org.pl/projects/e-foundry/latin-modern/download/lm2.004otf.zip | 1aa18cfefa58132c52ce5de70db1fd1154201c19cd2b2cdaffba4906a33e6852
-lmroman10-bold.otf | Latin Modern Roman 10 Bold 2.004 | GUST Font License 1.0 (LPPL-1.3c or later) | https://www.gust.org.pl/projects/e-foundry/latin-modern/download/lm2.004otf.zip | 102fe06c430a8b681b2bf6876b7cd967ae4d47b4b6b41d915eb7913b726d9fb1
-Andika-Regular.ttf | Andika Regular 6.200 | OFL-1.1, Reserved Font Names "Andika" and "SIL" | https://software.sil.org/downloads/r/andika/Andika-6.200.zip | 694d12d0f3fb2be696dbbde93eee3ccbdee766751d836eb1fbe8aab2d439d38a
-Andika-Bold.ttf | Andika Bold 6.200 | OFL-1.1, Reserved Font Names "Andika" and "SIL" | https://software.sil.org/downloads/r/andika/Andika-6.200.zip | 568e48915cd0ebbadfc3309e0550d050ccf9df526e809dffea189c68a54fb760
-
-4. Rust packages: 278
+3. Rust packages: 278
 ------------------------------------------------------------------------------
 
 name version | licence | repository
@@ -324,7 +310,7 @@ zip 9.0.5 | MIT | https://github.com/zip-rs/zip2
 zlib-rs 0.6.8 | Zlib | https://github.com/trifectatechfoundation/zlib-rs
 zmij 1.0.23 | MIT | https://github.com/dtolnay/zmij
 
-5. JavaScript packages (interface bundle): 21
+4. JavaScript packages (interface bundle): 21
 ------------------------------------------------------------------------------
 
 name version | licence | repository
@@ -350,6 +336,21 @@ locate-character 3.0.0 | MIT | https://gitlab.com/Rich-Harris/locate-character
 magic-string 0.30.21 | MIT | https://github.com/Rich-Harris/magic-string
 svelte 5.57.2 | MIT | https://github.com/sveltejs/svelte
 zimmerframe 1.1.5 | MIT | https://github.com/sveltejs/zimmerframe
+
+5. Fonts: 4
+------------------------------------------------------------------------------
+
+The text tool draws with these font files, embedded unmodified (no subset) in
+Ardoise. Latin Modern: two files of the Latin Modern collection by GUST
+e-foundry; the complete work is at
+https://www.gust.org.pl/projects/e-foundry/latin-modern.
+
+file | font version | licence | source | SHA-256
+
+lmroman10-regular.otf | Latin Modern Roman 10 Regular 2.004 | GUST Font License 1.0 (LPPL-1.3c or later) | https://www.gust.org.pl/projects/e-foundry/latin-modern/download/lm2.004otf.zip | 1aa18cfefa58132c52ce5de70db1fd1154201c19cd2b2cdaffba4906a33e6852
+lmroman10-bold.otf | Latin Modern Roman 10 Bold 2.004 | GUST Font License 1.0 (LPPL-1.3c or later) | https://www.gust.org.pl/projects/e-foundry/latin-modern/download/lm2.004otf.zip | 102fe06c430a8b681b2bf6876b7cd967ae4d47b4b6b41d915eb7913b726d9fb1
+Andika-Regular.ttf | Andika Regular 6.200 | OFL-1.1, Reserved Font Names "Andika" and "SIL" | https://software.sil.org/downloads/r/andika/Andika-6.200.zip | 694d12d0f3fb2be696dbbde93eee3ccbdee766751d836eb1fbe8aab2d439d38a
+Andika-Bold.ttf | Andika Bold 6.200 | OFL-1.1, Reserved Font Names "Andika" and "SIL" | https://software.sil.org/downloads/r/andika/Andika-6.200.zip | 568e48915cd0ebbadfc3309e0550d050ccf9df526e809dffea189c68a54fb760
 
 6. Licence texts: 234
 ------------------------------------------------------------------------------

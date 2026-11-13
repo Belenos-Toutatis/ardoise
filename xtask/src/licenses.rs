@@ -956,39 +956,12 @@ fn notices(root: &Path, rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
         "openh264 Rust packages listed below are only the bindings, under BSD-2-Clause.",
     );
     w(&mut out, "");
-    w(&mut out, &format!("3. Fonts: {}", FONTS.len()));
-    w(&mut out, &thin);
-    w(&mut out, "");
-    w(
-        &mut out,
-        "The text tool draws with these font files, embedded unmodified (no subset) in",
-    );
-    w(
-        &mut out,
-        "Ardoise. Latin Modern: two files of the Latin Modern collection by GUST",
-    );
-    w(
-        &mut out,
-        "e-foundry; the complete work is at https://www.gust.org.pl/projects/e-foundry/latin-modern.",
-    );
-    w(&mut out, "");
-    w(&mut out, "file | font version | licence | source | SHA-256");
-    w(&mut out, "");
-    for font in FONTS {
-        let _ = writeln!(
-            out,
-            "{} | {} {} | {} | {} | {}",
-            font.file, font.family, font.version, font.licence, font.source, font.sha256
-        );
-    }
-    w(&mut out, "");
-
     // Packages sorted for the lists; texts grouped across both ecosystems.
     let rust_sorted = sorted(rust.iter().collect());
     let npm_sorted = sorted(npm.iter().collect());
     for (n, title, pkgs) in [
-        (4, "Rust packages", &rust_sorted),
-        (5, "JavaScript packages (interface bundle)", &npm_sorted),
+        (3, "Rust packages", &rust_sorted),
+        (4, "JavaScript packages (interface bundle)", &npm_sorted),
     ] {
         w(&mut out, &format!("{n}. {title}: {}", pkgs.len()));
         w(&mut out, &thin);
@@ -1006,6 +979,34 @@ fn notices(root: &Path, rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
         }
         w(&mut out, "");
     }
+
+    w(&mut out, &format!("5. Fonts: {}", FONTS.len()));
+    w(&mut out, &thin);
+    w(&mut out, "");
+    w(
+        &mut out,
+        "The text tool draws with these font files, embedded unmodified (no subset) in",
+    );
+    w(
+        &mut out,
+        "Ardoise. Latin Modern: two files of the Latin Modern collection by GUST",
+    );
+    w(&mut out, "e-foundry; the complete work is at");
+    w(
+        &mut out,
+        "https://www.gust.org.pl/projects/e-foundry/latin-modern.",
+    );
+    w(&mut out, "");
+    w(&mut out, "file | font version | licence | source | SHA-256");
+    w(&mut out, "");
+    for font in FONTS {
+        let _ = writeln!(
+            out,
+            "{} | {} {} | {} | {} | {}",
+            font.file, font.family, font.version, font.licence, font.source, font.sha256
+        );
+    }
+    w(&mut out, "");
 
     // Licence texts, deduplicated by identical text.
     let mut texts: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -1064,7 +1065,8 @@ fn notices(root: &Path, rust: &[Pkg], npm: &[Pkg]) -> Result<String, String> {
     for font in FONTS {
         for name in font.texts {
             let path = root.join(FONTS_DIR).join(name);
-            let bytes = fs::read(&path).map_err(|e| format!("cannot read {FONTS_DIR}/{name}: {e}"))?;
+            let bytes =
+                fs::read(&path).map_err(|e| format!("cannot read {FONTS_DIR}/{name}: {e}"))?;
             texts
                 .entry(normalize_text(&bytes))
                 .or_default()

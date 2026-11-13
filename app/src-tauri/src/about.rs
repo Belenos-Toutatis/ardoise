@@ -22,9 +22,10 @@ const LICENSE_ID: &str = "GPL-3.0-or-later";
 pub struct AboutComponent {
     pub name: String,
     pub version: String,
-    /// SPDX expression, as the package declares it.
+    /// SPDX expression, as the package declares it (for a font, its licence as the notices name it).
     pub license: String,
-    /// `rust` (compiled into the executable) or `npm` (bundled into the interface).
+    /// `rust` (compiled into the executable), `npm` (bundled into the interface) or `font` (a font
+    /// file of the text tool, embedded in both).
     pub kind: &'static str,
 }
 
@@ -43,7 +44,8 @@ fn lf(text: &str) -> String {
 }
 
 /// The package lists of the notices: the lines `name version | licence | repository` after the
-/// headings "3. Rust packages" and "4. JavaScript packages", up to the next heading.
+/// headings "3. Rust packages" and "4. JavaScript packages", and the fonts' lines `file | font
+/// version | licence | source | SHA-256` after "5. Fonts", up to the next heading.
 fn parse_components(notices: &str) -> Vec<AboutComponent> {
     let mut kind = None;
     let mut components = Vec::new();
@@ -53,11 +55,17 @@ fn parse_components(notices: &str) -> Vec<AboutComponent> {
             kind = Some("rust");
         } else if line.starts_with("4. JavaScript packages") {
             kind = Some("npm");
-        } else if line.starts_with("5. ") {
+        } else if line.starts_with("5. Fonts") {
+            kind = Some("font");
+        } else if line.starts_with("5. ") || line.starts_with("6. ") {
             break;
         }
         let Some(kind) = kind else { continue };
-        let mut fields = line.splitn(3, " | ");
+        let mut fields = line.splitn(5, " | ");
+        if kind == "font" {
+            // The file name comes first; the font's name and version second.
+            fields.next();
+        }
         let (Some(label), Some(license)) = (fields.next(), fields.next()) else {
             continue;
         };
@@ -146,6 +154,14 @@ mod tests {
         let count = |kind: &str| info.components.iter().filter(|c| c.kind == kind).count();
         assert_eq!(count("rust"), announced("3. Rust packages"));
         assert_eq!(count("npm"), announced("4. JavaScript packages"));
+        assert_eq!(count("font"), announced("5. Fonts"));
+        let andika = info
+            .components
+            .iter()
+            .find(|c| c.name == "Andika Regular")
+            .expect("the fonts are listed");
+        assert_eq!((andika.version.as_str(), andika.kind), ("6.200", "font"));
+        assert!(andika.license.starts_with("OFL-1.1"), "{}", andika.license);
         assert!(
             info.components
                 .iter()
