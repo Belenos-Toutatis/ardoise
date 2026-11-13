@@ -27,6 +27,9 @@ const connection = (state) => `document.querySelector(${j(`${STATUS}[data-connec
 const step = (name) => `document.querySelector(${j(`${ADD} [data-step="${name}"]`)}) !== null`;
 const invoke = (app, command) => app.evaluate(`window.__TAURI_INTERNALS__.invoke(${j(command)}).then(() => true)`);
 
+/** A tab of the tablet panel (« use », « settings », « tablets »): the panel opens on « use ». */
+const showTab = (app, id) => app.click(`${PANEL} [role="tab"][data-tab="${id}"]`);
+
 /** The tablet panel is open (a click on the sidebar block opens it, a second one would close it). */
 async function openPanel(app) {
   if (!(await app.evaluate(`document.querySelector(${j(PANEL)}) !== null`))) await app.click(STATUS);
@@ -79,6 +82,7 @@ export const blackboardJourneys = [
       });
 
       await check('la tablette Xiaomi est connue, sans Bamboo Slate : le panneau la liste et propose d’oublier celle-là seule', async () => {
+        await showTab(app, 'tablets');
         await app.waitFor(
           `document.querySelectorAll(${j(`${PANEL} [data-slot="known-tablet"]`)}).length === 1`,
           'one known tablet',
@@ -101,6 +105,7 @@ export const blackboardJourneys = [
       });
 
       await check('le résultat le dit : 3 notes enregistrées, 3 pages effacées de la tablette, 0 page restante', async () => {
+        await showTab(app, 'use');
         await app.waitFor(connection('connected'), 'the end of the sync', 30_000);
         const saved = l('tablet.sync.savedMany').replace('{count}', '3');
         const deleted = l('tablet.sync.deletedMany').replace('{count}', '3');
@@ -110,20 +115,23 @@ export const blackboardJourneys = [
           30_000,
         );
         await app.waitFor(
-          `document.querySelector(${j(`${PANEL} [data-slot="stored-pages"]`)})?.textContent === '0'`,
+          `document.querySelector(${j(`${PANEL} [data-slot="stored-pages"]`)})?.dataset.count === '0'`,
           'no page left on the tablet',
         );
       });
 
       await check('les informations : batterie 90 %, mémoire libre, 0 page, modèle ; ni nom, ni firmware, ni horloge', async () => {
+        // The card of the first tab has the battery and the pages; the list of tablets has the rest.
+        await showTab(app, 'tablets');
         const facts = await app.evaluate(`(() => {
-          const info = document.querySelector(${j(`${PANEL} [aria-labelledby="tablet-info"]`)});
+          const card = document.querySelector(${j(`${PANEL} [aria-labelledby="tablet-info"]`)});
+          const info = document.querySelector(${j(`${PANEL} [data-slot="known-tablet"][data-kind="blackboard"]`)});
           return {
-            battery: info.querySelector('.battery')?.dataset.battery,
-            charging: info.querySelector('.battery')?.dataset.charging,
-            memory: info.querySelector('[data-slot="memory"]')?.textContent.trim() ?? null,
+            battery: card.querySelector('.battery')?.dataset.battery,
+            charging: card.querySelector('.battery')?.dataset.charging,
+            memory: info.querySelector('[data-slot="known-memory"]')?.textContent.trim() ?? null,
             text: info.textContent,
-            name: info.querySelector('[data-slot="name"]') !== null,
+            name: card.querySelector('[data-slot="name"]') !== null,
             rename: document.querySelector(${j(`${PANEL} #tablet-name`)}) !== null,
             clock: document.querySelector(${j(`${PANEL} button[data-action="set-time"]`)}) !== null,
           };
@@ -138,7 +146,24 @@ export const blackboardJourneys = [
         if (position) throw new Error('the position of the tablet is offered without a Slate');
       });
 
+      await check('réglages : les quatre positions de la tablette Xiaomi, en hauteur boutons en bas d’abord', async () => {
+        await showTab(app, 'settings');
+        const radios = `document.querySelectorAll(${j(`${PANEL} input[data-option="boardPosition"]`)})`;
+        await app.waitFor(`${radios}.length === 4`, 'the four positions of the blackboard');
+        const values = await app.evaluate(`[...${radios}].map((r) => r.value)`);
+        if (values.join() !== 'buttonsBottom,buttonsTop,buttonsRight,buttonsLeft') throw new Error(`positions: ${values}`);
+        const checked = await app.evaluate(`[...${radios}].find((r) => r.checked)?.value`);
+        if (checked !== 'buttonsBottom') throw new Error(`checked position: ${checked}`);
+        const body = await app.evaluate(`document.querySelector(${j(`${PANEL} [data-tab-panel="settings"]`)}).textContent`);
+        for (const key of ['tablet.boardPosition.buttonsLeft', 'tablet.options.boardPositionHint']) {
+          if (!body.includes(l(key))) throw new Error(`the text ${key} is missing`);
+        }
+        // Not clicked: the Rust side keeps the position only once it reads `boardPosition` (docs/design/blackboard.md §9).
+        await showTab(app, 'use');
+      });
+
       await check('mode direct : la page est en hauteur, sans choix de position, le tracé de la tablette arrive', async () => {
+        await showTab(app, 'use');
         await app.waitFor(`document.querySelector(${j(`${PANEL} button[data-action="live"]:not([disabled])`)}) !== null`, 'the live button');
         await app.click(`${PANEL} button[data-action="live"]`);
         await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
@@ -170,6 +195,7 @@ export const blackboardJourneys = [
 
       await check('oublier la tablette Xiaomi : confirmation, puis plus aucune tablette connue', async () => {
         await openPanel(app);
+        await showTab(app, 'tablets');
         await app.waitFor(`document.querySelector(${j(`${PANEL} button[data-action="forget"]`)}) !== null`, 'the forget button');
         await app.click(`${PANEL} button[data-kind="blackboard"][data-action="forget"]`);
         await app.waitFor(`document.querySelector(${j(`${PANEL} [role="alertdialog"]`)}) !== null`, 'the question');

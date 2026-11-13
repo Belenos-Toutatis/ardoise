@@ -130,6 +130,35 @@ describe('settings: the two tablets', () => {
     expect(section.querySelector('[data-action="register"]')).not.toBeNull();
   });
 
+  it('sets one tablet at a time, as the tablet panel does: the Slate to begin with, the four positions of the Xiaomi once it is chosen', async () => {
+    const save = vi.spyOn(api, 'tabletSetOptions');
+    const { section } = await render('fr');
+    const select = section.querySelector<HTMLSelectElement>('[data-slot="settings-tablet"]')!;
+    expect([...select.options].map((o) => o.textContent)).toEqual(['Bamboo Slate', 'Tablette Xiaomi']);
+    expect(select.value).toBe('slate');
+    expect(section.querySelectorAll('[data-option="orientation"]')).toHaveLength(4);
+    expect(section.querySelector('[data-option="boardPosition"]')).toBeNull();
+    // Its name and its clock stay in the tablet panel.
+    expect(section.querySelector('#tablet-name')).toBeNull();
+    expect(section.querySelector('[data-action="set-time"]')).toBeNull();
+
+    select.value = 'blackboard';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(section.querySelector('[data-option="orientation"]')).toBeNull();
+    expect(section.querySelector('[data-option="button"]')).toBeNull();
+    const positions = [...section.querySelectorAll<HTMLInputElement>('[data-option="boardPosition"]')];
+    expect(positions.map((r) => r.value)).toEqual(['buttonsBottom', 'buttonsTop', 'buttonsRight', 'buttonsLeft']);
+    expect(positions[0].checked).toBe(true);
+    expect(section.textContent).toContain('Ces deux réglages valent pour toutes vos tablettes.');
+    expect(section.textContent).toContain('Tablette Xiaomi : sans cette option');
+
+    positions[3].click();
+    await settle();
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ boardPosition: 'buttonsLeft', orientation: 'landscape' }));
+    expect((await api.tabletStatus()).options.boardPosition).toBe('buttonsLeft');
+  });
+
   it('can add the Xiaomi tablet from the settings, in English too', async () => {
     setLocale('en');
     tablet.start();

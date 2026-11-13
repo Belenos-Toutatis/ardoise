@@ -44,7 +44,8 @@ export const orientationJourneys = [
         await app.waitFor(`['connected', 'syncing'].includes(document.querySelector(${j(STATUS)}).dataset.connection)`, 'the connection', 30_000);
       });
 
-      await check('le panneau propose les quatre positions, paysage d’abord', async () => {
+      await check('le panneau propose les quatre positions (onglet Réglages), paysage d’abord', async () => {
+        await app.click('.tablet-panel [role="tab"][data-tab="settings"]');
         await app.waitFor(`${radios}.length === 4`, 'the four positions');
         const values = await app.evaluate(`[...${radios}].map((r) => r.value)`);
         if (values.join() !== 'landscape,landscapeFlipped,portraitLeft,portraitRight') throw new Error(`positions: ${values}`);
@@ -62,6 +63,7 @@ export const orientationJourneys = [
           'the end of the sync',
           30_000,
         );
+        await app.click('.tablet-panel [role="tab"][data-tab="use"]');
         await app.click('.tablet-panel button[data-action="live"]');
         await app.waitFor(`document.querySelector('.live-view[data-state="live"]') !== null`, 'live mode', 30_000);
         await app.waitFor(`Number(${canvasData('strokes')}) > 0`, 'strokes on the live canvas', 10_000);
@@ -90,6 +92,7 @@ export const orientationJourneys = [
         await app.click('button[data-action="stop-live"]');
         await app.waitFor(`document.querySelector('.shell:not(.shell-hidden) input.search') !== null`, 'the library');
         await app.click(STATUS);
+        await app.click('.tablet-panel [role="tab"][data-tab="settings"]');
         await app.waitFor(`${radios}.length === 4`, 'the panel');
         await app.waitFor(`[...${radios}].find((r) => r.checked)?.value === 'portraitRight'`, 'the saved position');
         // Back to the default for the journeys that follow.

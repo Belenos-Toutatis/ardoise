@@ -13,7 +13,7 @@
   import PenTouchSection from './PenTouchSection.svelte';
   import SharePortSection from './SharePortSection.svelte';
   import KnownTablets from './tablet/KnownTablets.svelte';
-  import TabletOptions from './tablet/TabletOptions.svelte';
+  import TabletSettings from './tablet/TabletSettings.svelte';
 
   let { app, onchange, onclose, ontest }: {
     app: AppState;
@@ -91,7 +91,8 @@
     <KnownTablets detailed emptyText onerror={(message) => (error = message)} />
     {#if hasTablet}
       <h4 class="options-title">{t('tablet.options.title')}</h4>
-      <TabletOptions />
+      <!-- The same list and the same options as the tablet panel's « Settings » tab; the Slate's name and clock stay there. -->
+      <TabletSettings manage={false} />
     {/if}
     <!-- The guided test is the Slate's: the blackboard has none. -->
     {#if ontest && (tablet.slate || !tablet.board)}

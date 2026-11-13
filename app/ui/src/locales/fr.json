@@ -409,6 +409,26 @@
     "title": "Tablette",
     "loading": "Lecture de l'état de la tablette…",
     "unavailableStatus": "L'état de la tablette n'est pas disponible.",
+    "tablist": "Sections du panneau de la tablette",
+    "tabs": {
+      "use": "Utiliser",
+      "settings": "Réglages",
+      "tablets": "Tablettes",
+      "waiting": {
+        "one": "{count} page en attente sur la tablette",
+        "other": "{count} pages en attente sur la tablette"
+      }
+    },
+    "use": {
+      "pages": {
+        "one": "{count} page en mémoire",
+        "other": "{count} pages en mémoire"
+      }
+    },
+    "settings": {
+      "choose": "Tablette à régler",
+      "none": "Aucune tablette n'est connue : ajoutez-en une dans l'onglet « Tablettes »."
+    },
     "simulated": "Tablette simulée : aucune vraie tablette n'est utilisée.",
     "simulatedButton": "Appuyer sur le bouton de la tablette simulée",
     "state": {
@@ -449,7 +469,11 @@
     },
     "sync": {
       "title": "Synchronisation",
-      "now": "Synchroniser maintenant",
+      "now": "Synchroniser",
+      "waiting": {
+        "one": "{count} page",
+        "other": "{count} pages"
+      },
       "cancel": "Annuler",
       "progress": "Page {current} sur {total}",
       "progressLabel": "Progression de la synchronisation",
@@ -464,11 +488,11 @@
       "never": "Aucune synchronisation depuis le lancement d'Ardoise.",
       "pagesWaiting": "{count} pages attendent sur la tablette : seule la plus ancienne peut être lue tant qu'elle n'est pas effacée. Activez « {option} » pour les récupérer.",
       "boardTitle": "Les pages seront effacées de la tablette",
-      "boardConfirm": "La tablette Xiaomi ne donne que sa page la plus ancienne : pour atteindre la suivante, Ardoise doit effacer chaque page de la tablette une fois sa note écrite et vérifiée. Synchroniser maintenant et effacer les pages ?",
+      "boardConfirm": "La tablette Xiaomi ne donne que sa page la plus ancienne : pour atteindre la suivante, Ardoise doit effacer chaque page de la tablette une fois sa note écrite et vérifiée. Synchroniser et effacer les pages ?",
       "boardConfirmYes": "Synchroniser et effacer",
-      "boardWaitingOne": "1 page attend sur la tablette Xiaomi : elle n'est importée qu'à votre demande, avec « Synchroniser maintenant », et sera effacée de la tablette une fois sa note écrite.",
-      "boardWaitingMany": "{count} pages attendent sur la tablette Xiaomi : elles ne sont importées qu'à votre demande, avec « Synchroniser maintenant », et seront effacées de la tablette une fois leurs notes écrites.",
-      "boardOnRequest": "La tablette Xiaomi n'importe ses pages qu'à votre demande : allumez-la, puis cliquez sur « Synchroniser maintenant » une fois qu'elle est connectée."
+      "boardWaitingOne": "1 page attend sur la tablette Xiaomi : elle n'est importée qu'à votre demande, avec « Synchroniser », et sera effacée de la tablette une fois sa note écrite.",
+      "boardWaitingMany": "{count} pages attendent sur la tablette Xiaomi : elles ne sont importées qu'à votre demande, avec « Synchroniser », et seront effacées de la tablette une fois leurs notes écrites.",
+      "boardOnRequest": "La tablette Xiaomi n'importe ses pages qu'à votre demande : allumez-la, puis cliquez sur « Synchroniser » une fois qu'elle est connectée."
     },
     "live": {
       "open": "Mode direct",
@@ -485,7 +509,17 @@
       "buttonNewLayer": "Nouveau calque",
       "orientation": "Position de la tablette",
       "orientationHint": "Choisissez comment vous tenez la tablette : Ardoise redresse ce que vous dessinez pour qu'il apparaisse à l'endroit. À l'envers convient aux gauchers ; en portrait, les notes sont des pages en portrait. Le bouton est celui qui est à côté du voyant de la tablette.",
-      "deleteAfterImportBoard": "Tablette Xiaomi : sans cette option, ses pages ne sont importées qu'à la demande (« Synchroniser maintenant »), après confirmation, et elles sont effacées de la tablette quand même : c'est le seul moyen d'atteindre la page suivante."
+      "deleteAfterImportBoard": "Tablette Xiaomi : sans cette option, ses pages ne sont importées qu'à la demande (« Synchroniser »), après confirmation, et elles sont effacées de la tablette quand même : c'est le seul moyen d'atteindre la page suivante.",
+      "shared": "Ces deux réglages valent pour toutes vos tablettes.",
+      "boardPosition": "Position de la tablette",
+      "boardPositionHint": "Ardoise redresse ce que vous écrivez pour qu'il apparaisse à l'endroit.",
+      "more": "Plus de détails"
+    },
+    "boardPosition": {
+      "buttonsBottom": "En hauteur, boutons en bas",
+      "buttonsTop": "En hauteur, boutons en haut",
+      "buttonsRight": "En largeur, boutons à droite",
+      "buttonsLeft": "En largeur, boutons à gauche"
     },
     "orientation": {
       "landscape": "Paysage, bouton en bas",
@@ -550,6 +584,7 @@
     "known": {
       "title": "Tablettes",
       "notConnected": "Pas connectée",
+      "add": "Ajouter une tablette",
       "forgetLabel": "Oublier la tablette « {name} »"
     },
     "board": {

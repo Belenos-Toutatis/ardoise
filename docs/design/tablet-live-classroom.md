@@ -243,11 +243,18 @@ MonitorInfo = { key: string; name: string; x: number; y: number; width: number; 
   (`openLive()` from the tablet panel), like the editor.
 - Sidebar (`library/TabletStatus.svelte`): name, connection state (dot + text), battery (% and charging), a progress
   bar while syncing; click opens the tablet panel (`components/tablet/TabletPanel.svelte`).
-- Tablet panel: information (SPEC §4.1: name, battery and charge, firmware, pages in memory, model and size), "Sync
-  now" with progress `current / total` and **Cancel**, "Live mode", automatic sync toggle, "delete from the tablet
-  after import" toggle (on by default, with the sentence saying the page is deleted only once its file is written and
-  checked), button action (new page / new layer), settings: rename, set the clock, the tablet's position (M8: four), forget (with
-  confirmation). No tablet registered: the registration wizard.
+- Tablet panel (Q17, `components/tablet/TabletPanel.svelte`): narrow, with three icon tabs on a rail like the editor's
+  side panel (`TabletRail.svelte`; WAI-ARIA tabs, manual activation; every tab stays mounted). **Use**
+  (`TabletUse.svelte`): the connected tablet's card (picture by kind, name, state, battery, pages in memory), "Live
+  mode", "Sync" (saying how many pages wait) with progress `current / total` and **Cancel**, the last sync, and the
+  messages about the state; a badge on the tab says how many pages wait. **Settings** (`TabletSettings.svelte`): a list
+  of the known tablets (only when there are two; the connected one first), then that tablet's options
+  (`TabletOptions.svelte`: automatic sync and "delete from the tablet after import", which are one setting for both
+  tablets and say so; for the Slate the button action (new page / new layer) and its four positions; for the Xiaomi its
+  four positions, `boardPosition`, blackboard.md §10) and, for the Slate, rename and set the clock. **Tablets**
+  (`KnownTablets.svelte`): each known tablet with what it reported, forget (with confirmation), add a tablet, the
+  guided test. No tablet known: the first tab invites to register the Slate or to add the Xiaomi (the registration
+  wizard).
 - Registration wizard (`components/tablet/RegisterWizard.svelte`): 1. warning first (registering makes the tablet
   unusable with the phone app and with Inkspace until it is registered there again), 2. animation: a tablet drawing
   whose button is held 6 s while a ring fills, then the LED blinks blue (CSS, `prefers-reduced-motion` respected),
@@ -341,7 +348,7 @@ Interface (packages C and D):
 - `lib/live-state.svelte.ts` keeps batches received before the subscription's snapshot; view and style changes show
   at once (an older echo from Rust does not undo them), views are sent at most every 32 ms.
 - `window.__ardoiseLatency = { samples, median, p95, uiSamples, uiMedian }`; `median()` is `null` without samples.
-- The e2e journey checks that the tablet is empty from the sync result ("3 pages deleted"), and clicks "Sync now" if
+- The e2e journey checks that the tablet is empty from the sync result ("3 pages deleted"), and clicks "Sync" if
   the automatic sync did not bring 10 notes within 20 s.
 
 Review fixes (after the independent review of M4):
@@ -449,7 +456,7 @@ bottom left, button at the bottom right); to be confirmed with the real tablet (
 - **Relation to `device.json`'s `orientation`**: `identity.rs` only has a test keeping an `"orientation": "left-handed"`
   field "from a newer version" in the record's `extra`; it is not a field of the record and nothing reads it. The
   setting lives in `ardoise.toml` ([tablet]), shared by the PCs, not with the tablet's registration.
-- **Interface**: `TabletOptions` (Settings and tablet panel) lists the four positions as radio buttons with a picture
+- **Interface**: `TabletOptions` (Settings and the tablet panel's « Settings » tab, for the Slate) lists the four positions as radio buttons with a picture
   (`OrientationIcon.svelte`, the tablet turned by quarter turns, button and light drawn) and a name that says where
   the button ends up. The stand-ins (`mock-tablet.ts`, `mock-live.ts`, `lib/orientation.ts`) follow the same rules.
 

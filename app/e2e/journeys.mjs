@@ -186,7 +186,8 @@ export const journeys = [
           `(() => { const t = document.querySelector('.tablet-panel [data-slot="last-sync"]')?.textContent ?? ''; return t.includes(${j(saved)}) && t.includes(${j(deleted)}); })()`,
           'the result of the sync',
         );
-        const stored = await app.evaluate(`document.querySelector('.tablet-panel [data-slot="stored-pages"]')?.textContent`);
+        // The pages in memory are on the card of the first tab (`data-count`: the text around it is a sentence).
+        const stored = await app.evaluate(`document.querySelector('.tablet-panel [data-slot="stored-pages"]')?.dataset.count`);
         if (stored !== undefined && stored !== '0') throw new Error(`the tablet still holds ${stored} pages`);
       });
 

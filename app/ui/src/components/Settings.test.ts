@@ -151,7 +151,7 @@ describe('settings: tablet section', () => {
     option('orientation', 'landscapeFlipped').click();
     await settle();
     const saved = (await api.tabletStatus()).options;
-    expect(saved).toEqual({ autoSync: true, deleteAfterImport: false, orientation: 'landscapeFlipped', button: 'newPage' });
+    expect(saved).toEqual({ autoSync: true, deleteAfterImport: false, orientation: 'landscapeFlipped', boardPosition: 'buttonsBottom', button: 'newPage' });
     expect(option('deleteAfterImport').checked).toBe(false);
     expect(option('orientation', 'landscapeFlipped').checked).toBe(true);
   });

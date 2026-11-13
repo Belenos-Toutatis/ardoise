@@ -42,7 +42,7 @@ const beat = async (beats = 1) => {
   await settle();
 };
 
-const OPTIONS: TabletOptions = { autoSync: false, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' };
+const OPTIONS: TabletOptions = { autoSync: false, deleteAfterImport: true, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' };
 
 interface Options {
   locale?: 'fr' | 'en';
@@ -149,38 +149,53 @@ describe('tablet panel: two tablets', () => {
 });
 
 describe('tablet panel: the blackboard\'s details', () => {
-  it('shows battery, free memory of the total, pages and model, and hides what it does not have', async () => {
+  it('shows the blackboard on the first tab with its own drawing, battery and pages, and no name', async () => {
+    const { q } = await render();
+    const card = q('[aria-labelledby="tablet-info"]')!;
+    expect(card.getAttribute('data-kind')).toBe('blackboard');
+    expect(card.querySelector('[data-slot="card-name"]')!.textContent).toBe('Tablette Xiaomi');
+    expect(card.querySelector('[data-slot="state"]')!.textContent).toContain('Connectée');
+    expect(card.querySelector('.board-drawing')!.getAttribute('data-position')).toBe('buttonsBottom');
+    expect(card.querySelector('.orientation-icon')).toBeNull();
+    expect(card.querySelector('.battery')!.textContent).toContain('90 %');
+    expect(card.querySelector('.battery')!.getAttribute('data-charging')).toBe('false');
+    expect(card.querySelector('[data-slot="stored-pages"]')!.textContent).toBe('3 pages en mémoire');
+    expect(card.querySelector('[data-slot="name"]')).toBeNull();
+  });
+
+  it('shows battery, free memory of the total, pages and model on the Tablets tab, and hides what it does not have', async () => {
     const { q, target } = await render();
-    const info = q('[aria-labelledby="tablet-info"]')!;
-    expect(info.querySelector('.battery')!.textContent).toContain('90 %');
-    expect(info.querySelector('[data-slot="memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('126,4 Mo sur 126,9 Mo');
-    expect(info.querySelector('[data-slot="stored-pages"]')!.textContent).toBe('3');
-    expect(info.textContent).toContain('Xiaomi Mijia LCD blackboard');
-    expect(info.textContent).toContain('205 × 272 mm');
-    // No name, firmware, "charging": rename and the clock button are the Slate's.
-    expect(info.textContent).not.toContain('Version du firmware');
-    expect(info.querySelector('[data-slot="name"]')).toBeNull();
-    expect(info.querySelector('.battery')!.getAttribute('data-charging')).toBe('false');
+    const board = q('[data-slot="known-tablet"][data-kind="blackboard"]')!;
+    expect(board.querySelector('.battery')!.textContent).toContain('90 %');
+    expect(board.querySelector('[data-slot="known-memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('126,4 Mo sur 126,9 Mo');
+    expect(board.querySelector('[data-slot="known-pages"]')!.textContent).toBe('3');
+    expect(board.textContent).toContain('Xiaomi Mijia LCD blackboard');
+    expect(board.textContent).toContain('205 × 272 mm');
+    // No firmware, no "charging": the Slate's own.
+    expect(board.textContent).not.toContain('Version du firmware');
+    expect(board.querySelector('.battery')!.getAttribute('data-charging')).toBe('false');
+    expect(board.querySelector('[data-slot="board-clock"]')!.textContent).toContain("mise à l'heure à chaque connexion");
+    // Its settings have no name to change, no clock to set.
+    expect(q('[data-slot="tablet-options"]')!.getAttribute('data-kind')).toBe('blackboard');
     expect(q('#tablet-name')).toBeNull();
     for (const name of ['rename', 'set-time']) expect(q(`button[data-action="${name}"]`), name).toBeNull();
-    expect(info.querySelector('[data-slot="board-clock"]')!.textContent).toContain("mise à l'heure à chaque connexion");
     expect(target.textContent).not.toContain('Réglages de la tablette');
   });
 
   it('shows the memory in English too', async () => {
     const { q } = await render({ locale: 'en' });
-    expect(q('[data-slot="memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('126.4 MB of 126.9 MB');
-    expect(q('[aria-labelledby="tablet-info"]')!.textContent).toContain('Free memory');
+    expect(q('[data-slot="known-memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('126.4 MB of 126.9 MB');
+    expect(q('[data-slot="known-tablet"][data-kind="blackboard"]')!.textContent).toContain('Free memory');
   });
 
   it('counts the pages down while syncing, and shows the memory freed', async () => {
     const { q, action, click } = await render();
     await click(action('sync'));
     await beat(0.7);
-    expect(q('[data-slot="stored-pages"]')!.textContent).toBe('2');
+    expect(q('[data-slot="stored-pages"]')!.getAttribute('data-count')).toBe('2');
     await beat(3);
-    expect(q('[data-slot="stored-pages"]')!.textContent).toBe('0');
-    expect(q('[data-slot="memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('126,9 Mo sur 126,9 Mo');
+    expect(q('[data-slot="stored-pages"]')!.getAttribute('data-count')).toBe('0');
+    expect(q('[data-slot="known-memory"]')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('126,9 Mo sur 126,9 Mo');
     expect(q('[data-slot="last-sync"]')!.textContent).toContain('3 notes enregistrées.');
     expect(q('[data-slot="last-sync"]')!.textContent).toContain('3 pages effacées de la tablette.');
   });
@@ -193,6 +208,8 @@ describe('tablet panel: the blackboard\'s details', () => {
     await api.tabletCancel();
     await beat(2);
     expect(tablet.status?.active).toBe('slate');
+    // The settings are the Slate's, the tablet that is connected.
+    expect(q('[data-slot="tablet-options"]')!.getAttribute('data-kind')).toBe('slate');
     expect(q('#tablet-name')).not.toBeNull();
     expect(q('button[data-action="set-time"]')).not.toBeNull();
     expect(q('[data-kind="slate"]')!.textContent).toContain('Connectée');
@@ -356,17 +373,28 @@ describe('tablet panel: syncing the blackboard', () => {
 describe('tablet panel: options with the blackboard', () => {
   const option = (target: HTMLElement, name: string) => target.querySelector(`input[data-option="${name}"]`);
 
-  it('keeps the Slate\'s button and position while it is known', async () => {
-    const { target } = await render();
+  it('shows the Xiaomi\'s settings while it is the connected tablet, the Slate\'s once it is chosen in the list', async () => {
+    const { target, q } = await render();
+    // The Xiaomi is connected: its position, not the Slate's button and position.
+    expect(option(target, 'boardPosition')).not.toBeNull();
+    expect(option(target, 'orientation')).toBeNull();
+    expect(option(target, 'button')).toBeNull();
+    expect(option(target, 'deleteAfterImport')).not.toBeNull();
+    const select = q<HTMLSelectElement>('[data-slot="settings-tablet"]')!;
+    select.value = 'slate';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
     expect(option(target, 'orientation')).not.toBeNull();
     expect(option(target, 'button')).not.toBeNull();
+    expect(option(target, 'boardPosition')).toBeNull();
     expect(option(target, 'deleteAfterImport')).not.toBeNull();
   });
 
-  it('shows neither the button nor the position when only the blackboard is known', async () => {
+  it('shows neither the button nor the Slate\'s position when only the blackboard is known, but its own position', async () => {
     const { target, q } = await render({ boardOnly: true });
     expect(option(target, 'orientation')).toBeNull();
     expect(option(target, 'button')).toBeNull();
+    expect(option(target, 'boardPosition')).not.toBeNull();
     expect(option(target, 'autoSync')).not.toBeNull();
     expect(option(target, 'deleteAfterImport')).not.toBeNull();
     expect(q('[data-slot="board-delete-hint"]')).not.toBeNull();
@@ -394,14 +422,15 @@ describe('tablet panel: a library that knows the blackboard only', () => {
     const { q } = await render({ boardOnly: true, connect: false });
     expect(q('[data-slot="hint"]')!.textContent).toContain('Allumez la tablette Xiaomi');
     expect(q('[data-slot="hint"]')!.textContent).toContain('Fermez Mi Home');
-    expect(q('[aria-labelledby="tablet-info"]')!.textContent).toContain("n'a pas encore été lue");
-    expect(q('[aria-labelledby="tablet-info"]')!.textContent).toContain('205 × 272 mm');
+    expect(q('[data-slot="known-not-read"]')!.textContent).toContain("n'a pas encore été lue");
+    expect(q('[data-slot="known-tablet"][data-kind="blackboard"]')!.textContent).toContain('205 × 272 mm');
+    expect(q('[aria-labelledby="tablet-info"]')!.textContent).toContain('Tablette Xiaomi');
   });
 
   it('stores a page with the simulated button, and imports it', async () => {
     const { q, action, click } = await render({ boardOnly: true });
     await click(action('sim-store'));
-    expect(q('[data-slot="stored-pages"]')!.textContent).toBe('4');
+    expect(q('[data-slot="stored-pages"]')!.getAttribute('data-count')).toBe('4');
   });
 
   it('offers to add the blackboard again once it is forgotten, and nothing else', async () => {

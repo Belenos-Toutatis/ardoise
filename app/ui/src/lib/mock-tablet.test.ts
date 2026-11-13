@@ -6,7 +6,7 @@ import { mockTablet, mockTabletDraw, mockTabletPatch, resetMockTablet } from './
 import type { Orientation } from './orientation';
 import type { TabletOptions, TabletStatus } from './tablet';
 
-const OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' };
+const OPTIONS: TabletOptions = { autoSync: true, deleteAfterImport: true, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' };
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -396,12 +396,25 @@ describe('mock tablet: settings', () => {
   });
 
   it('keeps the options it is given and refuses odd ones', async () => {
-    const options: TabletOptions = { autoSync: false, deleteAfterImport: false, orientation: 'landscapeFlipped', button: 'newLayer' };
+    const options: TabletOptions = { autoSync: false, deleteAfterImport: false, orientation: 'landscapeFlipped', boardPosition: 'buttonsBottom', button: 'newLayer' };
     const status = await api.tabletSetOptions(options);
     expect(status.options).toEqual(options);
     expect((await api.tabletStatus()).options).toEqual(options);
     const odd = { ...options, orientation: 'both' } as unknown as TabletOptions;
     expect((await failureOf(api.tabletSetOptions(odd))).code).toBe('unexpected');
+  });
+
+  it('keeps the position of the blackboard apart from that of the Slate, upright by default, and refuses a wrong one', async () => {
+    expect((await api.tabletStatus()).options.boardPosition).toBe('buttonsBottom');
+    const options: TabletOptions = { ...OPTIONS, orientation: 'portraitLeft', boardPosition: 'buttonsRight' };
+    const status = await api.tabletSetOptions(options);
+    expect(status.options).toMatchObject({ orientation: 'portraitLeft', boardPosition: 'buttonsRight' });
+    // The Slate's names are not the blackboard's, and a missing field is refused like any other odd option.
+    for (const odd of ['landscape', 'portraitLeft', undefined]) {
+      const refused = { ...options, boardPosition: odd } as unknown as TabletOptions;
+      expect((await failureOf(api.tabletSetOptions(refused))).code, String(odd)).toBe('unexpected');
+    }
+    expect((await api.tabletStatus()).options.boardPosition).toBe('buttonsRight');
   });
 
   it('presses its button only for a simulation', async () => {

@@ -509,7 +509,8 @@ computer stays. The orientation switch has no effect on the blackboard.
   bound to Mi Home. Say that Mi Home must be closed (or the phone's Bluetooth off) while adding and using it.
 - Show: battery, free memory (`memory.free` of `memory.total`), pages stored, model. The clock is set at each connection:
   no button needed.
-- Hide: rename, orientation, firmware, "charging".
+- Hide: rename, the Slate's orientation and button, firmware, "charging". Show its own four positions
+  (`boardPosition`, §10).
 - Sync: with `options.deleteAfterImport === false` and `active === 'blackboard'`, `tablet_sync()` answers
   `blackboardConfirmDelete`: say that the pages will be deleted from the blackboard (it only gives its oldest page)
   and, if the user agrees, call `tablet_sync({ confirmBlackboardDelete: true })`. The automatic sync does nothing for
@@ -720,3 +721,37 @@ lists again. The earlier page still counts as imported: `ImportedPages::find` al
 note created at that page's time whose `original.bin` starts with the page's bytes (a rescue copy of it found later
 does not come back). Not covered: a page of a clock never set (its note is dated by the import), and the middle page
 of three stores found again later (a duplicate note, nothing lost).
+## 10. The four positions of the blackboard (Q17, interface done, Rust to do)
+
+The user may hold the blackboard in any of four positions, and Ardoise turns what it writes so that the page is upright
+(SPEC §4.1; `docs/questions.md` Q17). The interface (`TabletOptions.svelte`, `BoardDrawing.svelte`, `lib/board-position.ts`,
+the mock in `lib/mock-tablet.ts`) is done; this section is the contract for the Rust side.
+
+| | |
+|---|---|
+| Name | `boardPosition` in the options the interface sends and reads (`tablet_set_options({ options })`, `TabletStatus.options`); `TabletSettings::board_position` on the Rust side, stored next to `orientation` in `[tablet]` of `ardoise.toml` |
+| Values (strings, as `Orientation`'s) | `"buttonsBottom"` (default: held upright, the erase and store buttons on the bottom band), `"buttonsTop"` (half a turn), `"buttonsRight"` (the bottom edge is on the right), `"buttonsLeft"` (the bottom edge is on the left) |
+| Default | `buttonsBottom`; any other value loads as the default; an `ardoise.toml` without the key loads as the default (older files, older Ardoise) |
+| Independent of | `orientation`, which stays the Slate's: a Slate and a blackboard known together each keep their own position. `autoSync` and `deleteAfterImport` stay shared |
+
+- **`TabletOptions`** (`ardoise-device::service`, `tablet.ts`): add `board_position: BoardPosition` (`boardPosition` on the
+  wire, `rename_all = "camelCase"`), kept by `tablet_set_options_in` with the other fields, and in `From<&TabletSettings>`.
+  The interface already sends it; until the Rust side has the field serde drops it and the status answers without it
+  (the interface then reads `buttonsBottom`, `boardPositionOf` in `lib/board-position.ts`), so a position chosen today
+  does not stay.
+- **Where it is read**: the pages of the blackboard, imported by the sync (`pages::` for blackboard notes) and the live
+  page of the blackboard, so that both come out upright. The page of a blackboard note is portrait, 20 500 × 27 200 in
+  the tablet's own frame; held with the buttons at the right or at the left, the pen writes in that frame turned a
+  quarter turn, and the note is turned back (the page of a note held that way is landscape: `pageSizeFor`-like swap,
+  as for the Slate's `portraitLeft` / `portraitRight`). Which way each quarter turn goes has to be measured with the
+  real blackboard (H8): in the pictures, `buttonsLeft` is the upright picture turned a quarter turn clockwise,
+  `buttonsRight` a quarter turn anticlockwise.
+- **Live window**: it keeps today's behaviour for the blackboard (no position switch, portrait page, the Xiaomi
+  note `live.xiaomi.label`) until the Rust side applies the position to the live page; then
+  `LiveView.svelte` shows the same switch as for the Slate (`data-slot="orientation"`, four buttons) with the
+  blackboard's own four values, through a command like `tablet_set_orientation` (`tablet_set_board_position`, to be
+  added with the field). Not done here.
+- **Resuming** a note in live mode (§5.5) must compare the note's page with the position the way it does for the
+  Slate (the `live.resume.hold` notice), once the position is applied.
+- **Tests to add on the Rust side**: the default and an unknown value in `settings.rs`; `tablet_set_options` keeping the
+  field; a blackboard page imported in each position (golden strokes turned back); the file without the key.

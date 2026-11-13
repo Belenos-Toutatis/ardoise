@@ -50,7 +50,7 @@ interface Options {
 async function render({ locale = 'fr', manual = true, connect = true, forget = false }: Options = {}) {
   setLocale(locale);
   if (forget) await api.forgetTablet();
-  if (manual) await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' });
+  if (manual) await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' });
   tablet.start();
   await settle();
   const handlers = { onclose: vi.fn(), onlive: vi.fn(), ontest: vi.fn() };
@@ -78,34 +78,55 @@ async function render({ locale = 'fr', manual = true, connect = true, forget = f
   return { target, q, action, click, type, ...handlers };
 }
 
+/** The number of pages the card says are in the tablet's memory. */
+const pagesInMemory = (q: (selector: string) => Element | null) => q('[data-slot="stored-pages"]')!.getAttribute('data-count');
+
 describe('tablet panel: information', () => {
-  it('shows everything the tablet reported', async () => {
+  it('shows the connected tablet on the first tab: name, state, battery, pages in memory', async () => {
     const { target, q } = await render();
     expect(q('.tablet-panel')).not.toBeNull();
-    const info = q('[aria-labelledby="tablet-info"]')!;
-    expect(info.textContent).toContain('Informations');
-    expect(info.querySelector('[data-slot="state"]')!.textContent).toContain('Connectée');
-    expect(info.querySelector('[data-slot="name"]')!.textContent).toBe('Bamboo Slate');
-    expect(info.querySelector('.battery')!.textContent).toContain('87 %');
-    expect(info.textContent).toContain('B160805A-C170704A');
-    expect(info.querySelector('[data-slot="stored-pages"]')!.textContent).toBe('3');
-    expect(info.textContent).toContain('Bamboo Slate A4');
-    expect(info.textContent).toContain('297 × 216 mm');
-    expect(info.textContent).toMatch(/2026/);
+    expect(q('[data-slot="tablet-title"]')!.textContent).toBe('Utiliser');
+    const card = q('[aria-labelledby="tablet-info"]')!;
+    expect(card.getAttribute('data-kind')).toBe('slate');
+    expect(card.querySelector('[data-slot="state"]')!.textContent).toContain('Connectée');
+    expect(card.querySelector('[data-slot="name"]')!.textContent).toBe('Bamboo Slate');
+    expect(card.querySelector('.battery')!.textContent).toContain('87 %');
+    expect(card.querySelector('[data-slot="stored-pages"]')!.textContent).toBe('3 pages en mémoire');
+    expect(card.querySelector('.orientation-icon')).not.toBeNull();
+    expect(card.querySelector('.board-drawing')).toBeNull();
     expect(target.textContent).not.toContain("n'a pas encore été lue");
+  });
+
+  it('shows everything the tablet reported on the Tablets tab', async () => {
+    const { q } = await render();
+    const slate = q('[data-slot="known-tablet"][data-kind="slate"]')!;
+    expect(slate.getAttribute('data-connected')).toBe('true');
+    expect(slate.textContent).toContain('Bamboo Slate');
+    expect(slate.textContent).toContain('Connectée');
+    expect(slate.querySelector('.battery')!.textContent).toContain('87 %');
+    expect(slate.querySelector('[data-slot="known-firmware"]')!.textContent).toBe('B160805A-C170704A');
+    expect(slate.querySelector('[data-slot="known-pages"]')!.textContent).toBe('3');
+    expect(slate.textContent).toContain('Bamboo Slate A4');
+    expect(slate.textContent).toContain('297 × 216 mm');
+    expect(slate.textContent).toMatch(/2026/);
+    expect(q('[data-slot="known-not-read"]')).toBeNull();
+    expect(slate.querySelector('[data-slot="board-clock"]')).toBeNull();
   });
 
   it('shows that nothing was read yet while the tablet is out of range', async () => {
     mockTablet.inRange = false;
     const { q } = await render({ connect: false });
-    const info = q('[aria-labelledby="tablet-info"]')!;
-    expect(info.textContent).toContain("n'a pas encore été lue");
-    expect(info.textContent).toContain('Recherche de la tablette…');
+    const card = q('[aria-labelledby="tablet-info"]')!;
+    expect(card.textContent).toContain('Recherche de la tablette…');
     expect(q('[data-slot="hint"]')!.textContent).toContain('Appuyez brièvement sur le bouton');
-    expect(info.querySelector('.battery')).toBeNull();
+    expect(card.querySelector('.battery')).toBeNull();
+    expect(q('[data-slot="stored-pages"]')).toBeNull();
     // Even then, its name and size are those of the registration.
-    expect(info.textContent).toContain('Bamboo Slate');
-    expect(info.textContent).toContain('297 × 216 mm');
+    expect(card.querySelector('[data-slot="name"]')!.textContent).toBe('Bamboo Slate');
+    expect(q('[data-slot="known-not-read"]')!.textContent).toContain("n'a pas encore été lue");
+    const slate = q('[data-slot="known-tablet"][data-kind="slate"]')!;
+    expect(slate.textContent).toContain('297 × 216 mm');
+    expect(slate.querySelector('.battery')).toBeNull();
   });
 
   it('shows the battery charging', async () => {
@@ -165,7 +186,7 @@ describe('tablet panel: sync', () => {
     expect(last).toContain('Dernière synchronisation');
     expect(last).toContain('3 notes enregistrées.');
     expect(last).toContain('3 pages effacées de la tablette.');
-    expect(q('[data-slot="stored-pages"]')!.textContent).toBe('0');
+    expect(pagesInMemory(q)).toBe('0');
     expect(mockLibrary().notes.size).toBe(6);
     expect(action('live')!.disabled).toBe(false);
   });
@@ -179,7 +200,7 @@ describe('tablet panel: sync', () => {
     const last = q('[data-slot="last-sync"]')!.textContent!;
     expect(last).toContain('2 notes enregistrées.');
     expect(last).toContain('2 pages effacées de la tablette.');
-    expect(q('[data-slot="stored-pages"]')!.textContent).toBe('1');
+    expect(pagesInMemory(q)).toBe('1');
   });
 
   it('words one page, and no page', async () => {
@@ -223,7 +244,7 @@ describe('tablet panel: sync', () => {
 
   it('says that only the oldest page can be read when nothing is deleted', async () => {
     const { q, action, click } = await render();
-    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', button: 'newPage' });
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' });
     await settle();
     // Before any sync, nothing was read: no message yet.
     expect(q('[data-slot="pages-waiting"]')).toBeNull();
@@ -231,7 +252,7 @@ describe('tablet panel: sync', () => {
     await click(action('sync'));
     await beat(3);
     expect(q('[data-slot="last-sync"]')!.textContent).toContain('1 note enregistrée.');
-    expect(q('[data-slot="stored-pages"]')!.textContent).toBe('3');
+    expect(pagesInMemory(q)).toBe('3');
     const waiting = q('[data-slot="pages-waiting"]')!;
     expect(waiting.textContent).toContain('3 pages attendent sur la tablette');
     expect(waiting.textContent).toContain("seule la plus ancienne peut être lue tant qu'elle n'est pas effacée");
@@ -244,7 +265,7 @@ describe('tablet panel: sync', () => {
     expect(q('[data-slot="pages-waiting"]')).not.toBeNull();
 
     // Turning deletion on hides it: the next sync gets the pages.
-    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', button: 'newPage' });
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: true, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' });
     await settle();
     expect(q('[data-slot="pages-waiting"]')).toBeNull();
   });
@@ -255,7 +276,7 @@ describe('tablet panel: sync', () => {
     await beat(4);
     expect(q('[data-slot="pages-waiting"]')).toBeNull();
 
-    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', button: 'newPage' });
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' });
     mockTabletPatch({
       lastSync: { at: Date.now(), saved: ['a'], deleted: 0, error: null },
       device: { ...tablet.status!.device!, storedPages: 1 },
@@ -269,7 +290,7 @@ describe('tablet panel: sync', () => {
 
   it('says it in English too', async () => {
     const { q, action, click } = await render({ locale: 'en' });
-    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', button: 'newPage' });
+    await api.tabletSetOptions({ autoSync: false, deleteAfterImport: false, orientation: 'landscape', boardPosition: 'buttonsBottom', button: 'newPage' });
     await settle();
     await click(action('sync'));
     await beat(3);
@@ -338,11 +359,12 @@ describe('tablet panel: options', () => {
     await click(option(target, 'autoSync'));
     await click(option(target, 'button', 'newLayer'));
     await click(option(target, 'orientation', 'landscapeFlipped'));
-    expect(save).toHaveBeenLastCalledWith({ autoSync: true, deleteAfterImport: false, orientation: 'landscapeFlipped', button: 'newLayer' });
+    expect(save).toHaveBeenLastCalledWith({ autoSync: true, deleteAfterImport: false, orientation: 'landscapeFlipped', boardPosition: 'buttonsBottom', button: 'newLayer' });
     expect((await api.tabletStatus()).options).toEqual({
       autoSync: true,
       deleteAfterImport: false,
       orientation: 'landscapeFlipped',
+      boardPosition: 'buttonsBottom',
       button: 'newLayer',
     });
     expect(option(target, 'orientation', 'landscapeFlipped').checked).toBe(true);
