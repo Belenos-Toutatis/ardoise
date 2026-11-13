@@ -4,7 +4,7 @@
    * the library (the selected notes). The destination is asked last, with the native dialog: a
    * file for one note or for a PDF (one page per note), a folder for several images.
    */
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import { api, errorMessage } from '../lib/api';
   import { pickExportFile, pickExportFolder } from '../lib/dialogs';
   import {
@@ -25,15 +25,25 @@
   import TextExportSection from './TextExportSection.svelte';
 
   let {
-    sources,
+    sources: given,
+    binder,
     subject,
     onclose,
   }: {
     sources: ExportSource[];
+    /**
+     * « Exporter le classeur en PDF »: the notes are a binder's, in its order, and only the PDF is offered. `sourcesFor`
+     * gives them again with or without the sub-binders (the checkbox, shown when `hasSub`).
+     */
+    binder?: { name: string; hasSub: boolean; sourcesFor: (includeSub: boolean) => ExportSource[] };
     /** What is exported, as a sentence part: the note's title, or "3 notes". */
     subject: string;
     onclose: () => void;
   } = $props();
+
+  /** The sub-binders go in the PDF of a binder: off at first (SPEC: an option). */
+  let includeSub = $state(false);
+  const sources = $derived(binder ? binder.sourcesFor(includeSub) : given);
 
   /** Prefix of the element ids that tie each format to its description. */
   const uid = $props.id();
@@ -43,7 +53,7 @@
   const LAYER_CHOICES = ['separate', 'merged'] as const;
 
   const initial = loadChoice();
-  let format = $state<ExportFormat>(initial.format);
+  let format = $state<ExportFormat>(untrack(() => (binder ? 'pdf' : initial.format)));
   let options = $state<ExportOptions>({ ...initial.options });
   /** SVG and PDF: separate or merged layers, remembered per format. */
   let layers = $state({ ...initial.layers });
@@ -78,10 +88,11 @@
   const someHidden = $derived(notes?.some((note) => layerInk(note).hidden) ?? false);
 
   // The notes held by the library are read once; until then (or if it fails) every resolution is offered and the
-  // desktop app refuses what is too large.
-  onMount(() => {
+  // desktop app refuses what is too large. A binder's PDF needs none of it (no resolution, merged layers).
+  $effect(() => {
+    if (binder) return;
     let alive = true;
-    const read = sources.map((source) =>
+    const read = untrack(() => sources).map((source) =>
       source.note ? Promise.resolve(source.note) : api.openNote(source.path).then((opened) => opened.note),
     );
     Promise.all(read)
@@ -109,7 +120,7 @@
 
   /** The destination dialog's proposed file name. */
   function defaultName(): string {
-    const stem = many ? t('export.defaultPdfName') : exportStem(sources[0].path);
+    const stem = binder ? binder.name : many ? t('export.defaultPdfName') : exportStem(sources[0].path);
     return `${stem}.${format}`;
   }
 
@@ -140,7 +151,8 @@
         request,
         chosen,
       );
-      saveChoice({ format, options: { ...options }, layers: { ...layers } });
+      // A binder's PDF keeps what the dialog remembers of the formats (it is not a choice of format).
+      if (!binder) saveChoice({ format, options: { ...options }, layers: { ...layers } });
       phase = 'done';
     } catch (e) {
       if (typeof e === 'object' && e !== null && 'code' in e && e.code === 'cancelled') cancelled = true;
@@ -174,6 +186,18 @@
   <div aria-busy={running}>
     <p class="muted">{subject}</p>
 
+    {#if binder?.hasSub}
+      <label class="check" data-slot="include-sub-binders">
+        <input type="checkbox" data-option="include-sub-binders" bind:checked={includeSub} disabled={running} />
+        {t('export.includeSubBinders')}
+      </label>
+      <p class="muted small">{t('export.includeSubBindersHint')}</p>
+    {/if}
+    {#if binder}
+      <p class="muted small" data-slot="binder-pdf-hint">{t('export.binderPdfHint', { count: sources.length })}</p>
+    {/if}
+
+    {#if !binder}
     <fieldset class="export-fieldset" disabled={running}>
       <legend>{t('export.format')}</legend>
       <div class="export-choices" role="radiogroup" aria-label={t('export.format')}>
@@ -228,6 +252,7 @@
         <p class="muted small">{t('export.compare.advice')}</p>
       </details>
     </fieldset>
+    {/if}
 
     <fieldset class="export-fieldset" disabled={running}>
       <legend>{t('export.options')}</legend>
@@ -348,7 +373,9 @@
     </div>
 
     <!-- The recognised handwriting, as text (milestone M7). -->
-    <TextExportSection {sources} disabled={running} />
+    {#if !binder}
+      <TextExportSection {sources} disabled={running} />
+    {/if}
   </div>
 </Modal>
 

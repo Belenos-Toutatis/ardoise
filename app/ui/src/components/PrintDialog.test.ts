@@ -73,7 +73,7 @@ describe('print dialog', () => {
     expect(ui.fit('actual').checked).toBe(true);
     ui.button('Imprimer…').click();
     await settle();
-    expect(spy).toHaveBeenCalledWith(sources, { background: true, fit: 'actual' });
+    expect(spy).toHaveBeenCalledWith(sources, { background: true, fit: 'actual', perSheet: 1 });
     expect(mockPrint.last?.sources).toEqual(sources);
     expect(ui.target.querySelector('[role="status"]')?.textContent).toBe("Envoyé à l'imprimante : 2 pages.");
     expect(ui.button('Imprimer de nouveau…')).toBeTruthy();
@@ -85,15 +85,33 @@ describe('print dialog', () => {
     const ui = await render([{ path: pathOf('Liste de courses') }], 'en');
     ui.background().click();
     ui.fit('fit').click();
+    ui.target.querySelector<HTMLInputElement>('input[name="print-per-sheet"][value="4"]')!.click();
     await settle();
     ui.button('Print…').click();
     await settle();
-    expect(spy).toHaveBeenCalledWith(expect.any(Array), { background: false, fit: 'fit' });
+    expect(spy).toHaveBeenCalledWith(expect.any(Array), { background: false, fit: 'fit', perSheet: 4 });
     cleanup?.();
 
     const again = await render([{ path: pathOf('Liste de courses') }], 'en');
     expect(again.background().checked).toBe(false);
     expect(again.fit('fit').checked).toBe(true);
+    expect(again.target.querySelector<HTMLInputElement>('input[name="print-per-sheet"][value="4"]')!.checked).toBe(true);
+  });
+
+  it('offers 1, 2 or 4 notes per sheet, says what the dialog counts, and counts the sheets printed', async () => {
+    const ui = await render([{ path: pathOf('Liste de courses') }, { path: pathOf('Réunion parents') }, { path: pathOf('Cours de physique') }], 'en');
+    const radios = [...ui.target.querySelectorAll<HTMLInputElement>('input[name="print-per-sheet"]')];
+    expect(radios.map((r) => r.value)).toEqual(['1', '2', '4']);
+    expect(radios.map((r) => r.closest('label')?.textContent?.trim())).toEqual(['1 (one note per sheet)', '2 per sheet', '4 per sheet']);
+    expect(radios[0].checked).toBe(true);
+    expect(ui.target.textContent).not.toContain('the pages are the sheets');
+    radios[1].click();
+    await settle();
+    expect(ui.target.textContent).toContain('the pages are the sheets');
+    ui.button('Print…').click();
+    await settle();
+    // Three notes, two to a sheet: two sheets.
+    expect(ui.target.querySelector('[role="status"]')?.textContent).toBe('Sent to the printer: 2 pages.');
   });
 
   it('prints the note of the editor with its unsaved changes', async () => {

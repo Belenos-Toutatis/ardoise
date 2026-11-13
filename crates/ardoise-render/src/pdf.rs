@@ -11,6 +11,9 @@
 //! Layers: merged (the default) paints every fill in one stream; separate puts each note
 //! layer's fills in marked content tied to an optional content group (PDF 1.5), one group per
 //! layer name over the whole document, so that a viewer can show or hide it.
+//!
+//! Outline (bookmarks): [`notes_to_pdf_with_outline`] writes the document outline of the viewer's
+//! bookmarks panel from a flat list of [`OutlineEntry`] (title, depth, page), all entries open.
 
 use std::collections::HashMap;
 
@@ -65,9 +68,33 @@ impl Default for PdfOptions {
     }
 }
 
+/// One bookmark of a PDF's outline: a title, how deep it is (0 = top level; an entry one level
+/// deeper than the one before it is its child), and the 0-based page it goes to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutlineEntry {
+    pub title: String,
+    pub level: usize,
+    pub page: usize,
+}
+
 /// A PDF document with one page per note, in order (`&Note`s, or [`NoteView`]s for notes
 /// with a background image).
 pub fn notes_to_pdf<'a, V>(notes: &[V], options: &PdfOptions) -> Result<Vec<u8>, RenderError>
+where
+    V: Into<NoteView<'a>> + Copy,
+{
+    notes_to_pdf_with_outline(notes, options, &[])
+}
+
+/// [`notes_to_pdf`] with an outline (the viewer's bookmarks): `outline` in reading order, each
+/// entry's `level` at most one more than the entry before it (a deeper one is brought up to
+/// that), the first at level 0. An entry whose page does not exist is left out. With no entry
+/// the document has no outline.
+pub fn notes_to_pdf_with_outline<'a, V>(
+    notes: &[V],
+    options: &PdfOptions,
+    outline: &[OutlineEntry],
+) -> Result<Vec<u8>, RenderError>
 where
     V: Into<NoteView<'a>> + Copy,
 {
@@ -82,9 +109,19 @@ where
     let tree = next.bump();
     let info = next.bump();
     let pages: Vec<Ref> = notes.iter().map(|_| next.bump()).collect();
+    let bookmarks = Bookmarks::of(outline, notes.len(), &mut next);
     let separate = options.layers == LayerMode::Separate;
     if !separate {
-        pdf.catalog(catalog).pages(tree);
+        let mut root = pdf.catalog(catalog);
+        root.pages(tree);
+        if let Some(bookmarks) = &bookmarks {
+            root.outlines(bookmarks.root);
+            root.page_mode(PageMode::UseOutlines);
+        }
+        root.finish();
+    }
+    if let Some(bookmarks) = &bookmarks {
+        bookmarks.write(&mut pdf, &pages);
     }
     pdf.pages(tree).kids(pages.iter().copied()).count(count);
     let mut groups = Groups::default();
@@ -105,6 +142,9 @@ where
         write_groups(&mut pdf, &groups);
         let mut root = pdf.catalog(catalog);
         root.pages(tree);
+        if let Some(bookmarks) = &bookmarks {
+            root.outlines(bookmarks.root);
+        }
         if !groups.ids.is_empty() {
             root.page_mode(PageMode::UseOC);
             let mut properties = root.insert(Name(b"OCProperties")).dict();
@@ -134,6 +174,98 @@ where
     }
     document.finish();
     Ok(pdf.finish())
+}
+
+/// The outline of a document, laid out as the tree the PDF wants (parents, siblings, children).
+struct Bookmarks {
+    root: Ref,
+    /// Per entry, in order: its object, its title, its page, its parent (an entry's index; `None`
+    /// for the top level), and its children's indexes.
+    items: Vec<Bookmark>,
+    top: Vec<usize>,
+}
+
+struct Bookmark {
+    id: Ref,
+    title: String,
+    page: usize,
+    parent: Option<usize>,
+    children: Vec<usize>,
+}
+
+impl Bookmarks {
+    /// The tree of `outline` over `pages` pages, with its object numbers taken from `next`;
+    /// `None` when there is no entry to show.
+    fn of(outline: &[OutlineEntry], pages: usize, next: &mut Ref) -> Option<Bookmarks> {
+        let mut items: Vec<Bookmark> = Vec::new();
+        let mut top = Vec::new();
+        // The entries of the branch being built, from the top level down to the last one.
+        let mut path: Vec<usize> = Vec::new();
+        for entry in outline.iter().filter(|entry| entry.page < pages) {
+            let depth = entry.level.min(path.len());
+            path.truncate(depth);
+            let parent = path.last().copied();
+            let index = items.len();
+            items.push(Bookmark {
+                id: next.bump(),
+                title: entry.title.clone(),
+                page: entry.page,
+                parent,
+                children: Vec::new(),
+            });
+            match parent {
+                Some(parent) => items[parent].children.push(index),
+                None => top.push(index),
+            }
+            path.push(index);
+        }
+        (!items.is_empty()).then(|| Bookmarks {
+            root: next.bump(),
+            items,
+            top,
+        })
+    }
+
+    /// How many entries lie below `index`, at any depth (every entry is open).
+    fn below(&self, index: usize) -> i32 {
+        self.items[index]
+            .children
+            .iter()
+            .map(|child| 1 + self.below(*child))
+            .sum()
+    }
+
+    fn write(&self, pdf: &mut Pdf, pages: &[Ref]) {
+        let (first, last) = (self.top[0], self.top[self.top.len() - 1]);
+        let mut root = pdf.outline(self.root);
+        root.first(self.items[first].id)
+            .last(self.items[last].id)
+            .count(i32::try_from(self.items.len()).unwrap_or(i32::MAX));
+        root.finish();
+        for (index, item) in self.items.iter().enumerate() {
+            let siblings = match item.parent {
+                Some(parent) => &self.items[parent].children,
+                None => &self.top,
+            };
+            let at = siblings.iter().position(|s| *s == index).unwrap_or(0);
+            let mut dict = pdf.outline_item(item.id);
+            dict.title(TextStr(&item.title));
+            dict.parent(item.parent.map_or(self.root, |p| self.items[p].id));
+            if at > 0 {
+                dict.prev(self.items[siblings[at - 1]].id);
+            }
+            if let Some(next) = siblings.get(at + 1) {
+                dict.next(self.items[*next].id);
+            }
+            if let (Some(first), Some(last)) = (item.children.first(), item.children.last()) {
+                dict.first(self.items[*first].id)
+                    .last(self.items[*last].id)
+                    .count(self.below(index));
+            }
+            dict.dest().page(pages[item.page]).fit();
+            dict.finish();
+        }
+    }
 }
 
 /// The optional content groups of a document: one per distinct layer name, over all its pages,
@@ -634,6 +766,42 @@ mod tests {
             notes_to_pdf::<NoteView<'_>>(&[], &PdfOptions::default()),
             Err(RenderError::Encode(_))
         ));
+    }
+
+    fn entry(title: &str, level: usize, page: usize) -> OutlineEntry {
+        OutlineEntry {
+            title: title.to_owned(),
+            level,
+            page,
+        }
+    }
+
+    #[test]
+    fn the_outline_is_a_tree_of_the_levels_in_order() {
+        let outline = [
+            entry("A", 0, 0),
+            entry("S", 0, 1),
+            entry("S1", 1, 1),
+            entry("S2", 1, 2),
+            // Too deep (two levels below the entry before it): brought up to its child.
+            entry("S2x", 3, 3),
+            entry("B", 0, 4),
+            // Past the last page: left out.
+            entry("lost", 0, 9),
+        ];
+        let mut next = Ref::new(10);
+        let tree = Bookmarks::of(&outline, 5, &mut next).unwrap();
+        assert_eq!(tree.items.len(), 6);
+        assert_eq!(tree.top, [0, 1, 5]);
+        assert_eq!(tree.items[1].children, [2, 3]);
+        assert_eq!(tree.items[3].children, [4]);
+        assert_eq!(tree.items[4].parent, Some(3));
+        assert_eq!(tree.below(1), 3);
+        assert_eq!(tree.below(0), 0);
+        // Seven objects were taken: six entries and the root.
+        assert_eq!(next, Ref::new(17));
+        assert!(Bookmarks::of(&[], 5, &mut Ref::new(1)).is_none());
+        assert!(Bookmarks::of(&[entry("x", 0, 5)], 5, &mut Ref::new(1)).is_none());
     }
 
     #[test]

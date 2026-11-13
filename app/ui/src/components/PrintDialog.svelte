@@ -8,20 +8,27 @@
   import { api, errorMessage } from '../lib/api';
   import { t, tn } from '../lib/i18n.svelte';
   import type { ExportSource, PrintOptions } from '../lib/note';
-  import { loadPrintChoice, savePrintChoice } from '../lib/print-options';
+  import { PRINT_PER_SHEET, loadPrintChoice, savePrintChoice } from '../lib/print-options';
   import { beginWork } from '../lib/work';
   import Modal from './Modal.svelte';
 
   let {
-    sources,
+    sources: given,
+    binder,
     subject,
     onclose,
   }: {
     sources: ExportSource[];
+    /** « Imprimer le classeur »: the notes are a binder's, in its order; `sourcesFor` gives them with or without its sub-binders. */
+    binder?: { name: string; hasSub: boolean; sourcesFor: (includeSub: boolean) => ExportSource[] };
     /** What is printed, as a sentence part: the note's title, or "3 notes". */
     subject: string;
     onclose: () => void;
   } = $props();
+
+  /** The sub-binders are printed too: off at first (SPEC: an option). */
+  let includeSub = $state(false);
+  const sources = $derived(binder ? binder.sourcesFor(includeSub) : given);
 
   let options = $state<PrintOptions>({ ...loadPrintChoice() });
   let phase = $state<'idle' | 'running' | 'done' | 'cancelled'>('idle');
@@ -61,6 +68,17 @@
     <p class="muted">{subject}</p>
     <p class="muted small">{t('print.intro')}</p>
 
+    {#if binder?.hasSub}
+      <label class="check" data-slot="include-sub-binders">
+        <input type="checkbox" data-option="include-sub-binders" bind:checked={includeSub} disabled={running} />
+        {t('export.includeSubBinders')}
+      </label>
+      <p class="muted small">{t('export.includeSubBindersHint')}</p>
+    {/if}
+    {#if binder}
+      <p class="muted small" data-slot="binder-print-hint">{t('print.binderHint', { count: sources.length })}</p>
+    {/if}
+
     <fieldset class="export-fieldset" disabled={running}>
       <legend>{t('print.options')}</legend>
       <label class="check">
@@ -79,6 +97,18 @@
           {t('print.fitFit')}
         </label>
       </div>
+      <div class="export-row" role="radiogroup" aria-label={t('print.perSheet')} data-slot="print-per-sheet">
+        <span>{t('print.perSheet')}</span>
+        {#each PRINT_PER_SHEET as count (count)}
+          <label class="choice">
+            <input type="radio" name="print-per-sheet" value={count} bind:group={options.perSheet} />
+            {t(`print.perSheetChoices.${count}`)}
+          </label>
+        {/each}
+      </div>
+      {#if options.perSheet > 1}
+        <p class="muted small">{t('print.perSheetHint')}</p>
+      {/if}
     </fieldset>
 
     {#if running}

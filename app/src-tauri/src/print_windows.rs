@@ -1,6 +1,6 @@
 //! The Windows side of printing ([`crate::print`]): the system print dialog (`PrintDlgEx`), then
-//! a GDI job with one page per note, the orientation of the device context following each
-//! note (`ResetDC`) and the rendered note stretched over the sheet.
+//! a GDI job with one sheet per note, or per two or four notes, the orientation of the device
+//! context following each sheet (`ResetDC`) and each rendered note stretched over its cell.
 //!
 //! The job itself ([`print_job`]) takes any device context, so that the test prints to
 //! "Microsoft Print to PDF" with an output file (no dialog, no paper) and checks the PDF.
@@ -25,7 +25,8 @@ use windows::core::PCWSTR;
 use crate::commands::CommandResult;
 use crate::export::LoadedSource;
 use crate::print::{
-    Orientation, PrintOptions, PrintResult, Sheet, place, print_error, render_page, selected_notes,
+    Orientation, PrintOptions, PrintResult, Sheet, cells, place, print_error, render_page,
+    selected_sheets, sheet_count, sheet_orientation,
 };
 
 /// Ranges the dialog can hold ("1-3, 5, 7-9").
@@ -100,16 +101,16 @@ fn sheet_of(hdc: HDC) -> Sheet {
     }
 }
 
-/// Draws the pages of `notes` (the indexes `selected`) on `hdc`, one note per sheet in its
-/// orientation. `output` names a file to print to (a "print to file" printer), else the printer
-/// sends the job to its port. Returns the number of pages printed; the job is aborted on the
-/// first failure.
+/// Draws the sheets `sheets` (each the indexes of the notes of `sources` it holds) on `hdc`, in
+/// the orientation [`sheet_orientation`] gives. `output` names a file to print to (a "print to
+/// file" printer), else the printer sends the job to its port. Returns the number of sheets
+/// printed; the job is aborted on the first failure.
 pub fn print_job(
     hdc: HDC,
     mut devmode: Option<DevMode>,
     title: &str,
     sources: &[LoadedSource],
-    selected: &[usize],
+    sheets: &[Vec<usize>],
     options: &PrintOptions,
     output: Option<&Path>,
 ) -> CommandResult<u32> {
@@ -128,11 +129,15 @@ pub fn print_job(
         return Err(print_error("the printer refused the document"));
     }
     let mut pages = 0;
-    for &index in selected {
-        let Some(source) = sources.get(index) else {
+    for sheet in sheets {
+        let notes: Vec<&LoadedSource> = sheet
+            .iter()
+            .filter_map(|&index| sources.get(index))
+            .collect();
+        if notes.is_empty() {
             continue;
-        };
-        if let Err(error) = print_page(hdc, devmode.as_mut(), source, options) {
+        }
+        if let Err(error) = print_sheet(hdc, devmode.as_mut(), &notes, options) {
             // SAFETY: the document was started on this device context.
             unsafe { AbortDoc(hdc) };
             return Err(error);
@@ -146,14 +151,16 @@ pub fn print_job(
     Ok(pages)
 }
 
-fn print_page(
+/// One sheet: the notes `notes` (at most the number per sheet), each in its cell.
+fn print_sheet(
     hdc: HDC,
     devmode: Option<&mut DevMode>,
-    source: &LoadedSource,
+    notes: &[&LoadedSource],
     options: &PrintOptions,
 ) -> CommandResult<()> {
+    let per_sheet = options.notes_per_sheet();
     if let Some(devmode) = devmode {
-        devmode.set_orientation(Orientation::of(source.note.page));
+        devmode.set_orientation(sheet_orientation(notes[0].note.page, per_sheet));
         // SAFETY: between two pages, with nothing selected into the context.
         if unsafe { ResetDCW(hdc, devmode.as_ptr()) }.is_invalid() {
             return Err(print_error(
@@ -161,8 +168,42 @@ fn print_page(
             ));
         }
     }
-    let placement = place(source.note.page, sheet_of(hdc), options.fit);
-    let bitmap = render_page(source, &placement, options)?;
+    let sheet = sheet_of(hdc);
+    let cells = cells(sheet, per_sheet);
+    // Drawn before the page starts: a note that cannot be rendered fails the job early.
+    let mut drawings = Vec::with_capacity(notes.len());
+    for (source, cell) in notes.iter().zip(&cells) {
+        let in_cell = Sheet {
+            width: cell.width,
+            height: cell.height,
+            ..sheet
+        };
+        let mut placement = place(source.note.page, in_cell, options.fit);
+        placement.x += cell.x;
+        placement.y += cell.y;
+        let bitmap = render_page(source, &placement, options)?;
+        drawings.push((placement, bitmap));
+    }
+    // SAFETY: `hdc` is live and has a started document.
+    if unsafe { StartPage(hdc) } <= 0 {
+        return Err(print_error("the printer refused a page"));
+    }
+    for (placement, bitmap) in &drawings {
+        draw(hdc, placement, bitmap)?;
+    }
+    // SAFETY: the page was started above.
+    if unsafe { EndPage(hdc) } <= 0 {
+        return Err(print_error("the printer could not finish a page"));
+    }
+    Ok(())
+}
+
+/// Stretches `bitmap` over `placement` on the page being drawn.
+fn draw(
+    hdc: HDC,
+    placement: &crate::print::Placement,
+    bitmap: &crate::print::PageBitmap,
+) -> CommandResult<()> {
     let header = BITMAPINFOHEADER {
         biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
         biWidth: bitmap.width as i32,
@@ -177,12 +218,9 @@ fn print_page(
         bmiHeader: header,
         ..Default::default()
     };
-    // SAFETY: `hdc` is live and has a started document; `bitmap.bgra` holds
+    // SAFETY: `hdc` is live and has a started page; `bitmap.bgra` holds
     // `width × height` 32-bit pixels, as `info` says.
     unsafe {
-        if StartPage(hdc) <= 0 {
-            return Err(print_error("the printer refused a page"));
-        }
         SetStretchBltMode(hdc, HALFTONE);
         let drawn = StretchDIBits(
             hdc,
@@ -201,9 +239,6 @@ fn print_page(
         );
         if drawn == 0 {
             return Err(print_error("the page could not be drawn"));
-        }
-        if EndPage(hdc) <= 0 {
-            return Err(print_error("the printer could not finish a page"));
         }
     }
     Ok(())
@@ -264,7 +299,8 @@ fn show_dialog(
     dialog.nMaxPageRanges = MAX_RANGES;
     dialog.lpPageRanges = ranges.as_mut_ptr();
     dialog.nMinPage = 1;
-    dialog.nMaxPage = sources.len() as u32;
+    // The dialog's pages are the sheets: two notes per sheet make half as many pages.
+    dialog.nMaxPage = sheet_count(sources.len(), options.notes_per_sheet()) as u32;
     dialog.nCopies = 1;
     dialog.nStartPage = START_PAGE_GENERAL;
     // SAFETY: `dialog` is initialised as the function requires, and `ranges` outlives the call.
@@ -306,7 +342,7 @@ fn finish(
     } else {
         Vec::new()
     };
-    let selected = selected_notes(sources.len(), &chosen);
+    let sheets = selected_sheets(sources.len(), options.notes_per_sheet(), &chosen);
     let devmode = devmode_of(dialog.hDevMode);
     let title = match sources {
         [only] => only.note.title.trim().to_owned(),
@@ -317,9 +353,7 @@ fn finish(
     } else {
         title
     };
-    let pages = print_job(
-        dialog.hDC, devmode, &title, sources, &selected, options, None,
-    )?;
+    let pages = print_job(dialog.hDC, devmode, &title, sources, &sheets, options, None)?;
     Ok(PrintResult {
         printed: true,
         pages,
@@ -448,13 +482,14 @@ mod tests {
         let options = PrintOptions {
             background: true,
             fit: PrintFit::Fit,
+            per_sheet: 1,
         };
         let pages = print_job(
             hdc,
             Some(devmode),
             "Essai",
             &sources,
-            &[0, 1, 2],
+            &[vec![0], vec![1], vec![2]],
             &options,
             Some(&output),
         );
@@ -495,7 +530,7 @@ mod tests {
             Some(devmode),
             "Essai",
             &sources,
-            &[1],
+            &[vec![1]],
             &options,
             Some(&partial),
         );
@@ -505,6 +540,71 @@ mod tests {
         }
         assert_eq!(pages.unwrap(), 1);
         assert_eq!(page_sizes(&partial).len(), 1);
+    }
+
+    /// Four notes, two or four to a sheet, printed to "Microsoft Print to PDF": the sheets turn
+    /// as the layout wants (two portrait notes side by side on a landscape sheet), the last sheet
+    /// holds what is left, and the page count is the number of sheets.
+    #[test]
+    fn notes_share_a_sheet_in_cells() {
+        let Some(devmode) = default_devmode(PRINTER) else {
+            eprintln!("skipped: the printer \"{PRINTER}\" is not installed");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let sources: Vec<LoadedSource> = (0..5)
+            .map(|n| source(&format!("Note {n}"), A4_PORTRAIT))
+            .collect();
+        let print = |per_sheet: u8, sheets: &[Vec<usize>], name: &str, devmode: DevMode| {
+            let output = dir.path().join(name);
+            let printer = wide(PRINTER);
+            let mut devmode = devmode;
+            // SAFETY: valid null-terminated strings and a complete DEVMODE.
+            let hdc = unsafe {
+                CreateDCW(
+                    PCWSTR::null(),
+                    PCWSTR(printer.as_ptr()),
+                    PCWSTR::null(),
+                    Some(devmode.as_ptr()),
+                )
+            };
+            assert!(!hdc.is_invalid(), "cannot open the printer");
+            let options = PrintOptions {
+                background: true,
+                fit: PrintFit::Fit,
+                per_sheet,
+            };
+            let pages = print_job(
+                hdc,
+                Some(devmode),
+                "Essai",
+                &sources,
+                sheets,
+                &options,
+                Some(&output),
+            );
+            // SAFETY: the context was created above.
+            unsafe {
+                let _ = DeleteDC(hdc);
+            }
+            (pages.unwrap(), page_sizes(&output))
+        };
+        // Two per sheet: portrait notes make landscape sheets (5 notes: 3 sheets).
+        let sheets = crate::print::selected_sheets(5, 2, &[]);
+        let (pages, sizes) = print(2, &sheets, "two.pdf", devmode);
+        assert_eq!(pages, 3);
+        assert_eq!(sizes.len(), 3);
+        assert!(sizes.iter().all(|(w, h)| w > h), "{sizes:?}");
+        // Four per sheet: the sheets keep the notes' orientation (5 notes: 2 sheets).
+        let sheets = crate::print::selected_sheets(5, 4, &[]);
+        let (pages, sizes) = print(4, &sheets, "four.pdf", default_devmode(PRINTER).unwrap());
+        assert_eq!(pages, 2);
+        assert!(sizes.iter().all(|(w, h)| w < h), "{sizes:?}");
+        // The dialog's page range counts sheets: the second sheet only.
+        let sheets = crate::print::selected_sheets(5, 2, &[(2, 2)]);
+        assert_eq!(sheets, [vec![2, 3]]);
+        let (pages, _) = print(2, &sheets, "second.pdf", default_devmode(PRINTER).unwrap());
+        assert_eq!(pages, 1);
     }
 
     /// Opens Windows' real print dialog over a window of the test, closes it as the user would
@@ -548,6 +648,7 @@ mod tests {
         let options = PrintOptions {
             background: true,
             fit: PrintFit::Fit,
+            per_sheet: 1,
         };
         let worker = std::thread::spawn(move || {
             // The dialog needs an owner window (the app passes its main window): a small
