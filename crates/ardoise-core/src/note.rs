@@ -9,6 +9,8 @@
 use ardoise_ink::{Rgba, Stroke};
 
 pub use crate::objects::{ObjectBody, PageObject, TextBody};
+/// The families of a text frame, for the crates that build notes and do not depend on the fonts.
+pub use ardoise_text::FontFamily;
 
 /// Page sizes of the Bamboo Slate Large (A4) in device units.
 pub const A4_LANDSCAPE: PageSize = PageSize {
@@ -234,6 +236,44 @@ impl Note {
     pub fn has_content(&self) -> bool {
         !self.objects.is_empty() || self.strokes.iter().any(|s| !s.points.is_empty())
     }
+
+    /// Whether `layer` is shown (a layer the note does not have is not).
+    pub fn layer_visible(&self, layer: u32) -> bool {
+        self.layers
+            .get(layer as usize)
+            .is_some_and(|layer| layer.visible)
+    }
+
+    /// The text frames this version can read, in reading order (top to bottom, then left to
+    /// right, by the top-left corner of their box on the page), with their text. Every layer;
+    /// the caller picks with [`Note::layer_visible`].
+    pub fn text_frames(&self) -> Vec<(&PageObject, &TextBody)> {
+        let mut frames: Vec<_> = self
+            .objects
+            .iter()
+            .filter_map(|object| Some((object, object.as_text()?)))
+            .collect();
+        frames.sort_by(|(a, _), (b, _)| {
+            let (a, b) = (a.page_bounds(), b.page_bounds());
+            a[1].total_cmp(&b[1]).then(a[0].total_cmp(&b[0]))
+        });
+        frames
+    }
+
+    /// What the library search reads of the page's typed text: the text of the frames of the
+    /// visible layers, in reading order, joined by a line break; a frame with nothing but white
+    /// space says nothing. Empty when the page has no text frame. Hidden layers are left out like
+    /// they are for the recognised handwriting: the search finds what the page shows.
+    pub fn typed_text(&self) -> String {
+        self.text_frames()
+            .into_iter()
+            .filter(|(object, body)| {
+                self.layer_visible(object.layer) && !body.text.trim().is_empty()
+            })
+            .map(|(_, body)| body.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 #[cfg(test)]
@@ -264,6 +304,49 @@ mod tests {
             ImageRect::fit(A4_LANDSCAPE, (0, 10), ImageFit::Contain),
             whole
         );
+    }
+
+    fn frame(id: &str, layer: u32, x: f32, y: f32, text: &str) -> PageObject {
+        PageObject::text(
+            id,
+            layer,
+            0,
+            x,
+            y,
+            TextBody {
+                text: text.to_owned(),
+                font: ardoise_text::FontFamily::LatinModern,
+                bold: false,
+                size: 600.0,
+                color: Rgba::BLACK,
+            },
+        )
+    }
+
+    #[test]
+    fn typed_text_is_read_in_reading_order_on_visible_layers_only() {
+        let mut note = crate::testutil::blank_note("n", "Texte");
+        note.layers.push(Layer {
+            name: "Cachée".into(),
+            visible: false,
+        });
+        note.objects = vec![
+            frame("low", 0, 100.0, 5_000.0, "Bas"),
+            frame("right", 0, 9_000.0, 1_000.0, "Droite"),
+            frame("left", 0, 100.0, 1_000.0, "Gauche\nsuite"),
+            frame("hidden", 1, 100.0, 3_000.0, "Secret"),
+            frame("blank", 0, 100.0, 4_000.0, "  \n "),
+        ];
+        assert_eq!(note.typed_text(), "Gauche\nsuite\nDroite\nBas");
+        // Every frame, every layer, in the same order, for the callers that choose.
+        let ids: Vec<&str> = note
+            .text_frames()
+            .iter()
+            .map(|(object, _)| object.id.as_str())
+            .collect();
+        assert_eq!(ids, ["left", "right", "hidden", "blank", "low"]);
+        assert!(note.layer_visible(0) && !note.layer_visible(1) && !note.layer_visible(2));
+        assert_eq!(crate::testutil::blank_note("m", "").typed_text(), "");
     }
 
     #[test]
