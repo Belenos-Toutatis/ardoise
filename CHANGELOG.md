@@ -2,6 +2,11 @@
 
 ## Non publié
 
+### Corrigé (sélection de plusieurs notes ; retour de l'utilisateur du 2026-11-13)
+
+- **Ctrl+A sélectionne toutes les notes affichées** où que soit le dernier clic (il sélectionnait le texte de la fenêtre quand aucune carte n'avait le focus), et **Échap désélectionne tout** de la même façon ; dans un champ de saisie, ces touches restent celles du champ.
+- **Maj+clic sur la case d'une carte** sélectionne la plage, comme Maj+clic sur la carte (il ne cochait que cette note). Sans note cochée auparavant, la plage part de la première note affichée, comme dans l'Explorateur. Maj+clic ne surligne plus le texte des cartes.
+
 ### Modifié (le panneau Tablette en onglets, les quatre positions de la Xiaomi ; retour de l'utilisateur, Q17)
 
 - **Le panneau Tablette est étroit et n'a plus rien à faire défiler** : trois onglets en icônes sur un rail, comme le panneau de côté de l'éditeur (flèches haut et bas, `Début`, `Fin`, `Entrée` ; le lecteur d'écran lit les onglets comme tels). **Utiliser** : la tablette connectée (son dessin, son nom, son état, la batterie, les pages en mémoire), puis **Mode direct** et **Synchroniser** l'un sous l'autre, ce dernier disant ce qui attend (« 3 pages »), la dernière synchronisation et tous les messages d'état (recherche, attente, progression, échec, pages qui attendent, confirmation **Synchroniser et effacer** de la Xiaomi). Une pastille sur l'icône donne le nombre de pages qui attendent sur la tablette, quel que soit l'onglet ouvert. **Réglages** : ceux d'une seule tablette, choisie dans une liste quand on en connaît deux (la tablette connectée au départ) ; pour la Bamboo Slate, la synchronisation automatique, l'effacement après import, le bouton, ses quatre positions, son nom et **Mettre à l'heure** ; pour la Xiaomi, les deux premières options et ses propres positions. Les deux options communes le restent, et l'écran le dit. **Tablettes** : chaque tablette connue avec ce qu'elle a indiqué à sa dernière connexion, **Oublier la tablette** (même confirmation), **Ajouter une tablette**, **Tester la tablette…**. Les longs textes d'aide du panneau se replient derrière **Plus de détails** ; l'écran **Réglages** les montre toujours.

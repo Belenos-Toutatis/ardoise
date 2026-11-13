@@ -291,15 +291,22 @@ export class LibraryState {
     this.anchor = path;
   }
 
-  /** Selects the notes from the last toggled one to `path`, in display order. */
+  /**
+   * Selects the notes from the last toggled one to `path`, in display order. With no such note (nothing was ticked
+   * or Ctrl-clicked, or it is no longer shown), the range starts at the first note shown, as in the Explorer.
+   */
   selectRange(path: string): void {
     const paths = this.visible.map((n) => n.path);
-    const from = this.anchor ? paths.indexOf(this.anchor) : -1;
     const to = paths.indexOf(path);
-    if (from < 0 || to < 0) {
+    if (to < 0) {
       this.selected = [path];
       this.anchor = path;
       return;
+    }
+    let from = this.anchor ? paths.indexOf(this.anchor) : -1;
+    if (from < 0) {
+      from = 0;
+      this.anchor = paths[0];
     }
     const range = paths.slice(Math.min(from, to), Math.max(from, to) + 1);
     this.selected = [...new Set([...this.selected, ...range])];

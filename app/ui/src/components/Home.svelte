@@ -266,7 +266,39 @@
     return !(panel === 'diagnostic' && workInProgress());
   }
 
+  /** Whether the key is typed in a field: Ctrl+A and Escape are the field's own there. */
+  function typing(event: KeyboardEvent): boolean {
+    const target = event.target;
+    return (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
+    );
+  }
+
+  /**
+   * The selection's keys wherever the focus is in the library (a card handles them itself when it has the focus):
+   * Ctrl+A selects every note shown instead of the window's text, Escape drops the selection.
+   */
+  function selectionKey(event: KeyboardEvent): boolean {
+    if (away || lib.dialog || fromFile || share.panelOpen || modalOpen() || event.defaultPrevented || typing(event)) return false;
+    if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey && lib.selected.length > 0) {
+      lib.clearSelection();
+      return true;
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'a') {
+      lib.selectAll();
+      return true;
+    }
+    return false;
+  }
+
   function shortcuts(event: KeyboardEvent) {
+    if (selectionKey(event)) {
+      event.preventDefault();
+      return;
+    }
     if (closesPanel(event)) {
       event.preventDefault();
       panel = null;

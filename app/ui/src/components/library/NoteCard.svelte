@@ -94,6 +94,14 @@
     else onopen(note);
   }
 
+  /** The card's box: ticks or unticks the note; with Shift, selects the range up to it, as a Shift-click on the card. */
+  function check(event: MouseEvent) {
+    // The state decides what the box shows, not the click.
+    event.preventDefault();
+    if (event.shiftKey) lib.selectRange(note.path);
+    else lib.toggle(note.path);
+  }
+
   function keydown(event: KeyboardEvent) {
     const key = event.key;
     if (key === 'Enter') {
@@ -188,7 +196,7 @@
       type="checkbox"
       checked={selected}
       aria-label={t('library.card.select', { title })}
-      onchange={() => lib.toggle(note.path)}
+      onclick={check}
     />
   </label>
 

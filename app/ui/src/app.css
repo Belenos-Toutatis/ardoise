@@ -905,6 +905,8 @@ select {
 }
 
 .note-card {
+  /* A Shift-click selects notes, not the text between two clicks. */
+  user-select: none;
   position: relative;
   display: flex;
   flex-direction: column;

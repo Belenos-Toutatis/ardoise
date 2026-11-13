@@ -307,6 +307,46 @@ describe('library: selection, moving, trash', () => {
     expect(ui.q('.selection-bar')).toBeNull();
   });
 
+  it('selects a range with Shift on the boxes, and from the first note when nothing was chosen', async () => {
+    const ui = await render();
+    const box = (title: string) => ui.card(title).querySelector<HTMLInputElement>('.card-check input')!;
+    // Nothing chosen yet: the range starts at the first note shown.
+    await ui.click(ui.open('Liste de courses'), { shiftKey: true });
+    expect(ui.all('.note-card.selected').length).toBe(2);
+    await ui.click(ui.button('Désélectionner'));
+    // A box ticked, then Shift on another box: the notes between them too.
+    await ui.click(box('Réunion parents'));
+    expect(ui.q('.selection-count')?.textContent).toBe('Sélection : 1');
+    expect(box('Réunion parents').checked).toBe(true);
+    await ui.click(box('Cours de physique'), { shiftKey: true });
+    expect(ui.all('.note-card.selected').length).toBe(3);
+    // A box unticked alone.
+    await ui.click(box('Liste de courses'));
+    expect(ui.all('.note-card.selected').length).toBe(2);
+    expect(box('Liste de courses').checked).toBe(false);
+  });
+
+  it('selects every note with Ctrl+A and drops the selection with Escape wherever the focus is, but not in a field', async () => {
+    const ui = await render();
+    const search = ui.q<HTMLInputElement>('input.search')!;
+    // In the search field the keys are the field's own.
+    const typed = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
+    search.dispatchEvent(typed);
+    await ui.settle();
+    expect(typed.defaultPrevented).toBe(false);
+    expect(ui.q('.selection-bar')).toBeNull();
+    // Anywhere else: every note shown, and the window's text is left alone.
+    const all = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(all);
+    await ui.settle();
+    expect(all.defaultPrevented).toBe(true);
+    expect(ui.all('.note-card.selected').length).toBe(3);
+    await ui.key(search, 'Escape');
+    expect(ui.all('.note-card.selected').length).toBe(3);
+    await ui.key(document.body, 'Escape');
+    expect(ui.q('.selection-bar')).toBeNull();
+  });
+
   it('selects and navigates with the keyboard', async () => {
     const ui = await render();
     const first = ui.open('Réunion parents');
