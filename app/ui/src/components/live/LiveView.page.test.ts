@@ -373,7 +373,10 @@ describe('the live window Fond tab', () => {
     (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\\Documents\\fiche.pdf';
     view.button('Choisir un PDF ou une image…').click();
     await vi.waitFor(() => expect(view.fondBlock().querySelector('[data-slot="background-pdf"]')).toBeTruthy());
-    choose(view.fondBlock().querySelector('select')!, '2');
+    // Live mode asks the same question, with the same thumbnails: the second page.
+    expect(view.fondBlock().querySelectorAll('[role="radio"]').length).toBe(3);
+    view.fondBlock().querySelector<HTMLElement>('[role="radio"][data-page="2"]')!.click();
+    await tick();
     view.button('Mettre en fond').click();
     await vi.waitFor(() => expect(view.canvas().dataset.image).toBe('fiche.pdf'));
     // A portrait PDF on the tablet's landscape page: no question, the page stays as the tablet holds it.

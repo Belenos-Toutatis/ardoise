@@ -259,7 +259,18 @@ and the `mock-*.ts` stand-ins, `locales/fr.json` and `locales/en.json` (each par
 - **Error codes** (`errorCodes.*`): `backgroundUnsupported`, `backgroundTooLarge` (an image of more than 50
   megapixels or 256 MB, a PDF of more than 512 MB or 10 000 pages: its sentence names both),
   `backgroundDamaged`, `backgroundUnreadable`, `backgroundMissing`, `pdfUnsupported`, `pdfEncrypted`,
-  `pdfNoSuchPage`.
+  `pdfNoSuchPage`, `pdfPreviewClosed`.
+- **Choosing the page of a PDF** (`PdfPagePicker.svelte`, used by `BackgroundImageSection.svelte` in the editor's and
+  live mode's Fond tab; Rust side `pdf_preview.rs`): a radio group of page thumbnails, two to a row, the number under
+  each (one tab stop, arrows, Home and End; a number field from 8 pages). The thumbnails come from the same Windows
+  renderer as the import: `open_pdf_preview(path)` reads and loads the PDF once and answers a token (at most 4 are
+  kept, the oldest dropped), `render_pdf_thumbnail(token, page, width)` answers a `data:image/png` URL (about 128 CSS
+  px wide at the screen's pixel ratio, at most 2.5 times as tall as wide; one page at a time in Rust),
+  `close_pdf_preview(token)` frees the PDF. The interface (`lib/pdf-thumbnails.svelte.ts`) asks for a page only when
+  its cell comes within 120 px of the grid's visible part, two at a time, lowest page first; a page that scrolled
+  away before its turn is not drawn; the pictures are kept while the question is open and dropped, with the PDF,
+  when it is answered, cancelled or another file is chosen. A page that cannot be drawn keeps a neutral placeholder
+  and stays chooseable.
 
 ## Drag a note out (`drag`)
 

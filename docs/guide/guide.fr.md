@@ -771,7 +771,7 @@ Les onglets **Page** et **Fond** sont grisés tant que le direct n'est pas lanc�
 - Une page qui n'a ni écriture ni image n'est pas enregistrée, même si vous avez changé son papier.
 
 **L'image** (onglet **Fond**, bloc **Image ou PDF de fond**) : **Choisir un PDF ou une image…**, la page du PDF s'il y en
-a plusieurs, puis **Mettre en fond**. L'image (PNG ou JPEG) ou la page de PDF se place *sous* l'écriture de la page en
+a plusieurs (une vignette par page, comme dans l'éditeur : voir plus bas), puis **Mettre en fond**. L'image (PNG ou JPEG) ou la page de PDF se place *sous* l'écriture de la page en
 cours, **Entière** (toute visible, sans déformation) ; **Placement** (**Entière**, **Pleine page**, **Étirée**),
 **Opacité**, **Tourner l'image seule**, **Remplacer…** et **Retirer l'image** la règlent ensuite, comme dans l'éditeur
 (chapitre 8). L'import d'une page de PDF peut prendre quelques secondes : la tablette continue d'écrire pendant ce temps.
@@ -1238,7 +1238,13 @@ L'onglet **Page** du panneau de côté règle la feuille :
 
 Dans l'onglet **Fond** du panneau de côté, la section **Image ou PDF de fond** place une image (PNG ou JPEG) ou une page de PDF *sous*
 l'écriture, pour annoter une fiche, un document ou une photo : **Choisir un PDF ou une image…**, la page du PDF si
-besoin, puis **Mettre en fond**. Réglez le **Placement** (**Entière**, **Pleine page**, **Étirée**) et l'**Opacité** ; **Remplacer…**
+besoin, puis **Mettre en fond**. Pour un PDF de plusieurs pages, Ardoise montre une **vignette de chaque page**, son
+numéro dessous, pour reconnaître celle qu'il vous faut : cliquez sur la vignette voulue (la première est choisie au
+départ, la page choisie est entourée), ou, au clavier, `Tab` pour entrer dans la liste, les flèches pour passer d'une
+page à l'autre (`↑` et `↓` d'une ligne, `←` et `→` d'une page), `Début` et `Fin` pour la première et la dernière page.
+Les vignettes se dessinent quand elles arrivent à l'écran, si bien qu'un PDF de plusieurs centaines de pages s'ouvre
+tout de suite ; à partir de huit pages, un champ **Page** permet d'aller directement à un numéro. Une page que
+Windows n'arrive pas à dessiner reste choisissable : sa vignette dit « Aperçu indisponible ». Réglez le **Placement** (**Entière**, **Pleine page**, **Étirée**) et l'**Opacité** ; **Remplacer…**
 change le fichier, **Retirer l'image** l'enlève, **Tourner l'image seule** tourne l'image sans toucher à la feuille ni
 à l'écriture. Si l'image n'a pas l'orientation de la note, Ardoise propose de passer la note dans l'orientation de
 l'image. Tout est annulable. L'image suit les rotations, découpes et assemblages et figure dans les miniatures, les

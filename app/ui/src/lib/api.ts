@@ -595,6 +595,16 @@ export const api = {
   /** Forgets every staged image (the editor closes or opens another note). */
   releaseBackgroundImages: () => call<void>('release_background_images'),
   /**
+   * Loads the PDF at `path` for the thumbnails of the question « which page? » (`pdf_preview.rs`); answers the token
+   * the two commands below take. Close it when the question is over.
+   */
+  openPdfPreview: (path: string) => call<number>('open_pdf_preview', { path }),
+  /** Page `page` (from 1) of an open preview as a PNG data URL, about `width` pixels wide. */
+  renderPdfThumbnail: (token: number, page: number, width: number) =>
+    call<string>('render_pdf_thumbnail', { token, page, width }),
+  /** Frees the preview. */
+  closePdfPreview: (token: number) => call<void>('close_pdf_preview', { token }),
+  /**
    * New notes in `binder`: one per page of a PDF (`pages` from 1, all when absent) or one for an
    * image; `onProgress` hears how many are made, before the first one and after each.
    */

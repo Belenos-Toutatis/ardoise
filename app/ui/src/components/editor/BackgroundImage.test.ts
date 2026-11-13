@@ -4,6 +4,7 @@ import { mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type AppState } from '../../lib/api';
 import { setLocale } from '../../lib/i18n.svelte';
+import { openPdfPreviews } from '../../lib/mock-background';
 import { mockLibrary, resetMockLibrary } from '../../lib/mock-data';
 import BackgroundImageSection from './BackgroundImageSection.svelte';
 import Editor from './Editor.svelte';
@@ -99,7 +100,11 @@ describe('background image in the editor', () => {
     button('Choisir un PDF ou une image…').click();
     await vi.waitFor(() => expect(section()?.querySelector('[data-slot="background-pdf"]')).toBeTruthy());
     expect(section()?.textContent).toContain('fiche.pdf : 3 pages');
-    choose(section()!.querySelector('select')!, '2');
+    // The pages are thumbnails: the first is chosen to begin with, a click chooses the second.
+    expect(section()!.querySelector('[role="radio"][aria-checked="true"]')?.getAttribute('aria-label')).toBe('Page 1');
+    expect(section()!.querySelector('select')).toBeNull();
+    section()!.querySelector<HTMLElement>('[role="radio"][data-page="2"]')!.click();
+    await tick();
     button('Mettre en fond').click();
     // A portrait page on a landscape note: the user is asked, and keeps the note as it is.
     await vi.waitFor(() => expect(section()?.querySelector('[data-slot="background-orientation-offer"]')).toBeTruthy());
@@ -252,7 +257,8 @@ describe('the background image section on its own (M17)', () => {
     (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\\Documents\\fiche.pdf';
     target.querySelector<HTMLButtonElement>('button[data-action="background-choose"]')!.click();
     await vi.waitFor(() => expect(target.querySelector('[data-slot="background-pdf"]')).toBeTruthy());
-    choose(target.querySelector('select')!, pdfPage);
+    target.querySelector<HTMLElement>(`[role="radio"][data-page="${pdfPage}"]`)!.click();
+    await tick();
     [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Mettre en fond')!.click();
   }
 
@@ -282,6 +288,39 @@ describe('the background image section on its own (M17)', () => {
     expect(image.rect.width).toBeLessThan(LANDSCAPE.width);
     expect(pixels.key).toMatch(/^mock-/);
     expect(orientation).toBeUndefined();
+  });
+
+  it('sends the chosen page, unchanged, to the import, and frees the thumbnails', async () => {
+    const stage = vi.spyOn(api, 'stageBackgroundImage');
+    const { target, onset } = mountSection({ offerOrientation: false });
+    await placePdf(target, '3');
+    await vi.waitFor(() => expect(onset).toHaveBeenCalledTimes(1));
+    expect(stage).toHaveBeenCalledExactlyOnceWith('C:\\Documents\\fiche.pdf', 3);
+    // The question is over: the PDF is no longer held for its thumbnails.
+    expect(target.querySelector('[data-slot="background-pdf"]')).toBeNull();
+    await vi.waitFor(() => expect(openPdfPreviews()).toBe(0));
+  });
+
+  it('starts at the first page, shows a thumbnail of each, and frees them when cancelled', async () => {
+    const stage = vi.spyOn(api, 'stageBackgroundImage');
+    const { target, onset } = mountSection();
+    (window as E2eWindow).__ardoiseE2eOpenPath = 'C:\\Documents\\fiche.pdf';
+    target.querySelector<HTMLButtonElement>('button[data-action="background-choose"]')!.click();
+    await vi.waitFor(() => expect(target.querySelector('[data-slot="background-pdf"]')).toBeTruthy());
+    expect(target.querySelectorAll('[role="radio"]').length).toBe(3);
+    expect(target.querySelector('[role="radio"][aria-checked="true"]')?.getAttribute('aria-label')).toBe('Page 1');
+    await vi.waitFor(() => expect(target.querySelectorAll('.pdf-frame img').length).toBe(3));
+    expect(openPdfPreviews()).toBe(1);
+    [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Annuler')!.click();
+    await tick();
+    expect(target.querySelector('[data-slot="background-pdf"]')).toBeNull();
+    await vi.waitFor(() => expect(openPdfPreviews()).toBe(0));
+    expect(stage).not.toHaveBeenCalled();
+    expect(onset).not.toHaveBeenCalled();
+    // Chosen again: the first page is chosen again, whatever was chosen before.
+    target.querySelector<HTMLButtonElement>('button[data-action="background-choose"]')!.click();
+    await vi.waitFor(() => expect(target.querySelector('[data-slot="background-pdf"]')).toBeTruthy());
+    expect(target.querySelector('[role="radio"][aria-checked="true"]')?.getAttribute('aria-label')).toBe('Page 1');
   });
 
   it('stays busy until an asynchronous `onset` is done', async () => {

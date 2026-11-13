@@ -7,6 +7,9 @@
    * change is one undoable step of the editor. When the image's orientation differs from the
    * note's, the user is offered to switch the note's orientation, in the same step.
    *
+   * A PDF of several pages asks which page to use, with a thumbnail of each (`PdfPagePicker`, drawn as they come into
+   * view); the first page is chosen to begin with.
+   *
    * M17: live mode's Fond tab uses it too (the image goes under the writing of the page on screen, `live_page_image`):
    * `offerOrientation` false (a page of live mode follows the tablet: the image is placed on the page as it is) and
    * its own `hint`; `onset` may be asynchronous, the busy state lasting until it is done.
@@ -26,6 +29,7 @@
   import { orientationOf, swappedPage, type Orientation } from '../../lib/editor/page-size';
   import { t } from '../../lib/i18n.svelte';
   import type { BackgroundImage, PageSize } from '../../lib/note';
+  import PdfPagePicker from './PdfPagePicker.svelte';
 
   let {
     page,
@@ -149,14 +153,13 @@
     <p class="small" data-slot="background-pdf">
       {t('background.editor.pdfPages', { name: chosen.source.name, count: chosen.source.pages.length })}
     </p>
-    <label class="pane-row">
-      <span>{t('background.editor.page')}</span>
-      <select bind:value={chosen.page} disabled={busy}>
-        {#each chosen.source.pages as _, i (i)}
-          <option value={i + 1}>{i + 1}</option>
-        {/each}
-      </select>
-    </label>
+    <PdfPagePicker
+      path={chosen.path}
+      name={chosen.source.name}
+      pages={chosen.source.pages}
+      bind:selected={chosen.page}
+      disabled={busy}
+    />
     <div class="pane-actions">
       <button type="button" class="button small-button primary" disabled={busy} onclick={() => void place(chosen.path, chosen.page)}>
         {t('background.editor.place')}
